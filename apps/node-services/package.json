@@ -53,7 +53,7 @@
     "proper-lockfile": "^4.1.2",
     "sharp": "0.35.3",
     "tesseract.js-core": "7.0.0",
-    "undici": "8.10.0",
+    "undici": "8.12.2",
     "word-extractor": "1.0.4",
     "ws": "8.22.0",
     "xlsx": "npm:@e965/xlsx@0.20.3",
