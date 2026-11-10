@@ -30,15 +30,15 @@ Powered by **Efficient AI model–harness co-design**, it brings powerful local 
 
 <a href="docs/local-inference.md"><img src="assets/feature-local-moe.webp" width="100%" alt="Run a 125B model on a 12 GB GPU, powered by PolyStrata: Qwen3.8-Flash-Next, whose 3-bit model file is 55 GB. GPU only, the baseline: the whole model has to sit on the card, only 12 GB fits and the rest has nowhere to go, so it needs 55 GB or more of VRAM, an H100 80 GB. With PolyStrata, ours: a router picks experts for each token. The busiest experts stay in the 12 GB of GPU memory, warm experts wait in 64 GB of system RAM and cold experts on the SSD. Tokens use experts on the GPU and in RAM, and an expert picked from the SSD is read into RAM while one RAM expert moves back to the SSD. Result: 45.5 tokens per second on an RTX 3060 12 GB with 64 GB of RAM, and 179 on an RTX 5090 32 GB"></a>
 
-| Feature                              | What it does                                                                                                            |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| Efficient AI model–harness co-design | Brings a full local agent to supported consumer Macs and PCs.                                                           |
-| Efficient MoE inference              | PolyStrata optimizes local inference so larger models can run with less GPU memory.                                     |
-| Privacy and data ownership           | In local mode, personal data and memories stay on your device. Connected apps exchange data with their services.        |
-| Cross-app context                    | Understands work across authorized files and apps.                                                                      |
-| Wiki and memory                      | Remembers important information, preferences, and decisions across conversations, in wiki pages every agent can search. |
-| Proactive Another Me                 | Follows up and moves work forward.                                                                                      |
-| Agent teams                          | Brings in the agents a job needs and writes one `team.md` that they all follow.                                         |
+| Feature                              | What it does                                                                                                                                           |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Efficient AI model–harness co-design | Brings a full local agent to supported consumer Macs and PCs.                                                                                          |
+| Efficient MoE inference              | PolyStrata optimizes local inference so larger models can run with less GPU memory.                                                                    |
+| Privacy and data ownership           | In local mode, personal data and memories stay on your device. Connected apps exchange data with their services.                                       |
+| Cross-app context                    | Understands work across authorized files and apps.                                                                                                     |
+| Wiki and memory                      | Remembers important information, preferences, and decisions across conversations, in wiki pages every agent can search.                                |
+| Proactive Another Me                 | Watches your inbox, calendar and Slack, follows up and moves work forward, and messages you only when something needs you. Every "not now" teaches it. |
+| Agent teams                          | Brings in the agents a job needs and writes one `team.md` that they all follow.                                                                        |
 
 ## Quick start
 
