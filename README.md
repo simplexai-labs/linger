@@ -1,4 +1,6 @@
-<p align="center"><img src="assets/hero.gif" width="900" alt="Linger: Open Source Personal Agent That Fully Runs on Your Local PC. Finds what you need across apps, remembers what matters, and gets things done. Open-Source, Local AI, Consumer Macs and PCs. Five pages play in turn. Local AI, powered by PolyStrata: a 125B parameter model on a 12 GB GPU, with the 55 GB 3-bit model file kept partly in GPU memory and the rest in RAM or on SSD, writing 45.5 tokens per second with Qwen3.8-Flash-Next on an RTX 3060 12 GB with 64 GB of RAM. Find and connect: stop searching app by app; Linger searches Files, Mail, Calendar, Slack and Docs and returns a project brief with its status, what is blocked and who can help. Remember and grow: a detail from a chat three weeks ago, Mom's birthday is the 14th and she loves orchids, is saved to memory and becomes a birthday plan with an orchid order to approve, right on time. Get it done: Linger keeps working while you are away, sorting the week's files by project, summarizing progress, drafting the recap email and preparing the weekly brief, ready for your review. Agent teams: one launch brief becomes a team.md that a research agent, a copy agent and a visuals agent follow, and they bring back a launch package for review"></p>
+<p align="center"><img src="assets/logo-horizontal.svg" width="900" alt="Linger"></p>
+
+<p align="center"><b>Linger is an open-source personal agent that runs locally on your computer.</b></p>
 
 <p align="center">
   <b>Open-Source</b>&nbsp;&nbsp;·&nbsp;&nbsp;<b>Local AI</b>&nbsp;&nbsp;·&nbsp;&nbsp;<b>Consumer Macs &amp; PCs</b>
@@ -10,7 +12,7 @@
   <a href="https://github.com/Niko1221/Strata"><img alt="Powered by Strata" src="https://img.shields.io/badge/Powered%20by-Strata-1a1a16?logo=github&logoColor=white"></a>
 </p>
 
-Linger is an open-source personal agent that runs locally on your computer.
+<p align="center"><img src="assets/hero.gif" width="900" alt="Linger: Open Source Personal Agent That Fully Runs on Your Local PC. Finds what you need across apps, remembers what matters, and gets things done. Open-Source, Local AI, Consumer Macs and PCs. Five pages play in turn. Local AI, powered by PolyStrata: a 125B parameter model on a 12 GB GPU, with the 55 GB 3-bit model file kept partly in GPU memory and the rest in RAM or on SSD, writing 45.5 tokens per second with Qwen3.8-Flash-Next on an RTX 3060 12 GB with 64 GB of RAM. Find and connect: stop searching app by app; Linger searches Files, Mail, Calendar, Slack and Docs and returns a project brief with its status, what is blocked and who can help. Remember and grow: a detail from a chat three weeks ago, Mom's birthday is the 14th and she loves orchids, is saved to memory and becomes a birthday plan with an orchid order to approve, right on time. Get it done: Linger keeps working while you are away, sorting the week's files by project, summarizing progress, drafting the recap email and preparing the weekly brief, ready for your review. Agent teams: one launch brief becomes a team.md that a research agent, a copy agent and a visuals agent follow, and they bring back a launch package for review"></p>
 
 Powered by **Efficient AI model–harness co-design**, it brings powerful local AI to everyday computers. It understands your context across files and apps, remembers what matters, and proactively gets things done.
 
