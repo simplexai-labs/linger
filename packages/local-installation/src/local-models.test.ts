@@ -148,6 +148,27 @@ test("applies exactly the approved saved plan and binds only the upstream verifi
     ),
   ).toEqual(f.binding);
 });
+test("reports why the planner refused and logs its output", async () => {
+  const f = await fixture();
+  const events: string[] = [];
+  f.call.mockImplementation(async () => ({
+    code: 2,
+    stdout: "",
+    stderr: "stack: no verified LLM fits this computer\n",
+  }));
+  const result = await prepareLocalModels(
+    f.instance,
+    { ...f.options, onEvent: (event) => events.push(event.message ?? "") },
+    { localmodels: f.call },
+  );
+  expect(result).toMatchObject({
+    details: { code: "LOCAL_MODELS_UNAVAILABLE" },
+    message: expect.stringContaining(
+      "stack: no verified LLM fits this computer",
+    ),
+  });
+  expect(events.join("\n")).toContain("localmodels stack plan exited with");
+});
 test("never records a successful binding when apply fails", async () => {
   const f = await fixture();
   await prepareLocalModels(f.instance, f.options, { localmodels: f.call });

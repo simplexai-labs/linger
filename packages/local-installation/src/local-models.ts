@@ -10,6 +10,7 @@ import {
   type Instance,
 } from "./instance.js";
 import type { InstallOutcome, InstallerEvent } from "./events.js";
+import { localmodelsFailure } from "./localmodels-failure.js";
 import { runLocalmodels } from "./localmodels-tool.js";
 import {
   readSetupChoice,
@@ -279,11 +280,15 @@ export async function prepareLocalModels(
           temporary,
           "--json",
         ]);
-        if (result.code !== 0)
+        if (result.code !== 0) {
+          const { cause, log } = localmodelsFailure(["stack", "plan"], result);
+          for (const message of log)
+            options.onEvent({ kind: "log", stage: "runtime", message });
           return action(
             "LOCAL_MODELS_UNAVAILABLE",
-            "The upstream planner could not create a local model plan. Existing resources were preserved.",
+            `The upstream planner could not create a local model plan${cause ? `: ${cause}` : "."} Existing resources were preserved.`,
           );
+        }
         const generated = await readPrivate(temporary);
         if (!generated)
           throw new Error("The upstream planner did not save a plan.");

@@ -567,6 +567,10 @@ export class LocalServerModule implements Module {
     const eligible = report.localModels.eligible && !!name;
     const strings = (value: unknown) =>
       Array.isArray(value) ? value.map(String) : [];
+    const memoryInUse =
+      !eligible &&
+      !!name &&
+      strings(report.localModels.reasons).includes("free-memory-required");
     const messages = strings(report.localModels.reasonMessages);
     const reasons = strings(report.localModels.reasons).map((code, index) =>
       messages[index] ? `${code}: ${messages[index]}` : code,
@@ -580,7 +584,8 @@ export class LocalServerModule implements Module {
           ? hardware.diskFreeBytes
           : null,
       ...(typeof gpu === "string" ? { gpu } : {}),
-      ...(eligible && name
+      ...(memoryInUse ? { memoryInUse } : {}),
+      ...((eligible || memoryInUse) && name
         ? {
             model: {
               name,

@@ -89,13 +89,17 @@ export type SetupLocalModelsCheck =
       readonly memoryBytes: number;
       readonly diskFreeBytes: number | null;
       readonly gpu?: string;
-      // The inference model to deploy, with what it needs; when eligible.
+      // The inference model to deploy, with what it needs; when eligible or
+      // when only memoryInUse stands in the way.
       readonly model?: {
         readonly name: string;
         readonly downloadBytes: number | null;
         readonly diskBytes: number | null;
         readonly memoryBytes: number | null;
       };
+      // The hardware can serve the model, but other programs hold the
+      // memory it needs right now.
+      readonly memoryInUse?: boolean;
       // Why not, in the localmodels tool's words; when not eligible.
       readonly reasons?: readonly string[];
     };

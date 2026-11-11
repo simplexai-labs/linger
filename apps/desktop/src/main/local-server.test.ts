@@ -74,13 +74,14 @@ fs.mkdirSync(path.join(home, "installer"), { recursive: true });
 fs.writeFileSync(path.join(home, "installer", "args.json"), JSON.stringify(args));
 if (args.includes("--inspect")) {
   const hardware = { totalMemoryBytes: 64 * 1024 ** 3, diskFreeBytes: 200 * 1024 ** 3, gpus: [{ name: "RTX 4090" }] };
-  const eligible = !fs.existsSync(path.join(home, "small-computer"));
-  const estimate = eligible
+  const busy = fs.existsSync(path.join(home, "busy-computer"));
+  const eligible = !busy && !fs.existsSync(path.join(home, "small-computer"));
+  const estimate = eligible || busy
     ? { model: "qwen3-8b", downloadBytes: 6 * 1024 ** 3, diskBytes: 8 * 1024 ** 3, memoryBytes: 12 * 1024 ** 3 }
     : { model: "", downloadBytes: null, diskBytes: null, memoryBytes: null };
   process.stderr.write("Checked this computer in 1.5s.\n");
-  const reasons = eligible ? [] : ["facts-unavailable"];
-  const reasonMessages = eligible ? [] : ["nvidia-smi was not found"];
+  const reasons = eligible ? [] : [busy ? "free-memory-required" : "facts-unavailable"];
+  const reasonMessages = eligible ? [] : [busy ? "memory is held" : "nvidia-smi was not found"];
   process.stdout.write(JSON.stringify({ hardware, localModels: { eligible, reasons, reasonMessages, estimate } }) + "\n");
   process.exit(0);
 }
@@ -1292,6 +1293,24 @@ describe("LocalServerModule", () => {
       }),
     );
     info.mockRestore();
+  });
+
+  it("names the model other programs keep this computer from serving", async () => {
+    const f = fixture({ checkout: "/src" }, {}, (home) => {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(path.join(home, "busy-computer"), "");
+    });
+    await f.host.start();
+    f.module.inspect();
+    await vi.waitFor(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+        eligible: false,
+        memoryInUse: true,
+        model: { name: "qwen3-8b" },
+        reasons: ["free-memory-required: memory is held"],
+      }),
+    );
   });
 
   it("approves the deployment of the chosen local model", async () => {

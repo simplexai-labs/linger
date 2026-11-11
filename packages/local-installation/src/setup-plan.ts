@@ -90,6 +90,9 @@ interface UpstreamReport {
   };
   stack: {
     available: boolean;
+    // "capacity": the plan fits the hardware only once other programs
+    // release the memory they hold now.
+    basis?: string;
     reasons: { code: string; message: string }[];
     plan: {
       llm: { model: { id: string }; placement: { gpus: { index: number }[] } };
@@ -184,7 +187,9 @@ export async function inspectSetup(
       },
       choices: [...choices],
       localModels: {
-        eligible: value.stack.available,
+        // Installing plans against the memory free at that moment, so a
+        // capacity plan cannot be installed as the computer stands.
+        eligible: value.stack.available && value.stack.basis !== "capacity",
         reasons: value.stack.reasons.map((reason) => reason.code),
         reasonMessages: value.stack.reasons.map((reason) => reason.message),
         selectedGpuIndex: plan?.llm.placement.gpus[0]?.index ?? null,

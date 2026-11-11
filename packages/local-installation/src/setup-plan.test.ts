@@ -90,6 +90,23 @@ it("delegates all hardware policy, runtime detection, estimates and recommendati
   });
   expect(report.recommendation).toBe("local-models");
 });
+it("does not offer a plan that fits only once other programs release memory", async () => {
+  const value = upstream();
+  const stack = {
+    ...value.stack,
+    basis: "capacity",
+    reasons: [{ code: "free-memory-required", message: "Memory is held" }],
+  };
+  const localmodels = runner({ ...value, stack });
+  const report = await inspectSetup({ localmodels });
+  expect(report.localModels.eligible).toBe(false);
+  expect(report.localModels.reasons).toEqual(["free-memory-required"]);
+  // The model the hardware could serve is still named.
+  expect(report.localModels.estimate.model).toBe("upstream-model");
+  await expect(assertLocalModelsEligible({ localmodels })).rejects.toThrow(
+    "free-memory-required: Memory is held",
+  );
+});
 it("preserves upstream rejection and never substitutes downstream eligibility", async () => {
   const localmodels = runner(upstream(false));
   const report = await inspectSetup({ localmodels });

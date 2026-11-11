@@ -2123,8 +2123,12 @@
         // serve it; until then its row does not show.
         const models = local.localModels;
         const model =
-          models.state === "checked" && models.eligible && models.model;
-        if (!model) plan.localModel = false;
+          models.state === "checked" &&
+          (models.eligible || models.memoryInUse) &&
+          models.model;
+        // Shown but not selectable while other programs hold its memory.
+        const blocked = models.state === "checked" && !models.eligible;
+        if (!model || blocked) plan.localModel = false;
         const custom = !isDefaultPlan(local);
         $("welcome-lead").textContent = local.available
           ? "Runs on this computer, just for you. Takes a few minutes."
@@ -2183,20 +2187,22 @@
             .filter(Boolean)
             .join(" · ");
           $("local-model-name").textContent = model.name;
-          $("local-model-needs").textContent = [
-            model.downloadBytes != null &&
-              gigabytes(model.downloadBytes) + " download",
-            model.diskBytes != null && gigabytes(model.diskBytes) + " disk",
-            model.memoryBytes != null &&
-              gigabytes(model.memoryBytes) + " memory",
-          ]
-            .filter(Boolean)
-            .join(" · ");
+          $("local-model-needs").textContent = blocked
+            ? "Other apps are using the memory this model needs. Quit them, then reopen Linger."
+            : [
+                model.downloadBytes != null &&
+                  gigabytes(model.downloadBytes) + " download",
+                model.diskBytes != null && gigabytes(model.diskBytes) + " disk",
+                model.memoryBytes != null &&
+                  gigabytes(model.memoryBytes) + " memory",
+              ]
+                .filter(Boolean)
+                .join(" · ");
           $("local-model").setAttribute(
             "aria-checked",
             String(plan.localModel),
           );
-          $("local-model").disabled = busy;
+          $("local-model").disabled = busy || blocked;
         }
         $("runtime-sub").textContent = plan.localModel
           ? "Pi + local model."
