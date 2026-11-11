@@ -20,10 +20,17 @@ function desktopLocalAccount(): DesktopLocalAccount | undefined {
         .lingerDesktop?.localAccount;
 }
 
+// How often the page asks again whether the desktop can still sign it in:
+// the local services can stop, or another program take their port, while
+// the page is open.
+export const DESKTOP_LOCAL_ACCOUNT_CHECK_MS = 15_000;
+
 /**
  * The account sign-in when this page runs in the desktop app and shows the
- * Linger installed on this computer; undefined in a browser, in older desktop
- * builds and for any other server.
+ * Linger installed on this computer, while its server answers as itself;
+ * undefined in a browser, in older desktop builds and for any other server.
+ * Asked again every DESKTOP_LOCAL_ACCOUNT_CHECK_MS and whenever the window
+ * comes back into view.
  */
 export function useDesktopLocalAccount(): DesktopLocalAccount | undefined {
   const [account, setAccount] = useState<DesktopLocalAccount>();
@@ -31,14 +38,29 @@ export function useDesktopLocalAccount(): DesktopLocalAccount | undefined {
     const api = desktopLocalAccount();
     if (!api) return;
     let active = true;
-    api
-      .available()
-      .then((available) => {
-        if (active && available) setAccount(api);
-      })
-      .catch(() => undefined);
+    let checking = false;
+    const check = () => {
+      if (checking || document.visibilityState === "hidden") return;
+      checking = true;
+      void api
+        .available()
+        .catch(() => false)
+        .then((available) => {
+          if (active) setAccount(available ? api : undefined);
+        })
+        .finally(() => {
+          checking = false;
+        });
+    };
+    check();
+    const timer = window.setInterval(check, DESKTOP_LOCAL_ACCOUNT_CHECK_MS);
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
     return () => {
       active = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
     };
   }, []);
   return account;

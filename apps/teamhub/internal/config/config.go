@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/localidentity"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/secretbox"
 )
 
@@ -68,6 +69,9 @@ type Config struct {
 	CaptureMaxBytes             int64
 	SkillPackageMaxArchiveBytes int64
 	PublicWebURL                string
+	// LocalIdentityKey proves to the desktop app that this server is the
+	// Linger installed on this computer; set only on local installations.
+	LocalIdentityKey string
 	// The optional features: each is assembled from its own group, and one
 	// whose configuration is missing is not built.
 	ExternalApps     ExternalAppsConfig
@@ -298,6 +302,7 @@ func applyEnvironment(cfg *Config) {
 	setNonemptyEnvironment(&cfg.ExternalApps.ComposioEnvironmentKey, "TEAMHUB_COMPOSIO_ENVIRONMENT_KEY")
 	setNonemptyEnvironment(&cfg.ExternalApps.ComposioAPIKey, "COMPOSIO_API_KEY")
 	setNonemptyEnvironment(&cfg.ExternalApps.SecretEncryptionKey, "TEAMHUB_SECRET_ENCRYPTION_KEY")
+	setNonemptyEnvironment(&cfg.LocalIdentityKey, "TEAMHUB_LOCAL_IDENTITY_KEY")
 	setNonemptyEnvironment(&cfg.Voice.SonioxAPIKey, "SONIOX_API_KEY")
 	setNonemptyEnvironment(&cfg.Voice.XaiAPIKey, "XAI_API_KEY")
 	setNonemptyEnvironment(&cfg.Voice.LiveKitURL, "LIVEKIT_URL")
@@ -376,6 +381,11 @@ func validate(cfg *Config) error {
 	if cfg.ExternalApps.SecretEncryptionKey != "" {
 		if _, err := secretbox.New(cfg.ExternalApps.SecretEncryptionKey); err != nil {
 			return errors.New("TEAMHUB_SECRET_ENCRYPTION_KEY must be 32 bytes in standard base64")
+		}
+	}
+	if cfg.LocalIdentityKey != "" {
+		if _, err := localidentity.DecodeKey(cfg.LocalIdentityKey); err != nil {
+			return err
 		}
 	}
 	// The judge runs through the Agent Service, which owns the Runtime link.

@@ -44,6 +44,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/local/identity": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Prove that this server is the Linger installed on this computer.
+     * @description Answers only on a local installation that has TEAMHUB_LOCAL_IDENTITY_KEY; elsewhere 404. The proof is the unpadded base64url HMAC-SHA256, keyed with that 32-byte key, of "linger-local-identity", the nonce and the server's web origin, joined with newlines. The desktop app checks it with the key from the installation's private files before it sends the owner's password, so a process that took the port cannot receive it.
+     */
+    post: operations["proveLocalIdentity"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/session": {
     parameters: {
       query?: never;
@@ -3971,6 +3991,14 @@ export interface components {
     ErrorResponse: {
       error: components["schemas"]["Error"];
     };
+    LocalIdentityChallenge: {
+      /** @description 32 fresh random bytes in unpadded base64url. */
+      nonce: string;
+    };
+    LocalIdentityProof: {
+      /** @description Unpadded base64url HMAC-SHA256 of the challenge. */
+      proof: string;
+    };
     PasswordChangeRequest: {
       current_password: string;
       /** @description 8-1024 UTF-8 bytes. TeamHub counts bytes; minLength and maxLength count characters, so they bound the byte rule only loosely. */
@@ -7652,6 +7680,32 @@ export interface operations {
         content?: never;
       };
       500: components["responses"]["InternalError"];
+    };
+  };
+  proveLocalIdentity: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalIdentityChallenge"];
+      };
+    };
+    responses: {
+      /** @description The proof for this nonce. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalIdentityProof"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      404: components["responses"]["NotFound"];
     };
   };
   getSession: {

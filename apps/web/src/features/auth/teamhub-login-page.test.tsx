@@ -16,6 +16,7 @@ import {
 } from "@/test/teamhub-test-server";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 
+import { DESKTOP_LOCAL_ACCOUNT_CHECK_MS } from "./desktop-local-account";
 import { TeamHubLoginPage } from "./teamhub-login-page";
 
 afterEach(() => vi.useRealTimers());
@@ -417,6 +418,49 @@ describe("TeamHubLoginPage in the desktop app", () => {
     });
     renderAuthenticationPage({});
     await waitFor(() => expect(account.available).toHaveBeenCalled());
+    expect(
+      screen.queryByRole("button", { name: LOCAL_BUTTON }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides the account button while the desktop cannot use it and shows it again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const available = vi.fn(async () => true);
+    desktop({ available, signIn: vi.fn() });
+    renderAuthenticationPage({});
+    expect(
+      await screen.findByRole("button", { name: LOCAL_BUTTON }),
+    ).toBeInTheDocument();
+    // The local services stopped.
+    available.mockResolvedValue(false);
+    await act(() =>
+      vi.advanceTimersByTimeAsync(DESKTOP_LOCAL_ACCOUNT_CHECK_MS),
+    );
+    expect(
+      screen.queryByRole("button", { name: LOCAL_BUTTON }),
+    ).not.toBeInTheDocument();
+    // They are back; the window coming into view asks at once.
+    available.mockResolvedValue(true);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(
+      screen.getByRole("button", { name: LOCAL_BUTTON }),
+    ).toBeInTheDocument();
+    expect(available).toHaveBeenCalledTimes(3);
+  });
+
+  it("hides the account button when asking fails", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const available = vi.fn(async () => true);
+    desktop({ available, signIn: vi.fn() });
+    renderAuthenticationPage({});
+    await screen.findByRole("button", { name: LOCAL_BUTTON });
+    available.mockRejectedValue(new Error("Not allowed"));
+    await act(() =>
+      vi.advanceTimersByTimeAsync(DESKTOP_LOCAL_ACCOUNT_CHECK_MS),
+    );
     expect(
       screen.queryByRole("button", { name: LOCAL_BUTTON }),
     ).not.toBeInTheDocument();

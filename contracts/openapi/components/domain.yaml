@@ -699,6 +699,23 @@ components:
           minLength: 1
           maxLength: 1024
           writeOnly: true
+    LocalIdentityChallenge:
+      type: object
+      additionalProperties: false
+      required: [nonce]
+      properties:
+        nonce:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{43}$"
+          description: 32 fresh random bytes in unpadded base64url.
+    LocalIdentityProof:
+      type: object
+      additionalProperties: false
+      required: [proof]
+      properties:
+        proof:
+          type: string
+          description: Unpadded base64url HMAC-SHA256 of the challenge.
     RoomKind:
       type: string
       enum: [room, direct, thread]

@@ -50,6 +50,9 @@ const credentials: Record<string, () => string> = {
   LINGER_SECRET_SEED: () => randomBytes(32).toString("hex"),
   // TeamHub requires 32 bytes in standard base64.
   TEAMHUB_SECRET_ENCRYPTION_KEY: () => randomBytes(32).toString("base64"),
+  // Only TeamHub and the desktop app read it: TeamHub proves with it that it
+  // is this instance's server before the app sends the saved password.
+  TEAMHUB_LOCAL_IDENTITY_KEY: () => randomBytes(32).toString("base64"),
 };
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export { atomicPrivate, privateDirectory, readPrivate };

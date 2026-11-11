@@ -1,5 +1,11 @@
 import { spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 import { createReadStream, existsSync, readFileSync } from "node:fs";
 import {
   constants as fsConstants,
@@ -20,7 +26,10 @@ import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { createZstdDecompress } from "node:zlib";
 
-import { readLocalLogin } from "@linger/local-installation/account";
+import {
+  readLocalIdentity,
+  readLocalLogin,
+} from "@linger/local-installation/account";
 import { downloadVerified } from "@linger/local-installation/download";
 import { legacyMigrationPending } from "@linger/local-installation/home";
 import {
@@ -244,12 +253,20 @@ export interface LocalServerOptions {
   // A linger checkout installed instead of the source package, for developers
   // (LINGER_CHECKOUT).
   readonly checkout?: string;
-  // Signs the app's web session in to the local server with its owner.
+  // Signs the app's web session in to the local server with its owner, once
+  // the server proved it is this installation's (signInWithPassword).
   readonly signIn: (
-    origin: string,
+    server: LocalServerIdentity,
     email: string,
     password: string,
   ) => Promise<void>;
+  // The installed server's identity; read from its private files by default.
+  readonly serverIdentity?: (
+    home: string,
+    origin: string,
+  ) => Promise<LocalServerIdentity>;
+  // Asks the server to prove it; proveLocalServer by default.
+  readonly proveServer?: (server: LocalServerIdentity) => Promise<void>;
   // The cookie header of that web session, to follow the agents it sets up.
   readonly sessionCookie?: (origin: string) => Promise<string | undefined>;
   readonly platform?: NodeJS.Platform;
@@ -276,6 +293,9 @@ const STARTER_ROOM = "Getting Started";
 const AGENTS_TIMEOUT_MS = 5 * 60_000;
 // Each check runs the installer's runtime status, a short process.
 const SIGN_IN_POLL_MS = 3_000;
+// How long one check that the installed server still answers as itself
+// serves the pages that ask whether to offer the owner account.
+const SERVER_CHECK_TTL_MS = 2_000;
 
 // The instance the desktop installs.
 export const LOCAL_INSTANCE = "desktop";
@@ -327,6 +347,10 @@ export class LocalServerModule implements Module {
   #signInWake: (() => void) | undefined;
   #switchTo: LocalRuntime | undefined;
   #opened: string | undefined;
+  #serverCheck:
+    | { readonly at: number; readonly ok: Promise<boolean> }
+    | undefined;
+  #serverOk: boolean | undefined;
 
   constructor(options: LocalServerOptions) {
     this.#options = options;
@@ -669,7 +693,7 @@ export class LocalServerModule implements Module {
       });
       this.#advance("connect", 0, "Connecting this computer…");
       const login = await installer.login();
-      await this.#options.signIn(job.origin, login.email, login.password);
+      await this.#signInAs(home, job.origin, login.email, login.password);
       await this.#writeRecord({
         home,
         repo,
@@ -806,12 +830,17 @@ export class LocalServerModule implements Module {
   }
 
   // Whether the window shows the Linger this app installed here and its
-  // services are running; only then can its owner account sign the window in.
+  // server still answers as itself; only then can its owner account sign the
+  // window in. The services can stop while the app runs, and another program
+  // can take their port, so the server is asked every time, at most once per
+  // SERVER_CHECK_TTL_MS.
   async servesWindow(): Promise<boolean> {
-    if (this.#phase !== "ready") return false;
-    const record = await this.#readRecord();
-    const serverUrl = this.#ctx?.config.get().serverUrl;
-    return !!record && !!serverUrl && sameOrigin(record.origin, serverUrl);
+    const record = await this.#windowRecord();
+    if (!record) return false;
+    const now = Date.now();
+    if (!this.#serverCheck || now - this.#serverCheck.at >= SERVER_CHECK_TTL_MS)
+      this.#serverCheck = { at: now, ok: this.#checkServer(record) };
+    return this.#serverCheck.ok;
   }
 
   // The owner account the installer created, read from its private file on
@@ -827,20 +856,93 @@ export class LocalServerModule implements Module {
   // Signs the window in to the installed Linger with its owner account; the
   // password goes from the file to the server and nowhere else.
   async signInWithAccount(): Promise<void> {
-    const record = await this.#readRecord();
-    if (!record || !(await this.servesWindow()))
+    const record = await this.#windowRecord();
+    if (!record)
       throw new Error(
         "This window is not showing the Linger on this computer.",
       );
     const account = await this.account();
     try {
-      await this.#options.signIn(
+      await this.#signInAs(
+        record.home,
         record.origin,
         account.email,
         account.password,
       );
     } catch (error) {
       throw new Error(signInFailure(error), { cause: error });
+    }
+  }
+
+  // The installation the window shows while its services run.
+  async #windowRecord(): Promise<LocalRecord | undefined> {
+    if (this.#phase !== "ready") return undefined;
+    const record = await this.#readRecord();
+    const serverUrl = this.#ctx?.config.get().serverUrl;
+    return record && serverUrl && sameOrigin(record.origin, serverUrl)
+      ? record
+      : undefined;
+  }
+
+  async #serverIdentity(
+    home: string,
+    origin: string,
+  ): Promise<LocalServerIdentity> {
+    try {
+      if (this.#options.serverIdentity)
+        return await this.#options.serverIdentity(home, origin);
+      const identity = await readLocalIdentity({
+        root: path.join(home, "instances", LOCAL_INSTANCE),
+      });
+      return { origin, ...identity };
+    } catch (error) {
+      throw new LocalServerUnverifiedError("no identity", { cause: error });
+    }
+  }
+
+  async #checkServer(record: LocalRecord): Promise<boolean> {
+    const prove =
+      this.#options.proveServer ??
+      ((server) => proveLocalServer(server, this.#options.fetch));
+    let ok = true;
+    let reason: string | undefined;
+    try {
+      await prove(await this.#serverIdentity(record.home, record.origin));
+    } catch (error) {
+      ok = false;
+      reason = unverifiedReason(error);
+    }
+    // Only changes are logged, so the periodic checks stay out of the log.
+    if (ok !== this.#serverOk)
+      this.#ctx?.log[ok ? "info" : "warn"]("local_server.identity", {
+        ok,
+        ...(reason ? { reason } : {}),
+      });
+    this.#serverOk = ok;
+    return ok;
+  }
+
+  async #signInAs(
+    home: string,
+    origin: string,
+    email: string,
+    password: string,
+  ): Promise<void> {
+    try {
+      await this.#options.signIn(
+        await this.#serverIdentity(home, origin),
+        email,
+        password,
+      );
+    } catch (error) {
+      if (error instanceof LocalServerUnverifiedError) {
+        this.#ctx?.log.warn("local_server.identity_unverified", {
+          reason: error.reason,
+        });
+        // The next question about the account asks the server again.
+        this.#serverCheck = undefined;
+      }
+      throw error;
     }
   }
 
@@ -2366,8 +2468,10 @@ export const signInFailure = (error: unknown): string => {
   if (error instanceof SignInRejectedError && error.status === 401)
     return "The saved password no longer works. Log in with your email and password.";
   // fetch rejects with a TypeError when nothing answers, and with a
-  // TimeoutError or AbortError when the answer takes too long.
+  // TimeoutError or AbortError when the answer takes too long. What answers
+  // without proving it is this installation's server is not Linger either.
   if (
+    error instanceof LocalServerUnverifiedError ||
     error instanceof TypeError ||
     (error instanceof Error &&
       (error.name === "TimeoutError" || error.name === "AbortError"))
@@ -2376,38 +2480,120 @@ export const signInFailure = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error);
 };
 
-// The local services listen on 127.0.0.1 only, while the window uses
-// localhost, which may resolve to ::1 first.
-export const loopbackUrl = (origin: string): URL => {
-  const url = new URL(origin);
-  if (url.hostname === "localhost") url.hostname = "127.0.0.1";
-  return url;
+// The installed server as the desktop checks it: the origin the window
+// uses, TeamHub's own loopback address and the key only TeamHub and this
+// computer's account hold.
+export interface LocalServerIdentity {
+  readonly origin: string;
+  readonly teamhub: string;
+  readonly key: Uint8Array;
+}
+
+// The installed server did not prove it is this installation's.
+export class LocalServerUnverifiedError extends Error {
+  // Says what failed, never with what.
+  readonly reason: string;
+
+  constructor(reason: string, options?: ErrorOptions) {
+    super("Linger on this computer is not responding.", options);
+    this.name = "LocalServerUnverifiedError";
+    this.reason = reason;
+  }
+}
+
+const unverifiedReason = (error: unknown): string =>
+  error instanceof LocalServerUnverifiedError
+    ? error.reason
+    : error instanceof Error
+      ? error.name
+      : "unknown";
+
+export const LOCAL_IDENTITY_TIMEOUT_MS = 5_000;
+
+// What TeamHub answers a challenge with (internal/localidentity).
+export const localIdentityProof = (
+  key: Uint8Array,
+  nonce: string,
+  origin: string,
+): Buffer =>
+  createHmac("sha256", key)
+    .update(`linger-local-identity\n${nonce}\n${origin}`)
+    .digest();
+
+// Asks TeamHub to prove it holds this installation's identity key, with a
+// fresh nonce each time, so an earlier answer proves nothing. The challenge
+// goes to TeamHub's own port: a program on the web port could pass it on to
+// a TeamHub still running, but whatever answers on TeamHub's port and holds
+// the key is TeamHub.
+export const proveLocalServer = async (
+  server: LocalServerIdentity,
+  fetcher: typeof fetch = fetch,
+  timeoutMs = LOCAL_IDENTITY_TIMEOUT_MS,
+): Promise<void> => {
+  const nonce = randomBytes(32).toString("base64url");
+  let proof: unknown;
+  try {
+    const response = await fetcher(
+      new URL("/v0/local/identity", server.teamhub),
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ nonce }),
+        redirect: "error",
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+    );
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new LocalServerUnverifiedError(`status ${response.status}`);
+    }
+    proof = ((await response.json()) as { proof?: unknown } | null)?.proof;
+  } catch (error) {
+    if (error instanceof LocalServerUnverifiedError) throw error;
+    throw new LocalServerUnverifiedError(
+      error instanceof SyntaxError ? "invalid answer" : "no answer",
+      { cause: error },
+    );
+  }
+  const expected = localIdentityProof(server.key, nonce, server.origin);
+  const actual =
+    typeof proof === "string" && /^[A-Za-z0-9_-]{43}$/.test(proof)
+      ? Buffer.from(proof, "base64url")
+      : undefined;
+  if (
+    !actual ||
+    actual.length !== expected.length ||
+    !timingSafeEqual(actual, expected)
+  )
+    throw new LocalServerUnverifiedError("wrong proof");
 };
 
 // Signs in to the local server with its owner and hands the session cookies
-// to the app's web session; the password is never stored. The request goes
-// to the loopback address the services bind, the cookies to the origin.
+// to the app's web session; the password is never stored, and is sent only
+// after the server proved it is this installation's TeamHub. Both requests
+// go to TeamHub's own loopback port, the cookies to the window's origin.
 export const signInWithPassword = async (
-  origin: string,
+  server: LocalServerIdentity,
   email: string,
   password: string,
   setCookie: (cookie: SetCookie) => Promise<void>,
   fetcher: typeof fetch = fetch,
 ): Promise<void> => {
-  const response = await fetcher(
-    new URL("/v0/auth/login", loopbackUrl(origin)),
-    {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json",
-        origin,
-      },
-      body: JSON.stringify({ identifier: email, password }),
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
+  await proveLocalServer(server, fetcher);
+  const response = await fetcher(new URL("/v0/auth/login", server.teamhub), {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      origin: server.origin,
     },
-  );
+    body: JSON.stringify({ identifier: email, password }),
+    redirect: "error",
+    signal: AbortSignal.timeout(30_000),
+  });
   await response.body?.cancel();
   if (!response.ok) throw new SignInRejectedError(response.status);
   const cookies = response.headers

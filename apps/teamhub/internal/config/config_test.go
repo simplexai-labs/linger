@@ -20,6 +20,7 @@ var teamhubEnvironment = []string{
 	"TEAMHUB_ARTIFACT_STORAGE_ROOT",
 	"TEAMHUB_DOCUMENT_PREVIEW_PUBLIC_ORIGIN",
 	"COMPOSIO_API_KEY",
+	"TEAMHUB_LOCAL_IDENTITY_KEY",
 	"TEAMHUB_COMPOSIO_ENVIRONMENT_KEY",
 	"WEB_PUBLIC_ORIGIN",
 	"SONIOX_API_KEY",
@@ -313,6 +314,7 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 		{name: "public URL must be an origin", env: map[string]string{"TEAMHUB_DATABASE_URL": "postgres://example", "WEB_PUBLIC_ORIGIN": "https://user@app.example.test/path"}},
 		{name: "Artifact storage root required", env: map[string]string{"TEAMHUB_DATABASE_URL": "postgres://example", "TEAMHUB_ARTIFACT_STORAGE_ROOT": " "}},
 		{name: "invalid Composio environment key", env: map[string]string{"TEAMHUB_DATABASE_URL": "postgres://example", "TEAMHUB_COMPOSIO_ENVIRONMENT_KEY": "Shared:Env"}},
+		{name: "local identity key must be 32 bytes", env: map[string]string{"TEAMHUB_DATABASE_URL": "postgres://example", "TEAMHUB_LOCAL_IDENTITY_KEY": "c2hvcnQ="}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
