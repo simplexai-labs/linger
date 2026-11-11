@@ -400,7 +400,11 @@ func (c *cuaSession) launchEverydayChrome(ctx context.Context, b agentBrowser, u
 	for _, w := range windows {
 		before[w.WindowID] = true
 	}
-	if output, err := agentChromeOpen(ctx, []string{"-n", "-g", "-b", b.Bundle, "--args", "--new-window", urls[0]}); err != nil {
+	// Naming the profile Chrome last used keeps a profile picker, which
+	// Chrome may show for a user with several profiles, from taking the
+	// command instead of a window.
+	open := []string{"-n", "-g", "-b", b.Bundle, "--args", "--profile-directory=" + everydayChromeProfile(), "--new-window", urls[0]}
+	if output, err := agentChromeOpen(ctx, open); err != nil {
 		return nil, fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
 	}
 	var window listedWindow
@@ -500,4 +504,26 @@ func everydayChromeKeys(name string, arguments map[string]any) error {
 		return fmt.Errorf("%s: %w", everydayChromeKeysRefused, errNotSent)
 	}
 	return nil
+}
+
+// everydayChromeData is the user's Chrome data folder, whose Local State
+// names the profile Chrome last used.
+var everydayChromeData = func() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Library", "Application Support", "Google", "Chrome")
+}
+
+// everydayChromeProfile returns the folder name of the profile the user's
+// Chrome last used, or Default when Local State does not say.
+func everydayChromeProfile() string {
+	var state struct {
+		Profile struct {
+			LastUsed string `json:"last_used"`
+		} `json:"profile"`
+	}
+	data, err := os.ReadFile(filepath.Join(everydayChromeData(), "Local State"))
+	if err == nil && json.Unmarshal(data, &state) == nil && chromeProfilePattern.MatchString(state.Profile.LastUsed) {
+		return state.Profile.LastUsed
+	}
+	return "Default"
 }

@@ -1896,6 +1896,9 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 		return nil, err
 	}
 	t.Cleanup(func() { agentChromeOpen = open })
+	data := everydayChromeData
+	everydayChromeData = func() string { return t.TempDir() }
+	t.Cleanup(func() { everydayChromeData = data })
 	settle := everydayChromeSettle
 	everydayChromeSettle = 0
 	t.Cleanup(func() { everydayChromeSettle = settle })
@@ -1908,7 +1911,7 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stopped != 1 || len(opened) != 2 || !slices.Contains(opened[0], "--restore-last-session") || !slices.Contains(opened[0], "--disable-backgrounding-occluded-windows") || !slices.Equal(opened[1][len(opened[1])-2:], []string{"--new-window", "https://example.com/"}) {
+	if stopped != 1 || len(opened) != 2 || !slices.Contains(opened[0], "--restore-last-session") || !slices.Contains(opened[0], "--disable-backgrounding-occluded-windows") || !slices.Equal(opened[1][len(opened[1])-3:], []string{"--profile-directory=Default", "--new-window", "https://example.com/"}) {
 		t.Fatalf("stopped=%d opened=%v, want a restart, then the site in a new window", stopped, opened)
 	}
 	if !strings.Contains(string(result), `"window_id":12`) || !strings.Contains(string(result), "takes no keys") {
