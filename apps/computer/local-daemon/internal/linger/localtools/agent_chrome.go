@@ -28,6 +28,12 @@ func (c *cuaSession) agentBrowserDirectory(b agentBrowser) string {
 	return filepath.Join(c.op.manager.options.StateDirectory, "computer-tools", b.Directory)
 }
 
+// agentChromeOpen runs macOS open with args to start the browser or open a
+// window of it.
+var agentChromeOpen = func(ctx context.Context, args []string) ([]byte, error) {
+	return exec.CommandContext(ctx, "/usr/bin/open", args...).CombinedOutput()
+}
+
 // agentChromePID finds the main process of the browser whose profile is
 // directory and returns its pid and command line, or 0 when none runs. Its
 // helper and content processes name the profile too, with a process type.
@@ -107,7 +113,7 @@ func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls
 	// so each URL opens below as a new tab, the last one in front.
 	openWindow := func() error {
 		args := append([]string{"-g", "-n", "-b", b.Bundle, "--args"}, b.Args(directory)...)
-		if output, err := exec.CommandContext(ctx, "/usr/bin/open", args...).CombinedOutput(); err != nil {
+		if output, err := agentChromeOpen(ctx, args); err != nil {
 			return fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
 		}
 		return nil

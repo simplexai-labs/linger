@@ -182,6 +182,12 @@ func runToolFixture(mode string) {
 					tabs = max(1, tabs-1)
 				case "tabs-unreadable":
 					tabs = 0
+				case "tabs-reopen":
+					// The listed window has left the accessibility tree; only
+					// the window open starts shows tabs.
+					if !strings.Contains(string(data), `"name":"open"`) {
+						tabs = 0
+					}
 				}
 				if request.Params.Name != "get_window_state" && request.Params.Name != "list_windows" {
 					f, _ := os.OpenFile(marker, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -1847,6 +1853,64 @@ func TestLocalToolCuaDeltaCountFailureReadsFullWindowOnlyOnce(t *testing.T) {
 
 // A starting Chrome may list a larger surface that has no accessibility
 // window; the browser window is the largest one whose tab strip reads.
+func TestLocalToolCuaMacAgentChromeOpensAFreshWindowForAnUnreadableOne(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the Computer's own Chrome is macOS only")
+	}
+	inputSettle = 0
+	t.Cleanup(func() { inputSettle = 300 * time.Millisecond })
+	wait := agentChromeWait
+	agentChromeWait = 300 * time.Millisecond
+	t.Cleanup(func() { agentChromeWait = wait })
+	pause := agentChromePause
+	agentChromePause = func() time.Duration { return 0 }
+	t.Cleanup(func() { agentChromePause = pause })
+	marker := filepath.Join(t.TempDir(), "calls.jsonl")
+	c := cuaFixtureSession(t, "tabs-reopen", marker)
+	pid := agentChromePID
+	agentChromePID = func(context.Context, string) (int, string, error) { return 42, "", nil }
+	t.Cleanup(func() { agentChromePID = pid })
+	open := agentChromeOpen
+	agentChromeOpen = func(context.Context, []string) ([]byte, error) {
+		f, err := os.OpenFile(marker, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		_, err = f.WriteString(`{"name":"open"}` + "\n")
+		return nil, err
+	}
+	t.Cleanup(func() { agentChromeOpen = open })
+	b := agentBrowser{Name: "Chrome", Bundle: "com.google.Chrome", Directory: "agent-chrome-test", Args: func(string) []string { return nil }, AddressRole: "AXTextField", AddressLabel: "Address and search bar"}
+	result, err := c.launchAgentChrome(t.Context(), b, []string{"https://example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fresh window's first tab takes the URL in place, with no new tab.
+	var got []string
+	for _, call := range fixtureCalls(t, marker) {
+		got = append(got, call.Name)
+	}
+	if want := []string{"open", "set_value", "press_key"}; !slices.Equal(got, want) {
+		t.Fatalf("calls=%v, want %v", got, want)
+	}
+	if !strings.Contains(string(result), "Started the Computer's own Chrome") {
+		t.Fatalf("result=%s, want the note for a started browser", result)
+	}
+	// Typing there is paced at the default speed unless the Agent sets one.
+	c.op.chromeTabs, c.op.chromePID, c.op.chromeWindow = 1, 42, 9
+	if _, err := c.call(t.Context(), "type_text", json.RawMessage(`{"pid":42,"window_id":9,"text":"kettle","element_token":"s1:1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	calls := fixtureCalls(t, marker)
+	if last := calls[len(calls)-1]; last.Name != "type_text" || last.Arguments["delay_ms"] != float64(agentChromeTypeDelay) {
+		t.Fatalf("last call=%+v, want type_text with delay_ms %d", last, agentChromeTypeDelay)
+	}
+	if err := c.drain(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLocalToolCuaMacAgentChromePicksTheWindowWithTabs(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("the Computer's own Chrome is macOS only")

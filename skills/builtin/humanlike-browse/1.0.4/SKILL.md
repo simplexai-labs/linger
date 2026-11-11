@@ -21,6 +21,7 @@ These sites watch how a visitor moves, and the user may watch the window. Every 
 - Open each site once with `launch_app`, at its home page, such as `https://www.reddit.com/`. A page the user names or describes, such as a forum, a category, a search or their order list, is reached from the home page through the site's own controls. Never call `launch_app` again for another page of a site already open.
 - After that, reach each page the way a person does: type into the site's own search box, use its menus, filters, sort controls and page links, and click the item you want.
 - Never type or paste an address into the browser's address bar, and never build a search, filter or page address yourself, in a tool call or in a script.
+- If the page the user wants cannot be reached from the home page, such as a private share link, tell the user and stop.
 - Go back with the page's own back link or with the `cmd+[` hotkey to the window. If the item opened in a new tab, close that tab with its Close button instead.
 - To see more items in a list that grows as it scrolls, scroll the list with `scroll`. Use the site's next-page link for a paged list.
 
@@ -30,7 +31,7 @@ The user watches the window, and each turn of yours costs seconds. The Computer 
 
 - Browse in this conversation yourself. Do not hand the browsing to a background Task: starting one adds a minute, and the user watches this Room.
 - Put each page visit in one `run_script`: search, wait, read what you need, open the item, wait, read it, go back. Return to the model only to choose something, such as which items to open.
-- Fill a search box with `setValue` and then press Return: it is instant. Use `typeText` only where the box ignores `setValue`.
+- Fill a search box with `setValue`, then press Return on that box: it is instant. Use `typeText` only where the box ignores `setValue`.
 - After a click or a key that loads something, wait with `app.waitFor` for what the next page shows, such as a heading or a button, with `timeout_ms` about 8000. Never wait with `cua.sleep`; one sleep lasts at most 1.5 s there.
 - Read only what you need: `app.query({role, name})`, `getState({query})` or `get_window_state` with `query`. Read the whole tree only to find your way on a page you have not seen.
 
@@ -39,7 +40,7 @@ A visit to a result, in one script:
 ```js
 const app = await cua.getApp({pid, windowId});
 await app.setValue({role: "AXTextField", name: "Search"}, "camping kettle");
-await app.pressKey("return");
+await app.pressKey("return", {role: "AXTextField", name: "Search"});
 await app.waitFor({role: "AXLink", name: "Next", timeout_ms: 8000});
 const links = await app.query({role: "AXLink"});
 const first = links.find((l) => /kettle/i.test(l.label));
