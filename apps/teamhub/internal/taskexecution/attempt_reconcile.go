@@ -274,6 +274,17 @@ func taskDoneReminder(taskID string) string {
 		"ordinary message what the user should add or check, if anything."
 }
 
+// ReportReply is the Agent's own words in an idle Task report, without the
+// first line that tells the Meta what to do with them. Any other report is
+// returned whole.
+func ReportReply(report string) string {
+	header, reply, found := strings.Cut(report, "\n")
+	if found && strings.HasPrefix(header, "Task ") && strings.Contains(header, ") is idle. If it is done, deliver it") {
+		return reply
+	}
+	return report
+}
+
 func failTaskAttempt(
 	ctx context.Context,
 	queries *store.Queries,

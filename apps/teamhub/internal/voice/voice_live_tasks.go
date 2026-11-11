@@ -54,7 +54,7 @@ func (s *Service) voiceLiveTaskViews(ctx context.Context, session voicelive.Sess
 			// The live voice coordinates the task: it gets the AlterEgo's own
 			// words, without what a Meta is reminded to do with them.
 			records[index].Report = &voicelive.TaskReport{
-				ID: row.ReportID, Body: row.ReportBody, Delivered: row.ReportDelivered,
+				ID: row.ReportID, Body: taskexecution.ReportReply(row.ReportBody), Delivered: row.ReportDelivered,
 			}
 		}
 		if row.RunID != "" {
