@@ -19,13 +19,41 @@ import (
 	teamhubinternal "github.com/simplexai-labs/linger/contracts-go/teamhubinternal"
 )
 
-// canvasRuntime is a Document Runtime whose state is the canvas Markdown
-// itself: it exports that Markdown, its header and paragraphs as blocks, and
-// applies a whole-canvas block_replace to the body in pool.
 // canvasAttachmentLink is an attachment line as the Markdown export writes
 // a file block: its name and its Document Asset.
 var canvasAttachmentLink = regexp.MustCompile(`^\[([^\]]*)\]\(document-asset:([A-Za-z0-9_-]+)\)$`)
 
+// canvasConflicts makes a canvas's next changes conflict, as if another
+// change landed first: skip changes apply before conflicts of them conflict.
+var canvasConflicts sync.Map // document ID → *canvasConflictPlan
+
+type canvasConflictPlan struct {
+	mu              sync.Mutex
+	skip, conflicts int
+}
+
+func canvasConflicted(documentID string) bool {
+	value, ok := canvasConflicts.Load(documentID)
+	if !ok {
+		return false
+	}
+	plan := value.(*canvasConflictPlan)
+	plan.mu.Lock()
+	defer plan.mu.Unlock()
+	if plan.skip > 0 {
+		plan.skip--
+		return false
+	}
+	if plan.conflicts > 0 {
+		plan.conflicts--
+		return true
+	}
+	return false
+}
+
+// canvasRuntime is a Document Runtime whose state is the canvas Markdown
+// itself: it exports that Markdown, its header and paragraphs as blocks, and
+// applies a whole-canvas block_replace to the body in pool.
 func canvasRuntime(t *testing.T, computes *atomic.Int32, replaced chan<- string, pool func() *pgxpool.Pool) *httptest.Server {
 	t.Helper()
 	digest := func(data []byte) string {
@@ -108,7 +136,7 @@ func canvasRuntime(t *testing.T, computes *atomic.Int32, replaced chan<- string,
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			if request.ExpectedSeq != nil && *request.ExpectedSeq != seq {
+			if request.ExpectedSeq != nil && *request.ExpectedSeq != seq || canvasConflicted(documentID) {
 				write(nodeservicesinternal.ConflictedDocumentChangeResult{Status: "conflicted", Reason: "stale_head"})
 				return
 			}
@@ -274,11 +302,11 @@ func TestVoiceLiveWritesAndChangesAnEmailCanvasAsTheAgent(t *testing.T) {
 	if changed["status"] != "changed" || next == "" || next == revisionID {
 		t.Fatalf("edit=%v", changed)
 	}
+	// The canvas title follows the subject, so the model never renames it.
+	<-replaced
 	if content := <-replaced; content != "```\ncanvas: gmail\nto: amy@example.com\ncc: bob@example.org\nsubject: Next Wed barbecue pickup\nstatus: editing\nlink:\nexternal_id:\n```\n" {
 		t.Fatalf("replacement=%q", content)
 	}
-	// The canvas title follows the subject, so the model never renames it.
-	<-replaced
 	if countRows(t, env, `SELECT count(*) FROM documents WHERE id=$1 AND title='Next Wed barbecue pickup'`, documentID) != 1 {
 		t.Fatal("the canvas title did not follow the subject")
 	}
@@ -305,6 +333,15 @@ func TestVoiceLiveWritesAndChangesAnEmailCanvasAsTheAgent(t *testing.T) {
 		outdated["revision_id"] != rewritten["revision_id"] || !strings.Contains(outdated["body"].(string), "Barbecue is on me!") {
 		t.Fatalf("body edit over a newer body=%v", outdated)
 	}
+	drain := func() {
+		for {
+			select {
+			case <-replaced:
+			default:
+				return
+			}
+		}
+	}
 	stateOf := func() string {
 		t.Helper()
 		var state []byte
@@ -312,6 +349,27 @@ func TestVoiceLiveWritesAndChangesAnEmailCanvasAsTheAgent(t *testing.T) {
 			t.Fatal(err)
 		}
 		return string(state)
+	}
+	// A change that lands while an edit is made, here after its title step,
+	// is redone on the latest canvas as new operations and lands once.
+	canvasConflicts.Store(documentID, &canvasConflictPlan{skip: 2, conflicts: 1})
+	before := computes.Load()
+	redone := call("edit-3c", "edit_email_canvas", map[string]string{"document_id": documentID, "revision_id": rewritten["revision_id"].(string),
+		"subject": "Saturday barbecue pickup", "body": "Hi Amy,\n\nBarbecue on Saturday!"})
+	drain()
+	if state := stateOf(); redone["status"] != "changed" || !strings.Contains(state, "subject: Saturday barbecue pickup\n") ||
+		!strings.HasSuffix(state, "```\n\nHi Amy,\n\nBarbecue on Saturday!\n") || computes.Load()-before < 3 ||
+		countRows(t, env, `SELECT count(*) FROM documents WHERE id=$1 AND title='Saturday barbecue pickup'`, documentID) != 1 {
+		t.Fatalf("edit redone after a conflict=%v state=%q", redone, state)
+	}
+	// One that keeps conflicting gives up after a few tries with the latest
+	// canvas, and nothing more changes.
+	canvasConflicts.Store(documentID, &canvasConflictPlan{conflicts: 3})
+	before, unchanged := computes.Load(), stateOf()
+	gaveUp := call("edit-3d", "edit_email_canvas", map[string]string{"document_id": documentID, "revision_id": redone["revision_id"].(string), "body": "Hi Amy,\n\nNever mind."})
+	canvasConflicts.Delete(documentID)
+	if gaveUp["error"] != "canvas_changed" || gaveUp["revision_id"] != redone["revision_id"] || computes.Load() != before || stateOf() != unchanged {
+		t.Fatalf("edit that keeps conflicting=%v state=%q", gaveUp, stateOf())
 	}
 	setState := func(state string) string {
 		t.Helper()

@@ -141,9 +141,10 @@ func (s *Service) openVoiceLiveCanvas(ctx context.Context, session voicelive.Ses
 	return created, "", tx.Commit(ctx)
 }
 
-// editVoiceLiveEmailCanvas replaces the canvas with the changed email as
-// the Agent, only when it is still the revision the live model last saw:
-// the user's own edits in between are returned to it, never overwritten.
+// editVoiceLiveEmailCanvas changes the email on the canvas as the Agent. To,
+// cc and subject change on the latest canvas; the body changes only while it
+// is still the text the live model last read, so the user's own edits to it
+// are returned to the model, never overwritten.
 func (s *Service) editVoiceLiveEmailCanvas(ctx context.Context, session voicelive.Session, request teamhubinternal.VoiceLiveToolCall) (string, error) {
 	var args voicelive.EditEmailCanvasArguments
 	if voicelive.DecodeArguments(request.Arguments, &args) != nil || args.DocumentID == "" {
@@ -231,7 +232,7 @@ func (s *Service) voiceLiveCanvasBodySince(ctx context.Context, revisionID strin
 }
 
 // applyVoiceLiveEmailEdit makes one email edit on the canvas as read. A
-// native edit is one operation: the header, the title and the body's text
+// native edit is one operation: the title, the header and the body's text
 // change in turn, each against the revision the one before made. conflicted
 // means another change landed first, after which part of it may be made.
 func (s *Service) applyVoiceLiveEmailEdit(ctx context.Context, session voicelive.Session, request teamhubinternal.VoiceLiveToolCall,
@@ -241,12 +242,14 @@ func (s *Service) applyVoiceLiveEmailEdit(ctx context.Context, session voicelive
 		return voicelive.ErrorOutput(problem), false, nil
 	}
 	edits := []map[string]string{}
-	if args.To != nil || args.Cc != nil || args.Subject != nil {
-		edits = append(edits, map[string]string{"command": "block_replace", "block_id": canvas.firstBlockID, "content": header})
-	}
 	if args.Subject != nil && voicelive.EmailCanvasTitle(*args.Subject) != voicelive.EmailCanvasTitle(canvas.fields["subject"]) {
 		// The canvas is named after its email, as open_email_canvas names it.
+		// The title goes before the subject line, so a try redone after the
+		// subject changed has already renamed it.
 		edits = append(edits, map[string]string{"command": "set_title", "title": voicelive.EmailCanvasTitle(*args.Subject)})
+	}
+	if args.To != nil || args.Cc != nil || args.Subject != nil {
+		edits = append(edits, map[string]string{"command": "block_replace", "block_id": canvas.firstBlockID, "content": header})
 	}
 	if args.Body != nil {
 		// The other text runs go first, last to first, and the attachments
@@ -606,7 +609,6 @@ func (s *Service) voiceLiveDocument(ctx context.Context, principal agentcredenti
 	return voiceLiveDocumentState{}, document.ErrRevisionUnavailable
 }
 
-// voiceLiveCanvas reads the latest Gmail canvas as the Agent.
 // voiceLiveCanvasText is a canvas's Markdown without its header, and the
 // text of that body without attachment lines, as the live model reads it.
 func voiceLiveCanvasText(markdown string) (body, text string) {
@@ -614,6 +616,7 @@ func voiceLiveCanvasText(markdown string) (body, text string) {
 	return body, strings.TrimSpace(voiceLiveAttachmentLine.ReplaceAllString(body, "")) + "\n"
 }
 
+// voiceLiveCanvas reads the latest Gmail canvas as the Agent.
 func (s *Service) voiceLiveCanvas(ctx context.Context, principal agentcredential.Principal, documentID string) (voiceLiveCanvasState, error) {
 	state, err := s.voiceLiveDocument(ctx, principal, documentID)
 	if err != nil {
