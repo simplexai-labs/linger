@@ -113,18 +113,3 @@ func TestInspectCurrentAttemptRunsKeepsTheReportedRunAndError(t *testing.T) {
 		t.Fatalf("activation failure=%+v err=%v", result, err)
 	}
 }
-
-func TestReportReplyDropsOnlyTheMetaReminder(t *testing.T) {
-	idle := "Task Find ticket prices (workitem_1) is idle. " + taskDoneReminder("workitem_1") + "\nAdult tickets are 190.\nBook ahead."
-	if got := ReportReply(idle); got != "Adult tickets are 190.\nBook ahead." {
-		t.Fatalf("idle report: %q", got)
-	}
-	failed := "Task Find ticket prices (workitem_1) failed: the site was down"
-	if got := ReportReply(failed); got != failed {
-		t.Fatalf("failed report: %q", got)
-	}
-	plain := "Task one\nsecond line"
-	if got := ReportReply(plain); got != plain {
-		t.Fatalf("other text: %q", got)
-	}
-}

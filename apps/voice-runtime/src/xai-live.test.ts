@@ -4,22 +4,10 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { LiveEvent } from "./live-session.js";
-import {
-  cutOffNote,
-  spokenLanguage,
-  withLanguage,
-  XaiLiveSession,
-} from "./xai-live.js";
+import { cutOffNote, withLanguage, XaiLiveSession } from "./xai-live.js";
 
-/** Han text built from code points, so the source holds no Chinese. */
-const han = (count: number) =>
-  String.fromCodePoint(
-    ...Array.from({ length: count }, (_, index) => 0x4e00 + index),
-  );
-/** A Chinese request with English names in it, as the live input reads. */
-const chineseRequest = `${han(5)}Chrome${han(6)}OpenAI${han(3)}`;
-/** Japanese: kana mixed with Han. */
-const japaneseRequest = `${han(2)}${String.fromCodePoint(0x306e, 0x30cb, 0x30e5)}${han(2)}`;
+/** A request in a language the code names nowhere. */
+const spanishRequest = "abre Bing y busca noticias de OpenAI";
 
 type Sent = Record<string, unknown>;
 const servers: WebSocketServer[] = [];
@@ -391,7 +379,7 @@ describe("XaiLiveSession", () => {
       {
         type: "conversation.item.input_audio_transcription.completed",
         item_id: "i1",
-        transcript: chineseRequest,
+        transcript: spanishRequest,
         status: "completed",
       },
       { type: "response.created", response: { id: "r1" } },
@@ -407,7 +395,9 @@ describe("XaiLiveSession", () => {
     await waitForSent(provider.sent, 2);
     const item = provider.sent.at(-1)?.item as { output: string };
     expect(item.output.startsWith('{"status":"created"}')).toBe(true);
-    expect(item.output).toContain("The user speaks Chinese");
+    expect(item.output).toContain(
+      `Reply in the language of the user's latest words (“${spanishRequest}”)`,
+    );
     await session.close();
   });
 
@@ -919,16 +909,12 @@ describe("XaiLiveSession", () => {
   });
 });
 
-describe("spokenLanguage", () => {
-  it("reads Chinese with English names in it as Chinese", () => {
-    expect(spokenLanguage(chineseRequest)).toBe("Chinese");
-    expect(spokenLanguage("Please use my local browser")).toBe("English");
-    expect(spokenLanguage("OK")).toBeUndefined();
-    expect(spokenLanguage(japaneseRequest)).toBeUndefined();
-  });
-
-  it("leaves a result alone when the language is unknown", () => {
+describe("withLanguage", () => {
+  it("quotes the user's latest words and leaves a result alone without them", () => {
     expect(withLanguage("ok")).toBe("ok");
-    expect(withLanguage("ok", "English")).toContain("entirely in English");
+    expect(withLanguage("ok", "  ")).toBe("ok");
+    const long = withLanguage("ok", "word ".repeat(100));
+    expect(long.startsWith("ok\n\nReply in the language")).toBe(true);
+    expect(long).toContain("…”)");
   });
 });
