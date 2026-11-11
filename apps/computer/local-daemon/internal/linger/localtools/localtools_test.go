@@ -198,10 +198,18 @@ func runToolFixture(mode string) {
 						result = map[string]any{"isError": true, "content": []any{map[string]string{"type": "text", "text": "keys were not delivered"}}}
 					}
 				case "list_windows":
-					result = map[string]any{"content": []any{}, "structuredContent": map[string]any{"windows": []any{
-						map[string]any{"pid": 42, "window_id": 9, "title": "b", "z_index": 3, "is_on_screen": true},
-					}}}
+					windows := []any{map[string]any{"pid": 42, "window_id": 9, "title": "b", "z_index": 3, "is_on_screen": true, "bounds": map[string]any{"width": 800, "height": 600}}}
+					if mode == "tabs-ghost" {
+						// A starting Chrome lists a larger surface with no
+						// accessibility window beside its browser window.
+						windows = append(windows, map[string]any{"pid": 42, "window_id": 8, "title": "", "z_index": 4, "is_on_screen": true, "bounds": map[string]any{"width": 1600, "height": 1000}})
+					}
+					result = map[string]any{"content": []any{}, "structuredContent": map[string]any{"windows": windows}}
 				case "get_window_state":
+					if mode == "tabs-ghost" && request.Params.Arguments["window_id"] == float64(8) {
+						result = map[string]any{"content": []any{}, "structuredContent": map[string]any{"tree_markdown": "", "degraded_reason": "ax_window_unresolved"}}
+						break
+					}
 					var tree strings.Builder
 					for i := range tabs {
 						fmt.Fprintf(&tree, "- [%d] AXRadioButton \"Tab %d\"\n- [%d] AXButton \"Close\" [actions=[press]]\n", 2*i, i, 2*i+1)
@@ -1213,6 +1221,10 @@ func TestLocalToolCuaMacAgentChromeHoldsOnlyItsOwnWindow(t *testing.T) {
 	if _, err := c.call(t.Context(), "launch_app", json.RawMessage(`{"agent_browser":true,"urls":["https://example.com/"]}`)); !strings.Contains(fmt.Sprint(err), "COMPUTER_SITE_BLOCKED") {
 		t.Fatalf("err=%v, want the stopped task held", err)
 	}
+	// A built search address is refused before anything opens.
+	if _, err := c.call(t.Context(), "launch_app", json.RawMessage(`{"agent_browser":true,"urls":["https://example.com/s/Kyoto?adults=2"]}`)); !strings.Contains(fmt.Sprint(err), "COMPUTER_HOME_PAGE_ONLY") {
+		t.Fatalf("err=%v, want only a home page", err)
+	}
 	if err := c.drain(); err != nil {
 		t.Fatal(err)
 	}
@@ -1830,5 +1842,24 @@ func TestLocalToolCuaDeltaCountFailureReadsFullWindowOnlyOnce(t *testing.T) {
 				t.Fatal("completed read retained action fence")
 			}
 		})
+	}
+}
+
+// A starting Chrome may list a larger surface that has no accessibility
+// window; the browser window is the largest one whose tab strip reads.
+func TestLocalToolCuaMacAgentChromePicksTheWindowWithTabs(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the Computer's own Chrome is macOS only")
+	}
+	c := cuaFixtureSession(t, "tabs-ghost", filepath.Join(t.TempDir(), "calls.jsonl"))
+	windows, err := c.appWindows(t.Context(), 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if window, tabs := c.agentChromeWindow(t.Context(), 42, windows); window.WindowID != 9 || tabs != 1 {
+		t.Fatalf("window=%v tabs=%d, want window 9 with 1 tab", window.WindowID, tabs)
+	}
+	if err := c.drain(); err != nil {
+		t.Fatal(err)
 	}
 }

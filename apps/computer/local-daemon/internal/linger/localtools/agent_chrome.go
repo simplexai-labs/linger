@@ -102,15 +102,20 @@ func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls
 			return nil, err
 		}
 	}
-	started := pid == 0 || len(windows) == 0
-	if started {
-		// A running instance without a window opens one for the same
-		// command. The command opens no URL: the browser would put its first
-		// tab in front, so each URL opens below as a new tab, the last one in
-		// front.
+	// A running instance without a window opens one for the same command.
+	// The command opens no URL: the browser would put its first tab in front,
+	// so each URL opens below as a new tab, the last one in front.
+	openWindow := func() error {
 		args := append([]string{"-g", "-n", "-b", b.Bundle, "--args"}, b.Args(directory)...)
 		if output, err := exec.CommandContext(ctx, "/usr/bin/open", args...).CombinedOutput(); err != nil {
-			return nil, fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
+			return fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
+		}
+		return nil
+	}
+	started := pid == 0 || len(windows) == 0
+	if started {
+		if err := openWindow(); err != nil {
+			return nil, err
 		}
 		deadline := time.Now().Add(agentChromeWait)
 		for len(windows) == 0 {
@@ -130,13 +135,21 @@ func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls
 			}
 		}
 	}
-	// Bubbles such as the translate or permission prompts are small extra
-	// windows of the same pid, so the browser window is the largest one.
-	window := slices.MaxFunc(windows, func(a, b listedWindow) int {
-		return cmp.Compare(a.Bounds.Width*a.Bounds.Height, b.Bounds.Width*b.Bounds.Height)
-	})
-	// A just-started window shows its tab strip a moment after it appears.
-	for deadline := time.Now().Add(agentChromeWait); started && len(urls) > 0 && c.agentChromeTabs(ctx, pid, window.WindowID) == 0; {
+	window, tabs := c.agentChromeWindow(ctx, pid, windows)
+	if !started && len(urls) > 0 && tabs == 0 && !offSpace(window) {
+		// A window macOS has not shown for a while first reads as empty. One
+		// that stays empty has left the accessibility tree while its frame is
+		// still listed, so the browser opens a fresh window for the URLs.
+		if tabs = c.agentChromeTabsUntil(ctx, pid, window.WindowID, agentChromeWait, func(n int) bool { return n > 0 }); tabs == 0 {
+			if err := openWindow(); err != nil {
+				return nil, err
+			}
+			started = true
+		}
+	}
+	// A just-started browser shows its tab strip a moment after its window
+	// appears, and may first list a window that is not the browser window.
+	for deadline := time.Now().Add(agentChromeWait); started && len(urls) > 0 && tabs == 0; {
 		if time.Now().After(deadline) {
 			if offSpace(window) {
 				return nil, errAgentChromeOffSpace
@@ -145,6 +158,11 @@ func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls
 		}
 		if err := sleepContext(ctx, 200*time.Millisecond); err != nil {
 			return nil, err
+		}
+		if listed, err := c.appWindows(ctx, pid); err != nil {
+			return nil, err
+		} else if len(listed) > 0 {
+			window, tabs = c.agentChromeWindow(ctx, pid, listed)
 		}
 	}
 	for i, url := range urls {
@@ -159,7 +177,7 @@ func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls
 			return nil, err
 		}
 	}
-	note := "This is the Computer's own " + b.Name + ", separate from the user's everyday browser and with its own sign-ins. It works while other windows cover it, but only on the desktop (Space) the user is on. Keys without an element, such as escape, go to it in the background; the Computer never brings it forward for them. Only a click with delivery_mode foreground brings it forward: use one only where a control takes only a real pointer, and tell the user first. Type into a page field with type_text and the field's element_token: pressing an element does not move the keyboard focus, so keys without one can land in the address bar. Close a tab with the Close button of its tab, not cmd+w. If a site asks to sign in, ask the user to sign in once in this window."
+	note := "This is the Computer's own " + b.Name + ", separate from the user's everyday browser and with its own sign-ins. It works while other windows cover it, but only on the desktop (Space) the user is on. Keys without an element, such as escape, go to it in the background; the Computer never brings it forward for them. Only a click with delivery_mode foreground brings it forward: use one only where a control takes only a real pointer, and tell the user first. Type into a page field with type_text and the field's element_token: pressing an element does not move the keyboard focus, so keys without one can land in the address bar. Move between pages as a person does: through the page's search box, menus and links, back with cmd+[; never type an address into the address bar. Close a tab with the Close button of its tab, not cmd+w. If a site asks to sign in, ask the user to sign in once in this window."
 	if started {
 		note = "Started the Computer's own " + b.Name + "; its window came forward once. " + note
 	}
@@ -167,7 +185,7 @@ func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls
 	m.mu.Lock()
 	m.agentChromePID, m.agentChromeChecked = pid, time.Now()
 	m.mu.Unlock()
-	tabs := c.agentChromeTabs(ctx, pid, window.WindowID)
+	tabs = c.agentChromeTabs(ctx, pid, window.WindowID)
 	c.op.mu.Lock()
 	c.op.chromeTabs, c.op.chromePID, c.op.chromeWindow = tabs, pid, window.WindowID
 	c.op.mu.Unlock()
@@ -178,6 +196,25 @@ func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls
 	text := fmt.Sprintf("Opened %d URL(s) in the Computer's own %s (pid %d), window %q [window_id: %v]. The window has %d tab(s). %s\n%s", len(urls), b.Name, pid, window.Title, window.WindowID, tabs, opened, note)
 	return json.Marshal(map[string]any{"content": []any{map[string]string{"type": "text", "text": text}},
 		"structuredContent": map[string]any{"browser": b.Name, "pid": pid, "windows": []map[string]any{{"window_id": window.WindowID, "title": window.Title, "on_screen": window.IsOnScreen}}, "tabs": tabs, "note": note}})
+}
+
+// agentChromeWindow picks the browser window among windows and reads its
+// tab count. Bubbles such as the translate or permission prompts are small
+// extra windows of the same pid, so the browser window is the largest one
+// whose tab strip reads. A starting Chrome can list a larger surface that has
+// no accessibility window; it is skipped. With no readable tab strip, the
+// largest window is returned with 0 tabs.
+func (c *cuaSession) agentChromeWindow(ctx context.Context, pid int, windows []listedWindow) (listedWindow, int) {
+	bySize := slices.Clone(windows)
+	slices.SortStableFunc(bySize, func(a, b listedWindow) int {
+		return cmp.Compare(b.Bounds.Width*b.Bounds.Height, a.Bounds.Width*a.Bounds.Height)
+	})
+	for _, window := range bySize {
+		if tabs := c.agentChromeTabs(ctx, pid, window.WindowID); tabs > 0 {
+			return window, tabs
+		}
+	}
+	return bySize[0], 0
 }
 
 // agentChromeOpenTab opens url in a new tab of window: cmd+t and Return go

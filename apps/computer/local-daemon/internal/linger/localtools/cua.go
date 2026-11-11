@@ -53,6 +53,8 @@ type cuaSession struct {
 	named map[int]float64
 	// input is, per macOS app, when the Agent last sent it input.
 	input map[int]time.Time
+	// snapshots carries the Agent's tokens over the Computer's own reads.
+	snapshots *snapshotRows
 }
 
 func (c *cuaSession) checkDesktop() error {
@@ -116,7 +118,8 @@ func (m *Manager) openCua(ctx context.Context, op *operation) (*cuaSession, []to
 	client, err := startClientWith(ctx, run, m.options.CuaPath, arguments, op.spec.WorkingDirectory, environment)
 	var session *cuaSession
 	if client != nil {
-		session = &cuaSession{op: op, client: client, label: "linger-" + rand.Text(), servicePID: servicePID}
+		session = &cuaSession{op: op, client: client, label: "linger-" + rand.Text(), servicePID: servicePID, snapshots: newSnapshotRows()}
+		client.observe = session.snapshots.observe
 	}
 	if err != nil {
 		return session, nil, err
@@ -157,7 +160,7 @@ func (m *Manager) openCua(ctx context.Context, op *operation) (*cuaSession, []to
 		if item.Name == "launch_app" && runtime.GOOS == "darwin" {
 			item.Description = "Open a macOS app in the background through Launch Services, as `open -g` does, and return its pid and windows. Optional urls are handed to the app; for Finder, pass a folder to open it in a window."
 			item.InputSchema = schema(map[string]any{"bundle_id": map[string]string{"type": "string", "description": "Preferred, for example com.apple.TextEdit."}, "name": map[string]string{"type": "string", "description": "App name, when the bundle id is unknown."}, "urls": map[string]any{"type": "array", "items": map[string]string{"type": "string"}, "description": "Files or folders to open in the app."},
-				"agent_browser": map[string]string{"type": "boolean", "description": "Open the URLs in the Computer's own browser, which keeps working while other windows cover it on the user's desktop and has its own sign-ins, instead of the user's everyday browser. With no bundle_id it is the first installed of Chrome, Edge, Firefox and Safari; a bundle_id of com.google.Chrome, com.microsoft.edgemac, org.mozilla.firefox or com.apple.Safari picks one. Safari has no separate profile, so there it is a window of its own in the user's Safari, with the user's sign-ins."}})
+				"agent_browser": map[string]string{"type": "boolean", "description": "Open the URLs in the Computer's own browser, which keeps working while other windows cover it on the user's desktop and has its own sign-ins, instead of the user's everyday browser. Only a site's home page opens there, such as https://www.example.com/. With no bundle_id it is the first installed of Chrome, Edge, Firefox and Safari; a bundle_id of com.google.Chrome, com.microsoft.edgemac, org.mozilla.firefox or com.apple.Safari picks one. Safari has no separate profile, so there it is a window of its own in the user's Safari, with the user's sign-ins."}})
 		}
 		if item.Name == "get_desktop_state" {
 			item.Description += " Read-only whole-screen view; act through the window tools with a pid and window_id. A system privacy prompt about CuaDriver belongs to the user: never answer it, and keep working through the window tools."
@@ -381,6 +384,17 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 	if err != nil {
 		return nil, err
 	}
+	if own, _ := arguments["agent_browser"].(bool); own && name == "launch_app" {
+		// Refused before the launch takes the browser, the pace or the journal.
+		urls, _ := arguments["urls"].([]any)
+		for _, item := range urls {
+			if address, ok := item.(string); ok {
+				if err := homePage(address); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	agentChrome, err := c.claimAgentChromeInput(ctx, name, arguments, paged)
 	if err != nil {
 		return nil, err
@@ -508,8 +522,16 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 			return nil, err
 		}
 	}
+	if c.snapshots != nil {
+		// The Computer's own reads since the Agent's read, such as the tab
+		// check, replaced the snapshot the Agent's token names.
+		c.snapshots.remap(arguments)
+	}
 	driverStarted := time.Now()
 	result, err := c.sendInput(ctx, name, arguments, appKeys, agentChrome)
+	if c.snapshots != nil {
+		c.snapshots.sent()
+	}
 	driverMs = time.Since(driverStarted).Milliseconds()
 	if err == nil {
 		result = c.annotateInputResult(name, result)
@@ -633,7 +655,7 @@ func (c *cuaSession) claimAgentChromeInput(ctx context.Context, name string, arg
 		}
 	}
 	if modifiers, _ := arguments["modifier"].([]any); agentChrome && len(modifiers) > 0 && arguments["delivery_mode"] != "foreground" {
-		return false, fmt.Errorf("COMPUTER_INPUT_NOT_SENT: a click with modifier keys needs the window in front, and the Computer's own browser is never brought forward for it; open a link with launch_app urls instead: %w", errNotSent)
+		return false, fmt.Errorf("COMPUTER_INPUT_NOT_SENT: a click with modifier keys needs the window in front, and the Computer's own browser is never brought forward for it; click the link without modifier keys instead: %w", errNotSent)
 	}
 	return agentChrome, nil
 }
@@ -671,6 +693,9 @@ func (c *cuaSession) prepareInput(ctx context.Context, name string, arguments ma
 			return false, false, err
 		}
 		appKeys = false
+	}
+	if agentChrome && name == "type_text" && arguments["delay_ms"] == nil {
+		arguments["delay_ms"] = agentChromeTypeDelay
 	}
 	if pid, ok := arguments["pid"].(float64); ok && runtime.GOOS == "darwin" {
 		if window, ok := arguments["window_id"].(float64); ok {

@@ -117,14 +117,18 @@ People are watching a live chat, not a progress bar.
 
 const TASK_COMMAND = `teamhub task create --name "<short title>" --requirement "<brief>" (--requirement-file for a long brief). It starts at once; nobody approves it, and up to 10 Tasks can run at the same time.`;
 
+const OWN_BROWSER = `- Browsing a site in the Computer's own browser, the humanlike-browse way, is the exception: the person watches that window and a Task takes a minute to start, so do it yourself in this turn.`;
+
 const TASK_BRIEF = `- The AlterEgo can't read this Room, so write a self-contained requirement: what to do, the context from this conversation it needs (quote it), Document IDs or file paths, what counts as done, and what to report back. It can't reach people and reports only to you, so don't ask it to message anyone.`;
 
 // In a direct chat the Meta stays available and delegates anything heavier.
 const DIRECT_TASKS = `- Delegate any non-trivial work to your own AlterEgo with ${TASK_COMMAND} Non-trivial means web research beyond a quick lookup, reading or processing several files or data, producing a document, report or other file, a long command sequence, or anything that would keep you busy for more than a few seconds. Answer conversational questions and do one-step lookups yourself, and do the work directly when the person asks you to do it right now.
 - Give each independent piece of work its own Task and create them together so they run in parallel.
+${OWN_BROWSER}
 ${TASK_BRIEF}`;
 
 const ROOM_TASKS = `- Delegate researching something, digging through files, or a multi-step investigation to your own AlterEgo so the Room isn't blocked on you: ${TASK_COMMAND} Give each independent piece of work its own Task.
+${OWN_BROWSER}
 ${TASK_BRIEF}`;
 
 const TASK_COORDINATION = `- A Task runs as a separate AlterEgo of you in the background; its progress is not yours. Don't redo its work here.

@@ -15,7 +15,7 @@ import (
 // macScriptDescription replaces Cua's run_script description with the
 // Computer's rules: background input only, and a bounded result.
 const macScriptDescription = "Run a JavaScript program that drives apps on this Mac in ONE call: loops, waits, reads and checks between inputs, and only its return value comes back. Use it to repeat a flow over several items, such as open each result, read it and close it, instead of one model turn per input. The script is the body of an async function: use await and return a JSON value. The only API is cua:\n" +
-	"- const app = await cua.getApp({pid, windowId}) or cua.getApp(\"Google Chrome\"); cua.sleep(ms), where ms must be a whole number: a fraction returns at once without waiting; cua.listWindows({pid})\n" +
+	"- const app = await cua.getApp({pid, windowId}) or cua.getApp(\"Google Chrome\"); cua.sleep(ms), where ms must be a whole number: a fraction returns at once without waiting, and in the Computer's own browser one sleep lasts at most 1.5 s: wait for a page with app.waitFor; cua.listWindows({pid})\n" +
 	"- app.getState({query?, max_elements?, timeout_ms?, since?: \"latest\", tree_format?: \"elements\"}) returns {tree_markdown, window_title, snapshot_id, truncated?, elements?}; rows read as in get_window_state. In a script the walk stops after 250 nodes and 1000 ms unless you pass max_elements and timeout_ms, which cuts a browser page: pass about 3000 and 4000 there\n" +
 	"- app.query({role?, name?}) finds named elements {element_token, role, label, frame}; app.waitFor({role?, name?, text?, gone?, timeout_ms?}) waits until the window shows (or no longer shows) them; text also matches static text\n" +
 	"- app.click(t), doubleClick(t), typeText(text, t?), pressKey(\"escape\", t?), hotkey([\"cmd\",\"s\"]), scroll(t, \"down\", amount?), setValue(t, value), where t is {role, name, nth?}, an element_token, a row number of this app's last getState(), or [x, y] pixels of its last screenshot\n" +
@@ -92,7 +92,9 @@ for (let i = 0; i < ks.length; i++) { const v = r[ks[i]], w = out(v); if (w === 
 return c || r; };
 const wrap = o => { const w = {}, seen = {};
 for (let q = o; q && q !== plainProtos[0]; q = proto(q)) { const ns = names(q); for (let i = 0; i < ns.length; i++) { const k = ns[i]; if (k === "constructor" || seen[k]) continue; seen[k] = true;
-define(w, k, {enumerable: true, get() { const v = o[k]; if (typeof v !== "function") return out(v); return function (...a) { const c = {length: a.length}; for (let i = 0; i < a.length; i++) define(c, i, {value: plain(a[i])});
+define(w, k, {enumerable: true, get() { const v = o[k]; if (typeof v !== "function") return out(v); return function (...a) { let c = {length: a.length}; for (let i = 0; i < a.length; i++) define(c, i, {value: plain(a[i])});
+if (limit > 0 && k === "typeText") { const given = c.length > 2 && c[2] !== null && typeof c[2] === "object" ? c[2] : {}; const t = {length: 3}; define(t, 0, {value: c[0]}); define(t, 1, {value: c[1]}); define(t, 2, {value: {delay_ms: `+strconv.Itoa(agentChromeTypeDelay)+`, ...given}}); c = t; }
+if (limit > 0 && k === "sleep" && o === real && typeof c[0] === "number" && c[0] > `+strconv.Itoa(scriptSleepLimit)+`) { const t = {length: 1}; define(t, 0, {value: `+strconv.Itoa(scriptSleepLimit)+`}); c = t; }
 const run = () => { const r = apply(v, o, c); return r !== null && typeof r === "object" && typeof r.then === "function" ? apply(then, r, [out]) : out(r); };
 if (limit > 0 && (k === "launchApp" || k === "call" && c[0] === "launch_app")) throw new Error("COMPUTER_SCRIPT_REFUSED: a script in the Computer's own browser opens no app or URL, so the site checks of launch_app hold; call launch_app as its own tool");
 if (limit <= 0 || !input(k, c)) return run();

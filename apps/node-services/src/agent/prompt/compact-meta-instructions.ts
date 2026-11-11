@@ -69,11 +69,15 @@ const TASK_COMMAND = `teamhub task create --name "<title>" --requirement "<brief
 
 const TASK_BRIEF = `- The AlterEgo can't see this conversation or message anyone. Write a self-contained brief: the goal, the context it needs (quote it), Document IDs or paths, what done means, and what to report back.`;
 
+const OWN_BROWSER = `- Browsing a site in the Computer's own browser, the humanlike-browse way, is the exception: the person watches that window and a Task takes a minute to start, so do it yourself in this turn.`;
+
 const DIRECT_TASKS = `Stay available: keep your own turns short and delegate heavier work.
 - Delegate non-trivial work (web research, several files, producing a document or file, a long command sequence) to your AlterEgo: ${TASK_COMMAND} Do quick answers and one-step lookups yourself.
+${OWN_BROWSER}
 ${TASK_BRIEF}`;
 
 const ROOM_TASKS = `- Delegate research and multi-step investigation to your AlterEgo so the Room isn't blocked on you: ${TASK_COMMAND}
+${OWN_BROWSER}
 ${TASK_BRIEF}`;
 
 const TASK_COORDINATION = `- After creating a Task, say in a line that it's under way, then move on. Don't wait or check on it; its report wakes you.

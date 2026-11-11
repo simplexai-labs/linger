@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -13,12 +14,12 @@ import (
 // the same prelude's semantics.
 const guardHarness = `import fs from "fs";
 const log = [];
-class App { constructor(n) { this.n = n; } click(a) { log.push("raw:" + JSON.stringify(a)); return "clicked"; } }
+class App { constructor(n) { this.n = n; } click(a) { log.push("raw:" + JSON.stringify(a)); return "clicked"; } typeText(text, on, options) { log.push("type:" + JSON.stringify(options)); return "typed"; } }
 const fake = { call(t, a) { log.push("call:" + t + ":" + JSON.stringify(a)); return Promise.resolve({ok: true}); },
   getApp() { return Promise.resolve(new App("a")); },
   listApps() { return Promise.resolve([new App("b")]); },
   box() { return Promise.resolve({inner: {app: new App("c")}}); },
-  sleep(ms) { log.push("sleep:" + (ms >= 400 && ms < 1300 ? "paced" : ms)); return Promise.resolve(); } };
+  sleep(ms) { log.push("sleep:" + (ms >= 100 && ms < 250 ? "paced" : ms)); return Promise.resolve(); } };
 Object.defineProperty(globalThis, "cua", {value: Object.freeze(fake), writable: false, configurable: false});
 const AsyncFunction = (async function () {}).constructor;
 let result;
@@ -93,6 +94,36 @@ func TestScriptGuardPacesInputsForTheComputersChrome(t *testing.T) {
 	got := string(out)
 	if !strings.Contains(got, "threw:COMPUTER_SCRIPT_INPUT_LIMIT") || strings.Count(got, "sleep:paced") != 2 || strings.Contains(got, "press_key") || !strings.Contains(got, "call:get_window_state") {
 		t.Fatalf("got %s", got)
+	}
+}
+
+// In the Computer's own browser a script types with a short gap between
+// characters unless it names one, and one fixed wait lasts at most
+// scriptSleepLimit: pages are waited for with app.waitFor.
+func TestScriptGuardSpeedsTypingAndCapsWaits(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	dir := t.TempDir()
+	harness := filepath.Join(dir, "harness.mjs")
+	script := filepath.Join(dir, "script.js")
+	body := `const app = await cua.getApp({pid: 1}); await app.typeText("kettle", {role: "AXTextField"}); await app.typeText("pot", undefined, {delay_ms: 40}); await cua.sleep(5000); await cua.sleep(700); return "done";`
+	if err := os.WriteFile(harness, []byte(guardHarness), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, 20)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(node, harness, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	got := string(out)
+	for _, want := range []string{`type:{\"delay_ms\":` + strconv.Itoa(agentChromeTypeDelay) + `}`, `type:{\"delay_ms\":40}`, `"sleep:` + strconv.Itoa(scriptSleepLimit) + `"`, `"sleep:700"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("got %s, want %s", got, want)
+		}
 	}
 }
 

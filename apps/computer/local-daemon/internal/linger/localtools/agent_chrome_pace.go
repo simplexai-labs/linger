@@ -40,12 +40,23 @@ const (
 // agentChromePause is the gap kept between two inputs to the Computer's own
 // browser; a test replaces it.
 var agentChromePause = func() time.Duration {
-	return time.Duration(600+rand.IntN(1200)) * time.Millisecond //nolint:gosec // pacing jitter, not a secret
+	return time.Duration(150+rand.IntN(250)) * time.Millisecond //nolint:gosec // pacing jitter, not a secret
 }
 
 // scriptInputPause is the range, in milliseconds, of the pause a paced script
 // waits before each input.
-const scriptInputPauseMin, scriptInputPauseSpan = 400, 900
+const scriptInputPauseMin, scriptInputPauseSpan = 100, 150
+
+// agentChromeTypeDelay is the gap, in milliseconds, between the characters
+// type_text sends to the Computer's own browser. Chromium takes no
+// accessibility text insertion, so Cua types key by key; its own default of
+// 30 ms makes a short search take a second or more.
+const agentChromeTypeDelay = 8
+
+// scriptSleepLimit caps one cua.sleep, in milliseconds, in a script for the
+// Computer's own browser: a page is waited for with app.waitFor, and a fixed
+// wait only adds time the user watches.
+const scriptSleepLimit = 1500
 
 // blockerKinds are the checks report_blocker accepts. Every kind but
 // content_unavailable stops the task's input to the Computer's own browser.
@@ -85,6 +96,21 @@ func siteOf(address string) string {
 		return site
 	}
 	return host
+}
+
+// homePage refuses a web address other than a site's home page in the
+// Computer's own browser. A person opens a site and reaches a search,
+// listing or item through its own search box, menus and links; a built
+// address skips that and reads to the site as automation.
+func homePage(address string) error {
+	parsed, err := url.Parse(address)
+	if err != nil {
+		return nil //nolint:nilerr // an address that does not parse names no site page
+	}
+	if !webAddress(parsed) || (parsed.Path == "" || parsed.Path == "/") && parsed.RawQuery == "" && parsed.Fragment == "" {
+		return nil
+	}
+	return fmt.Errorf("COMPUTER_HOME_PAGE_ONLY: the Computer's own browser opens a site at its home page, such as %s://%s/; reach the page you need through the site's search box, menus and links: %w", parsed.Scheme, parsed.Host, errNotSent)
 }
 
 // coolingSite refuses work on a site in its cooldown.

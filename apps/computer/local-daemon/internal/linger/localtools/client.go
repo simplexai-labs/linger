@@ -40,6 +40,8 @@ type mcpClient struct {
 	stop      context.CancelFunc
 	closeOnce sync.Once
 	err       error
+	// observe, when set, sees every completed tool call and its result.
+	observe func(params any, result json.RawMessage)
 }
 
 func startClient(ctx context.Context, command string, args []string, cwd string, env []string) (*mcpClient, error) {
@@ -201,6 +203,9 @@ func (c *mcpClient) request(ctx context.Context, method string, params any) (jso
 		}
 		if len(response.Result) == 0 {
 			return nil, errors.Join(errOutcomeUnknown, errors.New("missing local MCP response"))
+		}
+		if c.observe != nil && method == "tools/call" {
+			c.observe(params, response.Result)
 		}
 		return response.Result, nil
 	case <-ctx.Done():

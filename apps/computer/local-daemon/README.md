@@ -327,7 +327,10 @@ profile under `computer-tools/agent-<browser>` in the state directory, so the
 user signs in there once. Safari cannot run a second profile; the Computer
 uses its own window in the user's Safari. Without a `bundle_id`, the Daemon
 picks the first installed of Chrome, Edge, Firefox and Safari.
-Input to that browser is paced: 600 to 1800 ms between inputs, at most 300
+It opens a site only at its home page and refuses any other web address with
+`COMPUTER_HOME_PAGE_ONLY`: the Agent reaches a search, listing or item through
+the site's own search box, menus and links, as a person does.
+Input to that browser is paced: 150 to 400 ms between inputs (100 to 250 ms inside a script; typed text 8 ms per character; one script `cua.sleep` at most 1.5 s), at most 300
 inputs per task and 1500 per day, and at most 20 inputs per `run_script`.
 `report_blocker` with the page URL stops
 the task; `rate_limited` also puts the site (its registrable domain) in a
@@ -338,10 +341,18 @@ A change in the number of tabs between the task's inputs stops the task with
 `COMPUTER_TAB_CHANGED`, because the next input could reach another page. A
 tab that the task's own input or script opens or closes is the task's: the
 task holds the browser's input lease, and the count is kept once the tab strip
-settles, since the browser shows such a tab a moment later. Only the window
+settles, since the browser shows such a tab a moment later. Reading the tab
+strip replaces Cua's snapshot of the window, so the Daemon remembers the rows
+of recent reads and moves an Agent's element token, in an input or written
+into a script, to the current snapshot when its row reads the same there.
+Only the window
 the task opened with `launch_app` is held. A script that names no window in
 its `args` is taken to drive that window; a script to another app is neither
-paced nor held, and a paced script may not call `launch_app`.
+paced nor held, and a paced script may not call `launch_app`. The browser
+window is the largest window whose tab strip reads: a starting Chrome can list
+a larger surface without an accessibility window, which is skipped. The
+`launch_app` result tells the Agent to move between pages through the site's
+own controls and never type into the address bar.
 
 Desktop input keeps one persistent action record,
 `computer-tools/action.json`. Each Agent's browser and each seat in the
