@@ -2005,30 +2005,37 @@ export class LiveVoiceWorker {
         Math.round(firstFrameAt - this.sessionCreatedAtMs),
       );
       this.reportBoundary(epoch, "track_started", startMs, startMs);
+      // The call listens once the microphone arrives, before the provider
+      // session opens: speech before then waits in the track's bounded input
+      // buffer and goes to the provider in order once it opens. Its
+      // transcript shows up then.
       if (Number.isSafeInteger(generation) && generation > 0 && track.sid) {
         const trackSid = track.sid;
-        void this.sessionReady.then(() => {
-          if (!consuming || signal.aborted || this.stopped || this.failed)
-            return;
-          const renew = () =>
-            withTimeout(
-              this.ctx.room.localParticipant!.setAttributes({
-                "linger.voice_ready_generation": String(generation),
-                "linger.voice_ready_track": trackSid,
-                "linger.voice_ready_at": String(Date.now()),
-                "linger.voice_purpose": "chat_live",
-              }),
-              1_000,
-              "Voice input readiness timed out",
-            )
-              .then(() => this.timing("voice_ready_set"))
-              .catch(() => undefined);
-          void renew();
-          readinessTimer = setInterval(() => {
+        const renew = () =>
+          withTimeout(
+            this.ctx.room.localParticipant!.setAttributes({
+              "linger.voice_ready_generation": String(generation),
+              "linger.voice_ready_track": trackSid,
+              "linger.voice_ready_at": String(Date.now()),
+              "linger.voice_purpose": "chat_live",
+            }),
+            1_000,
+            "Voice input readiness timed out",
+          )
+            .then(() => this.timing("voice_ready_set"))
+            .catch(() => undefined);
+        void renew();
+        readinessTimer = setInterval(() => {
+          if (consuming && !signal.aborted && !this.stopped && !this.failed)
             void renew();
-          }, 2_000);
-        });
+        }, 2_000);
       }
+      await Promise.race([
+        this.sessionReady,
+        new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        ),
+      ]);
       for (;;) {
         const queuedAt = input.oldestRetainedAtMs();
         const frame = await input.next(signal);
@@ -2039,7 +2046,7 @@ export class LiveVoiceWorker {
             Date.now() - queuedAt,
           );
         processedMs += (frame.samplesPerChannel / frame.sampleRate) * 1_000;
-        // Audio before the provider session is ready predates readiness.
+        // A provider session that is reconnecting drops what arrives meanwhile.
         if (!this.session) continue;
         const session = this.session;
         await this.detectSpeech(toDetectorRate(frame.data), signal);
