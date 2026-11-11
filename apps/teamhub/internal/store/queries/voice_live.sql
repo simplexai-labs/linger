@@ -219,10 +219,12 @@ WHERE voice_session_id=sqlc.arg(voice_session_id)::text
   AND turn_id=sqlc.arg(turn_id)::text AND name=sqlc.arg(name)::text;
 
 -- name: GetLatestVoiceLiveToolOutput :one
--- The newest output this session returned for the tool, such as the page
--- the cloud browser showed last.
+-- The newest output this session returned for the tool before the call that
+-- asks, such as the page the browser showed last. The asking call is already
+-- claimed with no output, so it is left out.
 SELECT output FROM voice_live_tool_calls
 WHERE voice_session_id=sqlc.arg(voice_session_id)::text AND name=sqlc.arg(name)::text
+ AND call_id<>sqlc.arg(call_id)::text
 ORDER BY created_at DESC LIMIT 1;
 
 -- name: SearchVoiceLiveMessagesForAccount :many

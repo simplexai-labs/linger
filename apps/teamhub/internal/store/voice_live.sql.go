@@ -243,18 +243,21 @@ func (q *Queries) FindVoiceLiveRoomsForAccount(ctx context.Context, arg FindVoic
 const getLatestVoiceLiveToolOutput = `-- name: GetLatestVoiceLiveToolOutput :one
 SELECT output FROM voice_live_tool_calls
 WHERE voice_session_id=$1::text AND name=$2::text
+ AND call_id<>$3::text
 ORDER BY created_at DESC LIMIT 1
 `
 
 type GetLatestVoiceLiveToolOutputParams struct {
 	VoiceSessionID string `json:"voice_session_id"`
 	Name           string `json:"name"`
+	CallID         string `json:"call_id"`
 }
 
-// The newest output this session returned for the tool, such as the page
-// the cloud browser showed last.
+// The newest output this session returned for the tool before the call that
+// asks, such as the page the browser showed last. The asking call is already
+// claimed with no output, so it is left out.
 func (q *Queries) GetLatestVoiceLiveToolOutput(ctx context.Context, arg GetLatestVoiceLiveToolOutputParams) (string, error) {
-	row := q.db.QueryRow(ctx, getLatestVoiceLiveToolOutput, arg.VoiceSessionID, arg.Name)
+	row := q.db.QueryRow(ctx, getLatestVoiceLiveToolOutput, arg.VoiceSessionID, arg.Name, arg.CallID)
 	var output string
 	err := row.Scan(&output)
 	return output, err
