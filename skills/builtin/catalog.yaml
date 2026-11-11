@@ -129,12 +129,6 @@ skills:
       - manifest_id: skill_manifest_simplexai_media_generation_1_0_2
         version: 1.0.2
         package_path: builtin/media-generation/1.0.2
-      - manifest_id: skill_manifest_simplexai_media_generation_1_0_1
-        version: 1.0.1
-        package_path: builtin/media-generation/1.0.1
-      - manifest_id: skill_manifest_simplexai_media_generation_1_0_0
-        version: 1.0.0
-        package_path: builtin/media-generation/1.0.0
   - skill_id: simplexai_slide_deck
     bootstrap_manifest_id: skill_manifest_simplexai_slide_deck_1_0_1
     default_agent_types:

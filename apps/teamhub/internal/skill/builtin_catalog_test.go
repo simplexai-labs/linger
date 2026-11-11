@@ -41,8 +41,8 @@ func TestBuiltinCatalogLoadsVersionedPackages(t *testing.T) {
 	}
 	assertImportedBuiltinSkillDefaults(t, catalog)
 	for _, skill := range catalog.Skills {
-		// Versions start at the 1.0.0 baseline and load oldest first; the newest
-		// bootstraps, and every embedded version directory is listed.
+		// Versions load oldest first; the newest bootstraps, and every embedded
+		// version directory is listed. Retired versions leave no directory.
 		listed := map[string]bool{}
 		for _, manifest := range skill.Manifests {
 			if manifest.PackagePath != "builtin/"+skill.Name+"/"+manifest.Version {
@@ -50,8 +50,8 @@ func TestBuiltinCatalogLoadsVersionedPackages(t *testing.T) {
 			}
 			listed[manifest.Version] = true
 		}
-		if len(skill.Manifests) == 0 || skill.Manifests[len(skill.Manifests)-1].ManifestID != skill.BootstrapManifestID || !listed["1.0.0"] {
-			t.Fatalf("%s must bootstrap its newest version and keep the 1.0.0 baseline: %+v", skill.SkillID, skill)
+		if len(skill.Manifests) == 0 || skill.Manifests[len(skill.Manifests)-1].ManifestID != skill.BootstrapManifestID {
+			t.Fatalf("%s must bootstrap its newest version: %+v", skill.SkillID, skill)
 		}
 		entries, err := fs.ReadDir(builtinskills.FS, "builtin/"+skill.Name)
 		if err != nil {
