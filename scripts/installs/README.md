@@ -1,9 +1,9 @@
 # Install scripts
 
 This directory holds only the entry scripts of the local model stack, plus this
-README. Its release pipeline generates the scripts with pinned versions; source,
-tests and release tools stay in their own repository, and the pipeline rewrites
-only its scripts and its marked section below.
+README. The upstream release tools generate scripts with pinned versions. Updates
+are copied into a local checkout for review; opening a pull request, merging it
+and releasing Linger are separate actions requested by the maintainer.
 
 ## Your own API keys: `user.env`
 
@@ -68,12 +68,17 @@ The Linger installer does not go through `stack.sh`; it calls the same kind of l
 directly and by convention pins the same version as here.
 
 The same script also runs without cloning the repository: `curl -fsSL https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/<version>/stack.sh | sh -s -- --help`.
-To follow the latest main build, use `…/cli/localmodels/mac-main/stack.sh` or `…/cli/localmodels/lin-main/stack.sh`
-on macOS and Linux (the two are the same file and run on both), and `…/cli/localmodels/win-main/stack.ps1` on Windows.
 
-The localmodels release process publishes each version's kits, both scripts and `release.json` under
-`https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/<version>/`, and rewrites `stack.sh`, `stack.ps1` and this section
-with the new pin. Do not edit them by hand. The version pin only says which published CLI runs; it does not state which
-platforms or GPUs are supported.
+For setup and supported runtime choices, see the
+[Linger documentation](https://docs.heylinger.com/models/choose-a-runtime).
+
+Maintainers generate these files from an explicitly published localmodels release
+and apply the three generated files together to a local Linger checkout for review.
+The updater preserves other README sections and does not create a branch, commit,
+pull request or release. Submitting and merging the update and releasing Linger
+require separate maintainer actions.
+The version pin identifies the published CLI; it does not establish platform or
+GPU support or real-device acceptance. Keep the scripts and this generated
+section together when updating the pin.
 
 <!-- <<< llm-inference-lab: stack -->

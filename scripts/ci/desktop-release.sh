@@ -5,8 +5,8 @@ set -euo pipefail
 # The packaging scripts make the macOS DMG and the Windows installer on Linux
 # (Docker images for the disk image and NSIS, rcodesign for signatures), so
 # every target builds on a Linux x64 host. .github/workflows/desktop-release.yml
-# calls this to publish releases in simplexai-labs/linger;
-# docs/desktop-release.md describes it.
+# calls this to publish releases in simplexai-labs/linger after an explicit
+# workflow dispatch. docs/desktop-release.md describes the release procedure.
 #
 #   desktop-release.sh version <tag>              print tag=, version= and prerelease= lines
 #   desktop-release.sh fetch-native <target>      put the pinned PostgreSQL and voice tools
@@ -15,9 +15,6 @@ set -euo pipefail
 #   desktop-release.sh package <target>           package.py for the target (Python, Docker)
 #   desktop-release.sh build <target>             fetch-native, compile and package
 #   desktop-release.sh checksums <dir> <version>  write <dir>/SHA256SUMS.txt
-#   desktop-release.sh gitlab-upload <dir> <version>
-#                                                 upload <dir>'s files to a GitLab generic
-#                                                 package from a GitLab CI job (test builds only)
 #   desktop-release.sh github-release <dir> <tag> <version>
 #                                                 create or update the GitHub Release of <tag>
 #                                                 in RELEASE_REPO with <dir>'s files (gh)
@@ -26,8 +23,7 @@ set -euo pipefail
 #   DESKTOP_VERSION              release version, as printed by `version` (compile, package)
 #   LINGER_NATIVE_POSTGRES_DIR   where build.mjs reads the bundled archives
 #                                (~/.cache/linger-desktop)
-#   LINGER_NATIVE_DEPS_URL       folder serving those archives by file name; in a GitLab
-#                                CI job it defaults to the project's linger-native-deps package
+#   LINGER_NATIVE_DEPS_URL       folder serving those archives by file name
 #   RELEASE_OUT                  output root (.linger-runtime/desktop-release); release
 #                                files go to $RELEASE_OUT/assets/
 #   RCODESIGN                    rcodesign executable for darwin-arm64 (PATH)
@@ -39,9 +35,6 @@ set -euo pipefail
 #   WINDOWS_SIGNING_P12, WINDOWS_SIGNING_PASSWORD_FILE
 #                                Authenticode .p12 and a file with its password for
 #                                the setup program (osslsigncode); unsigned without
-#   CI_API_V4_URL, CI_PROJECT_ID, CI_JOB_TOKEN
-#                                GitLab CI's own variables for gitlab-upload
-#   DESKTOP_PACKAGE_NAME         generic package of the dry-run files (linger-desktop-dry-run)
 #   RELEASE_REPO                 GitHub repository of the release (simplexai-labs/linger)
 #   GITHUB_REPOSITORY, GITHUB_SHA, GH_TOKEN
 #                                the workflow's repository and commit, and the token gh
@@ -51,7 +44,6 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 desktop="$repo_root/apps/desktop"
 version_pattern='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
 targets='darwin-arm64 linux-x64 win32-x64'
-package_name="${DESKTOP_PACKAGE_NAME:-linger-desktop-dry-run}"
 default_release_repo=simplexai-labs/linger
 
 die() {
@@ -61,8 +53,7 @@ die() {
 
 usage() {
   echo "Usage: $0 version <tag> | fetch-native|compile|package|build <target>" \
-    "| checksums <dir> <version> | github-release <dir> <tag> <version>" \
-    "| gitlab-upload <dir> <version>" >&2
+    "| checksums <dir> <version> | github-release <dir> <tag> <version>" >&2
   exit 2
 }
 
@@ -111,16 +102,10 @@ native_dir() {
 # distribution/<target>.json pins by `file`; a download is checked against the
 # pinned size and sha256 before it is kept.
 cmd_fetch_native() {
-  local target="${1:-}" dir base name sha bytes path part pins header=()
+  local target="${1:-}" dir base name sha bytes path part pins
   check_target "$target"
   dir="$(native_dir)"
   base="${LINGER_NATIVE_DEPS_URL:-}"
-  if [[ -z "$base" && -n "${CI_API_V4_URL:-}" && -n "${CI_PROJECT_ID:-}" ]]; then
-    base="$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/linger-native-deps/1"
-  fi
-  if [[ -n "${CI_JOB_TOKEN:-}" && -n "${CI_API_V4_URL:-}" && "$base" == "$CI_API_V4_URL"/* ]]; then
-    header=(--header "JOB-TOKEN: $CI_JOB_TOKEN")
-  fi
   pins="$(node -e '
     const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     for (const s of [...d.nativeSources, ...(d.voiceTools ?? [])])
@@ -139,7 +124,7 @@ cmd_fetch_native() {
     part="$path.part.$$"
     echo "desktop-release: downloading $name"
     # The folder's address stays out of the log, which a public repository shows to anyone.
-    curl -fsSL --retry 3 "${header[@]}" -o "$part" "${base%/}/$name" 2>/dev/null ||
+    curl -fsSL --retry 3 -o "$part" "${base%/}/$name" 2>/dev/null ||
       { rm -f "$part"; die "cannot download $name from LINGER_NATIVE_DEPS_URL (upload it there; see docs/desktop-release.md)"; }
     if [[ "$(wc -c <"$part" | tr -d ' ')" != "$bytes" || "$(sha256_of "$part")" != "$sha" ]]; then
       rm -f "$part"
@@ -291,32 +276,6 @@ cmd_checksums() {
   cat "$dir/SHA256SUMS.txt"
 }
 
-gitlab_env() {
-  local name
-  for name in CI_API_V4_URL CI_PROJECT_ID CI_JOB_TOKEN; do
-    [[ -n "${!name:-}" ]] || die "$name is not set; gitlab-upload runs in GitLab CI"
-  done
-}
-
-package_url() {
-  echo "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$package_name/$1"
-}
-
-# Uploading a file name again adds a newer copy that the same URL then serves,
-# so a retried job replaces what it published before.
-cmd_gitlab_upload() {
-  local dir="${1:-}" version="${2:-}" file
-  [[ -d "$dir" ]] || die "gitlab-upload needs the folder holding the release files"
-  [[ "$version" =~ $version_pattern ]] || die "gitlab-upload needs the release version"
-  gitlab_env
-  for file in "$dir"/*; do
-    [[ -f "$file" ]] || continue
-    echo "desktop-release: uploading $(basename "$file")"
-    curl -fsS --retry 3 --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$file" \
-      "$(package_url "$version/$(basename "$file")")" >/dev/null
-  done
-}
-
 # RELEASE_REPO defaults to the public simplexai-labs/linger. In that
 # repository the workflow's own GITHUB_TOKEN publishes; from any other one,
 # GH_TOKEN must be LINGER_RELEASE_TOKEN with contents write
@@ -368,7 +327,6 @@ case "$command" in
   package) cmd_package "$@" ;;
   build) cmd_build "$@" ;;
   checksums) cmd_checksums "$@" ;;
-  gitlab-upload) cmd_gitlab_upload "$@" ;;
   github-release) cmd_github_release "$@" ;;
   *) usage ;;
 esac

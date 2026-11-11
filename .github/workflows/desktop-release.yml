@@ -1,16 +1,13 @@
 name: Desktop release
 
-# Pushing a desktop-v<version> tag builds the macOS (Apple silicon), Linux x64
-# and Windows x64 packages and publishes them, with SHA256SUMS.txt, as the
-# GitHub Release of that tag in RELEASE_REPO (simplexai-labs/linger unless the
-# variable says otherwise); a version with a hyphen is a prerelease. A manual
-# run builds a version from the chosen branch and keeps the files as workflow
-# artifacts unless "publish" is set. scripts/ci/desktop-release.sh does the
+# An explicit workflow dispatch builds the macOS (Apple silicon), Linux x64
+# and Windows x64 packages from the chosen ref. Files stay as workflow artifacts
+# unless "publish" is set, which creates the desktop-v<version> GitHub Release
+# in RELEASE_REPO (simplexai-labs/linger unless configured otherwise).
+# A version with a hyphen is a prerelease. scripts/ci/desktop-release.sh does the
 # work; docs/desktop-release.md lists the variables and secrets. This is the
 # only workflow that publishes desktop releases.
 on:
-  push:
-    tags: ["desktop-v*"]
   workflow_dispatch:
     inputs:
       version:
@@ -53,8 +50,8 @@ jobs:
       - id: version
         shell: bash
         env:
-          INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
-          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+          INPUT: ${{ inputs.version }}
+          PUBLISH: ${{ inputs.publish }}
           HAS_RELEASE_TOKEN: ${{ secrets.LINGER_RELEASE_TOKEN != '' }}
         run: |
           set -euo pipefail
