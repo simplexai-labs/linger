@@ -30,6 +30,8 @@ import {
   hasNativePostgres,
   installLocation,
   parseSetCookie,
+  SignInRejectedError,
+  signInFailure,
   signInWithPassword,
   type LocalServerOptions,
 } from "./local-server.js";
@@ -1976,9 +1978,10 @@ describe("signInWithPassword", () => {
       set,
       fetcher as typeof fetch,
     );
-    expect(String((fetcher.mock.calls[0] as unknown[])[0])).toBe(
-      "http://localhost:3000/v0/auth/login",
-    );
+    const [url, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+    // The services bind 127.0.0.1; localhost may resolve to ::1 first.
+    expect(String(url)).toBe("http://127.0.0.1:3000/v0/auth/login");
+    expect(init.headers).toMatchObject({ origin: "http://localhost:3000" });
     expect(set).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "linger_session",
@@ -1999,7 +2002,36 @@ describe("signInWithPassword", () => {
         async () => {},
         (async () => new Response("{}", { status: 401 })) as typeof fetch,
       ),
-    ).rejects.toThrow(/401/);
+    ).rejects.toEqual(new SignInRejectedError(401));
+  });
+});
+
+describe("signInFailure", () => {
+  it("says what to do by status and error kind, not by message", () => {
+    expect(signInFailure(new SignInRejectedError(401))).toBe(
+      "The saved password no longer works. Log in with your email and password.",
+    );
+    const refused = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("connect"), { code: "ECONNREFUSED" }),
+    });
+    expect(signInFailure(refused)).toBe(
+      "Linger on this computer is not responding.",
+    );
+    expect(
+      signInFailure(
+        new DOMException("The operation timed out", "TimeoutError"),
+      ),
+    ).toBe("Linger on this computer is not responding.");
+    expect(signInFailure(new DOMException("aborted", "AbortError"))).toBe(
+      "Linger on this computer is not responding.",
+    );
+    // A message that merely mentions 401 is not a rejected password.
+    expect(signInFailure(new Error("Signing in to Linger failed (401)"))).toBe(
+      "Signing in to Linger failed (401)",
+    );
+    expect(signInFailure(new SignInRejectedError(500))).toBe(
+      "Signing in to Linger failed (500)",
+    );
   });
 });
 
@@ -2152,4 +2184,138 @@ describe("LocalServerModule on Windows", () => {
     expect(readdirSync(path.join(f.home, "desktop", "source"))).toEqual([]);
     await f.host.stop("quit");
   });
+});
+
+describe("LocalServerModule owner account", () => {
+  const ORIGIN = "http://localhost:3000";
+  const installed =
+    (account?: Record<string, unknown>, mode = 0o600) =>
+    (home: string) => {
+      mkdirSync(path.join(home, "desktop"), { recursive: true });
+      writeFileSync(
+        path.join(home, "desktop", "local-server.json"),
+        JSON.stringify({ home, repo: "/source", origin: ORIGIN }),
+      );
+      if (!account) return;
+      const directory = path.join(home, "instances", LOCAL_INSTANCE);
+      mkdirSync(directory, { recursive: true });
+      const file = path.join(directory, "local-account.json");
+      writeFileSync(file, JSON.stringify(account));
+      chmodSync(file, mode);
+    };
+  const OWNER = {
+    email: "owner@linger.local",
+    password: "a-private-password",
+    provisioned: true,
+  };
+
+  it("signs the window in to the installed server with the account file", async () => {
+    const f = fixture({}, { serverUrl: ORIGIN }, installed(OWNER));
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    expect(await f.module.servesWindow()).toBe(true);
+    expect(await f.module.account()).toEqual({
+      email: OWNER.email,
+      password: OWNER.password,
+      file: path.join(
+        f.home,
+        "instances",
+        LOCAL_INSTANCE,
+        "local-account.json",
+      ),
+    });
+    await f.module.signInWithAccount();
+    expect(f.signIn).toHaveBeenCalledWith(ORIGIN, OWNER.email, OWNER.password);
+    await f.host.stop("quit");
+  });
+
+  it("does not offer the account while the services are not running", async () => {
+    const f = fixture({}, { serverUrl: ORIGIN }, (home) => {
+      installed(OWNER)(home);
+      writeFileSync(path.join(home, "resume-fails"), "");
+    });
+    // Not started yet: nothing is serving the window.
+    expect(await f.module.servesWindow()).toBe(false);
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("failed"));
+    expect(await f.module.servesWindow()).toBe(false);
+    await expect(f.module.signInWithAccount()).rejects.toThrow(
+      "This window is not showing the Linger on this computer.",
+    );
+    expect(f.signIn).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+
+  it.each([
+    [
+      new SignInRejectedError(401),
+      "The saved password no longer works. Log in with your email and password.",
+    ],
+    [
+      new TypeError("fetch failed"),
+      "Linger on this computer is not responding.",
+    ],
+  ])("says what to do when signing in fails (%s)", async (error, message) => {
+    const f = fixture({}, { serverUrl: ORIGIN }, installed(OWNER));
+    f.signIn.mockRejectedValueOnce(error);
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await expect(f.module.signInWithAccount()).rejects.toThrow(message);
+    await f.host.stop("quit");
+  });
+
+  it("does not offer the account to another server", async () => {
+    const f = fixture(
+      {},
+      { serverUrl: "https://team.example.com" },
+      installed(OWNER),
+    );
+    await f.host.start();
+    expect(await f.module.servesWindow()).toBe(false);
+    await expect(f.module.signInWithAccount()).rejects.toThrow(
+      "This window is not showing the Linger on this computer.",
+    );
+    expect(f.signIn).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+
+  it("does not offer it before Linger is installed here", async () => {
+    const f = fixture({}, { serverUrl: ORIGIN });
+    await f.host.start();
+    expect(await f.module.servesWindow()).toBe(false);
+    await expect(f.module.account()).rejects.toThrow(
+      "Linger is not installed on this computer.",
+    );
+    await f.host.stop("quit");
+  });
+
+  it.each([
+    [
+      "missing",
+      installed(),
+      /^The account file of Linger on this computer is missing \(.*local-account\.json\)\.$/,
+    ],
+    [
+      "readable by others",
+      installed(OWNER, 0o644),
+      "The local account file must be private and owned by the current user (chmod 600).",
+    ],
+    [
+      "not provisioned",
+      installed({ ...OWNER, provisioned: false }),
+      "The local account file is invalid or the account has not been created.",
+    ],
+  ])(
+    "says why a %s account file cannot sign in",
+    async (_case, prepare, message) => {
+      const f = fixture({}, { serverUrl: ORIGIN }, prepare);
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      const failure = f.module.signInWithAccount();
+      await expect(failure).rejects.toThrow(message);
+      await expect(failure).rejects.not.toThrow(OWNER.password);
+      expect(f.signIn).not.toHaveBeenCalled();
+      await f.host.stop("quit");
+    },
+  );
 });

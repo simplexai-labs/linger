@@ -20,6 +20,7 @@ import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { createZstdDecompress } from "node:zlib";
 
+import { readLocalLogin } from "@linger/local-installation/account";
 import { downloadVerified } from "@linger/local-installation/download";
 import {
   removeRetrying,
@@ -43,6 +44,7 @@ import {
   nodeRuntimeDownloadUrls,
 } from "../../../../scripts/local-computer-node-distributions.mjs";
 import type { Module, ModuleContext } from "./modules.js";
+import { sameOrigin } from "./navigation.js";
 import { humanTenant, type EnrollmentModule } from "./enrollment.js";
 import type { WindowManagerModule } from "./window-manager.js";
 import {
@@ -791,6 +793,45 @@ export class LocalServerModule implements Module {
     this.#signInInstaller = undefined;
     this.#signInWake = undefined;
     this.#opened = undefined;
+  }
+
+  // Whether the window shows the Linger this app installed here and its
+  // services are running; only then can its owner account sign the window in.
+  async servesWindow(): Promise<boolean> {
+    if (this.#phase !== "ready") return false;
+    const record = await this.#readRecord();
+    const serverUrl = this.#ctx?.config.get().serverUrl;
+    return !!record && !!serverUrl && sameOrigin(record.origin, serverUrl);
+  }
+
+  // The owner account the installer created, read from its private file on
+  // every call so the password is never kept in memory.
+  async account(): Promise<LocalAccount> {
+    const record = await this.#readRecord();
+    if (!record) throw new Error("Linger is not installed on this computer.");
+    return readLocalAccount(
+      path.join(record.home, "instances", LOCAL_INSTANCE),
+    );
+  }
+
+  // Signs the window in to the installed Linger with its owner account; the
+  // password goes from the file to the server and nowhere else.
+  async signInWithAccount(): Promise<void> {
+    const record = await this.#readRecord();
+    if (!record || !(await this.servesWindow()))
+      throw new Error(
+        "This window is not showing the Linger on this computer.",
+      );
+    const account = await this.account();
+    try {
+      await this.#options.signIn(
+        record.origin,
+        account.email,
+        account.password,
+      );
+    } catch (error) {
+      throw new Error(signInFailure(error), { cause: error });
+    }
   }
 
   // Starts the runtime's own login (the installer runs it), or hands it the
@@ -2234,8 +2275,63 @@ export const parseSetCookie = (header: string): SetCookie | undefined => {
   return cookie;
 };
 
+export interface LocalAccount {
+  readonly email: string;
+  readonly password: string;
+  // The private local-account.json it came from.
+  readonly file: string;
+}
+
+// Reads an instance's owner account; a missing file says where it should be.
+export async function readLocalAccount(root: string): Promise<LocalAccount> {
+  try {
+    return await readLocalLogin({ root });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    throw new Error(
+      `The account file of Linger on this computer is missing (${path.join(root, "local-account.json")}).`,
+      { cause: error },
+    );
+  }
+}
+
+// A sign-in the local server answered with an error status.
+export class SignInRejectedError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`Signing in to Linger failed (${status})`);
+    this.name = "SignInRejectedError";
+    this.status = status;
+  }
+}
+
+// What a person can do about a failed sign-in with this computer's account.
+export const signInFailure = (error: unknown): string => {
+  if (error instanceof SignInRejectedError && error.status === 401)
+    return "The saved password no longer works. Log in with your email and password.";
+  // fetch rejects with a TypeError when nothing answers, and with a
+  // TimeoutError or AbortError when the answer takes too long.
+  if (
+    error instanceof TypeError ||
+    (error instanceof Error &&
+      (error.name === "TimeoutError" || error.name === "AbortError"))
+  )
+    return "Linger on this computer is not responding.";
+  return error instanceof Error ? error.message : String(error);
+};
+
+// The local services listen on 127.0.0.1 only, while the window uses
+// localhost, which may resolve to ::1 first.
+export const loopbackUrl = (origin: string): URL => {
+  const url = new URL(origin);
+  if (url.hostname === "localhost") url.hostname = "127.0.0.1";
+  return url;
+};
+
 // Signs in to the local server with its owner and hands the session cookies
-// to the app's web session; the password is never stored.
+// to the app's web session; the password is never stored. The request goes
+// to the loopback address the services bind, the cookies to the origin.
 export const signInWithPassword = async (
   origin: string,
   email: string,
@@ -2243,20 +2339,22 @@ export const signInWithPassword = async (
   setCookie: (cookie: SetCookie) => Promise<void>,
   fetcher: typeof fetch = fetch,
 ): Promise<void> => {
-  const response = await fetcher(new URL("/v0/auth/login", origin), {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json",
-      origin,
+  const response = await fetcher(
+    new URL("/v0/auth/login", loopbackUrl(origin)),
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        origin,
+      },
+      body: JSON.stringify({ identifier: email, password }),
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
     },
-    body: JSON.stringify({ identifier: email, password }),
-    redirect: "error",
-    signal: AbortSignal.timeout(30_000),
-  });
+  );
   await response.body?.cancel();
-  if (!response.ok)
-    throw new Error(`Signing in to Linger failed (${response.status})`);
+  if (!response.ok) throw new SignInRejectedError(response.status);
   const cookies = response.headers
     .getSetCookie()
     .map(parseSetCookie)
