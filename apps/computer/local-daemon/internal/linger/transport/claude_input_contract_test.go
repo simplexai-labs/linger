@@ -26,17 +26,28 @@ func TestClaudeInputWireOutcomes(t *testing.T) {
 		t.Fatal(err)
 	}
 	cli := filepath.Join(t.TempDir(), "claude-fixture")
+	// The fixture runs two main-agent tools after the input echo. Their
+	// PostToolUse hooks carry steered input; before the second one it closes
+	// its stdin, so the answer carrying the second steer cannot be written.
 	script := `#!` + python + `
-import json, sys
-inputs = 0
+import json, os, sys, time
+def emit(frame):
+    print(json.dumps(frame), flush=True)
+def hook(request_id):
+    time.sleep(0.5)
+    emit({'type': 'control_request', 'request_id': request_id, 'request': {'subtype': 'hook_callback', 'callback_id': 'hook_steer',
+          'input': {'hook_event_name': 'PostToolUse', 'tool_name': 'Bash', 'tool_input': {}}}})
 for line in sys.stdin:
     frame = json.loads(line)
     if frame['type'] == 'control_request':
-        print(json.dumps({'type': 'control_response', 'response': {'subtype': 'success', 'request_id': frame['request_id']}}), flush=True)
+        emit({'type': 'control_response', 'response': {'subtype': 'success', 'request_id': frame['request_id']}})
+    elif frame['type'] == 'control_response':
+        os.close(0)
+        hook('hook-2')
+        time.sleep(30)
     elif frame['type'] == 'user':
-        inputs += 1
-        if inputs <= 2:
-            print(json.dumps({'type': 'user', 'isReplay': True, 'uuid': frame['uuid'], 'session_id': 'fixture-session'}), flush=True)
+        emit({'type': 'user', 'isReplay': True, 'uuid': frame['uuid'], 'session_id': 'fixture-session'})
+        hook('hook-1')
 `
 	if err := os.WriteFile(cli, []byte(script), 0700); err != nil {
 		t.Fatal(err)
@@ -72,9 +83,7 @@ for line in sys.stdin:
 	if err != nil || ack.TurnID != turn {
 		t.Fatalf("ACK target mismatch: %+v %v", ack, err)
 	}
-	confirmationCtx, stop := context.WithTimeout(ctx, 100*time.Millisecond)
-	_, err = session.Steer(confirmationCtx, native.SteerRequest{ExpectedTurnID: turn, Input: "unconfirmed"})
-	stop()
+	_, err = session.Steer(ctx, native.SteerRequest{ExpectedTurnID: turn, Input: "unconfirmed"})
 	var failure *native.SteerError
 	if !errors.As(err, &failure) || failure.Effect != "uncertain" || failure.Reason != "transport" {
 		t.Fatalf("invalid native failure: %v", err)

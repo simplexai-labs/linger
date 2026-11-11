@@ -36,8 +36,10 @@ var claudeBuiltinTools = []string{"Read", "Glob", "Grep", "Write", "Edit", "Bash
 
 const (
 	claudeInitializeRequestID = "linger-session-restore"
-	claudeInterruptPrefix     = "linger-interrupt-"
 	claudeHookCallbackID      = "hook_0"
+	// claudeSteerHookID answers the main agent's tool results, which carry
+	// steered input.
+	claudeSteerHookID = "hook_steer"
 )
 
 // authorizedTools is the built-in list followed by qualifying MCP tools in
@@ -204,9 +206,13 @@ func claudeInitializeFrame(spec RunSpec) []byte {
 		"type":       "control_request",
 		"request_id": claudeInitializeRequestID,
 		"request": map[string]any{
-			"subtype":              "initialize",
-			"skills":               skills,
-			"hooks":                map[string]any{"PreToolUse": []any{map[string]any{"hookCallbackIds": []string{claudeHookCallbackID}}}},
+			"subtype": "initialize",
+			"skills":  skills,
+			"hooks": map[string]any{
+				"PreToolUse":         []any{map[string]any{"hookCallbackIds": []string{claudeHookCallbackID}}},
+				"PostToolUse":        []any{map[string]any{"hookCallbackIds": []string{claudeSteerHookID}}},
+				"PostToolUseFailure": []any{map[string]any{"hookCallbackIds": []string{claudeSteerHookID}}},
+			},
 			"appendSystemPrompt":   spec.AppendPrompt,
 			"systemPromptSnapshot": false,
 		},

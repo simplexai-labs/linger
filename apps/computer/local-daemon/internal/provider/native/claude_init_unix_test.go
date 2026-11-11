@@ -126,53 +126,32 @@ func TestClaudeTurnStartWaitsForEchoWithoutTurnInit(t *testing.T) {
 	}
 }
 
-func TestClaudeSteerInitDoesNotRestartTurn(t *testing.T) {
-	home := claudeInitHome(t, "turn", 0)
-	var steerErr error
-	done := make(chan struct{})
-	run := claudeStart(t, home.profile, "hold", RunSpec{ExposeTurnStarted: true})
-	events, outcome, _ := claudeTimed(t, run, func(started Event) {
-		defer close(done)
-		_, steerErr = run.Steer(t.Context(), SteerRequest{ExpectedTurnID: started.TurnID, Input: "go"})
-	})
-	<-done
-	if steerErr != nil || outcome.Status != statusCompleted || len(claudeStartedEvents(events)) != 1 {
-		t.Fatalf("steer = %v outcome = %+v starts = %d", steerErr, outcome, len(claudeStartedEvents(events)))
-	}
-}
-
-func TestClaudeSteerInSlowWindowMerges(t *testing.T) {
+func TestClaudeSteerRidesTheToolResult(t *testing.T) {
 	home := claudeInitHome(t, "turn", 0)
 	type result struct {
-		ack     SteerAck
-		err     error
-		elapsed time.Duration
-		turnID  string
+		ack    SteerAck
+		err    error
+		turnID string
 	}
 	results := make(chan result, 1)
-	run := claudeStart(t, home.profile, "slow hold", RunSpec{ExposeTurnStarted: true})
+	run := claudeStart(t, home.profile, "tool", RunSpec{ExposeTurnStarted: true})
 	events, outcome, _ := claudeTimed(t, run, func(started Event) {
-		begin := time.Now()
 		ack, err := run.Steer(t.Context(), SteerRequest{ExpectedTurnID: started.TurnID, Input: "go"})
-		results <- result{ack, err, time.Since(begin), started.TurnID}
+		results <- result{ack, err, started.TurnID}
 	})
 	r := <-results
-	if r.err != nil || r.ack.TurnID != r.turnID || r.elapsed < 700*time.Millisecond {
+	if r.err != nil || r.ack.TurnID != r.turnID {
 		t.Fatalf("steer = %+v", r)
 	}
-	if outcome.Status != statusCompleted || outcome.Output != "done 2" || len(home.pids(t)) != 1 || len(claudeStartedEvents(events)) != 1 {
-		t.Fatalf("outcome = %+v pids = %v", outcome, home.pids(t))
+	if outcome.Status != statusCompleted || outcome.Output != "done 1" || len(claudeStartedEvents(events)) != 1 {
+		t.Fatalf("outcome = %+v starts = %d", outcome, len(claudeStartedEvents(events)))
 	}
-	order := home.lines("events", "")
-	var inputs []int
-	for i, line := range order {
-		if strings.HasPrefix(line, "user ") {
-			inputs = append(inputs, i)
-		}
+	hooks := home.lines("hooks", "")
+	if len(hooks) != 1 || !strings.Contains(hooks[0], `"additionalContext"`) || !strings.Contains(hooks[0], `go"`) {
+		t.Fatalf("hooks = %q", hooks)
 	}
-	interrupt := slices.Index(order, "interrupt")
-	if len(inputs) != 2 || interrupt < inputs[0] || interrupt > inputs[1] {
-		t.Fatalf("events = %q", order)
+	if inputs := home.lines("events", "user "); len(inputs) != 1 {
+		t.Fatalf("inputs = %q", inputs)
 	}
 }
 
@@ -198,9 +177,6 @@ func TestClaudeSteerRejectedWhenTurnEndsBeforeEcho(t *testing.T) {
 		errs <- err
 	})
 	claudeNotAppliedError(t, <-errs)
-	if len(home.lines("events", "interrupt")) != 0 {
-		t.Fatal("an interrupt was written")
-	}
 }
 
 func TestClaudeSteerCancelledWhileWaiting(t *testing.T) {
@@ -224,7 +200,4 @@ func TestClaudeSteerCancelledWhileWaiting(t *testing.T) {
 		t.Fatalf("steer took %v", r.elapsed)
 	}
 	claudeMustComplete(t, outcome)
-	if len(home.lines("events", "interrupt")) != 0 {
-		t.Fatal("an interrupt was written")
-	}
 }

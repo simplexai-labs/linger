@@ -21,7 +21,6 @@ var (
 	claudeKillWait         = 5 * time.Second
 	claudePipeWait         = 10 * time.Second
 	claudeInitLimit        = 30 * time.Second
-	claudeSteerLimit       = 10 * time.Second
 	claudeRefusalLimit     = 5 * time.Second
 	claudeStopReaderSlack  = 30 * time.Second
 	claudeExtraKillRounds  = 2

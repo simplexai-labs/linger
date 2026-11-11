@@ -430,10 +430,10 @@ func TestClaudeResidentRecycleOverlapWaitsForExit(t *testing.T) {
 	}
 }
 
-func TestClaudeResidentSteeredHoldParksAndIsReused(t *testing.T) {
+func TestClaudeResidentSteeredTurnParksAndIsReused(t *testing.T) {
 	claudeEnableResidency(t, 8)
 	home := claudeNewResidentHome(t, nil)
-	run := claudeStart(t, home.profile, "hold", RunSpec{ExposeTurnStarted: true})
+	run := claudeStart(t, home.profile, "tool", RunSpec{ExposeTurnStarted: true})
 	started := <-run.Events
 	ack, err := run.Steer(t.Context(), SteerRequest{ExpectedTurnID: started.TurnID, Input: "go"})
 	if err != nil || ack.TurnID != started.TurnID {

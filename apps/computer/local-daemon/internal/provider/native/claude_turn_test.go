@@ -212,7 +212,9 @@ func TestClaudeInitializeFrameForEmptyPolicy(t *testing.T) {
 	}
 	request := decoded.Request
 	if decoded.RequestID != claudeInitializeRequestID || request.Subtype != "initialize" || string(request.Skills) != "[]" || request.AppendSystemPrompt != "extra" ||
-		request.SystemPromptSnapshot == nil || *request.SystemPromptSnapshot || len(request.Hooks["PreToolUse"]) != 1 || request.Hooks["PreToolUse"][0].HookCallbackIDs[0] != "hook_0" {
+		request.SystemPromptSnapshot == nil || *request.SystemPromptSnapshot || len(request.Hooks["PreToolUse"]) != 1 || request.Hooks["PreToolUse"][0].HookCallbackIDs[0] != "hook_0" ||
+		len(request.Hooks["PostToolUse"]) != 1 || request.Hooks["PostToolUse"][0].HookCallbackIDs[0] != claudeSteerHookID ||
+		len(request.Hooks["PostToolUseFailure"]) != 1 || request.Hooks["PostToolUseFailure"][0].HookCallbackIDs[0] != claudeSteerHookID {
 		t.Fatalf("initialize = %s", frame)
 	}
 }
@@ -321,10 +323,10 @@ func TestClaudeInlineAuthorizationFailureAborts(t *testing.T) {
 
 const claudeReplayOne = `{"type":"user","isReplay":true,"uuid":"turn-1","session_id":"s"}`
 
-func claudeSteerAsync(turn *claudeTurn, ctx context.Context, expected string) chan error {
+func claudeSteerAsync(turn *claudeTurn, ctx context.Context, expected, input string) chan error {
 	done := make(chan error, 1)
 	go func() {
-		ack, err := turn.steer(ctx, SteerRequest{ExpectedTurnID: expected, Input: "more"})
+		ack, err := turn.steer(ctx, SteerRequest{ExpectedTurnID: expected, Input: input})
 		if err == nil && ack.TurnID != expected {
 			err = errors.New("ack names " + ack.TurnID)
 		}
@@ -333,106 +335,135 @@ func claudeSteerAsync(turn *claudeTurn, ctx context.Context, expected string) ch
 	return done
 }
 
-func claudeFrameUUID(line string) string {
-	var frame struct {
-		UUID      string `json:"uuid"`
-		RequestID string `json:"request_id"`
-	}
-	_ = json.Unmarshal([]byte(line), &frame)
-	if frame.UUID != "" {
-		return frame.UUID
-	}
-	return strings.TrimPrefix(frame.RequestID, claudeInterruptPrefix)
+func claudeToolHook(requestID, event, agentID string) string {
+	return `{"type":"control_request","request_id":"` + requestID + `","request":{"subtype":"hook_callback","callback_id":"` + claudeSteerHookID +
+		`","input":{"hook_event_name":"` + event + `","tool_name":"Bash","tool_input":{},"agent_id":"` + agentID + `"}}}`
 }
 
-func TestClaudeSteerIgnoresOldResults(t *testing.T) {
-	for _, oldBeforeAck := range []bool{true, false} {
+// claudeAwaitQueued waits until n steers wait on the conversation.
+func claudeAwaitQueued(t *testing.T, turn *claudeTurn, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		turn.proc.conv.mu.Lock()
+		queued := len(turn.proc.conv.steers)
+		turn.proc.conv.mu.Unlock()
+		if queued == n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("queued steers = %d, want %d", queued, n)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func claudeHookReply(t *testing.T, line string) (string, map[string]any) {
+	t.Helper()
+	var frame struct {
+		Type     string `json:"type"`
+		Response struct {
+			Subtype   string         `json:"subtype"`
+			RequestID string         `json:"request_id"`
+			Response  map[string]any `json:"response"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal([]byte(line), &frame); err != nil || frame.Type != "control_response" || frame.Response.Subtype != "success" {
+		t.Fatalf("hook reply = %s", line)
+	}
+	return frame.Response.RequestID, frame.Response.Response
+}
+
+func TestClaudeSteerRidesTheNextMainToolResult(t *testing.T) {
+	for _, event := range []string{"PostToolUse", "PostToolUseFailure"} {
 		turn, wire := claudeHarness(t, RunSpec{})
 		claudeFeed(turn, claudeReplayOne)
-		done := claudeSteerAsync(turn, t.Context(), "turn-1")
-		interrupt := wire.await(t, 1)[0]
-		newID := claudeFrameUUID(interrupt)
-		old := `{"type":"result","result":"old","terminal_reason":"completed","user_message_uuid":"turn-1"}`
-		if oldBeforeAck {
-			claudeFeed(turn, old)
+		first := claudeSteerAsync(turn, t.Context(), "turn-1", "first")
+		claudeAwaitQueued(t, turn, 1)
+		second := claudeSteerAsync(turn, t.Context(), "turn-1", "second")
+		claudeAwaitQueued(t, turn, 2)
+
+		// A sub-agent's tool result keeps the steers waiting.
+		claudeFeed(turn, claudeToolHook("h1", event, "agent-1"))
+		if id, reply := claudeHookReply(t, wire.await(t, 1)[0]); id != "h1" || len(reply) != 0 {
+			t.Fatalf("sub-agent hook reply = %s %v", id, reply)
 		}
-		claudeFeed(turn, `{"type":"control_response","response":{"subtype":"success","request_id":"`+claudeInterruptPrefix+newID+`"}}`)
-		wire.await(t, 2)
-		if !oldBeforeAck {
-			claudeFeed(turn, old)
+		claudeAwaitQueued(t, turn, 2)
+
+		claudeFeed(turn, claudeToolHook("h2", event, ""))
+		id, reply := claudeHookReply(t, wire.await(t, 2)[1])
+		output, _ := reply["hookSpecificOutput"].(map[string]any)
+		context, _ := output["additionalContext"].(string)
+		if id != "h2" || output["hookEventName"] != event || !strings.HasPrefix(context, claudeSteerContext) ||
+			!strings.HasSuffix(context, "\n\nfirst\n\nsecond") {
+			t.Fatalf("main hook reply = %s %v", id, reply)
 		}
-		if turn.terminal != nil {
-			t.Fatal("an old result ended the replacement turn")
+		for _, done := range []chan error{first, second} {
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
 		}
-		claudeFeed(turn, `{"type":"user","isReplay":true,"uuid":"`+newID+`"}`)
-		if err := <-done; err != nil {
-			t.Fatal(err)
+		// Nothing interrupts the turn, and a later tool result carries nothing.
+		claudeFeed(turn, claudeToolHook("h3", event, ""))
+		if _, reply := claudeHookReply(t, wire.await(t, 3)[2]); len(reply) != 0 {
+			t.Fatalf("empty hook reply = %v", reply)
 		}
-		if turn.proc.conv.current() != newID {
-			t.Fatal("native turn did not change")
+		if turn.proc.conv.current() != "turn-1" || turn.proc.ctx.Err() != nil {
+			t.Fatal("steer changed or stopped the turn")
 		}
-		claudeFeed(turn, `{"type":"result","result":"new","terminal_reason":"completed","user_message_uuid":"`+newID+`"}`)
-		if turn.terminal == nil || turn.terminal.Result != "new" {
-			t.Fatalf("replacement result not accepted: %+v", turn.terminal)
+		claudeFeed(turn, `{"type":"result","result":"done","terminal_reason":"completed","user_message_uuid":"turn-1"}`)
+		if turn.terminal == nil || turn.terminal.Result != "done" {
+			t.Fatalf("result not accepted: %+v", turn.terminal)
 		}
 	}
 }
 
-func TestClaudeSteerLostConfirmation(t *testing.T) {
+func TestClaudeSteerNotAppliedWhenTheTurnEndsFirst(t *testing.T) {
 	turn, wire := claudeHarness(t, RunSpec{})
 	claudeFeed(turn, claudeReplayOne)
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer cancel()
-	go func() {
-		interrupt := wire.await(t, 1)[0]
-		claudeFeed(turn, `{"type":"control_response","response":{"subtype":"success","request_id":"`+claudeInterruptPrefix+claudeFrameUUID(interrupt)+`"}}`)
-	}()
-	_, err := turn.steer(ctx, SteerRequest{ExpectedTurnID: "turn-1", Input: "more"})
+	done := claudeSteerAsync(turn, t.Context(), "turn-1", "late")
+	claudeAwaitQueued(t, turn, 1)
+	claudeFeed(turn, `{"type":"result","result":"done","terminal_reason":"completed","user_message_uuid":"turn-1"}`)
 	var steerErr *SteerError
-	if !errors.As(err, &steerErr) || steerErr.Effect != "uncertain" || steerErr.Reason != "transport" || !strings.Contains(steerErr.Message, "not confirmed") || !strings.Contains(steerErr.Message, "must not be retried") {
-		t.Fatalf("err = %v", err)
+	if err := <-done; !errors.As(err, &steerErr) || steerErr.Effect != "definitely_not_applied" || steerErr.Reason != "no_active_turn" {
+		t.Fatalf("steer = %v", err)
 	}
-	if lines := wire.snapshot(); len(lines) != 2 || turn.proc.ctx.Err() == nil {
-		t.Fatalf("lines = %v cancelled = %v", lines, turn.proc.ctx.Err())
+	if lines := wire.snapshot(); len(lines) != 0 {
+		t.Fatalf("lines = %v", lines)
 	}
-	if turn.proc.conv.finish() == "" {
-		t.Fatal("finish reported no failure")
-	}
-	_, err = turn.steer(t.Context(), SteerRequest{ExpectedTurnID: "turn-1", Input: "again"})
-	if !errors.As(err, &steerErr) || steerErr.Effect != "definitely_not_applied" || len(wire.snapshot()) != 2 {
-		t.Fatalf("later steer = %v", err)
+	if !turn.proc.conv.idle() {
+		t.Fatal("a rejected steer kept the process from parking")
 	}
 }
 
-func TestClaudeSteerWaitsForNativeConfirmation(t *testing.T) {
-	previous := claudeSteerLimit
-	claudeSteerLimit = 100 * time.Millisecond
-	defer func() { claudeSteerLimit = previous }()
+func TestClaudeSteerWithdrawnWhenCallerStops(t *testing.T) {
 	turn, wire := claudeHarness(t, RunSpec{})
 	claudeFeed(turn, claudeReplayOne)
-	done := claudeSteerAsync(turn, t.Context(), "turn-1")
-	newID := claudeFrameUUID(wire.await(t, 1)[0])
-	claudeFeed(turn, `{"type":"control_response","response":{"subtype":"success","request_id":"`+claudeInterruptPrefix+newID+`"}}`)
-	wire.await(t, 2)
-	// Confirmation arrives well after the submission limit.
-	time.Sleep(300 * time.Millisecond)
-	claudeFeed(turn, `{"type":"user","isReplay":true,"uuid":"turn-1"}`, `{"type":"user","isReplay":true,"parent_tool_use_id":"p","uuid":"`+newID+`"}`)
-	select {
-	case err := <-done:
-		t.Fatalf("stale or child replay released the steer: %v", err)
-	case <-time.After(100 * time.Millisecond):
+	ctx, cancel := context.WithCancel(t.Context())
+	done := claudeSteerAsync(turn, ctx, "turn-1", "never")
+	claudeAwaitQueued(t, turn, 1)
+	cancel()
+	var steerErr *SteerError
+	if err := <-done; !errors.As(err, &steerErr) || steerErr.Effect != "definitely_not_applied" {
+		t.Fatalf("steer = %v", err)
 	}
-	claudeFeed(turn, `{"type":"user","isReplay":true,"uuid":"`+newID+`"}`)
-	if err := <-done; err != nil || turn.proc.ctx.Err() != nil {
-		t.Fatalf("steer = %v cancelled = %v", err, turn.proc.ctx.Err())
+	claudeFeed(turn, claudeToolHook("h1", "PostToolUse", ""))
+	if _, reply := claudeHookReply(t, wire.await(t, 1)[0]); len(reply) != 0 {
+		t.Fatalf("withdrawn steer was delivered: %v", reply)
 	}
-	second := claudeSteerAsync(turn, t.Context(), "turn-1")
-	otherID := claudeFrameUUID(wire.await(t, 3)[2])
-	claudeFeed(turn, `{"type":"control_response","response":{"subtype":"success","request_id":"`+claudeInterruptPrefix+otherID+`"}}`)
-	wire.await(t, 4)
-	claudeFeed(turn, `{"type":"user","isReplay":true,"uuid":"`+otherID+`"}`)
-	if err := <-second; err != nil || otherID == newID {
-		t.Fatalf("second steer = %v ids %s %s", err, newID, otherID)
+}
+
+func TestClaudeSteerReleasedWhenTheStreamEnds(t *testing.T) {
+	turn, _ := claudeHarness(t, RunSpec{})
+	claudeFeed(turn, claudeReplayOne)
+	done := claudeSteerAsync(turn, t.Context(), "turn-1", "lost")
+	claudeAwaitQueued(t, turn, 1)
+	if failure := turn.proc.conv.finish(); failure != "" {
+		t.Fatalf("finish = %q", failure)
+	}
+	var steerErr *SteerError
+	if err := <-done; !errors.As(err, &steerErr) || steerErr.Effect != "definitely_not_applied" {
+		t.Fatalf("steer = %v", err)
 	}
 }
 
@@ -440,11 +471,11 @@ func TestClaudeSteerRefusals(t *testing.T) {
 	turn, wire := claudeHarness(t, RunSpec{})
 	var steerErr *SteerError
 	if _, err := turn.steer(t.Context(), SteerRequest{ExpectedTurnID: "turn-1"}); !errors.As(err, &steerErr) || steerErr.Effect != "definitely_not_applied" {
-		t.Fatalf("unconfirmed input steer = %v", err)
+		t.Fatalf("steer before the turn started = %v", err)
 	}
 	claudeFeed(turn, `{"type":"user","isReplay":true,"parent_tool_use_id":"p","uuid":"turn-1"}`)
 	if _, err := turn.steer(t.Context(), SteerRequest{ExpectedTurnID: "turn-1"}); !errors.As(err, &steerErr) {
-		t.Fatal("a child replay confirmed the root input")
+		t.Fatal("a child replay started the turn")
 	}
 	claudeFeed(turn, `{"type":"result","parent_tool_use_id":"p","result":"child","terminal_reason":"completed"}`)
 	if turn.terminal != nil {
@@ -455,39 +486,9 @@ func TestClaudeSteerRefusals(t *testing.T) {
 	if !errors.As(err, &steerErr) || steerErr.Effect != "definitely_not_applied" || steerErr.Reason != "no_active_turn" || steerErr.ActualTurnID != "turn-1" || len(wire.snapshot()) != 0 {
 		t.Fatalf("wrong expected = %+v", err)
 	}
-}
-
-func TestClaudeContinuationFinishingAfterResult(t *testing.T) {
-	for range 100 {
-		turn, wire := claudeHarness(t, RunSpec{})
-		claudeFeed(turn, claudeReplayOne)
-		done := claudeSteerAsync(turn, t.Context(), "turn-1")
-		newID := claudeFrameUUID(wire.await(t, 1)[0])
-		claudeFeed(turn, `{"type":"control_response","response":{"subtype":"success","request_id":"`+claudeInterruptPrefix+newID+`"}}`)
-		wire.await(t, 2)
-		claudeFeed(turn, `{"type":"result","result":"old"}`, `{"type":"result","result":"new","user_message_uuid":"`+newID+`"}`)
-		if failure := turn.proc.conv.finish(); failure != "" {
-			t.Fatalf("finish = %q", failure)
-		}
-		if err := <-done; err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func TestClaudeFinishWithUnconfirmedSteer(t *testing.T) {
-	turn, wire := claudeHarness(t, RunSpec{})
-	claudeFeed(turn, claudeReplayOne)
-	done := claudeSteerAsync(turn, t.Context(), "turn-1")
-	newID := claudeFrameUUID(wire.await(t, 1)[0])
-	claudeFeed(turn, `{"type":"control_response","response":{"subtype":"success","request_id":"`+claudeInterruptPrefix+newID+`"}}`)
-	wire.await(t, 2)
-	first := turn.proc.conv.finish()
-	if !strings.Contains(first, "not confirmed") || !strings.Contains(first, "must not be retried") || turn.proc.conv.finish() != first {
-		t.Fatalf("finish = %q", first)
-	}
-	if err := <-done; err == nil {
-		t.Fatal("waiter was not released with a failure")
+	claudeFeed(turn, `{"type":"control_request","request_id":"h","request":{"subtype":"hook_callback","callback_id":"`+claudeSteerHookID+`","input":{"hook_event_name":"Stop"}}}`)
+	if turn.proc.conv.failureSummary() != claudePermissionInvalid {
+		t.Fatalf("unexpected hook event failure = %q", turn.proc.conv.failureSummary())
 	}
 }
 

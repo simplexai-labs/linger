@@ -5,37 +5,37 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"sync"
 	"time"
 )
 
-const claudeSteerNotConfirmed = "Claude steer submission was not confirmed; execution must not be retried"
-
 // claudeConversation is the input state of one process. A reused turn resets
 // it; the end of the stream finishes it for good.
 type claudeConversation struct {
-	proc    *claudeProcess
-	steerMu sync.Mutex
+	proc *claudeProcess
 
-	mu                 sync.Mutex
-	owner              *claudeTurn
-	nativeID           string
-	runID              string
-	active             bool
-	closed             bool
-	started            bool
-	pendingInterrupted int
-	steerUnconfirmed   bool
-	failure            string
-	finished           bool
-	finishedCh         chan struct{}
-	requests           map[string]chan claudeControlResult
-	waiters            map[string]chan struct{}
-	submitted          bool
-	inputWrittenAt     time.Time
-	// changed is closed and replaced whenever the turn's input state moves:
-	// confirmation, acceptance, abort, finish or reset.
-	changed chan struct{}
+	mu             sync.Mutex
+	owner          *claudeTurn
+	nativeID       string
+	closed         bool
+	started        bool
+	failure        string
+	finished       bool
+	finishedCh     chan struct{}
+	requests       map[string]chan claudeControlResult
+	submitted      bool
+	inputWrittenAt time.Time
+	// steers hold input for the running turn until the main agent's next
+	// tool result carries it to the model.
+	steers []*claudeSteer
+}
+
+// claudeSteer is input waiting for the next tool boundary of its turn. done
+// receives nil once the input reached the CLI, or the reason it did not.
+type claudeSteer struct {
+	text string
+	done chan error
 }
 
 // claudeControlResult is the answer to one control request: the response
@@ -47,32 +47,24 @@ type claudeControlResult struct {
 
 func claudeNewConversation(p *claudeProcess) *claudeConversation {
 	return &claudeConversation{
-		proc: p, finishedCh: make(chan struct{}), changed: make(chan struct{}),
-		requests: map[string]chan claudeControlResult{}, waiters: map[string]chan struct{}{},
+		proc: p, finishedCh: make(chan struct{}),
+		requests: map[string]chan claudeControlResult{},
 	}
 }
 
-// reset starts a new turn on the conversation with nativeID as both the
-// native and the run turn ID.
+// reset starts a new turn on the conversation with nativeID as its turn ID.
 func (c *claudeConversation) reset(owner *claudeTurn, nativeID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.owner, c.nativeID, c.runID = owner, nativeID, nativeID
-	c.active, c.closed, c.started = false, false, false
-	c.pendingInterrupted, c.steerUnconfirmed, c.failure = 0, false, ""
+	c.owner, c.nativeID = owner, nativeID
+	c.closed, c.started = false, false
+	c.failure = ""
 	c.submitted, c.inputWrittenAt = false, time.Time{}
 	for id, ch := range c.requests {
 		ch <- claudeControlResult{err: errors.New("Claude turn was reset")}
 		delete(c.requests, id)
 	}
-	c.waiters = map[string]chan struct{}{}
-	c.signalLocked()
-}
-
-// signalLocked wakes everyone waiting for an input state change.
-func (c *claudeConversation) signalLocked() {
-	close(c.changed)
-	c.changed = make(chan struct{})
+	c.rejectSteersLocked()
 }
 
 func (c *claudeConversation) current() string {
@@ -92,16 +84,6 @@ func (c *claudeConversation) markSubmitted(at time.Time) {
 	c.mu.Unlock()
 }
 
-// confirmLocked marks the current input confirmed.
-func (c *claudeConversation) confirmLocked() {
-	c.active, c.steerUnconfirmed = true, false
-	if waiter := c.waiters[c.nativeID]; waiter != nil {
-		close(waiter)
-		delete(c.waiters, c.nativeID)
-	}
-	c.signalLocked()
-}
-
 // claudeTurnStart is the moment a turn's run input reached the CLI.
 type claudeTurnStart struct {
 	turnID    string
@@ -110,7 +92,7 @@ type claudeTurnStart struct {
 
 // beginAtInit starts the turn on a system/init frame. It only counts once
 // the initial input is submitted and the turn has not started yet, so an
-// init sent at process start or caused by a steer is ignored.
+// init sent at process start is ignored.
 func (c *claudeConversation) beginAtInit() (claudeTurnStart, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -126,18 +108,15 @@ func (c *claudeConversation) beginAtInit() (claudeTurnStart, bool) {
 func (c *claudeConversation) confirmReplay(id string) (claudeTurnStart, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if id == "" || id != c.nativeID {
-		return claudeTurnStart{}, false
-	}
-	c.confirmLocked()
-	if c.started {
+	if id == "" || id != c.nativeID || c.started {
 		return claudeTurnStart{}, false
 	}
 	c.started = true
 	return claudeTurnStart{turnID: c.nativeID, writtenAt: c.inputWrittenAt}, true
 }
 
-// acceptResult applies the result acceptance rules.
+// acceptResult applies the result acceptance rules. The accepted result
+// ends the turn, so steers still waiting for a tool boundary never reach it.
 func (c *claudeConversation) acceptResult(parent, userMessage string) bool {
 	if parent != "" {
 		return false
@@ -145,27 +124,65 @@ func (c *claudeConversation) acceptResult(parent, userMessage string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if userMessage != "" && userMessage != c.nativeID {
-		if c.pendingInterrupted > 0 {
-			c.pendingInterrupted--
-		}
 		return false
 	}
-	if userMessage == "" && c.pendingInterrupted > 0 {
-		c.pendingInterrupted--
-		return false
-	}
-	c.confirmLocked()
-	c.pendingInterrupted = 0
 	c.closed = true
-	c.signalLocked()
+	c.rejectSteersLocked()
 	return true
+}
+
+// enqueueSteer holds text for the next tool boundary of owner's running
+// turn, the one named expected.
+func (c *claudeConversation) enqueueSteer(owner *claudeTurn, expected, text string) (*claudeSteer, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.owner != owner || !c.started || c.closed || c.finished || owner.proc.isStopping() || expected != c.nativeID {
+		return nil, claudeNotApplied(expected, c.nativeID)
+	}
+	steer := &claudeSteer{text: text, done: make(chan error, 1)}
+	c.steers = append(c.steers, steer)
+	return steer, nil
+}
+
+// withdrawSteer removes a steer that has not been handed to the CLI. It
+// reports false once the steer was taken.
+func (c *claudeConversation) withdrawSteer(steer *claudeSteer) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	index := slices.Index(c.steers, steer)
+	if index < 0 {
+		return false
+	}
+	c.steers = slices.Delete(c.steers, index, index+1)
+	return true
+}
+
+// takeSteers hands every waiting steer of owner's open turn to the caller,
+// which must resolve each one.
+func (c *claudeConversation) takeSteers(owner *claudeTurn) []*claudeSteer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.owner != owner || c.closed {
+		return nil
+	}
+	steers := c.steers
+	c.steers = nil
+	return steers
+}
+
+// rejectSteersLocked releases every waiting steer as not applied.
+func (c *claudeConversation) rejectSteersLocked() {
+	for _, steer := range c.steers {
+		steer.done <- claudeNotApplied(c.nativeID, c.nativeID)
+	}
+	c.steers = nil
 }
 
 // idle reports a conversation that may park.
 func (c *claudeConversation) idle() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.pendingInterrupted == 0 && !c.steerUnconfirmed && c.failure == ""
+	return c.failure == ""
 }
 
 func (c *claudeConversation) failureSummary() string {
@@ -181,27 +198,24 @@ func (c *claudeConversation) abort(text string) {
 		c.failure = text
 	}
 	c.closed = true
-	c.signalLocked()
+	c.rejectSteersLocked()
 	c.mu.Unlock()
 	c.proc.cancel()
 }
 
-// finish ends the stream: unconfirmed steer input becomes the failure, and
-// every waiter is released. Repeated calls return the same failure.
+// finish ends the stream and releases every waiter. Repeated calls return
+// the same failure.
 func (c *claudeConversation) finish() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.finished {
-		if c.steerUnconfirmed && c.failure == "" {
-			c.failure = claudeSteerNotConfirmed
-		}
 		c.closed, c.finished = true, true
 		close(c.finishedCh)
 		for id, ch := range c.requests {
 			ch <- claudeControlResult{err: io.EOF}
 			delete(c.requests, id)
 		}
-		c.signalLocked()
+		c.rejectSteersLocked()
 	}
 	return c.failure
 }

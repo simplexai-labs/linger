@@ -272,8 +272,6 @@ func (f *claudeFake) resident() int {
 				if initMode == "early" {
 					f.emit(systemInit)
 				}
-			case "interrupt":
-				f.record("events", "interrupt")
 			case "mcp_set_servers":
 				f.record("mcp", fmt.Sprintf("mcp %d %s", os.Getpid(), line))
 				var request struct {
@@ -324,6 +322,25 @@ func (f *claudeFake) resident() int {
 		}
 		if strings.Contains(prompt, "hang") {
 			select {}
+		}
+		if strings.Contains(prompt, "tool") {
+			// A main-agent tool finishes after a while and its PostToolUse
+			// hook waits for the daemon's answer, as Claude does.
+			time.Sleep(500 * time.Millisecond)
+			f.emit(map[string]any{"type": "control_request", "request_id": "hook-req", "request": map[string]any{
+				"subtype": "hook_callback", "callback_id": "hook_steer",
+				"input": map[string]any{"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": map[string]any{}},
+			}})
+			for {
+				reply, line, ok := f.next()
+				if !ok {
+					return 0
+				}
+				if reply.Type == "control_response" {
+					f.record("hooks", line)
+					break
+				}
+			}
 		}
 		if strings.Contains(prompt, "hold") {
 			continue

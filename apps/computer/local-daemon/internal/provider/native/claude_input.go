@@ -3,16 +3,14 @@ package native
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"io"
+	"strings"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/permission"
 )
 
 const (
+	claudeSteerNotConfirmed = "Claude steer submission was not confirmed; execution must not be retried"
 	claudeSubmitFailed      = "Claude initialization or input submission failed"
 	claudeAuthorizeFailed   = "Claude tool authorization failed"
 	claudePermissionInvalid = "Claude permission request is invalid"
@@ -82,98 +80,68 @@ func claudeNotApplied(expected, actual string) *SteerError {
 	}
 }
 
-const claudeSteerTargetGone = "Claude steer target is not the active turn"
-
-// steer interrupts the running turn and submits new input to the same Run.
-// The acknowledgement names the stable run turn, never the rotating native
-// uuid.
+// steer holds input for the running turn, as Codex does: nothing is
+// interrupted, and the main agent's next tool result carries the input to the
+// model. A turn that ends without another tool result did not apply it, so
+// the caller may run it as new input. The input stays in this process until
+// it is written, so the outcome is only uncertain when that write fails.
+// The acknowledgement names the stable run turn.
 func (t *claudeTurn) steer(ctx context.Context, request SteerRequest) (SteerAck, error) {
-	conv := t.proc.conv
-	conv.steerMu.Lock()
-	defer conv.steerMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return SteerAck{}, err
 	}
-	if err := t.awaitRunInput(ctx, request.ExpectedTurnID); err != nil {
+	conv := t.proc.conv
+	steer, err := conv.enqueueSteer(t, request.ExpectedTurnID, request.Input)
+	if err != nil {
 		return SteerAck{}, err
 	}
-	conv.mu.Lock()
-	runID := conv.runID
-	if conv.owner != t || conv.closed || conv.finished || !conv.active || t.proc.isStopping() || request.ExpectedTurnID != runID {
-		conv.mu.Unlock()
-		return SteerAck{}, claudeNotApplied(request.ExpectedTurnID, runID)
-	}
-	nativeID := uuid.NewString()
-	conv.nativeID, conv.active = nativeID, false
-	conv.pendingInterrupted++
-	conv.steerUnconfirmed = true
-	confirmed := make(chan struct{})
-	conv.waiters[nativeID] = confirmed
-	conv.mu.Unlock()
-
-	interrupt, _ := json.Marshal(map[string]any{
-		"type": "control_request", "request_id": claudeInterruptPrefix + nativeID,
-		"request": map[string]any{"subtype": "interrupt"},
-	})
-	limit, cancel := context.WithTimeout(ctx, claudeSteerLimit)
-	_, err := conv.request(limit, claudeInterruptPrefix+nativeID, interrupt)
-	if err == nil {
-		err = t.proc.write(limit, claudeUserFrame(nativeID, request.Input))
-	}
-	cancel()
-	if err == nil {
-		select {
-		case <-confirmed:
-		case <-ctx.Done():
-			err = ctx.Err()
-		case <-t.proc.ctx.Done():
-			err = errors.New("Claude process is stopping")
-		case <-conv.finishedCh:
-			err = io.EOF
+	select {
+	case err = <-steer.done:
+	case <-ctx.Done():
+		if conv.withdrawSteer(steer) {
+			return SteerAck{}, claudeNotApplied(request.ExpectedTurnID, request.ExpectedTurnID)
 		}
+		err = <-steer.done
 	}
-	if err != nil && !claudeClosed(confirmed) {
-		conv.abort(claudeSteerNotConfirmed)
-		return SteerAck{}, &SteerError{
-			Effect: "uncertain", Reason: "transport",
-			ExpectedTurnID: request.ExpectedTurnID, ActualTurnID: nativeID,
-			Message: claudeSteerNotConfirmed,
-		}
+	if err != nil {
+		return SteerAck{}, err
 	}
-	return SteerAck{TurnID: runID}, nil
+	return SteerAck{TurnID: request.ExpectedTurnID}, nil
 }
 
-// awaitRunInput holds a steer that arrives after system/init started the
-// turn but before the run input is confirmed. Nothing is written while it
-// waits. It returns nil once the input is confirmed or the turn ended; the
-// caller then checks admission again.
-func (t *claudeTurn) awaitRunInput(ctx context.Context, expected string) error {
-	conv := t.proc.conv
-	for {
-		conv.mu.Lock()
-		runID := conv.runID
-		waiting := conv.owner == t && conv.started && !conv.active && !conv.closed && !conv.finished &&
-			!t.proc.isStopping() && expected == runID
-		changed := conv.changed
-		conv.mu.Unlock()
-		if !waiting {
-			return nil
+// claudeSteerContext introduces steered input where the CLI shows it: as
+// context attached to a tool result, which the model would otherwise read as
+// part of that result.
+const claudeSteerContext = "New input for this turn arrived while the tool above was running. It is not part of the tool output. Take it into account from your next step on; it may add to or change what you are doing."
+
+// deliverSteers answers a PostToolUse or PostToolUseFailure hook. A tool
+// result of the main agent carries every waiting steer; a sub-agent's does
+// not, since its context is not the turn's.
+func (t *claudeTurn) deliverSteers(requestID string, hook claudeHookInput) {
+	var steers []*claudeSteer
+	output := map[string]any{}
+	if hook.AgentID == "" {
+		steers = t.proc.conv.takeSteers(t)
+	}
+	if len(steers) > 0 {
+		parts := []string{claudeSteerContext}
+		for _, steer := range steers {
+			parts = append(parts, steer.text)
 		}
-		gone := func() error {
-			return &SteerError{
-				Effect: "definitely_not_applied", Reason: "no_active_turn",
-				ExpectedTurnID: expected, ActualTurnID: runID, Message: claudeSteerTargetGone,
-			}
+		output["hookSpecificOutput"] = map[string]any{
+			"hookEventName": hook.HookEventName, "additionalContext": strings.Join(parts, "\n\n"),
 		}
-		select {
-		case <-changed:
-		case <-ctx.Done():
-			return gone()
-		case <-t.proc.ctx.Done():
-			return gone()
-		case <-conv.finishedCh:
-			return gone()
+	}
+	err := t.proc.write(t.runCtx, claudeControlReply(requestID, output))
+	if err != nil {
+		t.proc.conv.abort(claudeAuthorizeFailed)
+		err = &SteerError{
+			Effect: "uncertain", Reason: "transport",
+			ExpectedTurnID: t.proc.conv.current(), Message: claudeSteerNotConfirmed,
 		}
+	}
+	for _, steer := range steers {
+		steer.done <- err
 	}
 }
 
@@ -187,9 +155,21 @@ func (t *claudeTurn) authorize(frame claudeFrame) {
 		return
 	}
 	var peek struct {
-		Subtype string `json:"subtype"`
+		Subtype    string          `json:"subtype"`
+		CallbackID string          `json:"callback_id"`
+		Input      json.RawMessage `json:"input"`
 	}
 	_ = json.Unmarshal(frame.Request, &peek)
+	if peek.Subtype == "hook_callback" && peek.CallbackID == claudeSteerHookID {
+		var hook claudeHookInput
+		if frame.RequestID == "" || json.Unmarshal(peek.Input, &hook) != nil ||
+			(hook.HookEventName != "PostToolUse" && hook.HookEventName != "PostToolUseFailure") {
+			t.proc.conv.abort(claudePermissionInvalid)
+			return
+		}
+		t.deliverSteers(frame.RequestID, hook)
+		return
+	}
 	if peek.Subtype == "can_use_tool" && t.spec.PermissionReviewer != nil {
 		t.review(frame)
 		return
