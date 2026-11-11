@@ -17,7 +17,7 @@ import VoiceModeMiniWindow, {
   sessionMessages,
 } from "./voice-mode-mini-window";
 import type { VoiceModeSession } from "./voice-mode-session";
-import { openVoicePip, resetVoicePipForTest } from "./voice-pip";
+import { closeVoicePip, openVoicePip, resetVoicePipForTest } from "./voice-pip";
 
 const startedAt = "2026-10-02T03:00:00.000Z";
 const message = (
@@ -302,6 +302,33 @@ describe("Voice Mode mini window", () => {
       act(() => fake.pipWindow.close());
       await waitFor(() => expect(voice.exit).toHaveBeenCalledOnce());
       focused.mockRestore();
+    } finally {
+      fake.frame.remove();
+      Reflect.deleteProperty(window, "documentPictureInPicture");
+      resetVoicePipForTest();
+    }
+  });
+
+  it("floats the call again from the window inside the page", async () => {
+    const fake = installFakeVoicePip();
+    try {
+      renderWindow();
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: "Float Voice Mode window" }),
+        );
+        await fake.requestWindow.mock.results[0]?.value;
+      });
+      await within(fake.document.body).findByRole("region", {
+        name: "Voice Mode window",
+      });
+      expect(fake.requestWindow).toHaveBeenCalledOnce();
+      expect(
+        screen.queryByRole("region", { name: "Voice Mode window" }),
+      ).not.toBeInTheDocument();
+      expect(voice.exit).not.toHaveBeenCalled();
+      // The page takes the window back before the test removes its frame.
+      act(() => closeVoicePip("voice-mode"));
     } finally {
       fake.frame.remove();
       Reflect.deleteProperty(window, "documentPictureInPicture");

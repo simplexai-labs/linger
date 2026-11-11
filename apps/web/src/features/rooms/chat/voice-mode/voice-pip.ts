@@ -32,6 +32,11 @@ function api(): DocumentPictureInPicture | undefined {
   ).documentPictureInPicture;
 }
 
+/** Whether this browser can float a voice window over other tabs and apps. */
+export function voicePipSupported() {
+  return api() !== undefined;
+}
+
 function publish(next: typeof pip) {
   pip = next;
   for (const listener of listeners) listener();
