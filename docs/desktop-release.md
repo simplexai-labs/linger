@@ -1,15 +1,13 @@
 # Desktop Release
 
-Linger desktop releases are published in the public
-[simplexai-labs/linger](https://github.com/simplexai-labs/linger) repository:
-pushing a `desktop-v<version>` tag there runs GitHub Actions
-([`.github/workflows/desktop-release.yml`](../.github/workflows/desktop-release.yml)),
-which builds the packages for Apple silicon, Linux x64 and Windows x64 and
-publishes them as the GitHub Release of that tag. The workflow calls
-[`scripts/ci/desktop-release.sh`](../scripts/ci/desktop-release.sh), so the
-same steps also run on a developer machine.
+Linger desktop releases are built by explicitly running GitHub Actions in the public
+[simplexai-labs/linger](https://github.com/simplexai-labs/linger) repository.
+The [Desktop release workflow](../.github/workflows/desktop-release.yml) builds
+packages for Apple silicon, Linux x64 and Windows x64. It keeps the packages as
+workflow artifacts unless the person starting the run selects `publish`.
 
-This is the only release path.
+The workflow calls [`scripts/ci/desktop-release.sh`](../scripts/ci/desktop-release.sh),
+so the same build steps also run on a developer machine.
 
 ## Downloads
 
@@ -19,38 +17,37 @@ becomes the latest release. Link there, not to a version.
 
 ## Releasing
 
-In a checkout of simplexai-labs/linger:
+1. Open Actions → Desktop release → Run workflow in simplexai-labs/linger.
+2. Choose the branch or tag containing the commit to build and enter a version,
+   such as `0.16.36-rc.1`.
+3. Leave `publish` unchecked for a test build. Select it only when you intend to
+   create or update the GitHub Release, then start the workflow.
 
-```sh
-git tag desktop-v0.16.36
-git push origin desktop-v0.16.36
-```
+The release tag is `desktop-v<major>.<minor>.<patch>`, optionally with a suffix such
+as `-rc.1`. A version with a hyphen is a GitHub prerelease whose notes start with
+**Prerelease**; a stable version is marked as the latest release. Publishing
+creates the tag at the selected commit if it does not exist yet.
 
-- The tag is `desktop-v<major>.<minor>.<patch>`, optionally with a suffix such
-  as `-rc.1`, beside the `cli-v<version>` tags of the CLI. A version with a
-  hyphen is published as a GitHub prerelease whose notes start with
-  **Prerelease**; a stable version is marked as the latest release.
-- The version comes from the tag. The build writes it into
-  `apps/desktop/package.json` for packaging and restores the file afterwards, so
-  no version commit is needed.
-- The release appears under the repository's Releases with the files listed in
-  [Release Files](#release-files).
+The workflow writes the entered version into `apps/desktop/package.json` for
+packaging and restores the file afterwards, so no version commit is needed.
+The release appears under Releases with the files listed in
+[Release Files](#release-files).
 
 ## How the workflow runs
 
-The workflow runs for `desktop-v*` tags and from Actions → Desktop release →
-Run workflow. Its `build` jobs
-run on `ubuntu-24.04` (the macOS and Windows runners have no Docker) and keep
-the files as workflow artifacts for 14 days; `release` writes `SHA256SUMS.txt`
-and creates the GitHub Release, or uploads the files again to an existing one.
-A manual run publishes only with `publish` set.
+Only an explicit workflow dispatch starts a desktop build. Pushing a commit or
+`desktop-v*` tag does not start this workflow. Its `build` jobs run on
+`ubuntu-24.04` (the macOS and Windows runners have no Docker) and keep the files
+as workflow artifacts for 14 days. With `publish` selected, `release` writes
+`SHA256SUMS.txt` and creates the GitHub Release, or uploads the files again to an
+existing one.
 
 The release goes to `RELEASE_REPO`, `simplexai-labs/linger` by default:
 
 - **In simplexai-labs/linger itself**, the workflow's `GITHUB_TOKEN`
-  publishes; no extra secret is needed. The tag is the one pushed, at the
-  built commit.
-- **In another repository**, such as a private copy, it publishes
+  publishes; no extra secret is needed. The release tag points to the
+  selected commit.
+- **In another repository**, it publishes
   across repositories with the `LINGER_RELEASE_TOKEN` secret; `prepare` stops
   at once when that secret is missing. A tag points at a commit of its own
   repository, so the release creates `desktop-v<version>` in
@@ -85,7 +82,7 @@ that runs the workflow:
 The `native-deps` prerelease in simplexai-labs/linger holds every archive that
 `apps/desktop/distribution/*.json` pins, under its file name; being a
 prerelease, it never becomes the latest release. When a pin changes, upload the
-new archive there before tagging:
+new archive there before starting a release:
 
 ```sh
 gh release upload native-deps <archive> --repo simplexai-labs/linger
@@ -94,18 +91,11 @@ gh release upload native-deps <archive> --repo simplexai-labs/linger
 ### First release in simplexai-labs/linger
 
 1. Check that the `native-deps` prerelease has every pinned archive.
-2. With the source in simplexai-labs/linger, push a prerelease tag first, then
-   the release:
-
-   ```sh
-   git tag desktop-v0.16.36-rc.1 && git push origin desktop-v0.16.36-rc.1
-   git tag desktop-v0.16.36 && git push origin desktop-v0.16.36
-   ```
-
-   From another repository, also set `LINGER_RELEASE_TOKEN` there and push
-   the tags to that repository instead.
-
-3. Check the release page, download each file and compare it with
+2. Run the workflow with a prerelease version and `publish` unchecked. Inspect
+   the three build artifacts before publishing.
+3. Run it again at the same commit with `publish` selected to publish the
+   prerelease. After verification, explicitly run the stable version.
+4. Check the release page, download each file and compare it with
    `SHA256SUMS.txt`. A test release is removed with its tag:
    `gh release delete desktop-v0.16.36-rc.1 --repo simplexai-labs/linger --cleanup-tag`.
 

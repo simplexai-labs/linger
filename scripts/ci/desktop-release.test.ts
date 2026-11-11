@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { parseDocument } from "yaml";
 
 const script = join(process.cwd(), "scripts/ci/desktop-release.sh");
 const temporary: string[] = [];
@@ -36,6 +37,18 @@ function folder() {
 afterEach(() => {
   for (const dir of temporary.splice(0))
     rmSync(dir, { recursive: true, force: true });
+});
+
+it("requires an explicit workflow dispatch and defaults to a build without publishing", () => {
+  const workflow = parseDocument(
+    readFileSync(".github/workflows/desktop-release.yml", "utf8"),
+  );
+
+  expect(workflow.getIn(["on", "push"])).toBeUndefined();
+  expect(workflow.getIn(["on", "workflow_dispatch"])).toBeDefined();
+  expect(
+    workflow.getIn(["on", "workflow_dispatch", "inputs", "publish", "default"]),
+  ).toBe(false);
 });
 
 describe("desktop-release.sh version", () => {
@@ -130,7 +143,14 @@ describe("desktop-release.sh build", () => {
   });
 
   it("keeps the archive folder's address out of the log", () => {
+    const bin = folder();
+    writeFileSync(
+      join(bin, "curl"),
+      '#!/bin/sh\nprintf "%s\\n" "$*" >&2\nexit 22\n',
+    );
+    chmodSync(join(bin, "curl"), 0o755);
     const result = run(["fetch-native", "linux-x64"], {
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
       LINGER_NATIVE_POSTGRES_DIR: folder(),
       LINGER_NATIVE_DEPS_URL: "http://deps.invalid/private/folder",
     });
@@ -141,15 +161,8 @@ describe("desktop-release.sh build", () => {
   });
 });
 
-describe("desktop-release.sh gitlab-upload", () => {
-  it("needs GitLab CI", () => {
-    const result = run(["gitlab-upload", ".", "1.0.0"]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("CI_API_V4_URL is not set");
-  });
-
-  it.each(["target", "gitlab-release"])(
+describe("desktop-release.sh unsupported commands", () => {
+  it.each(["target", "gitlab-release", "gitlab-upload"])(
     "has no %s command: releases publish only on GitHub",
     (command) => {
       expect(run([command]).status).toBe(2);

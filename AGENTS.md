@@ -50,6 +50,9 @@ Memory, and Voice services.
 
 ## Important Conventions
 
+- Create pull requests, merge changes, push release tags, or publish releases only
+  when the user explicitly requests that action. Routine edits and checks end
+  with local changes ready for review.
 - Read the nearest `AGENTS.md` for the target path.
 - Keep each checkout's `node_modules` local; never symlink or copy another
   checkout's installed dependency tree. Run the install command above when
