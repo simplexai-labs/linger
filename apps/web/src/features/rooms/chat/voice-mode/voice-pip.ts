@@ -68,6 +68,23 @@ export function closeVoicePip(owner: VoicePipOwner) {
   current.close();
 }
 
+/**
+ * Whether closing the window brought the Human back to this page. The
+ * window's "back to tab" button closes it and puts its tab in front, while its
+ * close button does not; the browser reports neither, so this looks at the
+ * page a moment later. A close while this page is already in front reads the
+ * same as back to tab.
+ */
+export function returnedToOpener(waitMs = 300): Promise<boolean> {
+  return new Promise((resolve) =>
+    setTimeout(
+      () =>
+        resolve(document.visibilityState === "visible" && document.hasFocus()),
+      waitMs,
+    ),
+  );
+}
+
 /** Runs when the Human closes this owner's window with the desktop's button. */
 export function onVoicePipClosedByHuman(
   owner: VoicePipOwner,
