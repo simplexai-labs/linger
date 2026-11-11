@@ -9,7 +9,7 @@ import { parseDaemonToAgentEnvelope } from "@linger/wire-contracts/runner-gatewa
 import { expect, it } from "vitest";
 
 it.skipIf(process.platform === "win32")(
-  "accepts actual Claude ACK and uncertain failure through the Gateway contract",
+  "accepts actual Claude ACK and not-applied failure through the Gateway contract",
   async () => {
     const fixtureRoot = await mkdtemp(
       path.join(os.tmpdir(), "claude-input-wire-"),
@@ -51,8 +51,8 @@ it.skipIf(process.platform === "win32")(
       expect(failure).toMatchObject({
         type: "operation.input_result",
         outcome: "rejected",
-        effect: "uncertain",
-        reason: "transport",
+        effect: "definitely_not_applied",
+        reason: "no_active_turn",
         expected_turn_id: ack.turn_id,
         seq: ack.seq + 1,
       });

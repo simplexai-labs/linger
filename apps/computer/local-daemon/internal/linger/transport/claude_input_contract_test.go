@@ -26,28 +26,33 @@ func TestClaudeInputWireOutcomes(t *testing.T) {
 		t.Fatal(err)
 	}
 	cli := filepath.Join(t.TempDir(), "claude-fixture")
-	// The fixture runs two main-agent tools after the input echo. Their
-	// PostToolUse hooks carry steered input; before the second one it closes
-	// its stdin, so the answer carrying the second steer cannot be written.
+	// The fixture keeps running main-agent tools after the input echo until a
+	// PostToolUse hook answer carries steered input, then ends the turn, so
+	// a later steer is never carried.
 	script := `#!` + python + `
-import json, os, sys, time
+import json, sys, time
 def emit(frame):
     print(json.dumps(frame), flush=True)
-def hook(request_id):
-    time.sleep(0.5)
-    emit({'type': 'control_request', 'request_id': request_id, 'request': {'subtype': 'hook_callback', 'callback_id': 'hook_steer',
+def hook(n):
+    time.sleep(0.05)
+    emit({'type': 'control_request', 'request_id': 'hook-%d' % n, 'request': {'subtype': 'hook_callback', 'callback_id': 'hook_steer',
           'input': {'hook_event_name': 'PostToolUse', 'tool_name': 'Bash', 'tool_input': {}}}})
+hooks, turn = 0, None
 for line in sys.stdin:
     frame = json.loads(line)
     if frame['type'] == 'control_request':
         emit({'type': 'control_response', 'response': {'subtype': 'success', 'request_id': frame['request_id']}})
     elif frame['type'] == 'control_response':
-        os.close(0)
-        hook('hook-2')
-        time.sleep(30)
+        if 'additionalContext' in line:
+            emit({'type': 'result', 'subtype': 'success', 'is_error': False, 'terminal_reason': 'completed', 'result': 'done',
+                  'session_id': 'fixture-session', 'user_message_uuid': turn})
+        elif hooks < 200:
+            hooks += 1
+            hook(hooks)
     elif frame['type'] == 'user':
-        emit({'type': 'user', 'isReplay': True, 'uuid': frame['uuid'], 'session_id': 'fixture-session'})
-        hook('hook-1')
+        turn = frame['uuid']
+        emit({'type': 'user', 'isReplay': True, 'uuid': turn, 'session_id': 'fixture-session'})
+        hook(hooks)
 `
 	if err := os.WriteFile(cli, []byte(script), 0700); err != nil {
 		t.Fatal(err)
@@ -83,18 +88,18 @@ for line in sys.stdin:
 	if err != nil || ack.TurnID != turn {
 		t.Fatalf("ACK target mismatch: %+v %v", ack, err)
 	}
-	_, err = session.Steer(ctx, native.SteerRequest{ExpectedTurnID: turn, Input: "unconfirmed"})
+	_, err = session.Steer(ctx, native.SteerRequest{ExpectedTurnID: turn, Input: "late"})
 	var failure *native.SteerError
-	if !errors.As(err, &failure) || failure.Effect != "uncertain" || failure.Reason != "transport" {
+	if !errors.As(err, &failure) || failure.Effect != "definitely_not_applied" || failure.Reason != "no_active_turn" {
 		t.Fatalf("invalid native failure: %v", err)
 	}
 	select {
 	case result := <-session.Outcome:
-		if result.Status != "failed" {
-			t.Fatalf("unconfirmed input result=%+v", result)
+		if result.Status != "completed" {
+			t.Fatalf("steered turn result=%+v", result)
 		}
 	case <-ctx.Done():
-		t.Fatal("unconfirmed native query did not stop")
+		t.Fatal("steered native turn did not end")
 	}
 	base := protocol.Event{
 		ProtocolVersion: "2", TenantID: "tenant-1", RunnerID: "computer-1",

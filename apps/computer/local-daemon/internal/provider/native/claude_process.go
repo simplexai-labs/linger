@@ -215,20 +215,35 @@ func (p *claudeProcess) alive() bool {
 	return !stopping && p.ctx.Err() == nil && !claudeClosed(p.streamEnded) && !claudeClosed(p.leaderDone)
 }
 
+// claudeUnwrittenError is a write that failed before any byte of the frame
+// reached the CLI.
+type claudeUnwrittenError struct{ err error }
+
+func (e *claudeUnwrittenError) Error() string { return e.err.Error() }
+func (e *claudeUnwrittenError) Unwrap() error { return e.err }
+
 // write sends one frame. An expired caller limit cancels the whole process,
 // because a partial frame cannot be recovered.
 func (p *claudeProcess) write(ctx context.Context, frame []byte) error {
 	if claudeClosed(p.streamEnded) {
-		return io.EOF
+		return &claudeUnwrittenError{io.EOF}
+	}
+	// Checked first: select would pick a free slot over an ended context at
+	// random.
+	if ctx.Err() != nil {
+		return &claudeUnwrittenError{context.Cause(ctx)}
+	}
+	if p.ctx.Err() != nil {
+		return &claudeUnwrittenError{errors.New("Claude process is stopping")}
 	}
 	select {
 	case p.writeSlot <- struct{}{}:
 	case <-ctx.Done():
-		return context.Cause(ctx)
+		return &claudeUnwrittenError{context.Cause(ctx)}
 	case <-p.ctx.Done():
-		return errors.New("Claude process is stopping")
+		return &claudeUnwrittenError{errors.New("Claude process is stopping")}
 	case <-p.streamEnded:
-		return io.EOF
+		return &claudeUnwrittenError{io.EOF}
 	}
 	line := make([]byte, 0, len(frame)+1)
 	line = append(append(line, frame...), '\n')

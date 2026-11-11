@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -135,9 +136,15 @@ func (t *claudeTurn) deliverSteers(requestID string, hook claudeHookInput) {
 	err := t.proc.write(t.runCtx, claudeControlReply(requestID, output))
 	if err != nil {
 		t.proc.conv.abort(claudeAuthorizeFailed)
-		err = &SteerError{
-			Effect: "uncertain", Reason: "transport",
-			ExpectedTurnID: t.proc.conv.current(), Message: claudeSteerNotConfirmed,
+		turn := t.proc.conv.current()
+		var unwritten *claudeUnwrittenError
+		if errors.As(err, &unwritten) {
+			err = claudeNotApplied(turn, turn)
+		} else {
+			err = &SteerError{
+				Effect: "uncertain", Reason: "transport",
+				ExpectedTurnID: turn, Message: claudeSteerNotConfirmed,
+			}
 		}
 	}
 	for _, steer := range steers {

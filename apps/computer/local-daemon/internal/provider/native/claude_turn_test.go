@@ -467,6 +467,42 @@ func TestClaudeSteerReleasedWhenTheStreamEnds(t *testing.T) {
 	}
 }
 
+type claudeBrokenStdin struct{}
+
+func (claudeBrokenStdin) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+func (claudeBrokenStdin) Close() error              { return nil }
+
+func TestClaudeSteerOutcomeWhenTheHookAnswerFails(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		breaks func(*claudeTurn)
+		effect string
+	}{
+		// The Run was cancelled: nothing reached the CLI, so the input can
+		// run again as the next Run.
+		{"run cancelled", func(turn *claudeTurn) { turn.runCancel() }, "definitely_not_applied"},
+		// The frame was handed to the pipe and the write failed: Claude may
+		// have read it.
+		{"write failed", func(turn *claudeTurn) { turn.proc.stdin = claudeBrokenStdin{} }, "uncertain"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			turn, _ := claudeHarness(t, RunSpec{})
+			claudeFeed(turn, claudeReplayOne)
+			done := claudeSteerAsync(turn, t.Context(), "turn-1", "lost")
+			claudeAwaitQueued(t, turn, 1)
+			c.breaks(turn)
+			claudeFeed(turn, claudeToolHook("h1", "PostToolUse", ""))
+			var steerErr *SteerError
+			if err := <-done; !errors.As(err, &steerErr) || steerErr.Effect != c.effect {
+				t.Fatalf("steer = %v", err)
+			}
+			if turn.proc.conv.failureSummary() != claudeAuthorizeFailed {
+				t.Fatalf("failure = %q", turn.proc.conv.failureSummary())
+			}
+		})
+	}
+}
+
 func TestClaudeSteerRefusals(t *testing.T) {
 	turn, wire := claudeHarness(t, RunSpec{})
 	var steerErr *SteerError
