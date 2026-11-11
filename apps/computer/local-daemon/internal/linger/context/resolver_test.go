@@ -277,12 +277,11 @@ func TestExecutionResolverNamesClaudeWebTools(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			named := strings.Contains(spec.SystemPrompt, "select:WebSearch,WebFetch")
 			if runtimeType == "claude" {
-				if !named || spec.DeveloperInstructions == nil || *spec.DeveloperInstructions != "Developer\n\n"+claudeWebToolGuide {
+				if spec.SystemPrompt != "Base\n\nDeveloper\n\n"+claudeWebToolGuide {
 					t.Fatalf("Claude web tools not named: %+v", spec)
 				}
-			} else if named || spec.DeveloperInstructions == nil || *spec.DeveloperInstructions != "Developer" {
+			} else if strings.Contains(spec.SystemPrompt, "select:WebSearch,WebFetch") || spec.DeveloperInstructions == nil || *spec.DeveloperInstructions != "Developer" {
 				t.Fatalf("Codex got the Claude web tool guide: %+v", spec)
 			}
 		})

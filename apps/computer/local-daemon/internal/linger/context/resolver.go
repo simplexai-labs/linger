@@ -166,7 +166,7 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 		CodexVersion:          installation.Version,
 		TenantID:              command.TenantID, OwnerActorID: binding.OwnerActorID, AgentID: command.AgentID,
 	}
-	if command.HostAccess == "trusted" || r.ToolGuide != "" || command.RuntimeType == "claude" {
+	if command.HostAccess == "trusted" || r.ToolGuide != "" {
 		spec.DeveloperInstructions = &developerInstructions
 	}
 	// The profile path is stable and depends only on the Agent-level credential,
