@@ -91,25 +91,6 @@ it("gives every instance its own private identity key outside services.env", asy
   await initializeInstance({ name: "one", home: root });
   expect(await readLocalIdentityKey(one.root)).toBe(first);
 });
-// An earlier version kept the key in services.env; it moves unchanged so the
-// app and the TeamHub it already trusts keep matching.
-it("moves an identity key from services.env without changing it", async () => {
-  const root = await home();
-  const instance = await initializeInstance({ name: "older", home: root });
-  const file = path.join(instance.root, "services.env");
-  const others = await readFile(file, "utf8");
-  const legacy = Buffer.alloc(32, 9).toString("base64");
-  await rm(path.join(instance.root, "local-identity.key"));
-  await writeFile(file, `TEAMHUB_LOCAL_IDENTITY_KEY=${legacy}\n${others}`);
-  await initializeInstance({ name: "older", home: root });
-  expect(await readLocalIdentityKey(instance.root)).toBe(legacy);
-  expect(await readFile(file, "utf8")).toBe(others);
-  // Interrupted after the key file was written: the copy left behind goes.
-  await writeFile(file, `${others}TEAMHUB_LOCAL_IDENTITY_KEY=${legacy}\n`);
-  await initializeInstance({ name: "older", home: root });
-  expect(await readLocalIdentityKey(instance.root)).toBe(legacy);
-  expect(await readFile(file, "utf8")).toBe(others);
-});
 it("rejects path traversal names and invalid ports", async () => {
   const root = await home();
   await expect(

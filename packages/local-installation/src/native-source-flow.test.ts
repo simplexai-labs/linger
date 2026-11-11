@@ -245,6 +245,45 @@ test("only TeamHub's process gets the server identity key", async () => {
     );
   expect(events.join("\n")).not.toContain(key);
 });
+test("a new identity key restarts TeamHub alone", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const install = async () => {
+    vi.mocked(startNativeProcess).mockClear();
+    await installNativeSource({
+      home: f.home,
+      repo: f.repo,
+      name: "native-rekey",
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    return Object.fromEntries(
+      vi
+        .mocked(startNativeProcess)
+        .mock.calls.map(([options]) => [options.name, options.settings]),
+    );
+  };
+  const before = await install();
+  const file = path.join(
+    f.home,
+    "instances",
+    "native-rekey",
+    "local-identity.key",
+  );
+  const key = Buffer.alloc(32, 5).toString("base64");
+  await writeFile(file, `${key}\n`, { mode: 0o600 });
+  const after = await install();
+  expect(after.teamhub).not.toBe(before.teamhub);
+  expect(after.teamhub).not.toContain(key);
+  expect(after["node-services"]).toBe(before["node-services"]);
+  expect(after.web).toBe(before.web);
+});
 test("an external Computer skips the Go Computer release and enrollment", async () => {
   const f = await fixture();
   vi.mocked(prepareRuntime).mockResolvedValue({

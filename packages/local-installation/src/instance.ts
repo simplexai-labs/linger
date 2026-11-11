@@ -290,26 +290,13 @@ async function writeMissingCredentials(root: string): Promise<void> {
     `${current}${current && !current.endsWith("\n") ? "\n" : ""}${added.join("")}`,
   );
 }
-// Writes the identity key once. An earlier version kept it in services.env,
-// which the services were started with; it moves from there unchanged, so a
-// desktop app and TeamHub already paired by it stay paired.
+// Writes the identity key once; an instance keeps it from then on.
 async function writeLocalIdentityKey(root: string): Promise<void> {
-  const services = path.join(root, "services.env");
-  const current = (await readPrivate(services)) ?? "";
-  const legacy = parseEnv(current).TEAMHUB_LOCAL_IDENTITY_KEY;
-  if (!(await readLocalIdentityKey(root)))
-    await atomicPrivate(
-      localIdentityKeyFile(root),
-      `${legacy && validIdentityKey(legacy) ? legacy : randomBytes(32).toString("base64")}\n`,
-    );
-  if (legacy !== undefined)
-    await atomicPrivate(
-      services,
-      current
-        .split(/(?<=\n)/)
-        .filter((line) => !line.startsWith("TEAMHUB_LOCAL_IDENTITY_KEY="))
-        .join(""),
-    );
+  if (await readLocalIdentityKey(root)) return;
+  await atomicPrivate(
+    localIdentityKeyFile(root),
+    `${randomBytes(32).toString("base64")}\n`,
+  );
 }
 export async function withInstanceLock<T>(
   instance: Instance,

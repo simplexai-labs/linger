@@ -601,9 +601,16 @@ async function runNativeSource(
         // The services read user.env, the credentials and the voice tools from
         // their environment, which their command line does not cover: a
         // change restarts them.
-        const settings = JSON.stringify({
+        const shared = {
           env: configured.env,
           voice: voice ? voice.bin : voiceKeys ? "off" : undefined,
+        };
+        const settings = JSON.stringify(shared);
+        // TeamHub also restarts for a new identity key; the digest keeps the
+        // key itself out of the process record.
+        const teamhubSettings = JSON.stringify({
+          ...shared,
+          identity: createHash("sha256").update(identityKey).digest("hex"),
         });
         await timed("Protecting the instance data directories", () =>
           Promise.all(
@@ -814,7 +821,7 @@ async function runNativeSource(
           signal,
           redactions: secrets,
           // A changed user.env, port, credential or voice tool restarts it.
-          settings,
+          settings: name === "teamhub" ? teamhubSettings : settings,
           restartOnConfigurationChange: true,
         });
         // Stop the Agent Service only when TeamHub is about to restart for a
