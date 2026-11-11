@@ -1638,6 +1638,65 @@ export function scenarioJobs(
     s.close();
   }
 
+  // Asked for an email with only a recipient, the model asks what it
+  // should say; it does not take TeamHub's answer as a bad address.
+  async function b14(rep: number) {
+    const s = await open();
+    const t: string[] = [];
+    const filled = (value: unknown) =>
+      typeof value === "string" && value.trim() !== "";
+    const mock = makeMock({
+      // As TeamHub answers an email with no subject or body.
+      open_email_canvas: (a) =>
+        filled(a.subject) && filled(a.body)
+          ? {
+              status: "opened",
+              document_id: "document_canvas_1",
+              revision_id: "revision_1",
+            }
+          : { error: "missing_content" },
+    });
+    const r1 = await s.turn(
+      // Opened before its content is known, as in the call where this went
+      // wrong: TeamHub answers missing_content.
+      "Open an email to tonyzhang at simplexai dot com now, I will tell you what to say in a bit",
+      mock,
+    );
+    t.push(`U: email to tonyzhang → A: ${say(r1)}`);
+    const r2 = await s.turn("Say tomorrow's 3 pm meeting moves to 4 pm", mock);
+    t.push(`U: meeting moved → A: ${say(r2)}`);
+    const opened = calls(r2).find(
+      (c) =>
+        c.name === "open_email_canvas" &&
+        filled(c.args.subject) &&
+        filled(c.args.body),
+    );
+    push({
+      scenario: "B14 email content",
+      caseId: "email-recipient-only",
+      rep,
+      transcript: t,
+      metrics: {
+        // Whether the model wrote the email before it knew its content.
+        triedEmpty: calls(r1).some(
+          (c) =>
+            c.name === "open_email_canvas" &&
+            !(filled(c.args.subject) && filled(c.args.body)),
+        ),
+        noAddressBlame:
+          !/spell|say it again|address\b[^,.?!]{0,30}\b(not|isn't|wasn't|wrong|invalid)|(not|wasn't|isn't|couldn't)[^,.?!]{0,20}(recogni|valid)/i.test(
+            text(r1),
+          ),
+        asksContent: /what|subject|body|content|write|say/i.test(text(r1)),
+        openedWithContent: Boolean(opened),
+        keptRecipient:
+          typeof opened?.args.to === "string" &&
+          /tonyzhang@simplexai\.com/i.test(opened.args.to),
+      },
+    });
+    s.close();
+  }
+
   return [
     ["b1-result", b1],
     ["b1b-length", b1Length],
@@ -1652,5 +1711,6 @@ export function scenarioJobs(
     ["b10-regressions", b10],
     ["b11-cut-off", b11],
     ["b13-open-file", b13],
+    ["b14-email-content", b14],
   ];
 }

@@ -227,6 +227,11 @@ func TestVoiceLiveWritesAndChangesAnEmailCanvasAsTheAgent(t *testing.T) {
 	if output := call("email-0", "open_email_canvas", map[string]string{"to": "Amy", "subject": "Pickup", "body": "Can you pick me up?"}); output["error"] != "invalid_recipients" || canvasMessages() != 0 {
 		t.Fatalf("name as recipient=%v", output)
 	}
+	// A recipient alone is no email yet: the model is told the content is
+	// missing, not that the address is wrong, and nothing is written.
+	if output := call("email-empty", "open_email_canvas", map[string]string{"to": "tonyzhang@simplexai.com", "subject": "", "body": ""}); output["error"] != "missing_content" || canvasMessages() != 0 {
+		t.Fatalf("recipient alone=%v", output)
+	}
 	email := map[string]string{"to": "amy@example.com", "subject": "Next Wed LA airport pickup", "body": "Hi Amy,\n\nCan you pick me up at LAX at 9 am next Wednesday?"}
 	opened := call("email-1", "open_email_canvas", email)
 	documentID, _ := opened["document_id"].(string)
@@ -255,6 +260,10 @@ func TestVoiceLiveWritesAndChangesAnEmailCanvasAsTheAgent(t *testing.T) {
 	if stale["error"] != "canvas_changed" || stale["revision_id"] != revisionID || stale["subject"] != "Next Wed LA airport pickup" ||
 		!strings.Contains(stale["body"].(string), "Can you pick me up at LAX at 9 am next Wednesday?") || computes.Load() != 0 {
 		t.Fatalf("stale edit=%v computes=%d", stale, computes.Load())
+	}
+	// A change that names nothing to change is said so, and nothing runs.
+	if nothing := call("edit-none", "edit_email_canvas", map[string]string{"document_id": documentID, "revision_id": revisionID}); nothing["error"] != "nothing_to_change" || computes.Load() != 0 {
+		t.Fatalf("empty edit=%v computes=%d", nothing, computes.Load())
 	}
 	// A header change keeps every line it leaves out and replaces only the
 	// header, so the body's blocks stay as they are.
