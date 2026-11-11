@@ -41,6 +41,7 @@ import {
 import { prepareRuntime } from "./managed-runtimes.js";
 import {
   inspectNativeProcess,
+  nativeConfigurationChanged,
   startNativeProcess,
   stopNativeProcess,
 } from "./native-process.js";
@@ -71,6 +72,7 @@ vi.mock("./managed-codex.js", () => ({
 }));
 vi.mock("./native-process.js", () => ({
   inspectNativeProcess: vi.fn(),
+  nativeConfigurationChanged: vi.fn(),
   startNativeProcess: vi.fn(),
   stopNativeProcess: vi.fn(),
 }));
@@ -122,6 +124,7 @@ async function fixture() {
     running.add(options.name);
     return { running: true, pid: 100 };
   });
+  vi.mocked(nativeConfigurationChanged).mockResolvedValue(false);
   vi.mocked(stopNativeProcess).mockImplementation(async (_root, name) => {
     running.delete(name);
   });
@@ -314,6 +317,83 @@ test("failed preparation never stops services that were already running", async 
   expect(result.code).toBe(1);
   expect(stopNativeProcess).not.toHaveBeenCalled();
   expect(f.running.has("postgres")).toBe(true);
+});
+
+async function runFlow(f: Awaited<ReturnType<typeof fixture>>) {
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  return installNativeSource({
+    ...f,
+    name: "native-flow",
+    setupChoice: "pi",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+}
+
+test("an unchanged TeamHub leaves a running node-services alone", async () => {
+  const f = await fixture();
+  for (const name of ["teamhub", "node-services", "web"]) f.running.add(name);
+  await runFlow(f);
+  expect(vi.mocked(stopNativeProcess)).not.toHaveBeenCalledWith(
+    expect.anything(),
+    "node-services",
+  );
+});
+
+test("a stopped TeamHub never stops node-services up front", async () => {
+  const f = await fixture();
+  f.running.add("node-services");
+  await runFlow(f);
+  expect(vi.mocked(stopNativeProcess)).not.toHaveBeenCalledWith(
+    expect.anything(),
+    "node-services",
+  );
+});
+
+test("a running node-services stops before TeamHub restarts", async () => {
+  const f = await fixture();
+  for (const name of ["teamhub", "node-services", "web"]) f.running.add(name);
+  vi.mocked(nativeConfigurationChanged).mockImplementation(
+    async (options) => options.name === "teamhub",
+  );
+  await runFlow(f);
+  expect(
+    vi.mocked(stopNativeProcess).mock.calls.map((call) => call[1]),
+  ).toEqual(["node-services"]);
+  const teamHubStart = vi
+    .mocked(startNativeProcess)
+    .mock.calls.findIndex(([options]) => options.name === "teamhub");
+  expect(vi.mocked(stopNativeProcess).mock.invocationCallOrder[0]).toBeLessThan(
+    vi.mocked(startNativeProcess).mock.invocationCallOrder[teamHubStart]!,
+  );
+  expect(f.running.has("node-services")).toBe(true);
+});
+
+test("a failure after the restart keeps the node-services that ran before", async () => {
+  const f = await fixture();
+  for (const name of ["postgres", "teamhub", "node-services"])
+    f.running.add(name);
+  vi.mocked(nativeConfigurationChanged).mockImplementation(
+    async (options) => options.name === "teamhub",
+  );
+  vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    if (options.name === "web") throw new Error("web failed");
+    f.running.add(options.name);
+    return { running: true, pid: 100 };
+  });
+  const result = await runFlow(f);
+  expect(result.code).toBe(1);
+  // The pre-stop hands in-flight Runs back; the rollback stops only what this
+  // run started, never the node-services or TeamHub that were already running.
+  expect(
+    vi.mocked(stopNativeProcess).mock.calls.map((call) => call[1]),
+  ).toEqual(["node-services", "web"]);
+  expect(f.running.has("teamhub")).toBe(true);
+  expect(f.running.has("node-services")).toBe(true);
 });
 
 test("stops native business services even if owned gateway shutdown reports a failure", async () => {
