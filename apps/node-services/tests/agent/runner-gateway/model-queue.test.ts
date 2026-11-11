@@ -45,6 +45,14 @@ function track<T>(promise: Promise<T>) {
 }
 
 const flush = () => vi.advanceTimersByTimeAsync(0);
+const fixed = (limit: number) => ({ initial: limit, max: limit });
+/** One finished Run request: so many ms per thousand prompt tokens. */
+const latency = (msPerThousand: number) => ({
+  type: "latency" as const,
+  source: "run" as const,
+  latencyMs: msPerThousand * 4,
+  workTokens: 4_000,
+});
 const signal = new AbortController().signal;
 
 describe("ModelQueue", () => {
@@ -52,7 +60,7 @@ describe("ModelQueue", () => {
   afterEach(() => vi.useRealTimers());
 
   it("starts queued units by priority, then arrival, one at a time on a gateway endpoint", async () => {
-    const queue = new ModelQueue(() => 1);
+    const queue = new ModelQueue(() => fixed(1));
     const first = await queue.acquire(codex, call("wiki", "w1"), signal);
     const wiki = track(queue.acquire(codex, call("wiki", "w2"), signal));
     const memory = track(queue.acquire(codex, call("memory"), signal));
@@ -85,7 +93,7 @@ describe("ModelQueue", () => {
 
   it("runs as many units at once as the endpoint's concurrency, each endpoint on its own", async () => {
     const queue = new ModelQueue((endpoint) =>
-      endpoint.runtimeType === "claude" ? 2 : 1,
+      fixed(endpoint.runtimeType === "claude" ? 2 : 1),
     );
     await queue.acquire(codex, run("a"), signal);
     const codexWaits = track(queue.acquire(codex, run("b"), signal));
@@ -101,7 +109,7 @@ describe("ModelQueue", () => {
   });
 
   it("drops a waiter whose caller stops waiting", async () => {
-    const queue = new ModelQueue(() => 1);
+    const queue = new ModelQueue(() => fixed(1));
     const first = await queue.acquire(codex, call("memory"), signal);
     const stop = new AbortController();
     const dropped = track(queue.acquire(codex, call("memory"), stop.signal));
@@ -116,7 +124,7 @@ describe("ModelQueue", () => {
   });
 
   it("rejects every waiter of a Computer that disconnects", async () => {
-    const queue = new ModelQueue(() => 1);
+    const queue = new ModelQueue(() => fixed(1));
     await queue.acquire(codex, call("memory"), signal);
     await queue.acquire(claude, call("memory"), signal);
     const waiting = [
@@ -132,7 +140,7 @@ describe("ModelQueue", () => {
   });
 
   it("frees a place once however often it is released", async () => {
-    const queue = new ModelQueue(() => 1);
+    const queue = new ModelQueue(() => fixed(1));
     const first: ModelLease = await queue.acquire(codex, run(), signal);
     const second = track(queue.acquire(codex, call("wiki"), signal));
     const third = track(queue.acquire(codex, call("wiki"), signal));
@@ -144,16 +152,112 @@ describe("ModelQueue", () => {
   });
 });
 
+describe("ModelQueue limit", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("leaves the last place to a Run once background work could take it", async () => {
+    const queue = new ModelQueue(() => fixed(2));
+    await queue.acquire(codex, call("wiki", "w1"), signal);
+    const wiki = track(queue.acquire(codex, call("wiki", "w2"), signal));
+    const chat = track(queue.acquire(codex, run(), signal));
+    await flush();
+    expect(wiki.value).toBeUndefined();
+    expect(chat.value).toBeDefined();
+
+    // With one place, background work still runs.
+    const single = new ModelQueue(() => fixed(1));
+    expect(await single.acquire(claude, call("wiki"), signal)).toBeDefined();
+  });
+
+  it("tries one more unit while work waits and requests stay as fast", async () => {
+    const queue = new ModelQueue(() => ({ initial: 1, max: 3 }));
+    await queue.acquire(codex, run("a"), signal);
+    for (let i = 0; i < 4; i++) queue.observe(codex, latency(500));
+    // Nothing waited, so nothing showed a second place was needed.
+    const waiting = track(queue.acquire(codex, run("b"), signal));
+    await flush();
+    expect(waiting.value).toBeUndefined();
+
+    queue.observe(codex, latency(520));
+    await flush();
+    expect(waiting.value).toBeDefined();
+  });
+
+  it("gives a place back when requests slow down and halves it when refused", async () => {
+    const queue = new ModelQueue(() => ({ initial: 1, max: 8 }));
+    const first = await queue.acquire(codex, run("a"), signal);
+    for (let i = 0; i < 3; i++) queue.observe(codex, latency(500));
+    const second = track(queue.acquire(codex, run("b"), signal));
+    queue.observe(codex, latency(500));
+    await flush();
+    expect(second.value).toBeDefined();
+
+    // Two at once take three times as long: back to one.
+    for (let i = 0; i < 4; i++) queue.observe(codex, latency(1_500));
+    first.release(done);
+    const third = track(queue.acquire(codex, run("c"), signal));
+    await flush();
+    expect(third.value).toBeUndefined();
+
+    second.value!.release(done);
+    await flush();
+    expect(third.value).toBeDefined();
+
+    const busy = new ModelQueue(() => fixed(10));
+    const held = await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        busy.acquire(claude, run(`h${i}`), signal),
+      ),
+    );
+    busy.observe(claude, { type: "overload" });
+    const refused = track(busy.acquire(claude, run("r"), signal));
+    await flush();
+    // Halved to five, all of them running.
+    expect(refused.value).toBeUndefined();
+    held[0]!.release(done);
+    await flush();
+    expect(refused.value).toBeDefined();
+  });
+
+  it("keeps a learned limit while the endpoint is idle and starts over when its link changes", async () => {
+    let range = { initial: 1, max: 4 };
+    const queue = new ModelQueue(() => range);
+    const first = await queue.acquire(codex, run("a"), signal);
+    for (let i = 0; i < 3; i++) queue.observe(codex, latency(500));
+    const second = track(queue.acquire(codex, run("b"), signal));
+    queue.observe(codex, latency(500));
+    await flush();
+    first.release(done);
+    second.value!.release(done);
+
+    const again = await queue.acquire(codex, run("c"), signal);
+    const alongside = track(queue.acquire(codex, run("d"), signal));
+    await flush();
+    expect(alongside.value).toBeDefined();
+    again.release(done);
+    alongside.value!.release(done);
+
+    range = { initial: 1, max: 8 };
+    await queue.acquire(codex, run("e"), signal);
+    const reset = track(queue.acquire(codex, run("f"), signal));
+    await flush();
+    expect(reset.value).toBeUndefined();
+  });
+});
+
 describe("endpointConcurrency", () => {
-  it("serves several units only when every model is on the signed-in account", () => {
+  it("starts high only when every model is on the signed-in account", () => {
+    const subscription = { initial: 10, max: 10 };
+    const api = { initial: 1, max: 8 };
     expect(
       endpointConcurrency([{ link: "subscription" }, { link: "subscription" }]),
-    ).toBe(10);
+    ).toEqual(subscription);
     expect(
       endpointConcurrency([{ link: "subscription" }, { link: "api" }]),
-    ).toBe(1);
-    expect(endpointConcurrency([{}])).toBe(1);
-    expect(endpointConcurrency([])).toBe(1);
-    expect(endpointConcurrency(undefined)).toBe(1);
+    ).toEqual(api);
+    expect(endpointConcurrency([{}])).toEqual(api);
+    expect(endpointConcurrency([])).toEqual(api);
+    expect(endpointConcurrency(undefined)).toEqual(api);
   });
 });

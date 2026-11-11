@@ -1,5 +1,6 @@
 import type {
   ModelInvoke,
+  ModelInvoked,
   OperationStart,
   RunnerHello,
 } from "@linger/wire-contracts/runner-gateway/types";
@@ -69,6 +70,7 @@ const invoked = (
   connection: RunnerGatewayConnection,
   command: Pick<ModelInvoke, "command_id" | "invoke_id">,
   outcome: "completed" | "unavailable" = "completed",
+  usage?: ModelInvoked["usage"],
 ) =>
   connection.receive({
     type: "executed",
@@ -79,6 +81,7 @@ const invoked = (
     outcome,
     ...(outcome === "completed" ? { text: '{"summary":"ok"}' } : {}),
     duration_ms: 900,
+    ...(usage ? { usage } : {}),
   });
 
 const connect = async (
@@ -168,6 +171,41 @@ describe("RunnerGateway model invocation", () => {
         { outcome: "completed" },
         { outcome: "completed" },
       ]);
+    } finally {
+      connection.disconnect();
+    }
+  });
+
+  it("starts a second call at once after calls kept answering as fast while others waited", async () => {
+    const { gateway, peer, connection } = await connect();
+    try {
+      const results = Array.from({ length: 6 }, (_, i) =>
+        gateway.invokeModel(
+          "runner-local",
+          request({ input: `ask ${i}`, queue: queued("approval") }),
+        ),
+      );
+      const usage = {
+        input_tokens: 4_000,
+        cached_input_tokens: 0,
+        output_tokens: 100,
+      };
+      for (let answered = 0; answered < 4; answered++) {
+        await vi.waitFor(() =>
+          expect(sentInvocations(peer)).toHaveLength(answered + 1),
+        );
+        await invoked(
+          connection,
+          sentInvocations(peer)[answered]!,
+          "completed",
+          usage,
+        );
+      }
+      // Four answers at one place, as fast each time: the endpoint gets two.
+      await vi.waitFor(() => expect(sentInvocations(peer)).toHaveLength(6));
+      for (const command of sentInvocations(peer).slice(4))
+        await invoked(connection, command, "completed", usage);
+      await expect(Promise.all(results)).resolves.toHaveLength(6);
     } finally {
       connection.disconnect();
     }

@@ -8,6 +8,7 @@ import {
   RUNNER_GATEWAY_FRAME_LIMITS,
 } from "@linger/wire-contracts/runner-gateway/validator";
 import { LocalComputerOfflineError } from "./local-computer-management.js";
+import type { ModelSignal } from "./adaptive-limit.js";
 import type { ModelLease, ModelWork } from "./model-queue.js";
 import type {
   RunnerGatewayContext,
@@ -72,6 +73,7 @@ export class RunnerModelInvokeUnavailableError extends RunnerGatewayError {
 
 interface InFlightCall {
   readonly runnerId: string;
+  readonly runtimeType: ModelInvoke["runtime_type"];
   readonly lease?: ModelLease;
   readonly timer: NodeJS.Timeout;
   waiter?: {
@@ -253,6 +255,7 @@ export class RunnerModelInvocation {
       };
       this.#inFlight.set(command.invoke_id, {
         runnerId: command.runner_id,
+        runtimeType: command.runtime_type,
         ...(lease ? { lease } : {}),
         timer,
         waiter: { signal, onAbort, resolve, reject },
@@ -272,6 +275,17 @@ export class RunnerModelInvocation {
     if (!call) return;
     this.#inFlight.delete(invokeId);
     clearTimeout(call.timer);
+    // Chain steps and approvals hold no lease of their own but still tell
+    // how fast the endpoint answers.
+    const signal =
+      "outcome" in result ? modelSignal(result.outcome) : undefined;
+    if (signal)
+      this.owners
+        .queue()
+        .observe(
+          { computerId: call.runnerId, runtimeType: call.runtimeType },
+          signal,
+        );
     call.lease?.release(
       "outcome" in result
         ? {
@@ -286,4 +300,30 @@ export class RunnerModelInvocation {
     if ("outcome" in result) waiter.resolve(result.outcome);
     else waiter.reject(result.error);
   }
+}
+
+/** Prompt tokens cost far less than generated ones, on a local model about
+ * this many times less. */
+const OUTPUT_TOKEN_WEIGHT = 10;
+
+function modelSignal(
+  outcome: RunnerModelInvokeOutcome,
+): ModelSignal | undefined {
+  // A call out of time waited on a busy endpoint; other failures say
+  // nothing about its load.
+  if (outcome.outcome === "timed_out") return { type: "overload" };
+  if (
+    (outcome.outcome !== "completed" && outcome.outcome !== "output_limited") ||
+    !outcome.usage
+  )
+    return undefined;
+  const { input_tokens, cached_input_tokens, output_tokens } = outcome.usage;
+  return {
+    type: "latency",
+    source: "call",
+    latencyMs: outcome.duration_ms,
+    workTokens:
+      Math.max(input_tokens - cached_input_tokens, 0) +
+      OUTPUT_TOKEN_WEIGHT * output_tokens,
+  };
 }

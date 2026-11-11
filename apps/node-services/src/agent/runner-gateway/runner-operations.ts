@@ -13,6 +13,14 @@ import {
   resolveOperationModel,
 } from "./local-computer-management.js";
 import type { ModelEndpoint, ModelLease } from "./model-queue.js";
+
+type ModelResponded = Extract<
+  Extract<DaemonToAgentEnvelope, { type: "operation.event" }>["event"],
+  { type: "model.responded" }
+>;
+
+/** Runtime failure codes that mean the model endpoint refused the work. */
+const OVERLOAD_FAILURES = new Set(["rate_limited", "model_service_error"]);
 import { isServingConnection } from "./runner-connections.js";
 import type {
   CapacitySignal,
@@ -542,6 +550,11 @@ export class RunnerOperations {
   #releaseLease(operation: RunnerOperationState, outcome: string): void {
     const operationId = operation.start.operation_id;
     const usage = operation.usage;
+    const failureCode = operation.failureCode;
+    if (failureCode && OVERLOAD_FAILURES.has(failureCode))
+      this.owners
+        .queue()
+        .observe(operationEndpoint(operation), { type: "overload" });
     this.#leases.get(operationId)?.release({
       outcome,
       ...(usage ? { usage } : {}),
@@ -610,9 +623,29 @@ export class RunnerOperations {
       return;
     }
     const acknowledgement = await operation.receive(envelope);
+    if (
+      envelope.type === "operation.event" &&
+      envelope.event.type === "model.responded"
+    )
+      this.#observeModelResponse(operation, envelope.event);
     if (operation.terminal) this.#retireOperation(operation);
     if (acknowledgement)
       await this.owners.connections().send(connection, acknowledgement);
+  }
+
+  /** Time to the first item covers queueing and prompt processing, which is
+   * where a busy endpoint shows; later items depend on what the model wrote. */
+  #observeModelResponse(
+    operation: RunnerOperationState,
+    response: ModelResponded,
+  ): void {
+    if (response.first_item_at_unix_ms === undefined) return;
+    this.owners.queue().observe(operationEndpoint(operation), {
+      type: "latency",
+      source: "run",
+      latencyMs: response.first_item_at_unix_ms - response.started_at_unix_ms,
+      workTokens: response.usage.input + response.usage.cache_write,
+    });
   }
 
   getOperation(operationId: string): RunnerOperationState | undefined {
@@ -712,3 +745,10 @@ export const operationMCPPrepareIdentity = (
   workspace_grant_id: value.workspace_grant_id,
   runtime_type: value.runtime_type,
 });
+
+function operationEndpoint(operation: RunnerOperationState): ModelEndpoint {
+  return {
+    computerId: operation.start.runner_id,
+    runtimeType: operation.start.runtime_type,
+  };
+}

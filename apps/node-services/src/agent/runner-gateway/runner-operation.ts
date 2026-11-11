@@ -340,6 +340,14 @@ export class RunnerOperationState {
     return this.#outcomeEnvelope?.type;
   }
 
+  /** The Runtime's failure code, when the Operation failed with one. */
+  get failureCode(): string | undefined {
+    const outcome = this.#outcomeEnvelope;
+    return outcome?.type === "operation.failed"
+      ? outcome.error.failure?.code
+      : undefined;
+  }
+
   /** The usage the Daemon reported with the terminal, when it reported one. */
   get usage(): readonly Record<string, unknown>[] | undefined {
     const outcome = this.#outcomeEnvelope;
