@@ -7,6 +7,7 @@ import {
   rm,
   readFile,
   readdir,
+  rename,
   stat,
   utimes,
 } from "node:fs/promises";
@@ -74,6 +75,18 @@ async function fixture() {
     "package",
   );
   return { home, source, directory };
+}
+// The published archive of the fixture kit: an npm tarball, whose files sit
+// under package/. The fixture's own directory is moved into it.
+async function packed(f: Awaited<ReturnType<typeof fixture>>) {
+  const root = path.join(f.home, "packed");
+  await mkdir(root);
+  await rename(f.directory, path.join(root, "package"));
+  const archive = path.join(f.home, "kit.tgz");
+  execFileSync("tar", ["-czf", archive, "-C", root, "package"], {
+    env: { ...process.env, COPYFILE_DISABLE: "1" },
+  });
+  return readFile(archive);
 }
 test("requires a fixed authenticated-free tool source and source identity", () => {
   expect(() =>
@@ -168,11 +181,7 @@ test.skipIf(process.platform === "win32")(
   "repairs a kit altered after verification by fetching the same pinned archive",
   async () => {
     const f = await fixture();
-    const archive = path.join(f.home, "kit.tgz");
-    execFileSync("tar", ["-czf", archive, "-C", f.directory, "."], {
-      env: { ...process.env, COPYFILE_DISABLE: "1" },
-    });
-    const bytes = await readFile(archive);
+    const bytes = await packed(f);
     const source = { ...f.source, sha256: hash(bytes), bytes: bytes.length };
     const directory = path.join(f.home, "tools/localmodels", source.sha256);
     const first = vi.fn(async () => new Response(bytes));
@@ -216,15 +225,31 @@ test.skipIf(process.platform === "win32")(
   },
 );
 test.skipIf(process.platform === "win32")(
+  "installs the published kit, whose files sit under package/",
+  async () => {
+    const f = await fixture();
+    const bytes = await packed(f);
+    const source = { ...f.source, sha256: hash(bytes), bytes: bytes.length };
+    const directory = path.join(f.home, "tools/localmodels", source.sha256);
+    const tool = await ensureLocalmodelsTool(
+      f.home,
+      {},
+      { source, fetcher: async () => new Response(bytes) },
+    );
+    expect(tool.python).toBe(path.join(directory, "python/python"));
+    expect((await readdir(directory)).sort()).toEqual([
+      "modules",
+      "python",
+      "tool.json",
+    ]);
+    expect((await stat(directory)).mode & 0o777).toBe(0o500);
+  },
+);
+test.skipIf(process.platform === "win32")(
   "downloads the kit from the publisher's mirror when the primary host fails",
   async () => {
     const f = await fixture();
-    const archive = path.join(f.home, "kit.tgz");
-    execFileSync("tar", ["-czf", archive, "-C", f.directory, "."], {
-      env: { ...process.env, COPYFILE_DISABLE: "1" },
-    });
-    await rm(f.directory, { recursive: true, force: true });
-    const bytes = await readFile(archive);
+    const bytes = await packed(f);
     const source = {
       ...f.source,
       mirrors: ["https://mirror.example/tool.tgz"],
