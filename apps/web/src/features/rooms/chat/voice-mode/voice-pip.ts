@@ -91,6 +91,13 @@ export function closeVoicePip(owner: VoicePipOwner) {
  * neither, so this checks a moment later whether the page came to the front
  * around the close. A close while this page was already in front is a close,
  * even though focus lands on the page afterwards.
+ *
+ * Trade-off: back to tab on a page that stayed visible but unfocused (its
+ * window on another screen, or only partly covered, while the Human works in
+ * another app) brings no visibility change and also reads as a close, so the
+ * call ends. Telling it apart by focus instead made the close button keep the
+ * call whenever the page was in front; a close that ends the call is the
+ * surer of the two, and starting Voice Mode again floats a new window.
  */
 export function returnedToOpener(waitMs = 300): Promise<boolean> {
   const closedAt = performance.now();

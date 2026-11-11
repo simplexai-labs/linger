@@ -6,6 +6,7 @@ import {
   onVoicePipClosedByHuman,
   openVoicePip,
   resetVoicePipForTest,
+  returnedToOpener,
 } from "./voice-pip";
 
 /** A stand-in for the browser's picture-in-picture window. */
@@ -85,6 +86,25 @@ describe("Voice Mode picture-in-picture window", () => {
     fake.pipWindow.close();
     expect(closedByHuman).toHaveBeenCalledOnce();
     stop();
+  });
+
+  it("reads back to tab only from the page coming to the front", async () => {
+    installFakeVoicePip();
+    await openVoicePip("voice-mode");
+    const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    try {
+      // Back to tab from a background tab brings the page to the front.
+      const returned = returnedToOpener(20);
+      document.dispatchEvent(new Event("visibilitychange"));
+      await expect(returned).resolves.toBe(true);
+      resetVoicePipForTest();
+      // The documented trade-off: a page that stayed visible, focused
+      // afterwards or not, reads as a close, so the close button always ends
+      // the call even where back to tab on an unfocused visible window does too.
+      await expect(returnedToOpener(20)).resolves.toBe(false);
+    } finally {
+      focused.mockRestore();
+    }
   });
 
   it("gives the window to one owner at a time", async () => {
