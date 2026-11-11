@@ -298,6 +298,9 @@ earlier Codex does not know the field and keeps the tools in code mode. The two
 tool groups are therefore ordinary function tools, neither in code mode nor
 deferred, like Codex's own `cua_repl` plugin: one model call is one JSON function
 call, not a `text(await tools.mcp__computer__…)` script.
+Claude Code defers its own `WebSearch` and `WebFetch` behind `ToolSearch`, so
+every Claude Operation's developer instructions also name them and how to load
+them; Codex's `web_search` is not deferred and gets no such line.
 
 On macOS these tools show only the fields the Computer routes. They hide Cua's `scope` and `capture_id`; only `click` takes `delivery_mode`, as described above.
 Codex does not see the single macOS input tools: the `computer` server hides them

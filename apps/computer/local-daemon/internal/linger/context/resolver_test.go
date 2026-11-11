@@ -257,6 +257,38 @@ func TestExecutionResolverAppendsToolGuide(t *testing.T) {
 	}
 }
 
+// Claude defers its web tools behind ToolSearch, so every Claude Operation
+// names them; Codex has its own web_search and gets nothing.
+func TestExecutionResolverNamesClaudeWebTools(t *testing.T) {
+	for _, runtimeType := range []string{"claude", "codex"} {
+		t.Run(runtimeType, func(t *testing.T) {
+			resolver := ExecutionResolver{
+				Providers:       map[string]ProviderInstallation{runtimeType: {Type: runtimeType, ExecutablePath: "/local/bin/" + runtimeType}},
+				WorkspaceGrants: map[string]WorkspaceGrant{"grant-local": {GrantID: "grant-local", TenantID: "tenant-acme", Path: "/local/workspace"}},
+				Views:           testContextViews{root: "/local/workspace"},
+				Registrations: map[string]RegistrationBinding{
+					"registration-local": {RegistrationID: "registration-local", TenantID: "tenant-acme", OwnerActorID: "actor-alice", ProviderType: runtimeType, Status: registration.StatusOnline},
+				},
+			}
+			spec, err := resolver.Resolve(context.Background(), protocol.Command{
+				TenantID: "tenant-acme", RegistrationID: "registration-local", AssignmentRevision: 1,
+				WorkspaceGrantID: "grant-local", RuntimeType: runtimeType, ContextViewRef: json.RawMessage(`{"receipt_ref":"receipt-1"}`),
+			}, json.RawMessage(`{"kind":"run.start","runtime":{"type":"`+runtimeType+`","model":"m"},"session_options":{"base_instructions":"Base","developer_instructions":"Developer"},"session":{"threadId":"thread-1"},"input":{"type":"text","text":"Go"}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			named := strings.Contains(spec.SystemPrompt, "select:WebSearch,WebFetch")
+			if runtimeType == "claude" {
+				if !named || spec.DeveloperInstructions == nil || *spec.DeveloperInstructions != "Developer\n\n"+claudeWebToolGuide {
+					t.Fatalf("Claude web tools not named: %+v", spec)
+				}
+			} else if named || spec.DeveloperInstructions == nil || *spec.DeveloperInstructions != "Developer" {
+				t.Fatalf("Codex got the Claude web tool guide: %+v", spec)
+			}
+		})
+	}
+}
+
 func TestBoundServiceGuidanceUsesLocalCommandOnly(t *testing.T) {
 	command := []string{"/opt/node", "/private install/cli.js", "--config", "/private/current.json"}
 	text := boundServiceInstructions(command)
