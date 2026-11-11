@@ -133,11 +133,14 @@ skills:
         version: 1.0.0
         package_path: builtin/media-generation/1.0.0
   - skill_id: simplexai_slide_deck
-    bootstrap_manifest_id: skill_manifest_simplexai_slide_deck_1_0_1
+    bootstrap_manifest_id: skill_manifest_simplexai_slide_deck_1_0_2
     default_agent_types:
       - anotherme
       - general
     manifests:
+      - manifest_id: skill_manifest_simplexai_slide_deck_1_0_2
+        version: 1.0.2
+        package_path: builtin/slide-deck/1.0.2
       - manifest_id: skill_manifest_simplexai_slide_deck_1_0_1
         version: 1.0.1
         package_path: builtin/slide-deck/1.0.1
@@ -163,7 +166,7 @@ skills:
         version: 1.0.0
         package_path: builtin/pdf/1.0.0
   - skill_id: simplexai_builtin_pptx
-    bootstrap_manifest_id: skill_manifest_simplexai_builtin_pptx_1_0_2
+    bootstrap_manifest_id: skill_manifest_simplexai_builtin_pptx_1_0_3
     default_agent_types:
       - anotherme
       - general
@@ -177,6 +180,9 @@ skills:
       - manifest_id: skill_manifest_simplexai_builtin_pptx_1_0_2
         version: 1.0.2
         package_path: builtin/pptx/1.0.2
+      - manifest_id: skill_manifest_simplexai_builtin_pptx_1_0_3
+        version: 1.0.3
+        package_path: builtin/pptx/1.0.3
   - skill_id: simplexai_builtin_skill_installer
     bootstrap_manifest_id: skill_manifest_simplexai_builtin_skill_installer_1_0_0
     default_agent_types:
