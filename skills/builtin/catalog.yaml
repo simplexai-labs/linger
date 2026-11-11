@@ -121,11 +121,14 @@ skills:
         version: 1.0.0
         package_path: builtin/chat-card/1.0.0
   - skill_id: simplexai_media_generation
-    bootstrap_manifest_id: skill_manifest_simplexai_media_generation_1_0_1
+    bootstrap_manifest_id: skill_manifest_simplexai_media_generation_1_0_2
     default_agent_types:
       - anotherme
       - general
     manifests:
+      - manifest_id: skill_manifest_simplexai_media_generation_1_0_2
+        version: 1.0.2
+        package_path: builtin/media-generation/1.0.2
       - manifest_id: skill_manifest_simplexai_media_generation_1_0_1
         version: 1.0.1
         package_path: builtin/media-generation/1.0.1
