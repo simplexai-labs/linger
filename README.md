@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo-horizontal.svg" width="900" alt="Linger"></p>
+<p align="center"><img src="assets/logo-horizontal.svg" width="360" alt="Linger"></p>
 
 <p align="center"><b>Linger is an open-source personal agent that runs locally on your computer.</b></p>
 
