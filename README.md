@@ -14,7 +14,6 @@
 
 <p align="center">
   <a href="https://x.com/HeyLingerAI"><img alt="Follow on X" src="https://img.shields.io/badge/@HeyLingerAI-000000?logo=x&logoColor=white"></a>
-  <a href="https://discord.com/channels/1569960165426462791/1569960166429032561"><img alt="Discord" src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white"></a>
   <a href="https://www.youtube.com/@HeyLingerAI"><img alt="YouTube" src="https://img.shields.io/badge/YouTube-FF0000?logo=youtube&logoColor=white"></a>
   <a href="https://www.reddit.com/user/HeyLinger/"><img alt="Reddit" src="https://img.shields.io/badge/Reddit-FF4500?logo=reddit&logoColor=white"></a>
 </p>
