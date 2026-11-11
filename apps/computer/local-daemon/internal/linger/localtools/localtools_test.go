@@ -1851,8 +1851,8 @@ func TestLocalToolCuaDeltaCountFailureReadsFullWindowOnlyOnce(t *testing.T) {
 	}
 }
 
-// A starting Chrome may list a larger surface that has no accessibility
-// window; the browser window is the largest one whose tab strip reads.
+// A launch opens a fresh window when the listed one has left the
+// accessibility tree.
 func TestLocalToolCuaMacAgentChromeOpensAFreshWindowForAnUnreadableOne(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("the Computer's own Chrome is macOS only")
@@ -1911,6 +1911,8 @@ func TestLocalToolCuaMacAgentChromeOpensAFreshWindowForAnUnreadableOne(t *testin
 	}
 }
 
+// A starting Chrome may list a larger surface that has no accessibility
+// window; the browser window is the largest one whose tab strip reads.
 func TestLocalToolCuaMacAgentChromePicksTheWindowWithTabs(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("the Computer's own Chrome is macOS only")
