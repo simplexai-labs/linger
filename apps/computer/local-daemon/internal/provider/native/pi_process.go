@@ -19,8 +19,9 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/process"
 )
 
+var piExitWait = 3 * time.Second
+
 const (
-	piExitWait         = 3 * time.Second
 	piTermWait         = time.Second
 	piGroupGrace       = 100 * time.Millisecond
 	piGroupConfirmWait = 3 * time.Second

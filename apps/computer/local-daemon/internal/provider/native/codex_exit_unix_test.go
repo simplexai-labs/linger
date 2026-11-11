@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCodexExternalLeaderExit(t *testing.T) {
@@ -19,6 +20,10 @@ func TestCodexExternalLeaderExit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := newCodexFake(t, []codexFakeTurn{{Die: tc.die}}, nil)
+			// The sleeper grandchild outlives the leader, and in one case holds
+			// stdout, so a stop grace expires; newCodexFake's cleanup restores
+			// the grace.
+			codexStopGrace.set(300 * time.Millisecond)
 			receipt := filepath.Join(fake.root, "pids")
 			fake.env["FAKE_GRANDCHILD"] = receipt
 			if tc.holdStdout {

@@ -18,14 +18,18 @@ func TestPiAuthenticationBoundsUnresponsiveModelCatalog(t *testing.T) {
 	}
 	root := t.TempDir()
 	executable := filepath.Join(root, "pi")
-	if err := os.WriteFile(executable, []byte("#!/bin/sh\necho \"$$\" > \"$HOME/pi-probe.pid\"\nexec /bin/sleep 60\n"), 0700); err != nil {
+	// Priming runs without HOME and exits at once.
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\n[ -n \"$HOME\" ] || exit 0\necho \"$$\" > \"$HOME/pi-probe.pid\"\nexec /bin/sleep 60\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	// macOS scans a new executable on its first run, which can outlast the
+	// probe's one second budget.
+	primeTestExecutable(t, executable, "PATH=/usr/bin:/bin")
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	result := make(chan runtimeProbeOutcome, 1)
 	go func() {
-		result <- probePiAuthentication(ctx, executable, map[string]string{"HOME": root, "PATH": root}, 5*time.Second)
+		result <- probePiAuthentication(ctx, executable, map[string]string{"HOME": root, "PATH": root}, time.Second)
 	}()
 	select {
 	case outcome := <-result:
