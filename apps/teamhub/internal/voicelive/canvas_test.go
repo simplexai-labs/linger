@@ -29,8 +29,10 @@ func TestEmailCanvasRefusesWhatTheModelMustFix(t *testing.T) {
 		// A spoken name is not an address; the model asks for it.
 		{EmailCanvasArguments{To: "Amy", Subject: "s", Body: "b"}, "invalid_recipients"},
 		{EmailCanvasArguments{Cc: "amy@", Subject: "s", Body: "b"}, "invalid_recipients"},
-		{EmailCanvasArguments{Subject: " ", Body: "b"}, "invalid_email"},
-		{EmailCanvasArguments{Subject: "s", Body: strings.Repeat("x", MaxEmailBodyRunes+1)}, "invalid_email"},
+		// An empty subject or body is missing content, not a bad address.
+		{EmailCanvasArguments{To: "tonyzhang@simplexai.com"}, "missing_content"},
+		{EmailCanvasArguments{Subject: " ", Body: "b"}, "missing_content"},
+		{EmailCanvasArguments{Subject: "s", Body: strings.Repeat("x", MaxEmailBodyRunes+1)}, "body_too_long"},
 	} {
 		if _, problem := EmailCanvas(check.args); problem != check.problem {
 			t.Fatalf("%+v: problem=%q, want %q", check.args, problem, check.problem)
@@ -66,7 +68,7 @@ func TestEditedEmailCanvasKeepsWhatTheChangeLeavesOut(t *testing.T) {
 	if _, _, problem := EditedEmailCanvas(fields, body, EditEmailCanvasArguments{To: &name}); problem != "invalid_recipients" {
 		t.Fatalf("name as recipient: %q", problem)
 	}
-	if _, _, problem := EditedEmailCanvas(fields, body, EditEmailCanvasArguments{Body: &empty}); problem != "invalid_email" {
+	if _, _, problem := EditedEmailCanvas(fields, body, EditEmailCanvasArguments{Body: &empty}); problem != "missing_content" {
 		t.Fatalf("empty body: %q", problem)
 	}
 }

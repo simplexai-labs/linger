@@ -35,7 +35,9 @@ var EmailCanvasTool = Tool{
 		"subject is one line; body is the whole email in the language the user wants it in, plain text with a blank line between paragraphs, written only from what the user said: never invent facts, times or names. " +
 		"It returns document_id and revision_id. Then tell the user in one or two short sentences what you wrote (who it is to and the main points) and that it is open for them to look at and change; read it out in full only when they ask. " +
 		"Change it later with edit_email_canvas, and attach a file to it with attach_email_file. " + emailCanvasDelivery +
-		"invalid_recipients means an address is not an email address: ask the user for it.",
+		"invalid_recipients means an address is not an email address: ask the user for it. " +
+		"missing_content means the subject or body is empty: the address is fine; ask the user what the email should say, never invent it, then call again with both. " +
+		"body_too_long means the body is too long: shorten it. invalid_email means the app refused the email as written: rewrite it plainer and call again.",
 	Parameters: objectSchema([]string{"subject", "body"}, map[string]any{
 		"to":      stringProperty("Optional recipient email addresses, separated by commas"),
 		"cc":      stringProperty("Optional carbon-copy email addresses, separated by commas"),
@@ -52,7 +54,8 @@ var EditEmailCanvasTool = Tool{
 		"revision_id is the one the last open_email_canvas or edit_email_canvas result gave for this document_id. " +
 		"canvas_changed means the canvas is not as you last saw it (the user may have edited it): its result has the latest text and revision_id; redo the change on that text, keeping the user's own edits, and call again with that revision_id. " +
 		"When it is changed, tell the user in one short sentence what you changed. " + emailCanvasDelivery +
-		"canvas_has_media means images sit among the text, which a body rewrite would lose: recipients and subject still change here; change the body with start_task instead, naming the document_id. canvas_locked: change it with start_task instead, naming the document_id. invalid_recipients means an address is not an email address: ask the user for it.",
+		"canvas_has_media means images sit among the text, which a body rewrite would lose: recipients and subject still change here; change the body with start_task instead, naming the document_id. canvas_locked: change it with start_task instead, naming the document_id. invalid_recipients means an address is not an email address: ask the user for it. " +
+		"missing_content means the subject or body you gave is empty: ask the user what it should say. body_too_long means the body is too long: shorten it. nothing_to_change means you gave none of to, cc, subject or body.",
 	Parameters: objectSchema([]string{"document_id", "revision_id"}, map[string]any{
 		"document_id": stringProperty("The canvas, from open_email_canvas"),
 		"revision_id": stringProperty("The revision_id the last result gave for this canvas"),
@@ -168,8 +171,10 @@ func emailProblem(subject, body string, recipientsOK bool) string {
 	switch {
 	case !recipientsOK:
 		return "invalid_recipients"
-	case subject == "" || body == "" || utf8.RuneCountInString(body) > MaxEmailBodyRunes:
-		return "invalid_email"
+	case subject == "" || body == "":
+		return "missing_content"
+	case utf8.RuneCountInString(body) > MaxEmailBodyRunes:
+		return "body_too_long"
 	}
 	return ""
 }

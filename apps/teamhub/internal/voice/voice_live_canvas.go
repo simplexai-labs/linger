@@ -214,7 +214,7 @@ func (s *Service) editVoiceLiveEmailCanvas(ctx context.Context, session voiceliv
 		}
 	}
 	if len(edits) == 0 {
-		return voicelive.ErrorOutput("invalid_email"), nil
+		return voicelive.ErrorOutput("nothing_to_change"), nil
 	}
 	revisionID := canvas.revisionID
 	for index, edit := range edits {
