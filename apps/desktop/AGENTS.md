@@ -90,7 +90,10 @@ Gateway and runs Agents. The daemon exits with the app.
   instance's private `local-identity.key`, read by `readLocalIdentity`) over
   the nonce and the window's origin. The installer puts the key only in
   TeamHub's process environment, never in `services.env`, `native.env` or
-  another service's environment, so no other local service can answer. It asks TeamHub's port rather than the web
+  another service's environment, so no other local service can answer. An
+  earlier version kept it in `services.env`; the installer moves it out
+  unchanged, and until then `readLocalIdentity` reads it there, because a
+  TeamHub that version started still uses it. It asks TeamHub's port rather than the web
   port, which a program could take and relay through. "Sign in with this
   computer's account": `localAccount.signIn()` reads the file in the main
   process and signs the window's session in with `signInWithPassword`,

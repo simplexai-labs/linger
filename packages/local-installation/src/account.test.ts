@@ -272,18 +272,20 @@ it("reads the server identity from the private instance files", async () => {
     JSON.stringify({ source: { ports: { teamhub: 4100, web: 3000 } } }),
     { mode: 0o600 },
   );
-  // An instance the installer has not upgraded yet has no key; one left in
-  // services.env by an earlier version is not used until the installer
-  // moves it.
+  const services = path.join(f.instance.root, "services.env");
+  await writeFile(services, "LINGER_SECRET_SEED=x\n", { mode: 0o600 });
+  // An instance the installer has not upgraded yet has no key.
+  await expect(readLocalIdentity(f.instance)).rejects.toThrow(/identity/);
+  // A TeamHub an earlier version started still uses the key it kept in
+  // services.env until the installer moves it.
+  const legacy = Buffer.alloc(32, 3);
   await writeFile(
-    path.join(f.instance.root, "services.env"),
-    `TEAMHUB_LOCAL_IDENTITY_KEY=${key.toString("base64")}\n`,
+    services,
+    `TEAMHUB_LOCAL_IDENTITY_KEY=${legacy.toString("base64")}\n`,
     { mode: 0o600 },
   );
-  await expect(readLocalIdentity(f.instance)).rejects.toThrow(/identity/);
+  expect((await readLocalIdentity(f.instance)).key).toEqual(legacy);
   const keyFile = path.join(f.instance.root, "local-identity.key");
-  await writeFile(keyFile, "not a key\n", { mode: 0o600 });
-  await expect(readLocalIdentity(f.instance)).rejects.toThrow(/identity/);
   await writeFile(keyFile, `${key.toString("base64")}\n`, { mode: 0o600 });
   expect(await readLocalIdentity(f.instance)).toEqual({
     teamhub: "http://127.0.0.1:4100",

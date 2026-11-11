@@ -2,6 +2,7 @@ import { windowsPrivatePath } from "./windows-private.js";
 import { randomBytes } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
+import { parseEnv } from "node:util";
 import { readLocalIdentityKey, type Instance } from "./instance.js";
 import { atomicPrivate, readPrivate } from "./private-files.js";
 
@@ -59,6 +60,8 @@ export async function readLocalLogin(
 // How the desktop app checks that the server it sends the owner password to
 // is this instance's TeamHub: TeamHub's own loopback address and the key
 // only TeamHub's process and this file's owner hold (see TeamHub's /v0/local/identity).
+// Until the installer next starts the services, a TeamHub an earlier
+// version started still uses the key that version kept in services.env.
 export interface LocalIdentity {
   teamhub: string;
   key: Buffer;
@@ -68,11 +71,16 @@ export async function readLocalIdentity(
 ): Promise<LocalIdentity> {
   const unavailable = () =>
     new Error("Linger on this computer has no server identity yet.");
-  const [settings, encoded] = await Promise.all([
+  const [settings, encoded, services] = await Promise.all([
     readPrivate(path.join(instance.root, "instance.json")),
     readLocalIdentityKey(instance.root),
+    readPrivate(path.join(instance.root, "services.env")),
   ]);
-  if (settings === undefined || encoded === undefined) throw unavailable();
+  const key = Buffer.from(
+    encoded ?? parseEnv(services ?? "").TEAMHUB_LOCAL_IDENTITY_KEY ?? "",
+    "base64",
+  );
+  if (settings === undefined || key.length !== 32) throw unavailable();
   let port: unknown;
   try {
     port = (JSON.parse(settings) as Partial<Instance>).source?.ports?.teamhub;
@@ -85,7 +93,6 @@ export async function readLocalIdentity(
     (port as number) > 65535
   )
     throw unavailable();
-  const key = Buffer.from(encoded, "base64");
   return { teamhub: `http://127.0.0.1:${port as number}`, key };
 }
 interface LocalAccount {
