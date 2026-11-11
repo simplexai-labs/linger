@@ -19,7 +19,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/redact"
 )
 
-const (
+var (
 	operationMCPPrepareTimeout = 3 * time.Second
 	operationMCPCleanupLimit   = 3 * time.Second
 )

@@ -25,6 +25,16 @@ func withResidentCap[P residentProcess](t *testing.T, table *residentTable[P], l
 	t.Cleanup(func() { table.setCap(previous) })
 }
 
+// shortenForTest lowers a package duration for one test and restores it in
+// t.Cleanup. Overriding a package variable is safe only because no test in
+// this package calls t.Parallel.
+func shortenForTest(t *testing.T, v *time.Duration, d time.Duration) {
+	t.Helper()
+	previous := *v
+	*v = d
+	t.Cleanup(func() { *v = previous })
+}
+
 // holdsPrestart reports whether a live, non-retiring prestart of any
 // provider is parked.
 func holdsPrestart() bool {

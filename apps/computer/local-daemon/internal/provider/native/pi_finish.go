@@ -12,9 +12,10 @@ import (
 const (
 	piStatusCancelled = "cancelled"
 	piStartupBudget   = 30 * time.Second
-	piAbortBudget     = 2 * time.Second
 	piProbeBudget     = 2 * time.Second
 )
+
+var piAbortBudget = 2 * time.Second
 
 // drive runs the startup exchange, waits for the turn to settle, then parks
 // the process or stops it, and delivers the single Outcome.

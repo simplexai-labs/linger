@@ -137,6 +137,8 @@ func TestNativeBrowserCloseFlushesBeforeProcessGroupSignal(t *testing.T) {
 }
 
 func TestNativeBrowserCloseDoesNotTreatCDPReplyOrEOFAsExit(t *testing.T) {
+	// The peer never exits on Browser.close, so the graceful wait expires.
+	shortenForTest(t, &nativeBrowserGracefulCloseLimit, 200*time.Millisecond)
 	for _, mode := range []string{"ack-without-exit", "eof"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newBrowserCloseFixture(t, mode)
@@ -166,6 +168,10 @@ func TestNativeBrowserCloseDoesNotTreatCDPReplyOrEOFAsExit(t *testing.T) {
 }
 
 func TestNativeBrowserReadinessFailureRetainsUnknownProcess(t *testing.T) {
+	// The stop is suppressed, so both the graceful wait and the whole close
+	// bound expire.
+	shortenForTest(t, &nativeBrowserGracefulCloseLimit, 200*time.Millisecond)
+	shortenForTest(t, &nativeBrowserCloseLimit, 400*time.Millisecond)
 	f := newBrowserCloseFixture(t, "ack-without-exit")
 	f.suppressStop.Store(true)
 	m := &Manager{browsers: map[string]*nativeBrowser{}}

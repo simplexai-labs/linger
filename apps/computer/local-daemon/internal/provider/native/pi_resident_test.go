@@ -150,6 +150,9 @@ func piAwaitGone(t *testing.T, proc *piProcess) {
 
 // Scenario 56.
 func TestPiResidentReuseAcrossTurns(t *testing.T) {
+	// The fake hangs at exit, so the stop's stdin-close wait expires. Restore
+	// the wait only after the resident stop in the home's cleanup.
+	shortenForTest(t, &piExitWait, 200*time.Millisecond)
 	h := piNewResidentHome(t, map[string]string{piResidentExitHangEnv: "1"})
 	proc := h.createParked("reuse-session", RunSpec{})
 	if piProcessGone(proc.pid) {

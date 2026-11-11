@@ -20,6 +20,15 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/process"
 )
 
+var (
+	// nativeBrowserCloseLimit bounds a whole browser close, including the
+	// process-tree fallback.
+	nativeBrowserCloseLimit = 10 * time.Second
+	// nativeBrowserGracefulCloseLimit bounds waiting for Browser.close to end
+	// the process before the process-tree fallback.
+	nativeBrowserGracefulCloseLimit = 2 * time.Second
+)
+
 type nativeBrowser struct {
 	endpoint          string
 	webSocketEndpoint string
@@ -179,9 +188,9 @@ func (b *nativeBrowser) close() error {
 	// A process-group signal can kill Chrome's Network Service before its
 	// Cookie store flushes. Ask the owned browser to exit first, then retain
 	// the original whole-tree termination and ten-second cleanup boundary.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), nativeBrowserCloseLimit)
 	defer cancel()
-	graceful, stopGraceful := context.WithTimeout(ctx, 2*time.Second)
+	graceful, stopGraceful := context.WithTimeout(ctx, nativeBrowserGracefulCloseLimit)
 	b.closeGracefully(graceful)
 	stopGraceful()
 	select {

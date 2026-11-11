@@ -2,10 +2,21 @@ package daemon
 
 import (
 	"testing"
+	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/assignment"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/registration"
 )
+
+// shortenForTest lowers a package duration for one test and restores it in
+// t.Cleanup. Overriding a package variable is safe only because no test in
+// this package calls t.Parallel.
+func shortenForTest(t *testing.T, v *time.Duration, d time.Duration) {
+	t.Helper()
+	previous := *v
+	*v = d
+	t.Cleanup(func() { *v = previous })
+}
 
 // newTestDaemon fills the stores a test leaves unset with fresh ones.
 func newTestDaemon(t testing.TB, options Options) (*Daemon, error) {

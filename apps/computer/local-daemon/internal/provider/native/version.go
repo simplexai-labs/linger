@@ -154,7 +154,7 @@ func CodexSupportsPermissionHook(version string) bool {
 	return stableCodexAtLeast(version, codexPermissionHookVersion)
 }
 
-const versionProbePipeBudget = 2 * time.Second
+var versionProbePipeBudget = 2 * time.Second
 
 // versionProbeBudget bounds one ProbeVersion call; tests lower it.
 var versionProbeBudget = 10 * time.Second
