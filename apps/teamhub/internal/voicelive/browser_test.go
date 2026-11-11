@@ -1,8 +1,10 @@
 package voicelive
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestBrowserActionsMapToTheComputersBrowserTools(t *testing.T) {
@@ -37,12 +39,64 @@ func TestBrowserActionsMapToTheComputersBrowserTools(t *testing.T) {
 }
 
 func TestBrowserPageKeepsThePageAndDropsNoise(t *testing.T) {
-	page, truncated := BrowserPage("### Ran Playwright code\n```js\nawait page.goto('x');\n```\n### Page\n- Page URL: https://x\n- link \"News\" [ref=e1]:\n  - /url: https://x/news\n")
-	if truncated || strings.Contains(page, "page.goto") || strings.Contains(page, "/url:") || !strings.Contains(page, `link "News" [ref=e1]`) {
-		t.Fatalf("page: %q", page)
+	shown := BrowserPage("### Ran Playwright code\n```js\nawait page.goto('x');\n```\n### Page\n- Page URL: https://x\n### Snapshot\n```yaml\n- generic [ref=e1]:\n  - list [ref=e2]:\n    - listitem [ref=e3]:\n      - link \"News\" [ref=e4] [cursor=pointer]:\n        - /url: https://x/news\n      - link [ref=e5] [cursor=pointer]:\n        - heading \"Untitled link text\" [level=2] [ref=e6]\n      - generic [ref=e7]: Zhihu\n      - generic [ref=e8]: \"+2\"\n      - strong [aria-hidden] [ref=e9]: Primeval Forest\n      - generic [ref=e10] [cursor=pointer]\n```\n", 0, "")
+	page := shown.Page
+	for _, gone := range []string{"page.goto", "/url:", "[ref=e1]", "[ref=e2]", "[ref=e3]", `"+2"`} {
+		if strings.Contains(page, gone) {
+			t.Fatalf("%s stays in %q", gone, page)
+		}
 	}
-	if _, truncated := BrowserPage(strings.Repeat("x", MaxBrowserPageRunes+10)); !truncated {
-		t.Fatal("long pages are truncated")
+	// Every word and everything to press stays, hidden-from-reader text too.
+	for _, kept := range []string{"Page URL: https://x", `link "News" [ref=e4]`, "link [ref=e5]", `heading "Untitled link text"`, "Zhihu", "Primeval Forest", "[ref=e10] [cursor=pointer]"} {
+		if !strings.Contains(page, kept) {
+			t.Fatalf("%s is missing from %q", kept, page)
+		}
+	}
+	if strings.Contains(page, `link "News" [ref=e4] [cursor=pointer]`) || shown.Parts != 1 || shown.Truncated {
+		t.Fatalf("shown: %+v", shown)
+	}
+}
+
+func TestBrowserPageSplitsALongPageIntoParts(t *testing.T) {
+	var snapshot strings.Builder
+	for index := range 400 {
+		fmt.Fprintf(&snapshot, "- link \"Result %d about the lake\" [ref=e%d] [cursor=pointer]\n", index, index)
+	}
+	text := "### Open tabs\n- 0: (current) [Search](https://bing.test)\n### Page\n- Page URL: https://bing.test\n### Snapshot\n```yaml\n" + snapshot.String() + "```\n"
+	first := BrowserPage(text, 0, "")
+	if first.Parts < 3 || first.Part != 1 || first.Truncated || !strings.Contains(first.Page, "Result 0 about") || strings.Contains(first.Page, "Result 399 about") {
+		t.Fatalf("first: part %d of %d, truncated %v", first.Part, first.Parts, first.Truncated)
+	}
+	last := BrowserPage(text, 99, "")
+	if last.Part != last.Parts || !strings.Contains(last.Page, "Result 399 about") {
+		t.Fatalf("last: part %d of %d", last.Part, last.Parts)
+	}
+	// Each part keeps the tabs and address the tab handling reads.
+	for _, shown := range []BrowserPageResult{first, last} {
+		if !strings.Contains(shown.Page, "### Open tabs") || BrowserPageURL(shown.Page) != "https://bing.test" ||
+			!strings.Contains(shown.Page, fmt.Sprintf("(part %d of %d)", shown.Part, shown.Parts)) || utf8.RuneCountInString(shown.Page) > MaxBrowserPageRunes {
+			t.Fatalf("part %d: %q", shown.Part, shown.Page[:200])
+		}
+	}
+	found := BrowserPage(text, 0, "result 250 ABOUT")
+	if !found.Found || found.Part == 1 || !strings.Contains(found.Page, "Result 250 about") {
+		t.Fatalf("find: part %d found %v", found.Part, found.Found)
+	}
+	if some := BrowserPage(text, 0, "price 250 tickets"); !some.Found || !strings.Contains(some.Page, "Result 250 about") {
+		t.Fatalf("some words: part %d found %v", some.Part, some.Found)
+	}
+	if missing := BrowserPage(text, 2, "no such words"); missing.Found || missing.Part != 2 {
+		t.Fatalf("missing: part %d found %v", missing.Part, missing.Found)
+	}
+}
+
+func TestBrowserArgumentsReadAPartGivenAsText(t *testing.T) {
+	var args BrowserArguments
+	if err := DecodeArguments(`{"action":"look","part":"2","find":"Zhihu"}`, &args); err != nil || args.Part != 2 || args.Find != "Zhihu" {
+		t.Fatalf("args=%+v err=%v", args, err)
+	}
+	if err := DecodeArguments(`{"action":"look","part":3}`, &args); err != nil || args.Part != 3 {
+		t.Fatalf("args=%+v err=%v", args, err)
 	}
 }
 
@@ -91,7 +145,8 @@ func TestBrowserPageURLReadsWhereThePageIs(t *testing.T) {
 func TestBrowserConnectionDetailSendsTheUserToConnectChrome(t *testing.T) {
 	for _, code := range []string{"browser_connection_required", "browser_connection_invalid"} {
 		detail, ok := BrowserConnectionDetail(code)
-		if !ok || !strings.Contains(detail, "Settings under Computers") || !strings.Contains(detail, "start_task") {
+		if !ok || !strings.Contains(detail, "Settings under Computers") || !strings.Contains(detail, "Connect Chrome") ||
+			!strings.Contains(detail, "Playwright Extension") || !strings.Contains(detail, "start_task") {
 			t.Fatalf("%s: %q", code, detail)
 		}
 	}
