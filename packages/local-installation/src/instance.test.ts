@@ -8,6 +8,7 @@ import {
   type Instance,
   initializeInstance,
   loadInstance,
+  readLocalIdentityKey,
   withInstanceLock,
   writeModelConfig,
 } from "./instance.js";
@@ -39,47 +40,76 @@ it("persists stable private settings and credentials across repeated initializat
   expect((await stat(first.root)).mode & 0o777).toBe(0o700);
 });
 // Without the encryption key TeamHub cannot save a Composio key from the Apps
-// page; without the identity key the app cannot tell TeamHub from another
-// process on its port.
-const generatedKeys = [
-  "TEAMHUB_SECRET_ENCRYPTION_KEY",
-  "TEAMHUB_LOCAL_IDENTITY_KEY",
-] as const;
-it.each(generatedKeys)("gives every instance its own %s", async (name) => {
+// page.
+it("gives every instance its own TEAMHUB_SECRET_ENCRYPTION_KEY", async () => {
   const root = await home();
   const one = await initializeInstance({ name: "one", home: root });
   const two = await initializeInstance({ name: "two", home: root });
   const env = async (instance: Instance) =>
-    parseEnv(await readFile(path.join(instance.root, "services.env"), "utf8"));
-  const first = (await env(one))[name];
+    parseEnv(await readFile(path.join(instance.root, "services.env"), "utf8"))
+      .TEAMHUB_SECRET_ENCRYPTION_KEY;
+  const first = await env(one);
   expect(Buffer.from(first!, "base64")).toHaveLength(32);
   expect(Buffer.from(first!, "base64").toString("base64")).toBe(first);
-  expect((await env(two))[name]).not.toBe(first);
-  const others = generatedKeys.filter((other) => other !== name);
-  for (const other of others) expect((await env(one))[other]).not.toBe(first);
+  expect(await env(two)).not.toBe(first);
 });
-// Instances installed before a key existed get it on their next install or start.
-it.each(generatedKeys)(
-  "adds a missing %s once and keeps every other credential",
-  async (name) => {
-    const root = await home();
-    const instance = await initializeInstance({ name: "older", home: root });
-    const file = path.join(instance.root, "services.env");
-    const older = (await readFile(file, "utf8"))
-      .split("\n")
-      .filter((line) => !line.startsWith(`${name}=`))
-      .join("\n");
-    await writeFile(file, older);
-    await initializeInstance({ name: "older", home: root });
-    const upgraded = await readFile(file, "utf8");
-    expect(upgraded.startsWith(older)).toBe(true);
-    const key = parseEnv(upgraded)[name];
-    expect(Buffer.from(key!, "base64")).toHaveLength(32);
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
-    await initializeInstance({ name: "older", home: root });
-    expect(await readFile(file, "utf8")).toBe(upgraded);
-  },
-);
+// Instances installed before the key existed get it on their next install or start.
+it("adds a missing TEAMHUB_SECRET_ENCRYPTION_KEY once and keeps every other credential", async () => {
+  const name = "TEAMHUB_SECRET_ENCRYPTION_KEY";
+  const root = await home();
+  const instance = await initializeInstance({ name: "older", home: root });
+  const file = path.join(instance.root, "services.env");
+  const older = (await readFile(file, "utf8"))
+    .split("\n")
+    .filter((line) => !line.startsWith(`${name}=`))
+    .join("\n");
+  await writeFile(file, older);
+  await initializeInstance({ name: "older", home: root });
+  const upgraded = await readFile(file, "utf8");
+  expect(upgraded.startsWith(older)).toBe(true);
+  const key = parseEnv(upgraded)[name];
+  expect(Buffer.from(key!, "base64")).toHaveLength(32);
+  expect((await stat(file)).mode & 0o777).toBe(0o600);
+  await initializeInstance({ name: "older", home: root });
+  expect(await readFile(file, "utf8")).toBe(upgraded);
+});
+// Without the identity key the app cannot tell TeamHub from another process
+// on its port. It stays out of services.env, which the services' env is
+// built from.
+it("gives every instance its own private identity key outside services.env", async () => {
+  const root = await home();
+  const one = await initializeInstance({ name: "one", home: root });
+  const two = await initializeInstance({ name: "two", home: root });
+  const first = await readLocalIdentityKey(one.root);
+  expect(Buffer.from(first!, "base64")).toHaveLength(32);
+  expect(await readLocalIdentityKey(two.root)).not.toBe(first);
+  const file = path.join(one.root, "local-identity.key");
+  expect((await stat(file)).mode & 0o777).toBe(0o600);
+  expect(
+    await readFile(path.join(one.root, "services.env"), "utf8"),
+  ).not.toContain("TEAMHUB_LOCAL_IDENTITY_KEY");
+  await initializeInstance({ name: "one", home: root });
+  expect(await readLocalIdentityKey(one.root)).toBe(first);
+});
+// An earlier version kept the key in services.env; it moves unchanged so the
+// app and the TeamHub it already trusts keep matching.
+it("moves an identity key from services.env without changing it", async () => {
+  const root = await home();
+  const instance = await initializeInstance({ name: "older", home: root });
+  const file = path.join(instance.root, "services.env");
+  const others = await readFile(file, "utf8");
+  const legacy = Buffer.alloc(32, 9).toString("base64");
+  await rm(path.join(instance.root, "local-identity.key"));
+  await writeFile(file, `TEAMHUB_LOCAL_IDENTITY_KEY=${legacy}\n${others}`);
+  await initializeInstance({ name: "older", home: root });
+  expect(await readLocalIdentityKey(instance.root)).toBe(legacy);
+  expect(await readFile(file, "utf8")).toBe(others);
+  // Interrupted after the key file was written: the copy left behind goes.
+  await writeFile(file, `${others}TEAMHUB_LOCAL_IDENTITY_KEY=${legacy}\n`);
+  await initializeInstance({ name: "older", home: root });
+  expect(await readLocalIdentityKey(instance.root)).toBe(legacy);
+  expect(await readFile(file, "utf8")).toBe(others);
+});
 it("rejects path traversal names and invalid ports", async () => {
   const root = await home();
   await expect(

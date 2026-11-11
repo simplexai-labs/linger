@@ -15,6 +15,7 @@ import {
   atomicPrivate,
   loadInstance,
   privateDirectory,
+  readLocalIdentityKey,
   withInstanceLock,
   type Instance,
 } from "./instance.js";
@@ -436,6 +437,10 @@ async function runNativeSource(
         /secret|password|token|key|credential|database_url/i.test(key)
       )
         secrets.push(value);
+    const identityKey = await readLocalIdentityKey(instance.root);
+    if (!identityKey)
+      throw new Error("The instance has no server identity key.");
+    secrets.push(identityKey);
     for (const message of configured.warnings)
       emit({ kind: "log", stage, message });
     const current = instance;
@@ -590,6 +595,9 @@ async function runNativeSource(
               ? { SONIOX_API_KEY: "", XAI_API_KEY: "" }
               : {}),
         };
+        // Only TeamHub gets the identity key (serviceOptions); no other
+        // service may prove itself as this instance's server.
+        delete env.TEAMHUB_LOCAL_IDENTITY_KEY;
         // The services read user.env, the credentials and the voice tools from
         // their environment, which their command line does not cover: a
         // change restarts them.
@@ -799,7 +807,10 @@ async function runNativeSource(
             name,
           ],
           cwd: current.source!.repo,
-          env,
+          env:
+            name === "teamhub"
+              ? { ...env, TEAMHUB_LOCAL_IDENTITY_KEY: identityKey }
+              : env,
           signal,
           redactions: secrets,
           // A changed user.env, port, credential or voice tool restarts it.

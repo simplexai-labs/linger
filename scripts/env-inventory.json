@@ -136,7 +136,7 @@
     },
     "local-identity": {
       "owner": "out-of-env",
-      "description": "Per-instance key the local installer generates into the instance's private services.env and passes to TeamHub, which proves with it (POST /v0/local/identity) that it is the installation's server before the desktop app sends the owner password. Unset everywhere else, which turns the endpoint off. Not part of .env.",
+      "description": "Per-instance key the local installer generates into the instance's private local-identity.key and passes to the TeamHub process only (not native.env, which every service and Compose load), which proves with it (POST /v0/local/identity) that it is the installation's server before the desktop app sends the owner password. Unset everywhere else, which turns the endpoint off. Not part of .env.",
       "names": ["TEAMHUB_LOCAL_IDENTITY_KEY"]
     }
   }
