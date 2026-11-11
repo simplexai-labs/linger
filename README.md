@@ -44,9 +44,6 @@ Powered by **Efficient AI model–harness co-design**, it brings powerful local 
 
 ## Quick start
 
-Linger runs your agents on your own computer. You need Claude Code, Codex or Pi
-installed and signed in there. Pick one of two ways to start.
-
 ### Option 1: the desktop app
 
 For one person on one computer. Download the package for your platform from
