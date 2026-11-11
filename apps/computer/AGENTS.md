@@ -86,7 +86,9 @@
   source, package, shared Runtime, or generated Runner Gateway changes. Run `make check-scripts-heavy` only for installer,
   uninstaller, release generator, publish, or image paths;
   ordinary Computer tests, fixtures, documentation, and example configuration
-  do not require the full installer lifecycle gate. CI does not replace the
+  do not require the full installer lifecycle gate. CI runs
+  `make check-computer-go` (the daemon's Go unit tests) when `local-daemon/`
+  changes; the rest of `check-computer` stays local. CI does not replace the
   corresponding local verification.
 - When installer or lifecycle behavior changes, verify it under a temporary
   HOME (`make check-scripts-heavy`). Preserve install, safety-failure, rollback, and release
