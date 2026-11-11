@@ -192,9 +192,9 @@ async function main(): Promise<void> {
       ? { checkout: process.env.LINGER_CHECKOUT }
       : {}),
     // The window's session is the default one, which enrollment reads too.
-    signIn: (origin, email, password) =>
-      signInWithPassword(origin, email, password, (cookie) =>
-        session.defaultSession.cookies.set({ url: origin, ...cookie }),
+    signIn: (server, email, password) =>
+      signInWithPassword(server, email, password, (cookie) =>
+        session.defaultSession.cookies.set({ url: server.origin, ...cookie }),
       ),
     sessionCookie: webSessionCookie,
     openExternal: (url) => shell.openExternal(url),

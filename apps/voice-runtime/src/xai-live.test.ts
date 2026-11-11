@@ -4,7 +4,10 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { LiveEvent } from "./live-session.js";
-import { cutOffNote, XaiLiveSession } from "./xai-live.js";
+import { cutOffNote, withLanguage, XaiLiveSession } from "./xai-live.js";
+
+/** A request in a language the code names nowhere. */
+const spanishRequest = "abre Bing y busca noticias de OpenAI";
 
 type Sent = Record<string, unknown>;
 const servers: WebSocketServer[] = [];
@@ -365,6 +368,36 @@ describe("XaiLiveSession", () => {
     provider.emit({ type: "response.done", response: { status: "completed" } });
     await waitForSent(provider.sent, 4);
     expect(provider.sent.at(-1)).toEqual({ type: "response.create" });
+    await session.close();
+  });
+
+  it("tells the reply after a tool result to keep the user's language", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    const events = collect(session, 2);
+    provider.emit(
+      {
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "i1",
+        transcript: spanishRequest,
+        status: "completed",
+      },
+      { type: "response.created", response: { id: "r1" } },
+      {
+        type: "response.function_call_arguments.done",
+        call_id: "c1",
+        name: "lookup",
+        arguments: "{}",
+      },
+    );
+    await events;
+    session.sendToolResults([{ callId: "c1", output: '{"status":"created"}' }]);
+    await waitForSent(provider.sent, 2);
+    const item = provider.sent.at(-1)?.item as { output: string };
+    expect(item.output.startsWith('{"status":"created"}')).toBe(true);
+    expect(item.output).toContain(
+      `Reply in the language of the user's latest words (“${spanishRequest}”)`,
+    );
     await session.close();
   });
 
@@ -873,5 +906,15 @@ describe("XaiLiveSession", () => {
       transient: true,
       detail: "4000 session idle too long",
     });
+  });
+});
+
+describe("withLanguage", () => {
+  it("quotes the user's latest words and leaves a result alone without them", () => {
+    expect(withLanguage("ok")).toBe("ok");
+    expect(withLanguage("ok", "  ")).toBe("ok");
+    const long = withLanguage("ok", "word ".repeat(100));
+    expect(long.startsWith("ok\n\nReply in the language")).toBe(true);
+    expect(long).toContain("…”)");
   });
 });

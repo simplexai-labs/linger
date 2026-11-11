@@ -30,9 +30,13 @@ import {
   hasNativePostgres,
   installLocation,
   parseSetCookie,
+  LocalServerUnverifiedError,
+  localIdentityProof,
+  proveLocalServer,
   SignInRejectedError,
   signInFailure,
   signInWithPassword,
+  type LocalServerIdentity,
   type LocalServerOptions,
 } from "./local-server.js";
 import type { DesktopConfig } from "./config.js";
@@ -231,6 +235,14 @@ const installerApi = (
   return { handle, created, retried, runtime };
 };
 
+const TEAMHUB = "http://127.0.0.1:4100";
+const KEY = Buffer.from(Array.from({ length: 32 }, (_, i) => i));
+const server = (origin: string): LocalServerIdentity => ({
+  origin,
+  teamhub: TEAMHUB,
+  key: KEY,
+});
+
 const fixture = (
   overrides:
     | Partial<LocalServerOptions>
@@ -273,6 +285,8 @@ const fixture = (
   const loadServer = vi.fn();
   const enroll = vi.fn(async () => {});
   const signIn = vi.fn(async () => {});
+  // The installed server proves itself unless a test says otherwise.
+  const proveServer = vi.fn(async (_server: LocalServerIdentity) => {});
   const options = typeof overrides === "function" ? overrides(home) : overrides;
   const download = options.fetch;
   const fetcher = (async (
@@ -292,6 +306,12 @@ const fixture = (
     pollMs: 10,
     freeBytes: 1,
     signIn,
+    serverIdentity: async (_home, origin) => ({
+      origin,
+      teamhub: TEAMHUB,
+      key: KEY,
+    }),
+    proveServer,
     ...options,
     fetch: fetcher,
   });
@@ -324,6 +344,7 @@ const fixture = (
     bus,
     enroll,
     signIn,
+    proveServer,
     api,
   };
 };
@@ -480,7 +501,7 @@ describe("LocalServerModule", () => {
       },
     ]);
     expect(f.signIn).toHaveBeenCalledWith(
-      "http://localhost:3000",
+      server("http://localhost:3000"),
       "owner@linger.local",
       "pw",
     );
@@ -1959,29 +1980,144 @@ describe("followHttps", () => {
   });
 });
 
+// A TeamHub with KEY: it answers challenges for WEB_ORIGIN and logs in.
+const WEB_ORIGIN = "http://localhost:3000";
+const teamhub = (
+  answer: (nonce: string) => Response | Promise<Response> = (nonce) =>
+    Response.json({
+      proof: localIdentityProof(KEY, nonce, WEB_ORIGIN).toString("base64url"),
+    }),
+) =>
+  vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v0/local/identity")
+      return answer(
+        (JSON.parse(String(init?.body)) as { nonce: string }).nonce,
+      );
+    return new Response("{}", {
+      headers: {
+        "set-cookie":
+          "linger_session=v; Path=/; HttpOnly; SameSite=Lax; Max-Age=60",
+      },
+    });
+  });
+const sentPassword = (fetcher: ReturnType<typeof teamhub>, password: string) =>
+  fetcher.mock.calls.some(([, init]) => String(init?.body).includes(password));
+
+describe("proveLocalServer", () => {
+  // The same vector as TeamHub's internal/localidentity test.
+  it("computes TeamHub's proof", () => {
+    expect(
+      localIdentityProof(KEY, "A".repeat(43), WEB_ORIGIN).toString("base64url"),
+    ).toBe("eKUTsEU-NZv-SW4c6jF3nCKa44wHETVelI_1rT6yu9w");
+  });
+
+  it("accepts the server that holds the key, asked on its own port", async () => {
+    const fetcher = teamhub();
+    await proveLocalServer(server(WEB_ORIGIN), fetcher as typeof fetch);
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(String(url)).toBe(`${TEAMHUB}/v0/local/identity`);
+    const { nonce } = JSON.parse(String(init?.body)) as { nonce: string };
+    expect(nonce).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(Buffer.from(nonce, "base64url")).toHaveLength(32);
+  });
+
+  it.each([
+    [
+      "another key",
+      (nonce: string) =>
+        Response.json({
+          proof: localIdentityProof(
+            Buffer.alloc(32),
+            nonce,
+            WEB_ORIGIN,
+          ).toString("base64url"),
+        }),
+      "wrong proof",
+    ],
+    [
+      "another origin",
+      (nonce: string) =>
+        Response.json({
+          proof: localIdentityProof(
+            KEY,
+            nonce,
+            "http://localhost:3001",
+          ).toString("base64url"),
+        }),
+      "wrong proof",
+    ],
+    ["no proof", () => Response.json({}), "wrong proof"],
+    ["a page", () => new Response("<html>"), "invalid answer"],
+    ["an error", () => new Response("", { status: 404 }), "status 404"],
+  ])("rejects a server that answers with %s", async (_case, answer, reason) => {
+    await expect(
+      proveLocalServer(server(WEB_ORIGIN), teamhub(answer) as typeof fetch),
+    ).rejects.toMatchObject({
+      name: "LocalServerUnverifiedError",
+      reason,
+      message: "Linger on this computer is not responding.",
+    });
+  });
+
+  it("rejects an earlier answer replayed for a new challenge", async () => {
+    let first: string | undefined;
+    const fetcher = teamhub((nonce) => {
+      first ??= localIdentityProof(KEY, nonce, WEB_ORIGIN).toString(
+        "base64url",
+      );
+      return Response.json({ proof: first });
+    });
+    await proveLocalServer(server(WEB_ORIGIN), fetcher as typeof fetch);
+    await expect(
+      proveLocalServer(server(WEB_ORIGIN), fetcher as typeof fetch),
+    ).rejects.toMatchObject({ reason: "wrong proof" });
+    const nonces = fetcher.mock.calls.map(
+      ([, init]) => (JSON.parse(String(init?.body)) as { nonce: string }).nonce,
+    );
+    expect(new Set(nonces).size).toBe(2);
+  });
+
+  it("gives up on a server that does not answer", async () => {
+    const fetcher = teamhub(
+      () => new Promise<Response>(() => {}),
+    ).mockImplementation(
+      (_input, init) =>
+        new Promise((_resolve, reject) =>
+          init?.signal?.addEventListener("abort", () =>
+            reject(init.signal!.reason),
+          ),
+        ),
+    );
+    await expect(
+      proveLocalServer(server(WEB_ORIGIN), fetcher as typeof fetch, 20),
+    ).rejects.toMatchObject({ reason: "no answer" });
+  });
+
+  it("treats nothing listening as no answer", async () => {
+    await expect(
+      proveLocalServer(server(WEB_ORIGIN), (async () => {
+        throw new TypeError("fetch failed");
+      }) as typeof fetch),
+    ).rejects.toBeInstanceOf(LocalServerUnverifiedError);
+  });
+});
+
 describe("signInWithPassword", () => {
   it("hands the session cookies of the local server to the app", async () => {
     const set = vi.fn(async () => {});
-    const fetcher = vi.fn(
-      async () =>
-        new Response("{}", {
-          headers: {
-            "set-cookie":
-              "linger_session=v; Path=/; HttpOnly; SameSite=Lax; Max-Age=60",
-          },
-        }),
-    );
+    const fetcher = teamhub();
     await signInWithPassword(
-      "http://localhost:3000",
+      server(WEB_ORIGIN),
       "owner@linger.local",
       "pw",
       set,
       fetcher as typeof fetch,
     );
-    const [url, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
-    // The services bind 127.0.0.1; localhost may resolve to ::1 first.
-    expect(String(url)).toBe("http://127.0.0.1:3000/v0/auth/login");
-    expect(init.headers).toMatchObject({ origin: "http://localhost:3000" });
+    const [url, init] = fetcher.mock.calls[1]!;
+    // The login goes to TeamHub's port, as the window's origin.
+    expect(String(url)).toBe(`${TEAMHUB}/v0/auth/login`);
+    expect(init?.headers).toMatchObject({ origin: WEB_ORIGIN });
     expect(set).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "linger_session",
@@ -1993,14 +2129,42 @@ describe("signInWithPassword", () => {
     );
   });
 
-  it("fails without a session", async () => {
+  it.each([
+    ["answers wrongly", () => Response.json({ proof: "A".repeat(43) })],
+    ["serves a page", () => new Response("<html>login</html>")],
+  ])("never sends the password to a server that %s", async (_case, answer) => {
+    const fetcher = teamhub(answer);
     await expect(
       signInWithPassword(
-        "http://localhost:3000",
+        server(WEB_ORIGIN),
+        "owner@linger.local",
+        "a-private-password",
+        async () => {},
+        fetcher as typeof fetch,
+      ),
+    ).rejects.toBeInstanceOf(LocalServerUnverifiedError);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(sentPassword(fetcher, "a-private-password")).toBe(false);
+  });
+
+  it("fails without a session", async () => {
+    const fetcher = teamhub();
+    fetcher.mockImplementationOnce(async (_input, init) => {
+      const { nonce } = JSON.parse(String(init?.body)) as { nonce: string };
+      return Response.json({
+        proof: localIdentityProof(KEY, nonce, WEB_ORIGIN).toString("base64url"),
+      });
+    });
+    fetcher.mockImplementationOnce(
+      async () => new Response("{}", { status: 401 }),
+    );
+    await expect(
+      signInWithPassword(
+        server(WEB_ORIGIN),
         "a",
         "b",
         async () => {},
-        (async () => new Response("{}", { status: 401 })) as typeof fetch,
+        fetcher as typeof fetch,
       ),
     ).rejects.toEqual(new SignInRejectedError(401));
   });
@@ -2023,6 +2187,9 @@ describe("signInFailure", () => {
       ),
     ).toBe("Linger on this computer is not responding.");
     expect(signInFailure(new DOMException("aborted", "AbortError"))).toBe(
+      "Linger on this computer is not responding.",
+    );
+    expect(signInFailure(new LocalServerUnverifiedError("wrong proof"))).toBe(
       "Linger on this computer is not responding.",
     );
     // A message that merely mentions 401 is not a rejected password.
@@ -2225,7 +2392,11 @@ describe("LocalServerModule owner account", () => {
       ),
     });
     await f.module.signInWithAccount();
-    expect(f.signIn).toHaveBeenCalledWith(ORIGIN, OWNER.email, OWNER.password);
+    expect(f.signIn).toHaveBeenCalledWith(
+      server(ORIGIN),
+      OWNER.email,
+      OWNER.password,
+    );
     await f.host.stop("quit");
   });
 
@@ -2255,12 +2426,67 @@ describe("LocalServerModule owner account", () => {
       new TypeError("fetch failed"),
       "Linger on this computer is not responding.",
     ],
+    [
+      new LocalServerUnverifiedError("wrong proof"),
+      "Linger on this computer is not responding.",
+    ],
   ])("says what to do when signing in fails (%s)", async (error, message) => {
     const f = fixture({}, { serverUrl: ORIGIN }, installed(OWNER));
     f.signIn.mockRejectedValueOnce(error);
     await f.host.start();
     await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
     await expect(f.module.signInWithAccount()).rejects.toThrow(message);
+    await f.host.stop("quit");
+  });
+
+  it("offers the account only while the server proves it is this installation's", async () => {
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      const f = fixture({}, { serverUrl: ORIGIN }, installed(OWNER));
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      expect(await f.module.servesWindow()).toBe(true);
+      expect(f.proveServer).toHaveBeenLastCalledWith(server(ORIGIN));
+      // The services stopped, or another program took the port.
+      f.proveServer.mockRejectedValue(
+        new LocalServerUnverifiedError("no answer"),
+      );
+      // One check serves the pages for two seconds.
+      expect(await f.module.servesWindow()).toBe(true);
+      now += 2_000;
+      expect(await f.module.servesWindow()).toBe(false);
+      expect(await f.module.servesWindow()).toBe(false);
+      expect(f.proveServer).toHaveBeenCalledTimes(2);
+      // The services are back.
+      f.proveServer.mockResolvedValue(undefined);
+      now += 2_000;
+      expect(await f.module.servesWindow()).toBe(true);
+      await f.host.stop("quit");
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("neither offers nor sends the account without the server's identity", async () => {
+    const f = fixture(
+      {
+        serverIdentity: async () => {
+          throw new Error(
+            "Linger on this computer has no server identity yet.",
+          );
+        },
+      },
+      { serverUrl: ORIGIN },
+      installed(OWNER),
+    );
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    expect(await f.module.servesWindow()).toBe(false);
+    await expect(f.module.signInWithAccount()).rejects.toThrow(
+      "Linger on this computer is not responding.",
+    );
+    expect(f.signIn).not.toHaveBeenCalled();
     await f.host.stop("quit");
   });
 

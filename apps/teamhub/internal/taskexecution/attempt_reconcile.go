@@ -243,7 +243,7 @@ func settleTaskTurn(
 		return err
 	}
 	status, reason := "idle", "run_succeeded"
-	report := ""
+	var reports []string
 	if len(pending) > 0 {
 		status, reason = "waiting_for_approval", "pending_approval"
 	} else {
@@ -256,9 +256,11 @@ func settleTaskTurn(
 		if reply = strings.TrimSpace(reply); reply == "" {
 			reply = "(no reply)"
 		}
-		report = "Task " + snapshot.Title + " (" + input.TaskID + ") is idle. " + taskDoneReminder(input.TaskID) + "\n" + reply
+		// The Meta reads what to do, then the AlterEgo's own words as their
+		// own report, the one a live call tells as the Task's latest.
+		reports = []string{"Task " + snapshot.Title + " (" + input.TaskID + ") is idle. " + taskDoneReminder(input.TaskID), reply}
 	}
-	return settleTaskStatus(ctx, queries, lease, snapshot, input, status, reason, report, map[string]any{
+	return settleTaskStatus(ctx, queries, lease, snapshot, input, status, reason, reports, map[string]any{
 		"attempt_id": attempt.ID, "input_revision": attempt.CurrentInputRevision,
 		"agent_run_ref": lastRun.AgentRunRef, "pending_approvals": len(pending),
 	})
@@ -301,13 +303,13 @@ func failTaskAttempt(
 		return err
 	}
 	report := "Task " + snapshot.Title + " (" + input.TaskID + ") failed: " + truncateRunes(failure, taskReportFailureMaxRunes)
-	return settleTaskStatus(ctx, queries, lease, snapshot, input, "failed", stopReason, report, map[string]any{
+	return settleTaskStatus(ctx, queries, lease, snapshot, input, "failed", stopReason, []string{report}, map[string]any{
 		"attempt_id": attempt.ID, "attempt_number": attempt.AttemptNumber, "stop_reason_code": stopReason,
 	})
 }
 
 // settleTaskStatus moves a running Task to the state its ended turn
-// produced and, when report is set, writes it to the Task's hidden callback
+// produced and writes its reports, in order, to the Task's hidden callback
 // stream, which wakes the coordinating Meta.
 func settleTaskStatus(
 	ctx context.Context,
@@ -315,7 +317,8 @@ func settleTaskStatus(
 	lease store.WorkItem,
 	snapshot store.LockTaskExecutionSnapshotRow,
 	input WorkerTransitionInput,
-	status, reason, report string,
+	status, reason string,
+	reports []string,
 	payload map[string]any,
 ) error {
 	nextRevision := input.ExpectedExecutionRevision + 1
@@ -337,7 +340,7 @@ func settleTaskStatus(
 	} else if err != nil {
 		return err
 	}
-	if report != "" {
+	for _, report := range reports {
 		if err := appendTaskReport(ctx, queries, snapshot, input.ExecutionGeneration, report); err != nil {
 			return err
 		}

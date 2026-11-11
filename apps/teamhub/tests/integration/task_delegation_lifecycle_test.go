@@ -180,14 +180,16 @@ func TestDelegatedTaskTurnOutcomesAndReports(t *testing.T) {
 		reports := taskReports(t, env, created.TaskID)
 		want := "Task Summarize notes (" + created.TaskID + ") is idle. If it is done, deliver it to the user with teamhub message card: a title, " +
 			"a one-line result, and its files from ./playground/" + created.TaskID + "/ with --attach; then say in one " +
-			"ordinary message what the user should add or check, if anything.\nHere is the summary: all good."
-		if len(reports) != 1 || reports[0] != want {
+			"ordinary message what the user should add or check, if anything."
+		// What to do and the AlterEgo's own words are separate reports, so a
+		// live call tells the Task's latest report without the Meta's part.
+		if len(reports) != 2 || reports[0] != want || reports[1] != "Here is the summary: all good." {
 			t.Fatalf("reports=%q want %q", reports, want)
 		}
-		// The report wakes the origin Room's Meta through the Task callback stream.
+		// The reports wake the origin Room's Meta through the Task callback stream.
 		if got := countRows(t, env, `SELECT count(*) FROM task_meta_callbacks callback
 			WHERE callback.task_id=$1 AND callback.coordinator_actor_id='actor_acme_official'
-			  AND callback.coordinator_context_key=$2 AND callback.through_seq=1`,
+			  AND callback.coordinator_context_key=$2 AND callback.through_seq=2`,
 			created.TaskID, `["meta","`+acmeOfficialAgentManagementID+`","room","`+roomID+`"]`); got != 1 {
 			t.Fatalf("Meta callback cursor rows=%d want=1", got)
 		}
@@ -209,7 +211,7 @@ func TestDelegatedTaskTurnOutcomesAndReports(t *testing.T) {
 		insertAlterEgoLocalRun(t, env, created.TaskID, "run-outcome-empty", "  ")
 		worker.endTurn(effectID, "run-outcome-empty", "succeeded", "")
 		worker.advance()
-		if reports := taskReports(t, env, created.TaskID); len(reports) != 1 || !strings.HasSuffix(reports[0], "with --attach.\n(no reply)") {
+		if reports := taskReports(t, env, created.TaskID); len(reports) != 2 || reports[1] != "(no reply)" {
 			t.Fatalf("reports=%q", reports)
 		}
 	})

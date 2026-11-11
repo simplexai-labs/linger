@@ -107,6 +107,35 @@ paths:
           description: Session revoked or already absent.
         '500':
           $ref: '../components/common.yaml#/components/responses/InternalError'
+  /v0/local/identity:
+    post:
+      tags: [Authentication]
+      operationId: proveLocalIdentity
+      summary: Prove that this server is the Linger installed on this computer.
+      description: >-
+        Answers only on a local installation that has TEAMHUB_LOCAL_IDENTITY_KEY; elsewhere 404.
+        The proof is the unpadded base64url HMAC-SHA256, keyed with that 32-byte key, of
+        "linger-local-identity", the nonce and the server's web origin, joined with newlines. The
+        desktop app checks it with the key from the installation's private files before it sends
+        the owner's password, so a process that took the port cannot receive it.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../components/domain.yaml#/components/schemas/LocalIdentityChallenge'
+      responses:
+        '200':
+          description: The proof for this nonce.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/domain.yaml#/components/schemas/LocalIdentityProof'
+        '400':
+          $ref: '../components/common.yaml#/components/responses/BadRequest'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
   /v0/session:
     post:
       tags: [Authentication]

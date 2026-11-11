@@ -260,3 +260,29 @@ it("uses a source owner provisioner with saved credentials and confirms login", 
   expect(attempts).toBe(2);
   expect(JSON.parse(await readFile(f.file, "utf8")).provisioned).toBe(true);
 });
+it("reads the server identity from the private instance files", async () => {
+  const { readLocalIdentity } = await import("./account.js");
+  const f = await fixture();
+  const key = Buffer.alloc(32, 7);
+  await expect(readLocalIdentity(f.instance)).rejects.toThrow(
+    "Linger on this computer has no server identity yet.",
+  );
+  await writeFile(
+    path.join(f.instance.root, "instance.json"),
+    JSON.stringify({ source: { ports: { teamhub: 4100, web: 3000 } } }),
+    { mode: 0o600 },
+  );
+  // An instance without a key file yet, or with an invalid one, has none.
+  await expect(readLocalIdentity(f.instance)).rejects.toThrow(/identity/);
+  const keyFile = path.join(f.instance.root, "local-identity.key");
+  await writeFile(keyFile, "not a key\n", { mode: 0o600 });
+  await expect(readLocalIdentity(f.instance)).rejects.toThrow(/identity/);
+  await writeFile(keyFile, `${key.toString("base64")}\n`, { mode: 0o600 });
+  expect(await readLocalIdentity(f.instance)).toEqual({
+    teamhub: "http://127.0.0.1:4100",
+    key,
+  });
+  const { chmod } = await import("node:fs/promises");
+  await chmod(keyFile, 0o644);
+  await expect(readLocalIdentity(f.instance)).rejects.toThrow(/private/);
+});

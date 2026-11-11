@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,7 +17,7 @@ import VoiceModeMiniWindow, {
   sessionMessages,
 } from "./voice-mode-mini-window";
 import type { VoiceModeSession } from "./voice-mode-session";
-import { openVoicePip, resetVoicePipForTest } from "./voice-pip";
+import { closeVoicePip, openVoicePip, resetVoicePipForTest } from "./voice-pip";
 
 const startedAt = "2026-10-02T03:00:00.000Z";
 const message = (
@@ -289,10 +296,69 @@ describe("Voice Mode mini window", () => {
       ).not.toBeInTheDocument();
 
       // The desktop's close button ends Voice Mode instead of leaving a
-      // second window behind in the page.
+      // second window behind in the page, also when the page was already in
+      // front and takes the focus back.
+      const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
       act(() => fake.pipWindow.close());
-      expect(voice.exit).toHaveBeenCalledOnce();
+      await waitFor(() => expect(voice.exit).toHaveBeenCalledOnce());
+      focused.mockRestore();
     } finally {
+      fake.frame.remove();
+      Reflect.deleteProperty(window, "documentPictureInPicture");
+      resetVoicePipForTest();
+    }
+  });
+
+  it("floats the call again from the window inside the page", async () => {
+    const fake = installFakeVoicePip();
+    try {
+      renderWindow();
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: "Float Voice Mode window" }),
+        );
+        await fake.requestWindow.mock.results[0]?.value;
+      });
+      await within(fake.document.body).findByRole("region", {
+        name: "Voice Mode window",
+      });
+      expect(fake.requestWindow).toHaveBeenCalledOnce();
+      expect(
+        screen.queryByRole("region", { name: "Voice Mode window" }),
+      ).not.toBeInTheDocument();
+      expect(voice.exit).not.toHaveBeenCalled();
+      // The page takes the window back before the test removes its frame.
+      act(() => closeVoicePip("voice-mode"));
+    } finally {
+      fake.frame.remove();
+      Reflect.deleteProperty(window, "documentPictureInPicture");
+      resetVoicePipForTest();
+    }
+  });
+
+  it("keeps the call when the desktop's back to tab button returns to the page", async () => {
+    const fake = installFakeVoicePip();
+    const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    try {
+      renderWindow();
+      await act(() => openVoicePip("voice-mode"));
+      // Back to tab brings this page from the background to the front.
+      act(() => {
+        fake.pipWindow.close();
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      // The call goes on in the window inside the page, on its conversation.
+      await waitFor(() =>
+        expect(screen.getByTestId("location")).toHaveTextContent(
+          "/t/tenant-northstar/rooms/room-voice/chat",
+        ),
+      );
+      expect(voice.exit).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole("region", { name: "Voice Mode window" }),
+      ).toBeInTheDocument();
+    } finally {
+      focused.mockRestore();
       fake.frame.remove();
       Reflect.deleteProperty(window, "documentPictureInPicture");
       resetVoicePipForTest();

@@ -133,6 +133,11 @@
       "owner": "code-default",
       "description": "Where TeamHub calls the LiveKit API when it reaches LiveKit at another address than browsers do. Only the root docker-compose.yml sets it; otherwise TeamHub derives it from LIVEKIT_URL.",
       "names": ["LIVEKIT_API_URL"]
+    },
+    "local-identity": {
+      "owner": "out-of-env",
+      "description": "Per-instance key the local installer generates into the instance's private local-identity.key and passes to the TeamHub process only (not native.env, which every service and Compose load), which proves with it (POST /v0/local/identity) that it is the installation's server before the desktop app sends the owner password. Unset everywhere else, which turns the endpoint off. Not part of .env.",
+      "names": ["TEAMHUB_LOCAL_IDENTITY_KEY"]
     }
   }
 }

@@ -51,6 +51,20 @@ const credentials: Record<string, () => string> = {
   // TeamHub requires 32 bytes in standard base64.
   TEAMHUB_SECRET_ENCRYPTION_KEY: () => randomBytes(32).toString("base64"),
 };
+// TeamHub proves with this key that it is this instance's server before the
+// desktop app sends the saved password. It has its own file, not services.env
+// or native.env, so only TeamHub's process (native-source.ts) and the
+// desktop app read it.
+export const localIdentityKeyFile = (root: string) =>
+  path.join(root, "local-identity.key");
+export async function readLocalIdentityKey(
+  root: string,
+): Promise<string | undefined> {
+  const key = (await readPrivate(localIdentityKeyFile(root)))?.trim();
+  return key && validIdentityKey(key) ? key : undefined;
+}
+const validIdentityKey = (key: string) =>
+  /^[A-Za-z0-9+/]{43}=$/.test(key) && Buffer.from(key, "base64").length === 32;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export { atomicPrivate, privateDirectory, readPrivate };
 const missing = (error: unknown) =>
@@ -181,6 +195,7 @@ export async function initializeInstance(
               "Instance port is already configured; select a different instance",
             );
           await writeMissingCredentials(root);
+          await writeLocalIdentityKey(root);
           return existing;
         }
         const reserved = new Set<number>();
@@ -243,6 +258,7 @@ export async function initializeInstance(
         };
         await privateDirectory(path.dirname(instance.computerConfig));
         await writeMissingCredentials(root);
+        await writeLocalIdentityKey(root);
         await atomicPrivate(
           path.join(root, "instance.json"),
           JSON.stringify(instance, null, 2) + "\n",
@@ -272,6 +288,14 @@ async function writeMissingCredentials(root: string): Promise<void> {
   await atomicPrivate(
     file,
     `${current}${current && !current.endsWith("\n") ? "\n" : ""}${added.join("")}`,
+  );
+}
+// Writes the identity key once; an instance keeps it from then on.
+async function writeLocalIdentityKey(root: string): Promise<void> {
+  if (await readLocalIdentityKey(root)) return;
+  await atomicPrivate(
+    localIdentityKeyFile(root),
+    `${randomBytes(32).toString("base64")}\n`,
   );
 }
 export async function withInstanceLock<T>(

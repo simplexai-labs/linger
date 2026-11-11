@@ -1,7 +1,7 @@
 .PHONY: contracts-generate contracts-verify computer-release-local source-archive source-dependencies
 .PHONY: check-teamhub-cli check-installer check-desktop
 .PHONY: check check-heavy-lane check-web
-.PHONY: check-computer check-computer-release check-node-services check-voice-runtime
+.PHONY: check-computer check-computer-go check-computer-release check-node-services check-voice-runtime
 .PHONY: check-teamhub check-teamhub-tooling check-teamhub-integration
 .PHONY: check-teamhub-integration-process check-teamhub-integration-migrations
 .PHONY: check-contracts check-packages check-scripts check-scripts-fast check-scripts-heavy check-docs check-repository check-repository-gate
@@ -85,10 +85,7 @@ check-computer:
 	pnpm --filter @linger/computer lint
 	$(COMPUTER_TEST_RUNNER) pnpm --filter @linger/computer test
 	$(MAKE) -C apps/teamhub lint-go-daemon
-	cd apps/computer/local-daemon && go test ./... -run '^$$'
-	cd apps/computer/local-daemon && $(COMPUTER_TEST_RUNNER) go test ./internal/platform/...
-	cd apps/computer/local-daemon && $(COMPUTER_TEST_RUNNER) go test ./cmd/linger-computer-daemon ./cmd/linger-computer-launcher ./internal/computercli ./internal/computerconfig ./internal/daemon ./internal/linger/context ./internal/linger/assignment ./internal/linger/control ./internal/linger/registration ./internal/linger/localskills ./internal/linger/mcpproxy ./internal/linger/transport ./internal/linger/runtimehistory ./internal/linger/localtools ./internal/process ./internal/workspace ./internal/provider ./internal/provider/redact ./internal/permission
-	cd apps/computer/local-daemon && $(COMPUTER_TEST_RUNNER) go test ./internal/provider/native
+	$(MAKE) check-computer-go
 	LINGER_GO_LOCAL_DAEMON_TEST=1 $(COMPUTER_TEST_RUNNER) pnpm --filter @linger/node-services exec vitest run --project agent tests/agent/runner-gateway/go-local-daemon-process.test.ts --maxWorkers=2
 
 check-teamhub-cli:
@@ -108,6 +105,13 @@ check-desktop:
 	pnpm --filter @linger/desktop test
 	# The Go daemon that packaging bundles, for every platform the app ships on.
 	cd apps/desktop && node scripts/build-daemon.mjs --all
+
+# The Go unit tests of check-computer, which CI runs on its own.
+check-computer-go:
+	cd apps/computer/local-daemon && go test ./... -run '^$$'
+	cd apps/computer/local-daemon && $(COMPUTER_TEST_RUNNER) go test ./internal/platform/...
+	cd apps/computer/local-daemon && $(COMPUTER_TEST_RUNNER) go test ./cmd/linger-computer-daemon ./cmd/linger-computer-launcher ./internal/computercli ./internal/computerconfig ./internal/daemon ./internal/linger/context ./internal/linger/assignment ./internal/linger/control ./internal/linger/registration ./internal/linger/localskills ./internal/linger/mcpproxy ./internal/linger/transport ./internal/linger/runtimehistory ./internal/linger/localtools ./internal/process ./internal/workspace ./internal/provider ./internal/provider/redact ./internal/permission
+	cd apps/computer/local-daemon && $(COMPUTER_TEST_RUNNER) go test ./internal/provider/native
 
 check-computer-release:
 	pnpm vitest run --no-file-parallelism $(SCRIPT_COMPUTER_RELEASE_TEST)

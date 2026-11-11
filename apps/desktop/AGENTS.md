@@ -79,15 +79,38 @@ Gateway and runs Agents. The daemon exits with the app.
   file location" (`shell.showItemInFolder`); an unreadable file shows why
   instead. Only the email and file are kept; Show and Copy read the file
   again, and closing the setup window hides the password. After a logout
-  the SPA's login page asks `window.lingerDesktop.localAccount.available()`,
-  which is true only while the window shows the origin in
-  `local-server.json` and the services are `ready`, and offers "Sign in
-  with this computer's account": `localAccount.signIn()` reads the file in
-  the main process and signs the window's session in with
-  `signInWithPassword`, which posts to `127.0.0.1:<port>` (what the
-  services bind) and sets the cookies for the origin; the page gets only
-  `{ ok }` or the reason it failed (mapped by status and error kind by
-  `signInFailure`), never the password. The default AI runtime is the
+  the SPA's login page asks `window.lingerDesktop.localAccount.available()`
+  on load, every 15 s and when the window comes back into view; it is true
+  only while the window shows the origin in `local-server.json`, the
+  services are `ready` and TeamHub proves it is this installation's server
+  (one check per 2 s at most). The proof: `proveLocalServer` posts a fresh
+  32-byte nonce to TeamHub's own port (`POST /v0/local/identity` on
+  `127.0.0.1:<source.ports.teamhub>` from `instance.json`) and compares,
+  in constant time, its HMAC-SHA256 under `TEAMHUB_LOCAL_IDENTITY_KEY` (the
+  instance's private `local-identity.key`, read by `readLocalIdentity`) over
+  the nonce and the window's origin. The installer puts the key only in
+  TeamHub's process environment, never in `services.env`, `native.env` or
+  another service's environment, so no other local service can answer. A
+  new key restarts TeamHub. It asks TeamHub's port rather than the web
+  port, which a program could take and relay through. "Sign in with this
+  computer's account": `localAccount.signIn()` reads the file in the main
+  process and signs the window's session in with `signInWithPassword`,
+  which proves the server first and only then posts the password to the
+  same TeamHub port, setting the cookies for the origin; the install-time
+  sign-in does the same. A failed proof logs `local_server.identity_unverified`
+  with a reason (never the key, nonce or proof) and says "Linger on this
+  computer is not responding."; the page gets only `{ ok }` or the reason it
+  failed (mapped by status and error kind by `signInFailure`), never the
+  password. Known gap: the proof covers TeamHub, not the web listener. If
+  the web process dies and another program takes the web port while
+  TeamHub stays up, the proof still passes and the sign-in sets the session
+  cookies for the web origin, which that program then receives. The
+  password never leaves for it, but the session does. Asking the web origin
+  for a proof would not help, because the web server forwards `/v0` to
+  TeamHub and a relay forwards it the same way; a fix needs a check that
+  the web port belongs to the web process the installer started. Every
+  existing session cookie for the origin has the same exposure.
+  The default AI runtime is the
   installer's recommendation, or Codex when the installer cannot inspect the
   computer. It records the install location, source, origin and engine in
   `desktop/local-server.json` under the default home and, while the window

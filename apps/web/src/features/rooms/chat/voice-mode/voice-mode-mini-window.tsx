@@ -4,6 +4,7 @@ import {
   Mic01Icon,
   MicOff01Icon,
   Minimize01Icon,
+  PictureInPictureOnIcon,
   RotateLeft01Icon,
   VolumeHighIcon,
   VolumeOffIcon,
@@ -37,7 +38,13 @@ import { ActorAvatar } from "../../members/actor-avatar";
 import { voiceModeStatusLabel } from "./voice-mode-presentation";
 import styles from "./voice-mode.module.css";
 import { registerVoiceWindow, type VoiceWindowAction } from "./voice-ui-bridge";
-import { onVoicePipClosedByHuman, useVoicePip } from "./voice-pip";
+import {
+  onVoicePipClosedByHuman,
+  openVoicePip,
+  returnedToOpener,
+  useVoicePip,
+  voicePipSupported,
+} from "./voice-pip";
 import { showVoiceNotice, useVoiceNotice } from "./voice-notice";
 import {
   useOptionalVoiceModeSession,
@@ -68,6 +75,7 @@ type WindowSize = keyof typeof windowSizes;
  * tabs and apps. Closing it, from its own button or the desktop's, ends Voice
  * Mode: the window leaves at once while the session drains its last
  * words in the background, and the Room composer shows that finishing state.
+ * The desktop's back to tab button only returns to the conversation.
  */
 export default function VoiceModeMiniWindow({
   anotherMeActorId,
@@ -157,13 +165,23 @@ function MiniWindow({
   );
   const notice = useVoiceNotice();
   const pip = useVoicePip("voice-mode");
-  // One window: the desktop's close button on the floating one ends Voice Mode too.
+  // One window: the desktop's close button on the floating one ends Voice Mode
+  // too. Its back to tab button instead returns to this conversation and keeps
+  // the call, which goes on in the window inside the page.
   const exitRef = useRef(onExit);
+  const openRoomRef = useRef(() => {});
   useLayoutEffect(() => {
     exitRef.current = onExit;
+    openRoomRef.current = () =>
+      void navigate(`/t/${tenantId}/rooms/${roomId}/chat`);
   });
   useEffect(
-    () => onVoicePipClosedByHuman("voice-mode", () => exitRef.current()),
+    () =>
+      onVoicePipClosedByHuman("voice-mode", () => {
+        void returnedToOpener().then((returned) =>
+          returned ? openRoomRef.current() : exitRef.current(),
+        );
+      }),
     [],
   );
 
@@ -298,6 +316,19 @@ function MiniWindow({
               ) : (
                 <Icon icon={VolumeHighIcon} size={16} />
               )}
+            </Button>
+          )}
+          {/* Back in the page, one click floats the call again; the browser
+              opens that window only from a click in the page. */}
+          {pip || !voicePipSupported() ? null : (
+            <Button
+              aria-label="Float Voice Mode window"
+              onClick={() => void openVoicePip("voice-mode")}
+              size="compactIcon"
+              title="Float over other tabs and apps"
+              tone="ghost"
+            >
+              <Icon icon={PictureInPictureOnIcon} size={16} />
             </Button>
           )}
           {pip ? null : (

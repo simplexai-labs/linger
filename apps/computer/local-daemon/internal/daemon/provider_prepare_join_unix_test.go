@@ -99,6 +99,9 @@ func newJoinProviderFixture(t *testing.T, runtime string) joinProviderFixture {
 		// A run leaves its process parked in the process-wide table, which later tests would see.
 		_, _ = native.StopParkedResidentsForContext("context-1")
 		d.WaitForOperations()
+		// The Codex stop path queues its last diagnostics record into the
+		// Runtime home asynchronously; it must land before TempDir removal.
+		native.FlushTimings()
 	})
 	return fixture
 }

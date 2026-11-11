@@ -18,11 +18,23 @@ const pipSizes = {
 let pip: { owner: VoicePipOwner; window: Window } | undefined;
 const listeners = new Set<() => void>();
 const closedByHuman = new Set<(owner: VoicePipOwner) => void>();
+/** When this page last came to the front from the background. */
+let shownAt = Number.NEGATIVE_INFINITY;
+let watchingVisibility = false;
+
+function noteShown() {
+  if (document.visibilityState === "visible") shownAt = performance.now();
+}
 
 function api(): DocumentPictureInPicture | undefined {
   return (
     window as Window & { documentPictureInPicture?: DocumentPictureInPicture }
   ).documentPictureInPicture;
+}
+
+/** Whether this browser can float a voice window over other tabs and apps. */
+export function voicePipSupported() {
+  return api() !== undefined;
 }
 
 function publish(next: typeof pip) {
@@ -44,6 +56,10 @@ export async function openVoicePip(
   // The browser allows one such window per tab; the newest owner takes it.
   if (pip?.owner === owner) return pip.window;
   if (pip) closeVoicePip(pip.owner);
+  if (!watchingVisibility) {
+    document.addEventListener("visibilitychange", noteShown);
+    watchingVisibility = true;
+  }
   try {
     const opened = await pictureInPicture.requestWindow(pipSizes[owner]);
     const stopMirroring = mirrorStyles(opened.document);
@@ -66,6 +82,35 @@ export function closeVoicePip(owner: VoicePipOwner) {
   const current = pip.window;
   publish(undefined);
   current.close();
+}
+
+/**
+ * Whether closing the window brought the Human back to this page. The
+ * window's "back to tab" button closes it and brings its tab from the
+ * background to the front; its close button does not. The browser reports
+ * neither, so this checks a moment later whether the page came to the front
+ * around the close. A close while this page was already in front is a close,
+ * even though focus lands on the page afterwards.
+ *
+ * Trade-off: back to tab on a page that stayed visible but unfocused (its
+ * window on another screen, or only partly covered, while the Human works in
+ * another app) brings no visibility change and also reads as a close, so the
+ * call ends. Telling it apart by focus instead made the close button keep the
+ * call whenever the page was in front; a close that ends the call is the
+ * surer of the two, and starting Voice Mode again floats a new window.
+ */
+export function returnedToOpener(waitMs = 300): Promise<boolean> {
+  const closedAt = performance.now();
+  return new Promise((resolve) =>
+    setTimeout(
+      () =>
+        resolve(
+          document.visibilityState === "visible" &&
+            shownAt >= closedAt - waitMs,
+        ),
+      waitMs,
+    ),
+  );
 }
 
 /** Runs when the Human closes this owner's window with the desktop's button. */
@@ -122,4 +167,5 @@ export function resetVoicePipForTest() {
   pip = undefined;
   listeners.clear();
   closedByHuman.clear();
+  shownAt = Number.NEGATIVE_INFINITY;
 }

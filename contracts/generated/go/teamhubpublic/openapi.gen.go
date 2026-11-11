@@ -5610,6 +5610,18 @@ type LocalComputerWorkspaceGrant struct {
 // LocalComputerWorkspaceGrantMode defines model for LocalComputerWorkspaceGrant.Mode.
 type LocalComputerWorkspaceGrantMode string
 
+// LocalIdentityChallenge defines model for LocalIdentityChallenge.
+type LocalIdentityChallenge struct {
+	// Nonce 32 fresh random bytes in unpadded base64url.
+	Nonce string `json:"nonce"`
+}
+
+// LocalIdentityProof defines model for LocalIdentityProof.
+type LocalIdentityProof struct {
+	// Proof Unpadded base64url HMAC-SHA256 of the challenge.
+	Proof string `json:"proof"`
+}
+
 // LocalRuntimeDiagnosticErrorCode defines model for LocalRuntimeDiagnosticErrorCode.
 type LocalRuntimeDiagnosticErrorCode string
 
@@ -8710,6 +8722,9 @@ type CreateExternalConnectionStatusCheckJSONRequestBody = ExternalConnectionStat
 
 // ExchangeLocalComputerEnrollmentJSONRequestBody defines body for ExchangeLocalComputerEnrollment for application/json ContentType.
 type ExchangeLocalComputerEnrollmentJSONRequestBody = LocalComputerEnrollmentExchangeRequest
+
+// ProveLocalIdentityJSONRequestBody defines body for ProveLocalIdentity for application/json ContentType.
+type ProveLocalIdentityJSONRequestBody = LocalIdentityChallenge
 
 // UpdateRoomJSONRequestBody defines body for UpdateRoom for application/json ContentType.
 type UpdateRoomJSONRequestBody = RoomUpdateRequest

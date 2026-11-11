@@ -337,13 +337,15 @@ async function prepareLocalmodelsTool(
         dependencies.fetcher,
       );
       await unpack(archive, stage);
-      const tool = await verify(stage, source);
+      // The kit is an npm tarball: its files sit under package/.
+      const kit = path.join(stage, "package");
+      const tool = await verify(kit, source);
       if (process.platform !== "win32") await chmod(tool.python, 0o700);
       // The kit manifest is private state; publisher bytes stay unchanged for digest checks.
-      const body = await readFile(path.join(stage, "tool.json"), "utf8");
-      await atomicPrivate(path.join(stage, "tool.json"), body);
+      const body = await readFile(path.join(kit, "tool.json"), "utf8");
+      await atomicPrivate(path.join(kit, "tool.json"), body);
       signal.throwIfAborted();
-      await renameRetrying(stage, directory, { signal });
+      await renameRetrying(kit, directory, { signal });
       // The rename keeps every stamp, so this checks the published kit
       // without hashing it a second time.
       const verified = await verify(directory, source, tool.stamps);

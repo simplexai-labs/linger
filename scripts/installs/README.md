@@ -40,7 +40,7 @@ diagnostics.
 
 `stack.sh` (Linux, macOS) and `stack.ps1` (Windows) run a pinned version of `localmodels stack`.
 Both scripts hold only the version pin, no source: the first run downloads that version's
-self-contained Python + localmodels kit for the platform from the CDN, checks the archive SHA256
+self-contained Python + localmodels kit from `@simplexai/localmodels-<target>` on npm, checks the archive SHA256
 pinned in the script and every file listed in the kit's `tool.json`, then caches it; later runs start
 offline and need no system Python.
 
@@ -55,25 +55,47 @@ scripts/installs/stack.sh apply "/path/to/plan.json" --approve CONFIRMATION_ID
 powershell -ExecutionPolicy Bypass -File scripts\installs\stack.ps1 --help
 ```
 
-Arguments pass unchanged to `localmodels stack`; with no arguments it shows the help. Where the CLI
+`--region auto|global|cn` before the command selects the registry (`-Region` in PowerShell).
+The flag overrides `SIMPLEX_REGION`, which defaults to `auto`. Auto probes the first 256 KiB of
+the pinned tarball from both registries in parallel with a five second deadline. It chooses the
+faster success and defaults to global if both fail. A download error retries the other registry
+once. A SHA256 mismatch is fatal. The resolved region is passed to localmodels and its Bifrost
+downloader through `SIMPLEX_REGION`; a resolved parent value does not probe again.
+An untouched `auto` on a cached launch stays `auto`, so a later Bifrost download probes its own tarball.
+Redirects stay on HTTPS and are limited to five hops.
+
+Other arguments pass unchanged to `localmodels stack`; with no arguments it shows the help. Where the CLI
 hints say `python3 -m localmodels stack`, use `stack.sh` here. `apply` still needs the full
 confirmation ID the plan prints; the scripts never plan or install on their own.
 
 Environment variables:
 
-- `LOCALMODELS_KIT_HOME`: kit cache directory, default `~/.cache/linger-localmodels/kits` (on Windows `%LOCALAPPDATA%\linger-localmodels\kits`).
-- `LOCALMODELS_KIT_BASE_URL`: download the same files from an internal mirror; SHA256 is still checked against the pin in the script.
+- `LOCALMODELS_KIT_HOME`: kit cache directory, default `~/.cache/simplex-localmodels/kits` (on Windows `%LOCALAPPDATA%\simplex-localmodels\kits`).
+- `SIMPLEX_NPM_REGISTRY`: replace both registry bases with a test registry or private mirror. Archive SHA256 and size pins still apply.
+- `SIMPLEX_REGION`: `global` uses `registry.npmjs.org`; `cn` uses `registry.npmmirror.com`; `auto` probes both.
+- `LOCALMODELS_KIT_BASE_URL`: legacy mirror layout serving the same pinned npm archives as `<target>.tgz`.
 
 The Linger installer does not go through `stack.sh`; it calls the same kind of localmodels kit
 directly and by convention pins the same version as here.
 
-The same script also runs without cloning the repository: `curl -fsSL https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/<version>/stack.sh | sh -s -- --help`.
-To follow the latest main build, use `…/cli/localmodels/mac-main/stack.sh` or `…/cli/localmodels/lin-main/stack.sh`
-on macOS and Linux (the two are the same file and run on both), and `…/cli/localmodels/win-main/stack.ps1` on Windows.
+Run the pinned script without cloning the repository:
 
-The localmodels release process publishes each version's kits, both scripts and `release.json` under
-`https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/<version>/`, and rewrites `stack.sh`, `stack.ps1` and this section
-with the new pin. Do not edit them by hand. The version pin only says which published CLI runs; it does not state which
-platforms or GPUs are supported.
+```sh
+# global
+curl -fsSL https://cdn.jsdelivr.net/npm/@simplexai/localmodels@0.1.0-dev.31/stack.sh | sh -s -- --region global --help
+# cn
+curl -fsSL https://registry.npmmirror.com/@simplexai/localmodels/0.1.0-dev.31/files/stack.sh | sh -s -- --region cn --help
+```
+
+```powershell
+irm https://cdn.jsdelivr.net/npm/@simplexai/localmodels@0.1.0-dev.31/stack.ps1 -OutFile stack.ps1
+powershell -ExecutionPolicy Bypass -File .\stack.ps1 -Region global --help
+# cn script URL: https://registry.npmmirror.com/@simplexai/localmodels/0.1.0-dev.31/files/stack.ps1
+```
+
+The localmodels release process publishes each version's platform kits, its patched Bifrost packages and the
+platform-independent `@simplexai/localmodels` package holding both scripts and `release.json`. `stack.sh`, `stack.ps1`
+and this section carry that release's pin; do not edit them by hand. The version pin only says which published CLI
+runs; it does not state which platforms or GPUs are supported.
 
 <!-- <<< llm-inference-lab: stack -->

@@ -1,10 +1,11 @@
 name: CI
 
 # The repository gate runs on every pull request; each app's fast check runs
-# only when its paths change. Pushes to main run every check. The heavier
-# suites (node-services, voice-runtime, computer, integration, containers and
-# E2E) stay local: run `make check BASE=<target-ref>` and the targets in the
-# Makefile before you open a pull request.
+# only when its paths change. Pushes to main run every check. CI runs the
+# computer daemon's Go unit tests; the rest of check-computer (TS and process
+# tests) and the heavier suites (node-services, voice-runtime, integration,
+# containers and E2E) stay local: run `make check BASE=<target-ref>` and the
+# targets in the Makefile before you open a pull request.
 on:
   pull_request:
   push:
@@ -33,6 +34,7 @@ jobs:
       desktop: ${{ steps.filter.outputs.desktop }}
       contracts: ${{ steps.filter.outputs.contracts }}
       teamhub: ${{ steps.filter.outputs.teamhub }}
+      computer-go: ${{ steps.filter.outputs.computer-go }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,6 +64,7 @@ jobs:
           match "$node|^(apps/desktop/|apps/computer/local-daemon/|apps/computer/package\.json|packages/|contracts/generated/typescript/)" desktop
           match "$node|^contracts/" contracts
           match '^(apps/teamhub/|skills/|contracts/generated/go/|contracts/fixtures/|\.golangci\.yml|Makefile|\.github/)' teamhub
+          match '^(apps/computer/local-daemon/|apps/computer/run-test\.sh|contracts/generated/go/runnergateway/|contracts/runner-gateway/fixtures/|scripts/managed-tools-|scripts/local-computer-node-distributions\.mjs|scripts/test-fixtures/managed-tools-fixture\.mjs|Makefile|\.github/)' computer-go
 
   repository-gate:
     runs-on: ubuntu-latest
@@ -79,7 +82,16 @@ jobs:
       fail-fast: false
       matrix:
         app:
-          [web, packages, teamhub-cli, installer, desktop, contracts, teamhub]
+          [
+            web,
+            packages,
+            teamhub-cli,
+            installer,
+            desktop,
+            contracts,
+            teamhub,
+            computer-go,
+          ]
     steps:
       - name: Skip unchanged app
         if: needs.changes.outputs[matrix.app] != 'true'

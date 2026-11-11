@@ -525,7 +525,7 @@ describe("LiveVoiceWorker", () => {
     expect(test.session().close).toHaveBeenCalledOnce();
   });
 
-  it("waits for the provider even when PCM has already arrived", async () => {
+  it("listens before the provider opens and sends that speech once it does", async () => {
     let ready!: () => void;
     const providerOpening = new Promise<void>((resolve) => {
       ready = resolve;
@@ -534,16 +534,21 @@ describe("LiveVoiceWorker", () => {
       providerOpening,
       beforeReady: async ({ track, readyAttributes }) => {
         track.frame(0);
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        expect(readyAttributes()).toEqual([]);
+        // The microphone alone makes the call ready to hear the user.
+        await vi.waitFor(() =>
+          expect(readyAttributes()).toContainEqual(
+            expect.objectContaining({ "linger.voice_ready_generation": "1" }),
+          ),
+        );
+        track.frame(1);
         ready();
       },
     });
+    // What was said while the provider opened reaches it, in order.
     await vi.waitFor(() =>
-      expect(test.localParticipant.setAttributes).toHaveBeenCalledWith(
-        expect.objectContaining({ "linger.voice_ready_generation": "1" }),
-      ),
+      expect(test.session().audio.length).toBeGreaterThanOrEqual(2),
     );
+    expect(test.session().audio[0]![0]).toBe(0);
     await test.shutdown();
   });
 

@@ -9,7 +9,7 @@ vi.mock("./model-gateway.js", () => ({
 }));
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { afterEach, expect, test, vi } from "vitest";
@@ -193,6 +193,96 @@ test("native services and owner creation continue while selected Runtime authent
   expect(owner?.[2]?.input?.trim().length).toBeGreaterThan(8);
   expect(JSON.stringify(owner?.[1])).not.toContain(owner?.[2]?.input?.trim());
   expect(events.join("\n")).not.toContain(owner?.[2]?.input?.trim());
+});
+test("only TeamHub's process gets the server identity key", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  // Not even a key the installer itself was started with reaches the others.
+  vi.stubEnv("TEAMHUB_LOCAL_IDENTITY_KEY", "inherited");
+  const events: string[] = [];
+  try {
+    await installNativeSource({
+      home: f.home,
+      repo: f.repo,
+      name: "native-identity",
+      setupChoice: "pi",
+      signal: new AbortController().signal,
+      onEvent: (event) => events.push(event.message),
+    });
+  } finally {
+    vi.unstubAllEnvs();
+  }
+  const root = path.join(f.home, "instances", "native-identity");
+  const key = (
+    await readFile(path.join(root, "local-identity.key"), "utf8")
+  ).trim();
+  const services = vi
+    .mocked(startNativeProcess)
+    .mock.calls.map(([options]) => options);
+  expect(
+    services.find((options) => options.name === "teamhub")!.env
+      .TEAMHUB_LOCAL_IDENTITY_KEY,
+  ).toBe(key);
+  const others = services.filter((options) => options.name !== "teamhub");
+  expect(others.map((options) => options.name)).toEqual(
+    expect.arrayContaining(["node-services", "web"]),
+  );
+  for (const options of others)
+    expect(options.env).not.toHaveProperty("TEAMHUB_LOCAL_IDENTITY_KEY");
+  const commands = vi.mocked(runProcess).mock.calls;
+  expect(commands.some((row) => row[1].includes("migrate"))).toBe(true);
+  for (const [, , options] of commands)
+    expect(options?.env ?? {}).not.toHaveProperty("TEAMHUB_LOCAL_IDENTITY_KEY");
+  // Compose and the services load native.env; the installer's own secrets
+  // file no longer holds the key either.
+  for (const file of ["native.env", "services.env"])
+    expect(await readFile(path.join(root, file), "utf8")).not.toContain(
+      "TEAMHUB_LOCAL_IDENTITY_KEY",
+    );
+  expect(events.join("\n")).not.toContain(key);
+});
+test("a new identity key restarts TeamHub alone", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const install = async () => {
+    vi.mocked(startNativeProcess).mockClear();
+    await installNativeSource({
+      home: f.home,
+      repo: f.repo,
+      name: "native-rekey",
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    return Object.fromEntries(
+      vi
+        .mocked(startNativeProcess)
+        .mock.calls.map(([options]) => [options.name, options.settings]),
+    );
+  };
+  const before = await install();
+  const file = path.join(
+    f.home,
+    "instances",
+    "native-rekey",
+    "local-identity.key",
+  );
+  const key = Buffer.alloc(32, 5).toString("base64");
+  await writeFile(file, `${key}\n`, { mode: 0o600 });
+  const after = await install();
+  expect(after.teamhub).not.toBe(before.teamhub);
+  expect(after.teamhub).not.toContain(key);
+  expect(after["node-services"]).toBe(before["node-services"]);
+  expect(after.web).toBe(before.web);
 });
 test("an external Computer skips the Go Computer release and enrollment", async () => {
   const f = await fixture();

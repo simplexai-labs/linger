@@ -58,7 +58,9 @@ describe("desktop distributions", () => {
         voice.map((source) => [source.target, source.file !== undefined]),
       ).toEqual([[target, true]]);
       const tool = validateToolSource(value.localmodelsTool);
-      expect(tool.url).toBe(`${pin("STACK_BASE_URL")}/${target}.tgz`);
+      expect(tool.url.endsWith(`/${pin("STACK_VERSION")}/${target}.tgz`)).toBe(
+        true,
+      );
       expect(value.localmodelsTool.sourceCommit).toBe(
         pin("STACK_SOURCE_COMMIT"),
       );

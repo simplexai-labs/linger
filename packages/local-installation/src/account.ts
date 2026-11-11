@@ -2,8 +2,8 @@ import { windowsPrivatePath } from "./windows-private.js";
 import { randomBytes } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { Instance } from "./instance.js";
-import { atomicPrivate } from "./private-files.js";
+import { readLocalIdentityKey, type Instance } from "./instance.js";
+import { atomicPrivate, readPrivate } from "./private-files.js";
 
 export function validateLocalCredentials(options: {
   email?: string;
@@ -55,6 +55,38 @@ export async function readLocalLogin(
       "The local account file is invalid or the account has not been created.",
     );
   }
+}
+// How the desktop app checks that the server it sends the owner password to
+// is this instance's TeamHub: TeamHub's own loopback address and the key
+// only TeamHub's process and this file's owner hold (see TeamHub's /v0/local/identity).
+export interface LocalIdentity {
+  teamhub: string;
+  key: Buffer;
+}
+export async function readLocalIdentity(
+  instance: Pick<Instance, "root">,
+): Promise<LocalIdentity> {
+  const unavailable = () =>
+    new Error("Linger on this computer has no server identity yet.");
+  const [settings, encoded] = await Promise.all([
+    readPrivate(path.join(instance.root, "instance.json")),
+    readLocalIdentityKey(instance.root),
+  ]);
+  if (settings === undefined || encoded === undefined) throw unavailable();
+  let port: unknown;
+  try {
+    port = (JSON.parse(settings) as Partial<Instance>).source?.ports?.teamhub;
+  } catch {
+    throw unavailable();
+  }
+  if (
+    !Number.isSafeInteger(port) ||
+    (port as number) < 1024 ||
+    (port as number) > 65535
+  )
+    throw unavailable();
+  const key = Buffer.from(encoded, "base64");
+  return { teamhub: `http://127.0.0.1:${port as number}`, key };
 }
 interface LocalAccount {
   email: string;

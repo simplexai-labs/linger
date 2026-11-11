@@ -102,6 +102,28 @@ function audioConfig(transport: "binary" | "json", speed?: number) {
   };
 }
 
+/** How much of the user's latest words a tool result quotes back. */
+const latestWordsLimit = 160;
+
+/**
+ * Grok answers right after a tool result, whose English JSON and the English
+ * tool descriptions pulled Chinese replies into English mid-sentence (a Chinese
+ * “it is written” followed by “titled …, open beside the chat”). The reminder
+ * sits where the reply starts and quotes the user's latest words, so the model
+ * sees which language to keep without any language being named here.
+ */
+export function withLanguage(output: string, latestWords?: string) {
+  const words = latestWords?.trim();
+  if (!words) return output;
+  const quoted =
+    words.length > latestWordsLimit
+      ? `${words.slice(0, latestWordsLimit)}…`
+      : words;
+  return `${output}
+
+Reply in the language of the user's latest words (“${quoted}”), every word except names of people, companies, products and apps, whatever language this result is in.`;
+}
+
 const maximumQueuedEvents = 2_048;
 const maximumQueuedBytes = 8 << 20;
 const maximumSendBuffer = 1 << 20;
@@ -232,6 +254,8 @@ export class XaiLiveSession implements LiveSession {
   private readonly completedInputs = new Set<string>();
   private readonly inputTexts = new Map<string, string>();
   private lastInputId?: string;
+  /** The user's latest words, quoted back with tool results. */
+  private latestWords?: string;
 
   private constructor(
     private readonly socket: WebSocket,
@@ -528,7 +552,7 @@ export class XaiLiveSession implements LiveSession {
         item: {
           type: "function_call_output",
           call_id: result.callId,
-          output: result.output,
+          output: withLanguage(result.output, this.latestWords),
         },
       });
     }
@@ -592,6 +616,7 @@ export class XaiLiveSession implements LiveSession {
         const itemId = text("item_id");
         if (this.completedInputs.has(itemId)) return;
         this.inputTexts.set(itemId, text("transcript"));
+        this.latestWords = text("transcript") || this.latestWords;
         // The transcript is cumulative, as the worker's partial is.
         return this.push({
           type: "transcript_delta",
@@ -602,6 +627,7 @@ export class XaiLiveSession implements LiveSession {
       case "conversation.item.input_audio_transcription.completed": {
         const itemId = text("item_id");
         this.inputTexts.set(itemId, text("transcript"));
+        this.latestWords = text("transcript") || this.latestWords;
         // Interim segments also arrive as "completed" while still in progress.
         if (event.status === "completed") this.completeInput(itemId);
         return;
