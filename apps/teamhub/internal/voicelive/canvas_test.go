@@ -71,4 +71,11 @@ func TestEditedEmailCanvasKeepsWhatTheChangeLeavesOut(t *testing.T) {
 	if _, _, problem := EditedEmailCanvas(fields, body, EditEmailCanvasArguments{Body: &empty}); problem != "missing_content" {
 		t.Fatalf("empty body: %q", problem)
 	}
+	// The check covers the email after the change, so a canvas opened with
+	// no subject is still missing content when only a recipient changes.
+	untitled := map[string]string{"to": "amy@example.com", "subject": ""}
+	to := "carol@example.com"
+	if _, _, problem := EditedEmailCanvas(untitled, body, EditEmailCanvasArguments{To: &to}); problem != "missing_content" {
+		t.Fatalf("recipient change on an untitled canvas: %q", problem)
+	}
 }

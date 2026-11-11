@@ -55,7 +55,7 @@ var EditEmailCanvasTool = Tool{
 		"canvas_changed means the canvas is not as you last saw it (the user may have edited it): its result has the latest text and revision_id; redo the change on that text, keeping the user's own edits, and call again with that revision_id. " +
 		"When it is changed, tell the user in one short sentence what you changed. " + emailCanvasDelivery +
 		"canvas_has_media means images sit among the text, which a body rewrite would lose: recipients and subject still change here; change the body with start_task instead, naming the document_id. canvas_locked: change it with start_task instead, naming the document_id. invalid_recipients means an address is not an email address: ask the user for it. " +
-		"missing_content means the subject or body you gave is empty: ask the user what it should say. body_too_long means the body is too long: shorten it. nothing_to_change means you gave none of to, cc, subject or body.",
+		"missing_content means the email's subject or body is empty, also when the canvas already had it empty and this call left it out: ask the user what it should say. body_too_long means the body is too long: shorten it. nothing_to_change means you gave none of to, cc, subject or body.",
 	Parameters: objectSchema([]string{"document_id", "revision_id"}, map[string]any{
 		"document_id": stringProperty("The canvas, from open_email_canvas"),
 		"revision_id": stringProperty("The revision_id the last result gave for this canvas"),
