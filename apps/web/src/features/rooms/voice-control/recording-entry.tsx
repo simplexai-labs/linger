@@ -10,6 +10,7 @@ import {
   isTranscriptRecoveryPaused,
   useOptionalVoiceControl,
   VoiceCapabilitiesContext,
+  VoiceConnectionRetryContext,
 } from "./voice-control-context";
 
 /**
@@ -26,6 +27,8 @@ export function RecordingEntry({
   const voice = livekit;
   // Recording transcribes with Soniox; xAI alone does not offer it.
   const capabilities = use(VoiceCapabilitiesContext);
+  const retryConnection = use(VoiceConnectionRetryContext);
+  const connectionFailed = Boolean(retryConnection);
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
   const status = voice?.captureState?.status;
@@ -35,21 +38,31 @@ export function RecordingEntry({
     (status === "recovering" &&
       !(voice && isTranscriptRecoveryPaused(voice.captureState)));
   const standby = voice?.listenerStatus === "standby";
+  // Until voice connects, including while it reconnects, the icon spins.
+  const connecting = !voice && !connectionFailed;
   const label = recording
     ? "Return to recording"
     : saving
       ? "View save progress"
-      : "Meetings";
+      : connectionFailed
+        ? "Retry voice connection"
+        : "Meetings";
   const hint =
     error ??
-    (!voice || !anotherMeRoomId
-      ? "Meeting is loading"
-      : voice.composerMicrophoneActive
-        ? "Finish voice input first"
-        : standby
-          ? "Recording is active in another tab"
-          : label);
+    (connectionFailed
+      ? "Voice connection is unavailable. Click to retry."
+      : !voice || !anotherMeRoomId
+        ? "Meeting is loading"
+        : voice.composerMicrophoneActive
+          ? "Finish voice input first"
+          : standby
+            ? "Recording is active in another tab"
+            : label);
   function start() {
+    if (retryConnection) {
+      retryConnection();
+      return;
+    }
     if (!voice || !anotherMeRoomId || pending || voice.composerMicrophoneActive)
       return;
     setPending(true);
@@ -80,21 +93,25 @@ export function RecordingEntry({
       aria-label={label}
       className="xs-nav-btn relative"
       disabled={
-        pending || !voice || !anotherMeRoomId || voice.composerMicrophoneActive
+        !connectionFailed &&
+        (pending ||
+          !voice ||
+          !anotherMeRoomId ||
+          voice.composerMicrophoneActive)
       }
       onClick={start}
       title={hint}
       type="button"
     >
-      {saving ? (
+      {saving || connecting ? (
         <Icon icon={Loading03Icon} className="animate-spin" size={16} />
       ) : (
         <Icon icon={AiTranscribeAudioIcon} size={16} />
       )}
-      {recording ? (
+      {recording || connectionFailed ? (
         <span
           aria-hidden="true"
-          className="absolute top-1 right-1 size-2 rounded-full bg-app-danger ring-2 ring-app-sidebar"
+          className={`absolute top-1 right-1 size-2 rounded-full ring-2 ring-app-sidebar ${recording ? "bg-app-danger" : "bg-app-warning"}`}
         />
       ) : null}
       {error ? (

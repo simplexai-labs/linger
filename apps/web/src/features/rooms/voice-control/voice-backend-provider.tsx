@@ -9,12 +9,14 @@ import {
 import type { TeamHubVoiceMediaPolicy } from "@/features/teamhub/teamhub-types";
 import {
   VoiceCapabilitiesContext,
+  VoiceConnectionRetryContext,
   VoiceControlContext,
 } from "./voice-control-context";
 
 export interface VoiceContexts {
   livekit: ContextType<typeof VoiceControlContext>;
   policy?: TeamHubVoiceMediaPolicy;
+  retryConnection?: () => void;
 }
 
 const VoiceBackendController = lazy(async () => ({
@@ -43,7 +45,7 @@ function TenantVoiceControlProvider({
     () => <VoiceBackendController tenantId={tenantId} onChange={setContexts} />,
     [tenantId],
   );
-  const { livekit, policy } = contexts;
+  const { livekit, policy, retryConnection } = contexts;
   const ready = Boolean(policy && (!policy.voice_media_supported || livekit));
   const capabilities = useMemo(
     () =>
@@ -57,7 +59,9 @@ function TenantVoiceControlProvider({
       <Suspense fallback={null}>{controller}</Suspense>
       <VoiceControlContext value={livekit}>
         <VoiceCapabilitiesContext value={capabilities}>
-          {children}
+          <VoiceConnectionRetryContext value={retryConnection}>
+            {children}
+          </VoiceConnectionRetryContext>
         </VoiceCapabilitiesContext>
       </VoiceControlContext>
     </>

@@ -20,6 +20,7 @@ import {
 
 import {
   VoiceCapabilitiesContext,
+  VoiceConnectionRetryContext,
   VoiceControlContext,
   useOptionalVoiceControl,
   type VoiceControlContextValue,
@@ -100,6 +101,7 @@ const httpError = (status: number) =>
 const ui = (tenantId = "tenant-a", text = "Room content") => (
   <VoiceControlProvider tenantId={tenantId}>
     <p>{text}</p>
+    <ConnectionProbe />
   </VoiceControlProvider>
 );
 const advance = async (ms = 0) => {
@@ -158,6 +160,13 @@ afterEach(() => {
 function VoiceProbe() {
   const livekit = useOptionalVoiceControl();
   return <p>Target: {livekit?.targetRoomId ?? "loading"}</p>;
+}
+
+function ConnectionProbe() {
+  const retryConnection = useContext(VoiceConnectionRetryContext);
+  return retryConnection ? (
+    <button onClick={retryConnection}>Retry voice connection</button>
+  ) : null;
 }
 
 function CapabilitiesProbe() {
@@ -353,7 +362,9 @@ describe("voice backend bootstrap recovery", () => {
     render(ui());
     await advance(10_000);
     expect(fixture.policy).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("alert")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Retry voice connection" }),
+    ).toBeVisible();
     expect(
       screen.queryByRole("region", { name: "legacy:tenant-a" }),
     ).not.toBeInTheDocument();
@@ -363,7 +374,9 @@ describe("voice backend bootstrap recovery", () => {
     );
     await advance();
     expect(fixture.policy).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Retry voice connection" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("region", { name: "livekit:tenant-a" }),
     ).toBeVisible();
@@ -373,7 +386,9 @@ describe("voice backend bootstrap recovery", () => {
     fixture.policy.mockRejectedValue(httpError(404));
     render(ui());
     await advance();
-    expect(screen.getByRole("alert")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Retry voice connection" }),
+    ).toBeVisible();
     expect(fixture.mounted).not.toHaveBeenCalled();
     await advance(10_000);
     expect(fixture.policy).toHaveBeenCalledTimes(1);

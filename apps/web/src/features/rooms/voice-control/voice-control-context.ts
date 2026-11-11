@@ -91,6 +91,12 @@ export const VoiceCapabilitiesContext = createContext<
   VoiceCapabilities | undefined
 >({ voiceMedia: true });
 
+// Present only once the voice backend stopped retrying on its own; calling it
+// tries again.
+export const VoiceConnectionRetryContext = createContext<
+  (() => void) | undefined
+>(undefined);
+
 export const VoiceControlContext =
   createContext<VoiceControlContextValue | null>(null);
 

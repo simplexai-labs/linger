@@ -9,7 +9,6 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { Button } from "@/components/ui/button";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import {
@@ -58,6 +57,14 @@ export function VoiceBackendController({
   const [backend, setBackend] = useState<TeamHubVoiceMediaPolicy>();
   const [error, setError] = useState<"recovering" | "failed">();
   const retryRef = useRef<(() => void) | undefined>(undefined);
+  // The Meetings entry offers the retry where the Human uses voice.
+  useEffect(() => {
+    onChange((current) => ({
+      ...current,
+      retryConnection:
+        error === "failed" ? () => retryRef.current?.() : undefined,
+    }));
+  }, [error, onChange]);
   useEffect(() => {
     let pending = false;
     let failures = 0;
@@ -116,28 +123,16 @@ export function VoiceBackendController({
     };
   }, [client, tenantId, onChange]);
   return (
-    <>
-      <Suspense fallback={null}>
-        {backend?.voice_media_supported ? (
-          <LiveKitProvider
-            tenantId={tenantId}
-            activeRoomId={backend.active_room_id}
-          >
-            <VoiceContextBridge onChange={onChange} />
-          </LiveKitProvider>
-        ) : null}
-      </Suspense>
-      {error === "recovering" ? (
-        <div role="status">Reconnecting voice…</div>
-      ) : error === "failed" ? (
-        <div role="alert" className="flex items-center gap-3">
-          Voice connection is temporarily unavailable.
-          <Button onClick={() => retryRef.current?.()}>
-            Retry voice connection
-          </Button>
-        </div>
+    <Suspense fallback={null}>
+      {backend?.voice_media_supported ? (
+        <LiveKitProvider
+          tenantId={tenantId}
+          activeRoomId={backend.active_room_id}
+        >
+          <VoiceContextBridge onChange={onChange} />
+        </LiveKitProvider>
       ) : null}
-    </>
+    </Suspense>
   );
 }
 
