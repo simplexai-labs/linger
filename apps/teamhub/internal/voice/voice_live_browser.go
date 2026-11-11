@@ -208,9 +208,8 @@ func (s *Service) followLiveBrowserTab(ctx context.Context, session voicelive.Se
 	}
 	beforeCount, beforeCurrent := voicelive.BrowserTabs(lastPage)
 	count, current := voicelive.BrowserTabs(result.Text)
-	switch {
 	// Tabs are listed in the order they opened, so the new one is the last.
-	case action == "click" && count > beforeCount && current != count-1:
+	if action == "click" && count > beforeCount && current != count-1 {
 		if page, ok := s.switchLiveBrowserTab(ctx, session, browser, call, count-1); ok {
 			return page, current
 		}
