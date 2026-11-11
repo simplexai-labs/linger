@@ -55,7 +55,12 @@ func TestClaudeCredentialChangeStopsParkedResidentBeforeWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Cleanup(func() { _, _ = native.StopAllParkedResidents() })
+	t.Cleanup(func() {
+		_, _ = native.StopAllParkedResidents()
+		// The stop path queues its last diagnostics record into the Runtime
+		// home asynchronously; it must land before TempDir removal.
+		native.FlushTimings()
+	})
 	login := func(token string) {
 		t.Helper()
 		credential := `{"claudeAiOauth":{"accessToken":"` + token + `","expiresAt":4102448400000}}`

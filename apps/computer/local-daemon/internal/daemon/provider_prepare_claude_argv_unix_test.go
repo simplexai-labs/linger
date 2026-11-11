@@ -115,6 +115,9 @@ func newClaudeRig(t *testing.T, script string) claudeRig {
 		d.cancelProviderPrepares(providerPrepareAll, "test_cleanup")
 		_, _ = native.StopParkedResidentsForContext("context-1")
 		d.WaitForOperations()
+		// The stop path queues its last diagnostics record into the Runtime
+		// home asynchronously; it must land before TempDir removal.
+		native.FlushTimings()
 	})
 	return claudeRig{daemon: d, resolver: resolver, stream: stream, argvLog: argvLog, root: root}
 }

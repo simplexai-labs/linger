@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"reflect"
@@ -276,6 +277,40 @@ func TestTimingQueueNeverBlocks(t *testing.T) {
 	}
 	if len(queue.records) != 1 {
 		t.Fatalf("queue holds %d records", len(queue.records))
+	}
+}
+
+type collectHandler struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (h *collectHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *collectHandler) Handle(_ context.Context, record slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.messages = append(h.messages, record.Message)
+	return nil
+}
+func (h *collectHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *collectHandler) WithGroup(string) slog.Handler      { return h }
+
+func TestTimingQueueFlushHandlesQueuedRecords(t *testing.T) {
+	queue := newTimingQueue(8)
+	// A flush with nothing queued returns.
+	queue.flush()
+	handler := &collectHandler{}
+	logger := slog.New(handler)
+	for i := range 8 {
+		if !queue.enqueue(logger, time.Now(), fmt.Sprintf("record-%d", i)) {
+			t.Fatalf("record-%d dropped", i)
+		}
+	}
+	queue.flush()
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	if len(handler.messages) != 8 {
+		t.Fatalf("handled %d records before flush returned, want 8: %v", len(handler.messages), handler.messages)
 	}
 }
 

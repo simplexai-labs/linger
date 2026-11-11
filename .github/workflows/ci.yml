@@ -64,7 +64,7 @@ jobs:
           match "$node|^(apps/desktop/|apps/computer/local-daemon/|apps/computer/package\.json|packages/|contracts/generated/typescript/)" desktop
           match "$node|^contracts/" contracts
           match '^(apps/teamhub/|skills/|contracts/generated/go/|contracts/fixtures/|\.golangci\.yml|Makefile|\.github/)' teamhub
-          match '^(apps/computer/local-daemon/|contracts/generated/go/runnergateway/|Makefile|\.github/)' computer-go
+          match '^(apps/computer/local-daemon/|apps/computer/run-test\.sh|contracts/generated/go/runnergateway/|contracts/runner-gateway/fixtures/|scripts/managed-tools-|scripts/local-computer-node-distributions\.mjs|scripts/test-fixtures/managed-tools-fixture\.mjs|Makefile|\.github/)' computer-go
 
   repository-gate:
     runs-on: ubuntu-latest

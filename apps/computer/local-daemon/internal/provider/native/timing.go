@@ -22,6 +22,8 @@ const timingQueueCapacity = 64
 type timingRecord struct {
 	logger *slog.Logger
 	record slog.Record
+	// flushed marks a flush sentinel: the worker closes it instead of logging.
+	flushed chan struct{}
 }
 
 // timingQueue hands lifecycle observations to one background worker. A
@@ -57,6 +59,10 @@ func (q *timingQueue) enqueue(logger *slog.Logger, at time.Time, event string, a
 func (q *timingQueue) drain() {
 	ctx := context.Background()
 	for item := range q.records {
+		if item.flushed != nil {
+			close(item.flushed)
+			continue
+		}
 		handler := item.logger.Handler()
 		if handler.Enabled(ctx, slog.LevelInfo) {
 			_ = handler.Handle(ctx, item.record)
@@ -68,3 +74,18 @@ func (q *timingQueue) drain() {
 func recordTiming(logger *slog.Logger, at time.Time, event string, attrs ...any) {
 	processTimings.enqueue(logger, at, event, attrs...)
 }
+
+// flush blocks until every record queued before the call has been handled.
+// The sentinel's send blocks: only real records are dropped when full, and the
+// single FIFO worker handles everything queued ahead of it first.
+func (q *timingQueue) flush() {
+	q.once.Do(func() { go q.drain() })
+	done := make(chan struct{})
+	q.records <- timingRecord{flushed: done}
+	<-done
+}
+
+// FlushTimings blocks until every timing record queued before the call has
+// been handled. It exists so tests can wait for diagnostics written into a
+// Runtime home before removing it; hot-path callers never use it.
+func FlushTimings() { processTimings.flush() }

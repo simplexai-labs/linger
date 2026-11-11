@@ -69,6 +69,9 @@ done
 		for _, cfg := range captured {
 			_, _ = native.StopCodexHomeForMaintenance(cfg.Env["CODEX_HOME"])
 		}
+		// The stop path queues its last diagnostics record into the Runtime
+		// home asynchronously; it must land before TempDir removal.
+		native.FlushTimings()
 	})
 	env := func() map[string]string {
 		return map[string]string{"HOME": root, "CODEX_HOME": shared, "TEAMHUB_CONFIG": "/private/teamhub.json", "TEAMHUB_PROFILE": "runtime", "PATH": "/trusted:/bin", "LINGER_TEST_SED": sedPath}
