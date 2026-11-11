@@ -50,9 +50,10 @@ var EmailCanvasTool = Tool{
 var EditEmailCanvasTool = Tool{
 	Name: ToolEditEmailCanvas,
 	Description: "Change a Gmail canvas in this room as the user asks: its recipients, subject or body. It changes in the side panel at once. " +
+		"Put everything one request changes in one call, to, cc, subject and body together; never split it into several calls. " +
 		"Give only what changes: to, cc or subject replace that line, and the canvas title follows the subject, so never rename an email canvas yourself; body replaces the whole body text, so write all of it, keeping what the user did not ask to change. Attached files are not part of the body: they stay attached, listed as attachments, wherever they sat. " +
 		"revision_id is the one the last open_email_canvas or edit_email_canvas result gave for this document_id. " +
-		"canvas_changed means the canvas is not as you last saw it (the user may have edited it): its result has the latest text and revision_id; redo the change on that text, keeping the user's own edits, and call again with that revision_id. " +
+		"canvas_changed means the body is not as you last saw it (the user may have edited it): its result has the latest text and revision_id; redo the body on that text, keeping the user's own edits, and call again with that revision_id. " +
 		"When it is changed, tell the user in one short sentence what you changed. " + emailCanvasDelivery +
 		"canvas_has_media means images sit among the text, which a body rewrite would lose: recipients and subject still change here; change the body with start_task instead, naming the document_id. canvas_locked: change it with start_task instead, naming the document_id. invalid_recipients means an address is not an email address: ask the user for it. " +
 		"missing_content means the email's subject or body is empty, also when the canvas already had it empty and this call left it out: ask the user what it should say. body_too_long means the body is too long: shorten it. nothing_to_change means you gave none of to, cc, subject or body.",

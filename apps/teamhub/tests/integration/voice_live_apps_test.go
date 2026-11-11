@@ -210,8 +210,7 @@ func TestVoiceLiveSendsAnEmailCanvasOnlyAfterTheUserSaidYes(t *testing.T) {
 		t.Fatalf("saves of an unchanged canvas=%d", saves)
 	}
 	// A canvas changed after the question asks again.
-	stale := call("lt_edit", "edit-0", "edit_email_canvas", map[string]any{"document_id": documentID, "revision_id": "revision_unseen", "subject": "Wed afternoon pickup"})
-	edited := call("lt_edit", "edit-1", "edit_email_canvas", map[string]any{"document_id": documentID, "revision_id": stale["revision_id"], "subject": "Wed afternoon pickup"})
+	edited := call("lt_edit", "edit-1", "edit_email_canvas", map[string]any{"document_id": documentID, "revision_id": "revision_unseen", "subject": "Wed afternoon pickup"})
 	if edited["status"] != "changed" {
 		t.Fatalf("edit=%v", edited)
 	}

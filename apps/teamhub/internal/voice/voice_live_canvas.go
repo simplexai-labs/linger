@@ -163,26 +163,83 @@ func (s *Service) editVoiceLiveEmailCanvas(ctx context.Context, session voiceliv
 	if err != nil {
 		return "", err
 	}
-	// A body rewrite is text: it replaces the text blocks and keeps the
-	// attached files after them. Images or files among the text would be
-	// lost, so that body changes through a task; the header can always change.
-	if args.Body != nil && canvas.mediaInText {
-		return voicelive.ErrorOutput("canvas_has_media"), nil
-	}
-	if args.RevisionID != canvas.revisionID {
-		return canvas.changed(), nil
-	}
 	if args.Body != nil {
 		// The model may copy an attachment line from the body it was shown.
 		body := voiceLiveAttachmentLine.ReplaceAllString(*args.Body, "")
 		args.Body = &body
 	}
+	// To, cc and subject each replace a whole line with what the user just
+	// asked for, so they change on the latest canvas whatever changed since the
+	// model read it, also by its own calls in parallel. The body is rewritten
+	// from the text the model read, so it changes only while that text is
+	// still the body; a body the user edited since comes back to be redone.
+	for attempt := 0; ; attempt++ {
+		if args.Body != nil {
+			same, err := s.voiceLiveCanvasBodySince(ctx, args.RevisionID, canvas)
+			if err != nil {
+				return "", err
+			}
+			if !same {
+				return canvas.changed(), nil
+			}
+			// A body rewrite is text: it replaces the text blocks and keeps the
+			// attached files after them. Images or files among the text would be
+			// lost, so that body changes through a task; the header can always change.
+			if canvas.mediaInText {
+				return voicelive.ErrorOutput("canvas_has_media"), nil
+			}
+		}
+		output, conflicted, err := s.applyVoiceLiveEmailEdit(ctx, session, request, principal, canvas, args, attempt)
+		if err != nil || !conflicted {
+			return output, err
+		}
+		// Another change landed while this one was made: read the canvas
+		// again and redo it there, a few times at most.
+		latest, readErr := s.voiceLiveCanvas(ctx, principal, args.DocumentID)
+		if output, handled := voiceLiveCanvasError(readErr); handled {
+			return output, nil
+		}
+		if readErr != nil {
+			return "", readErr
+		}
+		if attempt+1 >= voiceLiveEmailEditAttempts {
+			return latest.changed(), nil
+		}
+		canvas = latest
+	}
+}
+
+// voiceLiveEmailEditAttempts bounds how often an email edit is redone on a
+// canvas that changed while it was made.
+const voiceLiveEmailEditAttempts = 3
+
+// voiceLiveCanvasBodySince reports whether the canvas body is still the text
+// it had at revisionID, the revision the live model last read.
+func (s *Service) voiceLiveCanvasBodySince(ctx context.Context, revisionID string, canvas voiceLiveCanvasState) (bool, error) {
+	if revisionID == canvas.revisionID {
+		return true, nil
+	}
+	markdown, err := s.documents.RevisionMarkdown(ctx, canvas.documentID, revisionID)
+	if errors.Is(err, document.ErrRevisionUnavailable) || errors.Is(err, document.ErrInvalidInput) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	_, text := voiceLiveCanvasText(string(markdown))
+	return text == canvas.text, nil
+}
+
+// applyVoiceLiveEmailEdit makes one email edit on the canvas as read. A
+// native edit is one operation: the header, the title and the body's text
+// change in turn, each against the revision the one before made. conflicted
+// means another change landed first, after which part of it may be made.
+func (s *Service) applyVoiceLiveEmailEdit(ctx context.Context, session voicelive.Session, request teamhubinternal.VoiceLiveToolCall,
+	principal agentcredential.Principal, canvas voiceLiveCanvasState, args voicelive.EditEmailCanvasArguments, attempt int) (string, bool, error) {
 	_, header, problem := voicelive.EditedEmailCanvas(canvas.fields, canvas.text, args)
 	if problem != "" {
-		return voicelive.ErrorOutput(problem), nil
+		return voicelive.ErrorOutput(problem), false, nil
 	}
-	// A native edit is one operation: the header, the title and the body's
-	// text change in turn, each against the revision the one before made.
 	edits := []map[string]string{}
 	if args.To != nil || args.Cc != nil || args.Subject != nil {
 		edits = append(edits, map[string]string{"command": "block_replace", "block_id": canvas.firstBlockID, "content": header})
@@ -214,16 +271,21 @@ func (s *Service) editVoiceLiveEmailCanvas(ctx context.Context, session voiceliv
 		}
 	}
 	if len(edits) == 0 {
-		return voicelive.ErrorOutput("nothing_to_change"), nil
+		return voicelive.ErrorOutput("nothing_to_change"), false, nil
 	}
 	revisionID := canvas.revisionID
 	for index, edit := range edits {
 		edit["kind"], edit["parser_version"] = "edit_document", "markdown-v1"
 		change, err := json.Marshal([]map[string]string{edit})
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
+		// Each step of each try is its own operation: a retried call makes
+		// it once, and a redone try never replays an earlier try's step.
 		invocationID := voiceLiveInvocationID(session, request)
+		if attempt > 0 {
+			invocationID += "_r" + strconv.Itoa(attempt)
+		}
 		if index > 0 {
 			invocationID += "_" + strconv.Itoa(index)
 		}
@@ -235,27 +297,19 @@ func (s *Service) editVoiceLiveEmailCanvas(ctx context.Context, session voiceliv
 		switch {
 		case errors.Is(err, document.ErrVersionConflict), errors.Is(err, document.ErrConflict),
 			err == nil && result.Status == document.SemanticMutationConflicted:
-			// The user edited it while the change was made: hand back the latest.
-			latest, readErr := s.voiceLiveCanvas(ctx, principal, args.DocumentID)
-			if output, handled := voiceLiveCanvasError(readErr); handled {
-				return output, nil
-			}
-			if readErr != nil {
-				return "", readErr
-			}
-			return latest.changed(), nil
+			return "", true, nil
 		case errors.Is(err, document.ErrInvalidInput):
 			// Block edits cannot keep comments anchored in the canvas.
-			return voicelive.ErrorOutput("canvas_locked"), nil
+			return voicelive.ErrorOutput("canvas_locked"), false, nil
 		case err != nil:
-			return "", err
+			return "", false, err
 		}
 		revisionID = result.RevisionID
 	}
 	return voicelive.Output(map[string]string{
 		"status": "changed", "document_id": args.DocumentID, "revision_id": revisionID,
 		"next": "Tell the user in one short sentence what you changed in the email.",
-	}), nil
+	}), false, nil
 }
 
 // attachVoiceLiveEmailFile copies a file the Agent reads (a Document in a
@@ -553,6 +607,13 @@ func (s *Service) voiceLiveDocument(ctx context.Context, principal agentcredenti
 }
 
 // voiceLiveCanvas reads the latest Gmail canvas as the Agent.
+// voiceLiveCanvasText is a canvas's Markdown without its header, and the
+// text of that body without attachment lines, as the live model reads it.
+func voiceLiveCanvasText(markdown string) (body, text string) {
+	body = agentconnectedapps.CanvasHeaderFence.ReplaceAllString(markdown, "")
+	return body, strings.TrimSpace(voiceLiveAttachmentLine.ReplaceAllString(body, "")) + "\n"
+}
+
 func (s *Service) voiceLiveCanvas(ctx context.Context, principal agentcredential.Principal, documentID string) (voiceLiveCanvasState, error) {
 	state, err := s.voiceLiveDocument(ctx, principal, documentID)
 	if err != nil {
@@ -568,7 +629,7 @@ func (s *Service) voiceLiveCanvas(ctx context.Context, principal agentcredential
 		return voiceLiveCanvasState{}, errNotEmailCanvas
 	}
 	runs, attachmentFirst, attachments, mediaInText := voiceLiveCanvasBody(idBlocks.Blocks)
-	body := agentconnectedapps.CanvasHeaderFence.ReplaceAllString(string(state.markdown), "")
+	body, text := voiceLiveCanvasText(string(state.markdown))
 	header, ok := agentconnectedapps.ReadCanvasHeader(headerBlocks.Blocks)
 	if !ok || header.Target != "gmail" {
 		return voiceLiveCanvasState{}, errNotEmailCanvas
@@ -576,7 +637,7 @@ func (s *Service) voiceLiveCanvas(ctx context.Context, principal agentcredential
 	return voiceLiveCanvasState{
 		documentID: documentID, revisionID: state.revisionID, firstBlockID: state.firstBlockID, lastBlockID: state.lastBlockID,
 		hasMedia: state.hasMedia, fields: header.Fields, body: body,
-		text:     strings.TrimSpace(voiceLiveAttachmentLine.ReplaceAllString(body, "")) + "\n",
+		text:     text,
 		textRuns: runs, attachmentFirst: attachmentFirst, attachments: attachments, mediaInText: mediaInText,
 	}, nil
 }

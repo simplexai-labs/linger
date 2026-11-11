@@ -74,6 +74,15 @@ func (s *Service) ApplyCommentTextReplacement(
 	}, nil
 }
 
+// RevisionMarkdown renders a stored revision of a Document as Markdown, such
+// as the revision an Agent last read, so a caller can see what changed since.
+// A revision that is unknown or no longer has its state is
+// ErrRevisionUnavailable.
+func (s *Service) RevisionMarkdown(ctx context.Context, documentID, revisionID string) ([]byte, error) {
+	markdown, _, err := s.renderRevisionMarkdown(ctx, documentID, revisionID)
+	return markdown, err
+}
+
 func (s *Service) renderRevisionMarkdown(
 	ctx context.Context,
 	documentID, revisionID string,

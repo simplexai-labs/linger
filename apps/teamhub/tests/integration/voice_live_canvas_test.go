@@ -255,8 +255,9 @@ func TestVoiceLiveWritesAndChangesAnEmailCanvasAsTheAgent(t *testing.T) {
 	if !strings.Contains(live.Instructions, `"Next Wed LA airport pickup" document_id=`+documentID+", last: open_email_canvas → opened") {
 		t.Fatalf("live context names no call Document: %q", live.Instructions[max(0, len(live.Instructions)-400):])
 	}
-	// A revision the live model did not see gets the latest text back instead.
-	stale := call("edit-0", "edit_email_canvas", map[string]string{"document_id": documentID, "revision_id": "revision_unseen", "subject": "Changed"})
+	// A body rewritten from a revision the live model did not see gets the
+	// latest text back instead.
+	stale := call("edit-0", "edit_email_canvas", map[string]string{"document_id": documentID, "revision_id": "revision_unseen", "body": "Changed"})
 	if stale["error"] != "canvas_changed" || stale["revision_id"] != revisionID || stale["subject"] != "Next Wed LA airport pickup" ||
 		!strings.Contains(stale["body"].(string), "Can you pick me up at LAX at 9 am next Wednesday?") || computes.Load() != 0 {
 		t.Fatalf("stale edit=%v computes=%d", stale, computes.Load())
@@ -285,14 +286,24 @@ func TestVoiceLiveWritesAndChangesAnEmailCanvasAsTheAgent(t *testing.T) {
 	if again := call("edit-1", "edit_email_canvas", edit); again["revision_id"] != next || computes.Load() != 2 {
 		t.Fatalf("retried edit=%v computes=%d", again, computes.Load())
 	}
-	if superseded := call("edit-2", "edit_email_canvas", edit); superseded["error"] != "canvas_changed" || superseded["revision_id"] != next || superseded["subject"] != "Next Wed barbecue pickup" {
-		t.Fatalf("superseded edit=%v", superseded)
+	// A header line replaces that line on the latest canvas, from whichever
+	// revision the model read: parallel calls of one request all land.
+	older := call("edit-2", "edit_email_canvas", map[string]string{"document_id": documentID, "revision_id": revisionID, "to": "amy@example.com, dan@example.com"})
+	if content := <-replaced; older["status"] != "changed" ||
+		content != "```\ncanvas: gmail\nto: amy@example.com, dan@example.com\ncc: bob@example.org\nsubject: Next Wed barbecue pickup\nstatus: editing\nlink:\nexternal_id:\n```\n" {
+		t.Fatalf("header edit from an older revision=%v replacement=%q", older, content)
 	}
-	// A body change replaces the body's text and leaves the header.
+	// A body change replaces the body's text and leaves the header. It is
+	// read at an older revision, but only the header changed since.
 	body := map[string]string{"document_id": documentID, "revision_id": next, "body": "Hi Amy,\n\nBarbecue is on me!"}
 	rewritten := call("edit-3", "edit_email_canvas", body)
 	if content := <-replaced; rewritten["status"] != "changed" || content != "Hi Amy,\n\nBarbecue is on me!\n" {
 		t.Fatalf("body edit=%v replacement=%q", rewritten, content)
+	}
+	// A body read before it was rewritten is redone on the latest text.
+	if outdated := call("edit-3b", "edit_email_canvas", map[string]string{"document_id": documentID, "revision_id": next, "body": "Hi Amy,\n\nSee you."}); outdated["error"] != "canvas_changed" ||
+		outdated["revision_id"] != rewritten["revision_id"] || !strings.Contains(outdated["body"].(string), "Barbecue is on me!") {
+		t.Fatalf("body edit over a newer body=%v", outdated)
 	}
 	stateOf := func() string {
 		t.Helper()
@@ -307,7 +318,7 @@ func TestVoiceLiveWritesAndChangesAnEmailCanvasAsTheAgent(t *testing.T) {
 		if _, err := bodies.Exec(t.Context(), `UPDATE document_bodies SET seq=seq+1,state=$2 WHERE document_id=$1`, documentID, []byte(state)); err != nil {
 			t.Fatal(err)
 		}
-		return call("read-"+state[len(state)-8:], "edit_email_canvas", map[string]string{"document_id": documentID, "revision_id": "revision_unseen", "to": "x"})["revision_id"].(string)
+		return call("read-"+state[len(state)-8:], "edit_email_canvas", map[string]string{"document_id": documentID, "revision_id": "revision_unseen", "body": "x"})["revision_id"].(string)
 	}
 	// An attached file after the text stays through recipient and body
 	// changes, and the model sees it apart from the text.
@@ -323,7 +334,7 @@ func TestVoiceLiveWritesAndChangesAnEmailCanvasAsTheAgent(t *testing.T) {
 		!strings.Contains(state, "to: carol@example.com") || !strings.HasSuffix(state, "Hi Carol,\n\nSee you at the Saturday barbecue.\n\n"+attachment+"\n") {
 		t.Fatalf("recipients=%v body=%v state=%q", recipients, rewritten, state)
 	}
-	stale = call("edit-6", "edit_email_canvas", map[string]string{"document_id": documentID, "revision_id": "revision_unseen", "subject": "x"})
+	stale = call("edit-6", "edit_email_canvas", map[string]string{"document_id": documentID, "revision_id": "revision_unseen", "body": "x"})
 	if attachments, _ := stale["attachments"].([]any); len(attachments) != 1 || strings.Contains(stale["body"].(string), "document-asset") {
 		t.Fatalf("canvas as the model sees it=%v", stale)
 	}
