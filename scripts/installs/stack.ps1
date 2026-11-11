@@ -563,7 +563,7 @@ try {
     }
     if (-not $target -or -not $StackKits.ContainsKey($target)) { Stop-Stack 'release has no kit for this platform' }
     $kit = $StackKits[$target]; $pin = $StackBootstrap[$target]
-    $root = if ($env:LOCALMODELS_KIT_HOME) { $env:LOCALMODELS_KIT_HOME } else { Join-Path $cacheBase 'linger-localmodels/kits' }
+    $root = if ($env:LOCALMODELS_KIT_HOME) { $env:LOCALMODELS_KIT_HOME } else { Join-Path $cacheBase 'simplex-localmodels/kits' }
     $root = [IO.Path]::GetFullPath($root)
     $final = Join-Path $root $kit
     if ($cleanup) { Remove-OperationStage; exit 0 }

@@ -70,7 +70,7 @@ confirmation ID the plan prints; the scripts never plan or install on their own.
 
 Environment variables:
 
-- `LOCALMODELS_KIT_HOME`: kit cache directory, default `~/.cache/linger-localmodels/kits` (on Windows `%LOCALAPPDATA%\linger-localmodels\kits`).
+- `LOCALMODELS_KIT_HOME`: kit cache directory, default `~/.cache/simplex-localmodels/kits` (on Windows `%LOCALAPPDATA%\simplex-localmodels\kits`).
 - `SIMPLEX_NPM_REGISTRY`: replace both registry bases with a test registry or private mirror. Archive SHA256 and size pins still apply.
 - `SIMPLEX_REGION`: `global` uses `registry.npmjs.org`; `cn` uses `registry.npmmirror.com`; `auto` probes both.
 - `LOCALMODELS_KIT_BASE_URL`: legacy mirror layout serving the same pinned npm archives as `<target>.tgz`.

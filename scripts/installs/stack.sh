@@ -55,7 +55,7 @@ esac
 # <<< bootstrap targets
 [ -n "$inventory" ] || die 'release lacks bootstrap pins'
 
-root=${LOCALMODELS_KIT_HOME:-${XDG_CACHE_HOME:-${HOME}/.cache}/linger-localmodels/kits}
+root=${LOCALMODELS_KIT_HOME:-${XDG_CACHE_HOME:-${HOME}/.cache}/simplex-localmodels/kits}
 case "$root" in /*) ;; *) root=$PWD/$root ;; esac
 while [ "$root" != / ] && [ "${root%/}" != "$root" ]; do root=${root%/}; done
 final=$root/$kit
