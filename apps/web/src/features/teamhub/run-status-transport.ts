@@ -19,6 +19,8 @@ export interface RunStatusTransport {
 
 const snapshotRetryBaseMs = 1_000;
 const snapshotRetryMaxMs = 30_000;
+// How long after a Run ends the snapshot is read again to settle the set.
+export const endedRunRereadMs = 60_000;
 
 /**
  * Follows the Run statuses a Room shows: the list endpoint is the snapshot,
@@ -28,6 +30,11 @@ const snapshotRetryMaxMs = 30_000;
  * were lost, so both reread the snapshot. A failed snapshot read is retried
  * with backoff until one succeeds, because nothing else repairs a Run that
  * ended while the stream was down.
+ *
+ * The server decides which Runs the set keeps. An announced end shows at
+ * once, and endedRunRereadMs later one snapshot read replaces the set, so
+ * the Runs that read omits leave it. Ends announced close together share
+ * that read.
  */
 export function createRunStatusTransport({
   client,
@@ -43,6 +50,7 @@ export function createRunStatusTransport({
       let loads = 0;
       let failedLoads = 0;
       let retryTimer: ReturnType<typeof setTimeout> | undefined;
+      let rereadTimer: ReturnType<typeof setTimeout> | undefined;
       const publish = () => input.onCollection([...runs.values()]);
       const apply = (run: TeamHubRunStatus) => {
         const current = runs.get(run.id);
@@ -119,11 +127,18 @@ export function createRunStatusTransport({
         if (!apply(run)) return;
         recordTerminalReceipt(run);
         publish();
+        if (run.status !== "active" && rereadTimer === undefined) {
+          rereadTimer = setTimeout(() => {
+            rereadTimer = undefined;
+            void load();
+          }, endedRunRereadMs);
+        }
       });
       void load();
       return () => {
         disposed = true;
         clearTimeout(retryTimer);
+        clearTimeout(rereadTimer);
         unsubscribe();
       };
     },

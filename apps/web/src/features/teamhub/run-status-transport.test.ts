@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createRunStatusTransport } from "./run-status-transport";
+import {
+  createRunStatusTransport,
+  endedRunRereadMs,
+} from "./run-status-transport";
 import { TeamHubError } from "./teamhub-error";
 import type { TeamHubEventSignal } from "./event-transport";
 import type {
@@ -10,6 +13,48 @@ import type {
 } from "./teamhub-types";
 
 describe("Run status transport", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("rereads the snapshot once after a burst of ends, which settles the set", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const harness = createHarness([run("run-1", 1), run("run-2", 1)]);
+    const collections = harness.subscribe();
+    await vi.waitFor(() => expect(collections).toHaveLength(1));
+    await harness.announce(published("run-1", 4, "completed"));
+    await harness.announce(published("run-2", 3, "aborted"));
+    expect(collections.at(-1)!.map(({ status }) => status)).toEqual([
+      "completed",
+      "aborted",
+    ]);
+
+    // The server keeps the failed Run and omits the succeeded one.
+    harness.items = [{ ...run("run-2", 3), status: "aborted" }];
+    vi.advanceTimersByTime(endedRunRereadMs);
+    await vi.waitFor(() => expect(harness.list).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(collections.at(-1)!.map(({ id }) => id)).toEqual(["run-2"]),
+    );
+    vi.advanceTimersByTime(endedRunRereadMs);
+    expect(harness.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reread after it is unsubscribed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const harness = createHarness([run("run-1", 1)]);
+    const collections: TeamHubRunStatus[][] = [];
+    const unsubscribe = harness.transport.subscribe({
+      onCollection: (items) => collections.push(items),
+      onSessionExpired: vi.fn(),
+      roomId: "room-1",
+    });
+    await vi.waitFor(() => expect(collections).toHaveLength(1));
+    await harness.announce(published("run-1", 4, "completed"));
+    unsubscribe();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("publishes the Room snapshot, then each newer announcement", async () => {
     const harness = createHarness([run("run-1", 1)]);
     const collections = harness.subscribe();
@@ -267,5 +312,5 @@ function createHarness(
       },
     },
   });
-  return harness;
+  return Object.assign(harness, { transport });
 }
