@@ -296,8 +296,9 @@ describe("Voice Mode mini window", () => {
       ).not.toBeInTheDocument();
 
       // The desktop's close button ends Voice Mode instead of leaving a
-      // second window behind in the page.
-      const focused = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+      // second window behind in the page, also when the page was already in
+      // front and takes the focus back.
+      const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
       act(() => fake.pipWindow.close());
       await waitFor(() => expect(voice.exit).toHaveBeenCalledOnce());
       focused.mockRestore();
@@ -314,7 +315,11 @@ describe("Voice Mode mini window", () => {
     try {
       renderWindow();
       await act(() => openVoicePip("voice-mode"));
-      act(() => fake.pipWindow.close());
+      // Back to tab brings this page from the background to the front.
+      act(() => {
+        fake.pipWindow.close();
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
       // The call goes on in the window inside the page, on its conversation.
       await waitFor(() =>
         expect(screen.getByTestId("location")).toHaveTextContent(

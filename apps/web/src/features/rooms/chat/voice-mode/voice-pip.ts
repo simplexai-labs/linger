@@ -18,6 +18,13 @@ const pipSizes = {
 let pip: { owner: VoicePipOwner; window: Window } | undefined;
 const listeners = new Set<() => void>();
 const closedByHuman = new Set<(owner: VoicePipOwner) => void>();
+/** When this page last came to the front from the background. */
+let shownAt = Number.NEGATIVE_INFINITY;
+let watchingVisibility = false;
+
+function noteShown() {
+  if (document.visibilityState === "visible") shownAt = performance.now();
+}
 
 function api(): DocumentPictureInPicture | undefined {
   return (
@@ -44,6 +51,10 @@ export async function openVoicePip(
   // The browser allows one such window per tab; the newest owner takes it.
   if (pip?.owner === owner) return pip.window;
   if (pip) closeVoicePip(pip.owner);
+  if (!watchingVisibility) {
+    document.addEventListener("visibilitychange", noteShown);
+    watchingVisibility = true;
+  }
   try {
     const opened = await pictureInPicture.requestWindow(pipSizes[owner]);
     const stopMirroring = mirrorStyles(opened.document);
@@ -70,16 +81,21 @@ export function closeVoicePip(owner: VoicePipOwner) {
 
 /**
  * Whether closing the window brought the Human back to this page. The
- * window's "back to tab" button closes it and puts its tab in front, while its
- * close button does not; the browser reports neither, so this looks at the
- * page a moment later. A close while this page is already in front reads the
- * same as back to tab.
+ * window's "back to tab" button closes it and brings its tab from the
+ * background to the front; its close button does not. The browser reports
+ * neither, so this checks a moment later whether the page came to the front
+ * around the close. A close while this page was already in front is a close,
+ * even though focus lands on the page afterwards.
  */
 export function returnedToOpener(waitMs = 300): Promise<boolean> {
+  const closedAt = performance.now();
   return new Promise((resolve) =>
     setTimeout(
       () =>
-        resolve(document.visibilityState === "visible" && document.hasFocus()),
+        resolve(
+          document.visibilityState === "visible" &&
+            shownAt >= closedAt - waitMs,
+        ),
       waitMs,
     ),
   );
@@ -139,4 +155,5 @@ export function resetVoicePipForTest() {
   pip = undefined;
   listeners.clear();
   closedByHuman.clear();
+  shownAt = Number.NEGATIVE_INFINITY;
 }
