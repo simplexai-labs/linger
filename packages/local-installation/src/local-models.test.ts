@@ -189,6 +189,29 @@ test("never records a successful binding when apply fails", async () => {
     stat(path.join(f.home, "runtime/localmodels/binding.json")),
   ).rejects.toThrow();
 });
+test("reports why a deployment stopped, from output that is not captured", async () => {
+  const f = await fixture();
+  await prepareLocalModels(f.instance, f.options, { localmodels: f.call });
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (...a) => {
+    if (a[1][1] !== "apply") return original(...a);
+    a[2]!.onOutput!(
+      '{"event":"progress","component":"llm","phase":"download","done":1,"total":2}\n',
+    );
+    a[2]!.onOutput!("stack: port 8080 is held by another program\n");
+    return { code: 1, stdout: "", stderr: "" };
+  });
+  const result = await prepareLocalModels(
+    f.instance,
+    { ...f.options, localModelsApproval: f.id },
+    { localmodels: f.call },
+  );
+  expect(result).toMatchObject({
+    details: { code: "LOCAL_MODELS_RECOVERY_REQUIRED" },
+    message:
+      "Local model installation or verification did not finish: stack: port 8080 is held by another program Existing resources were preserved.",
+  });
+});
 test("forwards actual split JSONL byte counters but never raw output", async () => {
   const f = await fixture();
   await prepareLocalModels(f.instance, f.options, { localmodels: f.call });

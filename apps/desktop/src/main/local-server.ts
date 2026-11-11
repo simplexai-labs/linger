@@ -2287,7 +2287,7 @@ export class InstallerApi {
       if (!["queued", "running"].includes(job.state))
         throw new Error(
           LOCAL_MODEL_FAILURES.has(job.errorCode ?? "")
-            ? "This computer can't run the local model right now. Choose another AI runtime and try again."
+            ? `This computer can't run the local model right now. Choose another AI runtime and try again.${job.message ? ` (${job.message})` : ""}`
             : job.message || "The installation stopped",
         );
       await delay(this.#pollMs, undefined, { signal });

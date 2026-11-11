@@ -1362,11 +1362,13 @@ describe("LocalServerModule", () => {
         state: "waiting_user",
         errorCode: "LOCAL_MODELS_APPROVAL_REQUIRED",
         localModelsPlan: { planId: "a".repeat(64) },
+        message: "Review the plan before installing.",
       }),
     );
     await f.host.start();
+    // The installer's own reason follows the advice.
     await expect(f.module.begin({ runtime: "pi" })).rejects.toThrow(
-      "can't run the local model",
+      "Choose another AI runtime and try again. (Review the plan before installing.)",
     );
     expect(f.api.retried).toEqual([]);
     expect(f.module.status().phase).toBe("failed");
