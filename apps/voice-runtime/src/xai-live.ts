@@ -102,6 +102,33 @@ function audioConfig(transport: "binary" | "json", speed?: number) {
   };
 }
 
+export type SpokenLanguage = "Chinese" | "English";
+
+/**
+ * The language of a user transcript: Chinese once Han characters outnumber
+ * the Latin words mixed into it (Chrome, OpenAI), English when it is Latin
+ * words only. Japanese kana or too little text decide nothing.
+ */
+export function spokenLanguage(text: string): SpokenLanguage | undefined {
+  if (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text)) return undefined;
+  const han = text.match(/\p{Script=Han}/gu)?.length ?? 0;
+  const latinWords = text.match(/[A-Za-z]+/g)?.length ?? 0;
+  if (han > 0 && han >= latinWords) return "Chinese";
+  if (han === 0 && latinWords >= 2) return "English";
+  return undefined;
+}
+
+/**
+ * Grok answers right after a tool result, whose English JSON and the English
+ * tool descriptions pulled Chinese replies into English mid-sentence (a Chinese
+ * “it is written” followed by “titled …, open beside the chat”).
+ * The reminder sits where the reply starts.
+ */
+export function withLanguage(output: string, language?: SpokenLanguage) {
+  if (!language) return output;
+  return `${output}\n\nThe user speaks ${language}: say your reply entirely in ${language}, every word except names of people, companies, products and apps, whatever language this result is in.`;
+}
+
 const maximumQueuedEvents = 2_048;
 const maximumQueuedBytes = 8 << 20;
 const maximumSendBuffer = 1 << 20;
@@ -232,6 +259,8 @@ export class XaiLiveSession implements LiveSession {
   private readonly completedInputs = new Set<string>();
   private readonly inputTexts = new Map<string, string>();
   private lastInputId?: string;
+  /** The language of the user's latest words, for tool results. */
+  private userLanguage?: SpokenLanguage;
 
   private constructor(
     private readonly socket: WebSocket,
@@ -528,7 +557,7 @@ export class XaiLiveSession implements LiveSession {
         item: {
           type: "function_call_output",
           call_id: result.callId,
-          output: result.output,
+          output: withLanguage(result.output, this.userLanguage),
         },
       });
     }
@@ -592,6 +621,8 @@ export class XaiLiveSession implements LiveSession {
         const itemId = text("item_id");
         if (this.completedInputs.has(itemId)) return;
         this.inputTexts.set(itemId, text("transcript"));
+        this.userLanguage =
+          spokenLanguage(text("transcript")) ?? this.userLanguage;
         // The transcript is cumulative, as the worker's partial is.
         return this.push({
           type: "transcript_delta",
@@ -602,6 +633,8 @@ export class XaiLiveSession implements LiveSession {
       case "conversation.item.input_audio_transcription.completed": {
         const itemId = text("item_id");
         this.inputTexts.set(itemId, text("transcript"));
+        this.userLanguage =
+          spokenLanguage(text("transcript")) ?? this.userLanguage;
         // Interim segments also arrive as "completed" while still in progress.
         if (event.status === "completed") this.completeInput(itemId);
         return;

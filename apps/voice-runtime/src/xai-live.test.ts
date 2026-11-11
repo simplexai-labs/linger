@@ -4,7 +4,22 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { LiveEvent } from "./live-session.js";
-import { cutOffNote, XaiLiveSession } from "./xai-live.js";
+import {
+  cutOffNote,
+  spokenLanguage,
+  withLanguage,
+  XaiLiveSession,
+} from "./xai-live.js";
+
+/** Han text built from code points, so the source holds no Chinese. */
+const han = (count: number) =>
+  String.fromCodePoint(
+    ...Array.from({ length: count }, (_, index) => 0x4e00 + index),
+  );
+/** A Chinese request with English names in it, as the live input reads. */
+const chineseRequest = `${han(5)}Chrome${han(6)}OpenAI${han(3)}`;
+/** Japanese: kana mixed with Han. */
+const japaneseRequest = `${han(2)}${String.fromCodePoint(0x306e, 0x30cb, 0x30e5)}${han(2)}`;
 
 type Sent = Record<string, unknown>;
 const servers: WebSocketServer[] = [];
@@ -365,6 +380,34 @@ describe("XaiLiveSession", () => {
     provider.emit({ type: "response.done", response: { status: "completed" } });
     await waitForSent(provider.sent, 4);
     expect(provider.sent.at(-1)).toEqual({ type: "response.create" });
+    await session.close();
+  });
+
+  it("tells the reply after a tool result to keep the user's language", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    const events = collect(session, 2);
+    provider.emit(
+      {
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "i1",
+        transcript: chineseRequest,
+        status: "completed",
+      },
+      { type: "response.created", response: { id: "r1" } },
+      {
+        type: "response.function_call_arguments.done",
+        call_id: "c1",
+        name: "lookup",
+        arguments: "{}",
+      },
+    );
+    await events;
+    session.sendToolResults([{ callId: "c1", output: '{"status":"created"}' }]);
+    await waitForSent(provider.sent, 2);
+    const item = provider.sent.at(-1)?.item as { output: string };
+    expect(item.output.startsWith('{"status":"created"}')).toBe(true);
+    expect(item.output).toContain("The user speaks Chinese");
     await session.close();
   });
 
@@ -873,5 +916,19 @@ describe("XaiLiveSession", () => {
       transient: true,
       detail: "4000 session idle too long",
     });
+  });
+});
+
+describe("spokenLanguage", () => {
+  it("reads Chinese with English names in it as Chinese", () => {
+    expect(spokenLanguage(chineseRequest)).toBe("Chinese");
+    expect(spokenLanguage("Please use my local browser")).toBe("English");
+    expect(spokenLanguage("OK")).toBeUndefined();
+    expect(spokenLanguage(japaneseRequest)).toBeUndefined();
+  });
+
+  it("leaves a result alone when the language is unknown", () => {
+    expect(withLanguage("ok")).toBe("ok");
+    expect(withLanguage("ok", "English")).toContain("entirely in English");
   });
 });
