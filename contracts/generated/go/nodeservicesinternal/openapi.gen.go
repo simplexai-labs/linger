@@ -712,8 +712,8 @@ func (e InternalErrorCode) Valid() bool {
 
 // Defines values for LocalComputerToolCallServer.
 const (
-	Browser   LocalComputerToolCallServer = "browser"
-	TaskFiles LocalComputerToolCallServer = "task_files"
+	Browser    LocalComputerToolCallServer = "browser"
+	Playground LocalComputerToolCallServer = "playground"
 )
 
 // Valid indicates whether the value is a known member of the LocalComputerToolCallServer enum.
@@ -721,7 +721,7 @@ func (e LocalComputerToolCallServer) Valid() bool {
 	switch e {
 	case Browser:
 		return true
-	case TaskFiles:
+	case Playground:
 		return true
 	default:
 		return false
@@ -1555,20 +1555,17 @@ type InternalErrorCode string
 
 // LocalComputerToolCall defines model for LocalComputerToolCall.
 type LocalComputerToolCall struct {
-	AgentId      string                      `json:"agent_id"`
-	Arguments    map[string]interface{}      `json:"arguments"`
-	ComputerId   string                      `json:"computer_id"`
-	OwnerActorId string                      `json:"owner_actor_id"`
-	Server       LocalComputerToolCallServer `json:"server"`
-	TaskScope    *struct {
-		AgentId      string `json:"agent_id"`
-		OriginRoomId string `json:"origin_room_id"`
-		TaskId       string `json:"task_id"`
-		TenantId     string `json:"tenant_id"`
-	} `json:"task_scope,omitempty"`
-	TenantId      string `json:"tenant_id"`
-	ToolName      string `json:"tool_name"`
-	ToolSessionId string `json:"tool_session_id"`
+	AgentId    string                 `json:"agent_id"`
+	Arguments  map[string]interface{} `json:"arguments"`
+	ComputerId string                 `json:"computer_id"`
+
+	// DeadlineMs How long the Computer may take; 60000 when omitted.
+	DeadlineMs    *int                        `json:"deadline_ms,omitempty"`
+	OwnerActorId  string                      `json:"owner_actor_id"`
+	Server        LocalComputerToolCallServer `json:"server"`
+	TenantId      string                      `json:"tenant_id"`
+	ToolName      string                      `json:"tool_name"`
+	ToolSessionId string                      `json:"tool_session_id"`
 }
 
 // LocalComputerToolCallServer defines model for LocalComputerToolCall.Server.

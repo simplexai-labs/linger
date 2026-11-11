@@ -154,6 +154,7 @@ func (q *Queries) CreateVoiceLiveReply(ctx context.Context, arg CreateVoiceLiveR
 const createVoiceLiveReportDelivery = `-- name: CreateVoiceLiveReportDelivery :exec
 INSERT INTO voice_live_report_deliveries(report_id,voice_session_id,message_id)
 VALUES($1::text,$2::text,$3::text)
+ON CONFLICT (report_id) DO NOTHING
 `
 
 type CreateVoiceLiveReportDeliveryParams struct {
@@ -162,6 +163,7 @@ type CreateVoiceLiveReportDeliveryParams struct {
 	MessageID      string `json:"message_id"`
 }
 
+// A report is delivered once; a later card with the same files keeps the first.
 func (q *Queries) CreateVoiceLiveReportDelivery(ctx context.Context, arg CreateVoiceLiveReportDeliveryParams) error {
 	_, err := q.db.Exec(ctx, createVoiceLiveReportDelivery, arg.ReportID, arg.VoiceSessionID, arg.MessageID)
 	return err
@@ -501,43 +503,6 @@ func (q *Queries) GetVoiceLiveReplySessionContext(ctx context.Context, voiceSess
 	return i, err
 }
 
-const getVoiceLiveReportDelivery = `-- name: GetVoiceLiveReportDelivery :one
-SELECT message_id FROM voice_live_report_deliveries WHERE report_id=$1::text
-`
-
-func (q *Queries) GetVoiceLiveReportDelivery(ctx context.Context, reportID string) (string, error) {
-	row := q.db.QueryRow(ctx, getVoiceLiveReportDelivery, reportID)
-	var message_id string
-	err := row.Scan(&message_id)
-	return message_id, err
-}
-
-const getVoiceLiveReportTask = `-- name: GetVoiceLiveReportTask :one
-SELECT message.task_id FROM task_meta_callback_messages message
-JOIN task_meta_callbacks callback ON callback.task_id=message.task_id AND callback.generation=message.generation
-WHERE message.id=$1::text AND message.task_id=$2::text
-  AND callback.coordinator_actor_id=$3::text AND callback.tenant_id=$4::text
-`
-
-type GetVoiceLiveReportTaskParams struct {
-	ReportID           string `json:"report_id"`
-	TaskID             string `json:"task_id"`
-	CoordinatorActorID string `json:"coordinator_actor_id"`
-	TenantID           string `json:"tenant_id"`
-}
-
-func (q *Queries) GetVoiceLiveReportTask(ctx context.Context, arg GetVoiceLiveReportTaskParams) (string, error) {
-	row := q.db.QueryRow(ctx, getVoiceLiveReportTask,
-		arg.ReportID,
-		arg.TaskID,
-		arg.CoordinatorActorID,
-		arg.TenantID,
-	)
-	var task_id string
-	err := row.Scan(&task_id)
-	return task_id, err
-}
-
 const getVoiceLiveRoomLabel = `-- name: GetVoiceLiveRoomLabel :one
 SELECT coalesce(agent_peer.display_name,room.name)::text AS label
 FROM rooms room
@@ -589,6 +554,29 @@ func (q *Queries) GetVoiceLiveSlackUser(ctx context.Context, connectionID string
 	var column_1 string
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const getVoiceLiveTaskLatestReport = `-- name: GetVoiceLiveTaskLatestReport :one
+SELECT message.id FROM task_meta_callback_messages message
+JOIN work_items item ON item.id=message.task_id AND item.task_execution_generation=message.generation
+JOIN task_meta_callbacks callback ON callback.task_id=message.task_id AND callback.generation=message.generation
+WHERE message.task_id=$1::text
+  AND callback.coordinator_actor_id=$2::text AND callback.tenant_id=$3::text
+ORDER BY message.meta_seq DESC LIMIT 1
+`
+
+type GetVoiceLiveTaskLatestReportParams struct {
+	TaskID             string `json:"task_id"`
+	CoordinatorActorID string `json:"coordinator_actor_id"`
+	TenantID           string `json:"tenant_id"`
+}
+
+// The report the Task's coordinator got when its latest turn ended.
+func (q *Queries) GetVoiceLiveTaskLatestReport(ctx context.Context, arg GetVoiceLiveTaskLatestReportParams) (string, error) {
+	row := q.db.QueryRow(ctx, getVoiceLiveTaskLatestReport, arg.TaskID, arg.CoordinatorActorID, arg.TenantID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getVoiceLiveToolCall = `-- name: GetVoiceLiveToolCall :one
@@ -1096,15 +1084,6 @@ func (q *Queries) ListVoiceLiveUncertainOperations(ctx context.Context, voiceSes
 		return nil, err
 	}
 	return items, nil
-}
-
-const lockVoiceLiveReport = `-- name: LockVoiceLiveReport :exec
-SELECT id FROM task_meta_callback_messages WHERE id=$1::text FOR UPDATE
-`
-
-func (q *Queries) LockVoiceLiveReport(ctx context.Context, reportID string) error {
-	_, err := q.db.Exec(ctx, lockVoiceLiveReport, reportID)
-	return err
 }
 
 const lockVoiceLiveSessionCurrent = `-- name: LockVoiceLiveSessionCurrent :one

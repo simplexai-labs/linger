@@ -105,7 +105,7 @@ var AppTools = []Tool{
 	{
 		Name: ToolSendSlack,
 		Description: "Send a Slack message from the user's connected Slack: to a channel (a channel_id from a Slack result, or a name such as #sales), into one of its threads with thread_ts, as a direct message to person (a colleague's name or email) or user_id (a result's author_id, to answer whoever wrote), or to_self for the user's own Slack DM with themself. Give exactly one of channel, person, user_id and to_self. " +
-			"text is only what the user wants to say, in their words. To send a file, attach one: document_id for a document in this app (sent as Markdown, or as its original file), or task_id with file for a task's output (a path as task_files lists it); text is then the note with the file and may be empty. " +
+			"text is only what the user wants to say, in their words. To send a file, attach one: document_id for a document in this app (sent as Markdown, or as its original file), or file for a file on the user's computer (a path under ./playground as ls lists it, such as a task's output); text is then the note with the file and may be empty. " +
 			"It cannot be undone: first call without confirmed; it returns needs_confirmation with where it goes, the file and the text: say that and ask. Only after the user says yes in their next turn, call again with the same arguments and confirmed=true. " +
 			"Say it was sent only when the result is sent; outcome_unknown means it may have gone out: never send again. " + slackPerson + "channel_not_found or channel_ambiguous: ask which channel. " + accountChoice,
 		Parameters: objectSchema([]string{"confirmed"}, map[string]any{
@@ -116,8 +116,7 @@ var AppTools = []Tool{
 			"user_id":     stringProperty("A Slack result's author_id, for a direct message"),
 			"to_self":     map[string]any{"type": "boolean", "description": "Send to the user's own Slack DM with themself"},
 			"document_id": stringProperty("Optional document in this app to attach as a file"),
-			"task_id":     stringProperty("Optional task whose output file to attach, such as t1; needs file"),
-			"file":        stringProperty("With task_id: the output file's path, such as report.md"),
+			"file":        stringProperty("Optional file to attach, such as ./playground/workitem_1d09.../report.md"),
 			"account":     stringProperty("Optional Slack workspace account"),
 			"confirmed":   map[string]any{"type": "boolean", "description": "Whether the user said yes to sending it, in their own next turn"},
 		}),
@@ -175,7 +174,6 @@ type AppArguments struct {
 	UserID     string    `json:"user_id"`
 	Since      string    `json:"since"`
 	ToSelf     LooseBool `json:"to_self"`
-	TaskID     string    `json:"task_id"`
 	File       string    `json:"file"`
 }
 

@@ -162,10 +162,6 @@ export type OperationAck = OperationIdentity & {
   command_id: Id;
   through_seq: PositiveInteger;
 };
-/**
- * TeamHub identifier used as a single directory segment on every platform.
- */
-export type SharedTaskScopeId = string;
 export type DaemonToAgentEnvelope =
   | RunnerHello
   | RunnerHeartbeat
@@ -934,23 +930,11 @@ export interface ComputerToolCall {
   owner_actor_id: Id;
   agent_id: Id;
   tool_session_id: Id;
-  server: "browser" | "task_files";
+  server: "browser" | "playground";
   tool_name: string;
   arguments: OpaqueObject;
-  task_scope?: SharedTaskScope;
   deadline_ms: number;
   kind: "computer_tool";
-}
-/**
- * TeamHub-trusted shared Task directory identity. The receiver resolves it under its own configured shared root; no host path crosses the protocol. A meta scope has no task_id; an alter_ego scope requires one.
- */
-export interface SharedTaskScope {
-  version: 1;
-  tenant_id: SharedTaskScopeId;
-  agent_id: SharedTaskScopeId;
-  origin_room_id: SharedTaskScopeId;
-  role: "meta" | "alter_ego";
-  task_id?: SharedTaskScopeId;
 }
 export interface RunnerHello {
   type: "runner.hello";

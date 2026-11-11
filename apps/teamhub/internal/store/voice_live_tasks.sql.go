@@ -238,6 +238,37 @@ func (q *Queries) GetVoiceLiveTask(ctx context.Context, arg GetVoiceLiveTaskPara
 	return i, err
 }
 
+const getVoiceLiveTaskByWorkItem = `-- name: GetVoiceLiveTaskByWorkItem :one
+SELECT work_item_id, room_id, owner_actor_id, home_room_id, ordinal, voice_session_id, goal, surface, canceled_at, created_at FROM voice_live_tasks
+WHERE room_id=$1::text AND owner_actor_id=$2::text
+  AND work_item_id=$3::text
+`
+
+type GetVoiceLiveTaskByWorkItemParams struct {
+	RoomID       string `json:"room_id"`
+	OwnerActorID string `json:"owner_actor_id"`
+	WorkItemID   string `json:"work_item_id"`
+}
+
+// A call names a Task's output folder by its Work Item ID.
+func (q *Queries) GetVoiceLiveTaskByWorkItem(ctx context.Context, arg GetVoiceLiveTaskByWorkItemParams) (VoiceLiveTask, error) {
+	row := q.db.QueryRow(ctx, getVoiceLiveTaskByWorkItem, arg.RoomID, arg.OwnerActorID, arg.WorkItemID)
+	var i VoiceLiveTask
+	err := row.Scan(
+		&i.WorkItemID,
+		&i.RoomID,
+		&i.OwnerActorID,
+		&i.HomeRoomID,
+		&i.Ordinal,
+		&i.VoiceSessionID,
+		&i.Goal,
+		&i.Surface,
+		&i.CanceledAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listVoiceLivePendingApprovals = `-- name: ListVoiceLivePendingApprovals :many
 SELECT decision.id,coalesce(decision.alter_ego_task_id,'')::text AS task_id,decision.kind,decision.view,
   card.version AS card_version

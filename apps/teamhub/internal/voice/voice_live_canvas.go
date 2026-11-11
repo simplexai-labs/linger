@@ -324,8 +324,8 @@ func (s *Service) attachVoiceLiveEmailFile(ctx context.Context, session voiceliv
 		return "", voicelive.ErrInvalid
 	}
 	canvasID, fileID := strings.TrimSpace(args.DocumentID), strings.TrimSpace(args.FileDocumentID)
-	taskID, file := strings.TrimSpace(args.TaskID), strings.TrimSpace(args.File)
-	if canvasID == "" || (fileID == "") == (taskID == "") || file != "" && taskID == "" {
+	file := strings.TrimSpace(args.File)
+	if canvasID == "" || (fileID == "") == (file == "") {
 		return "", voicelive.ErrInvalid
 	}
 	principal, err := s.voiceLiveAgentPrincipal(ctx, session)
@@ -342,7 +342,7 @@ func (s *Service) attachVoiceLiveEmailFile(ctx context.Context, session voiceliv
 	if err != nil {
 		return "", err
 	}
-	attachment, output, err := s.voiceLiveFileAttachment(ctx, session, principal, fileID, taskID, file)
+	attachment, output, err := s.voiceLiveFileAttachment(ctx, session, principal, fileID, file)
 	if output != "" || err != nil {
 		return output, err
 	}

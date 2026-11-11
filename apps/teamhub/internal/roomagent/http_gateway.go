@@ -20,6 +20,7 @@ var opaqueIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 type HTTPGateway struct {
 	client        *agentapi.ClientWithResponses
 	browserClient *agentapi.ClientWithResponses
+	toolClient    *agentapi.ClientWithResponses
 }
 
 const agentManagementRequestTimeout = 15 * time.Second
@@ -27,6 +28,10 @@ const agentManagementRequestTimeout = 15 * time.Second
 // localBrowserConnectionRequestTimeout covers the Computer's one-minute
 // browser verification at the Gateway.
 const localBrowserConnectionRequestTimeout = 65 * time.Second
+
+// localComputerToolRequestTimeout covers the longest deadline a Computer tool
+// call may name, two minutes, at the Gateway.
+const localComputerToolRequestTimeout = 125 * time.Second
 
 // NewHTTPGateway validates the service endpoint and creates an AgentManagement client.
 func NewHTTPGateway(baseURL, token string, client *http.Client) (*HTTPGateway, error) {
@@ -44,7 +49,13 @@ func NewHTTPGateway(baseURL, token string, client *http.Client) (*HTTPGateway, e
 	if err != nil {
 		return nil, fmt.Errorf("create browser connection contract client: %w", err)
 	}
-	return &HTTPGateway{client: generatedClient, browserClient: browserClient}, nil
+	toolHTTPClient := *client
+	toolHTTPClient.Timeout = localComputerToolRequestTimeout
+	toolClient, err := NewAgentManagementClient(baseURL, token, &toolHTTPClient)
+	if err != nil {
+		return nil, fmt.Errorf("create Computer tool contract client: %w", err)
+	}
+	return &HTTPGateway{client: generatedClient, browserClient: browserClient, toolClient: toolClient}, nil
 }
 
 // NewAgentManagementClient validates the Agent Service origin and creates a

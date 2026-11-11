@@ -2,17 +2,14 @@ package voice
 
 import (
 	"bytes"
-	"context"
 	"encoding/base64"
 	"io"
 	"testing"
-
-	api "github.com/simplexai-labs/linger/contracts-go/nodeservicesinternal"
 )
 
-func TestVoiceTaskFileChunksRejectMissingOrInconsistentBoundaries(t *testing.T) {
+func TestVoiceLiveChunksRejectMissingOrInconsistentBoundaries(t *testing.T) {
 	good := map[string]any{"data_base64": base64.StdEncoding.EncodeToString([]byte("hello")), "size": 5, "modified_ns": "1234567890123456789", "offset": 0, "next_offset": 5, "eof": true}
-	chunk, err := decodeVoiceFileChunk(good)
+	chunk, err := decodeVoiceLiveChunk(good)
 	if err != nil || string(chunk.data) != "hello" {
 		t.Fatalf("valid chunk=%v %v", chunk, err)
 	}
@@ -22,44 +19,38 @@ func TestVoiceTaskFileChunksRejectMissingOrInconsistentBoundaries(t *testing.T) 
 			bad[k] = v
 		}
 		bad[key] = value
-		if _, err := decodeVoiceFileChunk(bad); err == nil {
+		if _, err := decodeVoiceLiveChunk(bad); err == nil {
 			t.Fatalf("accepted inconsistent %s", key)
 		}
 	}
 }
 
-// fakeTaskFiles serves one task output file in chunks, optionally changing it
-// after the first read.
-type fakeTaskFiles struct {
-	content  []byte
-	chunk    int
-	modified []string
-	calls    int
-}
-
-func (f *fakeTaskFiles) CallLocalComputerTool(_ context.Context, call api.LocalComputerToolCall) (map[string]any, error) {
-	offset := int(call.Arguments["offset"].(int64))
-	end := min(offset+f.chunk, len(f.content))
-	modified := f.modified[min(f.calls, len(f.modified)-1)]
-	f.calls++
-	return map[string]any{
-		"data_base64": base64.StdEncoding.EncodeToString(f.content[offset:end]), "size": len(f.content),
-		"modified_ns": modified, "offset": offset, "next_offset": end, "eof": end == len(f.content),
-	}, nil
-}
-
-func TestCopyVoiceTaskFileReadsEveryChunkAndRefusesAChangingFile(t *testing.T) {
-	files := &fakeTaskFiles{content: []byte("# ウォリアーズ brief\n116:113"), chunk: 7, modified: []string{"1"}}
-	var out bytes.Buffer
-	if err := copyVoiceTaskFile(t.Context(), files, api.LocalComputerToolCall{}, "report.md", &out); err != nil || out.String() != string(files.content) || files.calls < 2 {
-		t.Fatalf("copy=%q calls=%d err=%v", out.String(), files.calls, err)
+// chunkedFile serves one file in chunks, optionally changing it after the
+// first read.
+func chunkedFile(content []byte, size int, modified []string, calls *int) func(int64) (map[string]any, error) {
+	return func(offset int64) (map[string]any, error) {
+		end := min(int(offset)+size, len(content))
+		stamp := modified[min(*calls, len(modified)-1)]
+		*calls++
+		return map[string]any{
+			"data_base64": base64.StdEncoding.EncodeToString(content[offset:end]), "size": len(content),
+			"modified_ns": stamp, "offset": offset, "next_offset": end, "eof": end == len(content),
+		}, nil
 	}
-	changing := &fakeTaskFiles{content: []byte("0123456789"), chunk: 4, modified: []string{"1", "2"}}
-	if err := copyVoiceTaskFile(t.Context(), changing, api.LocalComputerToolCall{}, "report.md", io.Discard); err == nil {
+}
+
+func TestCopyVoiceLiveFileReadsEveryChunkAndRefusesAChangingFile(t *testing.T) {
+	content := []byte("# ウォリアーズ brief\n116:113")
+	var calls int
+	var out bytes.Buffer
+	if err := copyVoiceLiveFile(chunkedFile(content, 7, []string{"1"}, &calls), &out); err != nil || !bytes.Equal(out.Bytes(), content) || calls < 2 {
+		t.Fatalf("copy=%q calls=%d err=%v", out.String(), calls, err)
+	}
+	calls = 0
+	if err := copyVoiceLiveFile(chunkedFile([]byte("0123456789"), 4, []string{"1", "2"}, &calls), io.Discard); err == nil {
 		t.Fatal("a file that changed while read was accepted")
 	}
 }
-
 func TestVoiceLiveMediaTypeIsABareType(t *testing.T) {
 	for name, want := range map[string]string{"report.md": "text/markdown", "data.json": "application/json", "slides.pdf": "application/pdf", "blob": "application/octet-stream"} {
 		if got := voiceLiveMediaType(name, ""); got != want {

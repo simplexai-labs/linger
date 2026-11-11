@@ -6,7 +6,6 @@ import (
 	"errors"
 	"time"
 
-	lingercontext "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/context"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/localtools"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/protocol"
@@ -19,12 +18,11 @@ type liveBrowserTools interface {
 
 func (d *Daemon) handleComputerTool(ctx context.Context, stream transport.Stream, command protocol.Command) error {
 	var request struct {
-		ToolSessionID string                         `json:"tool_session_id"`
-		Server        string                         `json:"server"`
-		Name          string                         `json:"tool_name"`
-		Arguments     json.RawMessage                `json:"arguments"`
-		Scope         *lingercontext.SharedTaskScope `json:"task_scope"`
-		DeadlineMS    int64                          `json:"deadline_ms"`
+		ToolSessionID string          `json:"tool_session_id"`
+		Server        string          `json:"server"`
+		Name          string          `json:"tool_name"`
+		Arguments     json.RawMessage `json:"arguments"`
+		DeadlineMS    int64           `json:"deadline_ms"`
 	}
 	if json.Unmarshal(command.Payload, &request) != nil || request.DeadlineMS < 1000 || request.DeadlineMS > 120000 {
 		return errors.New("invalid Computer tool command")
@@ -69,10 +67,8 @@ func (d *Daemon) handleComputerTool(ctx context.Context, stream transport.Stream
 					result, err = liveBrowserResult(data)
 				}
 			}
-		case "task_files":
-			if request.Scope != nil && d.contextViews != nil && request.Scope.TenantID == command.TenantID && request.Scope.AgentID == command.AgentID {
-				result, err = d.contextViews.ReadLiveTaskFiles(callCtx, *request.Scope, request.Name, request.Arguments)
-			}
+		case "playground":
+			result, err = d.callPlayground(callCtx, command.TenantID, command.AgentID, request.Name, request.Arguments)
 		}
 		if failure := localtools.BrowserCallNotRun(err); failure != "" {
 			// Nothing ran: the owner's Chrome is not connected or is busy.

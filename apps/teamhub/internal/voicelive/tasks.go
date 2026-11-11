@@ -119,7 +119,7 @@ var taskTools = []Tool{
 	{
 		Name: ToolListTasks,
 		Description: "See the user's tasks in this room: those of this call, and earlier ones still working or reported within the last day. Each task's goal, state (pending, working, waiting_for_approval, reported with its latest report, which may be a result or something it needs from the user, failed, canceled) and the latest steps. When asked how things are going, give the state of every task, canceled and finished ones included. Only pending and working mean something is being done right now; never say a task is still doing something in any other state. " +
-			"Call it when the user asks how far along something is, whether it is done or what is being worked on, and to find a task_id; never answer progress from impression. " +
+			"Call it when the user asks how far along something is, whether it is done or what is being worked on, and to find a task_id or the folder its files are in; never answer progress from impression. " +
 			"scope=room instead reports every Agent still working in this room, the last ones that finished and background Tasks; for another room, get its room_id with find_rooms and pass it. " +
 			"The work is yours to the user: speak of it in the first person, picking the one or two lines that matter.",
 		Parameters: objectSchema([]string{}, map[string]any{
@@ -145,6 +145,8 @@ const ConfirmationValidFor = 10 * time.Minute
 // TaskRecord is one voice task with the state of its delegated Task.
 type TaskRecord struct {
 	Ordinal int32
+	// WorkItemID names the Task, and its output folder ./playground/<WorkItemID>/.
+	WorkItemID string
 	// StartedHere is set for tasks this call started.
 	StartedHere bool
 	Goal        string
@@ -172,6 +174,7 @@ type TaskReport struct {
 // TaskView is what Voice Runtime and the live model learn about one task.
 type TaskView struct {
 	Ordinal     int32
+	WorkItemID  string
 	StartedHere bool
 	Goal        string
 	Surface     string
@@ -185,7 +188,7 @@ type TaskView struct {
 // View reports one task in the terms of its delegated Task.
 func View(record TaskRecord) TaskView {
 	view := TaskView{
-		Ordinal: record.Ordinal, StartedHere: record.StartedHere, Goal: record.Goal, Surface: record.Surface,
+		Ordinal: record.Ordinal, WorkItemID: record.WorkItemID, StartedHere: record.StartedHere, Goal: record.Goal, Surface: record.Surface,
 		Report: record.Report, Steps: record.Steps, RunningFor: record.RunningFor, Approvals: record.Approvals,
 	}
 	switch {
@@ -210,6 +213,9 @@ func TaskListOutput(views []TaskView) map[string]any {
 	tasks := make([]map[string]any, 0, len(views))
 	for _, view := range views {
 		task := map[string]any{"task_id": TaskID(view.Ordinal), "goal": truncateRunes(view.Goal, 200), "state": view.State}
+		if view.WorkItemID != "" {
+			task["folder"] = PlaygroundRoot + view.WorkItemID + "/"
+		}
 		if len(view.Steps) > 0 {
 			task["recent_steps"] = view.Steps
 		}
@@ -218,7 +224,6 @@ func TaskListOutput(views []TaskView) map[string]any {
 		}
 		if view.Report != nil {
 			task["latest_report"] = Snippet(view.Report.Body)
-			task["report_id"] = view.Report.ID
 			task["delivered"] = view.Report.Delivered
 		}
 		if len(view.Approvals) > 0 {

@@ -420,7 +420,11 @@ const createAgentManagerHttpApp = <TRuntimeSettings>(
       if (
         !isRecord(body) ||
         !isRecord(body.arguments) ||
-        !["browser", "task_files"].includes(String(body.server)) ||
+        !["browser", "playground"].includes(String(body.server)) ||
+        (body.deadline_ms !== undefined &&
+          (!Number.isInteger(body.deadline_ms) ||
+            Number(body.deadline_ms) < 1_000 ||
+            Number(body.deadline_ms) > 120_000)) ||
         [
           "tenant_id",
           "owner_actor_id",
@@ -451,7 +455,6 @@ const createAgentManagerHttpApp = <TRuntimeSettings>(
         );
       const request =
         body as unknown as AgentManagementSchemas["schemas"]["LocalComputerToolCall"];
-      const scope = request.task_scope;
       const result = await computerTools.callComputerTool({
         tenantId: request.tenant_id,
         ownerActorId: request.owner_actor_id,
@@ -461,15 +464,7 @@ const createAgentManagerHttpApp = <TRuntimeSettings>(
         server: request.server,
         toolName: request.tool_name,
         arguments: request.arguments,
-        ...(scope
-          ? {
-              taskScope: {
-                ...scope,
-                version: 1 as const,
-                role: "alter_ego" as const,
-              },
-            }
-          : {}),
+        ...(request.deadline_ms ? { deadlineMs: request.deadline_ms } : {}),
         signal: context.req.raw.signal,
       });
       return context.json({ result });

@@ -70,14 +70,13 @@ var EditEmailCanvasTool = Tool{
 // AttachEmailFileTool describes the tool that attaches a file to a canvas.
 var AttachEmailFileTool = Tool{
 	Name: ToolAttachEmailFile,
-	Description: "Attach a file to a Gmail canvas in this room, so the email goes out with it: a document or file in this app (one shared in a room or in the Library, such as a deck a task delivered; find its document_id with search_documents) or a task's output file (task_id with file, a path as task_files lists it). It is added at the end of the canvas at once; never call start_task for this. " +
-		"Give exactly one of file_document_id and task_id. It returns the canvas's attachments and revision_id: tell the user in one short sentence what is attached. " +
+	Description: "Attach a file to a Gmail canvas in this room, so the email goes out with it: a document or file in this app (one shared in a room or in the Library, such as a deck a task delivered; find its document_id with search_documents) or a file on the user's computer (file, a path under ./playground as ls lists it, such as a task's output). It is added at the end of the canvas at once; never call start_task for this. " +
+		"Give exactly one of file_document_id and file. It returns the canvas's attachments and revision_id: tell the user in one short sentence what is attached. " +
 		"file_not_supported means the email cannot carry that kind of file (it takes PDF, Office, image, text and ZIP files); file_too_large means it is over 15 MB.",
 	Parameters: objectSchema([]string{"document_id"}, map[string]any{
 		"document_id":      stringProperty("The canvas, from open_email_canvas"),
 		"file_document_id": stringProperty("The document or file in this app to attach, from search_documents"),
-		"task_id":          stringProperty("Or the task whose output file to attach, such as t1; needs file"),
-		"file":             stringProperty("With task_id: the output file's path, such as report.pptx"),
+		"file":             stringProperty("Or a file such as ./playground/workitem_1d09.../report.pptx"),
 	}),
 }
 
@@ -85,7 +84,6 @@ var AttachEmailFileTool = Tool{
 type AttachEmailFileArguments struct {
 	DocumentID     string `json:"document_id"`
 	FileDocumentID string `json:"file_document_id"`
-	TaskID         string `json:"task_id"`
 	File           string `json:"file"`
 }
 

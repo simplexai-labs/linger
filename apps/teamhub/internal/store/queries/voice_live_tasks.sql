@@ -20,6 +20,12 @@ ORDER BY task.created_at DESC LIMIT 1;
 SELECT * FROM voice_live_tasks
 WHERE room_id=sqlc.arg(room_id)::text AND owner_actor_id=sqlc.arg(owner_actor_id)::text AND ordinal=sqlc.arg(ordinal)::int;
 
+-- name: GetVoiceLiveTaskByWorkItem :one
+-- A call names a Task's output folder by its Work Item ID.
+SELECT * FROM voice_live_tasks
+WHERE room_id=sqlc.arg(room_id)::text AND owner_actor_id=sqlc.arg(owner_actor_id)::text
+  AND work_item_id=sqlc.arg(work_item_id)::text;
+
 -- name: CancelVoiceLiveTask :execrows
 UPDATE voice_live_tasks SET canceled_at=clock_timestamp()
 WHERE work_item_id=sqlc.arg(work_item_id)::text AND canceled_at IS NULL;

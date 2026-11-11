@@ -213,10 +213,12 @@ func (s *Service) executeVoiceLiveTool(ctx context.Context, session voicelive.Se
 		return s.replyToVoiceLiveTask(ctx, session, request)
 	case voicelive.ToolCancelTask:
 		return s.cancelVoiceLiveTask(ctx, session, request)
-	case voicelive.ToolTaskFiles:
-		return s.voiceLiveTaskFiles(ctx, session, request)
-	case voicelive.ToolPublishTaskResult:
-		return s.publishVoiceLiveTaskResult(ctx, session, request)
+	case voicelive.ToolListFiles:
+		return s.listVoiceLiveFiles(ctx, session, request)
+	case voicelive.ToolReadFile:
+		return s.readVoiceLiveFile(ctx, session, request)
+	case voicelive.ToolSendCard:
+		return s.sendVoiceLiveCard(ctx, session, request)
 	case voicelive.ToolListTasks:
 		return s.listVoiceLiveTasks(ctx, session, request)
 	case voicelive.ToolDecideApproval:

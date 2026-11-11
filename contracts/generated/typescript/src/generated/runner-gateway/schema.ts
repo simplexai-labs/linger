@@ -4624,7 +4624,7 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/Id",
         },
         server: {
-          enum: ["browser", "task_files"],
+          enum: ["browser", "playground"],
         },
         tool_name: {
           type: "string",
@@ -4633,9 +4633,6 @@ export const runnerGatewayEnvelopeSchema = {
         },
         arguments: {
           $ref: "#/$defs/OpaqueObject",
-        },
-        task_scope: {
-          $ref: "#/$defs/SharedTaskScope",
         },
         deadline_ms: {
           type: "integer",

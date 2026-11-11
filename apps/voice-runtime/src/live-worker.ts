@@ -70,6 +70,8 @@ const retryMs = 300;
  * hears its real result instead of a timeout.
  */
 const confirmedWriteTimeoutMs = 60_000;
+/** A card's files upload from the Computer for up to two minutes. */
+const sendCardTimeoutMs = 130_000;
 /** A local browser step may wake a sleeping Computer before it runs. */
 const browserTimeoutMs = 70_000;
 /** A local browser step longer than this no longer holds the conversation. */
@@ -1573,8 +1575,8 @@ export class LiveVoiceWorker {
     const result = await this.client.executeLiveToolCall(
       request,
       AbortSignal.timeout(
-        call.name === "publish_task_result"
-          ? 120_000
+        call.name === "send_card"
+          ? sendCardTimeoutMs
           : parseArguments(call)?.confirmed === true
             ? confirmedWriteTimeoutMs
             : (this.options.toolTimeoutMs ?? 15_000),

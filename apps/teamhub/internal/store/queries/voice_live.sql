@@ -385,21 +385,20 @@ SELECT EXISTS(
     AND callback.coordinator_actor_id=sqlc.arg(coordinator_actor_id)::text AND item.archived_at IS NULL
 )::boolean;
 
--- name: GetVoiceLiveReportTask :one
-SELECT message.task_id FROM task_meta_callback_messages message
+-- name: GetVoiceLiveTaskLatestReport :one
+-- The report the Task's coordinator got when its latest turn ended.
+SELECT message.id FROM task_meta_callback_messages message
+JOIN work_items item ON item.id=message.task_id AND item.task_execution_generation=message.generation
 JOIN task_meta_callbacks callback ON callback.task_id=message.task_id AND callback.generation=message.generation
-WHERE message.id=sqlc.arg(report_id)::text AND message.task_id=sqlc.arg(task_id)::text
-  AND callback.coordinator_actor_id=sqlc.arg(coordinator_actor_id)::text AND callback.tenant_id=sqlc.arg(tenant_id)::text;
-
--- name: GetVoiceLiveReportDelivery :one
-SELECT message_id FROM voice_live_report_deliveries WHERE report_id=sqlc.arg(report_id)::text;
-
--- name: LockVoiceLiveReport :exec
-SELECT id FROM task_meta_callback_messages WHERE id=sqlc.arg(report_id)::text FOR UPDATE;
+WHERE message.task_id=sqlc.arg(task_id)::text
+  AND callback.coordinator_actor_id=sqlc.arg(coordinator_actor_id)::text AND callback.tenant_id=sqlc.arg(tenant_id)::text
+ORDER BY message.meta_seq DESC LIMIT 1;
 
 -- name: CreateVoiceLiveReportDelivery :exec
+-- A report is delivered once; a later card with the same files keeps the first.
 INSERT INTO voice_live_report_deliveries(report_id,voice_session_id,message_id)
-VALUES(sqlc.arg(report_id)::text,sqlc.arg(voice_session_id)::text,sqlc.arg(message_id)::text);
+VALUES(sqlc.arg(report_id)::text,sqlc.arg(voice_session_id)::text,sqlc.arg(message_id)::text)
+ON CONFLICT (report_id) DO NOTHING;
 
 -- name: MarkVoiceLiveReportNonActionable :exec
 UPDATE task_meta_callback_messages SET non_actionable=true WHERE id=sqlc.arg(report_id)::text;

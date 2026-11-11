@@ -1266,9 +1266,7 @@ describe("LiveVoiceWorker background work", () => {
       {
         type: "function_calls",
         update: true,
-        calls: [
-          { callId: "publish", name: "publish_task_result", arguments: "{}" },
-        ],
+        calls: [{ callId: "publish", name: "send_card", arguments: "{}" }],
       },
       { type: "response_finished", canceled: false },
     );

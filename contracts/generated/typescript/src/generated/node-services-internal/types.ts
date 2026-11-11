@@ -1168,17 +1168,13 @@ export interface components {
       agent_id: string;
       tool_session_id: string;
       /** @enum {string} */
-      server: "browser" | "task_files";
+      server: "browser" | "playground";
       tool_name: string;
       arguments: {
         [key: string]: unknown;
       };
-      task_scope?: {
-        tenant_id: string;
-        agent_id: string;
-        origin_room_id: string;
-        task_id: string;
-      };
+      /** @description How long the Computer may take; 60000 when omitted. */
+      deadline_ms?: number;
     };
     LocalComputerToolResult: {
       result: {

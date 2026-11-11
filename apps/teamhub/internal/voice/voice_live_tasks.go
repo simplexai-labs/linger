@@ -47,7 +47,7 @@ func (s *Service) voiceLiveTaskViews(ctx context.Context, session voicelive.Sess
 	runStarted := map[string]time.Time{}
 	for index, row := range rows {
 		records[index] = voicelive.TaskRecord{
-			Ordinal: row.Ordinal, StartedHere: row.StartedHere, Goal: row.Goal, Surface: row.Surface,
+			Ordinal: row.Ordinal, WorkItemID: row.WorkItemID, StartedHere: row.StartedHere, Goal: row.Goal, Surface: row.Surface,
 			Canceled: row.CanceledAt.Valid, Execution: row.ExecutionStatus,
 		}
 		if row.ReportID != "" {

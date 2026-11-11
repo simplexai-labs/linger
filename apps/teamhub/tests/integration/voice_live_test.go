@@ -711,28 +711,36 @@ func TestVoiceLiveTasksReportResultsAndWhatTheyWaitFor(t *testing.T) {
 	if _, err := env.pool.Exec(t.Context(), `DELETE FROM voice_sessions WHERE id='voice_session_told'`); err != nil {
 		t.Fatal(err)
 	}
-	// Publication is a durable receipt, independent of the worker's tool call ID.
-	var reportID string
-	if err := env.pool.QueryRow(t.Context(), `SELECT id FROM task_meta_callback_messages WHERE task_id=$1 ORDER BY meta_seq DESC LIMIT 1`, workItem(first["task_id"])).Scan(&reportID); err != nil {
-		t.Fatal(err)
-	}
-	publish := func(callID string) string {
+	// A Task's result is posted from its folder on the user's Computer; the
+	// folder is named by the Task, and the card waits for the Computer.
+	sendCard := func(callID string, attach ...string) map[string]any {
 		t.Helper()
-		args, _ := json.Marshal(map[string]any{"task_id": first["task_id"], "report_id": reportID, "title": "Comparison ready", "text": "Sony at 1899 is the best fit, added to the cart.", "files": []string{}})
+		args, _ := json.Marshal(map[string]any{"title": "Comparison ready", "content": "Sony at 1899 is the best fit, added to the cart.", "attach": attach})
 		var result teamhubinternal.VoiceLiveToolResult
-		decode(t, voiceRuntimeCall(t, env, http.MethodPost, "/internal/v1/voice/live-tool-calls", map[string]any{"voice_session_id": sessionID, "turn_id": "lt_publish", "call_id": callID, "name": "publish_task_result", "arguments": string(args)}, http.StatusOK), &result)
-		return result.Output
+		decode(t, voiceRuntimeCall(t, env, http.MethodPost, "/internal/v1/voice/live-tool-calls", map[string]any{"voice_session_id": sessionID, "turn_id": "lt_card", "call_id": callID, "name": "send_card", "arguments": string(args)}, http.StatusOK), &result)
+		var output map[string]any
+		if err := json.Unmarshal([]byte(result.Output), &output); err != nil {
+			t.Fatalf("send_card output=%s", result.Output)
+		}
+		return output
 	}
-	published := publish("publish-first")
-	if !strings.Contains(published, `"status":"delivered"`) || publish("publish-again") != published {
-		t.Fatalf("publication did not deduplicate: %s", published)
+	folder := "./playground/" + workItem(first["task_id"]) + "/"
+	for attach, want := range map[string]string{
+		folder + "compare.md":                        "computer_offline",
+		"./playground/workitem_unknown/a.png":        "folder_not_found",
+		folder + "../" + workItem(second["task_id"]): "invalid_file_path",
+		folder: "not_a_file",
+	} {
+		if output := sendCard("card-"+want, attach); output["error"] != want {
+			t.Fatalf("send_card %s=%v, want %s", attach, output, want)
+		}
 	}
-	if countRows(t, env, `SELECT count(*) FROM voice_live_report_deliveries WHERE report_id=$1`, reportID) != 1 || countRows(t, env, `SELECT count(*) FROM task_meta_callback_messages WHERE id=$1 AND non_actionable`, reportID) != 1 {
-		t.Fatal("publication receipt or callback acknowledgement missing")
+	if countRows(t, env, `SELECT count(*) FROM voice_live_report_deliveries WHERE voice_session_id=$1`, sessionID) != 0 {
+		t.Fatal("a card that was not posted marked its report delivered")
 	}
 	decode(t, voiceRuntimeCall(t, env, http.MethodGet, "/internal/v1/voice/sessions/"+sessionID+"/live-tasks", nil, http.StatusOK), &tasks)
-	if len(tasks.Tasks) != 1 || tasks.Tasks[0].TaskId != second["task_id"] {
-		t.Fatalf("delivered old report still pending: %+v", tasks.Tasks)
+	if len(tasks.Tasks) != 2 || tasks.Tasks[0].TaskId != first["task_id"] || *tasks.Tasks[0].Replies[0].Delivered {
+		t.Fatalf("live tasks after an unposted card: %+v", tasks.Tasks)
 	}
 }
 

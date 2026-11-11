@@ -1,5 +1,14 @@
-import type { SharedTaskScope as SharedTaskScopeWire } from "@linger/wire-contracts/runner-gateway/types";
 import type { SharedTaskScope } from "../executor/context-ref.js";
+
+/** The envelope schema's SharedTaskScope, carried inside a Context View manifest. */
+export interface SharedTaskScopeWire {
+  readonly version: 1;
+  readonly tenant_id: string;
+  readonly agent_id: string;
+  readonly origin_room_id: string;
+  readonly role: "meta" | "alter_ego";
+  readonly task_id?: string;
+}
 
 /** The receiver resolves the scope under its own shared root. */
 export const sharedTaskScopeWire = (

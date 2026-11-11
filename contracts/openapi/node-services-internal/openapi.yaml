@@ -2763,7 +2763,7 @@ components:
           type: string
           enum:
             - browser
-            - task_files
+            - playground
         tool_name:
           type: string
           minLength: 1
@@ -2771,23 +2771,11 @@ components:
         arguments:
           type: object
           additionalProperties: true
-        task_scope:
-          type: object
-          additionalProperties: false
-          required:
-            - tenant_id
-            - agent_id
-            - origin_room_id
-            - task_id
-          properties:
-            tenant_id:
-              type: string
-            agent_id:
-              type: string
-            origin_room_id:
-              type: string
-            task_id:
-              type: string
+        deadline_ms:
+          type: integer
+          minimum: 1000
+          maximum: 120000
+          description: How long the Computer may take; 60000 when omitted.
     LocalComputerToolResult:
       type: object
       additionalProperties: false
