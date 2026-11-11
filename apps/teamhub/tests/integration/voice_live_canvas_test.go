@@ -350,9 +350,10 @@ func TestVoiceLiveWritesAndChangesAnEmailCanvasAsTheAgent(t *testing.T) {
 		}
 		return string(state)
 	}
-	// A change that lands while an edit is made, here after its title step,
-	// is redone on the latest canvas as new operations and lands once.
-	canvasConflicts.Store(documentID, &canvasConflictPlan{skip: 2, conflicts: 1})
+	// A change that lands while an edit is made, here after its title step
+	// and before its subject line, is redone on the latest canvas as new
+	// operations and lands once, the title included.
+	canvasConflicts.Store(documentID, &canvasConflictPlan{skip: 1, conflicts: 1})
 	before := computes.Load()
 	redone := call("edit-3c", "edit_email_canvas", map[string]string{"document_id": documentID, "revision_id": rewritten["revision_id"].(string),
 		"subject": "Saturday barbecue pickup", "body": "Hi Amy,\n\nBarbecue on Saturday!"})
