@@ -13,14 +13,6 @@ import {
   resolveOperationModel,
 } from "./local-computer-management.js";
 import type { ModelEndpoint, ModelLease } from "./model-queue.js";
-
-type ModelResponded = Extract<
-  Extract<DaemonToAgentEnvelope, { type: "operation.event" }>["event"],
-  { type: "model.responded" }
->;
-
-/** Runtime failure codes that mean the model endpoint refused the work. */
-const OVERLOAD_FAILURES = new Set(["rate_limited", "model_service_error"]);
 import { isServingConnection } from "./runner-connections.js";
 import type {
   CapacitySignal,
@@ -44,6 +36,14 @@ import {
   type RunnerOperation,
   type RunnerOperationTarget,
 } from "./runner-operation.js";
+
+type ModelResponded = Extract<
+  Extract<DaemonToAgentEnvelope, { type: "operation.event" }>["event"],
+  { type: "model.responded" }
+>;
+
+/** Runtime failure codes that mean the model endpoint refused the work. */
+const OVERLOAD_FAILURES = new Set(["rate_limited", "model_service_error"]);
 
 // These events only change what the Room shows while a Run works; nothing the
 // Run settles on reads them.

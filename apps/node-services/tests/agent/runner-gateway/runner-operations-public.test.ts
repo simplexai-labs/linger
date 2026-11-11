@@ -331,6 +331,129 @@ describe("RunnerGateway", () => {
     }
   });
 
+  describe("a Run's model requests move its endpoint's limit", () => {
+    const codex = { computerId: "runner-local", runtimeType: "codex" as const };
+    /** Foreground work, so the place it waits for is not held back. */
+    const approval = { priority: 0, kind: "approval", key: "approval:test" };
+
+    const startRun = async () => {
+      const gateway = createTestRunnerGateway({
+        heartbeatIntervalMs: 60_000,
+        createId: sequenceIds(),
+      });
+      const peer = new RecordingPeer();
+      const connection = await acceptReadyConnection(gateway, peer, {
+        ...hello(),
+        runtime_diagnostics: runtimeDiagnostics({ link: "api" }),
+      });
+      const operation = await gateway.startOperation(sessionTarget());
+      operation.result.catch(() => undefined);
+      const start = peer.sent.find(
+        (command) => command.type === "operation.start",
+      );
+      if (start?.type !== "operation.start")
+        throw new Error("Expected operation.start");
+      await connection.receive(
+        event(start, 1, {
+          type: "operation.accepted",
+          command_id: start.command_id,
+          runner_pid: 100,
+        }),
+      );
+      return { gateway, connection, operation, start };
+    };
+
+    /** Four requests of the Run alone, each as fast, while work waits. */
+    const answerFast = async (
+      connection: RunnerGatewayConnection,
+      start: OperationStart,
+    ) => {
+      for (let seq = 2; seq <= 5; seq++)
+        await connection.receive(
+          event(start, seq, {
+            type: "operation.event",
+            event: {
+              type: "model.responded",
+              started_at_unix_ms: 1_000,
+              first_item_at_unix_ms: 3_000,
+              responded_at_unix_ms: 4_000,
+              granularity: "item",
+              usage: {
+                input: 4_000,
+                cache_read: 0,
+                cache_write: 0,
+                output: 50,
+              },
+            },
+          }),
+        );
+    };
+
+    const admittedLater = (lease: Promise<unknown>) => {
+      const state = { admitted: false };
+      void lease.then(() => (state.admitted = true));
+      return state;
+    };
+
+    it("raises the limit while the Run answers fast and work waits", async () => {
+      const { gateway, connection, start } = await startRun();
+      try {
+        const waiting = admittedLater(
+          gateway.acquireModelChain(
+            codex,
+            approval,
+            new AbortController().signal,
+          ),
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(waiting.admitted).toBe(false);
+        await answerFast(connection, start);
+        await vi.waitFor(() => expect(waiting.admitted).toBe(true));
+      } finally {
+        connection.disconnect();
+      }
+    });
+
+    it("halves the limit when the Run fails rate limited", async () => {
+      const { gateway, connection, start } = await startRun();
+      try {
+        const alongside = gateway.acquireModelChain(
+          codex,
+          approval,
+          new AbortController().signal,
+        );
+        await answerFast(connection, start);
+        const lease = await alongside;
+        await connection.receive(
+          event(start, 6, {
+            type: "operation.failed",
+            stage: "runtime_execution",
+            error: {
+              code: "RUNTIME_EXECUTION_FAILED",
+              message: "Runtime execution failed",
+              retryable: false,
+              failure: { code: "rate_limited", runtime_type: "codex" },
+            },
+          }),
+        );
+        // Two places would admit it beside the running chain; one does not.
+        const next = admittedLater(
+          gateway.acquireModelChain(
+            codex,
+            approval,
+            new AbortController().signal,
+          ),
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(next.admitted).toBe(false);
+        lease.release({ outcome: "completed" });
+        await vi.waitFor(() => expect(next.admitted).toBe(true));
+      } finally {
+        connection.disconnect();
+      }
+    });
+  });
+
   it.each(["disconnect", "replacement", "removal"] as const)(
     "rejects a start whose capacity permit predates a %s",
     async (change) => {
