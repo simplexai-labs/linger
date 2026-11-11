@@ -20,6 +20,20 @@ export type ModelSignal =
     }
   | { readonly type: "overload" };
 
+/** One latency sample beside what it is compared with, in ms per thousand
+ * tokens; a median is missing until enough samples arrived. */
+export interface LatencySample {
+  readonly source: "run" | "call";
+  readonly perThousand: number;
+  readonly baseline?: number;
+  readonly window?: number;
+}
+
+export interface Observation {
+  readonly change?: LimitChange;
+  readonly latency?: LatencySample;
+}
+
 export interface LimitChange {
   readonly from: number;
   readonly to: number;
@@ -73,10 +87,12 @@ export class AdaptiveLimit {
       readonly saturated: boolean;
       readonly now: number;
     },
-  ): LimitChange | undefined {
+  ): Observation {
     if (signal.type === "overload") {
       this.#cooldownUntil = endpoint.now + OVERLOAD_COOLDOWN_MS;
-      return this.#set(Math.max(1, Math.floor(this.#limit / 2)), "overload");
+      return {
+        change: this.#set(Math.max(1, Math.floor(this.#limit / 2)), "overload"),
+      };
     }
     const perThousand =
       signal.latencyMs / (Math.max(signal.workTokens, MIN_WORK_TOKENS) / 1000);
@@ -87,26 +103,43 @@ export class AdaptiveLimit {
     }
     if (endpoint.active <= 1)
       keepLast(latencies.baseline, perThousand, BASELINE_SAMPLES);
-    keepLast(latencies.window, perThousand, WINDOW);
-    if (
-      latencies.baseline.length < BASELINE_MIN_SAMPLES ||
-      latencies.window.length < WINDOW
-    )
-      return undefined;
-    const ratio = median(latencies.window) / median(latencies.baseline);
+    // After a lower limit the units already running drain first; until
+    // then requests still show the old limit's load.
+    if (endpoint.active <= this.#limit)
+      keepLast(latencies.window, perThousand, WINDOW);
+    const baseline =
+      latencies.baseline.length >= BASELINE_MIN_SAMPLES
+        ? median(latencies.baseline)
+        : undefined;
+    const window =
+      latencies.window.length >= WINDOW ? median(latencies.window) : undefined;
+    const latency = {
+      source: signal.source,
+      perThousand,
+      ...(baseline === undefined ? {} : { baseline }),
+      ...(window === undefined ? {} : { window }),
+    };
+    if (baseline === undefined || window === undefined) return { latency };
+    const ratio = window / baseline;
     if (ratio > LOWER_ABOVE)
-      return this.#set(Math.max(1, this.#limit - 1), "slower", ratio);
+      return {
+        latency,
+        change: this.#set(Math.max(1, this.#limit - 1), "slower", ratio),
+      };
     if (
       ratio <= RAISE_AT_MOST &&
       endpoint.saturated &&
       endpoint.now >= this.#cooldownUntil
     )
-      return this.#set(
-        Math.min(this.range.max, this.#limit + 1),
-        "faster",
-        ratio,
-      );
-    return undefined;
+      return {
+        latency,
+        change: this.#set(
+          Math.min(this.range.max, this.#limit + 1),
+          "faster",
+          ratio,
+        ),
+      };
+    return { latency };
   }
 
   #set(

@@ -634,7 +634,9 @@ export class RunnerOperations {
   }
 
   /** Time to the first item covers queueing and prompt processing, which is
-   * where a busy endpoint shows; later items depend on what the model wrote. */
+   * where a busy endpoint shows; later items depend on what the model wrote.
+   * Work counts only fresh prompt tokens: a hosted model writes its prompt
+   * cache at no visible cost, and local servers report no cache writes. */
   #observeModelResponse(
     operation: RunnerOperationState,
     response: ModelResponded,
@@ -644,7 +646,7 @@ export class RunnerOperations {
       type: "latency",
       source: "run",
       latencyMs: response.first_item_at_unix_ms - response.started_at_unix_ms,
-      workTokens: response.usage.input + response.usage.cache_write,
+      workTokens: response.usage.input,
     });
   }
 

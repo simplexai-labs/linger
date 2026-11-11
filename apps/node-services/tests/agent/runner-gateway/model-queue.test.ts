@@ -220,6 +220,27 @@ describe("ModelQueue limit", () => {
     expect(refused.value).toBeDefined();
   });
 
+  it("judges a lower limit only once the units above it have finished", async () => {
+    const queue = new ModelQueue(() => ({ initial: 1, max: 4 }));
+    const a = await queue.acquire(codex, run("a"), signal);
+    for (let i = 0; i < 3; i++) queue.observe(codex, latency(500));
+    const b = track(queue.acquire(codex, run("b"), signal));
+    queue.observe(codex, latency(500));
+    const c = track(queue.acquire(codex, run("c"), signal));
+    for (let i = 0; i < 4; i++) queue.observe(codex, latency(500));
+    await flush();
+    expect(c.value).toBeDefined();
+
+    // Three at once are slow: two. Three still run, so their slow requests
+    // say nothing about two.
+    for (let i = 0; i < 8; i++) queue.observe(codex, latency(1_500));
+    a.release(done);
+    b.value!.release(done);
+    const d = track(queue.acquire(codex, run("d"), signal));
+    await flush();
+    expect(d.value).toBeDefined();
+  });
+
   it("keeps a learned limit while the endpoint is idle and starts over when its link changes", async () => {
     let range = { initial: 1, max: 4 };
     const queue = new ModelQueue(() => range);

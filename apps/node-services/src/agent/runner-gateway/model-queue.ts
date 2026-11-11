@@ -106,11 +106,29 @@ export class ModelQueue {
     const key = endpointKey(endpoint);
     const limit = this.#limit(key, endpoint);
     const state = this.#endpoints.get(key);
-    const change = limit.observe(signal, {
-      active: state?.active ?? 0,
-      saturated: (state?.waiting.length ?? 0) > 0,
+    const active = state?.active ?? 0;
+    const saturated = (state?.waiting.length ?? 0) > 0;
+    const { change, latency } = limit.observe(signal, {
+      active,
+      saturated,
       now: this.now(),
     });
+    if (latency)
+      logAgentEvent("debug", "model_queue.latency_sampled", {
+        computer_id: endpoint.computerId,
+        runtime_type: endpoint.runtimeType,
+        source: latency.source,
+        ms_per_thousand: Math.round(latency.perThousand),
+        ...(latency.baseline === undefined
+          ? {}
+          : { baseline_ms_per_thousand: Math.round(latency.baseline) }),
+        ...(latency.window === undefined
+          ? {}
+          : { window_ms_per_thousand: Math.round(latency.window) }),
+        active,
+        waiting: state?.waiting.length ?? 0,
+        limit: limit.value,
+      });
     if (!change) return;
     logAgentEvent("info", "model_queue.limit_changed", {
       computer_id: endpoint.computerId,
