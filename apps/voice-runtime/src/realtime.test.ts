@@ -49,6 +49,9 @@ describe("realtime session rules", () => {
     expect(rules).toContain(
       "\n- LANGUAGE: Speak only the language of the user's latest words.",
     );
+    expect(rules).toContain(
+      "changes only that text, never the language you speak",
+    );
     expect(rules).toContain("\n- LENGTH: ");
     expect(rules.indexOf("## Conversation Flow")).toBeLessThan(
       rules.indexOf("## CRITICAL INSTRUCTIONS"),

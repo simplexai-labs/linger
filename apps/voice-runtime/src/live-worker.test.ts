@@ -112,6 +112,7 @@ vi.mock("@livekit/rtc-node", () => ({
 
 import { LiveSessionError, type LiveEvent } from "./live-session.js";
 import {
+  afterCall,
   liveDataTopic,
   liveReplyEventId,
   liveTurnId,
@@ -405,6 +406,17 @@ async function startTask(test: Test, goal = "Research three vendors' pricing") {
     expect(test.session().sendToolResults).toHaveBeenCalledOnce(),
   );
 }
+
+describe("afterCall", () => {
+  it("keeps the words after a tool call apart from the sentence before it", () => {
+    expect(
+      afterCall("Switching everything to English.", "All English now"),
+    ).toBe(" All English now");
+    expect(afterCall("改好了。", "主题是周五会议")).toBe("主题是周五会议");
+    expect(afterCall("", "Done.")).toBe("Done.");
+    expect(afterCall("Done. ", "Next")).toBe("Next");
+  });
+});
 
 describe("parseLiveClientEvent", () => {
   const encode = (value: unknown) =>

@@ -197,6 +197,8 @@ interface Reply {
   endRequested?: boolean;
   /** Tool results not yet returned; the reply continues after them. */
   toolsPending: number;
+  /** A tool was called; the next words start a new sentence after it. */
+  called?: boolean;
   interrupted: boolean;
   /** A pause of it ended unconfirmed; only server VAD stops it now. */
   pauseDeclined?: boolean;
@@ -789,23 +791,31 @@ export class LiveVoiceWorker {
         if (!reply || reply.interrupted || !event.text) return;
         reply.outputStarted = true;
         const turn = reply.turn;
+        let text = event.text;
+        if (reply.called) {
+          reply.called = false;
+          text = afterCall(
+            reply.speech ? (reply.spokenText ?? "") : turn.text,
+            text,
+          );
+        }
         if (reply.speech) {
-          reply.spokenText = (reply.spokenText ?? "") + event.text;
+          reply.spokenText = (reply.spokenText ?? "") + text;
           if (reply.speechStarted)
             this.publish({
               type: "reply_delta",
               turn_id: reply.speech.turnId,
               speech_id: reply.speech.speechId,
-              text: event.text,
+              text,
             });
           return;
         }
         turn.firstTextAt ??= Date.now();
-        turn.text += event.text;
+        turn.text += text;
         this.publish({
           type: "reply_delta",
           turn_id: turn.id,
-          text: event.text,
+          text,
         });
         return;
       }
@@ -826,6 +836,7 @@ export class LiveVoiceWorker {
             : this.replyFor(false);
         if (!reply) return;
         reply.toolsPending += 1;
+        reply.called = true;
         const calledAt = Date.now();
         let answered = true;
         this.track(
@@ -2395,4 +2406,15 @@ export function withoutRepeat(said: string, text: string) {
   if (cut === 0 || best > Math.floor(before.length / 4)) return text;
   const kept = text.slice(tokens[cut - 1]!.end).replace(/^[\s\p{P}]+/u, "");
   return kept || text;
+}
+
+/**
+ * The words said after a tool call come from a new provider response that
+ * starts right after the sentence before the call ("…to English.All English
+ * now"); a space keeps them apart where a Latin word or number follows.
+ */
+export function afterCall(before: string, text: string) {
+  if (!before || /\s$/.test(before) || !/^[\p{Script=Latin}\p{N}]/u.test(text))
+    return text;
+  return ` ${text}`;
 }
