@@ -2212,6 +2212,14 @@ export class InstallerApi {
     )
       job = latest;
     else {
+      // The installer answers a new request with a job still waiting for
+      // the person, so an attempt that stopped there would be handed back,
+      // failed as it ended, on every later attempt.
+      if (latest?.state === "waiting_user")
+        await this.#json(
+          `/api/jobs/${encodeURIComponent(latest.id)}/cancel`,
+          {},
+        );
       const setupChoice =
         plan.runtime === "local"
           ? "local-models"

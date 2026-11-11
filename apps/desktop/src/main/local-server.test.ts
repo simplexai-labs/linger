@@ -139,6 +139,7 @@ const installerApi = (
   const updates = [running].flat();
   const created: unknown[] = [];
   const retried: unknown[] = [];
+  const canceled: string[] = [];
   // The runtime the installation set up and its sign-in; tests change them.
   const runtime: {
     setupChoice: string;
@@ -184,6 +185,10 @@ const installerApi = (
       return Response.json(job({ state: "queued" }), { status: 202 });
     }
     if (url.pathname === "/api/jobs") return Response.json({ items: jobs });
+    if (url.pathname === "/api/jobs/job/cancel" && init.method === "POST") {
+      canceled.push("job");
+      return Response.json(job({ state: "canceled" }), { status: 202 });
+    }
     if (url.pathname === "/api/jobs/job/retry" && init.method === "POST") {
       retried.push(JSON.parse(String(init.body)));
       polls = 0;
@@ -233,7 +238,7 @@ const installerApi = (
     }
     return new Response(null, { status: 404 });
   };
-  return { handle, created, retried, runtime };
+  return { handle, created, retried, canceled, runtime };
 };
 
 const TEAMHUB = "http://127.0.0.1:4100";
@@ -1349,6 +1354,32 @@ describe("LocalServerModule", () => {
     await f.host.start();
     await f.module.begin({ runtime: "local" });
     expect(f.api.retried).toEqual([{ localModelsReplan: true }]);
+    expect(f.module.status().phase).toBe("ready");
+    await f.host.stop("quit");
+  });
+
+  it("starts again past an attempt that stopped waiting for the person", async () => {
+    const f = fixture(
+      withCheckout,
+      {},
+      checkout,
+      installerApi([
+        {
+          id: "job",
+          instance: LOCAL_INSTANCE,
+          createdAt: "2026-11-03T00:00:00Z",
+          state: "waiting_user",
+          errorCode: "LOCAL_MODELS_UNAVAILABLE",
+        },
+      ]),
+    );
+    await f.host.start();
+    await f.module.begin({ runtime: "local" });
+    // The stopped attempt is closed first, or the installer hands it back.
+    expect(f.api.canceled).toEqual(["job"]);
+    expect(f.api.created).toEqual([
+      { instance: LOCAL_INSTANCE, setupChoice: "local-models" },
+    ]);
     expect(f.module.status().phase).toBe("ready");
     await f.host.stop("quit");
   });
