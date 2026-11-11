@@ -128,6 +128,7 @@ export class ModelQueue {
         active,
         waiting: state?.waiting.length ?? 0,
         limit: limit.value,
+        ...(limit.ceiling === undefined ? {} : { ceiling: limit.ceiling }),
       });
     if (!change) return;
     logAgentEvent("info", "model_queue.limit_changed", {
@@ -136,6 +137,7 @@ export class ModelQueue {
       from: change.from,
       to: change.to,
       reason: change.reason,
+      ...(limit.ceiling === undefined ? {} : { ceiling: limit.ceiling }),
       ...(change.ratio === undefined
         ? {}
         : { ratio: Math.round(change.ratio * 100) / 100 }),

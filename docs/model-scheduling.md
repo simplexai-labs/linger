@@ -16,8 +16,11 @@ waits and requests come back about as fast as with one unit running, the
 queue tries one more. When requests get clearly slower it gives one back, and
 when the endpoint refuses work (rate limited, overloaded, or a call runs out
 of time) it halves and holds off raising for a minute. Speed is compared per
-thousand new prompt tokens, so a long prompt does not look like a busy endpoint. What it
-learns lasts until the service restarts or the runtime's models change.
+thousand new prompt tokens, so a long prompt does not look like a busy
+endpoint. A number it had to come down from is not tried again for five
+minutes; if that retry is too slow as well, the wait doubles, up to half an
+hour. What it learns lasts until the service restarts or the runtime's models
+change.
 
 Background work never takes the last place once there is more than one, so a
 chat does not wait behind a wiki refresh.

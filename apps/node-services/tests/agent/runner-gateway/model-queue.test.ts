@@ -241,6 +241,52 @@ describe("ModelQueue limit", () => {
     expect(d.value).toBeDefined();
   });
 
+  it("keeps a limit it came down from as the ceiling and retries it later, waiting longer after each failed retry", async () => {
+    let now = 0;
+    const minutes = (count: number) => (now += count * 60_000);
+    const queue = new ModelQueue(
+      () => ({ initial: 1, max: 4 }),
+      () => now,
+    );
+    const a = await queue.acquire(codex, run("a"), signal);
+    for (let i = 0; i < 3; i++) queue.observe(codex, latency(500));
+    const b = track(queue.acquire(codex, run("b"), signal));
+    queue.observe(codex, latency(500));
+    await flush();
+    expect(b.value).toBeDefined();
+    for (let i = 0; i < 4; i++) queue.observe(codex, latency(1_500));
+    a.release(done);
+
+    // One unit running looks fast, but two were just too slow.
+    const c = track(queue.acquire(codex, run("c"), signal));
+    for (let i = 0; i < 4; i++) queue.observe(codex, latency(500));
+    await flush();
+    expect(c.value).toBeUndefined();
+    minutes(5);
+    queue.observe(codex, latency(500));
+    await flush();
+    expect(c.value).toBeDefined();
+
+    // The retry is slow too: the next one waits ten minutes.
+    for (let i = 0; i < 4; i++) queue.observe(codex, latency(1_500));
+    b.value!.release(done);
+    const d = track(queue.acquire(codex, run("d"), signal));
+    minutes(5);
+    for (let i = 0; i < 4; i++) queue.observe(codex, latency(500));
+    await flush();
+    expect(d.value).toBeUndefined();
+    minutes(5);
+    queue.observe(codex, latency(500));
+    await flush();
+    expect(d.value).toBeDefined();
+
+    // This retry holds: the ceiling is gone and the limit grows past it.
+    const e = track(queue.acquire(codex, run("e"), signal));
+    for (let i = 0; i < 4; i++) queue.observe(codex, latency(500));
+    await flush();
+    expect(e.value).toBeDefined();
+  });
+
   it("keeps a learned limit while the endpoint is idle and starts over when its link changes", async () => {
     let range = { initial: 1, max: 4 };
     const queue = new ModelQueue(() => range);

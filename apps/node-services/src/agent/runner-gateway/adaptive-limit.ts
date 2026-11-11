@@ -52,6 +52,10 @@ const RAISE_AT_MOST = 1.3;
 const LOWER_ABOVE = 1.8;
 /** No raise for this long after the endpoint refused work. */
 const OVERLOAD_COOLDOWN_MS = 60_000;
+/** First wait before a limit found too slow or refused is tried again; each
+ * failed retry doubles it, up to the most. */
+const RETRY_CEILING_MS = 5 * 60_000;
+const RETRY_CEILING_MAX_MS = 30 * 60_000;
 /** Below this, fixed per-request overhead dominates the latency. */
 const MIN_WORK_TOKENS = 1_000;
 
@@ -66,10 +70,18 @@ interface Latencies {
  * fast as with one unit running; it shrinks by one when they are clearly
  * slower and halves when the endpoint refuses work. Running units are never
  * interrupted, so a lower limit only holds back new ones.
+ *
+ * A limit it had to come down from is the ceiling: it is not tried again
+ * until the retry time, since one unit running always looks fast and would
+ * otherwise send the limit straight back up. A retry that holds clears the
+ * ceiling; one that fails waits twice as long for the next.
  */
 export class AdaptiveLimit {
   #limit: number;
   #cooldownUntil = 0;
+  #ceiling: number | undefined;
+  #retryAt = 0;
+  #retryAfterMs = RETRY_CEILING_MS;
   readonly #latencies = new Map<string, Latencies>();
 
   constructor(readonly range: ConcurrencyRange) {
@@ -78,6 +90,11 @@ export class AdaptiveLimit {
 
   get value(): number {
     return this.#limit;
+  }
+
+  /** The lowest limit found too slow or refused, until a retry holds. */
+  get ceiling(): number | undefined {
+    return this.#ceiling;
   }
 
   observe(
@@ -91,7 +108,11 @@ export class AdaptiveLimit {
     if (signal.type === "overload") {
       this.#cooldownUntil = endpoint.now + OVERLOAD_COOLDOWN_MS;
       return {
-        change: this.#set(Math.max(1, Math.floor(this.#limit / 2)), "overload"),
+        change: this.#lower(
+          Math.max(1, Math.floor(this.#limit / 2)),
+          "overload",
+          endpoint.now,
+        ),
       };
     }
     const perThousand =
@@ -124,22 +145,47 @@ export class AdaptiveLimit {
     if (ratio > LOWER_ABOVE)
       return {
         latency,
-        change: this.#set(Math.max(1, this.#limit - 1), "slower", ratio),
-      };
-    if (
-      ratio <= RAISE_AT_MOST &&
-      endpoint.saturated &&
-      endpoint.now >= this.#cooldownUntil
-    )
-      return {
-        latency,
-        change: this.#set(
-          Math.min(this.range.max, this.#limit + 1),
-          "faster",
+        change: this.#lower(
+          Math.max(1, this.#limit - 1),
+          "slower",
+          endpoint.now,
           ratio,
         ),
       };
+    if (this.#ceiling !== undefined && this.#limit >= this.#ceiling) {
+      this.#ceiling = undefined;
+      this.#retryAfterMs = RETRY_CEILING_MS;
+    }
+    const next = Math.min(this.range.max, this.#limit + 1);
+    if (
+      ratio <= RAISE_AT_MOST &&
+      endpoint.saturated &&
+      endpoint.now >= this.#cooldownUntil &&
+      (this.#ceiling === undefined ||
+        next < this.#ceiling ||
+        endpoint.now >= this.#retryAt)
+    )
+      return { latency, change: this.#set(next, "faster", ratio) };
     return { latency };
+  }
+
+  #lower(
+    to: number,
+    reason: LimitChange["reason"],
+    now: number,
+    ratio?: number,
+  ): LimitChange | undefined {
+    const from = this.#limit;
+    const change = this.#set(to, reason, ratio);
+    if (!change) return undefined;
+    if (this.#ceiling !== undefined && from >= this.#ceiling)
+      this.#retryAfterMs = Math.min(
+        this.#retryAfterMs * 2,
+        RETRY_CEILING_MAX_MS,
+      );
+    this.#ceiling = from;
+    this.#retryAt = now + this.#retryAfterMs;
+    return change;
   }
 
   #set(
