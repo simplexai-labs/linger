@@ -323,13 +323,29 @@ profile directory, stored under `computer-tools/browser-profiles/` in the state
 directory. Cua can observe the native Chrome window that Playwright connects to.
 
 On macOS, `launch_app` with `agent_browser: true` opens the Computer's own
-browser for a site that watches for automated browsers. The Agent drives it
-only with the computer tools, never through Playwright or a debugging port.
-Chrome, Edge and Firefox each run as a separate instance with their own
-profile under `computer-tools/agent-<browser>` in the state directory, so the
-user signs in there once. Safari cannot run a second profile; the Computer
-uses its own window in the user's Safari. Without a `bundle_id`, the Daemon
-picks the first installed of Chrome, Edge, Firefox and Safari.
+browser window for a site that watches for automated browsers. The Agent drives
+it only with the computer tools, never through Playwright or a debugging port.
+In Chrome it is a window of the Computer's own in the user's everyday Chrome,
+with the user's sign-ins, history and device trust. The window opens through
+Chrome's command line, one site per call, so no key reaches the user's other
+windows. A covered window keeps working only when Chrome runs with
+`--disable-backgrounding-occluded-windows`: a Chrome that is not running
+starts with it, and one running without it returns
+`COMPUTER_BROWSER_RESTART_REQUIRED` until the Agent passes `restart_browser`
+after the user agreed. The restart quits Chrome as its menu does and reopens it
+with `--restore-last-session`. The user's Chrome takes no keys from the
+Computer (`COMPUTER_KEYS_REFUSED`): a shortcut runs as a menu command in the
+Chrome window that has the keyboard, and Cua types text as keys that all read
+as the A key. Only a plain key bound to an element goes, and Cua sends it only
+when no other Chrome window could take it. The Agent fills fields with
+`set_value`, presses the page's buttons and goes back through its links.
+The separate Chrome profile earlier versions used, `computer-tools/agent-chrome`,
+is removed when the Daemon starts and that Chrome no longer runs.
+Edge and Firefox each run as a separate instance with their own profile under
+`computer-tools/agent-<browser>` in the state directory, so the user signs in
+there once. Safari cannot run a second profile; the Computer uses its own
+window in the user's Safari. Without a `bundle_id`, the Daemon picks the first
+installed of Chrome, Edge, Firefox and Safari.
 It opens a site only at its home page and refuses any other web address with
 `COMPUTER_HOME_PAGE_ONLY`: the Agent reaches a search, listing or item through
 the site's own search box, menus and links, as a person does.

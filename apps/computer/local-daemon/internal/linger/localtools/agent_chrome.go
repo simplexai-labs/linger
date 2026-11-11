@@ -58,7 +58,7 @@ var agentChromePID = func(ctx context.Context, directory string) (int, string, e
 // brings its first window forward once, where the user is. Later URLs open
 // in a new tab through the window's accessibility tree and one Return key to
 // that browser alone, so the user's apps, focus and Space stay as they are.
-func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls []string) (json.RawMessage, error) {
+func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls []string, restart bool) (json.RawMessage, error) {
 	var sites []string
 	for _, address := range urls {
 		if site := siteOf(address); site != "" {
@@ -77,6 +77,9 @@ func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls
 	// Opening a URL is input to that browser: a stopped task opens none.
 	if _, err := c.paceAgentChrome(ctx, 0); err != nil {
 		return nil, err
+	}
+	if b.Everyday {
+		return c.launchEverydayChrome(ctx, b, urls, restart)
 	}
 	if b.Shared {
 		return c.launchAgentSafari(ctx, b, urls)
@@ -413,8 +416,9 @@ var agentChromeRecheck = 30 * time.Second
 // because the Computer's own browser gets a new pid when it restarts. A failed
 // lookup refuses the input instead of treating the app as another one.
 //
-// In the user's Safari only the window the Computer opened is its own; an
-// input that names no window goes to that window.
+// In the user's own browser, such as their everyday Chrome or Safari, only
+// the window the Computer opened is its own; an input that names no window
+// goes to that window.
 func (c *cuaSession) isAgentChrome(ctx context.Context, pid, window any) (bool, error) {
 	number, ok := pid.(float64)
 	if !ok || runtime.GOOS != "darwin" {
@@ -423,11 +427,11 @@ func (c *cuaSession) isAgentChrome(ctx context.Context, pid, window any) (bool, 
 	m := c.op.manager
 	m.mu.Lock()
 	known, checked := m.agentChromePID, m.agentChromeChecked
-	safari, safariWindow := m.agentSafariPID, m.agentSafariWindow
+	shared, sharedWindow := m.sharedBrowserPID, m.sharedBrowserWindow
 	m.mu.Unlock()
-	if safari > 0 && safari == int(number) {
+	if shared > 0 && shared == int(number) {
 		id, named := window.(float64)
-		return !named || id == safariWindow, nil
+		return !named || id == sharedWindow, nil
 	}
 	if known > 0 && known == int(number) && time.Since(checked) < agentChromeRecheck {
 		return true, nil
@@ -483,11 +487,11 @@ func (c *cuaSession) agentChromeRunning(ctx context.Context) (int, error) {
 	}
 	m := c.op.manager
 	m.mu.Lock()
-	safari := m.agentSafariPID
+	shared, bundle := m.sharedBrowserPID, m.sharedBrowserBundle
 	m.mu.Unlock()
-	if own == 0 && safari > 0 {
-		if running, _ := lsappPID(ctx, "com.apple.Safari"); running == safari {
-			return safari, nil
+	if own == 0 && shared > 0 {
+		if running, _ := sharedBrowserRunning(ctx, bundle); running == shared {
+			return shared, nil
 		}
 	}
 	m.mu.Lock()
@@ -546,10 +550,10 @@ func (c *cuaSession) agentChromeKeys(ctx context.Context, arguments map[string]a
 	}
 	m := c.op.manager
 	m.mu.Lock()
-	safari, safariWindow := m.agentSafariPID, m.agentSafariWindow
+	shared, sharedWindow := m.sharedBrowserPID, m.sharedBrowserWindow
 	m.mu.Unlock()
-	if pid, ok := arguments["pid"].(float64); ok && safari > 0 && int(pid) == safari {
-		arguments["window_id"] = safariWindow
+	if pid, ok := arguments["pid"].(float64); ok && shared > 0 && int(pid) == shared {
+		arguments["window_id"] = sharedWindow
 		return nil
 	}
 	windows, err := c.appWindows(ctx, arguments["pid"])

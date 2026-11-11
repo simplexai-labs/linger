@@ -55,7 +55,7 @@ func TestScriptGuardRefusesForbiddenInputInAJSEngine(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			script := filepath.Join(dir, "script.js")
-			if err := os.WriteFile(script, []byte(guardedScript(`{"n":1}`, tc.body, 42, 0)), 0o600); err != nil {
+			if err := os.WriteFile(script, []byte(guardedScript(`{"n":1}`, tc.body, 42, 0, false)), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			out, err := exec.Command(node, harness, script).CombinedOutput()
@@ -84,7 +84,7 @@ func TestScriptGuardPacesInputsForTheComputersChrome(t *testing.T) {
 	if err := os.WriteFile(harness, []byte(guardHarness), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, 2)), 0o600); err != nil {
+	if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, 2, false)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command(node, harness, script).CombinedOutput()
@@ -112,7 +112,7 @@ func TestScriptGuardSpeedsTypingAndCapsWaits(t *testing.T) {
 	if err := os.WriteFile(harness, []byte(guardHarness), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, 20)), 0o600); err != nil {
+	if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, 20, false)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command(node, harness, script).CombinedOutput()
@@ -145,7 +145,7 @@ func TestScriptGuardRefusesLaunchAppForTheComputersChrome(t *testing.T) {
 		want  string
 	}{{2, "threw:COMPUTER_SCRIPT_REFUSED"}, {0, "call:launch_app"}} {
 		script := filepath.Join(dir, "script.js")
-		if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, tc.limit)), 0o600); err != nil {
+		if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, tc.limit, false)), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		out, err := exec.Command(node, harness, script).CombinedOutput()
@@ -154,6 +154,40 @@ func TestScriptGuardRefusesLaunchAppForTheComputersChrome(t *testing.T) {
 		}
 		if got := string(out); !strings.Contains(got, tc.want) || tc.limit > 0 && strings.Contains(got, "call:launch_app") {
 			t.Fatalf("limit %d: got %s, want %q", tc.limit, got, tc.want)
+		}
+	}
+}
+
+// In the user's everyday Chrome a script sends no shortcut, typed text or
+// unbound key; a plain key bound to an element and other input still go.
+func TestScriptGuardRefusesKeysForTheEverydayChrome(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	dir := t.TempDir()
+	harness := filepath.Join(dir, "harness.mjs")
+	if err := os.WriteFile(harness, []byte(guardHarness), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ body, want string }{
+		{`return await cua.call("hotkey", {pid: 1, keys: ["cmd", "["]});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({pid: 1}); return app.typeText("kettle", {role: "AXTextField"});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("press_key", {pid: 1, key: "return"});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("press_key", {pid: 1, key: "return", element_token: "s1:2", modifiers: ["cmd"]});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("press_key", {pid: 1, key: "return", element_token: "s1:2"});`, "call:press_key"},
+		{`return await cua.call("click", {pid: 1, element_token: "s1:2"});`, "call:click"},
+	} {
+		script := filepath.Join(dir, "script.js")
+		if err := os.WriteFile(script, []byte(guardedScript(`{}`, tc.body, 42, 20, true)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out, err := exec.Command(node, harness, script).CombinedOutput()
+		if err != nil {
+			t.Fatalf("node: %v\n%s", err, out)
+		}
+		if got := string(out); !strings.Contains(got, tc.want) {
+			t.Fatalf("%s: got %s, want %q", tc.body, got, tc.want)
 		}
 	}
 }

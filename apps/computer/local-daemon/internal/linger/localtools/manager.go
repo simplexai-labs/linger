@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"os/exec"
@@ -90,11 +91,13 @@ type Manager struct {
 	agentChromeOwner   *operation
 	agentChromePID     int
 	agentChromeChecked time.Time
-	// agentSafariPID and agentSafariWindow are the user's Safari and the
-	// window in it that the Computer opened as its own; see
-	// launchAgentSafari.
-	agentSafariPID    int
-	agentSafariWindow float64
+	// sharedBrowserBundle, sharedBrowserPID and sharedBrowserWindow are the
+	// user's own browser the Computer works in, such as their everyday Chrome
+	// or Safari, and the window in it that the Computer opened as its own;
+	// see launchEverydayChrome and launchAgentSafari.
+	sharedBrowserBundle string
+	sharedBrowserPID    int
+	sharedBrowserWindow float64
 	// paceMu guards the persisted pace record of the Computer's own browser
 	// and paceLast, when that Chrome last received input; see
 	// paceAgentChrome.
@@ -121,8 +124,27 @@ func New(options Options) (*Manager, error) {
 		if err := m.openBrowserJournals(); err != nil {
 			return nil, err
 		}
+		retireAgentChromeProfile(options.StateDirectory)
 	}
 	return m, nil
+}
+
+// retireAgentChromeProfile removes the separate Chrome profile the Computer
+// used before it worked in a window of the user's everyday Chrome. A profile
+// whose Chrome still runs stays until a later start finds it closed.
+func retireAgentChromeProfile(state string) {
+	directory := filepath.Join(state, "computer-tools", "agent-chrome")
+	if _, err := os.Stat(directory); err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if pid, _, err := agentChromePID(ctx, directory); err != nil || pid > 0 {
+		return
+	}
+	if err := os.RemoveAll(directory); err != nil {
+		slog.Warn("agent_browser.retire_profile_failed", "error", err)
+	}
 }
 
 type operation struct {
@@ -692,7 +714,7 @@ func describeBrowserMode(tools []tool, userChrome, chromeRequired, connectable b
 // siteSkillNote leaves the choice of tools on a site to a Skill written for
 // it: sites that block automated browsers are used through the computer
 // tools, and this browser leaves automation traces in their pages.
-const siteSkillNote = " When a Skill covers the site, follow its choice of tools, even when it asks for the computer tools instead of these. A social network, a marketplace or another site that watches for automated browsers is used through the computer tools in the Computer's own browser, where the user signs in once, even when the user says they are signed in: never connect their everyday browser for such a site."
+const siteSkillNote = " When a Skill covers the site, follow its choice of tools, even when it asks for the computer tools instead of these. A social network, a marketplace or another site that watches for automated browsers is used through the computer tools, in the Computer's own window of the user's everyday browser, never through these browser tools: they drive the page in a way such sites detect."
 
 func filterBrowserTools(catalog []tool) []tool {
 	var result []tool

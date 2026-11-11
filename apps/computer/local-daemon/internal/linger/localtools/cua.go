@@ -160,7 +160,8 @@ func (m *Manager) openCua(ctx context.Context, op *operation) (*cuaSession, []to
 		if item.Name == "launch_app" && runtime.GOOS == "darwin" {
 			item.Description = "Open a macOS app in the background through Launch Services, as `open -g` does, and return its pid and windows. Optional urls are handed to the app; for Finder, pass a folder to open it in a window."
 			item.InputSchema = schema(map[string]any{"bundle_id": map[string]string{"type": "string", "description": "Preferred, for example com.apple.TextEdit."}, "name": map[string]string{"type": "string", "description": "App name, when the bundle id is unknown."}, "urls": map[string]any{"type": "array", "items": map[string]string{"type": "string"}, "description": "Files or folders to open in the app."},
-				"agent_browser": map[string]string{"type": "boolean", "description": "Open the URLs in the Computer's own browser, which keeps working while other windows cover it on the user's desktop and has its own sign-ins, instead of the user's everyday browser. Only a site's home page opens there, such as https://www.example.com/. With no bundle_id it is the first installed of Chrome, Edge, Firefox and Safari; a bundle_id of com.google.Chrome, com.microsoft.edgemac, org.mozilla.firefox or com.apple.Safari picks one. Safari has no separate profile, so there it is a window of its own in the user's Safari, with the user's sign-ins."}})
+				"agent_browser":   map[string]string{"type": "boolean", "description": "Open the URLs in the Computer's own browser window, which keeps working while other windows cover it on the user's desktop. Only a site's home page opens there, such as https://www.example.com/. With no bundle_id it is the first installed of Chrome, Edge, Firefox and Safari; a bundle_id of com.google.Chrome, com.microsoft.edgemac, org.mozilla.firefox or com.apple.Safari picks one. In Chrome and Safari it is a window of the Computer's own in the user's everyday browser, with the user's sign-ins; in Chrome it opens one site per call. Edge and Firefox run as separate instances with their own sign-ins."},
+				"restart_browser": map[string]string{"type": "boolean", "description": "With agent_browser in Chrome: restart the user's Chrome so the Computer's window keeps working while covered. Pass it only after the user agreed to a COMPUTER_BROWSER_RESTART_REQUIRED question."}})
 		}
 		if item.Name == "get_desktop_state" {
 			item.Description += " Read-only whole-screen view; act through the window tools with a pid and window_id. A system privacy prompt about CuaDriver belongs to the user: never answer it, and keep working through the window tools."
@@ -223,7 +224,7 @@ const MacToolGuide = `Computer tools on this Mac (MCP server "computer"):
 - report_blocker({kind, url}) as soon as a page in the Computer's own browser shows a check only the user may pass (captcha, verification, login_required, rate_limited) or one item that cannot be viewed (content_unavailable). Never try to pass the check.
 The Computer's own browser takes input at a person's pace, within a budget per task and per day, and a script there sends at most 20 inputs: return what you have and look at the window before the next script. A tab that a link in the script opens is the task's and is in front afterwards. The browser tools stay off every site a task opened in that browser.
 Plan as many steps as you can in one run_actions call, as in one script; its read shows their effect, so do not read again before the next input unless you need another window. Keys are often shorter than clicks: in Finder, cmd+shift+g then a path and Return opens a folder, cmd+down opens the selected item, and in the Trash cmd+delete puts the selected item back.
-In Chrome, launch_app({bundle_id: "com.google.Chrome", urls: [url]}) opens a URL in a new tab without bringing Chrome forward; its pages read as empty while the window is covered or on another Space. Add agent_browser: true to use the Computer's own browser instead: it keeps working while covered and has its own sign-ins, but not on another desktop (Space). Chrome's own toolbar, such as Back and the address bar, refuses background input: press escape to close a page overlay, or hotkey cmd+[ to go back. A web control that ignores a background click, such as an option in a menu that opens on hover, takes one click with delivery_mode "foreground" at x,y of a screenshot.
+In Chrome, launch_app({bundle_id: "com.google.Chrome", urls: [url]}) opens a URL in a new tab without bringing Chrome forward; its pages read as empty while the window is covered or on another Space. Add agent_browser: true to use the Computer's own browser window instead: it keeps working while covered, but not on another desktop (Space). Chrome's own toolbar, such as Back and the address bar, refuses background input. In the Computer's window of the user's everyday Chrome no key or shortcut is sent: fill fields with set_value, press the page's buttons, and go back through its links. In Edge or Firefox press escape to close a page overlay, or hotkey cmd+[ to go back. A web control that ignores a background click, such as an option in a menu that opens on hover, takes one click with delivery_mode "foreground" at x,y of a screenshot.
 A menu item in the read, such as File > Put Back, can be clicked directly; do not click a menu bar title first, because an open menu holds the app until it closes. A right_click menu does not show in the read, so select the row with click and use the menu bar item or its keyboard shortcut.
 Before the first shell screenshot, or when one fails or comes back blank, run ` + "`teamhub computer permissions status`" + `; if Screen Recording is missing for Linger, run ` + "`teamhub computer permissions request --permissions screen_recording`" + ` and end your turn — the card wakes you. Never operate System Settings or privacy prompts yourself.
 ` + browserToolGuide
@@ -438,8 +439,14 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 			return nil, err
 		}
 	}
+	everyday := paced && c.everydayChrome(target["pid"])
+	if everyday && name != "run_script" {
+		if err := everydayChromeKeys(name, arguments); err != nil {
+			return nil, err
+		}
+	}
 	if name == "run_script" {
-		if err := scriptArguments(ctx, arguments, c.reviewScope(), scriptInputs); err != nil {
+		if err := scriptArguments(ctx, arguments, c.reviewScope(), scriptInputs, everyday); err != nil {
 			return nil, err
 		}
 	}
@@ -1951,7 +1958,8 @@ func (c *cuaSession) launchApp(ctx context.Context, arguments map[string]any) (j
 		if err != nil {
 			return nil, err
 		}
-		return c.launchAgentChrome(ctx, b, addresses)
+		restart, _ := arguments["restart_browser"].(bool)
+		return c.launchAgentChrome(ctx, b, addresses, restart)
 	}
 	app, flag := bundle, "-b"
 	if app == "" {

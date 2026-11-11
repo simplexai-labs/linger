@@ -205,6 +205,13 @@ func runToolFixture(mode string) {
 					}
 				case "list_windows":
 					windows := []any{map[string]any{"pid": 42, "window_id": 9, "title": "b", "z_index": 3, "is_on_screen": true, "bounds": map[string]any{"width": 800, "height": 600}}}
+					if mode == "tabs-everyday" {
+						// Each start or command line of the user's Chrome
+						// shows one more window beside the user's own.
+						for i := range strings.Count(string(data), `"name":"open"`) {
+							windows = append(windows, map[string]any{"pid": 42, "window_id": 11 + i, "title": "Home", "z_index": 2, "is_on_screen": true, "bounds": map[string]any{"width": 900, "height": 700}})
+						}
+					}
 					if mode == "tabs-ghost" {
 						// A starting Chrome lists a larger surface with no
 						// accessibility window beside its browser window.
@@ -1853,6 +1860,101 @@ func TestLocalToolCuaDeltaCountFailureReadsFullWindowOnlyOnce(t *testing.T) {
 
 // A launch opens a fresh window when the listed one has left the
 // accessibility tree.
+func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the Computer's window in the user's Chrome is macOS only")
+	}
+	inputSettle = 0
+	t.Cleanup(func() { inputSettle = 300 * time.Millisecond })
+	pause := agentChromePause
+	agentChromePause = func() time.Duration { return 0 }
+	t.Cleanup(func() { agentChromePause = pause })
+	marker := filepath.Join(t.TempDir(), "calls.jsonl")
+	c := cuaFixtureSession(t, "tabs-everyday", marker)
+	command := everydayChromeExecutable
+	pid := everydayChromePID
+	everydayChromePID = func(context.Context) (int, string, error) { return 42, command, nil }
+	t.Cleanup(func() { everydayChromePID = pid })
+	stopped := 0
+	stop := stopEverydayChrome
+	stopEverydayChrome = func(context.Context, int) error {
+		stopped++
+		command = everydayChromeExecutable + " --disable-backgrounding-occluded-windows"
+		return nil
+	}
+	t.Cleanup(func() { stopEverydayChrome = stop })
+	var opened [][]string
+	open := agentChromeOpen
+	agentChromeOpen = func(_ context.Context, args []string) ([]byte, error) {
+		opened = append(opened, args)
+		f, err := os.OpenFile(marker, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		_, err = f.WriteString(`{"name":"open"}` + "\n")
+		return nil, err
+	}
+	t.Cleanup(func() { agentChromeOpen = open })
+	settle := everydayChromeSettle
+	everydayChromeSettle = 0
+	t.Cleanup(func() { everydayChromeSettle = settle })
+	b := agentBrowsers[0]
+	// A Chrome started without the setting restarts only with consent.
+	if _, err := c.launchAgentChrome(t.Context(), b, []string{"https://example.com/"}, false); !errors.Is(err, errNotSent) || !strings.Contains(err.Error(), "COMPUTER_BROWSER_RESTART_REQUIRED") || stopped != 0 || len(opened) != 0 {
+		t.Fatalf("err=%v stopped=%d opened=%v, want a refused launch", err, stopped, opened)
+	}
+	result, err := c.launchAgentChrome(t.Context(), b, []string{"https://example.com/"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stopped != 1 || len(opened) != 2 || !slices.Contains(opened[0], "--restore-last-session") || !slices.Contains(opened[0], "--disable-backgrounding-occluded-windows") || !slices.Equal(opened[1][len(opened[1])-2:], []string{"--new-window", "https://example.com/"}) {
+		t.Fatalf("stopped=%d opened=%v, want a restart, then the site in a new window", stopped, opened)
+	}
+	if !strings.Contains(string(result), `"window_id":12`) || !strings.Contains(string(result), "takes no keys") {
+		t.Fatalf("result=%s, want the new window 12 after the restored one, and the note", result)
+	}
+	// The new window is the Computer's: input to it is paced and held, and
+	// the user's own window 9 is not the Computer's.
+	if own, err := c.isAgentChrome(t.Context(), float64(42), float64(12)); err != nil || !own {
+		t.Fatalf("own=%v err=%v, want window 12 as the Computer's", own, err)
+	}
+	for _, user := range []float64{9, 11} {
+		if own, _ := c.isAgentChrome(t.Context(), float64(42), user); own {
+			t.Fatalf("the user's own Chrome window %v read as the Computer's", user)
+		}
+	}
+	for _, call := range []string{
+		`{"pid":42,"window_id":12,"keys":["cmd","["]}`,
+	} {
+		if _, err := c.call(t.Context(), "hotkey", json.RawMessage(call)); !strings.Contains(fmt.Sprint(err), "COMPUTER_KEYS_REFUSED") {
+			t.Fatalf("hotkey err=%v, want refused", err)
+		}
+	}
+	if _, err := c.call(t.Context(), "type_text", json.RawMessage(`{"pid":42,"window_id":12,"text":"kettle","element_token":"s1:1"}`)); !strings.Contains(fmt.Sprint(err), "COMPUTER_KEYS_REFUSED") {
+		t.Fatalf("type_text err=%v, want refused", err)
+	}
+	if _, err := c.call(t.Context(), "press_key", json.RawMessage(`{"pid":42,"window_id":12,"key":"return"}`)); !strings.Contains(fmt.Sprint(err), "COMPUTER_KEYS_REFUSED") {
+		t.Fatalf("unbound press_key err=%v, want refused", err)
+	}
+	if _, err := c.call(t.Context(), "press_key", json.RawMessage(`{"pid":42,"window_id":12,"key":"return","element_token":"s1:1"}`)); err != nil {
+		t.Fatalf("Return bound to a field: %v", err)
+	}
+	if _, err := c.call(t.Context(), "set_value", json.RawMessage(`{"pid":42,"window_id":12,"value":"kettle","element_token":"s1:1"}`)); err != nil {
+		t.Fatalf("set_value: %v", err)
+	}
+	// A script there may not send keys either.
+	if _, err := c.call(t.Context(), "run_script", json.RawMessage(`{"script":"return 1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if calls := fixtureCalls(t, marker); !strings.Contains(fmt.Sprint(calls[len(calls)-1]), "noKeys = true") {
+		t.Fatalf("last call=%v, want a script guarded against keys", calls[len(calls)-1])
+	}
+	if err := c.drain(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLocalToolCuaMacAgentChromeOpensAFreshWindowForAnUnreadableOne(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("the Computer's own Chrome is macOS only")
@@ -1882,7 +1984,7 @@ func TestLocalToolCuaMacAgentChromeOpensAFreshWindowForAnUnreadableOne(t *testin
 	}
 	t.Cleanup(func() { agentChromeOpen = open })
 	b := agentBrowser{Name: "Chrome", Bundle: "com.google.Chrome", Directory: "agent-chrome-test", Args: func(string) []string { return nil }, AddressRole: "AXTextField", AddressLabel: "Address and search bar"}
-	result, err := c.launchAgentChrome(t.Context(), b, []string{"https://example.com/"})
+	result, err := c.launchAgentChrome(t.Context(), b, []string{"https://example.com/"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

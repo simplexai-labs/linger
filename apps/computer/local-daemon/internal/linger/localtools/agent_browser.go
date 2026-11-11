@@ -10,7 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
@@ -44,6 +46,11 @@ type agentBrowser struct {
 	// Safari does: it has no separate profile, so the Computer works in a
 	// window of its own there, with the user's sign-ins.
 	Shared bool
+	// Everyday marks the user's everyday Chrome: the Computer opens each
+	// site in a window of its own there, by command line, and the running
+	// instance must carry Settings, so a covered window keeps working. One
+	// started without them restarts only after the user agreed.
+	Everyday bool
 }
 
 // chromiumArgs start a Chromium browser as the Computer's own. Without
@@ -85,9 +92,17 @@ user_pref("browser.translations.automaticallyPopup", false);
 user_pref("media.autoplay.default", 5);
 `
 
+// everydayChromeArgs are what the user's everyday Chrome needs for the
+// Computer's window in it: see chromiumArgs for why a covered window stops
+// working without it. Sites see no other difference.
+var everydayChromeArgs = []string{"--disable-backgrounding-occluded-windows"}
+
 var agentBrowsers = []agentBrowser{
-	{Name: "Chrome", Bundle: "com.google.Chrome", App: "Google Chrome.app", Directory: "agent-chrome", Args: chromium,
-		Settings: append(slices.Clone(chromiumArgs), "-AppleLanguages"), AddressRole: "AXTextField", AddressLabel: "Address and search bar"},
+	// Chrome is the user's everyday Chrome, with their sign-ins, history and
+	// device trust: sites that watch for automated browsing trust that
+	// browser most, and the user signs in only once.
+	{Name: "Chrome", Bundle: "com.google.Chrome", App: "Google Chrome.app", Settings: everydayChromeArgs,
+		AddressRole: "AXTextField", AddressLabel: "Address and search bar", Shared: true, Everyday: true},
 	{Name: "Edge", Bundle: "com.microsoft.edgemac", App: "Microsoft Edge.app", Directory: "agent-edge", Args: chromium,
 		Settings: append(slices.Clone(chromiumArgs), "-AppleLanguages"), AddressRole: "AXTextField", AddressLabel: "Address and search bar"},
 	// Firefox keeps its window working while covered without a flag. Its
@@ -179,8 +194,8 @@ func (c *cuaSession) launchAgentSafari(ctx context.Context, b agentBrowser, urls
 		return nil, err
 	}
 	m.mu.Lock()
-	own := m.agentSafariWindow
-	if m.agentSafariPID != pid {
+	own := m.sharedBrowserWindow
+	if m.sharedBrowserPID != pid {
 		own = 0
 	}
 	m.mu.Unlock()
@@ -224,7 +239,7 @@ func (c *cuaSession) launchAgentSafari(ctx context.Context, b agentBrowser, urls
 		c.agentChromeTabsUntil(ctx, pid, window.WindowID, agentSafariWindowWait, func(n int) bool { return n > 0 })
 	}
 	m.mu.Lock()
-	m.agentSafariPID, m.agentSafariWindow = pid, window.WindowID
+	m.sharedBrowserBundle, m.sharedBrowserPID, m.sharedBrowserWindow = b.Bundle, pid, window.WindowID
 	m.mu.Unlock()
 	for _, url := range urls {
 		if err := c.agentChromeOpenTab(ctx, b, pid, window.WindowID, offSpace(window), url); err != nil {
@@ -272,4 +287,217 @@ func (c *cuaSession) waitSafariWindows(ctx context.Context, b agentBrowser, pid 
 			return nil, 0, err
 		}
 	}
+}
+
+// everydayChromePID finds the user's everyday Chrome: the main process of
+// Google Chrome on its default profile. Chrome instances on a profile of their
+// own, such as a test browser, name --user-data-dir and are not it. It returns
+// the pid and command line, or 0 when that Chrome is not running.
+var everydayChromePID = func(ctx context.Context) (int, string, error) {
+	output, err := exec.CommandContext(ctx, "/bin/ps", "-axww", "-o", "pid=,args=").Output()
+	if err != nil {
+		return 0, "", err
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		pidText, args, _ := strings.Cut(strings.TrimSpace(line), " ")
+		if !strings.HasPrefix(args, everydayChromeExecutable) || strings.Contains(args, "--type=") || strings.Contains(args, "--user-data-dir=") {
+			continue
+		}
+		if pid, err := strconv.Atoi(pidText); err == nil {
+			return pid, args, nil
+		}
+	}
+	return 0, "", nil
+}
+
+const everydayChromeExecutable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+// stopEverydayChrome asks the user's Chrome to quit, as quitting from its
+// menu does, and waits until it is gone. Chrome saves its session first, so
+// the restart brings back the user's windows and tabs.
+var stopEverydayChrome = func(ctx context.Context, pid int) error {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		return err
+	}
+	for deadline := time.Now().Add(everydayChromeQuitWait); ; {
+		if running, _, err := everydayChromePID(ctx); err != nil || running == 0 {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return errors.New("COMPUTER_BROWSER_RESTART_FAILED: the user's Chrome did not quit, so it was not restarted; ask the user to quit Chrome and try again")
+		}
+		if err := sleepContext(ctx, 200*time.Millisecond); err != nil {
+			return err
+		}
+	}
+}
+
+// everydayChromeQuitWait bounds how long the user's Chrome may take to quit.
+var everydayChromeQuitWait = 20 * time.Second
+
+// sharedBrowserRunning returns the pid of the user's own browser named by
+// bundle, or 0.
+func sharedBrowserRunning(ctx context.Context, bundle string) (int, error) {
+	if bundle == "com.google.Chrome" {
+		pid, _, err := everydayChromePID(ctx)
+		return pid, err
+	}
+	return lsappPID(ctx, bundle)
+}
+
+// everydayChromeRestart asks for the user's consent before the Computer
+// restarts their Chrome.
+const everydayChromeRestart = "COMPUTER_BROWSER_RESTART_REQUIRED: the user's Chrome runs without the setting that keeps the Computer's window working while other windows cover it, and Chrome takes it only when it starts; nothing was opened. Ask the user with a question card whether the Computer may restart Chrome now: Chrome quits and reopens with their windows and tabs, but text typed into a page and not yet sent may be lost. If the user agrees, call launch_app again with restart_browser: true; if not, end the task"
+
+// launchEverydayChrome opens url in a new window of the user's everyday
+// Chrome, the Computer's own window there, which the task then works in. The
+// window opens through Chrome's command line, as a link from another app
+// does, so no key reaches the user's other Chrome windows. A Chrome that is
+// not running starts with the setting the window needs; one running without
+// it restarts only when restart says the user agreed.
+func (c *cuaSession) launchEverydayChrome(ctx context.Context, b agentBrowser, urls []string, restart bool) (json.RawMessage, error) {
+	if len(urls) != 1 {
+		return nil, fmt.Errorf("launch_app opens one site at a time in the user's Chrome; call it once for each site: %w", errNotSent)
+	}
+	pid, command, err := everydayChromePID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	restarted := false
+	if pid > 0 && !b.startedWith(command) {
+		if !restart {
+			return nil, fmt.Errorf("%s: %w", everydayChromeRestart, errNotSent)
+		}
+		if err := stopEverydayChrome(ctx, pid); err != nil {
+			return nil, err
+		}
+		pid, restarted = 0, true
+	}
+	if pid == 0 {
+		// Chrome starts with the setting first, bringing back the user's
+		// windows after a restart; the Computer's window opens after them,
+		// so it is the one window that was not there before.
+		args := append([]string{"-g", "-b", b.Bundle, "--args"}, b.Settings...)
+		if restarted {
+			args = append(args, "--restore-last-session")
+		}
+		if output, err := agentChromeOpen(ctx, args); err != nil {
+			return nil, fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
+		}
+		if pid, err = c.waitEverydayChrome(ctx); err != nil {
+			return nil, err
+		}
+	}
+	windows, err := c.appWindows(ctx, pid)
+	if err != nil {
+		return nil, err
+	}
+	before := map[float64]bool{}
+	for _, w := range windows {
+		before[w.WindowID] = true
+	}
+	if output, err := agentChromeOpen(ctx, []string{"-n", "-g", "-b", b.Bundle, "--args", "--new-window", urls[0]}); err != nil {
+		return nil, fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	var window listedWindow
+	tabs := 0
+	for deadline := time.Now().Add(agentSafariWindowWait); window.WindowID == 0; {
+		windows, err := c.appWindows(ctx, pid)
+		if err != nil {
+			return nil, err
+		}
+		for _, w := range windows {
+			if !before[w.WindowID] {
+				if n := c.agentChromeTabs(ctx, pid, w.WindowID); n > 0 {
+					window, tabs = w, n
+					break
+				}
+			}
+		}
+		if window.WindowID != 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("launch_app: the user's Chrome did not open a window for the Computer")
+		}
+		if err := sleepContext(ctx, 200*time.Millisecond); err != nil {
+			return nil, err
+		}
+	}
+	m := c.op.manager
+	m.mu.Lock()
+	m.sharedBrowserBundle, m.sharedBrowserPID, m.sharedBrowserWindow = b.Bundle, pid, window.WindowID
+	m.mu.Unlock()
+	c.op.mu.Lock()
+	c.op.chromeTabs, c.op.chromePID, c.op.chromeWindow = tabs, pid, window.WindowID
+	c.op.mu.Unlock()
+	note := "This is the Computer's own window in the user's everyday Chrome, with the user's sign-ins; work only in this window, never in the user's other Chrome windows. It works while other windows cover it, but only on the desktop (Space) the user is on. The user's Chrome takes no keys from the Computer, because a key could reach the window the user is typing in: fill a field with set_value, press the page's own buttons, such as its search button, and go back through the page's links. Close a tab with the Close button of its tab; closing the window's last tab closes the window. If a site asks to sign in, ask the user to sign in once in this window."
+	if restarted {
+		note = "Restarted the user's Chrome with their windows and tabs. " + note
+	}
+	text := fmt.Sprintf("Opened %s in a new window of the user's Chrome (pid %d), window %q [window_id: %v]. The window has %d tab(s).\n%s", urls[0], pid, window.Title, window.WindowID, tabs, note)
+	return json.Marshal(map[string]any{"content": []any{map[string]string{"type": "text", "text": text}},
+		"structuredContent": map[string]any{"browser": b.Name, "pid": pid, "windows": []map[string]any{{"window_id": window.WindowID, "title": window.Title, "on_screen": window.IsOnScreen}}, "tabs": tabs, "note": note}})
+}
+
+// waitEverydayChrome waits until the user's Chrome that just started runs
+// and shows its windows, and returns its pid.
+func (c *cuaSession) waitEverydayChrome(ctx context.Context) (int, error) {
+	for deadline := time.Now().Add(agentSafariWindowWait); ; {
+		pid, _, err := everydayChromePID(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if pid > 0 {
+			if windows, err := c.appWindows(ctx, pid); err != nil {
+				return 0, err
+			} else if len(windows) > 0 {
+				// Restored windows appear one after another; a short settle
+				// keeps a late one from reading as the Computer's.
+				return pid, sleepContext(ctx, everydayChromeSettle)
+			}
+		}
+		if time.Now().After(deadline) {
+			return 0, errors.New("launch_app: the user's Chrome did not start")
+		}
+		if err := sleepContext(ctx, 200*time.Millisecond); err != nil {
+			return 0, err
+		}
+	}
+}
+
+// everydayChromeSettle is how long a just-started Chrome gets to reopen the
+// user's windows.
+var everydayChromeSettle = 2 * time.Second
+
+// everydayChrome reports whether pid is the user's everyday Chrome that the
+// Computer opened its window in.
+func (c *cuaSession) everydayChrome(pid any) bool {
+	number, ok := pid.(float64)
+	m := c.op.manager
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return ok && m.sharedBrowserPID > 0 && int(number) == m.sharedBrowserPID && m.sharedBrowserBundle == "com.google.Chrome"
+}
+
+// everydayChromeKeysRefused tells the Agent how to work without keys in the
+// user's everyday Chrome.
+const everydayChromeKeysRefused = "COMPUTER_KEYS_REFUSED: the user's everyday Chrome takes no keys from the Computer: a key or shortcut goes to the Chrome window that has the keyboard, which may be the one the user is typing in; nothing was sent. Fill a field with set_value, press the page's own buttons, such as its search button, and go back through the page's links"
+
+// everydayChromeKeys refuses keys to the user's everyday Chrome. Only one
+// plain key bound to an element, such as Return in a search box, may go:
+// Cua delivers it only when no other Chrome window could receive it.
+// Shortcuts are menu commands, which Chrome runs in the window that has the
+// keyboard, and typed text arrives as keys that all read as the A key.
+func everydayChromeKeys(name string, arguments map[string]any) error {
+	modifiers, _ := arguments["modifiers"].([]any)
+	_, bound := arguments["element_token"].(string)
+	if name == "hotkey" || name == "type_text" || name == "press_key" && (!bound || len(modifiers) > 0) {
+		return fmt.Errorf("%s: %w", everydayChromeKeysRefused, errNotSent)
+	}
+	return nil
 }

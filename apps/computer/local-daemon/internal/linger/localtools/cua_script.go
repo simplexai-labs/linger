@@ -69,7 +69,7 @@ var scriptForbidden = []string{"delivery_mode", "foreground", "screenshot_out_fi
 // Computer's own browser: the guard waits a person's pause before each input,
 // throws once the script tries to send more than inputLimit inputs, and
 // refuses launch_app, whose site checks run only in the Daemon's own call.
-func guardedScript(args, body string, deadline int64, inputLimit int) string {
+func guardedScript(args, body string, deadline int64, inputLimit int, noKeys bool) string {
 	pattern := make([]string, 0, len(scriptForbidden))
 	for _, word := range scriptForbidden {
 		pattern = append(pattern, regexp.QuoteMeta(word))
@@ -80,7 +80,8 @@ const keys = Object.keys, names = Object.getOwnPropertyNames, proto = Object.get
 const apply = Reflect.apply, stringify = JSON.stringify, parse = JSON.parse, test = RegExp.prototype.test, then = Promise.prototype.then;
 const plainProtos = [Object.prototype, Array.prototype, null], real = globalThis.cua;
 const bad = /`+strings.Join(pattern, "|")+`/;
-const limit = `+strconv.Itoa(inputLimit)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0;
+const limit = `+strconv.Itoa(inputLimit)+`, noKeys = `+strconv.FormatBool(noKeys)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0;
+const keyed = (k, c) => k === "hotkey" || k === "typeText" || k === "pressKey" && (c.length < 2 || c[1] === null || c[1] === undefined || typeof c[0] !== "string" || c[0].indexOf("+") >= 0) || k === "call" && (c[0] === "hotkey" || c[0] === "type_text" || c[0] === "press_key" && (c[1] === null || typeof c[1] !== "object" || typeof c[1].element_token !== "string" || c[1].modifiers !== undefined));
 const inputMethods = {__proto__: null, click: true, doubleClick: true, rightClick: true, drag: true, scroll: true, typeText: true, pressKey: true, hotkey: true, setValue: true};
 const inputOps = {__proto__: null, click: true, double_click: true, right_click: true, drag: true, scroll: true, type_text: true, press_key: true, hotkey: true, set_value: true};
 const input = (k, c) => inputMethods[k] === true || k === "call" && typeof c[0] === "string" && inputOps[c[0]] === true;
@@ -97,6 +98,7 @@ if (limit > 0 && k === "typeText") { const given = c.length > 2 && c[2] !== null
 if (limit > 0 && k === "sleep" && o === real && typeof c[0] === "number" && c[0] > `+strconv.Itoa(scriptSleepLimit)+`) { const t = {length: 1}; define(t, 0, {value: `+strconv.Itoa(scriptSleepLimit)+`}); c = t; }
 const run = () => { const r = apply(v, o, c); return r !== null && typeof r === "object" && typeof r.then === "function" ? apply(then, r, [out]) : out(r); };
 if (limit > 0 && (k === "launchApp" || k === "call" && c[0] === "launch_app")) throw new Error("COMPUTER_SCRIPT_REFUSED: a script in the Computer's own browser opens no app or URL, so the site checks of launch_app hold; call launch_app as its own tool");
+if (noKeys && keyed(k, c)) throw new Error(`+strconv.Quote(everydayChromeKeysRefused)+`);
 if (limit <= 0 || !input(k, c)) return run();
 if (++sent > limit) throw new Error("COMPUTER_SCRIPT_INPUT_LIMIT: a script sends at most " + limit + " inputs to the Computer's own browser; return what you have, look at the window, then continue in a new script");
 return apply(then, apply(rest, real, [`+strconv.Itoa(scriptInputPauseMin)+` + floor(random() * `+strconv.Itoa(scriptInputPauseSpan)+`)]), [run]); }; }}); } }
@@ -135,7 +137,7 @@ func forbiddenKey(value any, word string) bool {
 // into what remains of the call after waiting for the desktop lane. In a
 // reviewed Run, whose review scope is not empty, a script file runs only as
 // the judge allowed it in that scope: the body it read and the args it saw.
-func scriptArguments(ctx context.Context, arguments map[string]any, reviewScope string, inputLimit int) error {
+func scriptArguments(ctx context.Context, arguments map[string]any, reviewScope string, inputLimit int, noKeys bool) error {
 	for key := range arguments {
 		switch key {
 		case "script", "script_file", "args", "timeout_ms", "max_calls":
@@ -194,7 +196,7 @@ func scriptArguments(ctx context.Context, arguments map[string]any, reviewScope 
 	arguments["timeout_ms"] = timeout
 	delete(arguments, "script_file")
 	delete(arguments, "args")
-	arguments["script"] = guardedScript(string(encoded), script, time.Now().Add(time.Duration(timeout)*time.Millisecond).UnixMilli(), inputLimit)
+	arguments["script"] = guardedScript(string(encoded), script, time.Now().Add(time.Duration(timeout)*time.Millisecond).UnixMilli(), inputLimit, noKeys)
 	return nil
 }
 
