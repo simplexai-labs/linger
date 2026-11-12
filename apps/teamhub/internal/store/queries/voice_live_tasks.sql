@@ -164,4 +164,4 @@ ORDER BY decision.created_at,decision.id;
 SELECT body,created_at FROM task_meta_callback_messages
 WHERE task_id=sqlc.arg(task_id)::text AND tenant_id=sqlc.arg(tenant_id)::text
 ORDER BY meta_seq DESC
-LIMIT sqlc.arg(row_limit)::int;
+LIMIT sqlc.arg(row_limit)::int OFFSET sqlc.arg(row_offset)::int;

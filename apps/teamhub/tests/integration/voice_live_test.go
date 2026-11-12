@@ -687,9 +687,12 @@ func TestVoiceLiveTasksReportResultsAndWhatTheyWaitFor(t *testing.T) {
 	// check_task reads one task as its coordinator does, with its latest reports.
 	checked := tool("lt_check", "check-1", "check_task", map[string]any{"task_id": first["task_id"]})
 	reports, _ := checked["reports"].([]any)
-	if checked["status"] != "idle" || checked["folder"] != "./playground/"+workItem(first["task_id"])+"/" || len(reports) != 1 || checked["older_reports_omitted"] != false ||
+	if checked["status"] != "idle" || checked["folder"] != "./playground/"+workItem(first["task_id"])+"/" || len(reports) != 1 || checked["next_offset"] != nil ||
 		reports[0].(map[string]any)["text"] != "Sony at 1899 is the best fit, added to the cart." {
 		t.Fatalf("check_task=%v", checked)
+	}
+	if older := tool("lt_check", "check-3", "check_task", map[string]any{"task_id": first["task_id"], "offset": 1}); older["reports"] == nil || len(older["reports"].([]any)) != 0 || older["next_offset"] != nil {
+		t.Fatalf("check_task past the last report=%v", older)
 	}
 	if missing := tool("lt_check", "check-2", "check_task", map[string]any{"task_id": "t99"}); missing["error"] != "task_not_found" {
 		t.Fatalf("check_task of an unknown task=%v", missing)

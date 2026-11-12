@@ -414,6 +414,7 @@ func (s *Service) checkVoiceLiveTask(ctx context.Context, session voicelive.Sess
 	if !ok {
 		return "", voicelive.ErrInvalid
 	}
+	offset := min(max(int(args.Offset), 0), 100_000)
 	task, err := s.queries.GetVoiceLiveTask(ctx, store.GetVoiceLiveTaskParams{RoomID: session.RoomID, OwnerActorID: session.HumanActorID, Ordinal: ordinal})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return voicelive.ErrorOutput("task_not_found"), nil
@@ -429,7 +430,7 @@ func (s *Service) checkVoiceLiveTask(ctx context.Context, session voicelive.Sess
 		return "", err
 	}
 	reports, err := s.queries.ListVoiceLiveTaskReports(ctx, store.ListVoiceLiveTaskReportsParams{
-		TaskID: task.WorkItemID, TenantID: session.TenantID, RowLimit: voicelive.MaxCheckedReports + 1,
+		TaskID: task.WorkItemID, TenantID: session.TenantID, RowLimit: voicelive.CheckedReportsPage + 1, RowOffset: int32(offset),
 	})
 	if err != nil {
 		return "", err
@@ -447,8 +448,9 @@ func (s *Service) checkVoiceLiveTask(ctx context.Context, session voicelive.Sess
 	for _, approval := range view.PendingApprovals {
 		checked.Approvals = append(checked.Approvals, approval.Title)
 	}
-	if len(reports) > voicelive.MaxCheckedReports {
-		reports, checked.OlderReports = reports[:voicelive.MaxCheckedReports], true
+	checked.Offset = offset
+	if len(reports) > voicelive.CheckedReportsPage {
+		reports, checked.OlderReports = reports[:voicelive.CheckedReportsPage], true
 	}
 	for _, report := range reports {
 		checked.Reports = append(checked.Reports, voicelive.CheckedActivity{At: report.CreatedAt.Time, Text: report.Body})

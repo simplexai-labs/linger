@@ -69,6 +69,8 @@ type CancelTaskArguments struct {
 // CheckTaskArguments identifies the task the live model reads in full.
 type CheckTaskArguments struct {
 	TaskID string `json:"task_id"`
+	// Offset is how many of the latest reports to skip, from next_offset.
+	Offset LoosePart `json:"offset"`
 }
 
 // Unfinished reports whether a task in state is still being done or waits
@@ -146,11 +148,12 @@ var taskTools = []Tool{
 	},
 	{
 		Name: ToolCheckTask,
-		Description: "Read one of the user's tasks in full, as its coordinator does: its state and since when, the latest steps, the approvals it waits on, how many messages wait for it, and its latest reports, newest first and about 4000 characters in all; older_reports_omitted means earlier ones were left out. " +
+		Description: "Read one of the user's tasks in full, as its coordinator does: its state and since when, the latest steps, the approvals it waits on, how many messages wait for it, and its latest 5 reports, newest first and about 4000 characters in all. next_offset means there are older reports: pass it as offset to read them. " +
 			"list_tasks shows only the start of the latest report: use this when the user asks for details it left out (which models, what each option costs, what exactly it found or why it stopped), or before saying how a task really stands. " +
 			"A report may hold lines addressed to you, such as how to deliver its files; those are not for the user. Speak of the work in the first person.",
 		Parameters: objectSchema([]string{"task_id"}, map[string]any{
 			"task_id": stringProperty("The task, such as t2, from list_tasks"),
+			"offset":  map[string]any{"type": "integer", "minimum": 0, "description": "Optional: next_offset from the last check_task, to read older reports"},
 		}),
 	},
 }
@@ -280,15 +283,15 @@ func TaskAnswer(details string) string {
 	return "The user said this about your task by voice; take it into account and go on: " + details
 }
 
-// MaxCheckedReports is how many of a task's latest reports check_task reads.
-const MaxCheckedReports = 10
+// CheckedReportsPage is how many reports one check_task reads.
+const CheckedReportsPage = 5
 
 // checkedReportsRunes bounds all the report text one check_task returns: the
 // output stays in the realtime context for every later turn of the call.
 const checkedReportsRunes = 4000
 
-// CheckedTask is one task as check_task reads it: its Task's state and the
-// reports it sent back, newest first.
+// CheckedTask is one task as check_task reads it: its Task's state and one
+// page of the reports it sent back, newest first.
 type CheckedTask struct {
 	TaskID, Goal, Folder, Status, Reason string
 	StatusSince                          time.Time
@@ -296,6 +299,8 @@ type CheckedTask struct {
 	Approvals                            []string
 	QueuedMessages                       int
 	Reports                              []CheckedActivity
+	// Offset is how many newer reports precede Reports.
+	Offset int
 	// OlderReports is set when the task has reports older than Reports.
 	OlderReports bool
 }
@@ -312,24 +317,33 @@ func CheckTaskOutput(now time.Time, task CheckedTask) map[string]any {
 	for _, step := range task.Activity {
 		activity = append(activity, map[string]string{"ago": SpokenDuration(now.Sub(step.At)), "kind": step.Kind, "summary": step.Text})
 	}
-	reports := make([]map[string]string, 0, len(task.Reports))
+	// A report that does not fit waits for the next page; the first one on a
+	// page is cut instead, so paging always moves on.
+	reports := make([]map[string]any, 0, len(task.Reports))
 	left := checkedReportsRunes
 	for _, report := range task.Reports {
-		if left <= 0 {
+		length := utf8.RuneCountInString(report.Text)
+		if len(reports) > 0 && length > left {
 			break
 		}
-		text := truncateRunes(report.Text, left)
-		left -= utf8.RuneCountInString(text)
-		reports = append(reports, map[string]string{"ago": SpokenDuration(now.Sub(report.At)), "text": text})
+		shown := map[string]any{"ago": SpokenDuration(now.Sub(report.At)), "text": truncateRunes(report.Text, left)}
+		if length > left {
+			shown["truncated"] = true
+		}
+		reports = append(reports, shown)
+		left -= length
 	}
 	output := map[string]any{
 		"task_id": task.TaskID, "goal": truncateRunes(task.Goal, 300), "folder": task.Folder,
 		"status": task.Status, "status_for": SpokenDuration(now.Sub(task.StatusSince)),
-		"recent_activity": activity, "reports": reports, "older_reports_omitted": task.OlderReports || len(reports) < len(task.Reports),
+		"recent_activity": activity, "reports": reports,
 		"pending_approvals": task.Approvals, "queued_messages": task.QueuedMessages,
 	}
 	if task.Reason != "" {
 		output["reason"] = task.Reason
+	}
+	if task.OlderReports || len(reports) < len(task.Reports) {
+		output["next_offset"] = task.Offset + len(reports)
 	}
 	return output
 }

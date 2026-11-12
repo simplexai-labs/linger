@@ -372,13 +372,14 @@ const listVoiceLiveTaskReports = `-- name: ListVoiceLiveTaskReports :many
 SELECT body,created_at FROM task_meta_callback_messages
 WHERE task_id=$1::text AND tenant_id=$2::text
 ORDER BY meta_seq DESC
-LIMIT $3::int
+LIMIT $4::int OFFSET $3::int
 `
 
 type ListVoiceLiveTaskReportsParams struct {
-	TaskID   string `json:"task_id"`
-	TenantID string `json:"tenant_id"`
-	RowLimit int32  `json:"row_limit"`
+	TaskID    string `json:"task_id"`
+	TenantID  string `json:"tenant_id"`
+	RowOffset int32  `json:"row_offset"`
+	RowLimit  int32  `json:"row_limit"`
 }
 
 type ListVoiceLiveTaskReportsRow struct {
@@ -388,7 +389,12 @@ type ListVoiceLiveTaskReportsRow struct {
 
 // What a voice task sent back to its coordinator, newest first.
 func (q *Queries) ListVoiceLiveTaskReports(ctx context.Context, arg ListVoiceLiveTaskReportsParams) ([]ListVoiceLiveTaskReportsRow, error) {
-	rows, err := q.db.Query(ctx, listVoiceLiveTaskReports, arg.TaskID, arg.TenantID, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listVoiceLiveTaskReports,
+		arg.TaskID,
+		arg.TenantID,
+		arg.RowOffset,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
