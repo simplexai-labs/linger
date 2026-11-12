@@ -1,6 +1,6 @@
 .PHONY: contracts-generate contracts-verify computer-release-local source-archive source-dependencies
 .PHONY: check-teamhub-cli check-installer check-desktop
-.PHONY: check check-heavy-lane check-web
+.PHONY: check check-heavy-lane check-web check-web-static check-web-tests
 .PHONY: check-computer check-computer-go check-computer-release check-node-services check-voice-runtime
 .PHONY: check-teamhub check-teamhub-tooling check-teamhub-integration
 .PHONY: check-teamhub-integration-process check-teamhub-integration-migrations
@@ -70,12 +70,28 @@ check-repository:
 # branch reports the all-zero commit, which is not a ref.
 DOCTOR_BASE = $(if $(filter-out 0000000000000000000000000000000000000000,$(BASE)),--base '$(BASE)')
 
+WEB_TYPES = pnpm --filter @linger/web typecheck
+WEB_LINT = pnpm --filter @linger/web lint
+WEB_TESTS = pnpm --filter @linger/web test
+WEB_DOCTOR = pnpm react:doctor $(DOCTOR_BASE)
+
 check-web:
 	pnpm exec concurrently --success all --names types,lint,tests,doctor \
-		"pnpm --filter @linger/web typecheck" \
-		"pnpm --filter @linger/web lint" \
-		"pnpm --filter @linger/web test" \
-		"pnpm react:doctor $(DOCTOR_BASE)"
+		"$(WEB_TYPES)" \
+		"$(WEB_LINT)" \
+		"$(WEB_TESTS)" \
+		"$(WEB_DOCTOR)"
+
+# CI runs these as separate jobs (tests in shards, e.g. SHARD=2/3);
+# check-web stays the local entry point.
+check-web-static:
+	pnpm exec concurrently --success all --names types,lint,doctor \
+		"$(WEB_TYPES)" \
+		"$(WEB_LINT)" \
+		"$(WEB_DOCTOR)"
+
+check-web-tests:
+	$(WEB_TESTS)$(if $(SHARD), --shard=$(SHARD))
 
 check-node-services:
 	pnpm --filter @linger/node-services check

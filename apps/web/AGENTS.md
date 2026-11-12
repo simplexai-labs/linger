@@ -11,6 +11,8 @@ React Router Data Mode and TanStack Query power the active Room-first UI.
   before opening a pull request. If the change adds a static import on the
   Room or app initial graph, also run `pnpm --filter @linger/web run
 build:assets` to check the initial JS budget.
+  CI runs it as `make check-web-static` plus `make check-web-tests` in three
+  shards (`SHARD=1/3` and so on).
 
 ## Structure
 
