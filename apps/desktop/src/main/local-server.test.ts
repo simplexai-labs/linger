@@ -74,13 +74,14 @@ fs.mkdirSync(path.join(home, "installer"), { recursive: true });
 fs.writeFileSync(path.join(home, "installer", "args.json"), JSON.stringify(args));
 if (args.includes("--inspect")) {
   const hardware = { totalMemoryBytes: 64 * 1024 ** 3, diskFreeBytes: 200 * 1024 ** 3, gpus: [{ name: "RTX 4090" }] };
-  const eligible = !fs.existsSync(path.join(home, "small-computer"));
-  const estimate = eligible
+  const busy = fs.existsSync(path.join(home, "busy-computer"));
+  const eligible = !busy && !fs.existsSync(path.join(home, "small-computer"));
+  const estimate = eligible || busy
     ? { model: "qwen3-8b", downloadBytes: 6 * 1024 ** 3, diskBytes: 8 * 1024 ** 3, memoryBytes: 12 * 1024 ** 3 }
     : { model: "", downloadBytes: null, diskBytes: null, memoryBytes: null };
   process.stderr.write("Checked this computer in 1.5s.\n");
-  const reasons = eligible ? [] : ["facts-unavailable"];
-  const reasonMessages = eligible ? [] : ["nvidia-smi was not found"];
+  const reasons = eligible ? [] : [busy ? "free-memory-required" : "facts-unavailable"];
+  const reasonMessages = eligible ? [] : [busy ? "memory is held" : "nvidia-smi was not found"];
   process.stdout.write(JSON.stringify({ hardware, localModels: { eligible, reasons, reasonMessages, estimate } }) + "\n");
   process.exit(0);
 }
@@ -138,6 +139,7 @@ const installerApi = (
   const updates = [running].flat();
   const created: unknown[] = [];
   const retried: unknown[] = [];
+  const canceled: string[] = [];
   // The runtime the installation set up and its sign-in; tests change them.
   const runtime: {
     setupChoice: string;
@@ -183,6 +185,10 @@ const installerApi = (
       return Response.json(job({ state: "queued" }), { status: 202 });
     }
     if (url.pathname === "/api/jobs") return Response.json({ items: jobs });
+    if (url.pathname === "/api/jobs/job/cancel" && init.method === "POST") {
+      canceled.push("job");
+      return Response.json(job({ state: "canceled" }), { status: 202 });
+    }
     if (url.pathname === "/api/jobs/job/retry" && init.method === "POST") {
       retried.push(JSON.parse(String(init.body)));
       polls = 0;
@@ -232,7 +238,7 @@ const installerApi = (
     }
     return new Response(null, { status: 404 });
   };
-  return { handle, created, retried, runtime };
+  return { handle, created, retried, canceled, runtime };
 };
 
 const TEAMHUB = "http://127.0.0.1:4100";
@@ -1295,6 +1301,24 @@ describe("LocalServerModule", () => {
     info.mockRestore();
   });
 
+  it("names the model other programs keep this computer from serving", async () => {
+    const f = fixture({ checkout: "/src" }, {}, (home) => {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(path.join(home, "busy-computer"), "");
+    });
+    await f.host.start();
+    f.module.inspect();
+    await vi.waitFor(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+        eligible: false,
+        memoryInUse: true,
+        model: { name: "qwen3-8b" },
+        reasons: ["free-memory-required: memory is held"],
+      }),
+    );
+  });
+
   it("approves the deployment of the chosen local model", async () => {
     const api = installerApi([], {
       state: "waiting_user",
@@ -1334,6 +1358,32 @@ describe("LocalServerModule", () => {
     await f.host.stop("quit");
   });
 
+  it("starts again past an attempt that stopped waiting for the person", async () => {
+    const f = fixture(
+      withCheckout,
+      {},
+      checkout,
+      installerApi([
+        {
+          id: "job",
+          instance: LOCAL_INSTANCE,
+          createdAt: "2026-11-03T00:00:00Z",
+          state: "waiting_user",
+          errorCode: "LOCAL_MODELS_UNAVAILABLE",
+        },
+      ]),
+    );
+    await f.host.start();
+    await f.module.begin({ runtime: "local" });
+    // The stopped attempt is closed first, or the installer hands it back.
+    expect(f.api.canceled).toEqual(["job"]);
+    expect(f.api.created).toEqual([
+      { instance: LOCAL_INSTANCE, setupChoice: "local-models" },
+    ]);
+    expect(f.module.status().phase).toBe("ready");
+    await f.host.stop("quit");
+  });
+
   it("approves no local model the person did not choose", async () => {
     const f = fixture(
       withCheckout,
@@ -1343,11 +1393,13 @@ describe("LocalServerModule", () => {
         state: "waiting_user",
         errorCode: "LOCAL_MODELS_APPROVAL_REQUIRED",
         localModelsPlan: { planId: "a".repeat(64) },
+        message: "Review the plan before installing.",
       }),
     );
     await f.host.start();
+    // The installer's own reason follows the advice.
     await expect(f.module.begin({ runtime: "pi" })).rejects.toThrow(
-      "can't run the local model",
+      "Choose another AI runtime and try again. (Review the plan before installing.)",
     );
     expect(f.api.retried).toEqual([]);
     expect(f.module.status().phase).toBe("failed");

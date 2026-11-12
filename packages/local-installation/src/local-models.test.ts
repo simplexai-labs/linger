@@ -148,6 +148,27 @@ test("applies exactly the approved saved plan and binds only the upstream verifi
     ),
   ).toEqual(f.binding);
 });
+test("reports why the planner refused and logs its output", async () => {
+  const f = await fixture();
+  const events: string[] = [];
+  f.call.mockImplementation(async () => ({
+    code: 2,
+    stdout: "",
+    stderr: "stack: no verified LLM fits this computer\n",
+  }));
+  const result = await prepareLocalModels(
+    f.instance,
+    { ...f.options, onEvent: (event) => events.push(event.message ?? "") },
+    { localmodels: f.call },
+  );
+  expect(result).toMatchObject({
+    details: { code: "LOCAL_MODELS_UNAVAILABLE" },
+    message: expect.stringContaining(
+      "stack: no verified LLM fits this computer",
+    ),
+  });
+  expect(events.join("\n")).toContain("localmodels stack plan exited with");
+});
 test("never records a successful binding when apply fails", async () => {
   const f = await fixture();
   await prepareLocalModels(f.instance, f.options, { localmodels: f.call });
@@ -167,6 +188,29 @@ test("never records a successful binding when apply fails", async () => {
   await expect(
     stat(path.join(f.home, "runtime/localmodels/binding.json")),
   ).rejects.toThrow();
+});
+test("reports why a deployment stopped, from output that is not captured", async () => {
+  const f = await fixture();
+  await prepareLocalModels(f.instance, f.options, { localmodels: f.call });
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (...a) => {
+    if (a[1][1] !== "apply") return original(...a);
+    a[2]!.onOutput!(
+      '{"event":"progress","component":"llm","phase":"download","done":1,"total":2}\n',
+    );
+    a[2]!.onOutput!("stack: port 8080 is held by another program\n");
+    return { code: 1, stdout: "", stderr: "" };
+  });
+  const result = await prepareLocalModels(
+    f.instance,
+    { ...f.options, localModelsApproval: f.id },
+    { localmodels: f.call },
+  );
+  expect(result).toMatchObject({
+    details: { code: "LOCAL_MODELS_RECOVERY_REQUIRED" },
+    message:
+      "Local model installation or verification did not finish: stack: port 8080 is held by another program Existing resources were preserved.",
+  });
 });
 test("forwards actual split JSONL byte counters but never raw output", async () => {
   const f = await fixture();

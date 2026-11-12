@@ -563,6 +563,10 @@ export class LocalServerModule implements Module {
     const eligible = report.localModels.eligible && !!name;
     const strings = (value: unknown) =>
       Array.isArray(value) ? value.map(String) : [];
+    const memoryInUse =
+      !eligible &&
+      !!name &&
+      strings(report.localModels.reasons).includes("free-memory-required");
     const messages = strings(report.localModels.reasonMessages);
     const reasons = strings(report.localModels.reasons).map((code, index) =>
       messages[index] ? `${code}: ${messages[index]}` : code,
@@ -576,7 +580,8 @@ export class LocalServerModule implements Module {
           ? hardware.diskFreeBytes
           : null,
       ...(typeof gpu === "string" ? { gpu } : {}),
-      ...(eligible && name
+      ...(memoryInUse ? { memoryInUse } : {}),
+      ...((eligible || memoryInUse) && name
         ? {
             model: {
               name,
@@ -2206,6 +2211,14 @@ export class InstallerApi {
     )
       job = latest;
     else {
+      // The installer answers a new request with a job still waiting for
+      // the person, so an attempt that stopped there would be handed back,
+      // failed as it ended, on every later attempt.
+      if (latest?.state === "waiting_user")
+        await this.#json(
+          `/api/jobs/${encodeURIComponent(latest.id)}/cancel`,
+          {},
+        );
       const setupChoice =
         plan.runtime === "local"
           ? "local-models"
@@ -2281,7 +2294,7 @@ export class InstallerApi {
       if (!["queued", "running"].includes(job.state))
         throw new Error(
           LOCAL_MODEL_FAILURES.has(job.errorCode ?? "")
-            ? "This computer can't run the local model right now. Choose another AI runtime and try again."
+            ? `This computer can't run the local model right now. Choose another AI runtime and try again.${job.message ? ` (${job.message})` : ""}`
             : job.message || "The installation stopped",
         );
       await delay(this.#pollMs, undefined, { signal });
