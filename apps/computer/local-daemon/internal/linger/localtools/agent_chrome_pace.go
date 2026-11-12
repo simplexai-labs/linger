@@ -20,7 +20,7 @@ import (
 
 // The Computer's own browser is where Agents use sites that watch for
 // automated browsing. Every input it receives, from a tool call, a batch step,
-// a script or a paged text read, passes the same pace: a pause like a person's
+// or a script, passes the same pace: a pause like a person's
 // between inputs, a budget per task and per day, and a stop once the Agent
 // reports a check that only the user may pass. The model decides what a page
 // shows; the Computer only enforces what follows from that decision.

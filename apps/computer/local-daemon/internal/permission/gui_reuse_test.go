@@ -29,9 +29,6 @@ func TestGUIReuseKeyNamesNavigationShapesOnly(t *testing.T) {
 		{"no pid", "mcp__computer__click", `{"x":1,"y":2}`, ""},
 		{"foreground scroll", "mcp__computer__scroll", `{"pid":719,"window_id":433,"direction":"down","delivery_mode":"foreground"}`, ""},
 		{"batch with a foreground scroll", "mcp__computer__run_actions", `{"actions":[{"tool":"scroll","pid":719,"window_id":433,"direction":"down"},{"tool":"scroll","pid":719,"window_id":433,"direction":"down","delivery_mode":"foreground"}]}`, ""},
-		{"paged text read has its key's shape", "mcp__computer__recognize_text", `{"pid":719,"window_id":433,"pages":4,"next_key":"right","region":{"x":1,"y":2,"width":3,"height":4}}`, "press_key:right@719/433"},
-		{"paged text read with another field", "mcp__computer__recognize_text", `{"pid":719,"window_id":433,"pages":4,"next_key":"right","PID":999}`, ""},
-		{"paged text read without a known key", "mcp__computer__recognize_text", `{"pid":719,"window_id":433,"pages":4,"next_key":"return"}`, ""},
 		{"background scroll", "mcp__computer__scroll", `{"pid":719,"window_id":433,"direction":"down","delivery_mode":"background"}`, "scroll@719/433"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

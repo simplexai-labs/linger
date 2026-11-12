@@ -190,7 +190,6 @@ func (m *Manager) openCua(ctx context.Context, op *operation) (*cuaSession, []to
 	}
 	tools = append(tools, tool{Name: "run_actions", Description: batchDescription, InputSchema: schema(batchProperties, "actions")})
 	if runtime.GOOS == "darwin" {
-		tools = append(tools, tool{Name: "recognize_text", Description: recognizeTextDescription, InputSchema: recognizeTextSchema()})
 		tools = append(tools, tool{Name: "report_blocker", Description: reportBlockerDescription, InputSchema: reportBlockerSchema()})
 	}
 	tools = append(tools, tool{Name: checkPermissionsTool, Description: "Read Cua application permissions without prompting. Also reports an unresolved prior action.", InputSchema: schema(map[string]any{})})
@@ -219,7 +218,6 @@ const MacToolGuide = `Computer tools on this Mac (MCP server "computer"):
   A click, scroll or type_text, in a step or alone, can name its target with role and name instead of element_token: the one element with that role whose label or value is exactly name, or nth (from 0) when several match. It is found when it runs, so one batch can cross pages; finding it reads the window, which stales the tokens of your earlier read, so later steps name their targets the same way.
 - run_script({script}) runs JavaScript that loops, waits and reads between inputs and returns only what you extract. Use it to repeat a flow over several items, such as open each result, read it and close it, in one call instead of a turn per item.
 - bring_to_front({pid, window_id}) raises one window.
-- recognize_text({pid, window_id, region?, pages?, next_key?}) reads the text in a window's pixels, such as words inside a picture, in any language; it types nothing. pages with next_key reads a picture viewer page by page in one call.
 - report_blocker({kind, url}) as soon as a page in the Computer's own browser shows a check only the user may pass (captcha, verification, login_required, rate_limited) or one item that cannot be viewed (content_unavailable). Never try to pass the check.
 The Computer's own browser takes input at a person's pace, within a budget per task and per day, and a script there sends at most 20 inputs: return what you have and look at the window before the next script. A tab that a link in the script opens is the task's and is in front afterwards. The browser tools stay off every site a task opened in that browser.
 Plan as many steps as you can in one run_actions call, as in one script; its read shows their effect, so do not read again before the next input unless you need another window. Keys are often shorter than clicks: in Finder, cmd+shift+g then a path and Return opens a folder, cmd+down opens the selected item, and in the Trash cmd+delete puts the selected item back.
@@ -374,12 +372,6 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 			return c.reportBlocker(args)
 		}
 	}
-	// A one-page read sends nothing. A paged read presses keys, so it takes
-	// the lease and the action journal below as other input does.
-	paged := name == "recognize_text" && runtime.GOOS == "darwin" && pagedRead(args)
-	if name == "recognize_text" && runtime.GOOS == "darwin" && !paged {
-		return c.recognizeText(ctx, args, false)
-	}
 	arguments, err := cuaCallArguments(args)
 	if err != nil {
 		return nil, err
@@ -397,12 +389,12 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 	}
 	// A key to the user's Chrome reaches the window that has the keyboard,
 	// whichever window it names, so it is refused before anything is taken.
-	if name == "hotkey" || name == "type_text" || name == "press_key" || paged {
+	if name == "hotkey" || name == "type_text" || name == "press_key" {
 		if err := c.userChromeKeys(ctx, arguments); err != nil {
 			return nil, err
 		}
 	}
-	agentChrome, err := c.claimAgentChromeInput(ctx, name, arguments, paged)
+	agentChrome, err := c.claimAgentChromeInput(ctx, name, arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +412,7 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 			return nil, err
 		}
 	}
-	paced := agentChrome && (inputTools[name] || paged || ownScript)
+	paced := agentChrome && (inputTools[name] || ownScript)
 	scriptInputs := 0
 	if paced {
 		// A script reserves nothing: its own pause runs inside it, and its
@@ -494,12 +486,6 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 	}()
 	if err := c.requirePermissions(ctx); err != nil {
 		return nil, err
-	}
-	if paged {
-		result, err := c.recognizeText(ctx, args, agentChrome)
-		confirmed = !errors.Is(err, errOutcomeUnknown)
-		c.stampInput(arguments["pid"])
-		return result, err
 	}
 	// Only a script to the Computer's own browser wakes it first.
 	wake := scriptTarget
@@ -589,9 +575,6 @@ func (c *cuaSession) needsFocus(ctx context.Context, name string, args json.RawM
 	switch {
 	case cuaReadTools[name]:
 		return false
-	case name == "recognize_text":
-		// A paged read presses keys in the window.
-		return runtime.GOOS != "darwin" || pagedRead(args)
 	case runtime.GOOS != "darwin" || !backgroundTools[name]:
 		return true
 	}
@@ -652,13 +635,13 @@ func cuaCallArguments(args json.RawMessage) (map[string]any, error) {
 
 // claimAgentChromeInput reports whether the call reaches the Computer's own
 // Chrome and, if so, claims it for this Operation.
-func (c *cuaSession) claimAgentChromeInput(ctx context.Context, name string, arguments map[string]any, paged bool) (bool, error) {
+func (c *cuaSession) claimAgentChromeInput(ctx context.Context, name string, arguments map[string]any) (bool, error) {
 	// The Computer's own browser takes input and window changes from one
 	// Operation at a time. A script may reach any app from its body, and an
 	// input without a pid may reach it by its element_token alone, so both
 	// take the lease while that Chrome runs.
 	agentChrome := false
-	leased := inputTools[name] || windowTools[name] || paged
+	leased := inputTools[name] || windowTools[name]
 	if _, pid := arguments["pid"]; runtime.GOOS == "darwin" && (name == "run_script" || leased && !pid) {
 		own, err := c.agentChromeRunning(ctx)
 		if err != nil {

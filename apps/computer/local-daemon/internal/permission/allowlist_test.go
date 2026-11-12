@@ -21,9 +21,6 @@ func TestLocalWriteToolJudgesEveryNonReadOnlyLocalAction(t *testing.T) {
 		{"mcp__computer__click", `{"x":1,"y":2}`, true},
 		{"mcp__computer__type_text", `{"text":"hi"}`, true},
 		{"mcp__computer__scroll", `{}`, false},
-		{"mcp__computer__recognize_text", `{"pid":1,"window_id":2}`, false},
-		{"mcp__computer__recognize_text", `{"pid":1,"window_id":2,"pages":1}`, false},
-		{"mcp__computer__recognize_text", `{"pid":1,"window_id":2,"pages":4,"next_key":"right"}`, true},
 		{"mcp__linger__send_message", `{}`, false},
 		{"Bash", `{"command":"ls"}`, false},
 	}

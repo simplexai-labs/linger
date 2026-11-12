@@ -348,7 +348,7 @@ the tabs are found by role and place in the window, not by their names, which
 follow the user's language. The Daemon finds the running Chrome by its
 executable wherever the app is installed. The user's Chrome takes no keys from
 the Computer (`COMPUTER_KEYS_REFUSED`), in any of its windows, in tool calls,
-`run_actions` steps, paged `recognize_text` reads and scripts: a shortcut
+`run_actions` steps and scripts: a shortcut
 runs as a menu command in the Chrome window that has the keyboard, and Cua
 types text as keys that all read as the A key. A key named by its
 `element_token` goes to the app the token was read from, and a key that names

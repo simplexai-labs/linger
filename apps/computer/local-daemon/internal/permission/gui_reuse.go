@@ -32,9 +32,8 @@ var reusableHotkeys = map[string]bool{
 }
 
 // GUIReuseKey names the shape of a desktop navigation call: a movement or
-// dismissal key, a tab or history shortcut, a scroll, a paged recognize_text
-// (which has the shape of its next_key), or a run_actions batch made only of
-// those. Calls of one shape share an allow verdict within a Run
+// dismissal key, a tab or history shortcut, a scroll, or a run_actions batch
+// made only of those. Calls of one shape share an allow verdict within a Run
 // (see Reviewer). Clicks, typing, dragging, scripts and other shortcuts have
 // no shape: each is judged on its own.
 func GUIReuseKey(tool, input string) (string, bool) {
@@ -62,25 +61,6 @@ func GUIReuseKey(tool, input string) (string, bool) {
 	name, ok := strings.CutPrefix(tool, "mcp__computer__")
 	if !ok {
 		return "", false
-	}
-	if name == "recognize_text" {
-		// The read itself is display-only; the keys between pages are what
-		// is judged, so the call shares the verdict of that key.
-		for field := range arguments {
-			switch field {
-			case "pid", "window_id", "region", "pages", "next_key":
-			default:
-				return "", false
-			}
-		}
-		key, _ := arguments["next_key"].(string)
-		step := map[string]any{"key": key}
-		for _, field := range []string{"pid", "window_id"} {
-			if value, present := arguments[field]; present {
-				step[field] = value
-			}
-		}
-		return stepReuseKey("press_key", step)
 	}
 	return stepReuseKey(name, arguments)
 }

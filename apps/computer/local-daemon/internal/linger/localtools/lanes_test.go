@@ -425,8 +425,6 @@ func TestCuaInputNeedsFocusUnlessBackgroundToAnotherApp(t *testing.T) {
 		darwin     bool
 	}{
 		{"get_window_state", `{"pid":42}`, false},
-		{"recognize_text", `{"pid":42}`, false},
-		{"recognize_text", `{"pid":42,"pages":3}`, true},
 		{"click", `{"pid":42,"window_id":3,"element_token":"s1:5"}`, false},
 		{"double_click", `{"element_token":"s1:5"}`, true},
 		{"scroll", `{"pid":9}`, false},

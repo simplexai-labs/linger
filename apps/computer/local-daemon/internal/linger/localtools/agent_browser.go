@@ -628,7 +628,7 @@ func userChromePID(ctx context.Context) (int, error) {
 	return pid, nil
 }
 
-// userChromeKeys refuses a key tool, or a paged read, that reaches the user's
+// userChromeKeys refuses a key tool that reaches the user's
 // everyday Chrome, in any of its windows. A key named by its element_token
 // goes to the app the token was read from, and a key that names no app is
 // refused while that Chrome runs.

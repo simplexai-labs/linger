@@ -55,8 +55,7 @@ return {title: first.label, rating: page.tree_markdown};
 ## Read
 
 - Read with `get_window_state`. It returns the whole page the browser has loaded, including the part below the window, so text already on the page needs no scrolling. Pass `query` to narrow a long page. If a read says it was cut, read again narrower instead of guessing.
-- Text inside pictures: `recognize_text`; in a picture viewer, `pages` with `next_key`.
-- A state the tree does not show, such as liked or followed: look with `include_screenshot: true`.
+- Text inside pictures, or a state the tree does not show, such as liked or followed: look with `include_screenshot: true`.
 - To repeat a flow over items, use `run_script`. A script there sends at most 20 inputs: return what it extracted, look at the window, then continue. Many sites open a result in a new tab; the script then reads that tab, so read the tab in front before the next step.
 - Stop scrolling when two reads add no new items. Read only what the task needs: one search per keyword, and never reopen an item already read.
 - Act only in the tabs this task opened. A click that opens a new tab is the task's tab. Close each item's tab with its tab's Close button after reading it, and the task's last tab when done. If a tab the task did not open is in front, stop and tell the user.

@@ -992,7 +992,6 @@ func TestLocalToolCuaMacAgentChromeServesOneTaskAndNeverComesForward(t *testing.
 		{"launch_app", `{"bundle_id":"com.google.Chrome","urls":["https://example.com/"]}`},
 		{"launch_app", `{"name":"Google Chrome","urls":["https://example.com/"]}`},
 		{"run_script", `{"script":"return 1"}`},
-		{"recognize_text", `{"pid":42,"window_id":9,"pages":3,"next_key":"right"}`},
 	} {
 		if _, err := c.call(t.Context(), call.name, json.RawMessage(call.args)); err == nil || !strings.Contains(err.Error(), "COMPUTER_BUSY") {
 			t.Fatalf("%s err=%v, want busy", call.name, err)
@@ -1951,7 +1950,6 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 		{"press_key", `{"pid":42,"window_id":12,"key":"return","element_token":"s1:1","modifiers":[]}`},
 		{"press_key", `{"pid":42,"window_id":12,"key":"cmd+r","element_token":"s1:1"}`},
 		{"press_key", `{"pid":42,"window_id":9,"key":"return","element_token":"s9:1"}`},
-		{"recognize_text", `{"pid":42,"window_id":12,"pages":2,"next_key":"pagedown"}`},
 		// A token never read leaves the named pid.
 		{"press_key", `{"pid":42,"key":"return","element_token":"s7:1"}`},
 	} {

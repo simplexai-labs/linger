@@ -13,8 +13,7 @@ import (
 // effect stays on this screen: reading it, or moving the pointer, scrolling,
 // hovering, going back a page, and arranging windows. Clicking, typing, keys,
 // dragging, navigation to a new address, uploads, and dialogs are judged.
-// recognize_text is read-only only for one page: a paged read presses its
-// next_key between pages. report_blocker stops the task's own input to the
+// report_blocker stops the task's own input to the
 // Computer's own browser, and rate_limited also cools the site down there for
 // every task on this Computer.
 var readOnlyLocalTools = map[string]bool{
@@ -54,12 +53,6 @@ func ReadOnlyLocalToolNames() []string {
 func ReadOnlyLocalTool(tool, input string) bool {
 	if readOnlyLocalTools[tool] {
 		return true
-	}
-	if tool == "mcp__computer__recognize_text" {
-		var arguments struct {
-			Pages int `json:"pages"`
-		}
-		return json.Unmarshal([]byte(input), &arguments) == nil && arguments.Pages <= 1
 	}
 	if tool == "mcp__browser__browser_tabs" {
 		// Listing tabs and switching to an open one change nothing; opening
