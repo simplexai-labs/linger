@@ -583,7 +583,7 @@ func TestVoiceLiveProgressAndTodayRecallReadOnlyWhatTheHumanCanSee(t *testing.T)
 
 func TestVoiceLiveTasksReportResultsAndWhatTheyWaitFor(t *testing.T) {
 	allowParallelIntegrationTest(t)
-	env, alice, _, sessionID := newVoiceLiveRoom(t)
+	env, alice, roomID, sessionID := newVoiceLiveRoom(t)
 	tool := func(turnID, callID, name string, arguments map[string]any) map[string]any {
 		encoded, _ := json.Marshal(arguments)
 		var result teamhubinternal.VoiceLiveToolResult
@@ -737,6 +737,15 @@ func TestVoiceLiveTasksReportResultsAndWhatTheyWaitFor(t *testing.T) {
 	}
 	if countRows(t, env, `SELECT count(*) FROM voice_live_report_deliveries WHERE voice_session_id=$1`, sessionID) != 0 {
 		t.Fatal("a card that was not posted marked its report delivered")
+	}
+	// A new document's images under ./playground come from the Computer too;
+	// one that cannot be read names itself, and nothing is created.
+	image := folder + "strawberry.png"
+	if output := tool("lt_doc", "doc-1", "create_document", map[string]any{"title": "Strawberries", "content": "# Strawberries\n\n![A strawberry](" + image + ")\n"}); output["error"] != "computer_offline" || output["image"] != image {
+		t.Fatalf("create_document with an unreadable image=%v", output)
+	}
+	if countRows(t, env, `SELECT count(*) FROM messages WHERE room_id=$1 AND segments @> '[{"presentation":"canvas"}]'`, roomID) != 0 {
+		t.Fatal("a document whose image was not read was opened")
 	}
 	decode(t, voiceRuntimeCall(t, env, http.MethodGet, "/internal/v1/voice/sessions/"+sessionID+"/live-tasks", nil, http.StatusOK), &tasks)
 	if len(tasks.Tasks) != 2 || tasks.Tasks[0].TaskId != first["task_id"] || *tasks.Tasks[0].Replies[0].Delivered {

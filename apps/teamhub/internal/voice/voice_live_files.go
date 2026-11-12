@@ -1,12 +1,14 @@
 package voice
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -386,4 +388,41 @@ func remarshal(value any, target any) error {
 		return err
 	}
 	return json.Unmarshal(raw, target)
+}
+
+// voiceLiveImageTypes are the image types a Document embeds.
+var voiceLiveImageTypes = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+// inlineVoiceLiveImages embeds the ./playground images a new document shows,
+// read from the user's Computer, as the Document import takes them. output
+// is what the live model is told, naming the image, when one cannot be used.
+func (s *Service) inlineVoiceLiveImages(ctx context.Context, session voicelive.Session, markdown string) (string, string, error) {
+	uris := map[string]string{}
+	for _, image := range voicelive.PlaygroundImages(markdown) {
+		folder, inside, output, err := s.voiceLiveFilePath(ctx, session, image)
+		if err != nil {
+			return "", "", err
+		}
+		if output == "" {
+			var content bytes.Buffer
+			if readErr := s.readVoiceLiveFileWhole(ctx, session, folder, inside, &content); readErr != nil {
+				if output, err = voiceLiveFileError(readErr); err != nil {
+					return "", "", err
+				}
+			} else if mediaType := http.DetectContentType(content.Bytes()); !slices.Contains(voiceLiveImageTypes, mediaType) {
+				output = voicelive.ErrorOutput("not_an_image")
+			} else {
+				uris[image] = "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(content.Bytes())
+			}
+		}
+		if output != "" {
+			var fields map[string]any
+			if err := json.Unmarshal([]byte(output), &fields); err != nil {
+				return "", "", err
+			}
+			fields["image"] = image
+			return "", voicelive.Output(fields), nil
+		}
+	}
+	return voicelive.InlineImages(markdown, uris), "", nil
 }

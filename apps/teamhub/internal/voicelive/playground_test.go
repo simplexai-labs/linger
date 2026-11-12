@@ -2,6 +2,7 @@ package voicelive
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,22 @@ func TestEveryToolSchemaHasARequiredList(t *testing.T) {
 		}
 		if _, ok := schema["required"].([]any); !ok {
 			t.Errorf("%s: required=%v", tool.Name, schema["required"])
+		}
+	}
+}
+
+func TestPlaygroundImagesInlineOnlyPlaygroundFiles(t *testing.T) {
+	markdown := "# Title\n\n![one](./playground/workitem_1/a.png)\n\n![web](https://example.com/b.png)\n\n" +
+		"![again](./playground/workitem_1/a.png) ![two](playground/room_1/c.jpg \"caption\")\n\n" +
+		"```\n![code](./playground/workitem_1/d.png)\n```\n\n![folder](./playground/workitem_1/) ![bare](e.png)\n"
+	images := PlaygroundImages(markdown)
+	if want := []string{"./playground/workitem_1/a.png", "playground/room_1/c.jpg"}; !slices.Equal(images, want) {
+		t.Fatalf("images=%q, want %q", images, want)
+	}
+	inlined := InlineImages(markdown, map[string]string{images[0]: "data:image/png;base64,QQ==", images[1]: "data:image/jpeg;base64,Qg=="})
+	for _, want := range []string{"![one](data:image/png;base64,QQ==)", "![again](data:image/png;base64,QQ==)", "![two](data:image/jpeg;base64,Qg== \"caption\")", "![web](https://example.com/b.png)"} {
+		if !strings.Contains(inlined, want) {
+			t.Fatalf("inlined lacks %q:\n%s", want, inlined)
 		}
 	}
 }

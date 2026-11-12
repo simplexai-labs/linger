@@ -39,7 +39,11 @@ func (s *Service) runVoiceLiveDocumentTool(ctx context.Context, session voiceliv
 		if !ok || utf8.RuneCountInString(args.Content) > voicelive.MaxCreateDocumentRunes {
 			return "", voicelive.ErrInvalid
 		}
-		created, output, err := s.openVoiceLiveCanvas(ctx, session, request, title, strings.TrimSpace(args.Content), "invalid_document")
+		content, output, err := s.inlineVoiceLiveImages(ctx, session, strings.TrimSpace(args.Content))
+		if output != "" || err != nil {
+			return output, err
+		}
+		created, output, err := s.openVoiceLiveCanvas(ctx, session, request, title, content, "invalid_document")
 		if output != "" || err != nil {
 			return output, err
 		}
