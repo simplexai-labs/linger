@@ -1,13 +1,17 @@
 name: CI
 
-# The repository gate runs on every pull request; each app's fast check runs
-# only when its paths change. Pushes to main run every check. CI runs the
+# The repository gate runs on every pull request and merge-queue build; each
+# app's fast check runs only when its paths change. A merge-queue build
+# checks the paths its whole group changes, on top of the latest main. Pushes
+# to main run every check. CI runs the
 # computer daemon's Go unit tests; the rest of check-computer (TS and process
 # tests) and the heavier suites (node-services, voice-runtime, integration,
 # containers and E2E) stay local: run `make check BASE=<target-ref>` and the
 # targets in the Makefile before you open a pull request.
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
 
@@ -21,7 +25,7 @@ concurrency:
 env:
   # BASE reaches commitlint, the changed-file lints, the built-in Skill
   # immutability check and the doc-comment lint.
-  BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+  BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.before }}
 
 jobs:
   changes:
@@ -45,6 +49,9 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = pull_request ]; then
             changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          elif [ "${{ github.event_name }}" = merge_group ]; then
+            # Everything the queued group changes on top of the main it builds on.
+            changed=$(git diff --name-only "${{ github.event.merge_group.base_sha }}" HEAD)
           else
             changed=ALL
           fi
