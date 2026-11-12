@@ -14,7 +14,7 @@ import (
 // the same prelude's semantics.
 const guardHarness = `import fs from "fs";
 const log = [];
-class App { constructor(n, pid, windowId) { this.n = n; this.pid = pid; this.windowId = windowId; } hotkey(keys, on, options) { log.push("hotkey:" + keys.join("+") + ":" + JSON.stringify({pid: this.pid, ...on, ...options})); return "hotkeyed"; } click(a) { log.push("raw:" + JSON.stringify(a)); return "clicked"; } typeText(text, on, options) { log.push("type:" + JSON.stringify(options)); return "typed"; } pressKey(key, on) { log.push("key:" + key); return "pressed"; } }
+class App { constructor(n, pid, windowId) { this.n = n; this.pid = pid; this.windowId = windowId; } hotkey(keys, on, options) { log.push("hotkey:" + keys.join("+") + ":" + JSON.stringify({pid: this.pid, ...on, ...options})); return "hotkeyed"; } click(a) { log.push("raw:" + JSON.stringify(a)); return "clicked"; } typeText(text, on, options) { log.push("type:" + JSON.stringify(options)); return "typed"; } pressKey(key, on) { log.push("key:" + key); return "pressed"; } getState(options) { log.push("state:" + JSON.stringify(options)); return {tree_markdown: ""}; } }
 const fake = { call(t, a) { log.push("call:" + t + ":" + JSON.stringify(a)); return Promise.resolve({ok: true}); },
   launch(name) { log.push("launched:" + name); return Promise.resolve(new App("l", 7, 1)); },
   getApp(target) { return Promise.resolve(new App("a", target && target.pid, target && target.windowId)); },
@@ -51,6 +51,7 @@ func TestScriptGuardRefusesForbiddenInputInAJSEngine(t *testing.T) {
 		{"closing the wrapper", "return 1; }).call(undefined); })(globalThis.cua, globalThis, eval, Function); (function () { return (async function () {", "threw:COMPUTER_SCRIPT_REFUSED: the script is not one complete function body", "call:"},
 		{"closing the wrapper to call", `}); await globalThis.cua.call("click", {["deliv" + "ery_mode"]: "foreground"}); (async function () {`, "threw:", "call:"},
 		{"inputs", `return [args.n, DEADLINE].join(",");`, `"1,42"`, ""},
+		{"read without a screenshot", `const app = await cua.getApp({pid: 1}); await app.getState(); await app.getState({query: "Search"}); await app.getState({include_screenshot: true}); return "read";`, `"state:{\"include_screenshot\":false}","state:{\"include_screenshot\":false,\"query\":\"Search\"}","state:{\"include_screenshot\":true}"`, ""},
 		{"frozen builtins", `try { JSON.parse = () => ({delivery_mode: 1}); } catch (e) { return "refused"; } return "changed";`, "refused", ""},
 	}
 	for _, tc := range cases {

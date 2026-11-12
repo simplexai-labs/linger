@@ -34,7 +34,7 @@ The user watches the window, and each turn of yours costs seconds. The Computer 
 - Fill a search box with `setValue`, then click the site's search button. Return on the box also works in Safari, Edge and Firefox.
 - The user's Chrome takes no keys from the Computer: a key could reach the Chrome window the user is typing in. There, never use `typeText`, `hotkey` or `pressKey`, not even Return in the search box.
 - After a click that loads something, wait with `app.waitFor` for what the next page shows, such as a heading or a button, with `timeout_ms` about 8000. Never wait with `cua.sleep`; one sleep lasts at most 1.5 s there.
-- Read only what you need: `app.query({role, name})`, `getState({query})` or `get_window_state` with `query`. Read the whole tree only to find your way on a page you have not seen.
+- Read only what you need: `app.query({role, name})`, `getState({query})` or `get_window_state` with `query`. Read the whole tree only to find your way on a page you have not seen. A read with a screenshot takes seconds on a busy page; ask for one only to see what the text does not hold.
 
 A visit to a result, in one script:
 

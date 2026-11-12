@@ -16,8 +16,8 @@ import (
 // Computer's rules: background input only, and a bounded result.
 const macScriptDescription = "Run a JavaScript program that drives apps on this Mac in ONE call: loops, waits, reads and checks between inputs, and only its return value comes back. Use it to repeat a flow over several items, such as open each result, read it and close it, instead of one model turn per input. The script is the body of an async function: use await and return a JSON value. The only API is cua:\n" +
 	"- const app = await cua.getApp({pid, windowId}) or cua.getApp(\"Google Chrome\"); cua.sleep(ms), where ms must be a whole number: a fraction returns at once without waiting, and in the Computer's own browser one sleep lasts at most 1.5 s: wait for a page with app.waitFor; cua.listWindows({pid})\n" +
-	"- app.getState({query?, max_elements?, timeout_ms?, since?: \"latest\", tree_format?: \"elements\"}) returns {tree_markdown, window_title, snapshot_id, truncated?, elements?}; rows read as in get_window_state. In a script the walk stops after 250 nodes and 1000 ms unless you pass max_elements and timeout_ms, which cuts a browser page: pass about 3000 and 4000 there\n" +
-	"- app.query({role?, name?}) finds named elements {element_token, role, label, frame}; app.waitFor({role?, name?, text?, gone?, timeout_ms?}) waits until the window shows (or no longer shows) them; text also matches static text\n" +
+	"- app.getState({query?, max_elements?, timeout_ms?, since?: \"latest\", tree_format?: \"elements\"}) returns {tree_markdown, window_title, snapshot_id, truncated?, elements?}; rows read as in get_window_state. It takes no screenshot, which costs seconds on a busy page, unless you pass include_screenshot: true. In a script the walk stops after 250 nodes and 1000 ms unless you pass max_elements and timeout_ms, which cuts a browser page: pass about 3000 and 4000 there\n" +
+	"- app.query({role?, name?}) finds named elements {element_token, role, label, frame}; app.waitFor({role?, name?, text?, gone?, timeout_ms?}) waits, at most 10000 ms, until the window shows (or no longer shows) them; text also matches static text\n" +
 	"- app.click(t), doubleClick(t), typeText(text, t?), pressKey(\"escape\", t?), hotkey([\"cmd\",\"s\"]), scroll(t, \"down\", amount?), setValue(t, value), where t is {role, name, nth?}, an element_token, a row number of this app's last getState(), or [x, y] pixels of its last screenshot\n" +
 	"- cua.call(tool, args) for click, press_key, type_text, scroll, get_window_state or list_windows with their usual arguments. A script opens no app or URL: call launch_app as its own tool first.\n" +
 	"Inputs go to the app in the background, as the other computer tools do; a control that reacts only to a real pointer needs the click tool with delivery_mode \"foreground\". A failed call throws (catch it to recover), and the error names the line. timeout_ms is the wall-time limit (default 60000, at most 100000); max_calls bounds driver calls (default 100, at most 500). A Skill that ships a script names it with script_file and passes its inputs as args, read in the script as the constant args. Return only what you need, such as extracted text; the result is cut at 40000 characters and carries no screenshots: call get_window_state to look at the window."
@@ -65,7 +65,9 @@ var scriptForbidden = []string{"delivery_mode", "foreground", "screenshot_out_fi
 // that does not compile alone could close the wrapper around it and reach the
 // driver directly, so it is refused. DEADLINE is when the driver stops the
 // script, in Unix milliseconds, so it can refuse an input whose result it
-// could not verify in time. A positive inputLimit paces the script for the
+// could not verify in time. A script reads text, so getState takes no
+// screenshot unless the script asks for one: Cua's default captures one per
+// read, which took seconds on a busy page. A positive inputLimit paces the script for the
 // Computer's own browser: the guard waits a person's pause before each input,
 // throws once the script tries to send more than inputLimit inputs, and
 // refuses to open an app or URL, whose site checks run only in the Daemon's
@@ -105,6 +107,7 @@ const wrap = o => { const w = {}, seen = {};
 for (let q = o; q && q !== plainProtos[0]; q = proto(q)) { const ns = names(q); for (let i = 0; i < ns.length; i++) { const k = ns[i]; if (k === "constructor" || seen[k]) continue; seen[k] = true;
 define(w, k, {enumerable: true, get() { const v = o[k]; if (typeof v !== "function") return out(v); return function (...a) { let c = {length: a.length}; for (let i = 0; i < a.length; i++) define(c, i, {value: plain(a[i])});
 if (limit > 0 && k === "typeText") { const given = c.length > 2 && c[2] !== null && typeof c[2] === "object" ? c[2] : {}; const t = {length: 3}; define(t, 0, {value: c[0]}); define(t, 1, {value: c[1]}); define(t, 2, {value: {delay_ms: `+strconv.Itoa(agentChromeTypeDelay)+`, ...given}}); c = t; }
+if (k === "getState" && (c.length === 0 || c[0] === undefined || c[0] !== null && typeof c[0] === "object" && c[0].include_screenshot === undefined)) { const t = {length: 1}; define(t, 0, {value: {include_screenshot: false, ...(c.length > 0 && c[0] !== undefined ? c[0] : {})}}); c = t; }
 if (limit > 0 && k === "sleep" && o === real && typeof c[0] === "number" && c[0] > `+strconv.Itoa(scriptSleepLimit)+`) { const t = {length: 1}; define(t, 0, {value: `+strconv.Itoa(scriptSleepLimit)+`}); c = t; }
 const run = () => { const r = apply(v, o, c); return r !== null && typeof r === "object" && typeof r.then === "function" ? apply(then, r, [out]) : out(r); };
 if (launches(k, c)) throw new Error("COMPUTER_SCRIPT_REFUSED: a script opens no app or URL, so the site checks of launch_app hold and the key rule knows every app the script reaches; call launch_app as its own tool");
