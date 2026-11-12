@@ -1940,16 +1940,10 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 			t.Fatalf("the user's own Chrome window %v read as the Computer's", user)
 		}
 	}
-	// Token s1 was read from the Computer's window 12, so only the rule for
-	// keys refuses what follows with it.
-	c.op.reads.mu.Lock()
-	if c.op.reads.snapshots == nil {
-		c.op.reads.windows, c.op.reads.snapshots = map[windowKey]*windowRows{}, map[string]windowKey{}
-	}
-	c.op.reads.snapshots["s1"] = windowKey{pid: 42, window: 12}
-	c.op.reads.mu.Unlock()
-	// No key reaches the user's Chrome, in the Computer's window or theirs.
+	// No key reaches the user's Chrome, in the Computer's window or theirs,
+	// not even Return bound to a field of the Computer's window.
 	for _, call := range []struct{ name, args string }{
+		{"press_key", `{"pid":42,"window_id":12,"key":"return","element_token":"s1:1"}`},
 		{"hotkey", `{"pid":42,"window_id":12,"keys":["cmd","["]}`},
 		{"hotkey", `{"pid":42,"window_id":9,"keys":["cmd","w"]}`},
 		{"type_text", `{"pid":42,"window_id":12,"text":"kettle","element_token":"s1:1"}`},
@@ -1958,9 +1952,7 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 		{"press_key", `{"pid":42,"window_id":12,"key":"cmd+r","element_token":"s1:1"}`},
 		{"press_key", `{"pid":42,"window_id":9,"key":"return","element_token":"s9:1"}`},
 		{"recognize_text", `{"pid":42,"window_id":12,"pages":2,"next_key":"pagedown"}`},
-		// A token read from the user's window 9 places the key there,
-		// whatever window_id names; one never read places it nowhere.
-		{"press_key", `{"pid":42,"window_id":12,"key":"return","element_token":"s9:1"}`},
+		// A token never read leaves the named pid.
 		{"press_key", `{"pid":42,"key":"return","element_token":"s7:1"}`},
 	} {
 		c.op.reads.mu.Lock()
@@ -1979,9 +1971,6 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 	}
 	if _, err := c.call(t.Context(), "hotkey", json.RawMessage(`{"keys":["cmd","w"],"element_token":"s7:1"}`)); !strings.Contains(fmt.Sprint(err), "COMPUTER_TARGET_REQUIRED") {
 		t.Fatalf("hotkey with no pid: err=%v, want refused", err)
-	}
-	if _, err := c.call(t.Context(), "press_key", json.RawMessage(`{"pid":42,"window_id":12,"key":"return","element_token":"s1:1"}`)); err != nil {
-		t.Fatalf("Return bound to a field: %v", err)
 	}
 	if _, err := c.call(t.Context(), "set_value", json.RawMessage(`{"pid":42,"window_id":12,"value":"kettle","element_token":"s1:1"}`)); err != nil {
 		t.Fatalf("set_value: %v", err)

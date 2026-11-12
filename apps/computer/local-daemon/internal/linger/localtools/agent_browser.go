@@ -614,86 +614,54 @@ func (m *Manager) sharedWindowOf(pid int) (sharedWindow, bool) {
 	return sharedWindow{}, false
 }
 
-// userChromeWindow returns the pid of the user's everyday Chrome, or 0 when
-// it does not run, and the windows the Computer opened as its own there.
-// Chrome is looked up on each call, so the key rule holds before the
-// Computer opened a window and after Chrome restarts.
-func (c *cuaSession) userChromeWindow(ctx context.Context) (sharedWindow, error) {
+// userChromePID returns the pid of the user's everyday Chrome, or 0 when it
+// does not run. Chrome is looked up on each call, so the key rule holds before
+// the Computer opened a window and after Chrome restarts.
+func userChromePID(ctx context.Context) (int, error) {
 	if runtime.GOOS != "darwin" {
-		return sharedWindow{}, nil
+		return 0, nil
 	}
 	pid, _, err := everydayChromePID(ctx)
 	if err != nil {
-		return sharedWindow{}, fmt.Errorf("COMPUTER_INPUT_NOT_SENT: could not tell whether the user's Chrome runs: %w: %w", err, errNotSent)
+		return 0, fmt.Errorf("COMPUTER_INPUT_NOT_SENT: could not tell whether the user's Chrome runs: %w: %w", err, errNotSent)
 	}
-	m := c.op.manager
-	m.mu.Lock()
-	own := m.sharedWindows["com.google.Chrome"]
-	m.mu.Unlock()
-	if pid == 0 || own.PID != pid {
-		own.Windows = nil
-	}
-	own.PID = pid
-	return own, nil
+	return pid, nil
 }
 
 // userChromeKeys refuses a key tool, or a paged read, that reaches the user's
-// everyday Chrome. A key goes to the Chrome window that has the keyboard, so
-// the window is the one the element_token was read from, not the one named,
-// and a key that names no app is refused while that Chrome runs.
-func (c *cuaSession) userChromeKeys(ctx context.Context, name string, arguments map[string]any, paged bool) error {
-	chrome, err := c.userChromeWindow(ctx)
-	if err != nil || chrome.PID == 0 {
+// everyday Chrome, in any of its windows. A key named by its element_token
+// goes to the app the token was read from, and a key that names no app is
+// refused while that Chrome runs.
+func (c *cuaSession) userChromeKeys(ctx context.Context, arguments map[string]any) error {
+	chrome, err := userChromePID(ctx)
+	if err != nil || chrome == 0 {
 		return err
 	}
-	pid, window := arguments["pid"], arguments["window_id"]
+	pid := arguments["pid"]
 	if token, ok := arguments["element_token"].(string); ok {
-		// A token the Computer did not see read cannot be placed in a
-		// window, so it is not taken for one in the Computer's window. Cua
-		// refuses a token read from another pid than the one named, so a
-		// token cannot carry a key into another app.
-		window = nil
+		// Cua refuses a token read from another pid than the one named, so
+		// the token's own app is the one the key reaches.
 		if key, found := c.op.reads.window(token); found {
-			pid, window = float64(key.pid), float64(key.window)
+			pid = float64(key.pid)
 		}
 	}
 	number, ok := pid.(float64)
 	if !ok {
 		return fmt.Errorf("COMPUTER_TARGET_REQUIRED: while the user's Chrome runs, a key names its app by pid, so it cannot reach Chrome unseen: %w", errNotSent)
 	}
-	if int(number) != chrome.PID {
-		return nil
-	}
-	if paged {
-		return fmt.Errorf("%s: %w", everydayChromeKeysRefused, errNotSent)
-	}
-	id, named := window.(float64)
-	return everydayChromeKeys(name, arguments, named && slices.Contains(chrome.Windows, id))
-}
-
-// everydayChromeKeysRefused tells the Agent how to work without keys in the
-// user's everyday Chrome.
-const everydayChromeKeysRefused = "COMPUTER_KEYS_REFUSED: the user's everyday Chrome takes no keys from the Computer: a key or shortcut goes to the Chrome window that has the keyboard, which may be the one the user is typing in; nothing was sent. Fill a field with set_value, press the page's own buttons, such as its search button, and go back through the page's links"
-
-// everydayChromeKeys refuses keys to the user's everyday Chrome. Only one
-// plain key bound to an element, such as Return in a search box, may go:
-// Cua delivers it only when no other Chrome window could receive it.
-// Shortcuts are menu commands, which Chrome runs in the window that has the
-// keyboard, and typed text arrives as keys that all read as the A key. own
-// says the key names the Computer's window; one of the user's windows takes
-// none. The script guard (keyed in guardedScript) applies the same rule.
-func everydayChromeKeys(name string, arguments map[string]any, own bool) error {
-	if name != "hotkey" && name != "type_text" && name != "press_key" {
-		return nil
-	}
-	_, bound := arguments["element_token"].(string)
-	_, modified := arguments["modifiers"]
-	key, plain := arguments["key"].(string)
-	if own && name == "press_key" && bound && !modified && plain && !strings.Contains(key, "+") {
+	if int(number) != chrome {
 		return nil
 	}
 	return fmt.Errorf("%s: %w", everydayChromeKeysRefused, errNotSent)
 }
+
+// everydayChromeKeysRefused tells the Agent how to work without keys in the
+// user's everyday Chrome. Shortcuts are menu commands, which Chrome runs in
+// the window that has the keyboard, typed text arrives as keys that all read
+// as the A key, and Cua refuses even a key bound to an element while Chrome
+// has another window, which the user's Chrome always has. The script guard
+// (keyed in guardedScript) applies the same rule.
+const everydayChromeKeysRefused = "COMPUTER_KEYS_REFUSED: the user's everyday Chrome takes no keys from the Computer: a key or shortcut goes to the Chrome window that has the keyboard, which may be the one the user is typing in; nothing was sent. Fill a field with set_value, press the page's own buttons, such as its search button, and go back through the page's links"
 
 // everydayChromeData is the user's Chrome data folder, whose Local State
 // names the profile Chrome last used.

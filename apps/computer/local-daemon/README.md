@@ -350,12 +350,11 @@ executable wherever the app is installed. The user's Chrome takes no keys from
 the Computer (`COMPUTER_KEYS_REFUSED`), in any of its windows, in tool calls,
 `run_actions` steps, paged `recognize_text` reads and scripts: a shortcut
 runs as a menu command in the Chrome window that has the keyboard, and Cua
-types text as keys that all read as the A key. A key goes to the window its
-`element_token` was read from, and a key that names no app is refused while
-that Chrome runs. Only a plain key bound to an element of the Computer's
-window goes, as a tool call, and Cua sends it only when no other Chrome window
-could take it. A script sends that Chrome no key at all, because it cannot
-prove which window a token was read from. It refuses a key whose arguments
+types text as keys that all read as the A key. A key named by its
+`element_token` goes to the app the token was read from, and a key that names
+no app is refused while that Chrome runs. Not even Return bound to a search box goes: Cua refuses a
+background key while its app has another window, and the user's Chrome always
+has one. A script's guard refuses a key whose arguments
 name an app or window of their own, and no script opens an app or URL, so the
 key rule knows every app a script reaches.
 The Agent fills fields with

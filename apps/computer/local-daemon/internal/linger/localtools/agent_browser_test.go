@@ -65,32 +65,6 @@ func TestEverydayChromeProcessFindsChromeInAnyFolder(t *testing.T) {
 	}
 }
 
-func TestEverydayChromeKeysAllowOnlyOnePlainBoundKey(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		arguments map[string]any
-		allowed   bool
-	}{
-		{"press_key", map[string]any{"key": "return", "element_token": "s1:1"}, true},
-		{"set_value", map[string]any{"value": "kettle", "element_token": "s1:1"}, true},
-		{"press_key", map[string]any{"key": "return"}, false},
-		{"press_key", map[string]any{"key": "return", "element_token": "s1:1", "modifiers": []any{}}, false},
-		{"press_key", map[string]any{"key": "return", "element_token": "s1:1", "modifiers": "cmd"}, false},
-		{"press_key", map[string]any{"key": "cmd+r", "element_token": "s1:1"}, false},
-		{"press_key", map[string]any{"key": 13.0, "element_token": "s1:1"}, false},
-		{"hotkey", map[string]any{"keys": []any{"cmd", "["}}, false},
-		{"type_text", map[string]any{"text": "kettle", "element_token": "s1:1"}, false},
-	} {
-		if err := everydayChromeKeys(tc.name, tc.arguments, true); (err == nil) != tc.allowed {
-			t.Errorf("%s %v: err=%v, want allowed=%v", tc.name, tc.arguments, err, tc.allowed)
-		}
-	}
-	// One of the user's windows takes no key at all.
-	if err := everydayChromeKeys("press_key", map[string]any{"key": "return", "element_token": "s1:1"}, false); err == nil {
-		t.Error("a bound Return went to one of the user's windows")
-	}
-}
-
 func TestSharedWindowsKeepEveryWindowOfTheBrowser(t *testing.T) {
 	m := &Manager{}
 	m.setSharedWindow("com.google.Chrome", 42, 11)
