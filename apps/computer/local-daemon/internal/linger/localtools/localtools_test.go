@@ -224,7 +224,8 @@ func runToolFixture(mode string) {
 						// the user's that Chrome restored late lists before
 						// the Computer's window.
 						for _, id := range []int{11, 12} {
-							windows = append(windows, map[string]any{"pid": 42, "window_id": id, "title": "Home", "z_index": 2, "is_on_screen": true, "bounds": map[string]any{"width": 900, "height": 700}})
+							// Its title is its front tab's, as Chrome's is.
+							windows = append(windows, map[string]any{"pid": 42, "window_id": id, "title": fmt.Sprintf("Tab %d", tabs-1), "z_index": 2, "is_on_screen": true, "bounds": map[string]any{"width": 900, "height": 700}})
 						}
 					}
 					if mode == "tabs-ghost" {
@@ -1172,7 +1173,7 @@ func TestLocalToolCuaMacAgentChromeKeepsTabsItsOwnInputChangesLate(t *testing.T)
 		if err != nil {
 			t.Fatalf("input after the task's own %s: %v", step.keys, err)
 		}
-		if strings.Contains(string(result), "tab") || !strings.Contains(string(result), "a press on page text clicks it") {
+		if strings.Contains(string(result), "tab") || !strings.Contains(string(result), "even where its row lists no press") {
 			t.Fatalf("result of a click on page text that changed no tab=%s", result)
 		}
 	}
@@ -1241,11 +1242,17 @@ func TestLocalToolCuaMacAgentChromeReadsTheTabStripOnlyAsFarAsItNeeds(t *testing
 		t.Fatalf("calls for a script that clicked=%v, want two bounded reads after it", got)
 	}
 	// A tab closed behind the front tab does not stop the task, and the
-	// result reports the count without saying the input closed it.
+	// result reports the count without saying the input closed it. Fewer
+	// tabs in a bounded read are proven by whole reads, since a strip split
+	// across the bound would read as fewer too.
 	c.op.chromeTabs = 2
+	before = len(reads())
 	result, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got := reads()[before:]; !slices.Equal(got, []string{"click", "6", "0", "0"}) {
+		t.Fatalf("calls for fewer tabs=%v, want a bounded read, then whole reads", got)
 	}
 	if note := `The window now has 1 tab(s), 2 before this input; the tab in front still shows \"Tab 0\".`; !strings.Contains(string(result), note) || strings.Contains(string(result), "This input closed") {
 		t.Fatalf("result=%s, want the neutral note %s", result, note)
@@ -1648,6 +1655,10 @@ func TestLocalToolCuaMacInputsFindTheirTargetWhenTheyRun(t *testing.T) {
 	// A page label's no-break space matches the space the Agent writes.
 	if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"role":"AXLink","name":"Kettle [snapshot]"}`)); err != nil {
 		t.Fatalf("label with a no-break space: %v", err)
+	}
+	// A name of only white space names nothing, not the element without a value.
+	if _, err := c.call(t.Context(), "type_text", json.RawMessage(`{"pid":42,"window_id":9,"role":"AXTextArea","name":"\u00a0 ","text":"hi"}`)); err == nil || !strings.Contains(err.Error(), "COMPUTER_TARGET_REQUIRED") {
+		t.Fatalf("white space name err=%v, want target required", err)
 	}
 	if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"role":"AXButton","name":"Delete"}`)); err == nil || !strings.Contains(err.Error(), "COMPUTER_TARGET_NOT_FOUND") {
 		t.Fatalf("partial label err=%v, want not found", err)
@@ -2091,8 +2102,8 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 	if _, err := c.call(t.Context(), "hotkey", json.RawMessage(`{"keys":["cmd","w"],"element_token":"s7:1"}`)); !strings.Contains(fmt.Sprint(err), "COMPUTER_TARGET_REQUIRED") {
 		t.Fatalf("hotkey with no pid: err=%v, want refused", err)
 	}
-	// launch_app keeps the front tab's title, so the first input, which
-	// changes no tab, reports no change.
+	// launch_app keeps the front tab's title from list_windows, so the
+	// first input, which changes no tab, reports no change.
 	if c.op.chromeTitle != "Tab 0" {
 		t.Fatalf("front title after launch_app=%q, want Tab 0", c.op.chromeTitle)
 	}

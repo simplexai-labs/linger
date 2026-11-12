@@ -384,13 +384,15 @@ does not stop the task: the input still reaches the task's page, and its
 result reports the new count without saying the input changed it; after
 an input it reads the strip only to its depth, unless a script returned reads
 the Agent may act on, and not at all after a script that sent no input. A
+bounded read that shows no tabs or fewer than before is read again in full. A
 tab that the task's own input or script opens or closes is the task's: the
 task holds the browser's input lease, and the count is kept once the tab strip
 settles, since the browser shows such a tab a moment later. The input's
 result then says, from that same read, when it opened or closed a tab or
-changed the title of the tab in front. A click there on page text whose row
-lists no press notes that Chrome clicks it anyway, since Cua warns that such
-a press may have done nothing. Reading the tab
+changed the title of the tab in front. A click there on an element whose row
+lists no press notes that the press reaches it anyway, since Cua warns that
+such a press may have done nothing; a repeat by x,y waits for a read that
+shows no effect. Reading the tab
 strip replaces Cua's snapshot of the window, so the Daemon remembers the rows
 of recent reads and moves an Agent's element token, in an input or written
 into a script, to the current snapshot when its row reads the same there.

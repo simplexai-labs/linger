@@ -769,7 +769,7 @@ func (c *cuaSession) recordAgentChromeTabs(ctx context.Context, pid, window any,
 	if before == 0 {
 		return ""
 	}
-	got, front, close := c.settledAgentChromeTabs(ctx, pid, window, full)
+	got, front, close := c.settledAgentChromeTabs(ctx, pid, window, full, before)
 	if got == 0 {
 		return ""
 	}
@@ -801,7 +801,7 @@ func (c *cuaSession) recordAgentChromeTabs(ctx context.Context, pid, window any,
 // a moment after the input that opened or closed it returns, and the next
 // input's pause already covers that wait. The count is 0 when the strip
 // cannot be read.
-func (c *cuaSession) settledAgentChromeTabs(ctx context.Context, pid, window any, full bool) (int, string, string) {
+func (c *cuaSession) settledAgentChromeTabs(ctx context.Context, pid, window any, full bool, before int) (int, string, string) {
 	number, id, ok := c.agentChromeTabWindow(pid, window)
 	if !ok {
 		return 0, "", ""
@@ -811,8 +811,10 @@ func (c *cuaSession) settledAgentChromeTabs(ctx context.Context, pid, window any
 		depth = 0
 	}
 	got, title, close := c.agentChromeTabsAndTitle(ctx, number, id, depth)
-	if got == 0 && depth > 0 {
-		// A strip deeper than the bound, as in a browser laid out otherwise.
+	if (got == 0 || got < before) && depth > 0 {
+		// A strip deeper than the bound, as in a browser laid out otherwise,
+		// reads as no tabs, and one split across the bound as fewer. A
+		// closed tab is rare, so proving it with a whole read costs little.
 		depth = 0
 		got, title, close = c.agentChromeTabsAndTitle(ctx, number, id, depth)
 	}

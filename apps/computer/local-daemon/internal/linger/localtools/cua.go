@@ -534,7 +534,7 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 		// Chrome clicks a page element on a press even where the element
 		// lists no press, as the sort menu of a review list did; the Agent
 		// took Cua's warning as a miss and clicked by x,y, which missed.
-		result = withNote(result, "In the Computer's own browser, a press on page text clicks it as a person would, even where the row lists no press: check its effect in the next read, and do not repeat it by x,y.")
+		result = withNote(result, "In the Computer's own browser, a press goes to the element as a person's click would, even where its row lists no press. Check its effect in the next read; repeat it by x,y only if that read shows no effect.")
 	}
 	var scriptReads []windowRead
 	if err == nil && name == "run_script" {
@@ -1320,6 +1320,8 @@ func (c *cuaSession) locate(ctx context.Context, name string, arguments map[stri
 	}
 	role, _ := arguments["role"].(string)
 	label, _ := arguments["name"].(string)
+	// A name of only white space would match every element without a label.
+	label = sameSpaces(label)
 	if role == "" || label == "" || arguments["pid"] == nil || arguments["window_id"] == nil {
 		return fmt.Errorf("COMPUTER_TARGET_REQUIRED: a role and name target needs pid, window_id, role and name: %w", errNotSent)
 	}
@@ -1350,7 +1352,6 @@ func (c *cuaSession) locate(ctx context.Context, name string, arguments map[stri
 		return fmt.Errorf("COMPUTER_TARGET_UNREADABLE: window %v was read only in part, so a %s labeled %q cannot be proven to be the only one; use an element_token from a read: %w", arguments["window_id"], role, label, errNotSent)
 	}
 	var matches []string
-	label = sameSpaces(label)
 	for _, element := range state.Structured.Elements {
 		value, _ := element.Value.(string)
 		if element.Role == role && (sameSpaces(element.Label) == label || sameSpaces(value) == label) {
