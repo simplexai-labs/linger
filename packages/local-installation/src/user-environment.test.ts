@@ -10,7 +10,6 @@ import {
   userEnvironmentFile,
   updateUserKeys,
   userEnvironmentPending,
-  voiceEnabled,
 } from "./user-environment.js";
 
 const root = () => mkdtemp(path.join(tmpdir(), "linger-user-env-"));
@@ -62,13 +61,6 @@ describe("readUserEnvironment", () => {
       await expect(readUserEnvironment(directory)).rejects.toThrow(/chmod 600/);
     },
   );
-
-  it("turns voice on for either voice key", () => {
-    expect(voiceEnabled({})).toBe(false);
-    expect(voiceEnabled({ COMPOSIO_API_KEY: "c", TZ: "UTC" })).toBe(false);
-    expect(voiceEnabled({ SONIOX_API_KEY: "s" })).toBe(true);
-    expect(voiceEnabled({ XAI_API_KEY: "x" })).toBe(true);
-  });
 });
 
 describe("userEnvironmentPending", () => {

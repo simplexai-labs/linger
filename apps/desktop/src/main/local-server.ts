@@ -233,8 +233,6 @@ export interface LocalServerStatus {
   // keys themselves.
   readonly keys: {
     readonly composio: boolean;
-    readonly soniox: boolean;
-    readonly xai: boolean;
   };
   readonly origin?: string;
   // While the "signin" step waits for the person.
@@ -424,8 +422,6 @@ export class LocalServerModule implements Module {
       },
       keys: {
         composio: !!keys.composio,
-        soniox: !!keys.soniox,
-        xai: !!keys.xai,
       },
       ...(this.#origin ? { origin: this.#origin } : {}),
       ...(this.#signIn ? { signIn: this.#signIn } : {}),

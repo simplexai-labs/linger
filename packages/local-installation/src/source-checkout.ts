@@ -192,8 +192,6 @@ export async function prepareSourceConfiguration(
     const ports = instance.source.ports;
     const generated = {
       ...supplied,
-      // Native without its voice tools turns the voice keys off when it
-      // starts the services (native-source.ts).
       ...user,
       LOCAL_ENV_FILE: envFile,
       COMPUTER_RELEASE_TARGETS: `${process.platform}-${process.arch}`,

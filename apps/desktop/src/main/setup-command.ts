@@ -22,8 +22,6 @@ const setupCommand = z.discriminatedUnion("op", [
       keys: z
         .object({
           composio: providerKey.optional(),
-          soniox: providerKey.optional(),
-          xai: providerKey.optional(),
         })
         .strict()
         .optional(),

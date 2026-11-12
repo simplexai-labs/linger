@@ -58,7 +58,7 @@ if (args.includes("--user-keys")) {
   const changes = JSON.parse(fs.readFileSync(0, "utf8"));
   fs.writeFileSync(path.join(home, "keys-args.json"), JSON.stringify(args));
   if (Object.values(changes).includes("bad")) {
-    process.stdout.write(JSON.stringify({ error: "XAI_API_KEY is not a valid key" }) + "\n");
+    process.stdout.write(JSON.stringify({ error: "COMPOSIO_API_KEY is not a valid key" }) + "\n");
     process.exit(1);
   }
   const directory = path.join(home, "instances", "desktop");
@@ -1544,16 +1544,12 @@ describe("LocalServerModule", () => {
     };
     const f = fixture(withCheckout, {}, checkout, installerApi([finishedJob]));
     await f.host.start();
-    expect(f.module.status().keys).toEqual({
-      composio: false,
-      soniox: false,
-      xai: false,
-    });
+    expect(f.module.status().keys).toEqual({ composio: false });
     const info = vi.spyOn(silentLog, "info");
     const warn = vi.spyOn(silentLog, "warn");
     await f.module.begin({
       runtime: "claude",
-      keys: { composio: "composio-1", soniox: "soniox-1", xai: "xai-1" },
+      keys: { composio: "composio-1" },
     });
     // The keys go over stdin, never in the arguments.
     const keysArgs = readFileSync(path.join(f.home, "keys-args.json"), "utf8");
@@ -1569,29 +1565,22 @@ describe("LocalServerModule", () => {
         path.join(f.home, "instances", LOCAL_INSTANCE, "user.env"),
         "utf8",
       ),
-    ).toBe(
-      "COMPOSIO_API_KEY=composio-1\nSONIOX_API_KEY=soniox-1\nXAI_API_KEY=xai-1\n",
-    );
-    expect(f.module.status().keys).toEqual({
-      composio: true,
-      soniox: true,
-      xai: true,
-    });
+    ).toBe("COMPOSIO_API_KEY=composio-1\n");
+    expect(f.module.status().keys).toEqual({ composio: true });
     // The finished installation does not carry them, so a new one runs.
     expect(f.api.created).toHaveLength(1);
     expect(f.module.status().phase).toBe("ready");
     expect(info).toHaveBeenCalledWith("local_server.keys_saved", {
-      saved: ["COMPOSIO_API_KEY", "SONIOX_API_KEY", "XAI_API_KEY"],
+      saved: ["COMPOSIO_API_KEY"],
     });
     const logged = JSON.stringify([info.mock.calls, warn.mock.calls]);
     expect(logged).not.toContain("composio-1");
-    expect(logged).not.toContain("soniox-1");
-    expect(logged).not.toContain("xai-1");
     info.mockRestore();
     warn.mockRestore();
     await f.host.stop("quit");
 
-    // Removing one key keeps the other; without changes the finished
+    // Removing the Composio key keeps the voice keys a person put in
+    // user.env by hand; without changes the finished
     // installation is followed as before.
     const again = fixture(
       withCheckout,
@@ -1603,7 +1592,7 @@ describe("LocalServerModule", () => {
         });
         writeFileSync(
           path.join(home, "instances", LOCAL_INSTANCE, "user.env"),
-          "SONIOX_API_KEY=soniox-1\nXAI_API_KEY=xai-1\n",
+          "COMPOSIO_API_KEY=composio-1\nSONIOX_API_KEY=soniox-1\n",
         );
       },
       installerApi([finishedJob]),
@@ -1611,13 +1600,15 @@ describe("LocalServerModule", () => {
     await again.host.start();
     await again.module.begin({
       runtime: "claude",
-      keys: { xai: "" },
+      keys: { composio: "" },
     });
-    expect(again.module.status().keys).toEqual({
-      composio: false,
-      soniox: true,
-      xai: false,
-    });
+    expect(again.module.status().keys).toEqual({ composio: false });
+    expect(
+      readFileSync(
+        path.join(again.home, "instances", LOCAL_INSTANCE, "user.env"),
+        "utf8",
+      ),
+    ).toBe("SONIOX_API_KEY=soniox-1\n");
     await again.host.stop("quit");
     const plain = fixture(
       withCheckout,
@@ -1638,10 +1629,10 @@ describe("LocalServerModule", () => {
     await expect(
       f.module.begin({
         runtime: "claude",
-        keys: { xai: "bad" },
+        keys: { composio: "bad" },
       }),
     ).rejects.toThrow(
-      "Keys could not be saved: XAI_API_KEY is not a valid key",
+      "Keys could not be saved: COMPOSIO_API_KEY is not a valid key",
     );
     expect(existsSync(path.join(f.home, "installer", "args.json"))).toBe(false);
     expect(f.module.status().phase).toBe("failed");

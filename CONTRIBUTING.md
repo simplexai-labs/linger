@@ -26,17 +26,17 @@ pnpm dev
 
 `pnpm dev` starts no containers. It migrates the PostgreSQL that
 `TEAMHUB_DATABASE_URL` names, then runs Web, TeamHub and the node-services
-process on your machine with hot reload, plus a LiveKit server while a voice
-key is set. Set `TEAMHUB_DATABASE_URL` in `.env`
+process on your machine with hot reload, plus a LiveKit server. Set `TEAMHUB_DATABASE_URL` in `.env`
 to your database; the default matches the `postgres` service of the root
 `docker-compose.yml`. `.env.example` holds every other value `pnpm dev` needs;
 only optional personal keys (Composio, Soniox) are left empty. Check the
 services with `pnpm dev:check`, and open <http://localhost:3000>.
 
-Voice: set `SONIOX_API_KEY` (recording and dictation) or `XAI_API_KEY` (Grok
-Live) in `.env`. `pnpm dev` then runs `livekit-server` from `PATH` on the ports
-and keys `LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` name, and
-node-services starts the voice workers. Install it with `brew install livekit`
+Voice: `pnpm dev` runs `livekit-server` from `PATH` on the ports and keys
+`LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` name, with or without
+a voice key. Save a Soniox (recording and dictation) or xAI (Grok Live) key in
+the app, or set `SONIOX_API_KEY` or `XAI_API_KEY` in `.env` to override it;
+node-services then starts the voice workers. Install it with `brew install livekit`
 on macOS or `curl -sSL https://get.livekit.io | bash` on Linux; recording also
 needs `ffmpeg` and `ffprobe`. Point `LIVEKIT_URL` at another host to use a
 LiveKit server you run elsewhere instead.

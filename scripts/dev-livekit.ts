@@ -3,9 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // `pnpm dev` runs the LiveKit server voice needs, as docker-compose.yml does,
-// with the same ports and keys from .env. It runs only while a voice key is
-// set and LIVEKIT_URL names this computer; otherwise the services use the
-// LiveKit that LIVEKIT_URL names, or voice stays off.
+// with the same ports and keys from .env, whether or not a voice key is set,
+// so a key saved later in the app works without a restart. It runs while
+// LIVEKIT_URL names this computer; otherwise the services use the LiveKit
+// that LIVEKIT_URL names.
 
 // The media ports of the livekit service in docker-compose.yml.
 const RTC_UDP_PORT = 7882;
@@ -18,18 +19,9 @@ export type LiveKitDevPlan =
       httpPort: number;
       keys: string;
       config: string;
-      ffmpegNeeded: boolean;
     };
 
 export function planDevLiveKit(environment: NodeJS.ProcessEnv): LiveKitDevPlan {
-  const soniox = Boolean(environment.SONIOX_API_KEY?.trim());
-  const xai = Boolean(environment.XAI_API_KEY?.trim());
-  if (!soniox && !xai)
-    return {
-      action: "skip",
-      reason:
-        "Voice is off: set SONIOX_API_KEY or XAI_API_KEY in .env to run LiveKit with pnpm dev.",
-    };
   const url = environment.LIVEKIT_URL?.trim();
   const key = environment.LIVEKIT_API_KEY?.trim();
   const secret = environment.LIVEKIT_API_SECRET?.trim();
@@ -65,7 +57,6 @@ export function planDevLiveKit(environment: NodeJS.ProcessEnv): LiveKitDevPlan {
       },
       logging: { level: "info" },
     }),
-    ffmpegNeeded: soniox,
   };
 }
 
@@ -102,7 +93,7 @@ export async function runDevLiveKit(
     console.log(plan.reason);
     return 0;
   }
-  if (plan.ffmpegNeeded && !(onPath("ffmpeg") && onPath("ffprobe")))
+  if (!(onPath("ffmpeg") && onPath("ffprobe")))
     console.warn(
       "Recording needs ffmpeg and ffprobe on PATH; install them to save recordings.",
     );

@@ -16,12 +16,15 @@ must stay private to you (`chmod 600`); otherwise the app stops and says how
 to fix it. Docker Compose and `pnpm dev` read these keys from the root `.env`
 instead.
 
-| Name               | Turns on                                                |
-| ------------------ | ------------------------------------------------------- |
-| `COMPOSIO_API_KEY` | Connected apps such as Gmail, GitHub and Slack          |
-| `SONIOX_API_KEY`   | Recording, dictation and meeting transcripts            |
-| `XAI_API_KEY`      | Grok Live voice mode, without Soniox                    |
-| `TZ`               | The services' time zone, for example `America/New_York` |
+| Name               | Turns on                                                     |
+| ------------------ | ------------------------------------------------------------ |
+| `COMPOSIO_API_KEY` | Connected apps such as Gmail, GitHub and Slack               |
+| `SONIOX_API_KEY`   | Recording, dictation and meeting transcripts (overrides app) |
+| `XAI_API_KEY`      | Grok Live voice mode, without Soniox (overrides app)         |
+| `TZ`               | The services' time zone, for example `America/New_York`      |
+
+Voice keys are normally saved in the app itself; a voice key written here
+still works and takes precedence over the one saved in the app.
 
 ```sh
 XAI_API_KEY=xai-...
@@ -29,7 +32,8 @@ SONIOX_API_KEY=...
 ```
 
 Quit and reopen the Linger app after editing it: services whose configuration
-changed restart, and LiveKit runs only while a voice key is set. Other names,
+changed restart. LiveKit runs whenever the app has voice tools for this
+computer, with or without a voice key. Other names,
 such as `LINGER_SECRET_SEED` or ports, are ignored with a warning, because the
 installer manages them. Keys never appear in installer logs or the app's
 diagnostics.

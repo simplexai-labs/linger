@@ -37,8 +37,6 @@ export interface SetupLocalServer {
   // Which provider keys are saved there; the page never sees them.
   readonly keys: {
     readonly composio: boolean;
-    readonly soniox: boolean;
-    readonly xai: boolean;
   };
   // While the "signin" step shows: the AI runtime's own sign-in.
   readonly signIn?: SetupRuntimeSignIn;
@@ -113,8 +111,6 @@ export type SetupLocalRuntime =
 // removes it and an absent provider keeps it.
 export interface SetupProviderKeys {
   readonly composio?: string;
-  readonly soniox?: string;
-  readonly xai?: string;
 }
 
 export interface SetupState {

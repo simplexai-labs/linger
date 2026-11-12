@@ -110,7 +110,6 @@ test("keys saved from the setup page and LiveKit reach the Native services", asy
   const keys = { SONIOX_API_KEY: "soniox-1", XAI_API_KEY: "xai-1" };
   const root = (name: string) => path.join(f.home, "instances", name);
   await updateUserKeys(root("native-keys"), keys);
-  // Native turns voice off at start when it has no voice tools.
   const native = await prepareNativeConfiguration(f.repo, {
     home: f.home,
     name: "native-keys",

@@ -130,13 +130,16 @@ Gateway and runs Agents. The daemon exits with the app.
   says what is missing (offline computer, no writable folder, or no signed-in
   runtime with each runtime's reported state) and logs
   `local_server.another_me_missing`. Customize → API keys takes the
-  Composio, Soniox and xAI keys (`provider-keys.ts`); Install saves the edits
+  Composio key only (`provider-keys.ts`); voice keys are saved in the app,
+  and a `SONIOX_API_KEY` or `XAI_API_KEY` written into `user.env` by hand
+  still reaches the services and overrides the app's. Install saves the edits
   before the installer starts (`installer.js --instance desktop --user-keys`,
   the keys on stdin) into the owner-only `instances/desktop/user.env` of the
   install location, and the page only learns which keys are saved. Both
   engines pass them to the services whenever they are configured (an edit
   runs a new job even after a finished one); Native also starts its bundled
-  LiveKit when a voice key is set (see Release). There is no settings page
+  LiveKit whenever this computer has voice tools, with or without a voice
+  key (see Release). There is no settings page
   after setup yet: keys change on the next Install or Try Again.
 - `src/main/diagnostics.ts`: Diagnostics, "Show Logs" (opens
   `<userData>/logs`) and "Save Diagnostics" (a redacted
@@ -361,15 +364,17 @@ Linux with `node scripts/prepare-native-voice-tools.mjs --target <target>
 `voiceTools`. The build is reproducible except for the Go toolchain download,
 and it checks the versions, the ffmpeg components the voice workers use,
 static linking and the Mach-O signatures. Licenses ship in `licenses/` of the
-archive. When a voice key is saved, Native extracts the archive into
+archive. On every install and start, whether or not a voice key is saved,
+Native extracts the archive into
 `tools/native/components`, puts its `bin` first on the services' `PATH`
 (TeamHub and the voice workers run `ffmpeg`/`ffprobe` from it) and runs
 `livekit-server` as the `livekit` Native service: loopback only, HTTP and
 WebSocket on one free port and media on one free UDP port, both kept with
 the generated API key and secret in the owner-only `livekit.env` of the
 instance, logs in `native/logs/livekit.log`. ICE over TCP stays off because
-LiveKit binds it on every interface. Without the tools for the computer
-Native keeps voice off. The macOS tools are ad-hoc signed by their linker and
+LiveKit binds it on every interface. Without the tools for the computer, or
+when they fail to prepare, Native logs it, keeps voice off, gives TeamHub
+`TEAMHUB_VOICE_MEDIA=off` and finishes the install. The macOS tools are ad-hoc signed by their linker and
 live in the archive, outside the app's signature, like PostgreSQL.
 
 A build with a source package for `win32-x64`, `linux-x64` or `darwin-arm64`
