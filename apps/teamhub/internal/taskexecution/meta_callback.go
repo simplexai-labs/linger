@@ -28,7 +28,6 @@ type MetaCallbackAppendInput struct {
 	AuthorActorID string
 	Body          string
 	Segments      []byte
-	NonActionable bool
 }
 
 // MetaCallbackMessage is one persisted callback.
@@ -64,7 +63,7 @@ func AppendMetaCallback(ctx context.Context, queries *store.Queries, input MetaC
 	if _, err := queries.CreateTaskMetaCallbackMessage(ctx, store.CreateTaskMetaCallbackMessageParams{
 		ID: messageID, TaskID: input.TaskID, TenantID: input.TenantID,
 		Generation: input.Generation, MetaSeq: nextSeq, AuthorActorID: input.AuthorActorID,
-		Body: input.Body, Segments: input.Segments, NonActionable: input.NonActionable,
+		Body: input.Body, Segments: input.Segments,
 	}); err != nil {
 		return MetaCallbackMessage{}, err
 	}

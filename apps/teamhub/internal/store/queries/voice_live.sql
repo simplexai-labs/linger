@@ -343,15 +343,11 @@ WHERE message.room_id=sqlc.arg(room_id)::text AND message.message_kind='conversa
 ORDER BY message.created_at DESC,message.id DESC LIMIT 20;
 
 -- name: ListVoiceLiveHandoverTasks :many
+-- The call's Tasks the Meta keeps coordinating. Their reports are the live
+-- voice's to tell, so the Meta is not handed them.
 SELECT task.work_item_id,task.ordinal,task.goal,task.home_room_id,
- coalesce(item.task_execution_status,'')::text AS state,
- coalesce(report.id,'')::text AS report_id,coalesce(left(report.body,1000),'')::text AS report,
- coalesce(char_length(report.body)>1000,false)::boolean AS report_truncated,
- coalesce((SELECT delivery.message_id FROM voice_live_report_deliveries delivery WHERE delivery.report_id=report.id),'')::text AS delivered_message_id
+ coalesce(item.task_execution_status,'')::text AS state
 FROM voice_live_tasks task JOIN work_items item ON item.id=task.work_item_id
-LEFT JOIN LATERAL(SELECT message.id,message.body FROM task_meta_callback_messages message
- WHERE message.task_id=task.work_item_id AND message.generation=item.task_execution_generation
- ORDER BY message.meta_seq DESC LIMIT 1) report ON true
 WHERE task.room_id=sqlc.arg(room_id)::text AND task.owner_actor_id=sqlc.arg(owner_actor_id)::text
  AND task.canceled_at IS NULL AND item.archived_at IS NULL
 ORDER BY task.ordinal DESC LIMIT 20;
@@ -399,9 +395,6 @@ ORDER BY message.meta_seq DESC LIMIT 1;
 INSERT INTO voice_live_report_deliveries(report_id,voice_session_id,message_id)
 VALUES(sqlc.arg(report_id)::text,sqlc.arg(voice_session_id)::text,sqlc.arg(message_id)::text)
 ON CONFLICT (report_id) DO NOTHING;
-
--- name: MarkVoiceLiveReportNonActionable :exec
-UPDATE task_meta_callback_messages SET non_actionable=true WHERE id=sqlc.arg(report_id)::text;
 
 -- name: ListVoiceLiveRecentToolCalls :many
 -- This call's latest tool calls, newest first, for the Documents they named.

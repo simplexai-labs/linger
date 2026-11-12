@@ -777,14 +777,8 @@ func (q *Queries) ListVoiceLiveHandoverMessages(ctx context.Context, roomID stri
 
 const listVoiceLiveHandoverTasks = `-- name: ListVoiceLiveHandoverTasks :many
 SELECT task.work_item_id,task.ordinal,task.goal,task.home_room_id,
- coalesce(item.task_execution_status,'')::text AS state,
- coalesce(report.id,'')::text AS report_id,coalesce(left(report.body,1000),'')::text AS report,
- coalesce(char_length(report.body)>1000,false)::boolean AS report_truncated,
- coalesce((SELECT delivery.message_id FROM voice_live_report_deliveries delivery WHERE delivery.report_id=report.id),'')::text AS delivered_message_id
+ coalesce(item.task_execution_status,'')::text AS state
 FROM voice_live_tasks task JOIN work_items item ON item.id=task.work_item_id
-LEFT JOIN LATERAL(SELECT message.id,message.body FROM task_meta_callback_messages message
- WHERE message.task_id=task.work_item_id AND message.generation=item.task_execution_generation
- ORDER BY message.meta_seq DESC LIMIT 1) report ON true
 WHERE task.room_id=$1::text AND task.owner_actor_id=$2::text
  AND task.canceled_at IS NULL AND item.archived_at IS NULL
 ORDER BY task.ordinal DESC LIMIT 20
@@ -796,17 +790,15 @@ type ListVoiceLiveHandoverTasksParams struct {
 }
 
 type ListVoiceLiveHandoverTasksRow struct {
-	WorkItemID         string `json:"work_item_id"`
-	Ordinal            int32  `json:"ordinal"`
-	Goal               string `json:"goal"`
-	HomeRoomID         string `json:"home_room_id"`
-	State              string `json:"state"`
-	ReportID           string `json:"report_id"`
-	Report             string `json:"report"`
-	ReportTruncated    bool   `json:"report_truncated"`
-	DeliveredMessageID string `json:"delivered_message_id"`
+	WorkItemID string `json:"work_item_id"`
+	Ordinal    int32  `json:"ordinal"`
+	Goal       string `json:"goal"`
+	HomeRoomID string `json:"home_room_id"`
+	State      string `json:"state"`
 }
 
+// The call's Tasks the Meta keeps coordinating. Their reports are the live
+// voice's to tell, so the Meta is not handed them.
 func (q *Queries) ListVoiceLiveHandoverTasks(ctx context.Context, arg ListVoiceLiveHandoverTasksParams) ([]ListVoiceLiveHandoverTasksRow, error) {
 	rows, err := q.db.Query(ctx, listVoiceLiveHandoverTasks, arg.RoomID, arg.OwnerActorID)
 	if err != nil {
@@ -822,10 +814,6 @@ func (q *Queries) ListVoiceLiveHandoverTasks(ctx context.Context, arg ListVoiceL
 			&i.Goal,
 			&i.HomeRoomID,
 			&i.State,
-			&i.ReportID,
-			&i.Report,
-			&i.ReportTruncated,
-			&i.DeliveredMessageID,
 		); err != nil {
 			return nil, err
 		}
@@ -1121,15 +1109,6 @@ func (q *Queries) LockVoiceLiveTurn(ctx context.Context, arg LockVoiceLiveTurnPa
 		&i.CreatedAt,
 	)
 	return i, err
-}
-
-const markVoiceLiveReportNonActionable = `-- name: MarkVoiceLiveReportNonActionable :exec
-UPDATE task_meta_callback_messages SET non_actionable=true WHERE id=$1::text
-`
-
-func (q *Queries) MarkVoiceLiveReportNonActionable(ctx context.Context, reportID string) error {
-	_, err := q.db.Exec(ctx, markVoiceLiveReportNonActionable, reportID)
-	return err
 }
 
 const recordVoiceLiveHandoverReceipt = `-- name: RecordVoiceLiveHandoverReceipt :exec

@@ -290,7 +290,7 @@ func (s *Service) voiceLiveCurrent(ctx context.Context, session voicelive.Sessio
 }
 
 // markVoiceLiveTasksTold records each Task's latest report as delivered by
-// the card, so a switch does not ask the Meta to deliver it again.
+// the card, so list_tasks no longer offers it as news.
 func (s *Service) markVoiceLiveTasksTold(ctx context.Context, session voicelive.Session, tasks []string, messageID string) error {
 	if len(tasks) == 0 {
 		return nil
@@ -310,9 +310,6 @@ func (s *Service) markVoiceLiveTasksTold(ctx context.Context, session voicelive.
 			return err
 		}
 		if err = queries.CreateVoiceLiveReportDelivery(ctx, store.CreateVoiceLiveReportDeliveryParams{ReportID: report, VoiceSessionID: session.ID, MessageID: messageID}); err != nil {
-			return err
-		}
-		if err = queries.MarkVoiceLiveReportNonActionable(ctx, report); err != nil {
 			return err
 		}
 	}

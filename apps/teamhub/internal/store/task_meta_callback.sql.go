@@ -11,11 +11,11 @@ import (
 
 const createTaskMetaCallbackMessage = `-- name: CreateTaskMetaCallbackMessage :one
 INSERT INTO task_meta_callback_messages(
-    id,task_id,tenant_id,generation,meta_seq,author_actor_id,body,segments,non_actionable
+    id,task_id,tenant_id,generation,meta_seq,author_actor_id,body,segments
 )
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8)
 RETURNING id,task_id,tenant_id,generation,meta_seq,author_actor_id,body,segments,
-          non_actionable,created_at
+          created_at
 `
 
 type CreateTaskMetaCallbackMessageParams struct {
@@ -27,7 +27,6 @@ type CreateTaskMetaCallbackMessageParams struct {
 	AuthorActorID string `json:"author_actor_id"`
 	Body          string `json:"body"`
 	Segments      []byte `json:"segments"`
-	NonActionable bool   `json:"non_actionable"`
 }
 
 func (q *Queries) CreateTaskMetaCallbackMessage(ctx context.Context, arg CreateTaskMetaCallbackMessageParams) (TaskMetaCallbackMessage, error) {
@@ -40,7 +39,6 @@ func (q *Queries) CreateTaskMetaCallbackMessage(ctx context.Context, arg CreateT
 		arg.AuthorActorID,
 		arg.Body,
 		arg.Segments,
-		arg.NonActionable,
 	)
 	var i TaskMetaCallbackMessage
 	err := row.Scan(
@@ -52,7 +50,6 @@ func (q *Queries) CreateTaskMetaCallbackMessage(ctx context.Context, arg CreateT
 		&i.AuthorActorID,
 		&i.Body,
 		&i.Segments,
-		&i.NonActionable,
 		&i.CreatedAt,
 	)
 	return i, err

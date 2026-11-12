@@ -1706,7 +1706,6 @@ type TaskMetaCallbackMessage struct {
 	AuthorActorID string             `json:"author_actor_id"`
 	Body          string             `json:"body"`
 	Segments      []byte             `json:"segments"`
-	NonActionable bool               `json:"non_actionable"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
