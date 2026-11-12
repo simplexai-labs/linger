@@ -61,7 +61,7 @@ originals before it says something was never recorded.
 | Keywords | PostgreSQL full-text search, once for the query and once for each alternate wording | Same                                                           |
 | Time     |                                                                                     | Keyword matches inside a time window the question names        |
 | Fusion   | Reciprocal rank fusion of all lists                                                 | Same                                                           |
-| Extra    |                                                                                     | Facts extracted from conversations, returned as their own list |
+| Extra    |                                                                                     | A separate list of facts from chats, recordings, notes, emails |
 | Result   | Ranked previews; the agent reads the section it needs                               | Ranked passages with neighboring sections to read next         |
 
 <sub>Agents pass up to six alternate wordings, such as synonyms and

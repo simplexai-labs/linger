@@ -1690,9 +1690,9 @@ components:
           type: array
           maxItems: 30
           description:
-            Session facts extracted from Room conversations that matched the
-            query, ranked separately from items so they never displace Raw
-            candidates. Each names the Raw chunk that states it; that chunk
+            Session facts extracted from conversations, recordings, Pocket
+            Notes and personal mail that matched the query, ranked separately
+            from items so they never displace Raw candidates. Each names the Raw chunk that states it; that chunk
             remains the original evidence.
           items:
             $ref: "#/components/schemas/PersonalKnowledgeSessionFact"

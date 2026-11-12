@@ -13,7 +13,10 @@ import {
 } from "vitest";
 import { MemoryChunkIndex } from "../../src/memory/chunk-index.js";
 import { searchRawSources } from "../../src/memory/search/raw-query.js";
-import { storePocketNoteSource } from "../../src/memory/search/source-store.js";
+import {
+  documentRawSource,
+  storePocketNoteSource,
+} from "../../src/memory/search/source-store.js";
 import { SessionFactIndex } from "../../src/memory/session-fact-index.js";
 import type { ExtractedFact } from "../../src/memory/session-fact-extraction.js";
 import { readTimelineEvents } from "../../src/memory/graph-visualization.js";
@@ -69,7 +72,6 @@ describe.runIf(Boolean(databaseUrl))("Session facts in PostgreSQL", () => {
     extracted.length = 0;
     facts = new SessionFactIndex({
       sql: indexSql,
-      sourceUris: "%",
       // Stand-in for the Hindsight-prompt model call, keyed on window text.
       extract: async (batch) =>
         new Map(
@@ -116,9 +118,13 @@ describe.runIf(Boolean(databaseUrl))("Session facts in PostgreSQL", () => {
       markdown,
     );
   }
+  // The fixtures are Room transcripts staged through the Pocket Note store;
+  // marked Room so their message headings date and attribute facts.
   async function publishRaw(markdown: string) {
     await stageRaw(identity, markdown);
     await chunks.syncAgent(identity.agent_id);
+    await sql`UPDATE memory_index.sources SET origin_kind = 'room'
+      WHERE agent_id = ${identity.agent_id} AND origin_kind = 'pocket_note'`;
   }
   const shoes = {
     what: "User cleaned white Adidas sneakers in April 2026",
@@ -284,7 +290,6 @@ describe.runIf(Boolean(databaseUrl))("Session facts in PostgreSQL", () => {
     const owners: unknown[] = [];
     const batched = new SessionFactIndex({
       sql: indexSql,
-      sourceUris: "%",
       extract: async (batch, owner) => {
         batches.push(batch.length);
         owners.push(owner);
@@ -334,5 +339,51 @@ describe.runIf(Boolean(databaseUrl))("Session facts in PostgreSQL", () => {
       "Max (user's dog) is a Golden Retriever | Involving: Max (user's dog)",
       shoesText,
     ]);
+  });
+  it("extracts mail by class and whole threads the Human replied to", async () => {
+    const mail = async (
+      id: string,
+      cls: string,
+      thread: string,
+      extra = "",
+    ) => {
+      const markdown = `# ${id}\n\n- Provider: gmail\n- Message ID: \`${id}\`\n- Thread ID: \`${thread}\`\n- Timestamp: 2026-05-24T01:00:00Z\n- Direction: inbound\n- From: a@example.test\n- To: me@example.test\n- Cc: \n- Class: ${cls}\n\nBody of ${id}.\n${extra}`;
+      const source = documentRawSource({
+        identity,
+        documentId: `document_${id}`,
+        textSourceKind: "file_version",
+        textSourceId: `version_${id}`,
+        title: id,
+        filename: `${id}.md`,
+        mediaType: "text/markdown",
+        originKind: "mail",
+        date: "2026-05-24",
+        markdown,
+      });
+      await chunks.indexDatabaseSource(source, markdown);
+    };
+    // A body line shaped like a Room message heading must not date the fact.
+    await mail(
+      "person",
+      "direct_inbound",
+      "t1",
+      "\n## 2030-01-01T00:00:00.000Z · Alice\n\nI cleaned my white Adidas.\n",
+    );
+    await mail("notice", "system_notification", "t2");
+    await mail("promo", "marketing", "t3");
+    await mail("digest", "subscription", "t4");
+    await mail("sent", "self_sent", "t4");
+    await facts.syncAgent(identity.agent_id);
+    const bodies = extracted.map((text) => text.match(/Body of (\w+)/u)?.[1]);
+    // The digest joins because the Human replied in its thread; the promotion stays chunk-only.
+    expect(bodies.sort()).toEqual(["digest", "notice", "person", "sent"]);
+    const [stored] = await sql<
+      { mentioned_at: Date; speaker: string | null }[]
+    >`
+      SELECT mentioned_at, speaker FROM memory_index.session_facts`;
+    expect(stored).toEqual({
+      mentioned_at: new Date("2026-05-24T00:00:00Z"),
+      speaker: null,
+    });
   });
 });

@@ -2009,7 +2009,7 @@ type PersonalKnowledgeQueryRequest struct {
 
 // PersonalKnowledgeQueryResponse defines model for PersonalKnowledgeQueryResponse.
 type PersonalKnowledgeQueryResponse struct {
-	// Facts Session facts extracted from Room conversations that matched the query, ranked separately from items so they never displace Raw candidates. Each names the Raw chunk that states it; that chunk remains the original evidence.
+	// Facts Session facts extracted from conversations, recordings, Pocket Notes and personal mail that matched the query, ranked separately from items so they never displace Raw candidates. Each names the Raw chunk that states it; that chunk remains the original evidence.
 	Facts         *[]PersonalKnowledgeSessionFact `json:"facts,omitempty"`
 	Gaps          []PersonalKnowledgeEvidenceGap  `json:"gaps"`
 	IndexedAt     *time.Time                      `json:"indexedAt"`

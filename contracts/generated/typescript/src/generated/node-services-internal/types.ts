@@ -788,7 +788,7 @@ export interface components {
       gaps: components["schemas"]["PersonalKnowledgeEvidenceGap"][];
       /** Format: date-time */
       indexedAt: string | null;
-      /** @description Session facts extracted from Room conversations that matched the query, ranked separately from items so they never displace Raw candidates. Each names the Raw chunk that states it; that chunk remains the original evidence. */
+      /** @description Session facts extracted from conversations, recordings, Pocket Notes and personal mail that matched the query, ranked separately from items so they never displace Raw candidates. Each names the Raw chunk that states it; that chunk remains the original evidence. */
       facts?: components["schemas"]["PersonalKnowledgeSessionFact"][];
       requestId?: string;
     };

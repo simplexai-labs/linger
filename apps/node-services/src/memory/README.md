@@ -169,7 +169,13 @@ Core configuration:
   and does not start without it. It also enables the Raw Chunk persistent index and search.
 - The full Raw Chunk reconciliation runs once at service start and then at the built-in interval.
 - Session facts: after Raw Chunk sync finishes an Agent (without blocking indexing), Memory extracts Session facts
-  from its Room source text into `memory_index.session_facts`, following Hindsight retain. Consecutive Chunks form
+  into `memory_index.session_facts`, following Hindsight retain. Facts come from Room conversations, recording
+  transcripts, Pocket Notes and imported mail; My pages, the Wiki, period reports and the Profile stay chunk-only.
+  Mail is chosen by the `- Class:` line TeamHub writes into it: `self_sent`, `direct_inbound` and
+  `system_notification` are extracted, and so is every message of a thread with a `self_sent` message; marketing,
+  subscriptions and drafts are not. Each window's Context line names its origin, so the one prompt knows a
+  transcript may not label speakers, mail must tell the sender from the user, and a notification may hold no facts.
+  Consecutive Chunks form
   windows of at most 3,000 characters, extracted with `apps/node-services/prompts/memory/facts/fact-extraction.md`
   (the Hindsight concise prompt) at low reasoning effort. Up to 16 windows form one batch, and each batch runs as one
   ModelCall chain of kind `memory`, keyed `memory.facts:<sha256 of the batch's sorted window hashes>` so a restart

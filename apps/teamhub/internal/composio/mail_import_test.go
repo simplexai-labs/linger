@@ -195,7 +195,8 @@ func TestRenderImportedMailProfileViewMarksQuotesAndAutomatedMail(t *testing.T) 
 	}
 	authored := authoredProfileSections(profile)
 	if !strings.Contains(profile, "## Written by the sender of this message") || strings.Contains(authored, "Quoted history line") ||
-		!strings.Contains(profile, "Quoted history line") || !strings.Contains(full, "Quoted history line") || document.Automated {
+		!strings.Contains(profile, "Quoted history line") || !strings.Contains(full, "Quoted history line") || document.Automated ||
+		!strings.Contains(full, "- Cc: \n- Class: direct_inbound\n\n") || strings.Contains(profile, "- Class:") {
 		t.Fatalf("profile=%s\nmarkdown=%s", profile, full)
 	}
 	promotions := map[string]string{"Subject": "Sale", "From": "Shop <shop@example.test>"}
@@ -213,7 +214,7 @@ func TestRenderImportedMailProfileViewMarksQuotesAndAutomatedMail(t *testing.T) 
 		}
 		profile := string(document.ProfileMarkdown)
 		if !document.Automated || !strings.Contains(profile, "- Kind: automated (marketing)") || authoredProfileSections(profile) != "" ||
-			!strings.Contains(profile, test.body) || len(document.Markdown) == 0 {
+			!strings.Contains(profile, test.body) || !strings.Contains(string(document.Markdown), "- Class: marketing\n") {
 			t.Fatalf("%s: profile=%q markdown=%q", name, document.ProfileMarkdown, document.Markdown)
 		}
 	}
@@ -221,7 +222,8 @@ func TestRenderImportedMailProfileViewMarksQuotesAndAutomatedMail(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(sent.ProfileMarkdown), "## Written by the subject in this message\n\nHere is my plan.") {
+	if !strings.Contains(string(sent.ProfileMarkdown), "## Written by the subject in this message\n\nHere is my plan.") ||
+		!strings.Contains(string(sent.Markdown), "- Class: self_sent\n") {
 		t.Fatalf("sent profile=%s", sent.ProfileMarkdown)
 	}
 }

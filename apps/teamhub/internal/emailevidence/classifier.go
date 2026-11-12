@@ -53,6 +53,11 @@ func Classify(inputs []MessageInput) ([]ClassifiedMessage, error) {
 	return classified, nil
 }
 
+// ClassOf classifies one message from its direction and structural signals.
+func ClassOf(direction Direction, signals Signals) (MessageClass, error) {
+	return classifyMessage(MessageInput{Direction: direction, Signals: signals})
+}
+
 func classifyMessage(input MessageInput) (MessageClass, error) {
 	switch input.Direction {
 	case DirectionDraft:

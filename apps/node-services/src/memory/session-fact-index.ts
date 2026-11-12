@@ -33,8 +33,21 @@ const FACT_RESULTS = 30;
 /** Extraction chains one sync keeps on its endpoint's queue at once; the
  * queue decides how many of them run. */
 const DEFAULT_EXTRACTION_CONCURRENCY = 2;
-/** Facts come from Room conversations; documents keep Raw chunk recall only. */
-const ROOM_SOURCE_URI = "teamhub://rooms/%/messages";
+/** Raw origins facts are extracted from. My pages, the Wiki, period reports
+ * and the Profile keep Raw chunk recall only: documents are read on demand and
+ * the others are derived or already structured. */
+const FACT_ORIGINS = ["room", "recording", "pocket_note", "mail"];
+/** Mail classes extracted on their own; a thread the Human replied to is
+ * extracted whole, whatever its classes. Marketing, subscriptions and drafts
+ * stay chunk-only. */
+const FACT_MAIL_CLASSES = [
+  "self_sent",
+  "direct_inbound",
+  "system_notification",
+];
+/** The header lines TeamHub writes into imported mail Markdown. */
+const MAIL_CLASS_LINE = "\n- Class: ([a-z_]+)\n";
+const MAIL_THREAD_LINE = "\n- Thread ID: `([^`\n]+)`\n";
 const MESSAGE_HEADING = /^## (\d{4}-\d{2}-\d{2}T\S+) · (.+)$/gmu;
 
 /** The contract's model-visible Session fact with its Raw read handle. */
@@ -55,7 +68,7 @@ export interface FactSearchInput extends ChunkSearchInput {
   event_to?: string;
 }
 
-/** One Room Raw source at its active version. */
+/** One Raw source facts are extracted from, at its active version. */
 interface FactSource {
   id: string;
   tenant_id: string;
@@ -64,6 +77,9 @@ interface FactSource {
   active_sha256: string;
   content: string;
   date: string | null;
+  origin_kind: string;
+  mail_class: string | null;
+  replied: boolean;
 }
 
 interface PendingWindow {
@@ -135,15 +151,15 @@ export function messageAt(
 }
 
 /**
- * Extracts Session facts from Room Raw sources, independent of Wiki
- * generation, and serves the fact recall branches. Facts belong to a window of
+ * Extracts Session facts from conversation, transcript, Pocket Note and mail
+ * Raw sources, independent of Wiki generation, and serves the fact recall
+ * branches. Facts belong to a window of
  * the active Raw version; an unchanged window keeps its facts across versions.
  */
 export class SessionFactIndex {
   readonly #sql: postgres.Sql;
   readonly #extract: typeof extractWindowBatch;
   readonly #concurrency: number;
-  readonly #sourceUris: string;
   // One sync per Agent at a time, so repeated triggers never extract twice.
   readonly #agents = new Map<string, Promise<unknown>>();
 
@@ -153,16 +169,13 @@ export class SessionFactIndex {
     extract?: typeof extractWindowBatch;
     /** Extraction calls in flight per sync. */
     concurrency?: number;
-    /** SQL LIKE pattern of the Raw source URIs facts are extracted from. */
-    sourceUris?: string;
   }) {
     this.#extract = options.extract ?? extractWindowBatch;
     this.#concurrency = options.concurrency ?? DEFAULT_EXTRACTION_CONCURRENCY;
-    this.#sourceUris = options.sourceUris ?? ROOM_SOURCE_URI;
     this.#sql = options.sql;
   }
 
-  /** Extract new windows of an Agent's Room sources and drop changed ones. */
+  /** Extract new windows of an Agent's fact sources and drop changed ones. */
   syncAgent(agentId: string): Promise<FactSyncResult> {
     const run = (this.#agents.get(agentId) ?? Promise.resolve())
       .catch(() => undefined)
@@ -173,14 +186,33 @@ export class SessionFactIndex {
 
   async #syncAgent(agentId: string): Promise<FactSyncResult> {
     const sources = await this.#sql<FactSource[]>`
-      SELECT source.id, source.tenant_id, source.owner_id, source.agent_id,
-        source.active_sha256, version.content, version.manifest->>'date' AS date
-      FROM memory_index.sources source
-      JOIN memory_index.source_versions version
-        ON version.source_id = source.id AND version.sha256 = source.active_sha256
-      WHERE source.agent_id = ${agentId}
-        AND source.source_uri LIKE ${this.#sourceUris}
-      ORDER BY source.id`;
+      WITH candidate AS (
+        SELECT source.id, source.tenant_id, source.owner_id, source.agent_id,
+          source.active_sha256, version.content,
+          version.manifest->>'date' AS date, source.origin_kind,
+          CASE WHEN source.origin_kind = 'mail'
+            THEN substring(version.content from ${MAIL_CLASS_LINE}) END AS mail_class,
+          CASE WHEN source.origin_kind = 'mail'
+            THEN substring(version.content from ${MAIL_THREAD_LINE}) END AS mail_thread
+        FROM memory_index.sources source
+        JOIN memory_index.source_versions version
+          ON version.source_id = source.id AND version.sha256 = source.active_sha256
+        WHERE source.agent_id = ${agentId}
+          AND source.origin_kind = ANY(${FACT_ORIGINS}::text[])
+      ), replied AS (
+        SELECT DISTINCT mail_thread FROM candidate
+        WHERE mail_class = 'self_sent' AND mail_thread IS NOT NULL
+      )
+      SELECT candidate.id, candidate.tenant_id, candidate.owner_id,
+        candidate.agent_id, candidate.active_sha256, candidate.content,
+        candidate.date, candidate.origin_kind, candidate.mail_class,
+        replied.mail_thread IS NOT NULL AS replied
+      FROM candidate
+      LEFT JOIN replied ON replied.mail_thread = candidate.mail_thread
+      WHERE candidate.origin_kind <> 'mail'
+        OR candidate.mail_class = ANY(${FACT_MAIL_CLASSES}::text[])
+        OR replied.mail_thread IS NOT NULL
+      ORDER BY candidate.id`;
     const result = {
       sources: sources.length,
       windows: 0,
@@ -188,6 +220,29 @@ export class SessionFactIndex {
       facts: 0,
       failed: 0,
     };
+    // One query each for the Agent's extracted windows and for sources whose
+    // facts point at an older version, instead of two per source: mail makes
+    // sources number in the thousands.
+    const sourceIds = sources.map((source) => source.id);
+    const doneBySource = new Map<string, Set<string>>();
+    for (const row of await this.#sql<
+      { source_id: string; window_sha256: string }[]
+    >`
+      SELECT source_id, window_sha256 FROM memory_index.session_fact_windows
+      WHERE source_id = ANY(${sourceIds}::text[])`) {
+      const done = doneBySource.get(row.source_id) ?? new Set<string>();
+      done.add(row.window_sha256);
+      doneBySource.set(row.source_id, done);
+    }
+    const outdated = new Set(
+      (
+        await this.#sql<{ source_id: string }[]>`
+          SELECT DISTINCT fact.source_id FROM memory_index.session_facts fact
+          JOIN memory_index.sources source ON source.id = fact.source_id
+          WHERE fact.source_id = ANY(${sourceIds}::text[])
+            AND fact.source_sha256 <> source.active_sha256`
+      ).map((row) => row.source_id),
+    );
     // Pending windows by owner: a batch runs on one owner's Agent Runtime.
     const pending = new Map<string, PendingWindow[]>();
     for (const source of sources) {
@@ -195,13 +250,7 @@ export class SessionFactIndex {
       const windows = factWindows(chunks);
       result.windows += windows.length;
       const current = new Set(windows.map((window) => window.sha256));
-      const done = new Set(
-        (
-          await this.#sql<{ window_sha256: string }[]>`
-            SELECT window_sha256 FROM memory_index.session_fact_windows
-            WHERE source_id = ${source.id}`
-        ).map((row) => row.window_sha256),
-      );
+      const done = doneBySource.get(source.id) ?? new Set<string>();
       // A changed window (new messages in the last one) is extracted again.
       const stale = [...done].filter((sha) => !current.has(sha));
       if (stale.length)
@@ -211,7 +260,7 @@ export class SessionFactIndex {
           await sql`DELETE FROM memory_index.session_fact_windows
             WHERE source_id = ${source.id} AND window_sha256 = ANY(${stale}::text[])`;
         });
-      await this.#rebind(source, chunks);
+      if (outdated.has(source.id)) await this.#rebind(source, chunks);
       const owner = `${source.tenant_id}\n${source.owner_id}`;
       windows.forEach((window, index) => {
         if (done.has(window.sha256)) return;
@@ -222,8 +271,8 @@ export class SessionFactIndex {
             window,
             index,
             total: windows.length,
-            eventDate: eventDate(source.content, window, source.date),
-            context: `Conversation session on ${source.date ?? "an unknown date"}`,
+            eventDate: eventDate(source, window),
+            context: factContext(source),
           },
         });
         pending.set(owner, list);
@@ -321,7 +370,7 @@ export class SessionFactIndex {
     await this.#sql.begin(async (sql) => {
       for (const [ordinal, fact] of facts.entries()) {
         const chunk = factChunk(fact, window.chunks);
-        const message = messageAt(source.content, chunk.start);
+        const message = roomMessageAt(source, chunk.start);
         const id = `msf_${createHash("sha256")
           .update(`${source.id}:${window.sha256}:${ordinal}`)
           .digest("hex")
@@ -477,13 +526,45 @@ export function createSessionFactIndexFromEnvironment(
   });
 }
 
+/**
+ * The window's Context line: what kind of text it is and whose words it holds,
+ * so one extraction prompt serves every origin.
+ */
+export function factContext(
+  source: Pick<FactSource, "origin_kind" | "mail_class" | "replied" | "date">,
+): string {
+  const on = `on ${source.date ?? "an unknown date"}`;
+  switch (source.origin_kind) {
+    case "recording":
+      return `Meeting recording transcript ${on}, recorded by the user. Speakers may be unlabeled and are unknown; attribute a statement, commitment or decision to the user only when the text identifies the user as its speaker.`;
+    case "pocket_note":
+      return `The user's own Pocket Note ${on}.`;
+    case "mail":
+      return source.mail_class === "system_notification" && !source.replied
+        ? `Automated email ${on}, received by the user. Keep only what concerns the user: a booking, an appointment, a deadline or a changed time. A promotion, digest or plain receipt has no facts; return none.`
+        : `Email ${on} in the user's mailbox. The From line names the sender; the user is the mailbox owner. Attribute each fact to the sender or to the user, never confuse them.`;
+    default:
+      return `Conversation session ${on}`;
+  }
+}
+
+/** Message headings are trusted only in Room Raw, which escapes them in
+ * bodies; mail, notes and transcripts keep their source date. */
+function roomMessageAt(
+  source: Pick<FactSource, "origin_kind" | "content">,
+  offset: number,
+) {
+  return source.origin_kind === "room"
+    ? messageAt(source.content, offset)
+    : undefined;
+}
+
 /** Hindsight's Event Date: the first message time of the window, else the source date. */
 function eventDate(
-  content: string,
+  source: Pick<FactSource, "origin_kind" | "content" | "date">,
   window: FactWindow,
-  date: string | null,
 ): Date | undefined {
-  const at = messageAt(content, window.chunks[0]!.start + 1)?.mentionedAt;
-  const value = at ?? (date ? `${date}T00:00:00Z` : undefined);
+  const at = roomMessageAt(source, window.chunks[0]!.start + 1)?.mentionedAt;
+  const value = at ?? (source.date ? `${source.date}T00:00:00Z` : undefined);
   return value ? new Date(value) : undefined;
 }
