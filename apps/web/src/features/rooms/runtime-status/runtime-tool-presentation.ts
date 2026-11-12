@@ -75,9 +75,30 @@ const kinds: Record<string, ToolCategory> = {
   tool: "tool",
 };
 
-export function toolPresentation(kind: string) {
+/**
+ * How a tool call is shown. A call of the generic kind says nothing on its
+ * own, so its tool name labels it when one is known.
+ */
+export function toolPresentation(kind: string, name?: string) {
   const category = kinds[kind] ?? "tool";
-  return { category, ...presentations[category], summary: summaries[category] };
+  const named = category === "tool" && name ? toolNameLabel(name) : "";
+  return {
+    category,
+    ...presentations[category],
+    summary: named || summaries[category],
+  };
+}
+
+/**
+ * A tool name as words, without an MCP server prefix:
+ * `mcp__computer__get_window_state` reads "Get window state".
+ */
+export function toolNameLabel(name: string) {
+  const tool = name.startsWith("mcp__")
+    ? name.slice(name.lastIndexOf("__") + 2)
+    : name;
+  const words = tool.replaceAll("_", " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : name;
 }
 
 const summaries: Record<ToolCategory, string> = {

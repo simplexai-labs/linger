@@ -136,7 +136,7 @@ describe("RuntimeHistoryView", () => {
         ]}
       />,
     );
-    fireEvent.click(screen.getByText("Working on the task"));
+    fireEvent.click(screen.getByText("Exec command"));
     expect(screen.getByText("exec_command")).toBeVisible();
     expect(screen.queryByText(/README/)).not.toBeInTheDocument();
   });

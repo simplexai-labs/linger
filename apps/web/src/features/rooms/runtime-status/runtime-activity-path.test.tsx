@@ -134,13 +134,13 @@ describe("Runtime activity path", () => {
           record("3", {
             activity_id: "command-1",
             kind: "command",
-            title: "Running a command",
+            title: "exec_command",
             type: "activity.started",
           }),
           record("4", {
             activity_id: "command-2",
             kind: "command",
-            title: "Running a command",
+            title: "exec_command",
             type: "activity.started",
           }),
           record("5", {
@@ -243,10 +243,12 @@ describe("Runtime activity path", () => {
       const group = screen.getAllByText("Running a command")[0]!;
       expect(group).toBeVisible();
       const technicalCommand = screen.getByText(/git status --short/);
+      const tool = screen.getByText(title, { selector: "dd" });
       expect(technicalCommand).not.toBeVisible();
+      expect(tool).not.toBeVisible();
       fireEvent.click(group);
       expect(technicalCommand).toBeVisible();
-      expect(screen.queryByText("exec_command")).not.toBeInTheDocument();
+      expect(tool).toBeVisible();
     },
   );
 
@@ -406,7 +408,7 @@ describe("Runtime activity path", () => {
               },
             ],
             kind: "command",
-            title: "Running a command",
+            title: "exec_command",
           }),
           record("3", {
             type: "activity.started",
@@ -442,15 +444,101 @@ describe("Runtime activity path", () => {
     expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Working through 2 steps"));
-    expect(screen.getAllByText("Working on the task")).toHaveLength(2);
+    expect(screen.getByText("Get room")).toBeVisible();
+    expect(screen.getByText("List members")).toBeVisible();
+    expect(screen.queryByText("Working on the task")).not.toBeInTheDocument();
     expect(screen.getByText("Input").closest("details")).not.toHaveAttribute(
       "open",
     );
 
-    fireEvent.click(screen.getAllByText("Working on the task")[0]!);
+    fireEvent.click(screen.getByText("Get room"));
     expect(screen.getByText("Input").closest("details")).toHaveAttribute(
       "open",
       "",
+    );
+  });
+
+  it("opens a step without published content to show its tool and outcome", () => {
+    render(
+      <RuntimeActivityPath
+        records={[
+          record("1", {
+            type: "activity.started",
+            activity_id: "launch",
+            kind: "tool",
+            title: "mcp__computer__launch_app",
+          }),
+          record("2", {
+            type: "activity.finished",
+            activity_id: "launch",
+            outcome: "failed",
+          }),
+          record("3", {
+            type: "activity.started",
+            activity_id: "read",
+            kind: "tool",
+            title: "mcp__computer__get_window_state",
+          }),
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Working through 2 steps"));
+    const step = screen.getByText("Launch app");
+    const tool = screen.getByText("mcp__computer__launch_app");
+    expect(tool).not.toBeVisible();
+    fireEvent.click(step);
+    expect(step.closest("details")).toHaveAttribute("open", "");
+    expect(tool).toBeVisible();
+    expect(screen.getByText("Failed")).toBeVisible();
+
+    fireEvent.click(screen.getByText("Get window state"));
+    expect(screen.getByText("mcp__computer__get_window_state")).toBeVisible();
+    expect(screen.getAllByText("Outcome")).toHaveLength(1);
+  });
+
+  it("shows a failed step's error after its input", () => {
+    render(
+      <RuntimeActivityPath
+        records={[
+          record("1", {
+            type: "activity.started",
+            activity_id: "key",
+            kind: "tool",
+            title: "mcp__computer__press_key",
+            content: [
+              {
+                content: JSON.stringify({ key: "return" }),
+                format: "json",
+                label: "Input",
+              },
+            ],
+          }),
+          record("2", {
+            type: "activity.finished",
+            activity_id: "key",
+            outcome: "failed",
+            content: [
+              {
+                content: "COMPUTER_KEYS_REFUSED: no focused window",
+                format: "text",
+                label: "Error",
+              },
+            ],
+          }),
+        ]}
+      />,
+    );
+
+    const [group, step] = screen.getAllByText("Press key");
+    fireEvent.click(group!);
+    fireEvent.click(step!);
+    const details = screen.getByLabelText(
+      "Tool: mcp__computer__press_key details",
+    );
+    expect(details).toBeVisible();
+    expect(details.textContent).toMatch(
+      /mcp__computer__press_key.*Failed.*Input.*return.*Error.*COMPUTER_KEYS_REFUSED: no focused window/,
     );
   });
 
@@ -679,6 +767,7 @@ describe("Runtime activity path", () => {
         key: "command-1",
         kind: "command",
         name: "/bin/zsh -lc 'cat .agents/skills/agent-worker/SKILL.md'",
+        title: "Running a command",
       },
       {
         active: true,
@@ -695,6 +784,7 @@ describe("Runtime activity path", () => {
         key: "command-2",
         kind: "command",
         name: "/bin/zsh -lc 'cat playground/agent.json'",
+        title: "Running a command",
       },
       {
         active: false,
@@ -818,6 +908,7 @@ describe("Runtime activity path", () => {
         kind: "command",
         name: "pwd",
         outcome: "succeeded",
+        title: "Running a command",
       },
       {
         calls: [

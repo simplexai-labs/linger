@@ -184,7 +184,7 @@ function activityItemLabel(item: RuntimeActivityPathItem): string {
   }
   if (item.kind === "tool_calls") {
     return toolGroupPresentation(
-      item.calls.map((call) => toolPresentation(call.kind)),
+      item.calls.map((call) => toolPresentation(call.kind, call.name)),
     ).label;
   }
   if (item.kind === "reply") return "Prepared a reply";
@@ -220,7 +220,9 @@ function RuntimeActivityPathRow({ item }: { item: RuntimeActivityPathItem }) {
         unconfirmed={item.unconfirmed}
         entries={item.entries}
         icon={presentation.glyph}
+        outcome={item.outcome}
         summary={presentation.summary}
+        tool={item.title}
       />
     );
   }
@@ -232,7 +234,9 @@ function RuntimeActivityPathRow({ item }: { item: RuntimeActivityPathItem }) {
         unconfirmed={item.unconfirmed}
         entries={item.entries}
         icon={presentation.glyph}
+        outcome={item.outcome}
         summary={presentation.summary}
+        tool={item.title}
       />
     );
   }
@@ -259,51 +263,46 @@ function ActivitySummaryRow({
   unconfirmed,
   entries,
   icon,
+  outcome,
   summary,
+  tool,
 }: {
   active: boolean;
   unconfirmed?: boolean;
   entries: RuntimeActivityPathToolCall["entries"];
   icon: IconSvgElement;
+  outcome: RuntimeActivityPathToolCall["outcome"];
   summary: string;
+  tool: string;
 }) {
-  const line = (
-    <>
-      <Icon className="shrink-0" icon={icon} size={14} />
-      <span
-        className={`min-w-0 flex-1 truncate ${active ? "town-shimmer-text" : ""}`}
-        title={summary}
-      >
-        {summary}
-      </span>
-      {active ? <ActiveMark /> : null}
-      {unconfirmed ? (
-        <span className="text-[10px] text-app-muted">Unconfirmed</span>
-      ) : null}
-      {entries.length > 0 ? (
-        <Icon
-          icon={ArrowRight01Icon}
-          className="shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"
-          size={14}
-        />
-      ) : null}
-    </>
-  );
-  if (entries.length === 0) {
-    return (
-      <li className="runtime-activity-step flex min-h-8 items-center gap-2 py-1.5">
-        {line}
-      </li>
-    );
-  }
   return (
     <li className="runtime-activity-step">
       <details className="group">
         <summary className="flex min-h-8 cursor-pointer list-none items-center gap-2 py-1.5 hover:text-app-body focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-app-focus [&::-webkit-details-marker]:hidden">
-          {line}
+          <Icon className="shrink-0" icon={icon} size={14} />
+          <span
+            className={`min-w-0 flex-1 truncate ${active ? "town-shimmer-text" : ""}`}
+            title={summary}
+          >
+            {summary}
+          </span>
+          {active ? <ActiveMark /> : null}
+          {unconfirmed ? (
+            <span className="text-[10px] text-app-muted">Unconfirmed</span>
+          ) : null}
+          <Icon
+            icon={ArrowRight01Icon}
+            className="shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"
+            size={14}
+          />
         </summary>
         <div className="pb-2 pl-[1.45rem]">
-          <RuntimeActivityEntries entries={entries} title={summary} />
+          <RuntimeActivityEntries
+            entries={entries}
+            outcome={outcome}
+            title={summary}
+            tool={tool}
+          />
         </div>
       </details>
     </li>
@@ -319,7 +318,7 @@ function ToolCallsRow({
   const presentedCalls = calls.map((call) => {
     return {
       ...call,
-      ...toolPresentation(call.kind),
+      ...toolPresentation(call.kind, call.name),
     };
   });
   const { glyph: groupGlyph, label } = toolGroupPresentation(presentedCalls);
@@ -373,13 +372,6 @@ function ToolCallsRow({
                 ) : null}
               </>
             );
-            if (call.entries.length === 0) {
-              return (
-                <li className="flex min-h-7 items-center gap-2" key={call.id}>
-                  {name}
-                </li>
-              );
-            }
             return (
               <li className="min-w-0" key={call.id}>
                 <details className="group/tool">
@@ -388,7 +380,9 @@ function ToolCallsRow({
                   </summary>
                   <RuntimeActivityEntries
                     entries={call.entries}
+                    outcome={call.outcome}
                     title={`${label}: ${call.name}`}
+                    tool={call.name}
                   />
                 </details>
               </li>

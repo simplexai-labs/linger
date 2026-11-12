@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activityStatusLine,
   toolGroupPresentation,
+  toolNameLabel,
   toolPresentation,
 } from "./runtime-tool-presentation";
 
@@ -26,6 +27,23 @@ describe("toolPresentation", () => {
     expect(toolPresentation("read").summary).toBe("Reviewing files");
     expect(toolPresentation("message").summary).toBe("Sending an update");
     expect(toolPresentation("tool").summary).toBe("Working on the task");
+  });
+
+  it("labels a generic tool call by its tool name", () => {
+    expect(
+      toolPresentation("tool", "mcp__computer__get_window_state").summary,
+    ).toBe("Get window state");
+    expect(toolPresentation("tool", "Skill").summary).toBe("Skill");
+    expect(toolPresentation("unknown_kind", "run_script").summary).toBe(
+      "Run script",
+    );
+    expect(toolPresentation("read", "mcp__computer__read").summary).toBe(
+      "Reviewing files",
+    );
+    expect(toolNameLabel("mcp__teamhub__send_message")).toBe("Send message");
+    expect(
+      toolGroupPresentation([toolPresentation("tool", "Skill")]).label,
+    ).toBe("Skill");
   });
 
   it("summarizes mixed or unknown operations as user-facing steps", () => {

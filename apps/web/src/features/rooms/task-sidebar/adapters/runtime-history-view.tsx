@@ -3,6 +3,7 @@ import { useMemo } from "react";
 
 import {
   toolGroupPresentation,
+  toolNameLabel,
   toolPresentation,
 } from "@/features/rooms/runtime-status/runtime-tool-presentation";
 
@@ -70,10 +71,7 @@ function activityTimelineItems(
       record = {
         ...record,
         category: "tool_call",
-        tool_name:
-          stringValue(invocation?.tool)
-            ?.replaceAll("_", " ")
-            .replace(/^./, (letter) => letter.toUpperCase()) ?? "Tool call",
+        tool_name: toolNameLabel(stringValue(invocation?.tool) ?? "Tool call"),
       };
     } else if (record.category === "tool_call") {
       if (record.tool_name === "exec") continue;
@@ -122,10 +120,11 @@ function RuntimeToolCallsActivity({ calls }: { calls: ActivityToolCall[] }) {
     const name = record.tool_name ?? pair?.call?.tool_name ?? "Tool call";
     const invocation = asObject(nativePayload(record)?.invocation);
     // Native history carries tool names, not activity kinds: show the name.
+    const shownName = stringValue(invocation?.tool) ?? name;
     return {
       record,
-      name: stringValue(invocation?.tool) ?? name,
-      ...toolPresentation("tool"),
+      name: shownName,
+      ...toolPresentation("tool", shownName),
     };
   });
   const { icon: GroupIcon, label: groupLabel } =

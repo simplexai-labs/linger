@@ -26,6 +26,14 @@ func TestToolActivityPublishesDisplayInput(t *testing.T) {
 		{"view_image", "path", "preview.png"},
 		{"sleep", "duration_ms", float64(1000)},
 		{"update_plan", "plan", []any{map[string]any{"step": "Verify", "status": "pending"}}},
+		{"mcp__computer__launch_app", "bundle_id", "com.apple.TextEdit"},
+		{"mcp__computer__launch_app", "urls", []any{"https://www.example.com/"}},
+		{"mcp__computer__click", "role", "AXButton"},
+		{"mcp__computer__click", "name", "Save"},
+		{"mcp__computer__scroll", "direction", "down"},
+		{"mcp__computer__press_key", "key", "return"},
+		{"mcp__computer__hotkey", "keys", []any{"cmd", "s"}},
+		{"mcp__computer__run_script", "script", "tell application \"Finder\" to activate"},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
 			projection := eventProjection{operationID: "operation"}
@@ -97,5 +105,37 @@ func TestToolActivityUnwrapsMCPArgumentsAndPatchPaths(t *testing.T) {
 	}
 	if len(activityInput(nil, activityStatus{})) != 0 || len(activityInput(map[string]any{"body": "private-message"}, activityStatus{})) != 0 {
 		t.Fatal("invented input for an empty summary")
+	}
+}
+
+func TestComputerActivityInputKeepsTargetsAndDropsTypedText(t *testing.T) {
+	content := activityInput(map[string]any{
+		"pid": float64(42), "window_id": float64(7), "element_token": "private-token", "text": "private-text", "value": "private-value",
+		"actions": []any{
+			map[string]any{"tool": "click", "element_token": "private-token"},
+			map[string]any{"tool": "type_text", "text": "private-text"},
+			map[string]any{"tool": "press_key", "key": "return"},
+		},
+	}, activityStatus{})
+	if len(content) != 1 {
+		t.Fatal("batch input was lost")
+	}
+	var input map[string]any
+	if err := json.Unmarshal([]byte(content[0]["content"].(string)), &input); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(input, map[string]any{"actions": []any{"click", "type_text", "press_key"}}) {
+		t.Fatalf("batch input published more than its step tools: %v", input)
+	}
+}
+
+func TestComputerActivityInputClipsScripts(t *testing.T) {
+	content := activityInput(map[string]any{"script": strings.Repeat("a", 2000)}, activityStatus{})
+	var input map[string]string
+	if err := json.Unmarshal([]byte(content[0]["content"].(string)), &input); err != nil {
+		t.Fatal(err)
+	}
+	if got := []rune(input["script"]); len(got) != 501 || got[500] != '…' {
+		t.Fatalf("script was not clipped to 500 runes: %d", len(got))
 	}
 }

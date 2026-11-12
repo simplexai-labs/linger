@@ -1,18 +1,52 @@
 import type {
   RuntimeActivityContentBlock,
   RuntimeActivityEntry,
+  RuntimeActivityPresentation,
 } from "./runtime-presentation-events";
 
+const outcomeLabels: Record<
+  NonNullable<RuntimeActivityPresentation["outcome"]>,
+  string
+> = {
+  canceled: "Canceled",
+  declined: "Declined",
+  failed: "Failed",
+  succeeded: "Succeeded",
+};
+
+/**
+ * One step's details: the tool the Runtime called, how it ended once it has,
+ * and the public blocks the Computer published for it.
+ */
 export function RuntimeActivityEntries({
   entries,
+  outcome,
   title,
+  tool,
 }: {
   entries: readonly RuntimeActivityEntry[];
+  outcome?: RuntimeActivityPresentation["outcome"];
   title: string;
+  tool: string;
 }) {
-  if (entries.length === 0) return null;
   return (
     <div aria-label={`${title} details`} className="mt-1.5 space-y-1.5">
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-[12px] leading-4">
+        <dt className="text-app-subtle">Tool</dt>
+        <dd className="break-all font-mono text-app-body">{tool}</dd>
+        {outcome ? (
+          <>
+            <dt className="text-app-subtle">Outcome</dt>
+            <dd
+              className={
+                outcome === "failed" ? "text-app-danger" : "text-app-body"
+              }
+            >
+              {outcomeLabels[outcome]}
+            </dd>
+          </>
+        ) : null}
+      </dl>
       {entries.map((entry, index) =>
         entry.type === "content" ? (
           <RuntimeActivityContentBlockView

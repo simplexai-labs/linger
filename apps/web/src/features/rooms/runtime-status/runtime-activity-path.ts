@@ -30,6 +30,7 @@ export type RuntimeActivityPathItem =
       kind: "command";
       name: string;
       outcome?: ActivityOutcome;
+      title: string;
       unconfirmed?: boolean;
     }
   | {
@@ -262,6 +263,7 @@ function pushActivity(
       key: activity.activityId,
       kind: "command",
       name: commandSummary(activity),
+      title: activity.title,
       ...(activity.outcome === undefined ? {} : { outcome: activity.outcome }),
     });
     return;

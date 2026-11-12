@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"time"
@@ -144,10 +145,39 @@ func (projection *eventProjection) projectActivity(message native.Event) []any {
 			if event["is_error"] == true {
 				outcome = "failed"
 			}
-			return []any{event, map[string]any{"type": "activity.finished", "activity_id": stableEventID("activity", projection.operationID+"\x00"+callID), "outcome": outcome}}
+			finished := map[string]any{"type": "activity.finished", "activity_id": stableEventID("activity", projection.operationID+"\x00"+callID), "outcome": outcome}
+			// A failure's text tells the user why the step failed. Successful
+			// outputs stay private: they can be whole files or accessibility trees.
+			if output, _ := event["output"].(string); outcome == "failed" {
+				if text := strings.TrimSpace(toolResultText(output)); text != "" {
+					finished["content"] = []map[string]any{{"label": "Error", "format": "text", "content": clip(redact.Text(text), 500)}}
+				}
+			}
+			return []any{event, finished}
 		}
 	}
 	return []any{event}
+}
+
+// toolResultText reads a tool output as text. Claude reports a tool result as
+// raw JSON, either a string or a list of content blocks; other Runtimes report
+// plain text, which is returned unchanged.
+func toolResultText(output string) string {
+	var text string
+	if json.Unmarshal([]byte(output), &text) == nil {
+		return text
+	}
+	var blocks []struct{ Type, Text string }
+	if json.Unmarshal([]byte(output), &blocks) != nil {
+		return output
+	}
+	parts := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Type == "text" && block.Text != "" {
+			parts = append(parts, block.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // gatewayID is the Runner Gateway Id format; a native identifier outside it

@@ -81,9 +81,7 @@ describe("MessageActivitiesPanelTab", () => {
       </QueryClientProvider>,
     );
 
-    expect(
-      (await screen.findAllByText("Working on the task"))[0],
-    ).toBeVisible();
+    expect((await screen.findAllByText("Get room"))[0]).toBeVisible();
     expect(
       screen.queryByText("Tool result · get_room"),
     ).not.toBeInTheDocument();

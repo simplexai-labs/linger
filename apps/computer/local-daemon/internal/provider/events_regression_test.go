@@ -39,6 +39,35 @@ func TestEventProjectionPreservesToolIdentityAndActivityOutcome(t *testing.T) {
 	}
 }
 
+func TestFailedActivityPublishesItsRedactedError(t *testing.T) {
+	finish := func(status, output string) map[string]any {
+		projection := eventProjection{operationID: "operation"}
+		projection.project(native.Event{Kind: native.EventToolCall, InvocationID: "tool-1", ToolName: "mcp__computer__press_key"})
+		events := projection.project(native.Event{Kind: native.EventToolOutput, InvocationID: "tool-1", Status: status, Output: output})
+		return events[len(events)-1].(map[string]any)
+	}
+	for _, output := range []string{
+		"COMPUTER_KEYS_REFUSED: no window",
+		`"COMPUTER_KEYS_REFUSED: no window"`,
+		`[{"type":"text","text":"COMPUTER_KEYS_REFUSED: no window"},{"type":"image","data":"private-image"}]`,
+	} {
+		content, _ := finish("failed", output)["content"].([]map[string]any)
+		if len(content) != 1 || content[0]["label"] != "Error" || content[0]["format"] != "text" || content[0]["content"] != "COMPUTER_KEYS_REFUSED: no window" {
+			t.Fatalf("failed step lost its error for %s: %v", output, content)
+		}
+	}
+	content, _ := finish("failed", "Authorization: Bearer private-value "+strings.Repeat("é", 1000))["content"].([]map[string]any)
+	text, _ := content[0]["content"].(string)
+	if strings.Contains(text, "private-value") || utf8.RuneCountInString(text) > 500 {
+		t.Fatalf("error text was not redacted and clipped: %d runes", utf8.RuneCountInString(text))
+	}
+	for _, event := range []map[string]any{finish("completed", "whole accessibility tree"), finish("failed", " "), finish("failed", "[]")} {
+		if _, ok := event["content"]; ok {
+			t.Fatalf("published content without an error text: %v", event)
+		}
+	}
+}
+
 func TestEventProjectionSplitsLongUnicodeRepliesWithoutLosingContent(t *testing.T) {
 	projection := eventProjection{operationID: "operation"}
 	content := strings.Repeat("\u4e2d", 100_000)
