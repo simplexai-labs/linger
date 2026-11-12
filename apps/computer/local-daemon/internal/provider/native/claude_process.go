@@ -61,6 +61,12 @@ type claudeProcess struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// grace and killWait are the lifetime limits read once at creation.
+	// Teardown goroutines can outlive the Run that started them, so they
+	// never read the package variables, which tests restore afterwards.
+	grace    time.Duration
+	killWait time.Duration
+
 	writeSlot   chan struct{}
 	stdinOnce   sync.Once
 	stdoutOnce  sync.Once
@@ -95,6 +101,7 @@ func claudeNewProcess(group claudeGroup, logger *slog.Logger) *claudeProcess {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &claudeProcess{
 		group: group, ctx: ctx, cancel: cancel, lastLogger: logger,
+		grace: claudeTerminationGrace, killWait: claudeKillWait,
 		writeSlot:   make(chan struct{}, 1),
 		streamEnded: make(chan struct{}),
 		leaderDone:  make(chan struct{}),
@@ -340,13 +347,13 @@ func (p *claudeProcess) awaitLeader() bool {
 	select {
 	case <-p.leaderDone:
 		return true
-	case <-time.After(claudeKillWait):
+	case <-time.After(p.killWait):
 	}
 	_ = p.group.signal(syscall.SIGKILL)
 	select {
 	case <-p.leaderDone:
 		return true
-	case <-time.After(claudeKillWait):
+	case <-time.After(p.killWait):
 		return false
 	}
 }
@@ -368,7 +375,7 @@ func (p *claudeProcess) closeEventStream(readErr error) {
 	confirmed := exited && p.group.waitEmpty(0)
 	if !confirmed {
 		_ = p.group.signal(syscall.SIGKILL)
-		confirmed = p.group.waitEmpty(claudeKillWait)
+		confirmed = p.group.waitEmpty(p.killWait)
 	}
 	p.mu.Lock()
 	p.groupConfirmed = confirmed
@@ -402,10 +409,10 @@ func (p *claudeProcess) watch() {
 	}
 	p.closeStdin()
 	_ = p.group.signal(syscall.SIGTERM)
-	empty := p.group.waitEmpty(claudeTerminationGrace)
+	empty := p.group.waitEmpty(p.grace)
 	if !empty {
 		_ = p.group.signal(syscall.SIGKILL)
-		empty = p.group.waitEmpty(claudeKillWait)
+		empty = p.group.waitEmpty(p.killWait)
 	}
 	if !empty {
 		p.conv.abort(claudeCleanupUnconfirmed)
@@ -462,7 +469,7 @@ func (p *claudeProcess) stopTree() bool {
 	if readerActive {
 		select {
 		case <-p.readerDone:
-		case <-time.After(claudeTerminationGrace + claudeStopReaderSlack):
+		case <-time.After(p.grace + claudeStopReaderSlack):
 			return false
 		}
 	}
@@ -473,7 +480,7 @@ func (p *claudeProcess) stopTree() bool {
 		if p.stopRounds < claudeExtraKillRounds {
 			p.stopRounds++
 			_ = p.group.signal(syscall.SIGKILL)
-			confirmed = p.group.waitEmpty(claudeKillWait)
+			confirmed = p.group.waitEmpty(p.killWait)
 		} else {
 			confirmed = p.group.waitEmpty(0)
 		}
