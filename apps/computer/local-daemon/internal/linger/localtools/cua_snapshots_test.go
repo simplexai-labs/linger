@@ -2,6 +2,7 @@ package localtools
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -93,4 +94,66 @@ func TestSnapshotRowsCarriesTokensOverTheComputersOwnReads(t *testing.T) {
 	if after["element_token"] != "s00000001:4" {
 		t.Fatalf("after a script = %v, want the token unchanged", after["element_token"])
 	}
+}
+
+// A script's reads after its last input come back in its result, so a token
+// it returned carries over the Computer's own reads into the next script.
+func TestSnapshotRowsCarriesAScriptsTokensIntoTheNextScript(t *testing.T) {
+	tree := "- [0] AXWindow \"Shop\"\n  - [4] AXLink \"Kettle\" [actions=[press]]"
+	value := map[string]any{scriptReadsKey: []any{map[string]any{"snapshot_id": "s00000011", "pid": 7, "window_id": 9, "tree_markdown": tree}}, "value": map[string]any{"z": 1, "a": "s00000011:4"}}
+	encodedValue, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := "run_script: ok in 5 ms, 2 driver call(s)\nreturn value: " + string(encodedValue)[:40] + "…\nconsole (1 line(s)):\n  hi\ncalls:\n  1. line 1 get_window_state ok (3 ms): window_id=9"
+	result, err := json.Marshal(map[string]any{"content": []any{map[string]any{"type": "text", "text": text}},
+		"structuredContent": map[string]any{"ok": true, "value": json.RawMessage(`{"__computer_reads":` + string(mustJSON(t, value[scriptReadsKey])) + `,"value":{"z":1,"a":"s00000011:4"}}`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unwrapped, reads := scriptResultReads(result)
+	var reply struct {
+		Content    []struct{ Text string } `json:"content"`
+		Structured struct {
+			Value json.RawMessage `json:"value"`
+		} `json:"structuredContent"`
+	}
+	if err := json.Unmarshal(unwrapped, &reply); err != nil || len(reads) != 1 {
+		t.Fatalf("reply = %s, reads = %v, error = %v", unwrapped, reads, err)
+	}
+	if want := "return value: {\"z\":1,\"a\":\"s00000011:4\"}\nconsole (1 line(s)):\n  hi\ncalls:\n"; !strings.Contains(reply.Content[0].Text, want) {
+		t.Fatalf("text = %q, want it to hold %q", reply.Content[0].Text, want)
+	}
+	if string(reply.Structured.Value) != `{"z":1,"a":"s00000011:4"}` {
+		t.Fatalf("structured value = %s", reply.Structured.Value)
+	}
+
+	s := newSnapshotRows()
+	s.observe(map[string]any{"name": "run_script"}, unwrapped)
+	s.sent("run_script")
+	for _, read := range reads {
+		s.record(read)
+	}
+	// The Computer counts the tabs after the script and checks the tab
+	// before the next one; each read replaces the script's snapshot.
+	s.observe(readCall(nil), readResult(t, map[string]any{"snapshot_id": "s00000012", "pid": 7, "window_id": 9, "tree_markdown": tree}))
+	next := map[string]any{"script": `await app.click("s00000011:4")`}
+	s.remap(next)
+	if want := `await app.click("s00000012:4")`; next["script"] != want {
+		t.Fatalf("next script = %v, want %s", next["script"], want)
+	}
+
+	plain := json.RawMessage(`{"content":[{"type":"text","text":"run_script: ok\nreturn value: 1"}],"structuredContent":{"value":1}}`)
+	if same, reads := scriptResultReads(plain); string(same) != string(plain) || reads != nil {
+		t.Fatalf("a result without reads = %s, %v; want it unchanged", same, reads)
+	}
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
 }

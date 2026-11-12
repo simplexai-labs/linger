@@ -14,7 +14,7 @@ import (
 // the same prelude's semantics.
 const guardHarness = `import fs from "fs";
 const log = [];
-class App { constructor(n, pid, windowId) { this.n = n; this.pid = pid; this.windowId = windowId; } hotkey(keys, on, options) { log.push("hotkey:" + keys.join("+") + ":" + JSON.stringify({pid: this.pid, ...on, ...options})); return "hotkeyed"; } click(a) { log.push("raw:" + JSON.stringify(a)); return "clicked"; } typeText(text, on, options) { log.push("type:" + JSON.stringify(options)); return "typed"; } pressKey(key, on) { log.push("key:" + key); return "pressed"; } getState(options) { log.push("state:" + JSON.stringify(options)); return {tree_markdown: ""}; } }
+class App { constructor(n, pid, windowId) { this.n = n; this.pid = pid; this.windowId = windowId; } hotkey(keys, on, options) { log.push("hotkey:" + keys.join("+") + ":" + JSON.stringify({pid: this.pid, ...on, ...options})); return "hotkeyed"; } click(a) { log.push("raw:" + JSON.stringify(a)); return "clicked"; } typeText(text, on, options) { log.push("type:" + JSON.stringify(options)); return "typed"; } pressKey(key, on) { log.push("key:" + key); return "pressed"; } getState(options) { log.push("state:" + JSON.stringify(options)); return options.query === "rows" ? {snapshot_id: "s0000000a", pid: this.pid, window_id: 9, tree_markdown: "- [3] AXButton \"OK\"", elements: 1} : {tree_markdown: ""}; } }
 const fake = { call(t, a) { log.push("call:" + t + ":" + JSON.stringify(a)); return Promise.resolve({ok: true}); },
   launch(name) { log.push("launched:" + name); return Promise.resolve(new App("l", 7, 1)); },
   getApp(target) { return Promise.resolve(new App("a", target && target.pid, target && target.windowId)); },
@@ -48,10 +48,13 @@ func TestScriptGuardRefusesForbiddenInputInAJSEngine(t *testing.T) {
 		{"handle in an object", `const b = await cua.box(); return b.inner.app.click({out_file: "/tmp/x"});`, "threw:COMPUTER_SCRIPT_REFUSED", "raw:"},
 		{"no global object", `return [typeof globalThis, typeof eval, typeof Function, typeof this].join(",");`, "undefined,undefined,undefined,undefined", ""},
 		{"no function constructor", `return typeof (async function () {}).constructor;`, "undefined", ""},
-		{"closing the wrapper", "return 1; }).call(undefined); })(globalThis.cua, globalThis, eval, Function); (function () { return (async function () {", "threw:COMPUTER_SCRIPT_REFUSED: the script is not one complete function body", "call:"},
+		{"closing the wrapper", "return 1; }).call(undefined); })(globalThis.cua, globalThis, eval, Function)); Object(await (function () { return (async function () {", "threw:COMPUTER_SCRIPT_REFUSED: the script is not one complete function body", "call:"},
 		{"closing the wrapper to call", `}); await globalThis.cua.call("click", {["deliv" + "ery_mode"]: "foreground"}); (async function () {`, "threw:", "call:"},
 		{"inputs", `return [args.n, DEADLINE].join(",");`, `"1,42"`, ""},
 		{"read without a screenshot", `const app = await cua.getApp({pid: 1}); await app.getState(); await app.getState({query: "Search"}); await app.getState({include_screenshot: true}); return "read";`, `"state:{\"include_screenshot\":false}","state:{\"include_screenshot\":false,\"query\":\"Search\"}","state:{\"include_screenshot\":true}"`, ""},
+		{"reads after the last input", `const app = await cua.getApp({pid: 4}); await app.click(1); await app.getState({query: "rows"}); return "done";`, `"result":{"__computer_reads":[{"snapshot_id":"s0000000a","pid":4,"window_id":9,"tree_markdown":"- [3] AXButton \"OK\""}],"value":"done"}`, ""},
+		{"a read before an input", `const app = await cua.getApp({pid: 4}); await app.getState({query: "rows"}); await app.click(1); return "done";`, `"result":"done"`, ""},
+		{"no return value", `const app = await cua.getApp({pid: 4}); await app.getState({query: "rows"});`, `"result":{"__computer_reads":[{"snapshot_id":"s0000000a","pid":4,"window_id":9,"tree_markdown":"- [3] AXButton \"OK\""}]}`, ""},
 		{"frozen builtins", `try { JSON.parse = () => ({delivery_mode: 1}); } catch (e) { return "refused"; } return "changed";`, "refused", ""},
 	}
 	for _, tc := range cases {

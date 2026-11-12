@@ -383,6 +383,8 @@ settles, since the browser shows such a tab a moment later. Reading the tab
 strip replaces Cua's snapshot of the window, so the Daemon remembers the rows
 of recent reads and moves an Agent's element token, in an input or written
 into a script, to the current snapshot when its row reads the same there.
+A script's reads after its last input count too: the script guard returns
+them beside the script's value, and the Daemon takes them out of the result.
 Only the window
 the task opened with `launch_app` is held. A script that names no window in
 its `args` is taken to drive that window; a script to another app is neither

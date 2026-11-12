@@ -1,6 +1,7 @@
 package localtools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -67,7 +68,9 @@ var scriptForbidden = []string{"delivery_mode", "foreground", "screenshot_out_fi
 // script, in Unix milliseconds, so it can refuse an input whose result it
 // could not verify in time. A script reads text, so getState takes no
 // screenshot unless the script asks for one: Cua's default captures one per
-// read, which took seconds on a busy page. A positive inputLimit paces the script for the
+// read, which took seconds on a busy page. The guard returns the window reads
+// made after the script's last input beside its value, under scriptReadsKey,
+// for scriptResultReads to take out. A positive inputLimit paces the script for the
 // Computer's own browser: the guard waits a person's pause before each input,
 // throws once the script tries to send more than inputLimit inputs, and
 // refuses to open an app or URL, whose site checks run only in the Daemon's
@@ -85,10 +88,12 @@ func guardedScript(args, body string, deadline int64, inputLimit int, chrome int
 	source, _ := json.Marshal(`"use strict"; ` + body + "\n")
 	return strings.ReplaceAll(`const args = Object.freeze(`+args+`), DEADLINE = `+strconv.FormatInt(deadline, 10)+`; const __guarded = (() => {
 const keys = Object.keys, names = Object.getOwnPropertyNames, proto = Object.getPrototypeOf, define = Object.defineProperty, freeze = Object.freeze;
-const apply = Reflect.apply, stringify = JSON.stringify, parse = JSON.parse, test = RegExp.prototype.test, then = Promise.prototype.then;
+const apply = Reflect.apply, stringify = JSON.stringify, parse = JSON.parse, test = RegExp.prototype.test, then = Promise.prototype.then, slice = Array.prototype.slice;
 const plainProtos = [Object.prototype, Array.prototype, null], real = globalThis.cua;
 const bad = /`+strings.Join(pattern, "|")+`/;
-const limit = `+strconv.Itoa(inputLimit)+`, chrome = `+strconv.Itoa(chrome)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0;
+const limit = `+strconv.Itoa(inputLimit)+`, chrome = `+strconv.Itoa(chrome)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0, reads = [], readChars = 0;
+const reading = (k, c) => k === "getState" || k === "call" && c[0] === "get_window_state";
+const keep = r => { if (r === null || typeof r !== "object" || typeof r.snapshot_id !== "string" || typeof r.pid !== "number" || typeof r.window_id !== "number") return; const read = {snapshot_id: r.snapshot_id, pid: r.pid, window_id: r.window_id}; for (const f of ["tree_markdown", "tree_diff", "since", "since_status"]) if (typeof r[f] === "string") read[f] = r[f]; const size = (read.tree_markdown || "").length + (read.tree_diff || "").length; reads[reads.length] = read; readChars += size; while (reads.length > `+strconv.Itoa(scriptReadsKept)+` || readChars > `+strconv.Itoa(scriptReadCharacters)+` && reads.length > 0) { const first = reads[0]; readChars -= (first.tree_markdown || "").length + (first.tree_diff || "").length; reads = apply(slice, reads, [1]); } };
 const keyOps = {__proto__: null, hotkey: true, type_text: true, press_key: true}, keyMethods = {__proto__: null, hotkey: true, typeText: true, pressKey: true};
 const routes = v => v !== null && typeof v === "object" && (v.pid !== undefined || v.app !== undefined || v.target !== undefined || v.window_id !== undefined || v.windowId !== undefined);
 const rerouted = c => { for (let i = 0; i < c.length; i++) if (routes(c[i])) return true; return false; };
@@ -109,22 +114,23 @@ define(w, k, {enumerable: true, get() { const v = o[k]; if (typeof v !== "functi
 if (limit > 0 && k === "typeText") { const given = c.length > 2 && c[2] !== null && typeof c[2] === "object" ? c[2] : {}; const t = {length: 3}; define(t, 0, {value: c[0]}); define(t, 1, {value: c[1]}); define(t, 2, {value: {delay_ms: `+strconv.Itoa(agentChromeTypeDelay)+`, ...given}}); c = t; }
 if (k === "getState" && (c.length === 0 || c[0] === undefined || c[0] !== null && typeof c[0] === "object" && c[0].include_screenshot === undefined)) { const t = {length: 1}; define(t, 0, {value: {include_screenshot: false, ...(c.length > 0 && c[0] !== undefined ? c[0] : {})}}); c = t; }
 if (limit > 0 && k === "sleep" && o === real && typeof c[0] === "number" && c[0] > `+strconv.Itoa(scriptSleepLimit)+`) { const t = {length: 1}; define(t, 0, {value: `+strconv.Itoa(scriptSleepLimit)+`}); c = t; }
-const run = () => { const r = apply(v, o, c); return r !== null && typeof r === "object" && typeof r.then === "function" ? apply(then, r, [out]) : out(r); };
+const run = () => { const r = apply(v, o, c); const seen = x => { if (reading(k, c)) keep(x); return out(x); }; return r !== null && typeof r === "object" && typeof r.then === "function" ? apply(then, r, [seen]) : seen(r); };
 if (launches(k, c)) throw new Error("COMPUTER_SCRIPT_REFUSED: a script opens no app or URL, so the site checks of launch_app hold and the key rule knows every app the script reaches; call launch_app as its own tool");
 if (keyed(k, c, o)) throw new Error(`+strconv.Quote(everydayChromeKeysRefused)+`);
+if (input(k, c)) { reads = []; readChars = 0; }
 if (limit <= 0 || !input(k, c)) return run();
 if (++sent > limit) throw new Error("COMPUTER_SCRIPT_INPUT_LIMIT: a script sends at most " + limit + " inputs to the Computer's own browser; return what you have, look at the window, then continue in a new script");
 return apply(then, apply(rest, real, [`+strconv.Itoa(scriptInputPauseMin)+` + floor(random() * `+strconv.Itoa(scriptInputPauseSpan)+`)]), [run]); }; }}); } }
 return freeze(w); };
-return wrap(real); })();
+return {api: wrap(real), done: v => reads.length === 0 ? v : v === undefined ? {`+scriptReadsKey+`: reads} : {`+scriptReadsKey+`: reads, value: v}}; })();
 try { new ((async function () {}).constructor)(`+string(source)+`); } catch (e) { throw new Error("COMPUTER_SCRIPT_REFUSED: the script is not one complete function body: " + e.message); }
 for (const f of [function () {}, async function () {}, function* () {}, async function* () {}]) Object.defineProperty(Object.getPrototypeOf(f), "constructor", {value: undefined, writable: false, configurable: false});
 for (const b of [Object, Object.prototype, Array, Array.prototype, Function.prototype, Promise, Promise.prototype, JSON, Reflect, RegExp, RegExp.prototype, String.prototype, Symbol]) Object.freeze(b);
-return await (function (cua, globalThis, eval, Function) { return (async function () { "use strict"; `, "\n", " ") + body + scriptEpilogue
+return __guarded.done(await (function (cua, globalThis, eval, Function) { return (async function () { "use strict"; `, "\n", " ") + body + scriptEpilogue
 }
 
 // scriptEpilogue closes what guardedScript opened.
-const scriptEpilogue = "\n}).call(undefined); })(__guarded, undefined, undefined, undefined);"
+const scriptEpilogue = "\n}).call(undefined); })(__guarded.api, undefined, undefined, undefined));"
 
 // forbiddenKey reports whether value holds an object key that names word.
 func forbiddenKey(value any, word string) bool {
@@ -211,6 +217,93 @@ func scriptArguments(ctx context.Context, arguments map[string]any, reviewScope 
 	delete(arguments, "args")
 	arguments["script"] = guardedScript(string(encoded), script, time.Now().Add(time.Duration(timeout)*time.Millisecond).UnixMilli(), inputLimit, chrome)
 	return nil
+}
+
+// scriptReadsKey names the reads the guard adds to a script's return value.
+// The guard keeps at most scriptReadsKept of them and scriptReadCharacters of
+// tree text, the latest first kept: an Agent acts on its latest read, and a
+// whole busy page is a few hundred thousand characters.
+const (
+	scriptReadsKey       = "__computer_reads"
+	scriptReadsKept      = 4
+	scriptReadCharacters = 2000000
+)
+
+// scriptValueCharacters is where Cua cuts a return value in a script's text.
+const scriptValueCharacters = 8000
+
+// scriptResultReads takes the window reads the guard added to a script's
+// return value out of the result, and puts the value the script returned
+// back into the text Cua wrote for it. They are the script's reads after its
+// last input, so the Computer's own reads before the next call can carry the
+// tokens of those rows over, as they do for the Agent's own reads. A result
+// without them is returned as it is.
+func scriptResultReads(result json.RawMessage) (json.RawMessage, []windowRead) {
+	var reply map[string]json.RawMessage
+	var structured map[string]json.RawMessage
+	var value map[string]json.RawMessage
+	if json.Unmarshal(result, &reply) != nil || json.Unmarshal(reply["structuredContent"], &structured) != nil ||
+		json.Unmarshal(structured["value"], &value) != nil {
+		return result, nil
+	}
+	_, inner := value["value"]
+	if _, ok := value[scriptReadsKey]; !ok || len(value) > 2 || len(value) == 2 && !inner {
+		return result, nil
+	}
+	var reads []windowRead
+	if json.Unmarshal(value[scriptReadsKey], &reads) != nil {
+		return result, nil
+	}
+	returned := json.RawMessage("null")
+	if inner {
+		var compact bytes.Buffer
+		if json.Compact(&compact, value["value"]) != nil {
+			return result, nil
+		}
+		returned = compact.Bytes()
+	}
+	structured["value"] = returned
+	text := string(returned)
+	if runes := []rune(text); len(runes) > scriptValueCharacters {
+		text = string(runes[:scriptValueCharacters]) + "…"
+	}
+	var content []map[string]any
+	if json.Unmarshal(reply["content"], &content) == nil {
+		for _, item := range content {
+			if body, ok := item["text"].(string); ok {
+				item["text"] = withReturnValue(body, text)
+			}
+		}
+	}
+	encodedContent, contentErr := json.Marshal(content)
+	encodedStructured, structuredErr := json.Marshal(structured)
+	if contentErr != nil || structuredErr != nil {
+		return result, nil
+	}
+	reply["content"], reply["structuredContent"] = encodedContent, encodedStructured
+	unwrapped, err := json.Marshal(reply)
+	if err != nil {
+		return result, nil
+	}
+	return unwrapped, reads
+}
+
+// withReturnValue replaces the return value line of a script's text, which
+// runs to the console or call log section after it.
+func withReturnValue(text, value string) string {
+	const label = "\nreturn value: "
+	start := strings.Index(text, label)
+	if start < 0 {
+		return text
+	}
+	start += len(label)
+	end := len(text)
+	for _, next := range []string{"\nconsole (", "\ncalls:\n"} {
+		if at := strings.Index(text[start:], next); at >= 0 && start+at < end {
+			end = start + at
+		}
+	}
+	return text[:start] + value + text[end:]
 }
 
 // compactScriptResult keeps a script's result small in the model's context:

@@ -46,7 +46,8 @@ func newSnapshotRows() *snapshotRows {
 }
 
 // observe records the rows of a read, or forgets the current snapshots after
-// a script, whose reads run inside the driver.
+// a script, whose reads run inside the driver: the reads it made after its
+// last input are recorded from its result once the fence for it is set.
 func (s *snapshotRows) observe(params any, result json.RawMessage) {
 	call, _ := params.(map[string]any)
 	name, _ := call["name"].(string)
@@ -60,20 +61,29 @@ func (s *snapshotRows) observe(params any, result json.RawMessage) {
 		return
 	}
 	var reply struct {
-		Structured struct {
-			Snapshot string  `json:"snapshot_id"`
-			PID      float64 `json:"pid"`
-			Window   float64 `json:"window_id"`
-			Tree     string  `json:"tree_markdown"`
-			Diff     string  `json:"tree_diff"`
-			Since    string  `json:"since"`
-			Status   string  `json:"since_status"`
-		} `json:"structuredContent"`
+		Structured windowRead `json:"structuredContent"`
 	}
-	if json.Unmarshal(result, &reply) != nil || reply.Structured.Snapshot == "" {
+	if json.Unmarshal(result, &reply) == nil {
+		s.record(reply.Structured)
+	}
+}
+
+// windowRead is the part of a get_window_state result that names its rows.
+type windowRead struct {
+	Snapshot string  `json:"snapshot_id"`
+	PID      float64 `json:"pid"`
+	Window   float64 `json:"window_id"`
+	Tree     string  `json:"tree_markdown"`
+	Diff     string  `json:"tree_diff"`
+	Since    string  `json:"since"`
+	Status   string  `json:"since_status"`
+}
+
+// record keeps the rows of read as its window's current snapshot.
+func (s *snapshotRows) record(read windowRead) {
+	if read.Snapshot == "" {
 		return
 	}
-	read := reply.Structured
 	window := fmt.Sprintf("%g:%g", read.PID, read.Window)
 	rows := map[string]string{}
 	s.mu.Lock()

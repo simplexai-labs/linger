@@ -542,8 +542,17 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 	}
 	driverStarted := time.Now()
 	result, err := c.sendInput(ctx, name, arguments, appKeys, agentChrome)
+	var scriptReads []windowRead
+	if err == nil && name == "run_script" {
+		result, scriptReads = scriptResultReads(result)
+	}
 	if c.snapshots != nil {
 		c.snapshots.sent(name)
+		// The script's reads after its last input come after the fence, so
+		// their tokens carry over the Computer's reads before the next call.
+		for _, read := range scriptReads {
+			c.snapshots.record(read)
+		}
 	}
 	driverMs = time.Since(driverStarted).Milliseconds()
 	if err == nil {
