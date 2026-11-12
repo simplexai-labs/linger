@@ -634,7 +634,9 @@ func countTabs(tree string) int {
 		// A tab holds its Close button, whose name follows the user's
 		// language, so any button inside it counts.
 		for j, next := range rows[i+1:] {
-			if j > 0 && indent(next) <= indent(row) {
+			// The next row may be the button beside the tab, at its
+			// level; a row above that level, such as New Tab, is not.
+			if j > 0 && indent(next) <= indent(row) || indent(next) < indent(row) {
 				break
 			}
 			if trimmed := strings.TrimSpace(next); strings.Contains(trimmed, "] AXButton") && strings.HasSuffix(trimmed, "[actions=[press]]") {

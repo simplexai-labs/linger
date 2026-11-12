@@ -122,7 +122,9 @@ func New(options Options) (*Manager, error) {
 		if err := m.openBrowserJournals(); err != nil {
 			return nil, err
 		}
-		retireAgentChromeProfile(options.StateDirectory)
+		// Quitting a Chrome still on the old profile may take seconds, so
+		// it does not hold up the start.
+		go retireAgentChromeProfile(options.StateDirectory)
 	}
 	return m, nil
 }

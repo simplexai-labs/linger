@@ -291,36 +291,40 @@ func (c *cuaSession) waitSafariWindows(ctx context.Context, b agentBrowser, pid 
 // Google Chrome on its default profile, wherever the app is installed. Chrome
 // instances on a profile of their own, such as a test browser, name
 // --user-data-dir and are not it. It returns the pid and command line, or 0
-// when that Chrome is not running.
+// when that Chrome is not running. The executable comes from its own ps
+// column, because a path with spaces cannot be split from the arguments.
 var everydayChromePID = func(ctx context.Context) (int, string, error) {
-	output, err := exec.CommandContext(ctx, "/bin/ps", "-axww", "-o", "pid=,args=").Output()
+	paths, err := exec.CommandContext(ctx, "/bin/ps", "-axww", "-o", "pid=,comm=").Output()
 	if err != nil {
 		return 0, "", err
 	}
-	for _, line := range strings.Split(string(output), "\n") {
+	lines, err := exec.CommandContext(ctx, "/bin/ps", "-axww", "-o", "pid=,args=").Output()
+	if err != nil {
+		return 0, "", err
+	}
+	commands := map[string]string{}
+	for _, line := range strings.Split(string(lines), "\n") {
 		pidText, args, _ := strings.Cut(strings.TrimSpace(line), " ")
-		if !everydayChromeCommand(args) {
+		commands[pidText] = args
+	}
+	for _, line := range strings.Split(string(paths), "\n") {
+		pidText, path, _ := strings.Cut(strings.TrimSpace(line), " ")
+		if !everydayChromeProcess(path, commands[pidText]) {
 			continue
 		}
 		if pid, err := strconv.Atoi(pidText); err == nil {
-			return pid, args, nil
+			return pid, commands[pidText], nil
 		}
 	}
 	return 0, "", nil
 }
 
-// everydayChromeCommand reports whether args starts Google Chrome's own
-// executable on the default profile. The executable path has spaces, so it
-// ends where the first argument starts.
-func everydayChromeCommand(args string) bool {
-	index := strings.Index(args, everydayChromeExecutable)
-	// A command that only names Chrome's path as an argument has an option
-	// or another path before it.
-	if !strings.HasPrefix(args, "/") || index < 0 || strings.Contains(args[:index], " -") || strings.Contains(args[:index], " /") {
-		return false
-	}
-	rest := args[index+len(everydayChromeExecutable):]
-	return (rest == "" || rest[0] == ' ') && !strings.Contains(args, "--type=") && !strings.Contains(args, "--user-data-dir=")
+// everydayChromeProcess reports whether the process with executable path
+// and command line args is Google Chrome's main process on the default
+// profile.
+func everydayChromeProcess(path, args string) bool {
+	return strings.HasPrefix(path, "/") && strings.HasSuffix(path, everydayChromeExecutable) &&
+		!strings.Contains(args, "--type=") && !strings.Contains(args, "--user-data-dir=")
 }
 
 const everydayChromeExecutable = "/Google Chrome.app/Contents/MacOS/Google Chrome"

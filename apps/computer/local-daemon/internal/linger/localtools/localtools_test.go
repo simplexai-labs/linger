@@ -1983,12 +1983,12 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 		t.Fatalf("set_value: %v", err)
 	}
 	// Any script, whatever it targets, is guarded against keys to the
-	// user's Chrome, with the Computer's window 12 as the one exception.
+	// user's Chrome.
 	for _, script := range []string{`{"script":"return 1"}`, `{"script":"return 1","args":{"pid":42,"window_id":9}}`, `{"script":"return 1","args":{"pid":7}}`} {
 		if _, err := c.call(t.Context(), "run_script", json.RawMessage(script)); err != nil {
 			t.Fatal(err)
 		}
-		if calls := fixtureCalls(t, marker); !strings.Contains(fmt.Sprint(calls[len(calls)-1]), "chrome = 42, own = 12") {
+		if calls := fixtureCalls(t, marker); !strings.Contains(fmt.Sprint(calls[len(calls)-1]), "chrome = 42,") {
 			t.Fatalf("%s: last call=%v, want a script guarded against keys", script, calls[len(calls)-1])
 		}
 	}

@@ -16,22 +16,22 @@ import (
 
 func TestScriptArgumentsBoundTheScript(t *testing.T) {
 	arguments := map[string]any{"script": "return 1;"}
-	if err := scriptArguments(context.Background(), arguments, "", 0, sharedWindow{}); err != nil || arguments["timeout_ms"] != float64(scriptTimeoutMs) {
+	if err := scriptArguments(context.Background(), arguments, "", 0, 0); err != nil || arguments["timeout_ms"] != float64(scriptTimeoutMs) {
 		t.Fatalf("default: %v %v", err, arguments)
 	}
 	arguments = map[string]any{"script": "return 1;", "timeout_ms": float64(500000)}
-	if err := scriptArguments(context.Background(), arguments, "", 0, sharedWindow{}); err != nil || arguments["timeout_ms"] != float64(scriptMaxTimeoutMs) {
+	if err := scriptArguments(context.Background(), arguments, "", 0, 0); err != nil || arguments["timeout_ms"] != float64(scriptMaxTimeoutMs) {
 		t.Fatalf("cap: %v %v", err, arguments)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	arguments = map[string]any{"script": "return 1;", "timeout_ms": float64(90000)}
-	if err := scriptArguments(ctx, arguments, "", 0, sharedWindow{}); err != nil || arguments["timeout_ms"].(float64) > 45000 {
+	if err := scriptArguments(ctx, arguments, "", 0, 0); err != nil || arguments["timeout_ms"].(float64) > 45000 {
 		t.Fatalf("deadline: %v %v", err, arguments)
 	}
 	late, stop := context.WithTimeout(context.Background(), 10*time.Second)
 	defer stop()
-	if err := scriptArguments(late, map[string]any{"script": "return 1;"}, "", 0, sharedWindow{}); !errors.Is(err, errNotSent) {
+	if err := scriptArguments(late, map[string]any{"script": "return 1;"}, "", 0, 0); !errors.Is(err, errNotSent) {
 		t.Fatalf("late: %v", err)
 	}
 	for _, refused := range []map[string]any{
@@ -40,7 +40,7 @@ func TestScriptArgumentsBoundTheScript(t *testing.T) {
 		{"script": `await cua.call("click", {pid: 1, x: 2, y: 3, delivery_mode: "foreground"})`},
 		{"script": `await app.getState({screenshot_out_file: "/tmp/a.png"})`},
 	} {
-		if err := scriptArguments(context.Background(), refused, "", 0, sharedWindow{}); !errors.Is(err, errNotSent) {
+		if err := scriptArguments(context.Background(), refused, "", 0, 0); !errors.Is(err, errNotSent) {
 			t.Fatalf("%v: got %v", refused, err)
 		}
 	}
@@ -56,7 +56,7 @@ func TestScriptArgumentsReadASkillScriptWithArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	arguments := map[string]any{"script_file": file, "args": map[string]any{"pid": float64(7)}}
-	if err := scriptArguments(context.Background(), arguments, "", 0, sharedWindow{}); err != nil {
+	if err := scriptArguments(context.Background(), arguments, "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	script, _ := arguments["script"].(string)
@@ -70,19 +70,19 @@ func TestScriptArgumentsReadASkillScriptWithArgs(t *testing.T) {
 		{"script": `return cua.call("click", {delivery_mode: "foreground"});`},
 		{"script_file": file, "args": map[string]any{"click": []any{map[string]any{"delivery_mode": "foreground"}}}},
 	} {
-		if err := scriptArguments(context.Background(), refused, "", 0, sharedWindow{}); !errors.Is(err, errNotSent) {
+		if err := scriptArguments(context.Background(), refused, "", 0, 0); !errors.Is(err, errNotSent) {
 			t.Fatalf("%v: got %v", refused, err)
 		}
 	}
 	// args carry page and user text, which may name a forbidden option.
-	if err := scriptArguments(context.Background(), map[string]any{"script_file": file, "args": map[string]any{"text": "in the foreground"}}, "", 0, sharedWindow{}); err != nil {
+	if err := scriptArguments(context.Background(), map[string]any{"script_file": file, "args": map[string]any{"text": "in the foreground"}}, "", 0, 0); err != nil {
 		t.Fatalf("user text in args: %v", err)
 	}
 	// A reviewed Run runs a script file only as a review allowed it.
-	if err := scriptArguments(context.Background(), map[string]any{"script_file": file, "args": map[string]any{"pid": float64(7)}}, permission.ScriptScope("agent-1", "context-1"), 0, sharedWindow{}); !errors.Is(err, errNotSent) || !strings.Contains(err.Error(), "COMPUTER_SCRIPT_REFUSED") {
+	if err := scriptArguments(context.Background(), map[string]any{"script_file": file, "args": map[string]any{"pid": float64(7)}}, permission.ScriptScope("agent-1", "context-1"), 0, 0); !errors.Is(err, errNotSent) || !strings.Contains(err.Error(), "COMPUTER_SCRIPT_REFUSED") {
 		t.Fatalf("unreviewed script file in a reviewed Run: %v", err)
 	}
-	if err := scriptArguments(context.Background(), map[string]any{"script": "return 1;"}, permission.ScriptScope("agent-1", "context-1"), 0, sharedWindow{}); err != nil {
+	if err := scriptArguments(context.Background(), map[string]any{"script": "return 1;"}, permission.ScriptScope("agent-1", "context-1"), 0, 0); err != nil {
 		t.Fatalf("inline script in a reviewed Run: %v", err)
 	}
 }

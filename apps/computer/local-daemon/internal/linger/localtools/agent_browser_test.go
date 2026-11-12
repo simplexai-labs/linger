@@ -47,17 +47,20 @@ func TestPickAgentBrowserTakesTheFirstInstalledOrTheNamedOne(t *testing.T) {
 	}
 }
 
-func TestEverydayChromeCommandFindsChromeInAnyFolder(t *testing.T) {
-	for args, want := range map[string]bool{
-		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome":                                                                                                               true,
-		"/Users/a/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --disable-backgrounding-occluded-windows":                                                              true,
-		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=/tmp/test":                                                                                     false,
-		"/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper --type=renderer": false,
-		"/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary":                                                                                                 false,
-		"tail -f /Applications/Google Chrome.app/Contents/MacOS/Google Chrome":                                                                                                       false,
+func TestEverydayChromeProcessFindsChromeInAnyFolder(t *testing.T) {
+	for _, tc := range []struct {
+		path, args string
+		want       bool
+	}{
+		{"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", true},
+		{"/Users/a/Applications/Work - Apps/Google Chrome.app/Contents/MacOS/Google Chrome", "/Users/a/Applications/Work - Apps/Google Chrome.app/Contents/MacOS/Google Chrome --disable-backgrounding-occluded-windows", true},
+		{"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=/tmp/test", false},
+		{"/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper", "Google Chrome Helper --type=renderer", false},
+		{"/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary", "", false},
+		{"/usr/bin/tail", "/usr/bin/tail -f /Applications/Google Chrome.app/Contents/MacOS/Google Chrome", false},
 	} {
-		if got := everydayChromeCommand(args); got != want {
-			t.Errorf("%q: %v, want %v", args, got, want)
+		if got := everydayChromeProcess(tc.path, tc.args); got != tc.want {
+			t.Errorf("%q %q: %v, want %v", tc.path, tc.args, got, tc.want)
 		}
 	}
 }

@@ -69,11 +69,12 @@ var scriptForbidden = []string{"delivery_mode", "foreground", "screenshot_out_fi
 // Computer's own browser: the guard waits a person's pause before each input,
 // throws once the script tries to send more than inputLimit inputs, and
 // refuses launch_app, whose site checks run only in the Daemon's own call.
-// While the user's everyday Chrome runs as chrome.PID, the guard refuses
-// every key to it, and a key that names no app, by the rule of
-// everydayChromeKeys: only one plain press_key bound to an element token in
-// the Computer's window chrome.Window goes.
-func guardedScript(args, body string, deadline int64, inputLimit int, chrome sharedWindow) string {
+// While the user's everyday Chrome runs as chrome, the guard refuses every
+// key to it and every key that names no app: a script cannot prove which
+// window an element token was read from, so even the one key a tool call
+// may send there (see everydayChromeKeys) is refused. It also refuses to
+// start Chrome, whose pid the guard would not know.
+func guardedScript(args, body string, deadline int64, inputLimit int, chrome int) string {
 	pattern := make([]string, 0, len(scriptForbidden))
 	for _, word := range scriptForbidden {
 		pattern = append(pattern, regexp.QuoteMeta(word))
@@ -84,12 +85,11 @@ const keys = Object.keys, names = Object.getOwnPropertyNames, proto = Object.get
 const apply = Reflect.apply, stringify = JSON.stringify, parse = JSON.parse, test = RegExp.prototype.test, then = Promise.prototype.then;
 const plainProtos = [Object.prototype, Array.prototype, null], real = globalThis.cua;
 const bad = /`+strings.Join(pattern, "|")+`/;
-const limit = `+strconv.Itoa(inputLimit)+`, chrome = `+strconv.Itoa(chrome.PID)+`, own = `+strconv.FormatFloat(chrome.Window, 'f', -1, 64)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0;
-const plainKey = (key, token, win) => typeof key === "string" && key.indexOf("+") < 0 && typeof token === "string" && own !== 0 && win === own;
-const keyed = (k, c, o) => { if (chrome === 0) return false;
-if (k === "call") { if (c[0] !== "hotkey" && c[0] !== "type_text" && c[0] !== "press_key") return false; const a = c[1] !== null && typeof c[1] === "object" ? c[1] : {};
-if (typeof a.pid !== "number") return true; if (a.pid !== chrome) return false; return !(c[0] === "press_key" && a.modifiers === undefined && plainKey(a.key, a.element_token, a.window_id)); }
-if (k !== "hotkey" && k !== "typeText" && k !== "pressKey") return false; if (o.pid !== chrome) return false; return !(k === "pressKey" && c.length === 2 && plainKey(c[0], c[1], o.windowId)); };
+const limit = `+strconv.Itoa(inputLimit)+`, chrome = `+strconv.Itoa(chrome)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0;
+const keyOps = {__proto__: null, hotkey: true, type_text: true, press_key: true}, keyMethods = {__proto__: null, hotkey: true, typeText: true, pressKey: true};
+const keyed = (k, c, o) => chrome > 0 && (k === "call" ? keyOps[c[0]] === true && (c[1] === null || typeof c[1] !== "object" || typeof c[1].pid !== "number" || c[1].pid === chrome) : keyMethods[k] === true && o.pid === chrome);
+const namesChrome = v => v === "Google Chrome" || v === "com.google.Chrome" || v !== null && typeof v === "object" && (v.name === "Google Chrome" || v.bundle_id === "com.google.Chrome" || v.bundleId === "com.google.Chrome");
+const startsChrome = (k, c) => k === "launchApp" && namesChrome(c[0]) || k === "call" && c[0] === "launch_app" && namesChrome(c[1]);
 const inputMethods = {__proto__: null, click: true, doubleClick: true, rightClick: true, drag: true, scroll: true, typeText: true, pressKey: true, hotkey: true, setValue: true};
 const inputOps = {__proto__: null, click: true, double_click: true, right_click: true, drag: true, scroll: true, type_text: true, press_key: true, hotkey: true, set_value: true};
 const input = (k, c) => inputMethods[k] === true || k === "call" && typeof c[0] === "string" && inputOps[c[0]] === true;
@@ -106,6 +106,7 @@ if (limit > 0 && k === "typeText") { const given = c.length > 2 && c[2] !== null
 if (limit > 0 && k === "sleep" && o === real && typeof c[0] === "number" && c[0] > `+strconv.Itoa(scriptSleepLimit)+`) { const t = {length: 1}; define(t, 0, {value: `+strconv.Itoa(scriptSleepLimit)+`}); c = t; }
 const run = () => { const r = apply(v, o, c); return r !== null && typeof r === "object" && typeof r.then === "function" ? apply(then, r, [out]) : out(r); };
 if (limit > 0 && (k === "launchApp" || k === "call" && c[0] === "launch_app")) throw new Error("COMPUTER_SCRIPT_REFUSED: a script in the Computer's own browser opens no app or URL, so the site checks of launch_app hold; call launch_app as its own tool");
+if (startsChrome(k, c)) throw new Error("COMPUTER_SCRIPT_REFUSED: a script does not start Google Chrome; call launch_app as its own tool");
 if (keyed(k, c, o)) throw new Error(`+strconv.Quote(everydayChromeKeysRefused)+`);
 if (limit <= 0 || !input(k, c)) return run();
 if (++sent > limit) throw new Error("COMPUTER_SCRIPT_INPUT_LIMIT: a script sends at most " + limit + " inputs to the Computer's own browser; return what you have, look at the window, then continue in a new script");
@@ -145,7 +146,7 @@ func forbiddenKey(value any, word string) bool {
 // into what remains of the call after waiting for the desktop lane. In a
 // reviewed Run, whose review scope is not empty, a script file runs only as
 // the judge allowed it in that scope: the body it read and the args it saw.
-func scriptArguments(ctx context.Context, arguments map[string]any, reviewScope string, inputLimit int, chrome sharedWindow) error {
+func scriptArguments(ctx context.Context, arguments map[string]any, reviewScope string, inputLimit int, chrome int) error {
 	for key := range arguments {
 		switch key {
 		case "script", "script_file", "args", "timeout_ms", "max_calls":

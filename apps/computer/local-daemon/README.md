@@ -346,12 +346,14 @@ the tabs are found by role and place in the window, not by their names, which
 follow the user's language. The Daemon finds the running Chrome by its
 executable wherever the app is installed. The user's Chrome takes no keys from
 the Computer (`COMPUTER_KEYS_REFUSED`), in any of its windows, in tool calls,
-`run_actions` steps, paged `recognize_text` reads and every script: a shortcut
+`run_actions` steps, paged `recognize_text` reads and scripts: a shortcut
 runs as a menu command in the Chrome window that has the keyboard, and Cua
 types text as keys that all read as the A key. A key goes to the window its
 `element_token` was read from, and a key that names no app is refused while
 that Chrome runs. Only a plain key bound to an element of the Computer's
-window goes, and Cua sends it only when no other Chrome window could take it.
+window goes, as a tool call, and Cua sends it only when no other Chrome window
+could take it. A script sends that Chrome no key at all, because it cannot
+prove which window a token was read from, and it does not start Chrome.
 The Agent fills fields with
 `set_value`, presses the page's buttons and goes back through its links.
 The Daemon removes the separate Chrome profile `computer-tools/agent-chrome`
