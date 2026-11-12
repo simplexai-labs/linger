@@ -188,6 +188,8 @@ func cardCLIProgram(directory, goos string) (program string, prefix, environment
 		return program, nil, nil, true
 	}
 	script := filepath.Join(directory, "teamhub.js")
+	// The same relative app path teamhub.cmd names; apps/desktop/build.mjs
+	// writes both.
 	app := filepath.Join(directory, "..", "..", "..", "..", "Linger.exe")
 	if !regularFile(script) || !regularFile(app) {
 		return "", nil, nil, false

@@ -295,7 +295,9 @@ ELECTRON_RUN_AS_NODE=1 exec "$app" --use-env-proxy "$dir/teamhub.js" "$@"
   { mode: 0o755 },
 );
 // The same for cmd and PowerShell on Windows, which run `teamhub.cmd`; Git
-// Bash takes the script above.
+// Bash takes the script above. The Computer's live voice cards start the app
+// at this relative path directly (cardCLIProgram in the local daemon's
+// playground_tools.go), so a layout change updates both.
 await writeFile(
   "dist/teamhub-cli/teamhub.cmd",
   `@echo off\r
