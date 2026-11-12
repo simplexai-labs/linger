@@ -382,7 +382,7 @@ describe("Memory server", () => {
       },
       query: async (_root, input, options) => {
         received.push(input);
-        budgets.push(options?.outputBudgetBytes);
+        budgets.push(options?.outputBudgetChars);
         return {
           gaps: [{ code: "no_relevant_evidence" }],
           indexedAt: null,
@@ -417,13 +417,13 @@ describe("Memory server", () => {
         status: "empty",
       });
       expect(received).toEqual([body]);
-      // 90% of 15% of the owner's model window, at four bytes per token.
-      expect(budgets).toEqual([35_043]);
+      // 90% of the Daemon's limit for the owner's model window, in characters.
+      expect(budgets).toEqual([11_681]);
       await post(
         { ...body, user_artifact_owner_actor_id: "human_offline" },
         "memory-token",
       );
-      expect(budgets.at(-1)).toBe(12_000);
+      expect(budgets.at(-1)).toBe(14_400);
       for (const removed of [
         { source: "personal_knowledge" },
         { node_types: ["Session"] },

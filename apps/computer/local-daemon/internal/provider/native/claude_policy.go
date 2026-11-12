@@ -148,12 +148,14 @@ func claudeSettings(contextWindow int) string {
 	if contextWindow > 0 {
 		limit := toolOutputTokenLimit(contextWindow)
 		// One tool result keeps the share of the window Codex gives it.
-		// Claude measures Bash output in characters, and one character can be
-		// a whole token, so the token limit bounds characters too. Longer
-		// Bash output is saved to a file the model reads from, a longer Read
-		// is refused so the model reads a range, and longer MCP output is cut
-		// with a note to page.
-		settings["bashOutputMaxChars"] = limit
+		// Claude measures Bash output in characters. Codex counts four bytes
+		// per token, so it keeps limit×4/3 characters of three-byte text such
+		// as CJK, where one character is about one token; Bash keeps as many,
+		// so the same text stays inline on both. Longer Bash output is saved
+		// to a file the model reads from, a longer Read is refused so the
+		// model reads a range, and longer MCP output is cut with a note to
+		// page.
+		settings["bashOutputMaxChars"] = limit * 4 / 3
 		settingsEnv["CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS"] = strconv.Itoa(limit)
 		settingsEnv["MAX_MCP_OUTPUT_TOKENS"] = strconv.Itoa(limit)
 	}

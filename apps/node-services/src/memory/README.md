@@ -270,12 +270,15 @@ with all `alternates`. It adds no model call and no network round trip while the
 The top 6 sources carry limited text: a long Chunk gives only a window of about 800 characters from its best query
 match, keeping the time and speaker heading of its message; Raw candidates also keep a bounded directory of the
 matching and adjacent Chunks for a follow-up read of missing facts or truncated text.
-Memory keeps every search and read result within an output budget of JSON bytes; the CLI passes results
-through unchanged. A Runtime cuts the middle out of a tool result above its output limit, which the Daemon
-sets to 15% of the model's context window, between 4,000 and 25,000 tokens of four bytes each. The budget
-is 90% of that limit for the model the owner's calls run on, leaving room for the CLI's labels, so a
-bounded result reaches the Agent whole; the window comes from the owner's Computer through the model call
-layer. An unknown window, or an offline Computer, keeps 12,000 bytes.
+Memory keeps every search and read result within an output budget of JSON characters (UTF-16 units); the
+CLI passes results through unchanged. The Daemon limits one tool result to 15% of the model's context
+window, between 4,000 and 25,000 tokens, and to 12,000 tokens when the window is unknown. Codex counts four
+bytes per token and cuts the middle out of a longer result, so it keeps limit×4/3 characters of three-byte
+text such as CJK; Claude's Bash keeps the same number of characters and saves a longer result to a file.
+The budget is 90% of those characters for the model the owner's calls run on, leaving room for the CLI's
+labels; at no more than three bytes per character, a bounded result reaches the Agent whole on either
+Runtime. The window comes from the owner's Computer through the model call layer; an unknown window, or an
+offline Computer, gets the unknown-window limit.
 Session facts take at most a quarter of the budget, the best-ranked first. If the result is still too
 large, inline chunks go from the lowest rank up until only the top candidate's best chunk is left, then
 candidates go from the lowest rank up, then that chunk; the top candidate always stays, and every kept

@@ -331,7 +331,7 @@ func TestClaudeSettingsFollowContextWindow(t *testing.T) {
 		return settings, env
 	}
 	small, env := settingsFor(64896)
-	if small["autoCompactWindow"] != float64(200000) || small["bashOutputMaxChars"] != float64(9734) ||
+	if small["autoCompactWindow"] != float64(200000) || small["bashOutputMaxChars"] != float64(12978) ||
 		env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] != "64896" || env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] != "1" ||
 		env["CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS"] != "9734" || env["MAX_MCP_OUTPUT_TOKENS"] != "9734" ||
 		env["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"] != "1" {
@@ -340,7 +340,7 @@ func TestClaudeSettingsFollowContextWindow(t *testing.T) {
 	// A large window caps tool output at Claude's own Read and MCP limit;
 	// only a 1M one keeps the [1m] variants.
 	large, env := settingsFor(400000)
-	if large["bashOutputMaxChars"] != float64(25000) || env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] != "400000" ||
+	if large["bashOutputMaxChars"] != float64(33333) || env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] != "400000" ||
 		env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] != "1" || env["MAX_MCP_OUTPUT_TOKENS"] != "25000" {
 		t.Fatalf("400k settings = %v", large)
 	}

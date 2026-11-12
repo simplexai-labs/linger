@@ -352,7 +352,7 @@ export async function startMemoryServer(options: {
   // Results are sized for the model the owner's calls run on, which the
   // owner's Computer reports; an unknown model or an offline Computer keeps
   // the default size, since a search needs no model.
-  const outputBudgetBytes = async (input: {
+  const outputBudgetChars = async (input: {
     tenant_id: string;
     user_artifact_owner_actor_id: string;
   }) =>
@@ -369,7 +369,7 @@ export async function startMemoryServer(options: {
       200,
       await (options.query ?? queryPersonalKnowledge)(options.dataRoot, input, {
         chunkSearch: options.chunkSearch,
-        outputBudgetBytes: await outputBudgetBytes(input),
+        outputBudgetChars: await outputBudgetChars(input),
       }),
     );
   });
@@ -383,7 +383,7 @@ export async function startMemoryServer(options: {
           options.evidenceRead ?? readPersonalKnowledgeEvidence
         )(options.dataRoot, input, {
           rawSourceProvider: options.chunkSearch,
-          outputBudgetBytes: await outputBudgetBytes(input),
+          outputBudgetChars: await outputBudgetChars(input),
         });
         return respondJson(context, 200, result);
       } catch (error) {

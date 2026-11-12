@@ -1035,8 +1035,9 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
 });
 
 describe("knowledge output budget", () => {
-  const OUTPUT_BUDGET_BYTES = 12_000;
-  const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+  // Small enough that these fixtures always overflow it.
+  const OUTPUT_BUDGET_CHARS = 4_000;
+  const chars = (value: unknown) => JSON.stringify(value).length;
   // Unspaced text of three UTF-8 bytes per character, as in CJK sources.
   const wide = (seed: number, length: number) =>
     Array.from({ length }, (_, index) =>
@@ -1094,10 +1095,11 @@ describe("knowledge output budget", () => {
           search: async () => ranked,
           searchFacts: async () => facts,
         },
+        outputBudgetChars: OUTPUT_BUDGET_CHARS,
       },
     );
 
-    expect(bytes(result)).toBeLessThanOrEqual(OUTPUT_BUDGET_BYTES);
+    expect(chars(result)).toBeLessThanOrEqual(OUTPUT_BUDGET_CHARS);
     expect(result.gaps.map((gap) => gap.code)).toContain("results_trimmed");
     expect(result.status).toBe("partial");
     expect(result.facts!.length).toBeGreaterThan(0);
@@ -1120,10 +1122,34 @@ describe("knowledge output budget", () => {
   });
 
   it("sizes the budget by the model's context window", () => {
-    expect(knowledgeOutputBudget(undefined)).toBe(12_000);
-    expect(knowledgeOutputBudget(8_192)).toBe(4_423);
-    expect(knowledgeOutputBudget(64_896)).toBe(35_043);
-    expect(knowledgeOutputBudget(1_000_000)).toBe(90_000);
+    expect(knowledgeOutputBudget(undefined)).toBe(14_400);
+    expect(knowledgeOutputBudget(8_192)).toBe(1_474);
+    expect(knowledgeOutputBudget(64_896)).toBe(11_681);
+    expect(knowledgeOutputBudget(1_000_000)).toBe(30_000);
+  });
+
+  it("stays within the Daemon's tool output limit", async () => {
+    // Memory cannot import the Daemon, so this reads its constants: a change
+    // on one side that the other misses would let a Runtime cut results.
+    const source = await fs.readFile(
+      new URL(
+        "../../../computer/local-daemon/internal/provider/native/tool_output.go",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const constant = (name: string) =>
+      Number(new RegExp(`\\b${name} = (\\d+)`).exec(source)?.[1]);
+    const percent = constant("toolOutputWindowPercent");
+    const unknown = constant("toolOutputTokens");
+    const max = constant("maxToolOutputTokens");
+    // The Daemon's limit admits limit×4/3 characters; Memory keeps 90%.
+    const charsFor = (tokens: number) => Math.floor((tokens * 4 * 0.9) / 3);
+    expect(knowledgeOutputBudget(undefined)).toBe(charsFor(unknown));
+    expect(knowledgeOutputBudget(64_896)).toBe(
+      charsFor((64_896 * percent) / 100),
+    );
+    expect(knowledgeOutputBudget(10_000_000)).toBe(charsFor(max));
   });
 
   it("keeps more of a result within a larger budget", async () => {
@@ -1139,19 +1165,19 @@ describe("knowledge output budget", () => {
         score: 1 / (61 + index),
       };
     });
-    const search = (outputBudgetBytes: number) =>
+    const search = (outputBudgetChars: number) =>
       queryPersonalKnowledge(fixtureData.root, request("Report"), {
         chunkSearch: { search: async () => matches },
-        outputBudgetBytes,
+        outputBudgetChars,
       });
 
-    const small = await search(12_000);
-    const large = await search(knowledgeOutputBudget(64_896));
+    const small = await search(OUTPUT_BUDGET_CHARS);
+    const large = await search(knowledgeOutputBudget(131_072));
     expect(small.gaps.map((gap) => gap.code)).toContain("results_trimmed");
     expect(large.gaps).toEqual([]);
     expect(large.status).toBe("grounded");
-    expect(Buffer.byteLength(JSON.stringify(large))).toBeLessThanOrEqual(
-      knowledgeOutputBudget(64_896),
+    expect(JSON.stringify(large).length).toBeLessThanOrEqual(
+      knowledgeOutputBudget(131_072),
     );
     expect(large.items.filter((item) => item.content).length).toBeGreaterThan(
       small.items.filter((item) => item.content).length,
@@ -1214,13 +1240,17 @@ describe("knowledge output budget", () => {
       .slice(0, 8);
     expect(chunks).toHaveLength(8);
 
-    const read = await readPersonalKnowledgeEvidence(fixtureData.root, {
-      ...identity,
-      evidence_id: evidenceId,
-      section_requests: chunks.map((chunk) => ({ section_id: chunk.id })),
-    });
+    const read = await readPersonalKnowledgeEvidence(
+      fixtureData.root,
+      {
+        ...identity,
+        evidence_id: evidenceId,
+        section_requests: chunks.map((chunk) => ({ section_id: chunk.id })),
+      },
+      { outputBudgetChars: OUTPUT_BUDGET_CHARS },
+    );
 
-    expect(bytes(read)).toBeLessThanOrEqual(OUTPUT_BUDGET_BYTES);
+    expect(chars(read)).toBeLessThanOrEqual(OUTPUT_BUDGET_CHARS);
     expect(read.complete).toBe(false);
     expect(read.missingSections).toEqual([]);
     expect(read.sections.map((section) => section.id)).toEqual(

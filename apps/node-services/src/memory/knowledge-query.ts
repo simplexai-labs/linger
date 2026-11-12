@@ -33,20 +33,21 @@ const INLINE_CONTENT_SOURCES = 6;
 const INLINE_CONTENT_CHARS = 800;
 const INLINE_CONTENT_BUDGET_CHARS = 6_000;
 const INLINE_CONTENT_SEPARATOR = "\n\n…\n\n";
-// The Daemon limits one tool result to 15% of the model's context window and
-// at most 25,000 tokens, which Codex counts at four bytes each; a Runtime cuts
-// the middle out of a result above it. A search or read result stays within
-// 90% of that limit, since the CLI's labels add about 2% to the JSON.
+// The Daemon limits one tool result to 15% of the model's context window, at
+// most 25,000 tokens, and to 12,000 tokens when the window is unknown; a
+// Runtime cuts the middle out of a longer result or saves it to a file.
+// Codex counts four bytes per token, so the limit admits limit×4/3 characters
+// of three-byte text such as CJK, and the Daemon gives Claude's Bash output as
+// many characters. A search or read result is measured in UTF-16 characters
+// of JSON, at most three bytes each, so it fits both Runtimes; it keeps 90% of
+// that, since the CLI's labels add about 2%.
 const WINDOW_OUTPUT_SHARE = 0.15;
 const MAX_TOOL_OUTPUT_TOKENS = 25_000;
-const BYTES_PER_TOKEN = 4;
+const UNKNOWN_WINDOW_TOOL_OUTPUT_TOKENS = 12_000;
 const CLI_LABEL_ROOM = 0.9;
-// The budget when the model's window is unknown, within the Daemon's smallest
-// tool output limit, 4,000 tokens of four bytes, less the CLI's labels.
-const DEFAULT_KNOWLEDGE_OUTPUT_BYTES = 12_000;
 // A section that does not fit still returns a page this large, so every read
 // makes progress.
-const MIN_SECTION_PAGE_BYTES = 512;
+const MIN_SECTION_PAGE_CHARS = 200;
 const RESULTS_TRIMMED_GAP = {
   code: "results_trimmed",
   detail:
@@ -61,34 +62,35 @@ export class PersonalKnowledgeEvidenceNotFoundError extends Error {
 }
 
 /**
- * One search over every source of the Agent's index: Sessions, recordings,
- * My pages, mail, Pocket Notes, the Profile, the published Wiki and Daily and
- * Weekly reports. Each item names its source kind.
- */
-/**
- * The most bytes of JSON one search or read result may take for a model with
- * this context window in tokens. An unknown window gets the default.
+ * The most UTF-16 characters of JSON one search or read result may take for a
+ * model with this context window in tokens, or with an unknown one.
  */
 export function knowledgeOutputBudget(
   contextWindow: number | undefined,
 ): number {
-  if (contextWindow === undefined) return DEFAULT_KNOWLEDGE_OUTPUT_BYTES;
-  const toolOutputTokens = Math.min(
-    contextWindow * WINDOW_OUTPUT_SHARE,
-    MAX_TOOL_OUTPUT_TOKENS,
-  );
-  return Math.floor(toolOutputTokens * BYTES_PER_TOKEN * CLI_LABEL_ROOM);
+  const toolOutputTokens =
+    contextWindow === undefined
+      ? UNKNOWN_WINDOW_TOOL_OUTPUT_TOKENS
+      : Math.min(contextWindow * WINDOW_OUTPUT_SHARE, MAX_TOOL_OUTPUT_TOKENS);
+  // limit×4/3 characters, multiplied before dividing so round limits stay
+  // exact.
+  return Math.floor((toolOutputTokens * 4 * CLI_LABEL_ROOM) / 3);
 }
 
+/**
+ * One search over every source of the Agent's index: Sessions, recordings,
+ * My pages, mail, Pocket Notes, the Profile, the published Wiki and Daily and
+ * Weekly reports. Each item names its source kind.
+ */
 export async function queryPersonalKnowledge(
   dataRoot: string,
   input: PersonalKnowledgeQueryRequest,
   options: {
     chunkSearch?: ChunkSearchProvider;
-    outputBudgetBytes?: number;
+    outputBudgetChars?: number;
   } = {},
 ): Promise<PersonalKnowledgeQueryResponse> {
-  const budget = options.outputBudgetBytes ?? DEFAULT_KNOWLEDGE_OUTPUT_BYTES;
+  const budget = options.outputBudgetChars ?? knowledgeOutputBudget(undefined);
   const workspaceRoot = agentWorkspaceRoot(dataRoot, input.agent_id);
   // Facts rank in their own channel so they never displace Raw candidates.
   const [rawResult, facts] = await Promise.all([
@@ -153,7 +155,7 @@ export async function queryPersonalKnowledge(
     0,
     fittingPrefix(
       facts.length,
-      (count) => outputBytes(facts.slice(0, count)),
+      (count) => outputChars(facts.slice(0, count)),
       // Facts take at most a quarter, so they never crowd out candidates.
       budget / 4,
     ),
@@ -224,7 +226,7 @@ export async function queryPersonalKnowledge(
     }
     return last !== undefined && contentChunks.delete(last);
   };
-  while (outputBytes(response()) > budget && dropOne()) trimmed = true;
+  while (outputChars(response()) > budget && dropOne()) trimmed = true;
   return response();
 }
 
@@ -233,7 +235,7 @@ export async function readPersonalKnowledgeEvidence(
   input: PersonalKnowledgeEvidenceReadRequest,
   options: {
     rawSourceProvider?: ChunkSearchProvider;
-    outputBudgetBytes?: number;
+    outputBudgetChars?: number;
   } = {},
 ): Promise<PersonalKnowledgeEvidenceReadResponse> {
   if (!input.evidence_id.startsWith("raw_")) {
@@ -242,7 +244,7 @@ export async function readPersonalKnowledgeEvidence(
   return readRawEvidence(
     agentWorkspaceRoot(dataRoot, input.agent_id),
     input,
-    options.outputBudgetBytes ?? DEFAULT_KNOWLEDGE_OUTPUT_BYTES,
+    options.outputBudgetChars ?? knowledgeOutputBudget(undefined),
     options.rawSourceProvider,
   );
 }
@@ -347,11 +349,11 @@ async function readRawEvidence(
   };
   // Sections share what the rest of the response leaves in request order; a
   // section's unused share carries over to the ones after it.
-  let remaining = budget - outputBytes(response);
+  let remaining = budget - outputChars(response);
   pages.forEach(({ chunk, offset }, index) => {
     const share = Math.max(
       Math.floor(remaining / (pages.length - index)),
-      MIN_SECTION_PAGE_BYTES,
+      MIN_SECTION_PAGE_CHARS,
     );
     const section = (length: number) => {
       const content = chunk.content.slice(offset, offset + length);
@@ -368,7 +370,7 @@ async function readRawEvidence(
     };
     let length = fittingPrefix(
       chunk.content.length - offset,
-      (count) => outputBytes(section(count)) + 1,
+      (count) => outputChars(section(count)) + 1,
       share,
     );
     // A page never ends inside a surrogate pair, and never ends empty while
@@ -379,7 +381,7 @@ async function readRawEvidence(
       length = isHighSurrogate(chunk.content.charCodeAt(offset)) ? 2 : 1;
     const page = section(length);
     response.sections.push(page);
-    remaining -= outputBytes(page) + 1;
+    remaining -= outputChars(page) + 1;
   });
   response.complete =
     missingSections.length === 0 &&
@@ -387,8 +389,8 @@ async function readRawEvidence(
   return response;
 }
 
-function outputBytes(value: unknown): number {
-  return Buffer.byteLength(JSON.stringify(value));
+function outputChars(value: unknown): number {
+  return JSON.stringify(value).length;
 }
 
 /** The largest count in [0, total] whose measured size stays within budget. */
