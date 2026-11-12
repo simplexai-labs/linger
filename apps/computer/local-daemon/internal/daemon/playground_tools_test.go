@@ -36,9 +36,13 @@ func TestPlaygroundCardRunsTheCLIAsTheAgentInTheRoom(t *testing.T) {
 	t.Setenv("TEAMHUB_SECRET", "from-the-daemon")
 	directory, record := fakeCardCLI(t, `{"accepted":true,"message_id":"message-1","resources":[{"kind":"document","segment_index":1,"status":"published","document_id":"document-1","name":"report.md"}]}`, "", 0)
 	daemon := &Daemon{teamhubCLIBin: directory}
-	result, err := daemon.runCardCLI(t.Context(), cardInstallation, "room-1",
+	stdout, err := daemon.runAgentCLI(t.Context(), cardInstallation, "room-1",
 		[]string{"message", "card", "--title", "Report", "--file", "-", "--attach", "/work/playground/task-1/report.md", "--operation-id", "voice-live:abc", "--json"},
 		`Saved to C:\new\table.xlsx`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := cardCommitResult(stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +85,7 @@ func TestPlaygroundCardTellsWhyTheCLIFailed(t *testing.T) {
 		`not json`: "outcome_unknown",
 	} {
 		directory, _ := fakeCardCLI(t, "", stderr, 2)
-		_, err := (&Daemon{teamhubCLIBin: directory}).runCardCLI(t.Context(), cardInstallation, "room-1", []string{"message", "card"}, "Done.")
+		_, err := (&Daemon{teamhubCLIBin: directory}).runAgentCLI(t.Context(), cardInstallation, "room-1", []string{"message", "card"}, "Done.")
 		var failure *playgroundFailure
 		if !errors.As(err, &failure) || failure.code != want {
 			t.Fatalf("%s: err=%v, want %s", stderr, err, want)
@@ -91,7 +95,7 @@ func TestPlaygroundCardTellsWhyTheCLIFailed(t *testing.T) {
 		}
 	}
 	var failure *playgroundFailure
-	if _, err := (&Daemon{}).runCardCLI(t.Context(), cardInstallation, "room-1", nil, ""); !errors.As(err, &failure) || failure.code != "cli_unavailable" {
+	if _, err := (&Daemon{}).runAgentCLI(t.Context(), cardInstallation, "room-1", nil, ""); !errors.As(err, &failure) || failure.code != "cli_unavailable" {
 		t.Fatalf("no CLI = %v", err)
 	}
 }
@@ -146,5 +150,20 @@ func TestPlaygroundCardFindsTheCLIOnEveryLayout(t *testing.T) {
 	}
 	if _, _, _, ok := cardCLIProgram(t.TempDir(), "darwin"); ok {
 		t.Fatal("found a CLI in an empty directory")
+	}
+}
+
+func TestPlaygroundImageRefusesAnIncompletePlacement(t *testing.T) {
+	daemon := &Daemon{}
+	for _, image := range []playgroundImage{
+		{OperationID: "op", InboxID: "task:task-1", DocumentID: "document-1", AfterBlockID: "block-1"},
+		{OperationID: "op", InboxID: "room:room-1", AfterBlockID: "block-1"},
+		{OperationID: "op", InboxID: "room:room-1", DocumentID: "document-1"},
+		{OperationID: "op", InboxID: "room:room-1", DocumentID: "document-1", AfterBlockID: "block-1", Caption: "two\nlines"},
+	} {
+		var failure *playgroundFailure
+		if _, err := daemon.placePlaygroundImage(t.Context(), "tenant-1", "agent-1", image); !errors.As(err, &failure) || failure.code != "invalid_image" {
+			t.Fatalf("image %+v = %v", image, err)
+		}
 	}
 }

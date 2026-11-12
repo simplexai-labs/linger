@@ -86,3 +86,29 @@ func TestPlaygroundImagesInlineOnlyPlaygroundFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestImageAnchorFindsTheBlockAnImageGoesBelow(t *testing.T) {
+	export := []byte(`{"blocks":[
+		{"id":"title","type":"heading","content":[{"type":"text","text":"Strawberry tattoos"}]},
+		{"id":"intro","type":"paragraph","content":[{"type":"text","text":"Strawberries are "},{"type":"link","content":[{"type":"text","text":"popular"}]}]},
+		{"id":"list","type":"bulletListItem","content":[{"type":"text","text":"Roman"}],"children":[{"id":"nested","type":"paragraph","content":[{"type":"text","text":"Venus"}]}]},
+		{"id":"table","type":"table","content":{"type":"tableContent","rows":[]}},
+		{"id":"again","type":"paragraph","content":[{"type":"text","text":"Strawberry"}]}
+	]}`)
+	for after, want := range map[string][2]string{
+		"":                   {"again", ""},
+		"Strawberry tattoos": {"title", ""},
+		"are popular":        {"intro", ""},
+		"Venus":              {"list", ""},
+		"Strawberry":         {"again", ""},
+		"Strawberr":          {"", "ambiguous_text"},
+		"Missing text":       {"", "text_not_found"},
+	} {
+		if blockID, problem := ImageAnchor(export, after); blockID != want[0] || problem != want[1] {
+			t.Fatalf("after %q = %q %q, want %q", after, blockID, problem, want)
+		}
+	}
+	if _, problem := ImageAnchor([]byte(`{"blocks":[]}`), ""); problem != "document_empty" {
+		t.Fatalf("empty document problem=%q", problem)
+	}
+}

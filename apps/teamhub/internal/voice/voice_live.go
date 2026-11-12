@@ -318,7 +318,7 @@ func (s *Service) executeVoiceLiveTool(ctx context.Context, session voicelive.Se
 		return s.editVoiceLiveEmailCanvas(ctx, session, request)
 	case voicelive.ToolAttachEmailFile:
 		return s.attachVoiceLiveEmailFile(ctx, session, request)
-	case voicelive.ToolCreateDocument, voicelive.ToolRenameDocument, voicelive.ToolEditDocument, voicelive.ToolReplaceDocumentText,
+	case voicelive.ToolCreateDocument, voicelive.ToolRenameDocument, voicelive.ToolEditDocument, voicelive.ToolReplaceDocumentText, voicelive.ToolInsertDocumentImage,
 		voicelive.ToolListComments, voicelive.ToolAddComment, voicelive.ToolReplyComment, voicelive.ToolResolveComment:
 		return s.runVoiceLiveDocumentTool(ctx, session, request)
 	case voicelive.ToolListRoutines, voicelive.ToolCreateRoutine, voicelive.ToolChangeRoutine:

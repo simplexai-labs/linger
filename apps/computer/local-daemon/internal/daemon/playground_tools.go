@@ -36,6 +36,15 @@ type playgroundCardFile struct {
 	Path   string                         `json:"path"`
 }
 
+type playgroundImage struct {
+	OperationID  string             `json:"operation_id"`
+	InboxID      string             `json:"inbox_id"`
+	DocumentID   string             `json:"document_id"`
+	AfterBlockID string             `json:"after_block_id"`
+	Caption      string             `json:"caption"`
+	File         playgroundCardFile `json:"file"`
+}
+
 type playgroundCard struct {
 	OperationID string               `json:"operation_id"`
 	InboxID     string               `json:"inbox_id"`
@@ -70,6 +79,12 @@ func (d *Daemon) callPlayground(ctx context.Context, tenantID, agentID, name str
 			return map[string]any{"status": "invalid_card"}, nil
 		}
 		result, err = d.sendPlaygroundCard(ctx, tenantID, agentID, card)
+	case "place_image":
+		var image playgroundImage
+		if !decodes(arguments, &image) {
+			return map[string]any{"status": "invalid_image"}, nil
+		}
+		result, err = d.placePlaygroundImage(ctx, tenantID, agentID, image)
 	default:
 		return map[string]any{"status": "unavailable"}, nil
 	}
@@ -124,12 +139,59 @@ func (d *Daemon) sendPlaygroundCard(ctx context.Context, tenantID, agentID strin
 	if err != nil {
 		return nil, err
 	}
-	return d.runCardCLI(ctx, installation, roomID, arguments, card.Content)
+	stdout, err := d.runAgentCLI(ctx, installation, roomID, arguments, card.Content)
+	if err != nil {
+		return nil, err
+	}
+	return cardCommitResult(stdout)
 }
 
-// runCardCLI runs the bundled CLI with a profile of its own that targets the
-// card's Room. The credential stays in its file; the CLI reads it.
-func (d *Daemon) runCardCLI(ctx context.Context, installation clicredential.Installation, roomID string, arguments []string, body string) (map[string]any, error) {
+// placePlaygroundImage puts an image where the Agent wrote it into a
+// Document after one of its blocks by running `teamhub docs image put` as the
+// Agent, which stores the image in the Document first. The operation ID
+// makes a repeated call place it once.
+func (d *Daemon) placePlaygroundImage(ctx context.Context, tenantID, agentID string, image playgroundImage) (map[string]any, error) {
+	roomID, isRoom := strings.CutPrefix(image.InboxID, "room:")
+	if image.OperationID == "" || !isRoom || roomID == "" || image.DocumentID == "" || image.AfterBlockID == "" ||
+		strings.ContainsAny(image.Caption, "\r\n") {
+		return nil, &playgroundFailure{"invalid_image", "An image needs a Document, a block to follow and a one-line caption."}
+	}
+	filename, err := d.contextViews.PlaygroundFilePath(ctx, tenantID, agentID, image.File.Folder, image.File.Path)
+	if err != nil {
+		return nil, err
+	}
+	arguments := []string{"docs", "image", "put", image.DocumentID, filename, "--after", image.AfterBlockID}
+	if image.Caption != "" {
+		arguments = append(arguments, "--caption", image.Caption)
+	}
+	arguments = append(arguments, "--operation-id", image.OperationID, "--json")
+	installation, err := d.agentCLICredential(tenantID, agentID)
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := d.runAgentCLI(ctx, installation, roomID, arguments, "")
+	if err != nil {
+		return nil, err
+	}
+	var placed struct {
+		Status         string `json:"status"`
+		RevisionID     string `json:"revision_id"`
+		ConflictReason string `json:"conflict_reason"`
+	}
+	if json.Unmarshal(bytes.TrimSpace(stdout), &placed) != nil || placed.Status == "" {
+		return nil, &playgroundFailure{"outcome_unknown", agentCLIUnknown}
+	}
+	// TeamHub reads a status other than ok as a failure; a conflict is not one.
+	return map[string]any{"placement": placed.Status, "revision_id": placed.RevisionID, "conflict_reason": placed.ConflictReason}, nil
+}
+
+// agentCLIUnknown is told when a CLI run may have changed something.
+const agentCLIUnknown = "It may have been done; check before trying again."
+
+// runAgentCLI runs the bundled CLI as the Agent with a profile of its own
+// that targets roomID, and returns what it printed. The credential stays in
+// its file; the CLI reads it.
+func (d *Daemon) runAgentCLI(ctx context.Context, installation clicredential.Installation, roomID string, arguments []string, stdin string) ([]byte, error) {
 	program, prefix, environment, ok := cardCLIProgram(d.teamhubCLIBin, runtime.GOOS)
 	if !ok {
 		return nil, &playgroundFailure{"cli_unavailable", "This Computer has no TeamHub CLI; update the Computer."}
@@ -154,12 +216,12 @@ func (d *Daemon) runCardCLI(ctx context.Context, installation clicredential.Inst
 	command := exec.CommandContext(ctx, program, append(prefix, arguments...)...)
 	command.Dir = home
 	command.Env = append(append(cardCLIEnvironment(os.Environ()), environment...), "TEAMHUB_CONFIG="+configPath, "TEAMHUB_PROFILE=live")
-	command.Stdin = strings.NewReader(body)
+	command.Stdin = strings.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	runErr := command.Run()
 	if ctx.Err() != nil {
-		return nil, &playgroundFailure{"outcome_unknown", "The card may have been posted; check the chat before trying again."}
+		return nil, &playgroundFailure{"outcome_unknown", agentCLIUnknown}
 	}
 	if runErr != nil {
 		var exit *exec.ExitError
@@ -167,9 +229,9 @@ func (d *Daemon) runCardCLI(ctx context.Context, installation clicredential.Inst
 			// The CLI never started, so nothing was posted.
 			return nil, &playgroundFailure{"cli_unavailable", "The TeamHub CLI could not start: " + runErr.Error()}
 		}
-		return nil, cardCLIFailure(stderr.Bytes())
+		return nil, agentCLIFailure(stderr.Bytes())
 	}
-	return cardCommitResult(stdout.Bytes())
+	return stdout.Bytes(), nil
 }
 
 // cardCLIProgram is how to start the bundled CLI in directory. The Computer
@@ -214,9 +276,9 @@ func cardCLIEnvironment(environment []string) []string {
 	return kept
 }
 
-// cardCLIFailure tells the live model why the CLI did not post the card. A
+// agentCLIFailure tells the live model why the CLI did not do its work. A
 // failure whose outcome the CLI could not know is never reported as refused.
-func cardCLIFailure(stderr []byte) error {
+func agentCLIFailure(stderr []byte) error {
 	var envelope struct {
 		Error struct {
 			Code    string `json:"code"`
@@ -226,7 +288,7 @@ func cardCLIFailure(stderr []byte) error {
 	_ = json.Unmarshal(bytes.TrimSpace(stderr), &envelope)
 	switch envelope.Error.Code {
 	case "", "connection_failed", "timeout", "outcome_unknown", "external_outcome_unknown":
-		return &playgroundFailure{"outcome_unknown", "The card may have been posted; check the chat before trying again."}
+		return &playgroundFailure{"outcome_unknown", agentCLIUnknown}
 	}
 	return &playgroundFailure{"upload_failed", strings.TrimSpace(envelope.Error.Code + ": " + envelope.Error.Message)}
 }

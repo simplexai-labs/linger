@@ -747,6 +747,12 @@ func TestVoiceLiveTasksReportResultsAndWhatTheyWaitFor(t *testing.T) {
 	if countRows(t, env, `SELECT count(*) FROM messages WHERE room_id=$1 AND segments @> '[{"presentation":"canvas"}]'`, roomID) != 0 {
 		t.Fatal("a document whose image was not read was opened")
 	}
+	// An image goes into an existing document from a folder the call may open.
+	for path, want := range map[string]string{"./playground/workitem_unknown/a.png": "folder_not_found", image: "document_not_found"} {
+		if output := tool("lt_doc", "image-"+want, "insert_document_image", map[string]any{"document_id": "document_missing", "path": path}); output["error"] != want {
+			t.Fatalf("insert_document_image %s=%v, want %s", path, output, want)
+		}
+	}
 	decode(t, voiceRuntimeCall(t, env, http.MethodGet, "/internal/v1/voice/sessions/"+sessionID+"/live-tasks", nil, http.StatusOK), &tasks)
 	if len(tasks.Tasks) != 2 || tasks.Tasks[0].TaskId != first["task_id"] || *tasks.Tasks[0].Replies[0].Delivered {
 		t.Fatalf("live tasks after an unposted card: %+v", tasks.Tasks)
