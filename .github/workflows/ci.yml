@@ -102,5 +102,27 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/setup
         if: needs.changes.outputs[matrix.app] == 'true'
+      # Pinned golangci-lint and sqlc binaries; building them takes about 60 s
+      # each. Their file names carry the tool and Go versions, and the key
+      # hashes the files that pin both, so a version bump misses and rebuilds.
+      - uses: actions/cache@v4
+        if: matrix.app == 'teamhub' && needs.changes.outputs[matrix.app] == 'true'
+        with:
+          path: apps/teamhub/.tools/bin
+          key: teamhub-tools-${{ runner.os }}-${{ hashFiles('apps/teamhub/Makefile', 'apps/teamhub/scripts/verify-generated.sh', 'apps/teamhub/go.mod') }}
+      # A cold golangci-lint analysis cache costs about 115 s. Pull requests
+      # restore main's latest entry; only pushes save, so they never write one.
+      - uses: actions/cache/restore@v4
+        if: matrix.app == 'teamhub' && needs.changes.outputs[matrix.app] == 'true'
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', '.golangci.yml') }}-${{ github.sha }}
+          restore-keys: |
+            golangci-lint-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', '.golangci.yml') }}-
       - if: needs.changes.outputs[matrix.app] == 'true'
         run: make check-${{ matrix.app }} BASE="$BASE"
+      - uses: actions/cache/save@v4
+        if: always() && github.event_name == 'push' && matrix.app == 'teamhub' && needs.changes.outputs[matrix.app] == 'true'
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', '.golangci.yml') }}-${{ github.sha }}

@@ -17,18 +17,26 @@ GOVULNCHECK_VERSION := v1.1.4
 SQLC_VERSION := v1.29.0
 GOLANGCI_LINT ?= $(TOOLS_BIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)-$(GO_TOOLCHAIN_VERSION)
 GOVULNCHECK ?= $(TOOLS_BIN)/govulncheck-$(GOVULNCHECK_VERSION)-$(GO_TOOLCHAIN_VERSION)
+SQLC_BIN ?= $(TOOLS_BIN)/sqlc-$(SQLC_VERSION)-$(GO_TOOLCHAIN_VERSION)
 
 RELIABILITY_TESTS := Test(RoomEventCatchupAndSSE|SSEClosesWhenSessionExpires|SSEClosesWhenSessionIsRevoked|SSEClosesDuringApplicationShutdown)
 
 install:
 	pnpm -C ../.. install
 
-generate:
+generate: $(SQLC_BIN)
 	$(MAKE) -C ../.. contracts-generate
-	SQLC_VERSION=$(SQLC_VERSION) SQLC_BIN='$(SQLC_BIN)' ./scripts/verify-generated.sh --write
+	SQLC_VERSION=$(SQLC_VERSION) SQLC_BIN='$(abspath $(SQLC_BIN))' ./scripts/verify-generated.sh --write
 
-sqlc-verify:
-	SQLC_VERSION=$(SQLC_VERSION) SQLC_BIN='$(SQLC_BIN)' ./scripts/verify-generated.sh
+sqlc-verify: $(SQLC_BIN)
+	SQLC_VERSION=$(SQLC_VERSION) SQLC_BIN='$(abspath $(SQLC_BIN))' ./scripts/verify-generated.sh
+
+# A versioned binary under TOOLS_BIN lets CI cache sqlc instead of rebuilding it.
+$(SQLC_BIN):
+	mkdir -p $(TOOLS_BIN)
+	gobin=$$(mktemp -d '$(abspath $(TOOLS_BIN))/install.XXXXXX') && \
+		GOTOOLCHAIN=$(GO_TOOLCHAIN_VERSION) GOBIN="$$gobin" go install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) && \
+		mv "$$gobin/sqlc" $@ && rmdir "$$gobin"
 
 fmt:
 	gofmt -w cmd internal tests ../../skills
