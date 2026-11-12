@@ -9,9 +9,11 @@ import (
 
 // Publish only fields used by the product's tool summaries, not message bodies,
 // environment maps, credentials, file contents, or full patches. Computer
-// tools publish their target and keys but never typed text, field values,
-// element tokens, or window ids. The Room status line's title and steps come
-// first, so the size limit never drops them.
+// tools publish their target and keys but never the text or value arguments
+// they type or set, element tokens, or window ids. A script is published as
+// written, clipped, so text it types literally is shown, as a command line's
+// is. The Room status line's title and steps come first, so the size limit
+// never drops them.
 func activityInput(input map[string]any, status activityStatus) []map[string]any {
 	if arguments, ok := input["arguments"].(map[string]any); ok {
 		input = arguments
