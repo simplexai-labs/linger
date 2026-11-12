@@ -3,6 +3,7 @@ package localtools
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCountTabsReadsChromeEdgeAndFirefoxStrips(t *testing.T) {
@@ -104,5 +105,25 @@ func TestAgentChromeHoldsEachWindowTheTaskOpened(t *testing.T) {
 	c.holdAgentChromeWindow(77, 3, 1, "Home")
 	if _, _, _, ok := c.agentChromeTabWindow(float64(42), float64(9)); ok {
 		t.Fatal("a window of the earlier browser is still held")
+	}
+}
+
+// A window that showed briefly lends no time to the one that takes its
+// place: the settle wait counts from when the lone candidate showed.
+func TestWindowSettleCountsFromTheCandidate(t *testing.T) {
+	start := time.Unix(1000, 0)
+	a, b := []listedWindow{{WindowID: 21}}, []listedWindow{{WindowID: 22}}
+	var wait windowSettle
+	if wait.settled(a, start) {
+		t.Fatal("window A settled when it showed")
+	}
+	if wait.settled(b, start.Add(everydayChromeSettle)) {
+		t.Fatal("window B took the time window A stood")
+	}
+	if !wait.settled(b, start.Add(2*everydayChromeSettle)) {
+		t.Fatal("window B did not settle after standing the settle time")
+	}
+	if wait.settled(nil, start.Add(3*everydayChromeSettle)) || wait.settled(b, start.Add(3*everydayChromeSettle)) {
+		t.Fatal("window B settled again at once after it left and came back")
 	}
 }

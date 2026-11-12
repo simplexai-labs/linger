@@ -431,8 +431,7 @@ func (c *cuaSession) launchEverydayChrome(ctx context.Context, b agentBrowser, u
 // so a home page that moves to another site, such as a sign-in page, still
 // finds its window. Windows that stay ambiguous are refused.
 func (c *cuaSession) everydayChromeWindow(ctx context.Context, b agentBrowser, pid int, before map[float64]bool, site string) (listedWindow, int, error) {
-	var seen time.Time
-	var candidate float64
+	var wait windowSettle
 	for deadline := time.Now().Add(sharedBrowserWindowWait); ; {
 		windows, err := c.appWindows(ctx, pid)
 		if err != nil {
@@ -448,17 +447,7 @@ func (c *cuaSession) everydayChromeWindow(ctx context.Context, b agentBrowser, p
 				matching = append(matching, w)
 			}
 		}
-		// The wait counts from when the lone candidate showed: one that
-		// left, or another in its place, starts it again.
-		switch {
-		case len(fresh) == 0:
-			seen = time.Time{}
-		case len(fresh) == 1 && fresh[0].WindowID != candidate:
-			seen, candidate = time.Now(), fresh[0].WindowID
-		case seen.IsZero():
-			seen = time.Now()
-		}
-		settled := !seen.IsZero() && time.Since(seen) >= everydayChromeSettle
+		settled := wait.settled(fresh, time.Now())
 		switch {
 		case len(matching) == 1:
 			return matching[0], 1, nil
@@ -474,6 +463,29 @@ func (c *cuaSession) everydayChromeWindow(ctx context.Context, b agentBrowser, p
 			return listedWindow{}, 0, err
 		}
 	}
+}
+
+// windowSettle times how long the new windows of a launch have stood. The
+// wait counts from when the lone candidate showed: one that left, or another
+// in its place, starts it again, so a window that showed only briefly cannot
+// lend its time to the window that follows it.
+type windowSettle struct {
+	seen      time.Time
+	candidate float64
+}
+
+// settled reports whether fresh, the new windows seen at now, have stood for
+// everydayChromeSettle.
+func (w *windowSettle) settled(fresh []listedWindow, now time.Time) bool {
+	switch {
+	case len(fresh) == 0:
+		w.seen = time.Time{}
+	case len(fresh) == 1 && fresh[0].WindowID != w.candidate:
+		w.seen, w.candidate = now, fresh[0].WindowID
+	case w.seen.IsZero():
+		w.seen = now
+	}
+	return !w.seen.IsZero() && now.Sub(w.seen) >= everydayChromeSettle
 }
 
 // everydayChromeSettle is how long the Computer lets the user's Chrome
