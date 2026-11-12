@@ -70,7 +70,9 @@ var scriptForbidden = []string{"delivery_mode", "foreground", "screenshot_out_fi
 // screenshot unless the script asks for one: Cua's default captures one per
 // read, which took seconds on a busy page. The guard returns the window reads
 // made after the script's last input beside its value, under scriptReadsKey,
-// for scriptResultReads to take out. A positive inputLimit paces the script for the
+// for scriptResultReads to take out. It keeps a read by the pid and window_id
+// that Cua puts in every getState and get_window_state result, as in a tool
+// read, so a script read lands on the same window key as the Computer's own. A positive inputLimit paces the script for the
 // Computer's own browser: the guard waits a person's pause before each input,
 // throws once the script tries to send more than inputLimit inputs, and
 // refuses to open an app or URL, whose site checks run only in the Daemon's
