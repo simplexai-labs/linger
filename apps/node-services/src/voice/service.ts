@@ -117,8 +117,14 @@ export async function startVoiceService(options: {
   // The VAD model's native package, when the runtime ships it separately: the
   // workers wait for its first download and find it on NODE_PATH.
   const models = modelPackageNames("voice");
-  const install =
+  const installModels =
     options.installModels ?? (() => installModelPackages(models, env));
+  // Worker starts share one download, so concurrent starts never fetch twice.
+  let installing: Promise<void> | undefined;
+  const install = () =>
+    (installing ??= installModels().finally(() => {
+      installing = undefined;
+    }));
   const modelPath = models.length
     ? {
         NODE_PATH: [modelPackagesRoot(env), env.NODE_PATH]
@@ -297,6 +303,12 @@ export async function startVoiceService(options: {
     });
     return running;
   };
+  // Download the models before any key exists, so the first worker start after
+  // a key is saved fits TeamHub's media start timeout. A worker start retries.
+  if (!modelPackagesInstalled(models, env))
+    install().catch((error: unknown) => {
+      options.logger.log("warn", "voice.model_install_failed", { error });
+    });
   // TeamHub may still be starting; a failed first reconcile retries on the poll.
   void reconcile();
   const poll = setInterval(() => void reconcile(), VOICE_RECONCILE_POLL_MS);

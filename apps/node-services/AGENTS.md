@@ -52,7 +52,8 @@
 - Packages that hold model data (OCR language data, the Voice VAD binding)
   resolve through `src/model-packages.ts`: from node_modules in development
   and images, downloaded on first use where the offline runtime lists them in
-  `models.json`.
+  `models.json`. The `voice` role starts its download when the role starts,
+  before any provider key exists, so the first worker start does not wait for it.
 - Roles log through the `JsonLogger` the host passes to `start*Service`
   (`createJsonLogger` from `@linger/service-kit/node`); the `document` role
   creates its own inside its worker thread, and the `agent` role keeps its own
