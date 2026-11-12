@@ -1,37 +1,23 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"io/fs"
-	"mime/multipart"
-	"net/http"
 	"os"
-	"path"
-	"strconv"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/clicredential"
 	lingercontext "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/context"
 )
 
-const (
-	// The Agent message commit route's limits: per file and per message.
-	maxCardFileBytes  = 50 << 20
-	maxCardTotalBytes = 512 << 20
-	maxCardFiles      = 5
-)
-
-// playgroundCardClient posts cards to TeamHub; the Computer tool's deadline
-// bounds each request, and a redirect is never followed with the credential.
-var playgroundCardClient = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-	return http.ErrUseLastResponse
-}}
+// maxCardFiles is how many files one card carries.
+const maxCardFiles = 5
 
 // playgroundFailure is a result TeamHub tells the live model as an error code.
 type playgroundFailure struct{ code, detail string }
@@ -46,10 +32,8 @@ type playgroundRequest struct {
 }
 
 type playgroundCardFile struct {
-	Folder               lingercontext.PlaygroundFolder `json:"folder"`
-	Path                 string                         `json:"path"`
-	RepresentationFormat string                         `json:"representation_format"`
-	MediaType            string                         `json:"media_type"`
+	Folder lingercontext.PlaygroundFolder `json:"folder"`
+	Path   string                         `json:"path"`
 }
 
 type playgroundCard struct {
@@ -115,155 +99,120 @@ func decodes(arguments json.RawMessage, target any) bool {
 	return json.Unmarshal(arguments, target) == nil
 }
 
-type openedCardFile struct {
-	file     *os.File
-	upload   map[string]any
-	size     int64
-	uploadID string
-}
-
-// sendPlaygroundCard reads the card's files where the Agent wrote them and
-// commits the card through the Agent API, the request `teamhub message card
-// --attach` sends. The operation ID makes a repeated call the same message.
+// sendPlaygroundCard posts a card with files where the Agent wrote them by
+// running `teamhub message card --attach` as the Agent, so a card from the
+// live voice is the one a Meta posts, Markdown images included. The
+// operation ID makes a repeated call the same message.
 func (d *Daemon) sendPlaygroundCard(ctx context.Context, tenantID, agentID string, card playgroundCard) (map[string]any, error) {
-	title := strings.TrimSpace(card.Title)
-	if card.OperationID == "" || !strings.HasPrefix(card.InboxID, "room:") || title == "" || title != card.Title ||
-		len([]rune(title)) > 120 || strings.ContainsAny(title, "\r\n") || strings.TrimSpace(card.Content) == "" || len(card.Files) > maxCardFiles {
-		return nil, &playgroundFailure{"invalid_card", "A card needs a one-line title, content and at most 5 files."}
+	roomID, isRoom := strings.CutPrefix(card.InboxID, "room:")
+	if card.OperationID == "" || !isRoom || roomID == "" || strings.TrimSpace(card.Title) == "" ||
+		strings.TrimSpace(card.Content) == "" || len(card.Files) > maxCardFiles {
+		return nil, &playgroundFailure{"invalid_card", "A card needs a title, content and at most 5 files."}
 	}
-	files := make([]openedCardFile, 0, len(card.Files))
-	defer func() {
-		for _, opened := range files {
-			_ = opened.file.Close()
-		}
-	}()
-	var total int64
-	for index, requested := range card.Files {
-		file, info, err := d.contextViews.OpenPlaygroundFile(ctx, tenantID, agentID, requested.Folder, requested.Path)
+	arguments := []string{"message", "card", "--title", card.Title, "--content", card.Content}
+	for _, requested := range card.Files {
+		filename, err := d.contextViews.PlaygroundFilePath(ctx, tenantID, agentID, requested.Folder, requested.Path)
 		if err != nil {
 			return nil, err
 		}
-		opened, err := prepareCardFile(file, info.Size(), index, requested)
-		files = append(files, opened)
-		if err != nil {
-			return nil, err
-		}
-		if total += info.Size(); total > maxCardTotalBytes {
-			return nil, &playgroundFailure{"files_too_large", "The files are over 512 MiB together."}
-		}
+		arguments = append(arguments, "--attach", filename)
 	}
-	profile, token, err := d.agentCLICredential(tenantID, agentID)
+	arguments = append(arguments, "--operation-id", card.OperationID, "--json")
+	installation, err := d.agentCLICredential(tenantID, agentID)
 	if err != nil {
 		return nil, err
 	}
-	return commitCard(ctx, profile, token, card, files)
+	return d.runCardCLI(ctx, installation, roomID, arguments)
 }
 
-// prepareCardFile hashes one opened file for its upload entry.
-func prepareCardFile(file *os.File, size int64, index int, requested playgroundCardFile) (openedCardFile, error) {
-	opened := openedCardFile{file: file, size: size, uploadID: "upload_" + strconv.Itoa(index)}
-	if size > maxCardFileBytes {
-		return opened, &playgroundFailure{"file_too_large", path.Base(requested.Path) + " is over 50 MiB."}
+// runCardCLI runs the bundled CLI with a profile of its own that targets the
+// card's Room. The credential stays in its file; the CLI reads it.
+func (d *Daemon) runCardCLI(ctx context.Context, installation clicredential.Installation, roomID string, arguments []string) (map[string]any, error) {
+	if d.teamhubCLIBin == "" {
+		return nil, &playgroundFailure{"cli_unavailable", "This Computer has no TeamHub CLI; update the Computer."}
 	}
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return opened, err
+	program := filepath.Join(d.teamhubCLIBin, "teamhub")
+	if runtime.GOOS == "windows" {
+		program += ".exe"
 	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return opened, err
-	}
-	opened.upload = map[string]any{
-		"upload_id": opened.uploadID, "filename": path.Base(requested.Path),
-		"representation_format": requested.RepresentationFormat, "media_type": requested.MediaType,
-		"size_bytes": size, "sha256": hex.EncodeToString(hash.Sum(nil)),
-	}
-	return opened, nil
-}
-
-// commitCard posts the card and its prepared files as the Agent.
-func commitCard(ctx context.Context, profile clicredential.Profile, token string, card playgroundCard, files []openedCardFile) (map[string]any, error) {
-	segments := []map[string]any{{"type": "text", "content": card.Content}}
-	uploads := make([]map[string]any, 0, len(files))
-	for _, opened := range files {
-		segments = append(segments, map[string]any{"type": "document", "upload_id": opened.uploadID})
-		uploads = append(uploads, opened.upload)
-	}
-	invocation := sha256.Sum256([]byte(card.OperationID))
-	metadata, err := json.Marshal(map[string]any{
-		"invocation_id": "agent-invocation-sha256:" + hex.EncodeToString(invocation[:]),
-		"inbox_id":      card.InboxID, "card_title": card.Title, "segments": segments, "uploads": uploads,
-	})
+	home, err := os.MkdirTemp("", "linger-live-card-")
 	if err != nil {
 		return nil, err
 	}
-	body, writer := io.Pipe()
-	form := multipart.NewWriter(writer)
-	go func() {
-		_ = writer.CloseWithError(writeCardForm(form, metadata, files))
-	}()
-	defer body.Close()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(profile.URL, "/")+"/api/agent/v1/messages/commit", body)
+	defer os.RemoveAll(home)
+	config, err := json.Marshal(map[string]any{"version": 1, "default_profile": "live", "profiles": map[string]any{"live": map[string]any{
+		"url": installation.Profile.URL, "token_file": installation.CredentialPath,
+		"tenant_id": installation.Profile.TenantID, "agent_id": installation.Profile.AgentID,
+		"scope": map[string]string{"kind": "room", "id": roomID},
+	}}})
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("Authorization", "Bearer "+token)
-	request.Header.Set("Content-Type", form.FormDataContentType())
-	request.Header.Set("X-TeamHub-Expected-Tenant-Id", profile.TenantID)
-	request.Header.Set("X-TeamHub-Expected-Agent-Id", profile.AgentID)
-	request.Header.Set("X-TeamHub-Operation-Id", card.OperationID)
-	response, err := playgroundCardClient.Do(request)
-	if err != nil {
-		// The request may have reached TeamHub; only the same operation may retry.
+	configPath := filepath.Join(home, "config.json")
+	if err := os.WriteFile(configPath, config, 0o600); err != nil {
+		return nil, err
+	}
+	command := exec.CommandContext(ctx, program, arguments...)
+	command.Dir = home
+	command.Env = append(cardCLIEnvironment(os.Environ()), "TEAMHUB_CONFIG="+configPath, "TEAMHUB_PROFILE=live")
+	var stdout, stderr bytes.Buffer
+	command.Stdout, command.Stderr = &stdout, &stderr
+	runErr := command.Run()
+	if ctx.Err() != nil {
 		return nil, &playgroundFailure{"outcome_unknown", "The card may have been posted; check the chat before trying again."}
 	}
-	defer response.Body.Close()
-	return cardCommitResult(response)
+	if runErr != nil {
+		var exit *exec.ExitError
+		if !errors.As(runErr, &exit) {
+			return nil, runErr
+		}
+		return nil, cardCLIFailure(stderr.Bytes())
+	}
+	return cardCommitResult(stdout.Bytes())
 }
 
-func writeCardForm(form *multipart.Writer, metadata []byte, files []openedCardFile) error {
-	if err := form.WriteField("metadata", string(metadata)); err != nil {
-		return err
-	}
-	for _, opened := range files {
-		part, err := form.CreateFormFile("file", opened.uploadID)
-		if err != nil {
-			return err
-		}
-		// A file that grew since it was hashed fails TeamHub's size check.
-		if _, err := io.Copy(part, io.LimitReader(opened.file, opened.size+1)); err != nil {
-			return err
+// cardCLIEnvironment is the daemon's environment without TeamHub settings,
+// so only the card's own profile applies; proxies still reach the CLI.
+func cardCLIEnvironment(environment []string) []string {
+	kept := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		if !strings.HasPrefix(strings.ToUpper(entry), "TEAMHUB_") {
+			kept = append(kept, entry)
 		}
 	}
-	return form.Close()
+	return kept
+}
+
+// cardCLIFailure tells the live model why the CLI did not post the card. A
+// failure whose outcome the CLI could not know is never reported as refused.
+func cardCLIFailure(stderr []byte) error {
+	var envelope struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(bytes.TrimSpace(stderr), &envelope)
+	switch envelope.Error.Code {
+	case "", "connection_failed", "timeout", "outcome_unknown", "external_outcome_unknown":
+		return &playgroundFailure{"outcome_unknown", "The card may have been posted; check the chat before trying again."}
+	}
+	return &playgroundFailure{"upload_failed", strings.TrimSpace(envelope.Error.Code + ": " + envelope.Error.Message)}
 }
 
 // cardCommitResult is the posted card's message and the Documents its files
 // became, in file order.
-func cardCommitResult(response *http.Response) (map[string]any, error) {
-	data, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
-	if err != nil {
-		return nil, &playgroundFailure{"outcome_unknown", "The card may have been posted; check the chat before trying again."}
-	}
-	if response.StatusCode != http.StatusOK {
-		var envelope struct {
-			Error struct {
-				Code string `json:"code"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(data, &envelope)
-		return nil, &playgroundFailure{"upload_failed", strings.TrimSpace(fmt.Sprintf("TeamHub answered HTTP %d %s", response.StatusCode, envelope.Error.Code))}
-	}
+func cardCommitResult(stdout []byte) (map[string]any, error) {
 	var committed struct {
 		MessageID string `json:"message_id"`
 		Resources []struct {
-			Kind         string `json:"kind"`
-			SegmentIndex int    `json:"segment_index"`
-			DocumentID   string `json:"document_id"`
-			Name         string `json:"name"`
+			Kind       string `json:"kind"`
+			DocumentID string `json:"document_id"`
+			Name       string `json:"name"`
 		} `json:"resources"`
 	}
-	if err := json.Unmarshal(data, &committed); err != nil || committed.MessageID == "" {
-		return nil, &playgroundFailure{"outcome_unknown", "TeamHub's answer could not be read; check the chat before trying again."}
+	if json.Unmarshal(bytes.TrimSpace(stdout), &committed) != nil || committed.MessageID == "" {
+		return nil, &playgroundFailure{"outcome_unknown", "The CLI's answer could not be read; check the chat before trying again."}
 	}
 	documents := make([]map[string]any, 0, len(committed.Resources))
 	for _, resource := range committed.Resources {
@@ -274,22 +223,15 @@ func cardCommitResult(response *http.Response) (map[string]any, error) {
 	return map[string]any{"message_id": committed.MessageID, "documents": documents}, nil
 }
 
-// agentCLICredential is the TeamHub CLI profile and token the Agent Service
-// pushed to this Computer for the Agent.
-func (d *Daemon) agentCLICredential(tenantID, agentID string) (clicredential.Profile, string, error) {
+// agentCLICredential is the TeamHub CLI profile and credential file the
+// Agent Service pushed to this Computer for the Agent.
+func (d *Daemon) agentCLICredential(tenantID, agentID string) (clicredential.Installation, error) {
 	if d.cliCredentials == nil {
-		return clicredential.Profile{}, "", &playgroundFailure{"agent_unavailable", "This Computer holds no TeamHub credential for the Agent."}
+		return clicredential.Installation{}, &playgroundFailure{"agent_unavailable", "This Computer holds no TeamHub credential for the Agent."}
 	}
 	installation, err := d.cliCredentials.Lookup(tenantID, agentID)
 	if errors.Is(err, clicredential.ErrNotInstalled) {
-		return clicredential.Profile{}, "", &playgroundFailure{"agent_unavailable", "This Computer holds no TeamHub credential for the Agent."}
+		return clicredential.Installation{}, &playgroundFailure{"agent_unavailable", "This Computer holds no TeamHub credential for the Agent."}
 	}
-	if err != nil {
-		return clicredential.Profile{}, "", err
-	}
-	token, err := os.ReadFile(installation.CredentialPath)
-	if err != nil {
-		return clicredential.Profile{}, "", err
-	}
-	return installation.Profile, strings.TrimSpace(string(token)), nil
+	return installation, err
 }

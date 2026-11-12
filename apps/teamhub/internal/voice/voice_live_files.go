@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -248,8 +247,7 @@ func (s *Service) sendVoiceLiveCard(ctx context.Context, session voicelive.Sessi
 		if folder.taskID != "" && !slices.Contains(tasks, folder.taskID) {
 			tasks = append(tasks, folder.taskID)
 		}
-		format, mediaType := voicelive.FileType(path.Base(inside))
-		files = append(files, map[string]any{"folder": folder.folder, "path": inside, "representation_format": format, "media_type": mediaType})
+		files = append(files, map[string]any{"folder": folder.folder, "path": inside})
 	}
 	if roomID == "" {
 		roomID = session.RoomID
@@ -263,7 +261,7 @@ func (s *Service) sendVoiceLiveCard(ctx context.Context, session voicelive.Sessi
 		return "", voicelive.ErrNotFound
 	}
 	result, err := s.callVoiceLivePlayground(ctx, session, "send_card", map[string]any{
-		"operation_id": "voice-live:" + session.ID + ":" + request.CallId, "inbox_id": "room:" + roomID,
+		"operation_id": voiceLiveInvocationID(session, request), "inbox_id": "room:" + roomID,
 		"title": title, "content": content, "files": files,
 	}, voiceLiveCardDeadline)
 	if err != nil {

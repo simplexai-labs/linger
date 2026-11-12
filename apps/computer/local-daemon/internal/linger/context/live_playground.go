@@ -149,6 +149,21 @@ func (s *ViewStore) OpenPlaygroundFile(ctx context.Context, tenantID, agentID st
 	return file, info, nil
 }
 
+// PlaygroundFilePath is the path of one regular file of a folder, checked
+// the way OpenPlaygroundFile checks it, for a program that reads it itself.
+func (s *ViewStore) PlaygroundFilePath(ctx context.Context, tenantID, agentID string, folder PlaygroundFolder, relative string) (string, error) {
+	file, _, err := s.OpenPlaygroundFile(ctx, tenantID, agentID, folder, relative)
+	if err != nil {
+		return "", err
+	}
+	_ = file.Close()
+	directory, err := s.PlaygroundDirectory(ctx, tenantID, agentID, folder)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(directory, filepath.FromSlash(strings.Trim(relative, "/"))), nil
+}
+
 func openPlaygroundPath(directory, relative string) (*os.File, error) {
 	relative = filepath.FromSlash(strings.Trim(relative, "/"))
 	if relative == "" || relative == "." {

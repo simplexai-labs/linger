@@ -296,6 +296,7 @@ func run(args []string) (resultErr error) {
 		BrowserConnections: browserConnections, Owners: owners,
 		ComputerPermissions: localtools.NewComputerPermissions(permissionOptions),
 		CLICredentials:      cliCredentials,
+		TeamHubCLIBin:       teamhubBin,
 		ModelInvoker: provider.ModelInvoker{
 			TempBase:         operationTempBase,
 			ClaudeConfigRoot: filepath.Join(computer.StateDirectory, "model-invoke", "claude", ".claude"),

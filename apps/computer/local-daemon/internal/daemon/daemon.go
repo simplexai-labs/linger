@@ -44,6 +44,9 @@ type Options struct {
 	ComputerPermissions ComputerPermissions
 	Owners              []ComputerOwner
 	CLICredentials      *clicredential.Store
+	// TeamHubCLIBin is the bundled TeamHub CLI directory; live voice cards
+	// post through it as the Agent.
+	TeamHubCLIBin       string
 	ComputerID          string
 	OperationResolver   OperationResolver
 	RetryDelay          func(attempt int) time.Duration
@@ -99,6 +102,7 @@ type Daemon struct {
 	computerPermissions ComputerPermissions
 	owners              []ComputerOwner
 	cliCredentials      *clicredential.Store
+	teamhubCLIBin       string
 	onModelUnavailable  func(runtimeType, modelID string)
 	openMCPProxies      func(context.Context, json.RawMessage, mcpproxy.OperationIdentity) (*mcpproxy.Set, error)
 	connectionEpoch     uint64
@@ -242,6 +246,7 @@ func New(options Options) (*Daemon, error) {
 		computerPermissions:  options.ComputerPermissions,
 		owners:               options.Owners,
 		cliCredentials:       options.CLICredentials,
+		teamhubCLIBin:        options.TeamHubCLIBin,
 		openMCPProxies:       mcpproxy.Open,
 		onModelUnavailable:   options.OnModelUnavailable,
 	}, nil

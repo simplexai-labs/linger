@@ -2,7 +2,6 @@ package voicelive
 
 import (
 	"fmt"
-	"mime"
 	"path"
 	"strings"
 	"time"
@@ -86,24 +85,6 @@ func ParsePlaygroundPath(raw string) (PlaygroundPath, bool) {
 	}
 	folder, inside, _ := strings.Cut(rest, "/")
 	return PlaygroundPath{Folder: folder, Inside: inside}, true
-}
-
-// FileType is the Document representation format and media type a file is
-// stored with, from its extension.
-func FileType(filename string) (format, mediaType string) {
-	extension := strings.ToLower(path.Ext(filename))
-	format = strings.TrimPrefix(extension, ".")
-	switch format {
-	case "":
-		format = "binary"
-	case "md":
-		format = "markdown"
-	}
-	mediaType = mime.TypeByExtension(extension)
-	if mediaType == "" {
-		mediaType = "application/octet-stream"
-	}
-	return format, mediaType
 }
 
 // ListEntry is one row of a folder listing.

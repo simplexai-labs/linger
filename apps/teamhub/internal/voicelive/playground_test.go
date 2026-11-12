@@ -43,16 +43,10 @@ func TestFormatListingReadsLikeLs(t *testing.T) {
 	}
 }
 
-func TestHumanSizeAndFileType(t *testing.T) {
+func TestHumanSize(t *testing.T) {
 	for size, want := range map[int64]string{0: "0", 512: "512", 3800: "3.7K", 201_728: "197K", 12 << 20: "12M"} {
 		if got := HumanSize(size); got != want {
 			t.Errorf("HumanSize(%d)=%s, want %s", size, got, want)
-		}
-	}
-	for name, want := range map[string][2]string{"a.PNG": {"png", "image/png"}, "r.md": {"markdown", ""}, "blob": {"binary", "application/octet-stream"}} {
-		format, media := FileType(name)
-		if format != want[0] || (want[1] != "" && media != want[1]) {
-			t.Errorf("FileType(%s)=%s %s", name, format, media)
 		}
 	}
 }
