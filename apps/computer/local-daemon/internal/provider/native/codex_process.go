@@ -306,10 +306,12 @@ func (p *codexProcess) stopTree() bool {
 	p.mu.Unlock()
 	p.reapWithGrace()
 	gone := p.groupGone()
-	p.mu.Lock()
-	external := p.external
-	p.mu.Unlock()
-	excused := cleanupErr == nil || (external && errors.Is(cleanupErr, errCodexChildGone))
+	// A cleanup that failed because the process had gone needs no excuse
+	// beyond the reaped leader and the empty group: nothing is left to run
+	// the turn or its terminals. Who ended the process does not matter, and
+	// cannot be told reliably: the leader can exit just before the stop
+	// above closes its stdin, which then counts the exit as the stop's.
+	excused := cleanupErr == nil || errors.Is(cleanupErr, errCodexChildGone)
 	return p.confirmIf(p.isReaped() && gone && excused, logger)
 }
 
