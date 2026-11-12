@@ -205,11 +205,12 @@ func runToolFixture(mode string) {
 					}
 				case "list_windows":
 					windows := []any{map[string]any{"pid": 42, "window_id": 9, "title": "b", "z_index": 3, "is_on_screen": true, "bounds": map[string]any{"width": 800, "height": 600}}}
-					if mode == "tabs-everyday" {
-						// Each start or command line of the user's Chrome
-						// shows one more window beside the user's own.
-						for i := range strings.Count(string(data), `"name":"open"`) {
-							windows = append(windows, map[string]any{"pid": 42, "window_id": 11 + i, "title": "Home", "z_index": 2, "is_on_screen": true, "bounds": map[string]any{"width": 900, "height": 700}})
+					if mode == "tabs-everyday" && strings.Count(string(data), `"name":"open"`) >= 2 {
+						// After the start and the command line, a window of
+						// the user's that Chrome restored late lists before
+						// the Computer's window.
+						for _, id := range []int{11, 12} {
+							windows = append(windows, map[string]any{"pid": 42, "window_id": id, "title": "Home", "z_index": 2, "is_on_screen": true, "bounds": map[string]any{"width": 900, "height": 700}})
 						}
 					}
 					if mode == "tabs-ghost" {
@@ -227,8 +228,15 @@ func runToolFixture(mode string) {
 					for i := range tabs {
 						fmt.Fprintf(&tree, "- [%d] AXRadioButton \"Tab %d\"\n- [%d] AXButton \"Close\" [actions=[press]]\n", 2*i, i, 2*i+1)
 					}
+					// The address bar shows its site without the scheme, as
+					// Chrome's does: window 12 shows the site just opened.
+					window, _ := request.Params.Arguments["window_id"].(float64)
+					address := map[float64]string{12: "example.com"}[window]
+					if address == "" {
+						address = "news.example.org/today"
+					}
 					result = map[string]any{"content": []any{}, "structuredContent": map[string]any{"tree_markdown": tree.String(), "elements": []any{
-						map[string]any{"element_token": "s1:1", "role": "AXTextField", "label": "Address and search bar"},
+						map[string]any{"element_token": "s1:1", "role": "AXTextField", "label": "Address and search bar", "value": address},
 					}}}
 				}
 				break
@@ -1858,8 +1866,9 @@ func TestLocalToolCuaDeltaCountFailureReadsFullWindowOnlyOnce(t *testing.T) {
 	}
 }
 
-// A launch opens a fresh window when the listed one has left the
-// accessibility tree.
+// The user quits their Chrome themselves; the Computer then starts it with
+// the setting and opens its own window, found by the site it shows, and the
+// user's Chrome takes no keys in any of its windows.
 func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("the Computer's window in the user's Chrome is macOS only")
@@ -1871,22 +1880,15 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 	t.Cleanup(func() { agentChromePause = pause })
 	marker := filepath.Join(t.TempDir(), "calls.jsonl")
 	c := cuaFixtureSession(t, "tabs-everyday", marker)
-	command := everydayChromeExecutable
+	running, command := 42, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 	pid := everydayChromePID
-	everydayChromePID = func(context.Context) (int, string, error) { return 42, command, nil }
+	everydayChromePID = func(context.Context) (int, string, error) { return running, command, nil }
 	t.Cleanup(func() { everydayChromePID = pid })
-	stopped := 0
-	stop := stopEverydayChrome
-	stopEverydayChrome = func(context.Context, int) error {
-		stopped++
-		command = everydayChromeExecutable + " --disable-backgrounding-occluded-windows"
-		return nil
-	}
-	t.Cleanup(func() { stopEverydayChrome = stop })
 	var opened [][]string
 	open := agentChromeOpen
 	agentChromeOpen = func(_ context.Context, args []string) ([]byte, error) {
 		opened = append(opened, args)
+		running, command = 42, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --disable-backgrounding-occluded-windows"
 		f, err := os.OpenFile(marker, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {
 			return nil, err
@@ -1899,26 +1901,25 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 	data := everydayChromeData
 	everydayChromeData = func() string { return t.TempDir() }
 	t.Cleanup(func() { everydayChromeData = data })
-	settle := everydayChromeSettle
-	everydayChromeSettle = 0
-	t.Cleanup(func() { everydayChromeSettle = settle })
 	b := agentBrowsers[0]
-	// A Chrome started without the setting restarts only with consent.
-	if _, err := c.launchAgentChrome(t.Context(), b, []string{"https://example.com/"}, false); !errors.Is(err, errNotSent) || !strings.Contains(err.Error(), "COMPUTER_BROWSER_RESTART_REQUIRED") || stopped != 0 || len(opened) != 0 {
-		t.Fatalf("err=%v stopped=%d opened=%v, want a refused launch", err, stopped, opened)
+	// A Chrome started without the setting is never quit by the Computer.
+	if _, err := c.launchAgentChrome(t.Context(), b, []string{"https://example.com/"}); !errors.Is(err, errNotSent) || !strings.Contains(err.Error(), "COMPUTER_BROWSER_RESTART_REQUIRED") || len(opened) != 0 {
+		t.Fatalf("err=%v opened=%v, want a refused launch", err, opened)
 	}
-	result, err := c.launchAgentChrome(t.Context(), b, []string{"https://example.com/"}, true)
+	// The user quits it; the Computer starts it with the setting and their
+	// windows, then opens the site in a new window.
+	running = 0
+	result, err := c.launchAgentChrome(t.Context(), b, []string{"https://example.com/"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stopped != 1 || len(opened) != 2 || !slices.Contains(opened[0], "--restore-last-session") || !slices.Contains(opened[0], "--disable-backgrounding-occluded-windows") || !slices.Equal(opened[1][len(opened[1])-3:], []string{"--profile-directory=Default", "--new-window", "https://example.com/"}) {
-		t.Fatalf("stopped=%d opened=%v, want a restart, then the site in a new window", stopped, opened)
+	if len(opened) != 2 || !slices.Contains(opened[0], "--restore-last-session") || !slices.Contains(opened[0], "--disable-backgrounding-occluded-windows") || !slices.Equal(opened[1][len(opened[1])-3:], []string{"--profile-directory=Default", "--new-window", "https://example.com/"}) {
+		t.Fatalf("opened=%v, want a start with the user's windows, then the site in a new window", opened)
 	}
+	// Window 11, restored late, lists first, but it shows another site.
 	if !strings.Contains(string(result), `"window_id":12`) || !strings.Contains(string(result), "takes no keys") {
-		t.Fatalf("result=%s, want the new window 12 after the restored one, and the note", result)
+		t.Fatalf("result=%s, want the new window 12 that shows the site, and the note", result)
 	}
-	// The new window is the Computer's: input to it is paced and held, and
-	// the user's own window 9 is not the Computer's.
 	if own, err := c.isAgentChrome(t.Context(), float64(42), float64(12)); err != nil || !own {
 		t.Fatalf("own=%v err=%v, want window 12 as the Computer's", own, err)
 	}
@@ -1927,18 +1928,20 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 			t.Fatalf("the user's own Chrome window %v read as the Computer's", user)
 		}
 	}
-	for _, call := range []string{
-		`{"pid":42,"window_id":12,"keys":["cmd","["]}`,
+	// No key reaches the user's Chrome, in the Computer's window or theirs.
+	for _, call := range []struct{ name, args string }{
+		{"hotkey", `{"pid":42,"window_id":12,"keys":["cmd","["]}`},
+		{"hotkey", `{"pid":42,"window_id":9,"keys":["cmd","w"]}`},
+		{"type_text", `{"pid":42,"window_id":12,"text":"kettle","element_token":"s1:1"}`},
+		{"press_key", `{"pid":42,"window_id":12,"key":"return"}`},
+		{"press_key", `{"pid":42,"window_id":12,"key":"return","element_token":"s1:1","modifiers":[]}`},
+		{"press_key", `{"pid":42,"window_id":12,"key":"cmd+r","element_token":"s1:1"}`},
+		{"press_key", `{"pid":42,"window_id":9,"key":"return","element_token":"s1:1"}`},
+		{"recognize_text", `{"pid":42,"window_id":12,"pages":2,"next_key":"pagedown"}`},
 	} {
-		if _, err := c.call(t.Context(), "hotkey", json.RawMessage(call)); !strings.Contains(fmt.Sprint(err), "COMPUTER_KEYS_REFUSED") {
-			t.Fatalf("hotkey err=%v, want refused", err)
+		if _, err := c.call(t.Context(), call.name, json.RawMessage(call.args)); !strings.Contains(fmt.Sprint(err), "COMPUTER_KEYS_REFUSED") {
+			t.Fatalf("%s %s: err=%v, want refused", call.name, call.args, err)
 		}
-	}
-	if _, err := c.call(t.Context(), "type_text", json.RawMessage(`{"pid":42,"window_id":12,"text":"kettle","element_token":"s1:1"}`)); !strings.Contains(fmt.Sprint(err), "COMPUTER_KEYS_REFUSED") {
-		t.Fatalf("type_text err=%v, want refused", err)
-	}
-	if _, err := c.call(t.Context(), "press_key", json.RawMessage(`{"pid":42,"window_id":12,"key":"return"}`)); !strings.Contains(fmt.Sprint(err), "COMPUTER_KEYS_REFUSED") {
-		t.Fatalf("unbound press_key err=%v, want refused", err)
 	}
 	if _, err := c.call(t.Context(), "press_key", json.RawMessage(`{"pid":42,"window_id":12,"key":"return","element_token":"s1:1"}`)); err != nil {
 		t.Fatalf("Return bound to a field: %v", err)
@@ -1946,18 +1949,22 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 	if _, err := c.call(t.Context(), "set_value", json.RawMessage(`{"pid":42,"window_id":12,"value":"kettle","element_token":"s1:1"}`)); err != nil {
 		t.Fatalf("set_value: %v", err)
 	}
-	// A script there may not send keys either.
-	if _, err := c.call(t.Context(), "run_script", json.RawMessage(`{"script":"return 1"}`)); err != nil {
-		t.Fatal(err)
-	}
-	if calls := fixtureCalls(t, marker); !strings.Contains(fmt.Sprint(calls[len(calls)-1]), "noKeys = true") {
-		t.Fatalf("last call=%v, want a script guarded against keys", calls[len(calls)-1])
+	// A script there, or in one of the user's windows, may not send keys.
+	for _, script := range []string{`{"script":"return 1"}`, `{"script":"return 1","args":{"pid":42,"window_id":9}}`} {
+		if _, err := c.call(t.Context(), "run_script", json.RawMessage(script)); err != nil {
+			t.Fatal(err)
+		}
+		if calls := fixtureCalls(t, marker); !strings.Contains(fmt.Sprint(calls[len(calls)-1]), "noKeys = true") {
+			t.Fatalf("%s: last call=%v, want a script guarded against keys", script, calls[len(calls)-1])
+		}
 	}
 	if err := c.drain(); err != nil {
 		t.Fatal(err)
 	}
 }
 
+// A launch opens a fresh window when the listed one has left the
+// accessibility tree.
 func TestLocalToolCuaMacAgentChromeOpensAFreshWindowForAnUnreadableOne(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("the Computer's own Chrome is macOS only")
@@ -1987,7 +1994,7 @@ func TestLocalToolCuaMacAgentChromeOpensAFreshWindowForAnUnreadableOne(t *testin
 	}
 	t.Cleanup(func() { agentChromeOpen = open })
 	b := agentBrowser{Name: "Chrome", Bundle: "com.google.Chrome", Directory: "agent-chrome-test", Args: func(string) []string { return nil }, AddressRole: "AXTextField", AddressLabel: "Address and search bar"}
-	result, err := c.launchAgentChrome(t.Context(), b, []string{"https://example.com/"}, false)
+	result, err := c.launchAgentChrome(t.Context(), b, []string{"https://example.com/"})
 	if err != nil {
 		t.Fatal(err)
 	}

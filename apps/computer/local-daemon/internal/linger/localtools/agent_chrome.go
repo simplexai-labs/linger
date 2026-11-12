@@ -58,7 +58,7 @@ var agentChromePID = func(ctx context.Context, directory string) (int, string, e
 // brings its first window forward once, where the user is. Later URLs open
 // in a new tab through the window's accessibility tree and one Return key to
 // that browser alone, so the user's apps, focus and Space stay as they are.
-func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls []string, restart bool) (json.RawMessage, error) {
+func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls []string) (json.RawMessage, error) {
 	var sites []string
 	for _, address := range urls {
 		if site := siteOf(address); site != "" {
@@ -79,7 +79,7 @@ func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls
 		return nil, err
 	}
 	if b.Everyday {
-		return c.launchEverydayChrome(ctx, b, urls, restart)
+		return c.launchEverydayChrome(ctx, b, urls)
 	}
 	if b.Shared {
 		return c.launchAgentSafari(ctx, b, urls)

@@ -98,6 +98,9 @@ type Manager struct {
 	sharedBrowserBundle string
 	sharedBrowserPID    int
 	sharedBrowserWindow float64
+	// everydayChromeQuitAsked records that the Computer asked the user to quit
+	// their Chrome, so the next start of it brings back their windows.
+	everydayChromeQuitAsked bool
 	// paceMu guards the persisted pace record of the Computer's own browser
 	// and paceLast, when that Chrome last received input; see
 	// paceAgentChrome.

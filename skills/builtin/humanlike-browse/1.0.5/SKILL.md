@@ -11,7 +11,7 @@ description: Read, survey, post to or manage a site that watches for automated b
 - Anything else on a social network, a marketplace or a site where the user is signed in: only the computer tools, through `launch_app({agent_browser: true, urls: [url]})`. In Chrome or Safari this opens a window of the Computer's own in the user's everyday browser, with the user's sign-ins; Edge and Firefox run as separate instances. Pass `bundle_id` only when the user asks for one browser. The browser tools drive a page in a way these sites detect, so never use them on these sites; the Computer keeps them off every site the task opened this way.
 - If `launch_app` has no `agent_browser`, this needs a Mac Computer: tell the user and stop.
 - If a call says a computer tool does not exist, take the tool's exact name from your tool list and call it again before telling the user the tools are unavailable.
-- If `launch_app` answers `COMPUTER_BROWSER_RESTART_REQUIRED`, ask the user with a question card whether the Computer may restart Chrome, saying that their windows and tabs come back. Only if they agree, call `launch_app` again with `restart_browser: true`; otherwise end the task.
+- If `launch_app` answers `COMPUTER_BROWSER_RESTART_REQUIRED`, ask the user with a question card to quit Chrome from its menu and leave it closed, saying that the Computer starts it again with their windows and tabs; then end your turn. When they answer that Chrome is closed, call `launch_app` again; if they decline, end the task.
 - If the site asks to sign in, ask the user to sign in once in that browser window and stop; the sign-in stays for later tasks.
 
 ## Move like a person

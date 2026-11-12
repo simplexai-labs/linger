@@ -81,7 +81,7 @@ const apply = Reflect.apply, stringify = JSON.stringify, parse = JSON.parse, tes
 const plainProtos = [Object.prototype, Array.prototype, null], real = globalThis.cua;
 const bad = /`+strings.Join(pattern, "|")+`/;
 const limit = `+strconv.Itoa(inputLimit)+`, noKeys = `+strconv.FormatBool(noKeys)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0;
-const keyed = (k, c) => k === "hotkey" || k === "typeText" || k === "pressKey" && (c.length < 2 || c[1] === null || c[1] === undefined || typeof c[0] !== "string" || c[0].indexOf("+") >= 0) || k === "call" && (c[0] === "hotkey" || c[0] === "type_text" || c[0] === "press_key" && (c[1] === null || typeof c[1] !== "object" || typeof c[1].element_token !== "string" || c[1].modifiers !== undefined));
+const keyed = (k, c) => k === "hotkey" || k === "typeText" || k === "pressKey" && (c.length !== 2 || c[1] === null || c[1] === undefined || typeof c[0] !== "string" || c[0].indexOf("+") >= 0) || k === "call" && (c[0] === "hotkey" || c[0] === "type_text" || c[0] === "press_key" && (c[1] === null || typeof c[1] !== "object" || typeof c[1].element_token !== "string" || c[1].modifiers !== undefined || typeof c[1].key !== "string" || c[1].key.indexOf("+") >= 0));
 const inputMethods = {__proto__: null, click: true, doubleClick: true, rightClick: true, drag: true, scroll: true, typeText: true, pressKey: true, hotkey: true, setValue: true};
 const inputOps = {__proto__: null, click: true, double_click: true, right_click: true, drag: true, scroll: true, type_text: true, press_key: true, hotkey: true, set_value: true};
 const input = (k, c) => inputMethods[k] === true || k === "call" && typeof c[0] === "string" && inputOps[c[0]] === true;

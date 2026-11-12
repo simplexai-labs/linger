@@ -160,8 +160,7 @@ func (m *Manager) openCua(ctx context.Context, op *operation) (*cuaSession, []to
 		if item.Name == "launch_app" && runtime.GOOS == "darwin" {
 			item.Description = "Open a macOS app in the background through Launch Services, as `open -g` does, and return its pid and windows. Optional urls are handed to the app; for Finder, pass a folder to open it in a window."
 			item.InputSchema = schema(map[string]any{"bundle_id": map[string]string{"type": "string", "description": "Preferred, for example com.apple.TextEdit."}, "name": map[string]string{"type": "string", "description": "App name, when the bundle id is unknown."}, "urls": map[string]any{"type": "array", "items": map[string]string{"type": "string"}, "description": "Files or folders to open in the app."},
-				"agent_browser":   map[string]string{"type": "boolean", "description": "Open the URLs in the Computer's own browser window, which keeps working while other windows cover it on the user's desktop. Only a site's home page opens there, such as https://www.example.com/. With no bundle_id it is the first installed of Chrome, Edge, Firefox and Safari; a bundle_id of com.google.Chrome, com.microsoft.edgemac, org.mozilla.firefox or com.apple.Safari picks one. In Chrome and Safari it is a window of the Computer's own in the user's everyday browser, with the user's sign-ins; in Chrome it opens one site per call. Edge and Firefox run as separate instances with their own sign-ins."},
-				"restart_browser": map[string]string{"type": "boolean", "description": "With agent_browser in Chrome: restart the user's Chrome so the Computer's window keeps working while covered. Pass it only after the user agreed to a COMPUTER_BROWSER_RESTART_REQUIRED question."}})
+				"agent_browser": map[string]string{"type": "boolean", "description": "Open the URLs in the Computer's own browser window, which keeps working while other windows cover it on the user's desktop. Only a site's home page opens there, such as https://www.example.com/. With no bundle_id it is the first installed of Chrome, Edge, Firefox and Safari; a bundle_id of com.google.Chrome, com.microsoft.edgemac, org.mozilla.firefox or com.apple.Safari picks one. In Chrome and Safari it is a window of the Computer's own in the user's everyday browser, with the user's sign-ins; in Chrome it opens one site per call. Edge and Firefox run as separate instances with their own sign-ins."}})
 		}
 		if item.Name == "get_desktop_state" {
 			item.Description += " Read-only whole-screen view; act through the window tools with a pid and window_id. A system privacy prompt about CuaDriver belongs to the user: never answer it, and keep working through the window tools."
@@ -396,6 +395,26 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 			}
 		}
 	}
+	// A key to the user's Chrome reaches the window that has the keyboard,
+	// whichever window it names, so it is refused before anything is taken.
+	if name == "hotkey" || name == "type_text" || name == "press_key" || paged {
+		user, err := c.userChrome(ctx, arguments["pid"])
+		if err != nil {
+			return nil, err
+		}
+		if user && paged {
+			return nil, fmt.Errorf("%s: %w", everydayChromeKeysRefused, errNotSent)
+		}
+		if user {
+			own, err := c.isAgentChrome(ctx, arguments["pid"], arguments["window_id"])
+			if err != nil {
+				return nil, err
+			}
+			if err := everydayChromeKeys(name, arguments, own); err != nil {
+				return nil, err
+			}
+		}
+	}
 	agentChrome, err := c.claimAgentChromeInput(ctx, name, arguments, paged)
 	if err != nil {
 		return nil, err
@@ -439,14 +458,14 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 			return nil, err
 		}
 	}
-	everyday := paced && c.everydayChrome(target["pid"])
-	if everyday && name != "run_script" {
-		if err := everydayChromeKeys(name, arguments); err != nil {
-			return nil, err
-		}
-	}
 	if name == "run_script" {
-		if err := scriptArguments(ctx, arguments, c.reviewScope(), scriptInputs, everyday); err != nil {
+		noKeys := false
+		if scriptTarget != nil {
+			if noKeys, err = c.userChrome(ctx, scriptTarget["pid"]); err != nil {
+				return nil, err
+			}
+		}
+		if err := scriptArguments(ctx, arguments, c.reviewScope(), scriptInputs, noKeys); err != nil {
 			return nil, err
 		}
 	}
@@ -1958,8 +1977,7 @@ func (c *cuaSession) launchApp(ctx context.Context, arguments map[string]any) (j
 		if err != nil {
 			return nil, err
 		}
-		restart, _ := arguments["restart_browser"].(bool)
-		return c.launchAgentChrome(ctx, b, addresses, restart)
+		return c.launchAgentChrome(ctx, b, addresses)
 	}
 	app, flag := bundle, "-b"
 	if app == "" {

@@ -14,7 +14,7 @@ import (
 // the same prelude's semantics.
 const guardHarness = `import fs from "fs";
 const log = [];
-class App { constructor(n) { this.n = n; } click(a) { log.push("raw:" + JSON.stringify(a)); return "clicked"; } typeText(text, on, options) { log.push("type:" + JSON.stringify(options)); return "typed"; } }
+class App { constructor(n) { this.n = n; } click(a) { log.push("raw:" + JSON.stringify(a)); return "clicked"; } typeText(text, on, options) { log.push("type:" + JSON.stringify(options)); return "typed"; } pressKey(key, on) { log.push("key:" + key); return "pressed"; } }
 const fake = { call(t, a) { log.push("call:" + t + ":" + JSON.stringify(a)); return Promise.resolve({ok: true}); },
   getApp() { return Promise.resolve(new App("a")); },
   listApps() { return Promise.resolve([new App("b")]); },
@@ -175,6 +175,11 @@ func TestScriptGuardRefusesKeysForTheEverydayChrome(t *testing.T) {
 		{`const app = await cua.getApp({pid: 1}); return app.typeText("kettle", {role: "AXTextField"});`, "threw:COMPUTER_KEYS_REFUSED"},
 		{`return await cua.call("press_key", {pid: 1, key: "return"});`, "threw:COMPUTER_KEYS_REFUSED"},
 		{`return await cua.call("press_key", {pid: 1, key: "return", element_token: "s1:2", modifiers: ["cmd"]});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("press_key", {pid: 1, key: "return", element_token: "s1:2", modifiers: []});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("press_key", {pid: 1, key: "cmd+r", element_token: "s1:2"});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({pid: 1}); return app.pressKey("cmd+r", "s1:2");`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({pid: 1}); return app.pressKey("return");`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({pid: 1}); return app.pressKey("return", "s1:2");`, "pressed"},
 		{`return await cua.call("press_key", {pid: 1, key: "return", element_token: "s1:2"});`, "call:press_key"},
 		{`return await cua.call("click", {pid: 1, element_token: "s1:2"});`, "call:click"},
 	} {
