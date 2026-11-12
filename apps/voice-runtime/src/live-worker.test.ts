@@ -1451,9 +1451,13 @@ describe("LiveVoiceWorker background work", () => {
         { type: "update_accepted", id },
         { type: "response_finished", canceled: false, updateId: id },
       );
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Once it is given up the next update is told, and nothing more of it.
+    test.setAlerts([{ alert_id: "a2", text: "Max @you" }]);
+    await vi.waitFor(() =>
+      expect(test.session().tell).toHaveBeenCalledTimes(2),
+    );
+    expect(test.session().tell.mock.calls[1]![2]).not.toBe(id);
     expect(test.session().repeatUpdate).toHaveBeenCalledTimes(2);
-    expect(test.session().tell).toHaveBeenCalledOnce();
     expect(test.session().abandon).not.toHaveBeenCalled();
     await test.shutdown();
   });
