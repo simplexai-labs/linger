@@ -11,7 +11,7 @@ description: Read, survey, post to or manage a site that watches for automated b
 - Anything else on a social network, a marketplace or a site where the user is signed in: only the computer tools, through `launch_app({agent_browser: true, urls: [url]})`. In Chrome or Safari this opens a window of the Computer's own in the user's everyday browser, with the user's sign-ins; Edge and Firefox run as separate instances. Pass `bundle_id` only when the user asks for one browser. The browser tools drive a page in a way these sites detect, so never use them on these sites; the Computer keeps them off every site the task opened this way.
 - If `launch_app` has no `agent_browser`, this needs a Mac Computer: tell the user and stop.
 - If a call says a computer tool does not exist, take the tool's exact name from your tool list and call it again before telling the user the tools are unavailable.
-- If `launch_app` answers `COMPUTER_BROWSER_RESTART_REQUIRED`, ask the user with a question card to quit Chrome from its menu and leave it closed, saying that the Computer starts it again with their windows and tabs; then end your turn. When they answer that Chrome is closed, call `launch_app` again; if they decline, end the task.
+- If `launch_app` answers `COMPUTER_BROWSER_RESTART_REQUIRED`, ask the user with a question card whether the Computer may restart Chrome, saying that their windows and tabs come back. Only if they agree, call `launch_app` again with `restart_browser: true`; otherwise end the task.
 - If the site asks to sign in, ask the user to sign in once in that browser window and stop; the sign-in stays for later tasks.
 
 ## Move like a person
@@ -31,10 +31,10 @@ The user watches the window, and each turn of yours costs seconds. The Computer 
 
 - Browse in this conversation yourself. Do not hand the browsing to a background Task: starting one adds a minute, and the user watches this Room.
 - Put each page visit in one `run_script`: search, wait, read what you need, open the item, wait, read it, go back. Return to the model only to choose something, such as which items to open.
-- Fill a search box with `setValue`, then click the site's search button. Return on the box also works in Safari, Edge and Firefox.
-- The user's Chrome takes no keys from the Computer: a key could reach the Chrome window the user is typing in. There, never use `typeText`, `hotkey` or `pressKey`, not even Return in the search box.
+- Fill a search box with `setValue`, then click the site's search button. Return on the box also works in Edge and Firefox.
+- The user's Chrome takes no keys from the Computer: a key could reach the Chrome window the user is typing in. There, never use `typeText`, `hotkey` or a key without an element; Return bound to the search box goes only while no other Chrome window could take it.
 - After a click that loads something, wait with `app.waitFor` for what the next page shows, such as a heading or a button, with `timeout_ms` about 8000. Never wait with `cua.sleep`; one sleep lasts at most 1.5 s there.
-- Read only what you need: `app.query({role, name})`, `getState({query})` or `get_window_state` with `query`. Read the whole tree only to find your way on a page you have not seen. A read with a screenshot takes seconds on a busy page; ask for one only to see what the text does not hold.
+- Read only what you need: `app.query({role, name})`, `getState({query})` or `get_window_state` with `query`. Read the whole tree only to find your way on a page you have not seen.
 
 A visit to a result, in one script:
 
