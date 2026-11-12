@@ -91,16 +91,11 @@ type Manager struct {
 	agentChromeOwner   *operation
 	agentChromePID     int
 	agentChromeChecked time.Time
-	// sharedBrowserBundle, sharedBrowserPID and sharedBrowserWindow are the
-	// user's own browser the Computer works in, such as their everyday Chrome
-	// or Safari, and the window in it that the Computer opened as its own;
-	// see launchEverydayChrome and launchAgentSafari.
-	sharedBrowserBundle string
-	sharedBrowserPID    int
-	sharedBrowserWindow float64
-	// everydayChromeQuitAsked records that the Computer asked the user to quit
-	// their Chrome, so the next start of it brings back their windows.
-	everydayChromeQuitAsked bool
+	// sharedWindows holds, by bundle id, the user's own browser the Computer
+	// works in, such as their everyday Chrome or Safari, and the window in it
+	// that the Computer opened as its own; see launchEverydayChrome and
+	// launchAgentSafari.
+	sharedWindows map[string]sharedWindow
 	// paceMu guards the persisted pace record of the Computer's own browser
 	// and paceLast, when that Chrome last received input; see
 	// paceAgentChrome.
@@ -133,19 +128,24 @@ func New(options Options) (*Manager, error) {
 }
 
 // retireAgentChromeProfile removes the separate Chrome profile the Computer
-// used before it worked in a window of the user's everyday Chrome. A profile
-// whose Chrome still runs stays until a later start finds it closed.
+// used before it worked in a window of the user's everyday Chrome. A Chrome
+// still running on it is the Computer's own, so it is quit first; a profile
+// whose Chrome does not quit stays until a later start.
 func retireAgentChromeProfile(state string) {
 	directory := filepath.Join(state, "computer-tools", "agent-chrome")
 	if _, err := os.Stat(directory); err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), agentChromeWait+5*time.Second)
 	defer cancel()
-	if pid, _, err := agentChromePID(ctx, directory); err != nil || pid > 0 {
-		return
+	pid, _, err := agentChromePID(ctx, directory)
+	if err == nil && pid > 0 {
+		_, err = stopAgentChrome(ctx, directory, pid)
 	}
-	if err := os.RemoveAll(directory); err != nil {
+	if err == nil {
+		err = os.RemoveAll(directory)
+	}
+	if err != nil {
 		slog.Warn("agent_browser.retire_profile_failed", "error", err)
 	}
 }

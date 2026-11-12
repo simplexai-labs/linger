@@ -14,9 +14,9 @@ import (
 // the same prelude's semantics.
 const guardHarness = `import fs from "fs";
 const log = [];
-class App { constructor(n) { this.n = n; } click(a) { log.push("raw:" + JSON.stringify(a)); return "clicked"; } typeText(text, on, options) { log.push("type:" + JSON.stringify(options)); return "typed"; } pressKey(key, on) { log.push("key:" + key); return "pressed"; } }
+class App { constructor(n, pid, windowId) { this.n = n; this.pid = pid; this.windowId = windowId; } hotkey(keys) { log.push("hotkey:" + keys.join("+")); return "hotkeyed"; } click(a) { log.push("raw:" + JSON.stringify(a)); return "clicked"; } typeText(text, on, options) { log.push("type:" + JSON.stringify(options)); return "typed"; } pressKey(key, on) { log.push("key:" + key); return "pressed"; } }
 const fake = { call(t, a) { log.push("call:" + t + ":" + JSON.stringify(a)); return Promise.resolve({ok: true}); },
-  getApp() { return Promise.resolve(new App("a")); },
+  getApp(target) { return Promise.resolve(new App("a", target && target.pid, target && target.windowId)); },
   listApps() { return Promise.resolve([new App("b")]); },
   box() { return Promise.resolve({inner: {app: new App("c")}}); },
   sleep(ms) { log.push("sleep:" + (ms >= 100 && ms < 250 ? "paced" : ms)); return Promise.resolve(); } };
@@ -55,7 +55,7 @@ func TestScriptGuardRefusesForbiddenInputInAJSEngine(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			script := filepath.Join(dir, "script.js")
-			if err := os.WriteFile(script, []byte(guardedScript(`{"n":1}`, tc.body, 42, 0, false)), 0o600); err != nil {
+			if err := os.WriteFile(script, []byte(guardedScript(`{"n":1}`, tc.body, 42, 0, sharedWindow{})), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			out, err := exec.Command(node, harness, script).CombinedOutput()
@@ -84,7 +84,7 @@ func TestScriptGuardPacesInputsForTheComputersChrome(t *testing.T) {
 	if err := os.WriteFile(harness, []byte(guardHarness), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, 2, false)), 0o600); err != nil {
+	if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, 2, sharedWindow{})), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command(node, harness, script).CombinedOutput()
@@ -112,7 +112,7 @@ func TestScriptGuardSpeedsTypingAndCapsWaits(t *testing.T) {
 	if err := os.WriteFile(harness, []byte(guardHarness), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, 20, false)), 0o600); err != nil {
+	if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, 20, sharedWindow{})), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command(node, harness, script).CombinedOutput()
@@ -145,7 +145,7 @@ func TestScriptGuardRefusesLaunchAppForTheComputersChrome(t *testing.T) {
 		want  string
 	}{{2, "threw:COMPUTER_SCRIPT_REFUSED"}, {0, "call:launch_app"}} {
 		script := filepath.Join(dir, "script.js")
-		if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, tc.limit, false)), 0o600); err != nil {
+		if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, tc.limit, sharedWindow{})), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		out, err := exec.Command(node, harness, script).CombinedOutput()
@@ -170,21 +170,29 @@ func TestScriptGuardRefusesKeysForTheEverydayChrome(t *testing.T) {
 	if err := os.WriteFile(harness, []byte(guardHarness), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The user's Chrome runs as pid 1, and the Computer's window there is 12.
 	for _, tc := range []struct{ body, want string }{
-		{`return await cua.call("hotkey", {pid: 1, keys: ["cmd", "["]});`, "threw:COMPUTER_KEYS_REFUSED"},
-		{`const app = await cua.getApp({pid: 1}); return app.typeText("kettle", {role: "AXTextField"});`, "threw:COMPUTER_KEYS_REFUSED"},
-		{`return await cua.call("press_key", {pid: 1, key: "return"});`, "threw:COMPUTER_KEYS_REFUSED"},
-		{`return await cua.call("press_key", {pid: 1, key: "return", element_token: "s1:2", modifiers: ["cmd"]});`, "threw:COMPUTER_KEYS_REFUSED"},
-		{`return await cua.call("press_key", {pid: 1, key: "return", element_token: "s1:2", modifiers: []});`, "threw:COMPUTER_KEYS_REFUSED"},
-		{`return await cua.call("press_key", {pid: 1, key: "cmd+r", element_token: "s1:2"});`, "threw:COMPUTER_KEYS_REFUSED"},
-		{`const app = await cua.getApp({pid: 1}); return app.pressKey("cmd+r", "s1:2");`, "threw:COMPUTER_KEYS_REFUSED"},
-		{`const app = await cua.getApp({pid: 1}); return app.pressKey("return");`, "threw:COMPUTER_KEYS_REFUSED"},
-		{`const app = await cua.getApp({pid: 1}); return app.pressKey("return", "s1:2");`, "pressed"},
-		{`return await cua.call("press_key", {pid: 1, key: "return", element_token: "s1:2"});`, "call:press_key"},
+		{`return await cua.call("hotkey", {pid: 1, window_id: 12, keys: ["cmd", "["]});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("hotkey", {keys: ["cmd", "w"]});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("hotkey", {pid: 2, keys: ["cmd", "s"]});`, "call:hotkey"},
+		{`const app = await cua.getApp({pid: 1, windowId: 12}); return app.typeText("kettle", "s1:2");`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({pid: 1, windowId: 9}); return app.hotkey(["cmd", "w"]);`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({pid: 2, windowId: 5}); return app.hotkey(["cmd", "s"]);`, "hotkeyed"},
+		{`return await cua.call("press_key", {pid: 1, window_id: 12, key: "return"});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("press_key", {pid: 1, window_id: 12, key: "return", element_token: "s1:2", modifiers: ["cmd"]});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("press_key", {pid: 1, window_id: 12, key: "return", element_token: "s1:2", modifiers: []});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("press_key", {pid: 1, window_id: 12, key: "cmd+r", element_token: "s1:2"});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("press_key", {pid: 1, window_id: 9, key: "return", element_token: "s1:2"});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("press_key", {pid: 1, window_id: 12, key: "return", element_token: "s1:2"});`, "call:press_key"},
+		{`const app = await cua.getApp({pid: 1, windowId: 12}); return app.pressKey("cmd+r", "s1:2");`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({pid: 1, windowId: 12}); return app.pressKey("return");`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({pid: 1, windowId: 12}); return app.pressKey("return", [3, 4]);`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({pid: 1, windowId: 9}); return app.pressKey("return", "s1:2");`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({pid: 1, windowId: 12}); return app.pressKey("return", "s1:2");`, "pressed"},
 		{`return await cua.call("click", {pid: 1, element_token: "s1:2"});`, "call:click"},
 	} {
 		script := filepath.Join(dir, "script.js")
-		if err := os.WriteFile(script, []byte(guardedScript(`{}`, tc.body, 42, 20, true)), 0o600); err != nil {
+		if err := os.WriteFile(script, []byte(guardedScript(`{}`, tc.body, 42, 20, sharedWindow{PID: 1, Window: 12})), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		out, err := exec.Command(node, harness, script).CombinedOutput()

@@ -223,7 +223,7 @@ const MacToolGuide = `Computer tools on this Mac (MCP server "computer"):
 - report_blocker({kind, url}) as soon as a page in the Computer's own browser shows a check only the user may pass (captcha, verification, login_required, rate_limited) or one item that cannot be viewed (content_unavailable). Never try to pass the check.
 The Computer's own browser takes input at a person's pace, within a budget per task and per day, and a script there sends at most 20 inputs: return what you have and look at the window before the next script. A tab that a link in the script opens is the task's and is in front afterwards. The browser tools stay off every site a task opened in that browser.
 Plan as many steps as you can in one run_actions call, as in one script; its read shows their effect, so do not read again before the next input unless you need another window. Keys are often shorter than clicks: in Finder, cmd+shift+g then a path and Return opens a folder, cmd+down opens the selected item, and in the Trash cmd+delete puts the selected item back.
-In Chrome, launch_app({bundle_id: "com.google.Chrome", urls: [url]}) opens a URL in a new tab without bringing Chrome forward; its pages read as empty while the window is covered or on another Space. Add agent_browser: true to use the Computer's own browser window instead: it keeps working while covered, but not on another desktop (Space). Chrome's own toolbar, such as Back and the address bar, refuses background input. In the Computer's window of the user's everyday Chrome no key or shortcut is sent: fill fields with set_value, press the page's buttons, and go back through its links. In Edge or Firefox press escape to close a page overlay, or hotkey cmd+[ to go back. A web control that ignores a background click, such as an option in a menu that opens on hover, takes one click with delivery_mode "foreground" at x,y of a screenshot.
+In Chrome, launch_app({bundle_id: "com.google.Chrome", urls: [url]}) opens a URL in a new tab without bringing Chrome forward; its pages read as empty while the window is covered or on another Space. Add agent_browser: true to use the Computer's own browser window instead: it keeps working while covered, but not on another desktop (Space). Chrome's own toolbar, such as Back and the address bar, refuses background input. The user's everyday Chrome takes no shortcut, typed text or unbound key in any window; only one plain key bound to an element of the Computer's window, such as Return in its search box, goes. Fill fields with set_value, press the page's buttons, and go back through its links. In Edge or Firefox press escape to close a page overlay, or hotkey cmd+[ to go back. A web control that ignores a background click, such as an option in a menu that opens on hover, takes one click with delivery_mode "foreground" at x,y of a screenshot.
 A menu item in the read, such as File > Put Back, can be clicked directly; do not click a menu bar title first, because an open menu holds the app until it closes. A right_click menu does not show in the read, so select the row with click and use the menu bar item or its keyboard shortcut.
 Before the first shell screenshot, or when one fails or comes back blank, run ` + "`teamhub computer permissions status`" + `; if Screen Recording is missing for Linger, run ` + "`teamhub computer permissions request --permissions screen_recording`" + ` and end your turn — the card wakes you. Never operate System Settings or privacy prompts yourself.
 ` + browserToolGuide
@@ -398,21 +398,8 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 	// A key to the user's Chrome reaches the window that has the keyboard,
 	// whichever window it names, so it is refused before anything is taken.
 	if name == "hotkey" || name == "type_text" || name == "press_key" || paged {
-		user, err := c.userChrome(ctx, arguments["pid"])
-		if err != nil {
+		if err := c.userChromeKeys(ctx, name, arguments, paged); err != nil {
 			return nil, err
-		}
-		if user && paged {
-			return nil, fmt.Errorf("%s: %w", everydayChromeKeysRefused, errNotSent)
-		}
-		if user {
-			own, err := c.isAgentChrome(ctx, arguments["pid"], arguments["window_id"])
-			if err != nil {
-				return nil, err
-			}
-			if err := everydayChromeKeys(name, arguments, own); err != nil {
-				return nil, err
-			}
 		}
 	}
 	agentChrome, err := c.claimAgentChromeInput(ctx, name, arguments, paged)
@@ -459,13 +446,13 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 		}
 	}
 	if name == "run_script" {
-		noKeys := false
-		if scriptTarget != nil {
-			if noKeys, err = c.userChrome(ctx, scriptTarget["pid"]); err != nil {
-				return nil, err
-			}
+		// A script's body may reach any app, so its guard checks every key
+		// against the user's Chrome, whatever window args names.
+		chrome, err := c.userChromeWindow(ctx)
+		if err != nil {
+			return nil, err
 		}
-		if err := scriptArguments(ctx, arguments, c.reviewScope(), scriptInputs, noKeys); err != nil {
+		if err := scriptArguments(ctx, arguments, c.reviewScope(), scriptInputs, chrome); err != nil {
 			return nil, err
 		}
 	}

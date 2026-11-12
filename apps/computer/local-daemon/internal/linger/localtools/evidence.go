@@ -641,6 +641,19 @@ func applyDiff(previous map[int]string, text string) map[int]string {
 	return rows
 }
 
+// window returns the window a token was read from, even when a later read
+// of that window replaced its snapshot.
+func (w *windowReads) window(token string) (windowKey, bool) {
+	snapshot, _, ok := strings.Cut(token, ":")
+	if !ok {
+		return windowKey{}, false
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	key, found := w.snapshots[snapshot]
+	return key, found
+}
+
 // row returns the window and row text a token names, when the token is from
 // that window's latest read.
 func (w *windowReads) row(token string) (windowKey, string, bool) {

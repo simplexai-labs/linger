@@ -334,19 +334,28 @@ starts with it, and one running without it returns
 `COMPUTER_BROWSER_RESTART_REQUIRED`. The Daemon never quits the user's Chrome,
 because a quit loses text typed into a page and not yet sent: the Agent asks
 the user to quit Chrome, and the next `launch_app` starts it with the flag and
-`--restore-last-session`. The Computer's window is the new window with one tab
-whose address bar shows the site just opened, so a window the user opens or
-Chrome restores meanwhile is never taken for it. The Daemon finds the running
-Chrome by its executable wherever the app is installed. The user's Chrome
-takes no keys from the Computer (`COMPUTER_KEYS_REFUSED`), in any of its
-windows, in tool calls, `run_actions` steps, paged `recognize_text` reads and
-scripts that target it: a shortcut runs as a menu command in the Chrome window
-that has the keyboard, and Cua types text as keys that all read as the A key.
-Only a plain key bound to an element of the Computer's window goes, and Cua
-sends it only when no other Chrome window could take it. The Agent fills fields with
+`--restore-last-session`. The Daemon records that question in
+`computer-tools/everyday-chrome-quit` in the state directory, so a Daemon
+restart keeps it, and removes the record once Chrome started. Before the
+Computer opens its window, it waits until the list of Chrome windows stops
+changing, so every restored window is there. The Computer's window is the new
+window with one tab: the one whose address bar shows the site just opened, or
+the only new window when the home page moved to another site. Two new windows
+of the site are refused with `COMPUTER_WINDOW_AMBIGUOUS`. The address bar and
+the tabs are found by role and place in the window, not by their names, which
+follow the user's language. The Daemon finds the running Chrome by its
+executable wherever the app is installed. The user's Chrome takes no keys from
+the Computer (`COMPUTER_KEYS_REFUSED`), in any of its windows, in tool calls,
+`run_actions` steps, paged `recognize_text` reads and every script: a shortcut
+runs as a menu command in the Chrome window that has the keyboard, and Cua
+types text as keys that all read as the A key. A key goes to the window its
+`element_token` was read from, and a key that names no app is refused while
+that Chrome runs. Only a plain key bound to an element of the Computer's
+window goes, and Cua sends it only when no other Chrome window could take it.
+The Agent fills fields with
 `set_value`, presses the page's buttons and goes back through its links.
-The separate Chrome profile earlier versions used, `computer-tools/agent-chrome`,
-is removed when the Daemon starts and that Chrome no longer runs.
+The Daemon removes the separate Chrome profile `computer-tools/agent-chrome`
+when it starts, after quitting the Chrome that still runs on it.
 Edge and Firefox each run as a separate instance with their own profile under
 `computer-tools/agent-<browser>` in the state directory, so the user signs in
 there once. Safari cannot run a second profile; the Computer uses its own

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -427,11 +428,10 @@ func (c *cuaSession) isAgentChrome(ctx context.Context, pid, window any) (bool, 
 	m := c.op.manager
 	m.mu.Lock()
 	known, checked := m.agentChromePID, m.agentChromeChecked
-	shared, sharedWindow := m.sharedBrowserPID, m.sharedBrowserWindow
 	m.mu.Unlock()
-	if shared > 0 && shared == int(number) {
+	if shared, ok := m.sharedWindowOf(int(number)); ok {
 		id, named := window.(float64)
-		return !named || id == sharedWindow, nil
+		return !named || id == shared.Window, nil
 	}
 	if known > 0 && known == int(number) && time.Since(checked) < agentChromeRecheck {
 		return true, nil
@@ -487,11 +487,15 @@ func (c *cuaSession) agentChromeRunning(ctx context.Context) (int, error) {
 	}
 	m := c.op.manager
 	m.mu.Lock()
-	shared, bundle := m.sharedBrowserPID, m.sharedBrowserBundle
+	shared := maps.Clone(m.sharedWindows)
 	m.mu.Unlock()
-	if own == 0 && shared > 0 {
-		if running, _ := sharedBrowserRunning(ctx, bundle); running == shared {
-			return shared, nil
+	if own == 0 {
+		// The user's own browsers are checked in a fixed order, so one
+		// call names the same browser each time.
+		for _, bundle := range slices.Sorted(maps.Keys(shared)) {
+			if running, _ := sharedBrowserRunning(ctx, bundle); running > 0 && running == shared[bundle].PID {
+				return running, nil
+			}
 		}
 	}
 	m.mu.Lock()
@@ -548,13 +552,11 @@ func (c *cuaSession) agentChromeKeys(ctx context.Context, arguments map[string]a
 	if _, ok := arguments["window_id"].(float64); ok {
 		return nil
 	}
-	m := c.op.manager
-	m.mu.Lock()
-	shared, sharedWindow := m.sharedBrowserPID, m.sharedBrowserWindow
-	m.mu.Unlock()
-	if pid, ok := arguments["pid"].(float64); ok && shared > 0 && int(pid) == shared {
-		arguments["window_id"] = sharedWindow
-		return nil
+	if pid, ok := arguments["pid"].(float64); ok {
+		if shared, found := c.op.manager.sharedWindowOf(int(pid)); found {
+			arguments["window_id"] = shared.Window
+			return nil
+		}
 	}
 	windows, err := c.appWindows(ctx, arguments["pid"])
 	if err != nil {
@@ -604,13 +606,24 @@ func (c *cuaSession) agentChromeTabs(ctx context.Context, pid int, window float6
 }
 
 // countTabs counts the tab rows of a browser window's tree: a radio button
-// whose next row, or a row nested under it, is a Close or Close tab button.
+// outside the page that holds a button, its Close button.
 func countTabs(tree string) int {
 	rows := strings.Split(tree, "\n")
 	indent := func(row string) int { return len(row) - len(strings.TrimLeft(row, " ")) }
 	count := 0
+	// web is the indent of the page being skipped, or -1: a radio button
+	// in a page is not a tab.
+	web := -1
 	for i, row := range rows {
-		if !strings.Contains(row, "] AXRadioButton \"") {
+		if web >= 0 && indent(row) > web {
+			continue
+		}
+		web = -1
+		if strings.Contains(row, "] AXWebArea") || strings.HasPrefix(strings.TrimLeft(row, " -"), "AXWebArea") {
+			web = indent(row)
+			continue
+		}
+		if !strings.Contains(row, "] AXRadioButton") {
 			continue
 		}
 		if strings.Contains(row, "id=TabBarTab") {
@@ -618,11 +631,13 @@ func countTabs(tree string) int {
 			count++
 			continue
 		}
+		// A tab holds its Close button, whose name follows the user's
+		// language, so any button inside it counts.
 		for j, next := range rows[i+1:] {
 			if j > 0 && indent(next) <= indent(row) {
 				break
 			}
-			if trimmed := strings.TrimSpace(next); strings.HasSuffix(trimmed, `AXButton "Close" [actions=[press]]`) || strings.HasSuffix(trimmed, `AXButton "Close tab" [actions=[press]]`) {
+			if trimmed := strings.TrimSpace(next); strings.Contains(trimmed, "] AXButton") && strings.HasSuffix(trimmed, "[actions=[press]]") {
 				count++
 				break
 			}
