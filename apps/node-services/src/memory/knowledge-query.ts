@@ -33,12 +33,17 @@ const INLINE_CONTENT_SOURCES = 6;
 const INLINE_CONTENT_CHARS = 800;
 const INLINE_CONTENT_BUDGET_CHARS = 6_000;
 const INLINE_CONTENT_SEPARATOR = "\n\n…\n\n";
-// A Runtime cuts the middle out of a tool result above its output limit, and
-// Codex sets that limit as low as 4,000 tokens of four bytes each for a small
-// model window. Search and read results stay within this many bytes of JSON,
-// leaving room for the CLI's labels, so the Agent sees each result whole.
-const KNOWLEDGE_OUTPUT_BUDGET_BYTES = 12_000;
-const FACT_BUDGET_BYTES = KNOWLEDGE_OUTPUT_BUDGET_BYTES / 4;
+// One search or read result may take this share of the model's context
+// window, measured at four bytes per token as Codex estimates tool output.
+// The rest of the window holds the instructions, the history and other tool
+// results of the same turn.
+const WINDOW_OUTPUT_SHARE = 0.15;
+const BYTES_PER_TOKEN = 4;
+// A large window still keeps one result this small.
+const MAX_KNOWLEDGE_OUTPUT_BYTES = 100_000;
+// The budget when the model's window is unknown: Codex's smallest tool output
+// limit for a small window, 4,000 tokens of four bytes, less the CLI's labels.
+const DEFAULT_KNOWLEDGE_OUTPUT_BYTES = 12_000;
 // A section that does not fit still returns a page this large, so every read
 // makes progress.
 const MIN_SECTION_PAGE_BYTES = 512;
@@ -60,11 +65,29 @@ export class PersonalKnowledgeEvidenceNotFoundError extends Error {
  * My pages, mail, Pocket Notes, the Profile, the published Wiki and Daily and
  * Weekly reports. Each item names its source kind.
  */
+/**
+ * The most bytes of JSON one search or read result may take for a model with
+ * this context window in tokens. An unknown window gets the default.
+ */
+export function knowledgeOutputBudget(
+  contextWindow: number | undefined,
+): number {
+  if (contextWindow === undefined) return DEFAULT_KNOWLEDGE_OUTPUT_BYTES;
+  return Math.min(
+    Math.floor(contextWindow * WINDOW_OUTPUT_SHARE * BYTES_PER_TOKEN),
+    MAX_KNOWLEDGE_OUTPUT_BYTES,
+  );
+}
+
 export async function queryPersonalKnowledge(
   dataRoot: string,
   input: PersonalKnowledgeQueryRequest,
-  options: { chunkSearch?: ChunkSearchProvider } = {},
+  options: {
+    chunkSearch?: ChunkSearchProvider;
+    outputBudgetBytes?: number;
+  } = {},
 ): Promise<PersonalKnowledgeQueryResponse> {
+  const budget = options.outputBudgetBytes ?? DEFAULT_KNOWLEDGE_OUTPUT_BYTES;
   const workspaceRoot = agentWorkspaceRoot(dataRoot, input.agent_id);
   // Facts rank in their own channel so they never displace Raw candidates.
   const [rawResult, facts] = await Promise.all([
@@ -130,7 +153,8 @@ export async function queryPersonalKnowledge(
     fittingPrefix(
       facts.length,
       (count) => outputBytes(facts.slice(0, count)),
-      FACT_BUDGET_BYTES,
+      // Facts take at most a quarter, so they never crowd out candidates.
+      budget / 4,
     ),
   );
   let itemCount = selected.length;
@@ -199,15 +223,17 @@ export async function queryPersonalKnowledge(
     }
     return last !== undefined && contentChunks.delete(last);
   };
-  while (outputBytes(response()) > KNOWLEDGE_OUTPUT_BUDGET_BYTES && dropOne())
-    trimmed = true;
+  while (outputBytes(response()) > budget && dropOne()) trimmed = true;
   return response();
 }
 
 export async function readPersonalKnowledgeEvidence(
   dataRoot: string,
   input: PersonalKnowledgeEvidenceReadRequest,
-  options: { rawSourceProvider?: ChunkSearchProvider } = {},
+  options: {
+    rawSourceProvider?: ChunkSearchProvider;
+    outputBudgetBytes?: number;
+  } = {},
 ): Promise<PersonalKnowledgeEvidenceReadResponse> {
   if (!input.evidence_id.startsWith("raw_")) {
     throw new PersonalKnowledgeEvidenceNotFoundError();
@@ -215,6 +241,7 @@ export async function readPersonalKnowledgeEvidence(
   return readRawEvidence(
     agentWorkspaceRoot(dataRoot, input.agent_id),
     input,
+    options.outputBudgetBytes ?? DEFAULT_KNOWLEDGE_OUTPUT_BYTES,
     options.rawSourceProvider,
   );
 }
@@ -267,6 +294,7 @@ function rawDirectory(chunks: SourceChunk[]) {
 async function readRawEvidence(
   workspaceRoot: string,
   input: PersonalKnowledgeEvidenceReadRequest,
+  budget: number,
   rawSourceProvider?: ChunkSearchProvider,
 ): Promise<PersonalKnowledgeEvidenceReadResponse> {
   const { sources } = await resolveSearchRawSources(
@@ -318,7 +346,7 @@ async function readRawEvidence(
   };
   // Sections share what the rest of the response leaves in request order; a
   // section's unused share carries over to the ones after it.
-  let remaining = KNOWLEDGE_OUTPUT_BUDGET_BYTES - outputBytes(response);
+  let remaining = budget - outputBytes(response);
   pages.forEach(({ chunk, offset }, index) => {
     const share = Math.max(
       Math.floor(remaining / (pages.length - index)),

@@ -9,6 +9,7 @@ import {
 import { startMemoryServer } from "../../src/memory/server.js";
 import { MemoryScheduler } from "../../src/memory/scheduler.js";
 import {
+  knowledgeOutputBudget,
   queryPersonalKnowledge as queryWithDatabase,
   readPersonalKnowledgeEvidence as readWithDatabase,
 } from "../../src/memory/knowledge-query.js";
@@ -1116,6 +1117,45 @@ describe("knowledge output budget", () => {
       expect(item.excerpt.length).toBeGreaterThan(0);
       expect(item.directory!.length).toBeGreaterThan(0);
     }
+  });
+
+  it("sizes the budget by the model's context window", () => {
+    expect(knowledgeOutputBudget(undefined)).toBe(12_000);
+    expect(knowledgeOutputBudget(8_192)).toBe(4_915);
+    expect(knowledgeOutputBudget(64_896)).toBe(38_937);
+    expect(knowledgeOutputBudget(1_000_000)).toBe(100_000);
+  });
+
+  it("keeps more of a result within a larger budget", async () => {
+    const fixtureData = await fixture();
+    const matches = Array.from({ length: 6 }, (_, index) => {
+      const { input, markdown } = document(index, [wide(index, 1_200)]);
+      const source = storeDocumentSource(fixtureData.root, input);
+      const chunk = chunkSource(markdown).at(-1)!;
+      return {
+        chunkId: chunk.id,
+        mergedChunkIds: [chunk.id],
+        sourceId: source.id,
+        score: 1 / (61 + index),
+      };
+    });
+    const search = (outputBudgetBytes: number) =>
+      queryPersonalKnowledge(fixtureData.root, request("Report"), {
+        chunkSearch: { search: async () => matches },
+        outputBudgetBytes,
+      });
+
+    const small = await search(12_000);
+    const large = await search(knowledgeOutputBudget(64_896));
+    expect(small.gaps.map((gap) => gap.code)).toContain("results_trimmed");
+    expect(large.gaps).toEqual([]);
+    expect(large.status).toBe("grounded");
+    expect(Buffer.byteLength(JSON.stringify(large))).toBeLessThanOrEqual(
+      knowledgeOutputBudget(64_896),
+    );
+    expect(large.items.filter((item) => item.content).length).toBeGreaterThan(
+      small.items.filter((item) => item.content).length,
+    );
   });
 
   it("keeps a result that fits whole", async () => {

@@ -24,10 +24,12 @@ import {
   PersonalKnowledgeGraphNotFoundError,
 } from "./graph-visualization.js";
 import {
+  knowledgeOutputBudget,
   PersonalKnowledgeEvidenceNotFoundError,
   queryPersonalKnowledge,
   readPersonalKnowledgeEvidence,
 } from "./knowledge-query.js";
+import { memoryContextWindow } from "./llm.js";
 import {
   MemoryRebuildUnavailableError,
   type MemoryScheduler,
@@ -65,6 +67,7 @@ export async function startMemoryServer(options: {
   graphVisualization?: typeof getPersonalKnowledgeGraphVisualization;
   query?: typeof queryPersonalKnowledge;
   evidenceRead?: typeof readPersonalKnowledgeEvidence;
+  contextWindow?: typeof memoryContextWindow;
   listMemoryEntries?: typeof listMemoryEntries;
   getMemoryEntry?: typeof getMemoryEntry;
   chunkSearch?: ChunkSearchProvider;
@@ -346,6 +349,19 @@ export async function startMemoryServer(options: {
       }
     },
   );
+  // Results are sized for the model the owner's calls run on, which the
+  // owner's Computer reports; an unknown model or an offline Computer keeps
+  // the default size, since a search needs no model.
+  const outputBudgetBytes = async (input: {
+    tenant_id: string;
+    user_artifact_owner_actor_id: string;
+  }) =>
+    knowledgeOutputBudget(
+      await (options.contextWindow ?? memoryContextWindow)({
+        tenantId: input.tenant_id,
+        ownerActorId: input.user_artifact_owner_actor_id,
+      }).catch(() => undefined),
+    );
   app.post("/internal/v1/query", requireAuth, async (context) => {
     const input = parseQueryRequest(await readJsonBody(context));
     return respondJson(
@@ -353,6 +369,7 @@ export async function startMemoryServer(options: {
       200,
       await (options.query ?? queryPersonalKnowledge)(options.dataRoot, input, {
         chunkSearch: options.chunkSearch,
+        outputBudgetBytes: await outputBudgetBytes(input),
       }),
     );
   });
@@ -366,6 +383,7 @@ export async function startMemoryServer(options: {
           options.evidenceRead ?? readPersonalKnowledgeEvidence
         )(options.dataRoot, input, {
           rawSourceProvider: options.chunkSearch,
+          outputBudgetBytes: await outputBudgetBytes(input),
         });
         return respondJson(context, 200, result);
       } catch (error) {
