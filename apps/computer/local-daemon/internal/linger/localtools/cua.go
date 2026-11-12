@@ -543,7 +543,7 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 	driverStarted := time.Now()
 	result, err := c.sendInput(ctx, name, arguments, appKeys, agentChrome)
 	if c.snapshots != nil {
-		c.snapshots.sent()
+		c.snapshots.sent(name)
 	}
 	driverMs = time.Since(driverStarted).Milliseconds()
 	if err == nil {

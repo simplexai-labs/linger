@@ -153,12 +153,19 @@ func (s *snapshotRows) remap(arguments map[string]any) {
 
 // sent fences off every read so far: the input just sent may have changed
 // the page, so a token of an earlier read must not land on a row that only
-// reads the same.
-func (s *snapshotRows) sent() {
+// reads the same. A read changes nothing, so it fences nothing: the Agent's
+// own read must still carry over the Computer's reads before its next input.
+func (s *snapshotRows) sent(name string) {
+	if readTools[name] {
+		return
+	}
 	s.mu.Lock()
 	s.fence = s.seq
 	s.mu.Unlock()
 }
+
+// readTools only read the screen, so the page a token names stays as it was.
+var readTools = map[string]bool{"list_windows": true, "get_window_state": true, "get_desktop_state": true, "get_screen_size": true, "get_cursor_position": true, "clipboard_read": true}
 
 // carry returns the token on the current snapshot of its window, or the
 // token itself.
