@@ -109,7 +109,9 @@ func (d *Daemon) sendPlaygroundCard(ctx context.Context, tenantID, agentID strin
 		strings.TrimSpace(card.Content) == "" || len(card.Files) > maxCardFiles {
 		return nil, &playgroundFailure{"invalid_card", "A card needs a title, content and at most 5 files."}
 	}
-	arguments := []string{"message", "card", "--title", card.Title, "--content", card.Content}
+	// The body goes on stdin: the CLI decodes escapes such as \n in --content,
+	// which the live model does not write for it.
+	arguments := []string{"message", "card", "--title", card.Title, "--file", "-"}
 	for _, requested := range card.Files {
 		filename, err := d.contextViews.PlaygroundFilePath(ctx, tenantID, agentID, requested.Folder, requested.Path)
 		if err != nil {
@@ -122,18 +124,15 @@ func (d *Daemon) sendPlaygroundCard(ctx context.Context, tenantID, agentID strin
 	if err != nil {
 		return nil, err
 	}
-	return d.runCardCLI(ctx, installation, roomID, arguments)
+	return d.runCardCLI(ctx, installation, roomID, arguments, card.Content)
 }
 
 // runCardCLI runs the bundled CLI with a profile of its own that targets the
 // card's Room. The credential stays in its file; the CLI reads it.
-func (d *Daemon) runCardCLI(ctx context.Context, installation clicredential.Installation, roomID string, arguments []string) (map[string]any, error) {
-	if d.teamhubCLIBin == "" {
+func (d *Daemon) runCardCLI(ctx context.Context, installation clicredential.Installation, roomID string, arguments []string, body string) (map[string]any, error) {
+	program, prefix, environment, ok := cardCLIProgram(d.teamhubCLIBin, runtime.GOOS)
+	if !ok {
 		return nil, &playgroundFailure{"cli_unavailable", "This Computer has no TeamHub CLI; update the Computer."}
-	}
-	program := filepath.Join(d.teamhubCLIBin, "teamhub")
-	if runtime.GOOS == "windows" {
-		program += ".exe"
 	}
 	home, err := os.MkdirTemp("", "linger-live-card-")
 	if err != nil {
@@ -152,9 +151,10 @@ func (d *Daemon) runCardCLI(ctx context.Context, installation clicredential.Inst
 	if err := os.WriteFile(configPath, config, 0o600); err != nil {
 		return nil, err
 	}
-	command := exec.CommandContext(ctx, program, arguments...)
+	command := exec.CommandContext(ctx, program, append(prefix, arguments...)...)
 	command.Dir = home
-	command.Env = append(cardCLIEnvironment(os.Environ()), "TEAMHUB_CONFIG="+configPath, "TEAMHUB_PROFILE=live")
+	command.Env = append(append(cardCLIEnvironment(os.Environ()), environment...), "TEAMHUB_CONFIG="+configPath, "TEAMHUB_PROFILE=live")
+	command.Stdin = strings.NewReader(body)
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	runErr := command.Run()
@@ -164,11 +164,40 @@ func (d *Daemon) runCardCLI(ctx context.Context, installation clicredential.Inst
 	if runErr != nil {
 		var exit *exec.ExitError
 		if !errors.As(runErr, &exit) {
-			return nil, runErr
+			// The CLI never started, so nothing was posted.
+			return nil, &playgroundFailure{"cli_unavailable", "The TeamHub CLI could not start: " + runErr.Error()}
 		}
 		return nil, cardCLIFailure(stderr.Bytes())
 	}
 	return cardCommitResult(stdout.Bytes())
+}
+
+// cardCLIProgram is how to start the bundled CLI in directory. The Computer
+// bundle has a teamhub program on every platform. Desktop has only scripts on
+// Windows; its teamhub.cmd is not run, since cmd.exe would parse the card's
+// text, so the app it names runs teamhub.js as Node instead.
+func cardCLIProgram(directory, goos string) (program string, prefix, environment []string, ok bool) {
+	if directory == "" {
+		return "", nil, nil, false
+	}
+	if goos != "windows" {
+		program = filepath.Join(directory, "teamhub")
+		return program, nil, nil, regularFile(program)
+	}
+	if program = filepath.Join(directory, "teamhub.exe"); regularFile(program) {
+		return program, nil, nil, true
+	}
+	script := filepath.Join(directory, "teamhub.js")
+	app := filepath.Join(directory, "..", "..", "..", "..", "Linger.exe")
+	if !regularFile(script) || !regularFile(app) {
+		return "", nil, nil, false
+	}
+	return filepath.Clean(app), []string{"--use-env-proxy", script}, []string{"ELECTRON_RUN_AS_NODE=1"}, true
+}
+
+func regularFile(name string) bool {
+	info, err := os.Stat(name)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // cardCLIEnvironment is the daemon's environment without TeamHub settings,

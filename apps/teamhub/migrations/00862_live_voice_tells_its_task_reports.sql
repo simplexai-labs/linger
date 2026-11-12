@@ -41,10 +41,16 @@ CREATE OR REPLACE FUNCTION public.agent_inbox_message_disposition(p_tenant text,
  FROM task_meta_messages message
  WHERE starts_with(p_inbox,'meta:') AND message.id=p_message AND message.tenant_id=p_tenant
  UNION ALL
- -- A report from a Task a call started is the live voice's to tell while the
- -- call holds the Meta foreground; it never wakes the Meta as well.
- SELECT CASE WHEN voice_live_owns_context(p_context)
-   AND EXISTS(SELECT 1 FROM voice_live_tasks task WHERE task.work_item_id=message.task_id)
+ -- A report from a Task a call started is the live voice's to tell while
+ -- its owner's call in that Room holds this Meta; it never wakes the Meta as
+ -- well. Another user's call leaves it to the Meta.
+ SELECT CASE WHEN EXISTS(SELECT 1 FROM voice_live_tasks task
+   JOIN voice_sessions voice ON voice.room_id=task.room_id AND voice.created_by_actor_id=task.owner_actor_id
+   JOIN agent_execution_contexts context ON context.context_key=p_context AND context.context_kind='meta'
+    AND context.tenant_id=voice.tenant_id AND context.agent_actor_id=voice.live_agent_actor_id
+   WHERE task.work_item_id=message.task_id AND voice.purpose='chat_live'
+    AND voice.status IN ('provisioning','connected','reconnecting') AND voice.live_lease_until>now()
+    AND (context.room_id=voice.room_id OR context.room_id=task.home_room_id))
    THEN 'ignore' ELSE 'notify' END,
   agent_inbox_directly_mentions(message.segments,p_agent)
  FROM task_meta_callback_messages message

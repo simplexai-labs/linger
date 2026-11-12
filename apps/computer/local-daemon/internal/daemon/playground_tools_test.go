@@ -22,7 +22,7 @@ func fakeCardCLI(t *testing.T, stdout, stderr string, exit int) (directory, reco
 	directory = t.TempDir()
 	record = filepath.Join(t.TempDir(), "record")
 	script := "#!/bin/sh\n" +
-		"{ printf '%s\\n' \"$@\"; echo ---; echo \"$TEAMHUB_PROFILE\"; cat \"$TEAMHUB_CONFIG\"; echo; echo ---; env | grep -c '^TEAMHUB_SECRET=' ; } > '" + record + "'\n" +
+		"{ printf '%s\\n' \"$@\"; echo ---; echo \"$TEAMHUB_PROFILE\"; cat \"$TEAMHUB_CONFIG\"; echo; echo ---; env | grep -c '^TEAMHUB_SECRET=' ; echo ---; cat; } > '" + record + "'\n" +
 		"printf '%s' '" + stdout + "'\nprintf '%s' '" + stderr + "' >&2\nexit " + string(rune('0'+exit)) + "\n"
 	if err := os.WriteFile(filepath.Join(directory, "teamhub"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -37,7 +37,8 @@ func TestPlaygroundCardRunsTheCLIAsTheAgentInTheRoom(t *testing.T) {
 	directory, record := fakeCardCLI(t, `{"accepted":true,"message_id":"message-1","resources":[{"kind":"document","segment_index":1,"status":"published","document_id":"document-1","name":"report.md"}]}`, "", 0)
 	daemon := &Daemon{teamhubCLIBin: directory}
 	result, err := daemon.runCardCLI(t.Context(), cardInstallation, "room-1",
-		[]string{"message", "card", "--title", "Report", "--content", "Done.", "--attach", "/work/playground/task-1/report.md", "--operation-id", "voice-live:abc", "--json"})
+		[]string{"message", "card", "--title", "Report", "--file", "-", "--attach", "/work/playground/task-1/report.md", "--operation-id", "voice-live:abc", "--json"},
+		`Saved to C:\new\table.xlsx`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +69,9 @@ func TestPlaygroundCardRunsTheCLIAsTheAgentInTheRoom(t *testing.T) {
 	if strings.TrimSpace(parts[2]) != "0" {
 		t.Fatal("the daemon's own TeamHub settings reached the CLI")
 	}
+	if parts[3] != `Saved to C:\new\table.xlsx` {
+		t.Fatalf("stdin body=%q", parts[3])
+	}
 }
 
 func TestPlaygroundCardTellsWhyTheCLIFailed(t *testing.T) {
@@ -77,7 +81,7 @@ func TestPlaygroundCardTellsWhyTheCLIFailed(t *testing.T) {
 		`not json`: "outcome_unknown",
 	} {
 		directory, _ := fakeCardCLI(t, "", stderr, 2)
-		_, err := (&Daemon{teamhubCLIBin: directory}).runCardCLI(t.Context(), cardInstallation, "room-1", []string{"message", "card"})
+		_, err := (&Daemon{teamhubCLIBin: directory}).runCardCLI(t.Context(), cardInstallation, "room-1", []string{"message", "card"}, "Done.")
 		var failure *playgroundFailure
 		if !errors.As(err, &failure) || failure.code != want {
 			t.Fatalf("%s: err=%v, want %s", stderr, err, want)
@@ -87,7 +91,7 @@ func TestPlaygroundCardTellsWhyTheCLIFailed(t *testing.T) {
 		}
 	}
 	var failure *playgroundFailure
-	if _, err := (&Daemon{}).runCardCLI(t.Context(), cardInstallation, "room-1", nil); !errors.As(err, &failure) || failure.code != "cli_unavailable" {
+	if _, err := (&Daemon{}).runCardCLI(t.Context(), cardInstallation, "room-1", nil, ""); !errors.As(err, &failure) || failure.code != "cli_unavailable" {
 		t.Fatalf("no CLI = %v", err)
 	}
 }
@@ -108,5 +112,39 @@ func TestPlaygroundCardRefusesAnInvalidCardOrMissingCredential(t *testing.T) {
 	var failure *playgroundFailure
 	if _, err := daemon.agentCLICredential("tenant-1", "agent-1"); !errors.As(err, &failure) || failure.code != "agent_unavailable" {
 		t.Fatalf("credential = %v", err)
+	}
+}
+
+// Desktop ships only scripts beside its CLI on Windows; the card runs the app
+// as Node rather than through cmd.exe.
+func TestPlaygroundCardFindsTheCLIOnEveryLayout(t *testing.T) {
+	touch := func(name string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(name, nil, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bundle := t.TempDir()
+	touch(filepath.Join(bundle, "teamhub.exe"))
+	if program, prefix, _, ok := cardCLIProgram(bundle, "windows"); !ok || program != filepath.Join(bundle, "teamhub.exe") || prefix != nil {
+		t.Fatalf("Computer bundle: %s %v %v", program, prefix, ok)
+	}
+	app := t.TempDir()
+	desktop := filepath.Join(app, "resources", "app", "dist", "teamhub-cli")
+	touch(filepath.Join(desktop, "teamhub.cmd"))
+	touch(filepath.Join(desktop, "teamhub.js"))
+	if _, _, _, ok := cardCLIProgram(desktop, "windows"); ok {
+		t.Fatal("ran teamhub.cmd without the app beside it")
+	}
+	touch(filepath.Join(app, "Linger.exe"))
+	program, prefix, environment, ok := cardCLIProgram(desktop, "windows")
+	if !ok || program != filepath.Join(app, "Linger.exe") || len(prefix) != 2 || prefix[1] != filepath.Join(desktop, "teamhub.js") || environment[0] != "ELECTRON_RUN_AS_NODE=1" {
+		t.Fatalf("Desktop: %s %v %v %v", program, prefix, environment, ok)
+	}
+	if _, _, _, ok := cardCLIProgram(t.TempDir(), "darwin"); ok {
+		t.Fatal("found a CLI in an empty directory")
 	}
 }

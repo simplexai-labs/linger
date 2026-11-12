@@ -126,6 +126,15 @@ INSERT INTO task_meta_callback_messages(id,task_id,tenant_id,generation,meta_seq
 		t.Fatal(err)
 	}
 	check(t, []dispositionCase{{"a call's Task report during the call", env.contextKey, "taskmeta:" + taskID, "d-callback", "ignore", true}})
+	// Another user's call in the Room does not tell this Task's owner.
+	seedPeerHumanActor(t, env.pool)
+	if _, err := env.pool.Exec(t.Context(), `UPDATE voice_live_tasks SET owner_actor_id='actor_acme_bob' WHERE work_item_id=$1`, taskID); err != nil {
+		t.Fatal(err)
+	}
+	check(t, []dispositionCase{{"a Task report during another user's call", env.contextKey, "taskmeta:" + taskID, "d-callback", "notify", true}})
+	if _, err := env.pool.Exec(t.Context(), `UPDATE voice_live_tasks SET owner_actor_id='actor_acme_alice' WHERE work_item_id=$1`, taskID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := env.pool.Exec(t.Context(), `UPDATE voice_sessions SET live_lease_until=clock_timestamp()-interval '1 second' WHERE id='voice-handover'`); err != nil {
 		t.Fatal(err)
 	}
