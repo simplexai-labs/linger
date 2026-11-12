@@ -38,6 +38,7 @@ import {
   removePocketNote,
   storeTodayPocketNote,
 } from "./pocket-note-queries";
+import { LazyVoiceKeyDialog } from "@/features/rooms/voice-control/lazy-voice-key-dialog";
 import { usePocketDictation } from "./use-pocket-dictation";
 import {
   PocketNoteEditor,
@@ -262,6 +263,7 @@ function TodayPocketNote({
     update(before + fitted + tail);
   }
 
+  const [keyDialogOpen, setKeyDialogOpen] = useState(false);
   const dictation = usePocketDictation({
     onTurn: insertSpoken,
     roomId: anotherMeRoomId,
@@ -331,6 +333,13 @@ function TodayPocketNote({
       void stopDictation();
       return;
     }
+    if (dictation.needsKey) {
+      setKeyDialogOpen(true);
+      return;
+    }
+    startDictation();
+  }
+  function startDictation() {
     setTruncated(false);
     anchor.current = editorRef.current?.selectionStart() ?? anchor.current;
     blockStart.current = anchor.current;
@@ -403,6 +412,18 @@ function TodayPocketNote({
             connecting={dictation.connecting}
             level={dictation.level}
             onClick={toggleDictation}
+          />
+        ) : null}
+        {keyDialogOpen ? (
+          <LazyVoiceKeyDialog
+            onClose={() => setKeyDialogOpen(false)}
+            onReady={() => {
+              setKeyDialogOpen(false);
+              startDictation();
+            }}
+            policy={dictation.policy}
+            providers={["soniox"]}
+            tenantId={tenantId}
           />
         ) : null}
       </div>

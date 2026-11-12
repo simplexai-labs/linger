@@ -361,6 +361,66 @@ describe("Settings surfaces", () => {
   });
 });
 
+describe("Voice API keys", () => {
+  it("shows where each voice key comes from and saves one", async () => {
+    const runtime = await testRuntime();
+    let saved = false;
+    runtime.server
+      .on("GET", "/v0/tenants/{tenantId}/voice-media-policy", () => ({
+        voice_available: true,
+        voice_media_supported: saved,
+        live_supported: true,
+        soniox_key: saved
+          ? { source: "stored", can_save: true }
+          : { source: "none", can_save: true },
+        xai_key: { source: "environment", can_save: false },
+      }))
+      .on("PUT", "/v0/voice-provider-keys/{provider}", ({ params }) => {
+        expect(params.provider).toBe("soniox");
+        saved = true;
+        return { source: "stored", can_save: true };
+      });
+    renderSettings(runtime, "/t/tenant-northstar/settings/security");
+
+    const addSoniox = await screen.findByRole("button", {
+      name: "Add Soniox key",
+    });
+    expect(
+      screen.getByText(/Turns Voice Mode into a live conversation/u),
+    ).toHaveTextContent("Set with XAI_API_KEY on the server.");
+    expect(screen.getByText("Set by your server")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /xAI key/u })).toBeNull();
+
+    fireEvent.click(addSoniox);
+    const dialog = await screen.findByRole("dialog", { name: "Soniox key" });
+    fireEvent.change(within(dialog).getByLabelText("Soniox API key"), {
+      target: { value: "soniox-key" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save key" }));
+
+    expect(await screen.findByText("Soniox key saved")).toBeVisible();
+    expect(screen.queryByRole("dialog", { name: "Soniox key" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Replace Soniox key" }),
+    ).toBeVisible();
+  });
+
+  it("hides the voice rows where the deployment cannot run voice", async () => {
+    const runtime = await testRuntime();
+    runtime.server.on(
+      "GET",
+      "/v0/tenants/{tenantId}/voice-media-policy",
+      () => ({ voice_available: false, voice_media_supported: false }),
+    );
+    renderSettings(runtime, "/t/tenant-northstar/settings/security");
+
+    expect(await screen.findByText("Composio")).toBeVisible();
+    await act(async () => undefined);
+    expect(screen.queryByText("Soniox")).toBeNull();
+    expect(screen.queryByText("xAI")).toBeNull();
+  });
+});
+
 async function testRuntime() {
   const runtime = createTestTeamHubRuntime();
 

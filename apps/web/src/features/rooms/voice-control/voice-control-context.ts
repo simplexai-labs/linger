@@ -1,6 +1,9 @@
 import { createContext, useContext } from "react";
 
-import type { TeamHubVoiceCapture } from "@/features/teamhub/teamhub-types";
+import type {
+  TeamHubVoiceCapture,
+  TeamHubVoiceMediaPolicy,
+} from "@/features/teamhub/teamhub-types";
 
 import type { VoiceMicrophoneDevice } from "./microphone-devices";
 
@@ -85,11 +88,16 @@ export interface VoiceControlContextValue {
 // What the deployment offers. Undefined while the workspace reads its voice
 // policy or loads the LiveKit engine; outside a workspace everything is offered.
 export interface VoiceCapabilities {
+  /** Soniox transcription works now. */
   voiceMedia: boolean;
+  /** The deployment can run voice, so its entries show even without a key. */
+  voiceAvailable: boolean;
+  /** The workspace's policy, for the key dialog's statuses. */
+  policy?: TeamHubVoiceMediaPolicy;
 }
 export const VoiceCapabilitiesContext = createContext<
   VoiceCapabilities | undefined
->({ voiceMedia: true });
+>({ voiceAvailable: true, voiceMedia: true });
 
 // Present only once the voice backend stopped retrying on its own; calling it
 // tries again.

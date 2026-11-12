@@ -12,7 +12,7 @@ import { Icon, type IconSvgElement } from "@/components/ui/icon";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { ConnectorsNotConfiguredMessage } from "@/features/apps/connect-app-flow";
 import { externalAppsQueryOptions } from "@/features/apps/connected-apps-queries";
-import { ProviderKeyForm } from "@/features/apps/provider-key-form";
+import { ComposioKeyForm } from "@/features/apps/provider-key-form";
 import { ComposioKeyGuide } from "@/features/apps/provider-key-guide";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 
@@ -122,7 +122,7 @@ export function ProviderKeyDecision({
             ) : (
               <>
                 <ComposioKeyGuide />
-                <ProviderKeyForm onSaved={() => setOpen(false)} />
+                <ComposioKeyForm onSaved={() => setOpen(false)} />
               </>
             )}
           </div>

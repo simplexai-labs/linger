@@ -18,6 +18,7 @@ import {
 import type { TeamHubVoiceMediaPolicy } from "@/features/teamhub/teamhub-types";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
 import { voicePollRetryDelay } from "./voice-poll-retry";
+import { subscribeVoiceMediaPolicy } from "./use-voice-media-policy";
 import {
   VoiceRequestScope,
   waitForVoiceDelay,
@@ -116,8 +117,17 @@ export function VoiceBackendController({
       void attempt();
     };
     retryRef.current = retry;
+    // A key saved in this tab publishes the policy that turned voice on, so
+    // the LiveKit engine loads now instead of on the next reload.
+    const unsubscribe = subscribeVoiceMediaPolicy((published, policy) => {
+      if (published !== tenantId || controller.signal.aborted) return;
+      setBackend(policy);
+      setError(undefined);
+      onChange((current) => ({ ...current, policy }));
+    });
     void attempt();
     return () => {
+      unsubscribe();
       controller.abort();
       if (retryRef.current === retry) retryRef.current = undefined;
     };

@@ -38,10 +38,11 @@ export function usePocketDictation({
   useLayoutEffect(() => {
     latest.current = { hardware, onTurn };
   });
-  // Dictation transcribes with Soniox.
-  const supported =
-    useVoiceMediaPolicy(tenantId, Boolean(roomId))?.voice_media_supported ===
-    true;
+  // Dictation transcribes with Soniox. A deployment that runs voice offers it
+  // before the key exists; older servers only once Soniox is configured.
+  const policy = useVoiceMediaPolicy(tenantId, Boolean(roomId));
+  const supported = policy?.voice_media_supported === true;
+  const offered = policy?.voice_available ?? supported;
   const [state, setState] = useState(idle);
   const [level, setLevel] = useState(0);
   const [stopping, setStopping] = useState(false);
@@ -120,7 +121,10 @@ export function usePocketDictation({
     state.status === "closing";
 
   return {
-    available: supported && Boolean(roomId),
+    available: offered && Boolean(roomId),
+    /** Starting asks for a Soniox key first. */
+    needsKey: !supported,
+    policy,
     active,
     // The Voice Runtime buffers published audio (up to 20s) until its ASR
     // stream opens, so speech is safe once the microphone track is live.

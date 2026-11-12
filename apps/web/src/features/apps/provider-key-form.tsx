@@ -7,19 +7,29 @@ import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 
 import { externalAppsQueryOptions } from "./connected-apps-queries";
 
-// A private deployment without COMPOSIO_API_KEY saves its key here. TeamHub
-// checks the key before keeping it and never returns it.
-export function ProviderKeyForm({ onSaved }: { onSaved?: () => void } = {}) {
-  const { client } = useTeamHubRuntime();
-  const queryClient = useQueryClient();
+/**
+ * Takes one provider API key and hands it to `save`. TeamHub checks a key
+ * before keeping it and never returns it, so the field clears once it is saved.
+ */
+export function ProviderKeyForm({
+  describeError = (error) => error.message,
+  hint,
+  label,
+  onSaved,
+  save,
+}: {
+  /** The message shown under the field when `save` fails. */
+  describeError?: (error: Error) => string;
+  hint: string;
+  label: string;
+  onSaved?: () => void;
+  save: (apiKey: string) => Promise<unknown>;
+}) {
   const [apiKey, setApiKey] = useState("");
-  const save = useMutation({
-    mutationFn: () => client.saveExternalProviderKey(apiKey.trim()),
-    onSuccess: async () => {
+  const mutation = useMutation({
+    mutationFn: () => save(apiKey.trim()),
+    onSuccess: () => {
       setApiKey("");
-      await queryClient.invalidateQueries({
-        queryKey: externalAppsQueryOptions(client).queryKey,
-      });
       onSaved?.();
     },
   });
@@ -28,14 +38,14 @@ export function ProviderKeyForm({ onSaved }: { onSaved?: () => void } = {}) {
       className="space-y-3"
       onSubmit={(event) => {
         event.preventDefault();
-        if (apiKey.trim()) save.mutate();
+        if (apiKey.trim()) mutation.mutate();
       }}
     >
       <Field
         autoComplete="off"
-        error={save.error?.message}
-        hint="Use a key with full read and write access (Read All and Write All). It is stored encrypted and never shown again."
-        label="Composio API key"
+        error={mutation.error ? describeError(mutation.error) : undefined}
+        hint={hint}
+        label={label}
         onChange={(event) => setApiKey(event.target.value)}
         spellCheck={false}
         type="password"
@@ -43,12 +53,31 @@ export function ProviderKeyForm({ onSaved }: { onSaved?: () => void } = {}) {
       />
       <Button
         disabled={!apiKey.trim()}
-        loading={save.isPending}
+        loading={mutation.isPending}
         tone="primary"
         type="submit"
       >
-        {save.isPending ? "Checking key..." : "Save key"}
+        {mutation.isPending ? "Checking key..." : "Save key"}
       </Button>
     </form>
+  );
+}
+
+// A private deployment without COMPOSIO_API_KEY saves its key here.
+export function ComposioKeyForm({ onSaved }: { onSaved?: () => void } = {}) {
+  const { client } = useTeamHubRuntime();
+  const queryClient = useQueryClient();
+  return (
+    <ProviderKeyForm
+      hint="Use a key with full read and write access (Read All and Write All). It is stored encrypted and never shown again."
+      label="Composio API key"
+      onSaved={onSaved}
+      save={async (apiKey) => {
+        await client.saveExternalProviderKey(apiKey);
+        await queryClient.invalidateQueries({
+          queryKey: externalAppsQueryOptions(client).queryKey,
+        });
+      }}
+    />
   );
 }

@@ -50,7 +50,12 @@ function TenantVoiceControlProvider({
   const capabilities = useMemo(
     () =>
       ready && policy
-        ? { voiceMedia: policy.voice_media_supported }
+        ? {
+            policy,
+            voiceAvailable:
+              policy.voice_available ?? policy.voice_media_supported,
+            voiceMedia: policy.voice_media_supported,
+          }
         : undefined,
     [policy, ready],
   );

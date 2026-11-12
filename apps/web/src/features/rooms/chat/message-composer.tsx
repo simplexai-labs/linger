@@ -740,13 +740,18 @@ function ComposerSendControls({
     voiceModeTarget?.tenantId ?? "",
     Boolean(voiceModeTarget),
   );
-  // Without Soniox or xAI there is no Voice Mode, so the empty composer keeps
-  // its send button. Until the policy answers the voice entry keeps the slot,
-  // so a deployment with voice never flashes the send button first.
+  // A deployment that cannot run voice has no Voice Mode, so the empty
+  // composer keeps its send button; one that can shows Voice Mode even before
+  // a key exists, and the button asks for the key. Older servers without
+  // `voice_available` offer it only once Soniox or xAI is configured. Until
+  // the policy answers the voice entry keeps the slot, so a deployment with
+  // voice never flashes the send button first.
   const voiceOff =
     voicePolicy !== undefined &&
-    voicePolicy.voice_media_supported !== true &&
-    voicePolicy.live_supported !== true;
+    !(
+      voicePolicy.voice_available ??
+      (voicePolicy.voice_media_supported || voicePolicy.live_supported === true)
+    );
   return (
     <ComposerToolbar
       attachmentEnabled={attachmentEnabled}

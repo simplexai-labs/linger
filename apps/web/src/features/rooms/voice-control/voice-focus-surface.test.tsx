@@ -22,7 +22,10 @@ describe("RecordingEntry", () => {
           },
         })}
       >
-        <RecordingEntry anotherMeRoomId="room_another_me" />
+        <RecordingEntry
+          anotherMeRoomId="room_another_me"
+          tenantId="tenant-northstar"
+        />
       </VoiceControlContext.Provider>,
     );
     expect(
@@ -32,7 +35,10 @@ describe("RecordingEntry", () => {
       <VoiceControlContext.Provider
         value={voiceValue({ captureState: pausedRecovery() })}
       >
-        <RecordingEntry anotherMeRoomId="room_another_me" />
+        <RecordingEntry
+          anotherMeRoomId="room_another_me"
+          tenantId="tenant-northstar"
+        />
       </VoiceControlContext.Provider>,
     );
     const meetings = screen.getByRole("button", { name: "Meetings" });

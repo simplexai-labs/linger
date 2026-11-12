@@ -215,7 +215,10 @@ export function RoomSecondaryNavigation({
               anotherMeRoomId={anotherMeRoomId}
               tenantId={tenant.id}
             />
-            <RecordingEntry anotherMeRoomId={anotherMeRoomId} />
+            <RecordingEntry
+              anotherMeRoomId={anotherMeRoomId}
+              tenantId={tenant.id}
+            />
           </div>
           <button
             aria-label="Hide Chat list"
@@ -236,7 +239,10 @@ export function RoomSecondaryNavigation({
             anotherMeRoomId={anotherMeRoomId}
             tenantId={tenant.id}
           />
-          <RecordingEntry anotherMeRoomId={anotherMeRoomId} />
+          <RecordingEntry
+            anotherMeRoomId={anotherMeRoomId}
+            tenantId={tenant.id}
+          />
           <button
             aria-keyshortcuts="Control+k Meta+k"
             aria-label="Search"

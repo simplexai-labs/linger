@@ -125,3 +125,41 @@ describe("Pocket Note dictation session lifecycle", () => {
     expect(connections[1]!.close).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Pocket Note dictation availability", () => {
+  it.each([
+    [{ voice_available: true, voice_media_supported: false }, true, true],
+    [{ voice_available: false, voice_media_supported: false }, false, true],
+    // Older servers do not send voice_available.
+    [{ voice_media_supported: false }, false, true],
+    [{ voice_media_supported: true }, true, false],
+  ])(
+    "for policy %j offers dictation %s and asks for a key %s",
+    async (policy, available, needsKey) => {
+      const runtime = createTestTeamHubRuntime();
+      runtime.server.on(
+        "GET",
+        "/v0/tenants/{tenantId}/voice-media-policy",
+        () => policy,
+      );
+      const { result } = renderHook(
+        () =>
+          usePocketDictation({
+            roomId: "room-1",
+            tenantId: "tenant-1",
+            onTurn: vi.fn(),
+          }),
+        {
+          wrapper: ({ children }: { children: ReactNode }) => (
+            <TeamHubRuntimeProvider runtime={runtime}>
+              {children}
+            </TeamHubRuntimeProvider>
+          ),
+        },
+      );
+      await vi.waitFor(() => expect(result.current.policy).toBeDefined());
+      expect(result.current.available).toBe(available);
+      expect(result.current.needsKey).toBe(needsKey);
+    },
+  );
+});
