@@ -461,6 +461,24 @@ func (e AgentInsertDocumentBlocksSemanticOperationPosition) Valid() bool {
 	}
 }
 
+// Defines values for AgentKnowledgeSearchRequestScope.
+const (
+	Originals AgentKnowledgeSearchRequestScope = "originals"
+	Summaries AgentKnowledgeSearchRequestScope = "summaries"
+)
+
+// Valid indicates whether the value is a known member of the AgentKnowledgeSearchRequestScope enum.
+func (e AgentKnowledgeSearchRequestScope) Valid() bool {
+	switch e {
+	case Originals:
+		return true
+	case Summaries:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentMessageCommitResponseTargetType.
 const (
 	Room   AgentMessageCommitResponseTargetType = "room"
@@ -1856,7 +1874,7 @@ type AgentKnowledgeReadRequest struct {
 	} `json:"sectionRequests"`
 }
 
-// AgentKnowledgeSearchRequest One search over every source of the Human's knowledge index (Sessions, recordings, My pages, mail, Pocket Notes, the Profile, the published Wiki and Daily and Weekly reports); each result names its source kind.
+// AgentKnowledgeSearchRequest One search over every source of the Human's knowledge index (Sessions, recordings, My pages, mail, Pocket Notes, the Profile, the published Wiki and Daily and Weekly reports), returned as two separately ranked lists, items (originals) and summaries (Wiki and reports).
 type AgentKnowledgeSearchRequest struct {
 	// Alternates Up to six synonyms, translations or related terms the evidence may use instead of the query's words. Each is searched separately beside the query; always pass some when the query is a single wording.
 	Alternates *[]string `json:"alternates,omitempty"`
@@ -1873,9 +1891,18 @@ type AgentKnowledgeSearchRequest struct {
 	// EventTo Inclusive end of when the asked event happened; pair with eventFrom.
 	EventTo *openapi_types.Date `json:"eventTo,omitempty"`
 
+	// Page Result page of the same search; a result with nextPage has more on that page.
+	Page *int `json:"page,omitempty"`
+
 	// Query The distinctive phrase, entity, or term being asked about, keeping the current request's named project, person, or event. Do not add unrelated topics from earlier turns or put dates in the query text.
 	Query string `json:"query"`
+
+	// Scope Return only one list with the whole result size, summaries (Wiki pages and Daily/Weekly reports) or originals (conversations, recordings, mail, documents, notes, the Profile). Omit to get both.
+	Scope *AgentKnowledgeSearchRequestScope `json:"scope,omitempty"`
 }
+
+// AgentKnowledgeSearchRequestScope Return only one list with the whole result size, summaries (Wiki pages and Daily/Weekly reports) or originals (conversations, recordings, mail, documents, notes, the Profile). Omit to get both.
+type AgentKnowledgeSearchRequestScope string
 
 // AgentListAvailableAgentsRequest Manifest-attested pagination input for Sponsor-authorized Agent discovery. Sponsor, Human, Tenant, and candidate Agent identifiers are derived by TeamHub rather than accepted as authority from the caller.
 type AgentListAvailableAgentsRequest struct {

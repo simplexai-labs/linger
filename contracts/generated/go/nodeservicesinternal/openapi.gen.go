@@ -917,21 +917,36 @@ func (e ModelCallKind) Valid() bool {
 	}
 }
 
-// Defines values for PersonalKnowledgeEvidenceItemRepresentation.
+// Defines values for PersonalKnowledgeQueryRequestScope.
 const (
-	DerivedSummary PersonalKnowledgeEvidenceItemRepresentation = "derived_summary"
-	SourceExcerpt  PersonalKnowledgeEvidenceItemRepresentation = "source_excerpt"
-	StructuredFact PersonalKnowledgeEvidenceItemRepresentation = "structured_fact"
+	PersonalKnowledgeQueryRequestScopeOriginals PersonalKnowledgeQueryRequestScope = "originals"
+	PersonalKnowledgeQueryRequestScopeSummaries PersonalKnowledgeQueryRequestScope = "summaries"
 )
 
-// Valid indicates whether the value is a known member of the PersonalKnowledgeEvidenceItemRepresentation enum.
-func (e PersonalKnowledgeEvidenceItemRepresentation) Valid() bool {
+// Valid indicates whether the value is a known member of the PersonalKnowledgeQueryRequestScope enum.
+func (e PersonalKnowledgeQueryRequestScope) Valid() bool {
 	switch e {
-	case DerivedSummary:
+	case PersonalKnowledgeQueryRequestScopeOriginals:
 		return true
-	case SourceExcerpt:
+	case PersonalKnowledgeQueryRequestScopeSummaries:
 		return true
-	case StructuredFact:
+	default:
+		return false
+	}
+}
+
+// Defines values for PersonalKnowledgeQueryResponseScope.
+const (
+	PersonalKnowledgeQueryResponseScopeOriginals PersonalKnowledgeQueryResponseScope = "originals"
+	PersonalKnowledgeQueryResponseScopeSummaries PersonalKnowledgeQueryResponseScope = "summaries"
+)
+
+// Valid indicates whether the value is a known member of the PersonalKnowledgeQueryResponseScope enum.
+func (e PersonalKnowledgeQueryResponseScope) Valid() bool {
+	switch e {
+	case PersonalKnowledgeQueryResponseScopeOriginals:
+		return true
+	case PersonalKnowledgeQueryResponseScopeSummaries:
 		return true
 	default:
 		return false
@@ -953,6 +968,42 @@ func (e PersonalKnowledgeQueryResponseStatus) Valid() bool {
 	case Grounded:
 		return true
 	case Partial:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PersonalKnowledgeSearchEntryKind.
+const (
+	PersonalKnowledgeSearchEntryKindMail          PersonalKnowledgeSearchEntryKind = "mail"
+	PersonalKnowledgeSearchEntryKindMyPages       PersonalKnowledgeSearchEntryKind = "my_pages"
+	PersonalKnowledgeSearchEntryKindPeriodSummary PersonalKnowledgeSearchEntryKind = "period_summary"
+	PersonalKnowledgeSearchEntryKindPocketNote    PersonalKnowledgeSearchEntryKind = "pocket_note"
+	PersonalKnowledgeSearchEntryKindProfile       PersonalKnowledgeSearchEntryKind = "profile"
+	PersonalKnowledgeSearchEntryKindRecording     PersonalKnowledgeSearchEntryKind = "recording"
+	PersonalKnowledgeSearchEntryKindRoom          PersonalKnowledgeSearchEntryKind = "room"
+	PersonalKnowledgeSearchEntryKindWiki          PersonalKnowledgeSearchEntryKind = "wiki"
+)
+
+// Valid indicates whether the value is a known member of the PersonalKnowledgeSearchEntryKind enum.
+func (e PersonalKnowledgeSearchEntryKind) Valid() bool {
+	switch e {
+	case PersonalKnowledgeSearchEntryKindMail:
+		return true
+	case PersonalKnowledgeSearchEntryKindMyPages:
+		return true
+	case PersonalKnowledgeSearchEntryKindPeriodSummary:
+		return true
+	case PersonalKnowledgeSearchEntryKindPocketNote:
+		return true
+	case PersonalKnowledgeSearchEntryKindProfile:
+		return true
+	case PersonalKnowledgeSearchEntryKindRecording:
+		return true
+	case PersonalKnowledgeSearchEntryKindRoom:
+		return true
+	case PersonalKnowledgeSearchEntryKindWiki:
 		return true
 	default:
 		return false
@@ -1015,16 +1066,16 @@ func (e WikiRefreshCandidateGenerationRequestMode) Valid() bool {
 
 // Defines values for WikiRefreshSessionSourceKind.
 const (
-	Recording WikiRefreshSessionSourceKind = "recording"
-	Room      WikiRefreshSessionSourceKind = "room"
+	WikiRefreshSessionSourceKindRecording WikiRefreshSessionSourceKind = "recording"
+	WikiRefreshSessionSourceKindRoom      WikiRefreshSessionSourceKind = "room"
 )
 
 // Valid indicates whether the value is a known member of the WikiRefreshSessionSourceKind enum.
 func (e WikiRefreshSessionSourceKind) Valid() bool {
 	switch e {
-	case Recording:
+	case WikiRefreshSessionSourceKindRecording:
 		return true
-	case Room:
+	case WikiRefreshSessionSourceKindRoom:
 		return true
 	default:
 		return false
@@ -1887,44 +1938,6 @@ type PersonalKnowledgeEvidenceGap struct {
 // PersonalKnowledgeEvidenceId Opaque Raw source identifier returned by candidate query and passed unchanged to evidence read. It names a source ID and immutable content hash and grants no access outside the authenticated Tenant and represented Human scope.
 type PersonalKnowledgeEvidenceId = string
 
-// PersonalKnowledgeEvidenceItem defines model for PersonalKnowledgeEvidenceItem.
-type PersonalKnowledgeEvidenceItem struct {
-	CiteAs string `json:"citeAs"`
-
-	// Content Full matched chunk text for top-ranked candidates, bounded by the response budget. Lower-ranked candidates carry only the excerpt.
-	Content *string `json:"content,omitempty"`
-
-	// Directory Actual Markdown headings available for a follow-up evidence read. This is omitted when the candidate has no readable directory.
-	Directory *[]PersonalKnowledgeSectionDirectoryEntry `json:"directory,omitempty"`
-	Excerpt   string                                    `json:"excerpt"`
-	Facet     *string                                   `json:"facet,omitempty"`
-
-	// Id Opaque Raw source identifier returned by candidate query and passed unchanged to evidence read. It names a source ID and immutable content hash and grants no access outside the authenticated Tenant and represented Human scope.
-	Id             PersonalKnowledgeEvidenceId                                              `json:"id"`
-	Metadata       *map[string]*PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties `json:"metadata,omitempty"`
-	Representation PersonalKnowledgeEvidenceItemRepresentation                              `json:"representation"`
-	Source         PersonalKnowledgeEvidenceSource                                          `json:"source"`
-	TimeHint       *string                                                                  `json:"timeHint,omitempty"`
-	Title          string                                                                   `json:"title"`
-}
-
-// PersonalKnowledgeEvidenceItemMetadata0 defines model for .
-type PersonalKnowledgeEvidenceItemMetadata0 = string
-
-// PersonalKnowledgeEvidenceItemMetadata1 defines model for .
-type PersonalKnowledgeEvidenceItemMetadata1 = float32
-
-// PersonalKnowledgeEvidenceItemMetadata2 defines model for .
-type PersonalKnowledgeEvidenceItemMetadata2 = bool
-
-// PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties defines model for PersonalKnowledgeEvidenceItem.metadata.AdditionalProperties.
-type PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties struct {
-	union json.RawMessage
-}
-
-// PersonalKnowledgeEvidenceItemRepresentation defines model for PersonalKnowledgeEvidenceItem.Representation.
-type PersonalKnowledgeEvidenceItemRepresentation string
-
 // PersonalKnowledgeEvidenceReadRequest defines model for PersonalKnowledgeEvidenceReadRequest.
 type PersonalKnowledgeEvidenceReadRequest struct {
 	AgentActorId AgentId `json:"agent_actor_id"`
@@ -2001,28 +2014,80 @@ type PersonalKnowledgeQueryRequest struct {
 	EventFrom *openapi_types.Date `json:"event_from,omitempty"`
 
 	// EventTo Optional inclusive end of the asked event time; see event_from.
-	EventTo                  *openapi_types.Date `json:"event_to,omitempty"`
-	Query                    string              `json:"query"`
-	TenantId                 AgentId             `json:"tenant_id"`
-	UserArtifactOwnerActorId AgentId             `json:"user_artifact_owner_actor_id"`
+	EventTo *openapi_types.Date `json:"event_to,omitempty"`
+
+	// Page Result page of the same search; a response with nextPage has more.
+	Page  *int   `json:"page,omitempty"`
+	Query string `json:"query"`
+
+	// Scope Search only one list and give it the whole result size; omitted returns both lists.
+	Scope                    *PersonalKnowledgeQueryRequestScope `json:"scope,omitempty"`
+	TenantId                 AgentId                             `json:"tenant_id"`
+	UserArtifactOwnerActorId AgentId                             `json:"user_artifact_owner_actor_id"`
 }
 
-// PersonalKnowledgeQueryResponse defines model for PersonalKnowledgeQueryResponse.
+// PersonalKnowledgeQueryRequestScope Search only one list and give it the whole result size; omitted returns both lists.
+type PersonalKnowledgeQueryRequestScope string
+
+// PersonalKnowledgeQueryResponse One search returns two separately ranked lists, so long derived reports never crowd out original evidence. Items are original sources and summaries are derived Wiki pages and Daily/Weekly reports. The top entries of each list carry content around their best match; the rest carry a snippet and sections to read.
 type PersonalKnowledgeQueryResponse struct {
-	// Facts Session facts extracted from conversations, recordings, Pocket Notes and personal mail that matched the query, ranked separately from items so they never displace Raw candidates. Each names the Raw chunk that states it; that chunk remains the original evidence.
-	Facts         *[]PersonalKnowledgeSessionFact `json:"facts,omitempty"`
-	Gaps          []PersonalKnowledgeEvidenceGap  `json:"gaps"`
-	IndexedAt     *time.Time                      `json:"indexedAt"`
-	Items         []PersonalKnowledgeEvidenceItem `json:"items"`
-	RequestId     *string                         `json:"requestId,omitempty"`
-	SchemaVersion int                             `json:"schemaVersion"`
+	// Facts Session facts extracted from conversations, recordings, Pocket Notes and personal mail that matched the query, ranked separately from the lists so they never displace them. Each names the Raw chunk that states it; that chunk remains the original evidence.
+	Facts     *[]PersonalKnowledgeSessionFact `json:"facts,omitempty"`
+	Gaps      []PersonalKnowledgeEvidenceGap  `json:"gaps"`
+	IndexedAt *time.Time                      `json:"indexedAt"`
 
-	// Status Candidate retrieval status. grounded has candidates and no gaps, partial has candidates and at least one gap, and empty has no candidates. partial with evidence_sections_not_read requires reading relevant candidate sections before judging whether information is insufficient; it is not a failed search.
+	// Items Original sources: room, recording, mail, my_pages, pocket_note and profile.
+	Items []PersonalKnowledgeSearchEntry `json:"items"`
+
+	// NextPage Present when the same search has more entries on that page.
+	NextPage      *int                                 `json:"nextPage,omitempty"`
+	Page          int                                  `json:"page"`
+	RequestId     *string                              `json:"requestId,omitempty"`
+	SchemaVersion int                                  `json:"schemaVersion"`
+	Scope         *PersonalKnowledgeQueryResponseScope `json:"scope,omitempty"`
+
+	// Status grounded has entries and no gaps, partial has entries and at least one gap, and empty has no entries.
 	Status PersonalKnowledgeQueryResponseStatus `json:"status"`
+
+	// Summaries Derived Wiki pages and Daily/Weekly reports.
+	Summaries []PersonalKnowledgeSearchEntry `json:"summaries"`
 }
 
-// PersonalKnowledgeQueryResponseStatus Candidate retrieval status. grounded has candidates and no gaps, partial has candidates and at least one gap, and empty has no candidates. partial with evidence_sections_not_read requires reading relevant candidate sections before judging whether information is insufficient; it is not a failed search.
+// PersonalKnowledgeQueryResponseScope defines model for PersonalKnowledgeQueryResponse.Scope.
+type PersonalKnowledgeQueryResponseScope string
+
+// PersonalKnowledgeQueryResponseStatus grounded has entries and no gaps, partial has entries and at least one gap, and empty has no entries.
 type PersonalKnowledgeQueryResponseStatus string
+
+// PersonalKnowledgeSearchEntry defines model for PersonalKnowledgeSearchEntry.
+type PersonalKnowledgeSearchEntry struct {
+	// CiteAs S<n> for items, W<n> for summaries.
+	CiteAs string `json:"citeAs"`
+
+	// Content Text around the entry's best match, for the top entries of a list.
+	Content *string `json:"content,omitempty"`
+
+	// EvidenceId Opaque Raw source identifier returned by candidate query and passed unchanged to evidence read. It names a source ID and immutable content hash and grants no access outside the authenticated Tenant and represented Human scope.
+	EvidenceId PersonalKnowledgeEvidenceId      `json:"evidenceId"`
+	Kind       PersonalKnowledgeSearchEntryKind `json:"kind"`
+
+	// RoomId The Room a room entry's conversation belongs to.
+	RoomId *string `json:"roomId,omitempty"`
+
+	// Sections Matched and neighboring sections to read next.
+	Sections []struct {
+		SectionId string `json:"sectionId"`
+		Title     string `json:"title"`
+	} `json:"sections"`
+
+	// Snippet A short window around the best match, for entries without content.
+	Snippet  *string `json:"snippet,omitempty"`
+	TimeHint *string `json:"timeHint,omitempty"`
+	Title    string  `json:"title"`
+}
+
+// PersonalKnowledgeSearchEntryKind defines model for PersonalKnowledgeSearchEntry.Kind.
+type PersonalKnowledgeSearchEntryKind string
 
 // PersonalKnowledgeSectionDirectoryEntry defines model for PersonalKnowledgeSectionDirectoryEntry.
 type PersonalKnowledgeSectionDirectoryEntry struct {
@@ -3203,94 +3268,6 @@ func (t MemoryFailureSummaryResponse_RawChunkSources) MarshalJSON() ([]byte, err
 }
 
 func (t *MemoryFailureSummaryResponse_RawChunkSources) UnmarshalJSON(b []byte) error {
-	err := t.union.UnmarshalJSON(b)
-	return err
-}
-
-// AsPersonalKnowledgeEvidenceItemMetadata0 returns the union data inside the PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties as a PersonalKnowledgeEvidenceItemMetadata0
-func (t PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties) AsPersonalKnowledgeEvidenceItemMetadata0() (PersonalKnowledgeEvidenceItemMetadata0, error) {
-	var body PersonalKnowledgeEvidenceItemMetadata0
-	err := json.Unmarshal(t.union, &body)
-	return body, err
-}
-
-// FromPersonalKnowledgeEvidenceItemMetadata0 overwrites any union data inside the PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties as the provided PersonalKnowledgeEvidenceItemMetadata0
-func (t *PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties) FromPersonalKnowledgeEvidenceItemMetadata0(v PersonalKnowledgeEvidenceItemMetadata0) error {
-	b, err := json.Marshal(v)
-	t.union = b
-	return err
-}
-
-// MergePersonalKnowledgeEvidenceItemMetadata0 performs a merge with any union data inside the PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties, using the provided PersonalKnowledgeEvidenceItemMetadata0
-func (t *PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties) MergePersonalKnowledgeEvidenceItemMetadata0(v PersonalKnowledgeEvidenceItemMetadata0) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-
-	merged, err := runtime.JSONMerge(t.union, b)
-	t.union = merged
-	return err
-}
-
-// AsPersonalKnowledgeEvidenceItemMetadata1 returns the union data inside the PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties as a PersonalKnowledgeEvidenceItemMetadata1
-func (t PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties) AsPersonalKnowledgeEvidenceItemMetadata1() (PersonalKnowledgeEvidenceItemMetadata1, error) {
-	var body PersonalKnowledgeEvidenceItemMetadata1
-	err := json.Unmarshal(t.union, &body)
-	return body, err
-}
-
-// FromPersonalKnowledgeEvidenceItemMetadata1 overwrites any union data inside the PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties as the provided PersonalKnowledgeEvidenceItemMetadata1
-func (t *PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties) FromPersonalKnowledgeEvidenceItemMetadata1(v PersonalKnowledgeEvidenceItemMetadata1) error {
-	b, err := json.Marshal(v)
-	t.union = b
-	return err
-}
-
-// MergePersonalKnowledgeEvidenceItemMetadata1 performs a merge with any union data inside the PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties, using the provided PersonalKnowledgeEvidenceItemMetadata1
-func (t *PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties) MergePersonalKnowledgeEvidenceItemMetadata1(v PersonalKnowledgeEvidenceItemMetadata1) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-
-	merged, err := runtime.JSONMerge(t.union, b)
-	t.union = merged
-	return err
-}
-
-// AsPersonalKnowledgeEvidenceItemMetadata2 returns the union data inside the PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties as a PersonalKnowledgeEvidenceItemMetadata2
-func (t PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties) AsPersonalKnowledgeEvidenceItemMetadata2() (PersonalKnowledgeEvidenceItemMetadata2, error) {
-	var body PersonalKnowledgeEvidenceItemMetadata2
-	err := json.Unmarshal(t.union, &body)
-	return body, err
-}
-
-// FromPersonalKnowledgeEvidenceItemMetadata2 overwrites any union data inside the PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties as the provided PersonalKnowledgeEvidenceItemMetadata2
-func (t *PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties) FromPersonalKnowledgeEvidenceItemMetadata2(v PersonalKnowledgeEvidenceItemMetadata2) error {
-	b, err := json.Marshal(v)
-	t.union = b
-	return err
-}
-
-// MergePersonalKnowledgeEvidenceItemMetadata2 performs a merge with any union data inside the PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties, using the provided PersonalKnowledgeEvidenceItemMetadata2
-func (t *PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties) MergePersonalKnowledgeEvidenceItemMetadata2(v PersonalKnowledgeEvidenceItemMetadata2) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-
-	merged, err := runtime.JSONMerge(t.union, b)
-	t.union = merged
-	return err
-}
-
-func (t PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties) MarshalJSON() ([]byte, error) {
-	b, err := t.union.MarshalJSON()
-	return b, err
-}
-
-func (t *PersonalKnowledgeEvidenceItem_Metadata_AdditionalProperties) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }

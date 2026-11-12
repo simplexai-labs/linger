@@ -719,12 +719,12 @@ func (s *Service) recallVoiceLiveMemory(ctx context.Context, session voicelive.S
 	// the names alone when the query names people nobody's evidence mentions.
 	// Voice Runtime gives a tool 15s: retry only while a second query (up to
 	// 3s embedding plus search) still fits inside this call's 12s.
-	if time.Since(started) < recallRetryBefore && (len(evidence.Raw.Items) == 0 && len(evidence.Raw.Facts) == 0 || len(entities) > 0 && !voicelive.RecallMentions(evidence)) {
+	if time.Since(started) < recallRetryBefore && (len(evidence.Raw.Items) == 0 && len(evidence.Raw.Summaries) == 0 && len(evidence.Raw.Facts) == 0 || len(entities) > 0 && !voicelive.RecallMentions(evidence)) {
 		again := query
 		if len(entities) > 0 {
 			again = strings.Join(entities, " ")
 		}
-		if retry, retried := raw(again); retried && (len(retry.Items) > 0 || len(retry.Facts) > 0) {
+		if retry, retried := raw(again); retried && (len(retry.Items) > 0 || len(retry.Summaries) > 0 || len(retry.Facts) > 0) {
 			evidence.Raw, ok = retry, true
 		}
 	}

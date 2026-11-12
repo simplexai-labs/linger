@@ -213,12 +213,12 @@ const memoryText = () =>
 const communication = () =>
   revisions.at(-1)?.sections.communication_and_working_style ?? [];
 
-/** Asks the Another Me's search as its tool would; returns its items. */
+/** Asks the Another Me's search as its tool would; returns both lists. */
 async function searchKinds(query: string) {
   const response = await workspace.search(scope, { query });
-  return response.items.map((item) => ({
-    kind: item.source.kind,
-    uri: String(item.metadata?.sourceUri ?? ""),
+  return [...response.items, ...response.summaries].map((entry) => ({
+    kind: entry.kind,
+    room: entry.roomId ?? "",
   }));
 }
 
@@ -565,8 +565,9 @@ const chatHits = await searchKinds("revised SOW milestone payments Wednesday");
 check(
   "Day 1 daytime",
   "today's chat is searchable before the night",
-  chatHits.some((hit) => hit.kind === "room" && hit.uri.includes(ATLAS_ROOM)),
-  chatHits.map((hit) => `${hit.kind} ${hit.uri}`).join("; ") || "no candidates",
+  chatHits.some((hit) => hit.kind === "room" && hit.room === ATLAS_ROOM),
+  chatHits.map((hit) => `${hit.kind} ${hit.room}`).join("; ") ||
+    "no candidates",
 );
 check(
   "Day 1 daytime",

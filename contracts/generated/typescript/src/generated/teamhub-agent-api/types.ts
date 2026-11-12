@@ -1542,7 +1542,7 @@ export interface components {
       has_more: boolean;
       next_cursor?: string;
     };
-    /** @description One search over every source of the Human's knowledge index (Sessions, recordings, My pages, mail, Pocket Notes, the Profile, the published Wiki and Daily and Weekly reports); each result names its source kind. */
+    /** @description One search over every source of the Human's knowledge index (Sessions, recordings, My pages, mail, Pocket Notes, the Profile, the published Wiki and Daily and Weekly reports), returned as two separately ranked lists, items (originals) and summaries (Wiki and reports). */
     AgentKnowledgeSearchRequest: {
       /** @description The distinctive phrase, entity, or term being asked about, keeping the current request's named project, person, or event. Do not add unrelated topics from earlier turns or put dates in the query text. */
       query: string;
@@ -1568,6 +1568,13 @@ export interface components {
        * @description Inclusive end of when the asked event happened; pair with eventFrom.
        */
       eventTo?: string;
+      /**
+       * @description Return only one list with the whole result size, summaries (Wiki pages and Daily/Weekly reports) or originals (conversations, recordings, mail, documents, notes, the Profile). Omit to get both.
+       * @enum {string}
+       */
+      scope?: "originals" | "summaries";
+      /** @description Result page of the same search; a result with nextPage has more on that page. */
+      page?: number;
     };
     /**
      * @description Stable machine-readable failure classification.

@@ -1670,6 +1670,19 @@ components:
           type: string
           format: date
           description: Optional inclusive end of the asked event time; see event_from.
+        scope:
+          type: string
+          enum:
+            - originals
+            - summaries
+          description:
+            Search only one list and give it the whole result size; omitted
+            returns both lists.
+        page:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Result page of the same search; a response with nextPage has more.
     PersonalKnowledgeQueryResponse:
       type: object
       additionalProperties: false
@@ -1677,12 +1690,20 @@ components:
         - schemaVersion
         - status
         - items
+        - summaries
         - gaps
         - indexedAt
+        - page
+      description:
+        One search returns two separately ranked lists, so long derived
+        reports never crowd out original evidence. Items are original sources
+        and summaries are derived Wiki pages and Daily/Weekly reports. The top
+        entries of each list carry content around their best match; the rest
+        carry a snippet and sections to read.
       properties:
         schemaVersion:
           type: integer
-          const: 1
+          const: 2
         status:
           type: string
           enum:
@@ -1690,16 +1711,20 @@ components:
             - partial
             - empty
           description:
-            Candidate retrieval status. grounded has candidates and no gaps,
-            partial has candidates and at least one gap, and empty has no
-            candidates. partial with evidence_sections_not_read requires
-            reading relevant candidate sections before judging whether
-            information is insufficient; it is not a failed search.
+            grounded has entries and no gaps, partial has entries and at least
+            one gap, and empty has no entries.
         items:
           type: array
           maxItems: 20
+          description: "Original sources: room, recording, mail, my_pages, pocket_note and profile."
           items:
-            $ref: "#/components/schemas/PersonalKnowledgeEvidenceItem"
+            $ref: "#/components/schemas/PersonalKnowledgeSearchEntry"
+        summaries:
+          type: array
+          maxItems: 10
+          description: Derived Wiki pages and Daily/Weekly reports.
+          items:
+            $ref: "#/components/schemas/PersonalKnowledgeSearchEntry"
         gaps:
           type: array
           maxItems: 20
@@ -1715,10 +1740,24 @@ components:
           description:
             Session facts extracted from conversations, recordings, Pocket
             Notes and personal mail that matched the query, ranked separately
-            from items so they never displace Raw candidates. Each names the Raw chunk that states it; that chunk
-            remains the original evidence.
+            from the lists so they never displace them. Each names the Raw
+            chunk that states it; that chunk remains the original evidence.
           items:
             $ref: "#/components/schemas/PersonalKnowledgeSessionFact"
+        scope:
+          type: string
+          enum:
+            - originals
+            - summaries
+        page:
+          type: integer
+          minimum: 1
+          maximum: 10
+        nextPage:
+          type: integer
+          minimum: 2
+          maximum: 11
+          description: Present when the same search has more entries on that page.
         requestId:
           type: string
           minLength: 1
@@ -1769,70 +1808,73 @@ components:
           maxLength: 128
           pattern: ^[a-z0-9][a-z0-9_-]*$
           description: Raw section to read for the fact's original wording.
-    PersonalKnowledgeEvidenceItem:
+    PersonalKnowledgeSearchEntry:
       type: object
       additionalProperties: false
       required:
-        - id
         - citeAs
+        - evidenceId
+        - kind
         - title
-        - excerpt
-        - source
-        - representation
+        - sections
       properties:
-        id:
-          $ref: "#/components/schemas/PersonalKnowledgeEvidenceId"
         citeAs:
           type: string
-          pattern: ^S[1-9][0-9]*$
+          pattern: ^[SW][1-9][0-9]*$
+          description: "S<n> for items, W<n> for summaries."
+        evidenceId:
+          $ref: "#/components/schemas/PersonalKnowledgeEvidenceId"
+        kind:
+          type: string
+          enum:
+            - room
+            - recording
+            - mail
+            - my_pages
+            - pocket_note
+            - profile
+            - wiki
+            - period_summary
         title:
           type: string
           minLength: 1
           maxLength: 512
-        content:
-          type: string
-          maxLength: 6000
-          description:
-            Full matched chunk text for top-ranked candidates, bounded by the
-            response budget. Lower-ranked candidates carry only the excerpt.
-        excerpt:
-          type: string
-          minLength: 1
-          maxLength: 600
-        source:
-          $ref: "#/components/schemas/PersonalKnowledgeEvidenceSource"
-        representation:
-          type: string
-          enum:
-            - source_excerpt
-            - derived_summary
-            - structured_fact
-        facet:
-          type: string
-          minLength: 1
-          maxLength: 128
         timeHint:
           type: string
           minLength: 1
           maxLength: 128
-        metadata:
-          type: object
-          maxProperties: 20
-          additionalProperties:
-            nullable: true
-            oneOf:
-              - type: string
-                maxLength: 512
-              - type: number
-              - type: boolean
-        directory:
+        content:
+          type: string
+          maxLength: 3000
+          description: Text around the entry's best match, for the top entries of a list.
+        snippet:
+          type: string
+          maxLength: 400
+          description: A short window around the best match, for entries without content.
+        sections:
           type: array
-          maxItems: 64
+          maxItems: 4
+          description: Matched and neighboring sections to read next.
           items:
-            $ref: "#/components/schemas/PersonalKnowledgeSectionDirectoryEntry"
-          description:
-            Actual Markdown headings available for a follow-up evidence read.
-            This is omitted when the candidate has no readable directory.
+            type: object
+            additionalProperties: false
+            required:
+              - sectionId
+              - title
+            properties:
+              sectionId:
+                type: string
+                minLength: 1
+                maxLength: 128
+                pattern: ^[a-z0-9][a-z0-9_-]*$
+              title:
+                type: string
+                maxLength: 512
+        roomId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: The Room a room entry's conversation belongs to.
     PersonalKnowledgeEvidenceId:
       type: string
       pattern: ^raw_[a-f0-9]{16}_[a-f0-9]{16}$

@@ -1,4 +1,7 @@
-import { sessionFactSchema } from "./tools/query.js";
+import {
+  personalKnowledgeQueryOutputSchema,
+  sessionFactSchema,
+} from "./tools/query.js";
 import { ToolExecutionError } from "../../domain-support/errors.js";
 import type {
   PersonalKnowledgeEvidenceReadResponse,
@@ -6,8 +9,6 @@ import type {
 } from "@linger/wire-contracts/node-services-internal/client";
 import { PERSONAL_KNOWLEDGE_EVIDENCE_ID_PATTERN } from "@linger/wire-contracts/node-services-internal/client";
 import { isRecord } from "@linger/service-kit";
-
-const MAX_FACTS = 30;
 
 interface KnowledgeEvidenceReadInput {
   evidenceId: string;
@@ -20,28 +21,7 @@ export function formatKnowledgeCliOutput(
   input: Readonly<Record<string, unknown>>,
   response: unknown,
 ): Record<string, unknown> {
-  if (command === "search") {
-    const parsed = parseResponse(response);
-    return {
-      ...parsed,
-      schemaVersion: 2,
-      items: parsed.items.map(({ id, directory, ...item }) => {
-        if (
-          !PERSONAL_KNOWLEDGE_EVIDENCE_ID_PATTERN.test(id) ||
-          !directory?.length
-        )
-          throw unavailable();
-        return {
-          evidenceId: id,
-          ...item,
-          directory: directory.map(({ id: sectionId, ...entry }) => ({
-            sectionId,
-            ...entry,
-          })),
-        };
-      }),
-    };
-  }
+  if (command === "search") return parseSearchResponse(response);
   if (command === "read") {
     const parsed = parseEvidenceReadResponse(
       response,
@@ -65,123 +45,9 @@ export function formatKnowledgeCliOutput(
   throw new TypeError("Unknown knowledge command");
 }
 
-function parseResponse(value: unknown): PersonalKnowledgeQueryResponse {
+/** Memory's search result, validated as the Agent sees it. */
+function parseSearchResponse(value: unknown): PersonalKnowledgeQueryResponse {
   if (!isRecord(value)) throw unavailable();
-  const keys = Object.keys(value);
-  if (
-    !hasOnlyKeys(keys, [
-      "facts",
-      "gaps",
-      "indexedAt",
-      "items",
-      "requestId",
-      "schemaVersion",
-      "status",
-    ]) ||
-    value.schemaVersion !== 1 ||
-    (value.status !== "grounded" &&
-      value.status !== "partial" &&
-      value.status !== "empty") ||
-    (value.indexedAt !== null &&
-      (typeof value.indexedAt !== "string" ||
-        Number.isNaN(Date.parse(value.indexedAt)))) ||
-    (value.requestId !== undefined &&
-      (!isBoundedString(value.requestId, 128) || !value.requestId)) ||
-    !Array.isArray(value.items) ||
-    value.items.length > 20 ||
-    !Array.isArray(value.gaps) ||
-    value.gaps.length > 20
-  ) {
-    throw unavailable();
-  }
-
-  const itemIds = new Set<string>();
-  const items = value.items.map((candidate, index) => {
-    if (
-      !isRecord(candidate) ||
-      !hasOnlyKeys(Object.keys(candidate), [
-        "citeAs",
-        "content",
-        "directory",
-        "excerpt",
-        "facet",
-        "id",
-        "metadata",
-        "representation",
-        "source",
-        "timeHint",
-        "title",
-      ]) ||
-      !isBoundedString(candidate.id, 256) ||
-      itemIds.has(candidate.id) ||
-      candidate.citeAs !== `S${index + 1}` ||
-      !isBoundedString(candidate.title, 512) ||
-      !isBoundedString(candidate.excerpt, 600) ||
-      (candidate.content !== undefined &&
-        !isBoundedString(candidate.content, 6_000)) ||
-      (candidate.representation !== "source_excerpt" &&
-        candidate.representation !== "derived_summary" &&
-        candidate.representation !== "structured_fact") ||
-      (candidate.facet !== undefined &&
-        !isBoundedString(candidate.facet, 128)) ||
-      (candidate.timeHint !== undefined &&
-        !isBoundedString(candidate.timeHint, 128)) ||
-      !validMetadata(candidate.metadata)
-    ) {
-      throw unavailable();
-    }
-    const evidenceSource = parseEvidenceSource(candidate.source);
-    const directory =
-      candidate.directory === undefined
-        ? undefined
-        : parseDirectory(candidate.directory);
-    itemIds.add(candidate.id);
-    return Object.freeze({
-      citeAs: candidate.citeAs,
-      ...(candidate.content === undefined
-        ? {}
-        : { content: candidate.content }),
-      ...(directory === undefined ? {} : { directory }),
-      excerpt: candidate.excerpt,
-      ...(candidate.facet === undefined ? {} : { facet: candidate.facet }),
-      id: candidate.id,
-      ...(candidate.metadata === undefined
-        ? {}
-        : { metadata: Object.freeze({ ...candidate.metadata }) }),
-      representation: candidate.representation,
-      source: evidenceSource,
-      ...(candidate.timeHint === undefined
-        ? {}
-        : { timeHint: candidate.timeHint }),
-      title: candidate.title,
-    });
-  });
-
-  const gaps = value.gaps.map((candidate) => {
-    if (
-      !isRecord(candidate) ||
-      !hasOnlyKeys(Object.keys(candidate), ["code", "detail"]) ||
-      !isBoundedString(candidate.code, 64) ||
-      (candidate.detail !== undefined &&
-        !isBoundedString(candidate.detail, 512))
-    ) {
-      throw unavailable();
-    }
-    return Object.freeze({
-      code: candidate.code,
-      ...(candidate.detail === undefined ? {} : { detail: candidate.detail }),
-    });
-  });
-
-  if (
-    (value.status === "grounded" &&
-      (items.length === 0 || gaps.length !== 0)) ||
-    (value.status === "partial" && (items.length === 0 || gaps.length === 0)) ||
-    (value.status === "empty" && (items.length !== 0 || gaps.length === 0))
-  ) {
-    throw unavailable();
-  }
-
   // Facts are optional leads: drop an invalid one instead of failing the search.
   if (value.facts !== undefined && !Array.isArray(value.facts))
     throw unavailable();
@@ -189,17 +55,39 @@ function parseResponse(value: unknown): PersonalKnowledgeQueryResponse {
     const parsed = sessionFactSchema.safeParse(fact);
     return parsed.success ? [parsed.data] : [];
   });
-  if (facts.length > MAX_FACTS) throw unavailable();
-
-  return Object.freeze({
+  const { facts: _facts, ...rest } = value;
+  const parsed = personalKnowledgeQueryOutputSchema.safeParse({
+    ...rest,
     ...(facts.length ? { facts } : {}),
-    gaps,
-    indexedAt: value.indexedAt,
-    items,
-    ...(value.requestId === undefined ? {} : { requestId: value.requestId }),
-    schemaVersion: 1 as const,
-    status: value.status,
   });
+  if (!parsed.success) throw unavailable();
+  const result = parsed.data;
+  const entries = [...result.items, ...result.summaries];
+  // Each list is labelled S or W in one consecutive run; a later page
+  // continues where the previous one stopped.
+  const consecutive = (list: readonly { citeAs: string }[], prefix: string) =>
+    list.every(
+      ({ citeAs }, index) =>
+        citeAs.startsWith(prefix) &&
+        Number(citeAs.slice(1)) === Number(list[0]!.citeAs.slice(1)) + index,
+    );
+  if (
+    !consecutive(result.items, "S") ||
+    !consecutive(result.summaries, "W") ||
+    (result.page === 1 &&
+      [result.items[0], result.summaries[0]].some(
+        (entry) => entry && entry.citeAs.slice(1) !== "1",
+      )) ||
+    (result.status === "grounded" &&
+      (entries.length === 0 || result.gaps.length !== 0)) ||
+    (result.status === "partial" &&
+      (entries.length === 0 || result.gaps.length === 0)) ||
+    (result.status === "empty" &&
+      (entries.length !== 0 || result.gaps.length === 0))
+  ) {
+    throw unavailable();
+  }
+  return result;
 }
 
 function parseDirectory(value: unknown) {
@@ -368,18 +256,6 @@ function parseEvidenceReadResponse(
     ...(value.timeHint === undefined ? {} : { timeHint: value.timeHint }),
     title: value.title,
   });
-}
-
-function validMetadata(value: unknown): boolean {
-  if (value === undefined) return true;
-  if (!isRecord(value) || Object.keys(value).length > 20) return false;
-  return Object.values(value).every(
-    (item) =>
-      item === null ||
-      typeof item === "boolean" ||
-      (typeof item === "number" && Number.isFinite(item)) ||
-      (typeof item === "string" && item.length <= 512),
-  );
 }
 
 function hasOnlyKeys(actual: string[], allowed: string[]): boolean {

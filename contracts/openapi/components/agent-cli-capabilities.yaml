@@ -43,13 +43,28 @@ components:
           type: string
           format: date
           pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))$
+        scope:
+          description:
+            Return only one list with the whole result size, summaries (Wiki
+            pages and Daily/Weekly reports) or originals (conversations,
+            recordings, mail, documents, notes, the Profile). Omit to get both.
+          type: string
+          enum:
+            - originals
+            - summaries
+        page:
+          description: Result page of the same search; a result with nextPage has more on that page.
+          type: integer
+          minimum: 1
+          maximum: 10
       required:
         - query
       additionalProperties: false
       description:
         One search over every source of the Human's knowledge index (Sessions,
         recordings, My pages, mail, Pocket Notes, the Profile, the published
-        Wiki and Daily and Weekly reports); each result names its source kind.
+        Wiki and Daily and Weekly reports), returned as two separately ranked
+        lists, items (originals) and summaries (Wiki and reports).
     AgentKnowledgeReadRequest:
       type: object
       properties:

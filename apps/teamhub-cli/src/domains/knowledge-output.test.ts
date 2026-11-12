@@ -7,17 +7,23 @@ async function readEvidence(input: Record<string, unknown>, response: unknown) {
   return formatKnowledgeCliOutput("read", input, response);
 }
 describe("Knowledge output parsing", () => {
-  it("keeps the source kind each candidate names", async () => {
-    const returned = response("wiki", "raw_aaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbb");
-    returned.items[0] = {
-      ...returned.items[0]!,
-      directory: [{ id: "chunk-1", level: 2, title: "Page" }],
-    } as never;
-
-    const result = (await query({ query: "question" }, returned)) as {
-      items: { source: { kind: string } }[];
-    };
-    expect(result.items[0]!.source.kind).toBe("wiki");
+  const entry = (citeAs: string, kind: string, extra = {}) => ({
+    citeAs,
+    evidenceId: "raw_aaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbb",
+    kind,
+    title: "Source",
+    snippet: "Grounded evidence",
+    sections: [{ sectionId: "chunk-1", title: "Chat" }],
+    ...extra,
+  });
+  const grounded = (items: unknown[], summaries: unknown[] = []) => ({
+    gaps: [],
+    indexedAt: "2026-09-01T12:00:00Z",
+    items,
+    summaries,
+    page: 1,
+    schemaVersion: 2 as const,
+    status: "grounded" as const,
   });
   const sessionFact = {
     text: "User cleaned white Adidas sneakers in April 2026 | When: April 2026 | Involving: user",
@@ -29,32 +35,29 @@ describe("Knowledge output parsing", () => {
     evidenceId: "raw_1111111111111111_bbbbbbbbbbbbbbbb",
     sectionId: "chunk-1",
   };
-  const raw = (index: number, extra: Record<string, unknown>) => ({
-    ...item(
-      `raw_${String(index).repeat(16)}_bbbbbbbbbbbbbbbb`,
-      `S${index}`,
-      "raw",
-      `raw_${String(index).repeat(16)}_bbbbbbbbbbbbbbbb`,
-    ),
-    directory: [{ id: `chunk-${index}`, level: 2, title: "Chat" }],
-    ...extra,
-  });
-  const grounded = (items: unknown[]) => ({
-    gaps: [],
-    indexedAt: "2026-09-01T12:00:00Z",
-    items,
-    schemaVersion: 1 as const,
-    status: "grounded" as const,
+
+  it("keeps both lists and the kind each entry names", async () => {
+    const result = (await query(
+      { query: "question" },
+      grounded(
+        [entry("S1", "room", { content: "Chat text", roomId: "room_1" })],
+        [entry("W1", "wiki")],
+      ),
+    )) as {
+      items: { kind: string; roomId: string }[];
+      summaries: { kind: string }[];
+    };
+    expect(result.items[0]).toMatchObject({ kind: "room", roomId: "room_1" });
+    expect(result.summaries[0]!.kind).toBe("wiki");
   });
 
-  it("drops an invalid fact instead of failing the Raw search", async () => {
-    const items = [
-      raw(1, { content: "I cleaned my white Adidas last month." }),
-    ];
+  it("drops an invalid fact instead of failing the search", async () => {
     const result = await query(
       { query: "shoes" },
       {
-        ...grounded(items),
+        ...grounded([
+          entry("S1", "room", { content: "I cleaned my white Adidas." }),
+        ]),
         facts: [{ ...sessionFact, entities: ["x".repeat(97)] }, sessionFact],
       },
     );
@@ -83,59 +86,53 @@ describe("Knowledge output parsing", () => {
       retryable: true,
     });
   });
-  it("rejects non-contiguous citation labels", async () => {
-    const returned = {
-      ...response("raw", "raw_aaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbb"),
-      items: [
-        item(
-          "raw_aaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbb",
-          "S2",
-          "raw",
-          "raw_aaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbb",
-        ),
-      ],
-    };
 
-    await expect(query({ query: "question" }, returned)).rejects.toMatchObject({
-      code: "personal_knowledge_unavailable",
-      retryable: true,
-    });
+  it("rejects undeclared entry fields and non-contiguous citation labels", async () => {
+    for (const returned of [
+      grounded([
+        entry("S1", "room", { sourceUri: "teamhub://rooms/x/messages" }),
+      ]),
+      grounded([entry("S2", "room")]),
+      grounded([entry("S1", "room"), entry("S3", "room")]),
+      grounded([], [entry("S1", "wiki")]),
+    ])
+      await expect(
+        query({ query: "question" }, returned),
+      ).rejects.toMatchObject({
+        code: "personal_knowledge_unavailable",
+        retryable: true,
+      });
   });
-  it("accepts an empty result instead of turning missing knowledge into an error", async () => {
-    const emptyResponse = {
-      gaps: [{ code: "no_relevant_evidence" }],
-      indexedAt: null,
-      items: [],
-      schemaVersion: 1 as const,
-      status: "empty" as const,
-    };
-    const returned = emptyResponse;
 
-    await expect(query({ query: "question" }, returned)).resolves.toMatchObject(
-      { status: "empty", items: [] },
-    );
+  it("accepts a later page that continues the labels", async () => {
+    await expect(
+      query(
+        { query: "question", page: 2 },
+        {
+          ...grounded([entry("S6", "room"), entry("S7", "room")]),
+          page: 2,
+        },
+      ),
+    ).resolves.toMatchObject({ page: 2 });
+  });
+
+  it("accepts an empty result instead of turning missing knowledge into an error", async () => {
+    await expect(
+      query(
+        { query: "question" },
+        {
+          gaps: [{ code: "no_relevant_evidence" }],
+          indexedAt: null,
+          items: [],
+          summaries: [],
+          page: 1,
+          schemaVersion: 2 as const,
+          status: "empty" as const,
+        },
+      ),
+    ).resolves.toMatchObject({ status: "empty", items: [], summaries: [] });
   });
 });
-function response(kind: string, sourceRef: string) {
-  return {
-    gaps: [],
-    indexedAt: "2026-09-01T12:00:00Z",
-    items: [item(sourceRef, "S1", kind, sourceRef)],
-    schemaVersion: 1 as const,
-    status: "grounded" as const,
-  };
-}
-
-function item(id: string, citeAs: string, kind: string, ref: string) {
-  return {
-    citeAs,
-    excerpt: "Grounded evidence",
-    id,
-    representation: "source_excerpt" as const,
-    source: { kind, ref },
-    title: "Profile",
-  };
-}
 
 function evidenceResponse() {
   return {

@@ -12,27 +12,51 @@ import { contentWindow } from "./search/content-window.js";
 import {
   searchRawSources,
   resolveSearchRawSources,
+  type RawMatch,
 } from "./search/raw-query.js";
-import { rawEvidenceId, rawSourceOriginKind } from "./search/source-store.js";
+import {
+  rawEvidenceId,
+  rawSourceOriginKind,
+  type RawOriginKind,
+} from "./search/source-store.js";
 import { agentWorkspaceRoot } from "./paths.js";
 
-const MAX_EVIDENCE_ITEMS = 20;
 const MAX_DIRECTORY_ITEMS = 64;
-// A candidate lists only its matched chunks and their neighbors; the full
-// directory is returned by the evidence read.
-const MAX_CANDIDATE_DIRECTORY_ITEMS = 8;
-const CANDIDATE_EXCERPT_CHARS = 300;
-// One-shot retrieval: the top candidates carry their matched chunk text so the
-// Agent can answer without a second read round-trip.
-// Inline content shares one character budget: each of the top sources first
-// gets its best chunk, then the remaining budget goes to the next-ranked chunks
-// of those same sources. A long chunk contributes the window around its best
-// query match, so the same budget covers more sources; a user's short remark
-// inside a long assistant reply otherwise leaves room for only three.
-const INLINE_CONTENT_SOURCES = 6;
-const INLINE_CONTENT_CHARS = 800;
-const INLINE_CONTENT_BUDGET_CHARS = 6_000;
-const INLINE_CONTENT_SEPARATOR = "\n\n…\n\n";
+// One search returns two separately ranked lists, so long derived reports
+// never outrank original evidence on keyword scores alone: items are original
+// sources and summaries are the Wiki and Daily/Weekly reports.
+const ORIGINAL_KINDS: readonly RawOriginKind[] = [
+  "room",
+  "recording",
+  "mail",
+  "my_pages",
+  "pocket_note",
+  "profile",
+];
+const SUMMARY_KINDS: readonly RawOriginKind[] = ["wiki", "period_summary"];
+const MAX_ENTRIES = { items: 20, summaries: 10 } as const;
+// Chunks each list ranks before entries are grouped by source.
+const LIST_CANDIDATE_CHUNKS = 60;
+// The top entries of each list carry text around their best match; the
+// floors keep that many even when the result is trimmed. A small budget, as a
+// small context window gives, starts from fewer and shorter bodies.
+const BODY_FLOORS = { items: 3, summaries: 2 } as const;
+const LARGE_BUDGET_CHARS = 20_000;
+const LARGE_LAYOUT = {
+  bodies: { items: 5, summaries: 3 },
+  chars: { items: 1_500, summaries: 1_500 },
+} as const;
+const SMALL_LAYOUT = {
+  bodies: { items: 3, summaries: 2 },
+  chars: { items: 1_200, summaries: 800 },
+} as const;
+const MIN_BODY_CHARS = 600;
+const BODY_SHRINK_STEP = 100;
+const SNIPPET_CHARS = 200;
+const MAX_ENTRY_SECTIONS = 4;
+const MAX_PAGE = 10;
+const ROOM_SOURCE_URI =
+  /^teamhub:\/\/rooms\/([A-Za-z0-9_-]{1,128})\/messages$/u;
 // The Daemon limits one tool result to 15% of the model's context window, at
 // most 25,000 tokens, and to 12,000 tokens when the window is unknown; a
 // Runtime cuts the middle out of a longer result or saves it to a file.
@@ -48,11 +72,6 @@ const CLI_LABEL_ROOM = 0.9;
 // A section that does not fit still returns a page this large, so every read
 // makes progress.
 const MIN_SECTION_PAGE_CHARS = 200;
-const RESULTS_TRIMMED_GAP = {
-  code: "results_trimmed",
-  detail:
-    "Lower-ranked inline content, candidates or Session facts were left out to keep this result within its size budget. Read a candidate's sections for its full text, or search more narrowly.",
-};
 
 export class PersonalKnowledgeEvidenceNotFoundError extends Error {
   constructor() {
@@ -77,10 +96,24 @@ export function knowledgeOutputBudget(
   return Math.floor((toolOutputTokens * 4 * CLI_LABEL_ROOM) / 3);
 }
 
+type ListName = "items" | "summaries";
+type SearchEntry = PersonalKnowledgeQueryResponse["items"][number];
+type SessionFact = NonNullable<PersonalKnowledgeQueryResponse["facts"]>[number];
+
+/** One source in a list: its best match, its matched chunks and its body size. */
+interface ListEntry {
+  match: RawMatch;
+  matched: Set<string>;
+  // Characters of text around the best match; 0 gives a snippet instead.
+  body: number;
+}
+
 /**
- * One search over every source of the Agent's index: Sessions, recordings,
- * My pages, mail, Pocket Notes, the Profile, the published Wiki and Daily and
- * Weekly reports. Each item names its source kind.
+ * One search over every source of the Agent's index, as two separately ranked
+ * lists: items are Sessions, recordings, My pages, mail, Pocket Notes and the
+ * Profile; summaries are the published Wiki and Daily and Weekly reports.
+ * Session facts rank in their own channel. `scope` searches one list with the
+ * whole budget, and `page` continues the same search.
  */
 export async function queryPersonalKnowledge(
   dataRoot: string,
@@ -92,142 +125,306 @@ export async function queryPersonalKnowledge(
 ): Promise<PersonalKnowledgeQueryResponse> {
   const budget = options.outputBudgetChars ?? knowledgeOutputBudget(undefined);
   const workspaceRoot = agentWorkspaceRoot(dataRoot, input.agent_id);
-  // Facts rank in their own channel so they never displace Raw candidates.
-  const [rawResult, facts] = await Promise.all([
-    searchRawSources(workspaceRoot, input, options.chunkSearch),
+  const lists: readonly ListName[] =
+    input.scope === "summaries"
+      ? ["summaries"]
+      : input.scope === "originals"
+        ? ["items"]
+        : ["items", "summaries"];
+  const search = (name: ListName) =>
+    lists.includes(name)
+      ? searchRawSources(
+          workspaceRoot,
+          {
+            ...input,
+            originKinds: name === "items" ? ORIGINAL_KINDS : SUMMARY_KINDS,
+            limit: LIST_CANDIDATE_CHUNKS,
+          },
+          options.chunkSearch,
+        )
+      : Promise.resolve({ matches: [], limited: false });
+  const [itemResult, summaryResult, facts] = await Promise.all([
+    search("items"),
+    search("summaries"),
     options.chunkSearch?.searchFacts?.(input) ?? [],
   ]);
-  // A raw evidence ID identifies one immutable source version, not one
-  // matching chunk. Preserve the highest-ranked match as its preview and
-  // direct the follow-up read to every matched chunk of that source.
-  const bySource = new Map<string, (typeof rawResult.matches)[number]>();
-  const matchedChunkIds = new Map<string, Set<string>>();
-  for (const match of rawResult.matches) {
-    if (!bySource.has(match.source.id)) bySource.set(match.source.id, match);
-    const ids = matchedChunkIds.get(match.source.id) ?? new Set<string>();
-    ids.add(match.chunk.id);
-    matchedChunkIds.set(match.source.id, ids);
-  }
-  const selected = [...bySource.values()].slice(0, MAX_EVIDENCE_ITEMS);
-  const contentChunks = new Map<string, SourceChunk[]>();
-  let contentChars = 0;
-  for (const { source, chunk } of selected.slice(0, INLINE_CONTENT_SOURCES)) {
-    contentChunks.set(source.id, [chunk]);
-    contentChars += Math.min(chunk.content.length, INLINE_CONTENT_CHARS);
-  }
-  for (const match of rawResult.matches) {
-    const chunks = contentChunks.get(match.source.id);
-    if (!chunks || chunks.some(({ id }) => id === match.chunk.id)) continue;
-    const chars = Math.min(match.chunk.content.length, INLINE_CONTENT_CHARS);
-    if (contentChars + chars > INLINE_CONTENT_BUDGET_CHARS) continue;
-    chunks.push(match.chunk);
-    contentChars += chars;
-  }
-  const gaps = [
-    ...(rawResult.unavailable
-      ? [{ code: "raw_chunk_search_unavailable" }]
-      : []),
-    ...(rawResult.limited ? [{ code: "source_search_limited" }] : []),
-  ];
-  const dates = selected
-    .map(({ source }) => Date.parse(source.date))
-    .filter(Number.isFinite);
-  const indexedAt = dates.length
-    ? new Date(Math.max(...dates)).toISOString()
-    : null;
-
-  if (selected.length === 0) {
-    return {
-      gaps: rawResult.unavailable
-        ? gaps
-        : [...gaps, { code: "no_relevant_evidence" }],
-      indexedAt,
-      items: [],
-      schemaVersion: 1,
-      status: rawResult.unavailable ? "partial" : "empty",
-    };
-  }
-
   const terms = new Set(
     tokenizeSearchText([input.query, ...(input.alternates ?? [])].join(" ")),
   );
-  const keptFacts = facts.slice(
+  const unavailable = [itemResult, summaryResult].some(
+    (result) => "unavailable" in result && result.unavailable,
+  );
+  const limited = itemResult.limited || summaryResult.limited;
+  const layout = (
+    candidates: Record<ListName, ListEntry[]>,
+    remainingFacts: readonly SessionFact[],
+    offsets: Record<ListName, number>,
+  ) =>
+    layoutPage(candidates, remainingFacts, offsets, {
+      budget,
+      terms,
+      single: lists.length === 1,
+      // The largest the fields around the lists can be, so the final
+      // response always fits.
+      envelope: (body) => ({
+        schemaVersion: 2,
+        status: "partial",
+        gaps: [
+          { code: "raw_chunk_search_unavailable" },
+          { code: "source_search_limited" },
+          { code: "results_trimmed" },
+        ],
+        indexedAt: new Date(0).toISOString(),
+        ...(input.scope ? { scope: input.scope } : {}),
+        page: MAX_PAGE,
+        nextPage: MAX_PAGE + 1,
+        ...body,
+      }),
+    });
+  // Earlier pages are laid out again and their entries skipped, so a page
+  // continues exactly where the previous one stopped.
+  const page = Math.min(Math.max(1, input.page ?? 1), MAX_PAGE);
+  let remaining: Record<ListName, ListEntry[]> = {
+    items: groupBySource(itemResult.matches, MAX_ENTRIES.items),
+    summaries: groupBySource(summaryResult.matches, MAX_ENTRIES.summaries),
+  };
+  let remainingFacts: readonly SessionFact[] = facts;
+  let offsets: Record<ListName, number> = { items: 0, summaries: 0 };
+  let result = layout(remaining, remainingFacts, offsets);
+  for (let earlier = 1; earlier < page; earlier += 1) {
+    remaining = {
+      items: remaining.items.slice(result.shown.items),
+      summaries: remaining.summaries.slice(result.shown.summaries),
+    };
+    remainingFacts = remainingFacts.slice(result.shown.facts);
+    offsets = {
+      items: offsets.items + result.shown.items,
+      summaries: offsets.summaries + result.shown.summaries,
+    };
+    result = layout(remaining, remainingFacts, offsets);
+  }
+  const more =
+    page < MAX_PAGE &&
+    (remaining.items.length > result.shown.items ||
+      remaining.summaries.length > result.shown.summaries);
+  const shown = [...result.body.items, ...result.body.summaries];
+  const dates = shown
+    .map(({ timeHint }) => Date.parse(timeHint ?? ""))
+    .filter(Number.isFinite);
+  const gaps = [
+    ...(unavailable ? [{ code: "raw_chunk_search_unavailable" }] : []),
+    ...(limited ? [{ code: "source_search_limited" }] : []),
+    ...(!shown.length && !unavailable
+      ? [{ code: "no_relevant_evidence" }]
+      : []),
+    ...(shown.length && (result.trimmed || more)
+      ? [{ code: "results_trimmed" }]
+      : []),
+  ];
+  return {
+    schemaVersion: 2,
+    // Entries with any gap are partial, so status and gaps never disagree.
+    status: !shown.length
+      ? unavailable
+        ? "partial"
+        : "empty"
+      : gaps.length
+        ? "partial"
+        : "grounded",
+    gaps,
+    indexedAt: dates.length ? new Date(Math.max(...dates)).toISOString() : null,
+    ...(input.scope ? { scope: input.scope } : {}),
+    page,
+    ...(more ? { nextPage: page + 1 } : {}),
+    ...result.body,
+  };
+}
+
+/** A source's highest-ranked match, with every chunk of it that matched. */
+function groupBySource(matches: readonly RawMatch[], max: number): ListEntry[] {
+  const bySource = new Map<string, ListEntry>();
+  for (const match of matches) {
+    const entry = bySource.get(match.source.id);
+    if (entry) entry.matched.add(match.chunk.id);
+    else
+      bySource.set(match.source.id, {
+        match,
+        matched: new Set([match.chunk.id]),
+        body: 0,
+      });
+  }
+  return [...bySource.values()].slice(0, max);
+}
+
+/**
+ * Lays out one page within the budget. Over budget it drops, in order: the
+ * lowest-ranked entries without a body (alternating lists), facts from the
+ * tail, bodies beyond each list's floor, then shortens floor bodies. Room left
+ * over gives more bodies, items first.
+ */
+function layoutPage(
+  candidates: Record<ListName, ListEntry[]>,
+  allFacts: readonly SessionFact[],
+  offsets: Record<ListName, number>,
+  options: {
+    budget: number;
+    terms: ReadonlySet<string>;
+    single: boolean;
+    envelope: (
+      body: Pick<
+        PersonalKnowledgeQueryResponse,
+        "items" | "summaries" | "facts"
+      >,
+    ) => PersonalKnowledgeQueryResponse;
+  },
+) {
+  const lists: Record<ListName, ListEntry[]> = {
+    items: candidates.items.map((entry) => ({ ...entry, body: 0 })),
+    summaries: candidates.summaries.map((entry) => ({ ...entry, body: 0 })),
+  };
+  const shape =
+    options.budget >= LARGE_BUDGET_CHARS ? LARGE_LAYOUT : SMALL_LAYOUT;
+  // A single-list search gives its list the items' share.
+  const startBodies = options.single
+    ? { items: shape.bodies.items, summaries: shape.bodies.items }
+    : shape.bodies;
+  for (const name of ["items", "summaries"] as const)
+    lists[name]
+      .slice(0, startBodies[name])
+      .forEach((entry) => (entry.body = shape.chars[name]));
+  let facts = allFacts.slice(
     0,
     fittingPrefix(
-      facts.length,
-      (count) => outputChars(facts.slice(0, count)),
-      // Facts take at most a quarter, so they never crowd out candidates.
-      budget / 4,
+      allFacts.length,
+      (count) => outputChars(allFacts.slice(0, count)),
+      // Facts take at most a quarter, so they never crowd out the lists.
+      options.budget / 4,
     ),
   );
-  let itemCount = selected.length;
-  let trimmed = keptFacts.length < facts.length;
-  const response = (): PersonalKnowledgeQueryResponse => ({
-    gaps: trimmed ? [...gaps, RESULTS_TRIMMED_GAP] : gaps,
-    indexedAt,
-    ...(keptFacts.length ? { facts: keptFacts } : {}),
-    items: selected
-      .slice(0, itemCount)
-      .map(({ source, chunk, chunks }, index) => ({
-        citeAs: `S${index + 1}`,
-        directory: candidateDirectory(
-          chunks,
-          matchedChunkIds.get(source.id) ?? new Set([chunk.id]),
-        ),
-        excerpt: chunk.content
-          .replace(/\s+/gu, " ")
-          .trim()
-          .slice(0, CANDIDATE_EXCERPT_CHARS),
-        ...(contentChunks.has(source.id)
-          ? { content: inlineContent(contentChunks.get(source.id)!, terms) }
-          : {}),
-        id: rawEvidenceId(source),
-        metadata: {
-          sourceId: source.id,
-          sourceUri: source.sourceUri.slice(0, 512),
-          contentHash: source.contentHash,
-          linkedContentRef: source.anchorPath.slice(0, 512),
-          matchedChunk: chunk.id,
-          lineStart: String(chunk.lineStart),
-          lineEnd: String(chunk.lineEnd),
-          headingPath: chunk.headingPath.join(" > ").slice(0, 512),
-        },
-        representation: "source_excerpt",
-        source: {
-          kind: rawSourceOriginKind(source),
-          label: source.title,
-          ref: rawEvidenceId(source),
-        },
-        timeHint: source.date,
-        title: source.title,
-      })),
-    schemaVersion: 1,
-    // Candidates with any gap are partial, so status and gaps never disagree.
-    status: gaps.length || trimmed ? "partial" : "grounded",
+  let trimmed = facts.length < allFacts.length;
+  const body = () => ({
+    ...(facts.length ? { facts } : {}),
+    items: lists.items.map((entry, index) =>
+      searchEntry(entry, `S${offsets.items + index + 1}`, options.terms),
+    ),
+    summaries: lists.summaries.map((entry, index) =>
+      searchEntry(entry, `W${offsets.summaries + index + 1}`, options.terms),
+    ),
   });
-  // Inline chunks go from the lowest rank up until only the top candidate's
-  // best chunk is left, then candidates go from the lowest rank up, then that
-  // chunk. The top candidate always stays.
-  const dropOne = (): boolean => {
-    const withContent = [...contentChunks.keys()];
-    const last = withContent.at(-1);
-    if (
-      last !== undefined &&
-      (withContent.length > 1 || contentChunks.get(last)!.length > 1)
-    ) {
-      const chunks = contentChunks.get(last)!;
-      chunks.pop();
-      if (chunks.length === 0) contentChunks.delete(last);
-      return true;
+  const size = () => outputChars(options.envelope(body()));
+  let next: ListName = "items";
+  const dropEntryWithoutBody = (): boolean => {
+    for (const name of [
+      next,
+      next === "items" ? "summaries" : "items",
+    ] as const) {
+      const list = lists[name];
+      for (let index = list.length - 1; index >= BODY_FLOORS[name]; index -= 1)
+        if (!list[index]!.body) {
+          list.splice(index, 1);
+          next = name === "items" ? "summaries" : "items";
+          return true;
+        }
     }
-    if (itemCount > 1) {
-      itemCount -= 1;
-      return true;
-    }
-    return last !== undefined && contentChunks.delete(last);
+    return false;
   };
-  while (outputChars(response()) > budget && dropOne()) trimmed = true;
-  return response();
+  const dropBodyBeyondFloor = (): boolean => {
+    for (const name of ["summaries", "items"] as const) {
+      const list = lists[name];
+      for (let index = list.length - 1; index >= BODY_FLOORS[name]; index -= 1)
+        if (list[index]!.body) {
+          list[index]!.body = 0;
+          return true;
+        }
+    }
+    return false;
+  };
+  const shortenFloorBody = (): boolean => {
+    let longest: ListEntry | undefined;
+    for (const name of ["summaries", "items"] as const)
+      for (const entry of lists[name].slice(0, BODY_FLOORS[name]))
+        if (entry.body > MIN_BODY_CHARS && entry.body > (longest?.body ?? 0))
+          longest = entry;
+    if (!longest) return false;
+    longest.body = Math.max(MIN_BODY_CHARS, longest.body - BODY_SHRINK_STEP);
+    return true;
+  };
+  while (size() > options.budget) {
+    trimmed = true;
+    if (dropEntryWithoutBody()) continue;
+    if (facts.length) {
+      facts = facts.slice(0, -1);
+      continue;
+    }
+    if (dropBodyBeyondFloor() || shortenFloorBody()) continue;
+    break;
+  }
+  for (const name of ["items", "summaries"] as const)
+    for (const entry of lists[name]) {
+      if (entry.body) continue;
+      entry.body = shape.chars[name];
+      if (size() > options.budget) {
+        entry.body = 0;
+        break;
+      }
+    }
+  return {
+    body: body(),
+    trimmed,
+    shown: {
+      items: lists.items.length,
+      summaries: lists.summaries.length,
+      facts: facts.length,
+    },
+  };
+}
+
+function searchEntry(
+  { match: { source, chunk, chunks }, matched, body }: ListEntry,
+  citeAs: string,
+  terms: ReadonlySet<string>,
+): SearchEntry {
+  const roomId = ROOM_SOURCE_URI.exec(source.sourceUri)?.[1];
+  return {
+    citeAs,
+    evidenceId: rawEvidenceId(source),
+    kind: rawSourceOriginKind(source),
+    title: source.title,
+    timeHint: source.date,
+    ...(body
+      ? { content: contentWindow(chunk.content, terms, body) }
+      : {
+          snippet: contentWindow(chunk.content, terms, SNIPPET_CHARS)
+            .replace(/\s+/gu, " ")
+            .trim(),
+        }),
+    sections: entrySections(chunks, matched),
+    ...(roomId ? { roomId } : {}),
+  };
+}
+
+/** Matched sections first, then their neighbors, in document order. */
+function entrySections(
+  chunks: readonly SourceChunk[],
+  matchedIds: ReadonlySet<string>,
+) {
+  const keep = new Set<number>();
+  chunks.forEach((chunk, index) => {
+    if (!matchedIds.has(chunk.id)) return;
+    for (const neighbor of [index - 1, index, index + 1])
+      if (neighbor >= 0 && neighbor < chunks.length) keep.add(neighbor);
+  });
+  const ordered = [...keep].sort((a, b) => a - b);
+  return [
+    ...ordered.filter((index) => matchedIds.has(chunks[index]!.id)),
+    ...ordered.filter((index) => !matchedIds.has(chunks[index]!.id)),
+  ]
+    .slice(0, MAX_ENTRY_SECTIONS)
+    .sort((a, b) => a - b)
+    .map((index) => ({
+      sectionId: chunks[index]!.id,
+      title: chunks[index]!.heading.slice(0, 512),
+    }));
 }
 
 export async function readPersonalKnowledgeEvidence(
@@ -247,43 +444,6 @@ export async function readPersonalKnowledgeEvidence(
     options.outputBudgetChars ?? knowledgeOutputBudget(undefined),
     options.rawSourceProvider,
   );
-}
-
-// A visible marker between windows tells the Agent that the rest of the
-// source is only available through a read.
-function inlineContent(
-  chunks: readonly SourceChunk[],
-  terms: ReadonlySet<string>,
-): string {
-  return [...chunks]
-    .sort((left, right) => left.start - right.start)
-    .map(({ content }) => contentWindow(content, terms, INLINE_CONTENT_CHARS))
-    .join(INLINE_CONTENT_SEPARATOR);
-}
-
-function candidateDirectory(
-  chunks: SourceChunk[],
-  matchedIds: ReadonlySet<string>,
-) {
-  const keep = new Set<number>();
-  chunks.forEach((chunk, index) => {
-    if (!matchedIds.has(chunk.id)) return;
-    for (const neighbor of [index - 1, index, index + 1])
-      if (neighbor >= 0 && neighbor < chunks.length) keep.add(neighbor);
-  });
-  const ordered = [...keep].sort((a, b) => a - b);
-  // Matched chunks win the bounded slots before neighbors.
-  const selected = [
-    ...ordered.filter((index) => matchedIds.has(chunks[index]!.id)),
-    ...ordered.filter((index) => !matchedIds.has(chunks[index]!.id)),
-  ]
-    .slice(0, MAX_CANDIDATE_DIRECTORY_ITEMS)
-    .sort((a, b) => a - b);
-  return selected.map((index) => ({
-    id: chunks[index]!.id,
-    level: 2,
-    title: chunks[index]!.heading.slice(0, 512),
-  }));
 }
 
 function rawDirectory(chunks: SourceChunk[]) {

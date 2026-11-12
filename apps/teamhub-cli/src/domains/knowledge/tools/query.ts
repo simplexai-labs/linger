@@ -49,6 +49,21 @@ export const personalKnowledgeQueryInputSchema = z
       .describe(
         "Inclusive end of when the asked event happened; pair with eventFrom. Never a source-date filter.",
       ),
+    scope: z
+      .enum(["summaries", "originals"])
+      .optional()
+      .describe(
+        "Return only one list with the whole result size: summaries (Wiki pages and Daily/Weekly reports) or originals (conversations, recordings, mail, documents, notes, the Profile). Omit to get both lists.",
+      ),
+    page: z
+      .number()
+      .int()
+      .min(1)
+      .max(10)
+      .optional()
+      .describe(
+        "Result page of the same search; a result with nextPage has more entries on that page.",
+      ),
   })
   .strict()
   .refine(
@@ -62,17 +77,8 @@ export const personalKnowledgeQueryInputSchema = z
     { message: "eventFrom must not be after eventTo.", path: ["eventTo"] },
   )
   .describe(
-    "Question for one search over every source of the Human's knowledge: Sessions, recordings, My pages, mail, Pocket Notes, the Profile, the published Wiki and Daily and Weekly reports.",
+    "Question for one search over every source of the Human's knowledge: Sessions, recordings, My pages, mail, Pocket Notes, the Profile, the published Wiki and Daily and Weekly reports, returned as two separately ranked lists.",
   );
-
-const evidencePrimitiveSchema = z
-  .union([
-    z.string().max(512).describe("Metadata text value."),
-    z.number().describe("Metadata numeric value."),
-    z.boolean().describe("Metadata boolean value."),
-    z.null().describe("Metadata null value."),
-  ])
-  .describe("Primitive evidence metadata value.");
 
 export const evidenceSourceSchema = z
   .object({
@@ -156,57 +162,67 @@ export const sessionFactSchema = z
     "A fact extracted from a conversation, recording, Pocket Note or email, located in one source section.",
   );
 
-const evidenceItemSchema = z
+const SOURCE_KINDS = [
+  "room",
+  "recording",
+  "mail",
+  "my_pages",
+  "pocket_note",
+  "profile",
+  "wiki",
+  "period_summary",
+] as const;
+
+const searchEntrySchema = z
   .object({
-    id: evidenceIdSchema,
     citeAs: z
       .string()
-      .regex(/^S[1-9][0-9]*$/u)
-      .describe("Citation label assigned for this result."),
-    title: z.string().min(1).max(512).describe("Evidence title."),
-    excerpt: z
-      .string()
-      .min(1)
-      .max(600)
-      .describe("Short preview of the matched original-source chunk."),
-    content: z
-      .string()
-      .max(6000)
-      .optional()
-      .describe(
-        "Bounded matched chunk text for top-ranked candidates; several chunks are joined in document order with an ellipsis. A trailing ellipsis can indicate truncation. If a required fact is missing, read the returned directory section IDs; content presence does not mean the source is complete.",
-      ),
-    source: evidenceSourceSchema.describe("Evidence origin."),
-    representation: z
-      .enum(["source_excerpt", "derived_summary", "structured_fact"])
-      .describe("Whether the evidence is source text, a summary, or a fact."),
-    facet: z
-      .string()
-      .min(1)
-      .max(128)
-      .optional()
-      .describe("Extensible semantic facet."),
+      .regex(/^[SW][1-9][0-9]*$/u)
+      .describe("Citation label: S<n> for items, W<n> for summaries."),
+    evidenceId: evidenceIdSchema,
+    kind: z.enum(SOURCE_KINDS).describe("Where the source came from."),
+    title: z.string().min(1).max(512).describe("Source title."),
     timeHint: z
       .string()
       .min(1)
       .max(128)
       .optional()
-      .describe("Time associated with this evidence when available."),
-    metadata: z
-      .record(z.string(), evidencePrimitiveSchema)
-      .refine((value) => Object.keys(value).length <= 20, {
-        message: "Evidence metadata must contain at most 20 properties.",
-      })
+      .describe("Date of the source when available."),
+    content: z
+      .string()
+      .max(3000)
       .optional()
-      .describe("Small primitive metadata map."),
-    directory: z
-      .array(evidenceDirectoryEntrySchema)
-      .max(64)
+      .describe(
+        "Text around the entry's best match, for the top entries of a list. It is a window, not the whole source; read its sections for more.",
+      ),
+    snippet: z
+      .string()
+      .max(400)
       .optional()
-      .describe("Available Markdown headings for a follow-up evidence read."),
+      .describe(
+        "A short window around the best match, for entries without content.",
+      ),
+    sections: z
+      .array(
+        z
+          .object({
+            sectionId: evidenceSectionIdSchema,
+            title: z.string().max(512).describe("Section heading."),
+          })
+          .strict()
+          .describe("One matched or neighboring section to read."),
+      )
+      .max(4)
+      .describe("Sections to read next with teamhub knowledge read."),
+    roomId: z
+      .string()
+      .min(1)
+      .max(128)
+      .optional()
+      .describe("The Room a room entry's conversation belongs to."),
   })
   .strict()
-  .describe("One bounded piece of evidence for the Agent to synthesize.");
+  .describe("One source in a result list.");
 
 const evidenceGapSchema = z
   .object({
@@ -223,40 +239,58 @@ const evidenceGapSchema = z
 
 export const personalKnowledgeQueryOutputSchema = z
   .object({
-    schemaVersion: z.literal(1).describe("Evidence contract version."),
+    schemaVersion: z.literal(2).describe("Evidence contract version."),
     status: z
       .enum(["grounded", "partial", "empty"])
       .describe(
-        "Candidate retrieval status, not the sufficiency of unread bodies.",
+        "grounded has entries and no gaps, partial has entries and a gap, empty has no entries.",
       ),
     items: z
-      .array(evidenceItemSchema)
+      .array(searchEntrySchema)
       .max(20)
       .describe(
-        "Candidates ordered to match their S1...Sn labels; read relevant sections next.",
+        "Original sources (conversations, recordings, mail, documents, notes, the Profile), ranked; cite them for exact claims.",
+      ),
+    summaries: z
+      .array(searchEntrySchema)
+      .max(10)
+      .describe(
+        "Derived Wiki pages and Daily/Weekly reports, ranked separately; good for overviews, not for exact wording.",
       ),
     gaps: z
       .array(evidenceGapSchema)
       .max(20)
       .describe(
-        "evidence_sections_not_read requires relevant reads before judging that information is missing.",
+        "results_trimmed means more entries exist: use nextPage, --scope or a read.",
       ),
     indexedAt: z
       .union([
         z
           .string()
           .datetime({ offset: true })
-          .describe("Newest source snapshot time."),
-        z.null().describe("No source snapshot is available."),
+          .describe("Newest shown source date."),
+        z.null().describe("No source is shown."),
       ])
-      .describe("Time of the newest source snapshot queried, when available."),
+      .describe("Date of the newest shown source, when available."),
     facts: z
       .array(sessionFactSchema)
       .max(30)
       .optional()
       .describe(
-        "Matched Session facts, ranked apart from items. They pinpoint details and event times; read the named source section when the answer depends on exact wording.",
+        "Matched Session facts, ranked apart from the lists. They pinpoint details and event times; read the named source section when the answer depends on exact wording.",
       ),
+    scope: z
+      .enum(["summaries", "originals"])
+      .optional()
+      .describe("The one list this search returned."),
+    page: z.number().int().min(1).max(10).describe("This result page."),
+    nextPage: z
+      .number()
+      .int()
+      .min(2)
+      .max(11)
+      .optional()
+      .describe("Pass as page to see more entries of the same search."),
     requestId: z
       .string()
       .min(1)
@@ -266,7 +300,7 @@ export const personalKnowledgeQueryOutputSchema = z
   })
   .strict()
   .describe(
-    "Candidate routing hints; do not conclude information is insufficient before reading relevant available sections.",
+    "Two ranked lists of sources plus facts; read the sections an answer depends on.",
   );
 export const queryPersonalKnowledgeSchema = {
   input: personalKnowledgeQueryInputSchema,

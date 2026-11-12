@@ -241,16 +241,14 @@ describe("independent Recording Wiki sources", () => {
       },
       { chunkSearch: database },
     );
-    const match = result.items.find((value) => value.id.startsWith("raw_"));
+    const match = result.items[0];
     expect(match).toBeDefined();
     const evidence = await readPersonalKnowledgeEvidence(
       root,
       {
         ...identity,
-        evidence_id: match!.id,
-        section_requests: [
-          { section_id: String(match!.metadata!.matchedChunk) },
-        ],
+        evidence_id: match!.evidenceId,
+        section_requests: [{ section_id: match!.sections[0]!.sectionId }],
       },
       { rawSourceProvider: database },
     );

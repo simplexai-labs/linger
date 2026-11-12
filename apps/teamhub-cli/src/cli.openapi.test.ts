@@ -410,10 +410,12 @@ async function respond(request: Request): Promise<Response> {
     });
   if (endpoint.endsWith("/knowledge/search"))
     return Response.json({
-      schemaVersion: 1,
+      schemaVersion: 2,
       indexedAt: null,
       status: "empty",
       items: [],
+      summaries: [],
+      page: 1,
       gaps: [{ code: "no_matches" }],
     });
   if (endpoint.endsWith("/knowledge/read"))

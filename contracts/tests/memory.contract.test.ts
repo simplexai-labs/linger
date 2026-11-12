@@ -102,7 +102,7 @@ describe("Memory internal contract", () => {
       pattern: PERSONAL_KNOWLEDGE_EVIDENCE_ID_PATTERN.source,
     });
     for (const [schema, property] of [
-      ["PersonalKnowledgeEvidenceItem", "id"],
+      ["PersonalKnowledgeSearchEntry", "evidenceId"],
       ["PersonalKnowledgeEvidenceReadRequest", "evidence_id"],
       ["PersonalKnowledgeEvidenceReadResponse", "evidenceId"],
     ] as const) {
@@ -238,42 +238,59 @@ describe("Memory internal contract", () => {
     expect(schemas.QuerySource).toBeUndefined();
     expect(schemas.PersonalKnowledgeQueryResponse).toMatchObject({
       additionalProperties: false,
-      required: ["schemaVersion", "status", "items", "gaps", "indexedAt"],
+      required: [
+        "schemaVersion",
+        "status",
+        "items",
+        "summaries",
+        "gaps",
+        "indexedAt",
+        "page",
+      ],
       properties: {
-        schemaVersion: { type: "integer", const: 1 },
+        schemaVersion: { type: "integer", const: 2 },
         status: {
           type: "string",
           enum: ["grounded", "partial", "empty"],
         },
         items: {
           type: "array",
+          maxItems: 20,
           items: {
-            $ref: "#/components/schemas/PersonalKnowledgeEvidenceItem",
+            $ref: "#/components/schemas/PersonalKnowledgeSearchEntry",
+          },
+        },
+        summaries: {
+          type: "array",
+          maxItems: 10,
+          items: {
+            $ref: "#/components/schemas/PersonalKnowledgeSearchEntry",
           },
         },
         indexedAt: { type: "string", nullable: true },
       },
     });
-    expect(schemas.PersonalKnowledgeEvidenceItem).toMatchObject({
+    // Entries carry only what the Agent uses: no hashes, paths or URIs.
+    expect(schemas.PersonalKnowledgeEvidenceItem).toBeUndefined();
+    expect(schemas.PersonalKnowledgeSearchEntry).toMatchObject({
       additionalProperties: false,
-      required: [
-        "id",
-        "citeAs",
-        "title",
-        "excerpt",
-        "source",
-        "representation",
-      ],
-      properties: {
-        directory: {
-          type: "array",
-          maxItems: 64,
-          items: {
-            $ref: "#/components/schemas/PersonalKnowledgeSectionDirectoryEntry",
-          },
-        },
-      },
+      required: ["citeAs", "evidenceId", "kind", "title", "sections"],
     });
+    expect(
+      Object.keys(
+        schemas.PersonalKnowledgeSearchEntry?.properties ?? {},
+      ).sort(),
+    ).toEqual([
+      "citeAs",
+      "content",
+      "evidenceId",
+      "kind",
+      "roomId",
+      "sections",
+      "snippet",
+      "timeHint",
+      "title",
+    ]);
     expect(schemas.PersonalKnowledgeSectionDirectoryEntry).toMatchObject({
       additionalProperties: false,
       required: ["id", "title", "level"],

@@ -190,8 +190,8 @@ Core configuration:
   merged with `alternates`); with an event time window, facts inside the window that match the keywords get a second
   vote, fused by RRF, and the response returns at most 30 `facts` at the top level. Without keyword matches it
   returns none. Each fact carries its Raw's `evidenceId` and `sectionId` for a follow-up read. Facts take no part in
-  the original Chunk ranking and take at most a quarter of the response's output budget (below); with or without
-  the fact channel, the original candidates are ranked the same. A failed fact recall only omits `facts`.
+  the Chunk ranking and take at most a quarter of the response's output budget (below); with or without the fact
+  channel, both lists are ranked the same. A failed fact recall only omits `facts`.
 
 Memory's endpoints mount on the shared Node Services listener (`127.0.0.1:4319` by default), all under the
 `/internal/v1/` prefix and protected by the workload token. The process answers `GET /healthz`, `GET /startupz` and
@@ -212,8 +212,8 @@ Memory's endpoints mount on the shared Node Services listener (`127.0.0.1:4319` 
   AnotherMe graph for `tenant_id + owner_actor_id` and returns embedded HTML without internal subject identity. The
   request is read-only and triggers no graph build; it returns `404` when there is no graph.
 - `POST /internal/v1/query`: protected by the workload token; the one knowledge search over every source kind,
-  returning candidates (each naming its `source.kind`), previews and Chunk directories for the question,
-  optional `alternates` (below) and optional absolute dates.
+  returning two separately ranked lists (below) for the question, optional `alternates`, optional absolute dates,
+  optional `scope` (`originals` or `summaries`, one list with the whole budget) and optional `page`.
 - `POST /internal/v1/personal-knowledge/evidence`: protected by the workload token; reads at most 8 selected Chunks
   with an opaque `raw_` Evidence ID returned by a query. The service revalidates the ID against the database's
   current Raw version and content hash and accepts no file paths.
@@ -230,11 +230,11 @@ members or recent speakers as knowledge owners; when unauthorized or a source is
 back to another Agent's knowledge. Memory's Subject, Tenant, Human and Raw snapshot checks stay unchanged, as do the
 graph and Raw generation flows. There is no cross-user Agent transfer flow, and the general MCP credential and
 session revocation policy is unchanged.
-The model has one search, `teamhub knowledge search` (`query + alternates? + dateFrom/dateTo? + eventFrom/eventTo?`),
+The model has one search, `teamhub knowledge search` (`query + alternates? + dateFrom/dateTo? + eventFrom/eventTo? + scope? + page?`),
 and one read, `teamhub knowledge read` (`evidenceId + sectionRequests[{sectionId, offset?}]`). Actor, Tenant,
 Human owner, sources and file paths are set by trusted services, never by the model. For overviews the Agent
-answers from `wiki` and `period_summary` candidates when they state what it needs; for details, exact words and
-counts it answers from the original sources. The search does not build the graph; the graph only serves the
+answers from the summaries list when it states what it needs; for details, exact words and counts it answers
+from the items list of original sources. The search does not build the graph; the graph only serves the
 Workspace visualization and flashback. Memory builds OpenWiki's native `WikiGraph` from the indexed pages of
 the published Wiki when it is read: one node per page with a relative path ID, `source/target` edges only from
 parseable Markdown links, plus the inferred mention edges in `inferredEdges`. Nothing is stored;
@@ -269,13 +269,19 @@ asks it to keep time words in the query when the question mentions time.
 
 Raw and Wiki queries may also pass `alternates`: at most 6 synonymous wordings or translations, each at most 200
 characters. Each wording runs its own keyword search in parallel with the query and votes as its own RRF list, so a
-synonym match is not buried under documents that only repeat the query's original words; the time window channel
-uses only the query's own keywords. Raw's BM25 fallback scan and Session Fact keywords use the query's words merged
+synonym match is not buried under documents that only repeat the query's original words; inside a time window
+each wording votes again with the window's matches, ranked by distinct-term coverage like its keyword route. Raw's BM25 fallback scan and Session Fact keywords use the query's words merged
 with all `alternates`. It adds no model call and no network round trip while the user waits.
 
-The top 6 sources carry limited text: a long Chunk gives only a window of about 800 characters from its best query
-match, keeping the time and speaker heading of its message; Raw candidates also keep a bounded directory of the
-matching and adjacent Chunks for a follow-up read of missing facts or truncated text.
+One search returns two separately ranked lists, because keyword scores cannot compare a long Daily report
+with a short chat message fairly: `items` holds original sources (`room`, `recording`, `mail`, `my_pages`,
+`pocket_note`, `profile`, at most 20) and `summaries` holds the Wiki and Daily/Weekly reports (`wiki`,
+`period_summary`, at most 10). Each list runs its own keyword search (60 Chunks), fusion and coverage rerank,
+then keeps one entry per source. An entry has only `citeAs` (`S<n>` for items, `W<n>` for summaries),
+`evidenceId`, `kind`, `title`, `timeHint`, `sections` (at most 4 matched and neighboring sections to read),
+`roomId` for a Room conversation, and either `content` (text around its best match, keeping the time and
+speaker heading of its message) or `snippet` (about 200 characters around the best match).
+
 Memory keeps every search and read result within an output budget of JSON characters (UTF-16 units); the
 CLI passes results through unchanged. The Daemon limits one tool result to 15% of the model's context
 window, between 4,000 and 25,000 tokens, and to 12,000 tokens when the window is unknown. Codex counts four
@@ -285,23 +291,25 @@ The budget is 90% of those characters for the model the owner's calls run on, le
 labels; at no more than three bytes per character, a bounded result reaches the Agent whole on either
 Runtime. The window comes from the owner's Computer through the model call layer; an unknown window, or an
 offline Computer, gets the unknown-window limit.
-Session facts take at most a quarter of the budget, the best-ranked first. If the result is still too
-large, inline chunks go from the lowest rank up until only the top candidate's best chunk is left, then
-candidates go from the lowest rank up, then that chunk; the top candidate always stays, and every kept
-candidate keeps its excerpt and the sections to read.
 
-- Raw search keeps the fused order and takes the top 10 candidates with no model rerank. The fact channel recalls
-  100 candidates per channel (Hindsight's high budget recalls 1,000). When facts, inline chunks or candidates were left
-  out, the result carries the gap `results_trimmed`, and the Agent chooses a follow-up read or a narrower query by the facts the question
-  needs. Status follows the gaps: candidates with no gap are `grounded`, candidates with any gap (this one
-  included) are `partial`, and no candidates is `empty`. `grounded` still means only that the search matched,
-  not that the evidence answers the question.
+The top entries of each list carry content: from a budget of 20,000 characters up, 5 items and 3 summaries
+of about 1,500 characters; below it, 3 items of about 1,200 and 2 summaries of about 800. Session facts take
+at most a quarter of the budget, the best-ranked first. Over budget, Memory drops in order: the lowest-ranked
+entries without content (alternating lists), facts from the tail, content beyond the floors (3 items, 2
+summaries), then shortens floor content down to 600 characters; floor entries are never dropped. Room left
+over gives more entries content, items first. A `scope` search gives its one list the items' share.
+
+- When entries, content or facts were left out, or more entries exist, the result carries the gap
+  `results_trimmed`; `nextPage` names the page that continues the same search, laid out again from the
+  first page so it starts exactly after the last shown entry. Status follows the gaps: entries with no gap are
+  `grounded`, entries with any gap (this one included) are `partial`, and no entries is `empty`. `grounded`
+  still means only that the search matched, not that the evidence answers the question.
 
 Raw query candidates, MCP read input and output, and Memory HTTP reads use one Evidence ID protocol: `raw_` followed
 by the first 16 characters of the source ID, an underscore and the first 16 characters of the content hash, naming
 one original snapshot (`^raw_[a-f0-9]{16}_[a-f0-9]{16}$`); Wiki pages and reports use the same IDs. A read resolves
 the prefix within the currently authorized owner scope and checks the current version; an ambiguous prefix or a
-changed version returns not found. A candidate's directory lists only its matched chunks and their neighbors. The model must pass IDs back unchanged; it
+changed version returns not found. An entry's sections list only its matched chunks and their neighbors. The model must pass IDs back unchanged; it
 cannot build, convert or replace them with file paths. The format is defined by the Memory OpenAPI, and the public
 validation rule exported by the generated client is shared by MCP and Memory HTTP; a valid format does not grant
 access, and reads still verify the trusted identity and the database's current snapshot. While relevant candidates
@@ -439,28 +447,35 @@ not mean the text was read:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "status": "partial",
   "items": [
     {
-      "id": "raw_3faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_7cbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "citeAs": "S1",
-      "title": "September 9 hardware partnership call",
-      "excerpt": "We collect the hardware requirements; they confirm the delivery date.",
-      "source": {
-        "kind": "raw",
-        "ref": "raw_3faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_7cbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "label": "September 9 hardware partnership call"
-      },
-      "representation": "source_excerpt",
+      "evidenceId": "raw_3faaaaaaaaaaaaaa_7cbbbbbbbbbbbbbb",
+      "kind": "room",
+      "title": "2026-09-09 Hardware partnership",
       "timeHint": "2026-09-09",
-      "directory": [
-        { "id": "chunk-1a2b3c4d-0", "title": "Action Items", "level": 2 }
-      ]
+      "content": "## 2026-09-09T02:10:00.000Z · Alice\n\nWe collect the hardware requirements; they confirm the delivery date.",
+      "sections": [{ "sectionId": "chunk-1a2b3c4d-0", "title": "Messages" }],
+      "roomId": "room_hw"
     }
   ],
-  "gaps": [{ "code": "evidence_sections_not_read" }],
-  "indexedAt": "2026-09-09T00:00:00.000Z"
+  "summaries": [
+    {
+      "citeAs": "W1",
+      "evidenceId": "raw_8dcccccccccccccc_2eaaaaaaaaaaaaaa",
+      "kind": "wiki",
+      "title": "Hardware partnership",
+      "timeHint": "2026-09-10",
+      "snippet": "Open work: delivery date pending the partner's confirmation.",
+      "sections": [{ "sectionId": "chunk-5e6f7a8b-2", "title": "Open work" }]
+    }
+  ],
+  "gaps": [{ "code": "results_trimmed" }],
+  "indexedAt": "2026-09-10T00:00:00.000Z",
+  "page": 1,
+  "nextPage": 2
 }
 ```
 

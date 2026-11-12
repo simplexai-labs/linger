@@ -132,13 +132,10 @@ func TestCompactRecallKeepsFourBulletsSourcesAndOpenableRoom(t *testing.T) {
 		{"text":"Give the breakdown by next Monday","mentionedAt":"2026-09-01T02:00:00Z","evidenceId":"raw_a"},
 		{"text":"A fourth fact must not crowd out the source","mentionedAt":"2026-09-01T02:00:00Z","evidenceId":"raw_a"}],
 	"items":[
-		{"title":"Budget meeting","excerpt":"` + strings.Repeat("x", 400) + `","timeHint":"2026-09-01","source":{"label":"Budget group"},
-		 "metadata":{"sourceUri":"teamhub://rooms/room-budget/messages"}},
-		{"title":"Someone else's Room","excerpt":"Must not give a room_id","timeHint":"2026-08-30","source":{"label":"Someone else's group"},
-		 "metadata":{"sourceUri":"teamhub://rooms/room-hidden/messages"}},
-		{"title":"Meeting notes","excerpt":"Notes","source":{"label":"Notes document"},
-		 "metadata":{"sourceUri":"teamhub://documents/doc-1/versions/v1"}},
-		{"title":"Fourth source","excerpt":"x","source":{"label":"Fourth"},"metadata":{}}]}`
+		{"title":"Budget group","content":"` + strings.Repeat("x", 400) + `","timeHint":"2026-09-01","roomId":"room-budget"},
+		{"title":"Someone else's group","snippet":"Must not give a room_id","timeHint":"2026-08-30","roomId":"room-hidden"},
+		{"title":"Notes document","snippet":"Notes"},
+		{"title":"Fourth","snippet":"x"}]}`
 	if err := json.Unmarshal([]byte(raw), &response); err != nil {
 		t.Fatal(err)
 	}
@@ -185,11 +182,10 @@ func TestCompactRecallPrefersEvidenceNamingThePerson(t *testing.T) {
 	var evidence RecallEvidence
 	// A published Wiki page is one more indexed source beside the Room text.
 	if err := json.Unmarshal([]byte(`{"items":[
-		{"title":"2026-08-25 Shisuo and Jieli hardware discussion","content":"Action Items: Ray Zhao follow up on the Jieli quote","timeHint":"2026-08-25",
-		 "source":{"kind":"wiki","label":"2026-08-25 Shisuo and Jieli hardware discussion"},"metadata":{}},
-		{"title":"GTM document","excerpt":"ICP inference benchmark","source":{"label":"icp.md"},"metadata":{}},
-		{"title":"Hardware discussion","excerpt":"Ray Zhao: hold on, nudge him again.","timeHint":"2026-08-25","source":{"label":"Hardware discussion group"},
-		 "metadata":{"sourceUri":"teamhub://rooms/room-hw/messages"}}]}`), &evidence.Raw); err != nil {
+		{"title":"GTM document","snippet":"ICP inference benchmark"},
+		{"title":"Hardware discussion group","snippet":"Ray Zhao: hold on, nudge him again.","timeHint":"2026-08-25","roomId":"room-hw"}],
+	"summaries":[
+		{"title":"2026-08-25 Shisuo and Jieli hardware discussion","content":"Action Items: Ray Zhao follow up on the Jieli quote","timeHint":"2026-08-25"}]}`), &evidence.Raw); err != nil {
 		t.Fatal(err)
 	}
 	evidence.Entities = []string{"Ray Zhao"}
@@ -198,7 +194,9 @@ func TestCompactRecallPrefersEvidenceNamingThePerson(t *testing.T) {
 	}
 	result := CompactRecall(evidence, func(string) (string, bool) { return "Hardware discussion group", true })
 	bullets := result["bullets"].([]string)
-	if result["status"] != "found" || len(bullets) != 2 || !strings.Contains(bullets[0], "follow up on the Jieli quote") || strings.Contains(strings.Join(bullets, ""), "ICP") {
+	// Originals come first; the summary that also names the person follows.
+	if result["status"] != "found" || len(bullets) != 2 || !strings.Contains(bullets[0], "nudge him again") ||
+		!strings.Contains(bullets[1], "follow up on the Jieli quote") || strings.Contains(strings.Join(bullets, ""), "ICP") {
 		t.Fatalf("result = %#v", result)
 	}
 	sources := result["sources"].([]map[string]string)

@@ -4,7 +4,12 @@ import type { RawSourceReference } from "./source-store.js";
 import { searchBm25, tokenizeSearchText } from "../../bm25.js";
 import { rerankLexicalCandidates } from "./lexical-rerank.js";
 import { chunkSource, type SourceChunk } from "./chunks.js";
-import { type RawSource, type SourceIdentity } from "./source-store.js";
+import {
+  rawSourceOriginKind,
+  type RawOriginKind,
+  type RawSource,
+  type SourceIdentity,
+} from "./source-store.js";
 import { memoryLogger } from "../run-telemetry.js";
 
 /**
@@ -63,12 +68,21 @@ export async function searchRawSources(
   }
 }
 
+/** A search of one list: its origins and how many chunks to rank. */
+export type RawSearchInput = PersonalKnowledgeQueryRequest & {
+  originKinds?: readonly RawOriginKind[];
+  limit?: number;
+};
+
 async function searchAvailableRawSources(
   workspaceRoot: string,
-  input: PersonalKnowledgeQueryRequest,
+  input: RawSearchInput,
   chunkSearch?: ChunkSearchProvider,
   references: readonly RawSourceReference[] = [],
 ): Promise<{ matches: RawMatch[]; limited: boolean }> {
+  const { originKinds, limit } = input;
+  const inList = (source: RawSource) =>
+    !originKinds || originKinds.includes(rawSourceOriginKind(source));
   const sourcePriority = new Map<string, number>();
   for (const [index, reference] of references.entries()) {
     if (!sourcePriority.has(reference.sourceId)) {
@@ -86,6 +100,8 @@ async function searchAvailableRawSources(
       ...(input.event_from ? { event_from: input.event_from } : {}),
       ...(input.event_to ? { event_to: input.event_to } : {}),
       ...(input.date_to ? { date_to: input.date_to } : {}),
+      ...(originKinds ? { originKinds } : {}),
+      ...(limit ? { limit } : {}),
       ...(references.length
         ? { sourceIds: references.map((r) => r.sourceId) }
         : {}),
@@ -104,6 +120,7 @@ async function searchAvailableRawSources(
         const source = sourceById.get(match.sourceId);
         if (
           !source ||
+          !inList(source) ||
           (input.date_from && source.date < input.date_from) ||
           (input.date_to && source.date > input.date_to)
         )
@@ -138,7 +155,8 @@ async function searchAvailableRawSources(
     .filter(
       (source) =>
         (!input.date_from || source.date >= input.date_from) &&
-        (!input.date_to || source.date <= input.date_to),
+        (!input.date_to || source.date <= input.date_to) &&
+        inList(source),
     )
     .sort(
       (a, b) =>

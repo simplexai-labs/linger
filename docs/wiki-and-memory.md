@@ -50,19 +50,21 @@ entry. The Change Log keeps its newest 20 lines.</sub>
 
 Agents search with the `teamhub knowledge` command, from any Room. The server
 decides whose knowledge it is from the agent's registration, so an agent can
-only search the knowledge of the person it works for. There are two indexes: the
-wiki pages for overviews, and the original messages, transcripts, documents and
-emails for exact details. An agent starts with the wiki and must search the
-originals before it says something was never recorded.
+only search the knowledge of the person it works for. One search returns two
+separately ranked lists: the wiki pages and Daily/Weekly reports for overviews,
+and the original messages, transcripts, documents and emails for exact details.
+The top entries of each list come with the text around their match. An agent
+can search one list on its own, and must search the originals before it says
+something was never recorded.
 
 | Step     | Wiki pages                                                                          | Originals                                                      |
 | -------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | Index    | One chunk per page, or per section for long pages; headings weigh most in keywords  | Chunks of each conversation, transcript, document or email     |
 | Keywords | PostgreSQL full-text search, once for the query and once for each alternate wording | Same                                                           |
-| Time     |                                                                                     | Keyword matches inside a time window the question names        |
+| Time     | Keyword matches inside a time window the question names                             | Same                                                           |
 | Fusion   | Reciprocal rank fusion of all lists                                                 | Same                                                           |
 | Extra    |                                                                                     | A separate list of facts from chats, recordings, notes, emails |
-| Result   | Ranked previews; the agent reads the section it needs                               | Ranked passages with neighboring sections to read next         |
+| Result   | Its own ranked list; the top entries carry the text near the match                  | Its own ranked list; the same                                  |
 
 <sub>Agents pass up to six alternate wordings, such as synonyms and
 translations, so a Chinese question can find an English page. Search uses

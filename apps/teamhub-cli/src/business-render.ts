@@ -79,35 +79,31 @@ function knowledge(command: string, result: Json): string {
         ["PURPOSE", "purpose"],
       ]),
     );
-  if (result.items !== undefined) {
-    const items = result.items as Json[];
-    output.push(`Chunks: ${items.length}`);
-    for (const item of items) {
+  for (const [label, key] of [
+    ["Items", "items"],
+    ["Summaries", "summaries"],
+  ] as const) {
+    if (result[key] === undefined) continue;
+    const entries = result[key] as Json[];
+    output.push("", `${label}: ${entries.length}`);
+    for (const entry of entries) {
       output.push(
         "",
-        `[${String(item.citeAs)}] ${singleLine(item.title)}`,
-        `Evidence ID: ${String(item.evidenceId)}`,
+        `[${String(entry.citeAs)}] ${singleLine(entry.title)}`,
+        `Evidence ID: ${String(entry.evidenceId)}`,
       );
-      for (const key of [
-        "collection",
-        "pageKey",
-        "revision",
-        "headingPath",
-        "lineStart",
-        "lineEnd",
-        "score",
-        "source",
-        "representation",
-        "facet",
+      for (const field of [
+        "kind",
         "timeHint",
-        "metadata",
-        "directory",
-        "excerpt",
+        "roomId",
+        "sections",
+        "snippet",
         "content",
       ])
-        output.push(...optionalLine(key, item[key]));
+        output.push(...optionalLine(field, entry[field]));
     }
   }
+  output.push(...optionalLine("Next page", result.nextPage));
   if (result.sections !== undefined)
     for (const item of result.sections as Json[]) {
       output.push(

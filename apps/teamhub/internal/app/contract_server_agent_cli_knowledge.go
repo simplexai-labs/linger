@@ -21,6 +21,8 @@ type agentKnowledgeInput struct {
 	DateTo          *string  `json:"dateTo,omitempty"`
 	EventFrom       *string  `json:"eventFrom,omitempty"`
 	EventTo         *string  `json:"eventTo,omitempty"`
+	Scope           string   `json:"scope,omitempty"`
+	Page            *int     `json:"page,omitempty"`
 	EvidenceID      string   `json:"evidenceId,omitempty"`
 	SectionRequests []struct {
 		SectionID string `json:"sectionId"`
@@ -132,8 +134,21 @@ func agentKnowledgeRequest(tool string, input agentKnowledgeInput, identity agen
 			input.EventFrom != nil && input.EventTo != nil && *input.EventFrom > *input.EventTo {
 			return nil, invalid
 		}
+		switch input.Scope {
+		case "":
+		case "originals", "summaries":
+			result["scope"] = input.Scope
+		default:
+			return nil, invalid
+		}
+		if input.Page != nil {
+			if *input.Page < 1 || *input.Page > 10 {
+				return nil, invalid
+			}
+			result["page"] = *input.Page
+		}
 	case "read_knowledge":
-		if len(input.Alternates) > 0 || input.Query != "" || input.DateFrom != nil || input.DateTo != nil || input.EventFrom != nil || input.EventTo != nil {
+		if len(input.Alternates) > 0 || input.Query != "" || input.DateFrom != nil || input.DateTo != nil || input.EventFrom != nil || input.EventTo != nil || input.Scope != "" || input.Page != nil {
 			return nil, invalid
 		}
 		if !agentKnowledgeEvidenceIDPattern.MatchString(input.EvidenceID) || len(input.SectionRequests) < 1 || len(input.SectionRequests) > 8 {

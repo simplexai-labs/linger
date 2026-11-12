@@ -390,21 +390,23 @@ type RecallArguments struct {
 	EventTo   string `json:"event_to"`
 }
 
+// RecallEntry is one source in a Memory personal knowledge result list.
+type RecallEntry struct {
+	Title    string `json:"title"`
+	Content  string `json:"content"`
+	Snippet  string `json:"snippet"`
+	TimeHint string `json:"timeHint"`
+	RoomID   string `json:"roomId"`
+}
+
 // RecallMemoryResponse is the part of the Memory personal knowledge query
-// response (queryPersonalKnowledge) the live recall reads.
+// response (queryPersonalKnowledge) the live recall reads: originals in
+// items, Wiki pages and reports in summaries.
 type RecallMemoryResponse struct {
-	Status string `json:"status"`
-	Items  []struct {
-		Title    string         `json:"title"`
-		Excerpt  string         `json:"excerpt"`
-		Content  string         `json:"content"`
-		TimeHint string         `json:"timeHint"`
-		Metadata map[string]any `json:"metadata"`
-		Source   struct {
-			Label string `json:"label"`
-		} `json:"source"`
-	} `json:"items"`
-	Facts []struct {
+	Status    string        `json:"status"`
+	Items     []RecallEntry `json:"items"`
+	Summaries []RecallEntry `json:"summaries"`
+	Facts     []struct {
 		Text        string `json:"text"`
 		MentionedAt string `json:"mentionedAt"`
 		EvidenceID  string `json:"evidenceId"`
@@ -417,8 +419,6 @@ const (
 	recallBulletRunes = 160
 )
 
-var roomSourceURI = regexp.MustCompile(`^teamhub://rooms/([A-Za-z0-9_-]{1,128})/messages$`)
-
 // RecallEvidence is everything one live recall retrieved.
 type RecallEvidence struct {
 	Raw RecallMemoryResponse
@@ -427,8 +427,8 @@ type RecallEvidence struct {
 }
 
 type recallCandidate struct {
-	text, title, date, uri string
-	mentions, fact         bool
+	text, title, date, roomID string
+	mentions, fact            bool
 }
 
 // CompactRecall turns one recall into what the live model reads aloud: at
@@ -457,11 +457,11 @@ func CompactRecall(evidence RecallEvidence, canOpenRoom func(roomID string) (str
 		}
 		candidates = append(candidates, recallCandidate{text: fact.Text, date: date, mentions: mentions(fact.Text), fact: true})
 	}
-	for _, item := range evidence.Raw.Items {
-		uri, _ := item.Metadata["sourceUri"].(string)
+	// Originals first: summaries are derived and only fill in after them.
+	for _, entry := range slices.Concat(evidence.Raw.Items, evidence.Raw.Summaries) {
 		candidates = append(candidates, recallCandidate{
-			text: firstNonEmpty(item.Content, item.Excerpt), title: firstNonEmpty(item.Source.Label, item.Title),
-			date: item.TimeHint, uri: uri, mentions: mentions(item.Title, item.Content, item.Excerpt),
+			text: firstNonEmpty(entry.Content, entry.Snippet), title: entry.Title,
+			date: entry.TimeHint, roomID: entry.RoomID, mentions: mentions(entry.Title, entry.Content, entry.Snippet),
 		})
 	}
 	matched := false
@@ -513,12 +513,12 @@ func CompactRecall(evidence RecallEvidence, canOpenRoom func(roomID string) (str
 		if candidate.date != "" {
 			source["date"] = truncateRunes(candidate.date, 32)
 		}
-		if match := roomSourceURI.FindStringSubmatch(candidate.uri); match != nil && canOpenRoom != nil {
-			if name, ok := canOpenRoom(match[1]); ok {
-				source["room_id"] = match[1]
+		if candidate.roomID != "" && canOpenRoom != nil {
+			if name, ok := canOpenRoom(candidate.roomID); ok {
+				source["room_id"] = candidate.roomID
 				source["room"] = name
 				if openable == "" {
-					openable, openableName = match[1], name
+					openable, openableName = candidate.roomID, name
 				}
 			}
 		}
@@ -548,8 +548,8 @@ func RecallMentions(evidence RecallEvidence) bool {
 				return true
 			}
 		}
-		for _, item := range evidence.Raw.Items {
-			if strings.Contains(item.Title+item.Content+item.Excerpt, entity) {
+		for _, entry := range slices.Concat(evidence.Raw.Items, evidence.Raw.Summaries) {
+			if strings.Contains(entry.Title+entry.Content+entry.Snippet, entity) {
 				return true
 			}
 		}

@@ -1,37 +1,37 @@
 import { expect, it } from "vitest";
 import { formatKnowledgeCliOutput } from "./domains/knowledge/format-output.js";
 
-it("retains metadata, source kinds, all ranked bodies and section handles without clipping", () => {
-  const items = Array.from({ length: 20 }, (_, index) => ({
-    id: `raw_0123456789abcdef_${index.toString(16).padStart(16, "0")}`,
-    citeAs: `S${index + 1}`,
+it("retains both lists, their kinds, bodies and section handles without clipping", () => {
+  const entry = (prefix: string, index: number, kind: string) => ({
+    citeAs: `${prefix}${index + 1}`,
+    evidenceId: `raw_0123456789abcdef_${index.toString(16).padStart(16, "0")}`,
+    kind,
     title: "Research",
-    excerpt: "Preview",
+    timeHint: "2026-09-01",
     content: "€✓".repeat(1500),
-    source: {
-      kind: index % 2 ? "wiki" : "room",
-      ref: `source_${index}`,
-    },
-    representation: "source_excerpt",
-    facet: "decision",
-    metadata: { count: 1 },
-    directory: [{ id: "summary", title: "Summary", level: 1 }],
-  }));
+    sections: [{ sectionId: "summary", title: "Summary" }],
+  });
+  const items = Array.from({ length: 20 }, (_, index) =>
+    entry("S", index, "room"),
+  );
+  const summaries = Array.from({ length: 10 }, (_, index) =>
+    entry("W", index, "wiki"),
+  );
   const result = formatKnowledgeCliOutput(
     "search",
     {},
-    { schemaVersion: 1, status: "grounded", indexedAt: null, gaps: [], items },
+    {
+      schemaVersion: 2,
+      status: "grounded",
+      indexedAt: null,
+      gaps: [],
+      items,
+      summaries,
+      page: 1,
+    },
   );
-  expect(result.items).toEqual(
-    items.map(({ id, directory, ...item }) => ({
-      evidenceId: id,
-      ...item,
-      directory: directory.map(({ id, ...entry }) => ({
-        sectionId: id,
-        ...entry,
-      })),
-    })),
-  );
+  expect(result.items).toEqual(items);
+  expect(result.summaries).toEqual(summaries);
   expect(result.gaps).toEqual([]);
 });
 

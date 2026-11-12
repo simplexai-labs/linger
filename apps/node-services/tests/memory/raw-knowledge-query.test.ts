@@ -20,6 +20,7 @@ import {
   readWorkspaceText,
   storeSessionSource as stageSessionSource,
   documentRawSource,
+  wikiPageRawSource,
   type DocumentRawSourceInput,
   type RawSource,
 } from "../../src/memory/search/source-store.js";
@@ -28,6 +29,9 @@ import { chunkSource } from "../../src/memory/search/chunks.js";
 import { resolveSearchRawSources } from "../../src/memory/search/raw-query.js";
 
 import { RawDatabaseFixture } from "./raw-database-fixture.js";
+/** The text an entry shows: its body, else its snippet. */
+const shown = (entry: { content?: string; snippet?: string }) =>
+  entry.content ?? entry.snippet ?? "";
 const databases = new Map<string, RawDatabaseFixture>();
 async function captureDatabase(root: string) {
   const database = databases.get(root) ?? new RawDatabaseFixture();
@@ -242,16 +246,20 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
       },
     );
     expect(searched).toBe(true);
-    const raw = result.items.find((item) => item.id.startsWith("raw_"))!;
-    expect(raw.metadata).toMatchObject({
-      matchedChunk: chunk.id,
-      lineStart: String(chunk.lineStart),
-      lineEnd: String(chunk.lineEnd),
-      linkedContentRef: fixtureData.anchorPath,
+    const [raw] = result.items;
+    expect(raw).toMatchObject({
+      kind: "room",
+      roomId: "room_1",
+      sections: expect.arrayContaining([
+        expect.objectContaining({ sectionId: chunk.id }),
+      ]),
     });
+    expect(raw!.content).toContain("37.5");
+    // Internal identifiers stay out of the result.
+    expect(JSON.stringify(result)).not.toContain(fixtureData.anchorPath);
   });
 
-  it("keeps the fused chunk order at the default limit", async () => {
+  it("keeps the fused chunk order of each list", async () => {
     const fixtureData = await fixture();
     const source = storeDocumentSource(fixtureData.root, meetingDocument);
     const chunks = chunkSource(meetingMarkdown);
@@ -274,8 +282,9 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
         },
       },
     );
-    expect(limits).toEqual([undefined]);
-    expect(result.items[0]!.metadata).toMatchObject({ matchedChunk: first.id });
+    // One ranked search per list.
+    expect(limits).toEqual([60, 60]);
+    expect(result.items[0]!.content).toContain(first.content.slice(0, 20));
   });
 
   it("returns Session facts beside Raw candidates without changing them", async () => {
@@ -341,15 +350,13 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
         },
       },
     );
-    const raw = result.items.filter((item) => item.id.startsWith("raw_"));
-    expect(raw).toHaveLength(1);
-    expect(new Set(raw.map((item) => item.id)).size).toBe(1);
-    expect(raw[0]?.directory?.map((section) => section.id)).toEqual(
-      expect.arrayContaining([chunk.id]),
-    );
+    expect(result.items).toHaveLength(1);
+    expect(
+      result.items[0]!.sections.map((section) => section.sectionId),
+    ).toEqual(expect.arrayContaining([chunk.id]));
   });
 
-  it("spends the remaining content budget on further matched chunks of the same source", async () => {
+  it("shows each entry's best match and lists its matched sections", async () => {
     const fixtureData = await fixture();
     const source = storeDocumentSource(fixtureData.root, meetingDocument);
     const chunks = chunkSource(meetingMarkdown);
@@ -372,49 +379,102 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     );
 
     expect(result.items).toHaveLength(1);
-    const content = result.items[0]!.content!;
-    // Both matched chunks, in document order rather than rank order.
-    expect(content.indexOf(first.content.slice(0, 20))).toBe(0);
-    expect(content).toContain(last.content.slice(0, 20));
+    const [entry] = result.items;
+    expect(entry!.content).toContain(last.content.slice(0, 20));
+    expect(entry!.sections.map((section) => section.sectionId)).toEqual(
+      expect.arrayContaining([first.id, last.id]),
+    );
+    expect(Object.keys(entry!).sort()).toEqual([
+      "citeAs",
+      "content",
+      "evidenceId",
+      "kind",
+      "sections",
+      "timeHint",
+      "title",
+    ]);
   });
 
-  it("keeps one chunk per top source before spending the budget on extra chunks", async () => {
+  it("ranks originals and summaries in separate lists", async () => {
     const fixtureData = await fixture();
-    const meeting = storeDocumentSource(fixtureData.root, meetingDocument);
-    const [other] = await listRawSources(fixtureData.workspace, identity);
-    const meetingChunks = chunkSource(meetingMarkdown);
-    const otherChunk = chunkSource(
-      (await readRawSource(fixtureData.workspace, other!))!,
+    const [room] = await listRawSources(fixtureData.workspace, identity);
+    const roomChunk = chunkSource(
+      (await readRawSource(fixtureData.workspace, room!))!,
     )[0]!;
-    const match = (sourceId: string, chunkId: string, rank: number) => ({
-      chunkId,
-      mergedChunkIds: [chunkId],
-      score: 1 / (60 + rank),
-      sourceId,
+    const markdown = `# Cobalt\n\n## Budget\n\n${"Cobalt budget history. ".repeat(40)}`;
+    const wiki = wikiPageRawSource({
+      identity,
+      pageKey: "projects/cobalt",
+      title: "Cobalt",
+      documentId: "document_wiki_cobalt",
+      documentVersionId: "version_wiki_cobalt",
+      publishedAt: "2026-09-16T00:00:00Z",
+      revision: "revision_1",
+      markdown,
     });
+    databases.get(fixtureData.root)!.put(wiki, markdown);
+    const wikiChunk = chunkSource(markdown).at(-1)!;
+    const kinds: (readonly string[] | undefined)[] = [];
     const result = await queryPersonalKnowledge(
       fixtureData.root,
-      request("speaker latency Cobalt"),
+      request("Cobalt budget"),
       {
         chunkSearch: {
-          search: async () => [
-            match(meeting.id, meetingChunks.at(-1)!.id, 1),
-            match(meeting.id, meetingChunks[0]!.id, 2),
-            match(other!.id, otherChunk.id, 3),
-          ],
+          // Each list asks only for its own origins; the summary ranks first
+          // here, as a long report can on keyword scores alone.
+          search: async (input) => {
+            kinds.push(input.originKinds);
+            return [
+              {
+                chunkId: wikiChunk.id,
+                mergedChunkIds: [wikiChunk.id],
+                score: 1 / 61,
+                sourceId: wiki.id,
+              },
+              {
+                chunkId: roomChunk.id,
+                mergedChunkIds: [roomChunk.id],
+                score: 1 / 62,
+                sourceId: room!.id,
+              },
+            ];
+          },
         },
       },
     );
 
-    expect(result.items).toHaveLength(2);
-    const [first, second] = result.items;
-    // The lower-ranked source keeps its own chunk; only the leftover budget
-    // goes to the next-ranked chunk of the first source.
-    expect(second!.content).toContain(otherChunk.content.slice(0, 20));
-    expect(first!.content).toContain(meetingChunks[0]!.content.slice(0, 20));
-    expect(first!.content).toContain(
-      meetingChunks.at(-1)!.content.slice(0, 20),
+    expect(kinds).toEqual([
+      ["room", "recording", "mail", "my_pages", "pocket_note", "profile"],
+      ["wiki", "period_summary"],
+    ]);
+    expect(result.items.map(({ citeAs, kind }) => [citeAs, kind])).toEqual([
+      ["S1", "room"],
+    ]);
+    expect(result.summaries.map(({ citeAs, kind }) => [citeAs, kind])).toEqual([
+      ["W1", "wiki"],
+    ]);
+    expect(result.items[0]!.content).toContain("37.5");
+    expect(result.summaries[0]!.content).toContain("Cobalt budget history");
+  });
+
+  it("searches one list with the whole budget when scoped", async () => {
+    const fixtureData = await fixture();
+    const kinds: (readonly string[] | undefined)[] = [];
+    const result = await queryPersonalKnowledge(
+      fixtureData.root,
+      { ...request("Cobalt"), scope: "summaries" },
+      {
+        chunkSearch: {
+          search: async (input) => {
+            kinds.push(input.originKinds);
+            return [];
+          },
+          resolveRawSources: async () => [],
+        },
+      },
     );
+    expect(kinds).toEqual([["wiki", "period_summary"]]);
+    expect(result).toMatchObject({ scope: "summaries", items: [], page: 1 });
   });
 
   it("uses PG-backed Raw manifests and bytes when the filesystem projection is absent", async () => {
@@ -445,15 +505,15 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
       request("What is the exact Cobalt limit?"),
       { chunkSearch: provider },
     );
-    const raw = result.items.find((item) => item.id.startsWith("raw_"))!;
-    expect(raw.excerpt).toContain("37.5k USD");
+    const [raw] = result.items;
+    expect(shown(raw!)).toContain("37.5k USD");
 
     const evidence = await readPersonalKnowledgeEvidence(
       fixtureData.root,
       {
         ...identity,
-        evidence_id: raw.id,
-        section_requests: [{ section_id: String(raw.metadata!.matchedChunk) }],
+        evidence_id: raw!.evidenceId,
+        section_requests: [{ section_id: raw!.sections[0]!.sectionId }],
       },
       { rawSourceProvider: provider },
     );
@@ -472,7 +532,9 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
       },
     );
 
-    expect(result.items.some((item) => item.id.startsWith("raw_"))).toBe(true);
+    expect(
+      result.items.some((item) => item.evidenceId.startsWith("raw_")),
+    ).toBe(true);
   });
 
   it("reports a limited BM25 fallback with candidates as partial", async () => {
@@ -509,14 +571,16 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
       request("Cobalt exact amount"),
       { chunkSearch: provider },
     );
-    expect(result.items.some((item) => item.id.startsWith("raw_"))).toBe(false);
+    expect(
+      result.items.some((item) => item.evidenceId.startsWith("raw_")),
+    ).toBe(false);
     const unconfigured = await queryWithDatabase(
       f.root,
       request("Cobalt exact amount"),
     );
-    expect(unconfigured.items.some((item) => item.id.startsWith("raw_"))).toBe(
-      false,
-    );
+    expect(
+      unconfigured.items.some((item) => item.evidenceId.startsWith("raw_")),
+    ).toBe(false);
   });
 
   it("uses PG Raw for BM25 fallback after the local projection is lost", async () => {
@@ -535,7 +599,9 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
         },
       },
     );
-    expect(result.items.some((item) => item.id.startsWith("raw_"))).toBe(true);
+    expect(
+      result.items.some((item) => item.evidenceId.startsWith("raw_")),
+    ).toBe(true);
     await expect(
       fs.stat(rawDirectory(fixtureData.workspace)),
     ).rejects.toMatchObject({ code: "ENOENT" });
@@ -657,17 +723,14 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
       const candidates = await client.query(request("Cobalt source text"));
       expect(candidates.status).toBe("grounded");
       expect(candidates.items[0]?.content).toBeTruthy();
-      const candidate = candidates.items.find((item) =>
-        item.id.startsWith("raw_"),
-      )!;
-      expect(candidate).toBeDefined();
+      const candidate = candidates.items[0]!;
       const input = {
         ...identity,
-        evidence_id: candidate.id,
-        section_requests: [{ section_id: candidate.directory![0]!.id }],
+        evidence_id: candidate.evidenceId,
+        section_requests: [{ section_id: candidate.sections[0]!.sectionId }],
       };
       const evidence = await client.readEvidence(input);
-      expect(evidence.evidenceId).toBe(candidate.id);
+      expect(evidence.evidenceId).toBe(candidate.evidenceId);
       expect(evidence.source.kind).toBe("room");
       const sharedEvidence = await client.readEvidence({
         ...input,
@@ -722,7 +785,7 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     ).toEqual([source]);
     const item = (await queryPersonalKnowledge(f.root, request("Cobalt")))
       .items[0]!;
-    expect(item.id).toBe(
+    expect(item.evidenceId).toBe(
       `raw_${source!.id.slice(0, 16)}_${source!.contentHash.slice(0, 16)}`,
     );
     expect(JSON.stringify(item)).not.toContain("graph/raw");
@@ -743,7 +806,7 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     ).toEqual([]);
     expect(
       (await queryPersonalKnowledge(f.root, request("Cobalt"))).items.some(
-        (item) => item.id.startsWith("raw_") && item.excerpt.includes("37.5"),
+        (item) => shown(item).includes("37.5"),
       ),
     ).toBe(true);
   });
@@ -809,8 +872,9 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     await storeSessionSource(f.root, f.collection);
     expect(await fs.readdir(rawDirectory(f.workspace))).toHaveLength(2);
     expect(
-      (await queryPersonalKnowledge(f.root, request("Cobalt"))).items[0]
-        ?.excerpt,
+      shown(
+        (await queryPersonalKnowledge(f.root, request("Cobalt"))).items[0]!,
+      ),
     ).toContain("39");
   });
 
@@ -883,24 +947,20 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
       f.root,
       request("Cobalt limit exactly how much"),
     );
-    const item = result.items.find((entry) => entry.id.startsWith("raw_"))!;
-    expect(item.representation).toBe("source_excerpt");
-    expect(item.excerpt).toContain("37.5");
-    expect(item.metadata).toMatchObject({
-      sourceUri: "teamhub://rooms/room_1/messages",
-      linkedContentRef: f.anchorPath,
-    });
+    const [item] = result.items;
+    expect(item).toMatchObject({ kind: "room", roomId: "room_1" });
+    expect(shown(item!)).toContain("37.5");
     expect(JSON.stringify(result)).not.toContain(f.root);
     const read = await readPersonalKnowledgeEvidence(f.root, {
       ...identity,
-      evidence_id: item.id,
-      section_requests: [{ section_id: String(item.metadata!.matchedChunk) }],
+      evidence_id: item!.evidenceId,
+      section_requests: [{ section_id: item!.sections[0]!.sectionId }],
     });
     expect(read.sections[0]?.content).toContain("Alice");
     expect(read.sections[0]?.content).toContain("must not exceed this amount");
     expect(read.complete).toBe(true);
     expect(result.status).toBe("grounded");
-    expect(item.content).toContain("must not exceed this amount");
+    expect(item!.content).toContain("must not exceed this amount");
   });
 
   it("rejects cross-tenant, cross-owner and cross-Agent reads, even with a known evidence ID", async () => {
@@ -924,10 +984,8 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
         readPersonalKnowledgeEvidence(f.root, {
           ...identity,
           ...changed,
-          evidence_id: item.id,
-          section_requests: [
-            { section_id: String(item.metadata!.matchedChunk) },
-          ],
+          evidence_id: item.evidenceId,
+          section_requests: [{ section_id: item.sections[0]!.sectionId }],
         }),
       ).rejects.toThrow("not found");
     }
@@ -939,12 +997,12 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
       f.root,
       request("Cobalt limit source text"),
     );
-    const item = result.items.find((entry) => entry.id.startsWith("raw_"))!;
-    expect(item.excerpt).toContain("37.5");
+    const item = result.items[0]!;
+    expect(shown(item)).toContain("37.5");
     const read = await readPersonalKnowledgeEvidence(f.root, {
       ...identity,
-      evidence_id: item.id,
-      section_requests: [{ section_id: String(item.metadata!.matchedChunk) }],
+      evidence_id: item.evidenceId,
+      section_requests: [{ section_id: item.sections[0]!.sectionId }],
     });
     expect(read.sections[0]?.content).toContain("37.5");
     await expect(
@@ -956,7 +1014,7 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     const f = await fixture();
     const item = (
       await queryPersonalKnowledge(f.root, request("Cobalt exact amount"))
-    ).items.find((entry) => entry.id.startsWith("raw_"))!;
+    ).items[0]!;
     await fs.writeFile(
       path.join(f.workspace, f.anchorPath),
       "Forged projection",
@@ -967,8 +1025,8 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     });
     const read = await readPersonalKnowledgeEvidence(f.root, {
       ...identity,
-      evidence_id: item.id,
-      section_requests: [{ section_id: String(item.metadata!.matchedChunk) }],
+      evidence_id: item.evidenceId,
+      section_requests: [{ section_id: item.sections[0]!.sectionId }],
     });
     expect(read.sections[0]?.content).toContain("37.5");
     expect(read.sections[0]?.content).not.toContain("Forged");
@@ -999,7 +1057,7 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     await fs.symlink(f.targetPath, rawPath);
     expect(
       (await queryPersonalKnowledge(f.root, request("Cobalt"))).items.some(
-        (item) => item.id.startsWith("raw_") && item.excerpt.includes("37.5"),
+        (item) => shown(item).includes("37.5"),
       ),
     ).toBe(true);
   });
@@ -1010,8 +1068,9 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
       .items[0]!;
     await storeSessionSource(f.root, f.collection);
     expect(
-      (await queryPersonalKnowledge(f.root, request("Cobalt"))).items[0]?.id,
-    ).toBe(first.id);
+      (await queryPersonalKnowledge(f.root, request("Cobalt"))).items[0]
+        ?.evidenceId,
+    ).toBe(first.evidenceId);
     f.collection.rooms[0]!.messages[0]!.body =
       "The Cobalt limit is updated to 39k USD.";
     await fs.writeFile(
@@ -1020,15 +1079,14 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     );
     await storeSessionSource(f.root, f.collection);
     expect(
-      (await queryPersonalKnowledge(f.root, request("Cobalt"))).items[0]?.id,
-    ).not.toBe(first.id);
+      (await queryPersonalKnowledge(f.root, request("Cobalt"))).items[0]
+        ?.evidenceId,
+    ).not.toBe(first.evidenceId);
     await expect(
       readPersonalKnowledgeEvidence(f.root, {
         ...identity,
-        evidence_id: first.id,
-        section_requests: [
-          { section_id: String(first.metadata!.matchedChunk) },
-        ],
+        evidence_id: first.evidenceId,
+        section_requests: [{ section_id: first.sections[0]!.sectionId }],
       }),
     ).rejects.toThrow("not found");
   });
@@ -1061,7 +1119,7 @@ describe("knowledge output budget", () => {
     };
   };
 
-  it("drops lower-ranked content, candidates and facts to stay within the budget", async () => {
+  it("drops entries without a body, then facts, but keeps the floor bodies within the budget", async () => {
     const fixtureData = await fixture();
     const matches = Array.from({ length: 10 }, (_, index) => {
       const { input, markdown } = document(index, [
@@ -1102,23 +1160,59 @@ describe("knowledge output budget", () => {
     expect(chars(result)).toBeLessThanOrEqual(OUTPUT_BUDGET_CHARS);
     expect(result.gaps.map((gap) => gap.code)).toContain("results_trimmed");
     expect(result.status).toBe("partial");
-    expect(result.facts!.length).toBeGreaterThan(0);
-    expect(result.facts).toEqual(facts.slice(0, result.facts!.length));
-    expect(result.items.length).toBeGreaterThan(1);
-    expect(result.items.map((item) => item.metadata!.sourceId)).toEqual(
-      ranked.slice(0, result.items.length).map((match) => match.sourceId),
+    // Entries without a body go first, from the lowest rank; the floor
+    // entries keep their bodies and every entry stays in rank order.
+    expect(result.facts ?? []).toEqual(
+      facts.slice(0, result.facts?.length ?? 0),
+    );
+    expect(result.items.length).toBeGreaterThanOrEqual(3);
+    expect(result.items.length).toBeLessThan(10);
+    expect(result.items.map((item) => item.title)).toEqual(
+      result.items.map((_, index) => `Report ${index}`),
     );
     expect(result.items.map((item) => item.citeAs)).toEqual(
       result.items.map((_, index) => `S${index + 1}`),
     );
-    // The top candidate keeps its best chunk; every candidate keeps its
-    // excerpt and the sections to read.
-    expect(result.items[0]!.content).toBeDefined();
-    expect(result.items.slice(1).every((item) => !item.content)).toBe(true);
+    for (const item of result.items.slice(0, 3))
+      expect(item.content).toBeTruthy();
+    // Room left over gives later entries a body too; the rest show a snippet.
     for (const item of result.items) {
-      expect(item.excerpt.length).toBeGreaterThan(0);
-      expect(item.directory!.length).toBeGreaterThan(0);
+      expect(shown(item).length).toBeGreaterThan(0);
+      expect(item.sections.length).toBeGreaterThan(0);
     }
+    expect(result.summaries).toEqual([]);
+  });
+
+  it("continues the same search on the next page", async () => {
+    const fixtureData = await fixture();
+    const ranked = Array.from({ length: 12 }, (_, index) => {
+      const { input, markdown } = document(index, [wide(index, 1_200)]);
+      const source = storeDocumentSource(fixtureData.root, input);
+      const chunk = chunkSource(markdown).at(-1)!;
+      return {
+        chunkId: chunk.id,
+        mergedChunkIds: [chunk.id],
+        sourceId: source.id,
+        score: 1 / (61 + index),
+      };
+    });
+    const search = (page?: number) =>
+      queryPersonalKnowledge(
+        fixtureData.root,
+        { ...request("Report"), ...(page ? { page } : {}) },
+        {
+          chunkSearch: { search: async () => ranked },
+          outputBudgetChars: OUTPUT_BUDGET_CHARS,
+        },
+      );
+
+    const first = await search();
+    const second = await search(first.nextPage);
+    expect(first).toMatchObject({ page: 1, nextPage: 2 });
+    expect(second.page).toBe(2);
+    const titles = [...first.items, ...second.items].map((item) => item.title);
+    expect(titles).toEqual(titles.map((_, index) => `Report ${index}`));
+    expect(second.items[0]!.citeAs).toBe(`S${first.items.length + 1}`);
   });
 
   it("sizes the budget by the model's context window", () => {
@@ -1234,7 +1328,7 @@ describe("knowledge output budget", () => {
         },
       },
     );
-    const evidenceId = result.items[0]!.id;
+    const evidenceId = result.items[0]!.evidenceId;
     const chunks = chunkSource(markdown)
       .filter((chunk) => chunk.content.length > 500)
       .slice(0, 8);

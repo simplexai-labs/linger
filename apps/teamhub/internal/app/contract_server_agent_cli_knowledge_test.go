@@ -129,3 +129,24 @@ func TestAgentKnowledgeSearchForwardsBoundedAlternates(t *testing.T) {
 		t.Fatal("read accepted alternates")
 	}
 }
+
+func TestAgentKnowledgeSearchForwardsScopeAndPage(t *testing.T) {
+	identity := agentauth.Authorization{Principal: &agentcredential.Principal{TenantID: "t", UserArtifactOwnerActorID: "s"}, PersonalKnowledgeAgentID: "a"}
+	page := 2
+	body, err := agentKnowledgeRequest("search_knowledge", agentKnowledgeInput{Query: "budget", Scope: "summaries", Page: &page}, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body["scope"] != "summaries" || body["page"] != 2 {
+		t.Fatalf("scope and page were not forwarded: %#v", body)
+	}
+	bad, zero := 11, 0
+	for _, input := range []agentKnowledgeInput{{Query: "budget", Scope: "wiki"}, {Query: "budget", Page: &bad}, {Query: "budget", Page: &zero}} {
+		if _, err := agentKnowledgeRequest("search_knowledge", input, identity); err == nil {
+			t.Fatalf("accepted %#v", input)
+		}
+	}
+	if _, err := agentKnowledgeRequest("read_knowledge", agentKnowledgeInput{EvidenceID: "raw_0123456789abcdef_0123456789abcdef", Scope: "summaries"}, identity); err == nil {
+		t.Fatal("read accepted scope")
+	}
+}

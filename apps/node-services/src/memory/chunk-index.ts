@@ -66,6 +66,8 @@ export interface ChunkSearchInput extends SourceIdentity {
   alternates?: readonly string[];
   // Omitted searches the complete authorized scope; [] means no sources.
   sourceIds?: readonly string[];
+  /** Only sources of these origins: the originals or the summaries list. */
+  originKinds?: readonly RawOriginKind[];
   date_from?: string;
   date_to?: string;
 }
@@ -315,19 +317,26 @@ export class MemoryChunkIndex implements ChunkSearchProvider {
           : Promise.resolve<ChunkCandidateRow[]>([]);
       },
     );
-    // A time window adds the period's chunks that match the query's keywords
-    // as one more ranked vote.
-    const queryTokens = lexicalQueryTokens(input.query);
-    const temporalPromise =
-      queryTokens.length && (input.event_from || input.event_to)
-        ? this.#temporalCandidates(input, sourceIds, queryTokens)
-        : Promise.resolve<ChunkCandidateRow[]>([]);
+    // A time window adds the period's chunks that match each wording as more
+    // ranked votes, ranked like its lexical route (distinct-term coverage,
+    // then title).
+    const temporalRoutes =
+      input.event_from || input.event_to
+        ? [input.query, ...(input.alternates ?? [])].map(lexicalQueryTokens)
+        : [];
+    const temporalPromise = Promise.all(
+      temporalRoutes.map((tokens) =>
+        tokens.length
+          ? this.#temporalCandidates(input, sourceIds, tokens)
+          : Promise.resolve<ChunkCandidateRow[]>([]),
+      ),
+    );
     const [[lexical = [], ...alternates], temporal] = await Promise.all([
       Promise.all(lexicalRoutes),
       temporalPromise,
     ]);
     return rankChunkCandidates(lexical, input.limit ?? DEFAULT_RESULT_LIMIT, [
-      temporal,
+      ...temporal,
       ...alternates,
     ]);
   }
@@ -813,6 +822,7 @@ export class MemoryChunkIndex implements ChunkSearchProvider {
         AND chunk.agent_id = ${input.agent_id}
         AND source.active_sha256 = chunk.source_sha256
         AND (${sourceIds === undefined} OR source.document_id = ANY(${sourceIds ?? []}::text[]))
+        AND (${input.originKinds === undefined} OR source.origin_kind = ANY(${[...(input.originKinds ?? [])]}::text[]))
         AND (${input.date_from ?? null}::text IS NULL OR version.manifest->>'date' >= ${input.date_from ?? null})
         AND (${input.date_to ?? null}::text IS NULL OR version.manifest->>'date' <= ${input.date_to ?? null})
         AND chunk.search_tsv @@ to_tsquery('simple', ${query})
@@ -850,12 +860,18 @@ export class MemoryChunkIndex implements ChunkSearchProvider {
     const bounds = windowBounds(window);
     const query = tokens.join(" | ");
     const rows = await this.#sql<
-      (ChunkCandidateRow & { source_date: string })[]
+      (ChunkCandidateRow & {
+        source_date: string;
+        title: string;
+        matched_terms: number;
+      })[]
     >`
       SELECT chunk.id AS chunk_id, chunk.chunk_no, source.document_id,
         chunk.heading_path, chunk.line_start, chunk.line_end,
         ts_rank_cd(chunk.search_tsv, to_tsquery('simple', ${query}))::float8 AS score,
-        version.manifest->>'date' AS source_date
+        version.manifest->>'date' AS source_date, source.title,
+        (SELECT count(*) FROM unnest(${tokens}::text[]) term
+          WHERE chunk.search_tsv @@ to_tsquery('simple', term))::int AS matched_terms
       FROM memory_index.chunks chunk
       JOIN memory_index.sources source ON source.id = chunk.source_id
       JOIN memory_index.source_versions version ON version.source_id = source.id AND version.sha256 = source.active_sha256
@@ -864,6 +880,7 @@ export class MemoryChunkIndex implements ChunkSearchProvider {
         AND chunk.agent_id = ${input.agent_id}
         AND source.active_sha256 = chunk.source_sha256
         AND (${sourceIds === undefined} OR source.document_id = ANY(${sourceIds ?? []}::text[]))
+        AND (${input.originKinds === undefined} OR source.origin_kind = ANY(${[...(input.originKinds ?? [])]}::text[]))
         AND (${input.date_from ?? null}::text IS NULL OR version.manifest->>'date' >= ${input.date_from ?? null})
         AND (${input.date_to ?? null}::text IS NULL OR version.manifest->>'date' <= ${input.date_to ?? null})
         AND version.manifest->>'date' BETWEEN ${bounds.from} AND ${bounds.to}
@@ -871,7 +888,21 @@ export class MemoryChunkIndex implements ChunkSearchProvider {
       ORDER BY score DESC, chunk.id
       LIMIT ${TEMPORAL_POOL_SIZE}
     `;
-    return selectWithTemporalCoverage(rows, (row) => row.source_date, window);
+    const ordered = rerankLexicalCandidates(
+      rows,
+      tokens,
+      {
+        matchedTerms: (row) => row.matched_terms,
+        titleTerms: (row) => tokenizeSearchText(row.title ?? ""),
+        score: (row) => row.score,
+      },
+      rows.length,
+    );
+    return selectWithTemporalCoverage(
+      ordered,
+      (row) => row.source_date,
+      window,
+    );
   }
 }
 

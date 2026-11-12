@@ -387,7 +387,9 @@ describe("Memory server", () => {
           gaps: [{ code: "no_relevant_evidence" }],
           indexedAt: null,
           items: [],
-          schemaVersion: 1 as const,
+          summaries: [],
+          page: 1,
+          schemaVersion: 2 as const,
           status: "empty" as const,
         };
       },

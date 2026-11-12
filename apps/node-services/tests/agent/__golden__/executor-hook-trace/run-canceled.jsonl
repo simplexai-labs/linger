@@ -2,7 +2,7 @@
 {"hook":"context.onContextBound","context":{"kind":"meta","agentId":"agent-trace","roomId":"room-trace"},"bootstrap":"new"}
 {"step":"state.enqueueTrustedTurn","messageIds":["m-1"],"runId":"run-1"}
 {"hook":"activation.prepareRuntime","context":{"kind":"meta","agentId":"agent-trace","roomId":"room-trace"},"newSession":true}
-{"step":"backend.activate","developerInstructions":"sha256:cbcff50bf9f3ce2f","mappings":1}
+{"step":"backend.activate","developerInstructions":"sha256:dfc8e13cd4472173","mappings":1}
 {"step":"provider.createSession"}
 {"step":"state.claimLocalRun","runId":"run-1","messageIds":["m-1"]}
 {"hook":"context.prepareInput","messageId":"m-1"}
