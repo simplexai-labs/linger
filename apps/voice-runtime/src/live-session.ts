@@ -38,7 +38,14 @@ export type LiveEvent =
     }
   /** The model began a reply to the user (not an update). */
   | { type: "response_started" }
-  | { type: "response_finished"; canceled: boolean }
+  /** The provider started a response for the update tell() named. */
+  | { type: "update_accepted"; id: string }
+  | {
+      type: "response_finished";
+      canceled: boolean;
+      /** The update the response said, when it said one. */
+      updateId?: string;
+    }
   /** detail is the provider's own reason, bounded, for the log. */
   | { type: "provider_error"; code: string; detail: string };
 
@@ -60,7 +67,14 @@ export interface LiveSession {
    * of the call; with allowTools it may first call tools, and the response
    * after their results is still the update. Its words arrive as update text.
    */
-  tell(cue: string, allowTools?: boolean): void;
+  tell(cue: string, allowTools: boolean, id: string): void;
+  /**
+   * Asks again for the update `id` without telling its cue again, when its
+   * response ended without a word.
+   */
+  repeatUpdate(id: string, allowTools: boolean): void;
+  /** Ends a session that stopped answering, as a transient loss. */
+  abandon(code: string): void;
   /** Adds application context without generating speech. */
   note(text: string): void;
   /**

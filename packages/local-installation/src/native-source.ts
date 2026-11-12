@@ -563,17 +563,22 @@ async function runNativeSource(
             }),
         );
         // Voice needs LiveKit and ffmpeg; the desktop ships them for each
-        // computer. Without them (or without keys) voice stays off.
-        const voiceKeys = Boolean(
-          configured.env.SONIOX_API_KEY?.trim() ||
-          configured.env.XAI_API_KEY?.trim(),
-        );
-        const voice = voiceKeys
-          ? await timed("Preparing the voice tools", () =>
-              prepareNativeVoiceTools({ home, signal, onEvent: emit }),
-            )
-          : undefined;
-        if (voiceKeys && !voice)
+        // computer. They run whether or not a voice key is set, so a key
+        // saved later in the app works without a reinstall. A computer
+        // without them, or a failed preparation, keeps voice off and the
+        // install going; TeamHub then reports voice as unavailable.
+        const voice = await timed("Preparing the voice tools", () =>
+          prepareNativeVoiceTools({ home, signal, onEvent: emit }),
+        ).catch((error: unknown) => {
+          if (signal.aborted) throw error;
+          emit({
+            kind: "log",
+            stage,
+            message: `The voice tools could not be prepared: ${error instanceof Error ? error.message : String(error)}\n`,
+          });
+          return undefined;
+        });
+        if (!voice)
           emit({
             kind: "log",
             stage,
@@ -591,9 +596,7 @@ async function runNativeSource(
                   .filter(Boolean)
                   .join(path.delimiter),
               }
-            : voiceKeys
-              ? { SONIOX_API_KEY: "", XAI_API_KEY: "" }
-              : {}),
+            : { TEAMHUB_VOICE_MEDIA: "off" }),
         };
         // Only TeamHub gets the identity key (serviceOptions); no other
         // service may prove itself as this instance's server.
@@ -603,7 +606,9 @@ async function runNativeSource(
         // change restarts them.
         const shared = {
           env: configured.env,
-          voice: voice ? voice.bin : voiceKeys ? "off" : undefined,
+          // Tool availability only: a voice key saved in the app or user.env
+          // changes env, not this.
+          voice: voice ? voice.bin : "off",
         };
         const settings = JSON.stringify(shared);
         // TeamHub also restarts for a new identity key; the digest keeps the

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${SQLC_VERSION:?SQLC_VERSION is required}"
+: "${SQLC_BIN:?SQLC_BIN is required; run this through make generate or make sqlc-verify}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/teamhub-generated.XXXXXX")"
@@ -14,11 +14,7 @@ cp -R "$repo_root/internal/store/queries" "$tmp_root/internal/store/queries"
 
 (
   cd "$tmp_root"
-  if [[ -n "${SQLC_BIN:-}" ]]; then
-    "$SQLC_BIN" generate
-  else
-    go run "github.com/sqlc-dev/sqlc/cmd/sqlc@${SQLC_VERSION}" generate
-  fi
+  "$SQLC_BIN" generate
 )
 
 if [[ ${1:-} == --write ]]; then

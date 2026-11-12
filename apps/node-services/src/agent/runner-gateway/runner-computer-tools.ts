@@ -1,7 +1,4 @@
-import type {
-  ComputerToolResult,
-  SharedTaskScope,
-} from "@linger/wire-contracts/runner-gateway/types";
+import type { ComputerToolResult } from "@linger/wire-contracts/runner-gateway/types";
 import {
   RUNNER_GATEWAY_PROTOCOL_VERSION,
   parseAgentToDaemonEnvelope,
@@ -23,10 +20,11 @@ export interface ComputerToolRequest {
   computerId: string;
   agentId: string;
   toolSessionId: string;
-  server: "browser" | "task_files";
+  server: "browser" | "playground";
   toolName: string;
   arguments: Record<string, unknown>;
-  taskScope?: SharedTaskScope;
+  /** How long the Computer may take; defaults to one minute. */
+  deadlineMs?: number;
   signal: AbortSignal;
 }
 const unknown = () => ({
@@ -68,15 +66,8 @@ export class RunnerComputerTools {
         .places(request.computerId, request.tenantId, request.agentId)
     )
       throw new LocalComputerNotFoundError();
-    if (
-      request.taskScope &&
-      (request.server !== "task_files" ||
-        request.taskScope.tenant_id !== request.tenantId ||
-        request.taskScope.agent_id !== request.agentId ||
-        request.taskScope.role !== "alter_ego")
-    )
-      throw new LocalComputerNotFoundError();
     if (this.pending.size >= 16) return { status: "busy" };
+    const deadlineMs = request.deadlineMs ?? 60_000;
     const commandId = this.context.createId();
     const command = parseAgentToDaemonEnvelope({
       type: "execute",
@@ -92,8 +83,7 @@ export class RunnerComputerTools {
       server: request.server,
       tool_name: request.toolName,
       arguments: request.arguments,
-      ...(request.taskScope ? { task_scope: request.taskScope } : {}),
-      deadline_ms: 60_000,
+      deadline_ms: deadlineMs,
     });
     let timer: NodeJS.Timeout | undefined;
     let abort: (() => void) | undefined;
@@ -108,7 +98,7 @@ export class RunnerComputerTools {
         });
         abort = () => resolve(unknown());
         request.signal.addEventListener("abort", abort, { once: true });
-        timer = setTimeout(() => resolve(unknown()), 62_000);
+        timer = setTimeout(() => resolve(unknown()), deadlineMs + 2_000);
         timer.unref();
       });
       request.signal.throwIfAborted();

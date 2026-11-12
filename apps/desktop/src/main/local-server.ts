@@ -233,8 +233,6 @@ export interface LocalServerStatus {
   // keys themselves.
   readonly keys: {
     readonly composio: boolean;
-    readonly soniox: boolean;
-    readonly xai: boolean;
   };
   readonly origin?: string;
   // While the "signin" step waits for the person.
@@ -424,8 +422,6 @@ export class LocalServerModule implements Module {
       },
       keys: {
         composio: !!keys.composio,
-        soniox: !!keys.soniox,
-        xai: !!keys.xai,
       },
       ...(this.#origin ? { origin: this.#origin } : {}),
       ...(this.#signIn ? { signIn: this.#signIn } : {}),
@@ -686,7 +682,11 @@ export class LocalServerModule implements Module {
       // The desktop's Computer runs the runtime this installer set up, with
       // its profile, rather than whatever its PATH finds.
       const runtime = await installer.runtime();
-      this.#ctx?.config.update({ runtimeEnvironment: runtime.environment });
+      const preferredRuntime = setupRuntime(runtime.setupChoice);
+      this.#ctx?.config.update({
+        runtimeEnvironment: runtime.environment,
+        ...(preferredRuntime ? { preferredRuntime } : {}),
+      });
       this.#ctx?.log.info("local_server.runtime", {
         runtime: runtime.setupChoice,
         keys: Object.keys(runtime.environment),
@@ -745,9 +745,8 @@ export class LocalServerModule implements Module {
     installer: InstallerApi,
     signal: AbortSignal,
   ): Promise<LocalRuntime | undefined> {
-    const choice = (await installer.runtime()).setupChoice;
-    const runtime: LocalRuntime =
-      choice === "codex" || choice === "claude" ? choice : "pi";
+    const runtime =
+      setupRuntime((await installer.runtime()).setupChoice) ?? "pi";
     this.#signInInstaller = installer;
     this.#switchTo = undefined;
     try {
@@ -2370,6 +2369,14 @@ interface RuntimeLogin {
   readonly acceptsCode?: boolean;
   readonly message?: string;
 }
+
+// The runtime an installation's setup choice runs; local models run on pi.
+const setupRuntime = (choice: string | undefined): LocalRuntime | undefined =>
+  choice === "local-models"
+    ? "pi"
+    : choice === "codex" || choice === "claude" || choice === "pi"
+      ? choice
+      : undefined;
 
 // The installer's own pick; local models stand for the pi runtime.
 const recommended = (report: { recommendation?: string }) =>

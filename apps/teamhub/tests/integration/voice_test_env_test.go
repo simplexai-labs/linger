@@ -57,6 +57,8 @@ func newHardwareVoiceEnv(
 		c.ArtifactStorageRoot = storageRoot
 		c.ArtifactMaxBytes = artifactMaxBytes
 		c.CaptureMaxBytes = captureMaxBytes
+		// Voice sessions other than Live start only with a Soniox key.
+		c.Voice.SonioxAPIKey = "test-soniox-key"
 	})
 	if configure != nil {
 		configure(&appConfig)

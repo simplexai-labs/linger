@@ -47,7 +47,7 @@ func (s *Service) voiceLiveTaskViews(ctx context.Context, session voicelive.Sess
 	runStarted := map[string]time.Time{}
 	for index, row := range rows {
 		records[index] = voicelive.TaskRecord{
-			Ordinal: row.Ordinal, StartedHere: row.StartedHere, Goal: row.Goal, Surface: row.Surface,
+			Ordinal: row.Ordinal, WorkItemID: row.WorkItemID, StartedHere: row.StartedHere, Goal: row.Goal, Surface: row.Surface,
 			Canceled: row.CanceledAt.Valid, Execution: row.ExecutionStatus,
 		}
 		if row.ReportID != "" {
@@ -390,11 +390,72 @@ func (s *Service) listVoiceLiveTasks(ctx context.Context, session voicelive.Sess
 	}
 	tasks := make([]voicelive.ProgressTask, 0, len(background))
 	for _, row := range background {
-		tasks = append(tasks, voicelive.ProgressTask{Title: row.Title, Status: row.TaskExecutionStatus.String, CreatedAt: row.CreatedAt.Time})
+		status := row.TaskExecutionStatus.String
+		if !args.RunningOnly || status == "running" || status == "waiting_for_approval" {
+			tasks = append(tasks, voicelive.ProgressTask{Title: row.Title, Status: status, CreatedAt: row.CreatedAt.Time})
+		}
+	}
+	if args.RunningOnly {
+		views = slices.DeleteFunc(views, func(view voicelive.TaskView) bool { return !voicelive.Unfinished(view.State) })
 	}
 	output := voicelive.TaskListOutput(views)
 	output["background_tasks"] = voicelive.TaskProgress(time.Now(), tasks)
 	return voicelive.Output(output), nil
+}
+
+// check does, with one page of the reports it sent back, from offset.
+// check does, with every report it sent back.
+func (s *Service) checkVoiceLiveTask(ctx context.Context, session voicelive.Session, request teamhubinternal.VoiceLiveToolCall) (string, error) {
+	var args voicelive.CheckTaskArguments
+	if voicelive.DecodeArguments(request.Arguments, &args) != nil {
+		return "", voicelive.ErrInvalid
+	}
+	ordinal, ok := voicelive.TaskOrdinal(args.TaskID)
+	if !ok {
+		return "", voicelive.ErrInvalid
+	}
+	offset := min(max(int(args.Offset), 0), 100_000)
+	task, err := s.queries.GetVoiceLiveTask(ctx, store.GetVoiceLiveTaskParams{RoomID: session.RoomID, OwnerActorID: session.HumanActorID, Ordinal: ordinal})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return voicelive.ErrorOutput("task_not_found"), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	view, err := taskexecution.ReadTask(ctx, s.queries, task.WorkItemID)
+	if errors.Is(err, taskexecution.ErrNotFound) {
+		return voicelive.ErrorOutput("task_not_found"), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	reports, err := s.queries.ListVoiceLiveTaskReports(ctx, store.ListVoiceLiveTaskReportsParams{
+		TaskID: task.WorkItemID, TenantID: session.TenantID, RowLimit: voicelive.CheckedReportsPage + 1, RowOffset: int32(offset),
+	})
+	if err != nil {
+		return "", err
+	}
+	checked := voicelive.CheckedTask{
+		TaskID: args.TaskID, Goal: task.Goal, Folder: voicelive.PlaygroundRoot + task.WorkItemID + "/",
+		Status: view.Status, Reason: view.ReasonCode, StatusSince: view.StatusSince, QueuedMessages: view.QueuedMessageCount,
+	}
+	if task.CanceledAt.Valid {
+		checked.Status = "canceled"
+	}
+	for _, step := range view.RecentActivity {
+		checked.Activity = append(checked.Activity, voicelive.CheckedActivity{At: step.At, Kind: step.Kind, Text: step.Summary})
+	}
+	for _, approval := range view.PendingApprovals {
+		checked.Approvals = append(checked.Approvals, approval.Title)
+	}
+	checked.Offset = offset
+	if len(reports) > voicelive.CheckedReportsPage {
+		reports, checked.OlderReports = reports[:voicelive.CheckedReportsPage], true
+	}
+	for _, report := range reports {
+		checked.Reports = append(checked.Reports, voicelive.CheckedActivity{At: report.CreatedAt.Time, Text: report.Body})
+	}
+	return voicelive.Output(voicelive.CheckTaskOutput(time.Now(), checked)), nil
 }
 
 // LiveTasks lists the live call's Tasks and the event alerts waiting for it,

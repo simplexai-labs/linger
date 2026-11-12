@@ -1,0 +1,120 @@
+package voicelive
+
+import (
+	"encoding/json"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestParsePlaygroundPathKeepsInsideItsFolder(t *testing.T) {
+	for raw, want := range map[string]PlaygroundPath{
+		"":                                     {},
+		"./playground/":                        {},
+		"playground":                           {},
+		"./playground/workitem_1/":             {Folder: "workitem_1"},
+		"./playground/workitem_1/out/a.png":    {Folder: "workitem_1", Inside: "out/a.png"},
+		"playground/room_1/notes.md":           {Folder: "room_1", Inside: "notes.md"},
+		"./playground/workitem_1/./out//a.png": {Folder: "workitem_1", Inside: "out/a.png"},
+	} {
+		if got, ok := ParsePlaygroundPath(raw); !ok || got != want {
+			t.Errorf("ParsePlaygroundPath(%q)=%+v %v, want %+v", raw, got, ok, want)
+		}
+	}
+	for _, raw := range []string{"/etc/passwd", "./playground/workitem_1/../room_1/a", "../playground/x", "./other/a", "./playground/w\\a", "./playground/w/a\x00"} {
+		if got, ok := ParsePlaygroundPath(raw); ok {
+			t.Errorf("ParsePlaygroundPath(%q) accepted as %+v", raw, got)
+		}
+	}
+}
+
+func TestFormatListingReadsLikeLs(t *testing.T) {
+	modified := time.Date(2026, 11, 11, 10, 10, 2, 0, time.FixedZone("CST", 8*3600))
+	listing := FormatListing("./playground/workitem_1/", []ListEntry{
+		{Name: "out", Directory: true, Modified: modified},
+		{Name: "cartoon.png", Size: 201_728, Modified: modified},
+	}, 3)
+	for _, want := range []string{"./playground/workitem_1/\n", "    -  2026-11-11 02:10Z  out/\n", " 197K  2026-11-11 02:10Z  cartoon.png\n", "… 1 more\n"} {
+		if !strings.Contains(listing, want) {
+			t.Fatalf("listing %q lacks %q", listing, want)
+		}
+	}
+	if got := FormatListing("./playground/", nil, 0); got != "./playground/\n(empty)\n" {
+		t.Fatalf("empty listing=%q", got)
+	}
+}
+
+func TestHumanSize(t *testing.T) {
+	for size, want := range map[int64]string{0: "0", 512: "512", 3800: "3.7K", 201_728: "197K", 12 << 20: "12M"} {
+		if got := HumanSize(size); got != want {
+			t.Errorf("HumanSize(%d)=%s, want %s", size, got, want)
+		}
+	}
+}
+
+// The realtime model rejects a session whose tool schema has a null required
+// list, so every tool spells an empty one.
+func TestEveryToolSchemaHasARequiredList(t *testing.T) {
+	for _, tool := range Tools {
+		encoded, err := json.Marshal(tool.Parameters)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var schema map[string]any
+		if err := json.Unmarshal(encoded, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := schema["required"].([]any); !ok {
+			t.Errorf("%s: required=%v", tool.Name, schema["required"])
+		}
+	}
+}
+
+func TestPlaygroundImagesInlineOnlyPlaygroundFiles(t *testing.T) {
+	markdown := "# Title\n\n![one](./playground/workitem_1/a.png)\n\n![web](https://example.com/b.png)\n\n" +
+		"![again](./playground/workitem_1/a.png) ![two](playground/room_1/c.jpg \"caption\")\n\n" +
+		"```\n![code](./playground/workitem_1/a.png)\n```\n\n`![span](./playground/workitem_1/a.png)` ![longer](./playground/workitem_1/a.png.bak)\n\n" +
+		"![folder](./playground/workitem_1/) ![bare](e.png)\n"
+	images := PlaygroundImages(markdown)
+	if want := []string{"./playground/workitem_1/a.png", "playground/room_1/c.jpg", "./playground/workitem_1/a.png.bak"}; !slices.Equal(images, want) {
+		t.Fatalf("images=%q, want %q", images, want)
+	}
+	inlined := InlineImages(markdown, map[string]string{images[0]: "data:image/png;base64,QQ==", images[1]: "data:image/jpeg;base64,Qg=="})
+	for _, want := range []string{"![one](data:image/png;base64,QQ==)", "![again](data:image/png;base64,QQ==)", "![two](data:image/jpeg;base64,Qg== \"caption\")", "![web](https://example.com/b.png)"} {
+		if !strings.Contains(inlined, want) {
+			t.Fatalf("inlined lacks %q:\n%s", want, inlined)
+		}
+	}
+	for _, kept := range []string{"![code](./playground/workitem_1/a.png)", "`![span](./playground/workitem_1/a.png)`", "![longer](./playground/workitem_1/a.png.bak)"} {
+		if !strings.Contains(inlined, kept) {
+			t.Fatalf("inlined changed %q:\n%s", kept, inlined)
+		}
+	}
+}
+
+func TestImageAnchorFindsTheBlockAnImageGoesBelow(t *testing.T) {
+	export := []byte(`{"blocks":[
+		{"id":"title","type":"heading","content":[{"type":"text","text":"Strawberry tattoos"}]},
+		{"id":"intro","type":"paragraph","content":[{"type":"text","text":"Strawberries are "},{"type":"link","content":[{"type":"text","text":"popular"}]}]},
+		{"id":"list","type":"bulletListItem","content":[{"type":"text","text":"Roman"}],"children":[{"id":"nested","type":"paragraph","content":[{"type":"text","text":"Venus"}]}]},
+		{"id":"table","type":"table","content":{"type":"tableContent","rows":[]}},
+		{"id":"again","type":"paragraph","content":[{"type":"text","text":"Strawberry"}]}
+	]}`)
+	for after, want := range map[string][2]string{
+		"":                   {"again", ""},
+		"Strawberry tattoos": {"title", ""},
+		"are popular":        {"intro", ""},
+		"Venus":              {"list", ""},
+		"Strawberry":         {"again", ""},
+		"Strawberr":          {"", "ambiguous_text"},
+		"Missing text":       {"", "text_not_found"},
+	} {
+		if blockID, problem := ImageAnchor(export, after); blockID != want[0] || problem != want[1] {
+			t.Fatalf("after %q = %q %q, want %q", after, blockID, problem, want)
+		}
+	}
+	if _, problem := ImageAnchor([]byte(`{"blocks":[]}`), ""); problem != "document_empty" {
+		t.Fatalf("empty document problem=%q", problem)
+	}
+}

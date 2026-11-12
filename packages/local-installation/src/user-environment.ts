@@ -25,6 +25,8 @@ const TEMPLATE = `# Your own keys for this Linger instance. Linger reads only th
 
 # Connected apps such as Gmail, GitHub and Slack (Composio).
 COMPOSIO_API_KEY=
+# Voice keys are normally saved in the Linger app; a key here overrides the
+# app's.
 # Recording, dictation and meeting transcripts (Soniox).
 SONIOX_API_KEY=
 # Grok Live voice mode (xAI); it does not need Soniox.
@@ -96,10 +98,6 @@ export async function readUserEnvironment(
     values[name] = value;
   }
   return values;
-}
-
-export function voiceEnabled(values: UserEnvironment): boolean {
-  return Boolean(values.SONIOX_API_KEY || values.XAI_API_KEY);
 }
 
 /**

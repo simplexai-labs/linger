@@ -95,7 +95,7 @@ func alterEgoContextKey(taskID string) string {
 func taskReports(t *testing.T, env *testEnv, taskID string) []string {
 	t.Helper()
 	rows, err := env.pool.Query(t.Context(), `SELECT body FROM task_meta_callback_messages
-		WHERE task_id=$1 AND author_actor_id='actor_acme_official' AND NOT non_actionable ORDER BY meta_seq`, taskID)
+		WHERE task_id=$1 AND author_actor_id='actor_acme_official' ORDER BY meta_seq`, taskID)
 	if err != nil {
 		t.Fatal(err)
 	}

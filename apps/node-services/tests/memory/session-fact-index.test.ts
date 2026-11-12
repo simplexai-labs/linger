@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   factChunk,
+  factContext,
   messageAt,
   sessionFactText,
 } from "../../src/memory/session-fact-index.js";
@@ -23,6 +24,36 @@ describe("Session fact binding", () => {
     expect(
       messageAt("Recording transcript without headings", 5),
     ).toBeUndefined();
+  });
+});
+
+describe("Session fact context", () => {
+  it("tells the extraction what kind of text each origin is", () => {
+    const at = { date: "2026-09-29", mail_class: null, replied: false };
+    expect(factContext({ ...at, origin_kind: "room" })).toBe(
+      "Conversation session on 2026-09-29",
+    );
+    expect(factContext({ ...at, origin_kind: "recording" })).toMatch(
+      /^Meeting recording transcript on 2026-09-29.*Speakers may be unlabeled/u,
+    );
+    expect(factContext({ ...at, origin_kind: "pocket_note" })).toBe(
+      "The user's own Pocket Note on 2026-09-29.",
+    );
+    const mail = { ...at, origin_kind: "mail" };
+    expect(factContext({ ...mail, mail_class: "direct_inbound" })).toMatch(
+      /^Email on 2026-09-29.*Attribute each fact/u,
+    );
+    // A notification may hold nothing worth keeping, unless the Human replied.
+    expect(factContext({ ...mail, mail_class: "system_notification" })).toMatch(
+      /^Automated email.*return none\.$/u,
+    );
+    expect(
+      factContext({
+        ...mail,
+        mail_class: "system_notification",
+        replied: true,
+      }),
+    ).toMatch(/^Email on/u);
   });
 });
 

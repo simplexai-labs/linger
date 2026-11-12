@@ -712,8 +712,8 @@ func (e InternalErrorCode) Valid() bool {
 
 // Defines values for LocalComputerToolCallServer.
 const (
-	Browser   LocalComputerToolCallServer = "browser"
-	TaskFiles LocalComputerToolCallServer = "task_files"
+	Browser    LocalComputerToolCallServer = "browser"
+	Playground LocalComputerToolCallServer = "playground"
 )
 
 // Valid indicates whether the value is a known member of the LocalComputerToolCallServer enum.
@@ -721,7 +721,7 @@ func (e LocalComputerToolCallServer) Valid() bool {
 	switch e {
 	case Browser:
 		return true
-	case TaskFiles:
+	case Playground:
 		return true
 	default:
 		return false
@@ -1555,20 +1555,17 @@ type InternalErrorCode string
 
 // LocalComputerToolCall defines model for LocalComputerToolCall.
 type LocalComputerToolCall struct {
-	AgentId      string                      `json:"agent_id"`
-	Arguments    map[string]interface{}      `json:"arguments"`
-	ComputerId   string                      `json:"computer_id"`
-	OwnerActorId string                      `json:"owner_actor_id"`
-	Server       LocalComputerToolCallServer `json:"server"`
-	TaskScope    *struct {
-		AgentId      string `json:"agent_id"`
-		OriginRoomId string `json:"origin_room_id"`
-		TaskId       string `json:"task_id"`
-		TenantId     string `json:"tenant_id"`
-	} `json:"task_scope,omitempty"`
-	TenantId      string `json:"tenant_id"`
-	ToolName      string `json:"tool_name"`
-	ToolSessionId string `json:"tool_session_id"`
+	AgentId    string                 `json:"agent_id"`
+	Arguments  map[string]interface{} `json:"arguments"`
+	ComputerId string                 `json:"computer_id"`
+
+	// DeadlineMs How long the Computer may take; 60000 when omitted.
+	DeadlineMs    *int                        `json:"deadline_ms,omitempty"`
+	OwnerActorId  string                      `json:"owner_actor_id"`
+	Server        LocalComputerToolCallServer `json:"server"`
+	TenantId      string                      `json:"tenant_id"`
+	ToolName      string                      `json:"tool_name"`
+	ToolSessionId string                      `json:"tool_session_id"`
 }
 
 // LocalComputerToolCallServer defines model for LocalComputerToolCall.Server.
@@ -2012,7 +2009,7 @@ type PersonalKnowledgeQueryRequest struct {
 
 // PersonalKnowledgeQueryResponse defines model for PersonalKnowledgeQueryResponse.
 type PersonalKnowledgeQueryResponse struct {
-	// Facts Session facts extracted from Room conversations that matched the query, ranked separately from items so they never displace Raw candidates. Each names the Raw chunk that states it; that chunk remains the original evidence.
+	// Facts Session facts extracted from conversations, recordings, Pocket Notes and personal mail that matched the query, ranked separately from items so they never displace Raw candidates. Each names the Raw chunk that states it; that chunk remains the original evidence.
 	Facts         *[]PersonalKnowledgeSessionFact `json:"facts,omitempty"`
 	Gaps          []PersonalKnowledgeEvidenceGap  `json:"gaps"`
 	IndexedAt     *time.Time                      `json:"indexedAt"`
@@ -2020,11 +2017,11 @@ type PersonalKnowledgeQueryResponse struct {
 	RequestId     *string                         `json:"requestId,omitempty"`
 	SchemaVersion int                             `json:"schemaVersion"`
 
-	// Status Candidate retrieval status. partial with evidence_sections_not_read requires reading relevant candidate sections before judging whether information is insufficient; it is not a failed search.
+	// Status Candidate retrieval status. grounded has candidates and no gaps, partial has candidates and at least one gap, and empty has no candidates. partial with evidence_sections_not_read requires reading relevant candidate sections before judging whether information is insufficient; it is not a failed search.
 	Status PersonalKnowledgeQueryResponseStatus `json:"status"`
 }
 
-// PersonalKnowledgeQueryResponseStatus Candidate retrieval status. partial with evidence_sections_not_read requires reading relevant candidate sections before judging whether information is insufficient; it is not a failed search.
+// PersonalKnowledgeQueryResponseStatus Candidate retrieval status. grounded has candidates and no gaps, partial has candidates and at least one gap, and empty has no candidates. partial with evidence_sections_not_read requires reading relevant candidate sections before judging whether information is insufficient; it is not a failed search.
 type PersonalKnowledgeQueryResponseStatus string
 
 // PersonalKnowledgeSectionDirectoryEntry defines model for PersonalKnowledgeSectionDirectoryEntry.
@@ -2208,6 +2205,12 @@ type UpdateDocumentBlockSemanticOperation struct {
 
 	// StableBlockId Opaque, case-sensitive TeamHub identifier.
 	StableBlockId DocumentInternalId `json:"stable_block_id"`
+}
+
+// VoiceWorkersReconcileResult defines model for VoiceWorkersReconcileResult.
+type VoiceWorkersReconcileResult struct {
+	// Ready Every worker the effective keys require is ready to take a job.
+	Ready bool `json:"ready"`
 }
 
 // WikiRefreshBasePage defines model for WikiRefreshBasePage.
@@ -3505,6 +3508,9 @@ type ClientInterface interface {
 	ScanLocalComputerSkillsWithBody(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	ScanLocalComputerSkills(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ScanLocalComputerSkillsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReconcileVoiceWorkers request
+	ReconcileVoiceWorkers(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) GetLlmWikiHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -4145,6 +4151,18 @@ func (c *Client) ScanLocalComputerSkillsWithBody(ctx context.Context, tenantId T
 
 func (c *Client) ScanLocalComputerSkills(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ScanLocalComputerSkillsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewScanLocalComputerSkillsRequest(c.Server, tenantId, ownerActorId, computerId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ReconcileVoiceWorkers(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReconcileVoiceWorkersRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -5680,6 +5698,33 @@ func NewScanLocalComputerSkillsRequestWithBody(server string, tenantId TenantId,
 	return req, nil
 }
 
+// NewReconcileVoiceWorkersRequest generates requests for ReconcileVoiceWorkers
+func NewReconcileVoiceWorkersRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/voice/workers:reconcile")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -5863,6 +5908,9 @@ type ClientWithResponsesInterface interface {
 	ScanLocalComputerSkillsWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ScanLocalComputerSkillsResponse, error)
 
 	ScanLocalComputerSkillsWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ScanLocalComputerSkillsJSONRequestBody, reqEditors ...RequestEditorFn) (*ScanLocalComputerSkillsResponse, error)
+
+	// ReconcileVoiceWorkersWithResponse request
+	ReconcileVoiceWorkersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ReconcileVoiceWorkersResponse, error)
 }
 
 type GetLlmWikiHealthResponse struct {
@@ -6970,6 +7018,37 @@ func (r ScanLocalComputerSkillsResponse) ContentType() string {
 	return ""
 }
 
+type ReconcileVoiceWorkersResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *VoiceWorkersReconcileResult
+	JSON401      *Unauthenticated
+}
+
+// Status returns HTTPResponse.Status
+func (r ReconcileVoiceWorkersResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReconcileVoiceWorkersResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReconcileVoiceWorkersResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetLlmWikiHealthWithResponse request returning *GetLlmWikiHealthResponse
 func (c *ClientWithResponses) GetLlmWikiHealthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetLlmWikiHealthResponse, error) {
 	rsp, err := c.GetLlmWikiHealth(ctx, reqEditors...)
@@ -7433,6 +7512,15 @@ func (c *ClientWithResponses) ScanLocalComputerSkillsWithResponse(ctx context.Co
 		return nil, err
 	}
 	return ParseScanLocalComputerSkillsResponse(rsp)
+}
+
+// ReconcileVoiceWorkersWithResponse request returning *ReconcileVoiceWorkersResponse
+func (c *ClientWithResponses) ReconcileVoiceWorkersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ReconcileVoiceWorkersResponse, error) {
+	rsp, err := c.ReconcileVoiceWorkers(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReconcileVoiceWorkersResponse(rsp)
 }
 
 // ParseGetLlmWikiHealthResponse parses an HTTP response from a GetLlmWikiHealthWithResponse call
@@ -9053,6 +9141,39 @@ func ParseScanLocalComputerSkillsResponse(rsp *http.Response) (*ScanLocalCompute
 			return nil, err
 		}
 		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReconcileVoiceWorkersResponse parses an HTTP response from a ReconcileVoiceWorkersWithResponse call
+func ParseReconcileVoiceWorkersResponse(rsp *http.Response) (*ReconcileVoiceWorkersResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReconcileVoiceWorkersResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VoiceWorkersReconcileResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
 
 	}
 

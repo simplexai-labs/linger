@@ -65,6 +65,7 @@ func writeDocumentPreviewHeaders(c *gin.Context, content immutableObjectContent)
 	if disposition == "" {
 		disposition = "inline"
 	}
+	sendAsStored(c)
 	c.Header("Accept-Ranges", "bytes")
 	c.Header("ETag", `"`+content.sha256+`"`)
 	previewMediaType := content.mediaType

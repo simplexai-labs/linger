@@ -169,7 +169,13 @@ Core configuration:
   and does not start without it. It also enables the Raw Chunk persistent index and search.
 - The full Raw Chunk reconciliation runs once at service start and then at the built-in interval.
 - Session facts: after Raw Chunk sync finishes an Agent (without blocking indexing), Memory extracts Session facts
-  from its Room source text into `memory_index.session_facts`, following Hindsight retain. Consecutive Chunks form
+  into `memory_index.session_facts`, following Hindsight retain. Facts come from Room conversations, recording
+  transcripts, Pocket Notes and imported mail; My pages, the Wiki, period reports and the Profile stay chunk-only.
+  Mail is chosen by the `- Class:` line TeamHub writes into it: `self_sent`, `direct_inbound` and
+  `system_notification` are extracted, and so is every message of a thread with a `self_sent` message; marketing,
+  subscriptions and drafts are not. Each window's Context line names its origin, so the one prompt knows a
+  transcript may not label speakers, mail must tell the sender from the user, and a notification may hold no facts.
+  Consecutive Chunks form
   windows of at most 3,000 characters, extracted with `apps/node-services/prompts/memory/facts/fact-extraction.md`
   (the Hindsight concise prompt) at low reasoning effort. Up to 16 windows form one batch, and each batch runs as one
   ModelCall chain of kind `memory`, keyed `memory.facts:<sha256 of the batch's sorted window hashes>` so a restart
@@ -270,9 +276,15 @@ with all `alternates`. It adds no model call and no network round trip while the
 The top 6 sources carry limited text: a long Chunk gives only a window of about 800 characters from its best query
 match, keeping the time and speaker heading of its message; Raw candidates also keep a bounded directory of the
 matching and adjacent Chunks for a follow-up read of missing facts or truncated text.
-Memory keeps every search and read result within 12,000 bytes of JSON; the CLI passes results through
-unchanged. A Runtime cuts the middle out of a tool result above its output limit, which Codex sets as low
-as 4,000 tokens of four bytes each for a small model window, so a bounded result reaches the Agent whole.
+Memory keeps every search and read result within an output budget of JSON characters (UTF-16 units); the
+CLI passes results through unchanged. The Daemon limits one tool result to 15% of the model's context
+window, between 4,000 and 25,000 tokens, and to 12,000 tokens when the window is unknown. Codex counts four
+bytes per token and cuts the middle out of a longer result, so it keeps limit×4/3 characters of three-byte
+text such as CJK; Claude's Bash keeps the same number of characters and saves a longer result to a file.
+The budget is 90% of those characters for the model the owner's calls run on, leaving room for the CLI's
+labels; at no more than three bytes per character, a bounded result reaches the Agent whole on either
+Runtime. The window comes from the owner's Computer through the model call layer; an unknown window, or an
+offline Computer, gets the unknown-window limit.
 Session facts take at most a quarter of the budget, the best-ranked first. If the result is still too
 large, inline chunks go from the lowest rank up until only the top candidate's best chunk is left, then
 candidates go from the lowest rank up, then that chunk; the top candidate always stays, and every kept
@@ -281,7 +293,9 @@ candidate keeps its excerpt and the sections to read.
 - Raw search keeps the fused order and takes the top 10 candidates with no model rerank. The fact channel recalls
   100 candidates per channel (Hindsight's high budget recalls 1,000). When facts, inline chunks or candidates were left
   out, the result carries the gap `results_trimmed`, and the Agent chooses a follow-up read or a narrower query by the facts the question
-  needs; `grounded` only means the search matched, not that the evidence is complete.
+  needs. Status follows the gaps: candidates with no gap are `grounded`, candidates with any gap (this one
+  included) are `partial`, and no candidates is `empty`. `grounded` still means only that the search matched,
+  not that the evidence answers the question.
 
 Raw query candidates, MCP read input and output, and Memory HTTP reads use one Evidence ID protocol: `raw_` followed
 by the first 16 characters of the source ID, an underscore and the first 16 characters of the content hash, naming

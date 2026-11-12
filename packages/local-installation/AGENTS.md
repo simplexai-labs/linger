@@ -17,11 +17,14 @@ Each instance directory holds `user.env` (0600), the only file a person edits:
 `compose.env` / `native.env` over a developer checkout's `.env` and under the
 installer's own values; other names are ignored with a warning, and the file
 is created from a template once and never rewritten. The desktop source
-package's `.env` is not read. In a release, a voice key turns on the Compose
-`voice` profile, which runs LiveKit (pinned by digest, pulled only then) with
-the key pair and media ports in the instance's `livekit.env`; the gateway
-forwards `/rtc` to it. `compose up` recreates what a changed `user.env`
-touches; a native process restarts when its generated environment changes.
+package's `.env` is not read. Voice keys are normally saved in the app
+(TeamHub); a key in `user.env` overrides it. Whenever the distribution has
+voice tools for this computer, Native prepares them and runs LiveKit with
+the key pair and ports in the instance's `livekit.env`, with or without a
+voice key; without them, or when they fail to prepare, TeamHub gets
+`TEAMHUB_VOICE_MEDIA=off` and the install continues. The services' `voice`
+setting tracks only the tools, so a key change never restarts them through
+it. A native process restarts when its generated environment changes.
 Every update or recreate path stops node-services on its own, right before
 TeamHub restarts (natively: for a changed configuration) and while TeamHub is
 still up, so its graceful shutdown requeues in-flight Agent Runs.

@@ -11,8 +11,6 @@ export interface TaskUpdate {
   kind: "report" | "failed" | "approval" | "alert" | "browser";
   /** What to tell, full text: the reports or the failure. */
   replies: string[];
-  /** Times it was told without the provider starting it. */
-  attempts?: number;
 }
 
 interface Tracked {

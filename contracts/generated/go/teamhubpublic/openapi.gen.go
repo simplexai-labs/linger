@@ -3149,6 +3149,45 @@ func (e VoiceEventKind) Valid() bool {
 	}
 }
 
+// Defines values for VoiceProvider.
+const (
+	Soniox VoiceProvider = "soniox"
+	Xai    VoiceProvider = "xai"
+)
+
+// Valid indicates whether the value is a known member of the VoiceProvider enum.
+func (e VoiceProvider) Valid() bool {
+	switch e {
+	case Soniox:
+		return true
+	case Xai:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VoiceProviderKeyStatusSource.
+const (
+	Environment VoiceProviderKeyStatusSource = "environment"
+	None        VoiceProviderKeyStatusSource = "none"
+	Stored      VoiceProviderKeyStatusSource = "stored"
+)
+
+// Valid indicates whether the value is a known member of the VoiceProviderKeyStatusSource enum.
+func (e VoiceProviderKeyStatusSource) Valid() bool {
+	switch e {
+	case Environment:
+		return true
+	case None:
+		return true
+	case Stored:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for VoiceSessionPurpose.
 const (
 	ChatDictation   VoiceSessionPurpose = "chat_dictation"
@@ -7070,6 +7109,11 @@ type SaveExternalProviderKeyRequest struct {
 	ApiKey string `json:"api_key"`
 }
 
+// SaveVoiceProviderKeyRequest defines model for SaveVoiceProviderKeyRequest.
+type SaveVoiceProviderKeyRequest struct {
+	ApiKey string `json:"api_key"`
+}
+
 // Session defines model for Session.
 type Session struct {
 	// AccountId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
@@ -7730,11 +7774,31 @@ type VoiceMediaPolicy struct {
 	LiveEnabled *bool `json:"live_enabled,omitempty"`
 
 	// LiveSupported Whether the xAI live voice provider is configured; Live does not need Soniox.
-	LiveSupported *bool `json:"live_supported,omitempty"`
+	LiveSupported *bool                   `json:"live_supported,omitempty"`
+	SonioxKey     *VoiceProviderKeyStatus `json:"soniox_key,omitempty"`
+
+	// VoiceAvailable The deployment can run voice (TEAMHUB_VOICE_MEDIA=on); clients show voice entries only when true.
+	VoiceAvailable *bool `json:"voice_available,omitempty"`
 
 	// VoiceMediaSupported Soniox ASR is configured, so Recording, Pocket notes dictation and Voice Mode dictation are available.
-	VoiceMediaSupported bool `json:"voice_media_supported"`
+	VoiceMediaSupported bool                    `json:"voice_media_supported"`
+	XaiKey              *VoiceProviderKeyStatus `json:"xai_key,omitempty"`
 }
+
+// VoiceProvider defines model for VoiceProvider.
+type VoiceProvider string
+
+// VoiceProviderKeyStatus defines model for VoiceProviderKeyStatus.
+type VoiceProviderKeyStatus struct {
+	// CanSave False when the provider's environment variable is set, no secret encryption key is configured, or voice media is off.
+	CanSave bool `json:"can_save"`
+
+	// Source Where the effective key comes from; the environment wins over a stored key.
+	Source VoiceProviderKeyStatusSource `json:"source"`
+}
+
+// VoiceProviderKeyStatusSource Where the effective key comes from; the environment wins over a stored key.
+type VoiceProviderKeyStatusSource string
 
 // VoiceSession defines model for VoiceSession.
 type VoiceSession struct {
@@ -8860,6 +8924,9 @@ type CreateWorkItemJSONRequestBody = WorkItemCreateRequest
 
 // AskVoiceCaptureQuestionJSONRequestBody defines body for AskVoiceCaptureQuestion for application/json ContentType.
 type AskVoiceCaptureQuestionJSONRequestBody = VoiceCaptureQuestionRequest
+
+// SaveVoiceProviderKeyJSONRequestBody defines body for SaveVoiceProviderKey for application/json ContentType.
+type SaveVoiceProviderKeyJSONRequestBody = SaveVoiceProviderKeyRequest
 
 // StartVoiceCaptureJSONRequestBody defines body for StartVoiceCapture for application/json ContentType.
 type StartVoiceCaptureJSONRequestBody = VoiceCaptureStartRequest

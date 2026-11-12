@@ -1098,6 +1098,7 @@ func TestDaemonAppliesOperationInputAndRecordsAcknowledgement(t *testing.T) {
 		t.Fatal(err)
 	}
 	stream.beforeCommand = gateInputUntilStarted(daemon)
+	stream.idle = operationInputsSettled(daemon)
 	daemon.daemonID = device.DaemonID
 	if err := daemon.runConnection(context.Background(), device); !errors.Is(err, io.EOF) {
 		t.Fatalf("runConnection() error = %v, want EOF", err)
@@ -1162,6 +1163,7 @@ func TestDaemonReplaysOperationInputOutcomeWithoutSteeringTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 	stream.beforeCommand = gateInputUntilStarted(daemon)
+	stream.idle = operationInputsSettled(daemon)
 	daemon.daemonID = device.DaemonID
 	if err := daemon.runConnection(context.Background(), device); !errors.Is(err, io.EOF) {
 		t.Fatalf("runConnection() error = %v, want EOF", err)
@@ -1275,6 +1277,7 @@ func TestDaemonAcceptsRetainedOperationInputAfterConnectionEpochChanges(t *testi
 	input.InputContextViewRef = viewRef
 	second := &fakeStream{commands: []protocol.Command{{Type: "runner.welcome", ConnectionEpoch: 2}, input}}
 	second.beforeCommand = gateInputUntilStarted(daemon)
+	second.idle = operationInputsSettled(daemon)
 	daemon.controlPlane = fakeControlPlane{stream: second}
 	if err := daemon.runConnection(context.Background(), device); !errors.Is(err, io.EOF) {
 		t.Fatalf("second connection error = %v, want EOF", err)
@@ -1958,6 +1961,32 @@ func operationExecutionPending(d *Daemon) bool {
 	defer d.activeMu.Unlock()
 	for _, active := range d.activeOperations {
 		if active.execution == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// operationInputsSettled holds a fake stream's EOF until dispatch work is idle
+// and every accepted Operation input has recorded its outcome: an input's
+// Context View fetch ends with its connection, so an early EOF rejects it.
+func operationInputsSettled(d *Daemon) func() bool {
+	idle := dispatchIdle(d)
+	return func() bool { return idle() && !operationInputPending(d) }
+}
+
+func operationInputPending(d *Daemon) bool {
+	d.activeMu.Lock()
+	actives := make([]*activeOperation, 0, len(d.activeOperations))
+	for _, active := range d.activeOperations {
+		actives = append(actives, active)
+	}
+	d.activeMu.Unlock()
+	for _, active := range actives {
+		active.inputMu.Lock()
+		pending := len(active.pendingInputs)
+		active.inputMu.Unlock()
+		if pending > 0 {
 			return true
 		}
 	}

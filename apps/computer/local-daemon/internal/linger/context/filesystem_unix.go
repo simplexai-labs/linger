@@ -23,3 +23,10 @@ func syncDirectory(root *os.Root, relative string) error {
 	defer file.Close()
 	return file.Sync()
 }
+
+// singleLink reports whether a file has no other hard link that could name
+// content from outside its folder.
+func singleLink(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Nlink == 1
+}

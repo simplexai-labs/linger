@@ -153,7 +153,7 @@ export const sessionFactSchema = z
   })
   .strict()
   .describe(
-    "A fact extracted from a Room conversation, located in one source section.",
+    "A fact extracted from a conversation, recording, Pocket Note or email, located in one source section.",
   );
 
 const evidenceItemSchema = z

@@ -37,7 +37,7 @@ func (e *LocalComputerToolError) Error() string { return e.Code + ": " + e.Messa
 
 // CallLocalComputerTool dispatches directly to the Computer without creating a model Run.
 func (g *HTTPGateway) CallLocalComputerTool(ctx context.Context, call api.LocalComputerToolCall) (map[string]any, error) {
-	response, err := g.browserClient.CallLocalComputerToolWithResponse(ctx, call)
+	response, err := g.toolClient.CallLocalComputerToolWithResponse(ctx, call)
 	if err != nil {
 		return nil, &LocalComputerToolError{Code: "outcome_unknown", Message: "The Computer may have performed the operation. Check its effect before retrying."}
 	}
@@ -45,7 +45,11 @@ func (g *HTTPGateway) CallLocalComputerTool(ctx context.Context, call api.LocalC
 		return nil, &LocalComputerToolError{Code: "computer_unavailable", Message: "The Computer could not accept this tool call."}
 	}
 	if status, ok := response.JSON200.Result["status"].(string); ok && status != "ok" {
-		return nil, &LocalComputerToolError{Code: status, Message: "Check the Computer and current operation state before continuing."}
+		message, _ := response.JSON200.Result["detail"].(string)
+		if message == "" {
+			message = "Check the Computer and current operation state before continuing."
+		}
+		return nil, &LocalComputerToolError{Code: status, Message: message}
 	}
 	return response.JSON200.Result, nil
 }

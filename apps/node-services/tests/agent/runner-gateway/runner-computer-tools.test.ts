@@ -112,26 +112,19 @@ const target = {
   ownerActorId: "actor-1",
   agentId: "agent-1",
   toolSessionId: "voice-session-1",
-  server: "task_files" as const,
-  toolName: "list_files",
-  arguments: {},
-  taskScope: {
-    version: 1 as const,
-    tenant_id: "tenant-1",
-    agent_id: "agent-1",
-    role: "alter_ego" as const,
-    origin_room_id: "room-1",
-    task_id: "task-1",
-  },
+  server: "playground" as const,
+  toolName: "list",
+  arguments: { location: { room_id: "room-1" }, path: "" },
   signal: new AbortController().signal,
 };
 
 describe("Live native Computer tools", () => {
-  it("reads a retained task workspace without starting a model", async () => {
+  it("reads a playground folder without starting a model", async () => {
     const { gateway, connection, command, sent } = await connect();
     const pending = gateway.callComputerTool(target);
     const request = await command();
-    expect(request.task_scope).toEqual(target.taskScope);
+    expect(request.arguments).toEqual(target.arguments);
+    expect(request.deadline_ms).toBe(60_000);
     await connection.receive({
       type: "executed",
       kind: "computer_tool",
@@ -151,19 +144,18 @@ describe("Live native Computer tools", () => {
       ),
     ).toBe(false);
   });
-  it("rejects another owner, Agent or task scope before dispatch", async () => {
+  it("gives the Computer the deadline the caller asks for", async () => {
+    const { gateway, command } = await connect();
+    void gateway.callComputerTool({ ...target, deadlineMs: 120_000 });
+    expect((await command()).deadline_ms).toBe(120_000);
+  });
+  it("rejects another owner or Agent before dispatch", async () => {
     const { gateway, sent } = await connect();
     await expect(
       gateway.callComputerTool({ ...target, ownerActorId: "actor-other" }),
     ).rejects.toBeInstanceOf(LocalComputerNotFoundError);
     await expect(
       gateway.callComputerTool({ ...target, agentId: "agent-other" }),
-    ).rejects.toBeInstanceOf(LocalComputerNotFoundError);
-    await expect(
-      gateway.callComputerTool({
-        ...target,
-        taskScope: { ...target.taskScope, tenant_id: "tenant-other" },
-      }),
     ).rejects.toBeInstanceOf(LocalComputerNotFoundError);
     expect(
       sent.some(
@@ -184,7 +176,6 @@ describe("Live native Computer tools", () => {
       ...target,
       server: "browser",
       toolName: "browser_click",
-      taskScope: undefined,
     });
     await command();
     connection.disconnect();

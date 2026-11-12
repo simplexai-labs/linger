@@ -53,7 +53,8 @@ type codexFakeTurn struct {
 	// Gate holds the turn open until the file named by FAKE_GATE exists. The
 	// fake writes FAKE_GATE+".started" first.
 	Gate bool `json:"gate,omitempty"`
-	// DelayMs holds turn/completed back for this long.
+	// DelayMs holds turn/completed back for this long while the fake keeps
+	// answering other requests.
 	DelayMs int `json:"delayMs,omitempty"`
 }
 
@@ -304,7 +305,6 @@ func (s *codexFakeServer) turn(id json.RawMessage, compact bool) (int, bool) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	time.Sleep(time.Duration(script.DelayMs) * time.Millisecond)
 	turn := map[string]any{"id": s.current, "status": script.Status}
 	if script.Error != "" {
 		turn["error"] = map[string]any{"message": script.Error, "codexErrorInfo": script.ErrorInfo}
@@ -312,7 +312,19 @@ func (s *codexFakeServer) turn(id json.RawMessage, compact bool) (int, bool) {
 	if script.Usage != nil {
 		turn["usage"] = script.Usage
 	}
-	s.send(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": s.thread, "turn": turn}})
+	completed := map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": s.thread, "turn": turn}}
+	if script.DelayMs > 0 && !script.Exit {
+		// Codex keeps serving requests while a turn runs, so the delay must
+		// not block the read loop: a request sent after turn/start is
+		// answered before turn/completed.
+		go func() {
+			time.Sleep(time.Duration(script.DelayMs) * time.Millisecond)
+			s.send(completed)
+		}()
+		return 0, false
+	}
+	time.Sleep(time.Duration(script.DelayMs) * time.Millisecond)
+	s.send(completed)
 	if script.Exit {
 		return 0, true
 	}

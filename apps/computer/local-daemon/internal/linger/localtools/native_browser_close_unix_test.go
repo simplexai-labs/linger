@@ -137,6 +137,8 @@ func TestNativeBrowserCloseFlushesBeforeProcessGroupSignal(t *testing.T) {
 }
 
 func TestNativeBrowserCloseDoesNotTreatCDPReplyOrEOFAsExit(t *testing.T) {
+	// The peer never exits on Browser.close, so the graceful wait expires.
+	shortenForTest(t, &nativeBrowserGracefulCloseLimit, 200*time.Millisecond)
 	for _, mode := range []string{"ack-without-exit", "eof"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newBrowserCloseFixture(t, mode)
@@ -144,7 +146,7 @@ func TestNativeBrowserCloseDoesNotTreatCDPReplyOrEOFAsExit(t *testing.T) {
 			if err := f.browser.close(); err != nil {
 				t.Fatal(err)
 			}
-			if time.Since(started) > 12*time.Second {
+			if time.Since(started) > nativeBrowserCloseLimit+2*time.Second {
 				t.Fatal("browser cleanup exceeded its bounded fallback")
 			}
 			if f.stopCalls.Load() != 1 || f.closeCalls.Load() != 1 {
@@ -166,6 +168,10 @@ func TestNativeBrowserCloseDoesNotTreatCDPReplyOrEOFAsExit(t *testing.T) {
 }
 
 func TestNativeBrowserReadinessFailureRetainsUnknownProcess(t *testing.T) {
+	// The stop is suppressed, so both the graceful wait and the whole close
+	// bound expire.
+	shortenForTest(t, &nativeBrowserGracefulCloseLimit, 200*time.Millisecond)
+	shortenForTest(t, &nativeBrowserCloseLimit, 400*time.Millisecond)
 	f := newBrowserCloseFixture(t, "ack-without-exit")
 	f.suppressStop.Store(true)
 	m := &Manager{browsers: map[string]*nativeBrowser{}}
@@ -176,7 +182,7 @@ func TestNativeBrowserReadinessFailureRetainsUnknownProcess(t *testing.T) {
 	if !errors.Is(err, mcpproxy.ErrCleanupUnconfirmed) || owner != f.browser || m.browsers["fixture"] != f.browser {
 		t.Fatalf("startup dropped unknown browser ownership: %v", err)
 	}
-	if time.Since(started) > 12*time.Second {
+	if time.Since(started) > nativeBrowserCloseLimit+2*time.Second {
 		t.Fatal("unknown startup cleanup exceeded its bounded return")
 	}
 	select {

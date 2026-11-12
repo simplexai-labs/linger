@@ -39,4 +39,13 @@ describe("updateCue", () => {
       updateCue([{ taskId: "t1", goal: "", kind: "alert" }], { kind: "idle" }),
     ).not.toContain("latest words in this call");
   });
+
+  it("names a report's task without its goal, which the report note already has", () => {
+    const cue = updateCue(
+      [{ taskId: "t2", goal: "Draw a strawberry tattoo", kind: "report" }],
+      { kind: "idle" },
+    );
+    expect(cue).toContain("Task t2 ended its turn");
+    expect(cue).not.toContain("Draw a strawberry tattoo");
+  });
 });

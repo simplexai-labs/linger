@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
@@ -26,8 +27,11 @@ type Config struct {
 	MaxConcurrentOperations *int
 	RuntimePaths            map[string]string
 	EnabledRuntimes         []string
-	WorkspaceGrants         []WorkspaceGrant
-	Owners                  []Owner
+	// PreferredRuntime is the Runtime the person chose at installation, or
+	// empty when the installer chose none.
+	PreferredRuntime string
+	WorkspaceGrants  []WorkspaceGrant
+	Owners           []Owner
 	// Desktop is set when the Linger Desktop app runs this Daemon as its child.
 	Desktop *Desktop
 }
@@ -64,6 +68,7 @@ type encodedConfig struct {
 	MaxConcurrentOperations *int              `json:"max_concurrent_operations,omitempty"`
 	RuntimePaths            map[string]string `json:"runtime_paths,omitempty"`
 	EnabledRuntimes         json.RawMessage   `json:"enabled_runtimes,omitempty"`
+	PreferredRuntime        string            `json:"preferred_runtime,omitempty"`
 	WorkspaceGrants         []WorkspaceGrant  `json:"workspace_grants"`
 	CredentialExpiresAt     string            `json:"credential_expires_at,omitempty"`
 	Codex                   *encodedCodex     `json:"codex,omitempty"`
@@ -153,6 +158,12 @@ func Load(path string, environment map[string]string) (Config, error) {
 	if err := provider.ValidateRuntimeSelection(enabledRuntimes); err != nil {
 		return Config{}, fmt.Errorf("enabled_runtimes: %w", err)
 	}
+	if value.PreferredRuntime != "" {
+		if provider.ValidateRuntimeSelection([]string{value.PreferredRuntime}) != nil ||
+			(enabledRuntimes != nil && !slices.Contains(enabledRuntimes, value.PreferredRuntime)) {
+			return Config{}, errors.New("preferred_runtime must be an enabled supported Runtime")
+		}
+	}
 	seenGrants := make(map[string]struct{})
 	for index := range value.WorkspaceGrants {
 		grant := &value.WorkspaceGrants[index]
@@ -173,7 +184,7 @@ func Load(path string, environment map[string]string) (Config, error) {
 		ComputerID: value.RunnerID, DisplayName: value.DisplayName,
 		GatewayURL: value.Gateway.URL, GatewayToken: token, CodexAuthFile: codexAuthFile(value.Codex), StateDirectory: value.StateDirectory,
 		MaxConcurrentOperations: value.MaxConcurrentOperations, RuntimePaths: value.RuntimePaths,
-		EnabledRuntimes: enabledRuntimes,
+		EnabledRuntimes: enabledRuntimes, PreferredRuntime: value.PreferredRuntime,
 		WorkspaceGrants: value.WorkspaceGrants, Owners: owners, Desktop: desktop,
 	}, nil
 }

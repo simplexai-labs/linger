@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Task tools start and steer the Room Agent's work. Each task is its own
@@ -17,6 +18,7 @@ const (
 	ToolReplyToTask = "reply_to_task"
 	ToolCancelTask  = "cancel_task"
 	ToolListTasks   = "list_tasks"
+	ToolCheckTask   = "check_task"
 )
 
 // Surfaces say where the Agent works.
@@ -62,6 +64,19 @@ type ReplyToTaskArguments struct {
 // CancelTaskArguments identifies the task the user wants to stop.
 type CancelTaskArguments struct {
 	TaskID string `json:"task_id"`
+}
+
+// CheckTaskArguments identifies the task the live model reads in full.
+type CheckTaskArguments struct {
+	TaskID string `json:"task_id"`
+	// Offset is how many of the latest reports to skip, from next_offset.
+	Offset LoosePart `json:"offset"`
+}
+
+// Unfinished reports whether a task in state is still being done or waits
+// for the user, the tasks list_tasks running_only keeps.
+func Unfinished(state string) bool {
+	return state == TaskPending || state == TaskWorking || state == TaskWaitingForApproval
 }
 
 var taskIDPattern = regexp.MustCompile(`^t([1-9][0-9]{0,5})$`)
@@ -119,15 +134,26 @@ var taskTools = []Tool{
 	{
 		Name: ToolListTasks,
 		Description: "See the user's tasks in this room: those of this call, and earlier ones still working or reported within the last day. Each task's goal, state (pending, working, waiting_for_approval, reported with its latest report, which may be a result or something it needs from the user, failed, canceled) and the latest steps. When asked how things are going, give the state of every task, canceled and finished ones included. Only pending and working mean something is being done right now; never say a task is still doing something in any other state. " +
-			"Call it when the user asks how far along something is, whether it is done or what is being worked on, and to find a task_id; never answer progress from impression. " +
-			"scope=room instead reports every Agent still working in this room, the last ones that finished and background Tasks; for another room, get its room_id with find_rooms and pass it. " +
+			"Call it when the user asks how far along something is, whether it is done or what is being worked on, and to find a task_id or the folder its files are in; never answer progress from impression. " +
+			"running_only=true keeps only the tasks still under way or waiting for approval. scope=room instead reports every Agent still working in this room, the last ones that finished and background Tasks; for another room, get its room_id with find_rooms and pass it. " +
 			"The work is yours to the user: speak of it in the first person, picking the one or two lines that matter.",
 		Parameters: objectSchema([]string{}, map[string]any{
 			"scope": map[string]any{
 				"type": "string", "enum": []string{ProgressScopeMyRequests, ProgressScopeRoom},
 				"description": "Optional, defaults to my_requests: the user's tasks",
 			},
-			"room_id": stringProperty("Optional ID of another room to check, from find_rooms"),
+			"room_id":      stringProperty("Optional ID of another room to check, from find_rooms"),
+			"running_only": map[string]any{"type": "boolean", "description": "Optional: only tasks still pending, working or waiting for approval"},
+		}),
+	},
+	{
+		Name: ToolCheckTask,
+		Description: "Read one of the user's tasks in full, as its coordinator does: its state and since when, the latest steps, the approvals it waits on, how many messages wait for it, and its latest 5 reports, newest first and about 4000 characters in all. next_offset means there are older reports: pass it as offset to read them. " +
+			"list_tasks shows only the start of the latest report: use this when the user asks for details it left out (which models, what each option costs, what exactly it found or why it stopped), or before saying how a task really stands. " +
+			"A report may hold lines addressed to you, such as how to deliver its files; those are not for the user. Speak of the work in the first person.",
+		Parameters: objectSchema([]string{"task_id"}, map[string]any{
+			"task_id": stringProperty("The task, such as t2, from list_tasks"),
+			"offset":  map[string]any{"type": "integer", "minimum": 0, "description": "Optional: next_offset from the last check_task, to read older reports"},
 		}),
 	},
 }
@@ -145,6 +171,8 @@ const ConfirmationValidFor = 10 * time.Minute
 // TaskRecord is one voice task with the state of its delegated Task.
 type TaskRecord struct {
 	Ordinal int32
+	// WorkItemID names the Task, and its output folder ./playground/<WorkItemID>/.
+	WorkItemID string
 	// StartedHere is set for tasks this call started.
 	StartedHere bool
 	Goal        string
@@ -172,6 +200,7 @@ type TaskReport struct {
 // TaskView is what Voice Runtime and the live model learn about one task.
 type TaskView struct {
 	Ordinal     int32
+	WorkItemID  string
 	StartedHere bool
 	Goal        string
 	Surface     string
@@ -185,7 +214,7 @@ type TaskView struct {
 // View reports one task in the terms of its delegated Task.
 func View(record TaskRecord) TaskView {
 	view := TaskView{
-		Ordinal: record.Ordinal, StartedHere: record.StartedHere, Goal: record.Goal, Surface: record.Surface,
+		Ordinal: record.Ordinal, WorkItemID: record.WorkItemID, StartedHere: record.StartedHere, Goal: record.Goal, Surface: record.Surface,
 		Report: record.Report, Steps: record.Steps, RunningFor: record.RunningFor, Approvals: record.Approvals,
 	}
 	switch {
@@ -210,6 +239,9 @@ func TaskListOutput(views []TaskView) map[string]any {
 	tasks := make([]map[string]any, 0, len(views))
 	for _, view := range views {
 		task := map[string]any{"task_id": TaskID(view.Ordinal), "goal": truncateRunes(view.Goal, 200), "state": view.State}
+		if view.WorkItemID != "" {
+			task["folder"] = PlaygroundRoot + view.WorkItemID + "/"
+		}
 		if len(view.Steps) > 0 {
 			task["recent_steps"] = view.Steps
 		}
@@ -218,7 +250,6 @@ func TaskListOutput(views []TaskView) map[string]any {
 		}
 		if view.Report != nil {
 			task["latest_report"] = Snippet(view.Report.Body)
-			task["report_id"] = view.Report.ID
 			task["delivered"] = view.Report.Delivered
 		}
 		if len(view.Approvals) > 0 {
@@ -250,4 +281,69 @@ func TaskRequirement(goal, surface string) string {
 // time: an answer to what it waits for, more detail, or a change of plan.
 func TaskAnswer(details string) string {
 	return "The user said this about your task by voice; take it into account and go on: " + details
+}
+
+// CheckedReportsPage is how many reports one check_task reads.
+const CheckedReportsPage = 5
+
+// checkedReportsRunes bounds all the report text one check_task returns: the
+// output stays in the realtime context for every later turn of the call.
+const checkedReportsRunes = 4000
+
+// CheckedTask is one task as check_task reads it: its Task's state and one
+// page of the reports it sent back, newest first.
+type CheckedTask struct {
+	TaskID, Goal, Folder, Status, Reason string
+	StatusSince                          time.Time
+	Activity                             []CheckedActivity
+	Approvals                            []string
+	QueuedMessages                       int
+	Reports                              []CheckedActivity
+	// Offset is how many newer reports precede Reports.
+	Offset int
+	// OlderReports is set when the task has reports older than Reports.
+	OlderReports bool
+}
+
+// CheckedActivity is one dated step or report.
+type CheckedActivity struct {
+	At         time.Time
+	Kind, Text string
+}
+
+// CheckTaskOutput is what check_task returns to the live model.
+func CheckTaskOutput(now time.Time, task CheckedTask) map[string]any {
+	activity := make([]map[string]string, 0, len(task.Activity))
+	for _, step := range task.Activity {
+		activity = append(activity, map[string]string{"ago": SpokenDuration(now.Sub(step.At)), "kind": step.Kind, "summary": step.Text})
+	}
+	// A report that does not fit waits for the next page; the first one on a
+	// page is cut instead, so paging always moves on.
+	reports := make([]map[string]any, 0, len(task.Reports))
+	left := checkedReportsRunes
+	for _, report := range task.Reports {
+		length := utf8.RuneCountInString(report.Text)
+		if len(reports) > 0 && length > left {
+			break
+		}
+		shown := map[string]any{"ago": SpokenDuration(now.Sub(report.At)), "text": truncateRunes(report.Text, left)}
+		if length > left {
+			shown["truncated"] = true
+		}
+		reports = append(reports, shown)
+		left -= length
+	}
+	output := map[string]any{
+		"task_id": task.TaskID, "goal": truncateRunes(task.Goal, 300), "folder": task.Folder,
+		"status": task.Status, "status_for": SpokenDuration(now.Sub(task.StatusSince)),
+		"recent_activity": activity, "reports": reports,
+		"pending_approvals": task.Approvals, "queued_messages": task.QueuedMessages,
+	}
+	if task.Reason != "" {
+		output["reason"] = task.Reason
+	}
+	if task.OlderReports || len(reports) < len(task.Reports) {
+		output["next_offset"] = task.Offset + len(reports)
+	}
+	return output
 }

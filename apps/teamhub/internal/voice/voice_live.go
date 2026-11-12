@@ -213,12 +213,16 @@ func (s *Service) executeVoiceLiveTool(ctx context.Context, session voicelive.Se
 		return s.replyToVoiceLiveTask(ctx, session, request)
 	case voicelive.ToolCancelTask:
 		return s.cancelVoiceLiveTask(ctx, session, request)
-	case voicelive.ToolTaskFiles:
-		return s.voiceLiveTaskFiles(ctx, session, request)
-	case voicelive.ToolPublishTaskResult:
-		return s.publishVoiceLiveTaskResult(ctx, session, request)
+	case voicelive.ToolListFiles:
+		return s.listVoiceLiveFiles(ctx, session, request)
+	case voicelive.ToolReadFile:
+		return s.readVoiceLiveFile(ctx, session, request)
+	case voicelive.ToolSendCard:
+		return s.sendVoiceLiveCard(ctx, session, request)
 	case voicelive.ToolListTasks:
 		return s.listVoiceLiveTasks(ctx, session, request)
+	case voicelive.ToolCheckTask:
+		return s.checkVoiceLiveTask(ctx, session, request)
 	case voicelive.ToolDecideApproval:
 		return s.decideVoiceLiveApproval(ctx, session, request)
 	case voicelive.ToolCheckReminders:
@@ -316,7 +320,7 @@ func (s *Service) executeVoiceLiveTool(ctx context.Context, session voicelive.Se
 		return s.editVoiceLiveEmailCanvas(ctx, session, request)
 	case voicelive.ToolAttachEmailFile:
 		return s.attachVoiceLiveEmailFile(ctx, session, request)
-	case voicelive.ToolCreateDocument, voicelive.ToolRenameDocument, voicelive.ToolEditDocument, voicelive.ToolReplaceDocumentText,
+	case voicelive.ToolCreateDocument, voicelive.ToolRenameDocument, voicelive.ToolEditDocument, voicelive.ToolReplaceDocumentText, voicelive.ToolInsertDocumentImage,
 		voicelive.ToolListComments, voicelive.ToolAddComment, voicelive.ToolReplyComment, voicelive.ToolResolveComment:
 		return s.runVoiceLiveDocumentTool(ctx, session, request)
 	case voicelive.ToolListRoutines, voicelive.ToolCreateRoutine, voicelive.ToolChangeRoutine:
@@ -1036,7 +1040,7 @@ func (s *Service) ExecuteLiveToolCall(ctx context.Context, request teamhubintern
 	if err != nil {
 		return "", fmt.Errorf("check foreground transition: %w", err)
 	}
-	if switching && request.Name != "list_tasks" && request.Name != "recall_memory" && request.Name != "read_document" {
+	if switching && request.Name != "list_tasks" && request.Name != "check_task" && request.Name != "recall_memory" && request.Name != "read_document" {
 		return voicelive.Output(map[string]string{"status": "switching", "detail": "The previous foreground is stopping. This operation was not accepted; retry after the transition."}), nil
 	}
 	digest := sha256.Sum256([]byte(request.TurnId + "\x00" + request.Name + "\x00" + request.Arguments))

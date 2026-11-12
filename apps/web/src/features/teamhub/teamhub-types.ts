@@ -79,6 +79,9 @@ export type TeamHubDocumentTreeSummary =
   components["schemas"]["DocumentTreeSummary"];
 export type TeamHubVoiceSession = components["schemas"]["VoiceSession"];
 export type TeamHubVoiceMediaPolicy = components["schemas"]["VoiceMediaPolicy"];
+export type TeamHubVoiceProvider = components["schemas"]["VoiceProvider"];
+export type TeamHubVoiceProviderKeyStatus =
+  components["schemas"]["VoiceProviderKeyStatus"];
 export type TeamHubVoiceConnectionCredential =
   components["schemas"]["VoiceConnectionCredential"];
 export type TeamHubVoiceCapture = components["schemas"]["VoiceCapture"];

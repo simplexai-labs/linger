@@ -1,0 +1,104 @@
+name: Check app
+description: Set up the toolchain and caches for one app and run its fast check.
+
+inputs:
+  app:
+    description: The app whose `make check-<app>` target runs.
+    required: true
+  changes-result:
+    description: The changes job's result. The job runs when the path filter failed, so this step can fail it instead of letting a skip pass.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # GitHub does not enforce required composite inputs, so anything but an
+    # explicit success fails, a missing input included.
+    - name: Fail when the path filter failed
+      if: inputs.changes-result != 'success'
+      shell: bash
+      env:
+        CHANGES_RESULT: ${{ inputs.changes-result }}
+      run: |
+        echo "::error::The changes job did not succeed (${CHANGES_RESULT:-not passed}); no check can be skipped."
+        exit 1
+    # teamhub runs only Go. computer-go's tests run the managed-tools scripts,
+    # which need the pinned Node but no workspace packages.
+    # Each Go check keeps its own build and module cache, so one job's save
+    # never replaces another's. Pull requests and merge-queue builds restore
+    # main's latest entry; only pushes to main save. Go trims build cache
+    # entries unused for five days, so the restored cache does not grow
+    # without bound.
+    - id: plan
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+        GO_SUM_HASH: ${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}
+      run: |
+        set -euo pipefail
+        case "$APP" in
+          teamhub) is_go=true node=false install=false ;;
+          computer-go) is_go=true node=true install=false ;;
+          desktop | contracts) is_go=true node=true install=true ;;
+          packages | teamhub-cli | installer) is_go=false node=true install=true ;;
+          *)
+            echo "::error::Unknown app: $APP"
+            exit 1
+            ;;
+        esac
+        {
+          echo "is_go=$is_go"
+          echo "node=$node"
+          echo "install=$install"
+          echo "app_prefix=go-$APP-$RUNNER_OS-"
+          echo "prefix=go-$APP-$RUNNER_OS-$GO_SUM_HASH-"
+        } >>"$GITHUB_OUTPUT"
+    - uses: ./.github/actions/setup
+      with:
+        node: ${{ steps.plan.outputs.node }}
+        install: ${{ steps.plan.outputs.install }}
+        go: ${{ steps.plan.outputs.is_go }}
+    - uses: actions/cache/restore@v4
+      if: steps.plan.outputs.is_go == 'true'
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ steps.plan.outputs.prefix }}${{ github.sha }}
+        restore-keys: |
+          ${{ steps.plan.outputs.prefix }}
+          ${{ steps.plan.outputs.app_prefix }}
+    # Pinned golangci-lint and sqlc binaries; building them takes about 60 s
+    # each. Their file names carry the tool and Go versions, and the key
+    # hashes the files that pin both, so a version bump misses and rebuilds.
+    - uses: actions/cache@v4
+      if: inputs.app == 'teamhub'
+      with:
+        path: apps/teamhub/.tools/bin
+        key: teamhub-tools-${{ runner.os }}-${{ hashFiles('apps/teamhub/Makefile', 'apps/teamhub/go.mod') }}
+    # A cold golangci-lint analysis cache costs about 115 s. Pull requests
+    # restore main's latest entry; only pushes save, so they never write one.
+    - uses: actions/cache/restore@v4
+      if: inputs.app == 'teamhub'
+      with:
+        path: ~/.cache/golangci-lint
+        key: golangci-lint-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', '.golangci.yml') }}-${{ github.sha }}
+        restore-keys: |
+          golangci-lint-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', '.golangci.yml') }}-
+    # BASE comes from the workflow env.
+    - shell: bash
+      env:
+        APP: ${{ inputs.app }}
+      run: make "check-$APP" BASE="$BASE"
+    - uses: actions/cache/save@v4
+      if: always() && github.event_name == 'push' && inputs.app == 'teamhub'
+      with:
+        path: ~/.cache/golangci-lint
+        key: golangci-lint-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', '.golangci.yml') }}-${{ github.sha }}
+    - uses: actions/cache/save@v4
+      if: always() && github.event_name == 'push' && steps.plan.outputs.is_go == 'true'
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ steps.plan.outputs.prefix }}${{ github.sha }}

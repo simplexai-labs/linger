@@ -583,7 +583,7 @@ func TestVoiceLiveProgressAndTodayRecallReadOnlyWhatTheHumanCanSee(t *testing.T)
 
 func TestVoiceLiveTasksReportResultsAndWhatTheyWaitFor(t *testing.T) {
 	allowParallelIntegrationTest(t)
-	env, alice, _, sessionID := newVoiceLiveRoom(t)
+	env, alice, roomID, sessionID := newVoiceLiveRoom(t)
 	tool := func(turnID, callID, name string, arguments map[string]any) map[string]any {
 		encoded, _ := json.Marshal(arguments)
 		var result teamhubinternal.VoiceLiveToolResult
@@ -684,6 +684,24 @@ func TestVoiceLiveTasksReportResultsAndWhatTheyWaitFor(t *testing.T) {
 	if _, err := env.pool.Exec(t.Context(), `UPDATE work_items SET task_execution_status='waiting_for_approval' WHERE id=$1`, waiting); err != nil {
 		t.Fatal(err)
 	}
+	// check_task reads one task as its coordinator does, with its latest reports.
+	checked := tool("lt_check", "check-1", "check_task", map[string]any{"task_id": first["task_id"]})
+	reports, _ := checked["reports"].([]any)
+	if checked["status"] != "idle" || checked["folder"] != "./playground/"+workItem(first["task_id"])+"/" || len(reports) != 1 || checked["next_offset"] != nil ||
+		reports[0].(map[string]any)["text"] != "Sony at 1899 is the best fit, added to the cart." {
+		t.Fatalf("check_task=%v", checked)
+	}
+	if older := tool("lt_check", "check-3", "check_task", map[string]any{"task_id": first["task_id"], "offset": 1}); older["reports"] == nil || len(older["reports"].([]any)) != 0 || older["next_offset"] != nil {
+		t.Fatalf("check_task past the last report=%v", older)
+	}
+	if missing := tool("lt_check", "check-2", "check_task", map[string]any{"task_id": "t99"}); missing["error"] != "task_not_found" {
+		t.Fatalf("check_task of an unknown task=%v", missing)
+	}
+	// running_only keeps the tasks still under way or waiting for the user.
+	listed := tool("lt_check", "list-1", "list_tasks", map[string]any{"running_only": true})
+	if items, _ := listed["tasks"].([]any); len(items) != 1 || items[0].(map[string]any)["task_id"] != second["task_id"] {
+		t.Fatalf("running_only list_tasks=%v", listed)
+	}
 	if _, err := env.pool.Exec(t.Context(), `UPDATE work_items SET task_execution_updated_at=now()-interval '25 hours' WHERE id=ANY($1)`,
 		[]string{workItem(first["task_id"]), waiting}); err != nil {
 		t.Fatal(err)
@@ -711,28 +729,51 @@ func TestVoiceLiveTasksReportResultsAndWhatTheyWaitFor(t *testing.T) {
 	if _, err := env.pool.Exec(t.Context(), `DELETE FROM voice_sessions WHERE id='voice_session_told'`); err != nil {
 		t.Fatal(err)
 	}
-	// Publication is a durable receipt, independent of the worker's tool call ID.
-	var reportID string
-	if err := env.pool.QueryRow(t.Context(), `SELECT id FROM task_meta_callback_messages WHERE task_id=$1 ORDER BY meta_seq DESC LIMIT 1`, workItem(first["task_id"])).Scan(&reportID); err != nil {
-		t.Fatal(err)
-	}
-	publish := func(callID string) string {
+	// A Task's result is posted from its folder on the user's Computer; the
+	// folder is named by the Task, and the card waits for the Computer.
+	sendCard := func(callID string, attach ...string) map[string]any {
 		t.Helper()
-		args, _ := json.Marshal(map[string]any{"task_id": first["task_id"], "report_id": reportID, "title": "Comparison ready", "text": "Sony at 1899 is the best fit, added to the cart.", "files": []string{}})
+		args, _ := json.Marshal(map[string]any{"title": "Comparison ready", "content": "Sony at 1899 is the best fit, added to the cart.", "attach": attach})
 		var result teamhubinternal.VoiceLiveToolResult
-		decode(t, voiceRuntimeCall(t, env, http.MethodPost, "/internal/v1/voice/live-tool-calls", map[string]any{"voice_session_id": sessionID, "turn_id": "lt_publish", "call_id": callID, "name": "publish_task_result", "arguments": string(args)}, http.StatusOK), &result)
-		return result.Output
+		decode(t, voiceRuntimeCall(t, env, http.MethodPost, "/internal/v1/voice/live-tool-calls", map[string]any{"voice_session_id": sessionID, "turn_id": "lt_card", "call_id": callID, "name": "send_card", "arguments": string(args)}, http.StatusOK), &result)
+		var output map[string]any
+		if err := json.Unmarshal([]byte(result.Output), &output); err != nil {
+			t.Fatalf("send_card output=%s", result.Output)
+		}
+		return output
 	}
-	published := publish("publish-first")
-	if !strings.Contains(published, `"status":"delivered"`) || publish("publish-again") != published {
-		t.Fatalf("publication did not deduplicate: %s", published)
+	folder := "./playground/" + workItem(first["task_id"]) + "/"
+	for attach, want := range map[string]string{
+		folder + "compare.md":                        "computer_offline",
+		"./playground/workitem_unknown/a.png":        "folder_not_found",
+		folder + "../" + workItem(second["task_id"]): "invalid_file_path",
+		folder: "not_a_file",
+	} {
+		if output := sendCard("card-"+want, attach); output["error"] != want {
+			t.Fatalf("send_card %s=%v, want %s", attach, output, want)
+		}
 	}
-	if countRows(t, env, `SELECT count(*) FROM voice_live_report_deliveries WHERE report_id=$1`, reportID) != 1 || countRows(t, env, `SELECT count(*) FROM task_meta_callback_messages WHERE id=$1 AND non_actionable`, reportID) != 1 {
-		t.Fatal("publication receipt or callback acknowledgement missing")
+	if countRows(t, env, `SELECT count(*) FROM voice_live_report_deliveries WHERE voice_session_id=$1`, sessionID) != 0 {
+		t.Fatal("a card that was not posted marked its report delivered")
+	}
+	// A new document's images under ./playground come from the Computer too;
+	// one that cannot be read names itself, and nothing is created.
+	image := folder + "strawberry.png"
+	if output := tool("lt_doc", "doc-1", "create_document", map[string]any{"title": "Strawberries", "content": "# Strawberries\n\n![A strawberry](" + image + ")\n"}); output["error"] != "computer_offline" || output["image"] != image {
+		t.Fatalf("create_document with an unreadable image=%v", output)
+	}
+	if countRows(t, env, `SELECT count(*) FROM messages WHERE room_id=$1 AND segments @> '[{"presentation":"canvas"}]'`, roomID) != 0 {
+		t.Fatal("a document whose image was not read was opened")
+	}
+	// An image goes into an existing document from a folder the call may open.
+	for path, want := range map[string]string{"./playground/workitem_unknown/a.png": "folder_not_found", image: "document_not_found"} {
+		if output := tool("lt_doc", "image-"+want, "insert_document_image", map[string]any{"document_id": "document_missing", "path": path}); output["error"] != want {
+			t.Fatalf("insert_document_image %s=%v, want %s", path, output, want)
+		}
 	}
 	decode(t, voiceRuntimeCall(t, env, http.MethodGet, "/internal/v1/voice/sessions/"+sessionID+"/live-tasks", nil, http.StatusOK), &tasks)
-	if len(tasks.Tasks) != 1 || tasks.Tasks[0].TaskId != second["task_id"] {
-		t.Fatalf("delivered old report still pending: %+v", tasks.Tasks)
+	if len(tasks.Tasks) != 2 || tasks.Tasks[0].TaskId != first["task_id"] || *tasks.Tasks[0].Replies[0].Delivered {
+		t.Fatalf("live tasks after an unposted card: %+v", tasks.Tasks)
 	}
 }
 

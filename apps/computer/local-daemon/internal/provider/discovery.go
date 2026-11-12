@@ -18,17 +18,19 @@ import (
 )
 
 type RuntimeDiagnostic struct {
-	Type              string           `json:"type"`
-	Status            string           `json:"status"`
-	Protocol          string           `json:"protocol"`
-	CheckedAt         time.Time        `json:"checked_at"`
-	Version           string           `json:"version,omitempty"`
-	Models            []RuntimeModel   `json:"models"`
-	ModelCatalogError string           `json:"model_catalog_error,omitempty"`
-	Error             *DiagnosticError `json:"error,omitempty"`
-	ExecutablePath    string           `json:"-"`
-	EntryPath         string           `json:"-"`
-	ExecutionPath     string           `json:"-"`
+	Type              string         `json:"type"`
+	Status            string         `json:"status"`
+	Protocol          string         `json:"protocol"`
+	CheckedAt         time.Time      `json:"checked_at"`
+	Version           string         `json:"version,omitempty"`
+	Models            []RuntimeModel `json:"models"`
+	ModelCatalogError string         `json:"model_catalog_error,omitempty"`
+	// Preferred marks the Runtime the person chose at installation.
+	Preferred      bool             `json:"preferred,omitempty"`
+	Error          *DiagnosticError `json:"error,omitempty"`
+	ExecutablePath string           `json:"-"`
+	EntryPath      string           `json:"-"`
+	ExecutionPath  string           `json:"-"`
 	// Internal provenance: only an authentication probe failure may be
 	// retried without rerunning version and protocol discovery.
 	authProbeFailed bool
@@ -67,6 +69,8 @@ type DiscoveryOptions struct {
 	Timeout         time.Duration
 	// Runtimes limits discovery to these types; empty diagnoses every Runtime.
 	Runtimes []string
+	// PreferredRuntime is the type whose diagnostic is marked Preferred.
+	PreferredRuntime string
 }
 
 type runtimeDefinition struct {
@@ -125,6 +129,7 @@ func discoverResolved(ctx context.Context, options DiscoveryOptions) DiscoveryRe
 	for index, definition := range definitions {
 		workers.Go(func() {
 			observations[index] = diagnose(ctx, definition.Type, definition.Command, definition.Protocol, options, budget)
+			observations[index].Preferred = definition.Type == options.PreferredRuntime
 		})
 	}
 	workers.Wait()

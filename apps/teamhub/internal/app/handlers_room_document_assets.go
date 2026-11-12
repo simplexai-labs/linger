@@ -70,6 +70,7 @@ func (a *App) downloadRoomDocumentAssetContent(c *gin.Context) {
 		return
 	}
 	defer content.Reader.Close()
+	sendAsStored(c)
 	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": content.Asset.Filename}))
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.DataFromReader(http.StatusOK, content.Asset.SizeBytes, content.Asset.MediaType, content.Reader, map[string]string{

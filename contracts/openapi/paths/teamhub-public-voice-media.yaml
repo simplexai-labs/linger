@@ -384,6 +384,39 @@ tenantVoiceMediaPolicy:
       "404":
         $ref: "../components/common.yaml#/components/responses/NotFound"
 
+voiceProviderKey:
+  put:
+    tags: [Capture]
+    operationId: saveVoiceProviderKey
+    summary: Save the deployment's API key for one voice provider.
+    description: >-
+      For deployments without the provider's environment key. TeamHub checks the key with the
+      provider, then stores it encrypted with TEAMHUB_SECRET_ENCRYPTION_KEY. Any signed-in Human
+      may save it; the key is never returned. 400 carries INVALID_REQUEST or VOICE_KEY_REJECTED,
+      409 VOICE_KEY_FROM_ENVIRONMENT, and 503 VOICE_KEY_STORAGE_UNAVAILABLE,
+      VOICE_PROVIDER_UNAVAILABLE or VOICE_MEDIA_OFF.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/voice-media.yaml#/components/schemas/SaveVoiceProviderKeyRequest"
+    responses:
+      "200":
+        description: Key status after saving.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/voice-media.yaml#/components/schemas/VoiceProviderKeyStatus"
+      "400":
+        $ref: "../components/common.yaml#/components/responses/BadRequest"
+      "401":
+        $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+      "409":
+        $ref: "../components/common.yaml#/components/responses/Conflict"
+      "503":
+        $ref: "../components/common.yaml#/components/responses/ServiceUnavailable"
+
 voiceSessionEvents:
   get:
     tags: [Capture]

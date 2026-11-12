@@ -1,13 +1,20 @@
 name: CI
 
-# The repository gate runs on every pull request; each app's fast check runs
-# only when its paths change. Pushes to main run every check. CI runs the
+# The repository gate runs on every pull request and merge-queue build; each
+# app's fast check runs only when its paths change; the web check is split
+# into a static job and sharded test jobs. An unchanged app's job is skipped,
+# which GitHub reports as success for its required check; a failed path
+# filter makes every app check fail instead of skipping. A merge-queue build
+# checks the paths its whole group changes, on top of the latest main. Pushes
+# to main run every check. CI runs the
 # computer daemon's Go unit tests; the rest of check-computer (TS and process
 # tests) and the heavier suites (node-services, voice-runtime, integration,
 # containers and E2E) stay local: run `make check BASE=<target-ref>` and the
 # targets in the Makefile before you open a pull request.
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
 
@@ -21,7 +28,7 @@ concurrency:
 env:
   # BASE reaches commitlint, the changed-file lints, the built-in Skill
   # immutability check and the doc-comment lint.
-  BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+  BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.before }}
 
 jobs:
   changes:
@@ -45,6 +52,9 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = pull_request ]; then
             changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          elif [ "${{ github.event_name }}" = merge_group ]; then
+            # Everything the queued group changes on top of the main it builds on.
+            changed=$(git diff --name-only "${{ github.event.merge_group.base_sha }}" HEAD)
           else
             changed=ALL
           fi
@@ -73,34 +83,170 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup
+        with:
+          go: false
       - run: make check-repository-gate BASE="$BASE"
 
-  check:
+  web-static:
     needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+        with:
+          go: false
+      - run: make check-web-static BASE="$BASE"
+
+  web-tests:
+    name: web tests (${{ matrix.shard }}/3)
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        app:
-          [
-            web,
-            packages,
-            teamhub-cli,
-            installer,
-            desktop,
-            contracts,
-            teamhub,
-            computer-go,
-          ]
+        shard: [1, 2, 3]
     steps:
-      - name: Skip unchanged app
-        if: needs.changes.outputs[matrix.app] != 'true'
-        run: echo "No ${{ matrix.app }} paths changed."
       - uses: actions/checkout@v4
-        if: needs.changes.outputs[matrix.app] == 'true'
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup
-        if: needs.changes.outputs[matrix.app] == 'true'
-      - if: needs.changes.outputs[matrix.app] == 'true'
-        run: make check-${{ matrix.app }} BASE="$BASE"
+        with:
+          go: false
+      - run: make check-web-tests SHARD=${{ matrix.shard }}/3
+
+  # Reports the required `check (web)` context from the split web jobs. When
+  # web paths changed, every web job must succeed (an unexpected skip fails);
+  # otherwise they must have been skipped. A failed path filter always fails.
+  web:
+    name: check (web)
+    needs: [changes, web-static, web-tests]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          WEB_CHANGED: ${{ needs.changes.outputs.web }}
+          WEB_STATIC_RESULT: ${{ needs.web-static.result }}
+          WEB_TESTS_RESULT: ${{ needs.web-tests.result }}
+        run: |
+          set -euo pipefail
+          if [ "$CHANGES_RESULT" != success ]; then
+            echo "changes job result: $CHANGES_RESULT" >&2
+            exit 1
+          fi
+          status=0
+          for job in web-static:"$WEB_STATIC_RESULT" web-tests:"$WEB_TESTS_RESULT"; do
+            name=${job%%:*}
+            result=${job#*:}
+            if [ "$WEB_CHANGED" = true ]; then
+              [ "$result" = success ] && continue
+            else
+              [ "$result" = success ] || [ "$result" = skipped ] && continue
+            fi
+            echo "$name job result: $result (web changed: $WEB_CHANGED)" >&2
+            status=1
+          done
+          exit "$status"
+
+  packages:
+    name: check (packages)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.packages == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/check
+        with:
+          app: packages
+          changes-result: ${{ needs.changes.result }}
+
+  teamhub_cli:
+    name: check (teamhub-cli)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs['teamhub-cli'] == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/check
+        with:
+          app: teamhub-cli
+          changes-result: ${{ needs.changes.result }}
+
+  installer:
+    name: check (installer)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.installer == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/check
+        with:
+          app: installer
+          changes-result: ${{ needs.changes.result }}
+
+  desktop:
+    name: check (desktop)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.desktop == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/check
+        with:
+          app: desktop
+          changes-result: ${{ needs.changes.result }}
+
+  contracts:
+    name: check (contracts)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.contracts == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/check
+        with:
+          app: contracts
+          changes-result: ${{ needs.changes.result }}
+
+  teamhub:
+    name: check (teamhub)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.teamhub == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/check
+        with:
+          app: teamhub
+          changes-result: ${{ needs.changes.result }}
+
+  computer_go:
+    name: check (computer-go)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs['computer-go'] == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/check
+        with:
+          app: computer-go
+          changes-result: ${{ needs.changes.result }}

@@ -31,6 +31,9 @@ const desktopConfig = z.object({
   // (LINGER_<RUNTIME>_PATH) and profiles (CODEX_HOME, CLAUDE_CONFIG_DIR,
   // PI_CODING_AGENT_DIR). The Computer daemon runs with them.
   runtimeEnvironment: z.record(z.string(), z.string()).optional(),
+  // The runtime the person chose in that installation; the daemon marks it
+  // so TeamHub places Another Me on it.
+  preferredRuntime: z.enum(["codex", "claude", "pi"]).optional(),
   window: z
     .object({
       x: z.number().int(),

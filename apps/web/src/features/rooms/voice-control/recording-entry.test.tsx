@@ -14,7 +14,10 @@ function renderEntry(retryConnection?: () => void) {
   return render(
     <VoiceCapabilitiesContext value={undefined}>
       <VoiceConnectionRetryContext value={retryConnection}>
-        <RecordingEntry anotherMeRoomId="another-me" />
+        <RecordingEntry
+          anotherMeRoomId="another-me"
+          tenantId="tenant-northstar"
+        />
       </VoiceConnectionRetryContext>
     </VoiceCapabilitiesContext>,
   );

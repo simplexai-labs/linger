@@ -162,6 +162,9 @@ func TestCodexStartupStallKillsTree(t *testing.T) {
 	for _, method := range []string{"initialize", "thread/start"} {
 		t.Run(method, func(t *testing.T) {
 			fake := newCodexFake(t, nil, nil)
+			// The fake never answers the stall, so each stop step waits out its
+			// grace; newCodexFake's cleanup restores the grace.
+			codexStopGrace.set(300 * time.Millisecond)
 			receipt := filepath.Join(fake.root, "pids")
 			fake.env["FAKE_STALL"], fake.env["FAKE_GRANDCHILD"] = method, receipt
 			spec := fake.spec()
@@ -180,6 +183,9 @@ func TestCodexStartupFailureKeepsSecretsOut(t *testing.T) {
 	for _, variant := range []string{"startup", "budget"} {
 		t.Run(variant, func(t *testing.T) {
 			fake := newCodexFake(t, nil, map[string]string{"FAKE_STDERR": "env " + secret, "FAKE_STALL": "initialize"})
+			// The fake never answers the stall, so each stop step waits out its
+			// grace; newCodexFake's cleanup restores the grace.
+			codexStopGrace.set(300 * time.Millisecond)
 			var log codexTestLog
 			spec := fake.spec()
 			if variant == "startup" {
@@ -238,6 +244,9 @@ func TestCodexInitializeCancelUnconfirmed(t *testing.T) {
 
 func TestCodexInitializeTimeoutRetriesOnce(t *testing.T) {
 	fake := newCodexFake(t, nil, map[string]string{"FAKE_STALL": "initialize"})
+	// The fake never answers the stall, so each stop step waits out its
+	// grace; newCodexFake's cleanup restores the grace.
+	codexStopGrace.set(300 * time.Millisecond)
 	var log codexTestLog
 	spec := fake.spec()
 	spec.StartupBudget = 100 * time.Millisecond
@@ -940,8 +949,8 @@ func TestCodexThreadToolOutputLimitFollowsContextWindow(t *testing.T) {
 		window        int
 		want          any
 	}{
-		{"small window", "0.165.0", 64896, float64(4056)},
-		{"large window", "0.165.0", 272000, nil},
+		{"small window", "0.165.0", 64896, float64(9734)},
+		{"large window", "0.165.0", 272000, float64(25000)},
 		{"unknown window", "0.165.0", 0, nil},
 		{"Codex without the setting", "0.100.0", 64896, nil},
 	}

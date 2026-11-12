@@ -57,6 +57,13 @@ func (a *App) routeGroups() []routeGroup {
 			middleware: []gin.HandlerFunc{a.requireVoiceRuntime()}, routes: a.voiceRuntimeRoutes(),
 		},
 		{
+			contract: "teamhub-internal",
+			paramError: func(c *gin.Context, _ reflect.Type, _ error) {
+				c.JSON(http.StatusBadRequest, teamhubinternal.VoiceError{Code: "INVALID_REQUEST", Message: "Voice Runtime request is invalid"})
+			},
+			middleware: []gin.HandlerFunc{a.authenticateVoiceRuntime}, routes: a.voiceKeyRoutes(),
+		},
+		{
 			contract: "teamhub-agent-api",
 			paramError: func(c *gin.Context, _ reflect.Type, _ error) {
 				a.writeAgentAPIError(c, http.StatusBadRequest, teamhubagentapi.AgentApiErrorCodeInvalidRequest, "Agent API request parameters are invalid")

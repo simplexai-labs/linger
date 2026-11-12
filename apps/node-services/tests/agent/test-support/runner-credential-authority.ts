@@ -8,7 +8,7 @@ import {
   type RunnerCredentialAuthenticator,
   type RunnerGatewayCredential,
 } from "../../../src/agent/runner-gateway/runner-credential-authority.js";
-import { hasBearerToken } from "../../../src/agent/service-bearer-auth.js";
+import { hasBearerToken } from "../../../src/service-bearer-auth.js";
 
 export const TEST_RUNNER_SIGNING_KEY =
   "runner-signing-key-that-is-at-least-32-bytes";

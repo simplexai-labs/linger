@@ -40,13 +40,16 @@ func TestProbeVersionWithDescendants(t *testing.T) {
 	cases := []struct {
 		name, body  string
 		budget      time.Duration
+		pipeBudget  time.Duration
 		wantToken   string
 		wantWaitErr bool
 	}{
-		{"delayed answer", `(sleep 0.05; echo "fixture-cli 2.3.4") & echo "$$ $!" > "$RECEIPT"` + "\n", 0, "2.3.4", false},
-		{"answer, open pipe", `echo "fixture-cli 2.3.4"; sleep 30 & echo "$$ $!" > "$RECEIPT"` + "\n", 0, "2.3.4", false},
-		{"banner, open pipe", `echo "starting plugins"; sleep 30 & echo "$$ $!" > "$RECEIPT"` + "\n", 0, "", true},
-		{"no answer", `sleep 30 & echo "$$ $!" > "$RECEIPT"; wait` + "\n", 150 * time.Millisecond, "", false},
+		// The delayed answer arrives after the leader exits, inside the pipe budget.
+		{"delayed answer", `(sleep 0.05; echo "fixture-cli 2.3.4") & echo "$$ $!" > "$RECEIPT"` + "\n", 0, 0, "2.3.4", false},
+		// A descendant holds the pipe open until the pipe budget expires.
+		{"answer, open pipe", `echo "fixture-cli 2.3.4"; sleep 30 & echo "$$ $!" > "$RECEIPT"` + "\n", 0, 200 * time.Millisecond, "2.3.4", false},
+		{"banner, open pipe", `echo "starting plugins"; sleep 30 & echo "$$ $!" > "$RECEIPT"` + "\n", 0, 200 * time.Millisecond, "", true},
+		{"no answer", `sleep 30 & echo "$$ $!" > "$RECEIPT"; wait` + "\n", 150 * time.Millisecond, 0, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -54,9 +57,10 @@ func TestProbeVersionWithDescendants(t *testing.T) {
 			receipt := filepath.Join(dir, "pids")
 			program := writeExecutable(t, dir, "fixture-cli", "#!/bin/sh\n"+tc.body)
 			if tc.budget > 0 {
-				previous := versionProbeBudget
-				versionProbeBudget = tc.budget
-				defer func() { versionProbeBudget = previous }()
+				shortenForTest(t, &versionProbeBudget, tc.budget)
+			}
+			if tc.pipeBudget > 0 {
+				shortenForTest(t, &versionProbePipeBudget, tc.pipeBudget)
 			}
 			// A wrapper shell avoids the first-exec scan of a new executable,
 			// which can outlast the lowered budget on macOS.

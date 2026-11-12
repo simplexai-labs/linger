@@ -26,17 +26,17 @@ pnpm dev
 
 `pnpm dev` starts no containers. It migrates the PostgreSQL that
 `TEAMHUB_DATABASE_URL` names, then runs Web, TeamHub and the node-services
-process on your machine with hot reload, plus a LiveKit server while a voice
-key is set. Set `TEAMHUB_DATABASE_URL` in `.env`
+process on your machine with hot reload, plus a LiveKit server. Set `TEAMHUB_DATABASE_URL` in `.env`
 to your database; the default matches the `postgres` service of the root
 `docker-compose.yml`. `.env.example` holds every other value `pnpm dev` needs;
 only optional personal keys (Composio, Soniox) are left empty. Check the
 services with `pnpm dev:check`, and open <http://localhost:3000>.
 
-Voice: set `SONIOX_API_KEY` (recording and dictation) or `XAI_API_KEY` (Grok
-Live) in `.env`. `pnpm dev` then runs `livekit-server` from `PATH` on the ports
-and keys `LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` name, and
-node-services starts the voice workers. Install it with `brew install livekit`
+Voice: `pnpm dev` runs `livekit-server` from `PATH` on the ports and keys
+`LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` name, with or without
+a voice key. Save a Soniox (recording and dictation) or xAI (Grok Live) key in
+the app, or set `SONIOX_API_KEY` or `XAI_API_KEY` in `.env` to override it;
+node-services then starts the voice workers. Install it with `brew install livekit`
 on macOS or `curl -sSL https://get.livekit.io | bash` on Linux; recording also
 needs `ffmpeg` and `ffprobe`. Point `LIVEKIT_URL` at another host to use a
 LiveKit server you run elsewhere instead.
@@ -102,6 +102,12 @@ successful Wiki publication.
   runs commitlint and formats staged files.
 - Keep one pull request to one change. Describe what changed, why, and how you
   verified it; the pull request template lists what reviewers expect.
+- `main` merges through a merge queue. Once a pull request is approved and its
+  checks pass, click "Merge when ready". The queue rebases it onto the latest
+  `main` (with the pull requests ahead of it), runs the required checks on
+  that result and merges it, so you don't rebase by hand to catch up with
+  `main`. If a queue build fails, the pull request leaves the queue; fix it
+  and add it again.
 - Update the nearest `AGENTS.md` or README in the same pull request when
   behavior, ownership, contracts or file paths change.
 - Code, comments, docs, tests and user-facing strings are English.

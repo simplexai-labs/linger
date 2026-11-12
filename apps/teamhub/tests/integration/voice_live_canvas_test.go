@@ -459,8 +459,11 @@ func TestVoiceLiveWritesAndChangesAnEmailCanvasAsTheAgent(t *testing.T) {
 	if strings.Count(stateOf(), "](document-asset:") != 3 {
 		t.Fatalf("attachments at once=%v state=%q", results, stateOf())
 	}
-	// A task's output is a folder: without a file the model is told to list it.
-	if folder := call("attach-task", "attach_email_file", map[string]string{"document_id": documentID, "task_id": "t1"}); folder["error"] != "file_required" {
-		t.Fatalf("attach of a task without a file=%v", folder)
+	// A file is named by its ./playground path: a folder is not a file, and a
+	// folder of no task of the call is not found.
+	for file, want := range map[string]string{"./playground/workitem_unknown/": "not_a_file", "./playground/workitem_unknown/a.png": "folder_not_found", "/etc/hosts": "invalid_file_path"} {
+		if attached := call("attach-"+want, "attach_email_file", map[string]string{"document_id": documentID, "file": file}); attached["error"] != want {
+			t.Fatalf("attach of %s=%v", file, attached)
+		}
 	}
 }

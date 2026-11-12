@@ -86,6 +86,14 @@ func (a *App) mcpContextRoutes() []contractRoute {
 	}
 }
 
+// voiceKeyRoutes mounts the Voice Runtime operations that answer with voice
+// media off too.
+func (a *App) voiceKeyRoutes() []contractRoute {
+	return []contractRoute{
+		route(http.MethodGet, "/internal/v1/voice/provider-keys", nil, a.getVoiceProviderKeys),
+	}
+}
+
 // voiceRuntimeRoutes mounts the teamhub-internal operations Voice Runtime calls.
 func (a *App) voiceRuntimeRoutes() []contractRoute {
 	return []contractRoute{

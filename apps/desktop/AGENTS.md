@@ -70,9 +70,13 @@ Gateway and runs Agents. The daemon exits with the app.
   that `setupChoice`). No secret passes through the page. Then it saves the
   installed runtime's executable and profile paths
   (`GET /api/instances/desktop/runtime`) as `runtimeEnvironment` in the
-  Desktop config, signs in with the local owner account, switches the window
-  to the server and enrolls this computer, so setup ends on "Linger is
-  ready". That screen shows the owner account from the instance's
+  Desktop config, and the runtime its `setupChoice` runs (`local-models` runs
+  on Pi) as `preferredRuntime`. The daemon config carries that as
+  `preferred_runtime`, and the daemon marks that runtime's diagnostic
+  `preferred`, so TeamHub creates Another Me and the starter Agents on it
+  while it is ready instead of on the first ready runtime. Then it signs in
+  with the local owner account, switches the window to the server and
+  enrolls this computer, so setup ends on "Linger is ready". That screen shows the owner account from the instance's
   owner-only `local-account.json` (`setup-account.ts`): the email, the
   password masked until Show, Copy (the main process writes the clipboard
   and clears it after 60 s if it still holds the password) and "Open account
@@ -126,13 +130,16 @@ Gateway and runs Agents. The daemon exits with the app.
   says what is missing (offline computer, no writable folder, or no signed-in
   runtime with each runtime's reported state) and logs
   `local_server.another_me_missing`. Customize → API keys takes the
-  Composio, Soniox and xAI keys (`provider-keys.ts`); Install saves the edits
+  Composio key only (`provider-keys.ts`); voice keys are saved in the app,
+  and a `SONIOX_API_KEY` or `XAI_API_KEY` written into `user.env` by hand
+  still reaches the services and overrides the app's. Install saves the edits
   before the installer starts (`installer.js --instance desktop --user-keys`,
   the keys on stdin) into the owner-only `instances/desktop/user.env` of the
   install location, and the page only learns which keys are saved. Both
   engines pass them to the services whenever they are configured (an edit
   runs a new job even after a finished one); Native also starts its bundled
-  LiveKit when a voice key is set (see Release). There is no settings page
+  LiveKit whenever this computer has voice tools, with or without a voice
+  key (see Release). There is no settings page
   after setup yet: keys change on the next Install or Try Again.
 - `src/main/diagnostics.ts`: Diagnostics, "Show Logs" (opens
   `<userData>/logs`) and "Save Diagnostics" (a redacted
@@ -357,15 +364,17 @@ Linux with `node scripts/prepare-native-voice-tools.mjs --target <target>
 `voiceTools`. The build is reproducible except for the Go toolchain download,
 and it checks the versions, the ffmpeg components the voice workers use,
 static linking and the Mach-O signatures. Licenses ship in `licenses/` of the
-archive. When a voice key is saved, Native extracts the archive into
+archive. On every install and start, whether or not a voice key is saved,
+Native extracts the archive into
 `tools/native/components`, puts its `bin` first on the services' `PATH`
 (TeamHub and the voice workers run `ffmpeg`/`ffprobe` from it) and runs
 `livekit-server` as the `livekit` Native service: loopback only, HTTP and
 WebSocket on one free port and media on one free UDP port, both kept with
 the generated API key and secret in the owner-only `livekit.env` of the
 instance, logs in `native/logs/livekit.log`. ICE over TCP stays off because
-LiveKit binds it on every interface. Without the tools for the computer
-Native keeps voice off. The macOS tools are ad-hoc signed by their linker and
+LiveKit binds it on every interface. Without the tools for the computer, or
+when they fail to prepare, Native logs it, keeps voice off, gives TeamHub
+`TEAMHUB_VOICE_MEDIA=off` and finishes the install. The macOS tools are ad-hoc signed by their linker and
 live in the archive, outside the app's signature, like PostgreSQL.
 
 A build with a source package for `win32-x64`, `linux-x64` or `darwin-arm64`

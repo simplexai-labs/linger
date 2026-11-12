@@ -47,11 +47,9 @@ func (a *App) registerExternalApps(ctx context.Context, cfg config.ExternalAppsC
 	sources.SetAppImportLimits(composio.AppImportLimits{
 		MaxFieldBytes: config.AppImportMaxFieldBytes, MaxDocumentBytes: config.AppImportMaxDocumentBytes, MaxBatchBytes: config.AppImportMaxBatchBytes,
 	})
-	var keyBox *secretbox.Box
-	if cfg.SecretEncryptionKey != "" {
-		if keyBox, err = secretbox.New(cfg.SecretEncryptionKey); err != nil {
-			return err
-		}
+	keyBox, err := secretBox(cfg.SecretEncryptionKey)
+	if err != nil {
+		return err
 	}
 	if err = sources.ConfigureManagedApps(ctx, client, keyBox); err != nil {
 		return fmt.Errorf("configure managed connected apps: %w", err)
@@ -107,4 +105,13 @@ func (a *App) onboardingConnections(ctx context.Context, tx pgx.Tx, agentActorID
 		})
 	}
 	return connections, nil
+}
+
+// secretBox opens the box that seals provider keys saved in the product; nil
+// when the deployment sets no TEAMHUB_SECRET_ENCRYPTION_KEY.
+func secretBox(encodedKey string) (*secretbox.Box, error) {
+	if encodedKey == "" {
+		return nil, nil
+	}
+	return secretbox.New(encodedKey)
 }

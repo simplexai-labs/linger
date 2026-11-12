@@ -126,6 +126,7 @@ func (a *App) writeArtifactStorageError(c *gin.Context, err error) {
 }
 
 func (a *App) writeImmutableObjectContentHeaders(c *gin.Context, content immutableObjectContent) {
+	sendAsStored(c)
 	c.Header("Accept-Ranges", "bytes")
 	// Revalidate every use so logout or revoked access cannot be served from a shared browser cache.
 	c.Header("Cache-Control", "private, no-cache")

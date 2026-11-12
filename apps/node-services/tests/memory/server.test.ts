@@ -364,14 +364,25 @@ describe("Memory server", () => {
     const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), "memory-server-"));
     roots.push(dataRoot);
     const received: unknown[] = [];
+    const budgets: unknown[] = [];
     const server = await startMemoryServer({
       dataRoot,
       host: "127.0.0.1",
       port: 0,
       scheduler: new MemoryScheduler(schedule, async () => undefined),
       serviceToken: "memory-token",
-      query: async (_root, input) => {
+      contextWindow: async (owner) => {
+        if (owner.ownerActorId === "human_offline")
+          throw new Error("computer_offline");
+        expect(owner).toEqual({
+          tenantId: "tenant_1",
+          ownerActorId: "human_1",
+        });
+        return 64_896;
+      },
+      query: async (_root, input, options) => {
         received.push(input);
+        budgets.push(options?.outputBudgetChars);
         return {
           gaps: [{ code: "no_relevant_evidence" }],
           indexedAt: null,
@@ -406,6 +417,13 @@ describe("Memory server", () => {
         status: "empty",
       });
       expect(received).toEqual([body]);
+      // 90% of the Daemon's limit for the owner's model window, in characters.
+      expect(budgets).toEqual([11_681]);
+      await post(
+        { ...body, user_artifact_owner_actor_id: "human_offline" },
+        "memory-token",
+      );
+      expect(budgets.at(-1)).toBe(14_400);
       for (const removed of [
         { source: "personal_knowledge" },
         { node_types: ["Session"] },

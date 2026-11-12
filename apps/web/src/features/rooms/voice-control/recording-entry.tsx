@@ -2,9 +2,10 @@ import {
   Loading03Icon,
   AiTranscribeAudioIcon,
 } from "@hugeicons/core-free-icons";
-import { use, useState } from "react";
+import { use, useEffect, useEffectEvent, useRef, useState } from "react";
 import { Icon } from "@/components/ui/icon";
 
+import { LazyVoiceKeyDialog } from "./lazy-voice-key-dialog";
 import { openRecordingWindow } from "./recording-window-store";
 import {
   isTranscriptRecoveryPaused,
@@ -20,8 +21,10 @@ import {
  */
 export function RecordingEntry({
   anotherMeRoomId,
+  tenantId,
 }: {
   anotherMeRoomId?: string;
+  tenantId: string;
 }) {
   const livekit = useOptionalVoiceControl();
   const voice = livekit;
@@ -31,6 +34,10 @@ export function RecordingEntry({
   const connectionFailed = Boolean(retryConnection);
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
+  // Without a Soniox key the entry asks for one, then starts once voice runs.
+  const needsKey = capabilities?.voiceMedia === false;
+  const [keyDialogOpen, setKeyDialogOpen] = useState(false);
+  const startWhenReady = useRef(false);
   const status = voice?.captureState?.status;
   const recording = status === "recording" || status === "starting";
   const saving =
@@ -39,7 +46,7 @@ export function RecordingEntry({
       !(voice && isTranscriptRecoveryPaused(voice.captureState)));
   const standby = voice?.listenerStatus === "standby";
   // Until voice connects, including while it reconnects, the icon spins.
-  const connecting = !voice && !connectionFailed;
+  const connecting = !voice && !connectionFailed && !needsKey;
   const label = recording
     ? "Return to recording"
     : saving
@@ -51,16 +58,22 @@ export function RecordingEntry({
     error ??
     (connectionFailed
       ? "Voice connection is unavailable. Click to retry."
-      : !voice || !anotherMeRoomId
-        ? "Meeting is loading"
-        : voice.composerMicrophoneActive
-          ? "Finish voice input first"
-          : standby
-            ? "Recording is active in another tab"
-            : label);
+      : needsKey
+        ? label
+        : !voice || !anotherMeRoomId
+          ? "Meeting is loading"
+          : voice.composerMicrophoneActive
+            ? "Finish voice input first"
+            : standby
+              ? "Recording is active in another tab"
+              : label);
   function start() {
     if (retryConnection) {
       retryConnection();
+      return;
+    }
+    if (needsKey) {
+      setKeyDialogOpen(true);
       return;
     }
     if (!voice || !anotherMeRoomId || pending || voice.composerMicrophoneActive)
@@ -84,41 +97,66 @@ export function RecordingEntry({
       .finally(() => setPending(false));
   }
 
-  if (capabilities?.voiceMedia === false) return null;
+  // The engine for a just-saved key loads after the dialog closes; the
+  // recording the Human asked for starts once it is here.
+  const startSaved = useEffectEvent(() => start());
+  const engineReady = Boolean(voice && anotherMeRoomId) && !needsKey;
+  useEffect(() => {
+    if (!startWhenReady.current || !engineReady) return;
+    startWhenReady.current = false;
+    startSaved();
+  }, [engineReady]);
+
+  if (capabilities?.voiceAvailable === false) return null;
 
   return (
-    // eslint-disable-next-line jsx-a11y/role-supports-aria-props -- aria-description is a valid ARIA global attribute missing from the rule data.
-    <button
-      aria-description={hint === label ? undefined : hint}
-      aria-label={label}
-      className="xs-nav-btn relative"
-      disabled={
-        !connectionFailed &&
-        (pending ||
-          !voice ||
-          !anotherMeRoomId ||
-          voice.composerMicrophoneActive)
-      }
-      onClick={start}
-      title={hint}
-      type="button"
-    >
-      {saving || connecting ? (
-        <Icon icon={Loading03Icon} className="animate-spin" size={16} />
-      ) : (
-        <Icon icon={AiTranscribeAudioIcon} size={16} />
-      )}
-      {recording || connectionFailed ? (
-        <span
-          aria-hidden="true"
-          className={`absolute top-1 right-1 size-2 rounded-full ring-2 ring-app-sidebar ${recording ? "bg-app-danger" : "bg-app-warning"}`}
+    <>
+      {/* eslint-disable-next-line jsx-a11y/role-supports-aria-props -- aria-description is a valid ARIA global attribute missing from the rule data. */}
+      <button
+        aria-description={hint === label ? undefined : hint}
+        aria-label={label}
+        className="xs-nav-btn relative"
+        disabled={
+          !connectionFailed &&
+          !needsKey &&
+          (pending ||
+            !voice ||
+            !anotherMeRoomId ||
+            voice.composerMicrophoneActive)
+        }
+        onClick={start}
+        title={hint}
+        type="button"
+      >
+        {saving || connecting ? (
+          <Icon icon={Loading03Icon} className="animate-spin" size={16} />
+        ) : (
+          <Icon icon={AiTranscribeAudioIcon} size={16} />
+        )}
+        {recording || connectionFailed ? (
+          <span
+            aria-hidden="true"
+            className={`absolute top-1 right-1 size-2 rounded-full ring-2 ring-app-sidebar ${recording ? "bg-app-danger" : "bg-app-warning"}`}
+          />
+        ) : null}
+        {error ? (
+          <span className="sr-only" role="alert">
+            {error}
+          </span>
+        ) : null}
+      </button>
+      {keyDialogOpen ? (
+        <LazyVoiceKeyDialog
+          onClose={() => setKeyDialogOpen(false)}
+          onReady={() => {
+            setKeyDialogOpen(false);
+            startWhenReady.current = true;
+          }}
+          policy={capabilities?.policy}
+          providers={["soniox"]}
+          tenantId={tenantId}
         />
       ) : null}
-      {error ? (
-        <span className="sr-only" role="alert">
-          {error}
-        </span>
-      ) : null}
-    </button>
+    </>
   );
 }

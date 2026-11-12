@@ -210,6 +210,7 @@ type RuntimeDiagnostic struct {
 	Version           string                  `json:"version,omitempty"`
 	Models            []RuntimeModel          `json:"models"`
 	ModelCatalogError string                  `json:"model_catalog_error,omitempty"`
+	Preferred         *bool                   `json:"preferred,omitempty"`
 	Error             *RuntimeDiagnosticError `json:"error,omitempty"`
 	ManagedServices   []ManagedService        `json:"managed_services,omitempty"`
 }
@@ -2454,21 +2455,20 @@ func (OperationCancelled) RequiredFields() []string {
 
 // ComputerToolCall mirrors the ComputerToolCall schema shape.
 type ComputerToolCall struct {
-	Type            string           `json:"type"`
-	ProtocolVersion string           `json:"protocol_version"`
-	CommandID       string           `json:"command_id"`
-	RunnerID        string           `json:"runner_id"`
-	ConnectionEpoch uint64           `json:"connection_epoch"`
-	TenantID        string           `json:"tenant_id"`
-	OwnerActorID    string           `json:"owner_actor_id"`
-	AgentID         string           `json:"agent_id"`
-	ToolSessionID   string           `json:"tool_session_id"`
-	Server          string           `json:"server"`
-	ToolName        string           `json:"tool_name"`
-	Arguments       json.RawMessage  `json:"arguments"`
-	TaskScope       *SharedTaskScope `json:"task_scope,omitempty"`
-	DeadlineMs      uint64           `json:"deadline_ms"`
-	Kind            string           `json:"kind"`
+	Type            string          `json:"type"`
+	ProtocolVersion string          `json:"protocol_version"`
+	CommandID       string          `json:"command_id"`
+	RunnerID        string          `json:"runner_id"`
+	ConnectionEpoch uint64          `json:"connection_epoch"`
+	TenantID        string          `json:"tenant_id"`
+	OwnerActorID    string          `json:"owner_actor_id"`
+	AgentID         string          `json:"agent_id"`
+	ToolSessionID   string          `json:"tool_session_id"`
+	Server          string          `json:"server"`
+	ToolName        string          `json:"tool_name"`
+	Arguments       json.RawMessage `json:"arguments"`
+	DeadlineMs      uint64          `json:"deadline_ms"`
+	Kind            string          `json:"kind"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a ComputerToolCall.

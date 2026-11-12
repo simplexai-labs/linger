@@ -39,11 +39,17 @@ func (s *Service) runVoiceLiveDocumentTool(ctx context.Context, session voiceliv
 		if !ok || utf8.RuneCountInString(args.Content) > voicelive.MaxCreateDocumentRunes {
 			return "", voicelive.ErrInvalid
 		}
-		created, output, err := s.openVoiceLiveCanvas(ctx, session, request, title, strings.TrimSpace(args.Content), "invalid_document")
+		content, output, err := s.inlineVoiceLiveImages(ctx, session, strings.TrimSpace(args.Content))
+		if output != "" || err != nil {
+			return output, err
+		}
+		created, output, err := s.openVoiceLiveCanvas(ctx, session, request, title, content, "invalid_document")
 		if output != "" || err != nil {
 			return output, err
 		}
 		return voicelive.Output(map[string]string{"status": "created", "document_id": created.DocumentID, "revision_id": created.RevisionID}), nil
+	case voicelive.ToolInsertDocumentImage:
+		return s.insertVoiceLiveDocumentImage(ctx, session, request, args)
 	case voicelive.ToolRenameDocument, voicelive.ToolEditDocument, voicelive.ToolReplaceDocumentText:
 		if args.DocumentID == "" {
 			return "", voicelive.ErrInvalid
@@ -342,4 +348,50 @@ func (s *Service) resolveVoiceLiveComment(ctx context.Context, session voicelive
 		return "", err
 	}
 	return voicelive.Output(map[string]string{"status": status, "thread_id": args.ThreadID}), nil
+}
+
+// insertVoiceLiveDocumentImage puts a ./playground image into a Document
+// below one of its blocks by running `teamhub docs image put` as the Agent on
+// the user's Computer, which stores the image in the Document first: an edit
+// shows only images the Document already holds.
+func (s *Service) insertVoiceLiveDocumentImage(ctx context.Context, session voicelive.Session, request teamhubinternal.VoiceLiveToolCall, args voicelive.DocumentArguments) (string, error) {
+	caption := strings.TrimSpace(args.Caption)
+	if args.DocumentID == "" || strings.ContainsAny(caption, "\r\n") || utf8.RuneCountInString(caption) > 1000 {
+		return "", voicelive.ErrInvalid
+	}
+	folder, inside, output, err := s.voiceLiveFilePath(ctx, session, args.Path)
+	if output != "" || err != nil {
+		return output, err
+	}
+	principal, err := s.voiceLiveAgentPrincipal(ctx, session)
+	if errors.Is(err, errVoiceLiveAgentUnavailable) {
+		return voicelive.ErrorOutput("agent_unavailable"), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	current, err := s.voiceLiveDocument(ctx, principal, args.DocumentID)
+	if errors.Is(err, document.ErrNotFound) {
+		return voicelive.ErrorOutput("document_not_found"), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	blockID, problem := voicelive.ImageAnchor(current.blocks, args.After)
+	if problem != "" {
+		return voicelive.ErrorOutput(problem), nil
+	}
+	result, err := s.callVoiceLivePlayground(ctx, session, "place_image", map[string]any{
+		"operation_id": voiceLiveInvocationID(session, request), "inbox_id": "room:" + session.RoomID,
+		"document_id": args.DocumentID, "after_block_id": blockID, "caption": caption,
+		"file": map[string]any{"folder": folder.folder, "path": inside},
+	}, voiceLiveCardDeadline)
+	if err != nil {
+		return voiceLiveFileError(err)
+	}
+	if placement, _ := result["placement"].(string); placement != "applied" {
+		return voicelive.Output(map[string]any{"error": "document_changed", "detail": result["conflict_reason"],
+			"next": "Read the document and call again."}), nil
+	}
+	return voicelive.Output(map[string]any{"status": "inserted", "document_id": args.DocumentID, "revision_id": result["revision_id"]}), nil
 }

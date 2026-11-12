@@ -280,9 +280,9 @@ func claudeAbandonSpawn(p *claudeProcess, cause error) error {
 	_ = p.group.signal(syscall.SIGKILL)
 	select {
 	case <-p.leaderDone:
-	case <-time.After(claudeKillWait):
+	case <-time.After(p.killWait):
 	}
-	if claudeClosed(p.leaderDone) && p.group.waitEmpty(claudeKillWait) {
+	if claudeClosed(p.leaderDone) && p.group.waitEmpty(p.killWait) {
 		p.mu.Lock()
 		p.groupConfirmed, p.stopping = true, true
 		p.mu.Unlock()

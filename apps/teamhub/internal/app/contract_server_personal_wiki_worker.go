@@ -80,6 +80,7 @@ func (a *App) downloadPersonalWikiDocumentVersion(c *gin.Context) {
 		return
 	}
 	defer content.Close()
+	sendAsStored(c)
 	c.Header("ETag", `"`+selected.SHA256+`"`)
 	c.Header("Content-Type", selected.MediaType)
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`,
@@ -106,6 +107,7 @@ func (a *App) fetchSession(c *gin.Context) {
 		return
 	}
 	defer object.Close()
+	sendAsStored(c)
 	c.Header("ETag", `"`+content.Version.SHA256+`"`)
 	c.Header("X-Content-SHA256", content.Version.SHA256)
 	c.Header("Content-Type", content.Version.MediaType)

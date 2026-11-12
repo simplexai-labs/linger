@@ -35,8 +35,8 @@ type voiceLiveSlackCall func(slug string, arguments map[string]any) (map[string]
 func (s *Service) sendVoiceLiveSlack(ctx context.Context, session voicelive.Session, request teamhubinternal.VoiceLiveToolCall, args voicelive.AppArguments) (string, error) {
 	text := strings.TrimSpace(args.Text)
 	channel, person, userID, thread := strings.TrimSpace(args.Channel), strings.TrimSpace(args.Person), strings.TrimSpace(args.UserID), strings.TrimSpace(args.ThreadTS)
-	documentID, taskID, file := strings.TrimSpace(args.DocumentID), strings.TrimSpace(args.TaskID), strings.TrimSpace(args.File)
-	attaching := documentID != "" || taskID != ""
+	documentID, file := strings.TrimSpace(args.DocumentID), strings.TrimSpace(args.File)
+	attaching := documentID != "" || file != ""
 	targets := 0
 	for _, target := range []bool{channel != "", person != "", userID != "", bool(args.ToSelf)} {
 		if target {
@@ -44,7 +44,7 @@ func (s *Service) sendVoiceLiveSlack(ctx context.Context, session voicelive.Sess
 		}
 	}
 	if text == "" && !attaching || utf8.RuneCountInString(text) > voicelive.MaxSlackTextRunes || targets != 1 || thread != "" && channel == "" ||
-		documentID != "" && taskID != "" || file != "" && taskID == "" {
+		documentID != "" && file != "" {
 		return "", voicelive.ErrInvalid
 	}
 	app, output, err := s.voiceLiveApp(ctx, session, []string{"slack"}, args.Account)
@@ -83,7 +83,7 @@ func (s *Service) sendVoiceLiveSlack(ctx context.Context, session voicelive.Sess
 	}
 	var status, outcome string
 	if attaching {
-		attachment, output, err := s.voiceLiveFileAttachment(ctx, session, app.principal, documentID, taskID, file)
+		attachment, output, err := s.voiceLiveFileAttachment(ctx, session, app.principal, documentID, file)
 		if output != "" || err != nil {
 			return output, err
 		}
@@ -155,33 +155,21 @@ type voiceLiveAttachment struct {
 }
 
 // voiceLiveFileAttachment reads the file a Slack send or an email canvas
-// attaches: a Document
-// the call's Agent reads, as its Agent download gives it, or a task's output
-// file on the user's Local Computer. output is what the live model is told
+// attaches: a Document the call's Agent reads, as its Agent download gives
+// it, or a file under ./playground on the user's Local Computer. output is what the live model is told
 // instead when it cannot be read.
-func (s *Service) voiceLiveFileAttachment(ctx context.Context, session voicelive.Session, principal agentcredential.Principal, documentID, taskID, file string) (voiceLiveAttachment, string, error) {
-	if taskID != "" && file == "" {
-		// A task's output is a folder: the model must name one file in it.
-		return voiceLiveAttachment{}, voicelive.Output(map[string]string{
-			"error": "file_required", "next": "List this task's output files with task_files, then call again with the path of the one to attach.",
-		}), nil
-	}
-	if taskID != "" {
-		task, tools, call, err := s.voiceTaskComputer(ctx, session, taskID)
-		if err != nil {
-			output, err := voiceFileError(err)
+func (s *Service) voiceLiveFileAttachment(ctx context.Context, session voicelive.Session, principal agentcredential.Principal, documentID, file string) (voiceLiveAttachment, string, error) {
+	if file != "" {
+		folder, inside, output, err := s.voiceLiveFilePath(ctx, session, file)
+		if output != "" || err != nil {
 			return voiceLiveAttachment{}, output, err
-		}
-		filename := voicelive.TaskFilePath(file, task.WorkItemID)
-		if filename == "" || path.IsAbs(filename) || path.Clean(filename) != filename || filename == ".." || strings.HasPrefix(filename, "../") {
-			return voiceLiveAttachment{}, voicelive.ErrorOutput("invalid_file_path"), nil
 		}
 		var content bytes.Buffer
-		if err := copyVoiceTaskFile(ctx, tools, call, filename, &content); err != nil {
-			output, err := voiceFileError(err)
+		if err := s.readVoiceLiveFileWhole(ctx, session, folder, inside, &content); err != nil {
+			output, err := voiceLiveFileError(err)
 			return voiceLiveAttachment{}, output, err
 		}
-		name := path.Base(filename)
+		name := path.Base(inside)
 		return voiceLiveAttachment{name: name, mediaType: voiceLiveMediaType(name, ""), content: content.Bytes()}, "", nil
 	}
 	download, err := s.documents.DownloadAgentFileConditional(ctx, principal.TenantID, principal.AgentID, documentID, "markdown", "")
@@ -193,7 +181,7 @@ func (s *Service) voiceLiveFileAttachment(ctx context.Context, session voicelive
 	}
 	content := download.InlineBytes
 	if content == nil {
-		if download.SizeBytes > maxVoiceTaskFileBytes {
+		if download.SizeBytes > maxVoiceLiveFileBytes {
 			return voiceLiveAttachment{}, voicelive.ErrorOutput("file_too_large"), nil
 		}
 		object, err := s.artifacts.Open(ctx, download.ObjectKey)
@@ -201,11 +189,11 @@ func (s *Service) voiceLiveFileAttachment(ctx context.Context, session voicelive
 			return voiceLiveAttachment{}, "", err
 		}
 		defer object.Close()
-		if content, err = io.ReadAll(io.LimitReader(object, maxVoiceTaskFileBytes+1)); err != nil {
+		if content, err = io.ReadAll(io.LimitReader(object, maxVoiceLiveFileBytes+1)); err != nil {
 			return voiceLiveAttachment{}, "", err
 		}
 	}
-	if len(content) > maxVoiceTaskFileBytes {
+	if len(content) > maxVoiceLiveFileBytes {
 		return voiceLiveAttachment{}, voicelive.ErrorOutput("file_too_large"), nil
 	}
 	// The download names the stored file, which may be a rendering's own

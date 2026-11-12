@@ -28,7 +28,9 @@ func TestLiveKitStartEventProjectsCaptureIdentity(t *testing.T) {
 		t.Skip("ffmpeg required")
 	}
 	env, alice, _ := newHardwareVoiceCaptureEnvWithStorageAndLimitsAndConfig(t, 1<<20, 1<<30, func(cfg *config.Config) {
-		cfg.Voice.SonioxAPIKey = "test-soniox-key"
+		cfg.Voice.MediaEnabled = true
+		cfg.Voice.RuntimeToken = "voice-test-service-token"
+		cfg.Voice.LiveKitAPIURL = "http://127.0.0.1:17880"
 	})
 	q := store.New(env.pool)
 	roomID := env.createRoom(alice, acmeTenant, "Voice transcript identity", "voice-transcript-identity")

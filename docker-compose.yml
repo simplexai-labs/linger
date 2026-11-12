@@ -46,7 +46,8 @@ services:
 
   # Media server for voice. Browsers dial it on the published ports; TeamHub
   # and the voice workers in node-services dial it on the Compose network.
-  # Voice stays off until SONIOX_API_KEY is set.
+  # It always runs; a voice key saved in the app or set in .env starts the
+  # matching workers.
   livekit:
     mem_limit: 256m
     image: "livekit/livekit-server:v1.13.6"

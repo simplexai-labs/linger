@@ -117,17 +117,24 @@ beforeEach(() => {
 
 describe("voice material composer", () => {
   it.each([
-    [false, false, "Send message"],
-    [true, false, "Start Voice Mode"],
-    [false, true, "Start Voice Mode"],
+    [false, false, undefined, "Send message"],
+    [true, false, undefined, "Start Voice Mode"],
+    [false, true, undefined, "Start Voice Mode"],
+    // A deployment that runs voice offers it before any key is saved.
+    [false, false, true, "Start Voice Mode"],
+    [false, false, false, "Send message"],
   ])(
-    "on an empty draft shows the right corner by the voice policy (dictation %s, live %s)",
-    async (dictation, live, shown) => {
+    "on an empty draft shows the right corner by the voice policy (dictation %s, live %s, available %s)",
+    async (dictation, live, available, shown) => {
       const runtime = createTestTeamHubRuntime();
       runtime.server.on(
         "GET",
         "/v0/tenants/{tenantId}/voice-media-policy",
-        () => ({ voice_media_supported: dictation, live_supported: live }),
+        () => ({
+          voice_media_supported: dictation,
+          live_supported: live,
+          ...(available === undefined ? {} : { voice_available: available }),
+        }),
       );
       const view = render(
         <TeamHubRuntimeProvider runtime={runtime}>

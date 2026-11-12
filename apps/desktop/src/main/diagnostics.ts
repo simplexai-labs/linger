@@ -10,7 +10,7 @@ import { ZipFile } from "yazl";
 import type { LocalServerModule } from "./local-server.js";
 import { LOCAL_INSTANCE } from "./local-server.js";
 import type { Module, ModuleContext } from "./modules.js";
-import { savedProviderKeys } from "./provider-keys.js";
+import { savedSecretValues } from "./provider-keys.js";
 
 // A file put into the bundle: where it is read from and its name inside.
 export interface DiagnosticsFile {
@@ -187,10 +187,8 @@ export const collectDiagnostics = async (
   const zip = new ZipFile();
   const added = new Set<string>();
   const homes = [...new Set(options.homes.map((home) => path.resolve(home)))];
-  // The saved provider keys themselves, wherever a service printed them.
-  const keys = homes.flatMap((home) =>
-    Object.values(savedProviderKeys(home, LOCAL_INSTANCE)),
-  );
+  // The saved keys themselves, wherever a service printed them.
+  const keys = homes.flatMap((home) => savedSecretValues(home, LOCAL_INSTANCE));
   const addText = (entry: string, text: string) => {
     if (added.has(entry)) return;
     added.add(entry);

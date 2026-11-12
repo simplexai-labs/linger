@@ -61,9 +61,18 @@ export default function AgentAvatarMotion({
 }) {
   const boxRef = useRef<HTMLSpanElement>(null);
   const [animation, setAnimation] = useState<AnimationItem>();
+  // The complete listener reads the latest wishes without re-subscribing.
+  const idleRef = useRef({ hold, onIdle, playing });
+  useEffect(() => {
+    idleRef.current = { hold, onIdle, playing };
+  });
+  // One effect owns the Lottie item, so its cleanup can unsubscribe before
+  // destroy(); a separate listener effect would unsubscribe after it and throw.
+  // oxlint-disable-next-line react-doctor/effect-needs-cleanup -- The cleanup calls stopListening, which the rule cannot follow out of the async load.
   useEffect(() => {
     let cancelled = false;
     let item: AnimationItem | undefined;
+    let stopListening: (() => void) | undefined;
     void Promise.all([
       import("lottie-web/build/player/lottie_light"),
       fetch(motionUrl(figure)).then((response) => {
@@ -87,6 +96,10 @@ export default function AgentAvatarMotion({
           renderer: "svg",
           rendererSettings: { preserveAspectRatio: "xMidYMid slice" },
         });
+        stopListening = item.addEventListener("complete", () => {
+          const { hold: held, onIdle: idle, playing: wanted } = idleRef.current;
+          if (!held && !wanted) idle?.();
+        });
         // Inline animation data renders its SVG synchronously.
         setAnimation(item);
       })
@@ -94,22 +107,13 @@ export default function AgentAvatarMotion({
       .catch(() => undefined);
     return () => {
       cancelled = true;
+      // Unsubscribe before destroy(): Lottie clears its listener table there,
+      // and an unsubscribe after it throws.
+      stopListening?.();
       item?.destroy();
       setAnimation(undefined);
     };
   }, [figure]);
-  // The complete listener reads the latest wishes without re-subscribing.
-  const idleRef = useRef({ hold, onIdle, playing });
-  useEffect(() => {
-    idleRef.current = { hold, onIdle, playing };
-  });
-  useEffect(() => {
-    if (!animation) return;
-    return animation.addEventListener("complete", () => {
-      const { hold: held, onIdle: idle, playing: wanted } = idleRef.current;
-      if (!held && !wanted) idle?.();
-    });
-  }, [animation]);
   const heldRef = useRef(false);
   useEffect(() => {
     if (!animation) return;

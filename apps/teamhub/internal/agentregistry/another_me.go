@@ -99,7 +99,11 @@ func (s *Service) createAnotherMeTx(ctx context.Context, tx pgx.Tx, computer age
 	if err != nil || !listed {
 		return err
 	}
-	placement, err := chooseAnotherMeLocalPlacement([]httpapi.LocalComputer{projected})
+	preferredRuntime, err := storedPreferredRuntime(row.RuntimeDiagnostics)
+	if err != nil {
+		return err
+	}
+	placement, err := chooseAnotherMeLocalPlacement([]httpapi.LocalComputer{projected}, preferredRuntime)
 	if errors.Is(err, errAnotherMeComputerUnavailable) {
 		return nil
 	}

@@ -233,6 +233,11 @@ export const runnerGatewayEnvelopeSchema = {
           minLength: 1,
           maxLength: 240,
         },
+        preferred: {
+          type: "boolean",
+          description:
+            "Marks the Runtime the person chose when this Computer was installed; at most one diagnostic carries it. TeamHub places new template Agents on it while it is ready.",
+        },
         error: {
           type: "object",
           additionalProperties: false,
@@ -4619,7 +4624,7 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/Id",
         },
         server: {
-          enum: ["browser", "task_files"],
+          enum: ["browser", "playground"],
         },
         tool_name: {
           type: "string",
@@ -4628,9 +4633,6 @@ export const runnerGatewayEnvelopeSchema = {
         },
         arguments: {
           $ref: "#/$defs/OpaqueObject",
-        },
-        task_scope: {
-          $ref: "#/$defs/SharedTaskScope",
         },
         deadline_ms: {
           type: "integer",

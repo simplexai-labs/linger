@@ -40,7 +40,7 @@ const state = (
     attempt: 1,
     localModels: { state: "unavailable" },
     location: { path: "~/.simplexai", custom: false },
-    keys: { composio: false, soniox: false, xai: false },
+    keys: { composio: false },
     ...(account ? { account } : {}),
   },
 });

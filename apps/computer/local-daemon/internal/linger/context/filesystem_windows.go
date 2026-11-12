@@ -78,3 +78,7 @@ func replaceProjectionFile(root *os.Root, source, target string) error {
 // Contents are flushed before publication; the SQLite projection journal
 // replays interrupted replacements on the next activation.
 func syncDirectory(_ *os.Root, _ string) error { return nil }
+
+// singleLink is true on Windows: os.FileInfo carries no link count there, and
+// creating a hard link needs the same access as reading the file directly.
+func singleLink(os.FileInfo) bool { return true }

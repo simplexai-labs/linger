@@ -91,6 +91,9 @@ const open = (
     history,
   });
 
+/** The metadata an update's response.create carries, as xAI echoes it. */
+const told = (id: string, tools = "auto") => ({ update_id: id, tools });
+
 async function collect(session: XaiLiveSession, count: number) {
   const events: LiveEvent[] = [];
   for await (const event of session.events()) {
@@ -558,19 +561,26 @@ describe("XaiLiveSession", () => {
   it("never runs a call an update without tools wrote as words", async () => {
     const provider = await fakeProvider();
     const session = await open(provider.url);
-    session.tell("A result arrived.");
-    const events = collect(session, 2);
+    session.tell("A result arrived.", false, "u1");
+    const events = collect(session, 3);
     provider.emit(
-      { type: "response.created", response: { id: "r1" } },
+      {
+        type: "response.created",
+        response: { id: "r1", metadata: told("u1", "none") },
+      },
       {
         type: "response.output_audio_transcript.delta",
         delta: "By the way<tool_call>lookup</tool_call>",
       },
-      { type: "response.done", response: { status: "completed" } },
+      {
+        type: "response.done",
+        response: { status: "completed", metadata: told("u1", "none") },
+      },
     );
     expect(await events).toEqual([
+      { type: "update_accepted", id: "u1" },
       { type: "text_delta", text: "By the way", update: true },
-      { type: "response_finished", canceled: false },
+      { type: "response_finished", canceled: false, updateId: "u1" },
     ]);
     await session.close();
   });
@@ -578,10 +588,13 @@ describe("XaiLiveSession", () => {
   it("answers an update's tool round as the same update", async () => {
     const provider = await fakeProvider();
     const session = await open(provider.url);
-    session.tell("A report arrived.", true);
-    const first = collect(session, 2);
+    session.tell("A report arrived.", true, "u1");
+    const first = collect(session, 3);
     provider.emit(
-      { type: "response.created", response: { id: "r1" } },
+      {
+        type: "response.created",
+        response: { id: "r1", metadata: told("u1") },
+      },
       {
         type: "response.function_call_arguments.done",
         call_id: "c1",
@@ -591,23 +604,31 @@ describe("XaiLiveSession", () => {
       { type: "response.done", response: { status: "completed" } },
     );
     expect(await first).toEqual([
+      { type: "update_accepted", id: "u1" },
       {
         type: "function_calls",
         update: true,
         calls: [{ callId: "c1", name: "lookup", arguments: "{}" }],
       },
-      { type: "response_finished", canceled: false },
+      { type: "response_finished", canceled: false, updateId: "u1" },
     ]);
     session.sendToolResults([{ callId: "c1", output: "ok" }]);
     await waitForSent(provider.sent, 5);
-    expect(provider.sent.at(-1)).toEqual({ type: "response.create" });
-    const second = collect(session, 1);
+    // The response after the results speaks for the update, not a turn.
+    expect(provider.sent.at(-1)).toEqual({
+      type: "response.create",
+      response: { tool_choice: "auto", metadata: told("u1") },
+    });
+    const second = collect(session, 2);
     provider.emit(
-      { type: "response.created", response: { id: "r2" } },
+      {
+        type: "response.created",
+        response: { id: "r2", metadata: told("u1") },
+      },
       { type: "response.output_audio_transcript.delta", delta: "All checked." },
     );
-    // The response after the results speaks for the update, not a turn.
     expect(await second).toEqual([
+      { type: "update_accepted", id: "u1" },
       { type: "text_delta", text: "All checked.", update: true },
     ]);
     await session.close();
@@ -703,6 +724,42 @@ describe("XaiLiveSession", () => {
     await session.close();
   });
 
+  it("holds an update told while a reply is under way until it ends", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    const started = collect(session, 1);
+    provider.emit({ type: "response.created", response: { id: "r1" } });
+    expect(await started).toEqual([{ type: "response_started" }]);
+    // A new item with a response request would cancel the reply under way.
+    session.tell("A result arrived.", false, "u1");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(provider.sent).toHaveLength(1);
+    provider.emit({
+      type: "response.done",
+      response: { id: "r1", status: "completed" },
+    });
+    await waitForSent(provider.sent, 3);
+    expect(provider.sent.slice(1).map((event) => event.type)).toEqual([
+      "conversation.item.create",
+      "response.create",
+    ]);
+    await session.close();
+  });
+
+  it("asks again for an update without telling its cue twice", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    session.repeatUpdate("u1", true);
+    await waitForSent(provider.sent, 2);
+    expect(provider.sent.slice(1)).toEqual([
+      {
+        type: "response.create",
+        response: { tool_choice: "auto", metadata: told("u1") },
+      },
+    ]);
+    await session.close();
+  });
+
   it("asks for a reply when server VAD ended a turn without one", async () => {
     const provider = await fakeProvider();
     const session = await open(provider.url);
@@ -715,7 +772,7 @@ describe("XaiLiveSession", () => {
   it("tells an update in the model's own words, from a system note and without tools", async () => {
     const provider = await fakeProvider();
     const session = await open(provider.url);
-    session.tell("A result arrived.");
+    session.tell("A result arrived.", false, "u1");
     await waitForSent(provider.sent, 3);
     expect(provider.sent.slice(1, 3)).toEqual([
       {
@@ -726,16 +783,23 @@ describe("XaiLiveSession", () => {
           content: [{ type: "input_text", text: "[system] A result arrived." }],
         },
       },
-      { type: "response.create", response: { tool_choice: "none" } },
+      {
+        type: "response.create",
+        response: { tool_choice: "none", metadata: told("u1", "none") },
+      },
     ]);
-    const events = collect(session, 2);
+    const events = collect(session, 3);
     provider.emit(
-      { type: "response.created", response: { id: "r1" } },
+      {
+        type: "response.created",
+        response: { id: "r1", metadata: told("u1", "none") },
+      },
       // Words can precede the audio; they still belong to the update.
       { type: "response.output_audio_transcript.delta", delta: "By the way" },
       { type: "response.output_audio.delta", delta: pcmBase64(5) },
     );
     expect(await events).toEqual([
+      { type: "update_accepted", id: "u1" },
       { type: "text_delta", text: "By the way", update: true },
       { type: "audio_started", update: true },
     ]);
@@ -774,21 +838,28 @@ describe("XaiLiveSession", () => {
       { type: "response_finished", canceled: false },
     ]);
     // A report arrives: its answer is asked for, so it is never canceled.
-    session.tell("A task finished.");
+    session.tell("A task finished.", true, "u1");
     await waitForSent(provider.sent, 3);
-    const told = collect(session, 2);
+    const said = collect(session, 3);
     provider.emit(
-      { type: "response.created", response: { id: "r2" } },
+      {
+        type: "response.created",
+        response: { id: "r2", metadata: told("u1") },
+      },
       {
         type: "response.output_audio_transcript.delta",
         response_id: "r2",
         delta: "Done.",
       },
-      { type: "response.done", response: { id: "r2", status: "completed" } },
+      {
+        type: "response.done",
+        response: { id: "r2", status: "completed", metadata: told("u1") },
+      },
     );
-    expect(await told).toEqual([
+    expect(await said).toEqual([
+      { type: "update_accepted", id: "u1" },
       { type: "text_delta", text: "Done.", update: true },
-      { type: "response_finished", canceled: false },
+      { type: "response_finished", canceled: false, updateId: "u1" },
     ]);
     // The user's next words get an answer of their own, not one taken for
     // the report.

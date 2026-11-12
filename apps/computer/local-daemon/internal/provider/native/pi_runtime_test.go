@@ -397,6 +397,10 @@ func TestPiInputUnderPipePressure(t *testing.T) {
 		})
 	}
 	t.Run("blocked", func(t *testing.T) {
+		// The blocked fake answers neither abort nor stdin close, so both
+		// waits expire before the stop escalates to signals.
+		shortenForTest(t, &piAbortBudget, 200*time.Millisecond)
+		shortenForTest(t, &piExitWait, 200*time.Millisecond)
 		h := piNewHarness(t, "blocked", nil)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()

@@ -334,11 +334,11 @@ export function scenarioJobs(
               };
         case "end_voice_mode":
           return { status: "done" };
-        case "publish_task_result":
+        case "send_card":
           return {
             status: "delivered",
             message_id: "m_published",
-            room_id: "r_123",
+            documents: [],
           };
         default:
           return { status: "ok", results: [] };
@@ -377,7 +377,7 @@ export function scenarioJobs(
             goal: update.goal,
             state: "reported",
             latest_report: update.replies.at(-1),
-            report_id: `report_${update.taskId}`,
+            folder: `./playground/workitem_${update.taskId}/`,
             delivered: false,
           },
         ],

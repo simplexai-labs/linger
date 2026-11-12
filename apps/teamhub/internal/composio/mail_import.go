@@ -328,8 +328,15 @@ func (c *Client) renderImportedMail(provider string, message gmailMessage) (AppD
 	if err != nil {
 		return AppDocument{}, err
 	}
-	automated := emailevidence.AutomatedClass(gmailMessageSignals(message))
+	signals := gmailMessageSignals(message)
+	automated := emailevidence.AutomatedClass(signals)
+	class, err := emailevidence.ClassOf(emailevidence.Direction(gmailMessageDirectionValue(message)), signals)
+	if err != nil {
+		return AppDocument{}, err
+	}
 	profile := profileMailView(output.String(), withoutLinkTracking(authored), body, automated, gmailMessageDirectionValue(message) == "outbound")
+	// Memory decides from the class which mail it extracts Session facts from.
+	fmt.Fprintf(&output, "- Class: %s\n", class)
 	output.WriteString("\n" + body + "\n")
 	payload := gmailThreadPayload{ID: message.ThreadID, Messages: []gmailMessage{message}}
 	if payload.ID == "" {

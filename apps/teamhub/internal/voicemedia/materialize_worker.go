@@ -176,7 +176,11 @@ func (s *Service) processMaterialization(ctx context.Context, captureID string) 
 		return ErrCaptureConflict
 	}
 	var source store.CaptureMediaOutput
-	if s.archiveASR != nil {
+	ready, err := s.archiveTranscriberReady(ctx)
+	if err != nil {
+		return err
+	}
+	if ready {
 		source, err = s.saveSourceAudio(ctx, job)
 		if err != nil {
 			return err

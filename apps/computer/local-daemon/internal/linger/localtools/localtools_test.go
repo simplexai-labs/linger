@@ -22,6 +22,16 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 )
 
+// shortenForTest lowers a package duration for one test and restores it in
+// t.Cleanup. Overriding a package variable is safe only because no test in
+// this package calls t.Parallel.
+func shortenForTest(t *testing.T, v *time.Duration, d time.Duration) {
+	t.Helper()
+	previous := *v
+	*v = d
+	t.Cleanup(func() { *v = previous })
+}
+
 func TestLocalToolOperationPropagatesChildCleanupFailure(t *testing.T) {
 	reader, writer := io.Pipe()
 	defer reader.Close()

@@ -2,39 +2,127 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	artifactstore "github.com/simplexai-labs/linger/apps/teamhub/internal/artifact"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/config"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/document"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomagent"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voice"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicekey"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicemedia"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicetranscription"
 )
 
-// registerVoice builds voice media when SONIOX_API_KEY or XAI_API_KEY is set,
-// or takes the plane a test injects. Soniox turns on transcription
-// (Recording, dictation and Pocket Notes) with archive recovery; xAI turns on
-// Live alone. Without either voice stays off: the Voice Runtime callbacks
-// answer not found, the Voice media policy reports nothing supported, and no
-// voice retention rule or job exists.
-func (a *App) registerVoice(cfg config.VoiceConfig, injected voicemedia.Plane, objects artifactstore.ObjectStore, stagingRoot string) error {
-	media := injected
-	a.voiceTranscription = injected != nil || cfg.SonioxAPIKey != ""
-	if media == nil && (cfg.SonioxAPIKey != "" || cfg.XaiAPIKey != "") {
-		service, recordings, err := newVoiceMedia(a.pool, objects, stagingRoot, a.documents, cfg)
-		if err != nil {
+// voiceReconcileTimeout bounds how long a key save waits for the Node Services
+// voice workers to register. It covers Node Services' key read and its 20 s
+// readiness wait; their own periodic reconcile covers a miss.
+const voiceReconcileTimeout = 30 * time.Second
+
+// voiceReconcileStatusError reports a reconcile answered with an unexpected
+// HTTP status.
+type voiceReconcileStatusError struct{ status int }
+
+func (e voiceReconcileStatusError) Error() string {
+	return fmt.Sprintf("Node Services voice reconcile returned HTTP %d", e.status)
+}
+
+// registerVoice builds voice media while TEAMHUB_VOICE_MEDIA is on, or takes
+// the plane a test injects; without LINGER_SECRET_SEED or ffmpeg it runs
+// with voice off. Whether a provider can be used is decided at each
+// use from the key in effect then: the environment key, else the one saved in
+// the product. Soniox enables transcription (Recording, dictation and Pocket
+// Notes) with archive recovery; xAI enables Live alone. With voice media off
+// voice stays off: the Voice Runtime callbacks answer not found, the Voice
+// media policy reports nothing available, and no voice retention rule or job
+// exists. With voice on and no key the voice jobs and rules are registered
+// but find no work, because no voice session can start without a key.
+func (a *App) registerVoice(cfg config.Config, deps Deps, objects artifactstore.ObjectStore) error {
+	box, err := secretBox(cfg.ExternalApps.SecretEncryptionKey)
+	if err != nil {
+		return err
+	}
+	checker := deps.VoiceKeyChecker
+	if checker == nil {
+		checker = voicekey.NewHTTPChecker()
+	}
+	if cfg.NodeServicesURL != "" && cfg.NodeServicesInternalToken != "" {
+		if a.reconcileVoiceWorkers, err = newVoiceWorkerReconciler(cfg.NodeServicesURL, cfg.NodeServicesInternalToken); err != nil {
 			return err
 		}
-		media, a.voiceRecordings = service, recordings
 	}
-	if media == nil {
-		return nil
+	media, err := a.buildVoiceMedia(cfg, deps.VoiceMedia, objects)
+	if err != nil {
+		return err
 	}
+	// This is the one place voice is decided on or off for the process: the
+	// key service's Enabled drives the policy, saves and the key read.
 	a.voiceMedia = media
+	a.voiceKeys = voicekey.New(a.queries, checker, voicekey.Config{
+		Enabled: media != nil,
+		Environment: map[voicekey.Provider]string{
+			voicekey.Soniox: cfg.Voice.SonioxAPIKey, voicekey.XAI: cfg.Voice.XaiAPIKey,
+		},
+		Box: box,
+	}, a.logger)
 	return nil
+}
+
+// newVoiceMediaPlane builds the production plane; a test replaces it to
+// inject a build failure.
+var newVoiceMediaPlane = newVoiceMedia
+
+// buildVoiceMedia returns the plane voice runs on, or nil with voice off.
+// Like every other service link, voice stays off without LINGER_SECRET_SEED,
+// and a computer without ffmpeg runs without voice rather than not at all;
+// any other build error still stops startup.
+func (a *App) buildVoiceMedia(cfg config.Config, injected voicemedia.Plane, objects artifactstore.ObjectStore) (voicemedia.Plane, error) {
+	if injected != nil {
+		return injected, nil
+	}
+	if !cfg.Voice.MediaEnabled {
+		return nil, nil
+	}
+	if cfg.Voice.RuntimeToken == "" {
+		a.logger.Warn("voice.media_unavailable", "reason", "secret_seed_missing")
+		return nil, nil
+	}
+	service, recordings, err := newVoiceMediaPlane(a.pool, objects, cfg.ArtifactStorageRoot, a.documents, cfg.Voice, func(ctx context.Context) (string, error) {
+		return a.voiceKeys.Effective(ctx, voicekey.Soniox)
+	})
+	if errors.Is(err, voicemedia.ErrMediaToolsMissing) {
+		a.logger.Warn("voice.media_unavailable", "reason", "ffmpeg_missing")
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	a.voiceRecordings = recordings
+	return service, nil
+}
+
+// newVoiceWorkerReconciler asks Node Services to start or stop its voice
+// workers for the keys now in effect and reports whether every required worker
+// is ready to take a job. The request carries no key.
+func newVoiceWorkerReconciler(baseURL, token string) (func(context.Context) (bool, error), error) {
+	client, err := roomagent.NewAgentManagementClient(baseURL, token, &http.Client{Timeout: voiceReconcileTimeout})
+	if err != nil {
+		return nil, fmt.Errorf("configure Node Services voice reconcile: %w", err)
+	}
+	return func(ctx context.Context) (bool, error) {
+		response, err := client.ReconcileVoiceWorkersWithResponse(ctx)
+		if err != nil {
+			return false, err
+		}
+		if response.StatusCode() != http.StatusOK || response.JSON200 == nil {
+			return false, voiceReconcileStatusError{status: response.StatusCode()}
+		}
+		return response.JSON200.Ready, nil
+	}, nil
 }
 
 // addVoiceJobs registers the voice River jobs when the voice media plane has
@@ -52,10 +140,10 @@ func (a *App) addVoiceJobs(features *featureSet) {
 	})
 }
 
-// newVoiceMedia builds voice media over LiveKit, with Soniox archive recovery
-// when Soniox is configured. The recorder's HLS staging files live under
-// stagingRoot.
-func newVoiceMedia(pool *pgxpool.Pool, objects artifactstore.ObjectStore, stagingRoot string, documents *document.Service, cfg config.VoiceConfig) (*voicemedia.Service, *voicemedia.LocalStagingStore, error) {
+// newVoiceMedia builds voice media over LiveKit. Archive recovery reads the
+// Soniox key at each use, so it starts working as soon as a key is saved. The
+// recorder's HLS staging files live under stagingRoot.
+func newVoiceMedia(pool *pgxpool.Pool, objects artifactstore.ObjectStore, stagingRoot string, documents *document.Service, cfg config.VoiceConfig, sonioxKey func(context.Context) (string, error)) (*voicemedia.Service, *voicemedia.LocalStagingStore, error) {
 	liveKitProvider, err := voicemedia.NewLiveKitProvider(voicemedia.LiveKitConfig{
 		APIURL: cfg.LiveKitAPIURL, PublicURL: cfg.LiveKitURL,
 		APIKey: cfg.LiveKitAPIKey, APISecret: cfg.LiveKitAPISecret,
@@ -72,15 +160,8 @@ func newVoiceMedia(pool *pgxpool.Pool, objects artifactstore.ObjectStore, stagin
 		return nil, nil, fmt.Errorf("configure voice media materializer: %w", err)
 	}
 	service := voicemedia.NewWithDocuments(pool, liveKitProvider, materializer, documents)
-	if cfg.SonioxAPIKey != "" {
-		archiveTranscriber, err := voicetranscription.NewSonioxTranscriber(voicetranscription.SonioxConfig{
-			APIKey: cfg.SonioxAPIKey, LanguageHints: voicetranscription.SonioxLanguageHints,
-		})
-		if err != nil {
-			return nil, nil, fmt.Errorf("configure voice transcription: %w", err)
-		}
-		service.SetArchiveTranscriber(archiveTranscriber, voice.NormalizeCaptureTranscript)
-		service.SetArchiveRecoveryConcurrency(config.VoiceArchiveRecoveryConcurrency)
-	}
+	archiveTranscriber := voicetranscription.NewKeyedSonioxTranscriber(sonioxKey, voicetranscription.SonioxConfig{LanguageHints: voicetranscription.SonioxLanguageHints})
+	service.SetArchiveTranscriber(archiveTranscriber, voice.NormalizeCaptureTranscript)
+	service.SetArchiveRecoveryConcurrency(config.VoiceArchiveRecoveryConcurrency)
 	return service, recordings, nil
 }

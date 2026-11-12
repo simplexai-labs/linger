@@ -3,6 +3,8 @@ package voicelive
 import (
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 )
 
 func TestTaskIDRoundTrip(t *testing.T) {
@@ -58,5 +60,26 @@ func TestTaskListGivesTheLatestReport(t *testing.T) {
 	tasks := output["tasks"].([]map[string]any)
 	if tasks[0]["state"] != TaskReported || tasks[0]["latest_report"] != "Scan the QR code to log in to JD" || tasks[1]["state"] != TaskCanceled {
 		t.Fatalf("tasks: %v", tasks)
+	}
+}
+
+func TestCheckTaskOutputPagesReports(t *testing.T) {
+	now := time.Now()
+	long := strings.Repeat("\u00e9", 3000)
+	text := func(report map[string]any) string { return report["text"].(string) }
+	// A report that does not fit in what is left waits for the next page.
+	output := CheckTaskOutput(now, CheckedTask{Offset: 5, Reports: []CheckedActivity{{At: now, Text: long}, {At: now, Text: long}, {At: now, Text: "oldest"}}})
+	reports := output["reports"].([]map[string]any)
+	if len(reports) != 1 || text(reports[0]) != long || reports[0]["truncated"] != nil || output["next_offset"] != 6 {
+		t.Fatalf("reports=%d next_offset=%v", len(reports), output["next_offset"])
+	}
+	// The first report on a page is cut instead, so paging moves on.
+	output = CheckTaskOutput(now, CheckedTask{Reports: []CheckedActivity{{At: now, Text: long + long}}, OlderReports: true})
+	reports = output["reports"].([]map[string]any)
+	if len(reports) != 1 || utf8.RuneCountInString(text(reports[0])) != checkedReportsRunes || reports[0]["truncated"] != true || output["next_offset"] != 1 {
+		t.Fatalf("cut report=%v next_offset=%v", reports[0]["truncated"], output["next_offset"])
+	}
+	if output := CheckTaskOutput(now, CheckedTask{Reports: []CheckedActivity{{At: now, Text: "done"}, {At: now, Text: "started"}}}); output["next_offset"] != nil || len(output["reports"].([]map[string]any)) != 2 {
+		t.Fatalf("a short history is one page: %v", output)
 	}
 }

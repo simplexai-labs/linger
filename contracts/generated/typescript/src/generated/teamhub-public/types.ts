@@ -1429,6 +1429,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/voice-provider-keys/{provider}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider: components["schemas"]["VoiceProvider"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Save the deployment's API key for one voice provider.
+     * @description For deployments without the provider's environment key. TeamHub checks the key with the provider, then stores it encrypted with TEAMHUB_SECRET_ENCRYPTION_KEY. Any signed-in Human may save it; the key is never returned. 400 carries INVALID_REQUEST or VOICE_KEY_REJECTED, 409 VOICE_KEY_FROM_ENVIRONMENT, and 503 VOICE_KEY_STORAGE_UNAVAILABLE, VOICE_PROVIDER_UNAVAILABLE or VOICE_MEDIA_OFF.
+     */
+    put: operations["saveVoiceProviderKey"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/voice-sessions/{voiceSessionId}": {
     parameters: {
       query?: never;
@@ -5919,6 +5941,15 @@ export interface components {
     VoiceSessionCreateRequest: {
       purpose: components["schemas"]["VoiceSessionPurpose"];
     };
+    VoiceProviderKeyStatus: {
+      /**
+       * @description Where the effective key comes from; the environment wins over a stored key.
+       * @enum {string}
+       */
+      source: "none" | "environment" | "stored";
+      /** @description False when the provider's environment variable is set, no secret encryption key is configured, or voice media is off. */
+      can_save: boolean;
+    };
     VoiceMediaPolicy: {
       /** @description Soniox ASR is configured, so Recording, Pocket notes dictation and Voice Mode dictation are available. */
       voice_media_supported: boolean;
@@ -5927,6 +5958,15 @@ export interface components {
       live_supported?: boolean;
       /** @description Whether this tenant may enter live voice mode. */
       live_enabled?: boolean;
+      /** @description The deployment can run voice (TEAMHUB_VOICE_MEDIA=on); clients show voice entries only when true. */
+      voice_available?: boolean;
+      soniox_key?: components["schemas"]["VoiceProviderKeyStatus"];
+      xai_key?: components["schemas"]["VoiceProviderKeyStatus"];
+    };
+    /** @enum {string} */
+    VoiceProvider: "soniox" | "xai";
+    SaveVoiceProviderKeyRequest: {
+      api_key: string;
     };
     VoiceConnectionCredential: {
       /** Format: uri */
@@ -9986,6 +10026,36 @@ export interface operations {
       };
       401: components["responses"]["Unauthenticated"];
       404: components["responses"]["NotFound"];
+    };
+  };
+  saveVoiceProviderKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider: components["schemas"]["VoiceProvider"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SaveVoiceProviderKeyRequest"];
+      };
+    };
+    responses: {
+      /** @description Key status after saving. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VoiceProviderKeyStatus"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      409: components["responses"]["Conflict"];
+      503: components["responses"]["ServiceUnavailable"];
     };
   };
   getVoiceSession: {

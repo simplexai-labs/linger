@@ -14,6 +14,7 @@ const (
 	ToolRenameDocument      = "rename_document"
 	ToolEditDocument        = "edit_document"
 	ToolReplaceDocumentText = "replace_document_text"
+	ToolInsertDocumentImage = "insert_document_image"
 	ToolListComments        = "list_comments"
 	ToolAddComment          = "add_comment"
 	ToolReplyComment        = "reply_comment"
@@ -34,6 +35,7 @@ var DocumentTools = []Tool{
 		Name: ToolCreateDocument,
 		Description: "Create a new document in this room and open it beside the chat, such as meeting notes, a plan, a checklist or a draft the user asks for (“make a doc”, “write this up”). " +
 			"title is one line; content is the whole body in Markdown, written only from what the user said and this conversation; never invent facts, names or numbers. An empty content makes an empty document. " +
+			"To show an image from the user's computer, such as one a task made, write ![alt](./playground/<folder>/<file>) with its path as ls prints it; it is copied into the document. An error with image names the one to fix, and nothing was created. " +
 			"It returns document_id and revision_id. Then say in one short sentence what you wrote and that it is open beside the chat. Change it later with edit_document, replace_document_text or rename_document. " +
 			"An email is open_email_canvas; research and long reports are start_task.",
 		Parameters: objectSchema([]string{"title"}, map[string]any{
@@ -63,11 +65,24 @@ var DocumentTools = []Tool{
 		}),
 	},
 	{
+		Name: ToolInsertDocumentImage,
+		Description: "Put an image from the user's computer, such as one a task made, into a document in this app; it shows in the side panel at once. " + documentTarget +
+			"path is the image under ./playground as ls prints it. after is text copied exactly from the paragraph or heading the image goes below (read it first with read_document), long enough to occur once; leave it out to put the image at the end. " +
+			"To open a document with an image, put it below the title. caption is an optional one-line caption. " +
+			"text_not_found or ambiguous_text: read the document and use longer exact text. When it is in, say in one short sentence where you put it. document_not_editable means the Agent may not edit it.",
+		Parameters: objectSchema([]string{"document_id", "path"}, map[string]any{
+			"document_id": stringProperty("The document to put the image in"),
+			"path":        stringProperty("The image, ./playground/<folder>/<file>"),
+			"after":       stringProperty("Exact text of the paragraph or heading it goes below; empty for the end"),
+			"caption":     stringProperty("An optional one-line caption"),
+		}),
+	},
+	{
 		Name: ToolEditDocument,
 		Description: "Add to a document or canvas in this app, or rewrite all of it, as the user asks; it changes in the side panel at once. " + documentTarget +
 			"command append adds content (Markdown) at the end. command rewrite replaces the whole document with content: all of it in Markdown, keeping what the user did not ask to change. " +
 			"A rewrite needs the revision_id of the text you rewrote: call it without revision_id first, or after document_changed, to get the latest text and revision_id, redo the change on that text and call again. " +
-			"To change one line, use replace_document_text instead. document_has_media (images or files) or document_locked: use append or replace_document_text, or start_task naming the document_id. " +
+			"To change one line, use replace_document_text instead; to add an image, insert_document_image. document_has_media (images or files) or document_locked: use append or replace_document_text, or start_task naming the document_id. " +
 			"For a Gmail canvas use edit_email_canvas instead. When it is changed, say in one short sentence what you changed. document_not_editable means the Agent may not edit it.",
 		Parameters: objectSchema([]string{"document_id", "command", "content"}, map[string]any{
 			"document_id": stringProperty("The document to change"),
@@ -131,6 +146,53 @@ type DocumentArguments struct {
 	ThreadID    string    `json:"thread_id"`
 	Reopen      LooseBool `json:"reopen"`
 	Confirmed   LooseBool `json:"confirmed"`
+	Path        string    `json:"path"`
+	After       string    `json:"after"`
+	Caption     string    `json:"caption"`
+}
+
+// ImageAnchor is the top-level block of a Document's blocks export an image
+// goes below: the one whose text holds after, or the last block when after
+// is empty. problem names what the live model must fix instead.
+func ImageAnchor(export []byte, after string) (blockID, problem string) {
+	var document struct {
+		Blocks []exportBlock `json:"blocks"`
+	}
+	if json.Unmarshal(export, &document) != nil || len(document.Blocks) == 0 {
+		return "", "document_empty"
+	}
+	after = strings.TrimSpace(after)
+	if after == "" {
+		return document.Blocks[len(document.Blocks)-1].ID, ""
+	}
+	var holding, equal []string
+	for _, block := range document.Blocks {
+		text := strings.TrimSpace(blockText(block))
+		if strings.Contains(text, after) {
+			holding = append(holding, block.ID)
+		}
+		if text == after {
+			equal = append(equal, block.ID)
+		}
+	}
+	switch {
+	case len(holding) == 1:
+		return holding[0], ""
+	case len(equal) == 1:
+		return equal[0], ""
+	case len(holding) == 0:
+		return "", "text_not_found"
+	}
+	return "", "ambiguous_text"
+}
+
+// blockText is a block's inline text with its nested blocks' on lines below.
+func blockText(block exportBlock) string {
+	text := inlineText(block.Content)
+	for _, child := range block.Children {
+		text += "\n" + blockText(child)
+	}
+	return text
 }
 
 // DocumentEdit is the native edit operation for a change the live model

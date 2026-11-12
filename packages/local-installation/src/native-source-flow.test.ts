@@ -988,61 +988,112 @@ test("bundled services that do not verify fall back to installing packages", asy
   );
   expect(existsSync(directory)).toBe(false);
 });
-for (const bundled of [true, false])
-  test(`saved voice keys ${bundled ? "start LiveKit and put ffmpeg on PATH" : "stay off without voice tools"}`, async () => {
-    const f = await fixture();
-    vi.mocked(prepareRuntime).mockResolvedValue({
-      code: 0,
-      state: "ready",
-      message: "ready",
-    });
-    await updateUserKeys(path.join(f.home, "instances", "native-voice"), {
+async function installVoice(
+  tools: "bundled" | "absent" | "failed",
+  keys: Record<string, string> = {},
+  f?: Awaited<ReturnType<typeof fixture>>,
+) {
+  f ??= await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  if (Object.keys(keys).length)
+    await updateUserKeys(path.join(f.home, "instances", "native-voice"), keys);
+  const bin = path.join(f.home, "voice", "bin");
+  if (tools === "failed")
+    vi.mocked(prepareNativeVoiceTools).mockRejectedValue(
+      new Error("voice tools download failed"),
+    );
+  else
+    vi.mocked(prepareNativeVoiceTools).mockResolvedValue(
+      tools === "bundled"
+        ? { bin, livekit: path.join(bin, "livekit-server") }
+        : undefined,
+    );
+  const settings = {
+    httpPort: 30000,
+    rtcPort: 30001,
+    apiKey: "APIabcdef123456",
+    apiSecret: "s".repeat(64),
+  };
+  vi.mocked(readLiveKitSettings).mockResolvedValue(settings);
+  const events: string[] = [];
+  await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-voice",
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: (event) => events.push(event.message),
+  });
+  const services = vi
+    .mocked(startNativeProcess)
+    .mock.calls.map(([options]) => options)
+    .filter((options) => options.name !== "postgres");
+  const env = (name: string) =>
+    services.find((options) => options.name === name)!.env;
+  return { f, bin, settings, events: events.join(""), services, env };
+}
+
+for (const keys of [{}, { SONIOX_API_KEY: "soniox-1" }] as Record<
+  string,
+  string
+>[])
+  test(`voice tools start LiveKit and put ffmpeg on PATH ${Object.keys(keys).length ? "with" : "without"} a voice key`, async () => {
+    const { bin, settings, events, services, env } = await installVoice(
+      "bundled",
+      keys,
+    );
+    expect(prepareNativeVoiceTools).toHaveBeenCalled();
+    for (const options of services)
+      expect(JSON.parse(options.settings!).voice).toBe(bin);
+    expect(startNativeLiveKit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executable: path.join(bin, "livekit-server"),
+        settings,
+      }),
+    );
+    for (const name of ["teamhub", "node-services"]) {
+      expect(env(name).PATH!.split(path.delimiter)[0]).toBe(bin);
+      expect(env(name).TEAMHUB_VOICE_MEDIA).toBeUndefined();
+      expect(env(name).LIVEKIT_API_KEY).toBeTruthy();
+    }
+    // A key in user.env passes through unchanged.
+    expect(env("node-services").SONIOX_API_KEY).toBe(
+      "SONIOX_API_KEY" in keys ? "soniox-1" : undefined,
+    );
+    expect(events).not.toContain("soniox-1");
+  });
+
+for (const tools of ["absent", "failed"] as const)
+  test(`voice stays off and the install continues when voice tools are ${tools}`, async () => {
+    const { events, services, env } = await installVoice(tools, {
       SONIOX_API_KEY: "soniox-1",
     });
-    const bin = path.join(f.home, "voice", "bin");
-    vi.mocked(prepareNativeVoiceTools).mockResolvedValue(
-      bundled ? { bin, livekit: path.join(bin, "livekit-server") } : undefined,
-    );
-    const settings = {
-      httpPort: 30000,
-      rtcPort: 30001,
-      apiKey: "APIabcdef123456",
-      apiSecret: "s".repeat(64),
-    };
-    vi.mocked(readLiveKitSettings).mockResolvedValue(settings);
-    const events: string[] = [];
-    await installNativeSource({
-      home: f.home,
-      repo: f.repo,
-      name: "native-voice",
-      setupChoice: "pi",
-      externalComputer: true,
-      signal: new AbortController().signal,
-      onEvent: (event) => events.push(event.message),
-    });
-    const services = vi
-      .mocked(startNativeProcess)
-      .mock.calls.map(([options]) => options)
-      .filter((options) => options.name !== "postgres");
-    const env = services.find(
-      (options) => options.name === "node-services",
-    )!.env;
-    // A key or tools change restarts the services that read them.
     for (const options of services)
-      expect(JSON.parse(options.settings!).voice).toBe(bundled ? bin : "off");
-    if (bundled) {
-      expect(startNativeLiveKit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          executable: path.join(bin, "livekit-server"),
-          settings,
-        }),
-      );
-      expect(env.SONIOX_API_KEY).toBe("soniox-1");
-      expect(env.PATH!.split(path.delimiter)[0]).toBe(bin);
-    } else {
-      expect(startNativeLiveKit).not.toHaveBeenCalled();
-      expect(env.SONIOX_API_KEY).toBe("");
-      expect(events.join("")).toContain("Voice stays off");
-    }
-    expect(events.join("")).not.toContain("soniox-1");
+      expect(JSON.parse(options.settings!).voice).toBe("off");
+    expect(startNativeLiveKit).not.toHaveBeenCalled();
+    expect(env("teamhub").TEAMHUB_VOICE_MEDIA).toBe("off");
+    expect(env("node-services").SONIOX_API_KEY).toBe("soniox-1");
+    expect(events).toContain("Voice stays off");
+    if (tools === "failed")
+      expect(events).toContain("voice tools download failed");
+    expect(events).not.toContain("soniox-1");
   });
+
+test("a changed voice key leaves the voice setting alone", async () => {
+  const first = await installVoice("bundled", { XAI_API_KEY: "xai-1" });
+  vi.mocked(startNativeProcess).mockClear();
+  const second = await installVoice(
+    "bundled",
+    { XAI_API_KEY: "xai-2" },
+    first.f,
+  );
+  const voice = (run: typeof first) =>
+    run.services.map((options) => JSON.parse(options.settings!).voice);
+  expect(voice(second)).toEqual(voice(first));
+  expect(second.env("node-services").XAI_API_KEY).toBe("xai-2");
+});

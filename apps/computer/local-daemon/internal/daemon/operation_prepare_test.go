@@ -479,6 +479,8 @@ func TestOperationPrepareUnadoptedNativeFenceExpires(t *testing.T) {
 
 func testUnadoptedPreparationExpires(t *testing.T, backend *prepareBackend) {
 	t.Helper()
+	// The ready but unadopted preparation reaches its speculative deadline.
+	shortenForTest(t, &operationMCPPrepareTimeout, 500*time.Millisecond)
 	d, stream, command := prepareDaemonFixture(t, backend)
 	if err := d.handleOperationPrepare(t.Context(), stream, command); err != nil {
 		t.Fatal(err)
@@ -504,6 +506,8 @@ func testUnadoptedPreparationExpires(t *testing.T, backend *prepareBackend) {
 }
 
 func TestOperationStartOwnsPrepareBeyondSpeculativeDeadline(t *testing.T) {
+	// The speculative deadline passes after start adopts the preparation.
+	shortenForTest(t, &operationMCPPrepareTimeout, 500*time.Millisecond)
 	release := make(chan struct{})
 	backend := &prepareBackend{prepareStarted: make(chan struct{}), blockPrepare: true, prepareRelease: release}
 	d, stream, prepare := prepareDaemonFixture(t, backend)
@@ -699,6 +703,8 @@ func TestOperationStartRevalidatesAssignmentAfterPrepareWait(t *testing.T) {
 }
 
 func TestOperationStartFallsBackOnlyAfterPrepareDeadlineAndCleanup(t *testing.T) {
+	// The unadopted preparation reaches its speculative deadline.
+	shortenForTest(t, &operationMCPPrepareTimeout, 500*time.Millisecond)
 	backend := &prepareBackend{prepareStarted: make(chan struct{}), blockPrepare: true}
 	d, stream, prepare := prepareDaemonFixture(t, backend)
 	startedAt := time.Now()
@@ -731,6 +737,9 @@ func TestOperationStartFallsBackOnlyAfterPrepareDeadlineAndCleanup(t *testing.T)
 }
 
 func TestPreparedOperationCleanupTimeoutDoesNotAuthorizeFallback(t *testing.T) {
+	// Both the speculative prepare deadline and the cleanup limit expire.
+	shortenForTest(t, &operationMCPPrepareTimeout, 500*time.Millisecond)
+	shortenForTest(t, &operationMCPCleanupLimit, 300*time.Millisecond)
 	release := make(chan struct{})
 	backend := &prepareBackend{
 		prepareStarted: make(chan struct{}),

@@ -67,10 +67,9 @@ INSERT INTO task_meta_messages(id,tenant_id,task_id,agent_actor_id,meta_seq,auth
  VALUES('d-meta','tenant_acme',$2,'actor_acme_official',1,'actor_acme_official','meta','`+mention+`');
 INSERT INTO task_meta_callbacks(task_id,tenant_id,generation,coordinator_actor_id,coordinator_context_key)
  VALUES($2,'tenant_acme',1,'actor_acme_official',$1);
-INSERT INTO task_meta_callback_messages(id,task_id,tenant_id,generation,meta_seq,author_actor_id,body,segments,non_actionable) VALUES
- ('d-callback',$2,'tenant_acme',1,1,'actor_acme_alice','callback','`+mention+`',false),
- ('d-callback-own',$2,'tenant_acme',1,2,'actor_acme_official','callback','[]',false),
- ('d-callback-quiet',$2,'tenant_acme',1,3,'actor_acme_alice','callback','[]',true);`,
+INSERT INTO task_meta_callback_messages(id,task_id,tenant_id,generation,meta_seq,author_actor_id,body,segments) VALUES
+ ('d-callback',$2,'tenant_acme',1,1,'actor_acme_alice','callback','`+mention+`'),
+ ('d-callback-own',$2,'tenant_acme',1,2,'actor_acme_official','callback','[]');`,
 		pgx.QueryExecModeSimpleProtocol, env.contextKey, taskID); err != nil {
 		t.Fatal(err)
 	}
@@ -118,8 +117,28 @@ INSERT INTO task_meta_callback_messages(id,task_id,tenant_id,generation,meta_seq
 		{"private Meta never reaches a Room Context", env.contextKey, "meta:actor_acme_official:" + taskID, "d-meta", "skip", true},
 		{"a Task callback notifies its coordinator", env.contextKey, "taskmeta:" + taskID, "d-callback", "notify", true},
 		{"an AlterEgo report under the shared identity notifies its coordinator", env.contextKey, "taskmeta:" + taskID, "d-callback-own", "notify", false},
-		{"a non-actionable callback is ignored", env.contextKey, "taskmeta:" + taskID, "d-callback-quiet", "ignore", false},
 	})
+	// A report from a Task a call started is the live voice's to tell while
+	// the call holds the Meta; once it ends, the Meta hears its Tasks again.
+	insertRuntimeLiveSession(t, env)
+	if _, err := env.pool.Exec(t.Context(), `INSERT INTO voice_live_tasks(work_item_id,room_id,owner_actor_id,home_room_id,ordinal,voice_session_id,goal,surface)
+ VALUES($1,$2,'actor_acme_alice',$2,1,'voice-handover','Compare prices','workspace')`, taskID, testRuntimeInboxRoom); err != nil {
+		t.Fatal(err)
+	}
+	check(t, []dispositionCase{{"a call's Task report during the call", env.contextKey, "taskmeta:" + taskID, "d-callback", "ignore", true}})
+	// Another user's call in the Room does not tell this Task's owner.
+	seedPeerHumanActor(t, env.pool)
+	if _, err := env.pool.Exec(t.Context(), `UPDATE voice_live_tasks SET owner_actor_id='actor_acme_bob' WHERE work_item_id=$1`, taskID); err != nil {
+		t.Fatal(err)
+	}
+	check(t, []dispositionCase{{"a Task report during another user's call", env.contextKey, "taskmeta:" + taskID, "d-callback", "notify", true}})
+	if _, err := env.pool.Exec(t.Context(), `UPDATE voice_live_tasks SET owner_actor_id='actor_acme_alice' WHERE work_item_id=$1`, taskID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), `UPDATE voice_sessions SET live_lease_until=clock_timestamp()-interval '1 second' WHERE id='voice-handover'`); err != nil {
+		t.Fatal(err)
+	}
+	check(t, []dispositionCase{{"a call's Task report after the call", env.contextKey, "taskmeta:" + taskID, "d-callback", "notify", true}})
 	// A private stream decides only its own Messages.
 	var rows int
 	if err := env.pool.QueryRow(t.Context(), `SELECT count(*) FROM agent_inbox_message_disposition('tenant_acme','actor_acme_official',$1,$2,'d-mention')`, env.contextKey, "taskmeta:"+taskID).Scan(&rows); err != nil || rows != 0 {

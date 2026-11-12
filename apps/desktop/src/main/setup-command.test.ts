@@ -57,25 +57,36 @@ describe("parseSetupCommand", () => {
     expect(
       parseSetupCommand({
         op: "local.start",
-        keys: { composio: " key-0 ", soniox: " key-1 ", xai: "" },
+        keys: { composio: " key-0 " },
       }),
-    ).toEqual({
-      op: "local.start",
-      keys: { composio: "key-0", soniox: "key-1", xai: "" },
-    });
+    ).toEqual({ op: "local.start", keys: { composio: "key-0" } });
+    expect(
+      parseSetupCommand({ op: "local.start", keys: { composio: "" } }),
+    ).toEqual({ op: "local.start", keys: { composio: "" } });
+    // Voice keys are saved in the app, not on the setup page.
+    for (const provider of ["soniox", "xai"])
+      expect(() =>
+        parseSetupCommand({ op: "local.start", keys: { [provider]: "x" } }),
+      ).toThrow();
     expect(() =>
       parseSetupCommand({ op: "local.start", keys: { livekit: "x" } }),
     ).toThrow();
     expect(() =>
-      parseSetupCommand({ op: "local.start", keys: { xai: "a b" } }),
+      parseSetupCommand({ op: "local.start", keys: { composio: "a b" } }),
     ).toThrow();
     expect(() =>
-      parseSetupCommand({ op: "local.start", keys: { xai: "x".repeat(513) } }),
+      parseSetupCommand({
+        op: "local.start",
+        keys: { composio: "x".repeat(513) },
+      }),
     ).toThrow();
     // A rejected key is not repeated in the error.
     let message = "";
     try {
-      parseSetupCommand({ op: "local.start", keys: { xai: "secret value" } });
+      parseSetupCommand({
+        op: "local.start",
+        keys: { composio: "secret value" },
+      });
     } catch (error) {
       message = String(error);
     }

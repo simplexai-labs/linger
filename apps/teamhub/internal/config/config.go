@@ -121,11 +121,17 @@ type PermissionReviewConfig struct {
 
 // VoiceConfig configures voice media.
 type VoiceConfig struct {
-	// XaiAPIKey turns Live Voice Mode on over LiveKit, independently of Soniox.
+	// MediaEnabled is TEAMHUB_VOICE_MEDIA: whether this deployment can run
+	// voice at all (LiveKit and the voice tools). Off keeps voice entirely
+	// off whatever keys exist; without LINGER_SECRET_SEED or ffmpeg the App
+	// runs with voice off too.
+	MediaEnabled bool
+	// XaiAPIKey is the deployment's xAI key for Live. It wins over a key saved
+	// in the product, which then cannot be saved.
 	XaiAPIKey string
-	// SonioxAPIKey turns transcription on: Recording, Voice Mode dictation and
-	// Pocket Notes dictation over LiveKit, with Soniox archive recovery for
-	// recordings.
+	// SonioxAPIKey is the deployment's Soniox key for transcription:
+	// Recording, Voice Mode dictation and Pocket Notes dictation, with archive
+	// recovery for recordings. It wins over a key saved in the product.
 	SonioxAPIKey string
 	// LiveKitURL is the ws(s) origin browsers dial. LiveKitAPIURL is where
 	// TeamHub calls the LiveKit API: LIVEKIT_API_URL when TeamHub reaches
@@ -149,6 +155,9 @@ func Load() (Config, error) {
 	cfg := Default()
 	applyEnvironment(&cfg)
 	if err := applyPermissionReview(&cfg); err != nil {
+		return Config{}, err
+	}
+	if err := applyVoiceMedia(&cfg); err != nil {
 		return Config{}, err
 	}
 	if err := applyDerivedCredentials(&cfg); err != nil {
@@ -241,6 +250,8 @@ func ForTest(edits ...func(*Config)) Config {
 	cfg.ArtifactStorageRoot = filepath.Join(os.TempDir(), "teamhub-artifacts")
 	cfg.DocumentPreviewPublicOrigin = LocalPreviewOrigin(cfg.HTTPAddress)
 	cfg.Jobs.PollInterval = 25 * time.Millisecond
+	// Building voice media needs LiveKit and ffmpeg; a voice test turns it on.
+	cfg.Voice.MediaEnabled = false
 	for _, edit := range edits {
 		edit(&cfg)
 	}
@@ -271,6 +282,7 @@ func Default() Config {
 			AppImportProviderCallBudget: 100,
 		},
 		Voice: VoiceConfig{
+			MediaEnabled:     true,
 			LiveKitURL:       "ws://127.0.0.1:17880",
 			LiveKitAPIKey:    "devkey",
 			LiveKitAPISecret: "devsecret-livekit-voice-local-only-32-bytes",
@@ -326,9 +338,6 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	if (strings.TrimSpace(cfg.Voice.SonioxAPIKey) != "" || strings.TrimSpace(cfg.Voice.XaiAPIKey) != "") && strings.TrimSpace(cfg.Voice.RuntimeToken) == "" {
-		return errors.New("LINGER_SECRET_SEED is required when SONIOX_API_KEY or XAI_API_KEY turns voice media on")
-	}
 	liveKitURL, err := url.Parse(cfg.Voice.LiveKitURL)
 	if err != nil || liveKitURL.Host == "" || liveKitURL.User != nil || (liveKitURL.Path != "" && liveKitURL.Path != "/") || liveKitURL.RawQuery != "" || liveKitURL.Fragment != "" || (liveKitURL.Scheme != "ws" && liveKitURL.Scheme != "wss") {
 		return errors.New("LIVEKIT_URL must be an absolute ws or wss origin without credentials, path, query, or fragment")
@@ -458,6 +467,20 @@ func applyPermissionReview(cfg *Config) error {
 		return errors.New("TEAMHUB_PERMISSION_REVIEW must be true or false")
 	}
 	cfg.PermissionReview.Enabled = enabled
+	return nil
+}
+
+// applyVoiceMedia reads TEAMHUB_VOICE_MEDIA; unset keeps the default, on.
+func applyVoiceMedia(cfg *Config) error {
+	switch strings.TrimSpace(os.Getenv("TEAMHUB_VOICE_MEDIA")) {
+	case "":
+	case "on":
+		cfg.Voice.MediaEnabled = true
+	case "off":
+		cfg.Voice.MediaEnabled = false
+	default:
+		return errors.New("TEAMHUB_VOICE_MEDIA must be on or off")
+	}
 	return nil
 }
 

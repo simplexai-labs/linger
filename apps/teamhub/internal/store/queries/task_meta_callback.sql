@@ -14,11 +14,11 @@ FOR UPDATE;
 
 -- name: CreateTaskMetaCallbackMessage :one
 INSERT INTO task_meta_callback_messages(
-    id,task_id,tenant_id,generation,meta_seq,author_actor_id,body,segments,non_actionable
+    id,task_id,tenant_id,generation,meta_seq,author_actor_id,body,segments
 )
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8)
 RETURNING id,task_id,tenant_id,generation,meta_seq,author_actor_id,body,segments,
-          non_actionable,created_at;
+          created_at;
 
 -- name: SetTaskMetaCallbackThroughSeq :execrows
 UPDATE task_meta_callbacks

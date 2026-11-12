@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { finished } from "node:stream";
 
 import type { RuntimeState } from "../shared/api.js";
 import type {
@@ -163,6 +164,9 @@ export const daemonConfig = (
     state_directory: platformPath.join(options.directory, "state"),
     ...(Object.keys(runtimePaths).length > 0
       ? { runtime_paths: runtimePaths }
+      : {}),
+    ...(config.preferredRuntime
+      ? { preferred_runtime: config.preferredRuntime }
       : {}),
     workspace_grants: config.workspaceGrants.map((g) => ({
       grant_id: g.grantId,
@@ -546,13 +550,20 @@ export const spawnDaemon =
     });
     const lines: ((line: string) => void)[] = [];
     const exits: ((code: number | null, reason?: string) => void)[] = [];
+    let exiting = false;
     let exited: { code: number | null; reason?: string } | undefined;
     let reason: string | undefined;
     const exit = (code: number | null): void => {
-      if (exited) return;
-      exited = { code, ...(reason ? { reason } : {}) };
+      if (exiting) return;
+      exiting = true;
+      const result = { code, ...(reason ? { reason } : {}) };
       log.end();
-      for (const listener of exits) listener(code, reason);
+      // Listeners hear of the exit once the log file holds everything the
+      // daemon wrote, or once the log has failed.
+      finished(log, () => {
+        exited = result;
+        for (const listener of exits) listener(result.code, result.reason);
+      });
     };
     child.stderr.pipe(log, { end: false });
     createInterface({ input: child.stderr }).on("line", (line) => {

@@ -5,9 +5,12 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
+import { teamHubErrorResponse } from "@/test/teamhub-test-server";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { useVoiceMediaPolicy } from "@/features/rooms/voice-control/use-voice-media-policy";
@@ -432,6 +435,79 @@ describe("Voice Mode controls", () => {
     expect(
       screen.queryByRole("button", { name: "Start Voice Mode" }),
     ).toBeNull();
+    expect(transport.open).not.toHaveBeenCalled();
+  });
+});
+
+describe("Voice Mode without a voice key", () => {
+  it("asks for a key when neither exists and enters Live once xAI is saved", async () => {
+    const runtime = createTestTeamHubRuntime();
+    const missing = { source: "none" as const, can_save: true };
+    let saved = false;
+    const liveSessions: unknown[] = [];
+    runtime.server
+      .on("GET", "/v0/tenants/{tenantId}/voice-media-policy", () =>
+        saved
+          ? {
+              voice_available: true,
+              voice_media_supported: false,
+              live_supported: true,
+              live_enabled: true,
+              soniox_key: missing,
+              xai_key: { source: "stored", can_save: true },
+            }
+          : {
+              voice_available: true,
+              voice_media_supported: false,
+              live_supported: false,
+              soniox_key: missing,
+              xai_key: missing,
+            },
+      )
+      .on("PUT", "/v0/voice-provider-keys/{provider}", ({ params }) => {
+        expect(params.provider).toBe("xai");
+        saved = true;
+        return { source: "stored", can_save: true };
+      })
+      .on("POST", "/v0/rooms/{roomId}/voice-sessions", ({ body }) => {
+        liveSessions.push(body);
+        return teamHubErrorResponse(503, "VOICE_PROVIDER_UNAVAILABLE");
+      });
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TeamHubRuntimeProvider runtime={runtime}>
+          <VoiceModeSessionProvider>
+            <BoundControls
+              target={{
+                tenantId: "tenant-northstar",
+                roomId: "room-another-me",
+              }}
+              disabled={false}
+              empty
+              onChange={vi.fn()}
+              onSend={vi.fn()}
+            />
+          </VoiceModeSessionProvider>
+        </TeamHubRuntimeProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Start Voice Mode" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Turn on voice" });
+    expect(
+      within(dialog).getByRole("button", { name: "Soniox" }),
+    ).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "xAI" }));
+    fireEvent.change(within(dialog).getByLabelText("xAI API key"), {
+      target: { value: "xai-key" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save key" }));
+    // Live opens its own session; the dictation transport stays unused.
+    await waitFor(() =>
+      expect(liveSessions).toEqual([{ purpose: "chat_live" }]),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(transport.open).not.toHaveBeenCalled();
   });
 });

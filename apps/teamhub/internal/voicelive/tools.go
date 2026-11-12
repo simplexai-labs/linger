@@ -43,6 +43,10 @@ type Tool struct {
 }
 
 func objectSchema(required []string, properties map[string]any) map[string]any {
+	// The realtime model refuses the whole session for a null required list.
+	if required == nil {
+		required = []string{}
+	}
 	return map[string]any{"type": "object", "properties": properties, "required": required}
 }
 

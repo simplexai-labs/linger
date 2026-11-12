@@ -65,6 +65,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/taskexecution"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicecaptureqa"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicekey"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicemedia"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/workitem"
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
@@ -93,7 +94,7 @@ type App struct {
 	cfg                      config.Config
 	pool                     *pgxpool.Pool
 	queries                  *store.Queries
-	engine                   *gin.Engine
+	handler                  http.Handler
 	logger                   *slog.Logger
 	broker                   *realtime.Broker
 	roomPresence             roomPresenceThrottle
@@ -114,8 +115,12 @@ type App struct {
 	agentManagement          roomagent.AgentManagement
 	localComputers           roomagent.LocalComputerManagement
 	voiceMedia               voicemedia.Plane
-	// voiceTranscription is Soniox ASR: Recording, dictation and Pocket Notes.
-	voiceTranscription             bool
+	// voiceKeys resolves the Soniox and xAI keys at each use.
+	voiceKeys *voicekey.Service
+	// reconcileVoiceWorkers wakes the Node Services voice workers after a key
+	// is saved and reports whether they are ready; nil without a Node Services
+	// link.
+	reconcileVoiceWorkers          func(context.Context) (bool, error)
 	voiceRecordings                *voicemedia.LocalStagingStore
 	accounts                       *account.Lifecycle
 	passwordHashes                 *account.HashLimiter
@@ -205,10 +210,13 @@ type Deps struct {
 	WikiCandidates         document.WikiCandidateGenerator
 	DocumentTextNormalizer documenttext.Normalizer
 	VoiceMedia             voicemedia.Plane
-	PersonalProfile        personalprofile.Generator
-	PersonalInsight        personalinsight.Generator
-	ProactiveEventJudge    proactive.EventJudge
-	PermissionJudge        permissionreview.Judge
+	// VoiceKeyChecker checks a voice provider key before it is saved; nil
+	// asks the provider's API.
+	VoiceKeyChecker     voicekey.Checker
+	PersonalProfile     personalprofile.Generator
+	PersonalInsight     personalinsight.Generator
+	ProactiveEventJudge proactive.EventJudge
+	PermissionJudge     permissionreview.Judge
 	// RealtimeBroker lets a test watch committed-event wakes.
 	RealtimeBroker *realtime.Broker
 	// QueryTracer observes TeamHub database queries.
@@ -290,7 +298,7 @@ func New(ctx context.Context, cfg config.Config, deps Deps) (*App, error) {
 		return nil, err
 	}
 	a.retention = retention.NewSweeper(pool, a.retentionRules())
-	a.engine = a.routes()
+	a.handler = compressResponses(a.routes())
 	if err := a.startRealtimeListener(ctx); err != nil {
 		a.closeBuilt()
 		return nil, err
@@ -508,7 +516,7 @@ func newApp(cfg config.Config, deps Deps, pool *pgxpool.Pool, signingKey []byte,
 // registerFeatures builds every domain feature in dependency order; a
 // feature reads only the ones registered before it.
 func (a *App) registerFeatures(ctx context.Context, cfg config.Config, deps Deps, core coreServices) error {
-	if err := a.registerVoice(cfg.Voice, deps.VoiceMedia, core.artifacts, cfg.ArtifactStorageRoot); err != nil {
+	if err := a.registerVoice(cfg, deps, core.artifacts); err != nil {
 		return err
 	}
 	a.reminders = reminder.New(a.pool)
@@ -894,7 +902,7 @@ func newDatabasePoolConfig(cfg config.Config, tracer pgx.QueryTracer) (*pgxpool.
 }
 
 // Handler returns the HTTP handler with the public routes and authentication middleware.
-func (a *App) Handler() http.Handler { return a.engine }
+func (a *App) Handler() http.Handler { return a.handler }
 
 // StopStreams actively closes existing SSE and Voice Stream connections, but keeps the database and background workers running for the graceful shutdown phase.
 func (a *App) StopStreams() { a.stopStreams() }

@@ -130,10 +130,11 @@ func run(args []string) (resultErr error) {
 	}
 	providerEnvironment := runtimeProviderEnvironment(environment, computer.GatewayToken, computer.CodexAuthFile)
 	discovered, err := provider.Discover(context.Background(), provider.DiscoveryOptions{
-		ConfiguredPaths: computer.RuntimePaths,
-		Runtimes:        computer.EnabledRuntimes,
-		RuntimeHomeRoot: filepath.Join(computer.StateDirectory, "runtime-homes"),
-		Environment:     providerEnvironment,
+		ConfiguredPaths:  computer.RuntimePaths,
+		Runtimes:         computer.EnabledRuntimes,
+		PreferredRuntime: computer.PreferredRuntime,
+		RuntimeHomeRoot:  filepath.Join(computer.StateDirectory, "runtime-homes"),
+		Environment:      providerEnvironment,
 	})
 	if err != nil {
 		return err
@@ -295,6 +296,7 @@ func run(args []string) (resultErr error) {
 		BrowserConnections: browserConnections, Owners: owners,
 		ComputerPermissions: localtools.NewComputerPermissions(permissionOptions),
 		CLICredentials:      cliCredentials,
+		TeamHubCLIBin:       teamhubBin,
 		ModelInvoker: provider.ModelInvoker{
 			TempBase:         operationTempBase,
 			ClaudeConfigRoot: filepath.Join(computer.StateDirectory, "model-invoke", "claude", ".claude"),
@@ -362,10 +364,11 @@ func run(args []string) (resultErr error) {
 		monitorDone <- provider.MonitorRuntimeDiagnostics(ctx, provider.RuntimeMonitorOptions{
 			Initial: discovered,
 			Discovery: provider.DiscoveryOptions{
-				ConfiguredPaths: computer.RuntimePaths,
-				Runtimes:        computer.EnabledRuntimes,
-				RuntimeHomeRoot: filepath.Join(computer.StateDirectory, "runtime-homes"),
-				Environment:     providerEnvironment,
+				ConfiguredPaths:  computer.RuntimePaths,
+				Runtimes:         computer.EnabledRuntimes,
+				PreferredRuntime: computer.PreferredRuntime,
+				RuntimeHomeRoot:  filepath.Join(computer.StateDirectory, "runtime-homes"),
+				Environment:      providerEnvironment,
 			},
 			RefreshInterval:       15 * time.Second,
 			FullRefreshEveryTicks: 4,

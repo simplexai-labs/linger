@@ -147,5 +147,13 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   `notify_river_queue` so the job does not wait for the queue's poll. Such a
   loop is woken on commit and sleeps until its next due time, with a fallback
   of at least one minute; it never polls on a short fixed interval.
+- Voice: `TEAMHUB_VOICE_MEDIA` (`on` by default) builds the voice media plane
+  over LiveKit; `off`, a missing `LINGER_SECRET_SEED`, or missing ffmpeg keep
+  voice off (the last two log `voice.media_unavailable`) without stopping
+  TeamHub.
+  `internal/voicekey` resolves the Soniox and xAI keys at each use, the
+  environment key over one saved in the product (`voice_provider_keys`, sealed
+  with `TEAMHUB_SECRET_ENCRYPTION_KEY`), so a save applies without a restart
+  on every replica. A save wakes the Node Services voice workers best effort.
 - Do not add write-only audit, event, or provenance tables. A new audit table
   needs a named product or compliance reader in the same pull request.

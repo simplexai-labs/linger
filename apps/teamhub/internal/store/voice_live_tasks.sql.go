@@ -238,6 +238,37 @@ func (q *Queries) GetVoiceLiveTask(ctx context.Context, arg GetVoiceLiveTaskPara
 	return i, err
 }
 
+const getVoiceLiveTaskByWorkItem = `-- name: GetVoiceLiveTaskByWorkItem :one
+SELECT work_item_id, room_id, owner_actor_id, home_room_id, ordinal, voice_session_id, goal, surface, canceled_at, created_at FROM voice_live_tasks
+WHERE room_id=$1::text AND owner_actor_id=$2::text
+  AND work_item_id=$3::text
+`
+
+type GetVoiceLiveTaskByWorkItemParams struct {
+	RoomID       string `json:"room_id"`
+	OwnerActorID string `json:"owner_actor_id"`
+	WorkItemID   string `json:"work_item_id"`
+}
+
+// A call names a Task's output folder by its Work Item ID.
+func (q *Queries) GetVoiceLiveTaskByWorkItem(ctx context.Context, arg GetVoiceLiveTaskByWorkItemParams) (VoiceLiveTask, error) {
+	row := q.db.QueryRow(ctx, getVoiceLiveTaskByWorkItem, arg.RoomID, arg.OwnerActorID, arg.WorkItemID)
+	var i VoiceLiveTask
+	err := row.Scan(
+		&i.WorkItemID,
+		&i.RoomID,
+		&i.OwnerActorID,
+		&i.HomeRoomID,
+		&i.Ordinal,
+		&i.VoiceSessionID,
+		&i.Goal,
+		&i.Surface,
+		&i.CanceledAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listVoiceLivePendingApprovals = `-- name: ListVoiceLivePendingApprovals :many
 SELECT decision.id,coalesce(decision.alter_ego_task_id,'')::text AS task_id,decision.kind,decision.view,
   card.version AS card_version
@@ -327,6 +358,51 @@ func (q *Queries) ListVoiceLiveRoomPendingWakes(ctx context.Context, roomID stri
 			&i.AgentActorID,
 			&i.TenantID,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVoiceLiveTaskReports = `-- name: ListVoiceLiveTaskReports :many
+SELECT body,created_at FROM task_meta_callback_messages
+WHERE task_id=$1::text AND tenant_id=$2::text
+ORDER BY meta_seq DESC
+LIMIT $4::int OFFSET $3::int
+`
+
+type ListVoiceLiveTaskReportsParams struct {
+	TaskID    string `json:"task_id"`
+	TenantID  string `json:"tenant_id"`
+	RowOffset int32  `json:"row_offset"`
+	RowLimit  int32  `json:"row_limit"`
+}
+
+type ListVoiceLiveTaskReportsRow struct {
+	Body      string             `json:"body"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// What a voice task sent back to its coordinator, newest first.
+func (q *Queries) ListVoiceLiveTaskReports(ctx context.Context, arg ListVoiceLiveTaskReportsParams) ([]ListVoiceLiveTaskReportsRow, error) {
+	rows, err := q.db.Query(ctx, listVoiceLiveTaskReports,
+		arg.TaskID,
+		arg.TenantID,
+		arg.RowOffset,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVoiceLiveTaskReportsRow{}
+	for rows.Next() {
+		var i ListVoiceLiveTaskReportsRow
+		if err := rows.Scan(&i.Body, &i.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

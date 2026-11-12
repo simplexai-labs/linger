@@ -8,9 +8,16 @@ import { ModalDialog } from "@/components/ui/modal-dialog";
 import { StatusPill } from "@/components/ui/status-pill";
 import { AppLogoTile } from "@/features/apps/app-logo";
 import { externalAppsQueryOptions } from "@/features/apps/connected-apps-queries";
-import { ProviderKeyForm } from "@/features/apps/provider-key-form";
+import { ComposioKeyForm } from "@/features/apps/provider-key-form";
 import { ComposioKeyGuide } from "@/features/apps/provider-key-guide";
+import { LazyVoiceKeyDialog } from "@/features/rooms/voice-control/lazy-voice-key-dialog";
+import { useVoiceMediaPolicy } from "@/features/rooms/voice-control/use-voice-media-policy";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
+import type {
+  TeamHubVoiceProvider,
+  TeamHubVoiceProviderKeyStatus,
+} from "@/features/teamhub/teamhub-types";
+import { useParams } from "react-router";
 
 /** Composio serves its own mark the same way it serves connector logos. */
 const composioLogoUrl = "https://logos.composio.dev/api/composio";
@@ -19,9 +26,18 @@ const composioLogoUrl = "https://logos.composio.dev/api/composio";
 export function ApiKeysSettings() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const [voiceDialog, setVoiceDialog] = useState<TeamHubVoiceProvider>();
+  // Voice keys matter only where this deployment can run voice; the policy
+  // is read per Space, so Security outside a Space shows no voice rows.
+  const tenantId = useParams().tenantId ?? "";
+  const voicePolicy = useVoiceMediaPolicy(tenantId, Boolean(tenantId));
   function open() {
     setNotice(undefined);
     setDialogOpen(true);
+  }
+  function openVoice(provider: TeamHubVoiceProvider) {
+    setNotice(undefined);
+    setVoiceDialog(provider);
   }
 
   return (
@@ -35,6 +51,24 @@ export function ApiKeysSettings() {
       </header>
       <div className="divide-y divide-border rounded-2xl border border-border bg-background">
         <ComposioKeyRow onOpen={open} />
+        {voicePolicy?.voice_available ? (
+          <>
+            <VoiceKeyRow
+              detail="Transcribes meetings, Pocket Notes dictation and Voice Mode dictation."
+              environmentVariable="SONIOX_API_KEY"
+              onOpen={() => openVoice("soniox")}
+              status={voicePolicy.soniox_key}
+              title="Soniox"
+            />
+            <VoiceKeyRow
+              detail="Turns Voice Mode into a live conversation with Grok."
+              environmentVariable="XAI_API_KEY"
+              onOpen={() => openVoice("xai")}
+              status={voicePolicy.xai_key}
+              title="xAI"
+            />
+          </>
+        ) : null}
       </div>
 
       {notice ? (
@@ -63,7 +97,7 @@ export function ApiKeysSettings() {
         >
           <div className="space-y-4 px-5 py-5 text-sm text-app-body">
             <ComposioKeyGuide />
-            <ProviderKeyForm
+            <ComposioKeyForm
               onSaved={() => {
                 setNotice("Composio key saved");
                 setDialogOpen(false);
@@ -72,7 +106,74 @@ export function ApiKeysSettings() {
           </div>
         </ModalDialog>
       ) : null}
+
+      {voiceDialog ? (
+        <LazyVoiceKeyDialog
+          onClose={() => setVoiceDialog(undefined)}
+          onReady={(provider) => {
+            setNotice(`${provider === "soniox" ? "Soniox" : "xAI"} key saved`);
+            setVoiceDialog(undefined);
+          }}
+          policy={voicePolicy}
+          providers={[voiceDialog]}
+          tenantId={tenantId}
+        />
+      ) : null}
     </section>
+  );
+}
+
+/** Where a server key comes from: its environment, a saved key, or nowhere. */
+function KeySourcePill({
+  source,
+}: {
+  source: TeamHubVoiceProviderKeyStatus["source"];
+}) {
+  return source === "environment" ? (
+    <StatusPill>Set by your server</StatusPill>
+  ) : source === "stored" ? (
+    <StatusPill tone="success">Active</StatusPill>
+  ) : (
+    <StatusPill>Not set</StatusPill>
+  );
+}
+
+function VoiceKeyRow({
+  detail,
+  environmentVariable,
+  onOpen,
+  status,
+  title,
+}: {
+  detail: string;
+  environmentVariable: string;
+  onOpen: () => void;
+  status: TeamHubVoiceProviderKeyStatus | undefined;
+  title: string;
+}) {
+  return (
+    <KeyRow
+      actions={
+        status?.can_save ? (
+          <Button
+            aria-label={`${status.source === "stored" ? "Replace" : "Add"} ${title} key`}
+            onClick={onOpen}
+          >
+            {status.source === "stored" ? "Replace key" : "Add key"}
+          </Button>
+        ) : null
+      }
+      detail={
+        status?.source === "environment"
+          ? `${detail} Set with ${environmentVariable} on the server.`
+          : status?.can_save === false
+            ? `${detail} Set ${environmentVariable} on the server, or set TEAMHUB_SECRET_ENCRYPTION_KEY to save the key here.`
+            : detail
+      }
+      logo={<AppLogoTile name={title} />}
+      pill={status ? <KeySourcePill source={status.source} /> : null}
+      title={title}
+    />
   );
 }
 
@@ -125,15 +226,7 @@ function ComposioKeyRow({ onOpen }: { onOpen: () => void }) {
       }
       detail={detail}
       logo={<AppLogoTile name="Composio" url={composioLogoUrl} />}
-      pill={
-        !key ? null : key.source === "environment" ? (
-          <StatusPill>Set by your server</StatusPill>
-        ) : key.source === "stored" ? (
-          <StatusPill tone="success">Active</StatusPill>
-        ) : (
-          <StatusPill>Not set</StatusPill>
-        )
-      }
+      pill={key ? <KeySourcePill source={key.source} /> : null}
       title="Composio"
     />
   );

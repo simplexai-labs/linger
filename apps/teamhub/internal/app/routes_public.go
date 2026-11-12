@@ -213,6 +213,7 @@ func (a *App) publicRoutes() []contractRoute {
 		route(http.MethodPost, "/v0/voice-captures/:captureSessionId/questions/:questionId/task", nil, session, a.sendVoiceCaptureQuestionTask),
 		route(http.MethodPost, "/v0/voice-captures/:captureSessionId/stop", nil, session, a.stopVoiceCapture),
 		route(http.MethodPost, "/v0/voice-captures/:captureSessionId/transcript-recovery/retry", nil, session, a.retryVoiceCaptureTranscript),
+		route(http.MethodPut, "/v0/voice-provider-keys/:provider", nil, session, a.saveVoiceProviderKey),
 		route(http.MethodDelete, "/v0/voice-sessions/:voiceSessionId", nil, session, a.closeVoiceSession),
 		route(http.MethodGet, "/v0/voice-sessions/:voiceSessionId", nil, session, a.getVoiceSession),
 		route(http.MethodPost, "/v0/voice-sessions/:voiceSessionId/captures", nil, session, a.startVoiceCapture),

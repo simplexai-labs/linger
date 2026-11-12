@@ -237,14 +237,104 @@ describe("features that need model packages", () => {
     const service = await startVoiceService({
       logger: { log: vi.fn() } as unknown as JsonLogger,
       http: { mount: () => () => {} } as unknown as HttpHost,
-      environment: { ...environment, XAI_API_KEY: "test" },
+      environment: {
+        ...environment,
+        LINGER_SECRET_SEED: "model-packages-test-seed-0123456789abcdef",
+      },
+      fetch: async () => Response.json({ xai_api_key: "test" }),
       spawnWorker,
       installModels,
     });
-    expect(installModels).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(installModels).toHaveBeenCalledOnce());
     expect(spawnWorker).not.toHaveBeenCalled();
     installed();
-    await vi.waitFor(() => expect(spawnWorker).toHaveBeenCalledWith("live"));
+    await vi.waitFor(() =>
+      expect(spawnWorker).toHaveBeenCalledWith(
+        "live",
+        expect.objectContaining({
+          env: expect.objectContaining({
+            NODE_PATH: expect.stringContaining(
+              models.modelPackagesRoot(environment),
+            ),
+          }),
+        }),
+      ),
+    );
+    const stopping = service.stop();
+    (spawnWorker.mock.results[0]!.value as EventEmitter).emit("exit", 0, null);
+    await stopping;
+  });
+
+  it("download the voice packages at startup before any key exists", async () => {
+    const { startVoiceService } = await import("../src/voice/service.js");
+    const installModels = vi.fn(async () => undefined);
+    const spawnWorker = vi.fn();
+    const service = await startVoiceService({
+      logger: { log: vi.fn() } as unknown as JsonLogger,
+      http: { mount: () => () => {} } as unknown as HttpHost,
+      environment: {
+        ...environment,
+        LINGER_SECRET_SEED: "model-packages-test-seed-0123456789abcdef",
+      },
+      fetch: async () => Response.json({}),
+      spawnWorker,
+      installModels,
+    });
+    await service.reconcile();
+    expect(installModels).toHaveBeenCalledOnce();
+    expect(spawnWorker).not.toHaveBeenCalled();
+    await service.stop();
+  });
+
+  it("log a failed background download and retry it when a key arrives", async () => {
+    const { startVoiceService } = await import("../src/voice/service.js");
+    const models = await load();
+    const installModels = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementation(async () => {
+        const directory = path.join(
+          models.modelPackagesRoot(environment),
+          "@livekit/local-inference-linux-x64-gnu",
+        );
+        await mkdir(directory, { recursive: true });
+        writeFileSync(
+          path.join(directory, ".simplex-model-package.json"),
+          JSON.stringify({ integrity: integrity(vad) }),
+        );
+      });
+    const log = vi.fn();
+    let keys: Record<string, string> = {};
+    const spawnWorker = vi.fn(
+      () =>
+        Object.assign(new EventEmitter(), {
+          kill: vi.fn(() => true),
+        }) as unknown as ChildProcess,
+    );
+    const service = await startVoiceService({
+      logger: { log } as unknown as JsonLogger,
+      http: { mount: () => () => {} } as unknown as HttpHost,
+      environment: {
+        ...environment,
+        LINGER_SECRET_SEED: "model-packages-test-seed-0123456789abcdef",
+      },
+      fetch: async () => Response.json(keys),
+      spawnWorker,
+      installModels,
+    });
+    await vi.waitFor(() =>
+      expect(log).toHaveBeenCalledWith(
+        "warn",
+        "voice.model_install_failed",
+        expect.anything(),
+      ),
+    );
+    keys = { xai_api_key: "test" };
+    await service.reconcile();
+    await vi.waitFor(() =>
+      expect(spawnWorker).toHaveBeenCalledWith("live", expect.anything()),
+    );
+    expect(installModels).toHaveBeenCalledTimes(2);
     const stopping = service.stop();
     (spawnWorker.mock.results[0]!.value as EventEmitter).emit("exit", 0, null);
     await stopping;

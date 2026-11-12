@@ -547,6 +547,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/voice/workers:reconcile": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Reconcile the voice workers against TeamHub's effective provider keys and wait for them
+     * @description Runs a reconcile, or joins the one in flight, then waits until every worker the effective keys require is registered and ready, up to a bounded wait. It never carries keys; workers read keys from TeamHub. `ready=false` means the wait ended first or the keys could not be read.
+     */
+    post: operations["reconcileVoiceWorkers"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/local-computer-tools:call": {
     parameters: {
       query?: never;
@@ -780,7 +800,7 @@ export interface components {
       /** @constant */
       schemaVersion: 1;
       /**
-       * @description Candidate retrieval status. partial with evidence_sections_not_read requires reading relevant candidate sections before judging whether information is insufficient; it is not a failed search.
+       * @description Candidate retrieval status. grounded has candidates and no gaps, partial has candidates and at least one gap, and empty has no candidates. partial with evidence_sections_not_read requires reading relevant candidate sections before judging whether information is insufficient; it is not a failed search.
        * @enum {string}
        */
       status: "grounded" | "partial" | "empty";
@@ -788,7 +808,7 @@ export interface components {
       gaps: components["schemas"]["PersonalKnowledgeEvidenceGap"][];
       /** Format: date-time */
       indexedAt: string | null;
-      /** @description Session facts extracted from Room conversations that matched the query, ranked separately from items so they never displace Raw candidates. Each names the Raw chunk that states it; that chunk remains the original evidence. */
+      /** @description Session facts extracted from conversations, recordings, Pocket Notes and personal mail that matched the query, ranked separately from items so they never displace Raw candidates. Each names the Raw chunk that states it; that chunk remains the original evidence. */
       facts?: components["schemas"]["PersonalKnowledgeSessionFact"][];
       requestId?: string;
     };
@@ -1161,6 +1181,10 @@ export interface components {
         | "durability_invariant_failed";
       document_id: components["schemas"]["DocumentInternalId"];
     };
+    VoiceWorkersReconcileResult: {
+      /** @description Every worker the effective keys require is ready to take a job. */
+      ready: boolean;
+    };
     LocalComputerToolCall: {
       tenant_id: string;
       owner_actor_id: string;
@@ -1168,17 +1192,13 @@ export interface components {
       agent_id: string;
       tool_session_id: string;
       /** @enum {string} */
-      server: "browser" | "task_files";
+      server: "browser" | "playground";
       tool_name: string;
       arguments: {
         [key: string]: unknown;
       };
-      task_scope?: {
-        tenant_id: string;
-        agent_id: string;
-        origin_room_id: string;
-        task_id: string;
-      };
+      /** @description How long the Computer may take; 60000 when omitted. */
+      deadline_ms?: number;
     };
     LocalComputerToolResult: {
       result: {
@@ -2837,6 +2857,27 @@ export interface operations {
         };
       };
       default: components["responses"]["DocumentInternalError"];
+    };
+  };
+  reconcileVoiceWorkers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reconcile ran; whether the required workers are ready. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VoiceWorkersReconcileResult"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
     };
   };
   callLocalComputerTool: {

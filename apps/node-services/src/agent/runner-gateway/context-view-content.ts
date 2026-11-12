@@ -3,12 +3,14 @@ import { constants, type BigIntStats } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import type { SharedTaskScope } from "@linger/wire-contracts/runner-gateway/types";
 import { mediaTypeForExtension } from "@linger/document-files/media-type";
 import { sha256Hex } from "@linger/service-kit/node";
 
 import type { RuntimeViewPlan } from "../executor/workspace.js";
-import { sharedTaskScopeWire } from "./shared-task-scope.js";
+import {
+  sharedTaskScopeWire,
+  type SharedTaskScopeWire,
+} from "./shared-task-scope.js";
 
 const RUNTIME_WORKSPACE = "/workspace";
 const MAX_FILE_COUNT = 10_000;
@@ -50,7 +52,7 @@ export interface ContextViewManifest {
   readonly version: 1;
   readonly execution_context_key: string;
   readonly runtime_instance_id: string;
-  readonly shared_task_scope?: SharedTaskScope;
+  readonly shared_task_scope?: SharedTaskScopeWire;
   readonly mappings: readonly ContextViewMapping[];
   readonly skills: readonly ContextViewSkill[];
 }

@@ -36,6 +36,7 @@ type storedRuntimeDiagnostic struct {
 		IsDefault              bool     `json:"is_default"`
 	} `json:"models"`
 	ModelCatalogError json.RawMessage `json:"model_catalog_error"`
+	Preferred         bool            `json:"preferred"`
 }
 
 type storedWorkspaceGrant struct {
@@ -168,6 +169,25 @@ func projectStoredRuntimes(raw []byte) ([]httpapi.LocalComputerRuntime, error) {
 		return strings.Compare(string(left.Type), string(right.Type))
 	})
 	return runtimes, nil
+}
+
+// storedPreferredRuntime is the Runtime the Computer reports as the one its
+// person chose at installation, or "" when it reports none.
+func storedPreferredRuntime(raw []byte) (string, error) {
+	active, err := agentruntimestate.ActiveLocalRuntimeDiagnostics(raw)
+	if err != nil {
+		return "", err
+	}
+	var diagnostics []storedRuntimeDiagnostic
+	if err := json.Unmarshal(active, &diagnostics); err != nil {
+		return "", err
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Preferred {
+			return diagnostic.Type, nil
+		}
+	}
+	return "", nil
 }
 
 func storedRuntimeModels(diagnostic storedRuntimeDiagnostic) []httpapi.AgentModel {

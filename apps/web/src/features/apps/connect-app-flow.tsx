@@ -13,7 +13,7 @@ import type {
 import { AppLogoTile } from "./app-logo";
 import { externalAppsQueryOptions } from "./connected-apps-queries";
 import { openOAuthUrl } from "./oauth-popup";
-import { ProviderKeyForm } from "./provider-key-form";
+import { ComposioKeyForm } from "./provider-key-form";
 import { ComposioKeyGuide } from "./provider-key-guide";
 import {
   isComposioKeyRejected,
@@ -153,7 +153,7 @@ export function ConnectAppStatus({
             ) : flow.canSaveKey ? (
               <>
                 <ComposioKeyGuide />
-                <ProviderKeyForm onSaved={flow.keySaved} />
+                <ComposioKeyForm onSaved={flow.keySaved} />
               </>
             ) : flow.keyRejected ? (
               <p className="text-app-muted">

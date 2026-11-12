@@ -478,7 +478,7 @@ func TestCodexUnsentRequestLeavesNothingPending(t *testing.T) {
 }
 
 func TestCodexToolOutputTokenLimitFollowsContextWindow(t *testing.T) {
-	for window, want := range map[int]int{0: 12000, -1: 12000, 32768: 4000, 64896: 4056, 131072: 8192, 192000: 12000, 1048576: 12000} {
+	for window, want := range map[int]int{0: 12000, -1: 12000, 16384: 4000, 32768: 4915, 64896: 9734, 131072: 19660, 166667: 25000, 1048576: 25000} {
 		if got := toolOutputTokenLimit(window); got != want {
 			t.Fatalf("window %d: limit %d, want %d", window, got, want)
 		}
@@ -489,9 +489,9 @@ func TestCodexToolOutputTokenLimitFollowsContextWindow(t *testing.T) {
 	if large := codexBindingFingerprint("/home", "", spec); large == small {
 		t.Fatal("a different tool output limit must rebind the thread")
 	}
-	spec.ContextWindow = 0
-	if unknown := codexBindingFingerprint("/home", "", spec); unknown != codexBindingFingerprint("/home", "", RunSpec{Dir: "/work", Model: "local", ContextWindow: 400000}) {
-		t.Fatal("windows that keep the global limit must keep the thread")
+	spec.ContextWindow = 400000
+	if capped := codexBindingFingerprint("/home", "", spec); capped != codexBindingFingerprint("/home", "", RunSpec{Dir: "/work", Model: "local", ContextWindow: 1048576}) {
+		t.Fatal("windows that keep the same limit must keep the thread")
 	}
 }
 

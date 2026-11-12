@@ -20,6 +20,12 @@ ORDER BY task.created_at DESC LIMIT 1;
 SELECT * FROM voice_live_tasks
 WHERE room_id=sqlc.arg(room_id)::text AND owner_actor_id=sqlc.arg(owner_actor_id)::text AND ordinal=sqlc.arg(ordinal)::int;
 
+-- name: GetVoiceLiveTaskByWorkItem :one
+-- A call names a Task's output folder by its Work Item ID.
+SELECT * FROM voice_live_tasks
+WHERE room_id=sqlc.arg(room_id)::text AND owner_actor_id=sqlc.arg(owner_actor_id)::text
+  AND work_item_id=sqlc.arg(work_item_id)::text;
+
 -- name: CancelVoiceLiveTask :execrows
 UPDATE voice_live_tasks SET canceled_at=clock_timestamp()
 WHERE work_item_id=sqlc.arg(work_item_id)::text AND canceled_at IS NULL;
@@ -152,3 +158,10 @@ WHERE decision.alter_ego_task_id=ANY(sqlc.arg(task_ids)::text[])
   AND (decision.expires_at IS NULL OR decision.expires_at>clock_timestamp())
   AND decision.kind IN ('connector_write','runtime_permission','agent_change')
 ORDER BY decision.created_at,decision.id;
+
+-- name: ListVoiceLiveTaskReports :many
+-- What a voice task sent back to its coordinator, newest first.
+SELECT body,created_at FROM task_meta_callback_messages
+WHERE task_id=sqlc.arg(task_id)::text AND tenant_id=sqlc.arg(tenant_id)::text
+ORDER BY meta_seq DESC
+LIMIT sqlc.arg(row_limit)::int OFFSET sqlc.arg(row_offset)::int;

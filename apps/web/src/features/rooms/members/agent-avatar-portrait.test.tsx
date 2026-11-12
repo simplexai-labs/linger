@@ -5,14 +5,18 @@ import { figureKey } from "./agent-avatar";
 import { AgentAvatarPortrait } from "./agent-avatar-portrait";
 
 const animation = vi.hoisted(() => {
-  const listeners = new Set<() => void>();
+  // Like Lottie, destroy() drops the listener table, so an unsubscribe called
+  // after destroy() throws.
+  let listeners: Set<() => void> | null = new Set();
   const item = {
     addEventListener: vi.fn((_name: string, listener: () => void) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
+      listeners!.add(listener);
+      return () => listeners!.delete(listener);
     }),
     currentFrame: 0,
-    destroy: vi.fn(),
+    destroy: vi.fn(() => {
+      listeners = null;
+    }),
     firstFrame: 0,
     isPaused: true,
     play: vi.fn(() => {
@@ -27,12 +31,21 @@ const animation = vi.hoisted(() => {
     complete() {
       item.isPaused = true;
       item.currentFrame = 83;
-      listeners.forEach((listener) => listener());
+      listeners?.forEach((listener) => listener());
+    },
+    /** A fresh item for each loadAnimation, as Lottie returns. */
+    reset() {
+      listeners = new Set();
     },
   };
   return item;
 });
-const loadAnimation = vi.hoisted(() => vi.fn(() => animation));
+const loadAnimation = vi.hoisted(() =>
+  vi.fn(() => {
+    animation.reset();
+    return animation;
+  }),
+);
 vi.mock("lottie-web/build/player/lottie_light", () => ({
   default: { loadAnimation },
 }));
