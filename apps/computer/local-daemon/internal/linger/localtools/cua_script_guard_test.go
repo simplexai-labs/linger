@@ -102,6 +102,37 @@ func TestScriptGuardPacesInputsForTheComputersChrome(t *testing.T) {
 	}
 }
 
+// A paced input reaches the driver after its pause, so a read the script
+// makes during that pause, beside an input it did not await, shows the page
+// before the input and is not returned; a read after the input is.
+func TestScriptGuardDropsAReadThatAnInputOverlaps(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	dir := t.TempDir()
+	harness := filepath.Join(dir, "harness.mjs")
+	if err := os.WriteFile(harness, []byte(guardHarness), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ body, want string }{
+		{`const app = await cua.getApp({pid: 4}); const click = app.click(1); await app.getState({query: "rows"}); await click; return "done";`, `"result":"done"`},
+		{`const app = await cua.getApp({pid: 4}); await app.click(1); await app.getState({query: "rows"}); return "done";`, `"result":{"__computer_reads":[`},
+	} {
+		script := filepath.Join(dir, "script.js")
+		if err := os.WriteFile(script, []byte(guardedScript(`{}`, tc.body, 42, 2, 0)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out, err := exec.Command(node, harness, script).CombinedOutput()
+		if err != nil {
+			t.Fatalf("node: %v\n%s", err, out)
+		}
+		if got := string(out); !strings.Contains(got, tc.want) || !strings.Contains(got, "sleep:paced") {
+			t.Fatalf("script %s: got %s, want %s", tc.body, got, tc.want)
+		}
+	}
+}
+
 // In the Computer's own browser a script types with a short gap between
 // characters unless it names one, and one fixed wait lasts at most
 // scriptSleepLimit: pages are waited for with app.waitFor.

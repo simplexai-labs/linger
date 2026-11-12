@@ -398,8 +398,9 @@ of recent reads and moves an Agent's element token, in an input or written
 into a script, to the current snapshot when its row reads the same there.
 A script's reads after its last input count too: the script guard returns
 them beside the script's value, and the Daemon takes them out of the result.
-Only the window
-the task opened with `launch_app` is held. A script that names no window in
+A read that started before an input finished, such as one beside an input
+the script did not await, does not count. Only the windows
+the task opened with `launch_app` are held, each to its own tab count. A script that names no window in
 its `args` is taken to drive that window; a script to another app is neither
 paced nor held, and no script may open an app or URL. The browser
 window is the largest window whose tab strip reads: a starting Chrome can list

@@ -229,13 +229,11 @@ type operation struct {
 	chromeInputs  int
 	chromeBlocked string
 	chromeSites   map[string]bool
-	// chromeTabs is the tab count of the Computer's own browser after this
-	// task's last input there, and chromePID and chromeWindow the browser
-	// and window this task opened with launch_app; see checkAgentChromeTabs.
-	// chromeTitle is the front tab's title read with chromeTabs, from
-	// launch_app on. Guarded by mu.
-	chromeTabs   int
-	chromeTitle  string
+	// chromeHeld holds each window this task opened with launch_app to
+	// what it showed after the task's last input there, chromePID is the
+	// browser they belong to and chromeWindow the latest of them; see
+	// checkAgentChromeTabs. Guarded by mu.
+	chromeHeld   map[float64]heldTabs
 	chromePID    int
 	chromeWindow float64
 	closeOnce    sync.Once

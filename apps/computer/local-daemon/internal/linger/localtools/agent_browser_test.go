@@ -21,7 +21,7 @@ func TestCountTabsReadsChromeEdgeAndFirefoxStrips(t *testing.T) {
 		}
 	}
 	// A page's own radio buttons are not tabs.
-	if got := countTabs("- [9] AXRadioButton \"Small\"\n- [10] AXRadioButton \"Large\"\n- [11] AXButton \"Close\" [actions=[press]]"); got != 1 {
+	if got, _ := tabStrip("- [9] AXRadioButton \"Small\"\n- [10] AXRadioButton \"Large\"\n- [11] AXButton \"Close\" [actions=[press]]"); got != 1 {
 		t.Errorf("page radios: %d tabs, want 1", got)
 	}
 }
@@ -82,5 +82,27 @@ func TestSharedWindowsKeepEveryWindowOfTheBrowser(t *testing.T) {
 	}
 	if safari, ok := m.sharedWindowOf(7); !ok || safari.latest() != 3 {
 		t.Fatalf("safari=%+v ok=%v, want Safari's window kept apart", safari, ok)
+	}
+}
+
+// Each window a task opened stays held to its own tabs after it opens
+// another, and an input that names no window goes to the latest one.
+func TestAgentChromeHoldsEachWindowTheTaskOpened(t *testing.T) {
+	c := &cuaSession{op: &operation{}}
+	c.holdAgentChromeWindow(42, 9, 2, "Shop")
+	c.holdAgentChromeWindow(42, 13, 1, "News")
+	if _, id, held, ok := c.agentChromeTabWindow(float64(42), float64(9)); !ok || id != 9 || held != (heldTabs{count: 2, title: "Shop"}) {
+		t.Fatalf("first window id=%v held=%+v ok=%v, want its own tabs", id, held, ok)
+	}
+	if _, id, held, ok := c.agentChromeTabWindow(float64(42), nil); !ok || id != 13 || held.count != 1 {
+		t.Fatalf("no window id=%v held=%+v ok=%v, want the latest", id, held, ok)
+	}
+	if _, _, _, ok := c.agentChromeTabWindow(float64(42), float64(5)); ok {
+		t.Fatal("a window the task did not open is held")
+	}
+	// A browser started again runs as another pid: no earlier window is held.
+	c.holdAgentChromeWindow(77, 3, 1, "Home")
+	if _, _, _, ok := c.agentChromeTabWindow(float64(42), float64(9)); ok {
+		t.Fatal("a window of the earlier browser is still held")
 	}
 }

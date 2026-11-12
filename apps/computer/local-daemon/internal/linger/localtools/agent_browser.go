@@ -248,9 +248,7 @@ func (c *cuaSession) launchAgentSafari(ctx context.Context, b agentBrowser, urls
 		}
 	}
 	tabs, title, _ := c.agentChromeTabsAndTitle(ctx, pid, window.WindowID, 0)
-	c.op.mu.Lock()
-	c.op.chromeTabs, c.op.chromeTitle, c.op.chromePID, c.op.chromeWindow = tabs, title, pid, window.WindowID
-	c.op.mu.Unlock()
+	c.holdAgentChromeWindow(pid, window.WindowID, tabs, title)
 	note := "This is the Computer's own window in the user's Safari. Safari has no separate profile, so this window has the user's Safari sign-ins; work only in this window, never in the user's other Safari windows. It works while other windows cover it, but only on the desktop (Space) the user is on. Keys without an element go to this window in the background. Type into a page field with type_text and the field's element_token. Move between pages as a person does: through the page's search box, menus and links, back with cmd+[; never type an address into the address bar. Close a tab with its tab's close action, not cmd+w."
 	if started {
 		note = "Opened a new Safari window for the Computer. " + note
@@ -416,9 +414,7 @@ func (c *cuaSession) launchEverydayChrome(ctx context.Context, b agentBrowser, u
 	// list_windows gives the front tab's title, so the first input reports
 	// only a change it made. A title that moved on since then costs the
 	// first input's check one read of the strip.
-	c.op.mu.Lock()
-	c.op.chromeTabs, c.op.chromeTitle, c.op.chromePID, c.op.chromeWindow = tabs, window.Title, pid, window.WindowID
-	c.op.mu.Unlock()
+	c.holdAgentChromeWindow(pid, window.WindowID, tabs, window.Title)
 	note := "This is the Computer's own window in the user's everyday Chrome, with the user's sign-ins; work only in this window, never in the user's other Chrome windows. It works while other windows cover it, but only on the desktop (Space) the user is on. The user's Chrome takes no keys from the Computer, because a key could reach the window the user is typing in: fill a field with set_value, press the page's own buttons, such as its search button, and go back through the page's links. Close a tab with the Close button of its tab; closing the window's last tab closes the window. If a site asks to sign in, ask the user to sign in once in this window."
 	if restored {
 		note = "Started the user's Chrome again with their windows and tabs. " + note
@@ -436,6 +432,7 @@ func (c *cuaSession) launchEverydayChrome(ctx context.Context, b agentBrowser, u
 // finds its window. Windows that stay ambiguous are refused.
 func (c *cuaSession) everydayChromeWindow(ctx context.Context, b agentBrowser, pid int, before map[float64]bool, site string) (listedWindow, int, error) {
 	var seen time.Time
+	var candidate float64
 	for deadline := time.Now().Add(sharedBrowserWindowWait); ; {
 		windows, err := c.appWindows(ctx, pid)
 		if err != nil {
@@ -451,7 +448,14 @@ func (c *cuaSession) everydayChromeWindow(ctx context.Context, b agentBrowser, p
 				matching = append(matching, w)
 			}
 		}
-		if len(fresh) > 0 && seen.IsZero() {
+		// The wait counts from when the lone candidate showed: one that
+		// left, or another in its place, starts it again.
+		switch {
+		case len(fresh) == 0:
+			seen = time.Time{}
+		case len(fresh) == 1 && fresh[0].WindowID != candidate:
+			seen, candidate = time.Now(), fresh[0].WindowID
+		case seen.IsZero():
 			seen = time.Now()
 		}
 		settled := !seen.IsZero() && time.Since(seen) >= everydayChromeSettle

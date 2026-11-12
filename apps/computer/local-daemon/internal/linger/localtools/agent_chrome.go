@@ -196,9 +196,7 @@ func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls
 	m.agentChromePID, m.agentChromeChecked = pid, time.Now()
 	m.mu.Unlock()
 	tabs, title, _ := c.agentChromeTabsAndTitle(ctx, pid, window.WindowID, 0)
-	c.op.mu.Lock()
-	c.op.chromeTabs, c.op.chromeTitle, c.op.chromePID, c.op.chromeWindow = tabs, title, pid, window.WindowID
-	c.op.mu.Unlock()
+	c.holdAgentChromeWindow(pid, window.WindowID, tabs, title)
 	opened := "No URL was opened, so no tab is this task's."
 	if len(urls) > 0 {
 		opened = "The last one is this task's and in front; pass tabs to a Skill script that checks it."
@@ -623,15 +621,10 @@ func (c *cuaSession) agentChromeTabsAndTitle(ctx context.Context, pid int, windo
 	return count, state.Structured.Title, close
 }
 
-// countTabs counts the tab rows of a browser window's tree: a radio button
-// outside the page that holds a button, its Close button.
-func countTabs(tree string) int {
-	count, _ := tabStrip(tree)
-	return count
-}
-
-// tabStrip is countTabs with the label of a tab's Close button, which follows
-// the user's language; it is empty for a Safari tab, which has none.
+// tabStrip counts the tab rows of a browser window's tree, each a radio
+// button outside the page that holds a button, its Close button, and returns
+// the label of that button, which follows the user's language; it is empty
+// for a Safari tab, which has none.
 func tabStrip(tree string) (count int, close string) {
 	rows := strings.Split(tree, "\n")
 	indent := func(row string) int { return len(row) - len(strings.TrimLeft(row, " ")) }
@@ -696,22 +689,45 @@ func (c *cuaSession) agentChromeWindowTitle(ctx context.Context, pid int, window
 	return ""
 }
 
-// agentChromeTabWindow names the window whose tabs hold the task: the one
-// it opened with launch_app, when an input goes to that browser and names
-// no other window. An input to another app or window, such as one of the
-// user's own Safari windows, is not held.
-func (c *cuaSession) agentChromeTabWindow(pid, window any) (int, float64, bool) {
+// heldTabs is what a window the task opened with launch_app showed after
+// the task's last input there: its tab count and its front tab's title. A
+// count of 0 holds nothing, as for a strip that could not be read.
+type heldTabs struct {
+	count int
+	title string
+}
+
+// holdAgentChromeWindow makes window, in the browser that runs as pid, the
+// task's latest window, held to tabs and title. A window the task opened
+// before stays held to its own tabs, so going back to it keeps its check;
+// a browser that runs as another pid holds none of them.
+func (c *cuaSession) holdAgentChromeWindow(pid int, window float64, tabs int, title string) {
 	c.op.mu.Lock()
-	own, ownWindow := c.op.chromePID, c.op.chromeWindow
-	c.op.mu.Unlock()
+	defer c.op.mu.Unlock()
+	if c.op.chromePID != pid || c.op.chromeHeld == nil {
+		c.op.chromeHeld = map[float64]heldTabs{}
+	}
+	c.op.chromeHeld[window] = heldTabs{count: tabs, title: title}
+	c.op.chromePID, c.op.chromeWindow = pid, window
+}
+
+// agentChromeTabWindow names the window whose tabs hold the task: one it
+// opened with launch_app, when an input goes to that browser, or its latest
+// such window when the input names none. An input to another app or window,
+// such as one of the user's own Safari windows, is not held.
+func (c *cuaSession) agentChromeTabWindow(pid, window any) (int, float64, heldTabs, bool) {
+	c.op.mu.Lock()
+	defer c.op.mu.Unlock()
+	own, id := c.op.chromePID, c.op.chromeWindow
 	number, ok := pid.(float64)
 	if !ok || own == 0 || int(number) != own {
-		return 0, 0, false
+		return 0, 0, heldTabs{}, false
 	}
-	if id, ok := window.(float64); ok && id != ownWindow {
-		return 0, 0, false
+	if named, ok := window.(float64); ok {
+		id = named
 	}
-	return own, ownWindow, true
+	held, ok := c.op.chromeHeld[id]
+	return own, id, held, ok
 }
 
 // checkAgentChromeTabs holds the task to the tabs it left: the Computer's
@@ -722,14 +738,9 @@ func (c *cuaSession) agentChromeTabWindow(pid, window any) (int, float64, bool) 
 // held. The strip is read only when the window's title, which list_windows
 // gives without a read, differs from the front tab's title after that input.
 func (c *cuaSession) checkAgentChromeTabs(ctx context.Context, pid, window any) error {
-	c.op.mu.Lock()
-	want, title := c.op.chromeTabs, c.op.chromeTitle
-	c.op.mu.Unlock()
-	if want == 0 {
-		return nil
-	}
-	number, id, ok := c.agentChromeTabWindow(pid, window)
-	if !ok {
+	number, id, held, ok := c.agentChromeTabWindow(pid, window)
+	want, title := held.count, held.title
+	if !ok || want == 0 {
 		return nil
 	}
 	if title != "" && c.agentChromeWindowTitle(ctx, number, id) == title {
@@ -742,7 +753,7 @@ func (c *cuaSession) checkAgentChromeTabs(ctx context.Context, pid, window any) 
 	if got == 0 || got == want {
 		if got > 0 {
 			c.op.mu.Lock()
-			c.op.chromeTitle = front
+			c.op.chromeHeld[id] = heldTabs{count: want, title: front}
 			c.op.mu.Unlock()
 		}
 		return nil
@@ -763,18 +774,17 @@ func (c *cuaSession) checkAgentChromeTabs(ctx context.Context, pid, window any) 
 // keeps the read whole: after a script whose reads the Agent may act on, a
 // bounded read would drop their rows from Cua's snapshot.
 func (c *cuaSession) recordAgentChromeTabs(ctx context.Context, pid, window any, full bool) string {
-	c.op.mu.Lock()
-	before, title := c.op.chromeTabs, c.op.chromeTitle
-	c.op.mu.Unlock()
-	if before == 0 {
+	number, id, held, ok := c.agentChromeTabWindow(pid, window)
+	before, title := held.count, held.title
+	if !ok || before == 0 {
 		return ""
 	}
-	got, front, close := c.settledAgentChromeTabs(ctx, pid, window, full, before)
+	got, front, close := c.settledAgentChromeTabs(ctx, number, id, full, before)
 	if got == 0 {
 		return ""
 	}
 	c.op.mu.Lock()
-	c.op.chromeTabs, c.op.chromeTitle = got, front
+	c.op.chromeHeld[id] = heldTabs{count: got, title: front}
 	c.op.mu.Unlock()
 	switch {
 	case got != before && front == title:
@@ -801,11 +811,7 @@ func (c *cuaSession) recordAgentChromeTabs(ctx context.Context, pid, window any,
 // a moment after the input that opened or closed it returns, and the next
 // input's pause already covers that wait. The count is 0 when the strip
 // cannot be read.
-func (c *cuaSession) settledAgentChromeTabs(ctx context.Context, pid, window any, full bool, before int) (int, string, string) {
-	number, id, ok := c.agentChromeTabWindow(pid, window)
-	if !ok {
-		return 0, "", ""
-	}
+func (c *cuaSession) settledAgentChromeTabs(ctx context.Context, number int, id float64, full bool, before int) (int, string, string) {
 	depth := agentChromeTabDepth
 	if full {
 		depth = 0

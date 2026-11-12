@@ -2,15 +2,10 @@ package localtools
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"io"
 	"net"
 	"net/http"
@@ -124,35 +119,6 @@ func runToolFixture(mode string) {
 		case "tools/list":
 			result = map[string]any{"tools": []tool{{Name: "click", InputSchema: json.RawMessage(`{"additionalProperties":false,"properties":{"session":{"type":"string"}},"required":["session"],"type":"object"}`)}, {Name: "browser_snapshot", InputSchema: json.RawMessage(`{"additionalProperties":false,"properties":{},"type":"object"}`)}}}
 		case "tools/call":
-			if strings.HasPrefix(mode, "pages") && request.Params.Name != "start_session" && request.Params.Name != "end_session" && request.Params.Name != "check_permissions" {
-				// A picture viewer: page k shows one white pixel at (10+2k, 6),
-				// and keys past page 2 change nothing. Mode pages-refused
-				// refuses the second key.
-				marker := os.Getenv("LINGER_LOCAL_TOOL_MARKER")
-				data, _ := os.ReadFile(marker)
-				presses := strings.Count(string(data), `"name":"press_key"`)
-				result = map[string]any{"content": []any{}}
-				switch request.Params.Name {
-				case "press_key":
-					f, _ := os.OpenFile(marker, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-					_ = json.NewEncoder(f).Encode(request.Params)
-					_ = f.Close()
-					if mode == "pages-hang" {
-						// The key never completes, so its outcome stays unknown.
-						continue
-					}
-					if mode == "pages-refused" && presses == 1 {
-						result = map[string]any{"isError": true, "content": []any{map[string]string{"type": "text", "text": "off_space_or_ax_unresolved"}}}
-					}
-				case "get_window_state":
-					picture := image.NewRGBA(image.Rect(0, 0, 40, 30))
-					picture.Set(10+2*min(presses, 2), 6, color.White)
-					var encoded bytes.Buffer
-					_ = png.Encode(&encoded, picture)
-					result = map[string]any{"content": []any{map[string]string{"type": "image", "mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(encoded.Bytes())}}}
-				}
-				break
-			}
 			if strings.HasPrefix(mode, "tabs") && request.Params.Name != "start_session" && request.Params.Name != "end_session" && request.Params.Name != "check_permissions" {
 				// The Computer's Chrome: one window, where cmd+t adds a tab and
 				// cmd+w closes one unless mode tabs-refused refuses it, and each
@@ -1102,13 +1068,13 @@ func TestLocalToolCuaMacAgentChromeStopsWhenSomeoneElseChangesTheTabs(t *testing
 	agentChromePID = func(context.Context, string) (int, string, error) { return 42, "--mute-audio", nil }
 	t.Cleanup(func() { agentChromePID = original })
 	c.op.manager.agentChromeOwner = c.op
-	c.op.chromeTabs, c.op.chromePID, c.op.chromeWindow = 1, 42, 9
+	c.holdAgentChromeWindow(42, 9, 1, "")
 	// The task's own cmd+t opens a tab that is the task's.
 	if _, err := c.call(t.Context(), "hotkey", json.RawMessage(`{"pid":42,"window_id":9,"keys":["cmd","t"]}`)); err != nil {
 		t.Fatal(err)
 	}
-	if c.op.chromeTabs != 2 {
-		t.Fatalf("tabs after the task's own tab=%d, want 2", c.op.chromeTabs)
+	if c.op.chromeHeld[9].count != 2 {
+		t.Fatalf("tabs after the task's own tab=%d, want 2", c.op.chromeHeld[9].count)
 	}
 	// A tab someone else opens stops the task before its next input.
 	f, err := os.OpenFile(marker, os.O_APPEND|os.O_WRONLY, 0o600)
@@ -1147,7 +1113,7 @@ func TestLocalToolCuaMacAgentChromeKeepsTabsItsOwnInputChangesLate(t *testing.T)
 	agentChromePID = func(context.Context, string) (int, string, error) { return 42, "--mute-audio", nil }
 	t.Cleanup(func() { agentChromePID = original })
 	c.op.manager.agentChromeOwner = c.op
-	c.op.chromeTabs, c.op.chromePID, c.op.chromeWindow = 1, 42, 9
+	c.holdAgentChromeWindow(42, 9, 1, "")
 	// The click below presses a row of page text, which lists no press.
 	c.snapshots = newSnapshotRows()
 	c.snapshots.record(windowRead{Snapshot: "s1", PID: 42, Window: 9, Tree: `- [1] AXStaticText = "Sort by time"`})
@@ -1163,8 +1129,8 @@ func TestLocalToolCuaMacAgentChromeKeepsTabsItsOwnInputChangesLate(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if c.op.chromeTabs != step.want {
-			t.Fatalf("tabs after the task's own %s=%d, want %d", step.keys, c.op.chromeTabs, step.want)
+		if c.op.chromeHeld[9].count != step.want {
+			t.Fatalf("tabs after the task's own %s=%d, want %d", step.keys, c.op.chromeHeld[9].count, step.want)
 		}
 		if !strings.Contains(string(result), step.note) {
 			t.Fatalf("result after the task's own %s=%s, want note %s", step.keys, result, step.note)
@@ -1200,7 +1166,7 @@ func TestLocalToolCuaMacAgentChromeReadsTheTabStripOnlyAsFarAsItNeeds(t *testing
 	agentChromePID = func(context.Context, string) (int, string, error) { return 42, "--mute-audio", nil }
 	t.Cleanup(func() { agentChromePID = original })
 	c.op.manager.agentChromeOwner = c.op
-	c.op.chromeTabs, c.op.chromeTitle, c.op.chromePID, c.op.chromeWindow = 1, "Tab 0", 42, 9
+	c.holdAgentChromeWindow(42, 9, 1, "Tab 0")
 	reads := func() []string {
 		var got []string
 		for _, call := range fixtureCalls(t, marker) {
@@ -1245,7 +1211,7 @@ func TestLocalToolCuaMacAgentChromeReadsTheTabStripOnlyAsFarAsItNeeds(t *testing
 	// result reports the count without saying the input closed it. Fewer
 	// tabs in a bounded read are proven by whole reads, since a strip split
 	// across the bound would read as fewer too.
-	c.op.chromeTabs = 2
+	c.op.chromeHeld[9] = heldTabs{count: 2, title: "Tab 0"}
 	before = len(reads())
 	result, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`))
 	if err != nil {
@@ -1258,7 +1224,7 @@ func TestLocalToolCuaMacAgentChromeReadsTheTabStripOnlyAsFarAsItNeeds(t *testing
 		t.Fatalf("result=%s, want the neutral note %s", result, note)
 	}
 	// A front tab that changed since the last input is read whole first.
-	c.op.chromeTitle = "Elsewhere"
+	c.op.chromeHeld[9] = heldTabs{count: c.op.chromeHeld[9].count, title: "Elsewhere"}
 	if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -1285,7 +1251,7 @@ func TestLocalToolCuaMacAgentChromeKeepsTabsItsScriptsChange(t *testing.T) {
 	agentChromePID = func(context.Context, string) (int, string, error) { return 42, "--mute-audio", nil }
 	t.Cleanup(func() { agentChromePID = original })
 	c.op.manager.agentChromeOwner = c.op
-	c.op.chromeTabs, c.op.chromePID, c.op.chromeWindow = 1, 42, 9
+	c.holdAgentChromeWindow(42, 9, 1, "")
 	// change writes a tab change to the fixture's record; shown says whether
 	// the next read already shows it, as for a change made between inputs.
 	change := func(keys string, shown bool) {
@@ -1313,8 +1279,8 @@ func TestLocalToolCuaMacAgentChromeKeepsTabsItsScriptsChange(t *testing.T) {
 		if _, err := c.call(t.Context(), "run_script", json.RawMessage(step.script)); err != nil {
 			t.Fatalf("script that sent %s: %v", step.keys, err)
 		}
-		if c.op.chromeTabs != step.want {
-			t.Fatalf("tabs after the script that sent %s=%d, want %d", step.keys, c.op.chromeTabs, step.want)
+		if c.op.chromeHeld[9].count != step.want {
+			t.Fatalf("tabs after the script that sent %s=%d, want %d", step.keys, c.op.chromeHeld[9].count, step.want)
 		}
 		if _, err := c.call(t.Context(), "click", click); err != nil {
 			t.Fatalf("input after the script that sent %s: %v", step.keys, err)
@@ -1351,7 +1317,7 @@ func TestLocalToolCuaMacAgentChromeHoldsOnlyItsOwnWindow(t *testing.T) {
 	agentChromePID = func(context.Context, string) (int, string, error) { return 42, "--mute-audio", nil }
 	t.Cleanup(func() { agentChromePID = original })
 	c.op.manager.agentChromeOwner = c.op
-	c.op.chromeTabs, c.op.chromePID, c.op.chromeWindow = 2, 42, 9
+	c.holdAgentChromeWindow(42, 9, 2, "")
 	// A script to another app while that browser runs is neither paced nor
 	// held to its tabs, though the browser shows another count.
 	if _, err := c.call(t.Context(), "run_script", json.RawMessage(`{"script":"return 1","args":{"pid":99}}`)); err != nil {
@@ -1360,8 +1326,8 @@ func TestLocalToolCuaMacAgentChromeHoldsOnlyItsOwnWindow(t *testing.T) {
 	if calls := fixtureCalls(t, marker); len(calls) == 0 || !strings.Contains(fmt.Sprint(calls[len(calls)-1]), "const limit = 0,") {
 		t.Fatalf("calls=%v, want an unpaced script", calls)
 	}
-	if c.op.chromeTabs != 2 {
-		t.Fatalf("tabs=%d after a script to another app, want 2", c.op.chromeTabs)
+	if c.op.chromeHeld[9].count != 2 {
+		t.Fatalf("tabs=%d after a script to another app, want 2", c.op.chromeHeld[9].count)
 	}
 	// A task stopped by a check opens no URL there either.
 	c.op.chromeBlocked = "captcha"
@@ -2104,8 +2070,8 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 	}
 	// launch_app keeps the front tab's title from list_windows, so the
 	// first input, which changes no tab, reports no change.
-	if c.op.chromeTitle != "Tab 0" {
-		t.Fatalf("front title after launch_app=%q, want Tab 0", c.op.chromeTitle)
+	if got := c.op.chromeHeld[12].title; got != "Tab 0" {
+		t.Fatalf("front title after launch_app=%q, want Tab 0", got)
 	}
 	if result, err := c.call(t.Context(), "set_value", json.RawMessage(`{"pid":42,"window_id":12,"value":"kettle","element_token":"s1:1"}`)); err != nil || strings.Contains(string(result), "tab in front") {
 		t.Fatalf("set_value result=%s err=%v, want no tab note", result, err)
@@ -2212,7 +2178,7 @@ func TestLocalToolCuaMacAgentChromeOpensAFreshWindowForAnUnreadableOne(t *testin
 		t.Fatalf("result=%s, want the note for a started browser", result)
 	}
 	// Typing there is paced at the default speed unless the Agent sets one.
-	c.op.chromeTabs, c.op.chromePID, c.op.chromeWindow = 1, 42, 9
+	c.holdAgentChromeWindow(42, 9, 1, "")
 	if _, err := c.call(t.Context(), "type_text", json.RawMessage(`{"pid":42,"window_id":9,"text":"kettle","element_token":"s1:1"}`)); err != nil {
 		t.Fatal(err)
 	}

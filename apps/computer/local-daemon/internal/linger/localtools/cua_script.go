@@ -69,7 +69,10 @@ var scriptForbidden = []string{"delivery_mode", "foreground", "screenshot_out_fi
 // could not verify in time. A script reads text, so getState takes no
 // screenshot unless the script asks for one: Cua's default captures one per
 // read, which took seconds on a busy page. The guard returns the window reads
-// made after the script's last input beside its value, under scriptReadsKey,
+// made after the script's last input beside its value, under scriptReadsKey:
+// a read that started before an input finished, such as one beside an input
+// the script did not await, is dropped, since it may show the page before
+// that input,
 // for scriptResultReads to take out. It keeps a read by the pid and window_id
 // that Cua puts in every getState and get_window_state result, as in a tool
 // read, so a script read lands on the same window key as the Computer's own. A positive inputLimit paces the script for the
@@ -93,7 +96,7 @@ const keys = Object.keys, names = Object.getOwnPropertyNames, proto = Object.get
 const apply = Reflect.apply, stringify = JSON.stringify, parse = JSON.parse, test = RegExp.prototype.test, then = Promise.prototype.then, slice = Array.prototype.slice;
 const plainProtos = [Object.prototype, Array.prototype, null], real = globalThis.cua;
 const bad = /`+strings.Join(pattern, "|")+`/;
-const limit = `+strconv.Itoa(inputLimit)+`, chrome = `+strconv.Itoa(chrome)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0, reads = [], readChars = 0;
+const limit = `+strconv.Itoa(inputLimit)+`, chrome = `+strconv.Itoa(chrome)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0, reads = [], readChars = 0, inputs = 0;
 const reading = (k, c) => k === "getState" || k === "call" && c[0] === "get_window_state";
 const keep = r => { if (r === null || typeof r !== "object" || typeof r.snapshot_id !== "string" || typeof r.pid !== "number" || typeof r.window_id !== "number") return; const read = {snapshot_id: r.snapshot_id, pid: r.pid, window_id: r.window_id}; for (const f of ["tree_markdown", "tree_diff", "since", "since_status"]) if (typeof r[f] === "string") read[f] = r[f]; const size = (read.tree_markdown || "").length + (read.tree_diff || "").length; reads[reads.length] = read; readChars += size; while (reads.length > `+strconv.Itoa(scriptReadsKept)+` || readChars > `+strconv.Itoa(scriptReadCharacters)+` && reads.length > 0) { const first = reads[0]; readChars -= (first.tree_markdown || "").length + (first.tree_diff || "").length; reads = apply(slice, reads, [1]); } };
 const keyOps = {__proto__: null, hotkey: true, type_text: true, press_key: true}, keyMethods = {__proto__: null, hotkey: true, typeText: true, pressKey: true};
@@ -116,11 +119,11 @@ define(w, k, {enumerable: true, get() { const v = o[k]; if (typeof v !== "functi
 if (limit > 0 && k === "typeText") { const given = c.length > 2 && c[2] !== null && typeof c[2] === "object" ? c[2] : {}; const t = {length: 3}; define(t, 0, {value: c[0]}); define(t, 1, {value: c[1]}); define(t, 2, {value: {delay_ms: `+strconv.Itoa(agentChromeTypeDelay)+`, ...given}}); c = t; }
 if (k === "getState" && (c.length === 0 || c[0] === undefined || c[0] !== null && typeof c[0] === "object" && c[0].include_screenshot === undefined)) { const t = {length: 1}; define(t, 0, {value: {include_screenshot: false, ...(c.length > 0 && c[0] !== undefined ? c[0] : {})}}); c = t; }
 if (limit > 0 && k === "sleep" && o === real && typeof c[0] === "number" && c[0] > `+strconv.Itoa(scriptSleepLimit)+`) { const t = {length: 1}; define(t, 0, {value: `+strconv.Itoa(scriptSleepLimit)+`}); c = t; }
-const run = () => { const r = apply(v, o, c); const seen = x => { if (reading(k, c)) keep(x); return out(x); }; return r !== null && typeof r === "object" && typeof r.then === "function" ? apply(then, r, [seen]) : seen(r); };
+const sends = input(k, c), fence = () => { reads = []; readChars = 0; inputs++; };
+const run = () => { if (sends) fence(); const at = inputs, r = apply(v, o, c); const seen = x => { if (sends) fence(); else if (reading(k, c) && at === inputs) keep(x); return out(x); }; const missed = e => { if (sends) fence(); throw e; }; return r !== null && typeof r === "object" && typeof r.then === "function" ? apply(then, r, [seen, missed]) : seen(r); };
 if (launches(k, c)) throw new Error("COMPUTER_SCRIPT_REFUSED: a script opens no app or URL, so the site checks of launch_app hold and the key rule knows every app the script reaches; call launch_app as its own tool");
 if (keyed(k, c, o)) throw new Error(`+strconv.Quote(everydayChromeKeysRefused)+`);
-if (input(k, c)) { reads = []; readChars = 0; }
-if (limit <= 0 || !input(k, c)) return run();
+if (limit <= 0 || !sends) return run();
 if (++sent > limit) throw new Error("COMPUTER_SCRIPT_INPUT_LIMIT: a script sends at most " + limit + " inputs to the Computer's own browser; return what you have, look at the window, then continue in a new script");
 return apply(then, apply(rest, real, [`+strconv.Itoa(scriptInputPauseMin)+` + floor(random() * `+strconv.Itoa(scriptInputPauseSpan)+`)]), [run]); }; }}); } }
 return freeze(w); };
