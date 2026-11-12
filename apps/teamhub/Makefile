@@ -20,9 +20,10 @@ GOVULNCHECK ?= $(TOOLS_BIN)/govulncheck-$(GOVULNCHECK_VERSION)-$(GO_TOOLCHAIN_VE
 SQLC_DEFAULT_BIN := $(TOOLS_BIN)/sqlc-$(SQLC_VERSION)-$(GO_TOOLCHAIN_VERSION)
 SQLC_BIN ?= $(SQLC_DEFAULT_BIN)
 # Only the default versioned binary is built here. An explicit SQLC_BIN, a path
-# or a command on PATH, is used as given.
+# or a command on PATH, is used as given; a path is made absolute because the
+# verify script runs sqlc from a temporary directory.
 SQLC_PREREQ := $(if $(filter $(SQLC_DEFAULT_BIN),$(SQLC_BIN)),$(SQLC_DEFAULT_BIN))
-SQLC_RUN := $(if $(SQLC_PREREQ),$(abspath $(SQLC_BIN)),$(SQLC_BIN))
+SQLC_RUN := $(if $(findstring /,$(SQLC_BIN)),$(abspath $(SQLC_BIN)),$(SQLC_BIN))
 
 RELIABILITY_TESTS := Test(RoomEventCatchupAndSSE|SSEClosesWhenSessionExpires|SSEClosesWhenSessionIsRevoked|SSEClosesDuringApplicationShutdown)
 
