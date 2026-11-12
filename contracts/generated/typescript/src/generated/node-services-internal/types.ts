@@ -547,6 +547,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/voice/workers:reconcile": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Schedule a reconcile of the voice workers against TeamHub's effective provider keys
+     * @description It only schedules the reconcile and never carries keys; workers read keys from TeamHub.
+     */
+    post: operations["reconcileVoiceWorkers"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/local-computer-tools:call": {
     parameters: {
       query?: never;
@@ -2833,6 +2853,25 @@ export interface operations {
         };
       };
       default: components["responses"]["DocumentInternalError"];
+    };
+  };
+  reconcileVoiceWorkers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reconcile scheduled. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthenticated"];
     };
   };
   callLocalComputerTool: {

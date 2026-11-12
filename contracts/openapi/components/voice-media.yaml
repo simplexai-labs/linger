@@ -16,6 +16,37 @@ components:
         live_enabled:
           type: boolean
           description: Whether this tenant may enter live voice mode.
+        voice_available:
+          type: boolean
+          description: The deployment can run voice (TEAMHUB_VOICE_MEDIA=on); clients show voice entries only when true.
+        soniox_key:
+          $ref: "#/components/schemas/VoiceProviderKeyStatus"
+        xai_key:
+          $ref: "#/components/schemas/VoiceProviderKeyStatus"
+    VoiceProvider:
+      type: string
+      enum: [soniox, xai]
+    SaveVoiceProviderKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [api_key]
+      properties:
+        api_key:
+          type: string
+          minLength: 1
+          maxLength: 512
+    VoiceProviderKeyStatus:
+      type: object
+      additionalProperties: false
+      required: [source, can_save]
+      properties:
+        source:
+          type: string
+          enum: [none, environment, stored]
+          description: Where the effective key comes from; the environment wins over a stored key.
+        can_save:
+          type: boolean
+          description: False when the provider's environment variable is set, no secret encryption key is configured, or voice media is off.
     VoiceSessionStatus:
       type: string
       enum: [provisioning, connected, reconnecting, closing, closed]

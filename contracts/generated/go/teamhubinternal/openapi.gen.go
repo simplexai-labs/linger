@@ -3745,6 +3745,12 @@ type VoiceRecordingReport struct {
 // VoiceRecordingReportState active once the first sample is archived; available after the sealed playlist is stored; failed when this recorder can no longer extend the epoch, including a handover.
 type VoiceRecordingReportState string
 
+// VoiceRuntimeProviderKeys defines model for VoiceRuntimeProviderKeys.
+type VoiceRuntimeProviderKeys struct {
+	SonioxApiKey *string `json:"soniox_api_key,omitempty"`
+	XaiApiKey    *string `json:"xai_api_key,omitempty"`
+}
+
 // WorkItemCommentCreateRequest Concatenating segment content in order must equal body.
 type WorkItemCommentCreateRequest struct {
 	Body     string                   `json:"body"`

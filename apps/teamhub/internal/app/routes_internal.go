@@ -93,6 +93,7 @@ func (a *App) voiceRuntimeRoutes() []contractRoute {
 		route(http.MethodPost, "/internal/v1/voice/live-tool-calls", nil, a.executeVoiceLiveToolCall),
 		route(http.MethodPut, "/internal/v1/voice/media-objects", teamhubinternal.PutVoiceMediaObjectParams{}, a.putVoiceMediaObject),
 		route(http.MethodPost, "/internal/v1/voice/observations", nil, a.reportVoiceObservationRoute),
+		route(http.MethodGet, "/internal/v1/voice/provider-keys", nil, a.getVoiceProviderKeys),
 		route(http.MethodPost, "/internal/v1/voice/recordings", nil, a.reportVoiceRecording),
 		route(http.MethodGet, "/internal/v1/voice/sessions/:voiceSessionId/live-context", nil, a.getVoiceLiveContext),
 		route(http.MethodGet, "/internal/v1/voice/sessions/:voiceSessionId/live-task-events", nil, a.streamVoiceLiveTaskEvents),

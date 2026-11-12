@@ -1180,6 +1180,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/internal/v1/voice/provider-keys": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read the effective voice provider API keys for the voice runtime.
+     * @description An environment key wins over a stored key. Both keys are absent when voice media is off.
+     */
+    get: operations["getVoiceProviderKeys"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/internal/v1/voice/media-objects": {
     parameters: {
       query?: never;
@@ -1347,6 +1367,10 @@ export interface components {
       text?: string;
       /** @description Session-scoped anonymous speaker cluster. Omitted when the provider did not label this window. */
       speaker_id?: string;
+    };
+    VoiceRuntimeProviderKeys: {
+      soniox_api_key?: string;
+      xai_api_key?: string;
     };
     VoiceObservationReceipt: {
       event_id: components["schemas"]["VoiceId"];
@@ -5139,6 +5163,28 @@ export interface operations {
       401: components["responses"]["VoiceUnauthenticated"];
       404: components["responses"]["VoiceNotFound"];
       409: components["responses"]["VoiceConflict"];
+    };
+  };
+  getVoiceProviderKeys: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Effective provider keys. */
+      200: {
+        headers: {
+          "Cache-Control"?: "no-store";
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VoiceRuntimeProviderKeys"];
+        };
+      };
+      401: components["responses"]["VoiceUnauthenticated"];
     };
   };
   putVoiceMediaObject: {

@@ -16,6 +16,8 @@ tags:
     description: Stateless Wiki candidate generation.
   - name: Document Normalization
     description: Stateless conversion of one immutable source into compiler-ready Markdown.
+  - name: Voice
+    description: Voice worker supervision.
 paths:
   /v1/agent-debug/history:read:
     post:
@@ -1118,6 +1120,19 @@ paths:
           $ref: ../components/document-errors.yaml#/components/responses/DocumentInternalError
       security:
         - teamHubToRuntimeBearer: []
+  /v1/voice/workers:reconcile:
+    post:
+      tags: [Voice]
+      summary: Schedule a reconcile of the voice workers against TeamHub's effective provider keys
+      description: It only schedules the reconcile and never carries keys; workers read keys from TeamHub.
+      operationId: reconcileVoiceWorkers
+      responses:
+        "202":
+          description: Reconcile scheduled.
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+      security:
+        - agentManagementBearer: []
   /v1/local-computer-tools:call:
     post:
       operationId: callLocalComputerTool

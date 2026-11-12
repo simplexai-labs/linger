@@ -2027,6 +2027,14 @@ paths:
     parameters:
       - $ref: '#/components/parameters/TenantId'
     $ref: '../paths/teamhub-public-voice-media.yaml#/tenantVoiceMediaPolicy'
+  /v0/voice-provider-keys/{provider}:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          $ref: '../components/voice-media.yaml#/components/schemas/VoiceProvider'
+    $ref: '../paths/teamhub-public-voice-media.yaml#/voiceProviderKey'
   /v0/voice-sessions/{voiceSessionId}:
     parameters:
       - $ref: '#/components/parameters/VoiceSessionId'

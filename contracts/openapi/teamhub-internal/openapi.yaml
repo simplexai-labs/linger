@@ -784,6 +784,27 @@ paths:
           $ref: "#/components/responses/VoiceConflict"
       security:
         - voiceRuntimeBearer: []
+  /internal/v1/voice/provider-keys:
+    get:
+      operationId: getVoiceProviderKeys
+      summary: Read the effective voice provider API keys for the voice runtime.
+      description: An environment key wins over a stored key. Both keys are absent when voice media is off.
+      responses:
+        "200":
+          description: Effective provider keys.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceRuntimeProviderKeys"
+        "401":
+          $ref: "#/components/responses/VoiceUnauthenticated"
+      security:
+        - voiceRuntimeBearer: []
   /internal/v1/voice/media-objects:
     put:
       operationId: putVoiceMediaObject
@@ -1138,6 +1159,16 @@ components:
           maxLength: 16
           pattern: ^spk_[1-9][0-9]*$
           description: Session-scoped anonymous speaker cluster. Omitted when the provider did not label this window.
+    VoiceRuntimeProviderKeys:
+      type: object
+      additionalProperties: false
+      properties:
+        soniox_api_key:
+          type: string
+          minLength: 1
+        xai_api_key:
+          type: string
+          minLength: 1
     VoiceObservationReceipt:
       type: object
       additionalProperties: false
