@@ -1001,6 +1001,10 @@ export interface RuntimeDiagnostic {
    */
   models: RuntimeModel[];
   model_catalog_error?: string;
+  /**
+   * Marks the Runtime the person chose when this Computer was installed; at most one diagnostic carries it. TeamHub places new template Agents on it while it is ready.
+   */
+  preferred?: boolean;
   error?: {
     code:
       | "RUNTIME_NOT_INSTALLED"

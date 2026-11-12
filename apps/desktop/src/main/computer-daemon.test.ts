@@ -195,6 +195,7 @@ describe("ComputerDaemonModule", () => {
         PI_CODING_AGENT_DIR: "/home/me/.linger/runtime/pi-agent",
         CODEX_HOME: "relative/is/ignored",
       },
+      preferredRuntime: "pi",
     });
     bus.emit("computer.changed", "computer-1");
     await vi.waitFor(() => expect(children).toHaveLength(2));
@@ -206,9 +207,12 @@ describe("ComputerDaemonModule", () => {
       PI_CODING_AGENT_DIR: "/home/me/.linger/runtime/pi-agent",
       [TOKEN_ENV]: TOKEN,
     });
-    expect(
-      JSON.parse(readFileSync(child.configFile, "utf8")).runtime_paths,
-    ).toEqual({ codex: "/opt/codex", pi: "/home/me/.linger/runtime/pi/pi" });
+    const written = JSON.parse(readFileSync(child.configFile, "utf8"));
+    expect(written.runtime_paths).toEqual({
+      codex: "/opt/codex",
+      pi: "/home/me/.linger/runtime/pi/pi",
+    });
+    expect(written.preferred_runtime).toBe("pi");
   });
 
   it("takes Windows runtime paths and replaces inherited names in any case", () => {

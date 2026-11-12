@@ -718,6 +718,7 @@ describe("LocalServerModule", () => {
     expect(f.host.ctx.config.get().runtimeEnvironment).toEqual({
       LINGER_CODEX_PATH: "/opt/codex/codex",
     });
+    expect(f.host.ctx.config.get().preferredRuntime).toBe("codex");
     await f.host.stop("quit");
   });
 
@@ -1295,16 +1296,13 @@ describe("LocalServerModule", () => {
   });
 
   it("approves the deployment of the chosen local model", async () => {
-    const f = fixture(
-      withCheckout,
-      {},
-      checkout,
-      installerApi([], {
-        state: "waiting_user",
-        errorCode: "LOCAL_MODELS_APPROVAL_REQUIRED",
-        localModelsPlan: { planId: "a".repeat(64) },
-      }),
-    );
+    const api = installerApi([], {
+      state: "waiting_user",
+      errorCode: "LOCAL_MODELS_APPROVAL_REQUIRED",
+      localModelsPlan: { planId: "a".repeat(64) },
+    });
+    api.runtime.setupChoice = "local-models";
+    const f = fixture(withCheckout, {}, checkout, api);
     await f.host.start();
     await f.module.begin({ runtime: "local" });
     expect(f.api.created).toEqual([
@@ -1314,6 +1312,8 @@ describe("LocalServerModule", () => {
     ]);
     expect(f.api.retried).toEqual([{ localModelsApproval: "a".repeat(64) }]);
     expect(f.module.status().phase).toBe("ready");
+    // The local model runs on Pi, so the Computer prefers Pi.
+    expect(f.host.ctx.config.get().preferredRuntime).toBe("pi");
     await f.host.stop("quit");
   });
 

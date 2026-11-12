@@ -164,6 +164,9 @@ export const daemonConfig = (
     ...(Object.keys(runtimePaths).length > 0
       ? { runtime_paths: runtimePaths }
       : {}),
+    ...(config.preferredRuntime
+      ? { preferred_runtime: config.preferredRuntime }
+      : {}),
     workspace_grants: config.workspaceGrants.map((g) => ({
       grant_id: g.grantId,
       label: g.label,

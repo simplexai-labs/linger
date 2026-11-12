@@ -210,6 +210,7 @@ type RuntimeDiagnostic struct {
 	Version           string                  `json:"version,omitempty"`
 	Models            []RuntimeModel          `json:"models"`
 	ModelCatalogError string                  `json:"model_catalog_error,omitempty"`
+	Preferred         *bool                   `json:"preferred,omitempty"`
 	Error             *RuntimeDiagnosticError `json:"error,omitempty"`
 	ManagedServices   []ManagedService        `json:"managed_services,omitempty"`
 }

@@ -19,14 +19,22 @@ type anotherMeLocalPlacement struct {
 
 // chooseAnotherMeLocalPlacement chooses where a new Another Me runs: the first
 // online Computer with any ready Runtime, its first writable workspace grant,
-// and the model that Runtime runs by default, else the first it reports.
-func chooseAnotherMeLocalPlacement(computers []httpapi.LocalComputer) (anotherMeLocalPlacement, error) {
+// and the model that Runtime runs by default, else the first it reports. The
+// preferred Runtime, the one the person chose at installation, goes first
+// while it is ready.
+func chooseAnotherMeLocalPlacement(computers []httpapi.LocalComputer, preferredRuntime string) (anotherMeLocalPlacement, error) {
 	for _, computer := range computers {
 		grantID := writableWorkspaceGrant(computer.WorkspaceGrants)
 		if computer.Status != httpapi.LocalComputerStatusOnline || computer.UpgradeRequired || grantID == "" {
 			continue
 		}
-		for _, runtime := range computer.Runtimes {
+		runtimes := computer.Runtimes
+		if index := slices.IndexFunc(runtimes, func(runtime httpapi.LocalComputerRuntime) bool {
+			return string(runtime.Type) == preferredRuntime
+		}); index > 0 {
+			runtimes = slices.Concat(runtimes[index:index+1], runtimes[:index], runtimes[index+1:])
+		}
+		for _, runtime := range runtimes {
 			if runtime.Status != httpapi.LocalRuntimeDiagnosticStatusReady || len(runtime.Models) == 0 {
 				continue
 			}

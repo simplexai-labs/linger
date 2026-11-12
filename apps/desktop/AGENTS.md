@@ -70,9 +70,13 @@ Gateway and runs Agents. The daemon exits with the app.
   that `setupChoice`). No secret passes through the page. Then it saves the
   installed runtime's executable and profile paths
   (`GET /api/instances/desktop/runtime`) as `runtimeEnvironment` in the
-  Desktop config, signs in with the local owner account, switches the window
-  to the server and enrolls this computer, so setup ends on "Linger is
-  ready". That screen shows the owner account from the instance's
+  Desktop config, and the runtime its `setupChoice` runs (`local-models` runs
+  on Pi) as `preferredRuntime`. The daemon config carries that as
+  `preferred_runtime`, and the daemon marks that runtime's diagnostic
+  `preferred`, so TeamHub creates Another Me and the starter Agents on it
+  while it is ready instead of on the first ready runtime. Then it signs in
+  with the local owner account, switches the window to the server and
+  enrolls this computer, so setup ends on "Linger is ready". That screen shows the owner account from the instance's
   owner-only `local-account.json` (`setup-account.ts`): the email, the
   password masked until Show, Copy (the main process writes the clipboard
   and clears it after 60 s if it still holds the password) and "Open account

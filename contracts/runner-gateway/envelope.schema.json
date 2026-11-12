@@ -231,6 +231,10 @@
           "minLength": 1,
           "maxLength": 240
         },
+        "preferred": {
+          "type": "boolean",
+          "description": "Marks the Runtime the person chose when this Computer was installed; at most one diagnostic carries it. TeamHub places new template Agents on it while it is ready."
+        },
         "error": {
           "type": "object",
           "additionalProperties": false,

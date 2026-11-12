@@ -10,14 +10,20 @@ import (
 
 func enabledConfig(t *testing.T, selection string) (Config, error) {
 	t.Helper()
+	field := ""
+	if selection != "" {
+		field = `,"enabled_runtimes":` + selection
+	}
+	return loadConfigFields(t, field)
+}
+
+// loadConfigFields loads a minimal valid config with field appended to it.
+func loadConfigFields(t *testing.T, field string) (Config, error) {
+	t.Helper()
 	root := t.TempDir()
 	token := filepath.Join(root, "token")
 	if err := os.WriteFile(token, []byte(testToken("computer-1", "tenant-1", "owner-1")), 0o600); err != nil {
 		t.Fatal(err)
-	}
-	field := ""
-	if selection != "" {
-		field = `,"enabled_runtimes":` + selection
 	}
 	encoded := fmt.Sprintf(`{"runner_id":"computer-1","display_name":"Fixture","gateway":{"url":"wss://agent.example.test/v1/runner-gateway","token_file":%q},"state_directory":%q,"workspace_grants":[]%s}`, token, root, field)
 	file := filepath.Join(root, "computer.json")
