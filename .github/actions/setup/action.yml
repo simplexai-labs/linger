@@ -1,5 +1,5 @@
 name: Set up the toolchain
-description: Go at the repository's pinned version and a BASE that shares history with HEAD; the node and install inputs control the pinned Node, pnpm and the workspace install.
+description: The repository's pinned Node, pnpm and Go, a workspace install, and a BASE that shares history with HEAD; the node, install and go inputs turn off the parts a check does not use.
 
 inputs:
   node:
@@ -33,6 +33,9 @@ runs:
       shell: bash
       run: |
         echo "node=$(tr -d '[:space:]' <.node-version)" >>"$GITHUB_OUTPUT"
+        # setup-go@v5 installs the go.mod `go` directive (a full x.y.z here) and
+        # ignores `toolchain`. Change this together with any setup-go bump, or
+        # the restored directory stops matching the one setup-go looks for.
         echo "go=$(sed -n 's/^go //p' apps/teamhub/go.mod)" >>"$GITHUB_OUTPUT"
     - uses: actions/cache@v4
       if: inputs.node == 'true'
