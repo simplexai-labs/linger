@@ -6,11 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/klauspost/compress/gzhttp"
 )
 
 func TestCompressResponsesCompressesLargeJSONOnly(t *testing.T) {
@@ -24,6 +26,13 @@ func TestCompressResponsesCompressesLargeJSONOnly(t *testing.T) {
 		c.Data(http.StatusPartialContent, "application/json", []byte(large))
 	})
 	engine.GET("/pdf", func(c *gin.Context) { c.Data(http.StatusOK, "application/pdf", []byte(large)) })
+	// An uploaded JSON file is a stored file, not an API body.
+	engine.GET("/stored", func(c *gin.Context) {
+		sendAsStored(c)
+		c.Header("ETag", `"sha"`)
+		c.Header("Content-Length", strconv.Itoa(len(large)))
+		c.Data(http.StatusOK, "application/json", []byte(large))
+	})
 	handler := compressResponses(engine)
 	get := func(path string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
@@ -52,11 +61,16 @@ func TestCompressResponsesCompressesLargeJSONOnly(t *testing.T) {
 	if recorder.Header().Get("Content-Encoding") != "zstd" {
 		t.Fatalf("zstd offered: encoding %q", recorder.Header().Get("Content-Encoding"))
 	}
-	// A short body, a ranged read and a file keep their bytes as they are.
-	for _, path := range []string{"/small", "/file", "/pdf"} {
+	// A short body, a ranged read and files keep their bytes as they are.
+	for _, path := range []string{"/small", "/file", "/pdf", "/stored"} {
 		if encoding := get(path).Header().Get("Content-Encoding"); encoding != "" {
 			t.Fatalf("%s is encoded %q", path, encoding)
 		}
+	}
+	stored := get("/stored")
+	if stored.Header().Get("Content-Length") != strconv.Itoa(len(large)) || stored.Header().Get("ETag") != `"sha"` ||
+		stored.Header().Get(gzhttp.HeaderNoCompression) != "" || stored.Body.String() != large {
+		t.Fatalf("stored file headers=%v", stored.Header())
 	}
 	// A client that does not ask for it gets the plain body.
 	request = httptest.NewRequest(http.MethodGet, "/large", nil)
