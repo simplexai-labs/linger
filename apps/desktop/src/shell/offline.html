@@ -237,6 +237,9 @@
         <button class="link failed-only" id="diagnostics" type="button">
           Save Diagnostics
         </button>
+        <button class="link failed-only" id="reset" type="button">
+          Set Up Again
+        </button>
         <span class="countdown" id="countdown"></span>
       </div>
       <form action="app://offline/connect" method="get" id="form">
@@ -288,6 +291,8 @@
         $("title").textContent = "Connect to Linger";
         $("reason").textContent =
           "Enter your team's server address, then sign in.";
+        // Setup, where Linger can also be installed on this computer.
+        $("cancel").textContent = "Back to Setup";
         $("server").focus();
       } else {
         $("host").textContent = new URL(server).host;
@@ -313,9 +318,14 @@
         document.body.classList.add("editing");
         $("server").select();
       });
-      $("cancel").addEventListener("click", () =>
-        document.body.classList.remove("editing"),
-      );
+      $("reset").addEventListener("click", () => {
+        location.href = "app://offline/reset";
+      });
+      $("cancel").addEventListener("click", () => {
+        if (document.body.dataset.mode === "setup")
+          location.href = "app://offline/setup";
+        else document.body.classList.remove("editing");
+      });
       // Retry on its own while the user is not editing.
       if (server && !local) {
         let left = 15;

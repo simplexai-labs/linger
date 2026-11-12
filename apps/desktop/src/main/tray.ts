@@ -84,14 +84,14 @@ export class TrayModule implements Module {
 
   async start(ctx: ModuleContext): Promise<void> {
     this.#ctx = ctx;
-    const windows = ctx.get<WindowManagerModule>("WindowManager");
+    const setup = ctx.get<SetupWindowModule>("SetupWindow");
     try {
       if (headless()) throw new Error("No display");
       this.#tray = new Tray(this.#icon());
       this.#tray.setToolTip("Linger");
       // Windows and Linux open the window on click; macOS shows the menu.
       if (process.platform !== "darwin")
-        this.#tray.on("click", () => windows.show());
+        this.#tray.on("click", () => setup.showApp());
     } catch (error) {
       ctx.log.warn("tray.unavailable", { error: String(error) });
     }
@@ -177,7 +177,7 @@ export class TrayModule implements Module {
         else ctx.get<SetupWindowModule>("SetupWindow").show();
         break;
       case "open":
-        ctx.get<WindowManagerModule>("WindowManager").show();
+        ctx.get<SetupWindowModule>("SetupWindow").showApp();
         break;
       case "toggle-prevent-sleep": {
         const power = ctx.get<PowerGuardModule>("PowerGuard");

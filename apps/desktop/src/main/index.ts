@@ -311,7 +311,7 @@ async function main(): Promise<void> {
   ];
   const host = new ModuleHost(modules, { config, log, bus: new EventBus() });
 
-  const showApp = (): void => (setup.visible() ? setup.show() : windows.show());
+  const showApp = (): void => setup.showApp();
   app.on("second-instance", showApp);
   app.on("activate", showApp);
   // Closing the window only hides it; the tray keeps the app running.

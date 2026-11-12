@@ -128,10 +128,17 @@ Gateway and runs Agents. The daemon exits with the app.
   engine); a counter of one file (`partial`) shows only that file. When
   the check fails the installer picks, or Codex when it cannot inspect the
   computer either. It records the install location, source, origin and engine in
-  `desktop/local-server.json` under the default home and, while the window
-  still uses that origin, restarts the services on launch with
-  `installer.js --resume`, which also restarts them when the instance's
-  `user.env` changed. Before installing or resuming it moves the
+  `desktop/local-server.json` under the default home (written to a temporary
+  file and renamed, so a power loss leaves the old record or none) and, while
+  the window still uses that origin and the computer is enrolled, restarts the
+  services on launch with `installer.js --resume`, which also restarts them
+  when the instance's `user.env` changed. A source folder removed since is
+  unpacked again from the app's package first. A Quick Install that stopped
+  before the computer enrolled is not resumed: setup shows again and Install
+  finishes it, reusing a finished job only while its origin answers (a stopped
+  server gets a new job, which starts the services again). The start failure
+  page's Set Up Again forgets the record, unenrolls the computer, clears the
+  server address and shows setup; the instance and its data stay. Before installing or resuming it moves the
   `COMPOSIO_API_KEY`, `SONIOX_API_KEY`, `XAI_API_KEY` and `TZ` of an unpacked
   source package's `.env` into `<home>/instances/desktop/user.env` once and
   deletes that `.env` (never a `LINGER_CHECKOUT`'s), logging only the names
@@ -166,7 +173,11 @@ Gateway and runs Agents. The daemon exits with the app.
 - `src/main/window-manager.ts`: one `BaseWindow` with two views, the title bar
   (`app://shell/titlebar`) and the SPA. macOS keeps native traffic lights,
   Windows uses `titleBarOverlay`, Linux draws its own controls. Closing hides
-  the window to the tray.
+  the window to the tray. Closing the setup window does not quit either: an
+  installation keeps running, and opening Linger again (a second launch, the
+  Dock, the tray) shows setup until the computer is enrolled
+  (`app-window.ts`), the main window after. The main window's server form
+  without a server says Back to Setup instead of Cancel.
 - `src/shell/*.html`: app-owned pages (title bar, offline/setup page). They
   have no network access and talk to the main process via `src/preload/shell.ts`.
 - `src/preload/index.ts`: the only SPA API, `window.lingerDesktop`.

@@ -363,6 +363,7 @@ export class LocalServerModule implements Module {
   #outdated: LocalRecord | undefined;
   #updating: Promise<void> | undefined;
   #offRetry: (() => void) | undefined;
+  #offReset: (() => void) | undefined;
   #offDaemon: (() => void) | undefined;
   #daemonFailure: string | undefined;
   #signIn: RuntimeSignIn | undefined;
@@ -386,19 +387,24 @@ export class LocalServerModule implements Module {
     this.#ctx = ctx;
     const migrationFailure = await this.#migrateLegacyHome(ctx);
     // After a reboot the local services are gone; start them again while the
-    // window still points at them.
-    const record = await this.#readRecord();
+    // window still points at them. A record of a Quick Install that stopped
+    // before this computer connected (the app quit or the computer went off
+    // during its last steps) is not resumed: setup shows instead, and its
+    // Install finishes that installation.
+    let record = await this.#readRecord();
     if (record) this.#home = record.home;
+    const config = ctx.config.get();
+    const resumes =
+      !!record && config.serverUrl === record.origin && !!config.computerId;
     if (migrationFailure) {
       // Resume would fail on the legacy record with a less useful error;
       // Retry resumes, and the installer migrates again first.
       this.#set("failed", migrationFailure);
-      if (record && ctx.config.get().serverUrl === record.origin)
+      if (resumes)
         ctx
           .get<WindowManagerModule>("WindowManager")
           ?.showStartFailed(migrationFailure);
-    } else if (record && ctx.config.get().serverUrl === record.origin)
-      void this.#resume(record, this.#abort.signal);
+    } else if (record && resumes) void this.#resume(record, this.#abort.signal);
     this.#offDaemon = ctx.bus.on("computer.failed", (reason) => {
       this.#daemonFailure = reason;
     });
@@ -407,10 +413,15 @@ export class LocalServerModule implements Module {
         void this.#resume(record, this.#abort.signal);
       }
     });
+    this.#offReset = ctx.bus.on("local-server.reset", () => {
+      record = undefined;
+      void this.#reset();
+    });
   }
 
   async stop(): Promise<void> {
     this.#offRetry?.();
+    this.#offReset?.();
     this.#offDaemon?.();
     // The installer manager keeps running a started installation; it exits
     // by itself once idle.
@@ -1884,8 +1895,12 @@ export class LocalServerModule implements Module {
       // The window would show the server as unreachable until it is back.
       if (!(await this.#reachable(record.origin))) windows?.showStarting();
       const newer = this.#newerSource(record);
+      // A source folder removed since (by hand, or a cleanup that an uninstall
+      // left half done) is unpacked again from this app's package.
       const repo =
-        newer && !existsSync(record.repo)
+        this.#options.sourceArchive &&
+        !this.#options.checkout &&
+        !existsSync(record.repo)
           ? await this.#ensureSource(record.home, signal)
           : record.repo;
       await this.#runResume(record, repo, signal);
@@ -1902,18 +1917,31 @@ export class LocalServerModule implements Module {
     }
   }
 
-  // Whether the services already answer, such as after only the app quit.
-  async #reachable(origin: string): Promise<boolean> {
+  // The person gave up on the installation the window used, whose services
+  // do not start (it may have been removed or left broken by an uninstall):
+  // forget it and this computer's enrollment with it, and show setup. Its
+  // Install sets this computer up again in the same location, keeping what
+  // is left of that instance.
+  async #reset(): Promise<void> {
+    const ctx = this.#ctx!;
     try {
-      await (this.#options.fetch ?? fetch)(origin, {
-        method: "HEAD",
-        redirect: "manual",
-        signal: AbortSignal.timeout(1_000),
-      });
-      return true;
-    } catch {
-      return false;
+      await rm(this.#recordFile(), { force: true });
+      this.#origin = undefined;
+      this.#outdated = undefined;
+      this.#set("idle", "");
+      ctx.log.info("local_server.reset");
+      await ctx.get<EnrollmentModule>("Enrollment").unenroll();
+      ctx.config.update({ serverUrl: undefined });
+      ctx.get<WindowManagerModule>("WindowManager").loadServer();
+    } catch (error) {
+      ctx.log.warn("local_server.reset_failed", { error: String(error) });
     }
+    ctx.bus.emit("setup.open");
+  }
+
+  // Whether the services already answer, such as after only the app quit.
+  #reachable(origin: string): Promise<boolean> {
+    return answers(this.#options.fetch ?? fetch, origin);
   }
 
   // Whether the window's server is the one this app runs.
@@ -2059,9 +2087,17 @@ export class LocalServerModule implements Module {
 
   async #writeRecord(record: LocalRecord): Promise<void> {
     await mkdir(this.#desktopDirectory(), { recursive: true, mode: 0o700 });
-    await writeFile(this.#recordFile(), JSON.stringify(record), {
-      mode: 0o600,
-    });
+    // Written aside and moved into place: a record cut short by a power loss
+    // would read as no installation while the window still points at it.
+    const staged = `${this.#recordFile()}.${randomBytes(4).toString("hex")}.tmp`;
+    try {
+      await writeFile(staged, JSON.stringify(record), { mode: 0o600 });
+      await renameRetrying(staged, this.#recordFile());
+    } catch (error) {
+      // Each failed write would otherwise leave one more staged file.
+      await rm(staged, { force: true });
+      throw error;
+    }
   }
 }
 
@@ -2214,6 +2250,23 @@ const STAGES: Record<string, readonly [LocalServerStep, number, number]> = {
   computer: ["workspace", 1, 1],
 };
 
+// Whether a server answers at an origin at all.
+async function answers(
+  fetcher: typeof fetch,
+  origin: string,
+): Promise<boolean> {
+  try {
+    await fetcher(origin, {
+      method: "HEAD",
+      redirect: "manual",
+      signal: AbortSignal.timeout(1_000),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Done: services run and the owner exists. A runtime sign-in still missing
 // is the setup page's own step.
 const finished = (job: Job): boolean =>
@@ -2300,9 +2353,12 @@ export class InstallerApi {
       latest &&
       (["queued", "running"].includes(latest.state) ||
         // A finished one only while its instance is still there; its data
-        // may have been removed since.
+        // may have been removed since. Its services must still run too: after
+        // the app or the computer stopped part way through setup, a new job
+        // starts them again.
         (finished(latest) &&
-          (await this.#call(`/api/instances/${LOCAL_INSTANCE}/login`)).ok))
+          (await this.#call(`/api/instances/${LOCAL_INSTANCE}/login`)).ok &&
+          (await answers(this.#fetch, latest.origin!))))
     )
       job = latest;
     else {

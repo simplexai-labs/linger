@@ -21,11 +21,14 @@ export interface BusEvents {
   "computer.renamed": [];
   "grants.changed": [];
   "local-server.changed": [];
+  // Forget the installation the window used and set this computer up again.
+  "local-server.reset": [];
   "local-server.retry": [];
   "power.changed": [];
   "runtime.activity": [running: number];
   "runtime.state": [state: string];
   "server.changed": [serverUrl: string];
+  "setup.open": [];
   "status.changed": [status: { tone: string; label: string }];
   "update.changed": [state: string];
 }

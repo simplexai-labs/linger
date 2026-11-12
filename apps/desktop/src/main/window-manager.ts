@@ -473,6 +473,14 @@ export class WindowManagerModule implements Module {
       this.#ctx!.bus.emit("local-server.retry");
       return new Response(null, { status: 204 });
     }
+    // Back to setup from the server address form, or, from the start failure
+    // page, setting this computer up again.
+    if (url.pathname === "/setup" || url.pathname === "/reset") {
+      this.#window?.hide();
+      if (url.pathname === "/reset") this.#ctx!.bus.emit("local-server.reset");
+      else this.#ctx!.bus.emit("setup.open");
+      return new Response(null, { status: 204 });
+    }
     if (url.pathname === "/connect") {
       if (!this.setServer(url.searchParams.get("server") ?? ""))
         this.#loadOffline(INVALID_SERVER);

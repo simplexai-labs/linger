@@ -27,6 +27,7 @@ import {
   type SetupLocalAccount,
   type SetupState,
 } from "../shared/setup.js";
+import { appWindow } from "./app-window.js";
 import type { DiagnosticsModule } from "./diagnostics.js";
 import type { EnrollmentModule } from "./enrollment.js";
 import type { LocalServerModule } from "./local-server.js";
@@ -136,6 +137,7 @@ export class SetupWindowModule implements Module {
       ctx.bus.on("grants.changed", push),
       ctx.bus.on("local-server.changed", onLocal),
       ctx.bus.on("server.changed", onCookie),
+      ctx.bus.on("setup.open", () => this.show()),
     );
     if (this.#options.show) this.show();
   }
@@ -148,6 +150,15 @@ export class SetupWindowModule implements Module {
 
   visible(): boolean {
     return !!this.#window && !this.#window.isDestroyed();
+  }
+
+  // Opens Linger again: setup until this computer is connected, the main
+  // window after.
+  showApp(): void {
+    const enrolled = !!this.#ctx?.config.get().computerId;
+    if (appWindow({ enrolled, setupOpen: this.visible() }) === "setup")
+      this.show();
+    else this.#ctx?.get<WindowManagerModule>("WindowManager").show();
   }
 
   show(): void {
