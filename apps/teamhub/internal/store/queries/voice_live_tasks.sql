@@ -158,3 +158,10 @@ WHERE decision.alter_ego_task_id=ANY(sqlc.arg(task_ids)::text[])
   AND (decision.expires_at IS NULL OR decision.expires_at>clock_timestamp())
   AND decision.kind IN ('connector_write','runtime_permission','agent_change')
 ORDER BY decision.created_at,decision.id;
+
+-- name: ListVoiceLiveTaskReports :many
+-- What a voice task sent back to its coordinator, newest first.
+SELECT body,created_at FROM task_meta_callback_messages
+WHERE task_id=sqlc.arg(task_id)::text AND tenant_id=sqlc.arg(tenant_id)::text
+ORDER BY meta_seq DESC
+LIMIT sqlc.arg(row_limit)::int;

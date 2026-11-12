@@ -368,6 +368,45 @@ func (q *Queries) ListVoiceLiveRoomPendingWakes(ctx context.Context, roomID stri
 	return items, nil
 }
 
+const listVoiceLiveTaskReports = `-- name: ListVoiceLiveTaskReports :many
+SELECT body,created_at FROM task_meta_callback_messages
+WHERE task_id=$1::text AND tenant_id=$2::text
+ORDER BY meta_seq DESC
+LIMIT $3::int
+`
+
+type ListVoiceLiveTaskReportsParams struct {
+	TaskID   string `json:"task_id"`
+	TenantID string `json:"tenant_id"`
+	RowLimit int32  `json:"row_limit"`
+}
+
+type ListVoiceLiveTaskReportsRow struct {
+	Body      string             `json:"body"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// What a voice task sent back to its coordinator, newest first.
+func (q *Queries) ListVoiceLiveTaskReports(ctx context.Context, arg ListVoiceLiveTaskReportsParams) ([]ListVoiceLiveTaskReportsRow, error) {
+	rows, err := q.db.Query(ctx, listVoiceLiveTaskReports, arg.TaskID, arg.TenantID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVoiceLiveTaskReportsRow{}
+	for rows.Next() {
+		var i ListVoiceLiveTaskReportsRow
+		if err := rows.Scan(&i.Body, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVoiceLiveTasks = `-- name: ListVoiceLiveTasks :many
 SELECT task.ordinal,task.goal,task.surface,task.work_item_id,task.canceled_at,item.title,
   (task.voice_session_id IS NOT DISTINCT FROM $1::text)::boolean AS started_here,

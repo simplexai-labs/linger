@@ -221,6 +221,8 @@ func (s *Service) executeVoiceLiveTool(ctx context.Context, session voicelive.Se
 		return s.sendVoiceLiveCard(ctx, session, request)
 	case voicelive.ToolListTasks:
 		return s.listVoiceLiveTasks(ctx, session, request)
+	case voicelive.ToolCheckTask:
+		return s.checkVoiceLiveTask(ctx, session, request)
 	case voicelive.ToolDecideApproval:
 		return s.decideVoiceLiveApproval(ctx, session, request)
 	case voicelive.ToolCheckReminders:

@@ -16,8 +16,9 @@ const (
 
 // ProgressArguments selects the task or Room progress to report.
 type ProgressArguments struct {
-	Scope  string `json:"scope"`
-	RoomID string `json:"room_id"`
+	Scope       string    `json:"scope"`
+	RoomID      string    `json:"room_id"`
+	RunningOnly LooseBool `json:"running_only"`
 }
 
 // RecentRunWindow is how far back a Room report looks for finished Runs.
