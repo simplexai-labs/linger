@@ -21,13 +21,12 @@ Memory, and Voice services.
 - `make -C apps/teamhub test`: run TeamHub unit tests.
 - `pnpm contracts:generate && pnpm contracts:verify`: regenerate and verify OpenAPI consumers.
 - `make check BASE=<target-ref>`: run every app's fast check in parallel.
+  Fast checks are local and need no Postgres, containers, or full suite.
   `BASE` is required because the built-in Skill immutability check compares
   against it; the repository assumes no default branch.
 - `make check-repository-gate BASE=<target-ref>`: run the repository gate
   (migration history, commitlint, env inventory, changed-file format and lint,
   script tests, doc links).
-- Before opening a pull request, run the cheap gates listed under Important
-  Conventions. Those are not the full suite.
 
 ## Structure
 
@@ -58,13 +57,11 @@ Memory, and Voice services.
 - Implement the simplest solution that satisfies the current request. Do not
   design for requirements outside the current scope, and prefer existing
   dependencies over new custom infrastructure.
-- Before changing shared configuration (root or
-  shared tool configs, shared scripts, env defaults), find every consumer with
-  `rg` and check each affected app in the same pull request, not only the one being
-  fixed.
-- After the feature works, perform one explicit deletion pass: identify and
-  remove code that is no longer needed and abstractions that the current
-  request does not require.
+- A change to shared configuration (root or shared tool configs, shared
+  scripts, env defaults) is done when every app that consumes it passes its
+  fast checks in the same pull request, not only the one being fixed.
+- A feature is done when no code it made unnecessary and no abstraction the
+  request does not require is left behind.
 - When retiring or reshaping a feature, delete its code and drop its tables,
   columns, rows, and stored files in a forward migration. Data that must
   survive is converted once inside the migration; do not keep dual-read or
@@ -72,15 +69,14 @@ Memory, and Voice services.
   caches written by the Daemon or CLI on users' machines, but not
   compatibility with third-party tool versions such as Codex CLI.
 - During local development, run the focused tests for the changed behavior and
-  the affected fast boundary checks. Focused Vitest or Go unit tests do not
-  replace those gates. Do not run complete integration, E2E, container, or
+  the affected fast checks. Focused Vitest or Go unit tests do not
+  replace those checks. Do not run complete integration, E2E, container, or
   reliability suites by default; `make check BASE=<target-ref>` runs only the
   fast checks. Run a focused heavy scenario when
   changing that test or harness, reproducing its failure, or when real
   database, process, concurrency, or recovery semantics cannot be proved at a
   lower layer.
-- Before opening a pull request, run the cheap gates for every touched app.
-  These are local and do not need Postgres, containers, or the full suite:
+- Before opening a pull request, run the fast checks for every touched app:
   - Web: `make check-web` (typecheck, unit tests, and React Doctor). If the
     change adds a static import on the Room or app initial graph, also run
     `pnpm --filter @linger/web run build:assets` to check the initial JS
@@ -120,8 +116,12 @@ Memory, and Voice services.
   or would break a mode (for example `NODE_ENV`, `COMPOSE_PROJECT_NAME`).
   Every fixed local default for `pnpm dev` lives in
   `scripts/local-defaults.env`; `scripts/with-local-env.mjs` only merges files.
-- The repository is English-only, human-facing docs included. Write new and
-  changed doc text in English and do not add Chinese to any existing doc.
+- The repository is English-only: docs, code, comments, logs, user-facing
+  strings, prompts, Skills, tests, fixtures, and benchmark data.
+  `make check-repository-gate` rejects CJK ideographs in changed files.
+  - NO: a test fixture with a literal Chinese sentence.
+  - OK: the same text as escaped code points (`"\u4f60\u597d"`), or kana,
+    accented Latin, or emoji when any unspaced script will do.
 
 ## Cross-Module Conventions
 
@@ -147,7 +147,7 @@ to comply.
   `HTTP`).
 - TypeScript: export functions as `function` declarations; object types are
   `interface` (lint-enforced); private class state uses `#field`.
-- Comments are English and explain why or state an invariant; never restate
+- Comments explain why or state an invariant; never restate
   the code. No issue or pull request numbers, plan-step labels, or history
   ("previously", "used to"). Exported Go declarations and packages have doc
   comments; `make -C apps/teamhub lint-go BASE=<target-ref>` checks this on new
@@ -156,8 +156,7 @@ to comply.
   third-party error prose, model prose, or our own human-readable labels.
   Carry the decision in structured fields, error codes, or model structured
   output, and keep human-readable text for display only.
-- Code, comments, logs, user-facing strings, prompts, Skills, tests, fixtures,
-  and benchmark data contain no Chinese. Serve users of any language through
+- Serve users of any language through
   language-agnostic mechanisms: engine language settings, structured fields,
   model structured output, and prompts that answer in the user's language.
   Never add per-language keyword lists, regexes, or model-facing examples.
