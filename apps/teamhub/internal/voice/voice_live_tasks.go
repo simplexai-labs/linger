@@ -429,7 +429,7 @@ func (s *Service) checkVoiceLiveTask(ctx context.Context, session voicelive.Sess
 		return "", err
 	}
 	reports, err := s.queries.ListVoiceLiveTaskReports(ctx, store.ListVoiceLiveTaskReportsParams{
-		TaskID: task.WorkItemID, TenantID: session.TenantID, RowLimit: voicelive.MaxCheckedReports,
+		TaskID: task.WorkItemID, TenantID: session.TenantID, RowLimit: voicelive.MaxCheckedReports + 1,
 	})
 	if err != nil {
 		return "", err
@@ -447,8 +447,11 @@ func (s *Service) checkVoiceLiveTask(ctx context.Context, session voicelive.Sess
 	for _, approval := range view.PendingApprovals {
 		checked.Approvals = append(checked.Approvals, approval.Title)
 	}
-	for index := len(reports) - 1; index >= 0; index-- {
-		checked.Reports = append(checked.Reports, voicelive.CheckedActivity{At: reports[index].CreatedAt.Time, Text: reports[index].Body})
+	if len(reports) > voicelive.MaxCheckedReports {
+		reports, checked.OlderReports = reports[:voicelive.MaxCheckedReports], true
+	}
+	for _, report := range reports {
+		checked.Reports = append(checked.Reports, voicelive.CheckedActivity{At: report.CreatedAt.Time, Text: report.Body})
 	}
 	return voicelive.Output(voicelive.CheckTaskOutput(time.Now(), checked)), nil
 }

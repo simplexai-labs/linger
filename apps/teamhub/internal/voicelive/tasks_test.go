@@ -3,6 +3,8 @@ package voicelive
 import (
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 )
 
 func TestTaskIDRoundTrip(t *testing.T) {
@@ -58,5 +60,24 @@ func TestTaskListGivesTheLatestReport(t *testing.T) {
 	tasks := output["tasks"].([]map[string]any)
 	if tasks[0]["state"] != TaskReported || tasks[0]["latest_report"] != "Scan the QR code to log in to JD" || tasks[1]["state"] != TaskCanceled {
 		t.Fatalf("tasks: %v", tasks)
+	}
+}
+
+func TestCheckTaskOutputBoundsAllReportText(t *testing.T) {
+	now := time.Now()
+	long := strings.Repeat("\u00e9", 3000)
+	output := CheckTaskOutput(now, CheckedTask{TaskID: "t1", StatusSince: now, Reports: []CheckedActivity{
+		{At: now, Text: long}, {At: now, Text: long}, {At: now, Text: "oldest"},
+	}})
+	reports := output["reports"].([]map[string]string)
+	total := 0
+	for _, report := range reports {
+		total += utf8.RuneCountInString(report["text"])
+	}
+	if len(reports) != 2 || reports[0]["text"] != long || total != checkedReportsRunes || output["older_reports_omitted"] != true {
+		t.Fatalf("reports=%d total=%d omitted=%v", len(reports), total, output["older_reports_omitted"])
+	}
+	if output := CheckTaskOutput(now, CheckedTask{Reports: []CheckedActivity{{At: now, Text: "done"}}}); output["older_reports_omitted"] != false {
+		t.Fatalf("a short history is whole: %v", output)
 	}
 }

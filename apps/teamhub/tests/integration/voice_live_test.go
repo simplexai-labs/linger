@@ -684,10 +684,10 @@ func TestVoiceLiveTasksReportResultsAndWhatTheyWaitFor(t *testing.T) {
 	if _, err := env.pool.Exec(t.Context(), `UPDATE work_items SET task_execution_status='waiting_for_approval' WHERE id=$1`, waiting); err != nil {
 		t.Fatal(err)
 	}
-	// check_task reads one task as its coordinator does, every report included.
+	// check_task reads one task as its coordinator does, with its latest reports.
 	checked := tool("lt_check", "check-1", "check_task", map[string]any{"task_id": first["task_id"]})
 	reports, _ := checked["reports"].([]any)
-	if checked["status"] != "idle" || checked["folder"] != "./playground/"+workItem(first["task_id"])+"/" || len(reports) != 1 ||
+	if checked["status"] != "idle" || checked["folder"] != "./playground/"+workItem(first["task_id"])+"/" || len(reports) != 1 || checked["older_reports_omitted"] != false ||
 		reports[0].(map[string]any)["text"] != "Sony at 1899 is the best fit, added to the cart." {
 		t.Fatalf("check_task=%v", checked)
 	}

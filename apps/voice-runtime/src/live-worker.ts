@@ -70,7 +70,7 @@ const retryMs = 300;
  * hears its real result instead of a timeout.
  */
 const confirmedWriteTimeoutMs = 60_000;
-/** A card's files, or an image put into a document, upload from the Computer for up to two minutes. */
+/** A card's files, or images a document is written with or gets, come from the Computer for up to two minutes. */
 const sendCardTimeoutMs = 130_000;
 /** A local browser step may wake a sleeping Computer before it runs. */
 const browserTimeoutMs = 70_000;
@@ -1575,7 +1575,9 @@ export class LiveVoiceWorker {
     const result = await this.client.executeLiveToolCall(
       request,
       AbortSignal.timeout(
-        call.name === "send_card" || call.name === "insert_document_image"
+        call.name === "send_card" ||
+          call.name === "insert_document_image" ||
+          call.name === "create_document"
           ? sendCardTimeoutMs
           : parseArguments(call)?.confirmed === true
             ? confirmedWriteTimeoutMs

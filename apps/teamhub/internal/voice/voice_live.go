@@ -1040,7 +1040,7 @@ func (s *Service) ExecuteLiveToolCall(ctx context.Context, request teamhubintern
 	if err != nil {
 		return "", fmt.Errorf("check foreground transition: %w", err)
 	}
-	if switching && request.Name != "list_tasks" && request.Name != "recall_memory" && request.Name != "read_document" {
+	if switching && request.Name != "list_tasks" && request.Name != "check_task" && request.Name != "recall_memory" && request.Name != "read_document" {
 		return voicelive.Output(map[string]string{"status": "switching", "detail": "The previous foreground is stopping. This operation was not accepted; retry after the transition."}), nil
 	}
 	digest := sha256.Sum256([]byte(request.TurnId + "\x00" + request.Name + "\x00" + request.Arguments))
