@@ -1,6 +1,14 @@
 name: Set up the toolchain
 description: Node, pnpm and Go at the repository's pinned versions, with workspace dependencies installed, and a BASE that shares history with HEAD.
 
+inputs:
+  node:
+    description: Set up Node. Checks that run no JavaScript pass false.
+    default: "true"
+  install:
+    description: Set up pnpm and install workspace dependencies; needs node. Checks that only run Node scripts with builtin modules pass false.
+    default: "true"
+
 runs:
   using: composite
   steps:
@@ -16,17 +24,20 @@ runs:
         fi
     # Reads the version from packageManager in package.json.
     - uses: pnpm/action-setup@v4
+      if: inputs.install == 'true'
     - uses: actions/setup-node@v4
+      if: inputs.node == 'true'
       with:
         node-version-file: .node-version
-        cache: pnpm
+        cache: ${{ inputs.install == 'true' && 'pnpm' || '' }}
+    # The caller caches Go per job: setup-go's one shared entry is saved by
+    # whichever job finishes first, often one that compiled no Go, and its key
+    # never changes while go.sum stays the same.
     - uses: actions/setup-go@v5
       with:
         go-version-file: apps/teamhub/go.mod
-        cache-dependency-path: |
-          apps/teamhub/go.sum
-          apps/computer/local-daemon/go.sum
-          contracts/generated/go/go.sum
+        cache: false
     # No install scripts: none of the checks that run here loads a native addon.
     - shell: bash
+      if: inputs.install == 'true'
       run: pnpm install --frozen-lockfile --ignore-scripts

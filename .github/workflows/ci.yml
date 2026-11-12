@@ -109,6 +109,26 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/setup
         if: needs.changes.outputs[matrix.app] == 'true'
+        # teamhub runs only Go. computer-go's tests run the managed-tools
+        # scripts, which need the pinned Node but no workspace packages.
+        with:
+          node: ${{ matrix.app != 'teamhub' }}
+          install: ${{ matrix.app != 'teamhub' && matrix.app != 'computer-go' }}
+      # Each Go check keeps its own build and module cache, so one job's save
+      # never replaces another's. Pull requests and merge-queue builds restore
+      # main's latest entry; only pushes to main save. Go trims build cache
+      # entries unused for five days, so the restored cache does not grow
+      # without bound.
+      - uses: actions/cache/restore@v4
+        if: contains(fromJSON('["teamhub","computer-go","desktop","contracts"]'), matrix.app) && needs.changes.outputs[matrix.app] == 'true'
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ matrix.app }}-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-${{ matrix.app }}-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}-
+            go-${{ matrix.app }}-${{ runner.os }}-
       # Pinned golangci-lint and sqlc binaries; building them takes about 60 s
       # each. Their file names carry the tool and Go versions, and the key
       # hashes the files that pin both, so a version bump misses and rebuilds.
@@ -133,3 +153,10 @@ jobs:
         with:
           path: ~/.cache/golangci-lint
           key: golangci-lint-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', '.golangci.yml') }}-${{ github.sha }}
+      - uses: actions/cache/save@v4
+        if: always() && github.event_name == 'push' && contains(fromJSON('["teamhub","computer-go","desktop","contracts"]'), matrix.app) && needs.changes.outputs[matrix.app] == 'true'
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ matrix.app }}-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}-${{ github.sha }}
