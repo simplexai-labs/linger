@@ -60,9 +60,15 @@ const maximumPendingToolCalls = 16;
 const maximumPendingNotes = 256;
 const maximumPendingNoteChars = 512 * 1024;
 const maximumPendingUpdates = 64;
+/**
+ * How long each step of an update may take: the provider taking up its cue,
+ * then the response saying its first word, then a cancel coming back.
+ */
 const updateStartTimeoutMs = 15_000;
-/** An update is tried this many times before it is given up. */
+/** An update is asked for this many times before it is given up. */
 const maxUpdateAttempts = 3;
+/** A lost provider session is replaced at most this many times in a call. */
+const maxReconnects = 3;
 const inputFirstFrameTimeoutMs = 10_000;
 const retryMs = 300;
 /**
@@ -186,6 +192,12 @@ interface Speech {
   speechId: string;
   updates: TaskUpdate[];
   turnId: string;
+  allowTools: boolean;
+  attempts: number;
+  /** The provider started a response for it. */
+  accepted: boolean;
+  /** A response that said nothing is being canceled. */
+  canceling: boolean;
 }
 
 interface Reply {
@@ -432,7 +444,7 @@ export class LiveVoiceWorker {
   private startedAt = Date.now();
   private timed = new Set<string>();
   private markSessionReady!: () => void;
-  private reconnected = false;
+  private reconnects = 0;
   private failed = false;
   private stopped = false;
   private muted = false;
@@ -703,21 +715,21 @@ export class LiveVoiceWorker {
       } catch (error) {
         if (this.stopped) return;
         if (
-          this.reconnected ||
+          this.reconnects >= maxReconnects ||
           !(error instanceof LiveSessionError) ||
           !error.transient
         ) {
           await this.fail(error);
           return;
         }
-        this.reconnected = true;
+        this.reconnects += 1;
         log().warn(
           {
             voiceSessionId: this.voiceSessionId,
             failureCode: error.code,
             detail: error.detail,
           },
-          "Voice live provider session lost; reconnecting once",
+          "Voice live provider session lost; reconnecting",
         );
         // In-flight replies belong to the lost provider session.
         this.interrupt(true);
@@ -871,15 +883,23 @@ export class LiveVoiceWorker {
         );
         return;
       }
+      case "update_accepted": {
+        const speech = this.pendingSpeech;
+        if (speech?.speechId !== event.id || speech.accepted) return;
+        speech.accepted = true;
+        this.awaitUpdate(speech);
+        return;
+      }
       case "response_finished":
         if (this.pendingSpeech) {
+          const speech = this.pendingSpeech;
           if (event.canceled && this.pendingSpeechInterrupted) {
-            const speech = this.pendingSpeech;
             this.clearPendingSpeech();
             this.queuedUpdates.unshift(...speech.updates);
             this.flushNotes();
             this.flushUpdates();
-          }
+          } else if (event.updateId === speech.speechId)
+            this.repeatUpdate(speech);
           return;
         }
         if (this.reply) this.finishReply(event.canceled);
@@ -1883,6 +1903,10 @@ export class LiveVoiceWorker {
       speechId: `update_${randomUUID()}`,
       updates,
       turnId: this.latestTurn?.id ?? "lt_update",
+      allowTools: updates.some((update) => update.kind === "report"),
+      attempts: 1,
+      accepted: false,
+      canceling: false,
     };
     this.say(speech, at);
   }
@@ -1890,25 +1914,7 @@ export class LiveVoiceWorker {
   private say(speech: Speech, at: UpdateEntry) {
     this.pendingSpeech = speech;
     this.pendingSpeechInterrupted = false;
-    this.speechStartTimer = setTimeout(() => {
-      // An update the provider never started is tried again later; only
-      // one that keeps failing is given up, never the whole live session.
-      const retry = speech.updates.filter(
-        (update) =>
-          (update.attempts = (update.attempts ?? 0) + 1) < maxUpdateAttempts,
-      );
-      log().warn(
-        {
-          voiceSessionId: this.voiceSessionId,
-          interrupted: this.pendingSpeechInterrupted,
-          dropped: speech.updates.length - retry.length,
-        },
-        "Voice live update never started",
-      );
-      this.clearPendingSpeech();
-      this.queuedUpdates.unshift(...retry);
-      this.flushUpdates();
-    }, this.options.updateStartTimeoutMs ?? updateStartTimeoutMs);
+    this.awaitUpdate(speech);
     log().info(
       {
         voiceSessionId: this.voiceSessionId,
@@ -1923,8 +1929,60 @@ export class LiveVoiceWorker {
         at,
         this.latestTurn?.heard ?? this.latestTurn?.text,
       ),
-      speech.updates.some((update) => update.kind === "report"),
+      speech.allowTools,
+      speech.speechId,
     );
+  }
+
+  /**
+   * Watches the update's next step. A cue the provider never took up means
+   * the connection stalled: telling it again there would only queue behind
+   * the first and cut it off when both arrive, so the session is replaced.
+   * A response that started but says nothing is canceled and asked for again.
+   */
+  private awaitUpdate(speech: Speech) {
+    clearTimeout(this.speechStartTimer);
+    this.speechStartTimer = setTimeout(() => {
+      if (this.pendingSpeech !== speech) return;
+      const stage = speech.canceling
+        ? "cancel"
+        : speech.accepted
+          ? "silent"
+          : "unacknowledged";
+      log().warn(
+        { voiceSessionId: this.voiceSessionId, stage },
+        "Voice live update stalled",
+      );
+      if (stage === "silent") {
+        speech.canceling = true;
+        this.awaitUpdate(speech);
+        this.session?.cancel();
+      } else this.session?.abandon("live_update_stalled");
+    }, this.options.updateStartTimeoutMs ?? updateStartTimeoutMs);
+  }
+
+  /**
+   * Asks again for an update whose response ended without a word; its cue
+   * is already in the conversation, so it is not told twice.
+   */
+  private repeatUpdate(speech: Speech) {
+    speech.attempts += 1;
+    if (speech.attempts > maxUpdateAttempts) {
+      log().warn(
+        {
+          voiceSessionId: this.voiceSessionId,
+          updates: speech.updates.map((update) => update.kind),
+        },
+        "Voice live update given up",
+      );
+      this.clearPendingSpeech();
+      this.flushUpdates();
+      return;
+    }
+    speech.accepted = false;
+    speech.canceling = false;
+    this.awaitUpdate(speech);
+    this.session?.repeatUpdate(speech.speechId, speech.allowTools);
   }
 
   private clearPendingSpeech() {

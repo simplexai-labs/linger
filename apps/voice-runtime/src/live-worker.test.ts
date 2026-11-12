@@ -142,6 +142,10 @@ class FakeSession {
   respond = vi.fn();
   truncate = vi.fn();
   tell = vi.fn();
+  repeatUpdate = vi.fn();
+  abandon = vi.fn((code: string) =>
+    this.fail(new LiveSessionError(code, true)),
+  );
   note = vi.fn();
   sendToolResults = vi.fn();
   setSpeed = vi.fn((speed: number) => speed <= 1.5);
@@ -1116,10 +1120,12 @@ describe("LiveVoiceWorker", () => {
     await test.shutdown();
   });
 
-  it("reconnects once on a transient loss and fails the session after that", async () => {
+  it("reconnects on a transient loss three times and fails the session after that", async () => {
     const test = await harness();
-    test.session().fail(new LiveSessionError("live_socket_closed", true));
-    await vi.waitFor(() => expect(test.sessions).toHaveLength(2));
+    for (const count of [2, 3, 4]) {
+      test.session().fail(new LiveSessionError("live_socket_closed", true));
+      await vi.waitFor(() => expect(test.sessions).toHaveLength(count));
+    }
     test.session().fail(new LiveSessionError("live_socket_closed", true));
     await vi.waitFor(() =>
       expect(test.ofType("session_failure")).toEqual([
@@ -1406,17 +1412,66 @@ describe("LiveVoiceWorker background work", () => {
     await test.shutdown();
   });
 
-  it("tells an update again when the provider never started it, then gives it up", async () => {
+  it("replaces a session that never took up an update and tells it there", async () => {
     const test = await harness();
     test.setAlerts([{ alert_id: "a1", text: "Lisa @you" }]);
-    await vi.waitFor(
-      () => expect(test.session().tell).toHaveBeenCalledTimes(3),
-      {
-        timeout: 3_000,
-      },
+    await vi.waitFor(() => expect(test.session().tell).toHaveBeenCalledOnce());
+    const first = test.session();
+    // The cue is never taken up: telling it again on the same connection
+    // would only queue behind it.
+    await vi.waitFor(() =>
+      expect(first.abandon).toHaveBeenCalledWith("live_update_stalled"),
     );
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(test.session().tell).toHaveBeenCalledTimes(3);
+    expect(first.tell).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(test.sessions).toHaveLength(2));
+    await vi.waitFor(() => expect(test.session().tell).toHaveBeenCalledOnce());
+    await test.shutdown();
+  });
+
+  it("asks again for an update whose response said nothing, then gives it up", async () => {
+    const test = await harness();
+    test.setAlerts([{ alert_id: "a1", text: "Lisa @you" }]);
+    await vi.waitFor(() => expect(test.session().tell).toHaveBeenCalledOnce());
+    const id = test.session().tell.mock.calls[0]![2] as string;
+    for (const repeats of [1, 2]) {
+      test
+        .session()
+        .emit(
+          { type: "update_accepted", id },
+          { type: "response_finished", canceled: false, updateId: id },
+        );
+      await vi.waitFor(() =>
+        expect(test.session().repeatUpdate).toHaveBeenCalledTimes(repeats),
+      );
+    }
+    expect(test.session().repeatUpdate).toHaveBeenCalledWith(id, false);
+    test
+      .session()
+      .emit(
+        { type: "update_accepted", id },
+        { type: "response_finished", canceled: false, updateId: id },
+      );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(test.session().repeatUpdate).toHaveBeenCalledTimes(2);
+    expect(test.session().tell).toHaveBeenCalledOnce();
+    expect(test.session().abandon).not.toHaveBeenCalled();
+    await test.shutdown();
+  });
+
+  it("cancels an update's response that started but says nothing", async () => {
+    const test = await harness();
+    test.setAlerts([{ alert_id: "a1", text: "Lisa @you" }]);
+    await vi.waitFor(() => expect(test.session().tell).toHaveBeenCalledOnce());
+    const id = test.session().tell.mock.calls[0]![2] as string;
+    test.session().emit({ type: "update_accepted", id });
+    await vi.waitFor(() => expect(test.session().cancel).toHaveBeenCalled());
+    test
+      .session()
+      .emit({ type: "response_finished", canceled: true, updateId: id });
+    await vi.waitFor(() =>
+      expect(test.session().repeatUpdate).toHaveBeenCalledOnce(),
+    );
+    expect(test.session().abandon).not.toHaveBeenCalled();
     await test.shutdown();
   });
 

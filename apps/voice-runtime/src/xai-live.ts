@@ -193,10 +193,18 @@ export function textCall(
   return { name: tool.name, arguments: JSON.stringify(args) };
 }
 
+/** A response asked for an update: tell()'s, or one after its tool results. */
+interface UpdateRequest {
+  id: string;
+  tools: boolean;
+}
+
 interface Response {
   id: string;
   /** An update composed with tell(). */
   update: boolean;
+  /** The update it says, from its metadata. */
+  updateId?: string;
   /** Whether it may call tools; an update said with tell() may not. */
   tools: boolean;
   audioStarted: boolean;
@@ -230,15 +238,12 @@ export class XaiLiveSession implements LiveSession {
   private muted = false;
   private audioCarry = Buffer.alloc(0);
   private response?: Response;
-  /**
-   * Responses the server creates for tell() calls, and for the results of
-   * their tool calls, oldest first: whether each may call tools.
-   */
-  private readonly pendingUpdates: boolean[] = [];
-  /** Calls an update made; the response to their results is the update too. */
-  private readonly updateCalls = new Set<string>();
-  /** The round whose results are coming back holds an update's calls. */
-  private updateRound = false;
+  /** Calls an update made, by call ID: the update the next response says. */
+  private readonly updateCalls = new Map<string, string>();
+  /** The update whose calls' results are coming back. */
+  private updateRound?: string;
+  /** A tell() that waits for the response under way to end. */
+  private waitingTell?: { cue: string; update: UpdateRequest };
   /** The session's tools by worker name, for calls written as words. */
   private tools = new Map<string, LiveTool>();
   /** Calls the model wrote as words, by call ID: their worker tool names. */
@@ -250,6 +255,8 @@ export class XaiLiveSession implements LiveSession {
   /** Calls handed to the worker whose outputs have not come back yet. */
   private readonly pendingCalls = new Set<string>();
   private responseWanted = false;
+  /** The update the wanted response says, if any. */
+  private wantedUpdate?: UpdateRequest;
   /** Input items whose transcript the worker already received as final. */
   private readonly completedInputs = new Set<string>();
   private readonly inputTexts = new Map<string, string>();
@@ -482,9 +489,28 @@ export class XaiLiveSession implements LiveSession {
   /**
    * The cue joins the conversation right before the reply as a marked user
    * item: as response instructions or a system item, Grok answered the
-   * latest user turn again instead. It is never saved or shown.
+   * latest user turn again instead. It is never saved or shown. A new item
+   * with a response request cancels the response under way, so a cue told
+   * meanwhile waits for it to end.
    */
-  tell(cue: string, allowTools = false) {
+  tell(cue: string, allowTools: boolean, id: string) {
+    const update = { id, tools: allowTools };
+    if (this.response) this.waitingTell = { cue, update };
+    else this.sendTell(cue, update);
+  }
+
+  /** Asks again for an update whose cue the model already has. */
+  repeatUpdate(id: string, allowTools: boolean) {
+    this.requestResponse({ id, tools: allowTools });
+  }
+
+  /** Gives the session up as lost, so the worker connects a new one. */
+  abandon(code: string) {
+    this.fail(code, true);
+    this.socket.terminate();
+  }
+
+  private sendTell(cue: string, update: UpdateRequest) {
     this.send({
       type: "conversation.item.create",
       item: {
@@ -493,11 +519,7 @@ export class XaiLiveSession implements LiveSession {
         content: [{ type: "input_text", text: `[system] ${cue}` }],
       },
     });
-    this.pendingUpdates.push(allowTools);
-    this.send({
-      type: "response.create",
-      response: { tool_choice: allowTools ? "auto" : "none" },
-    });
+    this.createResponse(update);
   }
 
   /** Takes effect at the next response; the one playing keeps its speed. */
@@ -536,7 +558,11 @@ export class XaiLiveSession implements LiveSession {
   ) {
     for (const result of results) {
       this.pendingCalls.delete(result.callId);
-      if (this.updateCalls.delete(result.callId)) this.updateRound = true;
+      const update = this.updateCalls.get(result.callId);
+      if (update !== undefined) {
+        this.updateCalls.delete(result.callId);
+        this.updateRound = update;
+      }
       // A call written as words has no call item to answer; its result is
       // context, with a reminder of how to call.
       const written = this.textCalls.get(result.callId);
@@ -560,10 +586,11 @@ export class XaiLiveSession implements LiveSession {
     // answered by the update, which goes on in its own words.
     if (results.length === 0 || this.pendingCalls.size > 0) return;
     const update = this.updateRound;
-    this.updateRound = false;
+    this.updateRound = undefined;
     if (!reply) return;
-    if (update) this.pendingUpdates.push(true);
-    this.requestResponse();
+    this.requestResponse(
+      update === undefined ? undefined : { id: update, tools: true },
+    );
   }
 
   async *events(): AsyncIterable<LiveEvent> {
@@ -587,9 +614,27 @@ export class XaiLiveSession implements LiveSession {
     this.end();
   }
 
-  private requestResponse() {
-    if (this.response) this.responseWanted = true;
-    else this.send({ type: "response.create" });
+  private requestResponse(update?: UpdateRequest) {
+    if (this.response) {
+      this.responseWanted = true;
+      this.wantedUpdate = update;
+    } else this.createResponse(update);
+  }
+
+  /**
+   * An update's response carries its ID as metadata, which xAI echoes on
+   * response.created and response.done, also when it is canceled.
+   */
+  private createResponse(update?: UpdateRequest) {
+    if (!update) return this.send({ type: "response.create" });
+    const tools = update.tools ? "auto" : "none";
+    this.send({
+      type: "response.create",
+      response: {
+        tool_choice: tools,
+        metadata: { update_id: update.id, tools },
+      },
+    });
   }
 
   #sendAudio(pcm: Buffer) {
@@ -634,13 +679,22 @@ export class XaiLiveSession implements LiveSession {
       }
       case "response.created": {
         const response = event.response as Record<string, unknown> | undefined;
-        const update = this.pendingUpdates.length > 0;
-        const tools = update ? this.pendingUpdates.shift()! : true;
+        const metadata = response?.metadata as
+          | Record<string, unknown>
+          | null
+          | undefined;
+        const updateId =
+          typeof metadata?.update_id === "string"
+            ? metadata.update_id
+            : undefined;
+        const update = updateId !== undefined;
+        const tools = !update || metadata?.tools !== "none";
         // A server-started reply supersedes calls nobody answers any more.
         if (!update) this.pendingCalls.clear();
         this.response = {
           id: typeof response?.id === "string" ? response.id : "",
           update,
+          updateId,
           tools,
           audioStarted: false,
           canceled: false,
@@ -652,7 +706,9 @@ export class XaiLiveSession implements LiveSession {
         };
         this.retrying = false;
         this.audioCarry = Buffer.alloc(0);
-        if (!update) this.push({ type: "response_started" });
+        if (updateId !== undefined)
+          this.push({ type: "update_accepted", id: updateId });
+        else this.push({ type: "response_started" });
         return;
       }
       case "response.output_item.added": {
@@ -716,10 +772,22 @@ export class XaiLiveSession implements LiveSession {
             this.runTextCall(response, response.markup);
           else this.release(response);
         }
-        this.push({ type: "response_finished", canceled });
+        this.push({
+          type: "response_finished",
+          canceled,
+          ...(response?.updateId === undefined
+            ? {}
+            : { updateId: response.updateId }),
+        });
         if (this.responseWanted && this.pendingCalls.size === 0) {
+          const update = this.wantedUpdate;
           this.responseWanted = false;
-          this.send({ type: "response.create" });
+          this.wantedUpdate = undefined;
+          this.createResponse(update);
+        } else if (this.waitingTell) {
+          const { cue, update } = this.waitingTell;
+          this.waitingTell = undefined;
+          this.sendTell(cue, update);
         }
         return;
       }
@@ -837,8 +905,11 @@ export class XaiLiveSession implements LiveSession {
         "Your last reply wrote a tool call as words instead of calling the tool, so nothing ran and none of it was said. Call the tool now as a function call, without words first; never write a call in words or angle brackets.",
       );
       this.retrying = true;
-      if (response.update) this.pendingUpdates.push(true);
-      this.requestResponse();
+      this.requestResponse(
+        response.updateId === undefined
+          ? undefined
+          : { id: response.updateId, tools: true },
+      );
       return;
     }
     const callId = `text_call_${randomUUID()}`;
@@ -850,7 +921,8 @@ export class XaiLiveSession implements LiveSession {
   private handOver(response: Response, call: LiveFunctionCall) {
     response.called = true;
     this.pendingCalls.add(call.callId);
-    if (response.update) this.updateCalls.add(call.callId);
+    if (response.updateId !== undefined)
+      this.updateCalls.set(call.callId, response.updateId);
     this.push({
       type: "function_calls",
       calls: [call],
