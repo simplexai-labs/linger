@@ -40,6 +40,7 @@ pnpm env:inventory:check
 # Skill versions are immutable and never reformatted.
 prettier_files=()
 eslint_files=()
+changed_files=()
 while IFS= read -r -d '' file; do
   [[ "$file" =~ ^skills/builtin/[^/]+/[^/]+/ ]] && continue
   [[ -f "$file" ]] || continue
@@ -51,12 +52,21 @@ while IFS= read -r -d '' file; do
   case "$file" in
     *.cjs | *.cts | *.js | *.jsx | *.mjs | *.mts | *.ts | *.tsx) eslint_files+=("$file") ;;
   esac
+  changed_files+=("$file")
 done < <(git -c core.quotePath=false diff -z --name-only --no-renames --diff-filter=ACMRT "$base" "$head_sha")
 if ((${#prettier_files[@]} > 0)); then
   pnpm exec prettier --check "${prettier_files[@]}"
 fi
 if ((${#eslint_files[@]} > 0)); then
   pnpm exec eslint "${eslint_files[@]}"
+fi
+
+# The repository is English-only. Only CJK ideographs are rejected, so tests
+# may still use kana, Hangul, and full-width punctuation as unspaced scripts.
+if ((${#changed_files[@]} > 0)) &&
+  LC_ALL=C git grep -nIP '(*UTF)[\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}]' -- "${changed_files[@]}"; then
+  echo "Changed files contain Chinese characters; the repository is English-only (see AGENTS.md)." >&2
+  exit 1
 fi
 
 make check-scripts-fast check-docs

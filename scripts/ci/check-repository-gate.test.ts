@@ -20,6 +20,7 @@ const cleanEnv = Object.fromEntries(
 
 interface GateOptions {
   changedPath?: string;
+  changedContent?: string;
   // Delete this base file in the head commit.
   deletedPath?: string;
   // Pass a target branch that moved past the merge base, as a local run does.
@@ -57,7 +58,10 @@ function runGate(options: GateOptions = {}) {
     if (options.deletedPath) git("rm", "-q", options.deletedPath);
     const changed = options.changedPath ?? "apps/web/src/example.ts";
     mkdirSync(join(root, changed, ".."), { recursive: true });
-    writeFileSync(join(root, changed), "export {};\n");
+    writeFileSync(
+      join(root, changed),
+      options.changedContent ?? "export {};\n",
+    );
     git("add", ".");
     git("commit", "-q", "-m", "head");
     const head = git("rev-parse", "HEAD");
@@ -135,6 +139,23 @@ describe("local repository gate", { timeout: 60_000 }, () => {
       "pnpm exec eslint apps/web/src/example.ts",
       "make check-scripts-fast check-docs",
     ]);
+  });
+
+  it("rejects changed files with CJK ideographs and allows kana", () => {
+    const ideographs = runGate({
+      changedContent: 'export const greeting = "\u4f60\u597d";\n',
+    });
+    expect(ideographs.status).not.toBe(0);
+    expect(ideographs.stderr).toContain("English-only");
+    expect(ideographs.commands).not.toContain(
+      "make check-scripts-fast check-docs",
+    );
+
+    const kana = runGate({
+      changedContent:
+        'export const sample = "\u3072\u3089\u304c\u306a\u3002";\n',
+    });
+    expect(kana.status).toBe(0);
   });
 
   it("formats and lints only existing changed files outside published Skill versions", () => {
