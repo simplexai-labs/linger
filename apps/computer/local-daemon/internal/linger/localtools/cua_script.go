@@ -73,9 +73,8 @@ var scriptForbidden = []string{"delivery_mode", "foreground", "screenshot_out_fi
 // know. While the user's everyday Chrome runs as chrome, the guard refuses
 // every key to it, every key that names no app, and every key whose
 // arguments name an app or window of their own, which Cua lets override the
-// app the call is made on: a script cannot prove which window an element
-// token was read from, so even the one key a tool call may send there (see
-// everydayChromeKeys) is refused.
+// app the call is made on. This is the rule tool calls follow: no key
+// reaches the user's Chrome.
 func guardedScript(args, body string, deadline int64, inputLimit int, chrome int) string {
 	pattern := make([]string, 0, len(scriptForbidden))
 	for _, word := range scriptForbidden {

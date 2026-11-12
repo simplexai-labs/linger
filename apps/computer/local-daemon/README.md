@@ -352,13 +352,12 @@ the Computer (`COMPUTER_KEYS_REFUSED`), in any of its windows, in tool calls,
 runs as a menu command in the Chrome window that has the keyboard, and Cua
 types text as keys that all read as the A key. A key named by its
 `element_token` goes to the app the token was read from, and a key that names
-no app is refused while that Chrome runs. Not even Return bound to a search box goes: Cua refuses a
-background key while its app has another window, and the user's Chrome always
-has one. A script's guard refuses a key whose arguments
-name an app or window of their own, and no script opens an app or URL, so the
-key rule knows every app a script reaches.
-The Agent fills fields with
-`set_value`, presses the page's buttons and goes back through its links.
+no app is refused while that Chrome runs. Not even Return bound to a search
+box goes: Cua refuses a background key while its app has another window, and
+the user's Chrome always has one. A script's guard refuses a key whose
+arguments name an app or window of their own, and no script opens an app or
+URL, so the key rule knows every app a script reaches. The Agent fills fields
+with `set_value`, presses the page's buttons and goes back through its links.
 The Daemon removes the separate Chrome profile `computer-tools/agent-chrome`
 when it starts, after quitting the Chrome that still runs on it.
 Edge and Firefox each run as a separate instance with their own profile under
