@@ -237,14 +237,29 @@ describe("features that need model packages", () => {
     const service = await startVoiceService({
       logger: { log: vi.fn() } as unknown as JsonLogger,
       http: { mount: () => () => {} } as unknown as HttpHost,
-      environment: { ...environment, XAI_API_KEY: "test" },
+      environment: {
+        ...environment,
+        LINGER_SECRET_SEED: "model-packages-test-seed-0123456789abcdef",
+      },
+      fetch: async () => Response.json({ xai_api_key: "test" }),
       spawnWorker,
       installModels,
     });
-    expect(installModels).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(installModels).toHaveBeenCalledOnce());
     expect(spawnWorker).not.toHaveBeenCalled();
     installed();
-    await vi.waitFor(() => expect(spawnWorker).toHaveBeenCalledWith("live"));
+    await vi.waitFor(() =>
+      expect(spawnWorker).toHaveBeenCalledWith(
+        "live",
+        expect.objectContaining({
+          env: expect.objectContaining({
+            NODE_PATH: expect.stringContaining(
+              models.modelPackagesRoot(environment),
+            ),
+          }),
+        }),
+      ),
+    );
     const stopping = service.stop();
     (spawnWorker.mock.results[0]!.value as EventEmitter).emit("exit", 0, null);
     await stopping;

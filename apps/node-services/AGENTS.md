@@ -16,7 +16,7 @@
   role's readiness ok); roles must not register their own probes.
 - The `document` role keeps its own port (4321 by default) on its own worker
   thread (`src/document/main.ts`) because it installs jsdom globals and
-  replaces the global `Request`/`Response`. The `voice` role supervises separate ASR, recorder and Live child processes (ports 4324–4326); it does not run audio jobs on the main thread. Other roles run on the main thread
+  replaces the global `Request`/`Response`. The `voice` role supervises separate ASR, recorder and Live child processes (ports 4324–4326); it does not run audio jobs on the main thread. Voice workers follow TeamHub's effective provider keys (`GET /internal/v1/voice/provider-keys` with the `voice-runtime` credential): a Soniox key runs ASR and recorder, an xAI key runs Live. The role reconciles at startup, on TeamHub's `POST /v1/voice/workers:reconcile` notification (`node-services-internal` bearer), and every 60 seconds, so workers start, drain, or restart with a new key without restarting node-services. Keys reach a worker only through its environment; a failed key fetch leaves the running workers unchanged. Other roles run on the main thread
   and must not install process globals.
 - `NODE_SERVICES_ROLES` selects roles as a comma-separated list. An unset or
   empty value starts every role; an unknown role fails startup. Selected roles

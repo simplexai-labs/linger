@@ -10,7 +10,7 @@ import {
   type ExecutionContextRef,
 } from "../context-ref.js";
 import { AgentLifecycleCoordinator } from "../lifecycle-coordinator.js";
-import { hasBearerToken } from "../../service-bearer-auth.js";
+import { hasBearerToken } from "../../../service-bearer-auth.js";
 import {
   parseLocalPlacement,
   type LocalAgentRunnerManagement,
