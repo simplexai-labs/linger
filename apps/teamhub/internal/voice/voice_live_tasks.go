@@ -403,7 +403,7 @@ func (s *Service) listVoiceLiveTasks(ctx context.Context, session voicelive.Sess
 	return voicelive.Output(output), nil
 }
 
-// checkVoiceLiveTask reads one of the user's voice tasks as a Meta's task
+// check does, with one page of the reports it sent back, from offset.
 // check does, with every report it sent back.
 func (s *Service) checkVoiceLiveTask(ctx context.Context, session voicelive.Session, request teamhubinternal.VoiceLiveToolCall) (string, error) {
 	var args voicelive.CheckTaskArguments
