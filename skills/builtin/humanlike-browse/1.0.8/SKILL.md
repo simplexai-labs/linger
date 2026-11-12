@@ -76,4 +76,5 @@ If the user takes over the window, read the page and the account again before th
 - When a page shows a captcha, a code or QR check, a sign-in wall or a too-many-requests message, call `report_blocker` with that kind and the page's URL at once. Then tell the user in the Room what the page asks for and that they can deal with it in that browser window, report what was done, and end the task.
 - When only one item cannot be viewed, call `report_blocker` with `content_unavailable` and its URL, and skip it.
 - Never pass a check yourself, switch accounts or retry around a limit.
-- When the Computer refuses input with `COMPUTER_INPUT_BUDGET`, `COMPUTER_SITE_COOLDOWN`, `COMPUTER_SITE_BLOCKED` or `COMPUTER_TAB_CHANGED`, report what was done and end the task.
+- When the Computer refuses input with `COMPUTER_INPUT_BUDGET`, `COMPUTER_SITE_COOLDOWN` or `COMPUTER_SITE_BLOCKED`, report what was done and end the task.
+- When it refuses input with `COMPUTER_TAB_CHANGED`, read the window. Go on only if the tab in front is the page this task was working on; otherwise report what was done and end the task.

@@ -1076,7 +1076,8 @@ func TestLocalToolCuaMacAgentChromeStopsWhenSomeoneElseChangesTheTabs(t *testing
 	if c.op.chromeHeld[9].count != 2 {
 		t.Fatalf("tabs after the task's own tab=%d, want 2", c.op.chromeHeld[9].count)
 	}
-	// A tab someone else opens stops the task before its next input.
+	// A tab someone else opens refuses the next input once, with nothing
+	// sent; the input after it is held to the tabs the window shows now.
 	f, err := os.OpenFile(marker, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatal(err)
@@ -1087,11 +1088,14 @@ func TestLocalToolCuaMacAgentChromeStopsWhenSomeoneElseChangesTheTabs(t *testing
 	if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`)); !errors.Is(err, errNotSent) || !strings.Contains(err.Error(), "COMPUTER_TAB_CHANGED") {
 		t.Fatalf("err=%v, want the tab change refused", err)
 	}
-	if _, err := c.call(t.Context(), "press_key", json.RawMessage(`{"pid":42,"window_id":9,"key":"escape"}`)); !strings.Contains(fmt.Sprint(err), "COMPUTER_SITE_BLOCKED") {
-		t.Fatalf("err=%v, want the task held", err)
-	}
 	if calls := fixtureCalls(t, marker); len(calls) != sent {
 		t.Fatalf("calls after the change=%v, want none", calls[sent:])
+	}
+	if c.op.chromeHeld[9].count != 3 {
+		t.Fatalf("tabs held after the refusal=%d, want 3", c.op.chromeHeld[9].count)
+	}
+	if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`)); err != nil {
+		t.Fatalf("input after the refusal: %v", err)
 	}
 	if err := c.drain(); err != nil {
 		t.Fatal(err)
@@ -1286,8 +1290,8 @@ func TestLocalToolCuaMacAgentChromeKeepsTabsItsScriptsChange(t *testing.T) {
 			t.Fatalf("input after the script that sent %s: %v", step.keys, err)
 		}
 	}
-	// A tab someone else opens between inputs stops the next script before
-	// it runs.
+	// A tab someone else opens between inputs refuses the next script
+	// before it runs.
 	change(`["cmd","t"]`, true)
 	before, _ := os.ReadFile(marker)
 	if _, err := c.call(t.Context(), "run_script", json.RawMessage(`{"script":"return 1"}`)); !errors.Is(err, errNotSent) || !strings.Contains(err.Error(), "COMPUTER_TAB_CHANGED") {

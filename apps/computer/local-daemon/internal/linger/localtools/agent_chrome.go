@@ -732,9 +732,8 @@ func (c *cuaSession) agentChromeTabWindow(pid, window any) (int, float64, heldTa
 
 // checkAgentChromeTabs holds the task to the tabs it left: the Computer's
 // own Chrome keeps the tab count that followed this task's last input, so a
-// different count means someone else opened or closed a tab, and the tab in
-// front may not be this task's. The task then stops, as after a reported
-// check. A strip that cannot be read, or a task that has no count yet, is not
+// different count means a tab opened or closed since, and the tab in front
+// may not be this task's. The input is then refused, once. A strip that cannot be read, or a task that has no count yet, is not
 // held. The strip is read only when the window's title, which list_windows
 // gives without a read, differs from the front tab's title after that input.
 func (c *cuaSession) checkAgentChromeTabs(ctx context.Context, pid, window any) error {
@@ -758,10 +757,14 @@ func (c *cuaSession) checkAgentChromeTabs(ctx context.Context, pid, window any) 
 		}
 		return nil
 	}
+	// A tab that the task's own input opened after the reads that followed
+	// it looks the same as one someone else opened, so this input is
+	// refused, not the task: the Agent reads the window and judges the
+	// front tab, and the next input is held to what the window shows now.
 	c.op.mu.Lock()
-	c.op.chromeBlocked = "a change of tabs"
+	c.op.chromeHeld[id] = heldTabs{count: got, title: front}
 	c.op.mu.Unlock()
-	return fmt.Errorf("COMPUTER_TAB_CHANGED: the Computer's own browser had %d tab(s) after this task's last input and has %d now, so someone else opened or closed a tab and the tab in front may not be this task's; nothing was sent. Tell the user and end the task: %w", want, got, errNotSent)
+	return fmt.Errorf("COMPUTER_TAB_CHANGED: the Computer's own browser had %d tab(s) after this task's last input and has %d now, with %q in front; a tab may have opened late after that input, or someone else changed the tabs. Nothing was sent. Read the window: go on only if the tab in front is this task's page, otherwise report what was done and end the task: %w", want, got, front, errNotSent)
 }
 
 // recordAgentChromeTabs keeps the tab count after this task's own input or

@@ -376,8 +376,11 @@ the task; `rate_limited` also puts the site (its registrable domain) in a
 Once a task opens a site there, the browser tools refuse that site for the
 rest of the task, and `launch_app` refuses to open it in another browser.
 A change of the front tab between the task's inputs that also changed the
-number of tabs stops the task with `COMPUTER_TAB_CHANGED`, because the next
-input could reach another page. The Daemon reads the tab strip before an input
+number of tabs refuses that one input with `COMPUTER_TAB_CHANGED`, because it
+could reach another page: the Agent reads the window and goes on only when
+the front tab is its page. A tab its own input opened late, after the reads
+that followed the input, looks the same, so the task is not stopped, and the
+next input is held to the tabs the window shows then. The Daemon reads the tab strip before an input
 only when the window's title in `list_windows` differs from the front tab's
 title after the last input, so a tab opened or closed behind the front tab
 does not stop the task: the input still reaches the task's page, and its
