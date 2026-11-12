@@ -306,6 +306,35 @@ describe("voice worker reconcile", () => {
     await shutdown();
   });
 
+  it("waits for the replacement worker after a key change", async () => {
+    const { route, teamHub, health, shutdown, of } = await harness({
+      keys: { xai_api_key: XAI },
+    });
+    expect(of("live")).toHaveLength(1);
+    teamHub.keys = { xai_api_key: "xai-key-2" };
+    let answer: unknown;
+    const answered = Promise.resolve(route.fetch(reconcileRequest())).then(
+      async (response) => {
+        answer = await response.json();
+      },
+    );
+    // The draining worker still answers healthy; it must not count.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(of("live")[0]!.child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(of("live")).toHaveLength(1);
+    expect(answer).toBeUndefined();
+    health.healthy = false;
+    of("live")[0]!.child.emit("exit", 0, null);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(of("live")).toHaveLength(2);
+    expect(answer).toBeUndefined();
+    health.healthy = true;
+    await vi.advanceTimersByTimeAsync(250);
+    await answered;
+    expect(answer).toEqual({ ready: true });
+    await shutdown();
+  });
+
   it("answers not ready when the workers miss the wait", async () => {
     const { route, teamHub, shutdown } = await harness({ healthy: false });
     teamHub.keys = { soniox_api_key: SONIOX };

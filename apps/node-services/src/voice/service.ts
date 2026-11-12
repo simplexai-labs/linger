@@ -161,6 +161,8 @@ export async function startVoiceService(options: {
       digest?: string;
       generation: number;
       child?: ChildProcess;
+      /** The generation that started `child`; an older one is draining. */
+      childGeneration?: number;
       exited?: Promise<void>;
       retry?: NodeJS.Timeout;
       failures: number;
@@ -252,6 +254,7 @@ export async function startVoiceService(options: {
       return;
     }
     entry.child = child;
+    entry.childGeneration = generation;
     entry.exited = new Promise<void>((resolve) => {
       let settled = false;
       const finish = (error?: unknown) => {
@@ -341,10 +344,16 @@ export async function startVoiceService(options: {
   const workersReady = async () =>
     (
       await Promise.all(
-        wantedWorkers().map(
-          async (worker) =>
-            Boolean(entries.get(worker)?.child) && (await probeWorker(worker)),
-        ),
+        wantedWorkers().map(async (worker) => {
+          const entry = entries.get(worker)!;
+          // A replaced worker answers on the same port until it exits, so
+          // only the child of the current generation counts.
+          return (
+            Boolean(entry.child) &&
+            entry.childGeneration === entry.generation &&
+            (await probeWorker(worker))
+          );
+        }),
       )
     ).every(Boolean);
   /** Reconciles, then waits until every wanted worker can take a job, so the
