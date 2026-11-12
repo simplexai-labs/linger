@@ -52,6 +52,10 @@ type HLSMaterializer struct {
 	ffprobe string
 }
 
+// ErrMediaToolsMissing means ffmpeg or ffprobe is not on PATH, so this
+// computer cannot materialize recordings.
+var ErrMediaToolsMissing = errors.New("voice media tools are missing")
+
 func NewHLSMaterializer(
 	pool *pgxpool.Pool,
 	objects artifactstore.ObjectStore,
@@ -59,11 +63,11 @@ func NewHLSMaterializer(
 ) (*HLSMaterializer, error) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
-		return nil, errors.New("ffmpeg is required for voice media materialization")
+		return nil, fmt.Errorf("ffmpeg is required for voice media materialization: %w", ErrMediaToolsMissing)
 	}
 	ffprobe, err := exec.LookPath("ffprobe")
 	if err != nil {
-		return nil, errors.New("ffprobe is required for voice media validation")
+		return nil, fmt.Errorf("ffprobe is required for voice media validation: %w", ErrMediaToolsMissing)
 	}
 	return &HLSMaterializer{
 		queries: store.New(pool), staging: staging, objects: objects,

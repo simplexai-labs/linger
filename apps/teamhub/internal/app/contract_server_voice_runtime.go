@@ -20,23 +20,30 @@ func (a *App) requireVoiceRuntime() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		if a.cfg.Voice.RuntimeToken == "" {
-			c.JSON(http.StatusServiceUnavailable, teamhubinternal.VoiceError{
-				Code: "DEPENDENCY_UNAVAILABLE", Message: "Voice Runtime callback is not configured",
-			})
-			c.Abort()
-			return
-		}
-		token, ok := strings.CutPrefix(c.GetHeader("Authorization"), "Bearer ")
-		if !ok || token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(a.cfg.Voice.RuntimeToken)) != 1 {
-			c.JSON(http.StatusUnauthorized, teamhubinternal.VoiceError{
-				Code: "UNAUTHENTICATED", Message: "Voice Runtime authentication is invalid",
-			})
-			c.Abort()
-			return
-		}
-		c.Next()
+		a.authenticateVoiceRuntime(c)
 	}
+}
+
+// authenticateVoiceRuntime checks the Voice Runtime credential. The provider
+// key read uses it alone: Node Services asks whether to run voice workers
+// whether or not voice media is on, and gets no key while it is off.
+func (a *App) authenticateVoiceRuntime(c *gin.Context) {
+	if a.cfg.Voice.RuntimeToken == "" {
+		c.JSON(http.StatusServiceUnavailable, teamhubinternal.VoiceError{
+			Code: "DEPENDENCY_UNAVAILABLE", Message: "Voice Runtime callback is not configured",
+		})
+		c.Abort()
+		return
+	}
+	token, ok := strings.CutPrefix(c.GetHeader("Authorization"), "Bearer ")
+	if !ok || token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(a.cfg.Voice.RuntimeToken)) != 1 {
+		c.JSON(http.StatusUnauthorized, teamhubinternal.VoiceError{
+			Code: "UNAUTHENTICATED", Message: "Voice Runtime authentication is invalid",
+		})
+		c.Abort()
+		return
+	}
+	c.Next()
 }
 
 func (a *App) reportVoiceObservationRoute(c *gin.Context) {

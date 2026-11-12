@@ -11,6 +11,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/collaboration"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/idempotency"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voice"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicekey"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicemedia"
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
@@ -49,12 +50,16 @@ func (a *App) createVoiceSession(c *gin.Context) {
 		return
 	}
 	// Live runs on xAI alone; every other purpose transcribes with Soniox.
-	if purpose == voicemedia.PurposeChatLive && a.cfg.Voice.XaiAPIKey == "" {
-		a.writeVoiceMediaError(c, "start Live", voicemedia.ErrProviderUnavailable)
-		return
+	// The key is read now, so one saved a moment ago already counts.
+	provider := voicekey.Soniox
+	if purpose == voicemedia.PurposeChatLive {
+		provider = voicekey.XAI
 	}
-	if purpose != voicemedia.PurposeChatLive && !a.voiceTranscription {
-		a.writeVoiceMediaError(c, "start voice transcription", voicemedia.ErrProviderUnavailable)
+	key, err := a.voiceKeys.Effective(c.Request.Context(), provider)
+	if err == nil && key == "" {
+		err = voicemedia.ErrProviderUnavailable
+	}
+	if a.writeVoiceMediaError(c, "resolve voice provider key", err) {
 		return
 	}
 	session, err := a.voiceMedia.CreateVoiceSession(c.Request.Context(), voicemedia.CreateVoiceSessionRequest{

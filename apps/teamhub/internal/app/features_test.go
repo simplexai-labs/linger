@@ -1,18 +1,28 @@
 package app
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+	artifactstore "github.com/simplexai-labs/linger/apps/teamhub/internal/artifact"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/config"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/document"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/permissionreview"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/retention"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicekey"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicemedia"
 )
 
@@ -85,7 +95,7 @@ func TestOptionalFeaturesRegisterFromConfiguration(t *testing.T) {
 			if tc.voice {
 				plane = voicemedia.New(nil, nil, nil)
 			}
-			if err := a.registerVoice(config.VoiceConfig{}, plane, nil, ""); err != nil {
+			if err := a.registerVoice(config.ForTest(), Deps{VoiceMedia: plane}, nil); err != nil {
 				t.Fatal(err)
 			}
 			a.addVoiceJobs(features)
@@ -147,7 +157,7 @@ func TestVoiceRuntimeCallbacksNeedVoiceMedia(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a := &App{}
 			a.cfg.Voice.RuntimeToken = "voice-token"
-			if err := a.registerVoice(config.VoiceConfig{}, tc.media, nil, ""); err != nil {
+			if err := a.registerVoice(config.ForTest(), Deps{VoiceMedia: tc.media}, nil); err != nil {
 				t.Fatal(err)
 			}
 			engine := gin.New()
@@ -175,8 +185,11 @@ func TestVoiceSessionPurposeNeedsItsProvider(t *testing.T) {
 		{"live without xAI", "chat_live", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := &App{voiceMedia: voicemedia.New(nil, nil, nil), voiceTranscription: tc.transcription}
-			a.cfg.Voice.XaiAPIKey = tc.xai
+			environment := map[voicekey.Provider]string{voicekey.XAI: tc.xai}
+			if tc.transcription {
+				environment[voicekey.Soniox] = "soniox-key"
+			}
+			a := &App{voiceMedia: voicemedia.New(nil, nil, nil), voiceKeys: voicekey.New(nil, nil, voicekey.Config{Enabled: true, Environment: environment}, nil)}
 			engine := gin.New()
 			engine.POST("/v0/rooms/:roomId/voice-sessions", func(c *gin.Context) {
 				c.Set("request_id", "request")
@@ -187,6 +200,104 @@ func TestVoiceSessionPurposeNeedsItsProvider(t *testing.T) {
 			engine.ServeHTTP(response, request)
 			if response.Code != http.StatusServiceUnavailable {
 				t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusServiceUnavailable, response.Body)
+			}
+		})
+	}
+}
+
+// With TEAMHUB_VOICE_MEDIA on and no key anywhere the full voice plane is
+// built and its jobs and retention rules registered; they only find work once
+// a voice session exists, and none can start without a key.
+func TestVoiceMediaOnWithoutKeysRegistersTheVoicePlane(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg required to build the voice media materializer")
+	}
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe required to build the voice media materializer")
+	}
+	cfg := voiceOnConfig()
+	a := &App{cfg: cfg, logger: slog.Default()}
+	if err := a.registerVoice(cfg, Deps{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if a.voiceMedia == nil || a.voiceRecordings == nil || !a.voiceKeys.Enabled() {
+		t.Fatal("voice media on did not build the voice plane")
+	}
+	features := newFeatureSet()
+	a.addVoiceJobs(features)
+	// The bare App has no Document service, so materialization stays out.
+	want := []string{
+		"voice_capture_completion", "voice_capture_reconcile", "voice_capture_stop",
+		"voice_session_reconcile", "voice_staging_cleanup", "voice_transcript_recovery",
+	}
+	if got := registeredKinds(features.workers); !slices.Equal(got, want) {
+		t.Fatalf("River kinds:\n got %v\nwant %v", got, want)
+	}
+	if len(features.periodic) != 0 || len(features.resume) != 1 {
+		t.Fatalf("periodic=%d resume=%d, want no periodic voice job and one resume", len(features.periodic), len(features.resume))
+	}
+	if got := retentionTables(a.retentionRules()); !slices.Equal(got, slices.Concat(retentionTables(retention.Core), voiceRetentionTables)) {
+		t.Fatalf("retention rules = %v", got)
+	}
+}
+
+func voiceOnConfig() config.Config {
+	return config.ForTest(func(cfg *config.Config) {
+		cfg.Voice.MediaEnabled = true
+		cfg.Voice.RuntimeToken = "voice-token"
+		cfg.Voice.LiveKitAPIURL = "http://127.0.0.1:17880"
+	})
+}
+
+// Voice that cannot run here leaves TeamHub up with voice off and one
+// warning: without LINGER_SECRET_SEED, or without ffmpeg. Any other build
+// failure still stops startup.
+func TestVoiceMediaThatCannotRunTurnsVoiceOff(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason string
+		seed         bool
+		build        error
+		fails        bool
+	}{
+		{name: "no secret seed", reason: "secret_seed_missing"},
+		{name: "no ffmpeg", reason: "ffmpeg_missing", seed: true, build: fmt.Errorf("ffprobe: %w", voicemedia.ErrMediaToolsMissing)},
+		{name: "bad LiveKit configuration", seed: true, build: errors.New("configure LiveKit voice media provider"), fails: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			built := false
+			original := newVoiceMediaPlane
+			t.Cleanup(func() { newVoiceMediaPlane = original })
+			newVoiceMediaPlane = func(*pgxpool.Pool, artifactstore.ObjectStore, string, *document.Service, config.VoiceConfig, func(context.Context) (string, error)) (*voicemedia.Service, *voicemedia.LocalStagingStore, error) {
+				built = true
+				return nil, nil, tc.build
+			}
+			cfg := voiceOnConfig()
+			if !tc.seed {
+				cfg.Voice.RuntimeToken = ""
+			}
+			var logs bytes.Buffer
+			a := &App{cfg: cfg, logger: slog.New(slog.NewJSONHandler(&logs, nil))}
+			err := a.registerVoice(cfg, Deps{}, nil)
+			if tc.fails {
+				if err == nil {
+					t.Fatal("a broken voice configuration started")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if built != tc.seed || a.voiceMedia != nil || a.voiceKeys.Enabled() {
+				t.Fatalf("built=%v media=%v enabled=%v", built, a.voiceMedia != nil, a.voiceKeys.Enabled())
+			}
+			if !strings.Contains(logs.String(), `"msg":"voice.media_unavailable"`) || !strings.Contains(logs.String(), `"reason":"`+tc.reason+`"`) {
+				t.Fatalf("logs = %s", logs.String())
+			}
+			if status, _ := a.voiceKeys.Status(t.Context(), voicekey.Soniox); status.CanSave {
+				t.Fatal("a key can be saved with voice off")
+			}
+			if err := a.voiceKeys.Save(t.Context(), voicekey.Soniox, "key"); !errors.Is(err, voicekey.ErrVoiceOff) {
+				t.Fatalf("Save = %v", err)
 			}
 		})
 	}

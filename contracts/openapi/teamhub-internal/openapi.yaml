@@ -803,6 +803,18 @@ paths:
                 $ref: "#/components/schemas/VoiceRuntimeProviderKeys"
         "401":
           $ref: "#/components/responses/VoiceUnauthenticated"
+        "500":
+          description: The keys could not be read (INTERNAL_ERROR).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceError"
+        "503":
+          description: TeamHub has no voice runtime credential (DEPENDENCY_UNAVAILABLE).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceError"
       security:
         - voiceRuntimeBearer: []
   /internal/v1/voice/media-objects:

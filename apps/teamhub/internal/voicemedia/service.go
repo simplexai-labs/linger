@@ -39,6 +39,22 @@ func (s *Service) SetArchiveTranscriber(asr voicetranscription.ArchiveTranscribe
 	s.archiveASR, s.normalizeTranscript = asr, normalize
 }
 
+// archiveTranscriberReady reports whether archive recovery can transcribe
+// now. A transcriber whose provider key is saved while TeamHub runs answers
+// per call; without a key no source audio is kept and no recovery is queued.
+// A failed key read is returned so the job retries.
+func (s *Service) archiveTranscriberReady(ctx context.Context) (bool, error) {
+	if s.archiveASR == nil {
+		return false, nil
+	}
+	if keyed, ok := s.archiveASR.(interface {
+		Ready(context.Context) (bool, error)
+	}); ok {
+		return keyed.Ready(ctx)
+	}
+	return true, nil
+}
+
 func (s *Service) SetArchiveRecoveryConcurrency(limit int) {
 	s.archiveRecoveryConcurrency = limit
 }

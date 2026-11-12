@@ -5185,6 +5185,24 @@ export interface operations {
         };
       };
       401: components["responses"]["VoiceUnauthenticated"];
+      /** @description The keys could not be read (INTERNAL_ERROR). */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VoiceError"];
+        };
+      };
+      /** @description TeamHub has no voice runtime credential (DEPENDENCY_UNAVAILABLE). */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VoiceError"];
+        };
+      };
     };
   };
   putVoiceMediaObject: {

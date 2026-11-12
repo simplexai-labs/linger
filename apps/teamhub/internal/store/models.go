@@ -1850,6 +1850,12 @@ type VoiceMediaEpoch struct {
 	RestartRetryAt            pgtype.Timestamptz `json:"restart_retry_at"`
 }
 
+type VoiceProviderKey struct {
+	Provider         string             `json:"provider"`
+	ApiKeyCiphertext []byte             `json:"api_key_ciphertext"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type VoiceSession struct {
 	ID                         string             `json:"id"`
 	TenantID                   string             `json:"tenant_id"`

@@ -7,9 +7,18 @@ keep talking to an agent hands-free.**
 
 ## Turning voice on
 
-Voice needs a [Soniox](https://soniox.com) key in `SONIOX_API_KEY` for
-recording and dictation, or an [xAI](https://x.ai) key in `XAI_API_KEY` for
-Grok Live voice mode; either works without the other.
+Voice runs wherever the deployment can run it: TeamHub's
+`TEAMHUB_VOICE_MEDIA` is `on` (the default), `LINGER_SECRET_SEED` is set, and
+`ffmpeg` and `ffprobe` are on `PATH`. `TEAMHUB_VOICE_MEDIA=off`, a missing seed,
+or missing ffmpeg keep voice off; TeamHub still starts and logs
+`voice.media_unavailable` for the last two.
+
+Each feature then needs its provider key: [Soniox](https://soniox.com) for
+recording and dictation, [xAI](https://x.ai) for Grok Live voice mode; either
+works without the other. Set a key in `SONIOX_API_KEY` or `XAI_API_KEY`, or
+save it in the app when voice asks for it. A saved key applies at once,
+without a restart; an environment key wins over a saved one and cannot be
+replaced from the app.
 
 - The Linger app: put the keys in `user.env` in its instance folder
   (`~/.simplexai/instances/desktop/`), or type them under Customize → API

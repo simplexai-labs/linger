@@ -24,6 +24,8 @@ var teamhubEnvironment = []string{
 	"TEAMHUB_COMPOSIO_ENVIRONMENT_KEY",
 	"WEB_PUBLIC_ORIGIN",
 	"SONIOX_API_KEY",
+	"XAI_API_KEY",
+	"TEAMHUB_VOICE_MEDIA",
 	"LIVEKIT_URL",
 	"LIVEKIT_API_URL",
 	"LIVEKIT_API_KEY",
@@ -149,23 +151,50 @@ func TestLoadRejectsInvalidPublicURL(t *testing.T) {
 	}
 }
 
-func TestLoadSonioxKeyTurnsVoiceMediaOnWithSecretSeed(t *testing.T) {
+// Voice media is on by default. Without a seed Load still succeeds, like
+// every other link; the App then runs with voice off.
+func TestLoadVoiceMediaIsOnByDefault(t *testing.T) {
 	clearTeamHubEnvironment(t)
 	t.Setenv("TEAMHUB_DATABASE_URL", "postgres://environment.example/teamhub")
-	t.Setenv("SONIOX_API_KEY", "soniox-secret")
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "LINGER_SECRET_SEED") {
-		t.Fatalf("Soniox without a seed error = %v", err)
+	if cfg, err := Load(); err != nil || !cfg.Voice.MediaEnabled || cfg.Voice.RuntimeToken != "" {
+		t.Fatalf("voice media without a seed: enabled=%v err=%v", cfg.Voice.MediaEnabled, err)
 	}
 	t.Setenv("LINGER_SECRET_SEED", testSecretSeed)
+	t.Setenv("SONIOX_API_KEY", "soniox-secret")
+	t.Setenv("XAI_API_KEY", "xai-secret")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Voice.SonioxAPIKey != "soniox-secret" || cfg.Voice.RuntimeToken != ServiceCredential(testSecretSeed, "voice-runtime") {
-		t.Fatalf("unexpected voice config: %+v", cfg)
+	if !cfg.Voice.MediaEnabled || cfg.Voice.SonioxAPIKey != "soniox-secret" || cfg.Voice.XaiAPIKey != "xai-secret" || cfg.Voice.RuntimeToken != ServiceCredential(testSecretSeed, "voice-runtime") {
+		t.Fatalf("unexpected voice config: %+v", cfg.Voice)
 	}
 	if cfg.Voice.LiveKitURL != "ws://127.0.0.1:17880" || cfg.Voice.LiveKitAPIURL != "http://127.0.0.1:17880" || cfg.Voice.LiveKitAPIKey != "devkey" || cfg.Voice.LiveKitAPISecret != "devsecret-livekit-voice-local-only-32-bytes" {
 		t.Fatalf("unexpected LiveKit defaults: %+v", cfg)
+	}
+}
+
+func TestLoadVoiceMediaSetting(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{{"on", true}, {"off", false}, {" off ", false}} {
+		clearTeamHubEnvironment(t)
+		t.Setenv("TEAMHUB_DATABASE_URL", "postgres://environment.example/teamhub")
+		t.Setenv("LINGER_SECRET_SEED", testSecretSeed)
+		t.Setenv("TEAMHUB_VOICE_MEDIA", tc.value)
+		cfg, err := Load()
+		if err != nil || cfg.Voice.MediaEnabled != tc.want {
+			t.Fatalf("TEAMHUB_VOICE_MEDIA=%q: enabled=%v err=%v", tc.value, cfg.Voice.MediaEnabled, err)
+		}
+	}
+	clearTeamHubEnvironment(t)
+	t.Setenv("TEAMHUB_DATABASE_URL", "postgres://environment.example/teamhub")
+	for _, value := range []string{"true", "ON", "1", "yes"} {
+		t.Setenv("TEAMHUB_VOICE_MEDIA", value)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "TEAMHUB_VOICE_MEDIA") {
+			t.Fatalf("TEAMHUB_VOICE_MEDIA=%q error = %v", value, err)
+		}
 	}
 }
 
