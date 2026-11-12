@@ -16,6 +16,7 @@ export function ProviderKeyForm({
   hint,
   label,
   onSaved,
+  pendingLabel = "Checking key...",
   save,
 }: {
   /** The message shown under the field when `save` fails. */
@@ -23,6 +24,8 @@ export function ProviderKeyForm({
   hint: string;
   label: string;
   onSaved?: () => void;
+  /** The Save button's text while `save` runs. */
+  pendingLabel?: string;
   save: (apiKey: string) => Promise<unknown>;
 }) {
   const [apiKey, setApiKey] = useState("");
@@ -57,7 +60,7 @@ export function ProviderKeyForm({
         tone="primary"
         type="submit"
       >
-        {mutation.isPending ? "Checking key..." : "Save key"}
+        {mutation.isPending ? pendingLabel : "Save key"}
       </Button>
     </form>
   );

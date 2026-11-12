@@ -210,6 +210,8 @@ export function VoiceKeyDialog({
                   hint="Stored encrypted and never shown again."
                   key={provider}
                   label={`${details.name} API key`}
+                  // TeamHub answers the save once the voice workers are up.
+                  pendingLabel="Turning on voice…"
                   save={async (apiKey) => {
                     await teamHubData(
                       client.api.PUT("/v0/voice-provider-keys/{provider}", {

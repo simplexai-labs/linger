@@ -27,6 +27,9 @@ export const VOICE_DRAIN_MS = 72_000;
 /** Catches a reconcile notification that TeamHub could not deliver. */
 export const VOICE_RECONCILE_POLL_MS = 60_000;
 const RECONCILE_PATH = "/v1/voice/workers:reconcile";
+/** Bounds how long a reconcile request waits for the wanted workers. */
+export const VOICE_READY_WAIT_MS = 20_000;
+const VOICE_READY_POLL_MS = 250;
 
 type ProviderKeys = components["schemas"]["VoiceRuntimeProviderKeys"];
 
@@ -98,6 +101,20 @@ async function fetchProviderKeys(
   };
 }
 
+/** A LiveKit agents worker answers 2xx on its health port only once it is
+ * registered with LiveKit, so this is when it can take a dispatched job. */
+async function probeVoiceWorker(worker: VoiceWorker): Promise<boolean> {
+  try {
+    return (
+      await fetch(`http://127.0.0.1:${voiceWorkerPorts[worker]}/`, {
+        signal: AbortSignal.timeout(1_000),
+      })
+    ).ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Separate processes keep inference, recording and Agent work off each other's
  * event loops. Workers follow TeamHub's effective provider keys: a reconcile
  * starts, stops or replaces a worker, and only the failed worker restarts after
@@ -110,10 +127,12 @@ export async function startVoiceService(options: {
   spawnWorker?: (worker: VoiceWorker, spec: VoiceWorkerSpawn) => ChildProcess;
   installModels?: () => Promise<void>;
   fetch?: typeof fetch;
+  probeWorker?: (worker: VoiceWorker) => Promise<boolean>;
 }) {
   const env = options.environment ?? process.env;
   const config = readVoiceConfig(env);
   const fetchImpl = options.fetch ?? fetch;
+  const probeWorker = options.probeWorker ?? probeVoiceWorker;
   // The VAD model's native package, when the runtime ships it separately: the
   // workers wait for its first download and find it on NODE_PATH.
   const models = modelPackageNames("voice");
@@ -133,6 +152,7 @@ export async function startVoiceService(options: {
       }
     : {};
   let stopping = false;
+  const stopped = new AbortController();
   const entries = new Map<
     VoiceWorker,
     {
@@ -276,13 +296,16 @@ export async function startVoiceService(options: {
       });
     }
   };
-  let running: Promise<void> | undefined;
+  let running: Promise<boolean> | undefined;
   let again = false;
+  /** Resolves whether the last key fetch succeeded and was applied. */
   const runReconcile = async () => {
+    let applied: boolean;
     do {
       again = false;
       const result = await fetchProviderKeys(config, fetchImpl);
-      if (stopping) return;
+      if (stopping) return false;
+      applied = result.ok;
       if (result.ok) apply(result.keys);
       else
         options.logger.log("warn", "voice.reconcile_failed", {
@@ -290,10 +313,11 @@ export async function startVoiceService(options: {
           ...(result.status ? { status: result.status } : {}),
         });
     } while (again && !stopping);
+    return applied;
   };
   /** One reconcile runs at a time; triggers during it coalesce into one more. */
-  const reconcile = (): Promise<void> => {
-    if (stopping) return Promise.resolve();
+  const reconcile = (): Promise<boolean> => {
+    if (stopping) return Promise.resolve(false);
     if (running) {
       again = true;
       return running;
@@ -314,6 +338,39 @@ export async function startVoiceService(options: {
   const poll = setInterval(() => void reconcile(), VOICE_RECONCILE_POLL_MS);
   const wantedWorkers = () =>
     VOICE_WORKERS.filter((worker) => entries.get(worker)!.key);
+  const workersReady = async () =>
+    (
+      await Promise.all(
+        wantedWorkers().map(
+          async (worker) =>
+            Boolean(entries.get(worker)?.child) && (await probeWorker(worker)),
+        ),
+      )
+    ).every(Boolean);
+  /** Reconciles, then waits until every wanted worker can take a job, so the
+   * caller's next voice dispatch finds a registered worker. */
+  const reconcileAndWait = async () => {
+    if (!(await reconcile())) return false;
+    const deadline = Date.now() + VOICE_READY_WAIT_MS;
+    while (!stopping) {
+      if (await workersReady()) return !stopping;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return false;
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          clearTimeout(timer);
+          stopped.signal.removeEventListener("abort", finish);
+          resolve();
+        };
+        const timer = setTimeout(
+          finish,
+          Math.min(VOICE_READY_POLL_MS, remaining),
+        );
+        stopped.signal.addEventListener("abort", finish);
+      });
+    }
+    return false;
+  };
   // Readiness may fail while media reconnects; liveness continues to keep the
   // Agent and other media workers running. No provider credentials are returned.
   const unmount = options.http.mount({
@@ -340,34 +397,21 @@ export async function startVoiceService(options: {
         );
       if (request.method !== "POST")
         return new Response(null, { status: 405, headers: { allow: "POST" } });
-      void reconcile();
-      return new Response(null, { status: 202 });
+      return reconcileAndWait().then((ready) => Response.json({ ready }));
     },
     readiness: async () => {
-      const results = await Promise.all(
-        wantedWorkers().map(async (worker) => {
-          if (!entries.get(worker)?.child) return false;
-          try {
-            return (
-              await fetch(`http://127.0.0.1:${voiceWorkerPorts[worker]}/`, {
-                signal: AbortSignal.timeout(1_000),
-              })
-            ).ok;
-          } catch {
-            return false;
-          }
-        }),
-      );
-      return results.every(Boolean)
+      return (await workersReady())
         ? { ready: true }
         : { ready: false, reason: "voice_worker_reconnecting" };
     },
   });
   return {
-    /** Runs one reconcile now, or joins the one in flight. */
+    /** Runs one reconcile now, or joins the one in flight; resolves whether
+     * the keys were read and applied. */
     reconcile,
     async stop() {
       stopping = true;
+      stopped.abort();
       clearInterval(poll);
       unmount();
       // Signal all workers together, so recorder flushing never waits for ASR.

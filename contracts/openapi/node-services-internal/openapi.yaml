@@ -1123,12 +1123,20 @@ paths:
   /v1/voice/workers:reconcile:
     post:
       tags: [Voice]
-      summary: Schedule a reconcile of the voice workers against TeamHub's effective provider keys
-      description: It only schedules the reconcile and never carries keys; workers read keys from TeamHub.
+      summary: Reconcile the voice workers against TeamHub's effective provider keys and wait for them
+      description:
+        Runs a reconcile, or joins the one in flight, then waits until every
+        worker the effective keys require is registered and ready, up to a
+        bounded wait. It never carries keys; workers read keys from TeamHub.
+        `ready=false` means the wait ended first or the keys could not be read.
       operationId: reconcileVoiceWorkers
       responses:
-        "202":
-          description: Reconcile scheduled.
+        "200":
+          description: Reconcile ran; whether the required workers are ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceWorkersReconcileResult"
         "401":
           $ref: ../components/common.yaml#/components/responses/Unauthenticated
       security:
@@ -2751,6 +2759,14 @@ components:
       $ref: ../components/document-internal.yaml#/components/schemas/DurableAckEnvelope
     DurabilityFailureEnvelope:
       $ref: ../components/document-internal.yaml#/components/schemas/DurabilityFailureEnvelope
+    VoiceWorkersReconcileResult:
+      type: object
+      additionalProperties: false
+      required: [ready]
+      properties:
+        ready:
+          type: boolean
+          description: Every worker the effective keys require is ready to take a job.
     LocalComputerToolCall:
       type: object
       additionalProperties: false

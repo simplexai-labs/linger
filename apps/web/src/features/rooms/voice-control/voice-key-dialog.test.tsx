@@ -225,6 +225,33 @@ describe("VoiceKeyDialog", () => {
     expect(onReady).not.toHaveBeenCalled();
   });
 
+  it("says voice is turning on while the save waits for it", async () => {
+    const runtime = createTestTeamHubRuntime();
+    let answer: (() => void) | undefined;
+    runtime.server.on(
+      "PUT",
+      "/v0/voice-provider-keys/{provider}",
+      () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ source: "stored", can_save: true });
+        }),
+    );
+    renderDialog(runtime, noKeys);
+    fireEvent.change(screen.getByLabelText("Soniox API key"), {
+      target: { value: "soniox-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+    expect(
+      await screen.findByRole("button", { name: /Turning on voice/ }),
+    ).toBeDisabled();
+    answer!();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /Turning on voice/ }),
+      ).toBeNull(),
+    );
+  });
+
   it("explains that the deployment must configure a key it cannot save", () => {
     const runtime = createTestTeamHubRuntime();
     renderDialog(runtime, {

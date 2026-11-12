@@ -557,8 +557,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Schedule a reconcile of the voice workers against TeamHub's effective provider keys
-     * @description It only schedules the reconcile and never carries keys; workers read keys from TeamHub.
+     * Reconcile the voice workers against TeamHub's effective provider keys and wait for them
+     * @description Runs a reconcile, or joins the one in flight, then waits until every worker the effective keys require is registered and ready, up to a bounded wait. It never carries keys; workers read keys from TeamHub. `ready=false` means the wait ended first or the keys could not be read.
      */
     post: operations["reconcileVoiceWorkers"];
     delete?: never;
@@ -1180,6 +1180,10 @@ export interface components {
         | "backlog_exceeded"
         | "durability_invariant_failed";
       document_id: components["schemas"]["DocumentInternalId"];
+    };
+    VoiceWorkersReconcileResult: {
+      /** @description Every worker the effective keys require is ready to take a job. */
+      ready: boolean;
     };
     LocalComputerToolCall: {
       tenant_id: string;
@@ -2864,12 +2868,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Reconcile scheduled. */
-      202: {
+      /** @description Reconcile ran; whether the required workers are ready. */
+      200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["VoiceWorkersReconcileResult"];
+        };
       };
       401: components["responses"]["Unauthenticated"];
     };

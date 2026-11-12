@@ -54,7 +54,7 @@ func (f voiceKeyCheck) Check(ctx context.Context, provider voicekey.Provider, ke
 	return f(ctx, provider, key)
 }
 
-// syncBuffer collects log lines written from the background notify.
+// syncBuffer collects log lines written while a test reads them.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -108,40 +108,77 @@ func putVoiceKey(a *App, provider, body string) *httptest.ResponseRecorder {
 	return response
 }
 
-// A save answers with the new status, wakes Node Services once in the
-// background, and a failed wake only logs; the key appears in neither the
-// response nor the logs.
-func TestSaveVoiceProviderKeyNotifiesNodeServicesBestEffort(t *testing.T) {
+// A save answers only after Node Services reports its voice workers ready, so
+// a session started right after the save finds a registered worker.
+func TestSaveVoiceProviderKeyWaitsForVoiceWorkers(t *testing.T) {
 	a, logs := newVoiceKeyTestApp(t, voicekey.Config{Enabled: true, Box: testSecretBox(t)}, nil)
-	notified := make(chan struct{}, 1)
-	a.reconcileVoiceWorkers = func(ctx context.Context) error {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	a.reconcileVoiceWorkers = func(ctx context.Context) (bool, error) {
 		if _, ok := ctx.Deadline(); !ok {
-			t.Error("the reconcile notify has no deadline")
+			t.Error("the reconcile has no deadline")
 		}
-		notified <- struct{}{}
-		return errors.New("connection refused")
+		close(started)
+		<-release
+		return true, nil
 	}
-	response := putVoiceKey(a, "soniox", `{"api_key":"  `+testVoiceKey+`  "}`)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- putVoiceKey(a, "soniox", `{"api_key":"  `+testVoiceKey+`  "}`) }()
+	select {
+	case <-started:
+	case <-time.After(30 * time.Second):
+		t.Fatal("Node Services was not asked to reconcile")
+	}
+	select {
+	case response := <-done:
+		t.Fatalf("the save answered before the workers were ready: %d", response.Code)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	response := <-done
 	if response.Code != http.StatusOK || response.Body.String() != `{"can_save":true,"source":"stored"}` {
 		t.Fatalf("save = %d %s", response.Code, response.Body)
 	}
-	select {
-	case <-notified:
-	case <-time.After(30 * time.Second):
-		t.Fatal("Node Services was not notified")
+	if strings.Contains(logs.String(), "voice.workers_not_ready") {
+		t.Fatalf("ready workers logged as not ready: %s", logs.String())
 	}
-	deadline := time.Now().Add(30 * time.Second)
-	for !strings.Contains(logs.String(), "voice.reconcile_notify_failed") {
-		if time.Now().After(deadline) {
-			t.Fatalf("no notify failure log: %s", logs.String())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if key, _ := a.voiceKeys.Effective(t.Context(), voicekey.Soniox); key != testVoiceKey {
-		t.Fatalf("effective key = %q", key)
-	}
-	if strings.Contains(response.Body.String(), testVoiceKey) || strings.Contains(logs.String(), testVoiceKey) {
-		t.Fatal("the key leaked into the response or the logs")
+}
+
+// Workers that are not ready, or a reconcile that fails, never fail the save;
+// they log the reason without the key.
+func TestSaveVoiceProviderKeyLogsVoiceWorkersNotReady(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result func(context.Context) (bool, error)
+		reason string
+	}{
+		{"not ready", func(context.Context) (bool, error) { return false, nil }, `"reason":"not_ready"`},
+		{"status", func(context.Context) (bool, error) { return false, voiceReconcileStatusError{status: 503} }, `"reason":"status","status":503`},
+		{"error", func(context.Context) (bool, error) { return false, errors.New("connection refused") }, `"reason":"error"`},
+		{"timeout", func(ctx context.Context) (bool, error) {
+			timeout, cancel := context.WithTimeout(ctx, time.Millisecond)
+			defer cancel()
+			<-timeout.Done()
+			return false, timeout.Err()
+		}, `"reason":"error"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, logs := newVoiceKeyTestApp(t, voicekey.Config{Enabled: true, Box: testSecretBox(t)}, nil)
+			a.reconcileVoiceWorkers = tc.result
+			response := putVoiceKey(a, "xai", `{"api_key":"`+testVoiceKey+`"}`)
+			if response.Code != http.StatusOK || response.Body.String() != `{"can_save":true,"source":"stored"}` {
+				t.Fatalf("save = %d %s", response.Code, response.Body)
+			}
+			if !strings.Contains(logs.String(), `"msg":"voice.workers_not_ready"`) || !strings.Contains(logs.String(), tc.reason) {
+				t.Fatalf("no not-ready log with %s: %s", tc.reason, logs.String())
+			}
+			if key, _ := a.voiceKeys.Effective(t.Context(), voicekey.XAI); key != testVoiceKey {
+				t.Fatalf("effective key = %q", key)
+			}
+			if strings.Contains(response.Body.String(), testVoiceKey) || strings.Contains(logs.String(), testVoiceKey) {
+				t.Fatal("the key leaked into the response or the logs")
+			}
+		})
 	}
 }
 
@@ -167,9 +204,9 @@ func TestSaveVoiceProviderKeyErrors(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, logs := newVoiceKeyTestApp(t, tc.cfg, tc.check)
-			a.reconcileVoiceWorkers = func(context.Context) error {
+			a.reconcileVoiceWorkers = func(context.Context) (bool, error) {
 				t.Error("a refused save notified Node Services")
-				return nil
+				return true, nil
 			}
 			response := putVoiceKey(a, tc.provider, tc.body)
 			if response.Code != tc.status || !strings.Contains(response.Body.String(), `"code":"`+tc.code+`"`) {

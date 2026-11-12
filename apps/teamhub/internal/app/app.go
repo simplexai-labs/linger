@@ -118,8 +118,9 @@ type App struct {
 	// voiceKeys resolves the Soniox and xAI keys at each use.
 	voiceKeys *voicekey.Service
 	// reconcileVoiceWorkers wakes the Node Services voice workers after a key
-	// is saved; nil without a Node Services link.
-	reconcileVoiceWorkers          func(context.Context) error
+	// is saved and reports whether they are ready; nil without a Node Services
+	// link.
+	reconcileVoiceWorkers          func(context.Context) (bool, error)
 	voiceRecordings                *voicemedia.LocalStagingStore
 	accounts                       *account.Lifecycle
 	passwordHashes                 *account.HashLimiter

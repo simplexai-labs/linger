@@ -43,25 +43,32 @@ func (a *App) saveVoiceProviderKey(c *gin.Context) {
 			a.internalError(c, "resolve voice provider key status", err)
 			return
 		}
-		a.notifyVoiceWorkers(c.Request.Context())
+		a.awaitVoiceWorkers(c.Request.Context())
 		c.JSON(http.StatusOK, voiceProviderKeyModel(status))
 	}
 }
 
-// notifyVoiceWorkers asks Node Services, in the background, to start the
-// voice workers the saved key enables. A failure only logs: the save stands
-// and Node Services' periodic reconcile picks the key up.
-func (a *App) notifyVoiceWorkers(requestContext context.Context) {
+// awaitVoiceWorkers asks Node Services to start the voice workers the saved
+// key enables and waits until they are registered with LiveKit, so a voice
+// session the client starts right after the save finds a worker to dispatch
+// to. A failure only logs: the save stands and Node Services' periodic
+// reconcile picks the key up.
+func (a *App) awaitVoiceWorkers(requestContext context.Context) {
 	if a.reconcileVoiceWorkers == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(requestContext), voiceReconcileTimeout)
-	go func() {
-		defer cancel()
-		if err := a.reconcileVoiceWorkers(ctx); err != nil {
-			a.logger.Warn("voice.reconcile_notify_failed", "error", err)
-		}
-	}()
+	ctx, cancel := context.WithTimeout(requestContext, voiceReconcileTimeout)
+	defer cancel()
+	ready, err := a.reconcileVoiceWorkers(ctx)
+	var statusErr voiceReconcileStatusError
+	switch {
+	case errors.As(err, &statusErr):
+		a.logger.Warn("voice.workers_not_ready", "reason", "status", "status", statusErr.status)
+	case err != nil:
+		a.logger.Warn("voice.workers_not_ready", "reason", "error", "error", err)
+	case !ready:
+		a.logger.Warn("voice.workers_not_ready", "reason", "not_ready")
+	}
 }
 
 func voiceProviderKeyModel(status voicekey.Status) httpapi.VoiceProviderKeyStatus {

@@ -2207,6 +2207,12 @@ type UpdateDocumentBlockSemanticOperation struct {
 	StableBlockId DocumentInternalId `json:"stable_block_id"`
 }
 
+// VoiceWorkersReconcileResult defines model for VoiceWorkersReconcileResult.
+type VoiceWorkersReconcileResult struct {
+	// Ready Every worker the effective keys require is ready to take a job.
+	Ready bool `json:"ready"`
+}
+
 // WikiRefreshBasePage defines model for WikiRefreshBasePage.
 type WikiRefreshBasePage struct {
 	MarkdownContent []byte `json:"markdown_content"`
@@ -7015,6 +7021,7 @@ func (r ScanLocalComputerSkillsResponse) ContentType() string {
 type ReconcileVoiceWorkersResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
+	JSON200      *VoiceWorkersReconcileResult
 	JSON401      *Unauthenticated
 }
 
@@ -9154,6 +9161,13 @@ func ParseReconcileVoiceWorkersResponse(rsp *http.Response) (*ReconcileVoiceWork
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VoiceWorkersReconcileResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthenticated
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

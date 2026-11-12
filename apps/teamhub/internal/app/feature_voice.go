@@ -18,9 +18,18 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicetranscription"
 )
 
-// voiceReconcileTimeout bounds the best-effort wake of the Node Services voice
-// workers after a key is saved; their own periodic reconcile covers a miss.
-const voiceReconcileTimeout = 5 * time.Second
+// voiceReconcileTimeout bounds how long a key save waits for the Node Services
+// voice workers to register. It covers Node Services' key read and its 20 s
+// readiness wait; their own periodic reconcile covers a miss.
+const voiceReconcileTimeout = 30 * time.Second
+
+// voiceReconcileStatusError reports a reconcile answered with an unexpected
+// HTTP status.
+type voiceReconcileStatusError struct{ status int }
+
+func (e voiceReconcileStatusError) Error() string {
+	return fmt.Sprintf("Node Services voice reconcile returned HTTP %d", e.status)
+}
 
 // registerVoice builds voice media while TEAMHUB_VOICE_MEDIA is on, or takes
 // the plane a test injects; without LINGER_SECRET_SEED or ffmpeg it runs
@@ -97,21 +106,22 @@ func (a *App) buildVoiceMedia(cfg config.Config, injected voicemedia.Plane, obje
 }
 
 // newVoiceWorkerReconciler asks Node Services to start or stop its voice
-// workers for the keys now in effect. The request carries no key.
-func newVoiceWorkerReconciler(baseURL, token string) (func(context.Context) error, error) {
+// workers for the keys now in effect and reports whether every required worker
+// is ready to take a job. The request carries no key.
+func newVoiceWorkerReconciler(baseURL, token string) (func(context.Context) (bool, error), error) {
 	client, err := roomagent.NewAgentManagementClient(baseURL, token, &http.Client{Timeout: voiceReconcileTimeout})
 	if err != nil {
 		return nil, fmt.Errorf("configure Node Services voice reconcile: %w", err)
 	}
-	return func(ctx context.Context) error {
+	return func(ctx context.Context) (bool, error) {
 		response, err := client.ReconcileVoiceWorkersWithResponse(ctx)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if response.StatusCode() != http.StatusAccepted {
-			return fmt.Errorf("Node Services voice reconcile returned HTTP %d", response.StatusCode())
+		if response.StatusCode() != http.StatusOK || response.JSON200 == nil {
+			return false, voiceReconcileStatusError{status: response.StatusCode()}
 		}
-		return nil
+		return response.JSON200.Ready, nil
 	}, nil
 }
 

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { serviceCredential, type JsonLogger } from "@linger/service-kit/node";
 import {
   startVoiceService,
+  VOICE_READY_WAIT_MS,
   VOICE_RECONCILE_POLL_MS,
   type VoiceWorker,
   type VoiceWorkerSpawn,
@@ -27,6 +28,7 @@ async function harness(
     keys?: Record<string, unknown>;
     env?: NodeJS.ProcessEnv;
     failure?: "network" | number | "json";
+    healthy?: boolean;
   } = {},
 ) {
   vi.useFakeTimers();
@@ -58,6 +60,7 @@ async function harness(
     spec: VoiceWorkerSpawn;
     child: Worker;
   }[] = [];
+  const health = { healthy: options.healthy ?? true };
   const log = vi.fn();
   let route: HttpRoute | undefined;
   const unmount = vi.fn();
@@ -72,6 +75,7 @@ async function harness(
     environment: { ...environment, ...options.env },
     fetch: fetchImpl as unknown as typeof fetch,
     installModels: async () => undefined,
+    probeWorker: async () => health.healthy,
     spawnWorker: (worker, spec) => {
       const child = new Worker();
       spawned.push({ worker, spec, child });
@@ -89,6 +93,7 @@ async function harness(
   return {
     service,
     shutdown,
+    health,
     teamHub,
     spawned,
     of,
@@ -96,6 +101,15 @@ async function harness(
     route: route!,
     unmount,
   };
+}
+
+function reconcileRequest() {
+  return new Request("http://x/v1/voice/workers:reconcile", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${serviceCredential("node-services-internal", environment)}`,
+    },
+  });
 }
 
 describe("voice worker reconcile", () => {
@@ -216,18 +230,18 @@ describe("voice worker reconcile", () => {
     const first = service.reconcile();
     await vi.advanceTimersByTimeAsync(0);
     const callsBefore = teamHub.calls;
-    const notified = await route.fetch(
+    const notified = route.fetch(
       new Request("http://x/v1/voice/workers:reconcile", {
         method: "POST",
         headers: { authorization: `Bearer ${token}` },
       }),
     );
-    expect(notified.status).toBe(202);
     await vi.advanceTimersByTimeAsync(VOICE_RECONCILE_POLL_MS);
     expect(teamHub.calls).toBe(callsBefore);
     teamHub.hold = false;
     teamHub.pending.splice(0).forEach((resolve) => resolve());
     await first;
+    expect(await (await notified).json()).toEqual({ ready: true });
     // The two overlapping triggers ran exactly one follow-up reconcile.
     expect(teamHub.calls).toBe(callsBefore + 1);
     expect(of("asr")).toHaveLength(1);
@@ -268,6 +282,81 @@ describe("voice worker reconcile", () => {
     await vi.advanceTimersByTimeAsync(VOICE_RECONCILE_POLL_MS);
     expect(spawned).toHaveLength(2);
     await shutdown();
+  });
+
+  it("answers a reconcile once the wanted workers are registered", async () => {
+    const { route, teamHub, health, shutdown, of } = await harness({
+      healthy: false,
+    });
+    teamHub.keys = { xai_api_key: XAI };
+    let answer: unknown;
+    const answered = Promise.resolve(route.fetch(reconcileRequest())).then(
+      async (response) => {
+        expect(response.status).toBe(200);
+        answer = await response.json();
+      },
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(of("live")).toHaveLength(1);
+    expect(answer).toBeUndefined();
+    health.healthy = true;
+    await vi.advanceTimersByTimeAsync(250);
+    await answered;
+    expect(answer).toEqual({ ready: true });
+    await shutdown();
+  });
+
+  it("answers not ready when the workers miss the wait", async () => {
+    const { route, teamHub, shutdown } = await harness({ healthy: false });
+    teamHub.keys = { soniox_api_key: SONIOX };
+    let answer: unknown;
+    const answered = Promise.resolve(route.fetch(reconcileRequest())).then(
+      async (response) => {
+        answer = await response.json();
+      },
+    );
+    await vi.advanceTimersByTimeAsync(VOICE_READY_WAIT_MS - 1_000);
+    expect(answer).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await answered;
+    expect(answer).toEqual({ ready: false });
+    await shutdown();
+  });
+
+  it("answers ready at once when no key wants a worker", async () => {
+    const { route, shutdown } = await harness({ healthy: false });
+    const response = await route.fetch(reconcileRequest());
+    expect(await response.json()).toEqual({ ready: true });
+    await shutdown();
+  });
+
+  it("answers not ready when TeamHub's keys cannot be read", async () => {
+    const { route, teamHub, shutdown, log } = await harness({
+      keys: { soniox_api_key: SONIOX },
+    });
+    teamHub.failure = 503;
+    const response = await route.fetch(reconcileRequest());
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual({ ready: false });
+    expect(body).not.toContain(SONIOX);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(SONIOX);
+    await shutdown();
+  });
+
+  it("ends the readiness wait when the service stops", async () => {
+    const { route, teamHub, shutdown } = await harness({ healthy: false });
+    teamHub.keys = { xai_api_key: XAI };
+    let answer: unknown;
+    const answered = Promise.resolve(route.fetch(reconcileRequest())).then(
+      async (response) => {
+        answer = await response.json();
+      },
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(answer).toBeUndefined();
+    await shutdown();
+    await answered;
+    expect(answer).toEqual({ ready: false });
   });
 
   it("authenticates the reconcile route", async () => {
