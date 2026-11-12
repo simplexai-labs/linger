@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   SetupCommand,
   SetupLocalAccount,
+  SetupLocalModelsCheck,
   SetupState,
 } from "../shared/setup.js";
 
@@ -45,13 +46,16 @@ const state = (
   },
 });
 
-// Loads the setup page with a fake main process that starts mid-install.
-const openPage = async () => {
+// Loads the setup page with a fake main process, mid-install by default.
+const openPage = async (
+  initial: SetupState = state("installing"),
+  step = "installing",
+) => {
   const [, body] = /<body[^>]*>([\s\S]*)<\/body>/.exec(page)!;
   const [, script] = /<script>([\s\S]*)<\/script>/.exec(body!)!;
   document.body.innerHTML = body!.replace(/<script>[\s\S]*<\/script>/, "");
   let listener: ((next: SetupState) => void) | undefined;
-  let current = state("installing");
+  let current = initial;
   const run = vi.fn(async (command: SetupCommand) => {
     if (command.op === "local.account.show")
       current = state("ready", {
@@ -74,7 +78,7 @@ const openPage = async () => {
   new Function(script!)();
   await vi.waitFor(() =>
     expect(
-      document.querySelector('section[data-step="installing"].active'),
+      document.querySelector(`section[data-step="${step}"].active`),
     ).not.toBeNull(),
   );
   const push = (next: SetupState) => {
@@ -153,5 +157,130 @@ describe("setup page finish screen", () => {
     expect($("account-fields").hidden).toBe(true);
     expect($("account-note").hidden).toBe(true);
     expect($("account-error").textContent).toContain("chmod 600");
+  });
+});
+
+const GB = 1024 ** 3;
+const capable: SetupLocalModelsCheck = {
+  state: "checked",
+  eligible: true,
+  memoryBytes: 64 * GB,
+  diskFreeBytes: 400 * GB,
+  gpu: "RTX 4090",
+  model: {
+    name: "qwen3-8b",
+    downloadBytes: 6 * GB,
+    diskBytes: 8 * GB,
+    memoryBytes: 12 * GB,
+  },
+  recommendation: "local-models",
+};
+const small: SetupLocalModelsCheck = {
+  state: "checked",
+  eligible: false,
+  memoryBytes: 8 * GB,
+  diskFreeBytes: 100 * GB,
+  reasons: ["plan-unavailable: No model fits this computer."],
+  recommendation: "codex",
+};
+const welcome = (localModels: SetupLocalModelsCheck): SetupState => {
+  const base = state("idle");
+  return { ...base, localServer: { ...base.localServer, localModels } };
+};
+const installed = (run: ReturnType<typeof vi.fn>) =>
+  run.mock.calls
+    .map(([command]) => command as SetupCommand)
+    .filter((command) => command.op === "local.start");
+
+describe("setup page Quick Install recommendation", () => {
+  it("installs the local model with Pi when the localmodels tool recommends it", async () => {
+    const { run } = await openPage(welcome(capable), "welcome");
+    expect($("plan-summary").textContent).toBe(
+      "Recommended for this computer: Local model + Pi",
+    );
+    expect($("plan-why").hidden).toBe(false);
+    expect($("plan-why").textContent).toBe(
+      "qwen3-8b · fits RTX 4090 · 64 GB memory · 6 GB download",
+    );
+    expect($("local-install-label").textContent).toBe("Quick Install");
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)).toEqual([{ op: "local.start", runtime: "local" }]),
+    );
+  });
+
+  it("installs the tool's runtime and says why there is no local model", async () => {
+    const { run } = await openPage(welcome(small), "welcome");
+    expect($("plan-summary").textContent).toBe(
+      "Recommended for this computer: Codex",
+    );
+    expect($("plan-why").textContent).toBe(
+      "No local model: No model fits this computer.",
+    );
+    expect($("local-row").hidden).toBe(true);
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)).toEqual([{ op: "local.start", runtime: "codex" }]),
+    );
+  });
+
+  it("lets the installer pick when this computer could not be checked", async () => {
+    const { run } = await openPage(
+      welcome({ state: "unavailable" }),
+      "welcome",
+    );
+    expect($("plan-summary").textContent).toBe("Best AI runtime");
+    expect($("plan-why").textContent).toBe(
+      "Couldn't check this computer for a local model.",
+    );
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)).toEqual([
+        { op: "local.start", runtime: "recommended" },
+      ]),
+    );
+  });
+
+  it("waits for the check before Quick Install", async () => {
+    const { push } = await openPage(welcome({ state: "checking" }), "welcome");
+    expect($("plan-summary").textContent).toBe("Checking this computer…");
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    push(welcome(capable));
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+    expect($("plan-summary").textContent).toBe(
+      "Recommended for this computer: Local model + Pi",
+    );
+  });
+
+  it("marks the recommendation under Customize and installs the person's choice", async () => {
+    const { run } = await openPage(welcome(capable), "welcome");
+    $("local-customize").click();
+    const option = (value: string) =>
+      document.querySelector<HTMLButtonElement>(
+        `[data-plan="runtime"] [data-value="${value}"]`,
+      )!;
+    expect(option("pi").dataset.recommended).toBe("true");
+    expect(option("pi").getAttribute("aria-checked")).toBe("true");
+    expect(option("codex").dataset.recommended).toBe("false");
+    expect(option("recommended").hidden).toBe(true);
+    expect($("runtime-sub").textContent).toBe("Recommended: Pi.");
+    expect($("local-sub").textContent).toContain(
+      "Recommended for this computer",
+    );
+    expect($("local-model").getAttribute("aria-checked")).toBe("true");
+    option("claude").click();
+    expect($("local-model").getAttribute("aria-checked")).toBe("false");
+    expect($("local-install-label").textContent).toBe("Install");
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)).toEqual([
+        { op: "local.start", runtime: "claude" },
+      ]),
+    );
+    $("local-customize").click();
+    expect($("local-install-label").textContent).toBe("Quick Install");
+    expect($("plan-summary").textContent).toBe(
+      "Recommended for this computer: Local model + Pi",
+    );
   });
 });

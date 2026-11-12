@@ -108,7 +108,18 @@ export type LocalModelsCheck =
       // Why not, in the localmodels tool's words; present only when not
       // eligible.
       readonly reasons?: readonly string[];
+      // The localmodels tool's pick for this computer, which Quick Install
+      // installs; the page adds no rule of its own.
+      readonly recommendation?: SetupRecommendation;
     };
+
+export type SetupRecommendation = "local-models" | "codex" | "claude" | "pi";
+const RECOMMENDATIONS: readonly string[] = [
+  "local-models",
+  "codex",
+  "claude",
+  "pi",
+] satisfies readonly SetupRecommendation[];
 
 // What to install, chosen on the setup page; the installer applies it at once.
 export interface LocalServerPlan {
@@ -473,6 +484,9 @@ export class LocalServerModule implements Module {
           this.#ctx?.log.info("local_server.inspected", {
             ms: Date.now() - started,
             eligible: check.state === "checked" && check.eligible,
+            ...(check.state === "checked" && check.recommendation
+              ? { recommendation: check.recommendation }
+              : {}),
             ...(check.state === "checked" && check.reasons
               ? { reasons: check.reasons }
               : {}),
@@ -528,6 +542,7 @@ export class LocalServerModule implements Module {
       child.once("close", () => resolve(text));
     });
     const report = JSON.parse(output.trim().split("\n").at(-1) ?? "") as {
+      recommendation?: unknown;
       localModels?: {
         eligible?: unknown;
         reasons?: unknown;
@@ -567,6 +582,14 @@ export class LocalServerModule implements Module {
     const reasons = strings(report.localModels.reasons).map((code, index) =>
       messages[index] ? `${code}: ${messages[index]}` : code,
     );
+    const pick = report.recommendation;
+    // The local model is recommended only with a model the page can show.
+    const recommendation =
+      typeof pick === "string" &&
+      RECOMMENDATIONS.includes(pick) &&
+      (pick !== "local-models" || eligible)
+        ? (pick as SetupRecommendation)
+        : undefined;
     return {
       state: "checked",
       eligible,
@@ -587,6 +610,7 @@ export class LocalServerModule implements Module {
           }
         : {}),
       ...(!eligible && reasons.length ? { reasons } : {}),
+      ...(recommendation ? { recommendation } : {}),
     };
   }
 

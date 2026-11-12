@@ -96,6 +96,9 @@ export type SetupLocalModelsCheck =
       };
       // Why not, in the localmodels tool's words; when not eligible.
       readonly reasons?: readonly string[];
+      // The localmodels tool's pick, which Quick Install installs:
+      // "local-models" is the model above served by Pi.
+      readonly recommendation?: "local-models" | "codex" | "claude" | "pi";
     };
 
 // The AI runtime the installer sets up; "recommended" lets it pick and
