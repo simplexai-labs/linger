@@ -416,7 +416,12 @@ describe("afterCall", () => {
     expect(
       afterCall("Switching everything to English.", "All English now"),
     ).toBe(" All English now");
-    expect(afterCall("改好了。", "主题是周五会议")).toBe("主题是周五会议");
+    expect(
+      afterCall(
+        "\u6539\u597d\u4e86\u3002",
+        "\u4e3b\u9898\u662f\u5468\u4e94\u4f1a\u8bae",
+      ),
+    ).toBe("\u4e3b\u9898\u662f\u5468\u4e94\u4f1a\u8bae");
     expect(afterCall("", "Done.")).toBe("Done.");
     expect(afterCall("Done. ", "Next")).toBe("Next");
   });

@@ -63,10 +63,18 @@ fi
 
 # The repository is English-only. Only CJK ideographs are rejected, so tests
 # may still use kana, Hangul, and full-width punctuation as unspaced scripts.
-if ((${#changed_files[@]} > 0)) &&
-  LC_ALL=C git grep -nIP '(*UTF)[\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}]' -- "${changed_files[@]}"; then
-  echo "Changed files contain Chinese characters; the repository is English-only (see AGENTS.md)." >&2
-  exit 1
+# git grep exits 1 when nothing matches; any other non-zero status is an error
+# (for example a git without PCRE), which must fail the gate rather than pass it.
+if ((${#changed_files[@]} > 0)); then
+  cjk_status=0
+  LC_ALL=C git grep -nIP '(*UTF)[\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}]' -- "${changed_files[@]}" || cjk_status=$?
+  if ((cjk_status == 0)); then
+    echo "Changed files contain Chinese characters; the repository is English-only (see AGENTS.md)." >&2
+    exit 1
+  elif ((cjk_status != 1)); then
+    echo "The English-only check could not run (git grep exited $cjk_status)." >&2
+    exit 1
+  fi
 fi
 
 make check-scripts-fast check-docs

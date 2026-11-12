@@ -144,8 +144,9 @@ program of that version.
 ## Packaging Details
 
 Paths in this section are relative to `apps/desktop/`, except
-`scripts/prepare-native-*.mjs`, `scripts/source-native.mjs`, and
-`scripts/installs/`, which are in the repository root.
+`scripts/prepare-native-*.mjs`, `scripts/source-native.mjs`,
+`scripts/installs/`, and `packages/local-installation/`, which are in the
+repository root.
 
 ### Source Package
 
