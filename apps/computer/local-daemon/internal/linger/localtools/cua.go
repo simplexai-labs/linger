@@ -946,6 +946,7 @@ func (c *cuaSession) finishInput(ctx context.Context, name string, arguments map
 	}
 	if err == nil && name == "get_window_state" && arguments["include_accessibility_tree"] != false {
 		c.op.reads.observe(result)
+		c.readAgentChromeWindow(arguments["pid"], arguments["window_id"])
 	}
 	if err == nil && inputTools[name] && ctx.Value(cuaInternalInput{}) == nil && runtime.GOOS != "darwin" {
 		result = c.withWindowState(ctx, arguments, result)

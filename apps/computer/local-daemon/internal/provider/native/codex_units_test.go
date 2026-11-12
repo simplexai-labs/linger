@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -491,5 +492,24 @@ func TestCodexToolOutputTokenLimitFollowsContextWindow(t *testing.T) {
 	spec.ContextWindow = 0
 	if unknown := codexBindingFingerprint("/home", "", spec); unknown != codexBindingFingerprint("/home", "", RunSpec{Dir: "/work", Model: "local", ContextWindow: 400000}) {
 		t.Fatal("windows that keep the global limit must keep the thread")
+	}
+}
+
+// A cleanup that failed only because the process had gone, which the stop
+// may have counted as its own exit, still lets a reaped, empty group confirm
+// the stop; any other cleanup failure does not.
+func TestCodexCleanupExcusedWhenTheProcessHadGone(t *testing.T) {
+	gone := fmt.Errorf("turn/start outcome unconfirmed: %w", errCodexChildGone)
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{nil, true},
+		{gone, true},
+		{fmt.Errorf("interrupt Codex turn: %w", context.DeadlineExceeded), false},
+	} {
+		if got := codexCleanupExcused(tc.err); got != tc.want {
+			t.Fatalf("codexCleanupExcused(%v) = %v, want %v", tc.err, got, tc.want)
+		}
 	}
 }

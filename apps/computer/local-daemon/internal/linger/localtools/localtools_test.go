@@ -1053,7 +1053,7 @@ func TestLocalToolCuaMacAgentChromeOpensAURLOnlyInANewTab(t *testing.T) {
 	}
 }
 
-func TestLocalToolCuaMacAgentChromeStopsWhenSomeoneElseChangesTheTabs(t *testing.T) {
+func TestLocalToolCuaMacAgentChromeRefusesInputsWhenSomeoneElseChangesTheTabs(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("the Computer's own Chrome is macOS only")
 	}
@@ -1094,8 +1094,16 @@ func TestLocalToolCuaMacAgentChromeStopsWhenSomeoneElseChangesTheTabs(t *testing
 	if c.op.chromeHeld[9].count != 3 {
 		t.Fatalf("tabs held after the refusal=%d, want 3", c.op.chromeHeld[9].count)
 	}
+	// The Agent's old token still names a row, so only its own read of the
+	// window lets inputs through again.
+	if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`)); !errors.Is(err, errNotSent) || !strings.Contains(err.Error(), "COMPUTER_TAB_CHANGED") {
+		t.Fatalf("input before a read err=%v, want refused", err)
+	}
+	if _, err := c.call(t.Context(), "get_window_state", json.RawMessage(`{"pid":42,"window_id":9}`)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`)); err != nil {
-		t.Fatalf("input after the refusal: %v", err)
+		t.Fatalf("input after the read: %v", err)
 	}
 	if err := c.drain(); err != nil {
 		t.Fatal(err)

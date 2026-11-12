@@ -691,10 +691,13 @@ func (c *cuaSession) agentChromeWindowTitle(ctx context.Context, pid int, window
 
 // heldTabs is what a window the task opened with launch_app showed after
 // the task's last input there: its tab count and its front tab's title. A
-// count of 0 holds nothing, as for a strip that could not be read.
+// count of 0 holds nothing, as for a strip that could not be read. unread
+// marks a window whose change of tabs refused an input and that the Agent
+// has not read since: until it does, every input there is refused.
 type heldTabs struct {
-	count int
-	title string
+	count  int
+	title  string
+	unread bool
 }
 
 // holdAgentChromeWindow makes window, in the browser that runs as pid, the
@@ -733,14 +736,19 @@ func (c *cuaSession) agentChromeTabWindow(pid, window any) (int, float64, heldTa
 // checkAgentChromeTabs holds the task to the tabs it left: the Computer's
 // own Chrome keeps the tab count that followed this task's last input, so a
 // different count means a tab opened or closed since, and the tab in front
-// may not be this task's. The input is then refused, once. A strip that cannot be read, or a task that has no count yet, is not
-// held. The strip is read only when the window's title, which list_windows
-// gives without a read, differs from the front tab's title after that input.
+// may not be this task's. Inputs are then refused until the Agent reads the
+// window. A strip that cannot be read, or a task that has no count yet, is
+// not held. The strip is read only when the window's title, which
+// list_windows gives without a read, differs from the front tab's title
+// after that input.
 func (c *cuaSession) checkAgentChromeTabs(ctx context.Context, pid, window any) error {
 	number, id, held, ok := c.agentChromeTabWindow(pid, window)
 	want, title := held.count, held.title
 	if !ok || want == 0 {
 		return nil
+	}
+	if held.unread {
+		return fmt.Errorf("COMPUTER_TAB_CHANGED: the tabs of the Computer's own browser changed and this task has not read the window since, so the tab in front may not be this task's. Nothing was sent. Read the window with get_window_state: go on only if the tab in front is this task's page, otherwise report what was done and end the task: %w", errNotSent)
 	}
 	if title != "" && c.agentChromeWindowTitle(ctx, number, id) == title {
 		// The front tab still shows what this task's last input left. A
@@ -758,13 +766,27 @@ func (c *cuaSession) checkAgentChromeTabs(ctx context.Context, pid, window any) 
 		return nil
 	}
 	// A tab that the task's own input opened after the reads that followed
-	// it looks the same as one someone else opened, so this input is
-	// refused, not the task: the Agent reads the window and judges the
-	// front tab, and the next input is held to what the window shows now.
+	// it looks the same as one someone else opened, so inputs are refused,
+	// not the task: once the Agent has read the window and judged the front
+	// tab, its next input is held to what the window shows now.
 	c.op.mu.Lock()
-	c.op.chromeHeld[id] = heldTabs{count: got, title: front}
+	c.op.chromeHeld[id] = heldTabs{count: got, title: front, unread: true}
 	c.op.mu.Unlock()
-	return fmt.Errorf("COMPUTER_TAB_CHANGED: the Computer's own browser had %d tab(s) after this task's last input and has %d now, with %q in front; a tab may have opened late after that input, or someone else changed the tabs. Nothing was sent. Read the window: go on only if the tab in front is this task's page, otherwise report what was done and end the task: %w", want, got, front, errNotSent)
+	return fmt.Errorf("COMPUTER_TAB_CHANGED: the Computer's own browser had %d tab(s) after this task's last input and has %d now, with %q in front; a tab may have opened late after that input, or someone else changed the tabs. Nothing was sent. Read the window with get_window_state: go on only if the tab in front is this task's page, otherwise report what was done and end the task: %w", want, got, front, errNotSent)
+}
+
+// readAgentChromeWindow takes the Agent's own read of a window it opened
+// with launch_app as its look at the tab in front after a change of tabs,
+// so inputs there go through again.
+func (c *cuaSession) readAgentChromeWindow(pid, window any) {
+	_, id, held, ok := c.agentChromeTabWindow(pid, window)
+	if !ok || !held.unread {
+		return
+	}
+	held.unread = false
+	c.op.mu.Lock()
+	c.op.chromeHeld[id] = held
+	c.op.mu.Unlock()
 }
 
 // recordAgentChromeTabs keeps the tab count after this task's own input or
