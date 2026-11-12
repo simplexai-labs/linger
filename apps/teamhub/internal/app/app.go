@@ -93,7 +93,7 @@ type App struct {
 	cfg                      config.Config
 	pool                     *pgxpool.Pool
 	queries                  *store.Queries
-	engine                   *gin.Engine
+	handler                  http.Handler
 	logger                   *slog.Logger
 	broker                   *realtime.Broker
 	roomPresence             roomPresenceThrottle
@@ -290,7 +290,7 @@ func New(ctx context.Context, cfg config.Config, deps Deps) (*App, error) {
 		return nil, err
 	}
 	a.retention = retention.NewSweeper(pool, a.retentionRules())
-	a.engine = a.routes()
+	a.handler = compressResponses(a.routes())
 	if err := a.startRealtimeListener(ctx); err != nil {
 		a.closeBuilt()
 		return nil, err
@@ -894,7 +894,7 @@ func newDatabasePoolConfig(cfg config.Config, tracer pgx.QueryTracer) (*pgxpool.
 }
 
 // Handler returns the HTTP handler with the public routes and authentication middleware.
-func (a *App) Handler() http.Handler { return a.engine }
+func (a *App) Handler() http.Handler { return a.handler }
 
 // StopStreams actively closes existing SSE and Voice Stream connections, but keeps the database and background workers running for the graceful shutdown phase.
 func (a *App) StopStreams() { a.stopStreams() }
