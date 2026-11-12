@@ -119,16 +119,29 @@ jobs:
       # main's latest entry; only pushes to main save. Go trims build cache
       # entries unused for five days, so the restored cache does not grow
       # without bound.
+      - id: gocache
+        if: needs.changes.outputs[matrix.app] == 'true'
+        shell: bash
+        env:
+          APP: ${{ matrix.app }}
+          GO_SUM_HASH: ${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}
+        run: |
+          case "$APP" in
+            teamhub | computer-go | desktop | contracts) echo "is_go=true" ;;
+            *) echo "is_go=false" ;;
+          esac >>"$GITHUB_OUTPUT"
+          echo "app_prefix=go-$APP-$RUNNER_OS-" >>"$GITHUB_OUTPUT"
+          echo "prefix=go-$APP-$RUNNER_OS-$GO_SUM_HASH-" >>"$GITHUB_OUTPUT"
       - uses: actions/cache/restore@v4
-        if: contains(fromJSON('["teamhub","computer-go","desktop","contracts"]'), matrix.app) && needs.changes.outputs[matrix.app] == 'true'
+        if: steps.gocache.outputs.is_go == 'true'
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ matrix.app }}-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}-${{ github.sha }}
+          key: ${{ steps.gocache.outputs.prefix }}${{ github.sha }}
           restore-keys: |
-            go-${{ matrix.app }}-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}-
-            go-${{ matrix.app }}-${{ runner.os }}-
+            ${{ steps.gocache.outputs.prefix }}
+            ${{ steps.gocache.outputs.app_prefix }}
       # Pinned golangci-lint and sqlc binaries; building them takes about 60 s
       # each. Their file names carry the tool and Go versions, and the key
       # hashes the files that pin both, so a version bump misses and rebuilds.
@@ -154,9 +167,9 @@ jobs:
           path: ~/.cache/golangci-lint
           key: golangci-lint-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', '.golangci.yml') }}-${{ github.sha }}
       - uses: actions/cache/save@v4
-        if: always() && github.event_name == 'push' && contains(fromJSON('["teamhub","computer-go","desktop","contracts"]'), matrix.app) && needs.changes.outputs[matrix.app] == 'true'
+        if: always() && github.event_name == 'push' && steps.gocache.outputs.is_go == 'true'
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ matrix.app }}-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}-${{ github.sha }}
+          key: ${{ steps.gocache.outputs.prefix }}${{ github.sha }}

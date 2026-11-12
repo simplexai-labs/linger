@@ -1,5 +1,5 @@
 name: Set up the toolchain
-description: Node, pnpm and Go at the repository's pinned versions, with workspace dependencies installed, and a BASE that shares history with HEAD.
+description: Go at the repository's pinned version and a BASE that shares history with HEAD; the node and install inputs control the pinned Node, pnpm and the workspace install.
 
 inputs:
   node:
