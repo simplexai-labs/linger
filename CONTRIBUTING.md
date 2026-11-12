@@ -102,6 +102,12 @@ successful Wiki publication.
   runs commitlint and formats staged files.
 - Keep one pull request to one change. Describe what changed, why, and how you
   verified it; the pull request template lists what reviewers expect.
+- `main` merges through a merge queue. Once a pull request is approved and its
+  checks pass, click "Merge when ready". The queue rebases it onto the latest
+  `main` (with the pull requests ahead of it), runs the required checks on
+  that result and merges it, so you don't rebase by hand to catch up with
+  `main`. If a queue build fails, the pull request leaves the queue; fix it
+  and add it again.
 - Update the nearest `AGENTS.md` or README in the same pull request when
   behavior, ownership, contracts or file paths change.
 - Code, comments, docs, tests and user-facing strings are English.
