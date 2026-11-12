@@ -232,6 +232,17 @@ Gateway and runs Agents. The daemon exits with the app.
   left alone and it gives up after about two minutes. It keeps
   `%APPDATA%\Linger` and the Linger home with all their data and asks nothing;
   a later install starts the services again (resume, or setup's Install).
+  Setup over an installed release stops it the same way before it replaces
+  the files, since the services run on `Linger.exe` and hold it open. Each
+  install writes `resources\stops-services`; a release without it would start
+  on `--quit` and has no `--stop`, so setup skips `--quit` (CloseLinger asks
+  the person to quit a running app) and runs its own `installer.js`, copied to
+  the plugins folder, on the old `Linger.exe`. Retry in that prompt runs the
+  stop again. Nothing running: the stop finds nothing and setup goes on. The
+  localmodels tool's foundations controller (`foundations run`, which
+  `foundations ensure` starts detached on Windows) keeps running: the tool has
+  no command to stop it, and Linger does not end the tool's processes itself.
+  The tool refuses the chat stack on Windows, so no engine runs there.
 - `src/main/legacy-migration.ts`: on start, stops a bridge an older version
   left running and moves its credential and the Desktop 0.16 daemon identity
   into the daemon layout, so the computer keeps its id.

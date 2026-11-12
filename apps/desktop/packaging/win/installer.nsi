@@ -36,7 +36,8 @@ VIAddVersionKey "LegalCopyright" "Linger"
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_LANGUAGE "SimpChinese"
 
-; A running Linger holds its files open.
+; A running Linger holds its files open. Its services, run on Linger.exe, are
+; stopped again on Retry, in case it started them before it quit.
 !macro CLOSE_LINGER UN
 Function ${UN}CloseLinger
   retry:
@@ -44,8 +45,11 @@ Function ${UN}CloseLinger
   IfFileExists "$INSTDIR\Linger.exe" 0 done
   Delete "$INSTDIR\Linger.exe"
   IfErrors 0 done
-  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Linger is running. Quit it from its icon in the notification area, then select Retry." IDRETRY retry
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Linger is running. Quit it from its icon in the notification area, then select Retry." IDRETRY again
   Abort
+  again:
+  Call ${UN}StopLinger
+  Goto retry
   done:
 FunctionEnd
 !macroend
@@ -73,13 +77,78 @@ Function RemoveLegacyInstall
   done:
 FunctionEnd
 
+; Uninstalling, and installing over an earlier release, stops what Linger
+; runs, so nothing keeps running or holds a file (the services run on
+; Linger.exe as their Node): a running Linger quits (index.ts), then an
+; installer script, run by the app's own Node, stops the installation manager
+; and the services of the local installation (TeamHub, web, node-services,
+; LiveKit, PostgreSQL). The script ends on its own after a time limit; setup
+; goes on whatever it reports. Data stays and Linger starts the services again.
+!define INSTALLER_SCRIPT "$INSTDIR\resources\app\dist\installer\installer.js"
+; Written by every install since --quit and --stop: an earlier Linger.exe
+; starts on --quit instead of quitting, and its script has no --stop.
+!define STOP_MARKER "$INSTDIR\resources\stops-services"
+; $R0 is the installer script that stops the services.
+!macro STOP_LINGER UN
+Function ${UN}StopLinger
+  IfFileExists "$INSTDIR\Linger.exe" 0 done
+  IfFileExists "${STOP_MARKER}" 0 stop
+  ; Without a running Linger this exits at once.
+  ExecWait '"$INSTDIR\Linger.exe" --quit'
+  stop:
+  IfFileExists "$R0" 0 stopped
+  DetailPrint "Stopping Linger on this computer..."
+  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "1")'
+  nsExec::ExecToLog '"$INSTDIR\Linger.exe" "$R0" --instance desktop --stop'
+  Pop $0
+  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", n)'
+  StrCmp $0 "0" stopped
+  DetailPrint "Some of Linger's services may still be running."
+  stopped:
+  ; Only a release that was asked to quit is waited for; a running earlier
+  ; one never exits on its own and CloseLinger asks at once.
+  IfFileExists "${STOP_MARKER}" 0 done
+  ; The app takes a moment to quit; CloseLinger asks after that.
+  StrCpy $1 0
+  wait:
+  ClearErrors
+  Delete "$INSTDIR\Linger.exe"
+  IfErrors 0 done
+  IntOp $1 $1 + 1
+  IntCmp $1 20 done
+  Sleep 500
+  Goto wait
+  done:
+FunctionEnd
+!macroend
+!insertmacro STOP_LINGER ""
+!insertmacro STOP_LINGER "un."
+
+; An earlier release that cannot stop its services is stopped by this
+; release's script, run by that release's Linger.exe. A running app of such a
+; release is left to CloseLinger.
+Function StopEarlierLinger
+  IfFileExists "$INSTDIR\Linger.exe" 0 done
+  StrCpy $R0 "${INSTALLER_SCRIPT}"
+  IfFileExists "${STOP_MARKER}" stop
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\stop.mjs" "${STAGE}\resources\app\dist\installer\installer.js"
+  StrCpy $R0 "$PLUGINSDIR\stop.mjs"
+  stop:
+  Call StopLinger
+  done:
+FunctionEnd
+
 Section "Linger"
   SetOutPath "$INSTDIR"
+  Call StopEarlierLinger
   Call CloseLinger
   Call RemoveLegacyInstall
   ; An update replaces the whole app folder.
   RMDir /r "$INSTDIR\resources"
   File /r "${STAGE}\*"
+  FileOpen $0 "${STOP_MARKER}" w
+  FileClose $0
   WriteUninstaller "$INSTDIR\Uninstall Linger.exe"
   ; The app writes its notification id into this shortcut (index.ts).
   CreateShortcut "$SMPROGRAMS\Linger.lnk" "$INSTDIR\Linger.exe"
@@ -93,42 +162,10 @@ Section "Linger"
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
 SectionEnd
 
-; Uninstalling stops what Linger runs, so nothing keeps running or holds a
-; file: a running Linger quits (index.ts), then the bundled installer, run by
-; the app's own Node, stops the installation manager and the services of the
-; local installation (TeamHub, web, node-services, LiveKit, PostgreSQL). The
-; installer ends on its own after a time limit; the uninstall goes on whatever
-; it reports. Data stays and a new install starts the services again.
-!define INSTALLER_SCRIPT "$INSTDIR\resources\app\dist\installer\installer.js"
-Function un.StopLinger
-  IfFileExists "$INSTDIR\Linger.exe" 0 done
-  ; Without a running Linger this exits at once.
-  ExecWait '"$INSTDIR\Linger.exe" --quit'
-  IfFileExists "${INSTALLER_SCRIPT}" 0 closing
-  DetailPrint "Stopping Linger on this computer..."
-  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "1")'
-  nsExec::ExecToLog '"$INSTDIR\Linger.exe" "${INSTALLER_SCRIPT}" --instance desktop --stop'
-  Pop $0
-  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", n)'
-  StrCmp $0 "0" closing
-  DetailPrint "Some of Linger's services may still be running."
-  closing:
-  ; The app takes a moment to quit; un.CloseLinger asks after that.
-  StrCpy $1 0
-  wait:
-  ClearErrors
-  Delete "$INSTDIR\Linger.exe"
-  IfErrors 0 done
-  IntOp $1 $1 + 1
-  IntCmp $1 20 done
-  Sleep 500
-  Goto wait
-  done:
-FunctionEnd
-
 Section "Uninstall"
   ; Settings, sign-in and logs stay in %APPDATA%\Linger, and the local
   ; installation (%USERPROFILE%\.simplexai) with its data.
+  StrCpy $R0 "${INSTALLER_SCRIPT}"
   Call un.StopLinger
   Call un.CloseLinger
   Delete "$SMPROGRAMS\Linger.lnk"
