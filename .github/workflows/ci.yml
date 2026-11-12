@@ -81,6 +81,8 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup
+        with:
+          go: false
       - run: make check-repository-gate BASE="$BASE"
 
   web-static:
@@ -92,6 +94,8 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup
+        with:
+          go: false
       - run: make check-web-static BASE="$BASE"
 
   web-tests:
@@ -108,6 +112,8 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup
+        with:
+          go: false
       - run: make check-web-tests SHARD=${{ matrix.shard }}/3
 
   # Reports the required `check (web)` context from the split web jobs. When
@@ -169,13 +175,6 @@ jobs:
         if: needs.changes.outputs[matrix.app] == 'true'
         with:
           fetch-depth: 0
-      - uses: ./.github/actions/setup
-        if: needs.changes.outputs[matrix.app] == 'true'
-        # teamhub runs only Go. computer-go's tests run the managed-tools
-        # scripts, which need the pinned Node but no workspace packages.
-        with:
-          node: ${{ matrix.app != 'teamhub' }}
-          install: ${{ matrix.app != 'teamhub' && matrix.app != 'computer-go' }}
       # Each Go check keeps its own build and module cache, so one job's save
       # never replaces another's. Pull requests and merge-queue builds restore
       # main's latest entry; only pushes to main save. Go trims build cache
@@ -194,6 +193,14 @@ jobs:
           esac >>"$GITHUB_OUTPUT"
           echo "app_prefix=go-$APP-$RUNNER_OS-" >>"$GITHUB_OUTPUT"
           echo "prefix=go-$APP-$RUNNER_OS-$GO_SUM_HASH-" >>"$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup
+        if: needs.changes.outputs[matrix.app] == 'true'
+        # teamhub runs only Go. computer-go's tests run the managed-tools
+        # scripts, which need the pinned Node but no workspace packages.
+        with:
+          node: ${{ matrix.app != 'teamhub' }}
+          install: ${{ matrix.app != 'teamhub' && matrix.app != 'computer-go' }}
+          go: ${{ steps.gocache.outputs.is_go }}
       - uses: actions/cache/restore@v4
         if: steps.gocache.outputs.is_go == 'true'
         with:

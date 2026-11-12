@@ -8,6 +8,9 @@ inputs:
   install:
     description: Set up pnpm and install workspace dependencies; needs node. Checks that only run Node scripts with builtin modules pass false.
     default: "true"
+  go:
+    description: Set up Go. Checks that build or run no Go pass false.
+    default: "true"
 
 runs:
   using: composite
@@ -22,6 +25,25 @@ runs:
           echo "::notice::BASE $BASE shares no history with HEAD; the changed-file checks compare HEAD with itself."
           echo "BASE=$(git rev-parse HEAD)" >>"$GITHUB_ENV"
         fi
+    # The runner image ships neither pinned version, and setup-node and
+    # setup-go spend about 8 s and 15 s copying a download into the tool cache.
+    # Restoring that tool cache directory takes a few seconds. The entries hold
+    # only the pinned release, so their keys are the versions.
+    - id: versions
+      shell: bash
+      run: |
+        echo "node=$(tr -d '[:space:]' <.node-version)" >>"$GITHUB_OUTPUT"
+        echo "go=$(sed -n 's/^go //p' apps/teamhub/go.mod)" >>"$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      if: inputs.node == 'true'
+      with:
+        path: ${{ runner.tool_cache }}/node/${{ steps.versions.outputs.node }}
+        key: toolcache-node-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.node }}
+    - uses: actions/cache@v4
+      if: inputs.go == 'true'
+      with:
+        path: ${{ runner.tool_cache }}/go/${{ steps.versions.outputs.go }}
+        key: toolcache-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.go }}
     # Reads the version from packageManager in package.json.
     - uses: pnpm/action-setup@v4
       if: inputs.install == 'true'
@@ -34,6 +56,7 @@ runs:
     # whichever job finishes first, often one that compiled no Go, and its key
     # never changes while go.sum stays the same.
     - uses: actions/setup-go@v5
+      if: inputs.go == 'true'
       with:
         go-version-file: apps/teamhub/go.mod
         cache: false
