@@ -43,6 +43,11 @@ type RegistrationBinding struct {
 	Status         registration.Status
 }
 
+// claudeWebToolGuide names Claude's web tools for every Operation. Claude Code
+// defers their definitions behind ToolSearch, so without it the model often
+// does not think to search the web, as with the Computer tools in ToolGuide.
+const claudeWebToolGuide = `Web tools: WebSearch searches the web and WebFetch reads one page. They are loaded on demand: before the first call, load them with ToolSearch (query "select:WebSearch,WebFetch").`
+
 type ExecutionResolver struct {
 	// Bound by the local launcher; never accepted from a wire request.
 	ServiceCommand     []string
@@ -135,6 +140,9 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 	}
 	if r.ToolGuide != "" {
 		developerInstructions = strings.TrimSpace(developerInstructions + "\n\n" + r.ToolGuide)
+	}
+	if command.RuntimeType == "claude" {
+		developerInstructions = strings.TrimSpace(developerInstructions + "\n\n" + claudeWebToolGuide)
 	}
 	systemPrompt := strings.TrimSpace(strings.Join([]string{
 		instructionValue(request.SessionOptions.BaseInstructions),

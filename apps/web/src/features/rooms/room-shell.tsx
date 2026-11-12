@@ -49,6 +49,7 @@ import {
   RoomNavigationLoading,
 } from "./route-loading-surface";
 import { TeamHubEventSync } from "./event-sync";
+import { useAnotherMeNotifications } from "./another-me-notifications";
 import { requireRoomRouteParam } from "./room-route-params";
 import { useScrollPaneActivity } from "./use-scroll-pane-activity";
 import {
@@ -119,6 +120,20 @@ function RoomShellReady({
       void navigate(`/t/${tenantId}/rooms/${anotherMeRoomId}/chat`);
     }
   }, [anotherMeRoomId, gated, navigate, tenantId]);
+
+  const openRoom = useCallback(
+    (roomId: string) =>
+      void navigate(
+        `/t/${encodeURIComponent(tenantId)}/rooms/${encodeURIComponent(roomId)}/chat`,
+      ),
+    [navigate, tenantId],
+  );
+  useAnotherMeNotifications({
+    rooms: roomsQuery.data?.items,
+    roomId: anotherMeRoomId,
+    agentActorId: anotherMe?.agent_actor_id,
+    open: openRoom,
+  });
 
   useEffect(() => {
     document.title = `${spaceOwnerName}'s space`;
