@@ -90,3 +90,22 @@ func TestEverydayChromeKeysAllowOnlyOnePlainBoundKey(t *testing.T) {
 		t.Error("a bound Return went to one of the user's windows")
 	}
 }
+
+func TestSharedWindowsKeepEveryWindowOfTheBrowser(t *testing.T) {
+	m := &Manager{}
+	m.setSharedWindow("com.google.Chrome", 42, 11)
+	m.setSharedWindow("com.google.Chrome", 42, 12)
+	m.setSharedWindow("com.apple.Safari", 7, 3)
+	shared, ok := m.sharedWindowOf(42)
+	if !ok || len(shared.Windows) != 2 || shared.latest() != 12 {
+		t.Fatalf("shared=%+v ok=%v, want windows 11 and 12 with 12 latest", shared, ok)
+	}
+	// A restarted Chrome has a new pid, and none of the old windows.
+	m.setSharedWindow("com.google.Chrome", 43, 20)
+	if shared, _ := m.sharedWindowOf(43); len(shared.Windows) != 1 || shared.latest() != 20 {
+		t.Fatalf("shared=%+v, want only window 20 after the restart", shared)
+	}
+	if safari, ok := m.sharedWindowOf(7); !ok || safari.latest() != 3 {
+		t.Fatalf("safari=%+v ok=%v, want Safari's window kept apart", safari, ok)
+	}
+}

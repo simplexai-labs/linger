@@ -340,8 +340,10 @@ restart keeps it, and removes the record once Chrome started. Before the
 Computer opens its window, it waits until the list of Chrome windows stops
 changing, so every restored window is there. The Computer's window is the new
 window with one tab: the one whose address bar shows the site just opened, or
-the only new window when the home page moved to another site. Two new windows
-of the site are refused with `COMPUTER_WINDOW_AMBIGUOUS`. The address bar and
+the only new window when the home page moved to another site. Two or more new
+one-tab windows that the site does not tell apart are refused with
+`COMPUTER_WINDOW_AMBIGUOUS`. Every window the Computer opened there stays its
+own for pacing and the key rule, until Chrome restarts. The address bar and
 the tabs are found by role and place in the window, not by their names, which
 follow the user's language. The Daemon finds the running Chrome by its
 executable wherever the app is installed. The user's Chrome takes no keys from
@@ -353,7 +355,9 @@ types text as keys that all read as the A key. A key goes to the window its
 that Chrome runs. Only a plain key bound to an element of the Computer's
 window goes, as a tool call, and Cua sends it only when no other Chrome window
 could take it. A script sends that Chrome no key at all, because it cannot
-prove which window a token was read from, and it does not start Chrome.
+prove which window a token was read from. It refuses a key whose arguments
+name an app or window of their own, and no script opens an app or URL, so the
+key rule knows every app a script reaches.
 The Agent fills fields with
 `set_value`, presses the page's buttons and goes back through its links.
 The Daemon removes the separate Chrome profile `computer-tools/agent-chrome`
@@ -384,7 +388,7 @@ into a script, to the current snapshot when its row reads the same there.
 Only the window
 the task opened with `launch_app` is held. A script that names no window in
 its `args` is taken to drive that window; a script to another app is neither
-paced nor held, and a paced script may not call `launch_app`. The browser
+paced nor held, and no script may open an app or URL. The browser
 window is the largest window whose tab strip reads: a starting Chrome can list
 a larger surface without an accessibility window, which is skipped. The
 `launch_app` result tells the Agent to move between pages through the site's

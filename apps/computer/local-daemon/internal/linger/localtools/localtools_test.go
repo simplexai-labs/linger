@@ -1940,6 +1940,14 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 			t.Fatalf("the user's own Chrome window %v read as the Computer's", user)
 		}
 	}
+	// Token s1 was read from the Computer's window 12, so only the rule for
+	// keys refuses what follows with it.
+	c.op.reads.mu.Lock()
+	if c.op.reads.snapshots == nil {
+		c.op.reads.windows, c.op.reads.snapshots = map[windowKey]*windowRows{}, map[string]windowKey{}
+	}
+	c.op.reads.snapshots["s1"] = windowKey{pid: 42, window: 12}
+	c.op.reads.mu.Unlock()
 	// No key reaches the user's Chrome, in the Computer's window or theirs.
 	for _, call := range []struct{ name, args string }{
 		{"hotkey", `{"pid":42,"window_id":12,"keys":["cmd","["]}`},
@@ -1948,7 +1956,7 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 		{"press_key", `{"pid":42,"window_id":12,"key":"return"}`},
 		{"press_key", `{"pid":42,"window_id":12,"key":"return","element_token":"s1:1","modifiers":[]}`},
 		{"press_key", `{"pid":42,"window_id":12,"key":"cmd+r","element_token":"s1:1"}`},
-		{"press_key", `{"pid":42,"window_id":9,"key":"return","element_token":"s1:1"}`},
+		{"press_key", `{"pid":42,"window_id":9,"key":"return","element_token":"s9:1"}`},
 		{"recognize_text", `{"pid":42,"window_id":12,"pages":2,"next_key":"pagedown"}`},
 		// A token read from the user's window 9 places the key there,
 		// whatever window_id names; one never read places it nowhere.
@@ -1972,10 +1980,6 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 	if _, err := c.call(t.Context(), "hotkey", json.RawMessage(`{"keys":["cmd","w"],"element_token":"s7:1"}`)); !strings.Contains(fmt.Sprint(err), "COMPUTER_TARGET_REQUIRED") {
 		t.Fatalf("hotkey with no pid: err=%v, want refused", err)
 	}
-	// A token read from the Computer's window 12 takes one plain key.
-	c.op.reads.mu.Lock()
-	c.op.reads.snapshots["s1"] = windowKey{pid: 42, window: 12}
-	c.op.reads.mu.Unlock()
 	if _, err := c.call(t.Context(), "press_key", json.RawMessage(`{"pid":42,"window_id":12,"key":"return","element_token":"s1:1"}`)); err != nil {
 		t.Fatalf("Return bound to a field: %v", err)
 	}

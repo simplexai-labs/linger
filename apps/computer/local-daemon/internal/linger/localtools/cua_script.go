@@ -19,7 +19,7 @@ const macScriptDescription = "Run a JavaScript program that drives apps on this 
 	"- app.getState({query?, max_elements?, timeout_ms?, since?: \"latest\", tree_format?: \"elements\"}) returns {tree_markdown, window_title, snapshot_id, truncated?, elements?}; rows read as in get_window_state. In a script the walk stops after 250 nodes and 1000 ms unless you pass max_elements and timeout_ms, which cuts a browser page: pass about 3000 and 4000 there\n" +
 	"- app.query({role?, name?}) finds named elements {element_token, role, label, frame}; app.waitFor({role?, name?, text?, gone?, timeout_ms?}) waits until the window shows (or no longer shows) them; text also matches static text\n" +
 	"- app.click(t), doubleClick(t), typeText(text, t?), pressKey(\"escape\", t?), hotkey([\"cmd\",\"s\"]), scroll(t, \"down\", amount?), setValue(t, value), where t is {role, name, nth?}, an element_token, a row number of this app's last getState(), or [x, y] pixels of its last screenshot\n" +
-	"- cua.call(tool, args) for click, press_key, type_text, scroll, get_window_state, list_windows or launch_app with their usual arguments.\n" +
+	"- cua.call(tool, args) for click, press_key, type_text, scroll, get_window_state or list_windows with their usual arguments. A script opens no app or URL: call launch_app as its own tool first.\n" +
 	"Inputs go to the app in the background, as the other computer tools do; a control that reacts only to a real pointer needs the click tool with delivery_mode \"foreground\". A failed call throws (catch it to recover), and the error names the line. timeout_ms is the wall-time limit (default 60000, at most 100000); max_calls bounds driver calls (default 100, at most 500). A Skill that ships a script names it with script_file and passes its inputs as args, read in the script as the constant args. Return only what you need, such as extracted text; the result is cut at 40000 characters and carries no screenshots: call get_window_state to look at the window."
 
 // scriptTimeoutMs bounds a script below the two-minute limit of one local
@@ -68,12 +68,14 @@ var scriptForbidden = []string{"delivery_mode", "foreground", "screenshot_out_fi
 // could not verify in time. A positive inputLimit paces the script for the
 // Computer's own browser: the guard waits a person's pause before each input,
 // throws once the script tries to send more than inputLimit inputs, and
-// refuses launch_app, whose site checks run only in the Daemon's own call.
-// While the user's everyday Chrome runs as chrome, the guard refuses every
-// key to it and every key that names no app: a script cannot prove which
-// window an element token was read from, so even the one key a tool call
-// may send there (see everydayChromeKeys) is refused. It also refuses to
-// start Chrome, whose pid the guard would not know.
+// refuses to open an app or URL, whose site checks run only in the Daemon's
+// own launch_app and which could start Chrome with a pid the guard does not
+// know. While the user's everyday Chrome runs as chrome, the guard refuses
+// every key to it, every key that names no app, and every key whose
+// arguments name an app or window of their own, which Cua lets override the
+// app the call is made on: a script cannot prove which window an element
+// token was read from, so even the one key a tool call may send there (see
+// everydayChromeKeys) is refused.
 func guardedScript(args, body string, deadline int64, inputLimit int, chrome int) string {
 	pattern := make([]string, 0, len(scriptForbidden))
 	for _, word := range scriptForbidden {
@@ -87,9 +89,10 @@ const plainProtos = [Object.prototype, Array.prototype, null], real = globalThis
 const bad = /`+strings.Join(pattern, "|")+`/;
 const limit = `+strconv.Itoa(inputLimit)+`, chrome = `+strconv.Itoa(chrome)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0;
 const keyOps = {__proto__: null, hotkey: true, type_text: true, press_key: true}, keyMethods = {__proto__: null, hotkey: true, typeText: true, pressKey: true};
-const keyed = (k, c, o) => chrome > 0 && (k === "call" ? keyOps[c[0]] === true && (c[1] === null || typeof c[1] !== "object" || typeof c[1].pid !== "number" || c[1].pid === chrome) : keyMethods[k] === true && (typeof o.pid !== "number" || o.pid === chrome));
-const namesChrome = v => v === "Google Chrome" || v === "com.google.Chrome" || v !== null && typeof v === "object" && (v.name === "Google Chrome" || v.bundle_id === "com.google.Chrome" || v.bundleId === "com.google.Chrome");
-const startsChrome = (k, c) => k === "launchApp" && namesChrome(c[0]) || k === "call" && c[0] === "launch_app" && namesChrome(c[1]);
+const routes = v => v !== null && typeof v === "object" && (v.pid !== undefined || v.app !== undefined || v.target !== undefined || v.window_id !== undefined || v.windowId !== undefined);
+const rerouted = c => { for (let i = 0; i < c.length; i++) if (routes(c[i])) return true; return false; };
+const keyed = (k, c, o) => chrome > 0 && (k === "call" ? keyOps[c[0]] === true && (c[1] === null || typeof c[1] !== "object" || typeof c[1].pid !== "number" || c[1].pid === chrome || c[1].app !== undefined || c[1].target !== undefined) : keyMethods[k] === true && (typeof o.pid !== "number" || o.pid === chrome || rerouted(c)));
+const launches = (k, c) => k === "launch" || k === "launchApp" || k === "call" && c[0] === "launch_app";
 const inputMethods = {__proto__: null, click: true, doubleClick: true, rightClick: true, drag: true, scroll: true, typeText: true, pressKey: true, hotkey: true, setValue: true};
 const inputOps = {__proto__: null, click: true, double_click: true, right_click: true, drag: true, scroll: true, type_text: true, press_key: true, hotkey: true, set_value: true};
 const input = (k, c) => inputMethods[k] === true || k === "call" && typeof c[0] === "string" && inputOps[c[0]] === true;
@@ -105,8 +108,7 @@ define(w, k, {enumerable: true, get() { const v = o[k]; if (typeof v !== "functi
 if (limit > 0 && k === "typeText") { const given = c.length > 2 && c[2] !== null && typeof c[2] === "object" ? c[2] : {}; const t = {length: 3}; define(t, 0, {value: c[0]}); define(t, 1, {value: c[1]}); define(t, 2, {value: {delay_ms: `+strconv.Itoa(agentChromeTypeDelay)+`, ...given}}); c = t; }
 if (limit > 0 && k === "sleep" && o === real && typeof c[0] === "number" && c[0] > `+strconv.Itoa(scriptSleepLimit)+`) { const t = {length: 1}; define(t, 0, {value: `+strconv.Itoa(scriptSleepLimit)+`}); c = t; }
 const run = () => { const r = apply(v, o, c); return r !== null && typeof r === "object" && typeof r.then === "function" ? apply(then, r, [out]) : out(r); };
-if (limit > 0 && (k === "launchApp" || k === "call" && c[0] === "launch_app")) throw new Error("COMPUTER_SCRIPT_REFUSED: a script in the Computer's own browser opens no app or URL, so the site checks of launch_app hold; call launch_app as its own tool");
-if (startsChrome(k, c)) throw new Error("COMPUTER_SCRIPT_REFUSED: a script does not start Google Chrome; call launch_app as its own tool");
+if (launches(k, c)) throw new Error("COMPUTER_SCRIPT_REFUSED: a script opens no app or URL, so the site checks of launch_app hold and the key rule knows every app the script reaches; call launch_app as its own tool");
 if (keyed(k, c, o)) throw new Error(`+strconv.Quote(everydayChromeKeysRefused)+`);
 if (limit <= 0 || !input(k, c)) return run();
 if (++sent > limit) throw new Error("COMPUTER_SCRIPT_INPUT_LIMIT: a script sends at most " + limit + " inputs to the Computer's own browser; return what you have, look at the window, then continue in a new script");

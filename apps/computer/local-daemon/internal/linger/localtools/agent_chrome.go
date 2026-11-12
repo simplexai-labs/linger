@@ -431,7 +431,7 @@ func (c *cuaSession) isAgentChrome(ctx context.Context, pid, window any) (bool, 
 	m.mu.Unlock()
 	if shared, ok := m.sharedWindowOf(int(number)); ok {
 		id, named := window.(float64)
-		return !named || id == shared.Window, nil
+		return !named || slices.Contains(shared.Windows, id), nil
 	}
 	if known > 0 && known == int(number) && time.Since(checked) < agentChromeRecheck {
 		return true, nil
@@ -554,7 +554,7 @@ func (c *cuaSession) agentChromeKeys(ctx context.Context, arguments map[string]a
 	}
 	if pid, ok := arguments["pid"].(float64); ok {
 		if shared, found := c.op.manager.sharedWindowOf(int(pid)); found {
-			arguments["window_id"] = shared.Window
+			arguments["window_id"] = shared.latest()
 			return nil
 		}
 	}

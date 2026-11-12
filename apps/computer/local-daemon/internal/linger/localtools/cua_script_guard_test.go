@@ -14,8 +14,9 @@ import (
 // the same prelude's semantics.
 const guardHarness = `import fs from "fs";
 const log = [];
-class App { constructor(n, pid, windowId) { this.n = n; this.pid = pid; this.windowId = windowId; } hotkey(keys) { log.push("hotkey:" + keys.join("+")); return "hotkeyed"; } click(a) { log.push("raw:" + JSON.stringify(a)); return "clicked"; } typeText(text, on, options) { log.push("type:" + JSON.stringify(options)); return "typed"; } pressKey(key, on) { log.push("key:" + key); return "pressed"; } }
+class App { constructor(n, pid, windowId) { this.n = n; this.pid = pid; this.windowId = windowId; } hotkey(keys, on, options) { log.push("hotkey:" + keys.join("+") + ":" + JSON.stringify({pid: this.pid, ...on, ...options})); return "hotkeyed"; } click(a) { log.push("raw:" + JSON.stringify(a)); return "clicked"; } typeText(text, on, options) { log.push("type:" + JSON.stringify(options)); return "typed"; } pressKey(key, on) { log.push("key:" + key); return "pressed"; } }
 const fake = { call(t, a) { log.push("call:" + t + ":" + JSON.stringify(a)); return Promise.resolve({ok: true}); },
+  launch(name) { log.push("launched:" + name); return Promise.resolve(new App("l", 7, 1)); },
   getApp(target) { return Promise.resolve(new App("a", target && target.pid, target && target.windowId)); },
   listApps() { return Promise.resolve([new App("b")]); },
   box() { return Promise.resolve({inner: {app: new App("c")}}); },
@@ -127,9 +128,9 @@ func TestScriptGuardSpeedsTypingAndCapsWaits(t *testing.T) {
 	}
 }
 
-// A paced script opens no app or URL, so launch_app's site checks hold; an
-// unpaced script may still call it.
-func TestScriptGuardRefusesLaunchAppForTheComputersChrome(t *testing.T) {
+// No script opens an app or URL, paced or not: launch_app's site checks hold,
+// and the key rule knows every app the script reaches.
+func TestScriptGuardRefusesLaunchApp(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is not installed")
@@ -139,21 +140,24 @@ func TestScriptGuardRefusesLaunchAppForTheComputersChrome(t *testing.T) {
 	if err := os.WriteFile(harness, []byte(guardHarness), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	body := `return await cua.call("launch_app", {urls: ["https://example.com/"]});`
 	for _, tc := range []struct {
+		body  string
 		limit int
-		want  string
-	}{{2, "threw:COMPUTER_SCRIPT_REFUSED"}, {0, "call:launch_app"}} {
+	}{
+		{`return await cua.call("launch_app", {urls: ["https://example.com/"]});`, 2},
+		{`return await cua.call("launch_app", {urls: ["https://example.com/"]});`, 0},
+		{`return await cua.launch("com.google.Chrome");`, 0},
+	} {
 		script := filepath.Join(dir, "script.js")
-		if err := os.WriteFile(script, []byte(guardedScript(`{}`, body, 42, tc.limit, 0)), 0o600); err != nil {
+		if err := os.WriteFile(script, []byte(guardedScript(`{}`, tc.body, 42, tc.limit, 0)), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		out, err := exec.Command(node, harness, script).CombinedOutput()
 		if err != nil {
 			t.Fatalf("node: %v\n%s", err, out)
 		}
-		if got := string(out); !strings.Contains(got, tc.want) || tc.limit > 0 && strings.Contains(got, "call:launch_app") {
-			t.Fatalf("limit %d: got %s, want %q", tc.limit, got, tc.want)
+		if got := string(out); !strings.Contains(got, "threw:COMPUTER_SCRIPT_REFUSED") || strings.Contains(got, "call:launch_app") || strings.Contains(got, "launched") {
+			t.Fatalf("%s (limit %d): got %s, want refused", tc.body, tc.limit, got)
 		}
 	}
 }
@@ -184,6 +188,12 @@ func TestScriptGuardRefusesKeysForTheEverydayChrome(t *testing.T) {
 		{`const app = await cua.getApp({pid: 2, windowId: 5}); return app.pressKey("return", "s1:2");`, "pressed"},
 		{`return await cua.call("click", {pid: 1, element_token: "s1:2"});`, "call:click"},
 		{`return await cua.call("launch_app", {bundle_id: "com.google.Chrome"});`, "threw:COMPUTER_SCRIPT_REFUSED"},
+		// Arguments that name an app or window of their own would override
+		// the app the key is called on.
+		{`const app = await cua.getApp({pid: 2, windowId: 5}); return app.hotkey(["cmd", "w"], undefined, {pid: 1});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({pid: 2, windowId: 5}); return app.pressKey("return", {app: "Google Chrome"});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`return await cua.call("press_key", {pid: 2, key: "return", target: {pid: 1}});`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({pid: 2, windowId: 5}); return app.pressKey("return", {role: "AXTextField", name: "Search"});`, "pressed"},
 		// An app object whose pid the guard cannot read could be that Chrome.
 		{`const apps = await cua.listApps(); return apps[0].hotkey(["cmd", "w"]);`, "threw:COMPUTER_KEYS_REFUSED"},
 		{`const app = await cua.getApp({name: "Google Chrome"}); return app.hotkey(["cmd", "w"]);`, "threw:COMPUTER_KEYS_REFUSED"},
