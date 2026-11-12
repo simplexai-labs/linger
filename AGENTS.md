@@ -11,7 +11,7 @@ Memory, and Voice services.
 - `pnpm dev`: migrate the PostgreSQL that `TEAMHUB_DATABASE_URL` names, then run
   Web, TeamHub, and the node-services process (Agent Service, Memory, LLM Wiki,
   Document Runtime, Voice) on this machine, plus `livekit-server` from `PATH`
-  while a voice key is set. It starts no containers; the developer runs
+  whether or not a voice key is set. It starts no containers; the developer runs
   PostgreSQL.
 - `docker compose up --build`: build and run every service in containers,
   PostgreSQL and LiveKit included.
