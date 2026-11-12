@@ -232,8 +232,10 @@ type operation struct {
 	// chromeTabs is the tab count of the Computer's own browser after this
 	// task's last input there, and chromePID and chromeWindow the browser
 	// and window this task opened with launch_app; see checkAgentChromeTabs.
-	// Guarded by mu.
+	// chromeTitle is the front tab's title read with chromeTabs, empty until
+	// the task's first input there. Guarded by mu.
 	chromeTabs   int
+	chromeTitle  string
 	chromePID    int
 	chromeWindow float64
 	closeOnce    sync.Once

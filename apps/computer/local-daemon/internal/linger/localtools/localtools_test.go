@@ -238,7 +238,7 @@ func runToolFixture(mode string) {
 					if address == "" {
 						address = "news.example.org/today"
 					}
-					result = map[string]any{"content": []any{}, "structuredContent": map[string]any{"tree_markdown": tree.String(), "elements": []any{
+					result = map[string]any{"content": []any{}, "structuredContent": map[string]any{"tree_markdown": tree.String(), "window_title": fmt.Sprintf("Tab %d", tabs-1), "elements": []any{
 						map[string]any{"element_token": "s1:1", "role": "AXTextField", "label": "Address and search bar", "value": address},
 					}}}
 				}
@@ -329,6 +329,7 @@ func runToolFixture(mode string) {
 							map[string]any{"element_token": "s2:4", "role": "AXButton", "label": "Delete all"},
 							map[string]any{"element_token": "s2:5", "role": "AXButton", "label": "Send"},
 							map[string]any{"element_token": "s2:6", "role": "AXButton", "label": "Send"},
+							map[string]any{"element_token": "s2:7", "role": "AXLink", "label": "Kettle\u00a0[snapshot]"},
 						}}}
 					}
 					break
@@ -1125,20 +1126,33 @@ func TestLocalToolCuaMacAgentChromeKeepsTabsItsOwnInputChangesLate(t *testing.T)
 	t.Cleanup(func() { agentChromePID = original })
 	c.op.manager.agentChromeOwner = c.op
 	c.op.chromeTabs, c.op.chromePID, c.op.chromeWindow = 1, 42, 9
+	// The click below presses a row of page text, which lists no press.
+	c.snapshots = newSnapshotRows()
+	c.snapshots.record(windowRead{Snapshot: "s1", PID: 42, Window: 9, Tree: `- [1] AXStaticText = "Sort by time"`})
 	// A tab the task's own input opens or closes may show only after the
 	// input returns; the task keeps the count the strip settles on.
+	// The input's result says what it changed in the window, and nothing
+	// when it changed neither the tabs nor the front tab.
 	for _, step := range []struct {
-		keys string
-		want int
-	}{{`["cmd","t"]`, 2}, {`["cmd","w"]`, 1}} {
-		if _, err := c.call(t.Context(), "hotkey", json.RawMessage(`{"pid":42,"window_id":9,"keys":`+step.keys+`}`)); err != nil {
+		keys, note string
+		want       int
+	}{{`["cmd","t"]`, `This input opened 1 new tab(s); the one in front shows \"Tab 1\". To go back, close it with the \"Close\" button`, 2}, {`["cmd","w"]`, `This input closed 1 tab(s); the tab in front shows \"Tab 0\".`, 1}} {
+		result, err := c.call(t.Context(), "hotkey", json.RawMessage(`{"pid":42,"window_id":9,"keys":`+step.keys+`}`))
+		if err != nil {
 			t.Fatal(err)
 		}
 		if c.op.chromeTabs != step.want {
 			t.Fatalf("tabs after the task's own %s=%d, want %d", step.keys, c.op.chromeTabs, step.want)
 		}
-		if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`)); err != nil {
+		if !strings.Contains(string(result), step.note) {
+			t.Fatalf("result after the task's own %s=%s, want note %s", step.keys, result, step.note)
+		}
+		result, err = c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`))
+		if err != nil {
 			t.Fatalf("input after the task's own %s: %v", step.keys, err)
+		}
+		if strings.Contains(string(result), "tab") || !strings.Contains(string(result), "a press on page text clicks it") {
+			t.Fatalf("result of a click on page text that changed no tab=%s", result)
 		}
 	}
 	if err := c.drain(); err != nil {
@@ -1528,6 +1542,10 @@ func TestLocalToolCuaMacInputsFindTheirTargetWhenTheyRun(t *testing.T) {
 	if result, err := c.call(t.Context(), "type_text", json.RawMessage(`{"pid":42,"window_id":9,"role":"AXTextArea","name":"Comment","text":"hi"}`)); err != nil || failed(result) {
 		t.Fatalf("located type_text result=%s err=%v", result, err)
 	}
+	// A page label's no-break space matches the space the Agent writes.
+	if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"role":"AXLink","name":"Kettle [snapshot]"}`)); err != nil {
+		t.Fatalf("label with a no-break space: %v", err)
+	}
 	if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"role":"AXButton","name":"Delete"}`)); err == nil || !strings.Contains(err.Error(), "COMPUTER_TARGET_NOT_FOUND") {
 		t.Fatalf("partial label err=%v, want not found", err)
 	}
@@ -1559,7 +1577,7 @@ func TestLocalToolCuaMacInputsFindTheirTargetWhenTheyRun(t *testing.T) {
 		}
 		sent = append(sent, call.Name+" "+fmt.Sprint(call.Arguments["element_token"]))
 	}
-	if want := []string{"click s1:15", "click s1:15", "type_text s2:3", "click s2:6"}; !slices.Equal(sent, want) {
+	if want := []string{"click s1:15", "click s1:15", "type_text s2:3", "click s2:7", "click s2:6"}; !slices.Equal(sent, want) {
 		t.Fatalf("sent=%v, want %v", sent, want)
 	}
 	if err := c.drain(); err != nil {

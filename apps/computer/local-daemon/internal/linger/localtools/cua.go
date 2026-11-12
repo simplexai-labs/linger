@@ -215,7 +215,7 @@ const MacToolGuide = `Computer tools on this Mac (MCP server "computer"):
   {tool: "click" | "double_click" | "right_click", pid, window_id, element_token, modifier?: ["cmd"]} on a row of the latest read; cmd-clicks add rows to a selection, so one cmd+c copies several files;
   {tool: "hotkey", pid, keys: ["cmd", "s"]}, {tool: "press_key", pid, key: "return"}, {tool: "type_text", pid, text} go to the app's focused field, such as a sheet, panel or rename field; a new Save sheet's name field already has focus with its text selected, so type the name without clicking, and text fields refuse click;
   {tool: "scroll", pid, window_id, direction}.
-  A click, scroll or type_text, in a step or alone, can name its target with role and name instead of element_token: the one element with that role whose label or value is exactly name, or nth (from 0) when several match. It is found when it runs, so one batch can cross pages; finding it reads the window, which stales the tokens of your earlier read, so later steps name their targets the same way.
+  A click, scroll or type_text, in a step or alone, can name its target with role and name instead of element_token: the one element with that role whose label or value is exactly name, apart from white space, or nth (from 0) when several match. It is found when it runs, so one batch can cross pages; finding it reads the window, which stales the tokens of your earlier read, so later steps name their targets the same way.
 - run_script({script}) runs JavaScript that loops, waits and reads between inputs and returns only what you extract. Use it to repeat a flow over several items, such as open each result, read it and close it, in one call instead of a turn per item.
 - bring_to_front({pid, window_id}) raises one window.
 - report_blocker({kind, url}) as soon as a page in the Computer's own browser shows a check only the user may pass (captcha, verification, login_required, rate_limited) or one item that cannot be viewed (content_unavailable). Never try to pass the check.
@@ -526,8 +526,16 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 		// check, replaced the snapshot the Agent's token names.
 		c.snapshots.remap(arguments)
 	}
+	token, _ := arguments["element_token"].(string)
+	pagePress := agentChrome && name == "click" && c.snapshots != nil && c.snapshots.unpressable(token)
 	driverStarted := time.Now()
 	result, err := c.sendInput(ctx, name, arguments, appKeys, agentChrome)
+	if err == nil && pagePress && !failed(result) {
+		// Chrome clicks a page element on a press even where the element
+		// lists no press, as the sort menu of a review list did; the Agent
+		// took Cua's warning as a miss and clicked by x,y, which missed.
+		result = withNote(result, "In the Computer's own browser, a press on page text clicks it as a person would, even where the row lists no press: check its effect in the next read, and do not repeat it by x,y.")
+	}
 	var scriptReads []windowRead
 	if err == nil && name == "run_script" {
 		result, scriptReads = scriptResultReads(result)
@@ -551,7 +559,9 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 	}
 	// A script that throws has still sent the inputs before the throw.
 	if paced && (err == nil || name == "run_script") {
-		c.recordAgentChromeTabs(ctx, target["pid"], target["window_id"])
+		if note := c.recordAgentChromeTabs(ctx, target["pid"], target["window_id"]); note != "" && result != nil {
+			result = withNote(result, note)
+		}
 	}
 	return c.finishInput(ctx, name, arguments, appKeys, result, err)
 }
@@ -1333,8 +1343,10 @@ func (c *cuaSession) locate(ctx context.Context, name string, arguments map[stri
 		return fmt.Errorf("COMPUTER_TARGET_UNREADABLE: window %v was read only in part, so a %s labeled %q cannot be proven to be the only one; use an element_token from a read: %w", arguments["window_id"], role, label, errNotSent)
 	}
 	var matches []string
+	label = sameSpaces(label)
 	for _, element := range state.Structured.Elements {
-		if element.Role == role && (element.Label == label || element.Value == label) {
+		value, _ := element.Value.(string)
+		if element.Role == role && (sameSpaces(element.Label) == label || sameSpaces(value) == label) {
 			matches = append(matches, element.Token)
 		}
 	}
@@ -1352,6 +1364,12 @@ func (c *cuaSession) locate(ctx context.Context, name string, arguments map[stri
 	delete(arguments, "name")
 	delete(arguments, "nth")
 	return nil
+}
+
+// sameSpaces writes every run of white space as one space: a page label may
+// hold a no-break space, which reads the same as the space the Agent writes.
+func sameSpaces(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }
 
 // listedWindow is one window from Cua list_windows.

@@ -157,3 +157,15 @@ func mustJSON(t *testing.T, value any) []byte {
 	}
 	return encoded
 }
+
+// A row that lists no press, such as a page's static text, is told apart
+// from a link that lists one; a token the Computer does not remember is not.
+func TestSnapshotRowsTellsTextFromAPressableRow(t *testing.T) {
+	rows := newSnapshotRows()
+	rows.record(windowRead{Snapshot: "s00000001", PID: 42, Window: 9, Tree: "- [2] AXWebArea \"Shop\"\n  - [3] AXStaticText = \"Sort by time\"\n  - [4] AXLink \"Kettle\" [actions=[press]]\n  - [5] AXGroup [actions=[show_menu]]"})
+	for token, want := range map[string]bool{"s00000001:3": true, "s00000001:5": true, "s00000001:4": false, "s00000001:9": false, "s00000002:3": false, "bad": false} {
+		if got := rows.unpressable(token); got != want {
+			t.Fatalf("unpressable(%s)=%v, want %v", token, got, want)
+		}
+	}
+}

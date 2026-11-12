@@ -174,6 +174,24 @@ func (s *snapshotRows) sent(name string) {
 	s.mu.Unlock()
 }
 
+// unpressable reports whether token names a remembered row that lists no
+// press action, such as a web page's static text, which lists none; Cua then
+// warns that the press may not have taken.
+func (s *snapshotRows) unpressable(token string) bool {
+	snapshot, index, ok := strings.Cut(token, ":")
+	if !ok {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row, ok := s.reads[snapshot].rows[index]
+	if !ok {
+		return false
+	}
+	_, actions, _ := strings.Cut(row, "[actions=[")
+	return !strings.Contains(actions, "press")
+}
+
 // carry returns the token on the current snapshot of its window, or the
 // token itself.
 func (s *snapshotRows) carry(token string) string {

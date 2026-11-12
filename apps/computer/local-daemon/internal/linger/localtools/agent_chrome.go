@@ -577,24 +577,32 @@ func (c *cuaSession) agentChromeKeys(ctx context.Context, arguments map[string]a
 // It returns 0 when the read fails or is cut short: the tab strip follows the
 // page in the tree, so a cut read may miss it.
 func (c *cuaSession) agentChromeTabs(ctx context.Context, pid int, window float64) int {
+	count, _, _ := c.agentChromeTabsAndTitle(ctx, pid, window)
+	return count
+}
+
+// agentChromeTabsAndTitle is agentChromeTabs with the title of the window's
+// front tab and the label of a tab's Close button, from the same read.
+func (c *cuaSession) agentChromeTabsAndTitle(ctx context.Context, pid int, window float64) (int, string, string) {
 	read, err := c.client.request(ctx, "tools/call", map[string]any{"name": "get_window_state", "arguments": map[string]any{
 		"pid": pid, "window_id": window, "include_screenshot": false, "max_elements": 6000, "timeout_ms": 6000, "session": c.label}})
 	if err != nil {
 		slog.Warn("agent_browser.tabs_unread", "pid", pid, "window_id", window, "error", err)
-		return 0
+		return 0, "", ""
 	}
 	var state struct {
 		Structured struct {
 			Tree      string `json:"tree_markdown"`
+			Title     string `json:"window_title"`
 			Truncated bool   `json:"truncated"`
 			Degraded  string `json:"degraded_reason"`
 		} `json:"structuredContent"`
 	}
 	if err := json.Unmarshal(read, &state); err != nil || state.Structured.Truncated {
 		slog.Warn("agent_browser.tabs_unread", "pid", pid, "window_id", window, "truncated", state.Structured.Truncated, "error", err)
-		return 0
+		return 0, "", ""
 	}
-	count := countTabs(state.Structured.Tree)
+	count, close := tabStrip(state.Structured.Tree)
 	if count == 0 && strings.Contains(state.Structured.Tree, "id=WEB_BROWSER_ADDRESS_AND_SEARCH_FIELD") {
 		// Safari hides its tab strip while a window has one tab.
 		count = 1
@@ -602,15 +610,21 @@ func (c *cuaSession) agentChromeTabs(ctx context.Context, pid int, window float6
 	if count == 0 && state.Structured.Degraded != "" {
 		slog.Warn("agent_browser.tabs_unread", "pid", pid, "window_id", window, "reason", state.Structured.Degraded)
 	}
-	return count
+	return count, state.Structured.Title, close
 }
 
 // countTabs counts the tab rows of a browser window's tree: a radio button
 // outside the page that holds a button, its Close button.
 func countTabs(tree string) int {
+	count, _ := tabStrip(tree)
+	return count
+}
+
+// tabStrip is countTabs with the label of a tab's Close button, which follows
+// the user's language; it is empty for a Safari tab, which has none.
+func tabStrip(tree string) (count int, close string) {
 	rows := strings.Split(tree, "\n")
 	indent := func(row string) int { return len(row) - len(strings.TrimLeft(row, " ")) }
-	count := 0
 	// web is the indent of the page being skipped, or -1: a radio button
 	// in a page is not a tab.
 	web := -1
@@ -641,11 +655,14 @@ func countTabs(tree string) int {
 			}
 			if trimmed := strings.TrimSpace(next); strings.Contains(trimmed, "] AXButton") && strings.HasSuffix(trimmed, "[actions=[press]]") {
 				count++
+				if _, label, ok := strings.Cut(trimmed, "] AXButton \""); ok && close == "" {
+					close, _, _ = strings.Cut(label, "\"")
+				}
 				break
 			}
 		}
 	}
-	return count
+	return count, close
 }
 
 // agentChromeTabWindow names the window whose tabs hold the task: the one
@@ -697,40 +714,59 @@ func (c *cuaSession) checkAgentChromeTabs(ctx context.Context, pid, window any) 
 // script, so a tab it opened or closed, such as a link to a new tab, is the
 // task's. While it runs, the task holds this browser's input lease, so no
 // other task changes the tabs. Only a task that opened its tab with
-// launch_app holds a count.
-func (c *cuaSession) recordAgentChromeTabs(ctx context.Context, pid, window any) {
+// launch_app holds a count. It returns a note on what the input changed in
+// the window, from the same read: a click result says nothing of where the
+// page went, and the Agent read the window only to learn that.
+func (c *cuaSession) recordAgentChromeTabs(ctx context.Context, pid, window any) string {
 	c.op.mu.Lock()
-	held := c.op.chromeTabs > 0
+	before, title := c.op.chromeTabs, c.op.chromeTitle
 	c.op.mu.Unlock()
-	if !held {
-		return
+	if before == 0 {
+		return ""
 	}
-	if got := c.settledAgentChromeTabs(ctx, pid, window); got > 0 {
-		c.op.mu.Lock()
-		c.op.chromeTabs = got
-		c.op.mu.Unlock()
+	got, front, close := c.settledAgentChromeTabs(ctx, pid, window)
+	if got == 0 {
+		return ""
 	}
+	c.op.mu.Lock()
+	c.op.chromeTabs, c.op.chromeTitle = got, front
+	c.op.mu.Unlock()
+	switch {
+	case got > before && close != "":
+		// The tab strip follows the page in the tree, past the default
+		// walk, so the Agent's search for the button came back empty.
+		return fmt.Sprintf("This input opened %d new tab(s); the one in front shows %q. To go back, close it with the %q button inside its tab: the tab strip follows the page in the tree, so read it with get_window_state query %q and max_elements 6000, or app.getState with the same in a script.", got-before, front, close, close)
+	case got > before:
+		return fmt.Sprintf("This input opened %d new tab(s); the one in front shows %q.", got-before, front)
+	case got < before:
+		return fmt.Sprintf("This input closed %d tab(s); the tab in front shows %q.", before-got, front)
+	case front != title:
+		return fmt.Sprintf("The tab in front now shows %q.", front)
+	}
+	return ""
 }
 
-// settledAgentChromeTabs reads the window's tab count once two reads a
-// settle apart agree: the browser adds or drops a tab a moment after the
-// input that opened or closed it returns, and the next input's pause already
-// covers that wait. It is 0 when the strip cannot be read.
-func (c *cuaSession) settledAgentChromeTabs(ctx context.Context, pid, window any) int {
+// settledAgentChromeTabs reads the window's tab count, its front tab's title
+// and the label of a tab's Close button once two reads a settle apart agree: the browser adds or drops a tab
+// a moment after the input that opened or closed it returns, and the next
+// input's pause already covers that wait. The count is 0 when the strip
+// cannot be read.
+func (c *cuaSession) settledAgentChromeTabs(ctx context.Context, pid, window any) (int, string, string) {
 	number, id, ok := c.agentChromeTabWindow(pid, window)
 	if !ok {
-		return 0
+		return 0, "", ""
 	}
-	got := c.agentChromeTabs(ctx, number, id)
+	got, title, close := c.agentChromeTabsAndTitle(ctx, number, id)
 	for range 3 {
 		if got == 0 || sleepContext(ctx, inputSettle) != nil {
 			break
 		}
-		next := c.agentChromeTabs(ctx, number, id)
+		next, nextTitle, nextClose := c.agentChromeTabsAndTitle(ctx, number, id)
+		title, close = nextTitle, nextClose
 		if next == got {
 			break
 		}
 		got = next
 	}
-	return got
+	return got, title, close
 }

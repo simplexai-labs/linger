@@ -15,8 +15,9 @@ func TestCountTabsReadsChromeEdgeAndFirefoxStrips(t *testing.T) {
 		"safari": "    - [17] AXRadioButton \"Trail checklist - Pinboard\" [id=TabBarTab?isPinned=false&isNarrow=false&isActive=false actions=[press,name:close tab]]\n" +
 			"    - [18] AXRadioButton \"Start Page\" [id=TabBarTab?isPinned=false&isNarrow=false&isActive=true actions=[press,name:close tab]]",
 	} {
-		if got := countTabs(tree); got != 2 {
-			t.Errorf("%s: %d tabs, want 2", name, got)
+		want := map[string]string{"chrome": "Close", "edge": "Close tab", "firefox": "Close tab"}[name]
+		if got, close := tabStrip(tree); got != 2 || close != want {
+			t.Errorf("%s: %d tabs closed by %q, want 2 closed by %q", name, got, close, want)
 		}
 	}
 	// A page's own radio buttons are not tabs.

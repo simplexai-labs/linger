@@ -312,7 +312,7 @@ changes in the same result. By default it reads the last step's window, or the
 application's focused window when that step gave no `window_id`; pass `read` to
 read another window or add a `query`. When a step is refused or its result is
 unknown, the result lists the completed, unsent and possibly applied steps.
-An `element_token` from an older read is refused, never rebound to another element with the same role and label. A step can name its target by role and name instead; the Daemon finds it when the step runs.
+An `element_token` from an older read is refused, never rebound to another element with the same role and label. A step can name its target by role and name instead; the Daemon finds it when the step runs, and white space in a label, such as a no-break space, matches any white space.
 On Windows, after a successful input the Daemon waits 100 ms before reading the
 window diff, because Cua already waits for its own read-back after input. The MCP
 initialize result carries no usage instructions, because Codex prepends them to
@@ -379,7 +379,11 @@ A change in the number of tabs between the task's inputs stops the task with
 `COMPUTER_TAB_CHANGED`, because the next input could reach another page. A
 tab that the task's own input or script opens or closes is the task's: the
 task holds the browser's input lease, and the count is kept once the tab strip
-settles, since the browser shows such a tab a moment later. Reading the tab
+settles, since the browser shows such a tab a moment later. The input's
+result then says, from that same read, when it opened or closed a tab or
+changed the title of the tab in front. A click there on page text whose row
+lists no press notes that Chrome clicks it anyway, since Cua warns that such
+a press may have done nothing. Reading the tab
 strip replaces Cua's snapshot of the window, so the Daemon remembers the rows
 of recent reads and moves an Agent's element token, in an input or written
 into a script, to the current snapshot when its row reads the same there.
