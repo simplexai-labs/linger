@@ -1,6 +1,7 @@
 package voicelive
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,24 @@ func TestHumanSize(t *testing.T) {
 	for size, want := range map[int64]string{0: "0", 512: "512", 3800: "3.7K", 201_728: "197K", 12 << 20: "12M"} {
 		if got := HumanSize(size); got != want {
 			t.Errorf("HumanSize(%d)=%s, want %s", size, got, want)
+		}
+	}
+}
+
+// The realtime model rejects a session whose tool schema has a null required
+// list, so every tool spells an empty one.
+func TestEveryToolSchemaHasARequiredList(t *testing.T) {
+	for _, tool := range Tools {
+		encoded, err := json.Marshal(tool.Parameters)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var schema map[string]any
+		if err := json.Unmarshal(encoded, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := schema["required"].([]any); !ok {
+			t.Errorf("%s: required=%v", tool.Name, schema["required"])
 		}
 	}
 }
