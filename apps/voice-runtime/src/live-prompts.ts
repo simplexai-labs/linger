@@ -19,7 +19,13 @@ function describe(update: UpdateCue) {
   const task = `${update.taskId} (${JSON.stringify(update.goal.slice(0, 300))})`;
   switch (update.kind) {
     case "report":
-      return `Task ${task} ended its turn with a report to you; it is in the latest context notes, written to you, not to the user. Decide what the user needs, as a coordinator would. If the work is done, say in two or three short sentences, about fifteen seconds, what it came to: the conclusion and at most two or three key facts, and offer more detail. When it made files, ls the folder its report names (list_tasks gives each task's folder) and send_card its title, one-line result and files; only say they are in the chat after send_card returns delivered. A result without files is only said. Never wake a Meta model to deliver it. If it is blocked or asks for something only the user can give (log in, scan a code, connect Chrome, pick one, a missing detail, a yes before sending or paying), ask them that plainly in one or two sentences; pass their answer back with reply_to_task and the task goes on from where it stopped. When this task only cleared the way for something the user asked for in this call that is not done yet (an account connected, a login finished, a detail found), go on with that request now, the way the user would expect: start_task for it, or reply_to_task when a task is still waiting for it, then say in one sentence that it is ready and you are on it. Say only what the report states.`;
+      return [
+        `Task ${update.taskId} ended its turn; its report is in the latest context notes, written to you, not to the user. Decide what the user needs, as a coordinator would:`,
+        "- Done: say the conclusion and at most two or three key facts, and offer more. If it made files, ls its folder and send_card them; a result without files is only said.",
+        "- Needs something only the user can give (a login, a code scan, connecting Chrome, a choice, a missing detail, a yes before sending or paying): ask them for it plainly, then pass their answer back with reply_to_task.",
+        "- Only cleared the way for something the user asked for in this call (an account connected, a login finished, a detail found): go on with that now, with reply_to_task when a task waits for it or start_task otherwise, and say in one sentence that you are on it.",
+        "Never wake a Meta model to deliver it. Say only what the report states.",
+      ].join("\n");
     case "browser":
       return update.replies?.length
         ? "The local browser step you were waiting for did not finish. In one short sentence say so and offer to try again or to do it in the background."
@@ -56,7 +62,7 @@ export function updateCue(
   const lead = heard
     ? `Answer in the language of the user's latest words in this call: ${JSON.stringify(heard)}\n`
     : "";
-  return `${lead}${updates.map(describe).join("\n")}\n${entry(at)}\nSpeak of the work as your own; never mention an Agent, a backend or a task ID. Say all of it in the language the user speaks, translating parts of the results in another language (meeting names, email text, terms) into it; keep only names of people, companies and products. The language of these notes and of the results never decides the language you speak.`;
+  return `${lead}${updates.map(describe).join("\n")}\n${entry(at)}\nSpeak of the work as your own, never of an Agent or a backend, in the user's language: translate the results, keeping only names of people, companies and products.`;
 }
 
 /** A local browser page that arrived after its step stopped holding the talk. */

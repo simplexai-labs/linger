@@ -1218,7 +1218,7 @@ describe("LiveVoiceWorker background work", () => {
     );
     await vi.waitFor(() => expect(test.session().tell).toHaveBeenCalledOnce());
     expect(test.session().tell.mock.calls[0]![0]).toContain(
-      "ask them that plainly",
+      "ask them for it plainly",
     );
     expect(test.session().tell.mock.calls[0]![0]).toContain(
       "You finished saying something else a moment ago",
