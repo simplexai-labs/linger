@@ -184,6 +184,9 @@ func TestScriptGuardRefusesKeysForTheEverydayChrome(t *testing.T) {
 		{`const app = await cua.getApp({pid: 2, windowId: 5}); return app.pressKey("return", "s1:2");`, "pressed"},
 		{`return await cua.call("click", {pid: 1, element_token: "s1:2"});`, "call:click"},
 		{`return await cua.call("launch_app", {bundle_id: "com.google.Chrome"});`, "threw:COMPUTER_SCRIPT_REFUSED"},
+		// An app object whose pid the guard cannot read could be that Chrome.
+		{`const apps = await cua.listApps(); return apps[0].hotkey(["cmd", "w"]);`, "threw:COMPUTER_KEYS_REFUSED"},
+		{`const app = await cua.getApp({name: "Google Chrome"}); return app.hotkey(["cmd", "w"]);`, "threw:COMPUTER_KEYS_REFUSED"},
 	} {
 		script := filepath.Join(dir, "script.js")
 		if err := os.WriteFile(script, []byte(guardedScript(`{}`, tc.body, 42, 20, 1)), 0o600); err != nil {

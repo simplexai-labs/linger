@@ -87,7 +87,7 @@ const plainProtos = [Object.prototype, Array.prototype, null], real = globalThis
 const bad = /`+strings.Join(pattern, "|")+`/;
 const limit = `+strconv.Itoa(inputLimit)+`, chrome = `+strconv.Itoa(chrome)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0;
 const keyOps = {__proto__: null, hotkey: true, type_text: true, press_key: true}, keyMethods = {__proto__: null, hotkey: true, typeText: true, pressKey: true};
-const keyed = (k, c, o) => chrome > 0 && (k === "call" ? keyOps[c[0]] === true && (c[1] === null || typeof c[1] !== "object" || typeof c[1].pid !== "number" || c[1].pid === chrome) : keyMethods[k] === true && o.pid === chrome);
+const keyed = (k, c, o) => chrome > 0 && (k === "call" ? keyOps[c[0]] === true && (c[1] === null || typeof c[1] !== "object" || typeof c[1].pid !== "number" || c[1].pid === chrome) : keyMethods[k] === true && (typeof o.pid !== "number" || o.pid === chrome));
 const namesChrome = v => v === "Google Chrome" || v === "com.google.Chrome" || v !== null && typeof v === "object" && (v.name === "Google Chrome" || v.bundle_id === "com.google.Chrome" || v.bundleId === "com.google.Chrome");
 const startsChrome = (k, c) => k === "launchApp" && namesChrome(c[0]) || k === "call" && c[0] === "launch_app" && namesChrome(c[1]);
 const inputMethods = {__proto__: null, click: true, doubleClick: true, rightClick: true, drag: true, scroll: true, typeText: true, pressKey: true, hotkey: true, setValue: true};
