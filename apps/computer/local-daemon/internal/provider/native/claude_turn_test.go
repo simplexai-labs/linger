@@ -621,3 +621,32 @@ func TestClaudeEventBackpressure(t *testing.T) {
 		t.Fatal("emit blocked or overwrote the buffered event")
 	}
 }
+
+// A result can be read while the submitting goroutine has written the input
+// but not yet recorded that its write returned. Parking then must wait for
+// the submission instead of treating it as failed.
+func TestClaudeSubmittedOKWaitsForInFlightSubmission(t *testing.T) {
+	p := &claudeProcess{}
+	p.conv = claudeNewConversation(p)
+	turn := &claudeTurn{proc: p, submitDone: make(chan struct{})}
+	if turn.submittedOK() {
+		t.Fatal("a turn without submitted input reported a clean submission")
+	}
+	p.conv.markSubmitted(time.Now())
+	calling := make(chan struct{})
+	answered := make(chan bool, 1)
+	go func() {
+		close(calling)
+		answered <- turn.submittedOK()
+	}()
+	<-calling
+	close(turn.submitDone)
+	if !<-answered {
+		t.Fatal("an in-flight submission that then succeeded was reported as failed")
+	}
+	failed := &claudeTurn{proc: p, submitDone: make(chan struct{}), submitErr: errors.New("write failed")}
+	close(failed.submitDone)
+	if failed.submittedOK() {
+		t.Fatal("a failed submission was reported as clean")
+	}
+}

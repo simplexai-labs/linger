@@ -84,6 +84,13 @@ func (c *claudeConversation) markSubmitted(at time.Time) {
 	c.mu.Unlock()
 }
 
+// inputSubmitted reports that the turn's first user frame is on its way.
+func (c *claudeConversation) inputSubmitted() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.submitted
+}
+
 // claudeTurnStart is the moment a turn's run input reached the CLI.
 type claudeTurnStart struct {
 	turnID    string

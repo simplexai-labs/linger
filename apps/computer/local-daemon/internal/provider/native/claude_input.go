@@ -63,14 +63,17 @@ func (t *claudeTurn) submitFailed(err error) {
 	t.runCancel()
 }
 
-// submittedOK checks without waiting that submission finished cleanly.
+// submittedOK reports that submission finished cleanly. The CLI can answer
+// the input before the submitting goroutine sees its own write return, so
+// once the input is on its way this waits for that write; the write ends
+// with the run context or the process. A turn whose input was never sent
+// has nothing to wait for.
 func (t *claudeTurn) submittedOK() bool {
-	select {
-	case <-t.submitDone:
-		return t.submitErr == nil
-	default:
+	if !t.proc.conv.inputSubmitted() {
 		return false
 	}
+	<-t.submitDone
+	return t.submitErr == nil
 }
 
 func claudeNotApplied(expected, actual string) *SteerError {
