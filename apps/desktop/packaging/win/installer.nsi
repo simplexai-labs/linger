@@ -93,8 +93,43 @@ Section "Linger"
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
 SectionEnd
 
+; Uninstalling stops what Linger runs, so nothing keeps running or holds a
+; file: a running Linger quits (index.ts), then the bundled installer, run by
+; the app's own Node, stops the installation manager and the services of the
+; local installation (TeamHub, web, node-services, LiveKit, PostgreSQL). The
+; installer ends on its own after a time limit; the uninstall goes on whatever
+; it reports. Data stays and a new install starts the services again.
+!define INSTALLER_SCRIPT "$INSTDIR\resources\app\dist\installer\installer.js"
+Function un.StopLinger
+  IfFileExists "$INSTDIR\Linger.exe" 0 done
+  ; Without a running Linger this exits at once.
+  ExecWait '"$INSTDIR\Linger.exe" --quit'
+  IfFileExists "${INSTALLER_SCRIPT}" 0 closing
+  DetailPrint "Stopping Linger on this computer..."
+  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "1")'
+  nsExec::ExecToLog '"$INSTDIR\Linger.exe" "${INSTALLER_SCRIPT}" --instance desktop --stop'
+  Pop $0
+  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", n)'
+  StrCmp $0 "0" closing
+  DetailPrint "Some of Linger's services may still be running."
+  closing:
+  ; The app takes a moment to quit; un.CloseLinger asks after that.
+  StrCpy $1 0
+  wait:
+  ClearErrors
+  Delete "$INSTDIR\Linger.exe"
+  IfErrors 0 done
+  IntOp $1 $1 + 1
+  IntCmp $1 20 done
+  Sleep 500
+  Goto wait
+  done:
+FunctionEnd
+
 Section "Uninstall"
-  ; Settings, sign-in and logs stay in %APPDATA%\Linger.
+  ; Settings, sign-in and logs stay in %APPDATA%\Linger, and the local
+  ; installation (%USERPROFILE%\.simplexai) with its data.
+  Call un.StopLinger
   Call un.CloseLinger
   Delete "$SMPROGRAMS\Linger.lnk"
   RMDir /r "$INSTDIR"

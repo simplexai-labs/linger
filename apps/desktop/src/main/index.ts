@@ -17,6 +17,7 @@ import {
 
 import { lingerHome } from "@linger/local-installation/home";
 
+import { quitRequested } from "./app-window.js";
 import { CredentialStore } from "./computer-credential.js";
 import {
   ComputerDaemonModule,
@@ -86,7 +87,9 @@ else if (app.isPackaged) {
 const APP_USER_MODEL_ID = "com.simplexai.linger.desktop.preview";
 if (process.platform === "win32") app.setAppUserModelId(APP_USER_MODEL_ID);
 
-if (!app.requestSingleInstanceLock()) {
+// `--quit` (the uninstaller) asks a running Linger to quit, and starts
+// nothing when none runs.
+if (!app.requestSingleInstanceLock() || quitRequested(process.argv)) {
   app.quit();
 } else {
   registerAppScheme();
@@ -312,7 +315,11 @@ async function main(): Promise<void> {
   const host = new ModuleHost(modules, { config, log, bus: new EventBus() });
 
   const showApp = (): void => setup.showApp();
-  app.on("second-instance", showApp);
+  app.on("second-instance", (_event, argv) => {
+    // Without asking: the uninstaller is removing the app.
+    if (quitRequested(argv)) app.quit();
+    else showApp();
+  });
   app.on("activate", showApp);
   // Closing the window only hides it; the tray keeps the app running.
   app.on("window-all-closed", () => {});

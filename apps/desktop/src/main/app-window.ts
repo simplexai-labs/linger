@@ -9,3 +9,9 @@ export function appWindow(state: {
 }): "setup" | "main" {
   return state.setupOpen || !state.enrolled ? "setup" : "main";
 }
+
+// The uninstaller runs `Linger.exe --quit` before it stops the local
+// services and removes the app.
+export function quitRequested(argv: readonly string[]): boolean {
+  return argv.includes("--quit");
+}

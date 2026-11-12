@@ -203,6 +203,18 @@ export async function startInstallerServer(options: ServerOptions) {
         setImmediate(() => void close());
         return;
       }
+      // The desktop's uninstall: closing cancels a running job, which keeps
+      // the account and data.
+      if (url.pathname === "/api/stop" && method === "POST") {
+        const input = (await body(req)) as { token?: unknown };
+        if (input.token !== controlToken) {
+          error(res, 401, "UNAUTHORIZED", "Open the installer again.");
+          return;
+        }
+        json(res, 200, { ok: true });
+        setImmediate(() => void close());
+        return;
+      }
       if (url.pathname === "/api/session" && method === "POST") {
         const input = (await body(req)) as { token?: unknown };
         if (

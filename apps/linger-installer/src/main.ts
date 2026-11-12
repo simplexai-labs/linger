@@ -16,6 +16,7 @@ export function parseInstallerArguments(args: string[]) {
     inspect?: boolean;
     userKeys?: boolean;
     migrate?: boolean;
+    stop?: boolean;
   } = {
     home: lingerHome(),
   };
@@ -35,6 +36,10 @@ export function parseInstallerArguments(args: string[]) {
     }
     if (flag === "--migrate") {
       options.migrate = true;
+      continue;
+    }
+    if (flag === "--stop") {
+      options.stop = true;
       continue;
     }
     if (flag === "--user-keys") {
@@ -69,13 +74,16 @@ export function parseInstallerArguments(args: string[]) {
     !options.sourceRepo &&
     !options.inspect &&
     !options.userKeys &&
-    !options.migrate
+    !options.migrate &&
+    !options.stop
   )
     throw new Error("The installer needs a source checkout (--source-repo).");
   if (options.resume && !options.instanceName)
     throw new Error("Resume needs a source checkout and an instance.");
   if (options.userKeys && !options.instanceName)
     throw new Error("Keys need an instance.");
+  if (options.stop && !options.instanceName)
+    throw new Error("Stop needs an instance.");
   return options;
 }
 // The desktop client shows this line, so it carries the real cause; only an
@@ -191,6 +199,30 @@ async function userKeys(options: ReturnType<typeof parseInstallerArguments>) {
     process.exit("error" in outcome ? 1 : 0),
   );
 }
+// Headless stop for the desktop's uninstall: the outcome as one JSON line on
+// stdout. The uninstall waits for it, so it ends on its own after a while.
+async function stopInstallation(
+  options: ReturnType<typeof parseInstallerArguments>,
+) {
+  const { stopDesktopInstallation } = await import("./server/stop.js");
+  setTimeout(() => process.exit(1), 150_000).unref();
+  const outcome = await stopDesktopInstallation({
+    home: options.home,
+    instanceName: options.instanceName!,
+    signal: AbortSignal.timeout(120_000),
+    log: (message) => process.stderr.write(message.replace(/\n?$/, "\n")),
+  }).catch((error: unknown) => ({
+    failed: [
+      {
+        home: options.home,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    ],
+  }));
+  process.stdout.write(`${JSON.stringify(outcome)}\n`, () =>
+    process.exit(outcome.failed.length ? 1 : 0),
+  );
+}
 async function serve(options: ReturnType<typeof parseInstallerArguments>) {
   const server = await launchInstaller({
     ...options,
@@ -245,7 +277,8 @@ if (
   }
   // Installs from before the rename move to the Linger home once, before
   // any mode opens it; --migrate does only that, for the desktop client.
-  if (options)
+  // Stopping for an uninstall changes nothing.
+  if (options && !options.stop)
     await import("@linger/local-installation/legacy-migration")
       .then(({ migrateLegacyInstallation }) =>
         migrateLegacyInstallation({ home: options!.home }),
@@ -254,7 +287,8 @@ if (
         failedToStart(error);
         options = undefined;
       });
-  if (options?.migrate) process.exit(0);
+  if (options?.stop) await stopInstallation(options);
+  else if (options?.migrate) process.exit(0);
   else if (options?.userKeys) await userKeys(options);
   else if (options?.inspect) await inspect(options);
   else if (options?.resume) await resume(options);

@@ -223,6 +223,15 @@ Gateway and runs Agents. The daemon exits with the app.
   Windows setup installs into `%LOCALAPPDATA%\Programs\Linger`; on upgrade it
   closes and removes `%LOCALAPPDATA%\Programs\Simplex` and moves the
   "Open at login" Run value from `ai.simplex.desktop.preview` to the new id.
+  The uninstaller (per-user, like the setup) first runs `Linger.exe --quit`,
+  which a running Linger obeys without asking, then the bundled
+  `installer.js --instance desktop --stop` under `ELECTRON_RUN_AS_NODE`. That
+  stops the installation manager the desktop started (cancelling a running
+  job) and the `desktop` instance's services in the default home and in the
+  location `desktop/local-server.json` names; services already stopped are
+  left alone and it gives up after about two minutes. It keeps
+  `%APPDATA%\Linger` and the Linger home with all their data and asks nothing;
+  a later install starts the services again (resume, or setup's Install).
 - `src/main/legacy-migration.ts`: on start, stops a bridge an older version
   left running and moves its credential and the Desktop 0.16 daemon identity
   into the daemon layout, so the computer keeps its id.
