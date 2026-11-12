@@ -227,9 +227,6 @@ skills:
       - manifest_id: skill_manifest_simplexai_humanlike_browse_1_0_6
         version: 1.0.6
         package_path: builtin/humanlike-browse/1.0.6
-      - manifest_id: skill_manifest_simplexai_humanlike_browse_1_0_5
-        version: 1.0.5
-        package_path: builtin/humanlike-browse/1.0.5
       - manifest_id: skill_manifest_simplexai_humanlike_browse_1_0_4
         version: 1.0.4
         package_path: builtin/humanlike-browse/1.0.4
