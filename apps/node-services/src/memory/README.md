@@ -281,7 +281,9 @@ candidate keeps its excerpt and the sections to read.
 - Raw search keeps the fused order and takes the top 10 candidates with no model rerank. The fact channel recalls
   100 candidates per channel (Hindsight's high budget recalls 1,000). When facts, inline chunks or candidates were left
   out, the result carries the gap `results_trimmed`, and the Agent chooses a follow-up read or a narrower query by the facts the question
-  needs; `grounded` only means the search matched, not that the evidence is complete.
+  needs. Status follows the gaps: candidates with no gap are `grounded`, candidates with any gap (this one
+  included) are `partial`, and no candidates is `empty`. `grounded` still means only that the search matched,
+  not that the evidence answers the question.
 
 Raw query candidates, MCP read input and output, and Memory HTTP reads use one Evidence ID protocol: `raw_` followed
 by the first 16 characters of the source ID, an underscore and the first 16 characters of the content hash, naming

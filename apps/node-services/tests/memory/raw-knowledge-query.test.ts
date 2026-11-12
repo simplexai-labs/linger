@@ -474,6 +474,28 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     expect(result.items.some((item) => item.id.startsWith("raw_"))).toBe(true);
   });
 
+  it("reports a limited BM25 fallback with candidates as partial", async () => {
+    const fixtureData = await fixture();
+    for (let index = 0; index < 31; index += 1) {
+      storeDocumentSource(fixtureData.root, {
+        ...meetingDocument,
+        documentId: `document_${index}`,
+        textSourceId: `version_${index}`,
+        title: `Cobalt note ${index}`,
+        markdown: `# Cobalt note ${index}\n\nThe Cobalt limit was discussed.`,
+      });
+    }
+    const result = await queryPersonalKnowledge(
+      fixtureData.root,
+      request("Cobalt limit"),
+      { chunkSearch: { search: async () => [] } },
+    );
+
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.gaps).toEqual([{ code: "source_search_limited" }]);
+    expect(result.status).toBe("partial");
+  });
+
   it("never revives local Raw when the database has no current source", async () => {
     const f = await fixture();
     const provider = {
@@ -1076,6 +1098,7 @@ describe("knowledge output budget", () => {
 
     expect(bytes(result)).toBeLessThanOrEqual(OUTPUT_BUDGET_BYTES);
     expect(result.gaps.map((gap) => gap.code)).toContain("results_trimmed");
+    expect(result.status).toBe("partial");
     expect(result.facts!.length).toBeGreaterThan(0);
     expect(result.facts).toEqual(facts.slice(0, result.facts!.length));
     expect(result.items.length).toBeGreaterThan(1);
@@ -1116,6 +1139,7 @@ describe("knowledge output budget", () => {
       },
     );
     expect(result.gaps).toEqual([]);
+    expect(result.status).toBe("grounded");
     expect(result.items[0]!.content).toContain(chunk.content.slice(0, 20));
   });
 

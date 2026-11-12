@@ -175,7 +175,8 @@ export async function queryPersonalKnowledge(
         title: source.title,
       })),
     schemaVersion: 1,
-    status: "grounded",
+    // Candidates with any gap are partial, so status and gaps never disagree.
+    status: gaps.length || trimmed ? "partial" : "grounded",
   });
   // Inline chunks go from the lowest rank up until only the top candidate's
   // best chunk is left, then candidates go from the lowest rank up, then that

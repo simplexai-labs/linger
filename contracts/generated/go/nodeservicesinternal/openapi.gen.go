@@ -2017,11 +2017,11 @@ type PersonalKnowledgeQueryResponse struct {
 	RequestId     *string                         `json:"requestId,omitempty"`
 	SchemaVersion int                             `json:"schemaVersion"`
 
-	// Status Candidate retrieval status. partial with evidence_sections_not_read requires reading relevant candidate sections before judging whether information is insufficient; it is not a failed search.
+	// Status Candidate retrieval status. grounded has candidates and no gaps, partial has candidates and at least one gap, and empty has no candidates. partial with evidence_sections_not_read requires reading relevant candidate sections before judging whether information is insufficient; it is not a failed search.
 	Status PersonalKnowledgeQueryResponseStatus `json:"status"`
 }
 
-// PersonalKnowledgeQueryResponseStatus Candidate retrieval status. partial with evidence_sections_not_read requires reading relevant candidate sections before judging whether information is insufficient; it is not a failed search.
+// PersonalKnowledgeQueryResponseStatus Candidate retrieval status. grounded has candidates and no gaps, partial has candidates and at least one gap, and empty has no candidates. partial with evidence_sections_not_read requires reading relevant candidate sections before judging whether information is insufficient; it is not a failed search.
 type PersonalKnowledgeQueryResponseStatus string
 
 // PersonalKnowledgeSectionDirectoryEntry defines model for PersonalKnowledgeSectionDirectoryEntry.
