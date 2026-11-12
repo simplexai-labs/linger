@@ -1988,8 +1988,13 @@ func TestLocalToolCuaMacEverydayChromeOpensTheComputersWindowAndTakesNoKeys(t *t
 	if _, err := c.call(t.Context(), "hotkey", json.RawMessage(`{"keys":["cmd","w"],"element_token":"s7:1"}`)); !strings.Contains(fmt.Sprint(err), "COMPUTER_TARGET_REQUIRED") {
 		t.Fatalf("hotkey with no pid: err=%v, want refused", err)
 	}
-	if _, err := c.call(t.Context(), "set_value", json.RawMessage(`{"pid":42,"window_id":12,"value":"kettle","element_token":"s1:1"}`)); err != nil {
-		t.Fatalf("set_value: %v", err)
+	// launch_app keeps the front tab's title, so the first input, which
+	// changes no tab, reports no change.
+	if c.op.chromeTitle != "Tab 0" {
+		t.Fatalf("front title after launch_app=%q, want Tab 0", c.op.chromeTitle)
+	}
+	if result, err := c.call(t.Context(), "set_value", json.RawMessage(`{"pid":42,"window_id":12,"value":"kettle","element_token":"s1:1"}`)); err != nil || strings.Contains(string(result), "tab in front") {
+		t.Fatalf("set_value result=%s err=%v, want no tab note", result, err)
 	}
 	// Any script, whatever it targets, is guarded against keys to the
 	// user's Chrome.

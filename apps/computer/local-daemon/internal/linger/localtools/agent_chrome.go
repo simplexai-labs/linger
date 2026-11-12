@@ -195,9 +195,9 @@ func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls
 	m.mu.Lock()
 	m.agentChromePID, m.agentChromeChecked = pid, time.Now()
 	m.mu.Unlock()
-	tabs = c.agentChromeTabs(ctx, pid, window.WindowID)
+	tabs, title, _ := c.agentChromeTabsAndTitle(ctx, pid, window.WindowID)
 	c.op.mu.Lock()
-	c.op.chromeTabs, c.op.chromePID, c.op.chromeWindow = tabs, pid, window.WindowID
+	c.op.chromeTabs, c.op.chromeTitle, c.op.chromePID, c.op.chromeWindow = tabs, title, pid, window.WindowID
 	c.op.mu.Unlock()
 	opened := "No URL was opened, so no tab is this task's."
 	if len(urls) > 0 {

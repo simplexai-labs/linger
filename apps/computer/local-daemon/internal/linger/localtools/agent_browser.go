@@ -247,9 +247,9 @@ func (c *cuaSession) launchAgentSafari(ctx context.Context, b agentBrowser, urls
 			return nil, err
 		}
 	}
-	tabs := c.agentChromeTabs(ctx, pid, window.WindowID)
+	tabs, title, _ := c.agentChromeTabsAndTitle(ctx, pid, window.WindowID)
 	c.op.mu.Lock()
-	c.op.chromeTabs, c.op.chromePID, c.op.chromeWindow = tabs, pid, window.WindowID
+	c.op.chromeTabs, c.op.chromeTitle, c.op.chromePID, c.op.chromeWindow = tabs, title, pid, window.WindowID
 	c.op.mu.Unlock()
 	note := "This is the Computer's own window in the user's Safari. Safari has no separate profile, so this window has the user's Safari sign-ins; work only in this window, never in the user's other Safari windows. It works while other windows cover it, but only on the desktop (Space) the user is on. Keys without an element go to this window in the background. Type into a page field with type_text and the field's element_token. Move between pages as a person does: through the page's search box, menus and links, back with cmd+[; never type an address into the address bar. Close a tab with its tab's close action, not cmd+w."
 	if started {
@@ -413,8 +413,11 @@ func (c *cuaSession) launchEverydayChrome(ctx context.Context, b agentBrowser, u
 		return nil, err
 	}
 	m.setSharedWindow(b.Bundle, pid, window.WindowID)
+	// The front tab's title, so the first input reports only a change it
+	// made; the window search above keeps no title.
+	_, title, _ := c.agentChromeTabsAndTitle(ctx, pid, window.WindowID)
 	c.op.mu.Lock()
-	c.op.chromeTabs, c.op.chromePID, c.op.chromeWindow = tabs, pid, window.WindowID
+	c.op.chromeTabs, c.op.chromeTitle, c.op.chromePID, c.op.chromeWindow = tabs, title, pid, window.WindowID
 	c.op.mu.Unlock()
 	note := "This is the Computer's own window in the user's everyday Chrome, with the user's sign-ins; work only in this window, never in the user's other Chrome windows. It works while other windows cover it, but only on the desktop (Space) the user is on. The user's Chrome takes no keys from the Computer, because a key could reach the window the user is typing in: fill a field with set_value, press the page's own buttons, such as its search button, and go back through the page's links. Close a tab with the Close button of its tab; closing the window's last tab closes the window. If a site asks to sign in, ask the user to sign in once in this window."
 	if restored {
