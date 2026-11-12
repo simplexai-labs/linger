@@ -841,8 +841,6 @@ func jsonText(value any) string {
 
 func TestCodexCancelledStartOnResidentKeepsHomeUsable(t *testing.T) {
 	fake := newCodexFake(t, []codexFakeTurn{{Status: "completed", Items: []map[string]any{codexAgentMessage("m", "ok", nil)}}}, nil)
-	previous := codexCleanupBudget.set(2 * time.Second)
-	t.Cleanup(func() { codexCleanupBudget.set(previous) })
 	rt := fake.runtime(nil)
 	spec := fake.spec()
 	out, _ := codexDrain(t, rt, "park", spec)
