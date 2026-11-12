@@ -1240,6 +1240,16 @@ func TestLocalToolCuaMacAgentChromeReadsTheTabStripOnlyAsFarAsItNeeds(t *testing
 	if got := reads()[before:]; !slices.Equal(got, []string{"run_script", "6", "6"}) {
 		t.Fatalf("calls for a script that clicked=%v, want two bounded reads after it", got)
 	}
+	// A tab closed behind the front tab does not stop the task, and the
+	// result reports the count without saying the input closed it.
+	c.op.chromeTabs = 2
+	result, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if note := `The window now has 1 tab(s), 2 before this input; the tab in front still shows \"Tab 0\".`; !strings.Contains(string(result), note) || strings.Contains(string(result), "This input closed") {
+		t.Fatalf("result=%s, want the neutral note %s", result, note)
+	}
 	// A front tab that changed since the last input is read whole first.
 	c.op.chromeTitle = "Elsewhere"
 	if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`)); err != nil {

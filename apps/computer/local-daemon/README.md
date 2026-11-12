@@ -375,10 +375,13 @@ the task; `rate_limited` also puts the site (its registrable domain) in a
 60-minute cooldown. The record lives in `computer-tools/agent-chrome-pace.json`.
 Once a task opens a site there, the browser tools refuse that site for the
 rest of the task, and `launch_app` refuses to open it in another browser.
-A change in the number of tabs between the task's inputs stops the task with
-`COMPUTER_TAB_CHANGED`, because the next input could reach another page. The
-Daemon reads the tab strip before an input only when the window's title in
-`list_windows` differs from the front tab's title after the last input; after
+A change of the front tab between the task's inputs that also changed the
+number of tabs stops the task with `COMPUTER_TAB_CHANGED`, because the next
+input could reach another page. The Daemon reads the tab strip before an input
+only when the window's title in `list_windows` differs from the front tab's
+title after the last input, so a tab opened or closed behind the front tab
+does not stop the task: the input still reaches the task's page, and its
+result reports the new count without saying the input changed it; after
 an input it reads the strip only to its depth, unless a script returned reads
 the Agent may act on, and not at all after a script that sent no input. A
 tab that the task's own input or script opens or closes is the task's: the

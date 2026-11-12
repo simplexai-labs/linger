@@ -777,6 +777,11 @@ func (c *cuaSession) recordAgentChromeTabs(ctx context.Context, pid, window any,
 	c.op.chromeTabs, c.op.chromeTitle = got, front
 	c.op.mu.Unlock()
 	switch {
+	case got != before && front == title:
+		// The front tab is the one the input went to. A tab opened or
+		// closed behind it may be someone else's, since the check before
+		// the input reads the strip only when the front tab changed.
+		return fmt.Sprintf("The window now has %d tab(s), %d before this input; the tab in front still shows %q.", got, before, front)
 	case got > before && close != "":
 		// The tab strip follows the page in the tree, past the default
 		// walk, so the Agent's search for the button came back empty.
