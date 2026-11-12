@@ -145,7 +145,8 @@ func claudeSettings(contextWindow int) string {
 			settingsEnv["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
 		}
 	}
-	if limit := toolOutputTokenLimit(contextWindow); limit < toolOutputTokens {
+	if contextWindow > 0 {
+		limit := toolOutputTokenLimit(contextWindow)
 		// One tool result keeps the share of the window Codex gives it.
 		// Claude measures Bash output in characters, and one character can be
 		// a whole token, so the token limit bounds characters too. Longer

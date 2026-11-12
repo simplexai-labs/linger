@@ -417,8 +417,8 @@ describe("Memory server", () => {
         status: "empty",
       });
       expect(received).toEqual([body]);
-      // 15% of the owner's model window, at four bytes per token.
-      expect(budgets).toEqual([38_937]);
+      // 90% of 15% of the owner's model window, at four bytes per token.
+      expect(budgets).toEqual([35_043]);
       await post(
         { ...body, user_artifact_owner_actor_id: "human_offline" },
         "memory-token",

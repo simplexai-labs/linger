@@ -216,7 +216,7 @@ func (op *codexOperation) openThread(ctx context.Context) error {
 	if spec.Effort != "" {
 		config["model_reasoning_effort"] = spec.Effort
 	}
-	if limit := toolOutputTokenLimit(spec.ContextWindow); limit < toolOutputTokens && stableCodexAtLeast(op.proc.version, codexToolOutputLimitVersion) {
+	if limit := toolOutputTokenLimit(spec.ContextWindow); limit != toolOutputTokens && stableCodexAtLeast(op.proc.version, codexToolOutputLimitVersion) {
 		config["tool_output_token_limit"] = limit
 	}
 	if hook := spec.CodexPermissionHook; hook != nil {

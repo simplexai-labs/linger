@@ -1121,9 +1121,9 @@ describe("knowledge output budget", () => {
 
   it("sizes the budget by the model's context window", () => {
     expect(knowledgeOutputBudget(undefined)).toBe(12_000);
-    expect(knowledgeOutputBudget(8_192)).toBe(4_915);
-    expect(knowledgeOutputBudget(64_896)).toBe(38_937);
-    expect(knowledgeOutputBudget(1_000_000)).toBe(100_000);
+    expect(knowledgeOutputBudget(8_192)).toBe(4_423);
+    expect(knowledgeOutputBudget(64_896)).toBe(35_043);
+    expect(knowledgeOutputBudget(1_000_000)).toBe(90_000);
   });
 
   it("keeps more of a result within a larger budget", async () => {

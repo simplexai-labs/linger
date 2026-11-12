@@ -951,8 +951,8 @@ func TestCodexThreadToolOutputLimitFollowsContextWindow(t *testing.T) {
 		window        int
 		want          any
 	}{
-		{"small window", "0.165.0", 64896, float64(4056)},
-		{"large window", "0.165.0", 272000, nil},
+		{"small window", "0.165.0", 64896, float64(9734)},
+		{"large window", "0.165.0", 272000, float64(25000)},
 		{"unknown window", "0.165.0", 0, nil},
 		{"Codex without the setting", "0.100.0", 64896, nil},
 	}

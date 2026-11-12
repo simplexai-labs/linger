@@ -271,11 +271,11 @@ The top 6 sources carry limited text: a long Chunk gives only a window of about 
 match, keeping the time and speaker heading of its message; Raw candidates also keep a bounded directory of the
 matching and adjacent Chunks for a follow-up read of missing facts or truncated text.
 Memory keeps every search and read result within an output budget of JSON bytes; the CLI passes results
-through unchanged. The budget is 15% of the context window of the model the owner's calls run on, at four
-bytes per token, and at most 100,000 bytes; the window comes from the owner's Computer through the model
-call layer. An unknown window, or an offline Computer, keeps 12,000 bytes. A Runtime cuts the middle out
-of a tool result above its own output limit, which the Daemon sets to a sixteenth of the window, between
-4,000 and 12,000 tokens, so a budget above that limit reaches the Agent cut.
+through unchanged. A Runtime cuts the middle out of a tool result above its output limit, which the Daemon
+sets to 15% of the model's context window, between 4,000 and 25,000 tokens of four bytes each. The budget
+is 90% of that limit for the model the owner's calls run on, leaving room for the CLI's labels, so a
+bounded result reaches the Agent whole; the window comes from the owner's Computer through the model call
+layer. An unknown window, or an offline Computer, keeps 12,000 bytes.
 Session facts take at most a quarter of the budget, the best-ranked first. If the result is still too
 large, inline chunks go from the lowest rank up until only the top candidate's best chunk is left, then
 candidates go from the lowest rank up, then that chunk; the top candidate always stays, and every kept

@@ -33,16 +33,16 @@ const INLINE_CONTENT_SOURCES = 6;
 const INLINE_CONTENT_CHARS = 800;
 const INLINE_CONTENT_BUDGET_CHARS = 6_000;
 const INLINE_CONTENT_SEPARATOR = "\n\n…\n\n";
-// One search or read result may take this share of the model's context
-// window, measured at four bytes per token as Codex estimates tool output.
-// The rest of the window holds the instructions, the history and other tool
-// results of the same turn.
+// The Daemon limits one tool result to 15% of the model's context window and
+// at most 25,000 tokens, which Codex counts at four bytes each; a Runtime cuts
+// the middle out of a result above it. A search or read result stays within
+// 90% of that limit, since the CLI's labels add about 2% to the JSON.
 const WINDOW_OUTPUT_SHARE = 0.15;
+const MAX_TOOL_OUTPUT_TOKENS = 25_000;
 const BYTES_PER_TOKEN = 4;
-// A large window still keeps one result this small.
-const MAX_KNOWLEDGE_OUTPUT_BYTES = 100_000;
-// The budget when the model's window is unknown: Codex's smallest tool output
-// limit for a small window, 4,000 tokens of four bytes, less the CLI's labels.
+const CLI_LABEL_ROOM = 0.9;
+// The budget when the model's window is unknown, within the Daemon's smallest
+// tool output limit, 4,000 tokens of four bytes, less the CLI's labels.
 const DEFAULT_KNOWLEDGE_OUTPUT_BYTES = 12_000;
 // A section that does not fit still returns a page this large, so every read
 // makes progress.
@@ -73,10 +73,11 @@ export function knowledgeOutputBudget(
   contextWindow: number | undefined,
 ): number {
   if (contextWindow === undefined) return DEFAULT_KNOWLEDGE_OUTPUT_BYTES;
-  return Math.min(
-    Math.floor(contextWindow * WINDOW_OUTPUT_SHARE * BYTES_PER_TOKEN),
-    MAX_KNOWLEDGE_OUTPUT_BYTES,
+  const toolOutputTokens = Math.min(
+    contextWindow * WINDOW_OUTPUT_SHARE,
+    MAX_TOOL_OUTPUT_TOKENS,
   );
+  return Math.floor(toolOutputTokens * BYTES_PER_TOKEN * CLI_LABEL_ROOM);
 }
 
 export async function queryPersonalKnowledge(
