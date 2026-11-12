@@ -19,7 +19,21 @@ becomes the latest release. Link there, not to a version.
 
 ## Releasing
 
-In a checkout of simplexai-labs/linger:
+The usual way is Actions → Cut desktop release → Run workflow. Pick `rc`,
+`patch`, `minor` or `major` and the workflow reads the `desktop-v*` tags, works
+out the next version and starts the Desktop release workflow for it on the
+branch it ran from:
+
+- `patch`, `minor` and `major` bump the latest stable version.
+- `rc` continues the release candidates ahead of the latest stable version, or
+  starts `rc.1` of its next patch version.
+- `version` replaces the computed version; it is required while no stable
+  `desktop-v*` tag exists. `dry_run` only prints the version.
+- `draft` (on by default) leaves the release as a draft: edit the notes on the
+  release page, then click Publish. Without it the release publishes itself.
+
+Pushing a tag by hand does the same without the version arithmetic. In a
+checkout of simplexai-labs/linger:
 
 ```sh
 git tag desktop-v0.16.36
@@ -33,8 +47,41 @@ git push origin desktop-v0.16.36
 - The version comes from the tag. The build writes it into
   `apps/desktop/package.json` for packaging and restores the file afterwards, so
   no version commit is needed.
-- The release appears under the repository's Releases with the files listed in
+- The release is created as a draft, and is published only after every file is
+  attached; a failed upload never leaves a half-filled release. The release
+  appears under the repository's Releases with the files listed in
   [Release Files](#release-files).
+
+## Release notes
+
+The `release` job writes the notes with
+[`scripts/ci/release-notes.mjs`](../scripts/ci/release-notes.mjs):
+
+1. **Changes:** GitHub's generated notes list the pull requests merged since the
+   previous release, grouped by the categories in
+   [`.github/release.yml`](../.github/release.yml). A stable release is measured
+   against the previous stable release, so it covers its release candidates; a
+   release candidate is measured against the closest earlier release.
+2. **Summary:** with the `ANTHROPIC_API_KEY` secret, Claude adds a headline,
+   an introduction and a few highlights above the list. It sees only the pull
+   request titles and authors, and its text is published as written, so keep
+   `draft` on while you trust it less. Without the key, or when the call
+   fails, the notes have no summary and the release still goes out.
+3. **Footer:** the notes link the previous release and end with GitHub's full
+   changelog link. A body is cut at 120,000 characters, under GitHub's limit.
+
+The groups come from the pull request's label, and the
+[`Pull request type labels`](../.github/workflows/pr-type-labels.yml) workflow
+sets it from the type of the Conventional Commits title: `feat` is
+`enhancement`, `fix` is `bug`, `perf` is `performance`, `docs` is
+`documentation`, `build`, `chore`, `ci`, `refactor`, `revert`, `style` and
+`test` are `maintenance`, and a `!` after the type adds `breaking-change`. The
+workflow creates the `performance`, `maintenance` and `breaking-change` labels
+when they are missing. A pull request with another title lands in "Other
+changes", so the title is what decides where a change appears in the notes.
+
+Generated notes list this repository's pull requests, so a release published
+to another `RELEASE_REPO` keeps a one-line note.
 
 ## How the workflow runs
 
@@ -73,6 +120,8 @@ that runs the workflow:
 | `LINGER_NATIVE_DEPS_URL`        | secret (or variable) | no                                        | Folder serving the archives `apps/desktop/distribution/*.json` pins; the `native-deps` prerelease when unset. Each download is checked against its pin. |
 | `RELEASE_REPO`                  | variable             | no                                        | `owner/name` that receives the release; `simplexai-labs/linger` when unset.                                                                             |
 | `LINGER_RELEASE_TOKEN`          | secret               | when `RELEASE_REPO` is another repository | Fine-grained token for `RELEASE_REPO` only, with Contents: read and write. Not needed in simplexai-labs/linger itself.                                  |
+| `ANTHROPIC_API_KEY`             | secret               | no                                        | Anthropic API key that writes the summary at the top of the release notes. Without it the notes hold only the pull request list.                        |
+| `RELEASE_SUMMARY_MODEL`         | variable             | no                                        | Model that writes the summary; the default is set in `scripts/ci/release-notes.mjs`.                                                                    |
 | `MACOS_DEVELOPER_ID_P12_BASE64` | secret               | no                                        | Base64 of the Developer ID `.p12`. Without it the app is signed ad hoc.                                                                                 |
 | `MACOS_DEVELOPER_ID_PASSWORD`   | secret               | with the `.p12`                           | Password of that `.p12`.                                                                                                                                |
 | `MACOS_NOTARY_KEY_JSON`         | secret               | no                                        | App Store Connect API key JSON; needs the Developer ID.                                                                                                 |

@@ -161,21 +161,41 @@ describe("desktop-release.sh github-release", () => {
   const version = "1.0.0-rc.1";
   const tag = `desktop-v${version}`;
 
-  // A gh that records its arguments and has no release yet.
-  function release(env: Record<string, string>) {
+  // A gh that records its arguments and has no release until it is created.
+  // `files` is how many assets it reports once the release has them; `draft`
+  // is whether the release it reports is still a draft.
+  function release(
+    env: Record<string, string>,
+    options: {
+      tag?: string;
+      version?: string;
+      files?: number;
+      draft?: boolean;
+    } = {},
+  ) {
     const dir = folder();
     const bin = folder();
-    const log = join(dir, "gh.log");
+    // Outside dir, which holds only the files to publish.
+    const log = join(bin, "gh.log");
     writeFileSync(
       join(bin, "gh"),
-      `#!/bin/sh\necho "$*" >>"${log}"\n[ "$2" != view ]\n`,
+      [
+        "#!/bin/sh",
+        `echo "$*" >>"${log}"`,
+        'case "$*" in',
+        `  *"--json assets"*) echo ${options.files ?? 1}; exit 0 ;;`,
+        `  *"--json isDraft"*) echo ${options.draft ?? true}; exit 0 ;;`,
+        '  *"release view"*) exit 1 ;;',
+        "esac",
+        "",
+      ].join("\n"),
     );
     chmodSync(join(bin, "gh"), 0o755);
     writeFileSync(join(dir, "SHA256SUMS.txt"), "");
-    const result = run(["github-release", dir, tag, version], {
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
-      ...env,
-    });
+    const result = run(
+      ["github-release", dir, options.tag ?? tag, options.version ?? version],
+      { PATH: `${bin}:${process.env.PATH ?? ""}`, ...env },
+    );
     let calls = "";
     try {
       calls = readFileSync(log, "utf8");
@@ -200,6 +220,62 @@ describe("desktop-release.sh github-release", () => {
     expect(result.calls).not.toContain("--latest");
   });
 
+  it("creates a draft and publishes it once every file is attached", () => {
+    const result = release({
+      GITHUB_REPOSITORY: "simplexai-labs/linger",
+      GH_TOKEN: "token",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toMatch(/release create \S+ .*--draft/);
+    expect(result.calls).toContain(
+      `release edit ${tag} --repo simplexai-labs/linger --draft=false --prerelease`,
+    );
+  });
+
+  it("leaves the draft unpublished when a file is missing", () => {
+    const result = release(
+      { GITHUB_REPOSITORY: "simplexai-labs/linger", GH_TOKEN: "token" },
+      { files: 0 },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("stays unpublished");
+    expect(result.calls).not.toContain("release edit");
+  });
+
+  it("keeps the draft when RELEASE_DRAFT is true", () => {
+    const result = release({
+      GITHUB_REPOSITORY: "simplexai-labs/linger",
+      GH_TOKEN: "token",
+      RELEASE_DRAFT: "true",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).not.toContain("release edit");
+    expect(result.stdout).toContain("left the");
+  });
+
+  it("uses the notes file when it has content", () => {
+    const notes = join(folder(), "notes.md");
+    writeFileSync(notes, "## Highlights\n");
+    const withFile = release({
+      GITHUB_REPOSITORY: "simplexai-labs/linger",
+      GH_TOKEN: "token",
+      RELEASE_NOTES_FILE: notes,
+    });
+    writeFileSync(notes, "");
+    const emptyFile = release({
+      GITHUB_REPOSITORY: "simplexai-labs/linger",
+      GH_TOKEN: "token",
+      RELEASE_NOTES_FILE: notes,
+    });
+
+    expect(withFile.calls).toContain(`--notes-file ${notes}`);
+    expect(emptyFile.calls).not.toContain("--notes-file");
+    expect(emptyFile.calls).toContain("--notes ");
+  });
+
   it("leaves another repository's commit out of a cross-repository release", () => {
     const result = release({
       GITHUB_REPOSITORY: "example/linger-copy",
@@ -213,24 +289,14 @@ describe("desktop-release.sh github-release", () => {
   });
 
   it("marks a stable release as the latest", () => {
-    const dir = folder();
-    const bin = folder();
-    const log = join(dir, "gh.log");
-    writeFileSync(
-      join(bin, "gh"),
-      `#!/bin/sh\necho "$*" >>"${log}"\n[ "$2" != view ]\n`,
+    const result = release(
+      { GITHUB_REPOSITORY: "simplexai-labs/linger", GH_TOKEN: "token" },
+      { tag: "desktop-v1.0.0", version: "1.0.0" },
     );
-    chmodSync(join(bin, "gh"), 0o755);
-    writeFileSync(join(dir, "SHA256SUMS.txt"), "");
-
-    const result = run(["github-release", dir, "desktop-v1.0.0", "1.0.0"], {
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
-      GITHUB_REPOSITORY: "simplexai-labs/linger",
-      GH_TOKEN: "token",
-    });
 
     expect(result.status).toBe(0);
-    expect(readFileSync(log, "utf8")).toContain("--latest");
+    expect(result.calls).toContain("--latest");
+    expect(result.calls).toContain("--draft=false --latest");
   });
 
   it("needs LINGER_RELEASE_TOKEN to publish from another repository", () => {
