@@ -146,7 +146,7 @@ func TestNativeBrowserCloseDoesNotTreatCDPReplyOrEOFAsExit(t *testing.T) {
 			if err := f.browser.close(); err != nil {
 				t.Fatal(err)
 			}
-			if time.Since(started) > 12*time.Second {
+			if time.Since(started) > nativeBrowserCloseLimit+2*time.Second {
 				t.Fatal("browser cleanup exceeded its bounded fallback")
 			}
 			if f.stopCalls.Load() != 1 || f.closeCalls.Load() != 1 {
@@ -182,7 +182,7 @@ func TestNativeBrowserReadinessFailureRetainsUnknownProcess(t *testing.T) {
 	if !errors.Is(err, mcpproxy.ErrCleanupUnconfirmed) || owner != f.browser || m.browsers["fixture"] != f.browser {
 		t.Fatalf("startup dropped unknown browser ownership: %v", err)
 	}
-	if time.Since(started) > 12*time.Second {
+	if time.Since(started) > nativeBrowserCloseLimit+2*time.Second {
 		t.Fatal("unknown startup cleanup exceeded its bounded return")
 	}
 	select {
