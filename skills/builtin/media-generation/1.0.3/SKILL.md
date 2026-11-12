@@ -35,7 +35,7 @@ Otherwise, before the first generation in this conversation, ask with one `teamh
 - Then end your turn. Do not guess the answer and do not start a trial generation. Once the user answers, use that path for every later generation in this conversation unless they ask for another. Do not claim the choice has been saved.
 - Settle the path before you delegate generation to a Task, and write the chosen provider, model and key parameters into the Task.
 
-In a Task you cannot ask. Follow the path the Task names, or one the user stated or holds as a lasting preference as above. If none is settled, do not choose one and do not generate: end the Task with a final reply that says the user must choose a path and lists the paths and prices you found, so the conversation that delegated it can ask the user and start a new Task.
+In a Task you cannot ask the user yourself. Follow the path the Task names, or one the user stated or holds as a lasting preference as above. If none is settled, do not choose one and do not generate: end your turn with a final reply that asks the user to choose and lists the paths and prices you found. The conversation that delegated the Task asks the user and sends their choice back to this Task, and you go on from there with what you already found; do not ask for a new Task.
 
 Before a video or a batch of several images, tell the user the model and, for fal, its unit price, unless they just chose it from a card that showed the price.
 
