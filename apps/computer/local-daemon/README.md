@@ -376,7 +376,11 @@ the task; `rate_limited` also puts the site (its registrable domain) in a
 Once a task opens a site there, the browser tools refuse that site for the
 rest of the task, and `launch_app` refuses to open it in another browser.
 A change in the number of tabs between the task's inputs stops the task with
-`COMPUTER_TAB_CHANGED`, because the next input could reach another page. A
+`COMPUTER_TAB_CHANGED`, because the next input could reach another page. The
+Daemon reads the tab strip before an input only when the window's title in
+`list_windows` differs from the front tab's title after the last input; after
+an input it reads the strip only to its depth, unless a script returned reads
+the Agent may act on, and not at all after a script that sent no input. A
 tab that the task's own input or script opens or closes is the task's: the
 task holds the browser's input lease, and the count is kept once the tab strip
 settles, since the browser shows such a tab a moment later. The input's

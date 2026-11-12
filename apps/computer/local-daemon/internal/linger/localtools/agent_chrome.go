@@ -195,7 +195,7 @@ func (c *cuaSession) launchAgentChrome(ctx context.Context, b agentBrowser, urls
 	m.mu.Lock()
 	m.agentChromePID, m.agentChromeChecked = pid, time.Now()
 	m.mu.Unlock()
-	tabs, title, _ := c.agentChromeTabsAndTitle(ctx, pid, window.WindowID)
+	tabs, title, _ := c.agentChromeTabsAndTitle(ctx, pid, window.WindowID, 0)
 	c.op.mu.Lock()
 	c.op.chromeTabs, c.op.chromeTitle, c.op.chromePID, c.op.chromeWindow = tabs, title, pid, window.WindowID
 	c.op.mu.Unlock()
@@ -577,15 +577,25 @@ func (c *cuaSession) agentChromeKeys(ctx context.Context, arguments map[string]a
 // It returns 0 when the read fails or is cut short: the tab strip follows the
 // page in the tree, so a cut read may miss it.
 func (c *cuaSession) agentChromeTabs(ctx context.Context, pid int, window float64) int {
-	count, _, _ := c.agentChromeTabsAndTitle(ctx, pid, window)
+	count, _, _ := c.agentChromeTabsAndTitle(ctx, pid, window, 0)
 	return count
 }
 
+// agentChromeTabDepth bounds a read of the tab strip alone: the strip lies
+// within four levels of the window, while a shop's page runs much deeper, so
+// the bounded read skips most of the page.
+const agentChromeTabDepth = 6
+
 // agentChromeTabsAndTitle is agentChromeTabs with the title of the window's
-// front tab and the label of a tab's Close button, from the same read.
-func (c *cuaSession) agentChromeTabsAndTitle(ctx context.Context, pid int, window float64) (int, string, string) {
-	read, err := c.client.request(ctx, "tools/call", map[string]any{"name": "get_window_state", "arguments": map[string]any{
-		"pid": pid, "window_id": window, "include_screenshot": false, "max_elements": 6000, "timeout_ms": 6000, "session": c.label}})
+// front tab and the label of a tab's Close button, from the same read. A
+// depth above 0 bounds the read; Cua then keeps only the rows within it, so
+// an earlier token of a deeper row cannot be carried over that read.
+func (c *cuaSession) agentChromeTabsAndTitle(ctx context.Context, pid int, window float64, depth int) (int, string, string) {
+	arguments := map[string]any{"pid": pid, "window_id": window, "include_screenshot": false, "max_elements": 6000, "timeout_ms": 6000, "session": c.label}
+	if depth > 0 {
+		arguments["max_depth"] = depth
+	}
+	read, err := c.client.request(ctx, "tools/call", map[string]any{"name": "get_window_state", "arguments": arguments})
 	if err != nil {
 		slog.Warn("agent_browser.tabs_unread", "pid", pid, "window_id", window, "error", err)
 		return 0, "", ""
@@ -665,6 +675,27 @@ func tabStrip(tree string) (count int, close string) {
 	return count, close
 }
 
+// agentChromeWindowTitle returns the title list_windows gives window, which
+// for a browser is its front tab's, or "" when it is not listed.
+func (c *cuaSession) agentChromeWindowTitle(ctx context.Context, pid int, window float64) string {
+	result, err := c.client.request(ctx, "tools/call", map[string]any{"name": "list_windows", "arguments": map[string]any{"pid": pid}})
+	if err != nil {
+		return ""
+	}
+	var listed struct {
+		Structured struct {
+			Windows []listedWindow `json:"windows"`
+		} `json:"structuredContent"`
+	}
+	_ = json.Unmarshal(result, &listed)
+	for _, w := range listed.Structured.Windows {
+		if w.WindowID == window {
+			return w.Title
+		}
+	}
+	return ""
+}
+
 // agentChromeTabWindow names the window whose tabs hold the task: the one
 // it opened with launch_app, when an input goes to that browser and names
 // no other window. An input to another app or window, such as one of the
@@ -688,10 +719,11 @@ func (c *cuaSession) agentChromeTabWindow(pid, window any) (int, float64, bool) 
 // different count means someone else opened or closed a tab, and the tab in
 // front may not be this task's. The task then stops, as after a reported
 // check. A strip that cannot be read, or a task that has no count yet, is not
-// held.
+// held. The strip is read only when the window's title, which list_windows
+// gives without a read, differs from the front tab's title after that input.
 func (c *cuaSession) checkAgentChromeTabs(ctx context.Context, pid, window any) error {
 	c.op.mu.Lock()
-	want := c.op.chromeTabs
+	want, title := c.op.chromeTabs, c.op.chromeTitle
 	c.op.mu.Unlock()
 	if want == 0 {
 		return nil
@@ -700,8 +732,19 @@ func (c *cuaSession) checkAgentChromeTabs(ctx context.Context, pid, window any) 
 	if !ok {
 		return nil
 	}
-	got := c.agentChromeTabs(ctx, number, id)
+	if title != "" && c.agentChromeWindowTitle(ctx, number, id) == title {
+		// The front tab still shows what this task's last input left. A
+		// tab someone opened behind it changes nothing this input reaches,
+		// and a full read here would cost a walk of the page.
+		return nil
+	}
+	got, front, _ := c.agentChromeTabsAndTitle(ctx, number, id, 0)
 	if got == 0 || got == want {
+		if got > 0 {
+			c.op.mu.Lock()
+			c.op.chromeTitle = front
+			c.op.mu.Unlock()
+		}
 		return nil
 	}
 	c.op.mu.Lock()
@@ -716,15 +759,17 @@ func (c *cuaSession) checkAgentChromeTabs(ctx context.Context, pid, window any) 
 // other task changes the tabs. Only a task that opened its tab with
 // launch_app holds a count. It returns a note on what the input changed in
 // the window, from the same read: a click result says nothing of where the
-// page went, and the Agent read the window only to learn that.
-func (c *cuaSession) recordAgentChromeTabs(ctx context.Context, pid, window any) string {
+// page went, and the Agent read the window only to learn that. Only full
+// keeps the read whole: after a script whose reads the Agent may act on, a
+// bounded read would drop their rows from Cua's snapshot.
+func (c *cuaSession) recordAgentChromeTabs(ctx context.Context, pid, window any, full bool) string {
 	c.op.mu.Lock()
 	before, title := c.op.chromeTabs, c.op.chromeTitle
 	c.op.mu.Unlock()
 	if before == 0 {
 		return ""
 	}
-	got, front, close := c.settledAgentChromeTabs(ctx, pid, window)
+	got, front, close := c.settledAgentChromeTabs(ctx, pid, window, full)
 	if got == 0 {
 		return ""
 	}
@@ -751,17 +796,26 @@ func (c *cuaSession) recordAgentChromeTabs(ctx context.Context, pid, window any)
 // a moment after the input that opened or closed it returns, and the next
 // input's pause already covers that wait. The count is 0 when the strip
 // cannot be read.
-func (c *cuaSession) settledAgentChromeTabs(ctx context.Context, pid, window any) (int, string, string) {
+func (c *cuaSession) settledAgentChromeTabs(ctx context.Context, pid, window any, full bool) (int, string, string) {
 	number, id, ok := c.agentChromeTabWindow(pid, window)
 	if !ok {
 		return 0, "", ""
 	}
-	got, title, close := c.agentChromeTabsAndTitle(ctx, number, id)
+	depth := agentChromeTabDepth
+	if full {
+		depth = 0
+	}
+	got, title, close := c.agentChromeTabsAndTitle(ctx, number, id, depth)
+	if got == 0 && depth > 0 {
+		// A strip deeper than the bound, as in a browser laid out otherwise.
+		depth = 0
+		got, title, close = c.agentChromeTabsAndTitle(ctx, number, id, depth)
+	}
 	for range 3 {
 		if got == 0 || sleepContext(ctx, inputSettle) != nil {
 			break
 		}
-		next, nextTitle, nextClose := c.agentChromeTabsAndTitle(ctx, number, id)
+		next, nextTitle, nextClose := c.agentChromeTabsAndTitle(ctx, number, id, depth)
 		title, close = nextTitle, nextClose
 		if next == got {
 			break

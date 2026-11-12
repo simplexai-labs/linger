@@ -557,9 +557,16 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 	if paced && name == "run_script" && err == nil {
 		c.countScriptInputs(result)
 	}
-	// A script that throws has still sent the inputs before the throw.
-	if paced && (err == nil || name == "run_script") {
-		if note := c.recordAgentChromeTabs(ctx, target["pid"], target["window_id"]); note != "" && result != nil {
+	// A script that throws has still sent the inputs before the throw. One
+	// that sent none changed no tab, and a read of the strip after it would
+	// stale the tokens its queries returned, which the Daemon keeps no rows of.
+	sentNone := false
+	if name == "run_script" {
+		sent, known := scriptInputsSent(result)
+		sentNone = known && sent == 0
+	}
+	if paced && (err == nil || name == "run_script") && !sentNone {
+		if note := c.recordAgentChromeTabs(ctx, target["pid"], target["window_id"], len(scriptReads) > 0); note != "" && result != nil {
 			result = withNote(result, note)
 		}
 	}
@@ -1318,7 +1325,7 @@ func (c *cuaSession) locate(ctx context.Context, name string, arguments map[stri
 	}
 	read, err := c.client.request(ctx, "tools/call", map[string]any{"name": "get_window_state", "arguments": map[string]any{
 		"pid": arguments["pid"], "window_id": arguments["window_id"], "tree_format": "elements", "include_screenshot": false,
-		"max_elements": 3000, "timeout_ms": float64(windowReadTimeoutMs), "session": arguments["session"]}})
+		"max_elements": 6000, "timeout_ms": float64(windowReadTimeoutMs), "session": arguments["session"]}})
 	if err != nil {
 		return err
 	}

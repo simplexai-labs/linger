@@ -247,7 +247,7 @@ func (c *cuaSession) launchAgentSafari(ctx context.Context, b agentBrowser, urls
 			return nil, err
 		}
 	}
-	tabs, title, _ := c.agentChromeTabsAndTitle(ctx, pid, window.WindowID)
+	tabs, title, _ := c.agentChromeTabsAndTitle(ctx, pid, window.WindowID, 0)
 	c.op.mu.Lock()
 	c.op.chromeTabs, c.op.chromeTitle, c.op.chromePID, c.op.chromeWindow = tabs, title, pid, window.WindowID
 	c.op.mu.Unlock()
@@ -415,7 +415,7 @@ func (c *cuaSession) launchEverydayChrome(ctx context.Context, b agentBrowser, u
 	m.setSharedWindow(b.Bundle, pid, window.WindowID)
 	// The front tab's title, so the first input reports only a change it
 	// made; the window search above keeps no title.
-	_, title, _ := c.agentChromeTabsAndTitle(ctx, pid, window.WindowID)
+	_, title, _ := c.agentChromeTabsAndTitle(ctx, pid, window.WindowID, 0)
 	c.op.mu.Lock()
 	c.op.chromeTabs, c.op.chromeTitle, c.op.chromePID, c.op.chromeWindow = tabs, title, pid, window.WindowID
 	c.op.mu.Unlock()

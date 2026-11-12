@@ -196,6 +196,15 @@ func runToolFixture(mode string) {
 				}
 				result = map[string]any{"content": []any{}}
 				switch request.Params.Name {
+				case "run_script":
+					if mode == "tabs-titled" {
+						// The driver's call log: a click when the script clicks.
+						calls := []any{}
+						if script, _ := request.Params.Arguments["script"].(string); strings.Contains(script, "app.click(") {
+							calls = append(calls, map[string]any{"op": "click"})
+						}
+						result = map[string]any{"content": []any{}, "structuredContent": map[string]any{"calls": calls}}
+					}
 				case "hotkey":
 					if mode == "tabs-off-space" && strings.Count(string(data), `"keys":["cmd","t"]`) == 0 {
 						result = map[string]any{"isError": true, "content": []any{map[string]string{"type": "text", "text": "off_space_or_ax_unresolved"}}}
@@ -204,7 +213,12 @@ func runToolFixture(mode string) {
 						result = map[string]any{"isError": true, "content": []any{map[string]string{"type": "text", "text": "keys were not delivered"}}}
 					}
 				case "list_windows":
-					windows := []any{map[string]any{"pid": 42, "window_id": 9, "title": "b", "z_index": 3, "is_on_screen": true, "bounds": map[string]any{"width": 800, "height": 600}}}
+					title := "b"
+					if mode == "tabs-titled" {
+						// The window's title is its front tab's, as Chrome's is.
+						title = fmt.Sprintf("Tab %d", tabs-1)
+					}
+					windows := []any{map[string]any{"pid": 42, "window_id": 9, "title": title, "z_index": 3, "is_on_screen": true, "bounds": map[string]any{"width": 800, "height": 600}}}
 					if strings.HasPrefix(mode, "tabs-everyday") && strings.Count(string(data), `"name":"open"`) >= 2 {
 						// After the start and the command line, a window of
 						// the user's that Chrome restored late lists before
@@ -223,6 +237,13 @@ func runToolFixture(mode string) {
 					if mode == "tabs-ghost" && request.Params.Arguments["window_id"] == float64(8) {
 						result = map[string]any{"content": []any{}, "structuredContent": map[string]any{"tree_markdown": "", "degraded_reason": "ax_window_unresolved"}}
 						break
+					}
+					if mode == "tabs-titled" {
+						// Each read logs its depth bound, 0 for a whole read.
+						depth, _ := request.Params.Arguments["max_depth"].(float64)
+						f, _ := os.OpenFile(marker, os.O_APPEND|os.O_WRONLY, 0o600)
+						_, _ = fmt.Fprintf(f, `{"name":"read","arguments":{"max_depth":%v}}`+"\n", depth)
+						_ = f.Close()
 					}
 					var tree strings.Builder
 					for i := range tabs {
@@ -1154,6 +1175,78 @@ func TestLocalToolCuaMacAgentChromeKeepsTabsItsOwnInputChangesLate(t *testing.T)
 		if strings.Contains(string(result), "tab") || !strings.Contains(string(result), "a press on page text clicks it") {
 			t.Fatalf("result of a click on page text that changed no tab=%s", result)
 		}
+	}
+	if err := c.drain(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An input whose window still shows the front tab the last input left skips
+// the read of the tab strip before it, and the reads after it stop at the
+// strip's depth, unless a script's reads must stay in Cua's snapshot.
+func TestLocalToolCuaMacAgentChromeReadsTheTabStripOnlyAsFarAsItNeeds(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the Computer's own Chrome is macOS only")
+	}
+	inputSettle = 0
+	t.Cleanup(func() { inputSettle = 300 * time.Millisecond })
+	pause := agentChromePause
+	agentChromePause = func() time.Duration { return 0 }
+	t.Cleanup(func() { agentChromePause = pause })
+	marker := filepath.Join(t.TempDir(), "calls.jsonl")
+	c := cuaFixtureSession(t, "tabs-titled", marker)
+	original := agentChromePID
+	agentChromePID = func(context.Context, string) (int, string, error) { return 42, "--mute-audio", nil }
+	t.Cleanup(func() { agentChromePID = original })
+	c.op.manager.agentChromeOwner = c.op
+	c.op.chromeTabs, c.op.chromeTitle, c.op.chromePID, c.op.chromeWindow = 1, "Tab 0", 42, 9
+	reads := func() []string {
+		var got []string
+		for _, call := range fixtureCalls(t, marker) {
+			if call.Name == "read" {
+				got = append(got, fmt.Sprint(call.Arguments["max_depth"]))
+			} else {
+				got = append(got, call.Name)
+			}
+		}
+		return got
+	}
+	if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := reads(), []string{"click", "6", "6"}; !slices.Equal(got, want) {
+		t.Fatalf("calls=%v, want the click alone, then two bounded reads", got)
+	}
+	// After a script that returned reads, the reads after it are whole.
+	if note := c.recordAgentChromeTabs(t.Context(), float64(42), float64(9), true); note != "" {
+		t.Fatalf("note=%q, want none", note)
+	}
+	if got := reads(); !slices.Equal(got[len(got)-2:], []string{"0", "0"}) {
+		t.Fatalf("calls=%v, want two whole reads after a script with reads", got)
+	}
+	// A script that sent no input reads no tab strip after it, so the
+	// tokens its queries returned stay current; one that clicked does.
+	before := len(reads())
+	if _, err := c.call(t.Context(), "run_script", json.RawMessage(`{"script":"return 1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := reads()[before:]; !slices.Equal(got, []string{"run_script"}) {
+		t.Fatalf("calls for a script with no input=%v, want the script alone", got)
+	}
+	before = len(reads())
+	if _, err := c.call(t.Context(), "run_script", json.RawMessage(`{"script":"const app = await cua.getApp({pid: 42, windowId: 9}); await app.click(\"s1:1\"); return 1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := reads()[before:]; !slices.Equal(got, []string{"run_script", "6", "6"}) {
+		t.Fatalf("calls for a script that clicked=%v, want two bounded reads after it", got)
+	}
+	// A front tab that changed since the last input is read whole first.
+	c.op.chromeTitle = "Elsewhere"
+	if _, err := c.call(t.Context(), "click", json.RawMessage(`{"pid":42,"window_id":9,"element_token":"s1:1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := reads(); !slices.Equal(got[len(got)-4:], []string{"0", "click", "6", "6"}) {
+		t.Fatalf("calls=%v, want a whole read before the click", got)
 	}
 	if err := c.drain(); err != nil {
 		t.Fatal(err)
