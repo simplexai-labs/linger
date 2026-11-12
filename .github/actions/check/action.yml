@@ -5,10 +5,23 @@ inputs:
   app:
     description: The app whose `make check-<app>` target runs.
     required: true
+  changes-result:
+    description: The changes job's result. The job runs when the path filter failed, so this step can fail it instead of letting a skip pass.
+    required: true
 
 runs:
   using: composite
   steps:
+    # GitHub does not enforce required composite inputs, so anything but an
+    # explicit success fails, a missing input included.
+    - name: Fail when the path filter failed
+      if: inputs.changes-result != 'success'
+      shell: bash
+      env:
+        CHANGES_RESULT: ${{ inputs.changes-result }}
+      run: |
+        echo "::error::The changes job did not succeed (${CHANGES_RESULT:-not passed}); no check can be skipped."
+        exit 1
     # teamhub runs only Go. computer-go's tests run the managed-tools scripts,
     # which need the pinned Node but no workspace packages.
     # Each Go check keeps its own build and module cache, so one job's save

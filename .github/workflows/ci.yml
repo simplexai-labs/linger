@@ -159,17 +159,13 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.packages == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Fail when the path filter failed
-        if: needs.changes.result != 'success'
-        run: |
-          echo "::error::The changes job did not succeed (${{ needs.changes.result }}); no check can be skipped."
-          exit 1
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: ./.github/actions/check
         with:
           app: packages
+          changes-result: ${{ needs.changes.result }}
 
   teamhub_cli:
     name: check (teamhub-cli)
@@ -177,17 +173,13 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs['teamhub-cli'] == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Fail when the path filter failed
-        if: needs.changes.result != 'success'
-        run: |
-          echo "::error::The changes job did not succeed (${{ needs.changes.result }}); no check can be skipped."
-          exit 1
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: ./.github/actions/check
         with:
           app: teamhub-cli
+          changes-result: ${{ needs.changes.result }}
 
   installer:
     name: check (installer)
@@ -195,17 +187,13 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.installer == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Fail when the path filter failed
-        if: needs.changes.result != 'success'
-        run: |
-          echo "::error::The changes job did not succeed (${{ needs.changes.result }}); no check can be skipped."
-          exit 1
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: ./.github/actions/check
         with:
           app: installer
+          changes-result: ${{ needs.changes.result }}
 
   desktop:
     name: check (desktop)
@@ -213,17 +201,13 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.desktop == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Fail when the path filter failed
-        if: needs.changes.result != 'success'
-        run: |
-          echo "::error::The changes job did not succeed (${{ needs.changes.result }}); no check can be skipped."
-          exit 1
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: ./.github/actions/check
         with:
           app: desktop
+          changes-result: ${{ needs.changes.result }}
 
   contracts:
     name: check (contracts)
@@ -231,17 +215,13 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.contracts == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Fail when the path filter failed
-        if: needs.changes.result != 'success'
-        run: |
-          echo "::error::The changes job did not succeed (${{ needs.changes.result }}); no check can be skipped."
-          exit 1
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: ./.github/actions/check
         with:
           app: contracts
+          changes-result: ${{ needs.changes.result }}
 
   teamhub:
     name: check (teamhub)
@@ -249,17 +229,13 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.teamhub == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Fail when the path filter failed
-        if: needs.changes.result != 'success'
-        run: |
-          echo "::error::The changes job did not succeed (${{ needs.changes.result }}); no check can be skipped."
-          exit 1
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: ./.github/actions/check
         with:
           app: teamhub
+          changes-result: ${{ needs.changes.result }}
 
   computer_go:
     name: check (computer-go)
@@ -267,14 +243,10 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs['computer-go'] == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Fail when the path filter failed
-        if: needs.changes.result != 'success'
-        run: |
-          echo "::error::The changes job did not succeed (${{ needs.changes.result }}); no check can be skipped."
-          exit 1
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: ./.github/actions/check
         with:
           app: computer-go
+          changes-result: ${{ needs.changes.result }}
