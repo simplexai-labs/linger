@@ -78,3 +78,34 @@ func TestClaudeHistoryCategorizesCompactionRecords(t *testing.T) {
 		t.Fatalf("categories = %v, want %v (page %+v)", got, want, page)
 	}
 }
+
+func TestClaudeHistoryLinksATurnByItsPromptAndCalls(t *testing.T) {
+	home := t.TempDir()
+	session := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	project := filepath.Join(home, ".claude", "projects", "workspace")
+	if err := os.MkdirAll(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	line := func(record string) string { return strings.ReplaceAll(record, "SESSION", session) + "\n" }
+	content := line(`{"type":"queue-operation","sessionId":"SESSION","operation":"enqueue"}`) +
+		line(`{"type":"user","sessionId":"SESSION","uuid":"u1","promptId":"p1","message":{"role":"user","content":"list it"}}`) +
+		line(`{"type":"assistant","sessionId":"SESSION","uuid":"a1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}`) +
+		line(`{"type":"user","sessionId":"SESSION","uuid":"u2","promptId":"p1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"a.md"}]}}`) +
+		line(`{"type":"assistant","sessionId":"SESSION","uuid":"a2","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}`) +
+		line(`{"type":"user","sessionId":"SESSION","uuid":"u3","promptId":"p2","message":{"role":"user","content":"again"}}`)
+	if err := os.WriteFile(filepath.Join(project, session+".jsonl"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	page := InspectClaude(context.Background(), Request{CodexHome: home, ThreadID: session})
+	var turns, calls []string
+	for _, item := range page.Records {
+		turns = append(turns, item.TurnID)
+		calls = append(calls, item.ToolCallID)
+	}
+	if got, want := strings.Join(turns, ","), ",p1,p1,p1,p1,p2"; got != want {
+		t.Fatalf("turns = %s, want %s", got, want)
+	}
+	if got, want := strings.Join(calls, ","), ",,toolu_1,toolu_1,,"; got != want {
+		t.Fatalf("calls = %s, want %s", got, want)
+	}
+}

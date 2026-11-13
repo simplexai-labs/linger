@@ -1169,7 +1169,7 @@ export interface paths {
     };
     /**
      * Get the exact sanitized Runtime activity log for an Agent Message.
-     * @description Authorizes the committed Message through ordinary Room membership, resolves its source Runtime run, and returns only records linked to that run by Activity identity. Task runs return unavailable; their public activities use Runtime presentation events.
+     * @description Authorizes the committed Message through ordinary Room membership, resolves its source Runtime run, and returns only records linked to that run by Activity identity.
      */
     get: operations["getMessageActivities"];
     put?: never;
@@ -1367,7 +1367,7 @@ export interface paths {
     };
     /**
      * Read sanitized native execution history of an Agent Run shown in a Room.
-     * @description Requires ordinary Room membership. Resolves native turns only through trusted invocation identities in persisted Runtime events. History may be unavailable until the Run has recorded such an identity. Task runs always return unavailable; use their public Runtime presentation events.
+     * @description Requires ordinary Room membership. Resolves native turns only through trusted invocation identities in persisted Runtime events. History may be unavailable until the Run has recorded such an identity. A Task Run reads its AlterEgo's history.
      */
     get: operations["getRunActivities"];
     put?: never;
@@ -3388,6 +3388,28 @@ export interface paths {
     };
     /** Get the Human-safe PostgreSQL-authoritative Task execution projection. */
     get: operations["getTaskExecutionProjection"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/tasks/{taskId}/conversation": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        taskId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read what a Task's Agent was told and the cards it raised.
+     * @description Returns the inputs the Task's own Agent received in its current generation, in delivery order, and every card its AlterEgo raised. Each card is read through its Message in the card's Room. The Agent's own steps come from each Run's activities.
+     */
+    get: operations["getTaskConversation"];
     put?: never;
     post?: never;
     delete?: never;
@@ -7137,6 +7159,27 @@ export interface components {
       run_spec: components["schemas"]["TaskRunSpecV1"];
       current_attempt?: components["schemas"]["TaskAttemptSummary"];
       execution_updated_at: components["schemas"]["Timestamp"];
+    };
+    TaskConversationInput: {
+      id: components["schemas"]["Id"];
+      author: components["schemas"]["ActorRef"];
+      body: string;
+      /**
+       * @description A message from the Meta or a person, or a system notice such as a card's result.
+       * @enum {string}
+       */
+      source: "message" | "system";
+      created_at: components["schemas"]["Timestamp"];
+    };
+    TaskConversationCard: {
+      decision_id: components["schemas"]["Id"];
+      room_id: components["schemas"]["Id"];
+      message_id: components["schemas"]["Id"];
+      created_at: components["schemas"]["Timestamp"];
+    };
+    TaskConversation: {
+      inputs: components["schemas"]["TaskConversationInput"][];
+      cards: components["schemas"]["TaskConversationCard"][];
     };
     WorkItemVersionRequest: {
       /** Format: int64 */
@@ -13427,6 +13470,30 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TaskExecutionProjection"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  getTaskConversation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        taskId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Task inputs and cards. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskConversation"];
         };
       };
       401: components["responses"]["Unauthenticated"];

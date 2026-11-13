@@ -68,6 +68,26 @@ func TestFailedActivityPublishesItsRedactedError(t *testing.T) {
 	}
 }
 
+func TestTaskCreationPublishesItsReceipt(t *testing.T) {
+	finish := func(command, output string) map[string]any {
+		projection := eventProjection{operationID: "operation"}
+		projection.project(native.Event{Kind: native.EventToolCall, InvocationID: "tool-1", ToolName: "Bash", ActivityKind: native.ActivityCommand, Input: map[string]any{"command": command}})
+		events := projection.project(native.Event{Kind: native.EventToolOutput, InvocationID: "tool-1", Status: "completed", Output: output})
+		return events[len(events)-1].(map[string]any)
+	}
+	receipt := "Task created and running\nTask ID: workitem_0123456789abcdef0123456789abcdef"
+	content, _ := finish(`teamhub task create --name "Rivals" --requirement "Compare"`, receipt)["content"].([]map[string]any)
+	if len(content) != 1 || content[0]["label"] != "Output" || content[0]["content"] != receipt {
+		t.Fatalf("task creation lost its receipt: %v", content)
+	}
+	// Any other output, including a script that also creates a Task, stays private.
+	for _, command := range []string{"teamhub task check", `teamhub task create --name x && cat notes.md`} {
+		if event := finish(command, receipt); event["content"] != nil {
+			t.Fatalf("published the output of %q: %v", command, event)
+		}
+	}
+}
+
 func TestEventProjectionSplitsLongUnicodeRepliesWithoutLosingContent(t *testing.T) {
 	projection := eventProjection{operationID: "operation"}
 	content := strings.Repeat("\u4e2d", 100_000)

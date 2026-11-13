@@ -10,6 +10,7 @@ import { roomMessagesInfiniteQueryOptions } from "../../room-queries";
 import { RuntimeActivityPath } from "../../runtime-status/runtime-activity-path-view";
 import { useRuntimePresentationEventRecords } from "../../runtime-status/use-runtime-presentation-event-records";
 import { PanelLoading } from "../panel-loading";
+import { TaskConversationProvider } from "./task-conversation-dialog";
 
 const EMPTY_MESSAGES: readonly TeamHubMessage[] = [];
 
@@ -64,60 +65,62 @@ export function AgentLiveActivityPanelTab({
   const pending = events.pending;
 
   return (
-    <div
-      className={hidden ? "hidden" : "flex h-full min-h-0 flex-col bg-card"}
-      data-testid="agent-live-activity-panel"
-      data-run-id={runId}
-      hidden={hidden || undefined}
-      inert={hidden || undefined}
-    >
-      <header className="flex min-h-14 shrink-0 items-center gap-2.5 border-b border-border bg-card px-4 py-2">
-        {onBack ? (
-          <button
-            aria-label={backLabel}
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-app-focus"
-            onClick={onBack}
-            title={backLabel}
-            type="button"
-          >
-            <Icon icon={ArrowLeft01Icon} size={16} />
-          </button>
-        ) : null}
-        <ActorAvatar
-          actorId={actorId}
-          kind="agent"
-          name={actorName}
-          size="xs"
-        />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-semibold text-foreground">
-            {`${actorName} activity`}
-          </h2>
-          <p className="truncate text-xs font-normal leading-4 text-app-muted">
-            {pending || hasEvents ? "Activity" : "Waiting for activity"}
-          </p>
-        </div>
-      </header>
-      {events.error ? (
-        <LiveActivityState
-          detail="Published Runtime events could not be read from TeamHub."
-          title="Activity could not be loaded"
-        />
-      ) : pending ? (
-        <PanelLoading label="Loading activity" />
-      ) : hasEvents ? (
-        <RuntimeActivityPath
-          key={`${activationKey}:${hidden}:${runId ?? runStatusId}`}
-          messages={activityMessages}
-          records={events.items}
-        />
-      ) : (
-        <LiveActivityState
-          detail="This run has not published any activity events yet."
-          title="No activity yet"
-        />
-      )}
-    </div>
+    <TaskConversationProvider roomId={roomId} tenantId={tenantId}>
+      <div
+        className={hidden ? "hidden" : "flex h-full min-h-0 flex-col bg-card"}
+        data-testid="agent-live-activity-panel"
+        data-run-id={runId}
+        hidden={hidden || undefined}
+        inert={hidden || undefined}
+      >
+        <header className="flex min-h-14 shrink-0 items-center gap-2.5 border-b border-border bg-card px-4 py-2">
+          {onBack ? (
+            <button
+              aria-label={backLabel}
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-app-focus"
+              onClick={onBack}
+              title={backLabel}
+              type="button"
+            >
+              <Icon icon={ArrowLeft01Icon} size={16} />
+            </button>
+          ) : null}
+          <ActorAvatar
+            actorId={actorId}
+            kind="agent"
+            name={actorName}
+            size="xs"
+          />
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-sm font-semibold text-foreground">
+              {`${actorName} activity`}
+            </h2>
+            <p className="truncate text-xs font-normal leading-4 text-app-muted">
+              {pending || hasEvents ? "Activity" : "Waiting for activity"}
+            </p>
+          </div>
+        </header>
+        {events.error ? (
+          <LiveActivityState
+            detail="Published Runtime events could not be read from TeamHub."
+            title="Activity could not be loaded"
+          />
+        ) : pending ? (
+          <PanelLoading label="Loading activity" />
+        ) : hasEvents ? (
+          <RuntimeActivityPath
+            key={`${activationKey}:${hidden}:${runId ?? runStatusId}`}
+            messages={activityMessages}
+            records={events.items}
+          />
+        ) : (
+          <LiveActivityState
+            detail="This run has not published any activity events yet."
+            title="No activity yet"
+          />
+        )}
+      </div>
+    </TaskConversationProvider>
   );
 }
 

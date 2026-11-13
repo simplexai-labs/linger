@@ -123,7 +123,11 @@ func AppendTaskInput(ctx context.Context, queries *store.Queries, input TaskInpu
 	}); err != nil {
 		return TaskInputResult{}, err
 	}
-	wakes, err := AppendParticipantMetaWakes(ctx, queries, input.TaskID, snapshot.TenantID, author.ID, recipients, message)
+	source := InputSourceMessage
+	if input.Cause == TaskInputSystem {
+		source = InputSourceSystem
+	}
+	wakes, err := AppendParticipantMetaWakes(ctx, queries, input.TaskID, snapshot.TenantID, author.ID, source, recipients, message)
 	if err != nil {
 		return TaskInputResult{}, err
 	}

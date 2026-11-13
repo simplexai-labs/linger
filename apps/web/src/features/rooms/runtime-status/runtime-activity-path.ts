@@ -7,6 +7,11 @@ import {
   type RuntimeActivityPresentation,
   type RuntimePlanPresentation,
 } from "./runtime-presentation-events";
+import {
+  parseTaskCommand,
+  createdTaskId,
+  type TaskCommand,
+} from "./task-command";
 
 export type RuntimeActivityLifecycle =
   | "active"
@@ -47,6 +52,14 @@ export type RuntimeActivityPathItem =
       calls: readonly RuntimeActivityPathToolCall[];
       kind: "tool_calls";
       key: string;
+    }
+  | {
+      active: boolean;
+      command: TaskCommand;
+      failed: boolean;
+      key: string;
+      kind: "task";
+      taskId?: string;
     }
   | {
       explanation?: string;
@@ -199,7 +212,8 @@ export function projectRuntimeActivityPath(
         active: false,
         unconfirmed: item.outcome === undefined,
       };
-    if (item.kind === "thinking") return { ...item, active: false };
+    if (item.kind === "thinking" || item.kind === "task")
+      return { ...item, active: false };
     if (item.kind === "plan")
       return {
         ...item,
@@ -256,6 +270,26 @@ function pushActivity(
   const entries = activity.entries ?? [];
   const active = activity.outcome === undefined;
   if (activity.kind === "response") return;
+  // The Computer names a TeamHub command by what it does, so a Task step can
+  // arrive as any kind; its `teamhub task` command line is what marks it.
+  const input = inputBlock(entries);
+  const task = parseTaskCommand(commandText(input));
+  if (task) {
+    const taskId =
+      task.taskId ??
+      (task.operation === "create"
+        ? createdTaskId(outputText(entries, input))
+        : undefined);
+    items.push({
+      active,
+      command: task,
+      failed: activity.outcome === "failed",
+      key: activity.activityId,
+      kind: "task",
+      ...(taskId ? { taskId } : {}),
+    });
+    return;
+  }
   if (activity.kind === "command") {
     items.push({
       active,
@@ -302,6 +336,45 @@ function pushActivity(
     kind: "tool_calls",
     key: `tools:${activity.activityId}`,
   });
+}
+
+/** An Activity's input: its first code or JSON block. */
+function inputBlock(entries: readonly RuntimeActivityEntry[]) {
+  return entries.find(
+    (entry) =>
+      entry.type === "content" &&
+      (entry.block.format === "code" || entry.block.format === "json"),
+  );
+}
+
+/** The command line an Activity ran, from its input block. */
+function commandText(block: RuntimeActivityEntry | undefined) {
+  if (block?.type !== "content") return "";
+  if (block.block.format === "code") return block.block.content;
+  try {
+    const input = JSON.parse(block.block.content) as {
+      cmd?: unknown;
+      command?: unknown;
+    };
+    const command = input.cmd ?? input.command;
+    if (typeof command === "string") return command;
+    if (Array.isArray(command)) return command.join(" ");
+  } catch {
+    // An unreadable input is not a Task command.
+  }
+  return "";
+}
+
+/** What the Activity published besides its input, such as a CLI receipt. */
+function outputText(
+  entries: readonly RuntimeActivityEntry[],
+  input: RuntimeActivityEntry | undefined,
+) {
+  return entries
+    .map((entry) =>
+      entry !== input && entry.type === "content" ? entry.block.content : "",
+    )
+    .join("\n");
 }
 
 function commandSummary(activity: RuntimeActivityPresentation) {

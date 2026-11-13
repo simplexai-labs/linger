@@ -45,6 +45,76 @@ describe("Runtime activity path", () => {
       expect(screen.getByText("Unconfirmed")).toBeVisible();
     },
   );
+  it("keeps each Task step its own item whatever kind the Computer gave it", () => {
+    const input = (command: string) => [
+      {
+        content: JSON.stringify({ command }),
+        format: "json" as const,
+        label: "Input",
+      },
+    ];
+    const created = "workitem_0123456789abcdef0123456789abcdef";
+    const receipt = (text: string) => [
+      { content: text, format: "text" as const, label: "Output" },
+    ];
+    const items = projectRuntimeActivityPath([
+      record("1", {
+        activity_id: "create",
+        content: input(
+          'teamhub task create --name "Rivals" --requirement "Compare"',
+        ),
+        kind: "delegation",
+        title: "Bash",
+        type: "activity.started",
+      }),
+      record("2", {
+        activity_id: "create",
+        content: receipt(`Task created and running\nTask ID: ${created}`),
+        outcome: "succeeded",
+        type: "activity.finished",
+      }),
+      record("3", {
+        activity_id: "send",
+        content: input(
+          'teamhub task send --task-id workitem_1 --message "Add pricing"',
+        ),
+        kind: "tool",
+        title: "Bash",
+        type: "activity.started",
+      }),
+      record("4", {
+        activity_id: "check",
+        content: input("teamhub task check"),
+        kind: "tool",
+        title: "Bash",
+        type: "activity.started",
+      }),
+      record("5", {
+        activity_id: "check",
+        // A check lists many Tasks; none of them is the step's own.
+        content: receipt(`Rivals ${created} running`),
+        outcome: "succeeded",
+        type: "activity.finished",
+      }),
+    ]);
+    expect(items).toMatchObject([
+      {
+        active: false,
+        command: { name: "Rivals", operation: "create" },
+        kind: "task",
+        taskId: created,
+      },
+      {
+        active: true,
+        command: { operation: "send" },
+        kind: "task",
+        taskId: "workitem_1",
+      },
+      { command: { operation: "check" }, kind: "task" },
+    ]);
+    expect(items[2]).not.toHaveProperty("taskId");
+  });
+
   it("positions the viewport at the bottom of the latest activity, including a tall last entry", async () => {
     render(
       <RuntimeActivityPath

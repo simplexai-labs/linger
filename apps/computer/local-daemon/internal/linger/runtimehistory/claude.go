@@ -124,6 +124,7 @@ func inspectClaude(ctx context.Context, request Request) (Page, error) {
 	matched := false
 	instructions := Instructions{Status: "unavailable", Source: "claude_transcript", Reason: "Native transcript does not contain an instruction snapshot", Blocks: []InstructionBlock{}}
 	instructionBytes := 0
+	turn := ""
 	for i := range records {
 		item := &records[i]
 		id := stringValue(item.original, "sessionId", 256)
@@ -134,9 +135,15 @@ func inspectClaude(ctx context.Context, request Request) (Page, error) {
 		kind := stringValue(item.original, "type", 256)
 		message := objectValue(item.original["message"])
 		item.history.Role = stringValue(message, "role", 64)
-		item.history.TurnID = stringValue(item.original, "uuid", 256)
+		// Claude stamps the prompt a turn answers only on its user records;
+		// carried forward, it gives every record of the turn one turn ID.
+		if prompt := stringValue(item.original, "promptId", 256); prompt != "" {
+			turn = prompt
+		}
+		item.history.TurnID = first(turn, stringValue(item.original, "uuid", 256))
 		if kind == "user" || kind == "assistant" {
 			item.history.Category = "message"
+			item.history.ToolCallID = claudeToolCallID(message)
 		}
 		if kind == "system" {
 			item.history.Category = "lifecycle"
@@ -208,6 +215,22 @@ func inspectClaude(ctx context.Context, request Request) (Page, error) {
 	}
 	selected = fitPage(selected, instructions, snapshot, previous)
 	return Page{Status: "available", ProviderKind: "claude", Source: "claude_transcript", Instructions: instructions, Snapshot: &snapshot, Records: selected, PreviousCursor: previous}, nil
+}
+
+// claudeToolCallID is the call a message's first tool block makes or answers.
+// It is the native call ID the Run published, so it links the turn to the Run.
+func claudeToolCallID(message map[string]any) string {
+	blocks, _ := message["content"].([]any)
+	for _, value := range blocks {
+		block := objectValue(value)
+		switch block["type"] {
+		case "tool_use":
+			return stringValue(block, "id", 256)
+		case "tool_result":
+			return stringValue(block, "tool_use_id", 256)
+		}
+	}
+	return ""
 }
 
 // claudeCompactionRecord reports a record a compaction wrote: its boundary, its

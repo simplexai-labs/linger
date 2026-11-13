@@ -15,7 +15,10 @@ type eventProjection struct {
 	operationID string
 	tools       map[string]string
 	// quiet holds tool calls that stay in history without a Room activity.
-	quiet         map[string]bool
+	quiet map[string]bool
+	// receipts holds the tool calls that create a Task, whose output is
+	// published so the Room can link the step to that Task.
+	receipts      map[string]bool
 	thinking      bool
 	thinkingTitle string
 	// reasoning collects thinking a Runtime streams without titles until a
@@ -126,6 +129,12 @@ func (projection *eventProjection) projectActivity(message native.Event) []any {
 			projection.quiet[callID] = true
 			return []any{event}
 		}
+		if _, command := inputCommand(input); createsTask(command) {
+			if projection.receipts == nil {
+				projection.receipts = make(map[string]bool)
+			}
+			projection.receipts[callID] = true
+		}
 		activity := map[string]any{"type": "activity.started", "activity_id": stableEventID("activity", projection.operationID+"\x00"+callID), "kind": kind, "title": event["tool_name"]}
 		if content := activityInput(input, status); len(content) > 0 {
 			activity["content"] = content
@@ -141,16 +150,26 @@ func (projection *eventProjection) projectActivity(message native.Event) []any {
 		}
 		if _, started := projection.tools[callID]; started {
 			delete(projection.tools, callID)
+			receipt := projection.receipts[callID]
+			delete(projection.receipts, callID)
 			outcome := "succeeded"
 			if event["is_error"] == true {
 				outcome = "failed"
 			}
 			finished := map[string]any{"type": "activity.finished", "activity_id": stableEventID("activity", projection.operationID+"\x00"+callID), "outcome": outcome}
-			// A failure's text tells the user why the step failed. Successful
+			// A failure's text tells the user why the step failed, and a Task's
+			// creation receipt names the Task the step links to. Other successful
 			// outputs stay private: they can be whole files or accessibility trees.
-			if output, _ := event["output"].(string); outcome == "failed" {
+			label := ""
+			switch {
+			case outcome == "failed":
+				label = "Error"
+			case receipt:
+				label = "Output"
+			}
+			if output, _ := event["output"].(string); label != "" {
 				if text := strings.TrimSpace(toolResultText(output)); text != "" {
-					finished["content"] = []map[string]any{{"label": "Error", "format": "text", "content": clip(redact.Text(text), 500)}}
+					finished["content"] = []map[string]any{{"label": label, "format": "text", "content": clip(redact.Text(text), 500)}}
 				}
 			}
 			return []any{event, finished}

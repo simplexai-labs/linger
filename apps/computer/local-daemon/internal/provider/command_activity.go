@@ -271,6 +271,17 @@ var commandWord = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 // messageSends post to the Room, which shows the message itself.
 var messageSends = map[string]bool{"send": true, "direct": true, "emoji": true, "sequence": true}
 
+// createsTask reports a script that is one `teamhub task create` call. Its
+// receipt names the Task it created, which the Room links the step to.
+func createsTask(script string) bool {
+	commands := simpleCommands(script)
+	if len(commands) != 1 || filepath.Base(commands[0].words[0]) != "teamhub" {
+		return false
+	}
+	path := teamhubPath(commands[0].words[1:])
+	return len(path) >= 2 && path[0] == "task" && path[1] == "create"
+}
+
 // teamhubPath is the leading command words of a TeamHub CLI call, at most
 // three, so an operand may follow the command.
 func teamhubPath(args []string) []string {

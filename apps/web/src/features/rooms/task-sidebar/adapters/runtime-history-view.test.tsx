@@ -1,8 +1,12 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubMessageActivityRecord } from "@/features/teamhub/teamhub-types";
+import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
 
+import { TaskActivityLinksProvider } from "../../runtime-status/task-activity-block";
 import { RuntimeHistoryView } from "./runtime-history-view";
 
 describe("RuntimeHistoryView", () => {
@@ -161,6 +165,76 @@ describe("RuntimeHistoryView", () => {
     );
 
     expect(screen.getByText("fixed").tagName).toBe("STRONG");
+  });
+
+  it("opens the Task a create step's receipt names", async () => {
+    const created = "workitem_0123456789abcdef0123456789abcdef";
+    const runtime = createTestTeamHubRuntime();
+    runtime.server.on("GET", "/v0/tasks/{taskId}/execution", () => ({
+      status: "idle",
+      task_id: created,
+    }));
+    const openTask = vi.fn();
+    const command =
+      'teamhub task create --name "Rivals" --requirement "Compare"';
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <TeamHubRuntimeProvider runtime={runtime}>
+          <TaskActivityLinksProvider openTask={openTask} tenantId="tenant-1">
+            <RuntimeHistoryView
+              records={[
+                claudeRecord(0, "tool_call", {
+                  native_type: "assistant.tool_use",
+                  role: "assistant",
+                  tool_call_id: "create",
+                  tool_name: "Bash",
+                  native_record: {
+                    type: "assistant",
+                    message: {
+                      role: "assistant",
+                      content: [
+                        {
+                          type: "tool_use",
+                          id: "create",
+                          name: "Bash",
+                          input: { command },
+                        },
+                      ],
+                    },
+                  },
+                }),
+                claudeRecord(1, "tool_result", {
+                  native_type: "user.tool_result",
+                  role: "user",
+                  tool_call_id: "create",
+                  tool_name: "Bash",
+                  native_record: {
+                    type: "user",
+                    message: {
+                      role: "user",
+                      content: [
+                        {
+                          type: "tool_result",
+                          tool_use_id: "create",
+                          content: `Task created and running\nTask ID: ${created}`,
+                        },
+                      ],
+                    },
+                  },
+                }),
+              ]}
+            />
+          </TaskActivityLinksProvider>
+        </TeamHubRuntimeProvider>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("Finished")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Open task Rivals" }));
+    expect(openTask).toHaveBeenCalledWith(created, "Rivals");
   });
 
   it("includes thinking, reply and every tool from mixed Claude messages", () => {

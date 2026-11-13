@@ -2924,6 +2924,24 @@ func (e TaskAttemptSummaryStatus) Valid() bool {
 	}
 }
 
+// Defines values for TaskConversationInputSource.
+const (
+	TaskConversationInputSourceMessage TaskConversationInputSource = "message"
+	TaskConversationInputSourceSystem  TaskConversationInputSource = "system"
+)
+
+// Valid indicates whether the value is a known member of the TaskConversationInputSource enum.
+func (e TaskConversationInputSource) Valid() bool {
+	switch e {
+	case TaskConversationInputSourceMessage:
+		return true
+	case TaskConversationInputSourceSystem:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TaskExecutionProjectionDesiredControl.
 const (
 	TaskExecutionProjectionDesiredControlRun TaskExecutionProjectionDesiredControl = "run"
@@ -7333,6 +7351,45 @@ type TaskAttemptSummary struct {
 
 // TaskAttemptSummaryStatus defines model for TaskAttemptSummary.Status.
 type TaskAttemptSummaryStatus string
+
+// TaskConversation defines model for TaskConversation.
+type TaskConversation struct {
+	Cards  []TaskConversationCard  `json:"cards"`
+	Inputs []TaskConversationInput `json:"inputs"`
+}
+
+// TaskConversationCard defines model for TaskConversationCard.
+type TaskConversationCard struct {
+	// CreatedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// DecisionId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	DecisionId Id `json:"decision_id"`
+
+	// MessageId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	MessageId Id `json:"message_id"`
+
+	// RoomId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	RoomId Id `json:"room_id"`
+}
+
+// TaskConversationInput defines model for TaskConversationInput.
+type TaskConversationInput struct {
+	Author ActorRef `json:"author"`
+	Body   string   `json:"body"`
+
+	// CreatedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Id Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	Id Id `json:"id"`
+
+	// Source A message from the Meta or a person, or a system notice such as a card's result.
+	Source TaskConversationInputSource `json:"source"`
+}
+
+// TaskConversationInputSource A message from the Meta or a person, or a system notice such as a card's result.
+type TaskConversationInputSource string
 
 // TaskExecutionProjection Human-safe current Task execution projection. It excludes Worker leases, effect payloads, and participant Local Run references.
 type TaskExecutionProjection struct {

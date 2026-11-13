@@ -33,12 +33,7 @@ func activityPresentation(message native.Event) (string, map[string]any, activit
 	if kind == "" {
 		kind = native.ActivityTool
 	}
-	key := "command"
-	command, _ := input[key].(string)
-	if command == "" {
-		key = "cmd"
-		command, _ = input[key].(string)
-	}
+	key, command := inputCommand(input)
 	if script := shellScript(command); script != command {
 		input = maps.Clone(input)
 		input[key], command = script, script
@@ -65,6 +60,17 @@ func activityPresentation(message native.Event) (string, map[string]any, activit
 		status.steps = append(status.steps, step.phrase())
 	}
 	return kind, input, status
+}
+
+// inputCommand is the shell command a tool call's input runs, under the key
+// its Runtime uses.
+func inputCommand(input map[string]any) (key, command string) {
+	for _, key := range []string{"command", "cmd"} {
+		if command, _ := input[key].(string); command != "" {
+			return key, command
+		}
+	}
+	return "command", ""
 }
 
 // step is one thing a tool call does, as the Room status line names it.

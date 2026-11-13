@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
 import type { TeamHubRoomBackgroundTask } from "@/features/teamhub/teamhub-types";
@@ -36,4 +36,30 @@ export function useRoomBackgroundTasks({
       query.state.data?.items.length ? 10_000 : false,
   });
   return tasks.data?.items ?? EMPTY_BACKGROUND_TASKS;
+}
+
+/**
+ * Cancels one of this Room's background Tasks, as its list and the Task's
+ * conversation both offer. It settles once the list has refreshed.
+ */
+export function useCancelRoomBackgroundTask({
+  client,
+  roomId,
+  tenantId,
+}: {
+  client: TeamHubClient;
+  roomId: string;
+  tenantId: string;
+}) {
+  const queryClient = useQueryClient();
+  return async (taskId: string) => {
+    await teamHubData(
+      client.api.POST("/v0/rooms/{roomId}/background-tasks/{taskId}/cancel", {
+        params: { path: { roomId, taskId } },
+      }),
+    );
+    await queryClient.invalidateQueries({
+      queryKey: roomBackgroundTasksQueryKey(tenantId, roomId),
+    });
+  };
 }

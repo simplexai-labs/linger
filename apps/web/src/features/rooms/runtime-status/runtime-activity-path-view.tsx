@@ -22,6 +22,7 @@ import {
   type RuntimeActivityPathToolCall,
 } from "./runtime-activity-path";
 import { RuntimeActivityEntries } from "./runtime-activity-entries";
+import { TaskActivityBlock } from "./task-activity-block";
 import {
   toolGroupPresentation,
   toolPresentation,
@@ -210,6 +211,16 @@ function RuntimeActivityPathRow({ item }: { item: RuntimeActivityPathItem }) {
         </ThinkingText>
         {item.active ? <ActiveMark /> : null}
       </li>
+    );
+  }
+  if (item.kind === "task") {
+    return (
+      <TaskActivityBlock
+        active={item.active}
+        command={item.command}
+        failed={item.failed}
+        taskId={item.taskId}
+      />
     );
   }
   if (item.kind === "command") {

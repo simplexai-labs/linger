@@ -15,6 +15,7 @@ import type { TeamHubMessage } from "@/features/teamhub/teamhub-types";
 
 import { ActorAvatar } from "../../members/actor-avatar";
 import { PanelLoading } from "../panel-loading";
+import { TaskConversationProvider } from "./task-conversation-dialog";
 
 export function MessageActivitiesPanelTab({
   activationKey,
@@ -76,107 +77,109 @@ export function MessageActivitiesPanelTab({
   }, [activationKey, hidden, message.id, activities.data?.records.length]);
 
   return (
-    <div
-      className={hidden ? "hidden" : "flex h-full min-h-0 flex-col bg-card"}
-      data-testid="message-activities-panel"
-      hidden={hidden || undefined}
-      inert={hidden || undefined}
-    >
-      <header className="flex min-h-14 shrink-0 items-center gap-2.5 border-b border-app-border px-4 py-2">
-        {onBack ? (
+    <TaskConversationProvider roomId={roomId} tenantId={tenantId}>
+      <div
+        className={hidden ? "hidden" : "flex h-full min-h-0 flex-col bg-card"}
+        data-testid="message-activities-panel"
+        hidden={hidden || undefined}
+        inert={hidden || undefined}
+      >
+        <header className="flex min-h-14 shrink-0 items-center gap-2.5 border-b border-app-border px-4 py-2">
+          {onBack ? (
+            <button
+              aria-label={backLabel}
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-app-focus"
+              onClick={onBack}
+              title={backLabel}
+              type="button"
+            >
+              <Icon icon={ArrowLeft01Icon} size={16} />
+            </button>
+          ) : null}
+          <ActorAvatar
+            actorId={message.author.id}
+            kind={message.author.kind}
+            name={message.author.display_name}
+            size="xs"
+          />
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-sm font-semibold text-foreground">
+              {message.author.display_name} activities
+            </h2>
+            <p className="truncate text-xs text-app-muted">Activity</p>
+          </div>
           <button
-            aria-label={backLabel}
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-app-focus"
-            onClick={onBack}
-            title={backLabel}
+            aria-label="Refresh message activities"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+            disabled={loading}
+            onClick={() => {
+              setRefreshing(true);
+              void activities.refetch().finally(() => setRefreshing(false));
+            }}
+            title="Refresh"
             type="button"
           >
-            <Icon icon={ArrowLeft01Icon} size={16} />
+            {refreshing ? (
+              <Icon
+                className="animate-spin motion-reduce:animate-none"
+                icon={Loading03Icon}
+                size={16}
+              />
+            ) : (
+              <Icon icon={RefreshIcon} size={16} />
+            )}
           </button>
-        ) : null}
-        <ActorAvatar
-          actorId={message.author.id}
-          kind={message.author.kind}
-          name={message.author.display_name}
-          size="xs"
-        />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-semibold text-foreground">
-            {message.author.display_name} activities
-          </h2>
-          <p className="truncate text-xs text-app-muted">Activity</p>
-        </div>
-        <button
-          aria-label="Refresh message activities"
-          className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
-          disabled={loading}
-          onClick={() => {
-            setRefreshing(true);
-            void activities.refetch().finally(() => setRefreshing(false));
-          }}
-          title="Refresh"
-          type="button"
-        >
-          {refreshing ? (
-            <Icon
-              className="animate-spin motion-reduce:animate-none"
-              icon={Loading03Icon}
-              size={16}
-            />
-          ) : (
-            <Icon icon={RefreshIcon} size={16} />
-          )}
-        </button>
-      </header>
+        </header>
 
-      <div
-        ref={scrollRef}
-        className="workspace-scrollbar min-h-0 flex-1 overflow-y-auto bg-card"
-        onScroll={(event) => {
-          const element = event.currentTarget;
-          followLatest.current =
-            element.scrollHeight - element.scrollTop - element.clientHeight <=
-            32;
-        }}
-      >
-        {activities.isError ? (
-          <ActivityLogState
-            detail="The Message activity log could not be read."
-            title="Activities could not be loaded"
-          />
-        ) : loading ? (
-          <PanelLoading label="Loading activities" />
-        ) : activities.data?.status !== "available" ? (
-          <ActivityLogState
-            detail={activities.data?.reason}
-            title="Message activity log unavailable"
-          />
-        ) : activities.data.records.length > 0 ? (
-          <section className="bg-card">
-            {!activities.data.has_native_turn ? (
-              <p className="border-b border-app-border px-4 py-2 text-xs text-app-muted">
-                Only linked tool records are available for this execution.
-              </p>
-            ) : null}
-            {activities.data.truncated ? (
-              <p className="border-b border-app-border px-4 py-2 text-xs text-app-muted">
-                This unusually large turn was limited to the latest 10,000
-                records.
-              </p>
-            ) : null}
-            <RuntimeHistoryView records={activities.data.records} />
-          </section>
-        ) : (
-          <ActivityLogState
-            detail={
-              activities.data.reason ??
-              "Only Runtime records connected by Activity identity are shown."
-            }
-            title="No exact activity log for this Message"
-          />
-        )}
+        <div
+          ref={scrollRef}
+          className="workspace-scrollbar min-h-0 flex-1 overflow-y-auto bg-card"
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            followLatest.current =
+              element.scrollHeight - element.scrollTop - element.clientHeight <=
+              32;
+          }}
+        >
+          {activities.isError ? (
+            <ActivityLogState
+              detail="The Message activity log could not be read."
+              title="Activities could not be loaded"
+            />
+          ) : loading ? (
+            <PanelLoading label="Loading activities" />
+          ) : activities.data?.status !== "available" ? (
+            <ActivityLogState
+              detail={activities.data?.reason}
+              title="Message activity log unavailable"
+            />
+          ) : activities.data.records.length > 0 ? (
+            <section className="bg-card">
+              {!activities.data.has_native_turn ? (
+                <p className="border-b border-app-border px-4 py-2 text-xs text-app-muted">
+                  Only linked tool records are available for this execution.
+                </p>
+              ) : null}
+              {activities.data.truncated ? (
+                <p className="border-b border-app-border px-4 py-2 text-xs text-app-muted">
+                  This unusually large turn was limited to the latest 10,000
+                  records.
+                </p>
+              ) : null}
+              <RuntimeHistoryView records={activities.data.records} />
+            </section>
+          ) : (
+            <ActivityLogState
+              detail={
+                activities.data.reason ??
+                "Only Runtime records connected by Activity identity are shown."
+              }
+              title="No exact activity log for this Message"
+            />
+          )}
+        </div>
       </div>
-    </div>
+    </TaskConversationProvider>
   );
 }
 

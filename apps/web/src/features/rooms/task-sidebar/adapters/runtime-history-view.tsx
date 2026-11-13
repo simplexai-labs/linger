@@ -8,9 +8,29 @@ import {
 } from "@/features/rooms/runtime-status/runtime-tool-presentation";
 
 import { MessageMarkdown } from "@/features/rooms/chat/message-markdown";
+import { TaskActivityBlock } from "@/features/rooms/runtime-status/task-activity-block";
+import {
+  parseTaskCommand,
+  createdTaskId,
+  type TaskCommand,
+} from "@/features/rooms/runtime-status/task-command";
 import type { TeamHubMessageActivityRecord } from "@/features/teamhub/teamhub-types";
 
-type HistoryCategory = TeamHubMessageActivityRecord["category"];
+import {
+  activityMessageText,
+  asObject,
+  contentBlockRecords,
+  indexToolCalls,
+  isAssistantMessage,
+  isEventRecord,
+  isUserMessage,
+  nativeCommand,
+  nativeOutput,
+  nativePayload,
+  reasoningText,
+  stringValue,
+  type ToolCallPair,
+} from "./native-activity-records";
 
 export function RuntimeHistoryView({
   records,
@@ -37,6 +57,12 @@ export function RuntimeHistoryView({
       {items.map((item) =>
         item.kind === "tool_calls" ? (
           <RuntimeToolCallsActivity calls={item.calls} key={item.key} />
+        ) : item.kind === "task" ? (
+          <TaskActivityBlock
+            command={item.command}
+            key={item.key}
+            taskId={item.taskId}
+          />
         ) : (
           <RuntimeActivityRecord key={item.key} record={item.record} />
         ),
@@ -52,6 +78,7 @@ interface ActivityToolCall {
 
 type ActivityTimelineItem =
   | { calls: ActivityToolCall[]; key: string; kind: "tool_calls" }
+  | { command: TaskCommand; key: string; kind: "task"; taskId?: string }
   | {
       kind: "record";
       key: string;
@@ -64,7 +91,9 @@ function activityTimelineItems(
 ): ActivityTimelineItem[] {
   const items: ActivityTimelineItem[] = [];
   const thinkingTitles = new Set<string>();
-  for (const source of records.flatMap(claudeActivityRecords)) {
+  // Later steps name a Task only by id; reuse the name it was created with.
+  const taskNames = new Map<string, string>();
+  for (const source of records.flatMap(contentBlockRecords)) {
     let record = source;
     if (record.native_type === "event_msg.mcp_tool_call_end") {
       const invocation = asObject(nativePayload(record)?.invocation);
@@ -74,7 +103,11 @@ function activityTimelineItems(
         tool_name: toolNameLabel(stringValue(invocation?.tool) ?? "Tool call"),
       };
     } else if (record.category === "tool_call") {
-      if (record.tool_name === "exec") continue;
+      if (
+        record.tool_name === "exec" &&
+        !parseTaskCommand(nativeCommand(record) ?? "")
+      )
+        continue;
     } else if (record.category === "reasoning") {
       const summary = reasoningText(record);
       if (!summary?.trim()) continue;
@@ -93,6 +126,26 @@ function activityTimelineItems(
     const pair = record.tool_call_id
       ? callPairs.get(record.tool_call_id)
       : undefined;
+    const taskCommand =
+      record.category === "tool_call"
+        ? parseTaskCommand(nativeCommand(record) ?? "")
+        : undefined;
+    if (taskCommand) {
+      const taskId =
+        taskCommand.taskId ??
+        (taskCommand.operation === "create" && pair?.result
+          ? createdTaskId(nativeOutput(pair.result))
+          : undefined);
+      if (taskId && taskCommand.name) taskNames.set(taskId, taskCommand.name);
+      const name = taskCommand.name ?? (taskId && taskNames.get(taskId));
+      items.push({
+        command: name ? { ...taskCommand, name } : taskCommand,
+        key: `task-${record.ordinal}-${items.length}`,
+        kind: "task",
+        taskId,
+      });
+      continue;
+    }
     if (record.category !== "tool_call") {
       items.push({
         kind: "record",
@@ -193,230 +246,4 @@ function RuntimeActivityRecord({
       />
     </li>
   );
-}
-
-function activityMessageText(record: TeamHubMessageActivityRecord) {
-  const payload = nativePayload(record);
-  return (
-    stringValue(payload?.message) ??
-    stringValue(payload?.text) ??
-    textContent(payload?.content) ??
-    "No message text recorded"
-  );
-}
-
-function nativePayload(record: TeamHubMessageActivityRecord) {
-  const nativeRecord = asObject(record.native_record);
-  return (
-    asObject(nativeRecord?.payload) ??
-    asObject(nativeRecord?.message) ??
-    nativeRecord
-  );
-}
-
-function claudeBlockCategory(type: unknown): HistoryCategory | undefined {
-  switch (type) {
-    case "text":
-      return "message";
-    case "thinking":
-    case "redacted_thinking":
-      return "reasoning";
-    case "tool_use":
-    case "server_tool_use":
-      return "tool_call";
-    case "tool_result":
-      return "tool_result";
-    default:
-      return undefined;
-  }
-}
-
-function claudeActivityRecords(
-  record: TeamHubMessageActivityRecord,
-): TeamHubMessageActivityRecord[] {
-  const blocks = claudeMessageBlocks(record);
-  if (!blocks) return [record];
-  const native = asObject(record.native_record)!;
-  const message = asObject(native.message)!;
-  return blocks.flatMap((block) => {
-    const category = claudeBlockCategory(block.type);
-    if (!category) return [];
-    return [
-      {
-        ...record,
-        category,
-        tool_call_id: stringValue(block.id ?? block.tool_use_id),
-        tool_name: stringValue(block.name),
-        native_record: { ...native, message: { ...message, content: [block] } },
-      },
-    ];
-  });
-}
-
-function reasoningText(
-  record: TeamHubMessageActivityRecord,
-): string | undefined {
-  const payload = nativePayload(record);
-  const block = nativeContentBlock(record, payload);
-  if (block?.type === "thinking" || block?.type === "redacted_thinking") {
-    return (
-      claudeThinkingSummary(block) ??
-      "Thinking recorded · private content hidden"
-    );
-  }
-  return stringValue(payload?.text) ?? textContent(payload?.summary);
-}
-
-function nativeContentBlock(
-  record: TeamHubMessageActivityRecord,
-  payload: JsonObject | undefined,
-) {
-  if (!Array.isArray(payload?.content)) return undefined;
-  const blocks = payload.content.flatMap((value) => {
-    const block = asObject(value);
-    return block ? [block] : [];
-  });
-  switch (record.category) {
-    case "tool_call":
-      return blocks.find(
-        (block) =>
-          (block.type === "tool_use" || block.type === "server_tool_use") &&
-          (!record.tool_call_id || block.id === record.tool_call_id),
-      );
-    case "tool_result":
-      return blocks.find(
-        (block) =>
-          block.type === "tool_result" &&
-          (!record.tool_call_id || block.tool_use_id === record.tool_call_id),
-      );
-    case "reasoning":
-      return blocks.find(
-        (block) =>
-          block.type === "thinking" || block.type === "redacted_thinking",
-      );
-    default:
-      return undefined;
-  }
-}
-
-function isUserMessage(record: TeamHubMessageActivityRecord) {
-  return record.role === "user" || record.native_type.endsWith(".user_message");
-}
-
-function isAssistantMessage(record: TeamHubMessageActivityRecord) {
-  return (
-    record.role === "assistant" || record.native_type.endsWith(".agent_message")
-  );
-}
-
-function isEventRecord(record: TeamHubMessageActivityRecord) {
-  return record.native_type.startsWith("event_msg.");
-}
-
-function textContent(value: unknown): string | undefined {
-  const parts = collectText(value).filter((part) => part.length > 0);
-  return parts.length > 0 ? parts.join("\n\n") : undefined;
-}
-
-function collectText(value: unknown): string[] {
-  if (typeof value === "string") return [value];
-  if (Array.isArray(value)) return value.flatMap(collectText);
-  const object = asObject(value);
-  if (!object) return [];
-  if (typeof object.text === "string") return [object.text];
-  return object.content === undefined ? [] : collectText(object.content);
-}
-
-function indexToolCalls(records: TeamHubMessageActivityRecord[]) {
-  const candidates = new Map<
-    string,
-    {
-      calls: TeamHubMessageActivityRecord[];
-      results: TeamHubMessageActivityRecord[];
-    }
-  >();
-  for (const record of records) {
-    const blocks = claudeMessageBlocks(record);
-    if (blocks) {
-      for (const block of blocks) {
-        const category = claudeBlockCategory(block.type);
-        const id = stringValue(
-          category === "tool_result" ? block.tool_use_id : block.id,
-        );
-        if (!id || (category !== "tool_call" && category !== "tool_result"))
-          continue;
-        const candidate = candidates.get(id) ?? { calls: [], results: [] };
-        candidate[category === "tool_call" ? "calls" : "results"].push(record);
-        candidates.set(id, candidate);
-      }
-      continue;
-    }
-    if (
-      !record.tool_call_id ||
-      (record.category !== "tool_call" && record.category !== "tool_result")
-    ) {
-      continue;
-    }
-    const current = candidates.get(record.tool_call_id) ?? {
-      calls: [],
-      results: [],
-    };
-    current[record.category === "tool_call" ? "calls" : "results"].push(record);
-    candidates.set(record.tool_call_id, current);
-  }
-  const pairs = new Map<string, ToolCallPair>();
-  for (const [callId, candidate] of candidates) {
-    if (candidate.calls.length > 1 || candidate.results.length > 1) continue;
-    pairs.set(callId, {
-      ...(candidate.calls[0] ? { call: candidate.calls[0] } : {}),
-      ...(candidate.results[0] ? { result: candidate.results[0] } : {}),
-    });
-  }
-  return pairs;
-}
-
-type JsonObject = Record<string, unknown>;
-
-interface ToolCallPair {
-  readonly call?: TeamHubMessageActivityRecord;
-  readonly result?: TeamHubMessageActivityRecord;
-}
-
-function claudeMessageBlocks(
-  record: TeamHubMessageActivityRecord,
-): JsonObject[] | undefined {
-  const native = asObject(record.native_record);
-  if (native?.type !== "user" && native?.type !== "assistant") return undefined;
-  const message = asObject(native.message);
-  if (typeof message?.content === "string")
-    return [{ type: "text", text: message.content }];
-  return Array.isArray(message?.content)
-    ? message.content.flatMap((value) => {
-        const block = asObject(value);
-        return block ? [block] : [];
-      })
-    : undefined;
-}
-
-function claudeThinkingSummary(block: JsonObject): string | undefined {
-  if (typeof block.summary === "string") return block.summary;
-  if (!Array.isArray(block.summary)) return undefined;
-  return (
-    block.summary
-      .flatMap((part) => {
-        const text = asObject(part)?.text;
-        return typeof text === "string" ? [text] : [];
-      })
-      .join("\n\n") || undefined
-  );
-}
-
-function asObject(value: unknown): JsonObject | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as JsonObject)
-    : undefined;
-}
-
-function stringValue(value: unknown) {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

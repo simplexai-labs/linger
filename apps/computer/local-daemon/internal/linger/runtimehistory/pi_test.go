@@ -47,6 +47,10 @@ func TestPiHistoryCurrentBranchFrozenPaginationAndRedaction(t *testing.T) {
 			t.Fatal("abandoned branch leaked")
 		}
 	}
+	// The answer and its tool result belong to the turn the question opened.
+	if turn := all.Records[len(all.Records)-2].TurnID; turn != "question" {
+		t.Fatalf("tool result turn = %q", turn)
+	}
 	if got := InspectPi(context.Background(), Request{CodexHome: t.TempDir(), ThreadID: id}); got.Status != "unavailable" {
 		t.Fatal("cross Context history")
 	}

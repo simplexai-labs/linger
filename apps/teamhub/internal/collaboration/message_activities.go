@@ -41,7 +41,6 @@ type runActivitySource struct {
 	contextKey   string
 	tenantID     string
 	agentActorID string
-	task         bool
 	eventOrdinal int64
 }
 
@@ -333,7 +332,7 @@ func (s *Service) MessageActivities(ctx context.Context, accountID, roomID, mess
 	}
 	return s.runtimeActivityLog(ctx, runActivitySource{
 		runID: run.RunID, contextKey: run.ContextKey, tenantID: run.TenantID, agentActorID: run.AgentActorID,
-		task: run.TaskID.Valid, eventOrdinal: run.EventOrdinal,
+		eventOrdinal: run.EventOrdinal,
 	}, history)
 }
 
@@ -348,14 +347,11 @@ func (s *Service) RunActivities(ctx context.Context, accountID, roomID, runID st
 	}
 	return s.runtimeActivityLog(ctx, runActivitySource{
 		runID: run.RunID, contextKey: run.ContextKey, tenantID: run.TenantID, agentActorID: run.AgentActorID,
-		task: run.TaskID.Valid, eventOrdinal: run.EventOrdinal,
+		eventOrdinal: run.EventOrdinal,
 	}, history)
 }
 
 func (s *Service) runtimeActivityLog(ctx context.Context, run runActivitySource, historyReader MessageActivityHistoryReader) (httpapi.MessageActivityLog, error) {
-	if run.task {
-		return unavailableMessageActivityLog("Task activities are available through public Runtime presentation events"), nil
-	}
 	executionContext, err := s.queries.GetAgentExecutionContext(ctx, run.contextKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return unavailableMessageActivityLog("The linked Agent Runtime Context is no longer available"), nil
