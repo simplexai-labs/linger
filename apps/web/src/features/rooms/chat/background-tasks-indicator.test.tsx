@@ -9,6 +9,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
+import type { TestRouteRequest } from "@/test/teamhub-test-server";
 import type { TeamHubRoomBackgroundTask } from "@/features/teamhub/teamhub-types";
 import {
   BackgroundTasksIndicator,
@@ -80,8 +81,18 @@ describe("BackgroundTasksPill", () => {
 describe("BackgroundTasksIndicator", () => {
   function renderIndicator(items: TeamHubRoomBackgroundTask[]) {
     const { client, server } = createTestTeamHubRuntime();
-    const list = vi.fn(() => ({ items }));
+    let current = items;
+    const list = vi.fn(() => ({ items: current }));
+    const cancel = vi.fn(({ params }: TestRouteRequest) => {
+      current = current.filter((task) => task.id !== params.taskId);
+      return { task_id: params.taskId, status: "canceled" };
+    });
     server.on("GET", "/v0/rooms/{roomId}/background-tasks", list);
+    server.on(
+      "POST",
+      "/v0/rooms/{roomId}/background-tasks/{taskId}/cancel",
+      cancel,
+    );
     const view = render(
       <QueryClientProvider
         client={
@@ -95,7 +106,7 @@ describe("BackgroundTasksIndicator", () => {
         />
       </QueryClientProvider>,
     );
-    return { list, ...view };
+    return { cancel, list, ...view };
   }
 
   it("shows nothing when no background Task runs", async () => {
@@ -113,6 +124,32 @@ describe("BackgroundTasksIndicator", () => {
     expect(
       await screen.findByRole("button", {
         name: "2 tasks running in the background",
+      }),
+    ).toBeVisible();
+  });
+
+  it("cancels one Task and drops it from the list", async () => {
+    const { cancel } = renderIndicator(tasks);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "2 tasks running in the background",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Cancel Draft the launch email to Lena",
+      }),
+    );
+    await waitFor(() =>
+      expect(cancel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          params: { roomId: "room-1", taskId: "task-2" },
+        }),
+      ),
+    );
+    expect(
+      await screen.findByRole("button", {
+        name: "1 task running in the background",
       }),
     ).toBeVisible();
   });

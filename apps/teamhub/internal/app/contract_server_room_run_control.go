@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentruntimestate"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomagent"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/taskdelegation"
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
 
@@ -32,6 +33,24 @@ func (a *App) listRoomBackgroundTasks(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, httpapi.RoomBackgroundTaskList{Items: items})
+}
+
+// cancelRoomBackgroundTask stops one Task running for the Room on a Human
+// member's request; the Task stays resumable by its Meta.
+func (a *App) cancelRoomBackgroundTask(c *gin.Context) {
+	taskID := c.Param("taskId")
+	status, err := a.taskDelegation.CancelFromRoom(c.Request.Context(), currentPrincipal(c).Session.AccountID, c.Param("roomId"), taskID)
+	switch {
+	case errors.Is(err, taskdelegation.ErrNotFound):
+		a.writeError(c, http.StatusNotFound, "NOT_FOUND", "Room was not found")
+		return
+	case errors.Is(err, taskdelegation.ErrConflict):
+		a.writeError(c, http.StatusConflict, "CONFLICT", "The Task changed at the same time; retry")
+		return
+	case a.notFoundOrError(c, "cancel Room background Task", err):
+		return
+	}
+	c.JSON(http.StatusOK, httpapi.RoomBackgroundTaskCancelResult{TaskId: taskID, Status: httpapi.RoomBackgroundTaskCancelResultStatus(status)})
 }
 
 func (a *App) cancelRoomRun(c *gin.Context) {

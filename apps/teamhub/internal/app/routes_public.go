@@ -88,6 +88,7 @@ func (a *App) publicRoutes() []contractRoute {
 		route(http.MethodPatch, "/v0/rooms/:roomId", nil, session, a.updateRoom),
 		route(http.MethodGet, "/v0/rooms/:roomId/active-voice-capture", nil, session, a.getActiveVoiceCapture),
 		route(http.MethodGet, "/v0/rooms/:roomId/background-tasks", nil, session, a.listRoomBackgroundTasks),
+		route(http.MethodPost, "/v0/rooms/:roomId/background-tasks/:taskId/cancel", nil, session, a.cancelRoomBackgroundTask),
 		route(http.MethodGet, "/v0/rooms/:roomId/documents", httpapi.ListRoomDocumentsParams{}, session, a.listRoomDocuments),
 		route(http.MethodPost, "/v0/rooms/:roomId/documents", nil, session, a.createRoomDocument),
 		route(http.MethodPut, "/v0/rooms/:roomId/documents/:documentId", nil, session, a.bindDocumentToRoom),

@@ -268,6 +268,28 @@ func StopTask(ctx context.Context, queries *store.Queries, taskID, actorID strin
 	return setDelegatedTaskStatus(ctx, queries, snapshot, status, "canceled", "stopped", "stopped", actorID, payload)
 }
 
+// CancelTaskByHuman stops a delegated Task's current turn exactly as
+// StopTask does, so the Task stays resumable, then tells its coordinating
+// Meta who canceled it. Canceling a canceled Task changes nothing and
+// returns revision 0.
+func CancelTaskByHuman(ctx context.Context, queries *store.Queries, taskID string, human store.Actor) (int64, error) {
+	if human.ID == "" || human.Kind != "human" {
+		return 0, ErrInvalid
+	}
+	revision, err := StopTask(ctx, queries, taskID, human.ID)
+	if err != nil || revision == 0 {
+		return revision, err
+	}
+	snapshot, err := queries.LockTaskExecutionSnapshot(ctx, taskID)
+	if err != nil {
+		return 0, err
+	}
+	notice := human.DisplayName + " canceled Task " + snapshot.Title + " (" + taskID + "). " +
+		"Its current turn was stopped; its session and ./playground/" + taskID + "/ are kept, so it can be resumed. " +
+		"Tell the user it was canceled, then follow what they want next."
+	return revision, appendTaskCallback(ctx, queries, snapshot, snapshot.TaskExecutionGeneration.Int64, human.ID, notice)
+}
+
 // setDelegatedTaskStatus records a Meta-driven change outside the Worker
 // lease: the fact, the Task snapshot (releasing any lease) and its Event.
 func setDelegatedTaskStatus(
@@ -306,6 +328,10 @@ func setDelegatedTaskStatus(
 // which wakes the coordinating Meta of the Task's origin Room. A Task
 // without a coordinator has nobody to report to.
 func appendTaskReport(ctx context.Context, queries *store.Queries, snapshot store.LockTaskExecutionSnapshotRow, generation int64, body string) error {
+	return appendTaskCallback(ctx, queries, snapshot, generation, snapshot.ResultAgentActorID, body)
+}
+
+func appendTaskCallback(ctx context.Context, queries *store.Queries, snapshot store.LockTaskExecutionSnapshotRow, generation int64, authorActorID, body string) error {
 	body = truncateRunes(body, taskReportMaxRunes)
 	segments, err := json.Marshal([]map[string]string{{"type": "text", "content": body}})
 	if err != nil {
@@ -318,7 +344,7 @@ func appendTaskReport(ctx context.Context, queries *store.Queries, snapshot stor
 	}
 	_, err = AppendMetaCallback(ctx, queries, MetaCallbackAppendInput{
 		TaskID: snapshot.TaskID, TenantID: snapshot.TenantID, Generation: generation,
-		AuthorActorID: snapshot.ResultAgentActorID, Body: body, Segments: segments,
+		AuthorActorID: authorActorID, Body: body, Segments: segments,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil

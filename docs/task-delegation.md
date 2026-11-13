@@ -11,18 +11,20 @@ conversation goes on.
 
 ![An animation of two Tasks running side by side: you ask Another Me to research Acme's rivals, then to draft a deck; its Meta starts a Task for each with task create, each AlterEgo's Task grows while it runs, a follow-up about the new logo joins the deck Task, and each result comes back into the chat as a card when its AlterEgo reports](../assets/feature-task-chat.gif)
 
-| Moment                                                       | Task state                                   | Who wakes                                |
-| ------------------------------------------------------------ | -------------------------------------------- | ---------------------------------------- |
-| An AlterEgo finishes a turn                                  | `idle`                                       | The Meta, with that turn's last reply    |
-| A turn ends while an approval card waits in your chat        | `waiting_for_approval`                       | No one, until the card is answered       |
-| You approve or deny the card, or it expires after 10 minutes | `running`                                    | The AlterEgo                             |
-| A turn fails                                                 | `failed`                                     | The Meta, with the error                 |
-| You add to the request, while it runs or after it is done    | `running`, or queued behind the current turn | The AlterEgo                             |
-| You ask how it is going                                      | Unchanged                                    | No one; the Meta reads the Task's status |
-| You ask to stop it                                           | `canceled`, with its files and session kept  | No one                                   |
+| Moment                                                         | Task state                                   | Who wakes                                |
+| -------------------------------------------------------------- | -------------------------------------------- | ---------------------------------------- |
+| An AlterEgo finishes a turn                                    | `idle`                                       | The Meta, with that turn's last reply    |
+| A turn ends while an approval card waits in your chat          | `waiting_for_approval`                       | No one, until the card is answered       |
+| You approve or deny the card, or it expires after 10 minutes   | `running`                                    | The AlterEgo                             |
+| A turn fails                                                   | `failed`                                     | The Meta, with the error                 |
+| You add to the request, while it runs or after it is done      | `running`, or queued behind the current turn | The AlterEgo                             |
+| You ask how it is going                                        | Unchanged                                    | No one; the Meta reads the Task's status |
+| You ask to stop it                                             | `canceled`, with its files and session kept  | No one                                   |
+| You press Cancel on it under _tasks running in the background_ | `canceled`, with its files and session kept  | The Meta, told that you canceled it      |
 
-<sub>An AlterEgo never asks you anything; a question goes into its report, and
-the Meta decides whether to ask.</sub>
+<sub>A canceled Task is paused, not closed: the Meta can resume it with your
+next request or do something else. An AlterEgo never asks you anything; a
+question goes into its report, and the Meta decides whether to ask.</sub>
 
 ## On the computer
 

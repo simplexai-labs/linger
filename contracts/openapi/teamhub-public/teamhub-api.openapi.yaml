@@ -1224,6 +1224,8 @@ paths:
     $ref: '../paths/room-run-control.yaml#/tenantRoomActivity'
   /v0/rooms/{roomId}/background-tasks:
     $ref: '../paths/room-run-control.yaml#/backgroundTasks'
+  /v0/rooms/{roomId}/background-tasks/{taskId}/cancel:
+    $ref: '../paths/room-run-control.yaml#/cancelBackgroundTask'
   /v0/rooms/{roomId}/runs/{runId}/cancel:
     $ref: '../paths/room-run-control.yaml#/cancelRun'
   /v0/rooms/{roomId}/runs/{runId}/redeliver-unconfirmed-inputs:

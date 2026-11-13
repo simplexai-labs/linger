@@ -42,6 +42,17 @@ components:
           description: Oldest first. Waiting for an approval counts as running; a Task leaves the list once it is idle, failed or canceled.
           items:
             $ref: "#/components/schemas/RoomBackgroundTask"
+    RoomBackgroundTaskCancelResult:
+      type: object
+      additionalProperties: false
+      required: [task_id, status]
+      properties:
+        task_id:
+          type: string
+        status:
+          type: string
+          description: canceled when this request stopped the Task; not_running when it was no longer running, so nothing changed.
+          enum: [canceled, not_running]
     RoomRunCancelRequest:
       type: object
       additionalProperties: false

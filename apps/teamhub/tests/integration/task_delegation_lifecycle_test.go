@@ -449,3 +449,43 @@ func TestApprovalResultWakesDelegatedTask(t *testing.T) {
 		t.Fatalf("another Agent's approval result err=%v", err)
 	}
 }
+
+func TestHumanCancelsBackgroundTask(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	env, alice, issued, roomID := newAgentCLIIdentity(t)
+	created := createDelegatedTask(t, env, issued, "human-cancel", "Draft the plan", "Draft the plan.", roomID)
+	cancelPath := "/v0/rooms/" + roomID + "/background-tasks/" + created.TaskID + "/cancel"
+
+	code, _, body := env.request(alice, http.MethodPost, cancelPath, nil, "")
+	if code != http.StatusOK || !strings.Contains(string(body), `"status":"canceled"`) {
+		t.Fatalf("cancel=%d %s", code, body)
+	}
+	// Canceling stops the Task as the Meta's task stop does.
+	assertDelegatedTaskState(t, env, created.TaskID, "canceled", "stopped")
+	if got := countRows(t, env, `SELECT count(*) FROM task_meta_callback_messages message
+		JOIN actors author ON author.id=message.author_actor_id AND author.kind='human'
+		WHERE message.task_id=$1 AND message.body LIKE '% canceled Task Draft the plan (' || $1 || ')%'`, created.TaskID); got != 1 {
+		t.Fatalf("Meta cancel notices=%d want=1", got)
+	}
+
+	// A Task that no longer runs is left alone.
+	code, _, body = env.request(alice, http.MethodPost, cancelPath, nil, "")
+	if code != http.StatusOK || !strings.Contains(string(body), `"status":"not_running"`) {
+		t.Fatalf("repeated cancel=%d %s", code, body)
+	}
+	if got := countRows(t, env, `SELECT count(*) FROM task_meta_callback_messages WHERE task_id=$1`, created.TaskID); got != 1 {
+		t.Fatalf("repeated cancel notified again: %d", got)
+	}
+
+	// The Meta can resume it.
+	started := sendDelegatedTask(t, env, issued, roomID, "human-cancel-resume", created.TaskID, "The user wants it after all.", false)
+	if started["delivery"] != "started" || started["status"] != "running" {
+		t.Fatalf("resume send=%v", started)
+	}
+
+	// Only a member of the Room reaches it.
+	code, _, body = env.request(alice, http.MethodPost, "/v0/rooms/room-missing/background-tasks/"+created.TaskID+"/cancel", nil, "")
+	if code != http.StatusNotFound {
+		t.Fatalf("cancel in unknown Room=%d %s", code, body)
+	}
+}

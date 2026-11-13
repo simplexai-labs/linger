@@ -40,6 +40,39 @@ backgroundTasks:
         $ref: "../components/common.yaml#/components/responses/Unauthenticated"
       "404":
         $ref: "../components/common.yaml#/components/responses/NotFound"
+cancelBackgroundTask:
+  post:
+    operationId: cancelRoomBackgroundTask
+    summary: Cancel one background Task's current turn
+    description: >-
+      Stops the Task as its Meta's task stop does: the current turn ends and
+      its approval cards expire, but its session and playground stay, so the
+      Meta can resume it later. The Room's Meta is told who canceled it.
+      Canceling a Task that is no longer running changes nothing.
+    parameters:
+      - name: roomId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: The Task's state after the request.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/room-run-control.yaml#/components/schemas/RoomBackgroundTaskCancelResult"
+      "401":
+        $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+      "404":
+        $ref: "../components/common.yaml#/components/responses/NotFound"
+      "409":
+        $ref: "../components/common.yaml#/components/responses/Conflict"
 cancelRun:
   post:
     operationId: cancelRoomRun

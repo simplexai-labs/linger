@@ -2414,6 +2414,24 @@ func (e ReferenceSegmentTargetType) Valid() bool {
 	}
 }
 
+// Defines values for RoomBackgroundTaskCancelResultStatus.
+const (
+	RoomBackgroundTaskCancelResultStatusCanceled   RoomBackgroundTaskCancelResultStatus = "canceled"
+	RoomBackgroundTaskCancelResultStatusNotRunning RoomBackgroundTaskCancelResultStatus = "not_running"
+)
+
+// Valid indicates whether the value is a known member of the RoomBackgroundTaskCancelResultStatus enum.
+func (e RoomBackgroundTaskCancelResultStatus) Valid() bool {
+	switch e {
+	case RoomBackgroundTaskCancelResultStatusCanceled:
+		return true
+	case RoomBackgroundTaskCancelResultStatusNotRunning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoomDocumentChangedPayloadKind.
 const (
 	RoomDocumentChangedPayloadKindDocumentCreated RoomDocumentChangedPayloadKind = "document.created"
@@ -2887,19 +2905,19 @@ func (e SlackConversationKind) Valid() bool {
 
 // Defines values for TaskAttemptSummaryStatus.
 const (
-	Passed  TaskAttemptSummaryStatus = "passed"
-	Running TaskAttemptSummaryStatus = "running"
-	Stopped TaskAttemptSummaryStatus = "stopped"
+	TaskAttemptSummaryStatusPassed  TaskAttemptSummaryStatus = "passed"
+	TaskAttemptSummaryStatusRunning TaskAttemptSummaryStatus = "running"
+	TaskAttemptSummaryStatusStopped TaskAttemptSummaryStatus = "stopped"
 )
 
 // Valid indicates whether the value is a known member of the TaskAttemptSummaryStatus enum.
 func (e TaskAttemptSummaryStatus) Valid() bool {
 	switch e {
-	case Passed:
+	case TaskAttemptSummaryStatusPassed:
 		return true
-	case Running:
+	case TaskAttemptSummaryStatusRunning:
 		return true
-	case Stopped:
+	case TaskAttemptSummaryStatusStopped:
 		return true
 	default:
 		return false
@@ -6514,6 +6532,16 @@ type RoomBackgroundTask struct {
 	Requirement string `json:"requirement"`
 	Title       string `json:"title"`
 }
+
+// RoomBackgroundTaskCancelResult defines model for RoomBackgroundTaskCancelResult.
+type RoomBackgroundTaskCancelResult struct {
+	// Status canceled when this request stopped the Task; not_running when it was no longer running, so nothing changed.
+	Status RoomBackgroundTaskCancelResultStatus `json:"status"`
+	TaskId string                               `json:"task_id"`
+}
+
+// RoomBackgroundTaskCancelResultStatus canceled when this request stopped the Task; not_running when it was no longer running, so nothing changed.
+type RoomBackgroundTaskCancelResultStatus string
 
 // RoomBackgroundTaskList defines model for RoomBackgroundTaskList.
 type RoomBackgroundTaskList struct {
