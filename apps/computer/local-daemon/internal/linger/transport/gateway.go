@@ -142,6 +142,7 @@ var agentShapes = map[string]func() wire.Shape{
 	"CapabilitySkillsScan":         func() wire.Shape { return &wire.CapabilitySkillsScan{} },
 	"CapabilityBrowserConnect":     func() wire.Shape { return &wire.CapabilityBrowserConnect{} },
 	"CapabilityComputerPermission": func() wire.Shape { return &wire.CapabilityComputerPermission{} },
+	"CapabilityLocalModelsExecute": func() wire.Shape { return &wire.CapabilityLocalModelsExecute{} },
 	"OperationPrepare":             func() wire.Shape { return &wire.OperationPrepare{} },
 	"ProviderPrepare":              func() wire.Shape { return &wire.ProviderPrepare{} },
 	"SessionCompact":               func() wire.Shape { return &wire.SessionCompact{} },
@@ -268,7 +269,7 @@ func decodeGatewayCommand(encoded []byte) (protocol.Command, error) {
 		protocol.CommandSessionCompact, protocol.CommandModelInvoke, protocol.CommandComputerToolCall,
 		protocol.CommandDebugInspect, protocol.CommandAgentCLICredentialPut,
 		protocol.CommandCapabilitySkillsScan, protocol.CommandCapabilityBrowserConnect,
-		protocol.CommandCapabilityComputerPermission:
+		protocol.CommandCapabilityComputerPermission, protocol.CommandCapabilityLocalModels:
 		// Their handlers decode the generated shape from the frame itself.
 		command.Payload = append(json.RawMessage(nil), encoded...)
 	}
@@ -424,6 +425,8 @@ func (s *gatewayStream) Send(ctx context.Context, event protocol.Event) error {
 	case event.Type == protocol.EventCapabilitySkillsScanned || event.Type == protocol.EventCapabilitySkillsFailed ||
 		event.Type == protocol.EventCapabilityBrowserConnected || event.Type == protocol.EventCapabilityBrowserFailed ||
 		event.Type == protocol.EventCapabilityComputerPermissionSucceeded || event.Type == protocol.EventCapabilityComputerPermissionFailed ||
+		event.Type == protocol.EventCapabilityLocalModelsAccepted || event.Type == protocol.EventCapabilityLocalModelsRefused ||
+		event.Type == protocol.EventLocalModels ||
 		event.Type == protocol.EventProviderPrepared || event.Type == protocol.EventSessionCompacted ||
 		event.Type == protocol.EventModelInvoked || event.Type == protocol.EventComputerToolResult:
 		// Their handlers already encode the generated wire shape.

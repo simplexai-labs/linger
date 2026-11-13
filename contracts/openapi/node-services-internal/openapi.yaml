@@ -204,6 +204,46 @@ paths:
           $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
       security:
         - agentManagementBearer: []
+  /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-model-actions:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/OwnerActorId"
+      - $ref: "#/components/parameters/ComputerId"
+    post:
+      summary: Send one local-models action to an owned Local Computer
+      description:
+        Agent Service sends execute with kind local_models and returns the
+        Computer's immediate accepted or refused answer. The Computer
+        supervises the job and reports progress only through runner.local_models
+        snapshots, which Agent Service records in TeamHub.
+      operationId: actOnLocalComputerModels
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../components/local-models.yaml#/components/schemas/LocalModelActionCommand
+      responses:
+        "200":
+          description: The Computer's answer.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/local-models.yaml#/components/schemas/LocalModelActionAck
+        "400":
+          $ref: ../components/common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+        "404":
+          $ref: ../components/common.yaml#/components/responses/NotFound
+        "409":
+          $ref: ../components/common.yaml#/components/responses/Conflict
+        "502":
+          $ref: ../components/common.yaml#/components/responses/BadGateway
+        "503":
+          $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
+      security:
+        - agentManagementBearer: []
   /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/browser-connection:
     parameters:
       - $ref: "#/components/parameters/TenantId"

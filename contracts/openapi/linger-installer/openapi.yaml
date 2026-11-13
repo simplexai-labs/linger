@@ -1070,7 +1070,10 @@ components:
             Absolute paths only, never credentials. LINGER_CODEX_PATH,
             LINGER_CLAUDE_PATH and LINGER_PI_PATH name the executable;
             CODEX_HOME, CLAUDE_CONFIG_DIR and PI_CODING_AGENT_DIR its profile
-            when it is not the user's default.
+            when it is not the user's default. LINGER_LOCALMODELS_PYTHON,
+            LINGER_LOCALMODELS_MODULE_DIR, LINGER_LOCALMODELS_STATE and
+            LINGER_LOCALMODELS_BASE_DIR, all four or none, name the
+            localmodels tool the Computer runs for its model library.
           additionalProperties:
             type: string
     SetupReport:

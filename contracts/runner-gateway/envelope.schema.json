@@ -45,6 +45,9 @@
           "$ref": "#/$defs/CapabilityComputerPermission"
         },
         {
+          "$ref": "#/$defs/CapabilityLocalModelsExecute"
+        },
+        {
           "$ref": "#/$defs/OperationPrepare"
         },
         {
@@ -85,6 +88,9 @@
           "$ref": "#/$defs/RunnerRuntimeDiagnostics"
         },
         {
+          "$ref": "#/$defs/RunnerLocalModels"
+        },
+        {
           "$ref": "#/$defs/RuntimeRegistrationObserved"
         },
         {
@@ -122,6 +128,12 @@
         },
         {
           "$ref": "#/$defs/CapabilityComputerPermissionFailed"
+        },
+        {
+          "$ref": "#/$defs/CapabilityLocalModelsAccepted"
+        },
+        {
+          "$ref": "#/$defs/CapabilityLocalModelsRefused"
         },
         {
           "$ref": "#/$defs/OperationPrepared"
@@ -1836,6 +1848,655 @@
           }
         }
       ]
+    },
+    "LocalModelId": {
+      "description": "Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+    },
+    "LocalModelPoolId": {
+      "description": "A place a model can live: gpu:<index>, system (RAM beside GPUs) or unified (RAM of a GPU-less or Apple silicon host).",
+      "type": "string",
+      "pattern": "^(gpu:(0|[1-9][0-9]{0,2})|system|unified)$"
+    },
+    "LocalModelErrorCode": {
+      "description": "Closed localmodels library error set. Extend it only together with the localmodels library contract.",
+      "enum": [
+        "MODEL_UNKNOWN",
+        "INVALID_STATE",
+        "JOB_RUNNING",
+        "MEMORY_INSUFFICIENT",
+        "DISK_INSUFFICIENT",
+        "PLATFORM_UNSUPPORTED",
+        "LOAD_NO_ROOM",
+        "DOWNLOAD_FAILED",
+        "CHECKSUM_MISMATCH",
+        "NETWORK_UNAVAILABLE",
+        "ENGINE_START_FAILED",
+        "HEALTH_CHECK_FAILED",
+        "OUT_OF_MEMORY",
+        "MODEL_FILES_MISSING",
+        "GATEWAY_REGISTRATION_FAILED",
+        "CANCELLED"
+      ]
+    },
+    "LocalModelsUnavailableCode": {
+      "description": "Why a Computer reports no model library: TOOL_NOT_INSTALLED when the Computer config names no localmodels tool, TOOL_FAILED when the tool did not answer library status.",
+      "enum": ["TOOL_NOT_INSTALLED", "TOOL_FAILED"]
+    },
+    "LocalModelActionRefusalCode": {
+      "description": "Why the Computer refused an action before it started: a localmodels library error or a reason the library is unavailable.",
+      "enum": [
+        "MODEL_UNKNOWN",
+        "INVALID_STATE",
+        "JOB_RUNNING",
+        "MEMORY_INSUFFICIENT",
+        "DISK_INSUFFICIENT",
+        "PLATFORM_UNSUPPORTED",
+        "LOAD_NO_ROOM",
+        "DOWNLOAD_FAILED",
+        "CHECKSUM_MISMATCH",
+        "NETWORK_UNAVAILABLE",
+        "ENGINE_START_FAILED",
+        "HEALTH_CHECK_FAILED",
+        "OUT_OF_MEMORY",
+        "MODEL_FILES_MISSING",
+        "GATEWAY_REGISTRATION_FAILED",
+        "CANCELLED",
+        "TOOL_NOT_INSTALLED",
+        "TOOL_FAILED"
+      ]
+    },
+    "LocalModelGpu": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "name", "total_bytes", "free_bytes"],
+      "properties": {
+        "index": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "uuid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "total_bytes": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "free_bytes": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        }
+      }
+    },
+    "LocalModelHost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "arch",
+        "os_label",
+        "engine_label",
+        "ram_total_bytes",
+        "disk_free_bytes",
+        "gpus"
+      ],
+      "properties": {
+        "platform": {
+          "enum": ["linux", "darwin", "windows"]
+        },
+        "arch": {
+          "enum": ["x86_64", "arm64"]
+        },
+        "os_label": {
+          "description": "Display only.",
+          "type": "string",
+          "maxLength": 200
+        },
+        "engine_label": {
+          "description": "Display only.",
+          "type": "string",
+          "maxLength": 200
+        },
+        "ram_total_bytes": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "disk_free_bytes": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "gpus": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/LocalModelGpu"
+          }
+        }
+      }
+    },
+    "LocalModelPoolHolder": {
+      "description": "Something holding pool memory. A component is a foundation service (embedding, reranker, speech) that is never a model row.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "name", "bytes"],
+      "properties": {
+        "kind": {
+          "enum": ["model", "component"]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "bytes": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        }
+      }
+    },
+    "LocalModelPool": {
+      "description": "One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "total_bytes", "used_bytes", "holders"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/LocalModelPoolId"
+        },
+        "kind": {
+          "enum": ["gpu", "system", "unified"]
+        },
+        "gpu_index": {
+          "description": "Present only for kind gpu; matches LocalModelGpu.index.",
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "total_bytes": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "used_bytes": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "holders": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/LocalModelPoolHolder"
+          }
+        }
+      }
+    },
+    "LocalModelAvailabilityReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": {
+          "enum": [
+            "MEMORY_INSUFFICIENT",
+            "DISK_INSUFFICIENT",
+            "PLATFORM_UNSUPPORTED"
+          ]
+        },
+        "need_bytes": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "have_bytes": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        }
+      }
+    },
+    "LocalModelAvailability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["downloadable"],
+      "properties": {
+        "downloadable": {
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "Present only when downloadable is false.",
+          "$ref": "#/$defs/LocalModelAvailabilityReason"
+        }
+      }
+    },
+    "LocalModelDownloadProgress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step", "done_bytes", "total_bytes"],
+      "properties": {
+        "step": {
+          "enum": ["download", "verify"]
+        },
+        "done_bytes": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "total_bytes": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "bytes_per_second": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        }
+      }
+    },
+    "LocalModelEndpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_url"],
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        }
+      }
+    },
+    "LocalModelError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/LocalModelErrorCode"
+        },
+        "detail": {
+          "description": "Diagnostic text for display; never matched on.",
+          "type": "string",
+          "maxLength": 4000
+        }
+      }
+    },
+    "LocalModelNote": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": {
+          "enum": ["NO_ROOM_TO_LOAD"]
+        }
+      }
+    },
+    "LocalModel": {
+      "description": "One validated chat model of the catalog on this platform, with its state on this Computer. Bytes everywhere; the reader formats them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "description",
+        "quant",
+        "context_tokens",
+        "vision",
+        "download_bytes",
+        "memory_bytes",
+        "fit",
+        "recommended",
+        "availability",
+        "state"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/LocalModelId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "quant": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "context_tokens": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "vision": {
+          "type": "boolean"
+        },
+        "download_bytes": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "memory_bytes": {
+          "description": "Footprint when loaded at its context policy, from the localmodels estimator.",
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "fit": {
+          "description": "Where the model can live judged on total capacity; stable across loads. system means localmodels can run it from RAM, slower.",
+          "enum": ["gpu", "unified", "system", "none"]
+        },
+        "recommended": {
+          "description": "At most one model, only an absent downloadable one.",
+          "type": "boolean"
+        },
+        "availability": {
+          "$ref": "#/$defs/LocalModelAvailability"
+        },
+        "pool": {
+          "description": "Planned placement while absent, actual placement afterwards; absent when fit is none.",
+          "$ref": "#/$defs/LocalModelPoolId"
+        },
+        "state": {
+          "enum": [
+            "absent",
+            "downloading",
+            "idle",
+            "loading",
+            "loaded",
+            "failed"
+          ]
+        },
+        "download": {
+          "description": "Present only while downloading.",
+          "$ref": "#/$defs/LocalModelDownloadProgress"
+        },
+        "endpoint": {
+          "description": "Present only while loaded.",
+          "$ref": "#/$defs/LocalModelEndpoint"
+        },
+        "pi_model": {
+          "description": "The runtime_model an Agent on runtime pi stores for this model, <pi provider>/<pi model id>; present while the model is on the Computer.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "tokens_per_second": {
+          "description": "Warm speed measured at the last load; absent when unknown.",
+          "type": "number",
+          "minimum": 0
+        },
+        "error": {
+          "description": "Present only when failed.",
+          "$ref": "#/$defs/LocalModelError"
+        },
+        "note": {
+          "description": "Present only when idle and the automatic load after download was skipped.",
+          "$ref": "#/$defs/LocalModelNote"
+        }
+      }
+    },
+    "LocalModelsUnavailableReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/LocalModelsUnavailableCode"
+        },
+        "detail": {
+          "description": "Diagnostic text for display; never matched on.",
+          "type": "string",
+          "maxLength": 4000
+        }
+      }
+    },
+    "LocalModelsSnapshot": {
+      "description": "The Computer's model library, mapped from localmodels.library-status/v1. When available is false only reason and observed_at are meaningful and the lists are empty.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available", "observed_at", "pools", "models"],
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "Present only when available is false.",
+          "$ref": "#/$defs/LocalModelsUnavailableReason"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "tool_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "host": {
+          "description": "Present when available.",
+          "$ref": "#/$defs/LocalModelHost"
+        },
+        "pools": {
+          "type": "array",
+          "maxItems": 65,
+          "items": {
+            "$ref": "#/$defs/LocalModelPool"
+          }
+        },
+        "models": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/LocalModel"
+          }
+        }
+      }
+    },
+    "CapabilityLocalModelsExecute": {
+      "description": "Ask the Computer to act on its model library. The Computer answers at once with accepted or refused and supervises the localmodels job itself; progress and the outcome arrive as runner.local_models snapshots. refresh rereads the library and needs no model_id; every other action names one. unload_first is only for load.",
+      "type": "object",
+      "unevaluatedProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/LocalSkillCommandIdentity"
+        },
+        {
+          "type": "object",
+          "required": ["type", "kind", "action"],
+          "properties": {
+            "type": {
+              "const": "execute"
+            },
+            "kind": {
+              "const": "local_models"
+            },
+            "action": {
+              "enum": [
+                "download",
+                "cancel",
+                "load",
+                "unload",
+                "remove",
+                "refresh"
+              ]
+            },
+            "model_id": {
+              "$ref": "#/$defs/LocalModelId"
+            },
+            "unload_first": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/LocalModelId"
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "action": {
+                "const": "refresh"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "model_id": false,
+              "unload_first": false
+            }
+          },
+          "else": {
+            "properties": {
+              "model_id": {
+                "$ref": "#/$defs/LocalModelId"
+              }
+            },
+            "required": ["model_id"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "load"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "unload_first": false
+            }
+          }
+        }
+      ]
+    },
+    "CapabilityLocalModelsAccepted": {
+      "description": "The Computer started the action, or for refresh queued a fresh snapshot.",
+      "type": "object",
+      "unevaluatedProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/LocalSkillCommandIdentity"
+        },
+        {
+          "type": "object",
+          "required": ["type", "kind", "action", "outcome"],
+          "properties": {
+            "type": {
+              "const": "executed"
+            },
+            "kind": {
+              "const": "local_models"
+            },
+            "action": {
+              "enum": [
+                "download",
+                "cancel",
+                "load",
+                "unload",
+                "remove",
+                "refresh"
+              ]
+            },
+            "model_id": {
+              "$ref": "#/$defs/LocalModelId"
+            },
+            "outcome": {
+              "const": "accepted"
+            }
+          }
+        }
+      ]
+    },
+    "LocalModelActionRefusal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/LocalModelActionRefusalCode"
+        },
+        "detail": {
+          "description": "Diagnostic text for display; never matched on.",
+          "type": "string",
+          "maxLength": 4000
+        },
+        "pool": {
+          "description": "With LOAD_NO_ROOM.",
+          "$ref": "#/$defs/LocalModelPoolId"
+        },
+        "need_bytes": {
+          "description": "With LOAD_NO_ROOM, MEMORY_INSUFFICIENT or DISK_INSUFFICIENT.",
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "free_bytes": {
+          "description": "With LOAD_NO_ROOM, MEMORY_INSUFFICIENT or DISK_INSUFFICIENT.",
+          "$ref": "#/$defs/NonNegativeInteger"
+        }
+      }
+    },
+    "CapabilityLocalModelsRefused": {
+      "description": "The Computer did not start the action; nothing changed on it.",
+      "type": "object",
+      "unevaluatedProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/LocalSkillCommandIdentity"
+        },
+        {
+          "type": "object",
+          "required": ["type", "kind", "action", "refusal", "outcome"],
+          "properties": {
+            "type": {
+              "const": "executed"
+            },
+            "kind": {
+              "const": "local_models"
+            },
+            "action": {
+              "enum": [
+                "download",
+                "cancel",
+                "load",
+                "unload",
+                "remove",
+                "refresh"
+              ]
+            },
+            "model_id": {
+              "$ref": "#/$defs/LocalModelId"
+            },
+            "refusal": {
+              "$ref": "#/$defs/LocalModelActionRefusal"
+            },
+            "outcome": {
+              "const": "refused"
+            }
+          }
+        }
+      ]
+    },
+    "RunnerLocalModels": {
+      "description": "The Computer's model library. Sent after runner.hello, after every library change, and at most every 2 seconds while a download or load runs. revision grows within one connection.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "protocol_version",
+        "runner_id",
+        "sent_at",
+        "revision",
+        "local_models"
+      ],
+      "properties": {
+        "type": {
+          "const": "runner.local_models"
+        },
+        "protocol_version": {
+          "$ref": "#/$defs/ProtocolVersion"
+        },
+        "runner_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "sent_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "local_models": {
+          "$ref": "#/$defs/LocalModelsSnapshot"
+        }
+      }
     },
     "RunnerHello": {
       "type": "object",

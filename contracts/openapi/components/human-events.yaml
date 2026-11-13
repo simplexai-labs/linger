@@ -8,7 +8,8 @@ components:
         (id is the Document ID). document-access: the same, and the Document's access may have been
         revoked, so cached Document bytes must be dropped (id is the Document ID). directory, agents (availability, status, and activity),
         another-me, computers, connections, and work-items name a Tenant collection (id is the
-        Tenant ID). Producers add a value here when they start publishing a new resource type.
+        Tenant ID). local-models: a Local Computer's model library (id is the Computer ID).
+        Producers add a value here when they start publishing a new resource type.
       enum:
         [
           room,
@@ -20,6 +21,7 @@ components:
           work-items,
           document,
           document-access,
+          local-models,
         ]
     ResourceInvalidatedSseEvent:
       type: object

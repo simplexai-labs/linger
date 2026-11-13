@@ -171,6 +171,8 @@ func (a *App) publicRoutes() []contractRoute {
 		route(http.MethodDelete, "/v0/tenants/:tenantId/local-computers/:computerId/browser-connection", nil, session, a.deleteLocalComputerBrowserConnection),
 		route(http.MethodGet, "/v0/tenants/:tenantId/local-computers/:computerId/browser-connection", nil, session, a.getLocalComputerBrowserConnection),
 		route(http.MethodPut, "/v0/tenants/:tenantId/local-computers/:computerId/browser-connection", nil, session, a.putLocalComputerBrowserConnection),
+		route(http.MethodGet, "/v0/tenants/:tenantId/local-computers/:computerId/local-models", nil, session, a.getLocalComputerModels),
+		route(http.MethodPost, "/v0/tenants/:tenantId/local-computers/:computerId/local-models/:modelId/actions", nil, session, a.actOnLocalComputerModel),
 		route(http.MethodGet, "/v0/tenants/:tenantId/local-computers/:computerId/permissions", nil, session, a.getLocalComputerPermissions),
 		route(http.MethodPost, "/v0/tenants/:tenantId/local-computers/:computerId/permissions", nil, session, a.actOnLocalComputerPermission),
 		route(http.MethodPost, "/v0/tenants/:tenantId/local-computers/:computerId/skill-scans", nil, session, a.scanLocalSkills),

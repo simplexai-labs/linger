@@ -29,6 +29,7 @@ func (a *App) agentServiceRoutes() []contractRoute {
 		route(http.MethodPost, "/v0/agent-runtime/inputs/accept-trusted-notification", nil, agentService, a.acceptAgentRuntimeTrustedNotification),
 		route(http.MethodGet, "/v0/agent-runtime/local-computer", teamhubinternal.GetAgentRuntimeLocalComputerParams{}, agentService, a.getAgentRuntimeLocalComputer),
 		route(http.MethodPost, "/v0/agent-runtime/local-computers/connect", nil, agentService, a.connectAgentRuntimeLocalComputer),
+		route(http.MethodPost, "/v0/agent-runtime/local-computers/local-models", nil, agentService, a.recordAgentRuntimeLocalModels),
 		route(http.MethodPost, "/v0/agent-runtime/local-computers/remove", nil, agentService, a.removeAgentRuntimeLocalComputer),
 		route(http.MethodPost, "/v0/agent-runtime/local-computers/touch", nil, agentService, a.touchAgentRuntimeLocalComputer),
 		route(http.MethodPost, "/v0/agent-runtime/permission-reviews", nil, agentService, a.createRuntimePermissionReview),
