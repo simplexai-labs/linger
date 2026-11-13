@@ -42,7 +42,7 @@ Efficient AI model–harness co-design brings a full local agent to consumer Mac
     <th align="center" width="2600">RTX 3060<br>12 GB</th>
     <th align="center" width="2600">RTX 5090<br>32 GB</th>
   </tr>
-  <tr><td>Qwen3.8-Flash-Next</td><td align="center">needs 12 GB</td><td align="center">45.5</td><td align="center">179</td></tr>
+  <tr><td>Qwen3.8-Flash-Next</td><td align="center">95 (IQ1_M)¹</td><td align="center">45.5</td><td align="center">179</td></tr>
   <tr><td>LFM2.5-24B-A2B</td><td align="center">70–73</td><td align="center">97.8</td><td align="center">480–485</td></tr>
   <tr><td>Flint 40B-A2.5B</td><td align="center">61–63</td><td align="center">65.5</td><td align="center">251–252</td></tr>
   <tr><td>Qwen3.6-35B-A3B</td><td align="center">94–100</td><td align="center">91.8</td><td align="center">394–395</td></tr>
@@ -50,6 +50,8 @@ Efficient AI model–harness co-design brings a full local agent to consumer Mac
   <tr><td>Gemma 4 26B-A4B</td><td align="center">92–93</td><td align="center">78.0 (Q4 file)</td><td align="center">353–356</td></tr>
   <tr><td>Tiel Coder 35B-A3B</td><td align="center">83</td><td align="center">78.8</td><td align="center">337–345</td></tr>
 </table>
+
+¹ The IQ1_M result comes from the [Autopilot reference configuration](docs/local-inference.md#planning): NVIDIA 8 GB, 32 GB RAM and 64K context. The source does not specify the GPU model.
 
 Full results (**5 more models**!) can be found in [PolyStrata](https://github.com/simplexai-labs/PolyStrata#how-fast-is-it).
 
