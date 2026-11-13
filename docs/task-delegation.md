@@ -23,8 +23,10 @@ conversation goes on.
 | You press Cancel on it under _tasks running in the background_ | `canceled`, with its files and session kept  | The Meta, told that you canceled it      |
 
 <sub>A canceled Task is paused, not closed: the Meta can resume it with your
-next request or do something else. An AlterEgo never asks you anything; a
-question goes into its report, and the Meta decides whether to ask.</sub>
+next request or do something else. A task a voice call started has no Meta, so
+canceling it from the list cancels it the way the call does. An AlterEgo never
+asks you anything; a question goes into its report, and the Meta decides
+whether to ask.</sub>
 
 ## On the computer
 

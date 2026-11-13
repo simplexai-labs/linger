@@ -483,9 +483,35 @@ func TestHumanCancelsBackgroundTask(t *testing.T) {
 		t.Fatalf("resume send=%v", started)
 	}
 
-	// Only a member of the Room reaches it.
+	// Only a member of the Room reaches it, and only through its own Room.
 	code, _, body = env.request(alice, http.MethodPost, "/v0/rooms/room-missing/background-tasks/"+created.TaskID+"/cancel", nil, "")
 	if code != http.StatusNotFound {
 		t.Fatalf("cancel in unknown Room=%d %s", code, body)
+	}
+	otherRoomID := createPrivateRoom(t, env, alice, "Other room", "human-cancel-other-room")
+	code, _, body = env.request(alice, http.MethodPost, "/v0/rooms/"+otherRoomID+"/background-tasks/"+created.TaskID+"/cancel", nil, "")
+	if code != http.StatusOK || !strings.Contains(string(body), `"status":"not_running"`) {
+		t.Fatalf("cancel through another Room=%d %s", code, body)
+	}
+	assertDelegatedTaskState(t, env, created.TaskID, "running", "")
+
+	// A task a Live call started is canceled as Live cancels it: no Meta
+	// notice in its report stream, and Live sees it canceled.
+	live := createDelegatedTask(t, env, issued, "human-cancel-live", "Book the table", "Book the table.", roomID)
+	if _, err := env.pool.Exec(t.Context(), `INSERT INTO voice_live_tasks(work_item_id,room_id,owner_actor_id,home_room_id,ordinal,goal,surface)
+		SELECT $1,$2,author_actor_id,$2,1,'Book the table','web' FROM task_meta_callback_messages WHERE task_id=$3`,
+		live.TaskID, roomID, created.TaskID); err != nil {
+		t.Fatal(err)
+	}
+	code, _, body = env.request(alice, http.MethodPost, "/v0/rooms/"+roomID+"/background-tasks/"+live.TaskID+"/cancel", nil, "")
+	if code != http.StatusOK || !strings.Contains(string(body), `"status":"canceled"`) {
+		t.Fatalf("cancel Live task=%d %s", code, body)
+	}
+	assertDelegatedTaskState(t, env, live.TaskID, "canceled", "stopped")
+	if got := countRows(t, env, `SELECT count(*) FROM voice_live_tasks WHERE work_item_id=$1 AND canceled_at IS NOT NULL`, live.TaskID); got != 1 {
+		t.Fatal("Room cancel left the Live task uncanceled")
+	}
+	if got := countRows(t, env, `SELECT count(*) FROM task_meta_callback_messages WHERE task_id=$1`, live.TaskID); got != 0 {
+		t.Fatalf("Room cancel wrote %d callback messages for a Live task", got)
 	}
 }

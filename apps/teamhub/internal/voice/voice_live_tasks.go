@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentruntimestate"
 	idgen "github.com/simplexai-labs/linger/apps/teamhub/internal/ids"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/jobs"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/reminder"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/taskdelegation"
@@ -346,10 +345,7 @@ func (s *Service) stopVoiceLiveTask(ctx context.Context, tenantID, workItemID, a
 	}
 	defer tx.Rollback(ctx)
 	queries := store.New(tx)
-	if _, err := taskexecution.StopTask(ctx, queries, workItemID, actorID); err != nil && !errors.Is(err, taskexecution.ErrNotFound) {
-		return err
-	}
-	if err := jobs.InsertTx(ctx, tx, typedcard.StoppedTaskApprovalsArgs{TenantID: tenantID, TaskID: workItemID}, nil); err != nil {
+	if _, err := taskdelegation.StopTask(ctx, tx, queries, tenantID, workItemID, actorID); err != nil && !errors.Is(err, taskexecution.ErrNotFound) {
 		return err
 	}
 	if _, err := queries.CancelVoiceLiveTask(ctx, workItemID); err != nil {

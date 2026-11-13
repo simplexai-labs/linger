@@ -268,26 +268,21 @@ func StopTask(ctx context.Context, queries *store.Queries, taskID, actorID strin
 	return setDelegatedTaskStatus(ctx, queries, snapshot, status, "canceled", "stopped", "stopped", actorID, payload)
 }
 
-// CancelTaskByHuman stops a delegated Task's current turn exactly as
-// StopTask does, so the Task stays resumable, then tells its coordinating
-// Meta who canceled it. Canceling a canceled Task changes nothing and
-// returns revision 0.
-func CancelTaskByHuman(ctx context.Context, queries *store.Queries, taskID string, human store.Actor) (int64, error) {
+// NotifyMetaOfHumanCancel tells a stopped Task's coordinating Meta which
+// Human canceled it, so the Meta can tell the user and later resume the Task
+// or do something else. Call it in the transaction that stopped the Task.
+func NotifyMetaOfHumanCancel(ctx context.Context, queries *store.Queries, taskID string, human store.Actor) error {
 	if human.ID == "" || human.Kind != "human" {
-		return 0, ErrInvalid
-	}
-	revision, err := StopTask(ctx, queries, taskID, human.ID)
-	if err != nil || revision == 0 {
-		return revision, err
+		return ErrInvalid
 	}
 	snapshot, err := queries.LockTaskExecutionSnapshot(ctx, taskID)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	notice := human.DisplayName + " canceled Task " + snapshot.Title + " (" + taskID + "). " +
 		"Its current turn was stopped; its session and ./playground/" + taskID + "/ are kept, so it can be resumed. " +
 		"Tell the user it was canceled, then follow what they want next."
-	return revision, appendTaskCallback(ctx, queries, snapshot, snapshot.TaskExecutionGeneration.Int64, human.ID, notice)
+	return appendTaskCallback(ctx, queries, snapshot, snapshot.TaskExecutionGeneration.Int64, human.ID, notice)
 }
 
 // setDelegatedTaskStatus records a Meta-driven change outside the Worker

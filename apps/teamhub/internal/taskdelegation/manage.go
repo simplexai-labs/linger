@@ -196,16 +196,27 @@ func (s *Service) Stop(
 	}
 	return s.change(ctx, token, stopTaskTool, invocationID, taskID, requestHash,
 		func(tx pgx.Tx, queries *store.Queries, authorization agentauth.Authorization) (ChangeResult, error) {
-			revision, err := taskexecution.StopTask(ctx, queries, taskID, authorization.AgentActorID)
+			revision, err := StopTask(ctx, tx, queries, authorization.TenantID, taskID, authorization.AgentActorID)
 			if err != nil {
-				return ChangeResult{}, err
-			}
-			// Stopping expires the cards the AlterEgo was waiting on.
-			if err := jobs.InsertTx(ctx, tx, typedcard.StoppedTaskApprovalsArgs{TenantID: authorization.TenantID, TaskID: taskID}, nil); err != nil {
 				return ChangeResult{}, err
 			}
 			return ChangeResult{TaskID: taskID, Status: "canceled", ExecutionRevision: revision}, nil
 		})
+}
+
+// StopTask stops a delegated Task's current turn and expires the approval
+// cards its AlterEgo was waiting on; every stop, by a Meta, Live or a Human,
+// goes through here so the two never come apart. Stopping a canceled Task
+// changes nothing and returns revision 0.
+func StopTask(ctx context.Context, tx pgx.Tx, queries *store.Queries, tenantID, taskID, actorID string) (int64, error) {
+	revision, err := taskexecution.StopTask(ctx, queries, taskID, actorID)
+	if err != nil {
+		return 0, err
+	}
+	if err := jobs.InsertTx(ctx, tx, typedcard.StoppedTaskApprovalsArgs{TenantID: tenantID, TaskID: taskID}, nil); err != nil {
+		return 0, err
+	}
+	return revision, nil
 }
 
 // SendSystemInput wakes a delegated Task's AlterEgo with a system notice,

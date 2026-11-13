@@ -47,8 +47,9 @@ cancelBackgroundTask:
     description: >-
       Stops the Task as its Meta's task stop does: the current turn ends and
       its approval cards expire, but its session and playground stay, so the
-      Meta can resume it later. The Room's Meta is told who canceled it.
-      Canceling a Task that is no longer running changes nothing.
+      Meta can resume it later. The Room's Meta is told who canceled it; a
+      task a Live call started is canceled as Live's own cancel does instead.
+      Canceling a Task that is not running for this Room changes nothing.
     parameters:
       - name: roomId
         in: path
