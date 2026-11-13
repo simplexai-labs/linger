@@ -231,16 +231,44 @@ describe("BrowserConnectionDialog", () => {
     expect(route).toHaveBeenCalledWith("PUT", { extension_token: token });
   });
 
+  it.each([
+    ["BROWSER_CONNECTION_UNSUPPORTED", "Browser connection is not available"],
+    ["BROWSER_CONNECTION_TIMEOUT", "Connection timed out"],
+  ])("shows %s after a previously connected status", async (code, message) => {
+    const { queryClient, route } = setup(async () => connected);
+    expect(
+      await screen.findByText(
+        "Connected. Browser tasks use your Chrome and its sign-ins.",
+      ),
+    ).toBeVisible();
+    route.mockRejectedValue(
+      new TeamHubError({ code, message: "Status unavailable", status: 409 }),
+    );
+    await queryClient.refetchQueries();
+    expect(await screen.findByText(new RegExp(message))).toBeVisible();
+    expect(
+      screen.queryByText(
+        "Connected. Browser tasks use your Chrome and its sign-ins.",
+      ),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeVisible();
+    if (code === "BROWSER_CONNECTION_UNSUPPORTED") {
+      expect(screen.queryByRole("button", { name: "Reconfigure" })).toBeNull();
+      expect(screen.queryByLabelText("Extension token")).toBeNull();
+    }
+  });
+
   it("offers no form when the Computer cannot reuse Chrome", async () => {
     setup(async () => ({ ...isolated, state: "unsupported" }));
 
     expect(
       await screen.findByText(
-        "This Computer can't use your browser. Agents use a separate browser without your sign-ins.",
+        "Browser connection is not available in this Linger Computer build. Agents can use a separate browser without your sign-ins.",
       ),
     ).toBeVisible();
     await waitFor(() =>
       expect(screen.queryByLabelText("Extension token")).toBeNull(),
     );
+    expect(screen.getByRole("button", { name: "Check again" })).toBeVisible();
   });
 });

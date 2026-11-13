@@ -197,8 +197,7 @@ export class SetupWindowModule implements Module {
     });
     this.#window = window;
     void window.loadURL(SETUP_URL).catch(() => undefined);
-    // Whether this computer can serve a local model, found out while the
-    // page is read; the option appears once it can.
+    // The page explains local model support while this check runs.
     this.#ctx?.get<LocalServerModule>("LocalServer").inspect();
   }
 
@@ -221,6 +220,9 @@ export class SetupWindowModule implements Module {
         void local.begin(plan).catch(() => undefined);
         return;
       }
+      case "local.cancel":
+        await ctx.get<LocalServerModule>("LocalServer").cancelInstallation();
+        return;
       case "local.location.pick": {
         const picked = await dialog.showOpenDialog(this.#window!, {
           title: "Choose Where to Install Linger",
@@ -240,6 +242,11 @@ export class SetupWindowModule implements Module {
         await ctx
           .get<LocalServerModule>("LocalServer")
           .startSignIn(command.code);
+        return;
+      case "local.signin.configure":
+        await ctx
+          .get<LocalServerModule>("LocalServer")
+          .configurePiProvider(command.credentials);
         return;
       case "local.signin.open":
         await ctx.get<LocalServerModule>("LocalServer").openSignInPage();
@@ -401,10 +408,12 @@ const localServerState = (
   const {
     available,
     phase,
+    cancellable,
     message,
     steps,
     step,
     progress,
+    modelActivity,
     attempt,
     localModels,
     location,
@@ -415,10 +424,12 @@ const localServerState = (
   return {
     available,
     phase,
+    cancellable,
     message,
     steps,
     step,
     progress,
+    ...(modelActivity ? { modelActivity } : {}),
     attempt,
     localModels,
     location: {

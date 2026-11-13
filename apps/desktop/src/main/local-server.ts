@@ -36,6 +36,7 @@ import {
   removeRetrying,
   renameRetrying,
 } from "@linger/local-installation/fs-retry";
+import { redactLocalmodelsOutput } from "@linger/local-installation/localmodels-failure";
 import {
   markNativeRuntimeVerified,
   nativeRuntimeVerified,
@@ -47,6 +48,8 @@ import {
   TEAMHUB_BINARY_DIRECTORY,
 } from "@linger/local-installation/teamhub-binaries";
 import { adoptUserEnvironment } from "@linger/local-installation/user-environment";
+
+import type { SetupPiProviderCredentials } from "../shared/setup.js";
 
 import {
   NODE_RUNTIME_RELEASES,
@@ -108,6 +111,7 @@ export type LocalModelsCheck =
       // Why not, in the localmodels tool's words; present only when not
       // eligible.
       readonly reasons?: readonly string[];
+      readonly reasonMessages?: readonly string[];
     };
 
 // What to install, chosen on the setup page; the installer applies it at once.
@@ -176,6 +180,8 @@ export type LocalServerPhase =
   | "idle"
   | "preparing"
   | "installing"
+  | "stopping"
+  | "cancelled"
   | "ready"
   | "failed";
 
@@ -214,17 +220,24 @@ export interface RuntimeSignIn {
   readonly message?: string;
 }
 
+export interface LocalModelActivity {
+  readonly message: string;
+  readonly progress?: { readonly completed: number; readonly total?: number };
+}
+
 export interface LocalServerStatus {
   // Source installs ship for macOS arm64, Linux x64 and Windows x64 only, and need the
   // pinned source package or a developer checkout.
   readonly available: boolean;
   readonly phase: LocalServerPhase;
+  readonly cancellable: boolean;
   readonly message: string;
   // While installing: the steps shown, the current one and the overall share
   // done (0-1).
   readonly steps: readonly LocalServerStep[];
   readonly step: LocalServerStep;
   readonly progress: number;
+  readonly modelActivity?: LocalModelActivity;
   // Which installation this is; each Install or Try Again starts a new one.
   readonly attempt: number;
   readonly localModels: LocalModelsCheck;
@@ -304,6 +317,20 @@ const GiB = 1024 * MiB;
 // a local model needs its own on top.
 export const LOCATION_FREE_BYTES = 20 * GiB;
 
+interface InstallationAttempt {
+  readonly controller: AbortController;
+  readonly done: Promise<void>;
+  readonly finish: () => void;
+}
+
+function installationAttempt(): InstallationAttempt {
+  let finish!: () => void;
+  const done = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  return { controller: new AbortController(), done, finish };
+}
+
 // Runs Linger on this computer: fetches a pinned Node 26 and the linger
 // source, drives the bundled installer through its local API and signs the
 // window in to the result. The desktop itself is the Computer, so the
@@ -317,6 +344,8 @@ export class LocalServerModule implements Module {
   #message = "";
   #step: LocalServerStep = "prepare";
   #progress = 0;
+  #modelActivity: LocalModelActivity | undefined;
+  #installation: InstallationAttempt | undefined;
   // Counts installations started, so the setup page restarts its timers.
   #attempt = 0;
   #origin: string | undefined;
@@ -409,10 +438,15 @@ export class LocalServerModule implements Module {
     return {
       available,
       phase: this.#phase,
+      cancellable:
+        this.#phase === "installing" &&
+        this.#installation !== undefined &&
+        !this.#installation.controller.signal.aborted,
       message: this.#message,
       steps: this.#steps(),
       step: this.#step,
       progress: this.#progress,
+      ...(this.#modelActivity ? { modelActivity: this.#modelActivity } : {}),
       attempt: this.#attempt,
       localModels: this.#check,
       location: {
@@ -435,6 +469,17 @@ export class LocalServerModule implements Module {
       this.#running = undefined;
     });
     return this.#running;
+  }
+
+  async cancelInstallation(): Promise<void> {
+    const attempt = this.#installation;
+    if (!this.#running || this.#phase !== "installing" || !attempt) return;
+    attempt.controller.abort();
+    this.#set(
+      "stopping",
+      "Stopping this installation. Waiting for the current step to finish safely…",
+    );
+    await attempt.done;
   }
 
   // Installs into a folder the person picked, once it can hold Linger; null
@@ -587,6 +632,7 @@ export class LocalServerModule implements Module {
           }
         : {}),
       ...(!eligible && reasons.length ? { reasons } : {}),
+      ...(!eligible && messages.length ? { reasonMessages: messages } : {}),
     };
   }
 
@@ -607,13 +653,19 @@ export class LocalServerModule implements Module {
     const status = this.status();
     if (!status.available)
       throw new Error("Running Linger on this computer is not supported here");
-    const signal = this.#abort.signal;
+    let installation: InstallationAttempt | undefined = installationAttempt();
+    this.#installation = installation;
+    const signal = AbortSignal.any([
+      this.#abort.signal,
+      installation.controller.signal,
+    ]);
     const home = this.#location ?? this.#home;
     this.#attempt += 1;
     try {
       // A retry starts over from the first step.
       this.#step = "prepare";
       this.#progress = 0;
+      this.#modelActivity = undefined;
       this.#endSignIn();
       this.#advance("prepare", 0, "Checking this computer…");
       await this.#adoptSourceKeys(home);
@@ -657,13 +709,36 @@ export class LocalServerModule implements Module {
       const installer = await this.#timed("installer_launch", () =>
         this.#launchInstaller(node, home, repo, signal),
       );
-      const runInstaller = (next: LocalServerPlan, fresh = false) =>
-        installer.run(
-          next,
-          signal,
-          (stage, share, text) => this.#advance(stage, share, text),
-          fresh,
-        );
+      const runInstaller = async (next: LocalServerPlan, fresh = false) => {
+        this.#abort.signal.throwIfAborted();
+        // Preparation and its first job share cancellation ownership.
+        const attempt = (installation ??= installationAttempt());
+        const runSignal = AbortSignal.any([
+          this.#abort.signal,
+          attempt.controller.signal,
+        ]);
+        this.#installation = attempt;
+        this.#ctx?.bus.emit("local-server.changed");
+        try {
+          const result = await installer.run(
+            next,
+            runSignal,
+            (stage, share, text, activity) => {
+              this.#modelActivity = activity;
+              this.#advance(stage, share, text);
+            },
+            fresh,
+            attempt.controller.signal,
+          );
+          installation = undefined;
+          return result;
+        } finally {
+          // Sign-in and connection can outlive the job this controller owns.
+          this.#installation = undefined;
+          attempt.finish();
+          this.#ctx?.bus.emit("local-server.changed");
+        }
+      };
       // Changed keys reach the services only when the installation runs
       // again, even after one that finished.
       let job = await runInstaller(plan, keysChanged);
@@ -672,13 +747,15 @@ export class LocalServerModule implements Module {
       // reruns the installation for it.
       for (;;) {
         const switchTo = job.signInRequired
-          ? await this.#awaitSignIn(installer, signal)
+          ? await this.#awaitSignIn(installer, this.#abort.signal)
           : undefined;
         if (!switchTo) break;
         this.#endSignIn();
         this.#step = "services";
         job = await runInstaller({ ...plan, runtime: switchTo }, true);
       }
+      this.#abort.signal.throwIfAborted();
+      this.#modelActivity = undefined;
       // The desktop's Computer runs the runtime this installer set up, with
       // its profile, rather than whatever its PATH finds.
       const runtime = await installer.runtime();
@@ -705,11 +782,26 @@ export class LocalServerModule implements Module {
       this.#ready(job.origin);
       await this.#ctx!.get<EnrollmentModule>("Enrollment").enroll();
       this.#advance("agents", 0, "Preparing your agents…");
-      await this.#awaitAgents(job.origin, signal);
+      await this.#awaitAgents(job.origin, this.#abort.signal);
       this.#set("ready", "Linger is running on this computer.");
     } catch (error) {
       this.#endSignIn();
-      if (signal.aborted) return;
+      this.#modelActivity = undefined;
+      if (error instanceof InstallerStopUnconfirmed) {
+        this.#set("failed", error.message);
+        throw error;
+      }
+      if (
+        installation?.controller.signal.aborted &&
+        !this.#abort.signal.aborted
+      ) {
+        this.#set(
+          "cancelled",
+          "Installation stopped. Existing downloads, data and services were kept. Try again to continue.",
+        );
+        return;
+      }
+      if (this.#abort.signal.aborted) return;
       const message = error instanceof Error ? error.message : String(error);
       this.#ctx?.log.warn("local_server.install_failed", {
         step: this.#step,
@@ -717,6 +809,9 @@ export class LocalServerModule implements Module {
       });
       this.#set("failed", message);
       throw error;
+    } finally {
+      this.#installation = undefined;
+      installation?.finish();
     }
   }
 
@@ -735,7 +830,10 @@ export class LocalServerModule implements Module {
       this.#progress,
       (steps.indexOf(step) + share) / steps.length,
     );
-    this.#set("installing", message);
+    this.#set(
+      this.#installation?.controller.signal.aborted ? "stopping" : "installing",
+      message,
+    );
   }
 
   // Waits on the "signin" step until the installer finds the runtime signed
@@ -964,6 +1062,26 @@ export class LocalServerModule implements Module {
     else this.#showSignIn(runtime, login);
   }
 
+  async configurePiProvider(
+    credentials: SetupPiProviderCredentials,
+  ): Promise<void> {
+    const installer = this.#signInInstaller;
+    if (!installer || this.#signIn?.runtime !== "pi") return;
+    this.#signIn = { runtime: "pi", state: "starting" };
+    this.#ctx?.bus.emit("local-server.changed");
+    const login = await installer
+      .configurePiProvider(credentials)
+      .catch(() => null);
+    if (this.#signInInstaller !== installer) return;
+    if (login?.state === "ready") this.#signInWake?.();
+    else
+      this.#showSignIn("pi", {
+        state: "failed",
+        message:
+          "Provider setup did not finish. Check the provider, API key and network, then try again.",
+      });
+  }
+
   // Stops the runtime's login the person started; they can start it again.
   async cancelSignIn(): Promise<void> {
     const installer = this.#signInInstaller;
@@ -1009,7 +1127,7 @@ export class LocalServerModule implements Module {
 
   #set(phase: LocalServerPhase, message: string): void {
     // A failure stays on the step it happened in.
-    if (phase !== "installing" && phase !== "ready" && phase !== "failed") {
+    if (["idle", "preparing"].includes(phase)) {
       this.#progress = 0;
       this.#step = "prepare";
     }
@@ -2093,6 +2211,7 @@ interface Job {
   readonly instance: string;
   readonly state: string;
   readonly createdAt: string;
+  readonly setupChoice?: string;
   readonly preparation?: string;
   readonly stage?: string;
   readonly message?: string;
@@ -2103,7 +2222,11 @@ interface Job {
   readonly stages: readonly {
     readonly id: string;
     readonly state: string;
-    readonly progress?: { readonly completed: number; readonly total?: number };
+    readonly progress?: {
+      readonly completed: number;
+      readonly total?: number;
+      readonly unit?: string;
+    };
   }[];
 }
 
@@ -2120,11 +2243,12 @@ const STAGES: Record<string, readonly [LocalServerStep, number, number]> = {
 };
 
 // Done: services run and the owner exists. A runtime sign-in still missing
-// is the setup page's own step.
+// is the setup page's own step. Cancelling a finished auth handoff preserves
+// its origin and error code, even though the manager changes it to canceled.
 const finished = (job: Job): boolean =>
   !!job.origin &&
   (job.state === "succeeded" ||
-    (job.state === "waiting_user" &&
+    (["waiting_user", "canceled"].includes(job.state) &&
       job.errorCode === "RUNTIME_AUTH_REQUIRED"));
 
 // The runtime has no sign-in on this computer. The desktop connects the
@@ -2137,13 +2261,33 @@ const signInRequired = (job: Job): boolean =>
     (stage) => stage.id === "runtime" && stage.state === "waiting_user",
   );
 
-// Why a local model could not be deployed after all.
-const LOCAL_MODEL_FAILURES = new Set([
-  "LOCAL_MODELS_APPROVAL_REQUIRED",
-  "LOCAL_MODELS_UNAVAILABLE",
-  "LOCAL_MODELS_RECOVERY_REQUIRED",
-  "GPU_SHARING_REVOCATION_FAILED",
-]);
+class InstallerStopUnconfirmed extends Error {
+  constructor(cause: unknown) {
+    super(
+      "The installer could not confirm stopping. It may still be running. Try again to check its status; do not remove its files.",
+      { cause },
+    );
+  }
+}
+
+function localModelFailureMessage(job: Pick<Job, "errorCode" | "message">) {
+  const guidance: Record<string, string> = {
+    LOCAL_MODELS_APPROVAL_REQUIRED:
+      "Review the local model plan before installing. Use Back to select Local model, then install again.",
+    LOCAL_MODELS_UNAVAILABLE:
+      "Use Back to review local model support and choose another AI runtime, or Try Again to check again.",
+    LOCAL_MODELS_RECOVERY_REQUIRED:
+      "Existing resources were preserved. Use Show Logs to review the failed step, then Try Again. Use Back to change your setup.",
+    GPU_SHARING_REVOCATION_FAILED:
+      "Existing models were not stopped. Try Again before approving a new plan.",
+  };
+  const code = job.errorCode ?? "";
+  const recovery = Object.hasOwn(guidance, code) ? guidance[code] : undefined;
+  const cause = redactLocalmodelsOutput(job.message ?? "");
+  return recovery
+    ? [cause, recovery].filter(Boolean).join("\n")
+    : cause || "The installation stopped";
+}
 
 // The desktop is the installer's only client here: it starts the job and
 // follows it, and nothing of the installer UI is shown.
@@ -2187,10 +2331,18 @@ export class InstallerApi {
   async run(
     plan: LocalServerPlan,
     signal: AbortSignal,
-    onStep: (step: LocalServerStep, share: number, message: string) => void,
+    onStep: (
+      step: LocalServerStep,
+      share: number,
+      message: string,
+      activity?: LocalModelActivity,
+    ) => void,
     fresh = false,
+    cancellation?: AbortSignal,
   ): Promise<{ readonly origin: string; readonly signInRequired: boolean }> {
+    signal.throwIfAborted();
     const { items } = await this.#json<{ items: Job[] }>("/api/jobs");
+    signal.throwIfAborted();
     const latest = items
       .filter((item) => item.instance === LOCAL_INSTANCE && !item.preparation)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
@@ -2217,10 +2369,16 @@ export class InstallerApi {
                 () => "codex",
               )
             : plan.runtime;
-      job = await this.#json<Job>("/api/jobs", {
-        instance: LOCAL_INSTANCE,
-        ...(setupChoice ? { setupChoice } : {}),
-      });
+      signal.throwIfAborted();
+      try {
+        job = await this.#json<Job>("/api/jobs", {
+          instance: LOCAL_INSTANCE,
+          ...(setupChoice ? { setupChoice } : {}),
+        });
+      } catch (error) {
+        if (cancellation?.aborted) throw new InstallerStopUnconfirmed(error);
+        throw error;
+      }
     }
     // The person chose the local model after seeing what it needs, so its
     // deployment plan is approved here; once, against a plan that keeps
@@ -2228,64 +2386,118 @@ export class InstallerApi {
     // first; that is asked for once too.
     let approved: string | undefined;
     let replanned = false;
-    for (;;) {
-      const at = job.stage ? STAGES[job.stage] : undefined;
-      if (at) {
-        const current = job.stage;
-        const stage = job.stages.find((item) => item.id === current);
-        const counter = stage?.progress;
-        // Native services report readiness only in the message ("2/4 ready").
-        const ready = /\((\d+)\/(\d+) ready\)/.exec(job.message ?? "");
-        const part =
-          stage?.state === "succeeded" || stage?.state === "skipped"
-            ? 1
-            : counter?.total
-              ? counter.completed / counter.total
-              : ready
-                ? Number(ready[1]) / Math.max(1, Number(ready[2]))
-                : 0;
-        onStep(at[0], at[1] + (at[2] - at[1]) * part, job.message ?? "");
+    try {
+      for (;;) {
+        if (finished(job))
+          return { origin: job.origin!, signInRequired: signInRequired(job) };
+        signal.throwIfAborted();
+        const at = job.stage ? STAGES[job.stage] : undefined;
+        if (at) {
+          const current = job.stage;
+          const stage = job.stages.find((item) => item.id === current);
+          const counter = stage?.progress;
+          // Native services report readiness only in the message ("2/4 ready").
+          const ready = /\((\d+)\/(\d+) ready\)/.exec(job.message ?? "");
+          const part =
+            stage?.state === "succeeded" || stage?.state === "skipped"
+              ? 1
+              : counter?.total
+                ? counter.completed / counter.total
+                : ready
+                  ? Number(ready[1]) / Math.max(1, Number(ready[2]))
+                  : 0;
+          const activity =
+            (plan.runtime === "local" || job.setupChoice === "local-models") &&
+            current === "runtime"
+              ? {
+                  message: job.message || "Preparing the local model…",
+                  ...(counter?.unit === "bytes" &&
+                  Number.isSafeInteger(counter.completed) &&
+                  counter.completed >= 0 &&
+                  (counter.total === undefined ||
+                    (Number.isSafeInteger(counter.total) &&
+                      counter.total >= counter.completed))
+                    ? {
+                        progress: {
+                          completed: counter.completed,
+                          ...(counter.total === undefined
+                            ? {}
+                            : { total: counter.total }),
+                        },
+                      }
+                    : {}),
+                }
+              : undefined;
+          onStep(
+            at[0],
+            at[1] + (at[2] - at[1]) * part,
+            job.message ?? "",
+            activity,
+          );
+        }
+        const planId = job.localModelsPlan?.planId;
+        if (
+          job.state === "waiting_user" &&
+          job.errorCode === "LOCAL_MODELS_APPROVAL_REQUIRED" &&
+          plan.runtime === "local" &&
+          planId &&
+          planId !== approved
+        ) {
+          approved = planId;
+          onStep("services", 0, "Deploying the local model");
+          job = await this.#json<Job>(
+            `/api/jobs/${encodeURIComponent(job.id)}/retry`,
+            { localModelsApproval: planId },
+          );
+          continue;
+        }
+        if (
+          job.state === "waiting_user" &&
+          job.errorCode === "LOCAL_MODELS_RECOVERY_REQUIRED" &&
+          plan.runtime === "local" &&
+          !replanned
+        ) {
+          replanned = true;
+          onStep("services", 0, "Deploying the local model");
+          job = await this.#json<Job>(
+            `/api/jobs/${encodeURIComponent(job.id)}/retry`,
+            { localModelsReplan: true },
+          );
+          continue;
+        }
+        if (!["queued", "running"].includes(job.state))
+          throw new Error(localModelFailureMessage(job));
+        await delay(this.#pollMs, undefined, { signal });
+        job = await this.#json<Job>(`/api/jobs/${encodeURIComponent(job.id)}`);
       }
-      if (finished(job))
-        return { origin: job.origin!, signInRequired: signInRequired(job) };
-      const planId = job.localModelsPlan?.planId;
-      if (
-        job.state === "waiting_user" &&
-        job.errorCode === "LOCAL_MODELS_APPROVAL_REQUIRED" &&
-        plan.runtime === "local" &&
-        planId &&
-        planId !== approved
-      ) {
-        approved = planId;
-        onStep("services", 0, "Deploying the local model");
+    } catch (error) {
+      if (!cancellation?.aborted) throw error;
+      // The manager owns rollback and safe checkpoints. Never kill its process
+      // or stop a service directly from the desktop.
+      try {
+        job = await this.#json<Job>(`/api/jobs/${encodeURIComponent(job.id)}`);
+        if (finished(job))
+          return { origin: job.origin!, signInRequired: signInRequired(job) };
         job = await this.#json<Job>(
-          `/api/jobs/${encodeURIComponent(job.id)}/retry`,
-          { localModelsApproval: planId },
+          `/api/jobs/${encodeURIComponent(job.id)}/cancel`,
+          {},
         );
-        continue;
+        for (;;) {
+          if (finished(job))
+            return { origin: job.origin!, signInRequired: signInRequired(job) };
+          if (!["queued", "running", "waiting_user"].includes(job.state)) break;
+          await delay(this.#pollMs);
+          job = await this.#json<Job>(
+            `/api/jobs/${encodeURIComponent(job.id)}`,
+          );
+        }
+      } catch (error) {
+        throw new InstallerStopUnconfirmed(error);
       }
-      if (
-        job.state === "waiting_user" &&
-        job.errorCode === "LOCAL_MODELS_RECOVERY_REQUIRED" &&
-        plan.runtime === "local" &&
-        !replanned
-      ) {
-        replanned = true;
-        onStep("services", 0, "Deploying the local model");
-        job = await this.#json<Job>(
-          `/api/jobs/${encodeURIComponent(job.id)}/retry`,
-          { localModelsReplan: true },
-        );
-        continue;
-      }
-      if (!["queued", "running"].includes(job.state))
-        throw new Error(
-          LOCAL_MODEL_FAILURES.has(job.errorCode ?? "")
-            ? "This computer can't run the local model right now. Choose another AI runtime and try again."
-            : job.message || "The installation stopped",
-        );
-      await delay(this.#pollMs, undefined, { signal });
-      job = await this.#json<Job>(`/api/jobs/${encodeURIComponent(job.id)}`);
+      throw new Error(
+        "Installation stopped. Existing downloads and data were kept.",
+        { cause: error },
+      );
     }
   }
 
@@ -2317,6 +2529,15 @@ export class InstallerApi {
           ...(code ? { code } : {}),
         })
       : this.#json(`/api/runtime-login?instance=${LOCAL_INSTANCE}`);
+  }
+
+  configurePiProvider(
+    credentials: SetupPiProviderCredentials,
+  ): Promise<RuntimeLogin> {
+    return this.#json("/api/runtime-login", {
+      instance: LOCAL_INSTANCE,
+      ...credentials,
+    });
   }
 
   #call(

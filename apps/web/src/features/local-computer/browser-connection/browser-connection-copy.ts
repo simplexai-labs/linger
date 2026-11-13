@@ -1,10 +1,43 @@
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
-import type { TeamHubBrowserConnectionStatus } from "@/features/teamhub/teamhub-types";
+import type {
+  TeamHubBrowserConnectionStatus,
+  TeamHubLocalComputerPage,
+} from "@/features/teamhub/teamhub-types";
+
+import { isUpgradeRecommended } from "../computer-version";
 
 export const PLAYWRIGHT_EXTENSION_URL =
   "https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm";
 
 type BrowserConnectionTone = "success" | "warning" | "neutral";
+
+export type BrowserConnectionComputer = Pick<
+  TeamHubLocalComputerPage["items"][number],
+  "platform" | "daemon_version" | "recommended_version" | "upgrade_required"
+>;
+
+export function isBrowserConnectionUnsupported(error: unknown): boolean {
+  return (
+    error instanceof TeamHubError &&
+    error.code === "BROWSER_CONNECTION_UNSUPPORTED"
+  );
+}
+
+export function browserConnectionUnavailableCopy(
+  computer?: BrowserConnectionComputer,
+): string {
+  if (computer?.platform === "linux") {
+    return "Connecting your everyday Chrome is not supported on Linux. Agents can use a separate browser without your sign-ins.";
+  }
+  if (
+    computer &&
+    (computer.upgrade_required ||
+      (computer.daemon_version && isUpgradeRecommended(computer)))
+  ) {
+    return "This Computer needs an update before connecting your browser. Open Advanced > Update in this Computer's settings.";
+  }
+  return "Browser connection is not available in this Linger Computer build. Agents can use a separate browser without your sign-ins.";
+}
 
 export function browserConnectionStateCopy(
   state: TeamHubBrowserConnectionStatus["state"],
@@ -68,7 +101,10 @@ export function browserConnectionStateCopy(
   }
 }
 
-export function browserConnectionErrorMessage(error: unknown): string {
+export function browserConnectionErrorMessage(
+  error: unknown,
+  computer?: BrowserConnectionComputer,
+): string {
   const code = error instanceof TeamHubError ? error.code : undefined;
   switch (code) {
     case "INVALID_BROWSER_TOKEN":
@@ -78,7 +114,7 @@ export function browserConnectionErrorMessage(error: unknown): string {
     case "LOCAL_COMPUTER_NOT_FOUND":
       return "Can't find this Computer. It may have been removed.";
     case "BROWSER_CONNECTION_UNSUPPORTED":
-      return "Linger Computer on this Computer is out of date. Update it, then connect your browser.";
+      return browserConnectionUnavailableCopy(computer);
     case "BROWSER_CONNECTION_TIMEOUT":
       return "Connection timed out. Make sure Chrome is open and the extension is enabled, then try again.";
     case "BROWSER_TOKEN_REJECTED":

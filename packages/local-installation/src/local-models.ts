@@ -49,6 +49,71 @@ interface Options {
 interface Dependencies {
   localmodels?: typeof runLocalmodels;
 }
+function stackFailureSummary(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return;
+  if (
+    "event" in value &&
+    value.event === "error" &&
+    "schema" in value &&
+    value.schema === "localmodels.stack-error/v1" &&
+    "causeCode" in value &&
+    typeof value.causeCode === "string"
+  ) {
+    const causes: Record<string, string> = {
+      STACK_APPLY_LOCKED:
+        "Another local model operation is running. Wait for it to finish, then retry.",
+      STACK_APPROVAL_MISMATCH:
+        "The local model approval no longer matches the plan. Review a new plan.",
+      STACK_PLAN_CHANGED:
+        "The local model plan changed. Review the updated resource requirements.",
+      STACK_REPLAN_FAILED:
+        "The local model planner could not refresh the plan. Check local model support and retry.",
+      STACK_APPLY_INTERRUPTED:
+        "Local model installation was interrupted. Retry to check the saved state.",
+      STACK_APPLY_FAILED:
+        "The local model operation stopped before it could finish. Review the logs and retry.",
+    };
+    return Object.hasOwn(causes, value.causeCode)
+      ? causes[value.causeCode]
+      : undefined;
+  }
+  if (
+    !("event" in value) ||
+    value.event !== "result" ||
+    !("ok" in value) ||
+    value.ok !== false ||
+    !("components" in value) ||
+    !Array.isArray(value.components)
+  )
+    return;
+  const labels: Record<string, string> = {
+    tools: "Runtime tools",
+    llm: "LLM",
+    decision: "Decision model",
+    search: "Search",
+    gateway: "Gateway",
+    acceptance: "Verification",
+  };
+  const summary: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value.components) {
+    const component: unknown = item;
+    if (
+      !component ||
+      typeof component !== "object" ||
+      !("component" in component) ||
+      typeof component.component !== "string" ||
+      !Object.hasOwn(labels, component.component) ||
+      seen.has(component.component) ||
+      !("status" in component) ||
+      (component.status !== "failed" && component.status !== "skipped")
+    )
+      continue;
+    seen.add(component.component);
+    summary.push(`${labels[component.component]}: ${component.status}.`);
+  }
+  return summary.length ? summary.join(" ") : undefined;
+}
 function review(value: unknown): LocalModelsPlanSummary {
   const v = value as LocalModelsPlanSummary & { schema?: string };
   if (
@@ -212,6 +277,7 @@ export async function prepareLocalModels(
       (await readGpuSharing(instance)) ??
       DEFAULT_GPU_SHARING;
     const invoke = dependencies.localmodels ?? runLocalmodels;
+    let applyFailure: string | undefined;
     const command = async (args: string[]) => {
       let buffer = "";
       return invoke(home, args, {
@@ -233,6 +299,8 @@ export async function prepareLocalModels(
             } catch {
               continue;
             }
+            if (args[0] === "stack" && args[1] === "apply")
+              applyFailure = stackFailureSummary(event) ?? applyFailure;
             if (
               event?.event === "progress" &&
               typeof event.component === "string" &&
@@ -375,7 +443,13 @@ export async function prepareLocalModels(
     if (applied.code !== 0)
       return action(
         "LOCAL_MODELS_RECOVERY_REQUIRED",
-        "Local model installation or verification did not finish. Existing resources were preserved.",
+        [
+          "Local model installation or verification did not finish.",
+          applyFailure,
+          "Existing resources were preserved.",
+        ]
+          .filter(Boolean)
+          .join(" "),
       );
     const observed = await observe();
     if (!observed?.ready)

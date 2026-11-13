@@ -35,6 +35,11 @@ build:assets` to check the initial JS budget.
   may inject `fetchRequest` (`fetchDouble`) instead.
 - Unit tests must not depend on machine speed: rely on the global 5s async wait (Testing Library and `vi.waitFor`) instead of per-test `timeout` options, use fake timers for time-based behavior, and put real Vite/Rollup builds in `*.build.test.ts`.
 - TanStack Query owns remote state; route loaders only ensure feature-owned queries.
+- Browser connection capability errors do not prove the Computer is outdated.
+  Use platform and known version metadata for guidance, omit unavailable Connect
+  actions, and keep status failures retryable. Damaged saved connections remain
+  repairable by pasting a new token. Fresh status errors take precedence over a
+  cached successful connection.
 - Components do not handwrite TeamHub endpoints or wire DTOs. Every TeamHub
   request names a generated contract path through the `openapi-fetch` client in
   `src/features/teamhub/teamhub-api.ts`; SSE, XHR upload, and download URLs use

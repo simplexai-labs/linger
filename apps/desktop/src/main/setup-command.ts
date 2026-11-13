@@ -9,6 +9,59 @@ const providerKey = z
   .trim()
   .regex(/^[A-Za-z0-9._~+/=:-]{0,512}$/, "Invalid key");
 
+const runtimeApiKey = z
+  .string()
+  .trim()
+  .min(1, "Enter an API key.")
+  .max(4096, "The API key is too long.")
+  .refine(
+    (key) =>
+      [...key].every(
+        (character) =>
+          character.charCodeAt(0) > 32 && character.charCodeAt(0) !== 127,
+      ),
+    "The API key must not contain spaces or control characters.",
+  );
+
+const piCredentials = z.discriminatedUnion("provider", [
+  z
+    .object({
+      provider: z.enum(["openai", "anthropic"]),
+      apiKey: runtimeApiKey,
+    })
+    .strict(),
+  z
+    .object({
+      provider: z.literal("openai-compatible"),
+      apiKey: runtimeApiKey,
+      baseUrl: z
+        .string()
+        .trim()
+        .max(2048)
+        .refine((value) => {
+          try {
+            const url = new URL(value);
+            return (
+              !url.username &&
+              !url.password &&
+              !url.search &&
+              !url.hash &&
+              (url.protocol === "https:" ||
+                (url.protocol === "http:" &&
+                  ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))
+            );
+          } catch {
+            return false;
+          }
+        }, "Use a credential-free HTTPS endpoint, or HTTP on localhost."),
+      model: z
+        .string()
+        .trim()
+        .regex(/^[-a-zA-Z0-9_./:]{1,256}$/, "Enter a valid model ID."),
+    })
+    .strict(),
+]);
+
 const setupCommand = z.discriminatedUnion("op", [
   z
     .object({ op: z.literal("server.set"), serverUrl: z.string().max(2048) })
@@ -27,6 +80,13 @@ const setupCommand = z.discriminatedUnion("op", [
         .optional(),
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("local.signin.configure"),
+      credentials: piCredentials,
+    })
+    .strict(),
+  z.object({ op: z.literal("local.cancel") }).strict(),
   z.object({ op: z.literal("local.location.pick") }).strict(),
   z.object({ op: z.literal("local.location.reset") }).strict(),
   z
@@ -70,5 +130,17 @@ const setupCommand = z.discriminatedUnion("op", [
 ]);
 
 // Commands come from a local page, but are still validated at the boundary.
-export const parseSetupCommand = (value: unknown): SetupCommand =>
-  setupCommand.parse(value) as SetupCommand;
+export function parseSetupCommand(value: unknown): SetupCommand {
+  const result = setupCommand.safeParse(value);
+  if (result.success) return result.data;
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    "op" in value &&
+    value.op === "local.signin.configure"
+  )
+    throw new Error(
+      "Check the provider settings. Enter an API key without spaces and, for a compatible provider, a valid HTTPS or localhost endpoint and model ID.",
+    );
+  throw result.error;
+}

@@ -11,6 +11,11 @@ stop unrelated processes, pull mutable images, or delete volumes as recovery.
 Every installation runs natively from a Linger source checkout; Docker is not
 used.
 
+Local model recovery messages summarize only known failed or skipped components
+and allowlisted guard codes from the upstream JSONL protocol. Native component
+details and exception text stay private; they are not copied into public
+installation events. An operation failure does not imply hardware ineligibility.
+
 Each instance directory holds `user.env` (0600), the only file a person edits:
 `COMPOSIO_API_KEY`, `SONIOX_API_KEY`, `XAI_API_KEY` and `TZ`
 (`user-environment.ts`). Every mode merges it into the generated

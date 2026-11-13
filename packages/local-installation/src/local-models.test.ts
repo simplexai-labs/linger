@@ -193,6 +193,65 @@ test("forwards actual split JSONL byte counters but never raw output", async () 
   );
   expect(JSON.stringify(f.options.onEvent.mock.calls)).not.toContain("hidden");
 });
+test("keeps failed and skipped stack components in safe recovery feedback", async () => {
+  const f = await fixture();
+  await prepareLocalModels(f.instance, f.options, { localmodels: f.call });
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (...args) => {
+    if (args[1][1] !== "apply") return original(...args);
+    const result = {
+      event: "result",
+      ok: false,
+      components: [
+        { component: "llm", status: "failed", detail: "token=private" },
+        { component: "search", status: "failed" },
+        { component: "gateway", status: "skipped" },
+        { component: "acceptance", status: "skipped" },
+        { component: "private-component", status: "failed" },
+      ],
+    };
+    const json = JSON.stringify(result);
+    args[2]?.onOutput?.(json.slice(0, 50));
+    args[2]?.onOutput?.(json.slice(50) + "\n");
+    return { code: 1, stdout: "", stderr: "token=private" };
+  });
+  const result = await prepareLocalModels(
+    f.instance,
+    { ...f.options, localModelsApproval: f.id },
+    { localmodels: f.call },
+  );
+  expect(result?.message).toContain(
+    "LLM: failed. Search: failed. Gateway: skipped. Verification: skipped.",
+  );
+  expect(result?.message).toContain("Existing resources were preserved");
+  expect(JSON.stringify(result)).not.toContain("private");
+});
+
+test("uses an upstream guard code for recovery without leaking exception text", async () => {
+  const f = await fixture();
+  await prepareLocalModels(f.instance, f.options, { localmodels: f.call });
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (...args) => {
+    if (args[1][1] !== "apply") return original(...args);
+    args[2]?.onOutput?.(
+      JSON.stringify({
+        schema: "localmodels.stack-error/v1",
+        event: "error",
+        code: "STACK_APPLY_FAILED",
+        causeCode: "STACK_APPLY_LOCKED",
+        message: "token=private",
+      }) + "\n",
+    );
+    return { code: 2, stdout: "", stderr: "token=private" };
+  });
+  const result = await prepareLocalModels(
+    f.instance,
+    { ...f.options, localModelsApproval: f.id },
+    { localmodels: f.call },
+  );
+  expect(result?.message).toContain("Another local model operation is running");
+  expect(JSON.stringify(result)).not.toContain("private");
+});
 test("replanning requires a separate review and never silently approves", async () => {
   const f = await fixture();
   await prepareLocalModels(f.instance, f.options, { localmodels: f.call });

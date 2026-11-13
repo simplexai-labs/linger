@@ -717,6 +717,10 @@
         flex-wrap: wrap;
         row-gap: 8px;
       }
+      .choice.local .sub {
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
       .pick {
         width: 100%;
         display: flex;
@@ -837,6 +841,21 @@
         width: 380px;
         margin: 26px auto 0;
         padding: 20px 22px 18px;
+      }
+      .transfer-note {
+        margin: 10px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+      }
+      .transfer-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 10px;
+      }
+      section[data-stopped="true"] .fill::after {
+        display: none;
       }
       .now {
         display: flex;
@@ -1033,7 +1052,9 @@
         display: none;
       }
       .signin-modal .sheet {
-        width: 340px;
+        width: min(380px, calc(100vw - 32px));
+        max-height: calc(100vh - 32px);
+        overflow-y: auto;
         padding: 22px 22px 18px;
         border-radius: 14px;
         background: #fff;
@@ -1079,6 +1100,48 @@
       }
       .signin-modal .actions .primary {
         width: 100%;
+      }
+      .signin-modal .provider-form,
+      .signin-modal .provider-fields {
+        display: grid;
+        gap: 12px;
+      }
+      .signin-modal .provider-form {
+        width: 100%;
+        margin: 0 0 14px;
+      }
+      .signin-modal .provider-fields {
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+      .signin-modal .provider-fields input,
+      .signin-modal .provider-fields select {
+        width: 100%;
+        height: 38px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--ink);
+        font: inherit;
+        font-size: 13px;
+      }
+      .signin-modal .provider-fields input:focus-visible {
+        outline: 2px solid var(--ink);
+        outline-offset: 2px;
+      }
+      .signin-modal .provider-fields .hint {
+        margin: 6px 0 0;
+        font-size: 12px;
+      }
+      .signin-modal .provider-fields input::placeholder {
+        color: var(--muted);
+        opacity: 1;
+      }
+      .signin-modal .provider-fields:disabled {
+        opacity: 0.6;
       }
       .signin-modal .row {
         display: flex;
@@ -1340,7 +1403,7 @@
               <div class="choice local" id="local-row" hidden>
                 <div class="text">
                   <strong>Local model</strong
-                  ><span class="sub" id="local-sub"></span>
+                  ><span class="sub" id="local-sub" role="status"></span>
                 </div>
                 <button
                   type="button"
@@ -1348,10 +1411,19 @@
                   id="local-model"
                   role="checkbox"
                   aria-label="Run tasks on a local model"
+                  aria-describedby="local-sub"
                   hidden
                 >
                   <span id="local-model-name"></span
                   ><small id="local-model-needs"></small>
+                </button>
+                <button
+                  type="button"
+                  class="change"
+                  id="local-model-alternative"
+                  hidden
+                >
+                  Use Pi with a provider
                 </button>
               </div>
               <div class="choice provider-keys">
@@ -1431,18 +1503,34 @@
       <section data-step="installing" aria-labelledby="installing-title">
         <h1 id="installing-title">Installing Linger</h1>
         <p class="lead tight" id="installing-plan"></p>
-        <div
-          class="panel"
-          role="progressbar"
-          id="installing-bar"
-          aria-valuemin="0"
-          aria-valuemax="100"
-        >
-          <div class="now">
-            <span id="installing-step"></span
-            ><span class="pct" id="installing-count"></span>
+        <div class="panel">
+          <div
+            role="progressbar"
+            id="installing-bar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <div class="now">
+              <span id="installing-step"></span
+              ><span class="pct" id="installing-count"></span>
+            </div>
+            <div class="track">
+              <div class="fill" id="installing-fill"></div>
+            </div>
           </div>
-          <div class="track"><div class="fill" id="installing-fill"></div></div>
+          <p
+            class="transfer-note"
+            id="installing-activity"
+            role="status"
+            aria-live="polite"
+            hidden
+          ></p>
+          <p class="transfer-note" id="installing-transfer" hidden></p>
+          <div class="transfer-actions" id="installing-stop-row" hidden>
+            <button class="ghost" id="local-stop" type="button">
+              Stop installation
+            </button>
+          </div>
           <ol class="checks" id="installing-checks"></ol>
         </div>
         <div
@@ -1457,14 +1545,95 @@
             <h2 id="runtime-signin-title"></h2>
             <p id="runtime-signin-lead"></p>
             <p class="waiting" id="runtime-signin-waiting" role="status">
-              <span class="spinner"></span>Waiting for authorization in your
-              browser…
+              <span class="spinner"></span
+              ><span id="runtime-signin-waiting-label"
+                >Waiting for authorization in your browser…</span
+              >
             </p>
             <p class="device-code" id="runtime-signin-device" hidden>
               Enter this code in your browser:
               <strong id="runtime-signin-device-code"></strong>
             </p>
             <p class="problem" id="runtime-signin-error" role="alert"></p>
+            <form
+              class="provider-form"
+              id="runtime-provider-form"
+              aria-label="Pi model provider"
+              hidden
+            >
+              <fieldset class="provider-fields" id="runtime-provider-fields">
+                <div>
+                  <label class="field" for="runtime-provider">Provider</label>
+                  <select id="runtime-provider">
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="openai-compatible">OpenAI-compatible</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field" for="runtime-provider-key"
+                    >API key</label
+                  >
+                  <input
+                    id="runtime-provider-key"
+                    type="password"
+                    required
+                    maxlength="4096"
+                    autocomplete="off"
+                    spellcheck="false"
+                    aria-describedby="runtime-provider-key-hint"
+                  />
+                  <p class="hint" id="runtime-provider-key-hint">
+                    Saved privately on this computer. Never included in
+                    diagnostics.
+                  </p>
+                </div>
+                <div id="runtime-provider-endpoint" hidden>
+                  <label class="field" for="runtime-provider-url"
+                    >API base URL</label
+                  >
+                  <input
+                    id="runtime-provider-url"
+                    type="url"
+                    maxlength="2048"
+                    placeholder="https://api.example.com/v1"
+                    autocomplete="off"
+                    spellcheck="false"
+                    aria-describedby="runtime-provider-url-hint"
+                  />
+                  <p class="hint" id="runtime-provider-url-hint">
+                    Use HTTPS, or HTTP on localhost for a model already running
+                    here.
+                  </p>
+                </div>
+                <div id="runtime-provider-model-row" hidden>
+                  <label class="field" for="runtime-provider-model"
+                    >Model ID</label
+                  >
+                  <input
+                    id="runtime-provider-model"
+                    type="text"
+                    maxlength="256"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </div>
+                <button
+                  class="primary"
+                  id="runtime-provider-save"
+                  type="submit"
+                >
+                  Save and continue
+                </button>
+                <button
+                  class="ghost"
+                  id="runtime-provider-cancel"
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </fieldset>
+            </form>
             <div class="actions" id="runtime-signin-idle">
               <button class="primary" id="runtime-signin-start" type="button">
                 Authorize
@@ -1522,6 +1691,7 @@
             </details>
           </div>
         </div>
+        <p class="problem" id="installing-stop-error" role="alert"></p>
         <p class="problem" id="installing-error" role="alert"></p>
         <div class="diagnostics" id="installing-diagnostics" hidden>
           <button class="link quiet" id="installing-more" type="button" hidden>
@@ -2028,6 +2198,8 @@
         claude: "your Claude account",
       };
       let otherRuntimes = false;
+      let providerError = "";
+      let providerFormOpen = true;
       // The runtime installed but not signed in: a dialog starts its own
       // login, which opens the browser, and closes once it is signed in.
       // The link and code it prints are only a fallback, folded away. No
@@ -2039,35 +2211,62 @@
           local.step === "signin" &&
           sign &&
           sign.state !== "signed_in";
+        const wasOpen = !$("runtime-signin").hidden;
         $("runtime-signin").hidden = !open;
         if (!open) {
           otherRuntimes = false;
+          providerError = "";
+          providerFormOpen = true;
+          $("runtime-provider-key").value = "";
           $("runtime-signin-trouble").open = false;
           return;
         }
         const name = RUNTIMES[sign.runtime];
         const failed = sign.state === "failed";
-        const running =
-          sign.state === "starting" || sign.state === "waiting_user";
         const pi = sign.runtime === "pi";
+        const running =
+          sign.state === "starting" ||
+          sign.state === "waiting_user" ||
+          (pi && pending === "local.signin.configure");
         $("runtime-signin-title").textContent = "Sign in to " + name;
         $("runtime-signin-lead").textContent = pi
-          ? "Pi needs a model provider. Run pi in a terminal to sign in; setup continues by itself."
+          ? "Choose the model provider Pi will use for your agents."
           : "Your agents run on " +
             name +
             ". Authorize it with " +
             ACCOUNTS[sign.runtime] +
             " to continue.";
-        $("runtime-signin-lead").hidden = running;
+        $("runtime-signin-lead").hidden = running && !pi;
         $("runtime-signin-waiting").hidden = !running;
+        $("runtime-signin-waiting-label").textContent = pi
+          ? "Saving provider settings…"
+          : "Waiting for authorization in your browser…";
         $("runtime-signin-device").hidden = !sign.deviceCode;
         $("runtime-signin-device-code").textContent = sign.deviceCode || "";
-        $("runtime-signin-error").textContent = failed
-          ? sign.message || "Sign-in did not finish."
-          : "";
+        $("runtime-signin-error").textContent =
+          providerError ||
+          (failed ? sign.message || "Sign-in did not finish." : "");
+        $("runtime-provider-form").hidden = !pi || !providerFormOpen;
+        $("runtime-provider-fields").disabled = busy || running;
+        const compatible = $("runtime-provider").value === "openai-compatible";
+        $("runtime-provider-endpoint").hidden = !compatible;
+        $("runtime-provider-model-row").hidden = !compatible;
+        $("runtime-provider-url").required = compatible;
+        $("runtime-provider-model").required = compatible;
+        $("runtime-provider-url").disabled = !compatible;
+        $("runtime-provider-model").disabled = !compatible;
+        $("runtime-provider-save").textContent = failed
+          ? "Try again"
+          : "Save and continue";
+        if (pi && !wasOpen) $("runtime-provider").focus();
+        if (!pi) $("runtime-provider-key").value = "";
         $("runtime-signin-idle").hidden = running;
-        $("runtime-signin-start").hidden = pi;
-        $("runtime-signin-start").textContent = failed ? "Retry" : "Authorize";
+        $("runtime-signin-start").hidden = pi && providerFormOpen;
+        $("runtime-signin-start").textContent = pi
+          ? "Configure provider"
+          : failed
+            ? "Retry"
+            : "Authorize";
         $("runtime-signin-logs").hidden = !failed;
         $("runtime-signin-runtimes").hidden = !otherRuntimes && !pi;
         $("runtime-signin-other").hidden = pi;
@@ -2089,15 +2288,17 @@
       const renderLocal = (busy) => {
         const local = state.localServer;
         plan ??= defaults();
-        // The local model is offered only once this computer is known to
-        // serve it; until then its row does not show.
+        // Keep unsupported and unfinished checks visible so the person can
+        // understand the available paths before installing.
         const models = local.localModels;
         const model =
           models.state === "checked" && models.eligible && models.model;
         if (!model) plan.localModel = false;
         const custom = !isDefaultPlan(local);
         $("welcome-lead").textContent = local.available
-          ? "Runs on this computer, just for you. Takes a few minutes."
+          ? plan.localModel
+            ? "Runs on this computer, just for you. Model setup takes longer while files download."
+            : "Runs on this computer, just for you. Takes a few minutes."
           : "Connect this computer to your team's Linger.";
         $("local-install").hidden = !local.available;
         $("team").hidden = !local.available || customizing;
@@ -2143,8 +2344,16 @@
           remove.textContent = removing ? "Keep" : "Remove";
         }
         $("keys-note").textContent = "Applies when the installation runs.";
-        $("local-row").hidden = !model;
-        $("local-model").hidden = !model;
+        $("local-row").hidden = !local.available;
+        $("local-model").hidden = false;
+        $("local-model").disabled = busy || !model;
+        $("local-model").setAttribute(
+          "aria-checked",
+          String(!!model && plan.localModel),
+        );
+        const checking = ["unchecked", "checking"].includes(models.state);
+        $("local-model-alternative").hidden = !!model || checking;
+        $("local-model-alternative").disabled = busy;
         if (model) {
           $("local-sub").textContent = [
             "Runs your tasks on this computer",
@@ -2162,11 +2371,25 @@
           ]
             .filter(Boolean)
             .join(" · ");
-          $("local-model").setAttribute(
-            "aria-checked",
-            String(plan.localModel),
-          );
-          $("local-model").disabled = busy;
+        } else {
+          $("local-sub").textContent = checking
+            ? "Checking local model support. You can choose an AI runtime while this finishes."
+            : models.state === "unavailable"
+              ? "Linger couldn't check local model support. You can continue with an AI runtime and provider."
+              : (models.reasonMessages?.length
+                  ? models.reasonMessages
+                  : models.reasons?.length
+                    ? models.reasons
+                    : [
+                        "No verified local model plan is available for this computer right now.",
+                      ]
+                ).join(" ");
+          $("local-model-name").textContent = checking
+            ? "Checking this computer…"
+            : "Local model unavailable";
+          $("local-model-needs").textContent = checking
+            ? "No model files are being downloaded."
+            : "Other AI runtimes are still available.";
         }
         $("runtime-sub").textContent = plan.localModel
           ? "Pi + local model."
@@ -2183,33 +2406,101 @@
 
         // Installing. A restart after a reboot shows here as starting.
         const failed = local.phase === "failed";
+        const cancelled = local.phase === "cancelled";
+        const stopping = local.phase === "stopping";
+        const activity = local.modelActivity;
+        const transfer = activity?.progress;
         const starting = local.phase === "preparing";
-        $("installing-title").textContent = failed
-          ? "Installation stopped"
-          : starting
-            ? "Starting Linger"
-            : "Installing Linger";
-        $("installing-plan").textContent = failed
-          ? "Your data is kept. Fix the problem and try again."
-          : "This takes a few minutes. You can keep working.";
+        $("installing-title").textContent =
+          failed || cancelled
+            ? "Installation stopped"
+            : stopping
+              ? "Stopping installation"
+              : starting
+                ? "Starting Linger"
+                : "Installing Linger";
+        $("installing-plan").textContent = cancelled
+          ? "Existing downloads, data and services were kept. Try again when you're ready."
+          : stopping
+            ? "Waiting for the current step to finish safely. Existing downloads and data will be kept."
+            : activity
+              ? "Model files can be large. You can stop and retry without deleting verified downloads."
+              : failed
+                ? "Your data is kept. Fix the problem and try again."
+                : "This takes a few minutes. You can keep working.";
         const section = document.querySelector('[data-step="installing"]');
         const steps = ALL_STEPS.filter(([id]) => local.steps.includes(id));
         section.dataset.failed = String(failed);
+        section.dataset.stopped = String(cancelled);
         const at = Math.max(
           0,
           steps.findIndex(([id]) => id === local.step),
         );
         startAttempt(local);
-        const percent = Math.round(shownProgress(local, at) * 100);
-        $("installing-fill").style.width = Math.max(2, percent) + "%";
-        $("installing-bar").setAttribute("aria-valuenow", String(percent));
+        const filePercent =
+          transfer?.total > 0
+            ? Math.round((transfer.completed / transfer.total) * 100)
+            : undefined;
+        const percent = activity
+          ? (filePercent ?? 0)
+          : Math.round(shownProgress(local, at) * 100);
+        $("installing-fill").style.width =
+          activity && filePercent === undefined
+            ? "100%"
+            : Math.max(2, percent) + "%";
+        $("installing-fill").style.opacity =
+          activity && filePercent === undefined ? "0.25" : "";
+        $("installing-bar").setAttribute(
+          "aria-label",
+          activity
+            ? "Last reported model file progress"
+            : "Installation progress",
+        );
+        if ((activity && filePercent === undefined) || stopping || cancelled)
+          $("installing-bar").removeAttribute("aria-valuenow");
+        else $("installing-bar").setAttribute("aria-valuenow", String(percent));
         timeStep(local, at);
-        $("installing-step").textContent = failed
-          ? steps[at][1]()
-          : starting
-            ? local.message
-            : steps[at][1]() + "…";
-        $("installing-count").textContent = starting ? "" : percent + "%";
+        $("installing-step").textContent = cancelled
+          ? "Stopped"
+          : stopping
+            ? "Stopping safely…"
+            : activity
+              ? "Preparing local model files…"
+              : failed
+                ? steps[at][1]()
+                : starting
+                  ? local.message
+                  : steps[at][1]() + "…";
+        $("installing-count").textContent =
+          starting ||
+          stopping ||
+          cancelled ||
+          (activity && filePercent === undefined)
+            ? ""
+            : percent + "%";
+        $("installing-activity").hidden = !activity || stopping || cancelled;
+        $("installing-activity").textContent = activity?.message || "";
+        const bytes = (value) =>
+          value >= 1024 ** 3
+            ? (value / 1024 ** 3).toFixed(1) + " GB"
+            : value >= 1024 ** 2
+              ? (value / 1024 ** 2).toFixed(1) + " MB"
+              : value >= 1024
+                ? (value / 1024).toFixed(1) + " KB"
+                : value + " B";
+        $("installing-transfer").hidden = !transfer || stopping || cancelled;
+        $("installing-transfer").textContent = transfer
+          ? bytes(transfer.completed) +
+            (transfer.total === undefined
+              ? " processed"
+              : " of " + bytes(transfer.total) + " processed") +
+            " · latest reported file"
+          : "";
+        $("installing-stop-row").hidden = !local.cancellable && !stopping;
+        $("local-stop").disabled = busy || !local.cancellable;
+        $("local-stop").textContent = stopping
+          ? "Stopping…"
+          : "Stop installation";
         $("installing-checks").hidden = starting;
         const checks = $("installing-checks");
         if (checks.children.length !== steps.length)
@@ -2229,11 +2520,14 @@
             local.phase === "ready" || index < at
               ? "done"
               : index === at
-                ? failed
-                  ? "failed"
-                  : "now"
+                ? cancelled
+                  ? "stopped"
+                  : failed
+                    ? "failed"
+                    : "now"
                 : "";
-          item.children[1].textContent = label();
+          item.children[1].textContent =
+            activity && index === at ? "Preparing local model files" : label();
           item.lastChild.textContent = stepTime(index, item.dataset.state);
         });
         const problem = $("installing-error");
@@ -2260,7 +2554,7 @@
             ? saved.error
             : "Saved " + saved.file + ". Send this file to Linger support.";
         shownDiagnostics = savedKey;
-        $("installing-actions").hidden = !failed;
+        $("installing-actions").hidden = !failed && !cancelled;
         renderSignIn(local, busy);
         // Each failure brings its message and actions into view once.
         if (failed && revealed !== local.attempt) {
@@ -2373,6 +2667,7 @@
             /^Error invoking remote method '[^']+': (Error: )?/,
             "",
           );
+          if (command.op === "local.signin.configure") providerError = message;
           if (errorId) $(errorId).textContent = message;
           return false;
         } finally {
@@ -2408,9 +2703,51 @@
         if (ok && state.localServer.phase !== "idle") show("installing");
       };
       $("local-install").addEventListener("click", install);
-      $("runtime-signin-start").addEventListener("click", () =>
-        run({ op: "local.signin.start" }, "runtime-signin-error"),
+      $("local-stop").addEventListener("click", () =>
+        run({ op: "local.cancel" }, "installing-stop-error"),
       );
+      $("runtime-signin-start").addEventListener("click", () => {
+        if (state.localServer.signIn?.runtime === "pi") {
+          providerFormOpen = true;
+          render();
+          $("runtime-provider").focus();
+        } else run({ op: "local.signin.start" }, "runtime-signin-error");
+      });
+      $("runtime-provider-cancel").addEventListener("click", () => {
+        $("runtime-provider-key").value = "";
+        providerError = "";
+        providerFormOpen = false;
+        render();
+        $("runtime-signin-start").focus();
+      });
+      $("runtime-provider").addEventListener("change", () => {
+        providerError = "";
+        $("runtime-provider-key").value = "";
+        render();
+      });
+      $("runtime-provider-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (pending !== null) return;
+        const key = $("runtime-provider-key");
+        const credentials = {
+          provider: $("runtime-provider").value,
+          apiKey: key.value.trim(),
+          ...($("runtime-provider").value === "openai-compatible"
+            ? {
+                baseUrl: $("runtime-provider-url").value.trim(),
+                model: $("runtime-provider-model").value.trim(),
+              }
+            : {}),
+        };
+        key.value = "";
+        providerError = "";
+        await run(
+          { op: "local.signin.configure", credentials },
+          "runtime-signin-error",
+        );
+        if (state.localServer.signIn?.state === "failed" || providerError)
+          key.focus();
+      });
       $("runtime-signin-paste").addEventListener("submit", async (event) => {
         event.preventDefault();
         const input = $("runtime-signin-input");
@@ -2436,12 +2773,14 @@
         run({ op: "logs.open" }, "runtime-signin-error"),
       );
       for (const option of document.querySelectorAll("[data-switch]"))
-        option.addEventListener("click", () =>
+        option.addEventListener("click", () => {
+          $("runtime-provider-key").value = "";
+          providerError = "";
           run(
             { op: "local.signin.switch", runtime: option.dataset.switch },
             "runtime-signin-error",
-          ),
-        );
+          );
+        });
       $("local-retry").addEventListener("click", install);
       $("installing-more").addEventListener("click", () => {
         detailsOpen = !detailsOpen;
@@ -2517,6 +2856,13 @@
           ? { ...plan, localModel: false }
           : { ...plan, runtime: "pi", localModel: true };
         render();
+      });
+      $("local-model-alternative").addEventListener("click", () => {
+        plan = { ...plan, runtime: "pi", localModel: false };
+        render();
+        document
+          .querySelector('[data-plan="runtime"] [data-value="pi"]')
+          .focus();
       });
       $("open").addEventListener("click", () => run({ op: "finish" }));
       $("account-show").addEventListener("click", () =>
@@ -2599,7 +2945,13 @@
         state = initial;
         const phase = initial.localServer.phase;
         show(
-          ["preparing", "installing", "failed"].includes(phase)
+          [
+            "preparing",
+            "installing",
+            "stopping",
+            "cancelled",
+            "failed",
+          ].includes(phase)
             ? "installing"
             : initial.enrolled
               ? "permissions"

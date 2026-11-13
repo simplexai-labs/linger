@@ -227,6 +227,7 @@ export function ComputersPage() {
               agents={selectedAgents}
               browserConnection={(variant) => (
                 <ComputerBrowserConnection
+                  computer={selectedComputer}
                   computerId={selectedComputer.computer_id}
                   online={selectedComputer.status === "online"}
                   tenantId={tenantId}

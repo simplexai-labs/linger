@@ -4,6 +4,7 @@ import { lazy, Suspense, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 
 import { ComputerRow, ProgressChip, RowMark, StatusDot } from "../computer-row";
@@ -11,6 +12,9 @@ import { browserConnectionQueryOptions } from "./browser-connection-api";
 import {
   browserConnectionErrorMessage,
   browserConnectionStateCopy,
+  browserConnectionUnavailableCopy,
+  isBrowserConnectionUnsupported,
+  type BrowserConnectionComputer,
 } from "./browser-connection-copy";
 import type { TeamHubBrowserConnectionStatus } from "@/features/teamhub/teamhub-types";
 
@@ -22,11 +26,13 @@ const BrowserConnectionDialog = lazy(() =>
 
 /** One Local Computer's browser, as a summary chip or an Access row. */
 export function ComputerBrowserConnection({
+  computer,
   computerId,
   online,
   tenantId,
   variant,
 }: {
+  computer?: BrowserConnectionComputer;
   computerId: string;
   online: boolean;
   tenantId: string;
@@ -39,21 +45,33 @@ export function ComputerBrowserConnection({
     enabled: online,
   });
   const state = status.data?.state;
+  const unsupported =
+    state === "unsupported" || isBrowserConnectionUnsupported(status.error);
+  const savedConnectionInvalid =
+    status.error instanceof TeamHubError &&
+    status.error.code === "BROWSER_CONNECTION_INVALID";
   // A Personal Cloud Computer has no everyday Chrome to connect, so the chip
   // waits for the status rather than appearing and then vanishing.
-  if (state === "unsupported") return null;
-  if (variant === "chip" && online && status.isPending) return null;
+  if (
+    variant === "chip" &&
+    (unsupported ||
+      (online &&
+        (status.isPending || (status.isError && !savedConnectionInvalid))))
+  )
+    return null;
   const connected = state === "connected";
   const copy = status.data
     ? browserConnectionStateCopy(status.data.state)
     : null;
   const explanation = !online
     ? "Unavailable while this computer is offline."
-    : status.data
-      ? browserExplanation(status.data.state)
+    : unsupported
+      ? browserConnectionUnavailableCopy(computer)
       : status.isError
-        ? browserConnectionErrorMessage(status.error)
-        : "Checking browser status…";
+        ? browserConnectionErrorMessage(status.error, computer)
+        : status.data
+          ? browserExplanation(status.data.state)
+          : "Checking browser status…";
   const dialog = open ? (
     <Suspense fallback={null}>
       <BrowserConnectionDialog
@@ -86,7 +104,21 @@ export function ComputerBrowserConnection({
     <>
       <ComputerRow
         action={
-          online ? (
+          online &&
+          status.isError &&
+          !unsupported &&
+          !savedConnectionInvalid ? (
+            <Button
+              disabled={status.isFetching}
+              onClick={() => void status.refetch()}
+              size="compact"
+              tone="secondary"
+            >
+              {status.isFetching ? "Checking…" : "Check again"}
+            </Button>
+          ) : online &&
+            (status.isSuccess || savedConnectionInvalid) &&
+            !unsupported ? (
             <Button
               onClick={() => setOpen(true)}
               size="compact"

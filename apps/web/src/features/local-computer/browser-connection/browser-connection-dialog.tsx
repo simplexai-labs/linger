@@ -23,7 +23,10 @@ import {
 import {
   browserConnectionErrorMessage,
   browserConnectionStateCopy,
+  browserConnectionUnavailableCopy,
+  isBrowserConnectionUnsupported,
   PLAYWRIGHT_EXTENSION_URL,
+  type BrowserConnectionComputer,
 } from "./browser-connection-copy";
 
 type PendingAction = "configure" | "disconnect" | null;
@@ -97,7 +100,7 @@ export function BrowserConnectionDialog({
       );
       setEditing(false);
     } catch (error) {
-      setFailure(browserConnectionErrorMessage(error));
+      setFailure(browserConnectionErrorMessage(error, computer));
     } finally {
       setPending(null);
     }
@@ -119,7 +122,9 @@ export function BrowserConnectionDialog({
   }
 
   const current = status.data;
-  const unsupported = current?.state === "unsupported";
+  const unsupported =
+    current?.state === "unsupported" ||
+    isBrowserConnectionUnsupported(status.error);
   // A damaged saved connection fails the status read; a new paste replaces it.
   const savedConnectionInvalid =
     status.error instanceof TeamHubError &&
@@ -207,11 +212,22 @@ export function BrowserConnectionDialog({
             )}
 
             <BrowserConnectionStatusSection
+              computer={computer}
               current={current}
               error={status.error}
               loading={online && status.isPending}
               online={online}
             />
+
+            {online && (status.isError || unsupported) ? (
+              <Button
+                disabled={pending !== null || status.isFetching}
+                onClick={() => void status.refetch()}
+                tone="secondary"
+              >
+                {status.isFetching ? "Checking…" : "Check again"}
+              </Button>
+            ) : null}
 
             {online &&
             current &&
@@ -326,11 +342,13 @@ export function BrowserConnectionDialog({
 }
 
 function BrowserConnectionStatusSection({
+  computer,
   current,
   error,
   loading,
   online,
 }: {
+  computer: BrowserConnectionComputer;
   current: TeamHubBrowserConnectionStatus | undefined;
   error: unknown;
   loading: boolean;
@@ -350,10 +368,19 @@ function BrowserConnectionStatusSection({
       </p>
     );
   }
-  if (!current) {
+  if (!current || error) {
     return (
-      <FormFeedback tone="danger">
-        {browserConnectionErrorMessage(error)}
+      <FormFeedback
+        tone={isBrowserConnectionUnsupported(error) ? "info" : "danger"}
+      >
+        {browserConnectionErrorMessage(error, computer)}
+      </FormFeedback>
+    );
+  }
+  if (current.state === "unsupported") {
+    return (
+      <FormFeedback tone="info">
+        {browserConnectionUnavailableCopy(computer)}
       </FormFeedback>
     );
   }

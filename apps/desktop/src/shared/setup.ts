@@ -2,6 +2,8 @@
 // The setup window walks a new install through server, sign-in, connecting
 // this computer and the system permissions it needs.
 
+import type { operations } from "@linger/wire-contracts/linger-installer/types";
+
 export interface SetupFolder {
   readonly grantId: string;
   readonly label: string;
@@ -15,13 +17,25 @@ export type SetupPermissionStatus = "granted" | "denied" | "unknown";
 export interface SetupLocalServer {
   // Whether this computer can run it; absent options are not offered.
   readonly available: boolean;
-  readonly phase: "idle" | "preparing" | "installing" | "ready" | "failed";
+  readonly phase:
+    | "idle"
+    | "preparing"
+    | "installing"
+    | "stopping"
+    | "cancelled"
+    | "ready"
+    | "failed";
+  readonly cancellable: boolean;
   readonly message: string;
   // While installing: the steps shown, the current one and the overall share
   // done (0-1).
   readonly steps: readonly SetupLocalStep[];
   readonly step: SetupLocalStep;
   readonly progress: number;
+  readonly modelActivity?: {
+    readonly message: string;
+    readonly progress?: { readonly completed: number; readonly total?: number };
+  };
   // Which installation this is; timers and the bar start over with each.
   readonly attempt: number;
   // Whether this computer can serve a local model; checked as the setup
@@ -62,8 +76,8 @@ export type SetupLocalStep =
   | "agents";
 
 // The runtime the installer set up has no sign-in on this computer. The
-// person signs in on the vendor's page (url, entering deviceCode there) or
-// in a terminal; Claude Code's page shows a code to paste back
+// person signs in on the vendor's page (url, entering deviceCode there), or
+// configures Pi's API provider; Claude Code's page shows a code to paste back
 // (acceptsCode). failed carries why the last attempt ended.
 export interface SetupRuntimeSignIn {
   readonly runtime: "codex" | "claude" | "pi";
@@ -96,6 +110,7 @@ export type SetupLocalModelsCheck =
       };
       // Why not, in the localmodels tool's words; when not eligible.
       readonly reasons?: readonly string[];
+      readonly reasonMessages?: readonly string[];
     };
 
 // The AI runtime the installer sets up; "recommended" lets it pick and
@@ -112,6 +127,25 @@ export type SetupLocalRuntime =
 export interface SetupProviderKeys {
   readonly composio?: string;
 }
+
+// Credentials are submitted once to the installer, never put in SetupState.
+type RuntimeLoginInput =
+  operations["startInstallerRuntimeLogin"]["requestBody"]["content"]["application/json"];
+
+export type SetupPiProviderCredentials = Readonly<
+  Required<Pick<RuntimeLoginInput, "apiKey">>
+> &
+  (
+    | {
+        readonly provider: Exclude<
+          NonNullable<RuntimeLoginInput["provider"]>,
+          "openai-compatible"
+        >;
+      }
+    | (Readonly<Required<Pick<RuntimeLoginInput, "baseUrl" | "model">>> & {
+        readonly provider: "openai-compatible";
+      })
+  );
 
 export interface SetupState {
   readonly platform: "darwin" | "win32" | "linux";
@@ -139,6 +173,7 @@ export type SetupCommand =
       readonly runtime?: SetupLocalRuntime;
       readonly keys?: SetupProviderKeys;
     }
+  | { readonly op: "local.cancel" }
   // Picks the install folder with the system picker, or goes back to the
   // default.
   | { readonly op: "local.location.pick" }
@@ -147,6 +182,10 @@ export type SetupCommand =
   // code its page showed), open its page again, check again, or install
   // another runtime instead.
   | { readonly op: "local.signin.start"; readonly code?: string }
+  | {
+      readonly op: "local.signin.configure";
+      readonly credentials: SetupPiProviderCredentials;
+    }
   | { readonly op: "local.signin.open" }
   | { readonly op: "local.signin.cancel" }
   | {

@@ -24,6 +24,7 @@ import {
   LOCAL_INSTANCE,
   LOCAL_STEPS,
   LocalServerModule,
+  InstallerApi,
   anotherMeMissing,
   checkLocation,
   followHttps,
@@ -722,6 +723,95 @@ describe("LocalServerModule", () => {
     await f.host.stop("quit");
   });
 
+  it("saves Pi provider credentials through the installer and continues the same setup", async () => {
+    const api = installerApi();
+    api.runtime.setupChoice = "pi";
+    api.runtime.login = { state: "idle" };
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), signInPollMs: 5 }),
+      {},
+      checkout,
+      api,
+    );
+    await f.host.start();
+    const done = f.module.begin({ runtime: "pi" });
+    await vi.waitFor(() =>
+      expect(f.module.status().signIn).toEqual({
+        runtime: "pi",
+        state: "required",
+      }),
+    );
+    const credentials = {
+      provider: "openai-compatible" as const,
+      apiKey: "private-pi-test-key",
+      baseUrl: "http://127.0.0.1:18100/v1",
+      model: "local/model",
+    };
+    await f.module.configurePiProvider(credentials);
+    expect(api.runtime.logins).toEqual([
+      { instance: LOCAL_INSTANCE, ...credentials },
+    ]);
+    expect(JSON.stringify(f.module.status())).not.toContain(credentials.apiKey);
+    api.runtime.login = { state: "ready" };
+    await done;
+    expect(f.module.status().phase).toBe("ready");
+    expect(api.created).toHaveLength(1);
+    await f.host.stop("quit");
+  });
+
+  it("keeps failed Pi credentials private and allows retry", async () => {
+    const api = installerApi();
+    api.runtime.setupChoice = "pi";
+    api.runtime.login = { state: "idle" };
+    let reject = true;
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), signInPollMs: 5 }),
+      {},
+      checkout,
+      {
+        ...api,
+        handle: async (url, input) => {
+          if (
+            reject &&
+            url.pathname === "/api/runtime-login" &&
+            input?.method === "POST"
+          )
+            return Response.json(
+              { message: "Upstream rejected private-pi-test-key" },
+              { status: 400 },
+            );
+          return api.handle(url, input);
+        },
+      },
+    );
+    await f.host.start();
+    const done = f.module.begin({ runtime: "pi" });
+    await vi.waitFor(() =>
+      expect(f.module.status().signIn?.state).toBe("required"),
+    );
+    const credentials = {
+      provider: "openai" as const,
+      apiKey: "private-pi-test-key",
+    };
+    await f.module.configurePiProvider(credentials);
+    expect(f.module.status().signIn).toEqual({
+      runtime: "pi",
+      state: "failed",
+      message:
+        "Provider setup did not finish. Check the provider, API key and network, then try again.",
+    });
+    expect(JSON.stringify(f.module.status())).not.toContain(credentials.apiKey);
+    reject = false;
+    api.runtime.login = { state: "ready" };
+    await f.module.configurePiProvider(credentials);
+    await done;
+    expect(f.module.status().phase).toBe("ready");
+    expect(api.runtime.logins).toEqual([
+      { instance: LOCAL_INSTANCE, ...credentials },
+    ]);
+    await f.host.stop("quit");
+  });
+
   it("unpacks the published dependency store into the source, or goes on without it", async () => {
     const root = tempDirectory();
     const archive = sourceArchive(root);
@@ -1281,6 +1371,7 @@ describe("LocalServerModule", () => {
         state: "checked",
         eligible: false,
         reasons: ["facts-unavailable: nvidia-smi was not found"],
+        reasonMessages: ["nvidia-smi was not found"],
       }),
     );
     expect(f.module.status().localModels).not.toHaveProperty("model");
@@ -1347,12 +1438,44 @@ describe("LocalServerModule", () => {
     );
     await f.host.start();
     await expect(f.module.begin({ runtime: "pi" })).rejects.toThrow(
-      "can't run the local model",
+      "Review the local model plan",
     );
     expect(f.api.retried).toEqual([]);
     expect(f.module.status().phase).toBe("failed");
     await f.host.stop("quit");
   });
+
+  it.each([
+    [
+      "LOCAL_MODELS_RECOVERY_REQUIRED",
+      "Local model services stopped. LLM: failed. Search: failed. Gateway: skipped. Verification: skipped.",
+      "Local model services stopped",
+    ],
+    [
+      "LOCAL_MODELS_UNAVAILABLE",
+      "No verified model plan is available for this platform.",
+      "No verified model plan",
+    ],
+    [
+      "GPU_SHARING_REVOCATION_FAILED",
+      "GPU sharing revocation could not be confirmed.",
+      "GPU sharing revocation could not be confirmed",
+    ],
+  ])(
+    "preserves the safe cause for %s instead of blaming hardware",
+    async (errorCode, message, expected) => {
+      const f = fixture(
+        withCheckout,
+        {},
+        checkout,
+        installerApi([], { state: "failed", errorCode, message }),
+      );
+      await f.host.start();
+      await expect(f.module.begin({ runtime: "pi" })).rejects.toThrow(expected);
+      expect(f.module.status().message).not.toContain("can't run");
+      await f.host.stop("quit");
+    },
+  );
 
   it("installs LINGER_CHECKOUT only when it is a Linger source", async () => {
     const f = fixture(withCheckout, {}, (home) =>
@@ -2535,4 +2658,731 @@ describe("LocalServerModule owner account", () => {
       await f.host.stop("quit");
     },
   );
+});
+
+describe("installer model transfer and stopping", () => {
+  it.each([
+    ...(
+      ["status", "before cancel", "cancel response", "checkpoint"] as const
+    ).flatMap((boundary) =>
+      (["succeeded", "waiting_user"] as const).map((state) => ({
+        boundary,
+        state,
+      })),
+    ),
+    { boundary: "cancel response", state: "canceled" },
+    { boundary: "checkpoint", state: "canceled" },
+  ])(
+    "acknowledges Stop before Pi sign-in when completed $state races with $boundary",
+    async ({ boundary, state }) => {
+      let enter!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const api = installerApi();
+      api.runtime.setupChoice = "pi";
+      api.runtime.login = { state: "idle" };
+      const handle = api.handle;
+      const requests: string[] = [];
+      const job = (fields: Record<string, unknown>) => ({
+        id: "job",
+        instance: LOCAL_INSTANCE,
+        createdAt: "2026-11-11T00:00:00Z",
+        stages: [],
+        ...fields,
+      });
+      const completed = {
+        state,
+        origin: "http://localhost:3000",
+        stages: [{ id: "runtime", state: "waiting_user" }],
+        ...(state === "succeeded"
+          ? {}
+          : { errorCode: "RUNTIME_AUTH_REQUIRED" }),
+      };
+      let polls = 0;
+      vi.spyOn(api, "handle").mockImplementation(async (url, init) => {
+        requests.push(`${init?.method ?? "GET"} ${url.pathname}`);
+        if (url.pathname === "/api/runtime-login" && init?.method === "POST")
+          api.runtime.login = { state: "ready" };
+        if (url.pathname === "/api/jobs/job/cancel")
+          return Response.json(
+            job(
+              boundary === "cancel response"
+                ? completed
+                : boundary === "checkpoint"
+                  ? { state: "waiting_user", cancelRequested: true }
+                  : { state: "canceled" },
+            ),
+          );
+        if (url.pathname === "/api/jobs/job") {
+          polls += 1;
+          if (polls === 1) {
+            enter();
+            await released;
+          }
+          const complete =
+            (boundary === "status" && polls === 1) ||
+            (boundary === "before cancel" && polls === 2) ||
+            (boundary === "checkpoint" && polls === 3);
+          return Response.json(
+            job(
+              complete
+                ? completed
+                : polls <= 2
+                  ? { state: "running" }
+                  : { state: "canceled" },
+            ),
+          );
+        }
+        return handle(url, init);
+      });
+      const f = fixture(
+        (home) => ({ ...withCheckout(home), signInPollMs: 5 }),
+        {},
+        checkout,
+        api,
+      );
+      const phases: string[] = [];
+      f.bus.on("local-server.changed", () =>
+        phases.push(f.module.status().phase),
+      );
+      await f.host.start();
+      let setupSettled = false;
+      const running = f.module.begin({ runtime: "pi" }).then(() => {
+        setupSettled = true;
+      });
+      let stopping: Promise<void> | undefined;
+      try {
+        await entered;
+        expect(f.module.status().cancellable).toBe(true);
+        let stopSettled = false;
+        stopping = f.module.cancelInstallation().then(() => {
+          stopSettled = true;
+        });
+        release();
+        await vi.waitFor(() =>
+          expect(f.module.status().signIn).toEqual({
+            runtime: "pi",
+            state: "required",
+          }),
+        );
+        expect(setupSettled).toBe(false);
+        expect(f.signIn).not.toHaveBeenCalled();
+        expect(f.enroll).not.toHaveBeenCalled();
+        await vi.waitFor(() => expect(stopSettled).toBe(true));
+        await f.module.configurePiProvider({
+          provider: "openai",
+          apiKey: "synthetic-provider-key",
+        });
+        await Promise.all([running, stopping]);
+
+        expect(f.module.status()).toMatchObject({
+          phase: "ready",
+          cancellable: false,
+          origin: completed.origin,
+        });
+        expect(phases).toContain("stopping");
+        expect(phases).not.toContain("cancelled");
+        expect(api.created).toHaveLength(1);
+        expect(api.retried).toEqual([]);
+        expect(
+          requests.filter((request) => request.endsWith("/cancel")),
+        ).toEqual(
+          boundary === "status" || boundary === "before cancel"
+            ? []
+            : ["POST /api/jobs/job/cancel"],
+        );
+        expect(polls).toBe(
+          boundary === "status" ? 1 : boundary === "checkpoint" ? 3 : 2,
+        );
+        expect(f.signIn).toHaveBeenCalledTimes(1);
+        expect(f.enroll).toHaveBeenCalledTimes(1);
+      } finally {
+        release();
+        await f.host.stop("quit");
+        await Promise.allSettled([running, stopping]);
+      }
+    },
+  );
+
+  it("reports connection errors after a completed attempt wins a Stop race", async () => {
+    const api = installerApi([], DONE, undefined, {
+      state: "running",
+      stage: "runtime",
+    });
+    api.runtime.setupChoice = "pi";
+    api.runtime.login = { state: "idle" };
+    const handle = api.handle;
+    vi.spyOn(api, "handle").mockImplementation(async (url, init) => {
+      if (url.pathname === "/api/runtime-login" && init?.method === "POST")
+        api.runtime.login = { state: "ready" };
+      return handle(url, init);
+    });
+    const f = fixture(
+      (home) => ({
+        ...withCheckout(home),
+        signInPollMs: 5,
+        signIn: async () => {
+          throw new Error("Owner connection failed");
+        },
+      }),
+      {},
+      checkout,
+      api,
+    );
+    let stopping: Promise<void> | undefined;
+    f.bus.on("local-server.changed", () => {
+      if (
+        f.module.status().step === "services" &&
+        f.module.status().cancellable
+      )
+        stopping = f.module.cancelInstallation();
+    });
+    await f.host.start();
+    const outcome = f.module
+      .begin({ runtime: "pi" })
+      .catch((error: unknown) => error);
+    try {
+      await vi.waitFor(() =>
+        expect(f.module.status().signIn?.state).toBe("required"),
+      );
+      await f.module.configurePiProvider({
+        provider: "openai",
+        apiKey: "synthetic-provider-key",
+      });
+      expect(await outcome).toMatchObject({
+        message: "Owner connection failed",
+      });
+      expect(f.module.status()).toMatchObject({
+        phase: "failed",
+        message: "Owner connection failed",
+      });
+      expect(f.enroll).not.toHaveBeenCalled();
+    } finally {
+      await f.host.stop("quit");
+      await Promise.allSettled([outcome, stopping]);
+    }
+  });
+
+  it("keeps a preparation Stop requested while opening the installer session", async () => {
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const api = installerApi();
+    const handle = api.handle;
+    const requests: string[] = [];
+    vi.spyOn(api, "handle").mockImplementation(async (url, init) => {
+      requests.push(`${init?.method ?? "GET"} ${url.pathname}`);
+      if (url.pathname === "/api/session") {
+        enter();
+        await released;
+      }
+      return handle(url, init);
+    });
+    const f = fixture(withCheckout, {}, checkout, api);
+    await f.host.start();
+    const running = f.module.begin({ runtime: "pi" });
+    let stopping: Promise<void> | undefined;
+    try {
+      await entered;
+      stopping = f.module.cancelInstallation();
+      expect(f.module.status().phase).toBe("stopping");
+      release();
+      await Promise.all([running, stopping]);
+      expect(f.module.status()).toMatchObject({
+        phase: "cancelled",
+        cancellable: false,
+      });
+      expect(requests).toEqual(["POST /api/session"]);
+      expect(api.created).toEqual([]);
+      expect(f.signIn).not.toHaveBeenCalled();
+      expect(f.enroll).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await f.host.stop("quit");
+      await Promise.allSettled([running, stopping]);
+    }
+  });
+
+  it("keeps Stop pending until the installer confirms a safe cancellation checkpoint", async () => {
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const api = installerApi();
+    const handle = api.handle;
+    let cancellationRequested = false;
+    const job = (state: string) => ({
+      id: "job",
+      instance: LOCAL_INSTANCE,
+      createdAt: "2026-11-11T00:00:00Z",
+      stage: "runtime",
+      stages: [],
+      state,
+    });
+    vi.spyOn(api, "handle").mockImplementation(async (url, init) => {
+      if (url.pathname === "/api/jobs/job/cancel") {
+        cancellationRequested = true;
+        return Response.json(job("waiting_user"));
+      }
+      if (url.pathname === "/api/jobs/job") {
+        if (!cancellationRequested) return Response.json(job("running"));
+        enter();
+        await released;
+        return Response.json(job("canceled"));
+      }
+      return handle(url, init);
+    });
+    const f = fixture(withCheckout, {}, checkout, api);
+    await f.host.start();
+    let setupSettled = false;
+    const running = f.module.begin({ runtime: "pi" }).then(() => {
+      setupSettled = true;
+    });
+    let stopping: Promise<void> | undefined;
+    try {
+      await vi.waitFor(() => expect(f.module.status().step).toBe("services"));
+      let stopSettled = false;
+      stopping = f.module.cancelInstallation().then(() => {
+        stopSettled = true;
+      });
+      await entered;
+      expect(f.module.status()).toMatchObject({
+        phase: "stopping",
+        cancellable: false,
+      });
+      expect(stopSettled).toBe(false);
+      expect(setupSettled).toBe(false);
+      release();
+      await Promise.all([running, stopping]);
+      expect(f.module.status().phase).toBe("cancelled");
+      expect(f.signIn).not.toHaveBeenCalled();
+      expect(f.enroll).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await f.host.stop("quit");
+      await Promise.allSettled([running, stopping]);
+    }
+  });
+
+  it.each([
+    {},
+    { origin: "http://localhost:3000" },
+    { errorCode: "RUNTIME_AUTH_REQUIRED" },
+    {
+      origin: "http://localhost:3000",
+      errorCode: "LOCAL_MODELS_RECOVERY_REQUIRED",
+    },
+  ])(
+    "keeps a canceled job without a completed runtime handoff stopped: %j",
+    async (fields) => {
+      const controller = new AbortController();
+      const requests: string[] = [];
+      const job = {
+        id: "owned",
+        instance: LOCAL_INSTANCE,
+        createdAt: "2026-11-11T00:00:00Z",
+        state: "running",
+        stage: "runtime",
+        stages: [],
+      };
+      const fetcher: typeof fetch = async (input, init) => {
+        const url = new URL(String(input));
+        requests.push(`${init?.method ?? "GET"} ${url.pathname}`);
+        if (url.pathname === "/api/session")
+          return new Response("{}", {
+            headers: {
+              "set-cookie": "linger_installer_session=test; Path=/api",
+            },
+          });
+        if (url.pathname === "/api/jobs")
+          return Response.json({ items: [job] });
+        if (url.pathname === "/api/jobs/owned/cancel")
+          return Response.json({ ...job, ...fields, state: "canceled" });
+        if (url.pathname === "/api/jobs/owned") return Response.json(job);
+        throw new Error("Unexpected test request");
+      };
+      const api = await InstallerApi.open(
+        "http://localhost:4321/#token=test",
+        fetcher,
+        1,
+      );
+      await expect(
+        api.run(
+          { runtime: "pi" },
+          controller.signal,
+          () => controller.abort(),
+          false,
+          controller.signal,
+        ),
+      ).rejects.toThrow("Installation stopped");
+      expect(requests.filter((request) => request.endsWith("/cancel"))).toEqual(
+        ["POST /api/jobs/owned/cancel"],
+      );
+    },
+  );
+
+  it.each(["runtime", "connect", "enrollment", "agents"] as const)(
+    "ignores Stop during %s after the installer run has returned",
+    async (stage) => {
+      let enter!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const block = async () => {
+        enter();
+        await released;
+      };
+      const api = installerApi([], {
+        state: "succeeded",
+        origin: "http://localhost:3000",
+      });
+      const handle = api.handle;
+      const requests: string[] = [];
+      vi.spyOn(api, "handle").mockImplementation(async (url, init) => {
+        requests.push(`${init?.method ?? "GET"} ${url.pathname}`);
+        if (
+          stage === "runtime" &&
+          url.pathname === `/api/instances/${LOCAL_INSTANCE}/runtime`
+        )
+          await block();
+        return handle(url, init);
+      });
+      const signIn = vi.fn(async () => {
+        if (stage === "connect") await block();
+      });
+      let anotherMePolls = 0;
+      const f = fixture(
+        (home) => ({
+          ...withCheckout(home),
+          signIn,
+          sessionCookie: async () => "session=test",
+          fetch: async (input) => {
+            const url = new URL(String(input));
+            if (url.pathname === "/v0/me")
+              return Response.json({
+                actors: [{ kind: "human", tenant_id: "t1" }],
+              });
+            if (url.pathname === "/v0/tenants/t1/another-me") {
+              if (stage === "agents" && anotherMePolls++ === 0) {
+                await block();
+                return Response.json({});
+              }
+              return Response.json({ agent_actor_id: "agent_test" });
+            }
+            if (url.pathname === "/v0/tenants/t1/rooms")
+              return Response.json({
+                items: [{ name: "Getting Started" }],
+              });
+            throw new Error("Unexpected test request");
+          },
+        }),
+        {},
+        checkout,
+        api,
+      );
+      if (stage === "enrollment") f.enroll.mockImplementation(block);
+      const phases: string[] = [];
+      f.bus.on("local-server.changed", () =>
+        phases.push(f.module.status().phase),
+      );
+      await f.host.start();
+      const running = f.module.begin({ runtime: "pi" });
+      await entered;
+      let stopSettled = false;
+      const stopping = f.module.cancelInstallation().then(() => {
+        stopSettled = true;
+      });
+      await Promise.resolve();
+      const stopSettledWhileBlocked = stopSettled;
+      const whileBlocked = f.module.status();
+      release();
+      await running;
+      await stopping;
+      await f.host.stop("quit");
+
+      expect(f.module.status().phase).toBe("ready");
+      expect(stopSettledWhileBlocked).toBe(true);
+      expect(whileBlocked).toMatchObject({
+        phase: "installing",
+        cancellable: false,
+      });
+      expect(phases).not.toContain("stopping");
+      expect(phases).not.toContain("cancelled");
+      expect(api.created).toHaveLength(1);
+      expect(api.retried).toEqual([]);
+      expect(requests.filter((request) => request.endsWith("/cancel"))).toEqual(
+        [],
+      );
+      expect(signIn).toHaveBeenCalledTimes(1);
+      expect(f.enroll).toHaveBeenCalledTimes(1);
+      expect(f.setServer).toHaveBeenCalledWith("http://localhost:3000");
+      expect(
+        JSON.parse(
+          readFileSync(
+            path.join(f.home, "desktop", "local-server.json"),
+            "utf8",
+          ),
+        ),
+      ).toMatchObject({ origin: "http://localhost:3000" });
+    },
+  );
+
+  it.each(["initial", "switched"] as const)(
+    "retains exact job cancellation during the %s installer run",
+    async (attempt) => {
+      const api = installerApi();
+      const targetJobs = attempt === "initial" ? 1 : 2;
+      const handle = api.handle;
+      const cancellations: string[] = [];
+      const job = (state: string) => ({
+        id: "job",
+        instance: LOCAL_INSTANCE,
+        state,
+        stage: "runtime",
+        createdAt: "2026-11-11T00:00:00Z",
+        stages: [],
+      });
+      vi.spyOn(api, "handle").mockImplementation(async (url, init) => {
+        if (
+          url.pathname === "/api/jobs/job/cancel" &&
+          init?.method === "POST"
+        ) {
+          cancellations.push(url.pathname);
+          return Response.json(job("waiting_user"));
+        }
+        if (
+          url.pathname === "/api/jobs/job" &&
+          api.created.length === targetJobs
+        )
+          return Response.json(
+            job(cancellations.length ? "canceled" : "running"),
+          );
+        return handle(url, init);
+      });
+      api.runtime.login = { state: "idle" };
+      const f = fixture(
+        (home) => ({ ...withCheckout(home), signInPollMs: 5 }),
+        {},
+        checkout,
+        api,
+      );
+      let enter!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      f.bus.on("local-server.changed", () => {
+        const status = f.module.status();
+        if (
+          status.cancellable &&
+          status.step === "services" &&
+          api.created.length === targetJobs
+        )
+          enter();
+      });
+      await f.host.start();
+      const running = f.module.begin({ runtime: "pi" });
+      if (attempt === "switched") {
+        await vi.waitFor(() =>
+          expect(f.module.status().signIn?.state).toBe("required"),
+        );
+        await f.module.cancelInstallation();
+        expect(f.module.status()).toMatchObject({
+          phase: "installing",
+          cancellable: false,
+        });
+        api.runtime.login = { state: "ready" };
+        f.module.switchRuntime("codex");
+      }
+      await entered;
+      expect(f.module.status().cancellable).toBe(true);
+      await f.module.cancelInstallation();
+      await running;
+      expect(f.module.status()).toMatchObject({
+        phase: "cancelled",
+        cancellable: false,
+      });
+      expect(cancellations).toEqual(["/api/jobs/job/cancel"]);
+      expect(api.created).toHaveLength(targetJobs);
+      expect(f.signIn).not.toHaveBeenCalled();
+      expect(f.enroll).not.toHaveBeenCalled();
+      await f.host.stop("quit");
+    },
+  );
+
+  it.each(["local", "recommended"] as const)(
+    "preserves trustworthy %s runtime byte activity for the setup renderer",
+    async (runtime) => {
+      const f = fixture(
+        withCheckout,
+        {},
+        checkout,
+        installerApi([], DONE, undefined, {
+          state: "running",
+          stage: "runtime",
+          setupChoice: "local-models",
+          message: "Local model llm: download",
+          stages: [
+            {
+              id: "runtime",
+              state: "running",
+              progress: {
+                completed: 4 * 1024 ** 3,
+                total: 17 * 1024 ** 3,
+                unit: "bytes",
+              },
+            },
+          ],
+        }),
+      );
+      const activities: unknown[] = [];
+      f.bus.on("local-server.changed", () =>
+        activities.push(f.module.status().modelActivity),
+      );
+      await f.host.start();
+      await f.module.begin({ runtime });
+      expect(activities).toContainEqual({
+        message: "Local model llm: download",
+        progress: { completed: 4 * 1024 ** 3, total: 17 * 1024 ** 3 },
+      });
+      expect(f.module.status().modelActivity).toBeUndefined();
+      await f.host.stop("quit");
+    },
+  );
+
+  it.each(["stop", "shutdown", "unconfirmed"])(
+    "handles %s without cancelling unrelated jobs or claiming unconfirmed stops",
+    async (action) => {
+      const controller = new AbortController();
+      const requests: string[] = [];
+      let stopping = false;
+      let polls = 0;
+      const job = (state: string, extra = {}) => ({
+        id: "owned",
+        instance: "desktop",
+        createdAt: "2026-11-11T00:00:00Z",
+        state,
+        stage: "runtime",
+        stages: [],
+        ...extra,
+      });
+      const fetcher: typeof fetch = async (input, init) => {
+        const url = new URL(String(input));
+        requests.push((init?.method ?? "GET") + " " + url.pathname);
+        if (url.pathname === "/api/session")
+          return new Response("{}", {
+            headers: {
+              "set-cookie": "linger_installer_session=test; Path=/api",
+            },
+          });
+        if (url.pathname === "/api/jobs" && init?.method !== "POST")
+          return Response.json({
+            items: [{ ...job("running"), id: "unrelated", instance: "other" }],
+          });
+        if (url.pathname === "/api/jobs") return Response.json(job("running"));
+        if (url.pathname === "/api/jobs/owned/cancel") {
+          if (action === "unconfirmed")
+            return Response.json({ message: "unavailable" }, { status: 503 });
+          stopping = true;
+          return Response.json(job("waiting_user", { cancelRequested: true }));
+        }
+        if (url.pathname === "/api/jobs/owned")
+          return Response.json(
+            stopping && ++polls > 1
+              ? job("canceled")
+              : job(stopping ? "waiting_user" : "running", {
+                  cancelRequested: stopping,
+                }),
+          );
+        throw new Error("Unexpected test request");
+      };
+      const api = await InstallerApi.open(
+        "http://localhost:4321/#token=test",
+        fetcher,
+        1,
+      );
+      const run = api.run(
+        { runtime: "local" },
+        controller.signal,
+        () => controller.abort(),
+        false,
+        action === "shutdown" ? undefined : controller.signal,
+      );
+      await expect(run).rejects.toThrow(
+        action === "shutdown"
+          ? /abort|interrupt/i
+          : action === "unconfirmed"
+            ? /could not confirm stopping/i
+            : /stopped/i,
+      );
+      expect(requests.filter((value) => value.endsWith("/cancel"))).toEqual(
+        action === "shutdown" ? [] : ["POST /api/jobs/owned/cancel"],
+      );
+      expect(polls).toBe(action === "stop" ? 2 : 0);
+    },
+  );
+
+  it("allows stopping pre-install preparation and retry without deleting existing data", async () => {
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    let blocked = true;
+    const archive = sourceArchive(tempDirectory());
+    const f = fixture({
+      sourceArchive: {
+        url: "https://cdn.example/linger.tar.gz",
+        sha256: archive.sha256,
+      },
+      fetch: async (_input, init) => {
+        if (!blocked) return new Response(archive.bytes);
+        enter();
+        await new Promise((_, reject) =>
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(init.signal?.reason),
+            {
+              once: true,
+            },
+          ),
+        );
+        return new Response(archive.bytes);
+      },
+    });
+    const asset = path.join(f.home, "existing-model.bin");
+    writeFileSync(asset, "verified model fixture");
+    await f.host.start();
+    const running = f.module.begin({ runtime: "pi" });
+    await entered;
+    expect(f.module.status().cancellable).toBe(true);
+    await f.module.cancelInstallation();
+    await running;
+    expect(f.module.status()).toMatchObject({
+      phase: "cancelled",
+      cancellable: false,
+      message: expect.stringContaining("kept"),
+    });
+    expect(readFileSync(asset, "utf8")).toBe("verified model fixture");
+    blocked = false;
+    await f.module.begin({ runtime: "pi" });
+    expect(f.module.status().phase).toBe("ready");
+    await f.host.stop("quit");
+  });
 });

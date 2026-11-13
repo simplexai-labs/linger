@@ -33,6 +33,7 @@ const state = (
   localServer: {
     available: true,
     phase,
+    cancellable: phase === "installing",
     message: "",
     steps: ["prepare", "services", "connect", "agents"],
     step: phase === "ready" ? "agents" : "services",

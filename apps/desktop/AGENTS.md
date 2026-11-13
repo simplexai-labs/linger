@@ -55,7 +55,22 @@ Gateway and runs Agents. The daemon exits with the app.
   the session from `installer/launch.html`, one job for instance `desktop`
   with the chosen AI runtime and local models, then the job's progress, which
   the setup page shows as five steps. Each Install or Try Again is a new attempt: its timers and bar
-  start over, and the bar never moves back within one. There is no
+  start over, and the overall bar never moves back within one. Local-model
+  runtime work instead shows the last reported file transfer bytes and measured
+  percentage, or an indeterminate phase when the upstream tool gives no total;
+  it never invents an ETA. Stop installation cancels only this attempt through
+  the installer job API and waits for its safe checkpoint before showing
+  stopped, with downloaded assets, data and existing services retained for
+  retry. Stop is available only during preparation or an installer run. Once
+  that run returns, Stop is hidden and stale stop requests do nothing while
+  runtime sign-in, connection, enrollment and agent preparation finish. Choosing
+  another runtime enables Stop again for its installer run.
+  A pending Stop acknowledges when its preparation or installer attempt settles,
+  including a completed handoff that still needs runtime sign-in; it never waits
+  for that interactive step. Preparation and the first installer run share one
+  cancellation controller, so a requested stop survives their handoff.
+  A failed cancellation confirmation says the manager may still be
+  running; closing the app alone still leaves its manager running. There is no
   installer window. When the job waits for the runtime sign-in (its
   `runtime` stage `waiting_user`, or `RUNTIME_AUTH_REQUIRED`), it asks the
   installer (`GET /api/runtime-login`) whether the runtime is signed in
@@ -67,7 +82,12 @@ Gateway and runs Agents. The daemon exits with the app.
   printed link and Claude Code's paste-code form sit behind "Having
   trouble?"; Cancel stops the login (`DELETE /api/runtime-login`); the
   dialog also offers installing another runtime instead (a new job with
-  that `setupChoice`). No secret passes through the page. Then it saves the
+  that `setupChoice`). Pi instead offers an API provider form for OpenAI,
+  Anthropic or an existing OpenAI-compatible endpoint and model. Its masked
+  API key is submitted once through the setup IPC to the same installer
+  endpoint, cleared from the input immediately and never added to setup
+  state or diagnostics; failures retain endpoint and model fields for retry.
+  Then it saves the
   installed runtime's executable and profile paths
   (`GET /api/instances/desktop/runtime`) as `runtimeEnvironment` in the
   Desktop config, and the runtime its `setupChoice` runs (`local-models` runs
@@ -141,6 +161,13 @@ Gateway and runs Agents. The daemon exits with the app.
   LiveKit whenever this computer has voice tools, with or without a voice
   key (see Source Package and Release). There is no settings page
   after setup yet: keys change on the next Install or Try Again.
+- Customize keeps the Local model section visible while its support check runs
+  and when no verified plan is available. It shows the installer's plain-language
+  reason, disables model selection and offers Pi with a provider as an
+  alternative. A failed check is separate from an unsupported computer. Local
+  model installation failures retain the installer's redacted cause and retry
+  guidance; service or verification failures must not be rewritten as hardware
+  ineligibility.
 - `src/main/diagnostics.ts`: Diagnostics, "Show Logs" (opens
   `<userData>/logs`) and "Save Diagnostics" (a redacted
   `linger-diagnostics-<time>.zip` in Downloads) for the setup page's failed

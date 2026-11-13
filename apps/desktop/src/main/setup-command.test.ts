@@ -3,6 +3,15 @@ import { describe, expect, it } from "vitest";
 import { parseSetupCommand } from "./setup-command.js";
 
 describe("parseSetupCommand", () => {
+  it("accepts scoped installation stop without arbitrary job IDs", () => {
+    expect(parseSetupCommand({ op: "local.cancel" })).toEqual({
+      op: "local.cancel",
+    });
+    expect(() =>
+      parseSetupCommand({ op: "local.cancel", job: "other" }),
+    ).toThrow();
+  });
+
   it("accepts known commands", () => {
     expect(parseSetupCommand({ op: "prevent-sleep.set", on: true })).toEqual({
       op: "prevent-sleep.set",
@@ -91,6 +100,72 @@ describe("parseSetupCommand", () => {
       message = String(error);
     }
     expect(message).not.toContain("secret value");
+  });
+
+  it("takes Pi provider credentials without requiring a terminal", () => {
+    for (const provider of ["openai", "anthropic"]) {
+      expect(
+        parseSetupCommand({
+          op: "local.signin.configure",
+          credentials: { provider, apiKey: " test-api-key " },
+        }),
+      ).toEqual({
+        op: "local.signin.configure",
+        credentials: { provider, apiKey: "test-api-key" },
+      });
+    }
+    expect(
+      parseSetupCommand({
+        op: "local.signin.configure",
+        credentials: {
+          provider: "openai-compatible",
+          apiKey: "local-test-key",
+          baseUrl: " http://127.0.0.1:18100/v1 ",
+          model: " local/model-1 ",
+        },
+      }),
+    ).toEqual({
+      op: "local.signin.configure",
+      credentials: {
+        provider: "openai-compatible",
+        apiKey: "local-test-key",
+        baseUrl: "http://127.0.0.1:18100/v1",
+        model: "local/model-1",
+      },
+    });
+  });
+
+  it("rejects unsafe Pi settings without repeating credentials", () => {
+    const base = {
+      provider: "openai-compatible",
+      apiKey: "private-test-value",
+      baseUrl: "https://api.example.test/v1",
+      model: "local-model",
+    };
+    for (const changes of [
+      { apiKey: "" },
+      { apiKey: "private-test-value with-spaces" },
+      { apiKey: "x".repeat(4097) },
+      { provider: "unknown" },
+      { baseUrl: "http://192.168.1.2/v1" },
+      { baseUrl: "https://user:private-test-value@api.example.test/v1" },
+      { baseUrl: "https://api.example.test/v1?key=private-test-value" },
+      { model: "bad model" },
+      { provider: "openai", baseUrl: "https://api.example.test/v1" },
+      { unexpected: "private-test-value" },
+    ]) {
+      let message = "";
+      try {
+        parseSetupCommand({
+          op: "local.signin.configure",
+          credentials: { ...base, ...changes },
+        });
+      } catch (error) {
+        message = String(error);
+      }
+      expect(message).not.toBe("");
+      expect(message).not.toContain("private-test-value");
+    }
   });
 
   it("rejects unknown commands and extra fields", () => {
