@@ -84,6 +84,15 @@ skills:
       - manifest_id: skill_manifest_simplexai_proactive_response_1_0_0
         version: 1.0.0
         package_path: builtin/proactive-response/1.0.0
+  - skill_id: simplexai_holistic_context
+    bootstrap_manifest_id: skill_manifest_simplexai_holistic_context_1_0_0
+    default_agent_types:
+      - anotherme
+      - general
+    manifests:
+      - manifest_id: skill_manifest_simplexai_holistic_context_1_0_0
+        version: 1.0.0
+        package_path: builtin/holistic-context/1.0.0
   - skill_id: simplexai_canvas
     bootstrap_manifest_id: skill_manifest_simplexai_canvas_1_0_2
     default_agent_types:

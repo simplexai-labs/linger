@@ -36,8 +36,8 @@ func TestBuiltinCatalogLoadsVersionedPackages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Skills) != 15+importedBuiltinSkillCount {
-		t.Fatalf("catalog Skills=%d, want %d", len(catalog.Skills), 15+importedBuiltinSkillCount)
+	if len(catalog.Skills) != 16+importedBuiltinSkillCount {
+		t.Fatalf("catalog Skills=%d, want %d", len(catalog.Skills), 16+importedBuiltinSkillCount)
 	}
 	assertImportedBuiltinSkillDefaults(t, catalog)
 	for _, skill := range catalog.Skills {
@@ -86,7 +86,7 @@ func TestBuiltinCatalogLoadsVersionedPackages(t *testing.T) {
 	}
 
 	t.Run("active CLI guides use supported commands", func(t *testing.T) {
-		for _, skillID := range []string{"simplexai_teamhub_files", "simplexai_collaborate", "simplexai_canvas", "simplexai_builtin_skill_installer", "simplexai_create_meeting_minutes", "simplexai_personal_profile"} {
+		for _, skillID := range []string{"simplexai_teamhub_files", "simplexai_collaborate", "simplexai_canvas", "simplexai_builtin_skill_installer", "simplexai_create_meeting_minutes", "simplexai_personal_profile", "simplexai_holistic_context"} {
 			skill := findBuiltinSkill(t, catalog, skillID)
 			current := findBuiltinManifest(t, skill, skill.BootstrapManifestID)
 			for _, file := range current.Package.Files {
@@ -112,6 +112,12 @@ func TestBuiltinCatalogLoadsVersionedPackages(t *testing.T) {
 	if collaborate.BootstrapManifestID != "skill_manifest_simplexai_collaborate_1_0_0" ||
 		!slices.Equal(collaborate.DefaultAgentTypes, []string{"anotherme", "general"}) {
 		t.Fatalf("Collaborate catalog entry=%+v", collaborate)
+	}
+	holistic := findBuiltinSkill(t, catalog, "simplexai_holistic_context")
+	if holistic.Name != "holistic-context" ||
+		holistic.BootstrapManifestID != "skill_manifest_simplexai_holistic_context_1_0_0" ||
+		!slices.Equal(holistic.DefaultAgentTypes, []string{"anotherme", "general"}) {
+		t.Fatalf("Holistic context catalog entry=%+v", holistic)
 	}
 	lev8Search := findBuiltinSkill(t, catalog, "simplexai_lev8_search")
 	if lev8Search.Name != "lev8-search" ||

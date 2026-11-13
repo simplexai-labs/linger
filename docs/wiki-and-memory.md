@@ -71,6 +71,15 @@ translations, so a Chinese question can find an English page. Search uses
 keywords only, with no embedding or reranker model. Another Me also has the
 wiki as read-only files in its workspace.</sub>
 
+When an answer needs more than the knowledge search, such as a project's state
+across Slack and the calendar, who is free next week, what is still owed, or a
+plan built on the person's constraints, Another Me and General agents open the
+built-in `holistic-context` Skill. It searches knowledge first and then only the
+live sources the answer still needs: the calendar, Tracking Items, Slack, live
+mail, Drive, Notion, GitHub or the web. Anything memory says that can change,
+such as a date, a role or an amount, is checked against its latest source before
+the answer states it as current.
+
 ## Agent memory
 
 Each agent also learns from its own conversations, separately from your wiki.
