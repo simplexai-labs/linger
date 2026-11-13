@@ -1,7 +1,7 @@
 /** Schedule the owned model controller; its readiness never gates installation. */
 import path from "node:path";
 import { atomicPrivate, readPrivate, type Instance } from "./instance.js";
-import { runLocalmodels } from "./localmodels-tool.js";
+import { modelServicesRoot, runLocalmodels } from "./localmodels-tool.js";
 import type { InstallerEvent } from "./events.js";
 import type { SetupChoice } from "./setup-plan.js";
 import {
@@ -63,7 +63,7 @@ export async function prepareFoundationServices(
     options.shareGpu ?? (await readGpuSharing(instance)) ?? DEFAULT_GPU_SHARING;
   if (options.shareGpu !== undefined)
     await writeGpuSharing(instance, options.shareGpu);
-  const root = path.join(path.resolve(options.home), "runtime/model-services");
+  const root = modelServicesRoot(options.home);
   const file = path.join(instance.root, "model-services.json");
   try {
     const result = await (dependencies.run ?? runLocalmodels)(

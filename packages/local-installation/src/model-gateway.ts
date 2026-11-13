@@ -2,7 +2,7 @@
 import path from "node:path";
 import { lstat, rm } from "node:fs/promises";
 import { atomicPrivate, readPrivate, type Instance } from "./instance.js";
-import { runLocalmodels } from "./localmodels-tool.js";
+import { modelServicesRoot, runLocalmodels } from "./localmodels-tool.js";
 import { localmodelsFailure } from "./localmodels-failure.js";
 import {
   setupSelection,
@@ -19,10 +19,7 @@ interface LocalGateway {
 }
 function validateLocal(instance: Instance, value: unknown): LocalGateway {
   const binding = value as LocalGateway;
-  const control = path.join(
-    path.resolve(instance.root, "../.."),
-    "runtime/model-services",
-  );
+  const control = modelServicesRoot(path.resolve(instance.root, "../.."));
   if (
     !binding ||
     binding.schema !== "localmodels.service-controller-binding/v1" ||

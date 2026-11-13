@@ -269,19 +269,15 @@ async function prepareLocalmodelsTool(
   options: Options = {},
   dependencies: { source?: LocalmodelsToolSource; fetcher?: typeof fetch } = {},
 ) {
-  let source = dependencies.source;
-  if (!source) {
-    const raw = process.env.LINGER_LOCALMODELS_TOOL_JSON;
-    if (!raw)
-      throw new Error(
-        "Upstream tool distribution metadata is unavailable. Download the current Linger installer.",
-      );
-    source = validateToolSource(JSON.parse(raw));
-  }
-  source = validateToolSource(source);
-  const base = path.join(path.resolve(home), "tools", "localmodels");
+  const pinned = dependencies.source ?? pinnedToolSource();
+  if (!pinned)
+    throw new Error(
+      "Upstream tool distribution metadata is unavailable. Download the current Linger installer.",
+    );
+  const source = validateToolSource(pinned);
+  const directory = kitDirectory(home, source);
+  const base = path.dirname(directory);
   await privateDirectory(base);
-  const directory = path.join(base, source.sha256);
   // Published kits are immutable and renamed into place only after validation.
   // Readers must not compete for the cross-process installation lock.
   try {
@@ -516,7 +512,7 @@ export async function stopLocalmodels(
   } = {},
 ): Promise<void> {
   if (!(await (dependencies.installed ?? hasPinnedTool)(home))) return;
-  const root = path.join(path.resolve(home), "runtime", "model-services");
+  const root = modelServicesRoot(home);
   const failed: string[] = [];
   for (const args of [
     ["foundations", "stop", "--root", root, "--json"],
@@ -546,16 +542,23 @@ export async function stopLocalmodels(
   if (failed.length) throw new Error(failed.join("; "));
 }
 async function hasPinnedTool(home: string): Promise<boolean> {
+  const source = pinnedToolSource();
+  if (!source) return false;
+  return !!(await installedKit(kitDirectory(home, source), source).catch(
+    () => undefined,
+  ));
+}
+/** The kit this release pins, from the installer's published metadata. */
+function pinnedToolSource(): LocalmodelsToolSource | undefined {
   const raw = process.env.LINGER_LOCALMODELS_TOOL_JSON;
-  if (!raw) return false;
-  const source = validateToolSource(JSON.parse(raw));
-  const directory = path.join(
-    path.resolve(home),
-    "tools",
-    "localmodels",
-    source.sha256,
-  );
-  return !!(await installedKit(directory, source).catch(() => undefined));
+  return raw ? validateToolSource(JSON.parse(raw)) : undefined;
+}
+function kitDirectory(home: string, source: LocalmodelsToolSource): string {
+  return path.join(path.resolve(home), "tools", "localmodels", source.sha256);
+}
+/** Where the foundations controller of a home keeps its state. */
+export function modelServicesRoot(home: string): string {
+  return path.join(path.resolve(home), "runtime", "model-services");
 }
 export async function readPublishedTool(
   file: string,
