@@ -616,6 +616,29 @@ func TestPiCatalogCarriesTheDeclaredContextWindow(t *testing.T) {
 	}
 }
 
+func TestPiCatalogLabelsAModelByItsName(t *testing.T) {
+	list, err := piCatalogList(piCatalogState{}, []json.RawMessage{
+		json.RawMessage(`{"id":"localmodels-lib-qwen/Qwen3.8-27B-UD-IQ3_S","provider":"localmodels-library","name":" Qwen3.8 27B "}`),
+		json.RawMessage(`{"id":"unnamed","provider":"local"}`),
+		// Two models of one name stay apart by their keys.
+		json.RawMessage(`{"id":"q4","provider":"local","name":"Qwen3 4B"}`),
+		json.RawMessage(`{"id":"q4","provider":"mirror","name":"Qwen3 4B"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var labels []string
+	for _, model := range list.Models {
+		labels = append(labels, model.Label)
+	}
+	if want := []string{"Qwen3.8 27B", "local/unnamed", "local/q4", "mirror/q4"}; !slices.Equal(labels, want) {
+		t.Fatalf("labels = %q, want %q", labels, want)
+	}
+	if list.Models[0].ID != "localmodels-library/localmodels-lib-qwen/Qwen3.8-27B-UD-IQ3_S" {
+		t.Fatalf("id = %q", list.Models[0].ID)
+	}
+}
+
 func TestPiEffortSupportDefaults(t *testing.T) {
 	support := piEffortSupport(map[string]json.RawMessage{"xhigh": json.RawMessage(`"x"`)}, "off")
 	var values []string
