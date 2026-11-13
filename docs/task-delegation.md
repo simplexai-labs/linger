@@ -45,4 +45,7 @@ you, and the AlterEgo's output lands in the Meta's own workspace.
 
 <sub>Task commands and reports pass through the server. Each AlterEgo has its
 own session and workspace on the same computer; only the Task folder is linked
-into both.</sub>
+into both. An AlterEgo can also read the folders of the other Tasks delegated
+from the same Room, at the same `playground/<task-id>/` paths, so one Task's
+output path works as-is in the next Task's brief. Its edits there are not
+pre-approved the way edits in its own folder are.</sub>

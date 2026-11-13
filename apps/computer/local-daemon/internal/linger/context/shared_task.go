@@ -241,8 +241,8 @@ func (s *ViewStore) sharedTaskStorage() *SharedTaskStorage {
 	return s.shared.storage
 }
 
-// prepareSharedTask readies the scope's directories and, for a Meta, reads the
-// Room's current Tasks. It runs without s.mu.
+// prepareSharedTask readies the scope's directories and reads the Room's
+// current Tasks. It runs without s.mu.
 func (s *ViewStore) prepareSharedTask(scope SharedTaskScope) ([]string, error) {
 	storage := s.sharedTaskStorage()
 	if storage == nil {
@@ -251,9 +251,6 @@ func (s *ViewStore) prepareSharedTask(scope SharedTaskScope) ([]string, error) {
 	if err := storage.prepare(scope); err != nil {
 		return nil, err
 	}
-	if scope.Role != sharedTaskRoleMeta {
-		return nil, nil
-	}
 	names, err := listSharedTaskNames(storage.roomTasks(scope))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSharedTaskStorageUnavailable, err)
@@ -261,9 +258,10 @@ func (s *ViewStore) prepareSharedTask(scope SharedTaskScope) ([]string, error) {
 	return names, nil
 }
 
-// linkSharedTasks registers the scope and links its Tasks into the published
-// workspace. An alter_ego fails on any conflict; a Meta reports a conflicting
-// Task and links the rest. The caller holds s.mu.
+// linkSharedTasks registers the scope and links the Room's Tasks into the
+// published workspace. An alter_ego fails on a conflict at its own Task; a
+// conflict at any other Task is reported and the rest are linked. The caller
+// holds s.mu.
 func (s *ViewStore) linkSharedTasks(ctx context.Context, command View, workspace string, tasks []string) error {
 	scope := *command.SharedTaskScope
 	storage := s.sharedTaskStorage()
@@ -279,9 +277,14 @@ func (s *ViewStore) linkSharedTasks(ctx context.Context, command View, workspace
 		return err
 	}
 	if scope.Role == sharedTaskRoleAlterEgo {
-		return s.ensureSharedTaskLink(ctx, command.ExecutionContextKey, workspace, scope.TaskID, storage.taskDirectory(scope, scope.TaskID), true)
+		if err := s.ensureSharedTaskLink(ctx, command.ExecutionContextKey, workspace, scope.TaskID, storage.taskDirectory(scope, scope.TaskID), true); err != nil {
+			return err
+		}
 	}
 	for _, taskID := range tasks {
+		if scope.Role == sharedTaskRoleAlterEgo && taskID == scope.TaskID {
+			continue
+		}
 		err := s.ensureSharedTaskLink(ctx, command.ExecutionContextKey, workspace, taskID, storage.taskDirectory(scope, taskID), false)
 		if errors.Is(err, ErrSharedTaskPathConflict) {
 			s.sharedTaskLogger().Warn("runner.shared_task.link_conflict", "execution_context_key", command.ExecutionContextKey,
@@ -407,8 +410,9 @@ func (s *ViewStore) SharedTaskAccess(ctx context.Context, executionContextKey, v
 	}
 	if scope.Role == sharedTaskRoleAlterEgo {
 		return provider.SharedTaskAccess{
-			WritableTaskRoot: storage.taskDirectory(*scope, scope.TaskID),
-			WritableTaskLink: filepath.Join(sharedTaskPlayground, scope.TaskID),
+			WritableTaskRoot:  storage.taskDirectory(*scope, scope.TaskID),
+			WritableTaskLink:  filepath.Join(sharedTaskPlayground, scope.TaskID),
+			ReadableTasksRoot: storage.roomTasks(*scope),
 		}, nil
 	}
 	return provider.SharedTaskAccess{ReadableTasksRoot: storage.roomTasks(*scope)}, nil
@@ -494,13 +498,64 @@ func (s *ViewStore) afterSharedTaskApply(record ViewRecord) {
 	// A Task created on this daemon appears in its Meta without waiting for
 	// the next periodic check, which still runs regardless.
 	s.shared.mu.Lock()
-	defer s.shared.mu.Unlock()
 	for _, loop := range s.shared.loops {
 		if loop.scope.TenantID == scope.TenantID && loop.scope.AgentID == scope.AgentID && loop.scope.OriginRoomID == scope.OriginRoomID {
 			select {
 			case loop.kick <- struct{}{}:
 			default:
 			}
+		}
+	}
+	s.shared.mu.Unlock()
+	s.linkIntoSiblingTasks(record.View.ExecutionContextKey, *scope)
+}
+
+// linkIntoSiblingTasks links one Task into the other ready alter_ego Views of
+// its Room, so an earlier Task reads a later one's output at the same path. An
+// alter_ego has no discovery loop: Views are never released, and each one
+// links the Room's existing Tasks when it is applied.
+func (s *ViewStore) linkIntoSiblingTasks(key string, scope SharedTaskScope) {
+	storage := s.sharedTaskStorage()
+	if storage == nil {
+		return
+	}
+	ctx := context.Background()
+	logger := s.sharedTaskLogger()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT execution_context_key FROM shared_task_scopes WHERE execution_context_key<>?
+		AND json_extract(scope_json,'$.tenant_id')=? AND json_extract(scope_json,'$.agent_id')=?
+		AND json_extract(scope_json,'$.origin_room_id')=? AND json_extract(scope_json,'$.role')=?`,
+		key, scope.TenantID, scope.AgentID, scope.OriginRoomID, sharedTaskRoleAlterEgo)
+	if err != nil {
+		logger.Warn("runner.shared_task.link_failed", "execution_context_key", key, "task_id", scope.TaskID, "role", scope.Role, "stage", "siblings", "error", err)
+		return
+	}
+	var siblings []string
+	for rows.Next() {
+		var sibling string
+		if rows.Scan(&sibling) == nil {
+			siblings = append(siblings, sibling)
+		}
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		logger.Warn("runner.shared_task.link_failed", "execution_context_key", key, "task_id", scope.TaskID, "role", scope.Role, "stage", "siblings", "error", err)
+		return
+	}
+	target := storage.taskDirectory(scope, scope.TaskID)
+	for _, sibling := range siblings {
+		record, err := s.read(ctx, sibling)
+		// An unready View links every Task of its Room when it is next applied.
+		if err != nil || record.Unready || record.View.SharedTaskScope == nil || record.View.SharedTaskScope.OriginRoomID != scope.OriginRoomID {
+			continue
+		}
+		if err := s.ensureSharedTaskLink(ctx, sibling, record.WorkspacePath, scope.TaskID, target, false); err != nil {
+			logger.Warn("runner.shared_task.link_failed", "execution_context_key", sibling, "task_id", scope.TaskID, "role", sharedTaskRoleAlterEgo, "stage", "siblings", "error", err)
 		}
 	}
 }

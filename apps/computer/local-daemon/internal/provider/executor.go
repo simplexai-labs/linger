@@ -88,9 +88,9 @@ type OperationSpec struct {
 	SharedTask SharedTaskAccess
 }
 
-// SharedTaskAccess is a Context's shared Task access. An alter_ego writes its
-// own Task directory; a Meta reads its Room tasks directory. Neither grants
-// the shared root.
+// SharedTaskAccess is a Context's shared Task access. Both roles read their
+// Room tasks directory; an alter_ego also writes its own Task directory.
+// Neither grants the shared root.
 type SharedTaskAccess struct {
 	WritableTaskRoot string
 	// WritableTaskLink is the workspace-relative link to WritableTaskRoot.

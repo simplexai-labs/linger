@@ -19,7 +19,7 @@ func ClaudeAllowRules(commands []TeamHubCommand) []string {
 
 // ClaudeSharedTaskRules allows the Runtime's ordinary file tools on its shared Task
 // directories: edits and reads in an alter_ego's own Task directory, reads in
-// a Meta's Room tasks directory. Claude checks a path reached through a
+// the Room tasks directory. Claude checks a path reached through a
 // workspace link against its real location, which these absolute rules name.
 // Nothing else is allowed by them.
 func ClaudeSharedTaskRules(writableRoot, readableRoot string) []string {

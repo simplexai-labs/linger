@@ -152,12 +152,62 @@ func TestSharedTaskLinksShareOneTaskBetweenTwoContexts(t *testing.T) {
 		t.Fatalf("ordinary playground file leaked: %v", err)
 	}
 	access, err := fixture.store.SharedTaskAccess(context.Background(), testAlterKey, alter.View.ViewDigest)
-	if err != nil || access.WritableTaskRoot != taskRoot || access.WritableTaskLink != filepath.Join("playground", "task-1") || access.ReadableTasksRoot != "" {
+	if err != nil || access.WritableTaskRoot != taskRoot || access.WritableTaskLink != filepath.Join("playground", "task-1") || access.ReadableTasksRoot != fixture.roomTasks() {
 		t.Fatalf("alter_ego access = %+v %v", access, err)
 	}
 	access, err = fixture.store.SharedTaskAccess(context.Background(), testMetaKey, meta.View.ViewDigest)
 	if err != nil || access.ReadableTasksRoot != fixture.roomTasks() || access.WritableTaskRoot != "" {
 		t.Fatalf("Meta access = %+v %v", access, err)
+	}
+}
+
+func TestAlterEgoReadsOtherTasksOfItsRoom(t *testing.T) {
+	fixture := openSharedTaskFixture(t)
+	first := applyScoped(t, fixture.store, scopedView("alter-1", testAlterKey, alterScope("task-1", "room-1")))
+	if err := os.WriteFile(filepath.Join(first.WorkspacePath, "playground", "task-1", "image.png"), []byte("first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second := applyScoped(t, fixture.store, scopedView("alter-2", `["alter_ego","agent-1","task-2"]`, alterScope("task-2", "room-1")))
+	other := applyScoped(t, fixture.store, scopedView("alter-3", `["alter_ego","agent-1","task-3"]`, alterScope("task-3", "room-2")))
+
+	// A later Task reads an earlier one at the path the earlier one reported.
+	if !readsAs(filepath.Join(second.WorkspacePath, "playground", "task-1", "image.png"), "first")() {
+		t.Fatal("the later Task cannot read the earlier Task's output")
+	}
+	// An earlier Task sees a later one without being applied again.
+	if err := os.WriteFile(filepath.Join(second.WorkspacePath, "playground", "task-2", "notes.md"), []byte("second"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !readsAs(filepath.Join(first.WorkspacePath, "playground", "task-2", "notes.md"), "second")() {
+		t.Fatal("the earlier Task cannot read the later Task's output")
+	}
+	// Tasks of another Room stay out of reach both ways.
+	for _, entry := range []string{
+		filepath.Join(other.WorkspacePath, "playground", "task-1"),
+		filepath.Join(first.WorkspacePath, "playground", "task-3"),
+		filepath.Join(second.WorkspacePath, "playground", "task-3"),
+	} {
+		if _, err := os.Lstat(entry); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s crosses Rooms: %v", entry, err)
+		}
+	}
+	access, err := fixture.store.SharedTaskAccess(context.Background(), `["alter_ego","agent-1","task-2"]`, second.View.ViewDigest)
+	if err != nil || access.WritableTaskRoot != filepath.Join(fixture.roomTasks(), "task-2") || access.ReadableTasksRoot != fixture.roomTasks() {
+		t.Fatalf("alter_ego access = %+v %v", access, err)
+	}
+
+	// A sibling entry the Agent occupied is reported, not fatal.
+	fixture.reopen(t)
+	occupied := filepath.Join(contextWorkspace(fixture.views, `["alter_ego","agent-1","task-4"]`), "playground", "task-1")
+	if err := os.MkdirAll(filepath.Dir(occupied), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(occupied, []byte("user"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fourth := applyScoped(t, fixture.store, scopedView("alter-4", `["alter_ego","agent-1","task-4"]`, alterScope("task-4", "room-1")))
+	if !readsAs(occupied, "user")() || !readsAs(filepath.Join(fourth.WorkspacePath, "playground", "task-2", "notes.md"), "second")() {
+		t.Fatal("a conflicting sibling entry blocked the other links")
 	}
 }
 
