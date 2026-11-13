@@ -90,7 +90,12 @@ export function stackProgress(value: unknown): InstallerEvent | undefined {
     wholeTotal !== undefined &&
     wholeTotal > 0 &&
     wholeDone <= wholeTotal;
-  const rate = count("bytes_per_second");
+  // A rate is bytes over elapsed time, so it may be fractional.
+  const rawRate = event.bytes_per_second;
+  const rate =
+    typeof rawRate === "number" && Number.isFinite(rawRate) && rawRate >= 0
+      ? Math.round(rawRate)
+      : undefined;
   const what =
     event.step === "engine"
       ? "the inference engine"

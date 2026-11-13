@@ -180,7 +180,10 @@ const small: SetupLocalModelsCheck = {
   eligible: false,
   memoryBytes: 8 * GB,
   diskFreeBytes: 100 * GB,
-  reasons: ["plan-unavailable: No model fits this computer."],
+  // A code the page never parses: it shows only the message.
+  reasons: [
+    { code: "upstream_policy", message: "No model fits this computer." },
+  ],
   recommendation: "codex",
 };
 const welcome = (localModels: SetupLocalModelsCheck): SetupState => {
@@ -271,6 +274,27 @@ describe("setup page Quick Install recommendation", () => {
     expect($("local-install-label").textContent).toBe("Quick Install");
     expect($("plan-summary").textContent).toBe(
       "Recommended for this computer: Local model + Pi",
+    );
+  });
+
+  it("follows the tool's pick when Auto was chosen during the check", async () => {
+    const { run, push } = await openPage(
+      welcome({ state: "checking" }),
+      "welcome",
+    );
+    $("local-customize").click();
+    const option = (value: string) =>
+      document.querySelector<HTMLButtonElement>(
+        `[data-plan="runtime"] [data-value="${value}"]`,
+      )!;
+    option("recommended").click();
+    push(welcome(capable));
+    expect(option("recommended").hidden).toBe(true);
+    expect(option("pi").getAttribute("aria-checked")).toBe("true");
+    expect($("local-model").getAttribute("aria-checked")).toBe("true");
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)).toEqual([{ op: "local.start", runtime: "local" }]),
     );
   });
 

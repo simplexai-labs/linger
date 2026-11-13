@@ -1326,7 +1326,9 @@ describe("LocalServerModule", () => {
       expect(f.module.status().localModels).toMatchObject({
         state: "checked",
         eligible: false,
-        reasons: ["facts-unavailable: nvidia-smi was not found"],
+        reasons: [
+          { code: "facts-unavailable", message: "nvidia-smi was not found" },
+        ],
         recommendation: "codex",
       }),
     );

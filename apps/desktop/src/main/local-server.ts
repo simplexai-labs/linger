@@ -33,6 +33,10 @@ import {
 import { downloadVerified } from "@linger/local-installation/download";
 import { legacyMigrationPending } from "@linger/local-installation/home";
 import {
+  type SetupChoice,
+  setupChoices,
+} from "@linger/local-installation/setup-plan";
+import {
   removeRetrying,
   renameRetrying,
 } from "@linger/local-installation/fs-retry";
@@ -107,15 +111,18 @@ export type LocalModelsCheck =
       readonly gpu?: string;
       // Present only when eligible.
       readonly model?: LocalModel;
-      // Why not, in the localmodels tool's words; present only when not
-      // eligible.
-      readonly reasons?: readonly string[];
+      // Why not, as the localmodels tool's code and words; present only
+      // when not eligible.
+      readonly reasons?: readonly SetupReason[];
       // The localmodels tool's pick for this computer, which Quick Install
       // installs; the page adds no rule of its own.
-      readonly recommendation?: SetupRecommendation;
+      readonly recommendation?: SetupChoice;
     };
 
-export type SetupRecommendation = "local-models" | "codex" | "claude" | "pi";
+export interface SetupReason {
+  readonly code: string;
+  readonly message?: string;
+}
 
 // A download under way: its bytes so far and in all, and the rate when the
 // source reports one. partial: the counts cover only the file downloading
@@ -126,12 +133,6 @@ export interface Transfer {
   readonly bytesPerSecond?: number;
   readonly partial?: boolean;
 }
-const RECOMMENDATIONS: readonly string[] = [
-  "local-models",
-  "codex",
-  "claude",
-  "pi",
-] satisfies readonly SetupRecommendation[];
 
 // What to install, chosen on the setup page; the installer applies it at once.
 export interface LocalServerPlan {
@@ -508,7 +509,11 @@ export class LocalServerModule implements Module {
               ? { recommendation: check.recommendation }
               : {}),
             ...(check.state === "checked" && check.reasons
-              ? { reasons: check.reasons }
+              ? {
+                  reasons: check.reasons.map(({ code, message }) =>
+                    message ? `${code}: ${message}` : code,
+                  ),
+                }
               : {}),
           });
           this.#check = check;
@@ -619,16 +624,17 @@ export class LocalServerModule implements Module {
     const strings = (value: unknown) =>
       Array.isArray(value) ? value.map(String) : [];
     const messages = strings(report.localModels.reasonMessages);
-    const reasons = strings(report.localModels.reasons).map((code, index) =>
-      messages[index] ? `${code}: ${messages[index]}` : code,
+    const reasons = strings(report.localModels.reasons).map(
+      (code, index): SetupReason =>
+        messages[index] ? { code, message: messages[index] } : { code },
     );
     const pick = report.recommendation;
     // The local model is recommended only with a model the page can show.
     const recommendation =
       typeof pick === "string" &&
-      RECOMMENDATIONS.includes(pick) &&
+      (setupChoices as readonly string[]).includes(pick) &&
       (pick !== "local-models" || eligible)
-        ? (pick as SetupRecommendation)
+        ? (pick as SetupChoice)
         : undefined;
     return {
       state: "checked",

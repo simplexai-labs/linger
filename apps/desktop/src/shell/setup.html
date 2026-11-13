@@ -2182,6 +2182,14 @@
       const renderLocal = (busy) => {
         const local = state.localServer;
         const recommended = defaults();
+        // Auto, picked before the check named a pick, means that pick; once
+        // it is known Auto no longer shows.
+        if (
+          picked &&
+          plan.runtime === "recommended" &&
+          recommended.runtime !== "recommended"
+        )
+          picked = false;
         if (!picked) plan = recommended;
         // The local model is offered only once this computer is known to
         // serve it; until then its row does not show.
@@ -2253,9 +2261,7 @@
                   .join(" · ")
               : models.state === "checked" && !models.eligible
                 ? "No local model: " +
-                  // The tool's message, without the "<code>: " the main
-                  // process puts before it.
-                  (models.reasons?.[0]?.replace(/^[a-z-]+: /, "") ||
+                  (models.reasons?.[0]?.message ||
                     "this computer can't run one.")
                 : models.state === "unavailable"
                   ? "Couldn't check this computer for a local model."

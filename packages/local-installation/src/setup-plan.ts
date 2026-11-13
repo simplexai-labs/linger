@@ -111,7 +111,12 @@ interface UpstreamReport {
   };
   recommendation: SetupChoice;
 }
-const choices: SetupChoice[] = ["local-models", "codex", "claude", "pi"];
+export const setupChoices: readonly SetupChoice[] = [
+  "local-models",
+  "codex",
+  "claude",
+  "pi",
+];
 /** Presentation adapter only. Host probes, admission, recommendation and budgets belong upstream. */
 export async function inspectSetup(
   options: SetupOptions = {},
@@ -149,7 +154,7 @@ export async function inspectSetup(
     if (
       value.schema !== "localmodels.setup-report/v1" ||
       value.harness.schema !== "localmodels.harness-status/v1" ||
-      !choices.includes(value.recommendation) ||
+      !setupChoices.includes(value.recommendation) ||
       typeof value.stack.available !== "boolean"
     )
       throw new Error("Invalid upstream report");
@@ -182,7 +187,7 @@ export async function inspectSetup(
             ) ?? false,
         })),
       },
-      choices: [...choices],
+      choices: [...setupChoices],
       localModels: {
         eligible: value.stack.available,
         reasons: value.stack.reasons.map((reason) => reason.code),

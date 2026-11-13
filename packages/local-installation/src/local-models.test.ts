@@ -648,6 +648,15 @@ test("names what downloads and keeps the tool's counters", () => {
     stackProgress({ ...progress, component: "embedding", phase: "verify" })
       ?.message,
   ).toBe("Checking the embedding model…");
+  // A rate is bytes over elapsed time, so the tool may send a fraction.
+  expect(
+    stackProgress({ ...progress, bytes_per_second: 42123456.7 })?.progress
+      ?.bytesPerSecond,
+  ).toBe(42123457);
+  for (const rate of [-1, Number.NaN, Number.POSITIVE_INFINITY, "3"])
+    expect(
+      stackProgress({ ...progress, bytes_per_second: rate })?.progress,
+    ).not.toHaveProperty("bytesPerSecond");
   for (const other of [
     { ...progress, phase: "loading", done: null, total: null },
     { ...progress, done: 11 },

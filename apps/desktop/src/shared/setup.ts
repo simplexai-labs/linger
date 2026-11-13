@@ -2,6 +2,8 @@
 // The setup window walks a new install through server, sign-in, connecting
 // this computer and the system permissions it needs.
 
+import type { SetupChoice } from "@linger/local-installation/setup-plan";
+
 export interface SetupFolder {
   readonly grantId: string;
   readonly label: string;
@@ -107,11 +109,15 @@ export type SetupLocalModelsCheck =
         readonly diskBytes: number | null;
         readonly memoryBytes: number | null;
       };
-      // Why not, in the localmodels tool's words; when not eligible.
-      readonly reasons?: readonly string[];
+      // Why not, as the localmodels tool's code and words; when not
+      // eligible.
+      readonly reasons?: readonly {
+        readonly code: string;
+        readonly message?: string;
+      }[];
       // The localmodels tool's pick, which Quick Install installs:
       // "local-models" is the model above served by Pi.
-      readonly recommendation?: "local-models" | "codex" | "claude" | "pi";
+      readonly recommendation?: SetupChoice;
     };
 
 // The AI runtime the installer sets up; "recommended" lets it pick and
