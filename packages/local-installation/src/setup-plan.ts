@@ -140,6 +140,9 @@ export async function inspectSetup(
       "--offline",
       "--defer-services",
       ...((options.shareGpu ?? DEFAULT_GPU_SHARING) ? ["--share-gpu"] : []),
+      // Reason messages and the summary in English, as the app shows them.
+      "--lang",
+      "en",
       "--json",
     ];
     const result = await (options.localmodels ?? runLocalmodels)(home, args, {

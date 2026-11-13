@@ -61,6 +61,8 @@ it("delegates all hardware policy, runtime detection, estimates and recommendati
       "--offline",
       "--defer-services",
       "--share-gpu",
+      "--lang",
+      "en",
       "--json",
     ],
     expect.objectContaining({ timeoutMs: 120000 }),

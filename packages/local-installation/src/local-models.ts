@@ -221,7 +221,7 @@ export async function reviewSavedModelPlan(
 ): Promise<LocalModelsPlanSummary> {
   const result = await (dependencies.localmodels ?? runLocalmodels)(
     home,
-    ["setup", "review", "--plan", path.resolve(file), "--json"],
+    ["setup", "review", "--plan", path.resolve(file), "--lang", "en", "--json"],
     { signal: options.signal, timeoutMs: 120000 },
   );
   if (result.code !== 0)
@@ -365,6 +365,8 @@ export async function prepareLocalModels(
         "binding",
         "--plan",
         planFile,
+        "--lang",
+        "en",
         "--json",
       ]);
       if (result.code !== 0) return null;

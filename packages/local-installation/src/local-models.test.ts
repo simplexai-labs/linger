@@ -111,6 +111,23 @@ test("delegates planning and review without pinning a model, decision or GPU", a
       0o077,
   ).toBe(0);
 });
+test("asks review and binding for English messages", async () => {
+  const f = await fixture();
+  await prepareLocalModels(f.instance, f.options, { localmodels: f.call });
+  await prepareLocalModels(
+    f.instance,
+    { ...f.options, localModelsApproval: f.id },
+    { localmodels: f.call },
+  );
+  for (const step of ["review", "binding"]) {
+    const args = f.call.mock.calls.find(
+      ([, args]) => args[0] === "setup" && args[1] === step,
+    )![1];
+    expect(
+      args.slice(args.indexOf("--lang"), args.indexOf("--lang") + 2),
+    ).toEqual(["--lang", "en"]);
+  }
+});
 test("a wrong confirmation never applies or replans a saved plan", async () => {
   const f = await fixture();
   await prepareLocalModels(f.instance, f.options, { localmodels: f.call });

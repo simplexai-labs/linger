@@ -2,6 +2,7 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { loadInstance } from "@linger/local-installation/instance";
+import { stopLocalmodels } from "@linger/local-installation/localmodels-tool";
 import { stopNativeSource } from "@linger/local-installation/native-source";
 
 import { privateRead } from "./storage.js";
@@ -23,13 +24,18 @@ export interface StopOutcome {
 export interface StopDependencies {
   load?: typeof loadInstance;
   stopInstance?: (instance: Instance, signal: AbortSignal) => Promise<void>;
+  stopModels?: (
+    home: string,
+    options: { signal: AbortSignal; log: (message: string) => void },
+  ) => Promise<void>;
   fetch?: typeof fetch;
 }
 
 /**
  * Stops what the desktop's installation runs, for its uninstall: the
- * installation manager it owns (a running job is cancelled) and the
- * instance's services. Nothing is deleted, and stopped services are left as
+ * installation manager it owns (a running job is cancelled), the
+ * instance's services, and the local models' controller and stack the
+ * localmodels tool started. Nothing is deleted, and stopped services are left as
  * they are. Every home is tried even when one fails.
  */
 export async function stopDesktopInstallation(
@@ -37,6 +43,7 @@ export async function stopDesktopInstallation(
   {
     load = loadInstance,
     stopInstance = stopNativeSource,
+    stopModels = stopLocalmodels,
     fetch: fetcher = fetch,
   }: StopDependencies = {},
 ): Promise<StopOutcome> {
@@ -60,6 +67,9 @@ export async function stopDesktopInstallation(
       options.log(`Stopping the services in ${instance.root}.`);
       await stopInstance(instance, options.signal);
     });
+    await attempt(home, () =>
+      stopModels(home, { signal: options.signal, log: options.log }),
+    );
   }
   return { failed };
 }

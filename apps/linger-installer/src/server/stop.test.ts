@@ -201,3 +201,30 @@ test("gives up on a stop that does not finish in time", async () => {
     { home: value, message: "The stop timed out" },
   ]);
 });
+
+test("stops the local models in every home, even where the services did not stop", async () => {
+  const value = await home();
+  const custom = await home();
+  await mkdir(path.join(value, "desktop"), { recursive: true });
+  await writeFile(
+    path.join(value, "desktop/local-server.json"),
+    JSON.stringify({ home: custom }),
+  );
+  const models: string[] = [];
+  const outcome = await stopDesktopInstallation(options(value), {
+    load: async ({ home: at }) => instance(at!),
+    stopInstance: async (target) => {
+      if (target.root === value) throw new Error("services still running");
+    },
+    stopModels: async (at) => {
+      models.push(at);
+      if (at === custom)
+        throw new Error("localmodels stack down: gateway still running");
+    },
+  });
+  expect(models).toEqual([value, custom]);
+  expect(outcome.failed).toEqual([
+    { home: value, message: "services still running" },
+    { home: custom, message: "localmodels stack down: gateway still running" },
+  ]);
+});

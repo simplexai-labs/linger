@@ -21,6 +21,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import {
   ensureLocalmodelsTool,
   runLocalmodels,
+  stopLocalmodels,
   validateToolSource,
 } from "./localmodels-tool.js";
 const roots: string[] = [];
@@ -352,6 +353,69 @@ test("invokes the verified upstream module with isolated module and state paths"
   expect(await readFile(path.join(f.directory, "tool.json"), "utf8")).toContain(
     "sourceCommit",
   );
+});
+test("stops the controller and the stack through the installed pinned kit", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  const run = vi.fn<typeof runLocalmodels>(async () => ({
+    code: 0,
+    stdout: "{}",
+    stderr: "",
+  }));
+  await stopLocalmodels(f.home, { signal: AbortSignal.timeout(5000) }, { run });
+  expect(run.mock.calls.map(([home, args]) => [home, args])).toEqual([
+    [
+      f.home,
+      [
+        "foundations",
+        "stop",
+        "--root",
+        path.join(f.home, "runtime/model-services"),
+        "--json",
+      ],
+    ],
+    [f.home, ["stack", "down", "--json"]],
+  ]);
+});
+test("a home without the pinned kit has nothing to stop and downloads nothing", async () => {
+  const f = await fixture();
+  vi.stubEnv(
+    "LINGER_LOCALMODELS_TOOL_JSON",
+    JSON.stringify({ ...f.source, sha256: "c".repeat(64) }),
+  );
+  const run = vi.fn<typeof runLocalmodels>();
+  await stopLocalmodels(f.home, { signal: AbortSignal.timeout(5000) }, { run });
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", "");
+  await stopLocalmodels(f.home, { signal: AbortSignal.timeout(5000) }, { run });
+  expect(run).not.toHaveBeenCalled();
+  expect(await readdir(path.join(f.home, "tools/localmodels"))).toEqual([
+    f.source.sha256,
+  ]);
+});
+test("stops the stack even when the controller did not stop, and names the failure", async () => {
+  const run = vi.fn<typeof runLocalmodels>(async (_home, args) =>
+    args[0] === "foundations"
+      ? {
+          code: 1,
+          stdout: JSON.stringify({
+            ok: false,
+            error: "controller still running",
+          }),
+          stderr: "",
+        }
+      : { code: 0, stdout: "{}", stderr: "" },
+  );
+  await expect(
+    stopLocalmodels(
+      "/home",
+      { signal: AbortSignal.timeout(5000) },
+      { run, installed: async () => true },
+    ),
+  ).rejects.toThrow("localmodels foundations stop: controller still running");
+  expect(run.mock.calls.map(([, args]) => args[0])).toEqual([
+    "foundations",
+    "stack",
+  ]);
 });
 test("reads a publisher-pinned upstream kit only for this host target", async () => {
   const f = await fixture();

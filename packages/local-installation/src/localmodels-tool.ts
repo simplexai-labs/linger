@@ -500,6 +500,63 @@ export async function runLocalmodels(
   });
   return result;
 }
+/**
+ * For an uninstall, or an install over this release: stops the model
+ * controller under <home>/runtime/model-services and the processes the stack
+ * started, through the pinned kit. Nothing is downloaded: a home without that
+ * kit has nothing it started. Both requests are made even when one fails; the
+ * error names each that did not stop.
+ */
+export async function stopLocalmodels(
+  home: string,
+  options: { signal: AbortSignal; log?: (message: string) => void },
+  dependencies: {
+    run?: typeof runLocalmodels;
+    installed?: (home: string) => Promise<boolean>;
+  } = {},
+): Promise<void> {
+  if (!(await (dependencies.installed ?? hasPinnedTool)(home))) return;
+  const root = path.join(path.resolve(home), "runtime", "model-services");
+  const failed: string[] = [];
+  for (const args of [
+    ["foundations", "stop", "--root", root, "--json"],
+    ["stack", "down", "--json"],
+  ]) {
+    options.signal.throwIfAborted();
+    options.log?.(
+      `Stopping the local models (localmodels ${args[0]} ${args[1]}).`,
+    );
+    const result = await (dependencies.run ?? runLocalmodels)(home, args, {
+      signal: options.signal,
+      timeoutMs: 30_000,
+    }).catch((error: unknown) => {
+      options.signal.throwIfAborted();
+      return { code: 1, stdout: "", stderr: String(error) };
+    });
+    if (result.code === 0) continue;
+    let reason = `exit ${result.code}`;
+    try {
+      const error = (JSON.parse(result.stdout) as { error?: unknown }).error;
+      if (typeof error === "string" && error) reason = error;
+    } catch {
+      // No report: the exit status is all there is.
+    }
+    failed.push(`localmodels ${args[0]} ${args[1]}: ${reason}`);
+  }
+  if (failed.length) throw new Error(failed.join("; "));
+}
+async function hasPinnedTool(home: string): Promise<boolean> {
+  const raw = process.env.LINGER_LOCALMODELS_TOOL_JSON;
+  if (!raw) return false;
+  const source = validateToolSource(JSON.parse(raw));
+  const directory = path.join(
+    path.resolve(home),
+    "tools",
+    "localmodels",
+    source.sha256,
+  );
+  return !!(await installedKit(directory, source).catch(() => undefined));
+}
 export async function readPublishedTool(
   file: string,
 ): Promise<LocalmodelsToolSource | undefined> {
