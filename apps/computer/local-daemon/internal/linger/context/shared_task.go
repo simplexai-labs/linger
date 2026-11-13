@@ -242,7 +242,9 @@ func (s *ViewStore) sharedTaskStorage() *SharedTaskStorage {
 }
 
 // prepareSharedTask readies the scope's directories and reads the Room's
-// current Tasks. It runs without s.mu.
+// current Tasks. The caller holds s.mu through linkSharedTasks, so a Task
+// created meanwhile is either listed here or links itself into this View
+// once the View is ready.
 func (s *ViewStore) prepareSharedTask(scope SharedTaskScope) ([]string, error) {
 	storage := s.sharedTaskStorage()
 	if storage == nil {
