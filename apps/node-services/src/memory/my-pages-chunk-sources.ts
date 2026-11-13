@@ -112,17 +112,25 @@ export async function syncMyPagesChunkSources(options: {
       indexedContent.get(document.document_id);
     if (content === undefined || !content.trim())
       return { indexed: false, skipped: true };
+    // Imported mail is stored when it is imported; its header carries when it
+    // was sent and what it is about.
+    const mail: MailHeader =
+      document.origin_kind === "mail" ? mailHeader(content) : {};
     try {
       const source = documentRawSource({
         identity,
         documentId: document.document_id,
         textSourceKind: document.text_source_kind,
         textSourceId: document.text_source_id,
-        title: document.title.trim() || document.filename.trim() || "Untitled",
+        title:
+          mail.title ||
+          document.title.trim() ||
+          document.filename.trim() ||
+          "Untitled",
         filename: document.filename.trim() || "untitled",
         mediaType: document.media_type,
         originKind: document.origin_kind,
-        date: localDate(document.created_at),
+        date: localDate(mail.sentAt ?? document.created_at),
         markdown: content,
         ...(document.folder_path ? { folderPath: document.folder_path } : {}),
       });
@@ -170,4 +178,25 @@ async function mapSequentially<T, R>(
     results.push(await operation(source, index));
   }
   return results;
+}
+
+interface MailHeader {
+  sentAt?: Date;
+  title?: string;
+}
+
+/**
+ * The subject and send time TeamHub writes at the top of an imported message
+ * (`# <subject>` and `- Timestamp: <Date header>`). Either is absent when the
+ * message has none or its time cannot be read.
+ */
+export function mailHeader(markdown: string): MailHeader {
+  // The subject is the first line; a body heading never stands in for it.
+  const title = /^# ([^\n]+)/u.exec(markdown)?.[1]?.trim();
+  const stamp = /^- Timestamp: (.+)$/mu.exec(markdown)?.[1]?.trim();
+  const sentAt = stamp ? new Date(stamp) : undefined;
+  return {
+    ...(title ? { title } : {}),
+    ...(sentAt && Number.isFinite(sentAt.getTime()) ? { sentAt } : {}),
+  };
 }

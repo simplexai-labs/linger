@@ -1,7 +1,10 @@
 import fs from "node:fs/promises";
 import type postgres from "postgres";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { syncMyPagesChunkSources } from "../../src/memory/my-pages-chunk-sources.js";
+import {
+  mailHeader,
+  syncMyPagesChunkSources,
+} from "../../src/memory/my-pages-chunk-sources.js";
 import { contentHash } from "../../src/memory/search/source-store.js";
 
 const identity = {
@@ -27,7 +30,7 @@ const scanStartedAt = new Date("2026-09-29T00:00:00Z");
 
 afterEach(() => vi.restoreAllMocks());
 
-function fixture(cached = false, documents = [document]) {
+function fixture(cached = false, documents = [document], text = markdown) {
   const sql = vi.fn(async (parts: TemplateStringsArray) => {
     const query = parts.join("?");
     if (query.includes("clock_timestamp() AS scan_started_at"))
@@ -36,7 +39,7 @@ function fixture(cached = false, documents = [document]) {
     if (query.includes("memory_source.personal_document_markdown("))
       return documents.map((entry) => ({
         document_id: entry.document_id,
-        markdown,
+        markdown: text,
       }));
     if (query.includes("version.content"))
       return cached
@@ -103,6 +106,81 @@ describe("read-only Document chunk ingestion", () => {
     expect(source.metadata).not.toHaveProperty("folder_path");
   });
 
+  it("dates and names imported mail by its own header, not the import", async () => {
+    const message = [
+      "# Re: Atlas statement of work",
+      "",
+      "- Provider: gmail",
+      "- Message ID: `m1`",
+      "- Thread ID: `t1`",
+      // 23:30 in UTC is already Jul 3 in the tests' time zone.
+      "- Timestamp: Thu, 2 Jul 2026 15:30:00 -0800",
+      "- Direction: inbound (received by mailbox owner)",
+      "- From: Tom <tom@example.test>",
+      "",
+      "# Not the subject",
+      "",
+      "Please send the revised plan next Tuesday.",
+      "",
+    ].join("\n");
+    const test = fixture(
+      false,
+      [
+        {
+          ...document,
+          origin_kind: "mail",
+          folder_path: "",
+          title: "gmail-message-1.md",
+          filename: "gmail-message-1.md",
+        },
+      ],
+      message,
+    );
+    await syncMyPagesChunkSources(test.options);
+    expect(test.ingest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        originKind: "mail",
+        date: "2026-07-03",
+        title: "Re: Atlas statement of work",
+      }),
+      message,
+    );
+  });
+
+  it("keeps the import time and file name when the mail header has neither", async () => {
+    const message = "# \n\n- Timestamp: unknown\n\nBody.\n";
+    const test = fixture(
+      false,
+      [
+        {
+          ...document,
+          origin_kind: "mail",
+          folder_path: "",
+          title: "gmail-message-2.md",
+        },
+      ],
+      message,
+    );
+    await syncMyPagesChunkSources(test.options);
+    expect(test.ingest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        date: "2026-09-30",
+        title: "gmail-message-2.md",
+      }),
+      message,
+    );
+  });
+
+  it("reads the mail header only from imported mail", async () => {
+    const page = "# My notes\n\n- Timestamp: Thu, 2 Jul 2026 15:30:00 +0800\n";
+    const test = fixture(false, [document], page);
+    await syncMyPagesChunkSources(test.options);
+    expect(test.ingest).toHaveBeenCalledWith(
+      expect.objectContaining({ date: "2026-09-30", title: "Document" }),
+      page,
+    );
+  });
+
   it("reads no Markdown for a Document whose indexed text is current", async () => {
     const test = fixture(true);
     await syncMyPagesChunkSources(test.options);
@@ -163,5 +241,23 @@ describe("read-only Document chunk ingestion", () => {
       }),
     ).resolves.toEqual({ indexed: 0, retired: 0, skipped: 0 });
     expect(ingest).not.toHaveBeenCalled();
+  });
+});
+
+describe("mail header", () => {
+  it("reads RFC 2822 and RFC 3339 send times and ignores unreadable ones", () => {
+    for (const [stamp, iso] of [
+      ["Sun, 4 Oct 2026 08:11:23 -0700 (MST)", "2026-10-04T15:11:23.000Z"],
+      ["Tue, 20 Oct 2026 03:44:40 -0500", "2026-10-20T08:44:40.000Z"],
+      ["2026-11-09T06:05:12Z", "2026-11-09T06:05:12.000Z"],
+    ] as const)
+      expect(
+        mailHeader(
+          `# Subject\n\n- Timestamp: ${stamp}\n`,
+        ).sentAt?.toISOString(),
+      ).toBe(iso);
+    expect(mailHeader("# Subject\n\n- Timestamp: unknown\n")).toEqual({
+      title: "Subject",
+    });
   });
 });

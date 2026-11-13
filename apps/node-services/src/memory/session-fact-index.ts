@@ -21,6 +21,7 @@ import {
 } from "./session-fact-extraction.js";
 import { isComputerOffline } from "../runtime-model-call.js";
 import { memoryDatabase } from "./database.js";
+import { localDateWindow } from "./date.js";
 import { memoryLogger } from "./run-telemetry.js";
 import { sha256Hex } from "@linger/service-kit/node";
 
@@ -565,6 +566,9 @@ function eventDate(
   window: FactWindow,
 ): Date | undefined {
   const at = roomMessageAt(source, window.chunks[0]!.start + 1)?.mentionedAt;
-  const value = at ?? (source.date ? `${source.date}T00:00:00Z` : undefined);
-  return value ? new Date(value) : undefined;
+  if (at) return new Date(at);
+  // A source dated by its day, such as mail, starts at that day's local midnight.
+  return source.date
+    ? new Date(localDateWindow(source.date).startIso)
+    : undefined;
 }

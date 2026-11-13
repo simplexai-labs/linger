@@ -46,6 +46,20 @@ function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
 
+/** The instant as ISO 8601 in the process time zone, with its UTC offset. */
+export function localIsoString(instant: Date): string {
+  const offset = -instant.getTimezoneOffset();
+  const sign = offset < 0 ? "-" : "+";
+  const minutes = Math.abs(offset);
+  return `${localDate(instant)}T${[
+    instant.getHours(),
+    instant.getMinutes(),
+    instant.getSeconds(),
+  ]
+    .map((value) => pad(value))
+    .join(":")}${sign}${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+}
+
 export function localMeetingTime(start: Date): string {
   return [start.getHours(), start.getMinutes(), start.getSeconds()]
     .map((value) => pad(value))

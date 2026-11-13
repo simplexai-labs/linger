@@ -175,6 +175,8 @@ Core configuration:
   `system_notification` are extracted, and so is every message of a thread with a `self_sent` message; marketing,
   subscriptions and drafts are not. Each window's Context line names its origin, so the one prompt knows a
   transcript may not label speakers, mail must tell the sender from the user, and a notification may hold no facts.
+  A window's Event Date is its first Room message time, else its source date at local midnight; it is shown in the
+  process time zone, so a message sent just after midnight belongs to the Human's own day rather than the UTC one.
   Consecutive Chunks form
   windows of at most 3,000 characters, extracted with `apps/node-services/prompts/memory/facts/fact-extraction.md`
   (the Hindsight concise prompt) at low reasoning effort. Up to 16 windows form one batch, and each batch runs as one
@@ -359,7 +361,10 @@ head, so a Wiki reference never points at the uploaded original while the Chunk 
 audio or video without a transcript do not enter the index.
 Memory does not normalize Documents: it reads My pages and imported mail as the Markdown TeamHub stored in
 `document_texts` (one River job per version), through `memory_source.personal_documents` and, for
-Documents whose indexed hash differs, `personal_document_markdown`. The normalizer TeamHub's job calls is
+Documents whose indexed hash differs, `personal_document_markdown`. A My pages Document is dated by its Version; an
+imported mail message by the send time in its `- Timestamp:` header and named by its `# subject` line, because TeamHub
+stores every message at the time of the import (the Version time and file name are used only when the header has no
+readable time or subject). The normalizer TeamHub's job calls is
 `apps/node-services/src/document-normalizer`, served by LLM Wiki in a restricted worker thread of this process. It
 converts PDF, DOC/DOCX, PPTX, XLSX, ODT/ODS/ODP, EPUB, EML/MHTML, Office templates and images into canonical Markdown.
 Scanned PDFs and raster images use the Chinese and English OCR bundled with the dependencies; conversion needs no

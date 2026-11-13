@@ -18,7 +18,10 @@ import {
   storePocketNoteSource,
 } from "../../src/memory/search/source-store.js";
 import { SessionFactIndex } from "../../src/memory/session-fact-index.js";
-import type { ExtractedFact } from "../../src/memory/session-fact-extraction.js";
+import {
+  factUserMessage,
+  type ExtractedFact,
+} from "../../src/memory/session-fact-extraction.js";
 import { readTimelineEvents } from "../../src/memory/graph-visualization.js";
 
 // Explicit opt-in: never reads TEAMHUB_DATABASE_URL or the application's .env.
@@ -385,5 +388,50 @@ describe.runIf(Boolean(databaseUrl))("Session facts in PostgreSQL", () => {
       mentioned_at: new Date("2026-05-24T00:00:00Z"),
       speaker: null,
     });
+  });
+  it("dates mail facts by the day the mail was sent", async () => {
+    // Sent late on Jul 2 in California, already Jul 3 in the tests' time zone;
+    // syncMyPagesChunkSources dates the source by this header, not the import.
+    const markdown =
+      "# Revised plan\n\n- Provider: gmail\n- Message ID: `m1`\n- Thread ID: `t1`\n- Timestamp: Thu, 2 Jul 2026 15:30:00 -0800\n- Direction: inbound\n- From: tom@example.test\n- Class: direct_inbound\n\nPlease send the revised plan next Tuesday.\n";
+    await chunks.indexDatabaseSource(
+      documentRawSource({
+        identity,
+        documentId: "document_mail",
+        textSourceKind: "file_version",
+        textSourceId: "version_mail",
+        title: "Revised plan",
+        filename: "gmail-message-1.md",
+        mediaType: "text/markdown",
+        originKind: "mail",
+        date: "2026-07-03",
+        markdown,
+      }),
+      markdown,
+    );
+    const messages: string[] = [];
+    const dated = new SessionFactIndex({
+      sql: indexSql,
+      extract: async (batch) =>
+        new Map(
+          batch.map((item) => {
+            messages.push(
+              factUserMessage(
+                item.window,
+                item.index,
+                item.total,
+                item.eventDate,
+                item.context,
+              ),
+            );
+            return [item.window.sha256, []];
+          }),
+        ),
+    });
+    expect((await dated.syncAgent(identity.agent_id)).extracted).toBe(1);
+    // "Next Tuesday" is resolved against the send day at local midnight.
+    expect(messages[0]).toContain(
+      "Event Date: Friday, July 03, 2026 (2026-07-03T00:00:00+08:00)",
+    );
   });
 });

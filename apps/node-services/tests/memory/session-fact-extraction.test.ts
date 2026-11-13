@@ -70,7 +70,22 @@ describe("Session fact extraction", () => {
         "Conversation session on 2024-03-14",
       ),
     ).toBe(
-      "Extract facts from the following chunk.\n\nChunk: 1/2\nEvent Date: Thursday, March 14, 2024 (2024-03-14T09:00:00.000Z)\nContext: Conversation session on 2024-03-14\n\nContent:\nContent here",
+      "Extract facts from the following chunk.\n\nChunk: 1/2\nEvent Date: Thursday, March 14, 2024 (2024-03-14T17:00:00+08:00)\nContext: Conversation session on 2024-03-14\n\nContent:\nContent here",
+    );
+  });
+
+  it("dates a message by the Human's day, not by UTC", () => {
+    // 01:30 on Thursday in the tests' time zone is still Wednesday in UTC.
+    expect(
+      factUserMessage(
+        { text: "See you tomorrow." },
+        0,
+        1,
+        new Date("2024-03-13T17:30:00Z"),
+        "",
+      ),
+    ).toContain(
+      "Event Date: Thursday, March 14, 2024 (2024-03-14T01:30:00+08:00)",
     );
   });
 

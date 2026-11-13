@@ -15,6 +15,7 @@ import {
   type ModelChain,
 } from "../runtime-model-call.js";
 import { runMemoryModelChain, type MemoryModelChainRunner } from "./llm.js";
+import { localIsoString, localTimeZone } from "./date.js";
 import { promptRoot } from "./paths.js";
 import type { SourceChunk } from "./search/chunks.js";
 
@@ -144,8 +145,10 @@ export function factUserMessage(
           month: "long",
           day: "2-digit",
           year: "numeric",
-          timeZone: "UTC",
-        })} (${eventDate.toISOString()})`
+          // Room messages are stamped in UTC; a message sent just after
+          // midnight belongs to the Human's own day.
+          timeZone: localTimeZone(),
+        })} (${localIsoString(eventDate)})`
       : "Unknown";
   return `Extract facts from the following chunk.
 
