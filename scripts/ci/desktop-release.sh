@@ -213,10 +213,10 @@ package_darwin() {
     echo "desktop-release: no DESKTOP_UPDATE_KEY; no macOS update feed" >&2
   fi
   (cd "$desktop" && python3 packaging/mac/package.py "${args[@]}")
-  mv "$pkg/Linger-$version-arm64.dmg" "$assets/"
+  mv "$pkg/Linger-$version-arm64.dmg" "$assets/Linger-$version-macos-arm64.dmg"
   # The feed's three files go to the server's install/desktop/stable/ as they are.
   if [[ -d "$pkg/update" ]]; then
-    tar -cf "$assets/Linger-$version-darwin-update-feed.tar" -C "$pkg/update" .
+    tar -cf "$assets/Linger-$version-macos-arm64-update-feed.tar" -C "$pkg/update" .
   fi
 }
 
@@ -277,7 +277,7 @@ cmd_checksums() {
   local dir="${1:-}" version="${2:-}" required file files=()
   [[ -d "$dir" ]] || die "checksums needs the folder holding the release files"
   [[ "$version" =~ $version_pattern ]] || die "checksums needs the release version"
-  for required in arm64.dmg linux-x64.tar.gz windows-x64-setup.exe; do
+  for required in macos-arm64.dmg linux-x64.tar.gz windows-x64-setup.exe; do
     [[ -f "$dir/Linger-$version-$required" ]] || die "$dir has no Linger-$version-$required"
   done
   while IFS= read -r file; do

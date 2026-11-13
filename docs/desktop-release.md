@@ -111,14 +111,14 @@ gh release upload native-deps <archive> --repo simplexai-labs/linger
 
 ## Release Files
 
-| File                                        | Contents                                                        |
-| ------------------------------------------- | --------------------------------------------------------------- |
-| `Linger-<version>-arm64.dmg`                | macOS, Apple silicon                                            |
-| `Linger-<version>-linux-x64.tar.gz`         | Linux x64 (glibc 2.35 or newer for the bundled Native services) |
-| `Linger-<version>-windows-x64-setup.exe`    | Windows x64 per-user installer                                  |
-| `Linger-<version>-windows-x64-portable.zip` | Windows x64 folder to run without installing                    |
-| `Linger-<version>-darwin-update-feed.tar`   | only with the update key: the macOS self-update feed            |
-| `SHA256SUMS.txt`                            | SHA-256 of every file above                                     |
+| File                                           | Contents                                                        |
+| ---------------------------------------------- | --------------------------------------------------------------- |
+| `Linger-<version>-macos-arm64.dmg`             | macOS, Apple silicon                                            |
+| `Linger-<version>-linux-x64.tar.gz`            | Linux x64 (glibc 2.35 or newer for the bundled Native services) |
+| `Linger-<version>-windows-x64-setup.exe`       | Windows x64 per-user installer                                  |
+| `Linger-<version>-windows-x64-portable.zip`    | Windows x64 folder to run without installing                    |
+| `Linger-<version>-macos-arm64-update-feed.tar` | only with the update key: the macOS self-update feed            |
+| `SHA256SUMS.txt`                               | SHA-256 of every file above                                     |
 
 Each package bundles the source package, PostgreSQL, voice tools, TeamHub and
 the Native services as described in

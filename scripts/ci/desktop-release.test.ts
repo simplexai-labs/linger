@@ -74,7 +74,7 @@ describe("desktop-release.sh version", () => {
 describe("desktop-release.sh checksums", () => {
   const version = "0.16.33";
   const required = [
-    `Linger-${version}-arm64.dmg`,
+    `Linger-${version}-macos-arm64.dmg`,
     `Linger-${version}-linux-x64.tar.gz`,
     `Linger-${version}-windows-x64-setup.exe`,
   ];
@@ -83,7 +83,7 @@ describe("desktop-release.sh checksums", () => {
     const dir = folder();
     const files = [...required, `Linger-${version}-windows-x64-portable.zip`];
     for (const name of files) writeFileSync(join(dir, name), name);
-    writeFileSync(join(dir, "Linger-0.16.32-arm64.dmg"), "older");
+    writeFileSync(join(dir, "Linger-0.16.32-macos-arm64.dmg"), "older");
 
     const result = run(["checksums", dir, version]);
 
@@ -107,6 +107,18 @@ describe("desktop-release.sh checksums", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(`Linger-${version}-windows-x64-setup.exe`);
+  });
+
+  // The DMG names its platform like the other packages.
+  it("refuses a DMG without macos in its name", () => {
+    const dir = folder();
+    for (const name of [`Linger-${version}-arm64.dmg`, ...required.slice(1)])
+      writeFileSync(join(dir, name), name);
+
+    const result = run(["checksums", dir, version]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`Linger-${version}-macos-arm64.dmg`);
   });
 });
 
