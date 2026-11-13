@@ -107,3 +107,10 @@ third_party/licenses/.
      third_party/licenses/libopus-BSD-3-Clause.txt
    TeamHub and Voice Runtime images include this file at /app/NOTICE and
    the license texts at /app/third_party/licenses/.
+
+README demo materials
+   Files: assets/linger-story.webp, assets/linger-story.mp4
+   Metal 011 by ambientCG, released under CC0 1.0 Universal.
+   Sources: https://ambientcg.com/view?id=Metal011
+   License: https://docs.ambientcg.com/license/
+   The metal color map is used in the laptop render.
