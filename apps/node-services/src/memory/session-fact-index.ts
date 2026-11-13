@@ -453,7 +453,7 @@ export class SessionFactIndex {
               ? // Hindsight's window match: event overlap, or an event edge or the mention inside it.
                 this
                   .#sql`AND ((fact.occurred_start <= ${eventBounds.to}::date AND fact.occurred_end >= ${eventBounds.from}::date)
-                  OR fact.mentioned_at::date BETWEEN ${eventBounds.from}::date AND ${eventBounds.to}::date)`
+                  OR version.manifest->>'date' BETWEEN ${eventBounds.from} AND ${eventBounds.to})`
               : order === "recorded"
                 ? // Recorded on its source's day, the Human's local date.
                   this
@@ -472,11 +472,10 @@ export class SessionFactIndex {
       recorded.from || recorded.to ? branch("recorded") : none,
       input.as_of ? branch("as_of") : none,
     ]);
-    const mentionDay = (row: FactRow) =>
-      new Date(row.mentioned_at).toISOString().slice(0, 10);
+    // A fact is mentioned on its source's local day; mentioned_at is UTC.
     const covered = selectWithTemporalCoverage(
       inEvent,
-      (row) => row.occurred_start ?? mentionDay(row),
+      (row) => row.occurred_start ?? row.source_date,
       event,
     );
     const recordedCovered = selectWithTemporalCoverage(

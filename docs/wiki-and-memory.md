@@ -20,18 +20,17 @@ its own conversations.
 
 The wiki is a set of typed Markdown pages. Clients, contacts, projects and
 topics each get one page per real-world entity, so every fact has one home, and
-each conversation or meeting gets a Session page that links to the entities it
-touched.
+each meeting gets a Session page that links to the entities it touched.
 
 ![A graph of wiki pages, with clients, contacts, projects, topics and sessions linked to each other, and the Acme rollout project page opened to show its sections: summaries kept or rewritten with a reason, lists changed entry by entry, and a Change Log the app writes](../assets/feature-wiki-pages.jpg)
 
-| Page    | What it remembers                                                                                   |
-| ------- | --------------------------------------------------------------------------------------------------- |
-| Client  | Who they are, how they work, needs and constraints, open and closed items, past contact             |
-| Contact | Role, how you know them, how they work, what they care about, past contact                          |
-| Project | Where it stands, its directions, open and closed items                                              |
-| Topic   | An overview and your current understanding                                                          |
-| Session | One conversation or meeting: summary, topics, decisions, action items, and patterns in how you work |
+| Page    | What it remembers                                                                       |
+| ------- | --------------------------------------------------------------------------------------- |
+| Client  | Who they are, how they work, needs and constraints, open and closed items, past contact |
+| Contact | Role, how you know them, how they work, what they care about, past contact              |
+| Project | Where it stands, its directions, open and closed items                                  |
+| Topic   | An overview and your current understanding                                              |
+| Session | One meeting: summary, topics, decisions, action items, and patterns in how you work     |
 
 A model reads each new conversation or file and proposes changes section by
 section, and the app checks every change against the page it replaces. A summary
