@@ -124,7 +124,7 @@ export function TaskConversationDialog({
           key: `card:${card.decision_id}`,
           kind: "card" as const,
         })),
-      ].sort((a, b) => a.at.localeCompare(b.at)),
+      ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at)),
     [conversation.data, data.runStatuses],
   );
   const stopped =
