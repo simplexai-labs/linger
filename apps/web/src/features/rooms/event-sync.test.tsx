@@ -7,6 +7,7 @@ import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
+import { localModelsQueryKey } from "@/features/local-models/local-models-queries";
 import { teamHubDocumentsQueryKey } from "@/features/teamhub/document-queries";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubRoomEvent } from "@/features/teamhub/teamhub-types";
@@ -137,6 +138,33 @@ describe("TeamHub event signals", () => {
     expect(otherTenant.fetch).toHaveBeenCalledOnce();
     for (const observer of [activity, availability, otherTenant])
       observer.stop();
+  });
+
+  it("refreshes only the named Computer's models for a local-models hint", async () => {
+    const queryClient = new QueryClient();
+    const lab = observe(queryClient, localModelsQueryKey("tenant-a", "lab"));
+    const mac = observe(queryClient, localModelsQueryKey("tenant-a", "mac"));
+    await vi.waitFor(() => expect(lab.fetch).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(mac.fetch).toHaveBeenCalledOnce());
+
+    await applyTeamHubEventSignal(queryClient, {
+      hint: { id: "lab", resource: "local-models", tenant_id: "tenant-a" },
+      type: "resource.invalidated",
+    });
+
+    await vi.waitFor(() => expect(lab.fetch).toHaveBeenCalledTimes(2));
+    expect(mac.fetch).toHaveBeenCalledOnce();
+
+    // A Computer's connection and its Agents are part of every models view.
+    await applyTeamHubEventSignal(queryClient, {
+      hint: { id: "tenant-a", resource: "computers", tenant_id: "tenant-a" },
+      type: "resource.invalidated",
+    });
+
+    await vi.waitFor(() => expect(lab.fetch).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(mac.fetch).toHaveBeenCalledTimes(2));
+    lab.stop();
+    mac.stop();
   });
 
   it("refreshes the directory, the Room members and the Room list it shows", async () => {

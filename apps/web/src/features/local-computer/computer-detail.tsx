@@ -1,6 +1,7 @@
 import {
   Activity01Icon,
   Add01Icon,
+  AiChipIcon,
   ArrowDown01Icon,
   ArrowRight01Icon,
   Delete02Icon,
@@ -17,6 +18,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { type ReactNode, useState } from "react";
+import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { Icon, type IconSvgElement } from "@/components/ui/icon";
@@ -68,6 +70,7 @@ export function ComputerDetail({
   agents,
   browserConnection,
   computer: latestComputer,
+  localModelsHref,
   onConnect,
   onOpenAgent,
   onRemove,
@@ -77,6 +80,8 @@ export function ComputerDetail({
   /** The browser status as a progress chip or an Access row; the page owns its TeamHub reads. */
   browserConnection?: (variant: "chip" | "row") => ReactNode;
   computer: LocalComputer;
+  /** Where this Computer's Local models page is; the page owns the route. */
+  localModelsHref?: string;
   onConnect?: () => void;
   onOpenAgent: (actorId: string) => void;
   onRemove?: () => void;
@@ -153,6 +158,31 @@ export function ComputerDetail({
           />
         ))}
       </Group>
+      {localModelsHref ? (
+        <Group title="Local models">
+          <Link
+            className="flex min-h-14 w-full items-center gap-3 rounded-lg py-2 pr-2.5 pl-2 transition-colors duration-150 hover:bg-sidebar-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none"
+            to={localModelsHref}
+          >
+            <RowMark>
+              <Icon icon={AiChipIcon} size={20} />
+            </RowMark>
+            <span className="min-w-0 flex-1 text-left">
+              <span className="block truncate text-sm text-foreground">
+                Manage local models
+              </span>
+              <span className="block truncate text-sm text-muted-foreground">
+                Download and load models that run on this computer
+              </span>
+            </span>
+            <Icon
+              className="text-muted-foreground/60"
+              icon={ArrowRight01Icon}
+              size={16}
+            />
+          </Link>
+        </Group>
+      ) : null}
       {displayStatus === "offline" ? null : (
         <Group defaultOpen={false} title="Access">
           {browserConnection?.("row")}

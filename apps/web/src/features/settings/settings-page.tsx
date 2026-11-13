@@ -1,4 +1,9 @@
-import { Key01Icon, LaptopIcon, UserIcon } from "@hugeicons/core-free-icons";
+import {
+  AiChipIcon,
+  Key01Icon,
+  LaptopIcon,
+  UserIcon,
+} from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { Suspense, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
@@ -35,6 +40,11 @@ export function SettingsLayout() {
             icon={<Icon icon={LaptopIcon} size={14} />}
             label="Computers"
             to="computers"
+          />
+          <SettingsLink
+            icon={<Icon icon={AiChipIcon} size={14} />}
+            label="Local models"
+            to="local-models"
           />
         </nav>
       </aside>

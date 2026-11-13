@@ -1,4 +1,5 @@
 import {
+  Alert02Icon,
   AlertCircleIcon,
   CheckmarkCircle02Icon,
   InformationCircleIcon,
@@ -7,7 +8,7 @@ import type { ReactNode } from "react";
 
 import { Icon, type IconSvgElement } from "@/components/ui/icon";
 
-type FormFeedbackTone = "danger" | "info" | "success";
+type FormFeedbackTone = "danger" | "info" | "success" | "warning";
 
 const feedbackStyle: Record<
   FormFeedbackTone,
@@ -29,6 +30,12 @@ const feedbackStyle: Record<
     className:
       "border-[var(--app-status-success-border)] bg-[var(--app-status-success-surface)] text-[var(--app-status-success-text)]",
     icon: CheckmarkCircle02Icon,
+    role: "status",
+  },
+  warning: {
+    className:
+      "border-[var(--app-status-warning-border)] bg-[var(--app-status-warning-surface)] text-[var(--app-status-warning-text)]",
+    icon: Alert02Icon,
     role: "status",
   },
 };
