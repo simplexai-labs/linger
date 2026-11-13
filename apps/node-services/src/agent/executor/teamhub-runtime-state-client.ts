@@ -179,6 +179,10 @@ export interface TeamHubRuntimeStateClient {
     body: RuntimeStateSchemas["AgentRuntimeLocalComputerCredentialRequest"],
     signal?: AbortSignal,
   ): Promise<RuntimeStateSchemas["AgentRuntimeLocalComputerRemovalResult"]>;
+  recordLocalModels(
+    body: RuntimeStateSchemas["RecordLocalModelsRequest"],
+    signal?: AbortSignal,
+  ): Promise<void>;
   recordRunOperation(
     body: RuntimeStateSchemas["RecordAgentLocalRunOperationRequest"],
     signal?: AbortSignal,
@@ -264,6 +268,7 @@ export const createTeamHubRuntimeStateClient = (
         responsesAfterUnknownAttempt.has(response),
       );
     }
+    if (response.status === 204) return undefined as T;
     try {
       return (await response.json()) as T;
     } catch (error) {
@@ -430,6 +435,8 @@ export const createTeamHubRuntimeStateClient = (
         raw.removeLocalComputer(body, signal),
         signal,
       ),
+    recordLocalModels: (body, signal) =>
+      request<void>(raw.recordLocalModels(body, signal), signal),
     recordRunOperation: (body, signal) =>
       request<RuntimeStateSchemas["AgentRuntimeSuccessResult"]>(
         raw.recordRunOperation(body, signal),

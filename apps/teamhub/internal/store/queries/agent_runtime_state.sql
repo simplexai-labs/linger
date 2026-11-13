@@ -1385,3 +1385,47 @@ WHERE message.id=sqlc.arg(message_id)::text
   AND message.room_id=sqlc.arg(room_id)::text
   AND message.tenant_id=context.tenant_id
   AND message.author_actor_id=context.agent_actor_id;
+
+-- name: UpsertLocalComputerModelSnapshot :exec
+INSERT INTO local_computer_model_snapshots(computer_id,snapshot,host,observed_at,updated_at)
+VALUES(sqlc.arg(computer_id)::text,sqlc.arg(snapshot)::jsonb,sqlc.narg(host)::jsonb,
+       sqlc.arg(observed_at)::timestamptz,clock_timestamp())
+ON CONFLICT (computer_id) DO UPDATE
+SET snapshot=EXCLUDED.snapshot,
+    host=COALESCE(EXCLUDED.host,local_computer_model_snapshots.host),
+    observed_at=EXCLUDED.observed_at,updated_at=EXCLUDED.updated_at;
+
+-- name: DeleteLocalComputerModelSnapshot :exec
+DELETE FROM local_computer_model_snapshots
+WHERE computer_id=sqlc.arg(computer_id)::text;
+
+-- name: GetLocalComputerModelSnapshot :one
+SELECT snapshot,host
+FROM local_computer_model_snapshots
+WHERE computer_id=sqlc.arg(computer_id)::text;
+
+-- name: ListLocalModelUsersOnComputer :many
+-- Active Agents on runtime pi placed on a Computer, limited to those the
+-- viewer sees in the Tenant Agent directory (ListTenantAgentsForAccount).
+SELECT registration.agent_management_id::text AS agent_id,
+       agent.display_name,registration.runtime_model
+FROM agent_registrations registration
+JOIN actors agent
+  ON agent.id=registration.actor_id AND agent.tenant_id=registration.tenant_id
+WHERE registration.tenant_id=sqlc.arg(tenant_id)::text
+  AND registration.computer_id=sqlc.arg(computer_id)::text
+  AND registration.status='active'
+  AND registration.local_runtime_type='pi'
+  AND (
+    registration.visibility_scope='workspace' OR
+    registration.created_by_actor_id=sqlc.arg(viewer_actor_id)::text OR
+    EXISTS (
+      SELECT 1
+      FROM active_room_members viewer_membership
+      JOIN active_room_members agent_membership
+        ON agent_membership.room_id=viewer_membership.room_id
+       AND agent_membership.actor_id=registration.actor_id
+      WHERE viewer_membership.actor_id=sqlc.arg(viewer_actor_id)::text
+    )
+  )
+ORDER BY agent.display_name,registration.agent_management_id;
