@@ -91,34 +91,6 @@ export function tenantAgentWorkItemsQueryOptions(
   });
 }
 
-/** Every Task the Room's Meta delegated, finished ones included. */
-export function roomTasksQueryOptions(
-  client: Pick<TeamHubClient, "api">,
-  tenantId: string,
-  roomId: string,
-) {
-  return queryOptions({
-    queryFn: () =>
-      collectTeamHubCursorPages((pagination) =>
-        teamHubData(
-          client.api.GET("/v0/tenants/{tenantId}/work-items", {
-            params: {
-              path: { tenantId },
-              query: {
-                ...pagination,
-                kind: "task",
-                origin_room_id: roomId,
-                scope: "tenant",
-              },
-            },
-          }),
-        ),
-      ),
-    queryKey: ["teamhub", tenantId, "work-items", "room-tasks", roomId],
-    staleTime: 0,
-  });
-}
-
 export function tenantWorkItemsDashboardQueryOptions(
   client: Pick<TeamHubClient, "api">,
   tenantId: string,

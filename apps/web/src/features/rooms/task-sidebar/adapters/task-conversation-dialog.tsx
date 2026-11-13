@@ -48,11 +48,7 @@ export function TaskConversationProvider({
     [],
   );
   return (
-    <TaskActivityLinksProvider
-      openTask={openTask}
-      roomId={roomId}
-      tenantId={tenantId}
-    >
+    <TaskActivityLinksProvider openTask={openTask} tenantId={tenantId}>
       {children}
       {task ? (
         <TaskConversationDialog

@@ -11,7 +11,7 @@ import { MessageMarkdown } from "@/features/rooms/chat/message-markdown";
 import { TaskActivityBlock } from "@/features/rooms/runtime-status/task-activity-block";
 import {
   parseTaskCommand,
-  taskIdFromOutput,
+  createdTaskId,
   type TaskCommand,
 } from "@/features/rooms/runtime-status/task-command";
 import type { TeamHubMessageActivityRecord } from "@/features/teamhub/teamhub-types";
@@ -133,7 +133,9 @@ function activityTimelineItems(
     if (taskCommand) {
       const taskId =
         taskCommand.taskId ??
-        taskIdFromOutput(pair?.result && nativeOutput(pair.result));
+        (taskCommand.operation === "create" && pair?.result
+          ? createdTaskId(nativeOutput(pair.result))
+          : undefined);
       if (taskId && taskCommand.name) taskNames.set(taskId, taskCommand.name);
       const name = taskCommand.name ?? (taskId && taskNames.get(taskId));
       items.push({

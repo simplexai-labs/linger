@@ -9,7 +9,7 @@ import {
 } from "./runtime-presentation-events";
 import {
   parseTaskCommand,
-  taskIdFromOutput,
+  createdTaskId,
   type TaskCommand,
 } from "./task-command";
 
@@ -272,9 +272,14 @@ function pushActivity(
   if (activity.kind === "response") return;
   // The Computer names a TeamHub command by what it does, so a Task step can
   // arrive as any kind; its `teamhub task` command line is what marks it.
-  const task = parseTaskCommand(commandText(entries));
+  const input = inputBlock(entries);
+  const task = parseTaskCommand(commandText(input));
   if (task) {
-    const taskId = task.taskId ?? taskIdFromOutput(outputText(entries));
+    const taskId =
+      task.taskId ??
+      (task.operation === "create"
+        ? createdTaskId(outputText(entries, input))
+        : undefined);
     items.push({
       active,
       command: task,
@@ -333,13 +338,17 @@ function pushActivity(
   });
 }
 
-/** The command line an Activity ran, from its first code or JSON block. */
-function commandText(entries: readonly RuntimeActivityEntry[]) {
-  const block = entries.find(
+/** An Activity's input: its first code or JSON block. */
+function inputBlock(entries: readonly RuntimeActivityEntry[]) {
+  return entries.find(
     (entry) =>
       entry.type === "content" &&
       (entry.block.format === "code" || entry.block.format === "json"),
   );
+}
+
+/** The command line an Activity ran, from its input block. */
+function commandText(block: RuntimeActivityEntry | undefined) {
   if (block?.type !== "content") return "";
   if (block.block.format === "code") return block.block.content;
   try {
@@ -356,10 +365,15 @@ function commandText(entries: readonly RuntimeActivityEntry[]) {
   return "";
 }
 
-/** Every block the Activity carried; a CLI receipt would be among them. */
-function outputText(entries: readonly RuntimeActivityEntry[]) {
+/** What the Activity published besides its input, such as a CLI receipt. */
+function outputText(
+  entries: readonly RuntimeActivityEntry[],
+  input: RuntimeActivityEntry | undefined,
+) {
   return entries
-    .map((entry) => (entry.type === "content" ? entry.block.content : ""))
+    .map((entry) =>
+      entry !== input && entry.type === "content" ? entry.block.content : "",
+    )
     .join("\n");
 }
 

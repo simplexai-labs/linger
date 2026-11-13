@@ -54,10 +54,12 @@ export function parseTaskCommand(command: string): TaskCommand | undefined {
   };
 }
 
-/** The `task_id` in the CLI's JSON receipt, when the output carries one. */
-export function taskIdFromOutput(output: string | undefined) {
-  const match = output?.match(/"task_id"\s*:\s*"([A-Za-z0-9][A-Za-z0-9_-]*)"/);
-  return match?.[1];
+/**
+ * The Task a `task create` receipt names. The receipt is display text, so the
+ * Task is found by TeamHub's ID format, never by the receipt's wording.
+ */
+export function createdTaskId(output: string | undefined) {
+  return output?.match(/\bworkitem_[0-9a-f]{32}\b/)?.[0];
 }
 
 /** Splits a command line into words, honoring single and double quotes. */
