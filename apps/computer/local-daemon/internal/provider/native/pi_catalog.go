@@ -29,6 +29,7 @@ type piCatalogState struct {
 type piCatalogModel struct {
 	ID               string                     `json:"id"`
 	Provider         string                     `json:"provider"`
+	Name             string                     `json:"name"`
 	Reasoning        bool                       `json:"reasoning"`
 	ThinkingLevelMap map[string]json.RawMessage `json:"thinkingLevelMap"`
 	ContextWindow    json.RawMessage            `json:"contextWindow"`
@@ -109,18 +110,32 @@ func piCatalogList(state piCatalogState, entries []json.RawMessage) (ModelList, 
 	if provider, id := strings.TrimSpace(state.Model.Provider), strings.TrimSpace(state.Model.ID); provider != "" && id != "" {
 		defaultKey = provider + "/" + id
 	}
-	var models catalogModels
+	parsed := make([]piCatalogModel, 0, len(entries))
+	names := map[string]int{}
 	for _, raw := range entries {
 		var entry piCatalogModel
 		if json.Unmarshal(raw, &entry) != nil {
 			return ModelList{}, errPiNoModels
 		}
+		entry.Name = strings.TrimSpace(entry.Name)
+		names[entry.Name]++
+		parsed = append(parsed, entry)
+	}
+	var models catalogModels
+	for _, entry := range parsed {
 		provider, id := strings.TrimSpace(entry.Provider), strings.TrimSpace(entry.ID)
 		if provider == "" || id == "" {
 			continue
 		}
 		key := provider + "/" + id
-		option := ModelOption{ID: key, Label: key, Provider: provider, Default: key == defaultKey}
+		// Pi's name (models.json "name" for a configured model) is what people
+		// call it; models sharing a name keep their keys so a picker can tell
+		// them apart.
+		label := key
+		if entry.Name != "" && names[entry.Name] == 1 {
+			label = entry.Name
+		}
+		option := ModelOption{ID: key, Label: label, Provider: provider, Default: key == defaultKey}
 		// A window that is not a whole token count stays unknown.
 		if window, err := strconv.Atoi(strings.TrimSpace(string(entry.ContextWindow))); err == nil && window > 0 {
 			option.ContextWindow = window
