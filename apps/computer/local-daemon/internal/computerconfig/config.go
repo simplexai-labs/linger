@@ -34,6 +34,20 @@ type Config struct {
 	Owners           []Owner
 	// Desktop is set when the Linger Desktop app runs this Daemon as its child.
 	Desktop *Desktop
+	// LocalModels locates the localmodels tool the installer prepared; nil
+	// when this Computer has none.
+	LocalModels *LocalModels
+}
+
+// LocalModels is where the installer put the localmodels tool and its state.
+// The Daemon runs `python -P -s -m localmodels library ...` with PYTHONPATH
+// and the working directory set to ModuleDirectory, LOCALMODELS_STATE set to
+// StateDirectory and --base-dir set to BaseDirectory.
+type LocalModels struct {
+	Python          string
+	ModuleDirectory string
+	StateDirectory  string
+	BaseDirectory   string
 }
 
 // Desktop configures a Daemon owned by the Linger Desktop app. The app ships
@@ -61,18 +75,26 @@ type WorkspaceGrant struct {
 }
 
 type encodedConfig struct {
-	RunnerID                string            `json:"runner_id"`
-	DisplayName             string            `json:"display_name"`
-	Gateway                 encodedGateway    `json:"gateway"`
-	StateDirectory          string            `json:"state_directory"`
-	MaxConcurrentOperations *int              `json:"max_concurrent_operations,omitempty"`
-	RuntimePaths            map[string]string `json:"runtime_paths,omitempty"`
-	EnabledRuntimes         json.RawMessage   `json:"enabled_runtimes,omitempty"`
-	PreferredRuntime        string            `json:"preferred_runtime,omitempty"`
-	WorkspaceGrants         []WorkspaceGrant  `json:"workspace_grants"`
-	CredentialExpiresAt     string            `json:"credential_expires_at,omitempty"`
-	Codex                   *encodedCodex     `json:"codex,omitempty"`
-	Desktop                 *encodedDesktop   `json:"desktop,omitempty"`
+	RunnerID                string              `json:"runner_id"`
+	DisplayName             string              `json:"display_name"`
+	Gateway                 encodedGateway      `json:"gateway"`
+	StateDirectory          string              `json:"state_directory"`
+	MaxConcurrentOperations *int                `json:"max_concurrent_operations,omitempty"`
+	RuntimePaths            map[string]string   `json:"runtime_paths,omitempty"`
+	EnabledRuntimes         json.RawMessage     `json:"enabled_runtimes,omitempty"`
+	PreferredRuntime        string              `json:"preferred_runtime,omitempty"`
+	WorkspaceGrants         []WorkspaceGrant    `json:"workspace_grants"`
+	CredentialExpiresAt     string              `json:"credential_expires_at,omitempty"`
+	Codex                   *encodedCodex       `json:"codex,omitempty"`
+	Desktop                 *encodedDesktop     `json:"desktop,omitempty"`
+	LocalModels             *encodedLocalModels `json:"local_models,omitempty"`
+}
+
+type encodedLocalModels struct {
+	Python          string `json:"python"`
+	ModuleDirectory string `json:"module_directory"`
+	StateDirectory  string `json:"state_directory"`
+	BaseDirectory   string `json:"base_directory"`
 }
 
 type encodedDesktop struct {
@@ -120,6 +142,19 @@ func Load(path string, environment map[string]string) (Config, error) {
 			return Config{}, errors.New("Computer Desktop TeamHub CLI path is invalid")
 		}
 		desktop = &Desktop{TeamHubCLIDirectory: value.Desktop.TeamHubCLIDirectory}
+	}
+	var localModels *LocalModels
+	if value.LocalModels != nil {
+		encoded := value.LocalModels
+		for _, path := range []string{encoded.Python, encoded.ModuleDirectory, encoded.StateDirectory, encoded.BaseDirectory} {
+			if !filepath.IsAbs(path) {
+				return Config{}, errors.New("local_models paths must be absolute")
+			}
+		}
+		localModels = &LocalModels{
+			Python: encoded.Python, ModuleDirectory: encoded.ModuleDirectory,
+			StateDirectory: encoded.StateDirectory, BaseDirectory: encoded.BaseDirectory,
+		}
 	}
 	var token string
 	if value.Gateway.TokenFile != "" {
@@ -185,7 +220,7 @@ func Load(path string, environment map[string]string) (Config, error) {
 		GatewayURL: value.Gateway.URL, GatewayToken: token, CodexAuthFile: codexAuthFile(value.Codex), StateDirectory: value.StateDirectory,
 		MaxConcurrentOperations: value.MaxConcurrentOperations, RuntimePaths: value.RuntimePaths,
 		EnabledRuntimes: enabledRuntimes, PreferredRuntime: value.PreferredRuntime,
-		WorkspaceGrants: value.WorkspaceGrants, Owners: owners, Desktop: desktop,
+		WorkspaceGrants: value.WorkspaceGrants, Owners: owners, Desktop: desktop, LocalModels: localModels,
 	}, nil
 }
 

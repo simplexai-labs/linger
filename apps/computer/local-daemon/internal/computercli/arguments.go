@@ -41,6 +41,7 @@ type command struct {
 	maxRuns         *int
 	enabledRuntimes []string
 	tokenStdin      bool
+	localModels     *stagedLocalModels
 
 	// daemon service start|stop
 	serviceName string
@@ -320,6 +321,9 @@ func parseLogin(args []string, configPath string, options parseOptions) (command
 	if parsed.enabledRuntimes, err = removeEnabledRuntimes(&args); err != nil {
 		return command{}, err
 	}
+	if parsed.localModels, err = removeLocalModelsTool(&args, options); err != nil {
+		return command{}, err
+	}
 	if len(args) > 0 {
 		return command{}, unknownCommand(append([]string{"login"}, args...), options.commandName)
 	}
@@ -341,6 +345,31 @@ func removeRuntimePaths(args *[]string, options parseOptions) (map[string]string
 		}
 	}
 	return values, nil
+}
+
+// removeLocalModelsTool reads the four --localmodels-* options, which name
+// the installer's localmodels tool together or not at all.
+func removeLocalModelsTool(args *[]string, options parseOptions) (*stagedLocalModels, error) {
+	names := []string{"--localmodels-python", "--localmodels-module-dir", "--localmodels-state", "--localmodels-base-dir"}
+	values := make([]string, len(names))
+	given := 0
+	for index, name := range names {
+		value, err := removeOption(args, name)
+		if err != nil {
+			return nil, err
+		}
+		if value != "" {
+			values[index] = resolvePath(options.workingDirectory, value)
+			given++
+		}
+	}
+	if given == 0 {
+		return nil, nil
+	}
+	if given != len(names) {
+		return nil, newError(categoryUsage, "--localmodels-python, --localmodels-module-dir, --localmodels-state and --localmodels-base-dir go together")
+	}
+	return &stagedLocalModels{Python: values[0], ModuleDirectory: values[1], StateDirectory: values[2], BaseDirectory: values[3]}, nil
 }
 
 func removeEnabledRuntimes(args *[]string) ([]string, error) {

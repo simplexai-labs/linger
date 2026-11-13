@@ -373,7 +373,7 @@ export async function ensureLocalmodelsTool(
   dependencies: { source?: LocalmodelsToolSource; fetcher?: typeof fetch } = {},
 ): Promise<ToolLocation> {
   options.signal?.throwIfAborted();
-  const key = `${path.resolve(home)}:${JSON.stringify(dependencies.source ?? process.env.LINGER_LOCALMODELS_TOOL_JSON)}`;
+  const key = `${path.resolve(home)}:${JSON.stringify(dependencies.source ?? pinnedToolSource())}`;
   const running = preparing.get(key);
   if (running) {
     const result = await running;
@@ -388,6 +388,14 @@ export async function ensureLocalmodelsTool(
     preparing.delete(key);
   }
 }
+/** LOCALMODELS_STATE of every call for this home. */
+export function localmodelsStateDirectory(home: string): string {
+  return path.join(path.resolve(home), "runtime", "localmodels", "state");
+}
+/** Where this home's models live: every call's --base-dir. */
+export function localmodelsBaseDirectory(home: string): string {
+  return path.join(path.resolve(home), "runtime", "localmodels", "models");
+}
 export async function runLocalmodels(
   home: string,
   args: string[],
@@ -397,12 +405,7 @@ export async function runLocalmodels(
   const startedAt = Date.now();
   const tool = await ensureLocalmodelsTool(home, options);
   const checkedAt = Date.now();
-  const state = path.join(
-    path.resolve(home),
-    "runtime",
-    "localmodels",
-    "state",
-  );
+  const state = localmodelsStateDirectory(home);
   await privateDirectory(state);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -548,8 +551,12 @@ async function hasPinnedTool(home: string): Promise<boolean> {
     () => undefined,
   ));
 }
-/** The kit this release pins, from the installer's published metadata. */
-function pinnedToolSource(): LocalmodelsToolSource | undefined {
+/**
+ * The kit this release pins, from the installer's published metadata
+ * (LINGER_LOCALMODELS_TOOL_JSON), or undefined when it ships none. The one
+ * reader of that variable.
+ */
+export function pinnedToolSource(): LocalmodelsToolSource | undefined {
   const raw = process.env.LINGER_LOCALMODELS_TOOL_JSON;
   return raw ? validateToolSource(JSON.parse(raw)) : undefined;
 }

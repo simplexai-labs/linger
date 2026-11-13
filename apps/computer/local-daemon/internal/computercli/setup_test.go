@@ -247,6 +247,37 @@ func TestSetupPersistsRuntimeScopeAndRunLimitBeforeTheFirstStart(t *testing.T) {
 	}
 }
 
+func TestSetupWritesTheLocalModelsToolLocation(t *testing.T) {
+	server := newExchangeServer(t, "runner-localmodels")
+	f := newSetupFixture(t, server)
+	root := t.TempDir()
+	tool := stagedLocalModels{
+		Python: filepath.Join(root, "kit", "python3"), ModuleDirectory: filepath.Join(root, "kit"),
+		StateDirectory: filepath.Join(root, "state"), BaseDirectory: filepath.Join(root, "models"),
+	}
+	f.options.localModels = &tool
+	f.deps.startDaemon = func(_ context.Context, configPath string) error {
+		encoded, err := os.ReadFile(configPath)
+		if err != nil {
+			return err
+		}
+		var config struct {
+			LocalModels *stagedLocalModels `json:"local_models"`
+		}
+		if err := json.Unmarshal(encoded, &config); err != nil || config.LocalModels == nil || *config.LocalModels != tool {
+			return errors.New("local_models missing at start: " + string(encoded))
+		}
+		return nil
+	}
+	if _, err := runComputerSetup(context.Background(), f.options, f.deps); err != nil {
+		t.Fatal(err)
+	}
+	f.options.localModels = &stagedLocalModels{Python: "python3", ModuleDirectory: tool.ModuleDirectory, StateDirectory: tool.StateDirectory, BaseDirectory: tool.BaseDirectory}
+	if _, err := runComputerSetup(context.Background(), f.options, f.deps); err == nil {
+		t.Fatal("relative localmodels Python was accepted")
+	}
+}
+
 func TestSetupRenewsTheExistingComputerIdentity(t *testing.T) {
 	server := newExchangeServer(t, "runner-existing")
 	f := newSetupFixture(t, server)

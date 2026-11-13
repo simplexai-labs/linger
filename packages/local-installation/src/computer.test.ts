@@ -28,6 +28,18 @@ function managedCodexPath(home: string) {
   return managedNativeRuntimePath(home, "codex");
 }
 vi.mock("./localmodels-tool.js", () => ({
+  // The distribution ships a tool when the test stubs its metadata.
+  pinnedToolSource: () =>
+    process.env.LINGER_LOCALMODELS_TOOL_JSON ? { sha256: "0" } : undefined,
+  ensureLocalmodelsTool: async (home: string) => ({
+    python: path.join(home, "tools", "localmodels", "kit", "python3"),
+    moduleDir: path.join(home, "tools", "localmodels", "kit"),
+    sourceCommit: "0".repeat(40),
+  }),
+  localmodelsStateDirectory: (home: string) =>
+    path.join(home, "runtime", "localmodels", "state"),
+  localmodelsBaseDirectory: (home: string) =>
+    path.join(home, "runtime", "localmodels", "models"),
   runLocalmodels: async (
     home: string,
     args: string[],
@@ -1300,4 +1312,93 @@ it("keeps a genuine failed start actionable only after bounded offline observati
       ([, args]) => args.slice(0, 2).join(" ") === "daemon start",
     ),
   ).toHaveLength(1);
+});
+
+function localModelsTool(home: string) {
+  return {
+    python: path.join(home, "tools", "localmodels", "kit", "python3"),
+    module_directory: path.join(home, "tools", "localmodels", "kit"),
+    state_directory: path.join(home, "runtime", "localmodels", "state"),
+    base_directory: path.join(home, "runtime", "localmodels", "models"),
+  };
+}
+function connectedStatus(args: string[]) {
+  return args.slice(0, 2).join(" ") === "daemon status"
+    ? JSON.stringify({
+        daemon: {
+          state: "running",
+          reconciled: true,
+          gateway_state: "connected",
+          active_operations: 0,
+        },
+        runtimes: [{ type: "codex", status: "ready" }],
+      })
+    : "";
+}
+it("names the localmodels tool when login creates the Computer config", async () => {
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", "{}");
+  try {
+    const f = await fixture();
+    const home = path.resolve(f.instance.root, "../..");
+    const run = vi
+      .spyOn(processes, "runProcess")
+      .mockImplementation(async (_executable, args) => {
+        if (args[0] === "login")
+          await writeFile(f.instance.computerConfig, "{}");
+        return { code: 0, stderr: "", stdout: connectedStatus(args) };
+      });
+    await connectComputer(f.instance, { interactive: true });
+    const login = run.mock.calls.find(([, args]) => args[0] === "login")![1];
+    const tool = localModelsTool(home);
+    for (const [flag, value] of [
+      ["--localmodels-python", tool.python],
+      ["--localmodels-module-dir", tool.module_directory],
+      ["--localmodels-state", tool.state_directory],
+      ["--localmodels-base-dir", tool.base_directory],
+    ] as const)
+      expect(login[login.indexOf(flag) + 1]).toBe(value);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+it("adds the localmodels tool to an existing Computer config once", async () => {
+  const f = await fixture();
+  const home = path.resolve(f.instance.root, "../..");
+  await writeFile(
+    f.instance.computerConfig,
+    JSON.stringify({
+      runner_id: "same-identity",
+      runtime_paths: { codex: "/existing/codex" },
+    }),
+    { mode: 0o600 },
+  );
+  const run = vi
+    .spyOn(processes, "runProcess")
+    .mockImplementation(async (_executable, args) => ({
+      code: 0,
+      stderr: "",
+      stdout: connectedStatus(args),
+    }));
+  const stops = () =>
+    run.mock.calls.filter(
+      ([, args]) => args.slice(0, 2).join(" ") === "daemon stop",
+    ).length;
+  // A Computer bound before it knew the tool.
+  await connectComputer(f.instance, { interactive: false });
+  await connectComputer(f.instance, { interactive: false });
+  expect(stops()).toBe(1);
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", "{}");
+  try {
+    await connectComputer(f.instance, { interactive: false });
+    await connectComputer(f.instance, { interactive: false });
+  } finally {
+    vi.unstubAllEnvs();
+  }
+  expect(stops()).toBe(2);
+  const config = JSON.parse(await readFile(f.instance.computerConfig, "utf8"));
+  expect(config).toEqual({
+    runner_id: "same-identity",
+    runtime_paths: { codex: "/existing/codex" },
+    local_models: localModelsTool(home),
+  });
 });

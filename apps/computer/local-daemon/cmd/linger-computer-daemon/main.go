@@ -28,6 +28,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/localtools"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/registration"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/localmodels"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/permission"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 	localprocess "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/process"
@@ -35,6 +36,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/redact"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/selfupdate"
 	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
+	wire "github.com/simplexai-labs/linger/contracts-go/runnergateway"
 )
 
 func main() {
@@ -274,8 +276,33 @@ func run(args []string) (resultErr error) {
 		computer: computer, rejected: provider.NewRejectedModels(runtimeCredentialFiles(providerEnvironment)),
 		runtimes: runtimes, diagnostics: discovered.Diagnostics, revision: runtimeObservationRevision,
 	}
+	// A load or unload changes Pi's model list: the library asks for a
+	// full Runtime discovery.
+	runtimeRefresh := make(chan struct{}, 1)
+	var localDaemon *daemon.Daemon
+	var localModelsTool *localmodels.Tool
+	if tool := computer.LocalModels; tool != nil {
+		localModelsTool = &localmodels.Tool{
+			Python: tool.Python, ModuleDirectory: tool.ModuleDirectory,
+			StateDirectory: tool.StateDirectory, BaseDirectory: tool.BaseDirectory,
+		}
+	}
+	localModels := localmodels.New(localmodels.Options{
+		Tool: localModelsTool, Environment: providerEnvironment,
+		JobDirectory: filepath.Join(computer.StateDirectory, "local-models", "jobs"),
+		// The library publishes only from Act and Refresh, which the Daemon
+		// calls once it runs.
+		Publish: func(snapshot wire.LocalModelsSnapshot) { localDaemon.PublishLocalModels(snapshot) },
+		RuntimeChanged: func() {
+			select {
+			case runtimeRefresh <- struct{}{}:
+			default:
+			}
+		},
+	})
+	defer localModels.Close()
 	codexModelSessions := &provider.CodexSessions{Root: filepath.Join(computer.StateDirectory, "model-invoke", "codex-sessions")}
-	localDaemon, err := daemon.New(daemon.Options{
+	localDaemon, err = daemon.New(daemon.Options{
 		ComputerID: computer.ComputerID, DisplayName: computer.DisplayName,
 		Capacity: computer.MaxConcurrentOperations, Runtimes: runtimes,
 		EnabledRuntimes:    computer.EnabledRuntimes,
@@ -297,6 +324,7 @@ func run(args []string) (resultErr error) {
 		ComputerPermissions: localtools.NewComputerPermissions(permissionOptions),
 		CLICredentials:      cliCredentials,
 		TeamHubCLIBin:       teamhubBin,
+		LocalModels:         localModels,
 		ModelInvoker: provider.ModelInvoker{
 			TempBase:         operationTempBase,
 			ClaudeConfigRoot: filepath.Join(computer.StateDirectory, "model-invoke", "claude", ".claude"),
@@ -378,6 +406,7 @@ func run(args []string) (resultErr error) {
 			RuntimeBusy: func() bool {
 				return localDaemon.ActiveOperationCount() > 0
 			},
+			Refresh: runtimeRefresh,
 			OnChanged: func(next provider.DiscoveryResult) error {
 				logRuntimeDiagnostics(next.Diagnostics)
 				nextProviders, nextRuntimes := providerInstallations(next, providerEnvironment)

@@ -6,7 +6,11 @@ import { initializeInstance } from "./instance.js";
 import { writeSetupChoice } from "./setup-selection.js";
 import { connectComputer } from "./computer.js";
 import { runLocalmodels } from "./localmodels-tool.js";
-vi.mock("./localmodels-tool.js", () => ({ runLocalmodels: vi.fn() }));
+vi.mock("./localmodels-tool.js", () => ({
+  // This distribution ships no localmodels tool.
+  pinnedToolSource: () => undefined,
+  runLocalmodels: vi.fn(),
+}));
 const roots: string[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();

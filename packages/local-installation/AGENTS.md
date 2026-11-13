@@ -43,6 +43,14 @@ error naming each failed instance, and the installer does not start. The
 cache markers `.simplex-files.json` and `.simplex-model-package.json` keep
 their names.
 
+The Computer config's `local_models` section names the verified localmodels
+tool, its `LOCALMODELS_STATE` and model base directory for the Daemon's model
+library (`localmodels-computer.ts`). A fresh login passes it as
+`--localmodels-*` options; it is part of the managed-runtime fingerprint, so an
+existing Computer is rebound once on its next connect. A distribution without
+the tool writes none. External Computers (the Desktop's) get the same paths as
+the `LINGER_LOCALMODELS_*` keys of the installer's instance runtime.
+
 Move a freshly downloaded or unpacked file or folder into place with
 `renameRetrying` from `fs-retry.ts`: on Windows antivirus and indexing hold
 new files for a moment, and a plain rename then fails with EPERM.

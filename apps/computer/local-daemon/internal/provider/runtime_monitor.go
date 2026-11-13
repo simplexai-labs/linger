@@ -22,6 +22,10 @@ type RuntimeMonitorOptions struct {
 	// RuntimeBusy reports an active operation. A running operation proves its
 	// Runtime works, so an inconclusive auth probe then keeps the ready state.
 	RuntimeBusy func() bool
+	// Refresh asks for a full discovery before the next scheduled one, for
+	// example after a local model load changed Pi's model list. The request
+	// waits while FullRefreshAllowed is false.
+	Refresh <-chan struct{}
 }
 
 const transientRuntimeFailureThreshold = 2
@@ -39,18 +43,23 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 	}
 	ticker := time.NewTicker(options.RefreshInterval)
 	defer ticker.Stop()
-	for tick := 1; ; tick++ {
+	requested := false
+	for tick := 0; ; {
 		select {
 		case <-ctx.Done():
 			return context.Cause(ctx)
 		case <-ticker.C:
+			tick++
+		case <-options.Refresh:
+			requested = true
 		}
 		var next DiscoveryResult
 		var err error
-		if (tick%options.FullRefreshEveryTicks == 0 || runtimeExecutablesChanged(current.Diagnostics)) &&
+		if (requested || tick%options.FullRefreshEveryTicks == 0 || runtimeExecutablesChanged(current.Diagnostics)) &&
 			(options.FullRefreshAllowed == nil || options.FullRefreshAllowed()) {
 			next, err = discover(ctx, options.Discovery)
 			if err == nil {
+				requested = false
 				for _, diagnostic := range next.Diagnostics {
 					if diagnostic.Status == "ready" {
 						delete(authenticationFailures, diagnostic.Type)

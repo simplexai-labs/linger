@@ -495,6 +495,7 @@ func (c *cli) executeLogin(ctx context.Context, parsed command) (int, error) {
 		maxRunsSet: parsed.maxRunsSet, maxRuns: parsed.maxRuns,
 		runtimePaths: runtimePaths, enabledRuntimes: parsed.enabledRuntimes,
 		codexAuthFile: parsed.codexAuthFile, gatewayURL: parsed.gatewayURL, serverToken: token,
+		localModels: parsed.localModels,
 	})
 	if err != nil {
 		return 0, err
