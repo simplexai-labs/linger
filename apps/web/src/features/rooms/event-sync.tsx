@@ -12,6 +12,10 @@ import {
   tenantExternalConnectionsQueryKey,
 } from "@/features/apps/connected-apps-queries";
 import { localComputersQueryKey } from "@/features/local-computer/local-computer-queries";
+import {
+  localModelsQueryKey,
+  tenantLocalModelsQueryKey,
+} from "@/features/local-models/local-models-queries";
 import { teamHubDocumentsQueryKey } from "@/features/teamhub/document-queries";
 import type { TeamHubEventSignal } from "@/features/teamhub/event-transport";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
@@ -158,7 +162,17 @@ async function applyInvalidation(
     case "computers":
       await Promise.all([
         refreshAgentStatus(queryClient, tenantId),
-        refreshActiveQueries(queryClient, [localComputersQueryKey(tenantId)]),
+        // A Local models view carries its Computer's connection and the
+        // Agents that use each model.
+        refreshActiveQueries(queryClient, [
+          localComputersQueryKey(tenantId),
+          tenantLocalModelsQueryKey(tenantId),
+        ]),
+      ]);
+      return;
+    case "local-models":
+      await refreshActiveQueries(queryClient, [
+        localModelsQueryKey(tenantId, hint.id),
       ]);
       return;
     case "another-me":

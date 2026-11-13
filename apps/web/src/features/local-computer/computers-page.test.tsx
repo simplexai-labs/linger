@@ -28,24 +28,15 @@ import type {
   TeamHubTenantAgentAvailabilitySnapshot,
 } from "@/features/teamhub/teamhub-types";
 
+import { tenantLocalModelsQueryKey } from "@/features/local-models/local-models-queries";
+
 import { ComputersPage } from "./computers-page";
 import { localComputersQueryKey } from "./local-computer-queries";
 import { publishLocalComputerEnrollment } from "./local-computer-enrollment-events";
 
 describe("ComputersPage", () => {
-  it("manages Computers without fetching or showing background model progress", async () => {
-    const fixture = await authenticatedFixture();
-    const getModelProgress = vi.fn().mockResolvedValue({
-      available: true,
-      components: [{ component: "embedding", state: "downloading" }],
-    });
-    const runtime = {
-      ...fixture,
-      client: {
-        ...fixture.client,
-        getTenantLocalModelServices: getModelProgress,
-      },
-    };
+  it("links a Computer to its Local models page without reading its models", async () => {
+    const runtime = await authenticatedFixture();
     const queryClient = renderPage(
       runtime,
       "/t/tenant-northstar/computers?computer=computer-offline-lab",
@@ -55,20 +46,31 @@ describe("ComputersPage", () => {
       name: "Offline Lab Mac details",
     });
     expect(within(detail).getByRole("status")).toHaveTextContent("Offline");
+    expect(
+      within(detail).getByRole("link", { name: /Manage local models/ }),
+    ).toHaveAttribute(
+      "href",
+      "/t/tenant-northstar/settings/local-models?computer=computer-offline-lab",
+    );
     fireEvent.click(within(detail).getByRole("button", { name: "Advanced" }));
     fireEvent.click(within(detail).getByRole("button", { name: "Remove" }));
     expect(
       await screen.findByRole("dialog", { name: "Remove Local Computer" }),
     ).toBeVisible();
 
-    expect(getModelProgress).not.toHaveBeenCalled();
+    // Model downloads and loads live on the Local models page only: the
+    // Computers page neither reads nor shows them.
     expect(
-      queryClient.getQueryState([
-        "teamhub",
-        "tenant-northstar",
-        "local-model-services",
-      ]),
-    ).toBeUndefined();
+      runtime.server.requestsTo(
+        "GET",
+        "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models",
+      ),
+    ).toHaveLength(0);
+    expect(
+      queryClient
+        .getQueryCache()
+        .findAll({ queryKey: tenantLocalModelsQueryKey("tenant-northstar") }),
+    ).toHaveLength(0);
     expect(
       screen.queryByRole("region", { name: "Background model services" }),
     ).not.toBeInTheDocument();

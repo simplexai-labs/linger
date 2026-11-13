@@ -19,6 +19,14 @@ build:assets` to check the initial JS budget.
 - `src/app`: routes, providers, route error boundaries, and global CSS.
 - `src/features/teamhub`: Human API, Session, error, and realtime adapters.
 - `src/features/rooms`: Room routes, Chat, Timeline, the right sidebar (Agent Info, Activity, Thread, Document) and membership UI.
+- `src/features/local-models`: Settings › Local models (`settings/local-models?computer=<id>`),
+  one Computer's model library as TeamHub last stored it. The Computer decides
+  fit, availability, placement, the recommendation and memory; the page only
+  orders and labels them, picks the Make room default, and maps every code to
+  English in `local-models-copy.ts`. Without `?computer=` the desktop app opens
+  its own Computer. Only the Computer's owner can act; actions return at once
+  and progress arrives as `local-models` invalidation hints. A Computer's
+  detail on the Computers page links here and reads no model state itself.
 - `src/test`: unit-test support, including the in-process TeamHub test server.
 - `e2e`: Playwright product workflows; every spec runs on the real TeamHub and
   Document Runtime stack (`make check-e2e-room-document`).

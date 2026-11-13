@@ -60,6 +60,7 @@ const invalidationResources = {
   directory: true,
   document: true,
   "document-access": true,
+  "local-models": true,
   room: true,
   "work-items": true,
 } satisfies Record<TeamHubInvalidationResource, true>;
