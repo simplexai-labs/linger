@@ -3,7 +3,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
@@ -43,9 +43,13 @@ export function TaskConversationProvider({
   tenantId: string;
 }) {
   const [task, setTask] = useState<{ id: string; title: string }>();
+  const openTask = useCallback(
+    (id: string, title: string) => setTask({ id, title }),
+    [],
+  );
   return (
     <TaskActivityLinksProvider
-      openTask={(id, title) => setTask({ id, title })}
+      openTask={openTask}
       roomId={roomId}
       tenantId={tenantId}
     >

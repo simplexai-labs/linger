@@ -5,7 +5,7 @@ import {
   TaskDone01Icon,
 } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 
 import { Icon } from "@/components/ui/icon";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -36,8 +36,12 @@ export function TaskActivityLinksProvider({
   roomId,
   tenantId,
 }: TaskActivityLinks & { children: ReactNode }) {
+  const links = useMemo(
+    () => ({ openTask, roomId, tenantId }),
+    [openTask, roomId, tenantId],
+  );
   return (
-    <TaskActivityLinksContext.Provider value={{ openTask, roomId, tenantId }}>
+    <TaskActivityLinksContext.Provider value={links}>
       {children}
     </TaskActivityLinksContext.Provider>
   );

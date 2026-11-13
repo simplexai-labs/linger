@@ -26,7 +26,7 @@ import {
   stringValue,
   thinkingSummary,
   type ToolCallPair,
-} from "./runtime-history-view";
+} from "./native-activity-records";
 
 type TrajectoryItem =
   | { key: string; kind: "reasoning"; text: string }
@@ -360,13 +360,13 @@ function editLines(args: Record<string, unknown> | undefined) {
   const listed = args?.edits;
   const edits = Array.isArray(listed) ? listed : [args];
   return edits
-    .map((value) => {
+    .flatMap((value) => {
       const edit = asObject(value);
-      return [
+      const lines = [
         ...prefix(edit?.old_string ?? edit?.oldText, "-"),
         ...prefix(edit?.new_string ?? edit?.newText, "+"),
-      ].join("\n");
+      ];
+      return lines.length ? [lines.join("\n")] : [];
     })
-    .filter(Boolean)
     .join("\n\n");
 }
