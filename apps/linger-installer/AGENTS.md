@@ -19,7 +19,10 @@ on stderr for the desktop to show.
 stopped services headless, reusing its saved choices; the desktop client runs it
 after a reboot and reads the outcome from the single JSON line on stdout. It
 also restarts running services when the instance's `user.env` no longer
-matches the configuration they started with.
+matches the configuration they started with. With `--external-computer`, a
+successful outcome carries `runtime`, the same instance runtime as
+`GET /api/instances/{name}/runtime` (runtime and localmodels tool paths), so
+the desktop's Computer follows them.
 
 `--stop` (with `--instance`) is the desktop uninstall's and Windows setup's: it stops the
 manager the desktop started for that instance (its `/api/stop` cancels a

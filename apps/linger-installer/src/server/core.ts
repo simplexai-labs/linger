@@ -27,20 +27,9 @@ import { inspectComputer } from "@linger/local-installation/computer";
 import type { components } from "@linger/wire-contracts/linger-installer/types";
 import { publicComputer } from "./public.js";
 import { prepareDependencies } from "@linger/local-installation/dependencies";
-import {
-  managedRuntimeEnvironment,
-  readManagedModel,
-} from "@linger/local-installation/managed-codex";
-import { localModelsEnvironment } from "@linger/local-installation/local-models";
+import { readManagedModel } from "@linger/local-installation/managed-codex";
 import type { RunInstallation } from "./jobs.js";
-const RUNTIME_ENVIRONMENT = [
-  "LINGER_CODEX_PATH",
-  "LINGER_CLAUDE_PATH",
-  "LINGER_PI_PATH",
-  "CODEX_HOME",
-  "CLAUDE_CONFIG_DIR",
-  "PI_CODING_AGENT_DIR",
-] as const;
+import { instanceRuntime } from "./instance-runtime.js";
 export function coreAdapter(
   home: string,
   sourceRepo: string,
@@ -187,25 +176,10 @@ export function coreAdapter(
         businessVerification: "not_run",
       };
     },
-    // What an external Computer (the desktop's) needs to find the runtime
-    // this installer manages: the paths the CLI's Computer gets in its
-    // environment, without the rest of that environment.
-    async runtime(
+    runtime(
       name: string,
     ): Promise<components["schemas"]["InstanceRuntime"] | undefined> {
-      const value = await instance(name);
-      if (!value) return undefined;
-      const setupChoice = await readSetupChoice({ name, home });
-      const found = {
-        ...(await managedRuntimeEnvironment(home, value.root)),
-        ...(await localModelsEnvironment(value)),
-      };
-      const environment: Record<string, string> = {};
-      for (const key of RUNTIME_ENVIRONMENT) {
-        const entry = found[key];
-        if (entry && path.isAbsolute(entry)) environment[key] = entry;
-      }
-      return { ...(setupChoice ? { setupChoice } : {}), environment };
+      return instanceRuntime(home, name);
     },
     async login(name: string) {
       const value = await instance(name);

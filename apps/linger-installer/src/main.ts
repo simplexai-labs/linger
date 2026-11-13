@@ -119,9 +119,20 @@ async function resume(options: ReturnType<typeof parseInstallerArguments>) {
     message: error instanceof Error ? error.message : String(error),
     details: undefined,
   }));
+  // The desktop's own Computer takes the runtime and localmodels tool paths
+  // from every resume, so an install from before it knew one gains it.
+  const runtime =
+    outcome.code === 0 && options.externalComputer
+      ? await import("./server/instance-runtime.js")
+          .then(({ instanceRuntime }) =>
+            instanceRuntime(options.home, options.instanceName!),
+          )
+          .catch(() => undefined)
+      : undefined;
   // Detached service processes may keep handles open; exit once flushed.
-  process.stdout.write(`${JSON.stringify(outcome)}\n`, () =>
-    process.exit(outcome.code),
+  process.stdout.write(
+    `${JSON.stringify({ ...outcome, ...(runtime ? { runtime } : {}) })}\n`,
+    () => process.exit(outcome.code),
   );
 }
 // Headless check of this computer for the desktop client: the setup report

@@ -20,6 +20,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -2016,47 +2017,85 @@ export class LocalServerModule implements Module {
   ): Promise<void> {
     await this.#adoptSourceKeys(record.home);
     const node = await this.#ensureNode(signal);
-    const outcome = await new Promise<{ code: number; message: string }>(
-      (resolve, reject) => {
-        const child = spawn(
-          node,
-          [
-            this.#installerScript(),
-            "--home",
-            record.home,
-            "--source-repo",
-            repo,
-            "--external-computer",
-            "--instance",
-            LOCAL_INSTANCE,
-            "--resume",
-          ],
-          {
-            stdio: ["ignore", "pipe", "ignore"],
-            // The pinned Node is a console program; without this Windows
-            // opens a console window for it.
-            windowsHide: true,
-            env: { ...process.env, LINGER_HOME: record.home },
-            signal,
-          },
-        );
-        let output = "";
-        child.stdout.on("data", (chunk: Buffer) => {
-          output += chunk.toString("utf8");
-        });
-        child.once("error", reject);
-        child.once("close", (code) => {
-          try {
-            const last = output.trim().split("\n").at(-1) ?? "";
-            resolve(JSON.parse(last) as { code: number; message: string });
-          } catch {
-            reject(new Error(`The installer exited with code ${code}`));
-          }
-        });
-      },
-    );
+    const outcome = await new Promise<{
+      code: number;
+      message: string;
+      runtime?: InstanceRuntime;
+    }>((resolve, reject) => {
+      const child = spawn(
+        node,
+        [
+          this.#installerScript(),
+          "--home",
+          record.home,
+          "--source-repo",
+          repo,
+          "--external-computer",
+          "--instance",
+          LOCAL_INSTANCE,
+          "--resume",
+        ],
+        {
+          stdio: ["ignore", "pipe", "ignore"],
+          // The pinned Node is a console program; without this Windows
+          // opens a console window for it.
+          windowsHide: true,
+          env: { ...process.env, LINGER_HOME: record.home },
+          signal,
+        },
+      );
+      let output = "";
+      child.stdout.on("data", (chunk: Buffer) => {
+        output += chunk.toString("utf8");
+      });
+      child.once("error", reject);
+      child.once("close", (code) => {
+        try {
+          const last = output.trim().split("\n").at(-1) ?? "";
+          resolve(
+            JSON.parse(last) as {
+              code: number;
+              message: string;
+              runtime?: InstanceRuntime;
+            },
+          );
+        } catch {
+          reject(new Error(`The installer exited with code ${code}`));
+        }
+      });
+    });
     if (outcome.code !== 0)
       throw new Error(outcome.message || "The installation stopped");
+    this.#adoptRuntime(outcome.runtime);
+  }
+
+  // Every resume reports the runtime and localmodels tool paths, so an
+  // install from before the Computer knew one gains it. A change restarts
+  // the Computer once its running tasks end.
+  #adoptRuntime(runtime: InstanceRuntime | undefined): void {
+    const ctx = this.#ctx;
+    if (
+      !ctx ||
+      !runtime?.environment ||
+      typeof runtime.environment !== "object" ||
+      Object.values(runtime.environment).some(
+        (value) => typeof value !== "string",
+      )
+    )
+      return;
+    if (
+      isDeepStrictEqual(
+        ctx.config.get().runtimeEnvironment ?? {},
+        runtime.environment,
+      )
+    )
+      return;
+    ctx.config.update({ runtimeEnvironment: runtime.environment });
+    ctx.log.info("local_server.runtime", {
+      runtime: runtime.setupChoice,
+      keys: Object.keys(runtime.environment),
+    });
+    ctx.bus.emit("computer.runtime");
   }
 
   // Kept in the default home, wherever the installation went.

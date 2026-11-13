@@ -215,6 +215,36 @@ describe("ComputerDaemonModule", () => {
     expect(written.preferred_runtime).toBe("pi");
   });
 
+  it("names the localmodels tool and restarts when the installer reports it", async () => {
+    const { daemon, ctx, bus, config, children } = setup();
+    await daemon.start(ctx);
+    bus.emit("computer.changed", "computer-1");
+    await vi.waitFor(() => expect(children).toHaveLength(2));
+    expect(
+      JSON.parse(readFileSync(children[1]!.configFile, "utf8")).local_models,
+    ).toBeUndefined();
+    config.update({
+      runtimeEnvironment: {
+        LINGER_LOCALMODELS_PYTHON:
+          "/home/me/.linger/tools/localmodels/kit/python3",
+        LINGER_LOCALMODELS_MODULE_DIR: "/home/me/.linger/tools/localmodels/kit",
+        LINGER_LOCALMODELS_STATE: "/home/me/.linger/runtime/localmodels/state",
+        LINGER_LOCALMODELS_BASE_DIR:
+          "/home/me/.linger/runtime/localmodels/models",
+      },
+    });
+    bus.emit("computer.runtime");
+    await vi.waitFor(() => expect(children).toHaveLength(3));
+    expect(
+      JSON.parse(readFileSync(children[2]!.configFile, "utf8")).local_models,
+    ).toEqual({
+      python: "/home/me/.linger/tools/localmodels/kit/python3",
+      module_directory: "/home/me/.linger/tools/localmodels/kit",
+      state_directory: "/home/me/.linger/runtime/localmodels/state",
+      base_directory: "/home/me/.linger/runtime/localmodels/models",
+    });
+  });
+
   it("takes Windows runtime paths and replaces inherited names in any case", () => {
     const env = daemonEnvironment(
       {

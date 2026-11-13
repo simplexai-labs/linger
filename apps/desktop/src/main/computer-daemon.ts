@@ -10,6 +10,11 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { finished } from "node:stream";
 
+import {
+  localModelsConfig,
+  localmodelsToolFromEnvironment,
+} from "@linger/local-installation/localmodels-computer";
+
 import type { RuntimeState } from "../shared/api.js";
 import type {
   ComputerCredential,
@@ -156,6 +161,7 @@ export const daemonConfig = (
     const value = options.env?.[name];
     if (value && platformPath.isAbsolute(value)) runtimePaths[runtime] = value;
   }
+  const localModels = localmodelsToolFromEnvironment(options.env, platformPath);
   return {
     runner_id: credential.computerId,
     display_name:
@@ -179,6 +185,7 @@ export const daemonConfig = (
     desktop: options.teamhubCliDirectory
       ? { teamhub_cli_directory: options.teamhubCliDirectory }
       : {},
+    ...(localModels ? { local_models: localModelsConfig(localModels) } : {}),
   };
 };
 
@@ -240,6 +247,7 @@ export class ComputerDaemonModule implements Module {
       // cancelling them.
       ctx.bus.on("grants.changed", () => this.#requestRestart(true)),
       ctx.bus.on("computer.renamed", () => this.#requestRestart(true)),
+      ctx.bus.on("computer.runtime", () => this.#requestRestart(true)),
     );
     const env = this.#options.env ?? {};
     const protect = this.#protect();
