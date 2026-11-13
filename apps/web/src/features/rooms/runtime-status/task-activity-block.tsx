@@ -12,12 +12,17 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubTaskExecution } from "@/features/teamhub/teamhub-types";
-import { tenantWorkItemTargetQueryOptions } from "@/features/work-items/work-item-queries";
+import {
+  roomTasksQueryOptions,
+  tenantWorkItemTargetQueryOptions,
+} from "@/features/work-items/work-item-queries";
 
 import { RunningDots } from "../task-sidebar/running-dots";
 import type { TaskCommand } from "./task-command";
 
 interface TaskActivityLinks {
+  /** The Room whose Meta ran these steps. */
+  roomId: string;
   tenantId: string;
   openTask?: (taskId: string, title: string) => void;
 }
@@ -28,10 +33,11 @@ const TaskActivityLinksContext = createContext<TaskActivityLinks | null>(null);
 export function TaskActivityLinksProvider({
   children,
   openTask,
+  roomId,
   tenantId,
 }: TaskActivityLinks & { children: ReactNode }) {
   return (
-    <TaskActivityLinksContext.Provider value={{ openTask, tenantId }}>
+    <TaskActivityLinksContext.Provider value={{ openTask, roomId, tenantId }}>
       {children}
     </TaskActivityLinksContext.Provider>
   );
@@ -68,18 +74,32 @@ export function TaskActivityBlock({
   const links = useContext(TaskActivityLinksContext);
   const { client } = useTeamHubRuntime();
   const tenantId = links?.tenantId ?? "";
-  const readable = Boolean(taskId && tenantId) && command.operation !== "check";
+  // A create step's receipt stays on the Computer, so it names no Task; the
+  // Room's Tasks hold it under the same name once the step has finished.
+  const named = useQuery({
+    ...roomTasksQueryOptions(client, tenantId, links?.roomId ?? ""),
+    enabled:
+      !taskId &&
+      !active &&
+      command.operation === "create" &&
+      Boolean(command.name && links?.roomId),
+    retry: false,
+    select: (page) => page.items.filter((task) => task.title === command.name),
+  });
+  const id =
+    taskId ?? (named.data?.length === 1 ? named.data[0]!.id : undefined);
+  const readable = Boolean(id && tenantId) && command.operation !== "check";
   const item = useQuery({
-    ...tenantWorkItemTargetQueryOptions(client, tenantId, taskId ?? ""),
+    ...tenantWorkItemTargetQueryOptions(client, tenantId, id ?? ""),
     enabled: readable && !command.name,
     retry: false,
   });
   const execution = useQuery({
-    queryKey: ["teamhub", tenantId, "task-execution", taskId],
+    queryKey: ["teamhub", tenantId, "task-execution", id],
     queryFn: () =>
       teamHubData(
         client.api.GET("/v0/tasks/{taskId}/execution", {
-          params: { path: { taskId: taskId ?? "" } },
+          params: { path: { taskId: id ?? "" } },
         }),
       ),
     enabled: readable,
@@ -95,8 +115,8 @@ export function TaskActivityBlock({
       ? undefined
       : (command.name ?? item.data?.title);
   const open =
-    taskId && title !== undefined && links?.openTask
-      ? () => links.openTask?.(taskId, title)
+    id && title !== undefined && links?.openTask
+      ? () => links.openTask?.(id, title)
       : undefined;
   const row = (
     <>
@@ -162,7 +182,7 @@ export function TaskStatusPill({
     case "waiting_for_approval":
       return <StatusPill tone="warning">Needs approval</StatusPill>;
     case "idle":
-      return <StatusPill tone="success">Reported</StatusPill>;
+      return <StatusPill tone="success">Finished</StatusPill>;
     case "failed":
       return <StatusPill tone="danger">Failed</StatusPill>;
     case "canceled":

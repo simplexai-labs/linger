@@ -28,6 +28,7 @@ import {
 } from "../../runtime-status/task-activity-block";
 import { useTaskActivityEvents } from "../../runtime-status/use-task-activity-events";
 import { PanelLoading } from "../panel-loading";
+import { RunningDots } from "../running-dots";
 import { RuntimeTrajectoryView } from "./runtime-trajectory-view";
 
 /** Lets the task blocks in an activity log open their Task's conversation. */
@@ -45,6 +46,7 @@ export function TaskConversationProvider({
   return (
     <TaskActivityLinksProvider
       openTask={(id, title) => setTask({ id, title })}
+      roomId={roomId}
       tenantId={tenantId}
     >
       {children}
@@ -130,25 +132,26 @@ export function TaskConversationDialog({
   return (
     <ModalDialog
       closeOnBackdrop
-      description={
-        execution ? (
-          <span className="inline-flex items-center gap-1">
-            <TaskStatusPill status={execution.status} />
-            {live ? (
-              <CancelTaskButton
-                cancel={async () => {
-                  await cancel(taskId);
-                  await data.execution.refetch();
-                }}
-                title={title}
-              />
-            ) : null}
-          </span>
+      footer={
+        live ? (
+          <CancelTaskButton
+            cancel={async () => {
+              await cancel(taskId);
+              await data.execution.refetch();
+            }}
+            prominent
+            title={title}
+          />
         ) : undefined
       }
       onClose={onClose}
       size="lg"
-      title={title}
+      title={
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate">{title}</span>
+          {execution ? <TaskStatusPill status={execution.status} /> : null}
+        </span>
+      }
     >
       <div
         aria-label="Task conversation"
@@ -246,8 +249,13 @@ function TaskConversationRun({
       ),
     retry: false,
   });
-  // Native history may lag a live turn; its published steps stand in.
-  const native = history.data?.status === "available" && history.data.records;
+  // Native history links a turn by its tool calls, so a turn without one,
+  // or a live turn the Runtime has not written yet, has none; its published
+  // steps stand in.
+  const native =
+    history.data?.status === "available" && history.data.records.length > 0
+      ? history.data.records
+      : undefined;
   const events = useTaskActivityEvents({
     tenantId,
     roomId,
@@ -268,8 +276,20 @@ function TaskConversationRun({
         size="sm"
       />
       <div className="min-w-0 flex-1">
-        <p className="mb-1 text-sm text-app-ink">
+        <p className="mb-1 flex items-center gap-2 text-sm text-app-ink">
           {runStatus.agent.display_name}
+          {active && !paused ? (
+            <span className="flex items-center gap-1.5 text-xs text-app-muted">
+              Working
+              <span
+                aria-label="Agent working"
+                className="flex h-3.5 items-center text-app-info"
+                role="img"
+              >
+                <RunningDots />
+              </span>
+            </span>
+          ) : null}
         </p>
         {native ? (
           <RuntimeTrajectoryView live={active} records={native} />

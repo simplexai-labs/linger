@@ -104,12 +104,12 @@ export function BackgroundTasksPill({
           <ul className="flex flex-col">
             {tasks.map((task) => (
               <li
-                className="flex items-center gap-1 rounded-md hover:bg-muted"
+                className="flex items-center gap-1.5 rounded-md hover:bg-muted"
                 key={task.id}
               >
                 <button
                   aria-label={`Open task ${task.title}`}
-                  className="grid min-w-0 flex-1 grid-cols-[6px_minmax(0,1fr)_auto] items-baseline gap-x-2.5 rounded-md py-1.5 pl-2 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-app-focus disabled:cursor-default"
+                  className="grid min-w-0 flex-1 grid-cols-[6px_minmax(0,1fr)_auto] items-baseline gap-x-2.5 rounded-md py-1.5 pr-1 pl-2 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-app-focus disabled:cursor-default"
                   disabled={!onOpen}
                   onClick={() => {
                     setOpen(false);

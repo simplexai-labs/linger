@@ -9,9 +9,12 @@ import { cn } from "@/lib/cn";
  */
 export function CancelTaskButton({
   cancel,
+  prominent = false,
   title,
 }: {
   cancel: () => Promise<void>;
+  /** A dialog's own action button, rather than a quiet link in a list row. */
+  prominent?: boolean;
   title: string;
 }) {
   const [state, setState] = useState<"idle" | "pending" | "error">("idle");
@@ -23,8 +26,9 @@ export function CancelTaskButton({
           : `Cancel ${title}`
       }
       className={cn(
-        "h-7 px-1.5 text-[12px] font-medium hover:bg-transparent hover:text-app-danger",
-        state === "error" ? "text-app-danger" : "text-app-muted",
+        !prominent &&
+          "h-7 px-1.5 text-[12px] font-medium hover:bg-transparent hover:text-app-danger",
+        state === "error" ? "text-app-danger" : !prominent && "text-app-muted",
       )}
       disabled={state === "pending"}
       onClick={() => {
@@ -35,14 +39,16 @@ export function CancelTaskButton({
         );
       }}
       size="compact"
-      tone="ghost"
+      tone={prominent ? "secondary" : "ghost"}
       type="button"
     >
       {state === "pending"
         ? "Canceling"
         : state === "error"
           ? "Retry"
-          : "Cancel"}
+          : prominent
+            ? "Cancel task"
+            : "Cancel"}
     </Button>
   );
 }

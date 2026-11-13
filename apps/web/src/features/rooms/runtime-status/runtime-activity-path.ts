@@ -7,6 +7,11 @@ import {
   type RuntimeActivityPresentation,
   type RuntimePlanPresentation,
 } from "./runtime-presentation-events";
+import {
+  parseTaskCommand,
+  taskIdFromOutput,
+  type TaskCommand,
+} from "./task-command";
 
 export type RuntimeActivityLifecycle =
   | "active"
@@ -47,6 +52,14 @@ export type RuntimeActivityPathItem =
       calls: readonly RuntimeActivityPathToolCall[];
       kind: "tool_calls";
       key: string;
+    }
+  | {
+      active: boolean;
+      command: TaskCommand;
+      failed: boolean;
+      key: string;
+      kind: "task";
+      taskId?: string;
     }
   | {
       explanation?: string;
@@ -199,7 +212,8 @@ export function projectRuntimeActivityPath(
         active: false,
         unconfirmed: item.outcome === undefined,
       };
-    if (item.kind === "thinking") return { ...item, active: false };
+    if (item.kind === "thinking" || item.kind === "task")
+      return { ...item, active: false };
     if (item.kind === "plan")
       return {
         ...item,
@@ -256,6 +270,21 @@ function pushActivity(
   const entries = activity.entries ?? [];
   const active = activity.outcome === undefined;
   if (activity.kind === "response") return;
+  // The Computer names a TeamHub command by what it does, so a Task step can
+  // arrive as any kind; its `teamhub task` command line is what marks it.
+  const task = parseTaskCommand(commandText(entries));
+  if (task) {
+    const taskId = task.taskId ?? taskIdFromOutput(outputText(entries));
+    items.push({
+      active,
+      command: task,
+      failed: activity.outcome === "failed",
+      key: activity.activityId,
+      kind: "task",
+      ...(taskId ? { taskId } : {}),
+    });
+    return;
+  }
   if (activity.kind === "command") {
     items.push({
       active,
@@ -302,6 +331,36 @@ function pushActivity(
     kind: "tool_calls",
     key: `tools:${activity.activityId}`,
   });
+}
+
+/** The command line an Activity ran, from its first code or JSON block. */
+function commandText(entries: readonly RuntimeActivityEntry[]) {
+  const block = entries.find(
+    (entry) =>
+      entry.type === "content" &&
+      (entry.block.format === "code" || entry.block.format === "json"),
+  );
+  if (block?.type !== "content") return "";
+  if (block.block.format === "code") return block.block.content;
+  try {
+    const input = JSON.parse(block.block.content) as {
+      cmd?: unknown;
+      command?: unknown;
+    };
+    const command = input.cmd ?? input.command;
+    if (typeof command === "string") return command;
+    if (Array.isArray(command)) return command.join(" ");
+  } catch {
+    // An unreadable input is not a Task command.
+  }
+  return "";
+}
+
+/** Every block the Activity carried; a CLI receipt would be among them. */
+function outputText(entries: readonly RuntimeActivityEntry[]) {
+  return entries
+    .map((entry) => (entry.type === "content" ? entry.block.content : ""))
+    .join("\n");
 }
 
 function commandSummary(activity: RuntimeActivityPresentation) {
