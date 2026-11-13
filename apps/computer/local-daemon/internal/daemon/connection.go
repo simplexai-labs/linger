@@ -268,6 +268,17 @@ func (d *Daemon) handleConnectionCommand(ctx, connectionCtx context.Context, str
 				slog.Warn("computer permission outcome was not sent", "error", err)
 			}
 		}()
+	case protocol.CommandCapabilityLocalModels:
+		if !d.welcomeSeen || command.ConnectionEpoch != d.connectionEpoch {
+			return errors.New("Local models command uses a stale connection epoch")
+		}
+		// Downloads and loads wait for the tool's first answer; Operation
+		// commands must not wait behind them.
+		go func() {
+			if err := d.handleLocalModelsCommand(connectionCtx, stream, command); err != nil {
+				slog.Warn("local_models.outcome_not_sent", "error", err)
+			}
+		}()
 	case protocol.CommandOperationCancel:
 		if !dispatch.followOperation(command, func() error { return d.handleOperationCancel(command) }) {
 			if err := d.handleOperationCancel(command); err != nil {
@@ -309,6 +320,7 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 		return err
 	}
 	go d.heartbeatLoop(connectionCtx, stream, command.HeartbeatIntervalMs)
+	d.refreshLocalModels(connectionCtx)
 	return nil
 }
 

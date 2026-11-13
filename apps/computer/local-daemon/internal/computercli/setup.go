@@ -36,8 +36,10 @@ type setupOptions struct {
 	serverToken     string
 	runtimePaths    map[string]string
 	enabledRuntimes []string
-	stateDirectory  string
-	webURL          string
+	// localModels locates the installer's localmodels tool; nil for none.
+	localModels    *stagedLocalModels
+	stateDirectory string
+	webURL         string
 }
 
 type setupResult struct {
@@ -268,16 +270,26 @@ func persistPendingRenewal(path string, bundle credentialBundle) error {
 // stagedConfig is the config file setup writes, in its key order.
 type stagedConfig struct {
 	// runner_id is the Computer ID key the Daemon config parser reads.
-	RunnerID                string            `json:"runner_id"`
-	CredentialExpiresAt     string            `json:"credential_expires_at"`
-	DisplayName             string            `json:"display_name"`
-	Gateway                 stagedGateway     `json:"gateway"`
-	MaxConcurrentOperations *int              `json:"max_concurrent_operations,omitempty"`
-	StateDirectory          string            `json:"state_directory"`
-	Codex                   *stagedCodex      `json:"codex,omitempty"`
-	RuntimePaths            map[string]string `json:"runtime_paths"`
-	EnabledRuntimes         []string          `json:"enabled_runtimes,omitempty"`
-	WorkspaceGrants         []stagedGrant     `json:"workspace_grants"`
+	RunnerID                string             `json:"runner_id"`
+	CredentialExpiresAt     string             `json:"credential_expires_at"`
+	DisplayName             string             `json:"display_name"`
+	Gateway                 stagedGateway      `json:"gateway"`
+	MaxConcurrentOperations *int               `json:"max_concurrent_operations,omitempty"`
+	StateDirectory          string             `json:"state_directory"`
+	Codex                   *stagedCodex       `json:"codex,omitempty"`
+	RuntimePaths            map[string]string  `json:"runtime_paths"`
+	EnabledRuntimes         []string           `json:"enabled_runtimes,omitempty"`
+	WorkspaceGrants         []stagedGrant      `json:"workspace_grants"`
+	LocalModels             *stagedLocalModels `json:"local_models,omitempty"`
+}
+
+// stagedLocalModels is the config's local_models section
+// (computerconfig.LocalModels).
+type stagedLocalModels struct {
+	Python          string `json:"python"`
+	ModuleDirectory string `json:"module_directory"`
+	StateDirectory  string `json:"state_directory"`
+	BaseDirectory   string `json:"base_directory"`
 }
 
 type stagedGateway struct {
@@ -368,6 +380,7 @@ func stageSetup(normalized normalizedSetup, bundle credentialBundle) ([]byte, st
 	if normalized.codexAuthFile != "" {
 		config.Codex = &stagedCodex{AuthFile: normalized.codexAuthFile}
 	}
+	config.LocalModels = normalized.localModels
 	encoded := []byte(marshalReport(config))
 	for _, file := range []struct {
 		name string
@@ -487,6 +500,13 @@ func normalizeSetupOptions(options setupOptions, deps setupDeps) (normalizedSetu
 	for _, executable := range normalized.runtimePaths {
 		if !filepath.IsAbs(executable) {
 			return normalizedSetup{}, newError(categoryConfiguration, "Runtime overrides must be absolute executable paths")
+		}
+	}
+	if tool := normalized.localModels; tool != nil {
+		for _, path := range []string{tool.Python, tool.ModuleDirectory, tool.StateDirectory, tool.BaseDirectory} {
+			if !filepath.IsAbs(path) {
+				return normalizedSetup{}, newError(categoryConfiguration, "localmodels tool paths must be absolute")
+			}
 		}
 	}
 	if options.gatewayURL != "" {

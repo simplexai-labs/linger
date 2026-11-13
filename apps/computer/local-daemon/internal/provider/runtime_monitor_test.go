@@ -288,3 +288,32 @@ func primeTestExecutable(t *testing.T, path string, env ...string) {
 	command.Env = env
 	_ = command.Run()
 }
+
+func TestRuntimeMonitorRunsARequestedFullRefreshBeforeItsSchedule(t *testing.T) {
+	initial := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{
+		Type: "pi", Status: "ready", Protocol: "rpc", Version: "pi-test", Models: []RuntimeModel{},
+	}}}
+	loaded := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{
+		Type: "pi", Status: "ready", Protocol: "rpc", Version: "pi-test", Models: []RuntimeModel{{ID: "local/qwen3-4b"}},
+	}}}
+	refresh := make(chan struct{}, 1)
+	refresh <- struct{}{}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var published []DiscoveryResult
+	err := MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+		Initial: initial, RefreshInterval: time.Hour, FullRefreshEveryTicks: 4, Refresh: refresh,
+		Discover: func(context.Context, DiscoveryOptions) (DiscoveryResult, error) { return loaded, nil },
+		OnChanged: func(next DiscoveryResult) error {
+			published = append(published, next)
+			cancel()
+			return nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("monitor ended with %v before the requested refresh", err)
+	}
+	if len(published) != 1 || len(published[0].Diagnostics[0].Models) != 1 {
+		t.Fatalf("published = %+v, want the refreshed Pi model list", published)
+	}
+}
