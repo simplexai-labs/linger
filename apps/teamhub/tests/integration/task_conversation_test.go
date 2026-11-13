@@ -2,7 +2,6 @@ package integration_test
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"testing"
@@ -73,11 +72,32 @@ func TestTaskConversationShowsOnlyItsAgentsInputs(t *testing.T) {
 		t.Fatalf("conversation=%s", body)
 	}
 
-	service := taskexecution.New(env.pool)
-	if _, err := service.GetConversationForHuman(t.Context(), "account_outsider", task.ID); !errors.Is(err, taskexecution.ErrNotFound) {
-		t.Fatalf("an Account outside the tenant read the conversation: %v", err)
+	// Any Human in the Task's tenant reads it, Room membership or not; a Human
+	// of another tenant does not learn the Task exists.
+	bob := seedPeerHuman(t, env)
+	if status, _, body := env.request(bob, http.MethodGet, "/v0/tasks/"+task.ID+"/conversation", nil, ""); status != http.StatusOK {
+		t.Fatalf("a Human of the tenant outside the Room status=%d body=%s", status, body)
+	}
+	outsider := seedOtherTenantHuman(t, env)
+	if status, _, body := env.request(outsider, http.MethodGet, "/v0/tasks/"+task.ID+"/conversation", nil, ""); status != http.StatusNotFound {
+		t.Fatalf("a Human of another tenant status=%d body=%s", status, body)
 	}
 	if status, _, body := env.request(alice, http.MethodGet, "/v0/tasks/workitem_missing/conversation", nil, ""); status != http.StatusNotFound {
 		t.Fatalf("missing Task status=%d body=%s", status, body)
 	}
+}
+
+// seedOtherTenantHuman signs in a Human whose only tenant is not acme.
+func seedOtherTenantHuman(t *testing.T, env *testEnv) *http.Client {
+	t.Helper()
+	const email, password = "carol@example.com", "teamhub-dev-carol"
+	if _, err := env.pool.Exec(t.Context(), `INSERT INTO accounts(id,email,password_hash) VALUES('account_carol',$1,$2)`,
+		email, lowCostIntegrationPasswordHash(email, password)); err != nil {
+		t.Fatalf("seed other tenant account: %v", err)
+	}
+	if _, err := env.pool.Exec(t.Context(), `INSERT INTO actors(id,tenant_id,kind,display_name,account_id)
+		VALUES('actor_other_carol','tenant_conversation_other','human','carol','account_carol')`); err != nil {
+		t.Fatalf("seed other tenant Human: %v", err)
+	}
+	return env.login(email, password)
 }
