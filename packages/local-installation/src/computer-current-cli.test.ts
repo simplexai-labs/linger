@@ -7,6 +7,8 @@ import { writeSetupChoice } from "./setup-selection.js";
 import { connectComputer, inspectComputer, stopComputer } from "./computer.js";
 
 vi.mock("./localmodels-tool.js", () => ({
+  // This distribution ships no localmodels tool.
+  pinnedToolSource: () => undefined,
   runLocalmodels: async () => ({
     code: 0,
     stderr: "",
