@@ -84,6 +84,12 @@ if (args.includes("--inspect")) {
     while (!fs.existsSync(path.join(home, "tool-ready")))
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
   }
+  if (fs.existsSync(path.join(home, "check-fails"))) {
+    // A failed check names its cause on stderr and prints null.
+    process.stderr.write("The check failed: Unsupported or changed Codex provider configuration\n");
+    process.stdout.write("null\n");
+    process.exit(1);
+  }
   process.stderr.write("Checked this computer in 1.5s.\n");
   const reasons = eligible ? [] : ["facts-unavailable"];
   const reasonMessages = eligible ? [] : ["nvidia-smi was not found"];
@@ -1285,6 +1291,31 @@ describe("LocalServerModule", () => {
       line: "Checked this computer in 1.5s.",
     });
     info.mockRestore();
+  });
+
+  it("reports a failed check with its cause instead of a crash", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    const warn = vi.spyOn(silentLog, "warn");
+    const f = fixture({ checkout: "/src" }, {}, (home) => {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(path.join(home, "check-fails"), "");
+    });
+    await f.host.start();
+    f.module.inspect();
+    await vi.waitFor(() =>
+      expect(f.module.status().localModels).toEqual({ state: "unavailable" }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "local_server.inspect_failed",
+      expect.objectContaining({
+        error: "The installer could not check this computer",
+      }),
+    );
+    expect(info).toHaveBeenCalledWith("local_server.inspect_log", {
+      line: "The check failed: Unsupported or changed Codex provider configuration",
+    });
+    info.mockRestore();
+    warn.mockRestore();
   });
 
   it("counts the localmodels tool download while checking", async () => {

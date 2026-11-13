@@ -113,6 +113,38 @@ it("fails explicitly and redacts tool output when upstream is unavailable or mal
     ).rejects.toMatchObject({ code: "LOCALMODELS_SETUP_UNAVAILABLE" });
   }
 });
+it("names the upstream cause and logs its redacted output when the check fails", async () => {
+  const onEvent = vi.fn();
+  await expect(
+    inspectSetup({
+      onEvent,
+      localmodels: vi.fn(async () => ({
+        code: 1,
+        stdout: "",
+        // A long traceback ends with its cause.
+        stderr: [
+          "Traceback (most recent call last):",
+          ...Array.from({ length: 40 }, (_, i) => `  File "frame${i}.py"`),
+          "sk-abcdefghijklmnopqrstuvwxyz",
+          "error: Unsupported or changed Codex provider configuration",
+        ].join("\n"),
+      })),
+    }),
+  ).rejects.toMatchObject({
+    code: "LOCALMODELS_SETUP_UNAVAILABLE",
+    message: expect.stringContaining(
+      "Unsupported or changed Codex provider configuration",
+    ),
+  });
+  const messages = onEvent.mock.calls.map(([event]) => event.message);
+  // The cause leads, ahead of the long output the desktop may cut off.
+  expect(messages[0]).toMatch(
+    /^localmodels setup inspect failed: .*Unsupported or changed Codex provider configuration$/,
+  );
+  const logged = messages.join("\n");
+  expect(logged).toContain("localmodels setup inspect exited with code 1");
+  expect(logged).not.toContain("sk-abcdefghijklmnopqrstuvwxyz");
+});
 it("honors cancellation before invoking upstream", async () => {
   const localmodels = runner();
   await expect(

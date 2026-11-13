@@ -597,6 +597,7 @@ export class LocalServerModule implements Module {
       child.once("error", reject);
       child.once("close", () => resolve(last));
     });
+    // A failed check prints null; its cause is in the logged stderr.
     const report = JSON.parse(output) as {
       recommendation?: unknown;
       localModels?: {
@@ -615,10 +616,10 @@ export class LocalServerModule implements Module {
         diskFreeBytes?: unknown;
         gpus?: { name?: unknown }[];
       };
-    };
-    const hardware = report.hardware;
+    } | null;
+    const hardware = report?.hardware;
     if (
-      typeof report.localModels?.eligible !== "boolean" ||
+      typeof report?.localModels?.eligible !== "boolean" ||
       typeof hardware?.totalMemoryBytes !== "number"
     )
       throw new Error("The installer could not check this computer");

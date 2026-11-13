@@ -153,7 +153,12 @@ async function inspect(options: ReturnType<typeof parseInstallerArguments>) {
         })}\n`,
       );
     },
-  }).catch(() => null);
+  }).catch((error: unknown) => {
+    process.stderr.write(
+      `The check failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    return null;
+  });
   process.stderr.write(
     `Checked this computer in ${((Date.now() - startedAt) / 1000).toFixed(1)}s.\n`,
   );

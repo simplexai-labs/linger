@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import type { InstallerEvent } from "./events.js";
+import { localmodelsFailure } from "./localmodels-failure.js";
 import { runLocalmodels } from "./localmodels-tool.js";
 import { DEFAULT_GPU_SHARING } from "./setup-selection.js";
 
@@ -125,31 +126,41 @@ export async function inspectSetup(
   const home = path.resolve(
     options.home ?? path.join(options.userHome ?? homedir(), ".simplexai"),
   );
+  let failure: string | undefined;
   try {
-    const result = await (options.localmodels ?? runLocalmodels)(
-      home,
-      [
-        "setup",
-        "inspect",
-        "--root",
-        path.join(home, "runtime", "harness"),
-        "--model-base-dir",
-        path.join(home, "runtime", "localmodels", "models"),
-        "--decision",
-        "none",
-        "--offline",
-        "--defer-services",
-        ...((options.shareGpu ?? DEFAULT_GPU_SHARING) ? ["--share-gpu"] : []),
-        "--json",
-      ],
-      {
-        signal: options.signal,
-        timeoutMs: 120000,
-        ...(options.onEvent ? { onEvent: options.onEvent } : {}),
-      },
-    );
+    const args = [
+      "setup",
+      "inspect",
+      "--root",
+      path.join(home, "runtime", "harness"),
+      "--model-base-dir",
+      path.join(home, "runtime", "localmodels", "models"),
+      "--decision",
+      "none",
+      "--offline",
+      "--defer-services",
+      ...((options.shareGpu ?? DEFAULT_GPU_SHARING) ? ["--share-gpu"] : []),
+      "--json",
+    ];
+    const result = await (options.localmodels ?? runLocalmodels)(home, args, {
+      signal: options.signal,
+      timeoutMs: 120000,
+      ...(options.onEvent ? { onEvent: options.onEvent } : {}),
+    });
     options.signal?.throwIfAborted();
-    if (result.code !== 0) throw new Error("Upstream setup failed");
+    if (result.code !== 0) {
+      const { cause, log } = localmodelsFailure(args, result);
+      // The cause goes first: the desktop logs only the first stderr lines,
+      // and the full output after it can be a long traceback.
+      if (cause)
+        options.onEvent?.({
+          kind: "log",
+          message: `localmodels setup inspect failed: ${cause}`,
+        });
+      for (const message of log) options.onEvent?.({ kind: "log", message });
+      failure = cause;
+      throw new Error("Upstream setup failed");
+    }
     const value = JSON.parse(result.stdout) as UpstreamReport;
     if (
       value.schema !== "localmodels.setup-report/v1" ||
@@ -226,7 +237,9 @@ export async function inspectSetup(
     options.signal?.throwIfAborted();
     throw Object.assign(
       new Error(
-        "The localmodels setup report is unavailable. Check the verified tool installation and retry.",
+        failure
+          ? `The localmodels setup check failed: ${failure}`
+          : "The localmodels setup report is unavailable. Check the verified tool installation and retry.",
       ),
       { code: "LOCALMODELS_SETUP_UNAVAILABLE" },
     );
