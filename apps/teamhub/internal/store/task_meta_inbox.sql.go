@@ -175,8 +175,8 @@ type ListTaskConversationInputsRow struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
-// Every input the Task's own Agent received in its current generation, in
-// delivery order. Other participants hold copies of the same inputs.
+// Every input the Task's result Agent received, in delivery order. Other
+// participants' inboxes hold their own copies, which are left out.
 func (q *Queries) ListTaskConversationInputs(ctx context.Context, taskID string) ([]ListTaskConversationInputsRow, error) {
 	rows, err := q.db.Query(ctx, listTaskConversationInputs, taskID)
 	if err != nil {

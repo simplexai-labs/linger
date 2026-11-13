@@ -22,8 +22,8 @@ SET through_seq=$4,updated_at=now()
 WHERE task_id=$1 AND tenant_id=$2 AND agent_actor_id=$3 AND through_seq<$4;
 
 -- name: ListTaskConversationInputs :many
--- Every input the Task's own Agent received in its current generation, in
--- delivery order. Other participants hold copies of the same inputs.
+-- Every input the Task's result Agent received, in delivery order. Other
+-- participants' inboxes hold their own copies, which are left out.
 SELECT message.id,message.author_actor_id,author.kind AS author_kind,
        author.display_name AS author_display_name,message.body,message.source,message.created_at
 FROM work_items item
