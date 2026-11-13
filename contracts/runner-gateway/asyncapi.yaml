@@ -17,7 +17,7 @@ info:
     prepared (target operation or provider), cancel (target operation or
     provider), execute and executed (kind session_compact, model_invoke,
     computer_tool, skills_scan, browser_connect, computer_permission,
-    debug_history or
+    local_models, debug_history or
     cli_credential), agent_runner.state (state ready, removed or failed) and
     operation.input_result (outcome accepted, rejected or closed); the
     Operation family carries operation.start, operation.input, operation.ack,
@@ -49,6 +49,13 @@ info:
     started. Responses carry the same owner and connection epoch.
     Disconnect/timeout means an unknown outcome; the caller must inspect
     effects and must not automatically replay actions.
+    execute with kind local_models acts on the Computer's localmodels
+    library (download, cancel, load with unload_first, unload, remove, or
+    refresh). The Computer answers executed with outcome accepted or refused
+    at once and supervises the long-running localmodels job itself; progress
+    and outcomes reach the service only as runner.local_models snapshots,
+    which the Computer sends after runner.hello, after every library change,
+    and at most every 2 seconds while a download or load runs.
 x-frame-limits:
   maxBytes: 4194304
   maxDepth: 32

@@ -35,6 +35,7 @@ const (
 	TypeRunnerHello                 = "runner.hello"
 	TypeRunnerHeartbeat             = "runner.heartbeat"
 	TypeRunnerRuntimeDiagnostics    = "runner.runtime_diagnostics"
+	TypeRunnerLocalModels           = "runner.local_models"
 	TypeRuntimeRegistrationObserved = "runtime.registration.observed"
 	TypeAgentRunnerState            = "agent_runner.state"
 	TypeExecuted                    = "executed"
@@ -54,6 +55,7 @@ const (
 	KindSkillsScan         = "skills_scan"
 	KindBrowserConnect     = "browser_connect"
 	KindComputerPermission = "computer_permission"
+	KindLocalModels        = "local_models"
 	TargetOperation        = "operation"
 	TargetProvider         = "provider"
 	KindSessionCompact     = "session_compact"
@@ -65,6 +67,7 @@ const (
 	OutcomeSucceeded       = "succeeded"
 	OutcomeFailed          = "failed"
 	OutcomeAccepted        = "accepted"
+	OutcomeRefused         = "refused"
 	OutcomeRejected        = "rejected"
 	OutcomeClosed          = "closed"
 )
@@ -89,6 +92,7 @@ var AgentToDaemonMessages = []Message{
 	{Name: "CapabilitySkillsScan", Type: "execute", Match: map[string]string{"kind": "skills_scan"}},
 	{Name: "CapabilityBrowserConnect", Type: "execute", Match: map[string]string{"kind": "browser_connect"}},
 	{Name: "CapabilityComputerPermission", Type: "execute", Match: map[string]string{"kind": "computer_permission"}},
+	{Name: "CapabilityLocalModelsExecute", Type: "execute", Match: map[string]string{"kind": "local_models"}},
 	{Name: "OperationPrepare", Type: "prepare", Match: map[string]string{"target": "operation"}},
 	{Name: "ProviderPrepare", Type: "prepare", Match: map[string]string{"target": "provider"}},
 	{Name: "SessionCompact", Type: "execute", Match: map[string]string{"kind": "session_compact"}},
@@ -105,6 +109,7 @@ var DaemonToAgentMessages = []Message{
 	{Name: "RunnerHello", Type: "runner.hello", Match: nil},
 	{Name: "RunnerHeartbeat", Type: "runner.heartbeat", Match: nil},
 	{Name: "RunnerRuntimeDiagnostics", Type: "runner.runtime_diagnostics", Match: nil},
+	{Name: "RunnerLocalModels", Type: "runner.local_models", Match: nil},
 	{Name: "RuntimeRegistrationObserved", Type: "runtime.registration.observed", Match: nil},
 	{Name: "AgentRunnerReady", Type: "agent_runner.state", Match: map[string]string{"state": "ready"}},
 	{Name: "AgentRunnerRemoved", Type: "agent_runner.state", Match: map[string]string{"state": "removed"}},
@@ -118,6 +123,8 @@ var DaemonToAgentMessages = []Message{
 	{Name: "CapabilityBrowserFailed", Type: "executed", Match: map[string]string{"kind": "browser_connect", "outcome": "failed"}},
 	{Name: "CapabilityComputerPermissionSucceeded", Type: "executed", Match: map[string]string{"kind": "computer_permission", "outcome": "succeeded"}},
 	{Name: "CapabilityComputerPermissionFailed", Type: "executed", Match: map[string]string{"kind": "computer_permission", "outcome": "failed"}},
+	{Name: "CapabilityLocalModelsAccepted", Type: "executed", Match: map[string]string{"kind": "local_models", "outcome": "accepted"}},
+	{Name: "CapabilityLocalModelsRefused", Type: "executed", Match: map[string]string{"kind": "local_models", "outcome": "refused"}},
 	{Name: "OperationPrepared", Type: "prepared", Match: map[string]string{"target": "operation"}},
 	{Name: "ProviderPrepared", Type: "prepared", Match: map[string]string{"target": "provider"}},
 	{Name: "SessionCompacted", Type: "executed", Match: map[string]string{"kind": "session_compact"}},
@@ -1003,6 +1010,325 @@ func (CapabilitySkillsFailed) FixedFields() map[string]string {
 // RequiredFields lists the keys a CapabilitySkillsFailed must carry.
 func (CapabilitySkillsFailed) RequiredFields() []string {
 	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "stage", "error", "kind", "outcome"}
+}
+
+// LocalModelGpu mirrors the LocalModelGpu schema shape.
+type LocalModelGpu struct {
+	Index      uint64 `json:"index"`
+	Uuid       string `json:"uuid,omitempty"`
+	Name       string `json:"name"`
+	TotalBytes uint64 `json:"total_bytes"`
+	FreeBytes  uint64 `json:"free_bytes"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelGpu.
+func (LocalModelGpu) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelGpu must carry.
+func (LocalModelGpu) RequiredFields() []string {
+	return []string{"index", "name", "total_bytes", "free_bytes"}
+}
+
+// LocalModelHost mirrors the LocalModelHost schema shape.
+type LocalModelHost struct {
+	Platform      string          `json:"platform"`
+	Arch          string          `json:"arch"`
+	OsLabel       string          `json:"os_label"`
+	EngineLabel   string          `json:"engine_label"`
+	RamTotalBytes uint64          `json:"ram_total_bytes"`
+	DiskFreeBytes uint64          `json:"disk_free_bytes"`
+	Gpus          []LocalModelGpu `json:"gpus"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelHost.
+func (LocalModelHost) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelHost must carry.
+func (LocalModelHost) RequiredFields() []string {
+	return []string{"platform", "arch", "os_label", "engine_label", "ram_total_bytes", "disk_free_bytes", "gpus"}
+}
+
+// LocalModelPoolHolder mirrors the LocalModelPoolHolder schema shape.
+type LocalModelPoolHolder struct {
+	Kind  string `json:"kind"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Bytes uint64 `json:"bytes"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelPoolHolder.
+func (LocalModelPoolHolder) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelPoolHolder must carry.
+func (LocalModelPoolHolder) RequiredFields() []string { return []string{"kind", "id", "name", "bytes"} }
+
+// LocalModelPool mirrors the LocalModelPool schema shape.
+type LocalModelPool struct {
+	ID         string                 `json:"id"`
+	Kind       string                 `json:"kind"`
+	GpuIndex   *uint64                `json:"gpu_index,omitempty"`
+	TotalBytes uint64                 `json:"total_bytes"`
+	UsedBytes  uint64                 `json:"used_bytes"`
+	Holders    []LocalModelPoolHolder `json:"holders"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelPool.
+func (LocalModelPool) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelPool must carry.
+func (LocalModelPool) RequiredFields() []string {
+	return []string{"id", "kind", "total_bytes", "used_bytes", "holders"}
+}
+
+// LocalModelAvailabilityReason mirrors the LocalModelAvailabilityReason schema shape.
+type LocalModelAvailabilityReason struct {
+	Code      string  `json:"code"`
+	NeedBytes *uint64 `json:"need_bytes,omitempty"`
+	HaveBytes *uint64 `json:"have_bytes,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelAvailabilityReason.
+func (LocalModelAvailabilityReason) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelAvailabilityReason must carry.
+func (LocalModelAvailabilityReason) RequiredFields() []string { return []string{"code"} }
+
+// LocalModelAvailability mirrors the LocalModelAvailability schema shape.
+type LocalModelAvailability struct {
+	Downloadable bool                          `json:"downloadable"`
+	Reason       *LocalModelAvailabilityReason `json:"reason,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelAvailability.
+func (LocalModelAvailability) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelAvailability must carry.
+func (LocalModelAvailability) RequiredFields() []string { return []string{"downloadable"} }
+
+// LocalModelDownloadProgress mirrors the LocalModelDownloadProgress schema shape.
+type LocalModelDownloadProgress struct {
+	Step           string  `json:"step"`
+	DoneBytes      uint64  `json:"done_bytes"`
+	TotalBytes     uint64  `json:"total_bytes"`
+	BytesPerSecond *uint64 `json:"bytes_per_second,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelDownloadProgress.
+func (LocalModelDownloadProgress) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelDownloadProgress must carry.
+func (LocalModelDownloadProgress) RequiredFields() []string {
+	return []string{"step", "done_bytes", "total_bytes"}
+}
+
+// LocalModelEndpoint mirrors the LocalModelEndpoint schema shape.
+type LocalModelEndpoint struct {
+	BaseURL string `json:"base_url"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelEndpoint.
+func (LocalModelEndpoint) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelEndpoint must carry.
+func (LocalModelEndpoint) RequiredFields() []string { return []string{"base_url"} }
+
+// LocalModelError mirrors the LocalModelError schema shape.
+type LocalModelError struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelError.
+func (LocalModelError) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelError must carry.
+func (LocalModelError) RequiredFields() []string { return []string{"code"} }
+
+// LocalModelNote mirrors the LocalModelNote schema shape.
+type LocalModelNote struct {
+	Code string `json:"code"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelNote.
+func (LocalModelNote) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelNote must carry.
+func (LocalModelNote) RequiredFields() []string { return []string{"code"} }
+
+// LocalModel mirrors the LocalModel schema shape.
+type LocalModel struct {
+	ID              string                      `json:"id"`
+	Name            string                      `json:"name"`
+	Description     string                      `json:"description"`
+	Quant           string                      `json:"quant"`
+	ContextTokens   uint64                      `json:"context_tokens"`
+	Vision          bool                        `json:"vision"`
+	DownloadBytes   uint64                      `json:"download_bytes"`
+	MemoryBytes     uint64                      `json:"memory_bytes"`
+	Fit             string                      `json:"fit"`
+	Recommended     bool                        `json:"recommended"`
+	Availability    LocalModelAvailability      `json:"availability"`
+	Pool            string                      `json:"pool,omitempty"`
+	State           string                      `json:"state"`
+	Download        *LocalModelDownloadProgress `json:"download,omitempty"`
+	Endpoint        *LocalModelEndpoint         `json:"endpoint,omitempty"`
+	PiModel         string                      `json:"pi_model,omitempty"`
+	TokensPerSecond *float64                    `json:"tokens_per_second,omitempty"`
+	Error           *LocalModelError            `json:"error,omitempty"`
+	Note            *LocalModelNote             `json:"note,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModel.
+func (LocalModel) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModel must carry.
+func (LocalModel) RequiredFields() []string {
+	return []string{"id", "name", "description", "quant", "context_tokens", "vision", "download_bytes", "memory_bytes", "fit", "recommended", "availability", "state"}
+}
+
+// LocalModelsUnavailableReason mirrors the LocalModelsUnavailableReason schema shape.
+type LocalModelsUnavailableReason struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelsUnavailableReason.
+func (LocalModelsUnavailableReason) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelsUnavailableReason must carry.
+func (LocalModelsUnavailableReason) RequiredFields() []string { return []string{"code"} }
+
+// LocalModelsSnapshot mirrors the LocalModelsSnapshot schema shape.
+type LocalModelsSnapshot struct {
+	Available   bool                          `json:"available"`
+	Reason      *LocalModelsUnavailableReason `json:"reason,omitempty"`
+	ObservedAt  string                        `json:"observed_at"`
+	ToolVersion string                        `json:"tool_version,omitempty"`
+	Host        *LocalModelHost               `json:"host,omitempty"`
+	Pools       []LocalModelPool              `json:"pools"`
+	Models      []LocalModel                  `json:"models"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelsSnapshot.
+func (LocalModelsSnapshot) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelsSnapshot must carry.
+func (LocalModelsSnapshot) RequiredFields() []string {
+	return []string{"available", "observed_at", "pools", "models"}
+}
+
+// CapabilityLocalModelsExecute mirrors the CapabilityLocalModelsExecute schema shape.
+type CapabilityLocalModelsExecute struct {
+	ProtocolVersion string   `json:"protocol_version"`
+	CommandID       string   `json:"command_id"`
+	RunnerID        string   `json:"runner_id"`
+	TenantID        string   `json:"tenant_id"`
+	OwnerActorID    string   `json:"owner_actor_id"`
+	ConnectionEpoch uint64   `json:"connection_epoch"`
+	ExpiresAt       string   `json:"expires_at"`
+	Type            string   `json:"type"`
+	Kind            string   `json:"kind"`
+	Action          string   `json:"action"`
+	ModelID         string   `json:"model_id,omitempty"`
+	UnloadFirst     []string `json:"unload_first,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilityLocalModelsExecute.
+func (CapabilityLocalModelsExecute) FixedFields() map[string]string {
+	return map[string]string{"protocol_version": "2", "type": "execute", "kind": "local_models"}
+}
+
+// RequiredFields lists the keys a CapabilityLocalModelsExecute must carry.
+func (CapabilityLocalModelsExecute) RequiredFields() []string {
+	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "kind", "action"}
+}
+
+// CapabilityLocalModelsAccepted mirrors the CapabilityLocalModelsAccepted schema shape.
+type CapabilityLocalModelsAccepted struct {
+	ProtocolVersion string `json:"protocol_version"`
+	CommandID       string `json:"command_id"`
+	RunnerID        string `json:"runner_id"`
+	TenantID        string `json:"tenant_id"`
+	OwnerActorID    string `json:"owner_actor_id"`
+	ConnectionEpoch uint64 `json:"connection_epoch"`
+	ExpiresAt       string `json:"expires_at"`
+	Type            string `json:"type"`
+	Kind            string `json:"kind"`
+	Action          string `json:"action"`
+	ModelID         string `json:"model_id,omitempty"`
+	Outcome         string `json:"outcome"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilityLocalModelsAccepted.
+func (CapabilityLocalModelsAccepted) FixedFields() map[string]string {
+	return map[string]string{"protocol_version": "2", "type": "executed", "kind": "local_models", "outcome": "accepted"}
+}
+
+// RequiredFields lists the keys a CapabilityLocalModelsAccepted must carry.
+func (CapabilityLocalModelsAccepted) RequiredFields() []string {
+	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "kind", "action", "outcome"}
+}
+
+// LocalModelActionRefusal mirrors the LocalModelActionRefusal schema shape.
+type LocalModelActionRefusal struct {
+	Code      string  `json:"code"`
+	Detail    string  `json:"detail,omitempty"`
+	Pool      string  `json:"pool,omitempty"`
+	NeedBytes *uint64 `json:"need_bytes,omitempty"`
+	FreeBytes *uint64 `json:"free_bytes,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelActionRefusal.
+func (LocalModelActionRefusal) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelActionRefusal must carry.
+func (LocalModelActionRefusal) RequiredFields() []string { return []string{"code"} }
+
+// CapabilityLocalModelsRefused mirrors the CapabilityLocalModelsRefused schema shape.
+type CapabilityLocalModelsRefused struct {
+	ProtocolVersion string                  `json:"protocol_version"`
+	CommandID       string                  `json:"command_id"`
+	RunnerID        string                  `json:"runner_id"`
+	TenantID        string                  `json:"tenant_id"`
+	OwnerActorID    string                  `json:"owner_actor_id"`
+	ConnectionEpoch uint64                  `json:"connection_epoch"`
+	ExpiresAt       string                  `json:"expires_at"`
+	Type            string                  `json:"type"`
+	Kind            string                  `json:"kind"`
+	Action          string                  `json:"action"`
+	ModelID         string                  `json:"model_id,omitempty"`
+	Refusal         LocalModelActionRefusal `json:"refusal"`
+	Outcome         string                  `json:"outcome"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilityLocalModelsRefused.
+func (CapabilityLocalModelsRefused) FixedFields() map[string]string {
+	return map[string]string{"protocol_version": "2", "type": "executed", "kind": "local_models", "outcome": "refused"}
+}
+
+// RequiredFields lists the keys a CapabilityLocalModelsRefused must carry.
+func (CapabilityLocalModelsRefused) RequiredFields() []string {
+	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "kind", "action", "refusal", "outcome"}
+}
+
+// RunnerLocalModels mirrors the RunnerLocalModels schema shape.
+type RunnerLocalModels struct {
+	Type            string              `json:"type"`
+	ProtocolVersion string              `json:"protocol_version"`
+	RunnerID        string              `json:"runner_id"`
+	SentAt          string              `json:"sent_at"`
+	Revision        uint64              `json:"revision"`
+	LocalModels     LocalModelsSnapshot `json:"local_models"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a RunnerLocalModels.
+func (RunnerLocalModels) FixedFields() map[string]string {
+	return map[string]string{"type": "runner.local_models", "protocol_version": "2"}
+}
+
+// RequiredFields lists the keys a RunnerLocalModels must carry.
+func (RunnerLocalModels) RequiredFields() []string {
+	return []string{"type", "protocol_version", "runner_id", "sent_at", "revision", "local_models"}
 }
 
 // RunnerHelloDaemonIdentity mirrors the RunnerHelloDaemonIdentity schema shape.

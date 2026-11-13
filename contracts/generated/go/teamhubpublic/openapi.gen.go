@@ -1961,27 +1961,417 @@ func (e LocalComputerWorkspaceGrantMode) Valid() bool {
 	}
 }
 
+// Defines values for LocalModelActionAcceptedAction.
+const (
+	LocalModelActionAcceptedCancel   LocalModelActionAcceptedAction = "cancel"
+	LocalModelActionAcceptedDownload LocalModelActionAcceptedAction = "download"
+	LocalModelActionAcceptedLoad     LocalModelActionAcceptedAction = "load"
+	LocalModelActionAcceptedRemove   LocalModelActionAcceptedAction = "remove"
+	LocalModelActionAcceptedUnload   LocalModelActionAcceptedAction = "unload"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelActionAcceptedAction enum.
+func (e LocalModelActionAcceptedAction) Valid() bool {
+	switch e {
+	case LocalModelActionAcceptedCancel:
+		return true
+	case LocalModelActionAcceptedDownload:
+		return true
+	case LocalModelActionAcceptedLoad:
+		return true
+	case LocalModelActionAcceptedRemove:
+		return true
+	case LocalModelActionAcceptedUnload:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelActionRequestAction.
+const (
+	LocalModelActionRequestCancel   LocalModelActionRequestAction = "cancel"
+	LocalModelActionRequestDownload LocalModelActionRequestAction = "download"
+	LocalModelActionRequestLoad     LocalModelActionRequestAction = "load"
+	LocalModelActionRequestRemove   LocalModelActionRequestAction = "remove"
+	LocalModelActionRequestUnload   LocalModelActionRequestAction = "unload"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelActionRequestAction enum.
+func (e LocalModelActionRequestAction) Valid() bool {
+	switch e {
+	case LocalModelActionRequestCancel:
+		return true
+	case LocalModelActionRequestDownload:
+		return true
+	case LocalModelActionRequestLoad:
+		return true
+	case LocalModelActionRequestRemove:
+		return true
+	case LocalModelActionRequestUnload:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelAvailabilityReasonCode.
+const (
+	LocalModelAvailabilityDiskInsufficient    LocalModelAvailabilityReasonCode = "DISK_INSUFFICIENT"
+	LocalModelAvailabilityMemoryInsufficient  LocalModelAvailabilityReasonCode = "MEMORY_INSUFFICIENT"
+	LocalModelAvailabilityPlatformUnsupported LocalModelAvailabilityReasonCode = "PLATFORM_UNSUPPORTED"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelAvailabilityReasonCode enum.
+func (e LocalModelAvailabilityReasonCode) Valid() bool {
+	switch e {
+	case LocalModelAvailabilityDiskInsufficient:
+		return true
+	case LocalModelAvailabilityMemoryInsufficient:
+		return true
+	case LocalModelAvailabilityPlatformUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelDownloadProgressStep.
+const (
+	LocalModelDownloadStepDownload LocalModelDownloadProgressStep = "download"
+	LocalModelDownloadStepVerify   LocalModelDownloadProgressStep = "verify"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelDownloadProgressStep enum.
+func (e LocalModelDownloadProgressStep) Valid() bool {
+	switch e {
+	case LocalModelDownloadStepDownload:
+		return true
+	case LocalModelDownloadStepVerify:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelErrorCode.
+const (
+	CANCELLED                 LocalModelErrorCode = "CANCELLED"
+	CHECKSUMMISMATCH          LocalModelErrorCode = "CHECKSUM_MISMATCH"
+	DISKINSUFFICIENT          LocalModelErrorCode = "DISK_INSUFFICIENT"
+	DOWNLOADFAILED            LocalModelErrorCode = "DOWNLOAD_FAILED"
+	ENGINESTARTFAILED         LocalModelErrorCode = "ENGINE_START_FAILED"
+	GATEWAYREGISTRATIONFAILED LocalModelErrorCode = "GATEWAY_REGISTRATION_FAILED"
+	HEALTHCHECKFAILED         LocalModelErrorCode = "HEALTH_CHECK_FAILED"
+	INVALIDSTATE              LocalModelErrorCode = "INVALID_STATE"
+	JOBRUNNING                LocalModelErrorCode = "JOB_RUNNING"
+	LOADNOROOM                LocalModelErrorCode = "LOAD_NO_ROOM"
+	MEMORYINSUFFICIENT        LocalModelErrorCode = "MEMORY_INSUFFICIENT"
+	MODELFILESMISSING         LocalModelErrorCode = "MODEL_FILES_MISSING"
+	MODELUNKNOWN              LocalModelErrorCode = "MODEL_UNKNOWN"
+	NETWORKUNAVAILABLE        LocalModelErrorCode = "NETWORK_UNAVAILABLE"
+	OUTOFMEMORY               LocalModelErrorCode = "OUT_OF_MEMORY"
+	PLATFORMUNSUPPORTED       LocalModelErrorCode = "PLATFORM_UNSUPPORTED"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelErrorCode enum.
+func (e LocalModelErrorCode) Valid() bool {
+	switch e {
+	case CANCELLED:
+		return true
+	case CHECKSUMMISMATCH:
+		return true
+	case DISKINSUFFICIENT:
+		return true
+	case DOWNLOADFAILED:
+		return true
+	case ENGINESTARTFAILED:
+		return true
+	case GATEWAYREGISTRATIONFAILED:
+		return true
+	case HEALTHCHECKFAILED:
+		return true
+	case INVALIDSTATE:
+		return true
+	case JOBRUNNING:
+		return true
+	case LOADNOROOM:
+		return true
+	case MEMORYINSUFFICIENT:
+		return true
+	case MODELFILESMISSING:
+		return true
+	case MODELUNKNOWN:
+		return true
+	case NETWORKUNAVAILABLE:
+		return true
+	case OUTOFMEMORY:
+		return true
+	case PLATFORMUNSUPPORTED:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelFit.
+const (
+	LocalModelFitGpu     LocalModelFit = "gpu"
+	LocalModelFitNone    LocalModelFit = "none"
+	LocalModelFitSystem  LocalModelFit = "system"
+	LocalModelFitUnified LocalModelFit = "unified"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelFit enum.
+func (e LocalModelFit) Valid() bool {
+	switch e {
+	case LocalModelFitGpu:
+		return true
+	case LocalModelFitNone:
+		return true
+	case LocalModelFitSystem:
+		return true
+	case LocalModelFitUnified:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelHostArch.
+const (
+	LocalModelHostArchArm64 LocalModelHostArch = "arm64"
+	LocalModelHostArchX8664 LocalModelHostArch = "x86_64"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelHostArch enum.
+func (e LocalModelHostArch) Valid() bool {
+	switch e {
+	case LocalModelHostArchArm64:
+		return true
+	case LocalModelHostArchX8664:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelHostPlatform.
+const (
+	LocalModelHostPlatformDarwin  LocalModelHostPlatform = "darwin"
+	LocalModelHostPlatformLinux   LocalModelHostPlatform = "linux"
+	LocalModelHostPlatformWindows LocalModelHostPlatform = "windows"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelHostPlatform enum.
+func (e LocalModelHostPlatform) Valid() bool {
+	switch e {
+	case LocalModelHostPlatformDarwin:
+		return true
+	case LocalModelHostPlatformLinux:
+		return true
+	case LocalModelHostPlatformWindows:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelNoteCode.
+const (
+	LocalModelNoteNoRoomToLoad LocalModelNoteCode = "NO_ROOM_TO_LOAD"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelNoteCode enum.
+func (e LocalModelNoteCode) Valid() bool {
+	switch e {
+	case LocalModelNoteNoRoomToLoad:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelPoolKind.
+const (
+	LocalModelPoolKindGpu     LocalModelPoolKind = "gpu"
+	LocalModelPoolKindSystem  LocalModelPoolKind = "system"
+	LocalModelPoolKindUnified LocalModelPoolKind = "unified"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelPoolKind enum.
+func (e LocalModelPoolKind) Valid() bool {
+	switch e {
+	case LocalModelPoolKindGpu:
+		return true
+	case LocalModelPoolKindSystem:
+		return true
+	case LocalModelPoolKindUnified:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelPoolHolderKind.
+const (
+	LocalModelPoolHolderKindComponent LocalModelPoolHolderKind = "component"
+	LocalModelPoolHolderKindModel     LocalModelPoolHolderKind = "model"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelPoolHolderKind enum.
+func (e LocalModelPoolHolderKind) Valid() bool {
+	switch e {
+	case LocalModelPoolHolderKindComponent:
+		return true
+	case LocalModelPoolHolderKindModel:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelState.
+const (
+	LocalModelStateAbsent      LocalModelState = "absent"
+	LocalModelStateDownloading LocalModelState = "downloading"
+	LocalModelStateFailed      LocalModelState = "failed"
+	LocalModelStateIdle        LocalModelState = "idle"
+	LocalModelStateLoaded      LocalModelState = "loaded"
+	LocalModelStateLoading     LocalModelState = "loading"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelState enum.
+func (e LocalModelState) Valid() bool {
+	switch e {
+	case LocalModelStateAbsent:
+		return true
+	case LocalModelStateDownloading:
+		return true
+	case LocalModelStateFailed:
+		return true
+	case LocalModelStateIdle:
+		return true
+	case LocalModelStateLoaded:
+		return true
+	case LocalModelStateLoading:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelsComputerStatus.
+const (
+	LocalModelsComputerOffline LocalModelsComputerStatus = "offline"
+	LocalModelsComputerOnline  LocalModelsComputerStatus = "online"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelsComputerStatus enum.
+func (e LocalModelsComputerStatus) Valid() bool {
+	switch e {
+	case LocalModelsComputerOffline:
+		return true
+	case LocalModelsComputerOnline:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelsErrorCode.
+const (
+	LocalModelsErrorCodeLOCALCOMPUTEROFFLINE          LocalModelsErrorCode = "LOCAL_COMPUTER_OFFLINE"
+	LocalModelsErrorCodeLOCALMODELACTIONFAILED        LocalModelsErrorCode = "LOCAL_MODEL_ACTION_FAILED"
+	LocalModelsErrorCodeLOCALMODELACTIONFORBIDDEN     LocalModelsErrorCode = "LOCAL_MODEL_ACTION_FORBIDDEN"
+	LocalModelsErrorCodeLOCALMODELACTIONUNCONFIRMED   LocalModelsErrorCode = "LOCAL_MODEL_ACTION_UNCONFIRMED"
+	LocalModelsErrorCodeLOCALMODELDISKINSUFFICIENT    LocalModelsErrorCode = "LOCAL_MODEL_DISK_INSUFFICIENT"
+	LocalModelsErrorCodeLOCALMODELINVALIDSTATE        LocalModelsErrorCode = "LOCAL_MODEL_INVALID_STATE"
+	LocalModelsErrorCodeLOCALMODELJOBRUNNING          LocalModelsErrorCode = "LOCAL_MODEL_JOB_RUNNING"
+	LocalModelsErrorCodeLOCALMODELMEMORYINSUFFICIENT  LocalModelsErrorCode = "LOCAL_MODEL_MEMORY_INSUFFICIENT"
+	LocalModelsErrorCodeLOCALMODELNOROOM              LocalModelsErrorCode = "LOCAL_MODEL_NO_ROOM"
+	LocalModelsErrorCodeLOCALMODELPLATFORMUNSUPPORTED LocalModelsErrorCode = "LOCAL_MODEL_PLATFORM_UNSUPPORTED"
+	LocalModelsErrorCodeLOCALMODELSSERVICEUNAVAILABLE LocalModelsErrorCode = "LOCAL_MODELS_SERVICE_UNAVAILABLE"
+	LocalModelsErrorCodeLOCALMODELSUNAVAILABLE        LocalModelsErrorCode = "LOCAL_MODELS_UNAVAILABLE"
+	LocalModelsErrorCodeLOCALMODELUNKNOWN             LocalModelsErrorCode = "LOCAL_MODEL_UNKNOWN"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelsErrorCode enum.
+func (e LocalModelsErrorCode) Valid() bool {
+	switch e {
+	case LocalModelsErrorCodeLOCALCOMPUTEROFFLINE:
+		return true
+	case LocalModelsErrorCodeLOCALMODELACTIONFAILED:
+		return true
+	case LocalModelsErrorCodeLOCALMODELACTIONFORBIDDEN:
+		return true
+	case LocalModelsErrorCodeLOCALMODELACTIONUNCONFIRMED:
+		return true
+	case LocalModelsErrorCodeLOCALMODELDISKINSUFFICIENT:
+		return true
+	case LocalModelsErrorCodeLOCALMODELINVALIDSTATE:
+		return true
+	case LocalModelsErrorCodeLOCALMODELJOBRUNNING:
+		return true
+	case LocalModelsErrorCodeLOCALMODELMEMORYINSUFFICIENT:
+		return true
+	case LocalModelsErrorCodeLOCALMODELNOROOM:
+		return true
+	case LocalModelsErrorCodeLOCALMODELPLATFORMUNSUPPORTED:
+		return true
+	case LocalModelsErrorCodeLOCALMODELSSERVICEUNAVAILABLE:
+		return true
+	case LocalModelsErrorCodeLOCALMODELSUNAVAILABLE:
+		return true
+	case LocalModelsErrorCodeLOCALMODELUNKNOWN:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelsViewUnavailableReasonCode.
+const (
+	LocalModelsViewNotReported      LocalModelsViewUnavailableReasonCode = "NOT_REPORTED"
+	LocalModelsViewToolFailed       LocalModelsViewUnavailableReasonCode = "TOOL_FAILED"
+	LocalModelsViewToolNotInstalled LocalModelsViewUnavailableReasonCode = "TOOL_NOT_INSTALLED"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelsViewUnavailableReasonCode enum.
+func (e LocalModelsViewUnavailableReasonCode) Valid() bool {
+	switch e {
+	case LocalModelsViewNotReported:
+		return true
+	case LocalModelsViewToolFailed:
+		return true
+	case LocalModelsViewToolNotInstalled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalRuntimeDiagnosticErrorCode.
 const (
-	LOCALCOMPUTEROFFLINE          LocalRuntimeDiagnosticErrorCode = "LOCAL_COMPUTER_OFFLINE"
-	RUNTIMEAUTHENTICATIONREQUIRED LocalRuntimeDiagnosticErrorCode = "RUNTIME_AUTHENTICATION_REQUIRED"
-	RUNTIMEDIAGNOSTICFAILED       LocalRuntimeDiagnosticErrorCode = "RUNTIME_DIAGNOSTIC_FAILED"
-	RUNTIMEINCOMPATIBLE           LocalRuntimeDiagnosticErrorCode = "RUNTIME_INCOMPATIBLE"
-	RUNTIMENOTINSTALLED           LocalRuntimeDiagnosticErrorCode = "RUNTIME_NOT_INSTALLED"
+	LocalRuntimeDiagnosticErrorCodeLOCALCOMPUTEROFFLINE          LocalRuntimeDiagnosticErrorCode = "LOCAL_COMPUTER_OFFLINE"
+	LocalRuntimeDiagnosticErrorCodeRUNTIMEAUTHENTICATIONREQUIRED LocalRuntimeDiagnosticErrorCode = "RUNTIME_AUTHENTICATION_REQUIRED"
+	LocalRuntimeDiagnosticErrorCodeRUNTIMEDIAGNOSTICFAILED       LocalRuntimeDiagnosticErrorCode = "RUNTIME_DIAGNOSTIC_FAILED"
+	LocalRuntimeDiagnosticErrorCodeRUNTIMEINCOMPATIBLE           LocalRuntimeDiagnosticErrorCode = "RUNTIME_INCOMPATIBLE"
+	LocalRuntimeDiagnosticErrorCodeRUNTIMENOTINSTALLED           LocalRuntimeDiagnosticErrorCode = "RUNTIME_NOT_INSTALLED"
 )
 
 // Valid indicates whether the value is a known member of the LocalRuntimeDiagnosticErrorCode enum.
 func (e LocalRuntimeDiagnosticErrorCode) Valid() bool {
 	switch e {
-	case LOCALCOMPUTEROFFLINE:
+	case LocalRuntimeDiagnosticErrorCodeLOCALCOMPUTEROFFLINE:
 		return true
-	case RUNTIMEAUTHENTICATIONREQUIRED:
+	case LocalRuntimeDiagnosticErrorCodeRUNTIMEAUTHENTICATIONREQUIRED:
 		return true
-	case RUNTIMEDIAGNOSTICFAILED:
+	case LocalRuntimeDiagnosticErrorCodeRUNTIMEDIAGNOSTICFAILED:
 		return true
-	case RUNTIMEINCOMPATIBLE:
+	case LocalRuntimeDiagnosticErrorCodeRUNTIMEINCOMPATIBLE:
 		return true
-	case RUNTIMENOTINSTALLED:
+	case LocalRuntimeDiagnosticErrorCodeRUNTIMENOTINSTALLED:
 		return true
 	default:
 		return false
@@ -5697,6 +6087,271 @@ type LocalIdentityProof struct {
 	Proof string `json:"proof"`
 }
 
+// LocalModel One validated chat model of the catalog on this platform and its state on this Computer. Sizes are bytes; readers format them.
+type LocalModel struct {
+	Availability  LocalModelAvailability      `json:"availability"`
+	ContextTokens int64                       `json:"context_tokens"`
+	Description   string                      `json:"description"`
+	Download      *LocalModelDownloadProgress `json:"download,omitempty"`
+	DownloadBytes int64                       `json:"download_bytes"`
+	Endpoint      *LocalModelEndpoint         `json:"endpoint,omitempty"`
+	Error         *LocalModelError            `json:"error,omitempty"`
+
+	// Fit Where the model can live, judged on total capacity so it stays stable across loads. system means localmodels can run it from RAM, slower.
+	Fit LocalModelFit `json:"fit"`
+
+	// Id Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
+	Id LocalModelId `json:"id"`
+
+	// MemoryBytes Footprint when loaded at its context policy, from the localmodels estimator.
+	MemoryBytes int64           `json:"memory_bytes"`
+	Name        string          `json:"name"`
+	Note        *LocalModelNote `json:"note,omitempty"`
+
+	// PiModel The runtime_model an Agent on runtime pi stores for this model, <pi provider>/<pi model id>; present while the model is on the Computer.
+	PiModel *string `json:"pi_model,omitempty"`
+
+	// Pool A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs).
+	Pool  *LocalModelPoolId `json:"pool,omitempty"`
+	Quant string            `json:"quant"`
+
+	// Recommended True on at most one model, an absent downloadable one.
+	Recommended bool `json:"recommended"`
+
+	// State absent: not on disk. idle: on disk, holding no memory. loading reserves its memory before it finishes; loaded is registered with the local gateway and Pi.
+	State LocalModelState `json:"state"`
+
+	// TokensPerSecond Warm speed measured at the last load; absent when unknown.
+	TokensPerSecond *float32 `json:"tokens_per_second,omitempty"`
+	Vision          bool     `json:"vision"`
+}
+
+// LocalModelActionAccepted defines model for LocalModelActionAccepted.
+type LocalModelActionAccepted struct {
+	Action LocalModelActionAcceptedAction `json:"action"`
+
+	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	ComputerId Id `json:"computer_id"`
+
+	// ModelId Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
+	ModelId LocalModelId `json:"model_id"`
+}
+
+// LocalModelActionAcceptedAction defines model for LocalModelActionAccepted.Action.
+type LocalModelActionAcceptedAction string
+
+// LocalModelActionRequest A Human's action on one model. The click is the approval; there is no separate confirm step on the Computer. unload_first only with load.
+type LocalModelActionRequest struct {
+	Action LocalModelActionRequestAction `json:"action"`
+
+	// UnloadFirst Loaded models in the same pool to unload before the load starts.
+	UnloadFirst *[]LocalModelId `json:"unload_first,omitempty"`
+}
+
+// LocalModelActionRequestAction defines model for LocalModelActionRequest.Action.
+type LocalModelActionRequestAction string
+
+// LocalModelAvailability defines model for LocalModelAvailability.
+type LocalModelAvailability struct {
+	Downloadable bool                          `json:"downloadable"`
+	Reason       *LocalModelAvailabilityReason `json:"reason,omitempty"`
+}
+
+// LocalModelAvailabilityReason defines model for LocalModelAvailabilityReason.
+type LocalModelAvailabilityReason struct {
+	Code      LocalModelAvailabilityReasonCode `json:"code"`
+	HaveBytes *int64                           `json:"have_bytes,omitempty"`
+	NeedBytes *int64                           `json:"need_bytes,omitempty"`
+}
+
+// LocalModelAvailabilityReasonCode defines model for LocalModelAvailabilityReason.Code.
+type LocalModelAvailabilityReasonCode string
+
+// LocalModelDownloadProgress defines model for LocalModelDownloadProgress.
+type LocalModelDownloadProgress struct {
+	BytesPerSecond *int64                         `json:"bytes_per_second,omitempty"`
+	DoneBytes      int64                          `json:"done_bytes"`
+	Step           LocalModelDownloadProgressStep `json:"step"`
+	TotalBytes     int64                          `json:"total_bytes"`
+}
+
+// LocalModelDownloadProgressStep defines model for LocalModelDownloadProgress.Step.
+type LocalModelDownloadProgressStep string
+
+// LocalModelEndpoint defines model for LocalModelEndpoint.
+type LocalModelEndpoint struct {
+	BaseUrl string `json:"base_url"`
+}
+
+// LocalModelError defines model for LocalModelError.
+type LocalModelError struct {
+	// Code Closed localmodels library error set. It is extended only together with the localmodels library contract.
+	Code LocalModelErrorCode `json:"code"`
+
+	// Detail Diagnostic text for display; never matched on.
+	Detail *string `json:"detail,omitempty"`
+}
+
+// LocalModelErrorCode Closed localmodels library error set. It is extended only together with the localmodels library contract.
+type LocalModelErrorCode string
+
+// LocalModelFit Where the model can live, judged on total capacity so it stays stable across loads. system means localmodels can run it from RAM, slower.
+type LocalModelFit string
+
+// LocalModelGpu defines model for LocalModelGpu.
+type LocalModelGpu struct {
+	FreeBytes  int64   `json:"free_bytes"`
+	Index      int     `json:"index"`
+	Name       string  `json:"name"`
+	TotalBytes int64   `json:"total_bytes"`
+	Uuid       *string `json:"uuid,omitempty"`
+}
+
+// LocalModelHost Hardware and software of the Computer as localmodels reports it.
+type LocalModelHost struct {
+	Arch          LocalModelHostArch `json:"arch"`
+	DiskFreeBytes int64              `json:"disk_free_bytes"`
+
+	// EngineLabel Display only, such as llama.cpp b11370 with CUDA.
+	EngineLabel string          `json:"engine_label"`
+	Gpus        []LocalModelGpu `json:"gpus"`
+
+	// OsLabel Display only, such as Ubuntu 24.04.
+	OsLabel       string                 `json:"os_label"`
+	Platform      LocalModelHostPlatform `json:"platform"`
+	RamTotalBytes int64                  `json:"ram_total_bytes"`
+}
+
+// LocalModelHostArch defines model for LocalModelHost.Arch.
+type LocalModelHostArch string
+
+// LocalModelHostPlatform defines model for LocalModelHost.Platform.
+type LocalModelHostPlatform string
+
+// LocalModelId Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
+type LocalModelId = string
+
+// LocalModelNote defines model for LocalModelNote.
+type LocalModelNote struct {
+	Code LocalModelNoteCode `json:"code"`
+}
+
+// LocalModelNoteCode defines model for LocalModelNote.Code.
+type LocalModelNoteCode string
+
+// LocalModelPool One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them.
+type LocalModelPool struct {
+	// GpuIndex Present only for kind gpu; matches LocalModelGpu.index.
+	GpuIndex *int                   `json:"gpu_index,omitempty"`
+	Holders  []LocalModelPoolHolder `json:"holders"`
+
+	// Id A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs).
+	Id         LocalModelPoolId   `json:"id"`
+	Kind       LocalModelPoolKind `json:"kind"`
+	TotalBytes int64              `json:"total_bytes"`
+	UsedBytes  int64              `json:"used_bytes"`
+}
+
+// LocalModelPoolKind defines model for LocalModelPool.Kind.
+type LocalModelPoolKind string
+
+// LocalModelPoolHolder Something holding pool memory. A component is a foundation service such as an embedding, reranker, or speech model; it is never a model row.
+type LocalModelPoolHolder struct {
+	Bytes int64                    `json:"bytes"`
+	Id    string                   `json:"id"`
+	Kind  LocalModelPoolHolderKind `json:"kind"`
+	Name  string                   `json:"name"`
+}
+
+// LocalModelPoolHolderKind defines model for LocalModelPoolHolder.Kind.
+type LocalModelPoolHolderKind string
+
+// LocalModelPoolId A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs).
+type LocalModelPoolId = string
+
+// LocalModelState absent: not on disk. idle: on disk, holding no memory. loading reserves its memory before it finishes; loaded is registered with the local gateway and Pi.
+type LocalModelState string
+
+// LocalModelUser An Agent whose runtime model is this model on this Computer.
+type LocalModelUser struct {
+	// AgentId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	AgentId Id     `json:"agent_id"`
+	Name    string `json:"name"`
+}
+
+// LocalModelView defines model for LocalModelView.
+type LocalModelView struct {
+	// Model One validated chat model of the catalog on this platform and its state on this Computer. Sizes are bytes; readers format them.
+	Model LocalModel `json:"model"`
+
+	// UsedBy Active Agents placed on this Computer with runtime pi whose runtime model is this model's gateway model.
+	UsedBy []LocalModelUser `json:"used_by"`
+}
+
+// LocalModelsComputer defines model for LocalModelsComputer.
+type LocalModelsComputer struct {
+	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	ComputerId  Id     `json:"computer_id"`
+	DisplayName string `json:"display_name"`
+
+	// Host Hardware and software of the Computer as localmodels reports it.
+	Host *LocalModelHost `json:"host,omitempty"`
+
+	// LastSeenAt UTC timestamp in RFC 3339 format with an explicit offset.
+	LastSeenAt *Timestamp                `json:"last_seen_at,omitempty"`
+	Status     LocalModelsComputerStatus `json:"status"`
+}
+
+// LocalModelsComputerStatus defines model for LocalModelsComputer.Status.
+type LocalModelsComputerStatus string
+
+// LocalModelsError The common error body with error.code narrowed to LocalModelsErrorCode.
+type LocalModelsError struct {
+	// Code error.code of a refused local-models action (403, 409, 502, 503, 504); 400, 401, and 404 use the common codes. LOCAL_COMPUTER_OFFLINE: the Computer is not connected. LOCAL_MODEL_ACTION_FORBIDDEN: the viewer is not the Computer owner. LOCAL_MODELS_UNAVAILABLE: the Computer has no usable localmodels tool. LOCAL_MODEL_ACTION_FAILED: the Computer refused with a library error that has no code of its own here (502). LOCAL_MODELS_SERVICE_UNAVAILABLE: Agent Service could not be reached (503). LOCAL_MODEL_ACTION_UNCONFIRMED: the connected Computer had not decided by the action's deadline; it may still run the action, and the library snapshots show the outcome (504). The other LOCAL_MODEL_ codes are the Computer's refusal codes of the same name (409).
+	Code    LocalModelsErrorCode `json:"code"`
+	Details *[]ErrorDetail       `json:"details,omitempty"`
+
+	// Message Human-readable summary safe to display; clients branch on code, not message.
+	Message   string `json:"message"`
+	RequestId string `json:"request_id"`
+	Retryable *bool  `json:"retryable,omitempty"`
+}
+
+// LocalModelsErrorCode error.code of a refused local-models action (403, 409, 502, 503, 504); 400, 401, and 404 use the common codes. LOCAL_COMPUTER_OFFLINE: the Computer is not connected. LOCAL_MODEL_ACTION_FORBIDDEN: the viewer is not the Computer owner. LOCAL_MODELS_UNAVAILABLE: the Computer has no usable localmodels tool. LOCAL_MODEL_ACTION_FAILED: the Computer refused with a library error that has no code of its own here (502). LOCAL_MODELS_SERVICE_UNAVAILABLE: Agent Service could not be reached (503). LOCAL_MODEL_ACTION_UNCONFIRMED: the connected Computer had not decided by the action's deadline; it may still run the action, and the library snapshots show the outcome (504). The other LOCAL_MODEL_ codes are the Computer's refusal codes of the same name (409).
+type LocalModelsErrorCode string
+
+// LocalModelsErrorResponse defines model for LocalModelsErrorResponse.
+type LocalModelsErrorResponse struct {
+	// Error The common error body with error.code narrowed to LocalModelsErrorCode.
+	Error LocalModelsError `json:"error"`
+}
+
+// LocalModelsView One Computer's model library as last reported. Only the Computer owner can act (viewer_is_owner); other Tenant members who can see the Computer read it.
+type LocalModelsView struct {
+	Available bool                `json:"available"`
+	Computer  LocalModelsComputer `json:"computer"`
+	Models    []LocalModelView    `json:"models"`
+
+	// ObservedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	ObservedAt    *Timestamp                        `json:"observed_at,omitempty"`
+	Pools         []LocalModelPool                  `json:"pools"`
+	Reason        *LocalModelsViewUnavailableReason `json:"reason,omitempty"`
+	ToolVersion   *string                           `json:"tool_version,omitempty"`
+	ViewerIsOwner bool                              `json:"viewer_is_owner"`
+}
+
+// LocalModelsViewUnavailableReason defines model for LocalModelsViewUnavailableReason.
+type LocalModelsViewUnavailableReason struct {
+	// Code NOT_REPORTED: the Computer never sent a snapshot. Otherwise the reason from its last snapshot.
+	Code LocalModelsViewUnavailableReasonCode `json:"code"`
+
+	// Detail Diagnostic text for display; never matched on.
+	Detail *string `json:"detail,omitempty"`
+}
+
+// LocalModelsViewUnavailableReasonCode NOT_REPORTED: the Computer never sent a snapshot. Otherwise the reason from its last snapshot.
+type LocalModelsViewUnavailableReasonCode string
+
 // LocalRuntimeDiagnosticErrorCode defines model for LocalRuntimeDiagnosticErrorCode.
 type LocalRuntimeDiagnosticErrorCode string
 
@@ -8350,6 +9005,9 @@ type Gone = ErrorResponse
 // InternalError defines model for InternalError.
 type InternalError = ErrorResponse
 
+// LocalModelsRefused defines model for LocalModelsRefused.
+type LocalModelsRefused = LocalModelsErrorResponse
+
 // NotFound defines model for NotFound.
 type NotFound = ErrorResponse
 
@@ -8967,6 +9625,9 @@ type CreateLocalComputerEnrollmentJSONRequestBody = LocalComputerEnrollmentCreat
 
 // PutLocalComputerBrowserConnectionJSONRequestBody defines body for PutLocalComputerBrowserConnection for application/json ContentType.
 type PutLocalComputerBrowserConnectionJSONRequestBody = BrowserConnectionConfigureRequest
+
+// ActOnLocalComputerModelJSONRequestBody defines body for ActOnLocalComputerModel for application/json ContentType.
+type ActOnLocalComputerModelJSONRequestBody = LocalModelActionRequest
 
 // ActOnLocalComputerPermissionJSONRequestBody defines body for ActOnLocalComputerPermission for application/json ContentType.
 type ActOnLocalComputerPermissionJSONRequestBody = ComputerPermissionAction

@@ -123,6 +123,7 @@ const (
 	CommandCapabilitySkillsScan         = wire.TypeExecute + ":" + wire.KindSkillsScan
 	CommandCapabilityBrowserConnect     = wire.TypeExecute + ":" + wire.KindBrowserConnect
 	CommandCapabilityComputerPermission = wire.TypeExecute + ":" + wire.KindComputerPermission
+	CommandCapabilityLocalModels        = wire.TypeExecute + ":" + wire.KindLocalModels
 	CommandSessionCompact               = wire.TypeExecute + ":" + wire.KindSessionCompact
 	CommandModelInvoke                  = wire.TypeExecute + ":" + wire.KindModelInvoke
 	CommandComputerToolCall             = wire.TypeExecute + ":" + wire.KindComputerTool
@@ -140,6 +141,7 @@ const (
 	EventRunnerHeartbeat                       = wire.TypeRunnerHeartbeat
 	EventRuntimeObserved                       = wire.TypeRuntimeRegistrationObserved
 	EventRuntimeDiagnostics                    = wire.TypeRunnerRuntimeDiagnostics
+	EventLocalModels                           = wire.TypeRunnerLocalModels
 	EventAgentRunnerReady                      = wire.TypeAgentRunnerState + ":" + wire.StateReady
 	EventAgentRunnerRemoved                    = wire.TypeAgentRunnerState + ":" + wire.StateRemoved
 	EventAgentRunnerFailed                     = wire.TypeAgentRunnerState + ":" + wire.StateFailed
@@ -152,6 +154,8 @@ const (
 	EventCapabilityBrowserFailed               = wire.TypeExecuted + ":" + wire.KindBrowserConnect + ":" + wire.OutcomeFailed
 	EventCapabilityComputerPermissionSucceeded = wire.TypeExecuted + ":" + wire.KindComputerPermission + ":" + wire.OutcomeSucceeded
 	EventCapabilityComputerPermissionFailed    = wire.TypeExecuted + ":" + wire.KindComputerPermission + ":" + wire.OutcomeFailed
+	EventCapabilityLocalModelsAccepted         = wire.TypeExecuted + ":" + wire.KindLocalModels + ":" + wire.OutcomeAccepted
+	EventCapabilityLocalModelsRefused          = wire.TypeExecuted + ":" + wire.KindLocalModels + ":" + wire.OutcomeRefused
 	EventSessionCompacted                      = wire.TypeExecuted + ":" + wire.KindSessionCompact
 	EventModelInvoked                          = wire.TypeExecuted + ":" + wire.KindModelInvoke
 	EventComputerToolResult                    = wire.TypeExecuted + ":" + wire.KindComputerTool

@@ -447,6 +447,53 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read the model library one Local Computer last reported.
+     * @description TeamHub answers from the latest snapshot the Computer sent, so an offline Computer shows what it last reported. Each model lists the Agents that use it. Tenant members who can see the Computer may read; only its owner may act. A local-models invalidation hint with the Computer ID follows every stored snapshot.
+     */
+    get: operations["getLocalComputerModels"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models/{modelId}/actions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+        modelId: components["parameters"]["LocalModelId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Download, cancel, load, unload, or remove one model on an owned Local Computer.
+     * @description The click is the approval. TeamHub forwards the action to the Computer, which answers at once; 202 means the Computer started it. Progress and the outcome arrive as new snapshots, announced by local-models invalidation hints. A retried request sends the action again.
+     */
+    post: operations["actOnLocalComputerModel"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/tenants/{tenantId}/local-computers/{computerId}/permissions": {
     parameters: {
       query?: never;
@@ -4393,6 +4440,253 @@ export interface components {
       extension_token: string;
       profile?: components["schemas"]["BrowserProfile"];
     };
+    LocalModelGpu: {
+      index: number;
+      uuid?: string;
+      name: string;
+      /** Format: int64 */
+      total_bytes: number;
+      /** Format: int64 */
+      free_bytes: number;
+    };
+    /** @description Hardware and software of the Computer as localmodels reports it. */
+    LocalModelHost: {
+      /** @enum {string} */
+      platform: "linux" | "darwin" | "windows";
+      /** @enum {string} */
+      arch: "x86_64" | "arm64";
+      /** @description Display only, such as Ubuntu 24.04. */
+      os_label: string;
+      /** @description Display only, such as llama.cpp b11370 with CUDA. */
+      engine_label: string;
+      /** Format: int64 */
+      ram_total_bytes: number;
+      /** Format: int64 */
+      disk_free_bytes: number;
+      gpus: components["schemas"]["LocalModelGpu"][];
+    };
+    LocalModelsComputer: {
+      computer_id: components["schemas"]["Id"];
+      display_name: string;
+      /** @enum {string} */
+      status: "online" | "offline";
+      last_seen_at?: components["schemas"]["Timestamp"];
+      /** @description From the last snapshot that carried one. */
+      host?: components["schemas"]["LocalModelHost"];
+    };
+    LocalModelsViewUnavailableReason: {
+      /**
+       * @description NOT_REPORTED: the Computer never sent a snapshot. Otherwise the reason from its last snapshot.
+       * @enum {string}
+       */
+      code: "TOOL_NOT_INSTALLED" | "TOOL_FAILED" | "NOT_REPORTED";
+      /** @description Diagnostic text for display; never matched on. */
+      detail?: string;
+    };
+    /** @description A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs). */
+    LocalModelPoolId: string;
+    /** @description Something holding pool memory. A component is a foundation service such as an embedding, reranker, or speech model; it is never a model row. */
+    LocalModelPoolHolder: {
+      /** @enum {string} */
+      kind: "model" | "component";
+      id: string;
+      name: string;
+      /** Format: int64 */
+      bytes: number;
+    };
+    /** @description One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them. */
+    LocalModelPool: {
+      id: components["schemas"]["LocalModelPoolId"];
+      /** @enum {string} */
+      kind: "gpu" | "system" | "unified";
+      /** @description Present only for kind gpu; matches LocalModelGpu.index. */
+      gpu_index?: number;
+      /** Format: int64 */
+      total_bytes: number;
+      /** Format: int64 */
+      used_bytes: number;
+      holders: components["schemas"]["LocalModelPoolHolder"][];
+    };
+    /** @description Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M. */
+    LocalModelId: string;
+    /**
+     * @description Where the model can live, judged on total capacity so it stays stable across loads. system means localmodels can run it from RAM, slower.
+     * @enum {string}
+     */
+    LocalModelFit: "gpu" | "unified" | "system" | "none";
+    LocalModelAvailabilityReason: {
+      /** @enum {string} */
+      code:
+        | "MEMORY_INSUFFICIENT"
+        | "DISK_INSUFFICIENT"
+        | "PLATFORM_UNSUPPORTED";
+      /** Format: int64 */
+      need_bytes?: number;
+      /** Format: int64 */
+      have_bytes?: number;
+    };
+    LocalModelAvailability: {
+      downloadable: boolean;
+      /** @description Present only when downloadable is false. */
+      reason?: components["schemas"]["LocalModelAvailabilityReason"];
+    };
+    /**
+     * @description absent: not on disk. idle: on disk, holding no memory. loading reserves its memory before it finishes; loaded is registered with the local gateway and Pi.
+     * @enum {string}
+     */
+    LocalModelState:
+      | "absent"
+      | "downloading"
+      | "idle"
+      | "loading"
+      | "loaded"
+      | "failed";
+    LocalModelDownloadProgress: {
+      /** @enum {string} */
+      step: "download" | "verify";
+      /** Format: int64 */
+      done_bytes: number;
+      /** Format: int64 */
+      total_bytes: number;
+      /** Format: int64 */
+      bytes_per_second?: number;
+    };
+    LocalModelEndpoint: {
+      base_url: string;
+    };
+    /**
+     * @description Closed localmodels library error set. It is extended only together with the localmodels library contract.
+     * @enum {string}
+     */
+    LocalModelErrorCode:
+      | "MODEL_UNKNOWN"
+      | "INVALID_STATE"
+      | "JOB_RUNNING"
+      | "MEMORY_INSUFFICIENT"
+      | "DISK_INSUFFICIENT"
+      | "PLATFORM_UNSUPPORTED"
+      | "LOAD_NO_ROOM"
+      | "DOWNLOAD_FAILED"
+      | "CHECKSUM_MISMATCH"
+      | "NETWORK_UNAVAILABLE"
+      | "ENGINE_START_FAILED"
+      | "HEALTH_CHECK_FAILED"
+      | "OUT_OF_MEMORY"
+      | "MODEL_FILES_MISSING"
+      | "GATEWAY_REGISTRATION_FAILED"
+      | "CANCELLED";
+    LocalModelError: {
+      code: components["schemas"]["LocalModelErrorCode"];
+      /** @description Diagnostic text for display; never matched on. */
+      detail?: string;
+    };
+    LocalModelNote: {
+      /** @enum {string} */
+      code: "NO_ROOM_TO_LOAD";
+    };
+    /** @description One validated chat model of the catalog on this platform and its state on this Computer. Sizes are bytes; readers format them. */
+    LocalModel: {
+      id: components["schemas"]["LocalModelId"];
+      name: string;
+      description: string;
+      quant: string;
+      /** Format: int64 */
+      context_tokens: number;
+      vision: boolean;
+      /** Format: int64 */
+      download_bytes: number;
+      /**
+       * Format: int64
+       * @description Footprint when loaded at its context policy, from the localmodels estimator.
+       */
+      memory_bytes: number;
+      fit: components["schemas"]["LocalModelFit"];
+      /** @description True on at most one model, an absent downloadable one. */
+      recommended: boolean;
+      availability: components["schemas"]["LocalModelAvailability"];
+      /** @description Planned placement while absent, actual placement afterwards; absent when fit is none. */
+      pool?: components["schemas"]["LocalModelPoolId"];
+      state: components["schemas"]["LocalModelState"];
+      /** @description Present only while downloading. */
+      download?: components["schemas"]["LocalModelDownloadProgress"];
+      /** @description Present only while loaded. */
+      endpoint?: components["schemas"]["LocalModelEndpoint"];
+      /** @description The runtime_model an Agent on runtime pi stores for this model, <pi provider>/<pi model id>; present while the model is on the Computer. */
+      pi_model?: string;
+      /** @description Warm speed measured at the last load; absent when unknown. */
+      tokens_per_second?: number;
+      /** @description Present only when failed. */
+      error?: components["schemas"]["LocalModelError"];
+      /** @description Present only when idle and the automatic load after download was skipped. */
+      note?: components["schemas"]["LocalModelNote"];
+    };
+    /** @description An Agent whose runtime model is this model on this Computer. */
+    LocalModelUser: {
+      agent_id: components["schemas"]["Id"];
+      name: string;
+    };
+    LocalModelView: {
+      model: components["schemas"]["LocalModel"];
+      /** @description Active Agents placed on this Computer with runtime pi whose runtime model is this model's gateway model. */
+      used_by: components["schemas"]["LocalModelUser"][];
+    };
+    /** @description One Computer's model library as last reported. Only the Computer owner can act (viewer_is_owner); other Tenant members who can see the Computer read it. */
+    LocalModelsView: {
+      computer: components["schemas"]["LocalModelsComputer"];
+      viewer_is_owner: boolean;
+      available: boolean;
+      /** @description Present only when available is false. */
+      reason?: components["schemas"]["LocalModelsViewUnavailableReason"];
+      /** @description When the Computer observed the snapshot; absent when it never sent one. */
+      observed_at?: components["schemas"]["Timestamp"];
+      tool_version?: string;
+      pools: components["schemas"]["LocalModelPool"][];
+      models: components["schemas"]["LocalModelView"][];
+    };
+    /** @description A Human's action on one model. The click is the approval; there is no separate confirm step on the Computer. unload_first only with load. */
+    LocalModelActionRequest: {
+      /** @enum {string} */
+      action: "download" | "cancel" | "load" | "unload" | "remove";
+      /** @description Loaded models in the same pool to unload before the load starts. */
+      unload_first?: components["schemas"]["LocalModelId"][];
+    };
+    LocalModelActionAccepted: {
+      computer_id: components["schemas"]["Id"];
+      model_id: components["schemas"]["LocalModelId"];
+      /** @enum {string} */
+      action: "download" | "cancel" | "load" | "unload" | "remove";
+    };
+    /**
+     * @description error.code of a refused local-models action (403, 409, 502, 503, 504); 400, 401, and 404 use the common codes. LOCAL_COMPUTER_OFFLINE: the Computer is not connected. LOCAL_MODEL_ACTION_FORBIDDEN: the viewer is not the Computer owner. LOCAL_MODELS_UNAVAILABLE: the Computer has no usable localmodels tool. LOCAL_MODEL_ACTION_FAILED: the Computer refused with a library error that has no code of its own here (502). LOCAL_MODELS_SERVICE_UNAVAILABLE: Agent Service could not be reached (503). LOCAL_MODEL_ACTION_UNCONFIRMED: the connected Computer had not decided by the action's deadline; it may still run the action, and the library snapshots show the outcome (504). The other LOCAL_MODEL_ codes are the Computer's refusal codes of the same name (409).
+     * @enum {string}
+     */
+    LocalModelsErrorCode:
+      | "LOCAL_COMPUTER_OFFLINE"
+      | "LOCAL_MODEL_ACTION_FORBIDDEN"
+      | "LOCAL_MODELS_UNAVAILABLE"
+      | "LOCAL_MODEL_UNKNOWN"
+      | "LOCAL_MODEL_INVALID_STATE"
+      | "LOCAL_MODEL_JOB_RUNNING"
+      | "LOCAL_MODEL_NO_ROOM"
+      | "LOCAL_MODEL_MEMORY_INSUFFICIENT"
+      | "LOCAL_MODEL_DISK_INSUFFICIENT"
+      | "LOCAL_MODEL_PLATFORM_UNSUPPORTED"
+      | "LOCAL_MODEL_ACTION_FAILED"
+      | "LOCAL_MODEL_ACTION_UNCONFIRMED"
+      | "LOCAL_MODELS_SERVICE_UNAVAILABLE";
+    /** @description The common error body with error.code narrowed to LocalModelsErrorCode. */
+    LocalModelsError: {
+      code: components["schemas"]["LocalModelsErrorCode"];
+      /** @description Human-readable summary safe to display; clients branch on code, not message. */
+      message: string;
+      request_id: string;
+      details?: components["schemas"]["ErrorDetail"][];
+      /** @default false */
+      retryable: boolean;
+    };
+    LocalModelsErrorResponse: {
+      error: components["schemas"]["LocalModelsError"];
+    };
     /**
      * @description The app macOS grants the permission to. linger is the Linger desktop app, which owns shell commands such as screencapture; computer_use is CuaDriver, which owns the computer-use tools.
      * @enum {string}
@@ -7657,6 +7951,15 @@ export interface components {
         "application/json": components["schemas"]["ErrorResponse"];
       };
     };
+    /** @description The Computer or TeamHub refused the local-models request; error.code is one of LocalModelsErrorCode. */
+    LocalModelsRefused: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["LocalModelsErrorResponse"];
+      };
+    };
     /** @description The resource existed but was explicitly removed and cannot be reused. */
     Gone: {
       headers: {
@@ -7704,6 +8007,7 @@ export interface components {
   parameters: {
     DecisionId: components["schemas"]["Id"];
     ComputerId: components["schemas"]["Id"];
+    LocalModelId: components["schemas"]["LocalModelId"];
     TenantId: components["schemas"]["Id"];
     ActorId: components["schemas"]["Id"];
     AgentId: components["schemas"]["Id"];
@@ -8443,6 +8747,67 @@ export interface operations {
       409: components["responses"]["Conflict"];
       502: components["responses"]["BadGateway"];
       503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  getLocalComputerModels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The Computer and its model library. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalModelsView"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  actOnLocalComputerModel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+        modelId: components["parameters"]["LocalModelId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalModelActionRequest"];
+      };
+    };
+    responses: {
+      /** @description The Computer started the action. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalModelActionAccepted"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["LocalModelsRefused"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["LocalModelsRefused"];
+      502: components["responses"]["LocalModelsRefused"];
+      503: components["responses"]["LocalModelsRefused"];
+      504: components["responses"]["LocalModelsRefused"];
     };
   };
   getLocalComputerPermissions: {
