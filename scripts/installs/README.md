@@ -86,15 +86,15 @@ Run the pinned script without cloning the repository:
 
 ```sh
 # global
-curl -fsSL https://cdn.jsdelivr.net/npm/@simplexai/localmodels@0.1.0-dev.31/stack.sh | sh -s -- --region global --help
+curl -fsSL https://cdn.jsdelivr.net/npm/@simplexai/localmodels@0.1.0-dev.35/stack.sh | sh -s -- --region global --help
 # cn
-curl -fsSL https://registry.npmmirror.com/@simplexai/localmodels/0.1.0-dev.31/files/stack.sh | sh -s -- --region cn --help
+curl -fsSL https://registry.npmmirror.com/@simplexai/localmodels/0.1.0-dev.35/files/stack.sh | sh -s -- --region cn --help
 ```
 
 ```powershell
-irm https://cdn.jsdelivr.net/npm/@simplexai/localmodels@0.1.0-dev.31/stack.ps1 -OutFile stack.ps1
+irm https://cdn.jsdelivr.net/npm/@simplexai/localmodels@0.1.0-dev.35/stack.ps1 -OutFile stack.ps1
 powershell -ExecutionPolicy Bypass -File .\stack.ps1 -Region global --help
-# cn script URL: https://registry.npmmirror.com/@simplexai/localmodels/0.1.0-dev.31/files/stack.ps1
+# cn script URL: https://registry.npmmirror.com/@simplexai/localmodels/0.1.0-dev.35/files/stack.ps1
 ```
 
 The localmodels release process publishes each version's platform kits, its patched Bifrost packages and the
