@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   start: vi.fn(),
   managedEnvironment: vi.fn(),
   localModelsEnvironment: vi.fn(),
+  localmodelsTool: vi.fn(),
 }));
 vi.mock("@linger/local-installation/managed-codex", () => ({
   managedRuntimeEnvironment: mocks.managedEnvironment,
@@ -22,6 +23,13 @@ vi.mock("@linger/local-installation/managed-codex", () => ({
 vi.mock("@linger/local-installation/local-models", () => ({
   localModelsEnvironment: mocks.localModelsEnvironment,
 }));
+vi.mock(
+  "@linger/local-installation/localmodels-computer",
+  async (original) => ({
+    ...(await original<object>()),
+    localmodelsComputerTool: mocks.localmodelsTool,
+  }),
+);
 vi.mock("@linger/local-installation/model-gateway", () => ({
   prepareModelGateway: mocks.prepare,
   stopModelGateway: mocks.stopGateway,
@@ -166,6 +174,29 @@ it("reports the local model's Pi for local models", async () => {
     environment: {
       LINGER_PI_PATH: "/test/runtime/localmodels/pi",
       PI_CODING_AGENT_DIR: "/test/runtime/localmodels/pi-agent",
+    },
+  });
+});
+
+it("reports the localmodels tool for the desktop Computer's model library", async () => {
+  mocks.runtime = "codex";
+  mocks.managedEnvironment.mockResolvedValue({});
+  mocks.localModelsEnvironment.mockResolvedValue({});
+  mocks.localmodelsTool.mockResolvedValueOnce({
+    python: "/test/tools/localmodels/kit/python3",
+    moduleDirectory: "/test/tools/localmodels/kit",
+    stateDirectory: "/test/runtime/localmodels/state",
+    baseDirectory: "/test/runtime/localmodels/models",
+  });
+  await expect(
+    coreAdapter("/test", "/checkout").runtime("default"),
+  ).resolves.toEqual({
+    setupChoice: "codex",
+    environment: {
+      LINGER_LOCALMODELS_PYTHON: "/test/tools/localmodels/kit/python3",
+      LINGER_LOCALMODELS_MODULE_DIR: "/test/tools/localmodels/kit",
+      LINGER_LOCALMODELS_STATE: "/test/runtime/localmodels/state",
+      LINGER_LOCALMODELS_BASE_DIR: "/test/runtime/localmodels/models",
     },
   });
 });

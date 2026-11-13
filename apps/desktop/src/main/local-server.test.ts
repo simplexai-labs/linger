@@ -99,7 +99,9 @@ if (args.includes("--inspect")) {
 }
 if (args.includes("--resume")) {
   const code = fs.existsSync(path.join(home, "resume-fails")) ? 1 : 0;
-  process.stdout.write("noise\n" + JSON.stringify({ code, message: code ? "Native teamhub stopped" : "ok" }) + "\n");
+  const runtimeFile = path.join(home, "resume-runtime.json");
+  const runtime = fs.existsSync(runtimeFile) ? JSON.parse(fs.readFileSync(runtimeFile, "utf8")) : undefined;
+  process.stdout.write("noise\n" + JSON.stringify({ code, message: code ? "Native teamhub stopped" : "ok", ...(runtime ? { runtime } : {}) }) + "\n");
   process.exit(code);
 }
 const origin = "http://127.0.0.1:4321";
@@ -1994,6 +1996,46 @@ describe("LocalServerModule after a restart", () => {
     expect(
       existsSync(path.join(f.home, "instances", LOCAL_INSTANCE, "user.env")),
     ).toBe(false);
+    await f.host.stop("quit");
+  });
+
+  it("takes the runtime and localmodels paths a resume reports, restarting the Computer once", async () => {
+    const tool = {
+      LINGER_LOCALMODELS_PYTHON:
+        "/home/u/.linger/tools/localmodels/kit/python3",
+      LINGER_LOCALMODELS_MODULE_DIR: "/home/u/.linger/tools/localmodels/kit",
+      LINGER_LOCALMODELS_STATE: "/home/u/.linger/runtime/localmodels/state",
+      LINGER_LOCALMODELS_BASE_DIR: "/home/u/.linger/runtime/localmodels/models",
+    };
+    const environment = { LINGER_PI_PATH: "/home/u/.linger/pi", ...tool };
+    const f = fixture(
+      {},
+      {
+        ...enrolled,
+        runtimeEnvironment: { LINGER_PI_PATH: "/home/u/.linger/pi" },
+      },
+      (home) => {
+        mkdirSync(path.join(home, "desktop"), { recursive: true });
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home,
+            repo: "/source",
+            origin: "http://localhost:3000",
+          }),
+        );
+        writeFileSync(
+          path.join(home, "resume-runtime.json"),
+          JSON.stringify({ setupChoice: "local-models", environment }),
+        );
+      },
+    );
+    const restarts = vi.fn();
+    f.bus.on("computer.runtime", restarts);
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    expect(f.host.ctx.config.get().runtimeEnvironment).toEqual(environment);
+    expect(restarts).toHaveBeenCalledTimes(1);
     await f.host.stop("quit");
   });
 
