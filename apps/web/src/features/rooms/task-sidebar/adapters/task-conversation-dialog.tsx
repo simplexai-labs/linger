@@ -6,14 +6,10 @@ import {
 import { useMemo, useState, type ReactNode } from "react";
 
 import { ModalDialog } from "@/components/ui/modal-dialog";
-import { StatusPill } from "@/components/ui/status-pill";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { useTaskActivities } from "@/features/work-items/use-task-activities";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
-import type {
-  TeamHubRunStatus,
-  TeamHubTaskExecution,
-} from "@/features/teamhub/teamhub-types";
+import type { TeamHubRunStatus } from "@/features/teamhub/teamhub-types";
 
 import { CancelTaskButton } from "../../chat/cancel-task-button";
 import { MessageMarkdown } from "../../chat/message-markdown";
@@ -26,7 +22,10 @@ import {
 import { ActorAvatar } from "../../members/actor-avatar";
 import { teamHubIdentityQueryOptions } from "../../room-queries";
 import { RuntimeActivityPath } from "../../runtime-status/runtime-activity-path-view";
-import { TaskActivityLinksProvider } from "../../runtime-status/task-activity-block";
+import {
+  TaskActivityLinksProvider,
+  TaskStatusPill,
+} from "../../runtime-status/task-activity-block";
 import { useTaskActivityEvents } from "../../runtime-status/use-task-activity-events";
 import { PanelLoading } from "../panel-loading";
 import { RuntimeTrajectoryView } from "./runtime-trajectory-view";
@@ -134,7 +133,7 @@ export function TaskConversationDialog({
       description={
         execution ? (
           <span className="inline-flex items-center gap-1">
-            <TaskConversationState execution={execution} />
+            <TaskStatusPill status={execution.status} />
             {live ? (
               <CancelTaskButton
                 cancel={async () => {
@@ -299,7 +298,6 @@ function TaskConversationRun({
   );
 }
 
-/** A card the AlterEgo raised, answered here as in its Room. */
 /**
  * A card the Task's AlterEgo raised. The card itself is a Message in the Room
  * that delegated the Task; it is answerable here too.
@@ -315,14 +313,10 @@ function TaskApprovalCard({
 }) {
   const { client } = useTeamHubRuntime();
   const queryClient = useQueryClient();
-  const queryKey = [
-    "teamhub",
-    tenantId,
-    "rooms",
-    roomId,
-    "messages",
-    messageId,
-  ];
+  const queryKey = useMemo(
+    () => ["teamhub", tenantId, "rooms", roomId, "messages", messageId],
+    [messageId, roomId, tenantId],
+  );
   const message = useQuery({
     queryKey,
     queryFn: () =>
@@ -346,9 +340,7 @@ function TaskApprovalCard({
         roomId,
         tenantId,
       }),
-    // queryKey is rebuilt from these same values on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [client, queryClient, roomId, tenantId, messageId],
+    [client, queryClient, queryKey, roomId, tenantId],
   );
   const identity = useQuery(teamHubIdentityQueryOptions(client));
   const currentActorId = identity.data?.actors.find(
@@ -368,23 +360,4 @@ function TaskApprovalCard({
       tenantId={tenantId}
     />
   );
-}
-
-function TaskConversationState({
-  execution,
-}: {
-  execution: TeamHubTaskExecution;
-}) {
-  switch (execution.status) {
-    case "running":
-      return <StatusPill tone="neutral">Running</StatusPill>;
-    case "waiting_for_approval":
-      return <StatusPill tone="warning">Needs approval</StatusPill>;
-    case "idle":
-      return <StatusPill tone="success">Reported</StatusPill>;
-    case "failed":
-      return <StatusPill tone="danger">Failed</StatusPill>;
-    case "canceled":
-      return <StatusPill>Stopped</StatusPill>;
-  }
 }

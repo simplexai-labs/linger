@@ -9,7 +9,6 @@ export interface TaskCommand {
   name?: string;
   /** The message `task send` delivered. */
   message?: string;
-  steer?: boolean;
   taskId?: string;
 }
 
@@ -31,19 +30,18 @@ export function parseTaskCommand(command: string): TaskCommand | undefined {
   const operation = words[start + 2] as TaskCommand["operation"];
   if (!OPERATIONS.has(operation)) return undefined;
   const flags = new Map<string, string>();
-  let steer = false;
   for (let index = start + 3; index < words.length; index += 1) {
     const word = words[index]!;
     if (word === "&&" || word === "|" || word === ";") break;
-    if (word === "--steer") {
-      steer = true;
-      continue;
-    }
     if (!word.startsWith("--")) continue;
     const equals = word.indexOf("=");
     if (equals > 0) {
       flags.set(word.slice(0, equals), word.slice(equals + 1));
-    } else if (index + 1 < words.length) {
+    } else if (
+      index + 1 < words.length &&
+      !words[index + 1]!.startsWith("--")
+    ) {
+      // A flag followed by another flag, such as --steer, takes no value.
       flags.set(word, words[index + 1]!);
       index += 1;
     }
@@ -53,7 +51,6 @@ export function parseTaskCommand(command: string): TaskCommand | undefined {
     ...(flags.has("--name") ? { name: flags.get("--name") } : {}),
     ...(flags.has("--message") ? { message: flags.get("--message") } : {}),
     ...(flags.has("--task-id") ? { taskId: flags.get("--task-id") } : {}),
-    ...(steer ? { steer } : {}),
   };
 }
 

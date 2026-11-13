@@ -137,17 +137,28 @@ export function TaskActivityBlock({
 }
 
 function TaskState({ execution }: { execution: TeamHubTaskExecution }) {
-  switch (execution.status) {
+  return execution.status === "running" ? (
+    <span
+      aria-label="Task running"
+      className="flex shrink-0 items-center text-app-info"
+      role="img"
+    >
+      <RunningDots />
+    </span>
+  ) : (
+    <TaskStatusPill status={execution.status} />
+  );
+}
+
+/** A Task's execution state in a word, as its block and its conversation show it. */
+export function TaskStatusPill({
+  status,
+}: {
+  status: TeamHubTaskExecution["status"];
+}) {
+  switch (status) {
     case "running":
-      return (
-        <span
-          aria-label="Task running"
-          className="flex shrink-0 items-center text-app-info"
-          role="img"
-        >
-          <RunningDots />
-        </span>
-      );
+      return <StatusPill tone="neutral">Running</StatusPill>;
     case "waiting_for_approval":
       return <StatusPill tone="warning">Needs approval</StatusPill>;
     case "idle":

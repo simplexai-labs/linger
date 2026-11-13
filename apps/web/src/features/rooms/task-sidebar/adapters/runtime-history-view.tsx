@@ -375,7 +375,7 @@ export function nativeContentBlock(
   }
 }
 
-export function isUserMessage(record: TeamHubMessageActivityRecord) {
+function isUserMessage(record: TeamHubMessageActivityRecord) {
   return record.role === "user" || record.native_type.endsWith(".user_message");
 }
 
