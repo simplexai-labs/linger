@@ -93,6 +93,20 @@ describe("Document Chunk Raw sources", () => {
     expect(rawSourceContentPath(page)).toMatch(
       /^memory-state\/raw\/wiki\/[a-f0-9]{64}\/[a-f0-9]{64}\.md$/u,
     );
+    // A Session page is dated by its Session, not by the Wiki's publication.
+    const session = (pageKey: string) =>
+      wikiPageRawSource({
+        identity,
+        pageKey,
+        title: "Kickoff",
+        documentId: "document_session",
+        documentVersionId: "version_session",
+        publishedAt: "2026-09-27T08:00:00.000Z",
+        revision: "revision_a",
+        markdown: "# Kickoff\n",
+      }).date;
+    expect(session("sessions/2026-03-04/kickoff.md")).toBe("2026-03-04");
+    expect(session("sessions/2026-03-04/index.md")).toBe("2026-09-27");
     expect(rawSourceContentPath(report)).toMatch(
       /^memory-state\/raw\/reports\/[a-f0-9]{64}\/[a-f0-9]{64}\.md$/u,
     );

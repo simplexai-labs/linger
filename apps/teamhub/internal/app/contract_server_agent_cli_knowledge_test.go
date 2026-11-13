@@ -88,26 +88,28 @@ func TestAgentKnowledgeSearchForwardsEventRangeSeparatelyFromSourceDates(t *test
 	}
 }
 
-func TestAgentKnowledgeSourceDatesBecomeASoftWindow(t *testing.T) {
+func TestAgentKnowledgeSearchKeepsRecordedEventAndAsOfApart(t *testing.T) {
 	identity := agentauth.Authorization{Principal: &agentcredential.Principal{TenantID: "t", UserArtifactOwnerActorID: "s"}, PersonalKnowledgeAgentID: "a"}
-	today, monthStart, april := "2026-05-30", "2026-05-01", "2026-04-01"
-	request, err := agentKnowledgeRequest("search_knowledge", agentKnowledgeInput{Query: "video", DateFrom: &today, DateTo: &today}, identity)
+	january, januaryEnd, april, asOf := "2026-01-01", "2026-01-31", "2026-04-01", "2026-05-30"
+	// Mail received in January about an April plan, as it stood on May 30.
+	request, err := agentKnowledgeRequest("search_knowledge", agentKnowledgeInput{
+		Query: "trip", DateFrom: &january, DateTo: &januaryEnd, EventFrom: &april, AsOf: &asOf,
+	}, identity)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request["date_from"] != nil || request["date_to"] != nil || request["event_from"] != today || request["event_to"] != today {
-		t.Fatalf("source dates must rank, not filter: %#v", request)
+	if request["date_from"] != january || request["date_to"] != januaryEnd || request["event_from"] != april ||
+		request["event_to"] != nil || request["as_of"] != asOf {
+		t.Fatalf("time parameters must reach Memory unmerged: %#v", request)
 	}
-	request, err = agentKnowledgeRequest("search_knowledge", agentKnowledgeInput{Query: "shoes", DateFrom: &monthStart, EventFrom: &april}, identity)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if request["event_from"] != april || request["event_to"] != nil || request["date_from"] != nil {
-		t.Fatalf("event bounds must take precedence: %#v", request)
-	}
-	bad := "2026-13-01"
-	if _, err := agentKnowledgeRequest("search_knowledge", agentKnowledgeInput{Query: "x", DateFrom: &bad}, identity); err == nil {
-		t.Fatal("invalid source date accepted")
+	for _, bad := range []agentKnowledgeInput{
+		{Query: "x", DateFrom: ptr("2026-13-01")},
+		{Query: "x", AsOf: ptr("2026-02-30")},
+		{Query: "x", DateFrom: &januaryEnd, DateTo: &january},
+	} {
+		if _, err := agentKnowledgeRequest("search_knowledge", bad, identity); err == nil {
+			t.Fatalf("accepted %#v", bad)
+		}
 	}
 }
 

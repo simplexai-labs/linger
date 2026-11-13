@@ -1879,13 +1879,16 @@ type AgentKnowledgeSearchRequest struct {
 	// Alternates Up to six synonyms, translations or related terms the evidence may use instead of the query's words. Each is searched separately beside the query; always pass some when the query is a single wording.
 	Alternates *[]string `json:"alternates,omitempty"`
 
-	// DateFrom Start of the period the sources were recorded in; ranks matching sources higher and excludes none.
+	// AsOf Day a changing value or state is asked for, today for the current one; its latest mentions on or before that day rank higher and later ones remain.
+	AsOf *openapi_types.Date `json:"asOf,omitempty"`
+
+	// DateFrom Start of the period the asked records were made in, such as mail received in January; ranks sources and facts recorded then higher and excludes none.
 	DateFrom *openapi_types.Date `json:"dateFrom,omitempty"`
 
 	// DateTo End of the period the sources were recorded in; pair with dateFrom.
 	DateTo *openapi_types.Date `json:"dateTo,omitempty"`
 
-	// EventFrom Inclusive start of when the asked event happened; takes precedence over dateFrom and dateTo and excludes none.
+	// EventFrom Inclusive start of when the asked event happened, whenever it was recorded; ranks facts and sources from that period higher and excludes none.
 	EventFrom *openapi_types.Date `json:"eventFrom,omitempty"`
 
 	// EventTo Inclusive end of when the asked event happened; pair with eventFrom.

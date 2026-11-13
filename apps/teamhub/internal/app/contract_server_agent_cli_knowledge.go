@@ -21,6 +21,7 @@ type agentKnowledgeInput struct {
 	DateTo          *string  `json:"dateTo,omitempty"`
 	EventFrom       *string  `json:"eventFrom,omitempty"`
 	EventTo         *string  `json:"eventTo,omitempty"`
+	AsOf            *string  `json:"asOf,omitempty"`
 	Scope           string   `json:"scope,omitempty"`
 	Page            *int     `json:"page,omitempty"`
 	EvidenceID      string   `json:"evidenceId,omitempty"`
@@ -110,25 +111,22 @@ func agentKnowledgeRequest(tool string, input agentKnowledgeInput, identity agen
 		if len(input.Alternates) > 0 {
 			result["alternates"] = input.Alternates
 		}
-		// Agents copy the current date into source filters, hiding earlier records.
-		// Every Agent time range is one soft window that ranks matching facts and
-		// chunks higher without excluding others; event bounds take precedence.
-		from, to := input.DateFrom, input.DateTo
-		if input.EventFrom != nil || input.EventTo != nil {
-			from, to = input.EventFrom, input.EventTo
-		}
-		for _, value := range []*string{input.DateFrom, input.DateTo, input.EventFrom, input.EventTo} {
-			if value != nil {
-				if _, err := time.Parse("2006-01-02", *value); err != nil {
-					return nil, invalid
-				}
+		// When records were made (date), when the asked event happened (event)
+		// and the day a changing value is asked for (as_of) each only rank
+		// results higher in Memory and exclude none: Agents copy the current
+		// date into time parameters, and a filter would hide earlier records.
+		for key, value := range map[string]*string{
+			"date_from": input.DateFrom, "date_to": input.DateTo,
+			"event_from": input.EventFrom, "event_to": input.EventTo,
+			"as_of": input.AsOf,
+		} {
+			if value == nil {
+				continue
 			}
-		}
-		if from != nil {
-			result["event_from"] = *from
-		}
-		if to != nil {
-			result["event_to"] = *to
+			if _, err := time.Parse("2006-01-02", *value); err != nil {
+				return nil, invalid
+			}
+			result[key] = *value
 		}
 		if input.DateFrom != nil && input.DateTo != nil && *input.DateFrom > *input.DateTo ||
 			input.EventFrom != nil && input.EventTo != nil && *input.EventFrom > *input.EventTo {

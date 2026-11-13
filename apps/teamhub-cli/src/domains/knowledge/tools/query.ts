@@ -9,7 +9,7 @@ export const personalKnowledgeQueryInputSchema = z
       .max(10_000)
       .refine((value) => value.trim() !== "", "Query must not be blank.")
       .describe(
-        "The distinctive phrase, entity, or term being asked about, keeping the current request's named project, person, or event. Do not add unrelated topics from earlier turns. When the question names a time, such as last weekend, in 2023, or last month, keep those words in the query and put the resolved dates in eventFrom/eventTo; leave them unset when the question names no time, even when the request carries a date.",
+        "The distinctive phrase, entity, or term being asked about, keeping the current request's named project, person, or event. Do not add unrelated topics from earlier turns. When the question names a time, such as last weekend, in 2023, or last month, keep those words in the query and put the resolved dates in the matching time parameter; leave every time parameter unset when the question names no time, even when the request carries a date.",
       ),
     alternates: z
       .array(
@@ -29,25 +29,31 @@ export const personalKnowledgeQueryInputSchema = z
       .date()
       .optional()
       .describe(
-        "Optional start of the period the question is about, such as when sources were recorded. It only ranks sources and facts from that period higher and never excludes other dates, so leave it unset unless the question names a period.",
+        "Optional start of the period the asked records were made in: mail received, messages sent or a meeting held then, such as 2026-01-01 for mail received in January. It ranks sources and facts recorded in that period higher and never excludes other dates.",
       ),
     dateTo: z.iso
       .date()
       .optional()
       .describe(
-        "Optional end of the period the question is about; pair with dateFrom. It only ranks results and never excludes other dates.",
+        "Optional end of the period the asked records were made in; pair with dateFrom. It only ranks results and never excludes other dates.",
       ),
     eventFrom: z.iso
       .date()
       .optional()
       .describe(
-        "Inclusive start of when the asked event happened, such as 2026-04-01 for what the Human did last month. It ranks facts and sources from that period higher and never excludes others; it takes precedence over dateFrom/dateTo. Leave unset when the question does not ask about a time.",
+        "Inclusive start of when the asked event happened, whenever it was recorded, such as 2026-04-01 for what the Human did last month. It ranks facts and sources from that period higher and never excludes others. Leave unset when the question does not ask about a time.",
       ),
     eventTo: z.iso
       .date()
       .optional()
       .describe(
         "Inclusive end of when the asked event happened; pair with eventFrom. Never a source-date filter.",
+      ),
+    asOf: z.iso
+      .date()
+      .optional()
+      .describe(
+        "The day a changing value or state is asked for: today for the current or latest one, or a past day such as the end of the month two months ago for what it was then. Its latest mentions on or before that day rank higher; later ones remain, so compare dates. Not for what happened in a period (eventFrom) or the earliest mention.",
       ),
     scope: z
       .enum(["summaries", "originals"])

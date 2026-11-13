@@ -61,14 +61,16 @@ something was never recorded.
 | -------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | Index    | One chunk per page, or per section for long pages; headings weigh most in keywords  | Chunks of each conversation, transcript, document or email     |
 | Keywords | PostgreSQL full-text search, once for the query and once for each alternate wording | Same                                                           |
-| Time     | Keyword matches inside a time window the question names                             | Same                                                           |
+| Time     | Session pages: matches from the period asked about; other pages take no time vote   | Matches from the period, recorded then, or latest by a day     |
 | Fusion   | Reciprocal rank fusion of all lists                                                 | Same                                                           |
 | Extra    |                                                                                     | A separate list of facts from chats, recordings, notes, emails |
 | Result   | Its own ranked list; the top entries carry the text near the match                  | Its own ranked list; the same                                  |
 
 <sub>Agents pass up to six alternate wordings, such as synonyms and
 translations, so a Chinese question can find an English page. Search uses
-keywords only, with no embedding or reranker model. Another Me also has the
+keywords only, with no embedding or reranker model. A time the question names
+only ranks matches higher and never hides others: when something happened,
+when it was recorded, or the latest value as of a day. Another Me also has the
 wiki as read-only files in its workspace.</sub>
 
 When an answer needs more than the knowledge search, such as a project's state

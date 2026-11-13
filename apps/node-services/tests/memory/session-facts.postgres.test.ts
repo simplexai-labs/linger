@@ -268,6 +268,70 @@ describe.runIf(Boolean(databaseUrl))("Session facts in PostgreSQL", () => {
     ).toEqual([dogText]);
   });
 
+  it("ranks facts by the recorded window and leads with the latest one before as_of", async () => {
+    const mail = async (id: string, date: string, body: string) => {
+      const markdown = `# Gift\n\n- Provider: gmail\n- Message ID: \`${id}\`\n- Thread ID: \`${id}\`\n- Timestamp: ${date}T01:00:00Z\n- Direction: outbound\n- Class: self_sent\n\n${body}\n`;
+      await chunks.indexDatabaseSource(
+        documentRawSource({
+          identity,
+          documentId: `document_${id}`,
+          textSourceKind: "file_version",
+          textSourceId: `version_${id}`,
+          title: "Gift",
+          filename: `${id}.md`,
+          mediaType: "text/markdown",
+          originKind: "mail",
+          date,
+          markdown,
+        }),
+        markdown,
+      );
+    };
+    await mail("first", "2026-05-20", "Clara's share for Ben's gift is 1,500.");
+    await mail(
+      "later",
+      "2026-05-28",
+      "Clara's share for Ben's gift is now 1,800.",
+    );
+    const share = (amount: string): ExtractedFact => ({
+      what: `Clara's share for Ben's gift is ${amount}`,
+      when: "N/A",
+      where: "N/A",
+      who: "Clara",
+      why: "N/A",
+      fact_kind: "conversation",
+      fact_type: "world",
+      entities: ["Clara", "Ben"],
+    });
+    await new SessionFactIndex({
+      sql: indexSql,
+      extract: async (batch) =>
+        new Map(
+          batch.map(({ window }) => [
+            window.sha256,
+            [share(window.text.includes("1,800") ? "1,800" : "1,500")],
+          ]),
+        ),
+    }).syncAgent(identity.agent_id);
+    const first = async (time: Record<string, string>) =>
+      (
+        await chunks.searchFacts({
+          ...identity,
+          query: "Clara share gift",
+          ...time,
+        })
+      ).map(({ text }) => text.match(/1,[58]00/u)?.[0]);
+    // Both stay; each time parameter only decides which leads.
+    expect(await first({ as_of: "2026-05-30" })).toEqual(["1,800", "1,500"]);
+    expect(await first({ as_of: "2026-05-25" })).toEqual(["1,500", "1,800"]);
+    expect(
+      await first({ date_from: "2026-05-01", date_to: "2026-05-22" }),
+    ).toEqual(["1,500", "1,800"]);
+    expect(
+      await first({ date_from: "2026-05-26", date_to: "2026-05-31" }),
+    ).toEqual(["1,800", "1,500"]);
+  });
+
   it("keeps Raw candidates identical whether fact recall is on or off", async () => {
     await publishRaw(afternoon);
     await facts.syncAgent(identity.agent_id);

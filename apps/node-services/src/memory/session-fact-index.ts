@@ -5,6 +5,8 @@ import { tokenizeSearchText } from "../bm25.js";
 import { chunkSource, type SourceChunk } from "./search/chunks.js";
 import { RRF_K } from "./search/rrf.js";
 import {
+  AS_OF_WEIGHT,
+  selectLatestOnOrBefore,
   selectWithTemporalCoverage,
   TEMPORAL_POOL_SIZE,
   windowBounds,
@@ -65,8 +67,11 @@ export interface FactSyncResult {
 }
 
 export interface FactSearchInput extends ChunkSearchInput {
+  /** When the asked event happened: a window that votes, never a filter. */
   event_from?: string;
   event_to?: string;
+  /** The day a changing value is asked for: its latest mention on or before it votes. */
+  as_of?: string;
 }
 
 /** One Raw source facts are extracted from, at its active version. */
@@ -404,7 +409,11 @@ export class SessionFactIndex {
     });
   }
 
-  /** Keyword matches, with those inside the event window ranked higher. */
+  /**
+   * Keyword matches, with more votes for facts whose event falls in the event
+   * window, facts recorded in the recorded window, and the latest facts on or
+   * before as_of. No window excludes a fact.
+   */
   async search(
     input: FactSearchInput,
     tokens: readonly string[],
@@ -414,16 +423,18 @@ export class SessionFactIndex {
       ? [...new Set(input.sourceIds)]
       : undefined;
     const query = tokens.join(" | ");
-    const eventWindow = input.event_from || input.event_to;
-    const window = { from: input.event_from, to: input.event_to };
-    const bounds = windowBounds(window);
-    const branch = (order: "lexical" | "event") =>
+    const event = { from: input.event_from, to: input.event_to };
+    const recorded = { from: input.date_from, to: input.date_to };
+    const eventBounds = windowBounds(event);
+    const recordedBounds = windowBounds(recorded);
+    const branch = (order: "lexical" | "event" | "recorded" | "as_of") =>
       this.#sql<FactRow[]>`
         SELECT fact.id AS fact_id, chunk.id AS chunk_id,
           source.document_id, fact.source_sha256,
           ts_rank_cd(fact.search_tsv, to_tsquery('simple', ${query}))::float8 AS score,
           fact.text, fact.fact_type, fact.occurred_start::text,
-          fact.occurred_end::text, fact.mentioned_at, fact.entities
+          fact.occurred_end::text, fact.mentioned_at, fact.entities,
+          version.manifest->>'date' AS source_date
         FROM memory_index.session_facts fact
         JOIN memory_index.sources source
           ON source.id = fact.source_id AND source.active_sha256 = fact.source_sha256
@@ -436,36 +447,57 @@ export class SessionFactIndex {
           AND fact.owner_id = ${input.user_artifact_owner_actor_id}
           AND fact.agent_id = ${input.agent_id}
           AND (${sourceIds === undefined} OR source.document_id = ANY(${sourceIds ?? []}::text[]))
-          AND (${input.date_from ?? null}::text IS NULL OR version.manifest->>'date' >= ${input.date_from ?? null})
-          AND (${input.date_to ?? null}::text IS NULL OR version.manifest->>'date' <= ${input.date_to ?? null})
           AND fact.search_tsv @@ to_tsquery('simple', ${query})
           ${
             order === "event"
               ? // Hindsight's window match: event overlap, or an event edge or the mention inside it.
                 this
-                  .#sql`AND ((fact.occurred_start <= ${bounds.to}::date AND fact.occurred_end >= ${bounds.from}::date)
-                  OR fact.mentioned_at::date BETWEEN ${bounds.from}::date AND ${bounds.to}::date)`
-              : this.#sql``
+                  .#sql`AND ((fact.occurred_start <= ${eventBounds.to}::date AND fact.occurred_end >= ${eventBounds.from}::date)
+                  OR fact.mentioned_at::date BETWEEN ${eventBounds.from}::date AND ${eventBounds.to}::date)`
+              : order === "recorded"
+                ? // Recorded on its source's day, the Human's local date.
+                  this
+                    .#sql`AND version.manifest->>'date' BETWEEN ${recordedBounds.from} AND ${recordedBounds.to}`
+                : order === "as_of"
+                  ? this
+                      .#sql`AND version.manifest->>'date' <= ${input.as_of ?? null}`
+                  : this.#sql``
           }
         ORDER BY score DESC, fact.id
-        LIMIT ${order === "event" ? TEMPORAL_POOL_SIZE : FACT_CANDIDATES}`;
-    const [lexical, event] = await Promise.all([
+        LIMIT ${order === "lexical" ? FACT_CANDIDATES : TEMPORAL_POOL_SIZE}`;
+    const none = Promise.resolve<FactRow[]>([]);
+    const [lexical, inEvent, inRecorded, onOrBefore] = await Promise.all([
       branch("lexical"),
-      eventWindow ? branch("event") : Promise.resolve<FactRow[]>([]),
+      event.from || event.to ? branch("event") : none,
+      recorded.from || recorded.to ? branch("recorded") : none,
+      input.as_of ? branch("as_of") : none,
     ]);
+    const mentionDay = (row: FactRow) =>
+      new Date(row.mentioned_at).toISOString().slice(0, 10);
     const covered = selectWithTemporalCoverage(
+      inEvent,
+      (row) => row.occurred_start ?? mentionDay(row),
       event,
-      (row) =>
-        row.occurred_start ??
-        new Date(row.mentioned_at).toISOString().slice(0, 10),
-      window,
+    );
+    const recordedCovered = selectWithTemporalCoverage(
+      inRecorded,
+      (row) => row.source_date,
+      recorded,
+    );
+    const latest = selectLatestOnOrBefore(onOrBefore, (row) =>
+      new Date(row.mentioned_at).toISOString(),
     );
     // Rank fusion across the fact branches, then one fact per statement.
     const fused = new Map<string, { row: FactRow; score: number }>();
-    for (const rows of [lexical, covered])
+    for (const [rows, weight] of [
+      [lexical, 1],
+      [covered, 1],
+      [recordedCovered, 1],
+      [latest, AS_OF_WEIGHT],
+    ] as const)
       for (const [index, row] of rows.entries()) {
         const current = fused.get(row.fact_id);
-        const vote = 1 / (RRF_K + index + 1);
+        const vote = weight / (RRF_K + index + 1);
         if (current) current.score += vote;
         else fused.set(row.fact_id, { row, score: vote });
       }
@@ -494,6 +526,7 @@ interface FactRow {
   occurred_end: string | null;
   mentioned_at: Date;
   entities: string[];
+  source_date: string;
 }
 
 function factHit(row: FactRow): SessionFactHit {

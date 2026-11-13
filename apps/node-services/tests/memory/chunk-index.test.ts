@@ -117,7 +117,9 @@ describe("Memory chunk ranking", () => {
       candidate("chunk-b", "source-b", 1),
       candidate("chunk-c", "source-c", 1),
     ];
-    const ranked = rankChunkCandidates(lexical, 10, [alternate]);
+    const ranked = rankChunkCandidates(lexical, 10, [
+      { rows: alternate, weight: 1 },
+    ]);
     expect(ranked[0]).toMatchObject({ chunkId: "chunk-b", lexicalRank: 2 });
   });
 

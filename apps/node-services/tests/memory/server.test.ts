@@ -426,9 +426,24 @@ describe("Memory server", () => {
         "memory-token",
       );
       expect(budgets.at(-1)).toBe(14_400);
+      // The time windows, as_of, one list and a later page pass through.
+      const full = {
+        ...body,
+        date_to: "2026-09-30",
+        event_from: "2026-08-01",
+        event_to: "2026-08-31",
+        as_of: "2026-09-15",
+        scope: "originals",
+        page: 2,
+      };
+      expect((await post(full, "memory-token")).status).toBe(200);
+      expect(received.at(-1)).toEqual(full);
       for (const removed of [
         { source: "personal_knowledge" },
         { node_types: ["Session"] },
+        { as_of: "2026-13-01" },
+        { scope: "wiki" },
+        { page: 11 },
       ]) {
         expect(
           await post({ ...body, ...removed }, "memory-token"),

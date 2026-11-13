@@ -62,3 +62,33 @@ export function selectWithTemporalCoverage<T>(
   // Fusion uses rank, so keep the incoming order among the chosen rows.
   return rows.filter((row) => selected.has(row));
 }
+
+/** Relevant candidates an as-of route reorders by recency. */
+export const AS_OF_RELEVANT = 20;
+/**
+ * An as-of route votes twice: it is asked only for a value that changes, and
+ * its candidates are already the most relevant, so recency should decide
+ * between them rather than tie with how often a stale mention repeats words.
+ */
+export const AS_OF_WEIGHT = 2;
+
+/**
+ * The value in effect on a day is its latest mention on or before it: of the
+ * most relevant candidates (best-ranked first, all on or before the day), the
+ * most recent come first, so the last thing said before then leads.
+ */
+export function selectLatestOnOrBefore<T>(
+  rows: readonly T[],
+  dateOf: (row: T) => string | undefined,
+  limit = TEMPORAL_ENTRY_POINTS,
+): T[] {
+  return rows
+    .slice(0, AS_OF_RELEVANT)
+    .map((row, rank) => ({ row, rank, date: dateOf(row) ?? "" }))
+    .sort(
+      (left, right) =>
+        right.date.localeCompare(left.date) || left.rank - right.rank,
+    )
+    .slice(0, limit)
+    .map(({ row }) => row);
+}

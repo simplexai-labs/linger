@@ -18,6 +18,7 @@ import {
   contentHash,
   listRawSourcesForAgent,
   storePocketNoteSource,
+  wikiPageRawSource,
 } from "../../src/memory/search/source-store.js";
 
 // Explicit opt-in to a disposable database that TeamHub migrations created;
@@ -97,7 +98,7 @@ describe.runIf(Boolean(databaseUrl))(
       await indexSql?.end();
     });
 
-    it("finds old keyword evidence beyond 100 sources without relaxing dates or ownership", async () => {
+    it("finds old keyword evidence beyond 100 sources without relaxing ownership", async () => {
       await publish("# Old\n\nUniqueRecallNeedle is 375000.", "2026-01-01");
       for (let i = 0; i < 114; i++)
         await publish(
@@ -122,13 +123,16 @@ describe.runIf(Boolean(databaseUrl))(
       );
       expect(result.matches[0]?.source.id).toBe(old.document_id);
       expect(result.matches[0]?.chunk.content).toContain("375000");
+      // A recorded window that misses the source only adds no vote.
       expect(
-        await index.search({
-          ...identity,
-          query: "UniqueRecallNeedle",
-          date_from: "2026-10-01",
-        }),
-      ).toEqual([]);
+        (
+          await index.search({
+            ...identity,
+            query: "UniqueRecallNeedle",
+            date_from: "2026-10-01",
+          })
+        ).map((match) => match.sourceId),
+      ).toEqual([old.document_id]);
       expect(
         await index.search({
           ...identity,
@@ -205,6 +209,85 @@ describe.runIf(Boolean(databaseUrl))(
       expect(late).toHaveLength(2);
       expect(early[0]).not.toBe(late[0]);
       expect(early[0]).toBe(late[1]);
+    });
+
+    async function titlesFor(input: Record<string, string>, query: string) {
+      const matches = await index.search({ ...identity, query, ...input });
+      const rows = await sql<{ document_id: string; title: string }[]>`
+        SELECT document_id, title FROM memory_index.sources`;
+      const byId = new Map(rows.map((row) => [row.document_id, row.title]));
+      return matches.map((match) => byId.get(match.sourceId));
+    }
+
+    it("ranks keyword matches recorded inside the recorded window first", async () => {
+      await publish("# March\n\nKelpforest budget mail.", "2026-03-02");
+      await publish("# June\n\nKelpforest budget mail.", "2026-06-10");
+      await index.syncAgent(identity.agent_id);
+      const march = await titlesFor(
+        { date_from: "2026-03-01", date_to: "2026-03-31" },
+        "Kelpforest",
+      );
+      const june = await titlesFor(
+        { date_from: "2026-06-01", date_to: "2026-06-30" },
+        "Kelpforest",
+      );
+      // Both stay; the window only decides which leads.
+      expect(march).toHaveLength(2);
+      expect(june).toHaveLength(2);
+      expect(march[0]).not.toBe(june[0]);
+    });
+
+    it("leads with the latest relevant match on or before as_of", async () => {
+      // The October pack repeats the value; the November note restates it once.
+      await publish(
+        "# October pack\n\nQ3 ARR is 27.4M. Q3 ARR grew; Q3 ARR by segment follows.",
+        "2026-10-05",
+      );
+      await publish(
+        "# November note\n\nQ3 ARR restated to 26.9M.",
+        "2026-11-02",
+      );
+      await index.syncAgent(identity.agent_id);
+      const keywords = await titlesFor({}, "Q3 ARR");
+      const now = await titlesFor({ as_of: "2026-11-13" }, "Q3 ARR");
+      const october = await titlesFor({ as_of: "2026-10-31" }, "Q3 ARR");
+      expect(keywords).toHaveLength(2);
+      // Pocket Notes are titled by their day.
+      expect(now).toEqual(["2026-11-02 Pocket Note", "2026-10-05 Pocket Note"]);
+      // A later restatement stays eligible but does not lead an earlier day.
+      expect(october).toEqual([
+        "2026-10-05 Pocket Note",
+        "2026-11-02 Pocket Note",
+      ]);
+    });
+
+    it("dates Session Wiki pages by their Session and leaves other pages out of time votes", async () => {
+      const page = async (pageKey: string, title: string) => {
+        const markdown = `# ${title}\n\nMarlinpoint kickoff decisions.\n`;
+        await index.indexDatabaseSource(
+          wikiPageRawSource({
+            identity,
+            pageKey,
+            title,
+            documentId: `document_${title.toLowerCase()}`,
+            documentVersionId: `version_${title.toLowerCase()}`,
+            publishedAt: "2026-06-15T08:00:00.000Z",
+            revision: "revision_1",
+            markdown,
+          }),
+          markdown,
+        );
+      };
+      await page("projects/marlinpoint.md", "Project");
+      await page("sessions/2026-03-10/kickoff.md", "Session");
+      const window = (from: string, to: string) =>
+        titlesFor({ event_from: from, event_to: to }, "Marlinpoint");
+      // The Session page votes for its March Session, not the June publication.
+      expect((await window("2026-03-01", "2026-03-31"))[0]).toBe("Session");
+      // In June neither page votes, so the order is the keyword order.
+      expect(await window("2026-06-01", "2026-06-30")).toEqual(
+        await titlesFor({}, "Marlinpoint"),
+      );
     });
 
     // One Pocket Note Raw source per business date.

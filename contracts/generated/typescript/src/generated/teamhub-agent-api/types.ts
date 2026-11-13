@@ -1550,7 +1550,7 @@ export interface components {
       alternates?: string[];
       /**
        * Format: date
-       * @description Start of the period the sources were recorded in; ranks matching sources higher and excludes none.
+       * @description Start of the period the asked records were made in, such as mail received in January; ranks sources and facts recorded then higher and excludes none.
        */
       dateFrom?: string;
       /**
@@ -1560,7 +1560,7 @@ export interface components {
       dateTo?: string;
       /**
        * Format: date
-       * @description Inclusive start of when the asked event happened; takes precedence over dateFrom and dateTo and excludes none.
+       * @description Inclusive start of when the asked event happened, whenever it was recorded; ranks facts and sources from that period higher and excludes none.
        */
       eventFrom?: string;
       /**
@@ -1568,6 +1568,11 @@ export interface components {
        * @description Inclusive end of when the asked event happened; pair with eventFrom.
        */
       eventTo?: string;
+      /**
+       * Format: date
+       * @description Day a changing value or state is asked for, today for the current one; its latest mentions on or before that day rank higher and later ones remain.
+       */
+      asOf?: string;
       /**
        * @description Return only one list with the whole result size, summaries (Wiki pages and Daily/Weekly reports) or originals (conversations, recordings, mail, documents, notes, the Profile). Omit to get both.
        * @enum {string}

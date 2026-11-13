@@ -2004,10 +2004,13 @@ type PersonalKnowledgeQueryRequest struct {
 	// Alternates Synonyms and translations searched beside the query; each ranks keywords separately.
 	Alternates *[]string `json:"alternates,omitempty"`
 
-	// DateFrom Optional inclusive lower bound for evidence dates.
+	// AsOf Optional day a changing value or state is asked for, such as today for the current one. Its latest mentions on or before that day rank higher; later ones remain eligible.
+	AsOf *openapi_types.Date `json:"as_of,omitempty"`
+
+	// DateFrom Optional inclusive start of when the asked records were made, the source's local date. It ranks sources and facts recorded in that period higher and excludes none.
 	DateFrom *openapi_types.Date `json:"date_from,omitempty"`
 
-	// DateTo Optional inclusive upper bound for evidence dates.
+	// DateTo Optional inclusive end of when the asked records were made; see date_from.
 	DateTo *openapi_types.Date `json:"date_to,omitempty"`
 
 	// EventFrom Optional inclusive start of the time the asked event happened. It ranks Session facts in that period higher and never filters by source date, so later mentions of earlier events remain eligible.

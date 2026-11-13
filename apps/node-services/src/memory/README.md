@@ -250,24 +250,27 @@ projection. Raw is checked by Tenant, Human, Agent and content hash; publishing 
 original-text queries do not depend on the graph. `memory-state/raw/` is the current original-text storage path, not
 old graph data; cleaning old graphs must keep it and all Memory and Wiki bodies.
 
-A Raw Chunk query deduplicates by immutable Raw source and returns at most 20 items; `dateFrom/dateTo` compare the
-source's business date, not the date of the events the text describes. For "the chats of some month" use the source
-date filter; for "what was done in some month" search by entity and action and verify the event time from the
-original text, which lets later records recount past events. Relative event times resolve against the date of the
-source they appear in, and an explicit historical cutoff still applies.
-A query may also pass `event_from/event_to` (the time range of interest): following Hindsight's temporal window, it
-is one weighted recall channel and filters no source. A fact matches when its event interval overlaps the window or
-its mention time falls inside it; an original Chunk matches by source date; both must also match the query keywords.
-The channel takes at most 60 by `ts_rank_cd`, then picks 10 round-robin over 8 time buckets so no single day fills
-it. TeamHub merges the Agent's `dateFrom/dateTo` and `eventFrom/eventTo` into this one soft window (the event range
-first) and sends Memory no hard filter; `date_from/date_to` remain for other callers.
-The Agent's time parameters only weight and never exclude: in LongMemEval the model writes the current date into the
-source filter almost every time, and a hard filter would exclude the earlier conversation that holds the answer.
-The soft window also requires the query itself to mention time (as Hindsight extracts time from the question text):
-when the query has no time expression such as "last week", "last month", "2023" or "October 3", Memory ignores
-`event_from/event_to` and uses only the keyword channels. The model often fills in the current date or
-`0001-01-01~9999-12-31` on every search, and this check does not rely on the model behaving; the tool description
-asks it to keep time words in the query when the question mentions time.
+A Raw Chunk query deduplicates by immutable Raw source and returns at most 20 items. Three kinds of time can come
+with a query, and each is one more weighted recall channel that filters no source (following Hindsight's temporal
+window); all of them also require the query keywords:
+
+- `event_from/event_to`, when the asked event happened: a fact votes when its event interval overlaps the window or
+  its mention time falls inside it; an original Chunk votes by its source date.
+- `date_from/date_to`, when the asked records were made (mail received in January, Monday's meeting): a Chunk or a
+  fact votes when its source's local date falls inside the window.
+- `as_of`, the day a changing value or state is asked for (today for the current one): of the 20 most relevant
+  matches on or before that day, the 10 most recent vote, so the last thing said before then leads; later mentions
+  stay eligible through the keyword channels.
+
+A window channel takes at most 60 by `ts_rank_cd`, then picks 10 round-robin over 8 time buckets so no single day
+fills it. Each wording (the query and each alternate) runs its own time channels. A Wiki page other than a Session
+page is dated by the Wiki's publication, not by what it is about, so no time channel takes it; a Session page
+(`sessions/<date>/<session>.md`) is dated by its Session. TeamHub forwards the Agent's `dateFrom/dateTo`,
+`eventFrom/eventTo` and `asOf` unchanged. None of them excludes a source: in LongMemEval the model writes the current
+date into a time parameter almost every time, and a filter would exclude the earlier conversation that holds the
+answer. For "what was done in some month" search by entity and action and verify the event time from the original
+text, which lets later records recount past events. Relative event times resolve against the date of the source they
+appear in, and an explicit historical cutoff still applies.
 
 Raw and Wiki queries may also pass `alternates`: at most 6 synonymous wordings or translations, each at most 200
 characters. Each wording runs its own keyword search in parallel with the query and votes as its own RRF list, so a
