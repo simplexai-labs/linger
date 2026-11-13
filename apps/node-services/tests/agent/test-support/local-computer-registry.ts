@@ -1,4 +1,7 @@
-import type { RuntimeDiagnostics } from "@linger/wire-contracts/runner-gateway/types";
+import type {
+  LocalModelsSnapshot,
+  RuntimeDiagnostics,
+} from "@linger/wire-contracts/runner-gateway/types";
 
 import type { LocalRuntimeType } from "../../../src/agent/runner-gateway/local-computer-management.js";
 import {
@@ -42,6 +45,8 @@ export interface TestLocalComputerRegistry extends LocalComputerRegistry {
   unplace(agentId: string): void;
   recorded(computerId: string): TestRecordedLocalComputer | undefined;
   list(owner: LocalComputerOwner): readonly TestRecordedLocalComputer[];
+  /** Every model library snapshot recorded for the Computer, oldest first. */
+  localModels(computerId: string): readonly LocalModelsSnapshot[];
 }
 
 const registries = new Map<string, TestLocalComputerRegistry>();
@@ -63,6 +68,7 @@ export function createTestLocalComputerRegistry(
     string,
     { computerId: string; placement: RunnerPlacement }
   >();
+  const localModels = new Map<string, LocalModelsSnapshot[]>();
   const owns = (
     computer: TestRecordedLocalComputer,
     owner: LocalComputerOwner,
@@ -142,6 +148,14 @@ export function createTestLocalComputerRegistry(
       if (touch.daemonVersion) computer.daemonVersion = touch.daemonVersion;
       if (touch.recommendedVersion)
         computer.recommendedVersion = touch.recommendedVersion;
+    },
+    async recordLocalModels(computerId, snapshot) {
+      const recorded = localModels.get(computerId) ?? [];
+      recorded.push(structuredClone(snapshot));
+      localModels.set(computerId, recorded);
+    },
+    localModels(computerId) {
+      return localModels.get(computerId) ?? [];
     },
     async remove({ computerId, ...owner }) {
       const computer = computers.get(computerId);

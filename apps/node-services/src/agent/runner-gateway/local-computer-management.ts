@@ -1,5 +1,9 @@
 import type { RuntimeExecutionFailure } from "../executor/provider.js";
 import type {
+  LocalModelActionAck,
+  LocalModelActionCommand,
+} from "./runner-local-models.js";
+import type {
   BrowserConnectionStatus,
   ComputerPermissionStatus,
 } from "@linger/wire-contracts/runner-gateway/types";
@@ -126,6 +130,10 @@ export interface LocalComputerManagement {
   computerPermissions?(
     command: LocalComputerPermissionCommand,
   ): Promise<LocalComputerPermissionStatus>;
+
+  actOnLocalModels?(
+    command: LocalModelActionCommand,
+  ): Promise<LocalModelActionAck>;
 
   /** Returns the placed model as the connected Computer reports it. */
   requireLocalPlacement(

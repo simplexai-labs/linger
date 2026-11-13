@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type {
+  LocalModelsSnapshot,
   RunnerHello,
   RuntimeDiagnostics,
 } from "@linger/wire-contracts/runner-gateway/types";
@@ -74,6 +75,11 @@ export interface LocalComputerRegistry {
     connection: LocalComputerConnection,
   ): Promise<readonly RunnerPlacement[]>;
   touch(computerId: string, touch: LocalComputerTouch): Promise<void>;
+  /** Replaces the Computer's stored model library with its latest snapshot. */
+  recordLocalModels(
+    computerId: string,
+    snapshot: LocalModelsSnapshot,
+  ): Promise<void>;
   remove(
     input: LocalComputerOwner & { readonly computerId: string },
   ): Promise<LocalComputerRemovalResult>;
@@ -86,6 +92,7 @@ export const createTeamHubLocalComputerRegistry = (
     | "connectLocalComputer"
     | "touchLocalComputer"
     | "removeLocalComputer"
+    | "recordLocalModels"
   >,
 ): LocalComputerRegistry => ({
   async credentialGeneration(computerId, owner) {
@@ -163,6 +170,12 @@ export const createTeamHubLocalComputerRegistry = (
       ...(touch.recommendedVersion === undefined
         ? {}
         : { recommended_version: touch.recommendedVersion }),
+    });
+  },
+  async recordLocalModels(computerId, snapshot) {
+    await client.recordLocalModels({
+      computer_id: computerId,
+      snapshot: structuredClone(snapshot),
     });
   },
   async remove({ computerId, tenantId, ownerActorId }) {

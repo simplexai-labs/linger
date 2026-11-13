@@ -13,6 +13,10 @@ import {
   type LocalComputerPermissionCommand,
   type LocalComputerManagement,
 } from "../../runner-gateway/local-computer-management.js";
+import {
+  LocalModelsActionTimeoutError,
+  type LocalModelActionCommand,
+} from "../../runner-gateway/runner-local-models.js";
 import { isRecord } from "@linger/service-kit";
 
 type LocalComputerHttpStatus = 400 | 404 | 405 | 409 | 410 | 502 | 503;
@@ -42,6 +46,7 @@ export interface LocalComputerRouteHandlers {
   ): Promise<Response> | Response;
   getLocalComputerPermissions(context: Context): Promise<Response> | Response;
   actOnLocalComputerPermission(context: Context): Promise<Response> | Response;
+  actOnLocalComputerModels(context: Context): Promise<Response> | Response;
 }
 
 export const createLocalComputerRouteHandlers = (options: {
@@ -176,6 +181,41 @@ export const createLocalComputerRouteHandlers = (options: {
       context,
       parseComputerPermissionAction(await options.readJsonBody(context)),
     ),
+  actOnLocalComputerModels: async (context) => {
+    const management = requireLocalComputerManagement(
+      options.localComputerManagement,
+    );
+    if (!management.actOnLocalModels) {
+      throw new LocalComputerHttpError(
+        503,
+        "LOCAL_MODELS_UNAVAILABLE",
+        "Local models are unavailable",
+      );
+    }
+    const body = parseLocalModelActionCommand(
+      await options.readJsonBody(context),
+    );
+    try {
+      const ack = await management.actOnLocalModels({
+        tenantId: options.pathId(context, "tenantId"),
+        ownerActorId: options.pathId(context, "ownerActorId"),
+        computerId: options.pathId(context, "computerId"),
+        action: body.action,
+        ...(body.model_id === undefined ? {} : { modelId: body.model_id }),
+        ...(body.unload_first === undefined
+          ? {}
+          : { unloadFirst: body.unload_first }),
+        expiresAt: body.expires_at,
+        signal: context.req.raw.signal,
+      });
+      return writeJson(context, 200, {
+        request_id: body.request_id,
+        ...ack,
+      });
+    } catch (error) {
+      throw localModelsRequestError(error);
+    }
+  },
 });
 
 const computerPermissions = async (
@@ -229,6 +269,109 @@ export const registerLocalComputerPermissionRoutes = (
   app.get(path, handlers.getLocalComputerPermissions);
   app.post(path, handlers.actOnLocalComputerPermission);
   app.all(path, (context) => methodNotAllowed(context, "GET, POST"));
+};
+
+/**
+ * Mounts the local-models action route next to the generated Agent
+ * management routes, which do not own this path yet.
+ */
+export const registerLocalComputerModelRoutes = (
+  app: Hono,
+  handlers: Pick<LocalComputerRouteHandlers, "actOnLocalComputerModels">,
+): void => {
+  const path =
+    "/v1/tenants/:tenantId/owners/:ownerActorId/local-computers/:computerId/local-model-actions";
+  app.post(path, handlers.actOnLocalComputerModels);
+  app.all(path, (context) => methodNotAllowed(context, "POST"));
+};
+
+const LOCAL_MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
+const LOCAL_MODEL_ACTIONS: ReadonlySet<unknown> = new Set([
+  "download",
+  "cancel",
+  "load",
+  "unload",
+  "remove",
+  "refresh",
+]);
+
+const isLocalModelId = (value: unknown): value is string =>
+  typeof value === "string" && LOCAL_MODEL_ID_PATTERN.test(value);
+
+const parseLocalModelActionCommand = (value: unknown) => {
+  const unloadFirst = isRecord(value) ? value.unload_first : undefined;
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some(
+      (key) =>
+        ![
+          "request_id",
+          "action",
+          "model_id",
+          "unload_first",
+          "expires_at",
+        ].includes(key),
+    ) ||
+    !isProtocolId(value.request_id) ||
+    !LOCAL_MODEL_ACTIONS.has(value.action) ||
+    !isTimestamp(value.expires_at) ||
+    // refresh names no model; every other action names one.
+    (value.action === "refresh") !== (value.model_id === undefined) ||
+    (value.model_id !== undefined && !isLocalModelId(value.model_id)) ||
+    (unloadFirst !== undefined &&
+      (value.action !== "load" ||
+        !Array.isArray(unloadFirst) ||
+        unloadFirst.length > 64 ||
+        !unloadFirst.every(isLocalModelId) ||
+        new Set(unloadFirst).size !== unloadFirst.length))
+  ) {
+    throw new LocalComputerHttpError(
+      400,
+      "INVALID_LOCAL_MODEL_ACTION",
+      "Local model action is invalid",
+    );
+  }
+  return value as {
+    readonly request_id: string;
+    readonly action: LocalModelActionCommand["action"];
+    readonly model_id?: string;
+    readonly unload_first?: readonly string[];
+    readonly expires_at: string;
+  };
+};
+
+const localModelsRequestError = (error: unknown): Error => {
+  if (error instanceof LocalComputerNotFoundError) {
+    return new LocalComputerHttpError(
+      404,
+      "LOCAL_COMPUTER_NOT_FOUND",
+      error.message,
+    );
+  }
+  if (error instanceof LocalComputerOfflineError) {
+    return new LocalComputerHttpError(
+      503,
+      "LOCAL_COMPUTER_OFFLINE",
+      error.message,
+    );
+  }
+  if (error instanceof LocalComputerCapabilityError) {
+    return new LocalComputerHttpError(
+      409,
+      "LOCAL_MODELS_UNSUPPORTED",
+      error.message,
+    );
+  }
+  if (error instanceof LocalModelsActionTimeoutError) {
+    return new LocalComputerHttpError(
+      503,
+      "LOCAL_MODELS_ACTION_TIMEOUT",
+      error.message,
+    );
+  }
+  return error instanceof Error
+    ? error
+    : new Error("Local models action failed");
 };
 
 const browserConnection = async (

@@ -52,6 +52,11 @@ import {
 } from "./runner-gateway-context.js";
 import { type RunnerGatewayPrincipal } from "./runner-gateway-principal.js";
 import { RunnerLocalCapabilities } from "./runner-local-capabilities.js";
+import {
+  RunnerLocalModels,
+  type LocalModelActionAck,
+  type LocalModelActionCommand,
+} from "./runner-local-models.js";
 import { RunnerOperationPreparation } from "./runner-operation-preparation.js";
 import type {
   RunnerCapacityPermit,
@@ -142,6 +147,7 @@ export class RunnerGateway
   readonly #modelInvocation: RunnerModelInvocation;
   readonly #queue: ModelQueue;
   readonly #computerTools: RunnerComputerTools;
+  readonly #localModels: RunnerLocalModels;
   constructor(options: RunnerGatewayOptions) {
     const context = createRunnerGatewayContext(options);
     const owners: RunnerGatewayControllers = {
@@ -156,6 +162,7 @@ export class RunnerGateway
       modelInvocation: () => this.#modelInvocation,
       queue: () => this.#queue,
       computerTools: () => this.#computerTools,
+      localModels: () => this.#localModels,
       contextViewContent: () => this.contextViewContent,
     };
     this.#connections = new RunnerConnections(context, owners);
@@ -173,6 +180,7 @@ export class RunnerGateway
       ),
     );
     this.#computerTools = new RunnerComputerTools(context, owners);
+    this.#localModels = new RunnerLocalModels(context, owners);
     validateRunnerGatewayContext(context);
     if (options.contextContent) {
       this.contextViewContent = createContextViewContent({
@@ -315,6 +323,12 @@ export class RunnerGateway
     command: LocalSkillScanCommand,
   ): Promise<LocalSkillScanResult> {
     return this.#capabilities.scanLocalSkills(command);
+  }
+
+  async actOnLocalModels(
+    command: LocalModelActionCommand,
+  ): Promise<LocalModelActionAck> {
+    return this.#localModels.act(command);
   }
 
   async runLocalComputerMutation<T>(

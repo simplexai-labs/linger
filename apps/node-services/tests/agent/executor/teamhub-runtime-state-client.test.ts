@@ -151,6 +151,31 @@ describe("TeamHubRuntimeStateClient retries", () => {
     },
   );
 
+  it("records a Computer's model library and accepts TeamHub's empty answer", async () => {
+    const fetchRequest = vi.fn<typeof fetch>(
+      async () => new Response(null, { status: 204 }),
+    );
+    const body = {
+      computer_id: "runner-local",
+      snapshot: {
+        available: false,
+        reason: { code: "TOOL_NOT_INSTALLED" as const },
+        observed_at: "2026-11-13T10:00:00.000Z",
+        pools: [],
+        models: [],
+      },
+    };
+    await expect(
+      runtimeStateClient(fetchRequest).recordLocalModels(body),
+    ).resolves.toBeUndefined();
+    const [input, init] = fetchRequest.mock.calls[0]!;
+    expect(new URL(requestUrlText(input)).pathname).toBe(
+      "/v0/agent-runtime/local-computers/local-models",
+    );
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual(body);
+  });
+
   it("posts a bounded Context reconciliation page", async () => {
     const fetchRequest = vi.fn().mockResolvedValue(
       jsonResponse({

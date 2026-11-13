@@ -101,6 +101,21 @@ take precedence.
   service-wide native home or shared app-server, E2B, or the Kubernetes cloud
   sandbox. Every Agent registration, update, and stored Ghost carries a Local
   placement; one without it is rejected.
+- A Computer's model library is the Daemon's; Agent Service stores none of it
+  (`runner-gateway/runner-local-models.ts`). It records each
+  `runner.local_models` snapshot in TeamHub (`recordAgentRuntimeLocalModels`),
+  drops a revision at or below the connection's last, and keeps one snapshot
+  per Computer in flight, sending only the newest after it, so TeamHub never
+  stores an older one last. A failed record is logged, the connection stays,
+  and the unsaved snapshot is written again after a backoff of 1 to 60
+  seconds (at once when a newer one arrives) until TeamHub stores it or
+  answers that it never will (a 4xx). `actOnLocalComputerModels` sends `execute` `local_models` only to a
+  connection that has reported a library (an older Daemon would treat the
+  command as a protocol error), and answers with the Computer's
+  accept or refusal, `LOCAL_MODELS_ACTION_TIMEOUT` past the command's
+  `expires_at` (at most 30 seconds; the Daemon never answers after that
+  deadline, so the outcome is unknown, not refused), or
+  `LOCAL_COMPUTER_OFFLINE`.
 - Default unit, integration, and fixture smoke tests use deterministic adapters
   and do not call a live model provider. Explicitly named live suites such as
   `smoke:local-runner:live` may use an authenticated provider and must remain
