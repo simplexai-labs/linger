@@ -8,6 +8,12 @@ import {
 } from "@/features/rooms/runtime-status/runtime-tool-presentation";
 
 import { MessageMarkdown } from "@/features/rooms/chat/message-markdown";
+import { TaskActivityBlock } from "@/features/rooms/runtime-status/task-activity-block";
+import {
+  parseTaskCommand,
+  taskIdFromOutput,
+  type TaskCommand,
+} from "@/features/rooms/runtime-status/task-command";
 import type { TeamHubMessageActivityRecord } from "@/features/teamhub/teamhub-types";
 
 type HistoryCategory = TeamHubMessageActivityRecord["category"];
@@ -37,6 +43,12 @@ export function RuntimeHistoryView({
       {items.map((item) =>
         item.kind === "tool_calls" ? (
           <RuntimeToolCallsActivity calls={item.calls} key={item.key} />
+        ) : item.kind === "task" ? (
+          <TaskActivityBlock
+            command={item.command}
+            key={item.key}
+            taskId={item.taskId}
+          />
         ) : (
           <RuntimeActivityRecord key={item.key} record={item.record} />
         ),
@@ -52,6 +64,7 @@ interface ActivityToolCall {
 
 type ActivityTimelineItem =
   | { calls: ActivityToolCall[]; key: string; kind: "tool_calls" }
+  | { command: TaskCommand; key: string; kind: "task"; taskId?: string }
   | {
       kind: "record";
       key: string;
@@ -64,6 +77,8 @@ function activityTimelineItems(
 ): ActivityTimelineItem[] {
   const items: ActivityTimelineItem[] = [];
   const thinkingTitles = new Set<string>();
+  // Later steps name a Task only by id; reuse the name it was created with.
+  const taskNames = new Map<string, string>();
   for (const source of records.flatMap(claudeActivityRecords)) {
     let record = source;
     if (record.native_type === "event_msg.mcp_tool_call_end") {
@@ -74,7 +89,11 @@ function activityTimelineItems(
         tool_name: toolNameLabel(stringValue(invocation?.tool) ?? "Tool call"),
       };
     } else if (record.category === "tool_call") {
-      if (record.tool_name === "exec") continue;
+      if (
+        record.tool_name === "exec" &&
+        !parseTaskCommand(nativeCommand(record) ?? "")
+      )
+        continue;
     } else if (record.category === "reasoning") {
       const summary = reasoningText(record);
       if (!summary?.trim()) continue;
@@ -93,6 +112,24 @@ function activityTimelineItems(
     const pair = record.tool_call_id
       ? callPairs.get(record.tool_call_id)
       : undefined;
+    const taskCommand =
+      record.category === "tool_call"
+        ? parseTaskCommand(nativeCommand(record) ?? "")
+        : undefined;
+    if (taskCommand) {
+      const taskId =
+        taskCommand.taskId ??
+        taskIdFromOutput(pair?.result && nativeOutput(pair.result));
+      if (taskId && taskCommand.name) taskNames.set(taskId, taskCommand.name);
+      const name = taskCommand.name ?? (taskId && taskNames.get(taskId));
+      items.push({
+        command: name ? { ...taskCommand, name } : taskCommand,
+        key: `task-${record.ordinal}-${items.length}`,
+        kind: "task",
+        taskId,
+      });
+      continue;
+    }
     if (record.category !== "tool_call") {
       items.push({
         kind: "record",
@@ -193,6 +230,41 @@ function RuntimeActivityRecord({
       />
     </li>
   );
+}
+
+/** The shell command a native tool call ran, for any Runtime's shape. */
+function nativeCommand(record: TeamHubMessageActivityRecord) {
+  const payload = nativePayload(record);
+  const block = nativeContentBlock(record, payload);
+  const input =
+    asObject(block?.input) ?? parseObject(payload?.arguments) ?? payload;
+  const command = input?.cmd ?? input?.command;
+  if (typeof command === "string") return command;
+  if (Array.isArray(command)) return command.filter(isString).join(" ");
+  return undefined;
+}
+
+function nativeOutput(record: TeamHubMessageActivityRecord) {
+  const payload = nativePayload(record);
+  const block = nativeContentBlock(record, payload);
+  return (
+    stringValue(payload?.output) ??
+    textContent(block?.content) ??
+    textContent(payload?.content)
+  );
+}
+
+function parseObject(value: unknown) {
+  if (typeof value !== "string") return asObject(value);
+  try {
+    return asObject(JSON.parse(value));
+  } catch {
+    return undefined;
+  }
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
 }
 
 function activityMessageText(record: TeamHubMessageActivityRecord) {

@@ -22,6 +22,8 @@ import {
   type RuntimeActivityPathToolCall,
 } from "./runtime-activity-path";
 import { RuntimeActivityEntries } from "./runtime-activity-entries";
+import { TaskActivityBlock } from "./task-activity-block";
+import { parseTaskCommand, taskIdFromOutput } from "./task-command";
 import {
   toolGroupPresentation,
   toolPresentation,
@@ -213,6 +215,19 @@ function RuntimeActivityPathRow({ item }: { item: RuntimeActivityPathItem }) {
     );
   }
   if (item.kind === "command") {
+    const taskCommand = parseTaskCommand(commandText(item.entries));
+    if (taskCommand) {
+      return (
+        <TaskActivityBlock
+          active={item.active}
+          command={taskCommand}
+          failed={item.outcome === "failed"}
+          taskId={
+            taskCommand.taskId ?? taskIdFromOutput(outputText(item.entries))
+          }
+        />
+      );
+    }
     const presentation = toolPresentation("command");
     return (
       <ActivitySummaryRow
@@ -508,4 +523,34 @@ function ActiveMark() {
       <span />
     </span>
   );
+}
+
+/** The command line a command Activity ran, from its first code or JSON block. */
+function commandText(entries: RuntimeActivityPathToolCall["entries"]) {
+  const block = entries.find(
+    (entry) =>
+      entry.type === "content" &&
+      (entry.block.format === "code" || entry.block.format === "json"),
+  );
+  if (block?.type !== "content") return "";
+  if (block.block.format === "code") return block.block.content;
+  try {
+    const input = JSON.parse(block.block.content) as {
+      cmd?: unknown;
+      command?: unknown;
+    };
+    const command = input.cmd ?? input.command;
+    if (typeof command === "string") return command;
+    if (Array.isArray(command)) return command.join(" ");
+  } catch {
+    // An unreadable input is not a Task command.
+  }
+  return "";
+}
+
+/** Every block the Activity carried; the CLI receipt is among them. */
+function outputText(entries: RuntimeActivityPathToolCall["entries"]) {
+  return entries
+    .map((entry) => (entry.type === "content" ? entry.block.content : ""))
+    .join("\n");
 }
