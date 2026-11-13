@@ -12,8 +12,6 @@
   padding: 0 6px;
   border: 0;
   border-radius: 8px;
-  background: transparent;
-  color: var(--app-muted);
   font-size: 12px;
   font-weight: 470;
   line-height: 1;
@@ -22,11 +20,6 @@
     background-color 150ms ease,
     color 150ms ease,
     transform 150ms cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-.agent-model-switch-trigger:hover {
-  background: hsl(var(--town-accent));
-  color: var(--app-ink);
 }
 
 .agent-model-switch-trigger:active {

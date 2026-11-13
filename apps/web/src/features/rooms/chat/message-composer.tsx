@@ -1278,12 +1278,12 @@ function ComposerToolbar({
   return (
     <div className="message-composer-toolbar mt-1.5 flex min-h-7 items-center justify-between gap-3">
       {hasLeftTools ? (
-        <div className="message-composer-toolbar-left flex min-w-0 items-center gap-0.5">
+        <div className="message-composer-toolbar-left flex min-w-0 items-center gap-2">
           {showAttach ? (
             <>
               <Button
                 aria-label="Attach file"
-                className="composer-attach-button text-app-muted"
+                className="composer-attach-button"
                 disabled={disabled}
                 onClick={() => fileInputRef.current?.click()}
                 size="compactIcon"

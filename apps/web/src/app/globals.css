@@ -2521,17 +2521,18 @@ a[href][aria-disabled="true"],
   }
 }
 
+/* The composer reads as a chat card: same border, surface and shadow. */
 .message-composer-box {
-  border: 0;
+  border: 1px solid var(--app-border);
   border-radius: var(--composer-radius);
-  background: hsl(var(--town-background));
+  background: var(--color-card);
   padding: 8px;
-  box-shadow: var(--composer-shadow);
-  transition: box-shadow var(--app-micro-duration) var(--app-emphasized-curve);
+  box-shadow: var(--chat-card-shadow);
+  transition: border-color var(--app-micro-duration) var(--app-emphasized-curve);
 }
 
 .message-composer-box:focus-within {
-  box-shadow: var(--composer-shadow-focus);
+  border-color: var(--app-border-strong);
 }
 
 /*
@@ -2543,6 +2544,7 @@ a[href][aria-disabled="true"],
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  border-color: transparent;
   background: transparent;
   box-shadow: none;
 }
@@ -2571,13 +2573,18 @@ a[href][aria-disabled="true"],
   border-radius: var(--composer-action-radius);
 }
 
-.composer-attach-button {
-  background: transparent;
-  color: var(--composer-action-icon);
+/* Composer toolbar controls (attach, model switch) share one look: a soft
+   secondary fill with muted text that darkens on hover. */
+.composer-attach-button,
+.agent-model-switch-trigger {
+  background: var(--composer-action-surface);
+  color: var(--app-muted);
 }
 
-.composer-attach-button:hover {
+.composer-attach-button:hover,
+.agent-model-switch-trigger:hover {
   background: var(--composer-action-hover);
+  color: var(--app-ink);
 }
 
 .message-composer-send {

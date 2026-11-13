@@ -123,9 +123,8 @@
   --message-hover-shadow-color: rgba(0, 0, 0, 0.04);
   --composer-line: hsl(var(--town-border));
   --composer-surface: hsl(var(--town-card));
-  --composer-action-surface: hsl(var(--town-muted));
-  --composer-action-hover: hsl(var(--town-accent));
-  --composer-action-icon: hsl(var(--town-muted-foreground));
+  --composer-action-surface: hsl(var(--town-secondary));
+  --composer-action-hover: hsl(var(--town-primary) / 0.09);
   --composer-send: hsl(var(--town-primary));
   --composer-send-hover: hsl(var(--town-primary) / 0.9);
   /* File-type tints come from the Town nature palette. */
