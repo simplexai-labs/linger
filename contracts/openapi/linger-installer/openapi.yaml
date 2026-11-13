@@ -880,6 +880,13 @@ components:
           type: number
           minimum: 0
         unit: *a1
+        bytesPerSecond:
+          type: number
+          minimum: 0
+          description: The current download rate, when the source reports one.
+        partial:
+          type: boolean
+          description: The counter covers only the file downloading now, not the whole download, so it gives no remaining amount.
     RuntimeLogin:
       type: object
       additionalProperties: false

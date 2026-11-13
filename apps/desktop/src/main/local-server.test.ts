@@ -78,6 +78,12 @@ if (args.includes("--inspect")) {
   const estimate = eligible
     ? { model: fs.existsSync(path.join(home, "unnamed-model")) ? "" : "qwen3-8b", downloadBytes: 6 * 1024 ** 3, diskBytes: 8 * 1024 ** 3, memoryBytes: 12 * 1024 ** 3 }
     : { model: "", downloadBytes: null, diskBytes: null, memoryBytes: null };
+  if (fs.existsSync(path.join(home, "tool-download"))) {
+    // The first check downloads the localmodels tool, counted before the report.
+    process.stdout.write(JSON.stringify({ event: "download", completed: 5, total: 10 }) + "\n");
+    while (!fs.existsSync(path.join(home, "tool-ready")))
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  }
   process.stderr.write("Checked this computer in 1.5s.\n");
   const reasons = eligible ? [] : ["facts-unavailable"];
   const reasonMessages = eligible ? [] : ["nvidia-smi was not found"];
@@ -1270,6 +1276,28 @@ describe("LocalServerModule", () => {
     info.mockRestore();
   });
 
+  it("counts the localmodels tool download while checking", async () => {
+    const f = fixture({ checkout: "/src" }, {}, (home) => {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(path.join(home, "tool-download"), "");
+    });
+    await f.host.start();
+    f.module.inspect();
+    await vi.waitFor(() =>
+      expect(f.module.status().localModels).toEqual({
+        state: "checking",
+        download: { completed: 5, total: 10 },
+      }),
+    );
+    writeFileSync(path.join(f.home, "tool-ready"), "");
+    await vi.waitFor(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+        recommendation: "local-models",
+      }),
+    );
+  });
+
   it("does not recommend a local model it cannot name", async () => {
     const f = fixture({ checkout: "/src" }, {}, (home) => {
       mkdirSync(home, { recursive: true });
@@ -1465,6 +1493,48 @@ describe("LocalServerModule", () => {
     // Services are the second of five steps without a download; half ready
     // is 1/5 + 0.625/5.
     expect(seen).toContain(0.325);
+    await f.host.stop("quit");
+  });
+
+  it("shows the local model download the installer counts", async () => {
+    const f = fixture(
+      withCheckout,
+      {},
+      checkout,
+      installerApi([], undefined, undefined, {
+        state: "running",
+        stage: "runtime",
+        message: "Downloading the local model…",
+        stages: [
+          {
+            id: "runtime",
+            state: "running",
+            progress: {
+              completed: 4,
+              total: 10,
+              unit: "bytes",
+              bytesPerSecond: 2,
+              partial: true,
+            },
+          },
+        ],
+      }),
+    );
+    await f.host.start();
+    const seen: unknown[] = [];
+    f.host.ctx.bus.on("local-server.changed", () =>
+      seen.push(f.module.status().transfer),
+    );
+    await f.module.begin();
+    expect(seen).toContainEqual({
+      label: "Downloading the local model…",
+      completed: 4,
+      total: 10,
+      bytesPerSecond: 2,
+      partial: true,
+    });
+    // Done, nothing downloads.
+    expect(f.module.status().transfer).toBeUndefined();
     await f.host.stop("quit");
   });
 

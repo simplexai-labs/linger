@@ -11,7 +11,15 @@ export interface InstallerEvent {
   stage?: InstallStage;
   state?: "running" | "succeeded" | "failed" | "skipped" | "waiting_user";
   message: string;
-  progress?: { completed: number; total?: number; unit: string };
+  progress?: {
+    completed: number;
+    total?: number;
+    unit: string;
+    // The current download rate, when the source reports one.
+    bytesPerSecond?: number;
+    // Counts only the file downloading now, not the whole download.
+    partial?: boolean;
+  };
 }
 export interface InstallObserver {
   interactive?: boolean;

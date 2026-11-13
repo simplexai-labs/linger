@@ -117,11 +117,13 @@ async function resume(options: ReturnType<typeof parseInstallerArguments>) {
   );
 }
 // Headless check of this computer for the desktop client: the setup report
-// as one JSON line on stdout.
+// as the last JSON line on stdout. Before it, {"event":"download"} lines
+// count the bytes while the check first downloads the localmodels tool.
 async function inspect(options: ReturnType<typeof parseInstallerArguments>) {
   const { inspectSetup } =
     await import("@linger/local-installation/setup-plan");
   const startedAt = Date.now();
+  let counted = 0;
   // The desktop logs stderr, so a slow check says which part was slow.
   const report = await inspectSetup({
     home: options.home,
@@ -129,6 +131,19 @@ async function inspect(options: ReturnType<typeof parseInstallerArguments>) {
     onEvent: (event) => {
       if (event.kind === "log")
         process.stderr.write(event.message.replace(/\n?$/, "\n"));
+      const progress = event.progress;
+      if (event.kind !== "stage" || progress?.unit !== "bytes") return;
+      // A download reports every chunk; a few lines a second are enough.
+      const done = progress.total === progress.completed;
+      if (!done && Date.now() - counted < 250) return;
+      counted = Date.now();
+      process.stdout.write(
+        `${JSON.stringify({
+          event: "download",
+          completed: progress.completed,
+          ...(progress.total ? { total: progress.total } : {}),
+        })}\n`,
+      );
     },
   }).catch(() => null);
   process.stderr.write(

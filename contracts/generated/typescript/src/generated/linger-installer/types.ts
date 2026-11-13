@@ -514,6 +514,10 @@ export interface components {
       completed: number;
       total?: number;
       unit: string;
+      /** @description The current download rate, when the source reports one. */
+      bytesPerSecond?: number;
+      /** @description The counter covers only the file downloading now, not the whole download, so it gives no remaining amount. */
+      partial?: boolean;
     };
     RuntimeLogin: {
       /** @enum {string} */

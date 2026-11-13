@@ -1,4 +1,4 @@
-import { expect, test, afterEach } from "vitest";
+import { expect, test, afterEach, vi } from "vitest";
 import { mkdtemp, rm, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -576,4 +576,34 @@ test("chunk progress replaces the previous update and keeps the log lines", asyn
   const loaded = new JobManager(dir, async () => {});
   await loaded.load();
   expect(loaded.replay(job.id, 0)).toHaveLength(events.length);
+});
+test("a step update without a counter clears the finished download's bytes", async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const { jobs } = await setup(async (_input, _signal, emit) => {
+    emit({
+      kind: "stage",
+      stage: "runtime",
+      state: "running",
+      message: "Downloading the local model…",
+      progress: { completed: 5, total: 10, unit: "bytes", bytesPerSecond: 2 },
+    });
+    emit({
+      kind: "stage",
+      stage: "runtime",
+      state: "running",
+      message: "Installing the selected Harness…",
+    });
+    await held;
+    return { code: 0, state: "ready", message: "Ready" };
+  });
+  const job = await jobs.start({ instance: "default" });
+  await vi.waitFor(() =>
+    expect(jobs.get(job.id)?.message).toBe("Installing the selected Harness…"),
+  );
+  expect(
+    jobs.get(job.id)?.stages.find((stage) => stage.id === "runtime")?.progress,
+  ).toBeUndefined();
+  release();
+  await jobs.wait(job.id);
 });

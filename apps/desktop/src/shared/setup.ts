@@ -22,6 +22,10 @@ export interface SetupLocalServer {
   readonly steps: readonly SetupLocalStep[];
   readonly step: SetupLocalStep;
   readonly progress: number;
+  // While the current step downloads: what (label), the bytes so far and
+  // in all, and the rate when the source reports one. partial: the counts
+  // cover only the file downloading now, so nothing says what remains.
+  readonly transfer?: SetupTransfer & { readonly label: string };
   // Which installation this is; timers and the bar start over with each.
   readonly attempt: number;
   // Whether this computer can serve a local model; checked as the setup
@@ -79,8 +83,17 @@ export interface SetupRuntimeSignIn {
   readonly message?: string;
 }
 
+export interface SetupTransfer {
+  readonly completed: number;
+  readonly total?: number;
+  readonly bytesPerSecond?: number;
+  readonly partial?: boolean;
+}
+
 export type SetupLocalModelsCheck =
-  | { readonly state: "unchecked" | "checking" | "unavailable" }
+  | { readonly state: "unchecked" | "unavailable" }
+  // While the check first downloads the localmodels tool: its bytes.
+  | { readonly state: "checking"; readonly download?: SetupTransfer }
   | {
       readonly state: "checked";
       readonly eligible: boolean;

@@ -95,7 +95,9 @@ export interface LocalModel {
 
 // What the installer found on this computer, for the optional local model.
 export type LocalModelsCheck =
-  | { readonly state: "unchecked" | "checking" | "unavailable" }
+  | { readonly state: "unchecked" | "unavailable" }
+  // While the check first downloads the localmodels tool: its bytes.
+  | { readonly state: "checking"; readonly download?: Transfer }
   | {
       readonly state: "checked";
       // Whether this computer can serve a local model at all.
@@ -114,6 +116,16 @@ export type LocalModelsCheck =
     };
 
 export type SetupRecommendation = "local-models" | "codex" | "claude" | "pi";
+
+// A download under way: its bytes so far and in all, and the rate when the
+// source reports one. partial: the counts cover only the file downloading
+// now, so nothing says what remains.
+export interface Transfer {
+  readonly completed: number;
+  readonly total?: number;
+  readonly bytesPerSecond?: number;
+  readonly partial?: boolean;
+}
 const RECOMMENDATIONS: readonly string[] = [
   "local-models",
   "codex",
@@ -236,6 +248,8 @@ export interface LocalServerStatus {
   readonly steps: readonly LocalServerStep[];
   readonly step: LocalServerStep;
   readonly progress: number;
+  // While the current step downloads: what and how far.
+  readonly transfer?: Transfer & { readonly label: string };
   // Which installation this is; each Install or Try Again starts a new one.
   readonly attempt: number;
   readonly localModels: LocalModelsCheck;
@@ -328,6 +342,7 @@ export class LocalServerModule implements Module {
   #message = "";
   #step: LocalServerStep = "prepare";
   #progress = 0;
+  #transfer: LocalServerStatus["transfer"];
   // Counts installations started, so the setup page restarts its timers.
   #attempt = 0;
   #origin: string | undefined;
@@ -424,6 +439,7 @@ export class LocalServerModule implements Module {
       steps: this.#steps(),
       step: this.#step,
       progress: this.#progress,
+      ...(this.#transfer ? { transfer: this.#transfer } : {}),
       attempt: this.#attempt,
       localModels: this.#check,
       location: {
@@ -478,7 +494,11 @@ export class LocalServerModule implements Module {
     this.#ctx?.bus.emit("local-server.changed");
     const started = Date.now();
     const signal = this.#abort.signal;
-    void this.#inspect(signal)
+    void this.#inspect(signal, (download) => {
+      if (this.#check.state !== "checking") return;
+      this.#check = { state: "checking", download };
+      this.#ctx?.bus.emit("local-server.changed");
+    })
       .then(
         (check) => {
           this.#ctx?.log.info("local_server.inspected", {
@@ -508,7 +528,10 @@ export class LocalServerModule implements Module {
       });
   }
 
-  async #inspect(signal: AbortSignal): Promise<LocalModelsCheck> {
+  async #inspect(
+    signal: AbortSignal,
+    onDownload: (download: Transfer) => void,
+  ): Promise<LocalModelsCheck> {
     // The app's own Node runs the check, so it needs no download of its own;
     // installing still uses the pinned Node runtime.
     const output = await new Promise<string>((resolve, reject) => {
@@ -534,14 +557,31 @@ export class LocalServerModule implements Module {
           line: line.slice(0, 300),
         });
       });
-      let text = "";
-      child.stdout.on("data", (chunk: Buffer) => {
-        text += chunk.toString("utf8");
+      // The report is the last line; lines before it count the bytes of the
+      // localmodels tool while the check first downloads it.
+      let last = "";
+      createInterface({ input: child.stdout }).on("line", (line) => {
+        if (!line.trim()) return;
+        last = line;
+        let event: { event?: unknown; completed?: unknown; total?: unknown };
+        try {
+          event = JSON.parse(line);
+        } catch {
+          return;
+        }
+        const count = (value: unknown) =>
+          typeof value === "number" && Number.isFinite(value) && value >= 0
+            ? value
+            : undefined;
+        const completed = count(event?.completed);
+        const total = count(event?.total);
+        if (event?.event === "download" && completed !== undefined)
+          onDownload({ completed, ...(total ? { total } : {}) });
       });
       child.once("error", reject);
-      child.once("close", () => resolve(text));
+      child.once("close", () => resolve(last));
     });
-    const report = JSON.parse(output.trim().split("\n").at(-1) ?? "") as {
+    const report = JSON.parse(output) as {
       recommendation?: unknown;
       localModels?: {
         eligible?: unknown;
@@ -685,7 +725,8 @@ export class LocalServerModule implements Module {
         installer.run(
           next,
           signal,
-          (stage, share, text) => this.#advance(stage, share, text),
+          (stage, share, text, transfer) =>
+            this.#advance(stage, share, text, transfer),
           fresh,
         );
       // Changed keys reach the services only when the installation runs
@@ -744,7 +785,12 @@ export class LocalServerModule implements Module {
     }
   }
 
-  #advance(step: LocalServerStep, share: number, message: string): void {
+  #advance(
+    step: LocalServerStep,
+    share: number,
+    message: string,
+    transfer?: Transfer,
+  ): void {
     const steps = this.#steps();
     share = Math.min(1, Math.max(0, share));
     // Without a download, its stages finish preparing instead.
@@ -759,6 +805,7 @@ export class LocalServerModule implements Module {
       this.#progress,
       (steps.indexOf(step) + share) / steps.length,
     );
+    this.#transfer = transfer && { ...transfer, label: message };
     this.#set("installing", message);
   }
 
@@ -1038,6 +1085,7 @@ export class LocalServerModule implements Module {
       this.#step = "prepare";
     }
     if (phase === "ready") this.#progress = 1;
+    if (phase !== "installing") this.#transfer = undefined;
     this.#phase = phase;
     this.#message = message;
     this.#ctx?.bus.emit("local-server.changed");
@@ -1211,8 +1259,13 @@ export class LocalServerModule implements Module {
         SOURCE_MARKER,
         path.join(home, "desktop", "downloads"),
         signal,
-        (share) =>
-          this.#advance("download", share * 0.05, "Downloading Linger…"),
+        (bytes) =>
+          this.#advance(
+            "download",
+            (bytes.completed / bytes.total) * 0.05,
+            "Downloading Linger…",
+            bytes,
+          ),
       );
     if (!(await isFile(path.join(directory, SOURCE_MARKER))))
       throw new Error("The source package is not a Linger source tree");
@@ -1420,7 +1473,13 @@ export class LocalServerModule implements Module {
         ".",
         path.join(path.dirname(path.dirname(repo)), "downloads"),
         signal,
-        (share) => this.#advance("download", 0.05 + share * 0.05, message),
+        (bytes) =>
+          this.#advance(
+            "download",
+            0.05 + (bytes.completed / bytes.total) * 0.05,
+            message,
+            bytes,
+          ),
       );
     } catch (error) {
       if (signal.aborted) throw error;
@@ -1480,7 +1539,7 @@ export class LocalServerModule implements Module {
     marker: string,
     downloads: string,
     signal: AbortSignal,
-    onShare?: (share: number) => void,
+    onBytes?: (bytes: { completed: number; total: number }) => void,
   ): Promise<void> {
     await mkdir(downloads, { recursive: true, mode: 0o700 });
     const file = path.join(
@@ -1501,7 +1560,7 @@ export class LocalServerModule implements Module {
           // A retry continues a large download where it stopped.
           resumable: true,
           onProgress: (completed, total) =>
-            total && onShare?.(completed / total),
+            total && onBytes?.({ completed, total }),
         },
         followHttps(this.#options.fetch ?? fetch),
       );
@@ -2127,7 +2186,13 @@ interface Job {
   readonly stages: readonly {
     readonly id: string;
     readonly state: string;
-    readonly progress?: { readonly completed: number; readonly total?: number };
+    readonly progress?: {
+      readonly completed: number;
+      readonly total?: number;
+      readonly unit?: string;
+      readonly bytesPerSecond?: number;
+      readonly partial?: boolean;
+    };
   }[];
 }
 
@@ -2211,7 +2276,12 @@ export class InstallerApi {
   async run(
     plan: LocalServerPlan,
     signal: AbortSignal,
-    onStep: (step: LocalServerStep, share: number, message: string) => void,
+    onStep: (
+      step: LocalServerStep,
+      share: number,
+      message: string,
+      transfer?: Transfer,
+    ) => void,
     fresh = false,
   ): Promise<{ readonly origin: string; readonly signInRequired: boolean }> {
     const { items } = await this.#json<{ items: Job[] }>("/api/jobs");
@@ -2268,7 +2338,26 @@ export class InstallerApi {
               : ready
                 ? Number(ready[1]) / Math.max(1, Number(ready[2]))
                 : 0;
-        onStep(at[0], at[1] + (at[2] - at[1]) * part, job.message ?? "");
+        // A byte counter on the running step is a download to show.
+        const bytes =
+          stage?.state === "running" &&
+          counter?.unit === "bytes" &&
+          counter.total
+            ? counter
+            : undefined;
+        onStep(
+          at[0],
+          at[1] + (at[2] - at[1]) * part,
+          job.message ?? "",
+          bytes && {
+            completed: bytes.completed,
+            total: bytes.total,
+            ...(bytes.bytesPerSecond !== undefined
+              ? { bytesPerSecond: bytes.bytesPerSecond }
+              : {}),
+            ...(bytes.partial ? { partial: true } : {}),
+          },
+        );
       }
       if (finished(job))
         return { origin: job.origin!, signInRequired: signInRequired(job) };

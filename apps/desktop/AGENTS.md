@@ -118,8 +118,14 @@ Gateway and runs Agents. The daemon exits with the app.
   report (`installer.js --inspect`, run once as the setup window opens):
   `local-models` is the planned model served by Pi, shown with the model,
   GPU, memory and download; otherwise the named runtime, with the tool's
-  reason for no local model. The page adds no host rule of its own; it waits
-  for the check, and Customize marks the recommended runtime and model. When
+  reason for no local model. The page adds no host rule of its own; while
+  the check runs the button waits with a spinner and says what it waits for
+  (the first run downloads the localmodels tool, counted by `download`
+  event lines before the report), and Customize marks the
+  recommended runtime and model. While installing, a step that downloads
+  shows its bytes, what remains and the rate from the installer's byte
+  counter (`localmodels.stack-progress/v1` for the local model and
+  engine); a counter of one file (`partial`) shows only that file. When
   the check fails the installer picks, or Codex when it cannot inspect the
   computer either. It records the install location, source, origin and engine in
   `desktop/local-server.json` under the default home and, while the window

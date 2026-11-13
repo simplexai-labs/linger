@@ -405,6 +405,7 @@ const localServerState = (
     steps,
     step,
     progress,
+    transfer,
     attempt,
     localModels,
     location,
@@ -419,6 +420,7 @@ const localServerState = (
     steps,
     step,
     progress,
+    ...(transfer ? { transfer } : {}),
     attempt,
     localModels,
     location: {

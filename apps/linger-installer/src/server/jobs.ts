@@ -235,6 +235,9 @@ export class JobManager {
       const stage = record.job.stages.find((item) => item.id === value.stage);
       if (stage && value.progress)
         stage.progress = structuredClone(value.progress);
+      // A step update without a counter ends the counted part, so a finished
+      // download's bytes do not stay on the step.
+      else if (stage && value.kind === "stage") delete stage.progress;
       if (stage && value.kind === "stage") {
         stage.state = (value.state ?? "running") as typeof stage.state;
         stage.message = event.message;

@@ -241,12 +241,34 @@ describe("setup page Quick Install recommendation", () => {
     );
   });
 
-  it("waits for the check before Quick Install", async () => {
+  it("says what Quick Install waits for until the check ends", async () => {
     const { push } = await openPage(welcome({ state: "checking" }), "welcome");
-    expect($("plan-summary").textContent).toBe("Checking this computer…");
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    const button = $("local-install") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect($("local-install-label").textContent).toBe(
+      "Checking this computer…",
+    );
+    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
+    expect($("plan-summary").textContent).toBe(
+      "Finding the best setup for this computer",
+    );
+    // The first run downloads the localmodels tool before checking.
+    push(
+      welcome({
+        state: "checking",
+        download: { completed: 12 * 1024 ** 2, total: 69 * 1024 ** 2 },
+      }),
+    );
+    expect($("local-install-label").textContent).toBe(
+      "Downloading setup tools…",
+    );
+    expect($("plan-why").textContent).toBe("12 MB of 69 MB · 57 MB left");
+    expect($("plan-why").hidden).toBe(false);
     push(welcome(capable));
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute("aria-busy")).toBe("false");
+    expect($("local-install-label").textContent).toBe("Quick Install");
     expect($("plan-summary").textContent).toBe(
       "Recommended for this computer: Local model + Pi",
     );
@@ -281,6 +303,53 @@ describe("setup page Quick Install recommendation", () => {
     expect($("local-install-label").textContent).toBe("Quick Install");
     expect($("plan-summary").textContent).toBe(
       "Recommended for this computer: Local model + Pi",
+    );
+  });
+});
+
+describe("setup page download progress", () => {
+  const installing = (transfer?: SetupState["localServer"]["transfer"]) => {
+    const base = state("installing");
+    return {
+      ...base,
+      localServer: { ...base.localServer, ...(transfer ? { transfer } : {}) },
+    };
+  };
+
+  it("shows how much of the local model is left, the rate and the time", async () => {
+    const { push } = await openPage(installing());
+    expect($("installing-transfer").hidden).toBe(true);
+    push(
+      installing({
+        label: "Downloading the local model…",
+        completed: 12 * GB,
+        total: 31 * GB,
+        bytesPerSecond: 50 * 1024 ** 2,
+      }),
+    );
+    expect($("installing-transfer").hidden).toBe(false);
+    expect($("installing-transfer-label").textContent).toBe(
+      "Downloading the local model…",
+    );
+    expect($("installing-transfer-bytes").textContent).toBe(
+      "12.0 GB of 31.0 GB · 19.0 GB left · 50 MB/s · about 6 min left",
+    );
+    push(installing());
+    expect($("installing-transfer").hidden).toBe(true);
+  });
+
+  it("says only the file's bytes when the tool counts one file", async () => {
+    await openPage(
+      installing({
+        label: "Downloading the local model…",
+        completed: 3 * GB,
+        total: 4 * GB,
+        bytesPerSecond: 50 * 1024 ** 2,
+        partial: true,
+      }),
+    );
+    expect($("installing-transfer-bytes").textContent).toBe(
+      "This file: 3.0 GB of 4.0 GB · 50 MB/s",
     );
   });
 });

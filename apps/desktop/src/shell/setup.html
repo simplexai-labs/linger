@@ -574,6 +574,14 @@
       .primary.large:hover:not(:disabled) svg {
         transform: translateX(2px);
       }
+      /* Checking this computer: the button waits with what it is doing. */
+      .primary.large[data-busy="true"] {
+        opacity: 0.8;
+        cursor: progress;
+      }
+      .primary.large[data-busy="true"] svg {
+        display: none;
+      }
       /* What Quick Install does, and the way to change it. */
       .plan-line {
         display: flex;
@@ -590,6 +598,24 @@
         color: var(--faint);
         font-size: 11.5px;
         line-height: 1.45;
+        font-variant-numeric: tabular-nums;
+      }
+      /* What downloads now, under the installing bar. */
+      .transfer {
+        display: grid;
+        gap: 2px;
+        margin: 10px 0 0;
+        color: var(--faint);
+        font-size: 11.5px;
+        line-height: 1.45;
+        font-variant-numeric: tabular-nums;
+      }
+      .transfer span span {
+        white-space: nowrap;
+      }
+      .transfer strong {
+        color: var(--ink);
+        font-weight: 500;
       }
       .plan-line .sep {
         width: 3px;
@@ -1462,6 +1488,10 @@
             ><span class="pct" id="installing-count"></span>
           </div>
           <div class="track"><div class="fill" id="installing-fill"></div></div>
+          <p class="transfer" id="installing-transfer" hidden>
+            <strong id="installing-transfer-label"></strong
+            ><span id="installing-transfer-bytes"></span>
+          </p>
           <ol class="checks" id="installing-checks"></ol>
         </div>
         <div
@@ -1857,6 +1887,40 @@
         ["agents", () => "Preparing your agents"],
       ];
       const gigabytes = (bytes) => Math.round(bytes / 1024 ** 3) + " GB";
+      // Download sizes: MB below a gigabyte, one decimal GB above.
+      const size = (bytes) =>
+        bytes < 1024 ** 3
+          ? Math.max(0, Math.round(bytes / 1024 ** 2)) + " MB"
+          : (bytes / 1024 ** 3).toFixed(1) + " GB";
+      const duration = (seconds) => {
+        const minutes = Math.round(seconds / 60);
+        if (minutes < 1) return "less than a minute left";
+        if (minutes < 60) return "about " + minutes + " min left";
+        const hours = Math.floor(minutes / 60);
+        return (
+          "about " +
+          hours +
+          " h" +
+          (minutes % 60 ? " " + (minutes % 60) + " min" : "") +
+          " left"
+        );
+      };
+      // A download as the localmodels tool or the installer counts it: how
+      // much of how much, what remains, and the rate and time left when the
+      // source reports a rate. A count of one file of several says only
+      // that file's bytes, since nothing says what remains after it.
+      const transferParts = (transfer) => {
+        const { completed, total, bytesPerSecond: rate, partial } = transfer;
+        const left = total && !partial ? total - completed : undefined;
+        return [
+          (partial ? "This file: " : "") +
+            size(completed) +
+            (total ? " of " + size(total) : ""),
+          left !== undefined && size(left) + " left",
+          rate > 0 && size(rate) + "/s",
+          rate > 0 && left !== undefined && duration(left / rate),
+        ].filter(Boolean);
+      };
       // Long folders keep their start and their end.
       const shortPath = (value) =>
         value.length <= 46
@@ -2145,14 +2209,25 @@
         $("local-customize").textContent = customizing
           ? "Use the defaults"
           : "Customize";
-        $("local-install-label").textContent = custom
-          ? "Install"
-          : "Quick Install";
+        // Until the check ends the button says what it waits for: the first
+        // run downloads the localmodels tool, then the check runs. The label
+        // changes only when it differs, so the spinner keeps turning.
+        const fetching = checking ? models.download : undefined;
+        const label = checking
+          ? '<span class="spinner"></span>' +
+            (fetching ? "Downloading setup tools…" : "Checking this computer…")
+          : custom
+            ? "Install"
+            : "Quick Install";
+        if ($("local-install-label").innerHTML !== label)
+          $("local-install-label").innerHTML = label;
         document.querySelector('[data-step="welcome"]').dataset.customizing =
           String(customizing && local.available);
         $("local-install").disabled ||= checking;
+        $("local-install").dataset.busy = String(checking);
+        $("local-install").setAttribute("aria-busy", String(checking));
         $("plan-summary").textContent = checking
-          ? "Checking this computer…"
+          ? "Finding the best setup for this computer"
           : following && known
             ? "Recommended for this computer: " + named(plan)
             : [
@@ -2162,8 +2237,9 @@
                 .filter(Boolean)
                 .join(" · ");
         // Why, in the localmodels tool's facts and words.
-        $("plan-why").textContent =
-          !following || checking
+        $("plan-why").textContent = fetching
+          ? transferParts(fetching).join(" · ")
+          : !following || checking
             ? ""
             : plan.localModel
               ? [
@@ -2287,6 +2363,21 @@
             ? local.message
             : steps[at][1]() + "…";
         $("installing-count").textContent = starting ? "" : percent + "%";
+        // A download under way: what it is and how far, in the counts the
+        // installer passes on from the localmodels tool.
+        const transfer = !failed && !starting ? local.transfer : undefined;
+        $("installing-transfer").hidden = !transfer;
+        $("installing-transfer-label").textContent = transfer
+          ? transfer.label
+          : "";
+        // Each part stays on one line, so a wrap falls between parts.
+        $("installing-transfer-bytes").replaceChildren(
+          ...(transfer ? transferParts(transfer) : []).flatMap((text, i) => {
+            const part = document.createElement("span");
+            part.textContent = text;
+            return i ? [" · ", part] : [part];
+          }),
+        );
         $("installing-checks").hidden = starting;
         const checks = $("installing-checks");
         if (checks.children.length !== steps.length)

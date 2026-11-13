@@ -49,6 +49,68 @@ interface Options {
 interface Dependencies {
   localmodels?: typeof runLocalmodels;
 }
+// What each stack component downloads, as the setup page names it.
+const DOWNLOADS: Record<string, string> = {
+  llm: "the local model",
+  decision: "the decision model",
+  embedding: "the embedding model",
+  rerank: "the reranking model",
+  stt: "the speech recognition model",
+  tts: "the speech model",
+  search: "the search service",
+};
+// A localmodels.stack-progress/v1 event from `stack apply --jsonl`, as the
+// runtime stage's byte counter. The tool counts the file downloading now
+// (done/total); component_done/component_total, when it sends them, count
+// the whole component, so the page can show what remains.
+export function stackProgress(value: unknown): InstallerEvent | undefined {
+  const event = value as Record<string, unknown> | null;
+  const count = (key: string) => {
+    const n = event?.[key];
+    return typeof n === "number" && Number.isSafeInteger(n) && n >= 0
+      ? n
+      : undefined;
+  };
+  const done = count("done"),
+    total = count("total");
+  if (
+    event?.event !== "progress" ||
+    typeof event.component !== "string" ||
+    !/^[a-z][a-z0-9_-]{0,40}$/.test(event.component) ||
+    !(event.phase === "download" || event.phase === "verify") ||
+    done === undefined ||
+    total === undefined ||
+    done > total
+  )
+    return;
+  const wholeDone = count("component_done"),
+    wholeTotal = count("component_total");
+  const whole =
+    wholeDone !== undefined &&
+    wholeTotal !== undefined &&
+    wholeTotal > 0 &&
+    wholeDone <= wholeTotal;
+  const rate = count("bytes_per_second");
+  const what =
+    event.step === "engine"
+      ? "the inference engine"
+      : (DOWNLOADS[event.component] ?? "the local model files");
+  return {
+    kind: "stage",
+    stage: "runtime",
+    state: "running",
+    message: `${event.phase === "download" ? "Downloading" : "Checking"} ${what}…`,
+    progress: {
+      completed: whole ? wholeDone : done,
+      total: whole ? wholeTotal : total,
+      unit: "bytes",
+      ...(rate !== undefined && event.phase === "download"
+        ? { bytesPerSecond: rate }
+        : {}),
+      ...(whole ? {} : { partial: true }),
+    },
+  };
+}
 function review(value: unknown): LocalModelsPlanSummary {
   const v = value as LocalModelsPlanSummary & { schema?: string };
   if (
@@ -227,33 +289,14 @@ export async function prepareLocalModels(
             if (newline < 0) break;
             const line = buffer.slice(0, newline);
             buffer = buffer.slice(newline + 1);
-            let event;
+            let event: unknown;
             try {
               event = JSON.parse(line);
             } catch {
               continue;
             }
-            if (
-              event?.event === "progress" &&
-              typeof event.component === "string" &&
-              /^[a-z][a-z0-9_-]{0,40}$/.test(event.component) &&
-              ["download", "verify"].includes(event.phase) &&
-              Number.isSafeInteger(event.done) &&
-              event.done >= 0 &&
-              Number.isSafeInteger(event.total) &&
-              event.total >= event.done
-            )
-              options.onEvent({
-                kind: "stage",
-                stage: "runtime",
-                state: "running",
-                message: `Local model ${event.component}: ${event.phase}`,
-                progress: {
-                  completed: event.done,
-                  total: event.total,
-                  unit: "bytes",
-                },
-              });
+            const progress = stackProgress(event);
+            if (progress) options.onEvent(progress);
           }
         },
       });

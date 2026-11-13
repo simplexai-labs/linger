@@ -9,7 +9,11 @@ import {
 import path from "node:path";
 import os from "node:os";
 import { afterEach, expect, test, vi } from "vitest";
-import { prepareLocalModels, localModelsEnvironment } from "./local-models.js";
+import {
+  prepareLocalModels,
+  localModelsEnvironment,
+  stackProgress,
+} from "./local-models.js";
 import { runProcess } from "./process.js";
 import { runLocalmodels } from "./localmodels-tool.js";
 import type { Instance } from "./instance.js";
@@ -188,7 +192,7 @@ test("forwards actual split JSONL byte counters but never raw output", async () 
   );
   expect(f.options.onEvent.mock.calls.flat()).toContainEqual(
     expect.objectContaining({
-      progress: { completed: 4, total: 10, unit: "bytes" },
+      progress: { completed: 4, total: 10, unit: "bytes", partial: true },
     }),
   );
   expect(JSON.stringify(f.options.onEvent.mock.calls)).not.toContain("hidden");
@@ -298,7 +302,7 @@ test("streams more than the process capture limit during an approved stack apply
   ).toBeUndefined();
   expect(f.options.onEvent.mock.calls.flat()).toContainEqual(
     expect.objectContaining({
-      progress: { completed: 2, total: 2, unit: "bytes" },
+      progress: { completed: 2, total: 2, unit: "bytes", partial: true },
     }),
   );
   expect(
@@ -607,4 +611,47 @@ test("a stale stored binding with missing approval inputs cannot authorize deplo
     details: { code: "LOCAL_MODELS_RECOVERY_REQUIRED" },
   });
   expect(f.call.mock.calls.some(([, args]) => args[0] === "stack")).toBe(false);
+});
+
+test("names what downloads and keeps the tool's counters", () => {
+  const progress = {
+    event: "progress",
+    component: "llm",
+    step: "download",
+    phase: "download",
+    done: 4,
+    total: 10,
+  };
+  // Today's tool counts one file at a time.
+  expect(stackProgress({ ...progress, bytes_per_second: 3 })).toEqual({
+    kind: "stage",
+    stage: "runtime",
+    state: "running",
+    message: "Downloading the local model…",
+    progress: {
+      completed: 4,
+      total: 10,
+      unit: "bytes",
+      bytesPerSecond: 3,
+      partial: true,
+    },
+  });
+  // Whole-component counters, once the tool sends them, replace the file's.
+  expect(
+    stackProgress({ ...progress, component_done: 40, component_total: 100 })
+      ?.progress,
+  ).toEqual({ completed: 40, total: 100, unit: "bytes" });
+  expect(stackProgress({ ...progress, step: "engine" })?.message).toBe(
+    "Downloading the inference engine…",
+  );
+  expect(
+    stackProgress({ ...progress, component: "embedding", phase: "verify" })
+      ?.message,
+  ).toBe("Checking the embedding model…");
+  for (const other of [
+    { ...progress, phase: "loading", done: null, total: null },
+    { ...progress, done: 11 },
+    { ...progress, event: "log" },
+  ])
+    expect(stackProgress(other)).toBeUndefined();
 });
