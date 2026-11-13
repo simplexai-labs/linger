@@ -10,7 +10,9 @@ import type {
   TeamHubTaskExecution,
 } from "@/features/teamhub/teamhub-types";
 
+import { CancelTaskButton } from "../../chat/cancel-task-button";
 import { MessageMarkdown } from "../../chat/message-markdown";
+import { useCancelRoomBackgroundTask } from "../../chat/use-room-background-tasks";
 import { createRoomCardDecisionController } from "../../cards/room-card-decision-controller";
 import {
   knownRoomMessageCard,
@@ -28,9 +30,12 @@ import { useTaskActivityView } from "./task-activities-panel-tab";
 /** Lets the task blocks in an activity log open their Task's conversation. */
 export function TaskConversationProvider({
   children,
+  roomId,
   tenantId,
 }: {
   children: ReactNode;
+  /** The Room whose Meta delegated these Tasks. */
+  roomId: string;
   tenantId: string;
 }) {
   const [task, setTask] = useState<{ id: string; title: string }>();
@@ -43,6 +48,7 @@ export function TaskConversationProvider({
       {task ? (
         <TaskConversationDialog
           onClose={() => setTask(undefined)}
+          originRoomId={roomId}
           taskId={task.id}
           tenantId={tenantId}
           title={task.title}
@@ -57,19 +63,27 @@ export function TaskConversationProvider({
  * on the left everything its AlterEgo thought, ran and replied, with the cards
  * it raised, answerable here.
  */
-function TaskConversationDialog({
+export function TaskConversationDialog({
   onClose,
+  originRoomId,
   taskId,
   tenantId,
   title,
 }: {
   onClose: () => void;
+  /** The Room whose Meta delegated the Task; its members can cancel it. */
+  originRoomId: string;
   taskId: string;
   tenantId: string;
   title: string;
 }) {
   const { client } = useTeamHubRuntime();
-  const { data, execution } = useTaskActivityView({
+  const cancel = useCancelRoomBackgroundTask({
+    client,
+    roomId: originRoomId,
+    tenantId,
+  });
+  const { data, execution, refresh } = useTaskActivityView({
     hidden: false,
     taskId,
     tenantId,
@@ -117,7 +131,20 @@ function TaskConversationDialog({
     <ModalDialog
       closeOnBackdrop
       description={
-        execution ? <TaskConversationState execution={execution} /> : undefined
+        execution ? (
+          <span className="inline-flex items-center gap-1">
+            <TaskConversationState execution={execution} />
+            {live ? (
+              <CancelTaskButton
+                cancel={async () => {
+                  await cancel(taskId);
+                  refresh();
+                }}
+                title={title}
+              />
+            ) : null}
+          </span>
+        ) : undefined
       }
       onClose={onClose}
       size="lg"

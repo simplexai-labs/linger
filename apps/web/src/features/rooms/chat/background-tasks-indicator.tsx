@@ -1,22 +1,21 @@
 import { ArrowUp01Icon } from "@hugeicons/core-free-icons";
-import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 
-import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/cn";
-import { teamHubData } from "@/features/teamhub/teamhub-api";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
 import type { TeamHubRoomBackgroundTask } from "@/features/teamhub/teamhub-types";
+import { TaskConversationDialog } from "../task-sidebar/adapters/task-conversation-dialog";
+import { CancelTaskButton } from "./cancel-task-button";
 import {
-  roomBackgroundTasksQueryKey,
+  useCancelRoomBackgroundTask,
   useRoomBackgroundTasks,
 } from "./use-room-background-tasks";
 
 /**
  * One floating line above the composer while this Room's Meta has background
  * Tasks running. It opens a short list of what each one is doing, where
- * each can be canceled, and disappears once every Task is done.
+ * each can be opened or canceled, and disappears once every Task is done.
  */
 export function BackgroundTasksIndicator({
   client,
@@ -27,35 +26,46 @@ export function BackgroundTasksIndicator({
   roomId: string;
   tenantId: string;
 }) {
-  const queryClient = useQueryClient();
   const tasks = useRoomBackgroundTasks({ client, roomId, tenantId });
-  if (!tasks.length) return null;
-  const cancel = async (taskId: string) => {
-    await teamHubData(
-      client.api.POST("/v0/rooms/{roomId}/background-tasks/{taskId}/cancel", {
-        params: { path: { roomId, taskId } },
-      }),
-    );
-    await queryClient.invalidateQueries({
-      queryKey: roomBackgroundTasksQueryKey(tenantId, roomId),
-    });
-  };
+  const cancel = useCancelRoomBackgroundTask({ client, roomId, tenantId });
+  // The opened Task stays open after it finishes and leaves the list.
+  const [opened, setOpened] = useState<TeamHubRoomBackgroundTask>();
   return (
-    // Floats over the bottom of the timeline instead of pushing the composer.
-    <div className="relative h-0">
-      <BackgroundTasksPill onCancel={cancel} tasks={tasks} />
-    </div>
+    <>
+      {tasks.length ? (
+        // Floats over the bottom of the timeline instead of pushing the composer.
+        <div className="relative h-0">
+          <BackgroundTasksPill
+            onCancel={cancel}
+            onOpen={setOpened}
+            tasks={tasks}
+          />
+        </div>
+      ) : null}
+      {opened ? (
+        <TaskConversationDialog
+          onClose={() => setOpened(undefined)}
+          originRoomId={roomId}
+          taskId={opened.id}
+          tenantId={tenantId}
+          title={opened.title}
+        />
+      ) : null}
+    </>
   );
 }
 
 export function BackgroundTasksPill({
   now = Date.now(),
   onCancel,
+  onOpen,
   tasks,
 }: {
   now?: number;
   /** Stops one Task; it settles once the Task has left the list. */
   onCancel?: (taskId: string) => Promise<void>;
+  /** Opens one Task's conversation. */
+  onOpen?: (task: TeamHubRoomBackgroundTask) => void;
   tasks: readonly TeamHubRoomBackgroundTask[];
 }) {
   const [open, setOpen] = useState(false);
@@ -94,30 +104,41 @@ export function BackgroundTasksPill({
           <ul className="flex flex-col">
             {tasks.map((task) => (
               <li
-                className="grid grid-cols-[6px_minmax(0,1fr)_auto_auto] items-baseline gap-x-2.5 rounded-md px-2 py-1.5 hover:bg-muted"
+                className="flex items-center gap-1 rounded-md hover:bg-muted"
                 key={task.id}
               >
-                <span
-                  aria-hidden="true"
-                  className="size-1.5 self-center rounded-full bg-app-link"
-                />
-                <span className="truncate text-sm leading-5 text-app-ink">
-                  {task.title}
-                </span>
-                <span className="text-[12px] leading-[18px] text-app-muted tabular-nums">
-                  {runningFor(task.created_at, now)}
-                </span>
-                <span className="row-span-2 self-center">
-                  {onCancel ? (
+                <button
+                  aria-label={`Open task ${task.title}`}
+                  className="grid min-w-0 flex-1 grid-cols-[6px_minmax(0,1fr)_auto] items-baseline gap-x-2.5 rounded-md py-1.5 pl-2 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-app-focus disabled:cursor-default"
+                  disabled={!onOpen}
+                  onClick={() => {
+                    setOpen(false);
+                    onOpen?.(task);
+                  }}
+                  type="button"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="size-1.5 self-center rounded-full bg-app-link"
+                  />
+                  <span className="truncate text-sm leading-5 text-app-ink">
+                    {task.title}
+                  </span>
+                  <span className="text-[12px] leading-[18px] text-app-muted tabular-nums">
+                    {runningFor(task.created_at, now)}
+                  </span>
+                  <span className="col-span-2 col-start-2 truncate text-[12px] leading-[18px] text-app-muted">
+                    {task.requirement}
+                  </span>
+                </button>
+                {onCancel ? (
+                  <span className="shrink-0 pr-1">
                     <CancelTaskButton
                       cancel={() => onCancel(task.id)}
                       title={task.title}
                     />
-                  ) : null}
-                </span>
-                <span className="col-span-2 col-start-2 truncate text-[12px] leading-[18px] text-app-muted">
-                  {task.requirement}
-                </span>
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -147,50 +168,6 @@ export function BackgroundTasksPill({
         </span>
       </button>
     </div>
-  );
-}
-
-/**
- * Cancels one Task's current turn. The Room's Meta is told and can resume
- * it later, so no confirmation is asked.
- */
-function CancelTaskButton({
-  cancel,
-  title,
-}: {
-  cancel: () => Promise<void>;
-  title: string;
-}) {
-  const [state, setState] = useState<"idle" | "pending" | "error">("idle");
-  return (
-    <Button
-      aria-label={
-        state === "error"
-          ? `Cancel of ${title} was not confirmed; retry`
-          : `Cancel ${title}`
-      }
-      className={cn(
-        "h-7 px-1.5 text-[12px] font-medium hover:bg-transparent hover:text-app-danger",
-        state === "error" ? "text-app-danger" : "text-app-muted",
-      )}
-      disabled={state === "pending"}
-      onClick={() => {
-        setState("pending");
-        cancel().then(
-          () => setState("idle"),
-          () => setState("error"),
-        );
-      }}
-      size="compact"
-      tone="ghost"
-      type="button"
-    >
-      {state === "pending"
-        ? "Canceling"
-        : state === "error"
-          ? "Retry"
-          : "Cancel"}
-    </Button>
   );
 }
 

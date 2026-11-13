@@ -65,7 +65,7 @@ export function AgentLiveActivityPanelTab({
   const pending = events.pending;
 
   return (
-    <TaskConversationProvider tenantId={tenantId}>
+    <TaskConversationProvider roomId={roomId} tenantId={tenantId}>
       <div
         className={hidden ? "hidden" : "flex h-full min-h-0 flex-col bg-card"}
         data-testid="agent-live-activity-panel"

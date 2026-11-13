@@ -77,7 +77,7 @@ export function MessageActivitiesPanelTab({
   }, [activationKey, hidden, message.id, activities.data?.records.length]);
 
   return (
-    <TaskConversationProvider tenantId={tenantId}>
+    <TaskConversationProvider roomId={roomId} tenantId={tenantId}>
       <div
         className={hidden ? "hidden" : "flex h-full min-h-0 flex-col bg-card"}
         data-testid="message-activities-panel"
