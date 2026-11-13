@@ -6,6 +6,8 @@ import { initializeInstance } from "./instance.js";
 import { writeSetupChoice } from "./setup-selection.js";
 import { connectComputer } from "./computer.js";
 vi.mock("./localmodels-tool.js", () => ({
+  // This distribution ships no localmodels tool.
+  configuredLocalmodelsToolSource: () => undefined,
   runLocalmodels: async () => ({
     code: 0,
     stderr: "",
