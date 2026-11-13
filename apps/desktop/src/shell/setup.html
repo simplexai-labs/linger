@@ -2258,7 +2258,10 @@
                     gigabytes(model.downloadBytes) + " download",
                 ]
                   .filter(Boolean)
-                  .join(" · ")
+                  .join(" · ") +
+                (models.reasons?.[0]?.message
+                  ? ". " + models.reasons[0].message
+                  : "")
               : models.state === "checked" && !models.eligible
                 ? "No local model: " +
                   (models.reasons?.[0]?.message ||

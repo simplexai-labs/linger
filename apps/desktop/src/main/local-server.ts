@@ -111,8 +111,8 @@ export type LocalModelsCheck =
       readonly gpu?: string;
       // Present only when eligible.
       readonly model?: LocalModel;
-      // Why not, as the localmodels tool's code and words; present only
-      // when not eligible.
+      // The localmodels tool's code and words for why not, or, when
+      // eligible, for what could still stop the install (free memory).
       readonly reasons?: readonly SetupReason[];
       // The localmodels tool's pick for this computer, which Quick Install
       // installs; the page adds no rule of its own.
@@ -667,7 +667,7 @@ export class LocalServerModule implements Module {
             },
           }
         : {}),
-      ...(!eligible && reasons.length ? { reasons } : {}),
+      ...(reasons.length ? { reasons } : {}),
       ...(recommendation ? { recommendation } : {}),
     };
   }
@@ -2457,7 +2457,7 @@ export class InstallerApi {
       if (!["queued", "running"].includes(job.state))
         throw new Error(
           LOCAL_MODEL_FAILURES.has(job.errorCode ?? "")
-            ? "This computer can't run the local model right now. Choose another AI runtime and try again."
+            ? "This computer can't run the local model right now. Close other programs to free memory, or choose another AI runtime, and try again."
             : job.message || "The installation stopped",
         );
       await delay(this.#pollMs, undefined, { signal });

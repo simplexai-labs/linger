@@ -91,8 +91,9 @@ if (args.includes("--inspect")) {
     process.exit(1);
   }
   process.stderr.write("Checked this computer in 1.5s.\n");
-  const reasons = eligible ? [] : ["facts-unavailable"];
-  const reasonMessages = eligible ? [] : ["nvidia-smi was not found"];
+  const lowMemory = eligible && fs.existsSync(path.join(home, "low-memory"));
+  const reasons = eligible ? (lowMemory ? ["free-memory-required"] : []) : ["facts-unavailable"];
+  const reasonMessages = eligible ? (lowMemory ? ["Close other programs before installing."] : []) : ["nvidia-smi was not found"];
   const recommendation = eligible ? "local-models" : "codex";
   process.stdout.write(JSON.stringify({ hardware, localModels: { eligible, reasons, reasonMessages, estimate }, recommendation }) + "\n");
   process.exit(0);
@@ -1384,6 +1385,28 @@ describe("LocalServerModule", () => {
       }),
     );
     info.mockRestore();
+  });
+
+  it("keeps the tool's free-memory warning for an eligible computer", async () => {
+    const f = fixture({ checkout: "/src" }, {}, (home) => {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(path.join(home, "low-memory"), "");
+    });
+    await f.host.start();
+    f.module.inspect();
+    await vi.waitFor(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+        eligible: true,
+        reasons: [
+          {
+            code: "free-memory-required",
+            message: "Close other programs before installing.",
+          },
+        ],
+        recommendation: "local-models",
+      }),
+    );
   });
 
   it("approves the deployment of the chosen local model", async () => {
