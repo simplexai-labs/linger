@@ -22,7 +22,9 @@ printf '%s\n' 'choose-a-password' | docker compose exec -T teamhub \
 
 Open <http://localhost:3000> and sign in. The app then shows the commands that
 connect your computer, and it opens once Claude Code, Codex or Pi is installed
-and signed in there.
+and signed in there. With Pi and no model yet, open Settings › Local models
+from that screen and load one; Settings stays reachable while the rest of the
+app waits.
 
 To serve other computers on your network, set these in `.env`, run
 `docker compose stop node-services`, then run
