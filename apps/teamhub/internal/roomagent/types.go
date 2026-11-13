@@ -92,6 +92,7 @@ type LocalComputerManagement interface {
 	ScanLocalSkills(ctx context.Context, command LocalSkillScanCommand) (LocalSkillScan, error)
 	ConnectLocalBrowser(ctx context.Context, command LocalBrowserConnectionCommand) (LocalBrowserConnectionStatus, error)
 	LocalComputerPermissions(ctx context.Context, command LocalComputerPermissionCommand) (LocalComputerPermissionStatus, error)
+	ActOnLocalModels(ctx context.Context, command LocalModelActionCommand) (*LocalModelActionRefusal, error)
 }
 
 // LocalBrowserConnectionAction selects how a browser connection command changes the Computer.

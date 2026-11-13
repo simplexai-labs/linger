@@ -45,6 +45,10 @@ func (r *recordingLocalComputers) LocalComputerPermissions(_ context.Context, _ 
 	return roomagent.LocalComputerPermissionStatus{}, roomagent.ErrLocalComputerPermissionsUnsupported
 }
 
+func (r *recordingLocalComputers) ActOnLocalModels(_ context.Context, _ roomagent.LocalModelActionCommand) (*roomagent.LocalModelActionRefusal, error) {
+	return nil, roomagent.ErrLocalModelsUnsupported
+}
+
 func TestTenantAgentAvailabilityProjectsUnknownWhenRuntimeStatusIsMissing(t *testing.T) {
 	allowParallelIntegrationTest(t)
 	artifactRoot := integrationArtifactRoot(t)

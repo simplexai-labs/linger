@@ -38,12 +38,15 @@ const (
 	// been revoked, so browsers drop cached Document bytes. The id is the
 	// Document ID.
 	InvalidateDocumentAccess = "document-access"
+	// InvalidateLocalModels: a Local Computer's model library snapshot
+	// changed. The id is the Computer ID.
+	InvalidateLocalModels = "local-models"
 )
 
 var invalidationResources = map[string]bool{
 	InvalidateRoom: true, InvalidateDirectory: true, InvalidateAgents: true, InvalidateAnotherMe: true,
 	InvalidateComputers: true, InvalidateConnections: true, InvalidateWorkItems: true, InvalidateDocument: true,
-	InvalidateDocumentAccess: true,
+	InvalidateDocumentAccess: true, InvalidateLocalModels: true,
 }
 
 // ValidInvalidationResource reports whether resource is a published hint type.
