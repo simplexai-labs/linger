@@ -171,13 +171,20 @@ func inspectPi(ctx context.Context, request Request) (Page, error) {
 	records = branch
 	instructions := Instructions{Status: "unavailable", Source: "pi_session", Reason: "Native session has no instruction snapshot", Blocks: []InstructionBlock{}}
 	sections := make(map[string]InstructionBlock)
+	turn := ""
 	for i := range records {
 		item := &records[i]
 		kind := stringValue(item.original, "type", 256)
 		message := objectValue(item.original["message"])
 		item.history.NativeType = kind
-		item.history.TurnID = stringValue(item.original, "id", 256)
 		item.history.Role = stringValue(message, "role", 64)
+		// A turn is everything after one user message, so its records share
+		// that message's ID.
+		id := stringValue(item.original, "id", 256)
+		if kind == "message" && item.history.Role == "user" {
+			turn = id
+		}
+		item.history.TurnID = first(turn, id)
 		item.history.Category = "lifecycle"
 		if kind == "message" {
 			switch item.history.Role {
