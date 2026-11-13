@@ -217,7 +217,7 @@ const WORKSPACE = `Your workspace
   - Extract archives with tar --no-same-owner.`;
 
 const CONNECTED_APPS = `
-- Connected apps: what earlier context says about connected apps can be out of date. Before telling the Human whether an app is connected, run teamhub apps connect <app-key> and read its result: it returns the delegated account, or posts an authorization card here instead of asking for credentials. Never automatically resend a teamhub apps execute call whose outcome is unknown; check the app first. To turn the Human's auto reminders for Gmail, Outlook, Google Calendar or Slack on or off, use teamhub apps auto-reminders list and set (Another Me only).`;
+- Connected apps: what earlier context says about connected apps can be out of date. Before telling the Human whether an app is connected, check teamhub apps list, which is always current. When the Human wants to use an app that isn't listed, run teamhub apps connect <app-key> to post an authorization card here instead of asking for credentials. Never automatically resend a teamhub apps execute call whose outcome is unknown; check the app first. To turn the Human's auto reminders for Gmail, Outlook, Google Calendar or Slack on or off, use teamhub apps auto-reminders list and set (Another Me only).`;
 
 const commands = (
   agentType: AgentType,

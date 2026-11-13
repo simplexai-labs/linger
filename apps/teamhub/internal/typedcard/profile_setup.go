@@ -161,7 +161,7 @@ func onboardingStatusText(status onboardingStatus) string {
 	if len(status.connections) == 0 {
 		lines = append(lines, "Connected apps right now: none.")
 	} else {
-		lines = append(lines, "Connected apps right now (no need to run teamhub apps list):")
+		lines = append(lines, "Connected apps right now:")
 		for _, connection := range status.connections {
 			line := "- " + connection.AppName
 			if connection.AccountLabel != "" {
