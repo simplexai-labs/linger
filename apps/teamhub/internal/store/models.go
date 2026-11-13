@@ -856,6 +856,14 @@ type LocalComputerEnrollment struct {
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
+type LocalComputerModelSnapshot struct {
+	ComputerID string             `json:"computer_id"`
+	Snapshot   []byte             `json:"snapshot"`
+	Host       []byte             `json:"host"`
+	ObservedAt pgtype.Timestamptz `json:"observed_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type MemoryIndexChunk struct {
 	ID            string             `json:"id"`
 	TenantID      string             `json:"tenant_id"`
