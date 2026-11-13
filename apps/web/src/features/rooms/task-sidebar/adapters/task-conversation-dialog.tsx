@@ -1,9 +1,14 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { StatusPill } from "@/components/ui/status-pill";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
+import { useTaskActivities } from "@/features/work-items/use-task-activities";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type {
   TeamHubRunStatus,
@@ -25,7 +30,6 @@ import { TaskActivityLinksProvider } from "../../runtime-status/task-activity-bl
 import { useTaskActivityEvents } from "../../runtime-status/use-task-activity-events";
 import { PanelLoading } from "../panel-loading";
 import { RuntimeTrajectoryView } from "./runtime-trajectory-view";
-import { useTaskActivityView } from "./task-activities-panel-tab";
 
 /** Lets the task blocks in an activity log open their Task's conversation. */
 export function TaskConversationProvider({
@@ -83,11 +87,8 @@ export function TaskConversationDialog({
     roomId: originRoomId,
     tenantId,
   });
-  const { data, execution, refresh } = useTaskActivityView({
-    hidden: false,
-    taskId,
-    tenantId,
-  });
+  const data = useTaskActivities({ enabled: true, taskId, tenantId });
+  const execution = data.execution.data;
   const live =
     execution?.status === "running" ||
     execution?.status === "waiting_for_approval";
@@ -138,7 +139,7 @@ export function TaskConversationDialog({
               <CancelTaskButton
                 cancel={async () => {
                   await cancel(taskId);
-                  refresh();
+                  await data.execution.refetch();
                 }}
                 title={title}
               />
@@ -222,8 +223,12 @@ function TaskConversationRun({
 }) {
   const { client } = useTeamHubRuntime();
   const active = runStatus.status === "active" && !stopped;
+  // Native history is read from the Runtime's session file on the Computer,
+  // so it is read again only when the Run publishes a new step, which bumps
+  // its revision, never on a timer.
   const history = useQuery({
     enabled: Boolean(roomId),
+    placeholderData: keepPreviousData,
     queryKey: [
       "teamhub",
       tenantId,
@@ -232,6 +237,7 @@ function TaskConversationRun({
       "runs",
       runStatus.id,
       "activities",
+      runStatus.revision,
     ],
     queryFn: () =>
       teamHubData(
@@ -240,7 +246,6 @@ function TaskConversationRun({
         }),
       ),
     retry: false,
-    refetchInterval: active ? 1_500 : false,
   });
   // Native history may lag a live turn; its published steps stand in.
   const native = history.data?.status === "available" && history.data.records;
@@ -268,7 +273,7 @@ function TaskConversationRun({
           {runStatus.agent.display_name}
         </p>
         {native ? (
-          <RuntimeTrajectoryView records={native} />
+          <RuntimeTrajectoryView live={active} records={native} />
         ) : events.data ? (
           <div className="[&_ol]:px-0 [&_ol]:py-1">
             <RuntimeActivityPath

@@ -79,7 +79,7 @@ function activityTimelineItems(
   const thinkingTitles = new Set<string>();
   // Later steps name a Task only by id; reuse the name it was created with.
   const taskNames = new Map<string, string>();
-  for (const source of records.flatMap(claudeActivityRecords)) {
+  for (const source of records.flatMap(contentBlockRecords)) {
     let record = source;
     if (record.native_type === "event_msg.mcp_tool_call_end") {
       const invocation = asObject(nativePayload(record)?.invocation);
@@ -237,7 +237,11 @@ export function nativeCommand(record: TeamHubMessageActivityRecord) {
   const payload = nativePayload(record);
   const block = nativeContentBlock(record, payload);
   const input =
-    asObject(block?.input) ?? parseObject(payload?.arguments) ?? payload;
+    asObject(block?.input) ??
+    asObject(block?.arguments) ??
+    parseObject(payload?.arguments) ??
+    asObject(payload?.action) ??
+    payload;
   const command = input?.cmd ?? input?.command;
   if (typeof command === "string") return command;
   if (Array.isArray(command)) return command.filter(isString).join(" ");
@@ -286,7 +290,7 @@ export function nativePayload(record: TeamHubMessageActivityRecord) {
   );
 }
 
-function claudeBlockCategory(type: unknown): HistoryCategory | undefined {
+function contentBlockCategory(type: unknown): HistoryCategory | undefined {
   switch (type) {
     case "text":
       return "message";
@@ -295,6 +299,7 @@ function claudeBlockCategory(type: unknown): HistoryCategory | undefined {
       return "reasoning";
     case "tool_use":
     case "server_tool_use":
+    case "toolCall":
       return "tool_call";
     case "tool_result":
       return "tool_result";
@@ -303,15 +308,15 @@ function claudeBlockCategory(type: unknown): HistoryCategory | undefined {
   }
 }
 
-export function claudeActivityRecords(
+export function contentBlockRecords(
   record: TeamHubMessageActivityRecord,
 ): TeamHubMessageActivityRecord[] {
-  const blocks = claudeMessageBlocks(record);
+  const blocks = messageContentBlocks(record);
   if (!blocks) return [record];
   const native = asObject(record.native_record)!;
   const message = asObject(native.message)!;
   return blocks.flatMap((block) => {
-    const category = claudeBlockCategory(block.type);
+    const category = contentBlockCategory(block.type);
     if (!category) return [];
     return [
       {
@@ -332,8 +337,7 @@ export function reasoningText(
   const block = nativeContentBlock(record, payload);
   if (block?.type === "thinking" || block?.type === "redacted_thinking") {
     return (
-      claudeThinkingSummary(block) ??
-      "Thinking recorded · private content hidden"
+      thinkingSummary(block) ?? "Thinking recorded · private content hidden"
     );
   }
   return stringValue(payload?.text) ?? textContent(payload?.summary);
@@ -352,7 +356,7 @@ export function nativeContentBlock(
     case "tool_call":
       return blocks.find(
         (block) =>
-          (block.type === "tool_use" || block.type === "server_tool_use") &&
+          contentBlockCategory(block.type) === "tool_call" &&
           (!record.tool_call_id || block.id === record.tool_call_id),
       );
     case "tool_result":
@@ -408,10 +412,10 @@ export function indexToolCalls(records: TeamHubMessageActivityRecord[]) {
     }
   >();
   for (const record of records) {
-    const blocks = claudeMessageBlocks(record);
+    const blocks = messageContentBlocks(record);
     if (blocks) {
       for (const block of blocks) {
-        const category = claudeBlockCategory(block.type);
+        const category = contentBlockCategory(block.type);
         const id = stringValue(
           category === "tool_result" ? block.tool_use_id : block.id,
         );
@@ -454,12 +458,20 @@ export interface ToolCallPair {
   readonly result?: TeamHubMessageActivityRecord;
 }
 
-function claudeMessageBlocks(
+/**
+ * The content blocks of a Runtime that records a whole message per line:
+ * Claude Code's user and assistant lines, and Pi's assistant messages. A Pi
+ * tool result is its own line, already a tool_result record.
+ */
+function messageContentBlocks(
   record: TeamHubMessageActivityRecord,
 ): JsonObject[] | undefined {
   const native = asObject(record.native_record);
-  if (native?.type !== "user" && native?.type !== "assistant") return undefined;
-  const message = asObject(native.message);
+  const message = asObject(native?.message);
+  const claudeLine = native?.type === "user" || native?.type === "assistant";
+  const piAssistant =
+    native?.type === "message" && message?.role === "assistant";
+  if (!claudeLine && !piAssistant) return undefined;
   if (typeof message?.content === "string")
     return [{ type: "text", text: message.content }];
   return Array.isArray(message?.content)
@@ -470,7 +482,7 @@ function claudeMessageBlocks(
     : undefined;
 }
 
-function claudeThinkingSummary(block: JsonObject): string | undefined {
+export function thinkingSummary(block: JsonObject): string | undefined {
   if (typeof block.summary === "string") return block.summary;
   if (!Array.isArray(block.summary)) return undefined;
   return (
