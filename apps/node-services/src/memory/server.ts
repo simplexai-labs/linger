@@ -560,6 +560,9 @@ function parseQueryRequest(value: unknown): PersonalKnowledgeQueryRequest {
     "date_to",
     "event_from",
     "event_to",
+    "as_of",
+    "scope",
+    "page",
   ];
   if (
     !requiredKeys.every((key) => Object.hasOwn(input, key)) ||
@@ -581,7 +584,17 @@ function parseQueryRequest(value: unknown): PersonalKnowledgeQueryRequest {
     !validOptionalDate(input.event_to) ||
     (typeof input.event_from === "string" &&
       typeof input.event_to === "string" &&
-      input.event_from > input.event_to)
+      input.event_from > input.event_to) ||
+    !validOptionalDate(input.as_of) ||
+    (input.scope !== undefined &&
+      input.scope !== "originals" &&
+      input.scope !== "summaries") ||
+    (input.page !== undefined &&
+      !(
+        Number.isInteger(input.page) &&
+        (input.page as number) >= 1 &&
+        (input.page as number) <= 10
+      ))
   ) {
     throw new TypeError("Request body is invalid");
   }

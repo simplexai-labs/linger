@@ -101,6 +101,7 @@ async function searchAvailableRawSources(
       ...(input.event_from ? { event_from: input.event_from } : {}),
       ...(input.event_to ? { event_to: input.event_to } : {}),
       ...(input.date_to ? { date_to: input.date_to } : {}),
+      ...(input.as_of ? { as_of: input.as_of } : {}),
       ...(originKinds ? { originKinds } : {}),
       ...(limit ? { limit } : {}),
       ...(references.length
@@ -120,13 +121,7 @@ async function searchAvailableRawSources(
       const matches: RawMatch[] = [];
       for (const match of ranked) {
         const source = sourceById.get(match.sourceId);
-        if (
-          !source ||
-          !inList(source) ||
-          (input.date_from && source.date < input.date_from) ||
-          (input.date_to && source.date > input.date_to)
-        )
-          continue;
+        if (!source || !inList(source)) continue;
         let chunks = loaded.get(source.id);
         if (!chunks) {
           if (
@@ -162,12 +157,7 @@ async function searchAvailableRawSources(
   );
   // Referenced sources first; otherwise keep the database's newest-first order.
   const sources = resolved.sources
-    .filter(
-      (source) =>
-        (!input.date_from || source.date >= input.date_from) &&
-        (!input.date_to || source.date <= input.date_to) &&
-        inList(source),
-    )
+    .filter(inList)
     .sort(
       (a, b) =>
         (sourcePriority.get(a.id) ?? Number.MAX_SAFE_INTEGER) -

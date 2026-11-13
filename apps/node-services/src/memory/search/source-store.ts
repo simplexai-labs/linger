@@ -325,6 +325,10 @@ export function sourceSearchText(
  * One page of the Human's published Wiki as Raw, kept at the Wiki's current
  * revision; only PostgreSQL stores it.
  */
+/** `sessions/<date>/<session>.md`, the path LLM Wiki gives a Session page. */
+const SESSION_PAGE_KEY =
+  /^sessions\/(\d{4}-\d{2}-\d{2})\/(?!index\.md$)[^/]+\.md$/u;
+
 export function wikiPageRawSource(input: {
   identity: SourceIdentity;
   pageKey: string;
@@ -335,7 +339,10 @@ export function wikiPageRawSource(input: {
   revision: string;
   markdown: string;
 }): RawSource {
-  const date = input.publishedAt.slice(0, 10);
+  // A Session page is about its Session's day; any other page is dated by its
+  // publication, which says nothing about when its content happened.
+  const date =
+    SESSION_PAGE_KEY.exec(input.pageKey)?.[1] ?? input.publishedAt.slice(0, 10);
   if (
     !input.pageKey ||
     !DOCUMENT_ID_PATTERN.test(input.documentId) ||

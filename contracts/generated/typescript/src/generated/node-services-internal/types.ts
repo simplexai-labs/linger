@@ -777,12 +777,12 @@ export interface components {
       alternates?: string[];
       /**
        * Format: date
-       * @description Optional inclusive lower bound for evidence dates.
+       * @description Optional inclusive start of when the asked records were made, the source's local date. It ranks sources and facts recorded in that period higher and excludes none.
        */
       date_from?: string;
       /**
        * Format: date
-       * @description Optional inclusive upper bound for evidence dates.
+       * @description Optional inclusive end of when the asked records were made; see date_from.
        */
       date_to?: string;
       /**
@@ -795,6 +795,11 @@ export interface components {
        * @description Optional inclusive end of the asked event time; see event_from.
        */
       event_to?: string;
+      /**
+       * Format: date
+       * @description Optional day a changing value or state is asked for, such as today for the current one. Its latest mentions on or before that day rank higher; later ones remain eligible.
+       */
+      as_of?: string;
       /**
        * @description Search only one list and give it the whole result size; omitted returns both lists.
        * @enum {string}

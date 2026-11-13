@@ -133,4 +133,28 @@ describe("temporal window coverage", () => {
     // Similarity order (input order) is kept among the selected rows.
     expect(selected.at(-1)!.id).toBe("late");
   });
+
+  it("puts the latest of the most relevant matches before a day first", async () => {
+    const { selectLatestOnOrBefore, AS_OF_RELEVANT } =
+      await import("../../src/memory/search/temporal-window.js");
+    // Best-ranked first; the 21st row is the newest but not relevant enough.
+    const rows = Array.from({ length: AS_OF_RELEVANT + 1 }, (_, i) => ({
+      id: `r${i}`,
+      date: `2026-10-${String(i + 1).padStart(2, "0")}`,
+    }));
+    const selected = selectLatestOnOrBefore(rows, (row) => row.date);
+    expect(selected).toHaveLength(10);
+    expect(selected[0]!.id).toBe(`r${AS_OF_RELEVANT - 1}`);
+    expect(selected.map((row) => row.id)).not.toContain(`r${AS_OF_RELEVANT}`);
+    // Same day keeps the relevance order.
+    expect(
+      selectLatestOnOrBefore(
+        [
+          { id: "a", date: "2026-10-01" },
+          { id: "b", date: "2026-10-01" },
+        ],
+        (row) => row.date,
+      ).map((row) => row.id),
+    ).toEqual(["a", "b"]);
+  });
 });

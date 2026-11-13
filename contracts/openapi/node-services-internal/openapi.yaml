@@ -1654,11 +1654,14 @@ components:
         date_from:
           type: string
           format: date
-          description: Optional inclusive lower bound for evidence dates.
+          description:
+            Optional inclusive start of when the asked records were made, the
+            source's local date. It ranks sources and facts recorded in that
+            period higher and excludes none.
         date_to:
           type: string
           format: date
-          description: Optional inclusive upper bound for evidence dates.
+          description: Optional inclusive end of when the asked records were made; see date_from.
         event_from:
           type: string
           format: date
@@ -1670,6 +1673,13 @@ components:
           type: string
           format: date
           description: Optional inclusive end of the asked event time; see event_from.
+        as_of:
+          type: string
+          format: date
+          description:
+            Optional day a changing value or state is asked for, such as today
+            for the current one. Its latest mentions on or before that day rank
+            higher; later ones remain eligible.
         scope:
           type: string
           enum:
