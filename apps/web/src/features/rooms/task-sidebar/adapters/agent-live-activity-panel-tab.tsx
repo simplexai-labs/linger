@@ -10,7 +10,7 @@ import { roomMessagesInfiniteQueryOptions } from "../../room-queries";
 import { RuntimeActivityPath } from "../../runtime-status/runtime-activity-path-view";
 import { useRuntimePresentationEventRecords } from "../../runtime-status/use-runtime-presentation-event-records";
 import { PanelLoading } from "../panel-loading";
-import { TaskActivityDrillDown } from "./task-activity-drill-down";
+import { TaskConversationProvider } from "./task-conversation-dialog";
 
 const EMPTY_MESSAGES: readonly TeamHubMessage[] = [];
 
@@ -65,11 +65,7 @@ export function AgentLiveActivityPanelTab({
   const pending = events.pending;
 
   return (
-    <TaskActivityDrillDown
-      hidden={hidden}
-      key={runId ?? runStatusId}
-      tenantId={tenantId}
-    >
+    <TaskConversationProvider tenantId={tenantId}>
       <div
         className={hidden ? "hidden" : "flex h-full min-h-0 flex-col bg-card"}
         data-testid="agent-live-activity-panel"
@@ -124,7 +120,7 @@ export function AgentLiveActivityPanelTab({
           />
         )}
       </div>
-    </TaskActivityDrillDown>
+    </TaskConversationProvider>
   );
 }
 

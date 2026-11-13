@@ -125,7 +125,7 @@ func PromoteLockedHumanTaskRoomMessage(
 		return HumanTaskRoomMessagePromotion{}, err
 	}
 	wakes, err := AppendParticipantMetaWakes(
-		ctx, queries, target.taskID, target.tenantID, input.AuthorActorID,
+		ctx, queries, target.taskID, target.tenantID, input.AuthorActorID, InputSourceMessage,
 		recipients, publicMessage,
 	)
 	if err != nil {

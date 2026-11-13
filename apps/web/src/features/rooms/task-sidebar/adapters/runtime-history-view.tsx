@@ -233,7 +233,7 @@ function RuntimeActivityRecord({
 }
 
 /** The shell command a native tool call ran, for any Runtime's shape. */
-function nativeCommand(record: TeamHubMessageActivityRecord) {
+export function nativeCommand(record: TeamHubMessageActivityRecord) {
   const payload = nativePayload(record);
   const block = nativeContentBlock(record, payload);
   const input =
@@ -244,7 +244,7 @@ function nativeCommand(record: TeamHubMessageActivityRecord) {
   return undefined;
 }
 
-function nativeOutput(record: TeamHubMessageActivityRecord) {
+export function nativeOutput(record: TeamHubMessageActivityRecord) {
   const payload = nativePayload(record);
   const block = nativeContentBlock(record, payload);
   return (
@@ -254,7 +254,7 @@ function nativeOutput(record: TeamHubMessageActivityRecord) {
   );
 }
 
-function parseObject(value: unknown) {
+export function parseObject(value: unknown) {
   if (typeof value !== "string") return asObject(value);
   try {
     return asObject(JSON.parse(value));
@@ -267,7 +267,7 @@ function isString(value: unknown): value is string {
   return typeof value === "string";
 }
 
-function activityMessageText(record: TeamHubMessageActivityRecord) {
+export function activityMessageText(record: TeamHubMessageActivityRecord) {
   const payload = nativePayload(record);
   return (
     stringValue(payload?.message) ??
@@ -277,7 +277,7 @@ function activityMessageText(record: TeamHubMessageActivityRecord) {
   );
 }
 
-function nativePayload(record: TeamHubMessageActivityRecord) {
+export function nativePayload(record: TeamHubMessageActivityRecord) {
   const nativeRecord = asObject(record.native_record);
   return (
     asObject(nativeRecord?.payload) ??
@@ -303,7 +303,7 @@ function claudeBlockCategory(type: unknown): HistoryCategory | undefined {
   }
 }
 
-function claudeActivityRecords(
+export function claudeActivityRecords(
   record: TeamHubMessageActivityRecord,
 ): TeamHubMessageActivityRecord[] {
   const blocks = claudeMessageBlocks(record);
@@ -325,7 +325,7 @@ function claudeActivityRecords(
   });
 }
 
-function reasoningText(
+export function reasoningText(
   record: TeamHubMessageActivityRecord,
 ): string | undefined {
   const payload = nativePayload(record);
@@ -339,7 +339,7 @@ function reasoningText(
   return stringValue(payload?.text) ?? textContent(payload?.summary);
 }
 
-function nativeContentBlock(
+export function nativeContentBlock(
   record: TeamHubMessageActivityRecord,
   payload: JsonObject | undefined,
 ) {
@@ -371,17 +371,17 @@ function nativeContentBlock(
   }
 }
 
-function isUserMessage(record: TeamHubMessageActivityRecord) {
+export function isUserMessage(record: TeamHubMessageActivityRecord) {
   return record.role === "user" || record.native_type.endsWith(".user_message");
 }
 
-function isAssistantMessage(record: TeamHubMessageActivityRecord) {
+export function isAssistantMessage(record: TeamHubMessageActivityRecord) {
   return (
     record.role === "assistant" || record.native_type.endsWith(".agent_message")
   );
 }
 
-function isEventRecord(record: TeamHubMessageActivityRecord) {
+export function isEventRecord(record: TeamHubMessageActivityRecord) {
   return record.native_type.startsWith("event_msg.");
 }
 
@@ -399,7 +399,7 @@ function collectText(value: unknown): string[] {
   return object.content === undefined ? [] : collectText(object.content);
 }
 
-function indexToolCalls(records: TeamHubMessageActivityRecord[]) {
+export function indexToolCalls(records: TeamHubMessageActivityRecord[]) {
   const candidates = new Map<
     string,
     {
@@ -449,7 +449,7 @@ function indexToolCalls(records: TeamHubMessageActivityRecord[]) {
 
 type JsonObject = Record<string, unknown>;
 
-interface ToolCallPair {
+export interface ToolCallPair {
   readonly call?: TeamHubMessageActivityRecord;
   readonly result?: TeamHubMessageActivityRecord;
 }
@@ -483,12 +483,12 @@ function claudeThinkingSummary(block: JsonObject): string | undefined {
   );
 }
 
-function asObject(value: unknown): JsonObject | undefined {
+export function asObject(value: unknown): JsonObject | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as JsonObject)
     : undefined;
 }
 
-function stringValue(value: unknown) {
+export function stringValue(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }

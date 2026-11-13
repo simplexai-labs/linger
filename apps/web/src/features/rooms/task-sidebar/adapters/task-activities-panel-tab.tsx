@@ -41,26 +41,8 @@ export function TaskActivitiesPanelTab({
   tenantId: string;
   title?: string;
 }) {
-  const data = useTaskActivities({ tenantId, taskId, enabled: !hidden });
-  const { client } = useTeamHubRuntime();
-  const messages = useInfiniteQuery({
-    ...roomMessagesInfiniteQueryOptions(client, tenantId, data.roomId ?? ""),
-    enabled: !hidden && Boolean(data.roomId),
-    refetchInterval:
-      !hidden && data.roomId && !taskExecutionStopped(data.execution.data)
-        ? 2_000
-        : false,
-  });
-  const publicMessages =
-    messages.data?.pages.flatMap((page) => page.items) ?? [];
-  const execution = data.execution.data;
-  const stopped = taskExecutionStopped(execution);
-  const refresh = () => {
-    void data.item.refetch();
-    void data.execution.refetch();
-    void data.activities.refetch();
-    if (data.roomId) void messages.refetch();
-  };
+  const view = useTaskActivityView({ hidden, taskId, tenantId });
+  const { data, execution, refresh } = view;
   return (
     <section
       className={hidden ? "hidden" : "flex h-full min-h-0 flex-col bg-card"}
@@ -100,51 +82,98 @@ export function TaskActivitiesPanelTab({
         </button>
       </header>
       <div className="workspace-scrollbar min-h-0 flex-1 overflow-y-auto">
-        {data.activities.error ? (
-          <State>
-            {isTaskActivityNotFound(data.activities.error)
-              ? "You do not have access to this task’s work room activity."
-              : "Activity could not be loaded. Try refreshing."}
-          </State>
-        ) : data.activities.isPending ? (
-          <State busy>Loading activity…</State>
-        ) : (
-          <>
-            {data.roomId && !data.connected ? (
-              <State>Reconnecting to live activity…</State>
-            ) : null}
-            {!data.runStatuses.length ? <State>No activity yet.</State> : null}
-            {data.roomId
-              ? data.runStatuses.map((runStatus) => (
-                  <TaskActivityGroup
-                    key={runStatus.id}
-                    runStatus={runStatus}
-                    tenantId={tenantId}
-                    roomId={data.roomId!}
-                    visible={!hidden}
-                    stopped={stopped}
-                    paused={execution?.status === "waiting_for_approval"}
-                    messages={publicMessages}
-                    labeled={data.runStatuses.length > 1}
-                  />
-                ))
-              : null}
-            {data.activities.hasNextPage ? (
-              <div className="px-4 py-3">
-                <Button
-                  size="compact"
-                  tone="ghost"
-                  disabled={data.activities.isFetchingNextPage}
-                  onClick={() => void data.activities.fetchNextPage()}
-                >
-                  Load earlier activity
-                </Button>
-              </div>
-            ) : null}
-          </>
-        )}
+        <TaskActivityRuns hidden={hidden} tenantId={tenantId} view={view} />
       </div>
     </section>
+  );
+}
+
+export function useTaskActivityView({
+  hidden,
+  taskId,
+  tenantId,
+}: {
+  hidden: boolean;
+  taskId: string;
+  tenantId: string;
+}) {
+  const data = useTaskActivities({ tenantId, taskId, enabled: !hidden });
+  const { client } = useTeamHubRuntime();
+  const messages = useInfiniteQuery({
+    ...roomMessagesInfiniteQueryOptions(client, tenantId, data.roomId ?? ""),
+    enabled: !hidden && Boolean(data.roomId),
+    refetchInterval:
+      !hidden && data.roomId && !taskExecutionStopped(data.execution.data)
+        ? 2_000
+        : false,
+  });
+  const refresh = () => {
+    void data.item.refetch();
+    void data.execution.refetch();
+    void data.activities.refetch();
+    if (data.roomId) void messages.refetch();
+  };
+  return {
+    data,
+    execution: data.execution.data,
+    messages: messages.data?.pages.flatMap((page) => page.items) ?? [],
+    refresh,
+  };
+}
+
+function TaskActivityRuns({
+  hidden,
+  tenantId,
+  view: { data, execution, messages },
+}: {
+  hidden: boolean;
+  tenantId: string;
+  view: ReturnType<typeof useTaskActivityView>;
+}) {
+  const stopped = taskExecutionStopped(execution);
+  if (data.activities.error)
+    return (
+      <State>
+        {isTaskActivityNotFound(data.activities.error)
+          ? "You do not have access to this task’s work room activity."
+          : "Activity could not be loaded. Try refreshing."}
+      </State>
+    );
+  if (data.activities.isPending) return <State busy>Loading activity…</State>;
+  return (
+    <>
+      {data.roomId && !data.connected ? (
+        <State>Reconnecting to live activity…</State>
+      ) : null}
+      {!data.runStatuses.length ? <State>No activity yet.</State> : null}
+      {data.roomId
+        ? data.runStatuses.map((runStatus) => (
+            <TaskActivityGroup
+              key={runStatus.id}
+              runStatus={runStatus}
+              tenantId={tenantId}
+              roomId={data.roomId!}
+              visible={!hidden}
+              stopped={stopped}
+              paused={execution?.status === "waiting_for_approval"}
+              messages={messages}
+              labeled={data.runStatuses.length > 1}
+            />
+          ))
+        : null}
+      {data.activities.hasNextPage ? (
+        <div className="px-4 py-3">
+          <Button
+            size="compact"
+            tone="ghost"
+            disabled={data.activities.isFetchingNextPage}
+            onClick={() => void data.activities.fetchNextPage()}
+          >
+            Load earlier activity
+          </Button>
+        </div>
+      ) : null}
+    </>
   );
 }
 

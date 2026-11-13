@@ -7,14 +7,16 @@ package store
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createTaskMetaMessage = `-- name: CreateTaskMetaMessage :one
 INSERT INTO task_meta_messages(
-    id,tenant_id,task_id,agent_actor_id,meta_seq,author_actor_id,body,segments
+    id,tenant_id,task_id,agent_actor_id,meta_seq,author_actor_id,body,segments,source
 )
-VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-RETURNING id,tenant_id,task_id,agent_actor_id,meta_seq,author_actor_id,body,segments,created_at
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+RETURNING id,tenant_id,task_id,agent_actor_id,meta_seq,author_actor_id,body,segments,created_at,source
 `
 
 type CreateTaskMetaMessageParams struct {
@@ -26,6 +28,7 @@ type CreateTaskMetaMessageParams struct {
 	AuthorActorID string `json:"author_actor_id"`
 	Body          string `json:"body"`
 	Segments      []byte `json:"segments"`
+	Source        string `json:"source"`
 }
 
 func (q *Queries) CreateTaskMetaMessage(ctx context.Context, arg CreateTaskMetaMessageParams) (TaskMetaMessage, error) {
@@ -38,6 +41,7 @@ func (q *Queries) CreateTaskMetaMessage(ctx context.Context, arg CreateTaskMetaM
 		arg.AuthorActorID,
 		arg.Body,
 		arg.Segments,
+		arg.Source,
 	)
 	var i TaskMetaMessage
 	err := row.Scan(
@@ -50,6 +54,7 @@ func (q *Queries) CreateTaskMetaMessage(ctx context.Context, arg CreateTaskMetaM
 		&i.Body,
 		&i.Segments,
 		&i.CreatedAt,
+		&i.Source,
 	)
 	return i, err
 }
@@ -96,6 +101,108 @@ func (q *Queries) GetTaskMetaInboxForUpdate(ctx context.Context, arg GetTaskMeta
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listTaskConversationCards = `-- name: ListTaskConversationCards :many
+SELECT id,room_id,message_id,created_at
+FROM decisions
+WHERE tenant_id=$1::text AND alter_ego_task_id=$2::text
+ORDER BY created_at,id
+LIMIT 200
+`
+
+type ListTaskConversationCardsParams struct {
+	TenantID string `json:"tenant_id"`
+	TaskID   string `json:"task_id"`
+}
+
+type ListTaskConversationCardsRow struct {
+	ID        string             `json:"id"`
+	RoomID    string             `json:"room_id"`
+	MessageID string             `json:"message_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// Every card the Task's AlterEgo raised, answered or not, by its card Message.
+func (q *Queries) ListTaskConversationCards(ctx context.Context, arg ListTaskConversationCardsParams) ([]ListTaskConversationCardsRow, error) {
+	rows, err := q.db.Query(ctx, listTaskConversationCards, arg.TenantID, arg.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskConversationCardsRow{}
+	for rows.Next() {
+		var i ListTaskConversationCardsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RoomID,
+			&i.MessageID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTaskConversationInputs = `-- name: ListTaskConversationInputs :many
+SELECT message.id,message.author_actor_id,author.kind AS author_kind,
+       author.display_name AS author_display_name,message.body,message.source,message.created_at
+FROM work_items item
+JOIN task_execution_generations generation
+  ON generation.task_id=item.id AND generation.tenant_id=item.tenant_id
+ AND generation.generation=item.task_execution_generation
+JOIN task_meta_messages message
+  ON message.task_id=item.id AND message.tenant_id=item.tenant_id
+ AND message.agent_actor_id=generation.result_agent_actor_id
+JOIN actors author ON author.id=message.author_actor_id AND author.tenant_id=message.tenant_id
+WHERE item.id=$1::text
+ORDER BY message.meta_seq
+LIMIT 500
+`
+
+type ListTaskConversationInputsRow struct {
+	ID                string             `json:"id"`
+	AuthorActorID     string             `json:"author_actor_id"`
+	AuthorKind        string             `json:"author_kind"`
+	AuthorDisplayName string             `json:"author_display_name"`
+	Body              string             `json:"body"`
+	Source            string             `json:"source"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+// Every input the Task's own Agent received in its current generation, in
+// delivery order. Other participants hold copies of the same inputs.
+func (q *Queries) ListTaskConversationInputs(ctx context.Context, taskID string) ([]ListTaskConversationInputsRow, error) {
+	rows, err := q.db.Query(ctx, listTaskConversationInputs, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskConversationInputsRow{}
+	for rows.Next() {
+		var i ListTaskConversationInputsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AuthorActorID,
+			&i.AuthorKind,
+			&i.AuthorDisplayName,
+			&i.Body,
+			&i.Source,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setTaskMetaInboxThroughSeq = `-- name: SetTaskMetaInboxThroughSeq :execrows

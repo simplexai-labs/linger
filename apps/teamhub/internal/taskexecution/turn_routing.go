@@ -38,6 +38,15 @@ type SubmitTurnEffectPayload struct {
 	Steer bool `json:"steer,omitempty"`
 }
 
+// InputSource says whether a Task input is a message or a system notice.
+type InputSource string
+
+// Task input sources stored with each private wake.
+const (
+	InputSourceMessage InputSource = "message"
+	InputSourceSystem  InputSource = "system"
+)
+
 // AppendParticipantMetaWakes durably appends exactly one private wake to every
 // recipient's frozen Meta Inbox. Callers must run it in the same transaction
 // that creates the corresponding InputRevision and submit effect.
@@ -46,11 +55,13 @@ func AppendParticipantMetaWakes(
 	queries *store.Queries,
 	taskID, tenantID string,
 	authorActorID string,
+	source InputSource,
 	recipientActorIDs []string,
 	publicMessage TurnMessageInput,
 ) ([]ParticipantMetaWake, error) {
 	authorActorID = strings.TrimSpace(authorActorID)
-	if queries == nil || strings.TrimSpace(taskID) == "" || strings.TrimSpace(tenantID) == "" || authorActorID == "" {
+	if queries == nil || strings.TrimSpace(taskID) == "" || strings.TrimSpace(tenantID) == "" || authorActorID == "" ||
+		source != InputSourceMessage && source != InputSourceSystem {
 		return nil, ErrInvalid
 	}
 	recipients, err := normalizedUniqueIDs(recipientActorIDs)
@@ -82,7 +93,7 @@ func AppendParticipantMetaWakes(
 		if _, err := queries.CreateTaskMetaMessage(ctx, store.CreateTaskMetaMessageParams{
 			ID: message.MessageID, TenantID: tenantID, TaskID: taskID,
 			AgentActorID: actorID, MetaSeq: nextSeq, AuthorActorID: authorActorID,
-			Body: message.RawMessage, Segments: message.Segments,
+			Body: message.RawMessage, Segments: message.Segments, Source: string(source),
 		}); err != nil {
 			return nil, err
 		}

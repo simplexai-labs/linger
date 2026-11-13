@@ -1679,7 +1679,6 @@ paths:
       description: >-
         Authorizes the committed Message through ordinary Room membership, resolves its source
         Runtime run, and returns only records linked to that run by Activity identity.
-        Task runs return unavailable; their public activities use Runtime presentation events.
       responses:
         '200':
           description: Exact Message activity log or an explicit unavailable state.
@@ -1966,8 +1965,7 @@ paths:
       description: >-
         Requires ordinary Room membership. Resolves native turns only through trusted
         invocation identities in persisted Runtime events. History may be unavailable
-        until the Run has recorded such an identity.
-        Task runs always return unavailable; use their public Runtime presentation events.
+        until the Run has recorded such an identity. A Task Run reads its AlterEgo's history.
       responses:
         '200':
           description: Native execution records with explicit availability and truncation.
@@ -4253,6 +4251,32 @@ paths:
             application/json:
               schema:
                 $ref: '../components/task-executions.yaml#/components/schemas/TaskExecutionProjection'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
+  /v0/tasks/{taskId}/conversation:
+    parameters:
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          $ref: '../components/common.yaml#/components/schemas/Id'
+    get:
+      tags: [Work Items]
+      operationId: getTaskConversation
+      summary: Read what a Task's Agent was told and the cards it raised.
+      description: >-
+        Returns the inputs the Task's own Agent received in its current generation, in delivery order,
+        and every card its AlterEgo raised. Each card is read through its Message in the card's Room.
+        The Agent's own steps come from each Run's activities.
+      responses:
+        '200':
+          description: Task inputs and cards.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/task-executions.yaml#/components/schemas/TaskConversation'
         '401':
           $ref: '../components/common.yaml#/components/responses/Unauthenticated'
         '404':

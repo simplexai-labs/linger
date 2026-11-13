@@ -18,6 +18,7 @@ import (
 type taskExecutionService interface {
 	ResolveAgentParticipantTaskByWorkRoom(context.Context, string, string) (taskexecution.ParticipantTaskResolution, error)
 	GetExecutionForHuman(context.Context, string, string) (taskexecution.Execution, error)
+	GetConversationForHuman(context.Context, string, string) (taskexecution.Conversation, error)
 	ClaimExecution(context.Context, taskexecution.WorkerClaimInput) (taskexecution.WorkerExecution, bool, *time.Duration, error)
 	GetExecutionForWorker(context.Context, taskexecution.WorkerLeaseInput) (taskexecution.WorkerExecution, error)
 	HeartbeatExecution(context.Context, taskexecution.WorkerHeartbeatInput) (taskexecution.WorkerLease, error)

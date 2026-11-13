@@ -1728,6 +1728,7 @@ type TaskMetaMessage struct {
 	Body          string             `json:"body"`
 	Segments      []byte             `json:"segments"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	Source        string             `json:"source"`
 }
 
 type ThreadRoomListActor struct {

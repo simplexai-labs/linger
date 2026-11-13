@@ -178,7 +178,7 @@ func CreateManagedGeneration(
 		wakeAuthorActorID = locked.UpdatedByActorID
 	}
 	wakes, err := AppendParticipantMetaWakes(
-		ctx, queries, input.TaskID, locked.TenantID, wakeAuthorActorID,
+		ctx, queries, input.TaskID, locked.TenantID, wakeAuthorActorID, InputSourceMessage,
 		recipients, initialMessage,
 	)
 	if err != nil {

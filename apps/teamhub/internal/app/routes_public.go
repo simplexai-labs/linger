@@ -136,6 +136,7 @@ func (a *App) publicRoutes() []contractRoute {
 		route(http.MethodPost, "/v0/shared-room-history/asset", nil, a.readRoomHistoryShareAsset),
 		route(http.MethodPost, "/v0/shared-room-history/read", nil, a.readRoomHistoryShare),
 		route(http.MethodGet, "/v0/tasks/:taskId/execution", nil, session, a.getTaskExecutionProjection),
+		route(http.MethodGet, "/v0/tasks/:taskId/conversation", nil, session, a.getTaskConversation),
 		route(http.MethodGet, "/v0/tasks/:taskId/runtime-presentation-runs", httpapi.ListTaskRuntimePresentationRunsParams{}, session, a.listTaskRuntimePresentationRuns),
 		route(http.MethodGet, "/v0/tenants", nil, session, a.listTenants),
 		route(http.MethodGet, "/v0/tenants/:tenantId", nil, session, a.getTenant),

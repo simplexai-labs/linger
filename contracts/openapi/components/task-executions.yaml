@@ -91,6 +91,56 @@ components:
           $ref: "./common.yaml#/components/schemas/Timestamp"
         finished_at:
           $ref: "./common.yaml#/components/schemas/Timestamp"
+    TaskConversation:
+      type: object
+      additionalProperties: false
+      required: [inputs, cards]
+      properties:
+        inputs:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/TaskConversationInput"
+        cards:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/TaskConversationCard"
+    TaskConversationInput:
+      type: object
+      additionalProperties: false
+      required: [id, author, body, source, created_at]
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        author:
+          $ref: "./common.yaml#/components/schemas/ActorRef"
+        body:
+          type: string
+          minLength: 1
+          maxLength: 50000
+        source:
+          type: string
+          enum: [message, system]
+          description: A message from the Meta or a person, or a system notice such as a card's result.
+          x-enum-varnames:
+            - TaskConversationInputSourceMessage
+            - TaskConversationInputSourceSystem
+        created_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+    TaskConversationCard:
+      type: object
+      additionalProperties: false
+      required: [decision_id, room_id, message_id, created_at]
+      properties:
+        decision_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        room_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        message_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        created_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
     TaskExecutionProjection:
       type: object
       additionalProperties: false

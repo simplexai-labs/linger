@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomagent"
-	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
 
 func TestMessageActivityRecordMatchesNativeTurn(t *testing.T) {
@@ -132,12 +131,4 @@ func (s *messageActivityInspectorStub) ReadRuntimeHistory(
 		cursor = *options.Cursor
 	}
 	return s.pages[cursor], nil
-}
-
-func TestTaskActivityNeverReadsNativeHistory(t *testing.T) {
-	// No native reader or database: both public native activity routes share this guard.
-	log, err := (&Service{}).runtimeActivityLog(t.Context(), runActivitySource{task: true}, nil)
-	if err != nil || log.Status != httpapi.MessageActivityLogStatusUnavailable {
-		t.Fatalf("native Task history log: %+v %v", log, err)
-	}
 }

@@ -15,7 +15,7 @@ import type { TeamHubMessage } from "@/features/teamhub/teamhub-types";
 
 import { ActorAvatar } from "../../members/actor-avatar";
 import { PanelLoading } from "../panel-loading";
-import { TaskActivityDrillDown } from "./task-activity-drill-down";
+import { TaskConversationProvider } from "./task-conversation-dialog";
 
 export function MessageActivitiesPanelTab({
   activationKey,
@@ -77,7 +77,7 @@ export function MessageActivitiesPanelTab({
   }, [activationKey, hidden, message.id, activities.data?.records.length]);
 
   return (
-    <TaskActivityDrillDown hidden={hidden} key={message.id} tenantId={tenantId}>
+    <TaskConversationProvider tenantId={tenantId}>
       <div
         className={hidden ? "hidden" : "flex h-full min-h-0 flex-col bg-card"}
         data-testid="message-activities-panel"
@@ -179,7 +179,7 @@ export function MessageActivitiesPanelTab({
           )}
         </div>
       </div>
-    </TaskActivityDrillDown>
+    </TaskConversationProvider>
   );
 }
 
