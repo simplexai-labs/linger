@@ -1,6 +1,7 @@
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
+import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -48,7 +49,8 @@ const statusLabels: Record<RuntimeStatus, string> = {
  * Every model call, Another Me's included, runs on the Human's own Computer,
  * so this build has nothing to offer before one runs an AI app. TeamHub
  * creates Another Me the first time such a Computer comes online; until then
- * this gate covers the product. It exists only while no hosted runtime does.
+ * this gate covers the product except Settings, where a Pi-only Computer
+ * loads its first local model. It exists only while no hosted runtime does.
  */
 export function LocalComputerGate({
   onSignOut,
@@ -143,7 +145,7 @@ export function LocalComputerGate({
               title="Set up an AI app"
             >
               {computer && online ? (
-                <AppSetup computer={computer} />
+                <AppSetup computer={computer} tenantId={tenantId} />
               ) : (
                 <p className="mt-1 text-xs text-muted-foreground">
                   Available once your computer is online.
@@ -207,7 +209,13 @@ function ConnectionStatus({
   );
 }
 
-function AppSetup({ computer }: { computer: LocalComputer }) {
+function AppSetup({
+  computer,
+  tenantId,
+}: {
+  computer: LocalComputer;
+  tenantId: string;
+}) {
   const missing = appOrder.filter(
     (app) => appStatus(computer, app) === "not_installed",
   );
@@ -237,6 +245,16 @@ function AppSetup({ computer }: { computer: LocalComputer }) {
           runtimeTypes={missing}
         />
       ) : null}
+      <p className="text-xs text-muted-foreground">
+        Or run a model on {computer.display_name} itself: load one in{" "}
+        <Link
+          className="text-foreground underline underline-offset-2"
+          to={`/t/${encodeURIComponent(tenantId)}/settings/local-models?computer=${encodeURIComponent(computer.computer_id)}`}
+        >
+          Local models
+        </Link>
+        .
+      </p>
       <p
         className="flex items-center gap-1.5 text-xs text-muted-foreground"
         role="status"

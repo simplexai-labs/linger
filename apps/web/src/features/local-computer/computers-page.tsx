@@ -235,6 +235,7 @@ export function ComputersPage() {
               )}
               computer={selectedComputer}
               key={selectedComputer.computer_id}
+              localModelsHref={`/t/${tenantId}/settings/local-models?computer=${encodeURIComponent(selectedComputer.computer_id)}`}
               onConnect={openSetup}
               onOpenAgent={(actorId) => {
                 if (!openAgent.isPending) openAgent.mutate(actorId);

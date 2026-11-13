@@ -710,6 +710,13 @@ function createSettingsRoute(): RouteObject {
         }),
         path: "computers",
       },
+      {
+        lazy: async () => ({
+          Component: (await import("@/features/local-models/local-models-page"))
+            .LocalModelsPage,
+        }),
+        path: "local-models",
+      },
       { loader: openProfile, path: "administration" },
     ],
     ErrorBoundary: PanelRouteErrorSurface,
