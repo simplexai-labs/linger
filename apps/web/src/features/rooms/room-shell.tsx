@@ -11,6 +11,7 @@ import {
 import {
   Outlet,
   useLocation,
+  useMatch,
   useNavigate,
   useNavigation,
   useParams,
@@ -107,19 +108,24 @@ function RoomShellReady({
   // settled lets them land together, instead of the card arriving later and
   // pushing every row down.
   const navigationPending = roomsQuery.isPending || anotherMeQuery.isPending;
-  const gated = anotherMeQuery.isSuccess && !anotherMe?.agent_actor_id;
+  // Settings stays open under the gate: a Computer whose only app is Pi gets
+  // its first model from Settings › Local models.
+  const onSettings = useMatch("/t/:tenantId/settings/*") !== null;
+  const gated =
+    anotherMeQuery.isSuccess && !anotherMe?.agent_actor_id && !onSettings;
   const navigate = useNavigate();
   const wasGated = useRef(false);
   const anotherMeRoomId = anotherMe?.room_id;
-  // The gate lands the Human in the Another Me Chat it waited for.
+  // The gate lands the Human in the Another Me Chat it waited for, once they
+  // are back from Settings.
   useEffect(() => {
     if (gated) {
       wasGated.current = true;
-    } else if (wasGated.current && anotherMeRoomId) {
+    } else if (wasGated.current && anotherMeRoomId && !onSettings) {
       wasGated.current = false;
       void navigate(`/t/${tenantId}/rooms/${anotherMeRoomId}/chat`);
     }
-  }, [anotherMeRoomId, gated, navigate, tenantId]);
+  }, [anotherMeRoomId, gated, navigate, onSettings, tenantId]);
 
   const openRoom = useCallback(
     (roomId: string) =>
