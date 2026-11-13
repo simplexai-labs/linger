@@ -14,7 +14,7 @@ func TestOnboardingStatusTextTellsAnotherMeWhatSetupCollected(t *testing.T) {
 	}{
 		"open, nothing shared": {
 			onboardingStatus{},
-			[]string{"Setup cards: not finished", "Connected apps: none.", "mention once that they can still connect", "Do not open the personal-profile Skill"},
+			[]string{"Setup cards: not finished", "Connected apps right now: none.", "mention once that they can still connect", "Do not open the personal-profile Skill"},
 		},
 		"open, app connected": {
 			onboardingStatus{connections: gmail},
@@ -36,6 +36,10 @@ func TestOnboardingStatusTextTellsAnotherMeWhatSetupCollected(t *testing.T) {
 		text := onboardingStatusText(test.status)
 		if !strings.HasPrefix(text, "Onboarding status from TeamHub") {
 			t.Fatalf("%s: text=%q", name, text)
+		}
+		// Apps can be granted after this status, so it never forbids checking them.
+		if strings.Contains(text, "check apps") {
+			t.Fatalf("%s: status forbids checking apps: %q", name, text)
 		}
 		for _, want := range test.want {
 			if !strings.Contains(text, want) {

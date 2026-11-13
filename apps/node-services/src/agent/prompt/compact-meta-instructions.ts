@@ -147,7 +147,7 @@ const authority = (agentType: AgentType, roomKind: MetaRoomKind): string => {
 };
 
 const CONNECTED_APPS = `
-- Connected apps: gmail, outlook, gcal, gdrive, slack, notion, and figma have their own commands (teamhub gmail --help). For other apps, find the tool with teamhub apps search "<the action in English, with the app name>", then run teamhub apps execute --connectionId <id> --toolSlug <slug> --toolVersion <version> --arguments '<json>'. When an app has no account, teamhub apps connect <app-key> posts an authorization card. Never resend a write whose outcome is unknown; check the app first.`;
+- Connected apps: gmail, outlook, gcal, gdrive, slack, notion, and figma have their own commands (teamhub gmail --help). For other apps, find the tool with teamhub apps search "<the action in English, with the app name>", then run teamhub apps execute --connectionId <id> --toolSlug <slug> --toolVersion <version> --arguments '<json>'. Before saying whether an app is connected, run teamhub apps connect <app-key> and read its result: it returns the account, or posts an authorization card. Never resend a write whose outcome is unknown; check the app first.`;
 
 const commands = (agentType: AgentType, connectedApps: boolean): string =>
   `TeamHub commands, all run through your shell tool (teamhub <domain> <action> --help explains each; credentials are installed, never read them)

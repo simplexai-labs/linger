@@ -317,7 +317,7 @@ func TestAnotherMeProfileSetupSourcesDoneHandsOffStatusWithAttachments(t *testin
 	}
 	// The Human never wrote, so the status tells AnotherMe to start.
 	status := f.onboardingStatus(t, cardMessageID)
-	for _, want := range []string{"Setup cards: finished.", "Connected apps: none.",
+	for _, want := range []string{"Setup cards: finished.", "Connected apps right now: none.",
 		"Links: https://alice.example.com https://github.com/alice", "Files: 2, attached to this message.",
 		"Tell the Human you are starting their profile"} {
 		if !strings.Contains(status.body, want) {

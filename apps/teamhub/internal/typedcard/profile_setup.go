@@ -148,7 +148,9 @@ type onboardingStatus struct {
 
 // onboardingStatusText is the hidden status AnotherMe reads: the facts, then
 // what to do with them. With nothing shared it keeps AnotherMe from reading
-// the personal-profile Skill or checking apps, so the chat goes on normally.
+// the personal-profile Skill, so the chat goes on normally. The apps are the
+// grants at this moment; a Connection that activates later is granted without
+// another status, so the text must not read as permanent.
 func onboardingStatusText(status onboardingStatus) string {
 	lines := []string{"Onboarding status from TeamHub (automatic, not written by the Human)."}
 	if status.finished {
@@ -157,9 +159,9 @@ func onboardingStatusText(status onboardingStatus) string {
 		lines = append(lines, "Setup cards: not finished; the Human can still answer them above.")
 	}
 	if len(status.connections) == 0 {
-		lines = append(lines, "Connected apps: none.")
+		lines = append(lines, "Connected apps right now: none.")
 	} else {
-		lines = append(lines, "Connected apps (current, no need to run teamhub apps list):")
+		lines = append(lines, "Connected apps right now (no need to run teamhub apps list):")
 		for _, connection := range status.connections {
 			line := "- " + connection.AppName
 			if connection.AccountLabel != "" {
@@ -184,9 +186,9 @@ func onboardingStatusText(status onboardingStatus) string {
 	}
 	switch {
 	case !shared && !status.finished:
-		lines = append(lines, "Answer the Human's message first. Then mention once that they can still connect an app or share links and files in the setup cards above. Do not open the personal-profile Skill or check apps until they share something.")
+		lines = append(lines, "Answer the Human's message first. Then mention once that they can still connect an app or share links and files in the setup cards above. Do not open the personal-profile Skill until they share something.")
 	case !shared:
-		lines = append(lines, "The Human shared nothing. Do not open the personal-profile Skill, check apps, or bring up setup again. Say briefly that you will get to know them as you talk and that they can connect apps anytime, then talk normally.")
+		lines = append(lines, "The Human shared nothing. Do not open the personal-profile Skill or bring up setup again. Say briefly that you will get to know them as you talk and that they can connect apps anytime, then talk normally.")
 	case !status.finished:
 		lines = append(lines, "Answer the Human's message first. Then tell them once that building their profile takes a while, and ask whether to start now from what is connected so far. Start it with the personal-profile Skill only if they agree; otherwise wait until they finish the setup cards.")
 	case status.chatted:
