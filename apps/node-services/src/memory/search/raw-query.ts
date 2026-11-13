@@ -79,6 +79,7 @@ async function searchAvailableRawSources(
   input: RawSearchInput,
   chunkSearch?: ChunkSearchProvider,
   references: readonly RawSourceReference[] = [],
+  options: { fallback?: "skip" | "only"; maxSources?: number } = {},
 ): Promise<{ matches: RawMatch[]; limited: boolean }> {
   const { originKinds, limit } = input;
   const inList = (source: RawSource) =>
@@ -89,7 +90,7 @@ async function searchAvailableRawSources(
       sourcePriority.set(reference.sourceId, index);
     }
   }
-  if (chunkSearch) {
+  if (chunkSearch && options.fallback !== "only") {
     const ranked: IndexedChunkMatch[] = await chunkSearch.search({
       agent_id: input.agent_id,
       tenant_id: input.tenant_id,
@@ -115,6 +116,7 @@ async function searchAvailableRawSources(
       );
       const sourceById = new Map(sources.map((source) => [source.id, source]));
       const loaded = new Map<string, SourceChunk[]>();
+      const attempted = new Set<string>();
       const matches: RawMatch[] = [];
       for (const match of ranked) {
         const source = sourceById.get(match.sourceId);
@@ -127,6 +129,13 @@ async function searchAvailableRawSources(
           continue;
         let chunks = loaded.get(source.id);
         if (!chunks) {
+          if (
+            attempted.has(source.id) ||
+            (options.maxSources !== undefined &&
+              attempted.size >= options.maxSources)
+          )
+            continue;
+          attempted.add(source.id);
           const text = await chunkSearch.readRawSource?.(input, source);
           if (text === undefined) continue;
           chunks = chunkSource(text);
@@ -144,6 +153,7 @@ async function searchAvailableRawSources(
       if (matches.length > 0) return { matches, limited: false };
     }
   }
+  if (options.fallback === "skip") return { matches: [], limited: false };
   const resolved = await resolveSearchRawSources(
     workspaceRoot,
     input,

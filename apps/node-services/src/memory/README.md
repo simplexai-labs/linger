@@ -191,7 +191,7 @@ Core configuration:
   vote, fused by RRF, and the response returns at most 30 `facts` at the top level. Without keyword matches it
   returns none. Each fact carries its Raw's `evidenceId` and `sectionId` for a follow-up read. Facts take no part in
   the Chunk ranking and take at most a quarter of the response's output budget (below); with or without the fact
-  channel, both lists are ranked the same. A failed fact recall only omits `facts`.
+  channel, both lists are ranked the same. A summaries-only search omits facts; a failed fact recall only omits `facts`.
 
 Memory's endpoints mount on the shared Node Services listener (`127.0.0.1:4319` by default), all under the
 `/internal/v1/` prefix and protected by the workload token. The process answers `GET /healthz`, `GET /startupz` and
@@ -383,8 +383,8 @@ top 50, merged by RRF with `k=60`; adjacent results from the same source are ded
 source before backfilling. The Chunk ranking may keep several matches from one source, but Personal Knowledge output
 deduplicates by immutable Raw source and returns one evidence ID per source: the top Chunk is the preview, and the
 full Chunk directory is offered for the second step.
-Without a valid chunk match, Memory runs a BM25 fallback over the text of the current PostgreSQL Raw versions within
-the same Tenant, Human owner, Agent and date range (the 30 most recently updated sources, at most 3 MB of text). It
+When neither requested list has a valid chunk match, Memory runs a BM25 fallback over the text of the current PostgreSQL Raw versions within
+the same Tenant, Human owner, Agent and date range (per list, at most 30 recent sources and 3 MB of text). It
 reads no local files, never scans all Raw, and never revives a retired My Pages source from a local Document
 projection. Fallback candidates can be verified by the same boundary's second-step Evidence read; a database query
 error returns `partial` with `raw_chunk_search_unavailable` rather than posing as an empty result.

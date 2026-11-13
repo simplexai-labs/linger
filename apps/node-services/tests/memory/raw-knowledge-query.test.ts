@@ -457,9 +457,124 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     expect(result.summaries[0]!.content).toContain("Cobalt budget history");
   });
 
+  it("does not scan an empty list when the other has an indexed match", async () => {
+    const f = await fixture();
+    const [room] = await listRawSources(f.workspace, identity);
+    const text = (await readRawSource(f.workspace, room!))!;
+    const chunk = chunkSource(text)[0]!;
+    const database = databases.get(f.root)!;
+    for (let index = 0; index < 40; index += 1) {
+      const markdown = `# Cobalt ${index}\n\nA summary.`;
+      const wiki = wikiPageRawSource({
+        identity,
+        pageKey: `projects/cobalt-${index}`,
+        title: `Cobalt ${index}`,
+        documentId: `wiki-${index}`,
+        documentVersionId: `version-${index}`,
+        publishedAt: "2026-09-16T00:00:00Z",
+        revision: "revision_1",
+        markdown,
+      });
+      database.put(wiki, markdown);
+    }
+    const resolve = vi.fn(database.resolveRawSources.bind(database));
+    const read = vi.fn(database.readRawSource.bind(database));
+    const result = await queryPersonalKnowledge(f.root, request("Cobalt"), {
+      chunkSearch: {
+        search: async (input) =>
+          input.originKinds?.includes("room")
+            ? [
+                {
+                  sourceId: room!.id,
+                  chunkId: chunk.id,
+                  mergedChunkIds: [chunk.id],
+                  score: 1,
+                },
+              ]
+            : [],
+        resolveRawSources: resolve,
+        readRawSource: read,
+      },
+    });
+    expect(result.status).toBe("grounded");
+    expect(result.summaries).toEqual([]);
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(resolve.mock.calls[0]![1]).toHaveLength(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(read.mock.calls[0]![1].id).toBe(room!.id);
+  });
+
+  it("does not scan when one list's index search fails", async () => {
+    const f = await fixture();
+    const database = databases.get(f.root)!;
+    const resolve = vi.fn(database.resolveRawSources.bind(database));
+    const read = vi.fn(database.readRawSource.bind(database));
+    const result = await queryPersonalKnowledge(f.root, request("Cobalt"), {
+      chunkSearch: {
+        search: async (input) => {
+          if (input.originKinds?.includes("room"))
+            throw new Error("index failed");
+          return [];
+        },
+        resolveRawSources: resolve,
+        readRawSource: read,
+      },
+    });
+    expect(result.status).toBe("partial");
+    expect(result.gaps).toContainEqual({
+      code: "raw_chunk_search_unavailable",
+    });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("loads at most the number of sources shown while retaining later matched sections", async () => {
+    const f = await fixture();
+    const database = databases.get(f.root)!;
+    const indexed = Array.from({ length: 25 }, (_, index) => {
+      const markdown = `# Cobalt ${index}\n\n## First\n\nCobalt first.\n\n## Second\n\nCobalt second.`;
+      const source = storeDocumentSource(f.root, {
+        ...meetingDocument,
+        documentId: `document_limit_${index}`,
+        textSourceId: `version_limit_${index}`,
+        title: `Cobalt ${index}`,
+        markdown,
+      });
+      const chunks = chunkSource(markdown);
+      return { source, chunks };
+    });
+    const match = (index: number, chunkIndex: number) => {
+      const { source, chunks } = indexed[index]!;
+      const chunk = chunks[chunkIndex]!;
+      return {
+        sourceId: source.id,
+        chunkId: chunk.id,
+        mergedChunkIds: [chunk.id],
+        score: 1,
+      };
+    };
+    const read = vi.fn(database.readRawSource.bind(database));
+    const result = await queryPersonalKnowledge(f.root, request("Cobalt"), {
+      outputBudgetChars: 100_000,
+      chunkSearch: {
+        search: async (input) =>
+          input.originKinds?.includes("my_pages")
+            ? [...indexed.map((_, index) => match(index, 0)), match(0, 2)]
+            : [],
+        readRawSource: read,
+      },
+    });
+    expect(read).toHaveBeenCalledTimes(20);
+    expect(result.items).toHaveLength(20);
+    expect(
+      result.items[0]!.sections.map((section) => section.sectionId),
+    ).toContain(indexed[0]!.chunks[2]!.id);
+  });
+
   it("searches one list with the whole budget when scoped", async () => {
     const fixtureData = await fixture();
     const kinds: (readonly string[] | undefined)[] = [];
+    const searchFacts = vi.fn(async () => []);
     const result = await queryPersonalKnowledge(
       fixtureData.root,
       { ...request("Cobalt"), scope: "summaries" },
@@ -470,10 +585,13 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
             return [];
           },
           resolveRawSources: async () => [],
+          searchFacts,
         },
       },
     );
     expect(kinds).toEqual([["wiki", "period_summary"]]);
+    expect(searchFacts).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty("facts");
     expect(result).toMatchObject({ scope: "summaries", items: [], page: 1 });
   });
 

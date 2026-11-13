@@ -112,8 +112,8 @@ interface ListEntry {
  * One search over every source of the Agent's index, as two separately ranked
  * lists: items are Sessions, recordings, My pages, mail, Pocket Notes and the
  * Profile; summaries are the published Wiki and Daily and Weekly reports.
- * Session facts rank in their own channel. `scope` searches one list with the
- * whole budget, and `page` continues the same search.
+ * Session facts rank in their own channel except in summaries-only searches.
+ * `scope` searches one list with the whole budget; `page` continues it.
  */
 export async function queryPersonalKnowledge(
   dataRoot: string,
@@ -131,7 +131,7 @@ export async function queryPersonalKnowledge(
       : input.scope === "originals"
         ? ["items"]
         : ["items", "summaries"];
-  const search = (name: ListName) =>
+  const search = (name: ListName, fallback: "skip" | "only") =>
     lists.includes(name)
       ? searchRawSources(
           workspaceRoot,
@@ -141,13 +141,31 @@ export async function queryPersonalKnowledge(
             limit: LIST_CANDIDATE_CHUNKS,
           },
           options.chunkSearch,
+          [],
+          { fallback, maxSources: MAX_ENTRIES[name] },
         )
-      : Promise.resolve({ matches: [], limited: false });
-  const [itemResult, summaryResult, facts] = await Promise.all([
-    search("items"),
-    search("summaries"),
-    options.chunkSearch?.searchFacts?.(input) ?? [],
+      : Promise.resolve({ matches: [], limited: false, unavailable: false });
+  const [indexedItems, indexedSummaries, facts] = await Promise.all([
+    search("items", "skip"),
+    search("summaries", "skip"),
+    input.scope === "summaries"
+      ? []
+      : (options.chunkSearch?.searchFacts?.(input) ?? []),
   ]);
+  let itemResult = indexedItems;
+  let summaryResult = indexedSummaries;
+  // A miss in one list must not scan Raw while the other list has index hits.
+  if (
+    !itemResult.unavailable &&
+    !summaryResult.unavailable &&
+    !itemResult.matches.length &&
+    !summaryResult.matches.length
+  ) {
+    [itemResult, summaryResult] = await Promise.all([
+      search("items", "only"),
+      search("summaries", "only"),
+    ]);
+  }
   const terms = new Set(
     tokenizeSearchText([input.query, ...(input.alternates ?? [])].join(" ")),
   );
