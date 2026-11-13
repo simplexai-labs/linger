@@ -24,6 +24,13 @@ Options:
   --max-concurrent-runs <n>    Limit concurrent runs (1-100)
   --no-max-concurrent-runs     Remove the concurrent run limit
   --codex-auth <path>          Use this Codex auth.json
+  --localmodels-python <path>  Run the localmodels tool with this Python; give
+                               all four --localmodels-* options together
+  --localmodels-module-dir <path>
+                               The localmodels tool directory
+  --localmodels-state <path>   The localmodels state directory
+  --localmodels-base-dir <path>
+                               The localmodels model base directory
 ` + runtimePathOptions + "\n" + configOption + "\n",
 	"auth": `Usage:
   linger-computer auth status [--json]

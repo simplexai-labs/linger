@@ -75,6 +75,13 @@ Options:
   --max-concurrent-runs <n>    Limit concurrent runs (1-100)
   --no-max-concurrent-runs     Remove the concurrent run limit
   --codex-auth <path>          Use this Codex auth.json
+  --localmodels-python <path>  Run the localmodels tool with this Python; give
+                               all four --localmodels-* options together
+  --localmodels-module-dir <path>
+                               The localmodels tool directory
+  --localmodels-state <path>   The localmodels state directory
+  --localmodels-base-dir <path>
+                               The localmodels model base directory
   --codex-path <path>          Use this Codex executable
   --claude-path <path>         Use this Claude Code executable
   --pi-path <path>             Use this Pi executable
@@ -129,6 +136,16 @@ func TestParsedCommandShapes(t *testing.T) {
 		if _, err := parseArguments(args, options); err == nil {
 			t.Fatalf("%v accepted", args)
 		}
+	}
+	parsed, err = parseArguments([]string{"login", "--localmodels-python", "kit/python3", "--localmodels-module-dir", "/kit", "--localmodels-state", "/state", "--localmodels-base-dir", "/models"}, options)
+	if err != nil || parsed.localModels == nil || *parsed.localModels != (stagedLocalModels{
+		Python: filepath.Join(string(filepath.Separator), "work", "kit", "python3"), ModuleDirectory: filepath.Join(string(filepath.Separator), "kit"),
+		StateDirectory: filepath.Join(string(filepath.Separator), "state"), BaseDirectory: filepath.Join(string(filepath.Separator), "models"),
+	}) {
+		t.Fatalf("login localmodels=%+v err=%v", parsed.localModels, err)
+	}
+	if _, err := parseArguments([]string{"login", "--localmodels-python", "/kit/python3"}, options); err == nil {
+		t.Fatal("a partial localmodels tool location was accepted")
 	}
 	parsed, _ = parseArguments([]string{"runtime", "check", "claude-code", "--live", "--pi-path", "bin/pi"}, options)
 	if parsed.name != "runtime-check" || parsed.runtime != "claude" || !parsed.live || parsed.runtimePaths["pi"] != filepath.Join(string(filepath.Separator), "work", "bin", "pi") {

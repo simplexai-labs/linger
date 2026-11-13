@@ -16,6 +16,11 @@
 - It consumes generated Runner Gateway contracts and shared Runtime packages.
   It must not import another `apps/*` source tree or own TeamHub records, Agent
   orchestration, model selection, or Room callback behavior.
+- It executes the local-model library actions a Computer owner chose
+  (download, cancel, load, unload, remove, refresh) through the installer's
+  `localmodels` tool, but it never chooses a model: every action names the
+  model the owner picked, and fit, placement and recommendation come from
+  `localmodels`.
 
 ## Structure
 

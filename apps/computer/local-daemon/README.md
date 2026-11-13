@@ -100,6 +100,59 @@ structured call and one workspace call with the locally signed-in Codex (checkin
 that it writes the file and cannot read files outside the working directory). It
 spends model quota and is not part of the default tests.
 
+## Local models
+
+The Daemon runs the model library of the installer's `localmodels` tool for
+the Local models page. The Computer config's `local_models` section names the
+tool: `python`, `module_directory` (the sealed kit, used as `PYTHONPATH` and
+working directory), `state_directory` (`LOCALMODELS_STATE`) and
+`base_directory` (`--base-dir`). `packages/local-installation` writes it for
+the CLI Computer and the Desktop app for its own; a Computer without it, or
+whose interpreter is gone, reports `available: false` with
+`TOOL_NOT_INSTALLED`. `internal/localmodels` owns the tool calls; the Daemon
+only routes `execute` (kind `local_models`) to it and sends what it publishes.
+The Daemon executes the actions the Computer owner chose; it never picks a
+model.
+
+- Answer. Every action is answered `accepted` or `refused` with a
+  `LocalModelActionRefusal`. `localmodels` checks every precondition before
+  it starts work, so a download or load runs as a child process whose first
+  event line decides the answer: a progress or result line accepts it, and an
+  error line before any progress refuses it with the tool's code and its
+  `pool`, `need_bytes` and `free_bytes` (`have_bytes` for download
+  refusals). A job that exits without an event is `TOOL_FAILED`. `unload`,
+  `remove` and `cancel` are answered when the tool finishes; `refresh` after a
+  status read. If the command's `expires_at` passes before the tool decides,
+  the Daemon sends no answer (the Gateway, waiting for the same deadline,
+  reports the action as unconfirmed) and the outcome reaches the owner only
+  through snapshots: an accepted job publishes its progress, and a late
+  refusal publishes a fresh status read. Command handling runs off the
+  connection loop.
+- Jobs. A download or load runs in its own process group and writes its event
+  lines to a file under `state/local-models/jobs`, which the Daemon tails, so
+  a Daemon restart neither signals the job nor breaks its output. `cancel` is
+  `library cancel <model>`; the Daemon never signals a job. Calls that print
+  one document also write to files and a timeout kills only the tool process:
+  a call may start or restart the local model gateway, which must survive.
+- Restart. `localmodels` keeps job records on disk, so a restarted Daemon
+  trusts `library status` and rereads it every 2 seconds while a download or
+  load it did not start is running. A failed status read (including the first
+  one after connecting) is retried with backoff up to one minute until a read
+  succeeds, so a transient failure never ends the watch.
+- Snapshots. `runner.local_models` carries `library-status/v1` mapped to
+  `LocalModelsSnapshot` (pools gain `kind` and `gpu_index`; a value outside
+  the contract's closed sets makes the read `TOOL_FAILED`). It is sent after
+  every welcome, after every action or job end, and at most every 2 seconds
+  for progress. When a job enters a phase (download, verify, load, warm) the
+  Daemon rereads the status, which carries what the phase reserved or freed
+  (pool use, placement, models unloaded first), and applies the job's line on
+  top; later lines of the phase update that snapshot without another read.
+- Pi. When the loaded models change, the Daemon asks the Runtime monitor for a
+  full discovery, so TeamHub sees Pi's new model list. Each model's
+  `pi_model` (`<provider>/<id>`, as an Agent's `runtime_model` stores it) is
+  passed through as `localmodels` reports it; the endpoint keeps only the
+  loaded engine's `base_url`.
+
 ## Codex models cache
 
 Signed in with ChatGPT, Codex blocks its first `thread/start` on a 4–5 s
