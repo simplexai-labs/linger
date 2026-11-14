@@ -329,6 +329,89 @@ describe("document normalization", () => {
     });
   });
 
+  it.each([PDF_MEDIA_TYPE, "text/plain"])(
+    "rejects an already cancelled %s source before preparing conversion",
+    async (mediaType) => {
+      const installModels = vi.fn(async () => undefined);
+      const execute = vi.fn(async () => encode("converted"));
+      const normalizer = new WorkerDocumentNormalizer({
+        installModels,
+        execute,
+      });
+      await expect(
+        normalizer.normalizeDocument(
+          { filename: "source", source: encode("source"), mediaType },
+          AbortSignal.abort(),
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_NORMALIZATION_UNAVAILABLE" });
+      expect(installModels).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["success", "failure"])(
+    "releases cancelled installation waits before a late installation %s",
+    async (outcome) => {
+      let finishInstallation!: () => void;
+      let failInstallation!: (error: Error) => void;
+      const installation = new Promise<void>((resolve, reject) => {
+        finishInstallation = resolve;
+        failInstallation = reject;
+      });
+      let markStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      const onModelsUnavailable = vi.fn();
+      const execute = vi.fn(async () => encode("converted"));
+      const normalizer = new WorkerDocumentNormalizer({
+        installModels: () => {
+          markStarted();
+          return installation;
+        },
+        onModelsUnavailable,
+        execute,
+        maxAdmittedBytes: MAX_DOCUMENT_SOURCE_BYTES,
+      });
+      const caller = new AbortController();
+      const cancelled = normalizer.normalizeDocument(
+        {
+          filename: "cancelled.pdf",
+          source: new Uint8Array(MAX_DOCUMENT_SOURCE_BYTES),
+          mediaType: PDF_MEDIA_TYPE,
+        },
+        caller.signal,
+      );
+      const rejected = expect(cancelled).rejects.toMatchObject({
+        code: "DOCUMENT_NORMALIZATION_UNAVAILABLE",
+        disposition: "retryable",
+      });
+      await started;
+      caller.abort();
+      try {
+        await rejected;
+        // The installation is still pending; this needs the released capacity.
+        await expect(
+          normalizer.normalizeDocument({
+            filename: "next.txt",
+            source: encode("next document"),
+            mediaType: "text/plain",
+          }),
+        ).resolves.toBeDefined();
+        expect(execute).not.toHaveBeenCalled();
+      } finally {
+        if (outcome === "failure") failInstallation(new Error("offline"));
+        else finishInstallation();
+        await installation.catch(() => undefined);
+        await cancelled.catch(() => undefined);
+      }
+      expect(execute).not.toHaveBeenCalled();
+      expect(onModelsUnavailable).toHaveBeenCalledTimes(
+        outcome === "failure" ? 1 : 0,
+      );
+    },
+  );
+
   it("converts one document at a time and gives each conversion its own deadline", async () => {
     let running = 0;
     let peak = 0;
