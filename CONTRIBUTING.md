@@ -99,7 +99,9 @@ successful Wiki publication.
 
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/),
   for example `fix(web): keep the composer draft across Rooms`. A commit hook
-  runs commitlint and formats staged files.
+  runs commitlint and formats staged files. The pull request title is what
+  release notes show, and its type (`feat`, `fix`, `perf`, ...) decides the
+  section: write it as a short, user-readable summary of the change.
 - Keep one pull request to one change. Describe what changed, why, and how you
   verified it; the pull request template lists what reviewers expect.
 - `main` merges through a merge queue. Once a pull request is approved and its

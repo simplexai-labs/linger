@@ -1,0 +1,85 @@
+name: Cut desktop release
+
+# Picks the next desktop version from the desktop-v* tags and starts the
+# Desktop release workflow for it on the branch this run was started from. The
+# tag is created by that release, not pushed here, because a tag pushed with
+# GITHUB_TOKEN does not start other workflows. docs/desktop-release.md
+# describes the flow.
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: What to release; rc continues or starts the release candidates of the next patch version
+        required: true
+        type: choice
+        default: rc
+        options:
+          - rc
+          - patch
+          - minor
+          - major
+      version:
+        description: Exact version instead of the computed one, such as 0.17.0; needed while no stable desktop tag exists
+        required: false
+        type: string
+        default: ""
+      draft:
+        description: Leave the release as a draft to edit its notes before publishing
+        required: false
+        type: boolean
+        default: true
+      dry_run:
+        description: Print the version without releasing
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: release-cut
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - name: Pick the version
+        id: version
+        env:
+          KIND: ${{ inputs.kind }}
+          EXPLICIT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "$EXPLICIT" ]; then
+            version="$EXPLICIT"
+          else
+            version="$(git tag --list 'desktop-v*' | node scripts/ci/desktop-tags.mjs next "$KIND")"
+          fi
+          # Validates the version and refuses one that is already released.
+          scripts/ci/desktop-release.sh version "$version" >/dev/null
+          if git rev-parse --verify --quiet "refs/tags/desktop-v$version" >/dev/null; then
+            echo "::error::desktop-v$version already exists"
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "Next desktop version: $version (from $GITHUB_REF_NAME at $GITHUB_SHA)" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Start the release
+        if: "!inputs.dry_run"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          DRAFT: ${{ inputs.draft }}
+        run: >-
+          gh workflow run desktop-release.yml --ref "$GITHUB_REF_NAME"
+          -f version="$VERSION" -f publish=true -f draft="$DRAFT"

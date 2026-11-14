@@ -1,0 +1,20 @@
+# Groups the pull requests listed in generated release notes. The labels come
+# from the pull request's Conventional Commits title through
+# .github/workflows/pr-type-labels.yml; an unlabeled pull request lands in the
+# last category.
+changelog:
+  categories:
+    - title: Breaking changes
+      labels: [breaking-change]
+    - title: New features and improvements
+      labels: [enhancement]
+    - title: Bug fixes
+      labels: [bug]
+    - title: Performance
+      labels: [performance]
+    - title: Documentation
+      labels: [documentation]
+    - title: Maintenance and CI
+      labels: [maintenance, dependencies]
+    - title: Other changes
+      labels: ["*"]

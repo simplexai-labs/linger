@@ -19,8 +19,10 @@ set -euo pipefail
 #                                                 upload <dir>'s files to a GitLab generic
 #                                                 package from a GitLab CI job (test builds only)
 #   desktop-release.sh github-release <dir> <tag> <version>
-#                                                 create or update the GitHub Release of <tag>
-#                                                 in RELEASE_REPO with <dir>'s files (gh)
+#                                                 create the GitHub Release of <tag> in
+#                                                 RELEASE_REPO as a draft, upload <dir>'s
+#                                                 files, and publish it once every file is
+#                                                 attached (or update an existing release) (gh)
 #
 # Inputs (environment):
 #   DESKTOP_VERSION              release version, as printed by `version` (compile, package)
@@ -46,6 +48,10 @@ set -euo pipefail
 #   GITHUB_REPOSITORY, GITHUB_SHA, GH_TOKEN
 #                                the workflow's repository and commit, and the token gh
 #                                publishes with
+#   RELEASE_NOTES_FILE           Markdown notes for a new release, as release-notes.mjs
+#                                writes them; a one-line note when unset or empty
+#   RELEASE_DRAFT                "true" leaves a new release as a draft for a person to edit
+#                                and publish
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 desktop="$repo_root/apps/desktop"
@@ -324,7 +330,7 @@ cmd_gitlab_upload() {
 # only a release in the workflow's own repository is tied to GITHUB_SHA; in
 # another one gh creates the tag at that repository's default branch.
 cmd_github_release() {
-  local dir="${1:-}" tag="${2:-}" version="${3:-}" repo notes flags=()
+  local dir="${1:-}" tag="${2:-}" version="${3:-}" repo notes flags=() notes_args=() publish_flag expected attached
   [[ -d "$dir" && "$tag" == "desktop-v$version" && "$version" =~ $version_pattern ]] ||
     die "github-release needs the folder of release files, a desktop-v<version> tag and its version"
   [[ -f "$dir/SHA256SUMS.txt" ]] || die "run '$0 checksums $dir $version' first"
@@ -344,17 +350,39 @@ cmd_github_release() {
   fi
   if [[ "$version" == *-* ]]; then
     notes="**Prerelease** for testing, not for general use. $notes"
+    # Applies again when the draft is published, whoever publishes it.
     flags+=(--prerelease)
+    publish_flag=--prerelease
   else
     # releases/latest, which the download links use, follows this flag.
     flags+=(--latest)
+    publish_flag=--latest
+  fi
+  if [[ -s "${RELEASE_NOTES_FILE:-}" ]]; then
+    notes_args=(--notes-file "$RELEASE_NOTES_FILE")
+  else
+    notes_args=(--notes "$notes")
   fi
   if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
     gh release upload "$tag" "$dir"/* --repo "$repo" --clobber
     echo "desktop-release: updated the $tag release of $repo"
   else
-    gh release create "$tag" "$dir"/* --repo "$repo" --title "Linger Desktop $version" --notes "$notes" "${flags[@]}"
-    echo "desktop-release: created the $tag release of $repo"
+    # A draft stays invisible, and a failed upload leaves no half-filled release.
+    gh release create "$tag" "$dir"/* --repo "$repo" --title "Linger Desktop $version" \
+      "${notes_args[@]}" --draft "${flags[@]}"
+    echo "desktop-release: created the $tag draft release of $repo"
+  fi
+  expected="$(find "$dir" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+  attached="$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets | length')"
+  [[ "$attached" -ge "$expected" ]] ||
+    die "the $tag release has $attached of $expected files; it stays unpublished"
+  if [[ "$(gh release view "$tag" --repo "$repo" --json isDraft --jq .isDraft)" == true ]]; then
+    if [[ "${RELEASE_DRAFT:-}" == true ]]; then
+      echo "desktop-release: left the $tag release as a draft for review"
+    else
+      gh release edit "$tag" --repo "$repo" --draft=false "$publish_flag"
+      echo "desktop-release: published the $tag release of $repo"
+    fi
   fi
   echo "desktop-release: https://github.com/$repo/releases/tag/$tag"
 }
