@@ -406,13 +406,14 @@ export async function startMemoryServer(options: {
         port: options.port ?? 0,
       });
   const http = options.http ?? ownedHost!;
-  http.mount({
+  const unmount = http.mount({
     prefixes: ["/internal/v1/"],
     fetch: (request) => app.fetch(request),
   });
   ownedHost?.finishStartup();
   return {
     close: async () => {
+      unmount();
       await ownedHost?.close();
     },
     url: http.url,

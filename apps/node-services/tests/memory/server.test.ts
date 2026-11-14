@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MemoryScheduleConfig } from "../../src/memory/config.js";
 import { PersonalKnowledgeGraphNotFoundError } from "../../src/memory/graph-visualization.js";
 import { MemoryScheduler } from "../../src/memory/scheduler.js";
+import { startHttpHost } from "../../src/http-host.js";
 import { startMemoryServer } from "../../src/memory/server.js";
 
 const roots: string[] = [];
@@ -25,6 +26,44 @@ afterEach(async () => {
 });
 
 describe("Memory server", () => {
+  it("unmounts on close without stopping other roles and allows a replacement", async () => {
+    const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), "memory-server-"));
+    roots.push(dataRoot);
+    const http = await startHttpHost({ host: "127.0.0.1", port: 0 });
+    http.mount({ prefixes: ["/v1/"], fetch: () => new Response("agent") });
+    const options = {
+      dataRoot,
+      http,
+      scheduler: new MemoryScheduler(schedule, async () => undefined),
+      serviceToken: "memory-token",
+    };
+    try {
+      const server = await startMemoryServer(options);
+      http.finishStartup();
+      expect(
+        (await fetch(`${http.url}/internal/v1/memory/entries`)).status,
+      ).toBe(401);
+      await server.close();
+      await server.close();
+      expect(
+        (await fetch(`${http.url}/internal/v1/memory/entries`)).status,
+      ).toBe(404);
+      expect(await (await fetch(`${http.url}/v1/status`)).text()).toBe("agent");
+      const replacement = await startMemoryServer(options);
+      try {
+        // Closing the previous instance again must not remove its replacement.
+        await server.close();
+        expect(
+          (await fetch(`${http.url}/internal/v1/memory/entries`)).status,
+        ).toBe(401);
+      } finally {
+        await replacement.close();
+      }
+    } finally {
+      await http.close();
+    }
+  });
+
   it("lists and reads only authenticated Memory entries through the internal API", async () => {
     const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), "memory-server-"));
     roots.push(dataRoot);

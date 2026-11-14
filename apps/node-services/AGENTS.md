@@ -14,6 +14,8 @@
   not collide. The host alone answers `/healthz` (process alive), `/startupz`
   (every selected role started), and `/readyz` (started and every mounted
   role's readiness ok); roles must not register their own probes.
+  Stopping Memory unmounts only its own routes. A shared listener and other
+  roles remain available, and a replacement Memory server can mount again.
 - The `document` role keeps its own port (4321 by default) on its own worker
   thread (`src/document/main.ts`) because it installs jsdom globals and
   replaces the global `Request`/`Response`. The `voice` role supervises separate ASR, recorder and Live child processes (ports 4324–4326); it does not run audio jobs on the main thread. Voice workers follow TeamHub's effective provider keys (`GET /internal/v1/voice/provider-keys` with the `voice-runtime` credential): a Soniox key runs ASR and recorder, an xAI key runs Live. The role reconciles at startup, on TeamHub's `POST /v1/voice/workers:reconcile` (`node-services-internal` bearer), and every 60 seconds, so workers start, drain, or restart with a new key without restarting node-services. The reconcile route answers `{ready}` only after every wanted worker's health port reports it registered with LiveKit, or after 20 seconds, so TeamHub answers a key save once a voice session can be dispatched. Keys reach a worker only through its environment; a failed key fetch leaves the running workers unchanged. Other roles run on the main thread
