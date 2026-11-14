@@ -213,6 +213,7 @@ export class WorkerDocumentNormalizer implements DocumentNormalizer {
     request: DocumentNormalizationRequest,
     signal?: AbortSignal,
   ): Promise<Uint8Array> {
+    if (signal?.aborted) throw unavailable();
     const size = request.source.byteLength;
     if (size > MAX_DOCUMENT_SOURCE_BYTES) {
       throw new DocumentNormalizationError("DOCUMENT_SOURCE_TOO_LARGE");
@@ -226,11 +227,16 @@ export class WorkerDocumentNormalizer implements DocumentNormalizer {
     this.#admittedBytes += size;
     try {
       const core = await import("./document-normalizer-core.js");
+      if (signal?.aborted) throw unavailable();
       if (core.isInProcessDocumentSource(request)) {
         return await core.normalizeDocumentContent(request);
       }
-      // Outside the conversion's deadline: the first install downloads.
-      await this.#installModels().catch(this.#onModelsUnavailable);
+      // A shared model download may continue after this caller leaves, but
+      // its source bytes must not occupy admission capacity until it finishes.
+      await waitForModelInstallation(
+        this.#installModels().catch(this.#onModelsUnavailable),
+        signal,
+      );
       const release = await this.#acquireWorker(signal);
       try {
         return await this.#convert(request, signal);
@@ -282,6 +288,7 @@ export class WorkerDocumentNormalizer implements DocumentNormalizer {
     request: DocumentNormalizationRequest,
     signal: AbortSignal | undefined,
   ): Promise<Uint8Array> {
+    if (signal?.aborted) throw unavailable();
     const controller = new AbortController();
     const abort = (): void => controller.abort();
     signal?.addEventListener("abort", abort, { once: true });
@@ -308,6 +315,24 @@ export class WorkerDocumentNormalizer implements DocumentNormalizer {
       if (timeout) clearTimeout(timeout);
       signal?.removeEventListener("abort", abort);
     }
+  }
+}
+
+async function waitForModelInstallation(
+  installation: Promise<void>,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (!signal) return installation;
+  let onAbort!: () => void;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(unavailable());
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  try {
+    await Promise.race([installation, cancelled]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
   }
 }
 

@@ -22,6 +22,9 @@
 - Normalize sources only through the process's one `DocumentNormalizer`, which
   the host passes in; never construct another. A source that can never be
   normalized is left out of the generation.
+- Cancelling normalization while model installation is pending releases the
+  caller's source-byte admission capacity without stopping the shared install.
+  Already-cancelled sources are rejected before installation or conversion.
 - Send sources only under the run's `inputs/`, beside the entity registry;
   neither is ever applied to the candidate or published.
 - A Session source arrives with its routing (`session`: date, Room, capture,
