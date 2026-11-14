@@ -10,6 +10,9 @@ Only the authorized no-store login endpoint and explicit credentials view may
 show the user's password; redact events, diagnostics and persisted job snapshots.
 Browser closure never cancels installation. Repeated launches reuse the manager,
 instance mutations remain locked, and cancellation retains account/data/device.
+A start returns the instance's running or queued job; a job that finished its
+run and waits for the person (`waiting_user`, e.g. `LOCAL_MODELS_UNAVAILABLE`)
+is canceled and replaced, so Try Again checks the computer again.
 An idle desktop-owned manager steps aside when the desktop relaunches the same
 instance with another checkout. Every installation runs natively from the
 source checkout `--source-repo` names. Start failures print their real cause

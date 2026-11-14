@@ -117,8 +117,9 @@ Gateway and runs Agents. The daemon exits with the app.
   Quick Install installs the `recommendation` of the localmodels setup
   report (`installer.js --inspect`, run once as the setup window opens):
   `local-models` is the planned model served by Pi, shown with the model,
-  GPU, memory and download; otherwise the named runtime, with the tool's
-  reason for no local model. The page adds no host rule of its own; while
+  GPU, memory and download, plus the tool's caveat when it has one (low free
+  memory, which the install's own plan can still fail on); otherwise the
+  named runtime, with the tool's reason for no local model. The page adds no host rule of its own; while
   the check runs the button waits with a spinner and says what it waits for
   (the first run downloads the localmodels tool, counted by `download`
   event lines before the report), and Customize marks the

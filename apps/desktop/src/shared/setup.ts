@@ -109,8 +109,8 @@ export type SetupLocalModelsCheck =
         readonly diskBytes: number | null;
         readonly memoryBytes: number | null;
       };
-      // Why not, as the localmodels tool's code and words; when not
-      // eligible.
+      // The localmodels tool's code and words for why not, or, when
+      // eligible, for what could still stop the install (free memory).
       readonly reasons?: readonly {
         readonly code: string;
         readonly message?: string;

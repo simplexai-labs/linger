@@ -168,6 +168,37 @@ test("waiting-user jobs retry by rechecking and can be canceled after their oper
   expect((await jobs.cancel(retried!.id))?.state).toBe("canceled");
 });
 
+test("a new start replaces a job waiting for the person and checks again", async () => {
+  let runs = 0;
+  const { jobs, dir } = await setup(async () => {
+    runs++;
+    return runs === 1
+      ? {
+          state: "action_required",
+          code: 4,
+          message: "No local model fits now",
+          details: { code: "LOCAL_MODELS_UNAVAILABLE" },
+        }
+      : { state: "ready", code: 0, message: "Complete" };
+  });
+  const first = await jobs.start({ instance: "default" });
+  await jobs.wait(first.id);
+  expect(jobs.get(first.id)?.state).toBe("waiting_user");
+  // Also after a restart, which keeps a local-model wait as it was.
+  const restarted = new JobManager(dir, async () => {
+    runs++;
+    return { state: "ready", code: 0, message: "Complete" };
+  });
+  await restarted.load();
+  expect(restarted.get(first.id)?.state).toBe("waiting_user");
+  const second = await restarted.start({ instance: "default" });
+  expect(second.id).not.toBe(first.id);
+  await restarted.wait(second.id);
+  expect(restarted.get(first.id)?.state).toBe("canceled");
+  expect(restarted.get(second.id)?.state).toBe("succeeded");
+  expect(runs).toBe(2);
+});
+
 test("shutdown cancels owned work and flushes final state before releasing ownership", async () => {
   const { jobs, dir } = await setup(async (_input, signal) => {
     await new Promise<void>((_resolve, reject) =>

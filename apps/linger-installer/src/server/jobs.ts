@@ -277,7 +277,12 @@ export class JobManager {
         record.job.preparation === input.preparation &&
         active(record.job),
     );
-    if (existing) return structuredClone(existing.job);
+    // A job that ran to the end and now waits for the person mutates
+    // nothing; a new start is their answer, so it replaces that job and
+    // checks the computer again instead of returning the stale outcome.
+    if (existing?.job.state === "waiting_user" && !existing.executing)
+      await this.cancel(existing.job.id);
+    else if (existing) return structuredClone(existing.job);
     const id = randomUUID(),
       // Preserve successor order even when jobs are created within one clock tick.
       at = new Date(
