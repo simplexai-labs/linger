@@ -328,6 +328,204 @@ const computerPermissionOutcomes = [
   },
 ] as const;
 
+const localModelsIdentity = {
+  ...computerPermissionIdentity,
+  command_id: "command-local-models",
+} as const;
+const localModelsActions = [
+  {
+    type: "execute",
+    kind: "local_models",
+    ...localModelsIdentity,
+    action: "load",
+    model_id: "qwen3-4b:Q4_K_M",
+    unload_first: ["gemma3-4b:Q4_K_M"],
+  },
+  {
+    type: "execute",
+    kind: "local_models",
+    ...localModelsIdentity,
+    action: "refresh",
+  },
+] as const;
+const localModelsSnapshot = {
+  type: "runner.local_models",
+  protocol_version: "2",
+  runner_id: "runner-local",
+  sent_at: "2026-07-27T00:00:03.000Z",
+  revision: 1,
+  local_models: {
+    available: true,
+    observed_at: "2026-07-27T00:00:03.000Z",
+    tool_version: "0.9.0",
+    host: {
+      platform: "linux",
+      arch: "x86_64",
+      os_label: "Ubuntu 24.04",
+      engine_label: "llama.cpp b11370 CUDA",
+      ram_total_bytes: 68_719_476_736,
+      disk_free_bytes: 500_000_000_000,
+      gpus: [
+        {
+          index: 0,
+          uuid: "GPU-1",
+          name: "RTX 4090",
+          total_bytes: 25_757_220_864,
+          free_bytes: 20_000_000_000,
+        },
+      ],
+    },
+    pools: [
+      {
+        id: "gpu:0",
+        kind: "gpu",
+        gpu_index: 0,
+        total_bytes: 25_757_220_864,
+        used_bytes: 4_000_000_000,
+        holders: [
+          {
+            kind: "model",
+            id: "qwen3-4b:Q4_K_M",
+            name: "Qwen3 4B",
+            bytes: 4_000_000_000,
+          },
+        ],
+      },
+      {
+        id: "system",
+        kind: "system",
+        total_bytes: 54_975_581_388,
+        used_bytes: 0,
+        holders: [],
+      },
+    ],
+    models: [
+      {
+        id: "qwen3-4b:Q4_K_M",
+        name: "Qwen3 4B",
+        description: "Small chat model",
+        quant: "Q4_K_M",
+        context_tokens: 32_768,
+        vision: false,
+        download_bytes: 2_500_000_000,
+        memory_bytes: 4_000_000_000,
+        fit: "gpu",
+        recommended: false,
+        availability: { downloadable: true },
+        pool: "gpu:0",
+        state: "loaded",
+        endpoint: { base_url: "http://127.0.0.1:18100/v1" },
+        pi_model: "localmodels-library/qwen3-4b",
+        tokens_per_second: 142.5,
+      },
+      {
+        id: "qwen3-235b:Q4_K_M",
+        name: "Qwen3 235B",
+        description: "Too large for this Computer",
+        quant: "Q4_K_M",
+        context_tokens: 131_072,
+        vision: false,
+        download_bytes: 140_000_000_000,
+        memory_bytes: 150_000_000_000,
+        fit: "none",
+        recommended: false,
+        availability: {
+          downloadable: false,
+          reason: {
+            code: "MEMORY_INSUFFICIENT",
+            need_bytes: 150_000_000_000,
+            have_bytes: 54_975_581_388,
+          },
+        },
+        state: "absent",
+      },
+      {
+        id: "gemma3-4b:Q4_K_M",
+        name: "Gemma 3 4B",
+        description: "Loaded without a resolved Pi catalog key",
+        quant: "Q4_K_M",
+        context_tokens: 32_768,
+        vision: true,
+        download_bytes: 2_500_000_000,
+        memory_bytes: 4_000_000_000,
+        fit: "gpu",
+        recommended: false,
+        availability: { downloadable: true },
+        pool: "gpu:0",
+        state: "loaded",
+        endpoint: { base_url: "http://127.0.0.1:18101/v1" },
+      },
+      {
+        id: "qwen3-32b:Q4_K_M",
+        name: "Qwen3 32B",
+        description: "Large chat model",
+        quant: "Q4_K_M",
+        context_tokens: 131_072,
+        vision: false,
+        download_bytes: 20_000_000_000,
+        memory_bytes: 24_000_000_000,
+        fit: "gpu",
+        recommended: false,
+        availability: { downloadable: true },
+        pool: "gpu:0",
+        state: "downloading",
+        download: {
+          step: "download",
+          done_bytes: 1_000_000_000,
+          total_bytes: 20_000_000_000,
+          bytes_per_second: 50_000_000,
+        },
+      },
+    ],
+  },
+} as const;
+const localModelsAnswers = [
+  {
+    type: "executed",
+    kind: "local_models",
+    outcome: "accepted",
+    ...localModelsIdentity,
+    action: "load",
+    model_id: "qwen3-4b:Q4_K_M",
+  },
+  {
+    type: "executed",
+    kind: "local_models",
+    outcome: "refused",
+    ...localModelsIdentity,
+    action: "load",
+    model_id: "qwen3-4b:Q4_K_M",
+    refusal: {
+      code: "LOAD_NO_ROOM",
+      pool: "gpu:0",
+      need_bytes: 4_000_000_000,
+      free_bytes: 1_000_000_000,
+    },
+  },
+  {
+    type: "executed",
+    kind: "local_models",
+    outcome: "refused",
+    ...localModelsIdentity,
+    action: "refresh",
+    refusal: { code: "TOOL_NOT_INSTALLED" },
+  },
+  {
+    type: "runner.local_models",
+    protocol_version: "2",
+    runner_id: "runner-local",
+    sent_at: "2026-07-27T00:00:04.000Z",
+    revision: 2,
+    local_models: {
+      available: false,
+      reason: { code: "TOOL_NOT_INSTALLED" },
+      observed_at: "2026-07-27T00:00:04.000Z",
+      pools: [],
+      models: [],
+    },
+  },
+] as const;
+
 const operationStart = (request: object, suffix: string) => ({
   type: "operation.start",
   ...identity,
@@ -434,6 +632,7 @@ const agentToDaemonFixtures = [
   sessionCompact,
   modelInvoke,
   computerPermission,
+  ...localModelsActions,
 ] as const;
 
 const runEventFixtures = [
@@ -616,6 +815,8 @@ const daemonToAgentFixtures = [
   sessionCompacted,
   modelInvoked,
   ...computerPermissionOutcomes,
+  localModelsSnapshot,
+  ...localModelsAnswers,
 ] as const;
 
 const withoutProperty = (
@@ -943,6 +1144,34 @@ describe("Runner Gateway contract", () => {
     ];
 
     for (const envelope of malformed) {
+      expect(() => parseRunnerGatewayEnvelope(envelope)).toThrow(
+        "Invalid Runner Gateway envelope",
+      );
+    }
+  });
+
+  it("ties local_models model_id and unload_first to the action", () => {
+    const [load, refresh] = localModelsActions;
+    const invalid = [
+      { ...refresh, model_id: "qwen3-4b:Q4_K_M" },
+      { ...load, action: "download" },
+      { ...refresh, action: "download" },
+      { ...load, model_id: "../escape" },
+      {
+        ...localModelsAnswers[1],
+        refusal: { code: "SOMETHING_ELSE" },
+      },
+      {
+        ...localModelsSnapshot,
+        local_models: {
+          ...localModelsSnapshot.local_models,
+          pools: [
+            { ...localModelsSnapshot.local_models.pools[0], id: "gpu-0" },
+          ],
+        },
+      },
+    ];
+    for (const envelope of invalid) {
       expect(() => parseRunnerGatewayEnvelope(envelope)).toThrow(
         "Invalid Runner Gateway envelope",
       );

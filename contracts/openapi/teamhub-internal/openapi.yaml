@@ -226,6 +226,32 @@ paths:
     $ref: ../paths/teamhub-agent-runtime-state.yaml#/touchLocalComputer
   /v0/agent-runtime/local-computers/remove:
     $ref: ../paths/teamhub-agent-runtime-state.yaml#/removeLocalComputer
+  /v0/agent-runtime/local-computers/local-models:
+    post:
+      tags: [Local Computers]
+      operationId: recordAgentRuntimeLocalModels
+      summary: Store the latest model library snapshot a Computer reported.
+      description: >-
+        Agent Service forwards every runner.local_models snapshot. TeamHub replaces the
+        Computer's stored snapshot, keeps it while the Computer is offline, and publishes a
+        local-models invalidation hint with the Computer ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../components/local-models.yaml#/components/schemas/RecordLocalModelsRequest"
+      responses:
+        "204":
+          description: Stored.
+        "400":
+          $ref: "../components/common.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+        "404":
+          $ref: "../components/common.yaml#/components/responses/NotFound"
+        "500":
+          $ref: "../components/common.yaml#/components/responses/InternalError"
   /v0/agents/{agentId}/identity:
     parameters:
       - $ref: "#/components/parameters/AgentId"

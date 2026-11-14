@@ -71,3 +71,41 @@ test edit is needed.
 
 JSON Schema and AsyncAPI directories are introduced only when a second real
 protocol needs them.
+
+## Local models flow
+
+A Computer's model library is the `localmodels` tool's, reached through the
+same chain as Skill scans. Schemas live in `openapi/components/local-models.yaml`
+and the `LocalModel*` definitions of `runner-gateway/envelope.schema.json`.
+
+Actions go Web → TeamHub → Agent Service → Computer → `localmodels`:
+
+1. Web posts `actOnLocalComputerModel`
+   (`POST /v0/tenants/{tenantId}/local-computers/{computerId}/local-models/{modelId}/actions`).
+   Only the Computer owner may act.
+2. TeamHub calls Node Services `actOnLocalComputerModels`
+   (`POST /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-model-actions`).
+3. Agent Service sends `execute` with kind `local_models` (download, cancel,
+   load with `unload_first`, unload, remove, or refresh). The Daemon answers
+   `executed` with outcome `accepted` or `refused` at once and runs the
+   `localmodels library` job itself. The ack returns to TeamHub as
+   `LocalModelActionAck`; a refusal becomes a `LocalModelsErrorCode`.
+
+Progress and outcomes travel back only as snapshots:
+
+1. The Daemon sends `runner.local_models` with a `LocalModelsSnapshot` mapped
+   from `localmodels.library-status/v1`: after `runner.hello`, after every
+   library change, and at most every 2 seconds while a download or load runs.
+   A Computer without the tool reports `available: false` with
+   `TOOL_NOT_INSTALLED`.
+2. Agent Service records it through TeamHub `recordAgentRuntimeLocalModels`
+   (`POST /v0/agent-runtime/local-computers/local-models`). TeamHub keeps the
+   latest snapshot per Computer, so an offline Computer shows what it last
+   reported, and publishes a `local-models` invalidation hint whose id is the
+   Computer ID.
+3. Web reads `getLocalComputerModels`
+   (`GET /v0/tenants/{tenantId}/local-computers/{computerId}/local-models`),
+   where TeamHub adds each model's `used_by`: active Agents on that Computer
+   with runtime `pi` whose runtime model is the model's `pi_model`. localmodels
+   reports `pi_model` for every model on the Computer, loaded or not, so an
+   idle model still lists the Agents that will run on it.

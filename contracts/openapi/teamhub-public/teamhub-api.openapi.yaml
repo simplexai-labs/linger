@@ -744,6 +744,72 @@ paths:
           $ref: '../components/common.yaml#/components/responses/BadGateway'
         '503':
           $ref: '../components/common.yaml#/components/responses/ServiceUnavailable'
+  /v0/tenants/{tenantId}/local-computers/{computerId}/local-models:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/ComputerId'
+    get:
+      tags: [Local Computers]
+      operationId: getLocalComputerModels
+      summary: Read the model library one Local Computer last reported.
+      description: >-
+        TeamHub answers from the latest snapshot the Computer sent, so an offline Computer shows
+        what it last reported. Each model lists the Agents that use it. Tenant members who can see
+        the Computer may read; only its owner may act. A local-models invalidation hint with the
+        Computer ID follows every stored snapshot.
+      responses:
+        '200':
+          description: The Computer and its model library.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/local-models.yaml#/components/schemas/LocalModelsView'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
+  /v0/tenants/{tenantId}/local-computers/{computerId}/local-models/{modelId}/actions:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/ComputerId'
+      - $ref: '#/components/parameters/LocalModelId'
+    post:
+      tags: [Local Computers]
+      operationId: actOnLocalComputerModel
+      summary: Download, cancel, load, unload, or remove one model on an owned Local Computer.
+      description: >-
+        The click is the approval. TeamHub forwards the action to the Computer, which answers at
+        once; 202 means the Computer started it. Progress and the outcome arrive as new snapshots,
+        announced by local-models invalidation hints. A retried request sends the action again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../components/local-models.yaml#/components/schemas/LocalModelActionRequest'
+      responses:
+        '202':
+          description: The Computer started the action.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/local-models.yaml#/components/schemas/LocalModelActionAccepted'
+        '400':
+          $ref: '../components/common.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
+        '409':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '502':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '503':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '504':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
   /v0/tenants/{tenantId}/local-computers/{computerId}/permissions:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -4995,6 +5061,12 @@ components:
       required: true
       schema:
         $ref: '../components/common.yaml#/components/schemas/Id'
+    LocalModelId:
+      name: modelId
+      in: path
+      required: true
+      schema:
+        $ref: '../components/local-models.yaml#/components/schemas/LocalModelId'
     TenantId:
       name: tenantId
       in: path

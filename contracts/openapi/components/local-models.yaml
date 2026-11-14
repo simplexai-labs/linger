@@ -1,0 +1,752 @@
+components:
+  responses:
+    LocalModelsRefused:
+      description: >-
+        The Computer or TeamHub refused the local-models request; error.code is
+        one of LocalModelsErrorCode.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/LocalModelsErrorResponse"
+  schemas:
+    LocalModelId:
+      description: >-
+        Stable localmodels library id: catalog id and variant, such as
+        qwen3-4b:Q4_K_M.
+      type: string
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+    LocalModelPoolId:
+      description: >-
+        A place a model can live: gpu:<index>, system (RAM beside GPUs), or
+        unified (RAM of a host without discrete GPUs).
+      type: string
+      pattern: "^(gpu:(0|[1-9][0-9]{0,2})|system|unified)$"
+    LocalModelErrorCode:
+      description: >-
+        Closed localmodels library error set. It is extended only together with
+        the localmodels library contract.
+      type: string
+      enum:
+        - MODEL_UNKNOWN
+        - INVALID_STATE
+        - JOB_RUNNING
+        - MEMORY_INSUFFICIENT
+        - DISK_INSUFFICIENT
+        - PLATFORM_UNSUPPORTED
+        - LOAD_NO_ROOM
+        - DOWNLOAD_FAILED
+        - CHECKSUM_MISMATCH
+        - NETWORK_UNAVAILABLE
+        - ENGINE_START_FAILED
+        - HEALTH_CHECK_FAILED
+        - OUT_OF_MEMORY
+        - MODEL_FILES_MISSING
+        - GATEWAY_REGISTRATION_FAILED
+        - CANCELLED
+    LocalModelsUnavailableCode:
+      description: >-
+        Why a Computer reports no model library. TOOL_NOT_INSTALLED: its
+        Computer config names no localmodels tool. TOOL_FAILED: the tool did
+        not answer library status.
+      type: string
+      enum: [TOOL_NOT_INSTALLED, TOOL_FAILED]
+    LocalModelActionRefusalCode:
+      description: >-
+        Why the Computer refused an action before starting it: a localmodels
+        library error or a reason the library is unavailable.
+      type: string
+      enum:
+        - MODEL_UNKNOWN
+        - INVALID_STATE
+        - JOB_RUNNING
+        - MEMORY_INSUFFICIENT
+        - DISK_INSUFFICIENT
+        - PLATFORM_UNSUPPORTED
+        - LOAD_NO_ROOM
+        - DOWNLOAD_FAILED
+        - CHECKSUM_MISMATCH
+        - NETWORK_UNAVAILABLE
+        - ENGINE_START_FAILED
+        - HEALTH_CHECK_FAILED
+        - OUT_OF_MEMORY
+        - MODEL_FILES_MISSING
+        - GATEWAY_REGISTRATION_FAILED
+        - CANCELLED
+        - TOOL_NOT_INSTALLED
+        - TOOL_FAILED
+    LocalModelGpu:
+      type: object
+      additionalProperties: false
+      required: [index, name, total_bytes, free_bytes]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+        uuid:
+          type: string
+          minLength: 1
+          maxLength: 128
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        total_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        free_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+    LocalModelHost:
+      description: Hardware and software of the Computer as localmodels reports it.
+      type: object
+      additionalProperties: false
+      required:
+        [
+          platform,
+          arch,
+          os_label,
+          engine_label,
+          ram_total_bytes,
+          disk_free_bytes,
+          gpus,
+        ]
+      properties:
+        platform:
+          type: string
+          enum: [linux, darwin, windows]
+          x-enum-varnames:
+            [
+              LocalModelHostPlatformLinux,
+              LocalModelHostPlatformDarwin,
+              LocalModelHostPlatformWindows,
+            ]
+        arch:
+          type: string
+          enum: [x86_64, arm64]
+          x-enum-varnames: [LocalModelHostArchX8664, LocalModelHostArchArm64]
+        os_label:
+          description: Display only, such as Ubuntu 24.04.
+          type: string
+          maxLength: 200
+        engine_label:
+          description: Display only, such as llama.cpp b11370 with CUDA.
+          type: string
+          maxLength: 200
+        ram_total_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        disk_free_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        gpus:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/LocalModelGpu"
+    LocalModelPoolHolder:
+      description: >-
+        Something holding pool memory. A component is a foundation service such
+        as an embedding, reranker, or speech model; it is never a model row.
+      type: object
+      additionalProperties: false
+      required: [kind, id, name, bytes]
+      properties:
+        kind:
+          type: string
+          enum: [model, component]
+          x-enum-varnames:
+            [LocalModelPoolHolderKindModel, LocalModelPoolHolderKindComponent]
+        id:
+          type: string
+          minLength: 1
+          maxLength: 160
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        bytes:
+          type: integer
+          format: int64
+          minimum: 0
+    LocalModelPool:
+      description: >-
+        One place models load into. The system and unified budgets are 80% of
+        RAM, as localmodels computes them.
+      type: object
+      additionalProperties: false
+      required: [id, kind, total_bytes, used_bytes, holders]
+      properties:
+        id:
+          $ref: "#/components/schemas/LocalModelPoolId"
+        kind:
+          type: string
+          enum: [gpu, system, unified]
+          x-enum-varnames:
+            [
+              LocalModelPoolKindGpu,
+              LocalModelPoolKindSystem,
+              LocalModelPoolKindUnified,
+            ]
+        gpu_index:
+          description: Present only for kind gpu; matches LocalModelGpu.index.
+          type: integer
+          minimum: 0
+        total_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        used_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        holders:
+          type: array
+          maxItems: 256
+          items:
+            $ref: "#/components/schemas/LocalModelPoolHolder"
+    LocalModelAvailability:
+      type: object
+      additionalProperties: false
+      required: [downloadable]
+      properties:
+        downloadable:
+          type: boolean
+        reason:
+          $ref: "#/components/schemas/LocalModelAvailabilityReason"
+          description: Present only when downloadable is false.
+    LocalModelAvailabilityReason:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+          enum: [MEMORY_INSUFFICIENT, DISK_INSUFFICIENT, PLATFORM_UNSUPPORTED]
+          x-enum-varnames:
+            [
+              LocalModelAvailabilityMemoryInsufficient,
+              LocalModelAvailabilityDiskInsufficient,
+              LocalModelAvailabilityPlatformUnsupported,
+            ]
+        need_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        have_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+    LocalModelDownloadProgress:
+      type: object
+      additionalProperties: false
+      required: [step, done_bytes, total_bytes]
+      properties:
+        step:
+          type: string
+          enum: [download, verify]
+          x-enum-varnames:
+            [LocalModelDownloadStepDownload, LocalModelDownloadStepVerify]
+        done_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        total_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        bytes_per_second:
+          type: integer
+          format: int64
+          minimum: 0
+    LocalModelEndpoint:
+      type: object
+      additionalProperties: false
+      required: [base_url]
+      properties:
+        base_url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+    LocalModelError:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          $ref: "#/components/schemas/LocalModelErrorCode"
+        detail:
+          description: Diagnostic text for display; never matched on.
+          type: string
+          maxLength: 4000
+    LocalModelNote:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+          enum: [NO_ROOM_TO_LOAD]
+          x-enum-varnames: [LocalModelNoteNoRoomToLoad]
+    LocalModelState:
+      description: >-
+        absent: not on disk. idle: on disk, holding no memory. loading reserves
+        its memory before it finishes; loaded is registered with the local
+        gateway and Pi.
+      type: string
+      enum: [absent, downloading, idle, loading, loaded, failed]
+      x-enum-varnames:
+        [
+          LocalModelStateAbsent,
+          LocalModelStateDownloading,
+          LocalModelStateIdle,
+          LocalModelStateLoading,
+          LocalModelStateLoaded,
+          LocalModelStateFailed,
+        ]
+    LocalModelFit:
+      description: >-
+        Where the model can live, judged on total capacity so it stays stable
+        across loads. system means localmodels can run it from RAM, slower.
+      type: string
+      enum: [gpu, unified, system, none]
+      x-enum-varnames:
+        [
+          LocalModelFitGpu,
+          LocalModelFitUnified,
+          LocalModelFitSystem,
+          LocalModelFitNone,
+        ]
+    LocalModel:
+      description: >-
+        One validated chat model of the catalog on this platform and its state
+        on this Computer. Sizes are bytes; readers format them.
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          name,
+          description,
+          quant,
+          context_tokens,
+          vision,
+          download_bytes,
+          memory_bytes,
+          fit,
+          recommended,
+          availability,
+          state,
+        ]
+      properties:
+        id:
+          $ref: "#/components/schemas/LocalModelId"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 2000
+        quant:
+          type: string
+          minLength: 1
+          maxLength: 64
+        context_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+        vision:
+          type: boolean
+        download_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        memory_bytes:
+          description: Footprint when loaded at its context policy, from the localmodels estimator.
+          type: integer
+          format: int64
+          minimum: 0
+        fit:
+          $ref: "#/components/schemas/LocalModelFit"
+        recommended:
+          description: True on at most one model, an absent downloadable one.
+          type: boolean
+        availability:
+          $ref: "#/components/schemas/LocalModelAvailability"
+        pool:
+          $ref: "#/components/schemas/LocalModelPoolId"
+          description: Planned placement while absent, actual placement afterwards; absent when fit is none.
+        state:
+          $ref: "#/components/schemas/LocalModelState"
+        download:
+          $ref: "#/components/schemas/LocalModelDownloadProgress"
+          description: Present only while downloading.
+        endpoint:
+          $ref: "#/components/schemas/LocalModelEndpoint"
+          description: Present only while loaded.
+        pi_model:
+          description: >-
+            The runtime_model an Agent on runtime pi stores for this model,
+            <pi provider>/<pi model id>; present while the model is on the
+            Computer.
+          type: string
+          minLength: 1
+          maxLength: 200
+        tokens_per_second:
+          description: Warm speed measured at the last load; absent when unknown.
+          type: number
+          minimum: 0
+        error:
+          $ref: "#/components/schemas/LocalModelError"
+          description: Present only when failed.
+        note:
+          $ref: "#/components/schemas/LocalModelNote"
+          description: Present only when idle and the automatic load after download was skipped.
+    LocalModelsUnavailableReason:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          $ref: "#/components/schemas/LocalModelsUnavailableCode"
+        detail:
+          description: Diagnostic text for display; never matched on.
+          type: string
+          maxLength: 4000
+    LocalModelsSnapshot:
+      description: >-
+        A Computer's model library as its Daemon reported it in
+        runner.local_models, mapped from localmodels.library-status/v1. When
+        available is false only reason and observed_at carry meaning and the
+        lists are empty.
+      type: object
+      additionalProperties: false
+      required: [available, observed_at, pools, models]
+      properties:
+        available:
+          type: boolean
+        reason:
+          $ref: "#/components/schemas/LocalModelsUnavailableReason"
+          description: Present only when available is false.
+        observed_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+        tool_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        host:
+          $ref: "#/components/schemas/LocalModelHost"
+          description: Present when available.
+        pools:
+          type: array
+          maxItems: 65
+          items:
+            $ref: "#/components/schemas/LocalModelPool"
+        models:
+          type: array
+          maxItems: 256
+          items:
+            $ref: "#/components/schemas/LocalModel"
+    RecordLocalModelsRequest:
+      description: >-
+        The latest runner.local_models snapshot of one Computer. TeamHub keeps
+        only the latest per Computer, so an offline Computer still shows what it
+        last reported.
+      type: object
+      additionalProperties: false
+      required: [computer_id, snapshot]
+      properties:
+        computer_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        snapshot:
+          $ref: "#/components/schemas/LocalModelsSnapshot"
+    LocalModelActionKind:
+      description: >-
+        refresh asks the Computer to reread its library and send a snapshot; it
+        names no model.
+      type: string
+      enum: [download, cancel, load, unload, remove, refresh]
+      x-enum-varnames:
+        [
+          LocalModelActionKindDownload,
+          LocalModelActionKindCancel,
+          LocalModelActionKindLoad,
+          LocalModelActionKindUnload,
+          LocalModelActionKindRemove,
+          LocalModelActionKindRefresh,
+        ]
+    LocalModelActionCommand:
+      description: >-
+        TeamHub asks Agent Service to send one execute local_models frame to an
+        owned Computer. model_id is required except for refresh; unload_first
+        only with load.
+      type: object
+      additionalProperties: false
+      required: [request_id, action, expires_at]
+      properties:
+        request_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        action:
+          $ref: "#/components/schemas/LocalModelActionKind"
+        model_id:
+          $ref: "#/components/schemas/LocalModelId"
+        unload_first:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/LocalModelId"
+        expires_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+    LocalModelActionRefusal:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          $ref: "#/components/schemas/LocalModelActionRefusalCode"
+        detail:
+          description: Diagnostic text for display; never matched on.
+          type: string
+          maxLength: 4000
+        pool:
+          $ref: "#/components/schemas/LocalModelPoolId"
+          description: With LOAD_NO_ROOM.
+        need_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        free_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+    LocalModelActionAck:
+      description: >-
+        The Computer's immediate answer. accepted means the job started (or a
+        snapshot is coming for refresh); refused means nothing changed.
+        Progress and outcomes arrive only as snapshots.
+      type: object
+      additionalProperties: false
+      required: [request_id, outcome]
+      properties:
+        request_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        outcome:
+          type: string
+          enum: [accepted, refused]
+          x-enum-varnames: [LocalModelActionAccepted, LocalModelActionRefused]
+        refusal:
+          $ref: "#/components/schemas/LocalModelActionRefusal"
+          description: Present only when refused.
+    LocalModelActionRequest:
+      description: >-
+        A Human's action on one model. The click is the approval; there is no
+        separate confirm step on the Computer. unload_first only with load.
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [download, cancel, load, unload, remove]
+          x-enum-varnames:
+            [
+              LocalModelActionRequestDownload,
+              LocalModelActionRequestCancel,
+              LocalModelActionRequestLoad,
+              LocalModelActionRequestUnload,
+              LocalModelActionRequestRemove,
+            ]
+        unload_first:
+          description: Loaded models in the same pool to unload before the load starts.
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/LocalModelId"
+    LocalModelActionAccepted:
+      type: object
+      additionalProperties: false
+      required: [computer_id, model_id, action]
+      properties:
+        computer_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        model_id:
+          $ref: "#/components/schemas/LocalModelId"
+        action:
+          type: string
+          enum: [download, cancel, load, unload, remove]
+          x-enum-varnames:
+            [
+              LocalModelActionAcceptedDownload,
+              LocalModelActionAcceptedCancel,
+              LocalModelActionAcceptedLoad,
+              LocalModelActionAcceptedUnload,
+              LocalModelActionAcceptedRemove,
+            ]
+    LocalModelsErrorCode:
+      description: >-
+        error.code of a refused local-models action (403, 409, 502, 503, 504);
+        400, 401, and 404 use the common codes. LOCAL_COMPUTER_OFFLINE: the
+        Computer is not connected. LOCAL_MODEL_ACTION_FORBIDDEN: the viewer is not the Computer owner.
+        LOCAL_MODELS_UNAVAILABLE: the Computer has no usable localmodels tool.
+        LOCAL_MODEL_ACTION_FAILED: the Computer refused with a library error
+        that has no code of its own here (502). LOCAL_MODELS_SERVICE_UNAVAILABLE:
+        Agent Service could not be reached (503). LOCAL_MODEL_ACTION_UNCONFIRMED:
+        the connected Computer had not decided by the action's deadline; it may
+        still run the action, and the library snapshots show the outcome (504).
+        The other LOCAL_MODEL_ codes
+        are the Computer's refusal codes of the same name (409).
+      type: string
+      enum:
+        - LOCAL_COMPUTER_OFFLINE
+        - LOCAL_MODEL_ACTION_FORBIDDEN
+        - LOCAL_MODELS_UNAVAILABLE
+        - LOCAL_MODEL_UNKNOWN
+        - LOCAL_MODEL_INVALID_STATE
+        - LOCAL_MODEL_JOB_RUNNING
+        - LOCAL_MODEL_NO_ROOM
+        - LOCAL_MODEL_MEMORY_INSUFFICIENT
+        - LOCAL_MODEL_DISK_INSUFFICIENT
+        - LOCAL_MODEL_PLATFORM_UNSUPPORTED
+        - LOCAL_MODEL_ACTION_FAILED
+        - LOCAL_MODEL_ACTION_UNCONFIRMED
+        - LOCAL_MODELS_SERVICE_UNAVAILABLE
+    LocalModelsError:
+      description: The common error body with error.code narrowed to LocalModelsErrorCode.
+      type: object
+      additionalProperties: false
+      required: [code, message, request_id]
+      properties:
+        code:
+          $ref: "#/components/schemas/LocalModelsErrorCode"
+        message:
+          type: string
+          minLength: 1
+          description: Human-readable summary safe to display; clients branch on code, not message.
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        details:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/ErrorDetail"
+        retryable:
+          type: boolean
+          default: false
+    LocalModelsErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/LocalModelsError"
+    LocalModelUser:
+      description: An Agent whose runtime model is this model on this Computer.
+      type: object
+      additionalProperties: false
+      required: [agent_id, name]
+      properties:
+        agent_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+    LocalModelView:
+      type: object
+      additionalProperties: false
+      required: [model, used_by]
+      properties:
+        model:
+          $ref: "#/components/schemas/LocalModel"
+        used_by:
+          description: >-
+            Active Agents placed on this Computer with runtime pi whose runtime
+            model is this model's gateway model.
+          type: array
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/LocalModelUser"
+    LocalModelsComputer:
+      type: object
+      additionalProperties: false
+      required: [computer_id, display_name, status]
+      properties:
+        computer_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        status:
+          type: string
+          enum: [online, offline]
+          x-enum-varnames:
+            [LocalModelsComputerOnline, LocalModelsComputerOffline]
+        last_seen_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+        host:
+          $ref: "#/components/schemas/LocalModelHost"
+          description: From the last snapshot that carried one.
+    LocalModelsViewUnavailableReason:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          description: >-
+            NOT_REPORTED: the Computer never sent a snapshot. Otherwise the
+            reason from its last snapshot.
+          type: string
+          enum: [TOOL_NOT_INSTALLED, TOOL_FAILED, NOT_REPORTED]
+          x-enum-varnames:
+            [
+              LocalModelsViewToolNotInstalled,
+              LocalModelsViewToolFailed,
+              LocalModelsViewNotReported,
+            ]
+        detail:
+          description: Diagnostic text for display; never matched on.
+          type: string
+          maxLength: 4000
+    LocalModelsView:
+      description: >-
+        One Computer's model library as last reported. Only the Computer owner
+        can act (viewer_is_owner); other Tenant members who can see the
+        Computer read it.
+      type: object
+      additionalProperties: false
+      required: [computer, viewer_is_owner, available, pools, models]
+      properties:
+        computer:
+          $ref: "#/components/schemas/LocalModelsComputer"
+        viewer_is_owner:
+          type: boolean
+        available:
+          type: boolean
+        reason:
+          $ref: "#/components/schemas/LocalModelsViewUnavailableReason"
+          description: Present only when available is false.
+        observed_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+          description: When the Computer observed the snapshot; absent when it never sent one.
+        tool_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        pools:
+          type: array
+          maxItems: 65
+          items:
+            $ref: "#/components/schemas/LocalModelPool"
+        models:
+          type: array
+          maxItems: 256
+          items:
+            $ref: "#/components/schemas/LocalModelView"

@@ -147,6 +147,14 @@ const agentFrames = [
     permission: "screen_recording",
   },
   {
+    type: "execute",
+    kind: "local_models",
+    ...localCapability,
+    action: "load",
+    model_id: "qwen3-4b:Q4_K_M",
+    unload_first: ["gemma3-4b:Q4_K_M"],
+  },
+  {
     type: "prepare",
     target: "operation",
     ...operation,

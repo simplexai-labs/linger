@@ -661,6 +661,18 @@ export class RunnerConnections {
       this.owners.capabilities().receiveLocalSkillOutcome(envelope);
       return;
     }
+    if (
+      envelope.type === "runner.local_models" ||
+      (envelope.type === "executed" && envelope.kind === "local_models")
+    ) {
+      // Agent Service does not relay local models to TeamHub yet; dropping the
+      // frame keeps a Computer that already reports them connected.
+      logAgentEvent("info", "runner.local_models.ignored", {
+        runnerId: connection.runnerId,
+        frameType: envelope.type,
+      });
+      return;
+    }
     if (envelope.type === "prepared" && envelope.target === "provider") {
       // Advisory: a prepare outcome carries no Operation identity or state.
       logAgentEvent("info", "runner.provider.prepared", {

@@ -103,6 +103,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-model-actions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        ownerActorId: components["parameters"]["OwnerActorId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Send one local-models action to an owned Local Computer
+     * @description Agent Service sends execute with kind local_models and returns the Computer's immediate accepted or refused answer. The Computer supervises the job and reports progress only through runner.local_models snapshots, which Agent Service records in TeamHub.
+     */
+    post: operations["actOnLocalComputerModels"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/browser-connection": {
     parameters: {
       query?: never;
@@ -1376,6 +1400,71 @@ export interface components {
       expires_at: components["schemas"]["Timestamp"];
       items: components["schemas"]["LocalSkillCandidate"][];
     };
+    /**
+     * @description refresh asks the Computer to reread its library and send a snapshot; it names no model.
+     * @enum {string}
+     */
+    LocalModelActionKind:
+      | "download"
+      | "cancel"
+      | "load"
+      | "unload"
+      | "remove"
+      | "refresh";
+    /** @description Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M. */
+    LocalModelId: string;
+    /** @description TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh; unload_first only with load. */
+    LocalModelActionCommand: {
+      request_id: components["schemas"]["Id"];
+      action: components["schemas"]["LocalModelActionKind"];
+      model_id?: components["schemas"]["LocalModelId"];
+      unload_first?: components["schemas"]["LocalModelId"][];
+      expires_at: components["schemas"]["Timestamp"];
+    };
+    /**
+     * @description Why the Computer refused an action before starting it: a localmodels library error or a reason the library is unavailable.
+     * @enum {string}
+     */
+    LocalModelActionRefusalCode:
+      | "MODEL_UNKNOWN"
+      | "INVALID_STATE"
+      | "JOB_RUNNING"
+      | "MEMORY_INSUFFICIENT"
+      | "DISK_INSUFFICIENT"
+      | "PLATFORM_UNSUPPORTED"
+      | "LOAD_NO_ROOM"
+      | "DOWNLOAD_FAILED"
+      | "CHECKSUM_MISMATCH"
+      | "NETWORK_UNAVAILABLE"
+      | "ENGINE_START_FAILED"
+      | "HEALTH_CHECK_FAILED"
+      | "OUT_OF_MEMORY"
+      | "MODEL_FILES_MISSING"
+      | "GATEWAY_REGISTRATION_FAILED"
+      | "CANCELLED"
+      | "TOOL_NOT_INSTALLED"
+      | "TOOL_FAILED";
+    /** @description A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs). */
+    LocalModelPoolId: string;
+    LocalModelActionRefusal: {
+      code: components["schemas"]["LocalModelActionRefusalCode"];
+      /** @description Diagnostic text for display; never matched on. */
+      detail?: string;
+      /** @description With LOAD_NO_ROOM. */
+      pool?: components["schemas"]["LocalModelPoolId"];
+      /** Format: int64 */
+      need_bytes?: number;
+      /** Format: int64 */
+      free_bytes?: number;
+    };
+    /** @description The Computer's immediate answer. accepted means the job started (or a snapshot is coming for refresh); refused means nothing changed. Progress and outcomes arrive only as snapshots. */
+    LocalModelActionAck: {
+      request_id: components["schemas"]["Id"];
+      /** @enum {string} */
+      outcome: "accepted" | "refused";
+      /** @description Present only when refused. */
+      refusal?: components["schemas"]["LocalModelActionRefusal"];
+    };
     /** @description A Chrome profile directory name inside the user's Chrome data directory. */
     BrowserProfile: string;
     /** @description The browser that browser tools of this owner's Agents drive on one Local Computer. It never contains the Playwright Extension token. */
@@ -2078,6 +2167,40 @@ export interface operations {
       401: components["responses"]["Unauthenticated"];
       404: components["responses"]["NotFound"];
       409: components["responses"]["Conflict"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  actOnLocalComputerModels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        ownerActorId: components["parameters"]["OwnerActorId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalModelActionCommand"];
+      };
+    };
+    responses: {
+      /** @description The Computer's answer. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalModelActionAck"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      502: components["responses"]["BadGateway"];
       503: components["responses"]["ServiceUnavailable"];
     };
   };
