@@ -46,7 +46,7 @@ func TestRoutineWakeAllowsAPreparedDocumentOrDeck(t *testing.T) {
 	if !strings.Contains(note, "links to the document or deck") {
 		t.Fatalf("tracking note=%q", note)
 	}
-	meetings, err := builtinskills.FS.ReadFile("builtin/proactive-response/1.0.2/references/meetings.md")
+	meetings, err := builtinskills.FS.ReadFile("builtin/proactive-response/1.0.3/references/meetings.md")
 	for _, want := range []string{"teamhub docs create", "teamhub task create", "from the web", "earlier meetings with the same people"} {
 		if err != nil || !strings.Contains(string(meetings), want) {
 			t.Fatalf("meetings guide misses %q: %v", want, err)

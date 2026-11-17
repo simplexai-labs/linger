@@ -74,10 +74,13 @@ skills:
         version: 1.0.0
         package_path: builtin/taste/1.0.0
   - skill_id: simplexai_proactive_response
-    bootstrap_manifest_id: skill_manifest_simplexai_proactive_response_1_0_2
+    bootstrap_manifest_id: skill_manifest_simplexai_proactive_response_1_0_3
     default_agent_types:
       - anotherme
     manifests:
+      - manifest_id: skill_manifest_simplexai_proactive_response_1_0_3
+        version: 1.0.3
+        package_path: builtin/proactive-response/1.0.3
       - manifest_id: skill_manifest_simplexai_proactive_response_1_0_2
         version: 1.0.2
         package_path: builtin/proactive-response/1.0.2
