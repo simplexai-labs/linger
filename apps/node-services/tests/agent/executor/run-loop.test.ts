@@ -30,6 +30,7 @@ import { createTeamHubRuntimeStateClientFake } from "../test-support/teamhub-run
 import {
   encodeExecutionContextRef,
   type ExecutionContextRef,
+  type MetaRoomKind,
 } from "../../../src/agent/executor/context-ref.js";
 import {
   createAgentLogger,
@@ -52,6 +53,7 @@ import { RunLoop } from "../../../src/agent/executor/run-loop.js";
 import type {
   ToolRunContext,
   Message,
+  NonEmptyReadonlyArray,
 } from "../../../src/agent/executor/types.js";
 import type { ExecutorFeaturePorts } from "../test-support/standalone-executor.js";
 import { TestContextRuntimeState as ContextRuntimeState } from "../test-support/context-runtime-state.js";
@@ -331,25 +333,39 @@ describe("RunLoop", () => {
     ];
     const finishRun = async (
       events: readonly RunEvent[],
-      executionContextRef?: ExecutionContextRef,
+      options: {
+        readonly ref?: ExecutionContextRef;
+        readonly roomKind?: MetaRoomKind;
+        readonly runtimeName?: string;
+        readonly inputs?: NonEmptyReadonlyArray<Message>;
+        readonly finalResponse?: string;
+      } = {},
     ) => {
       const harness = createHarness(
         undefined,
         undefined,
         undefined,
         undefined,
-        executionContextRef,
+        options.ref,
+        undefined,
+        options,
       );
       const run = new FakeRun(events);
       harness.provider.runs.push(run);
-      const runId = enqueue(harness.state, message("introduce yourself"));
+      const runId = harness.state.enqueueTrustedTurn(
+        options.inputs ?? [message("introduce yourself")],
+      );
       try {
         harness.execution.start();
         await vi.waitFor(() => expect(run.waitCalls).toBe(1));
-        run.complete("I could not deliver the reply: TeamHub returned 404.");
-        await vi.waitFor(() =>
-          expect(harness.state.getLocalRun(runId)?.status).not.toBe("running"),
+        run.complete(
+          options.finalResponse ??
+            "I could not deliver the reply: TeamHub returned 404.",
         );
+        await vi.waitFor(() =>
+          expect(harness.state.getLocalRun(runId)?.terminal).toBeDefined(),
+        );
+        expect(harness.provider.starts).toHaveLength(1);
         return {
           log: harness.log,
           run: harness.state.getLocalRun(runId),
@@ -359,6 +375,118 @@ describe("RunLoop", () => {
         harness.state.close();
       }
     };
+
+    const roomInput = ({
+      id = "1",
+      inboxId = "room:room-1",
+      targeted = true,
+      authorType = "user",
+      messageKind = "conversation",
+    } = {}) =>
+      renderAcceptedNotification({
+        ...message(`inbox-input-${id}`, inboxId),
+        acceptedNotification: {
+          inboxId,
+          after: "0",
+          through: "1",
+          targeted,
+          messages: [
+            {
+              id: `room-message-${id}`,
+              body: "What tools can you use?",
+              author: "Lin",
+              authorActorId: "human-1",
+              authorType,
+              messageKind,
+              mentioned: targeted,
+            },
+          ],
+        },
+      });
+
+    it.each([
+      { name: "one addressed message", inputs: [roomInput()] },
+      {
+        name: "an addressed message batched with an unaddressed message",
+        inputs: [roomInput({ id: "2", targeted: false }), roomInput()],
+      },
+    ] satisfies readonly {
+      name: string;
+      inputs: NonEmptyReadonlyArray<Message>;
+    }[])(
+      "reports a text-only Pi answer as undelivered for $name",
+      async ({ inputs }) => {
+        const finalResponse = "I can use the shell and read files.";
+        const { run } = await finishRun(
+          [
+            { type: "status.changed", status: "thinking" },
+            {
+              type: "message.delta",
+              messageId: "pi-text",
+              delta: finalResponse,
+            },
+            { type: "run.completed" },
+          ],
+          { roomKind: "direct", inputs, finalResponse },
+        );
+        expect(run).toMatchObject({
+          status: "failed",
+          terminal: {
+            failure: { code: "reply_undelivered", runtime_type: "pi" },
+          },
+        });
+        expect(JSON.stringify(run?.terminal)).not.toContain(finalResponse);
+      },
+    );
+
+    it.each([
+      {
+        name: "a successful message send",
+        events: messageWrite("send", "succeeded"),
+      },
+      {
+        name: "a tool action without a message write",
+        events: [
+          { type: "tool.called", callId: "edit", toolName: "edit", input: {} },
+        ],
+      },
+      { name: "a failed read without a write", events: failedRead },
+      { name: "a collaboration Room", roomKind: "collaboration" },
+      { name: "another Runtime", runtimeName: "codex" },
+      {
+        name: "a thread in the Room",
+        inputs: [roomInput({ inboxId: "room:thread-1" })],
+      },
+      {
+        name: "an untargeted Room input",
+        inputs: [roomInput({ targeted: false })],
+      },
+      {
+        name: "an Agent message",
+        inputs: [roomInput({ authorType: "agent" })],
+      },
+      {
+        name: "a runtime notification",
+        inputs: [roomInput({ messageKind: "agent_runtime" })],
+      },
+      { name: "a background turn", inputs: [message("follow-up")] },
+      { name: "a blank final response", finalResponse: "  " },
+    ] satisfies readonly {
+      readonly name: string;
+      readonly events?: readonly RunEvent[];
+      readonly roomKind?: MetaRoomKind;
+      readonly runtimeName?: string;
+      readonly inputs?: NonEmptyReadonlyArray<Message>;
+      readonly finalResponse?: string;
+    }[])("keeps $name succeeded", async ({ events, ...options }) => {
+      const { run } = await finishRun(events ?? [], {
+        roomKind: "direct",
+        inputs: [roomInput()],
+        ...options,
+      });
+
+      expect(run?.terminal).toMatchObject({ type: "succeeded" });
+    });
 
     it("fails a Room Run whose every message write failed as reply_undelivered", async () => {
       const { log, run } = await finishRun([
@@ -426,9 +554,7 @@ describe("RunLoop", () => {
 
     it("leaves a Task Run, which reports through its final response, succeeded", async () => {
       const { run } = await finishRun(messageWrite("send-1", "failed"), {
-        kind: "alter_ego",
-        agentId: "agent-1",
-        taskId: "task-1",
+        ref: { kind: "alter_ego", agentId: "agent-1", taskId: "task-1" },
       });
 
       expect(run?.terminal).toMatchObject({
@@ -3800,6 +3926,8 @@ const createHarness = (
   },
   activationFinishedAtMs?: () => number | undefined,
   features?: {
+    readonly roomKind?: MetaRoomKind;
+    readonly runtimeName?: string;
     readonly agentType?: "general" | "anotherme";
     readonly declarations?: readonly FeatureDeclaration[];
     readonly prepareInput?: ExecutorFeaturePorts["prepareInput"];
@@ -3838,7 +3966,8 @@ const createHarness = (
     executionContextRef,
     logger,
     provider,
-    runtimeName: "pi",
+    ...(features?.roomKind ? { roomKind: features.roomKind } : {}),
+    runtimeName: features?.runtimeName ?? "pi",
     runtimeSession,
     ...(runtimeStatusPublisher ? { runtimeStatusPublisher } : {}),
     ...(activationFinishedAtMs ? { activationFinishedAtMs } : {}),

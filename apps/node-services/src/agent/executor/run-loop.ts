@@ -18,7 +18,7 @@ import {
   runtimeSessionAwaitsFirstRun,
   runtimeSessionStartsFresh,
 } from "./provider.js";
-import type { ExecutionContextRef } from "./context-ref.js";
+import type { ExecutionContextRef, MetaRoomKind } from "./context-ref.js";
 import { ReplyDelivery } from "./reply-delivery.js";
 import type {
   ProfileUpdate,
@@ -43,7 +43,7 @@ import {
   renderRuntimeContinuationReminder,
 } from "../prompt/inbox-notification.js";
 import { runPriorities, COMPACTION_PRIORITY } from "../../model-tasks.js";
-import { runKind } from "./run-kind.js";
+import { isTargetedRoomChat, runKind } from "./run-kind.js";
 
 /** The Run's own agent in `agent.model_request`; a sub-agent logs its id. */
 const MAIN_AGENT = "main";
@@ -286,6 +286,7 @@ interface LocalRunExecution {
 export class RunLoop {
   readonly #logger: AgentLogger;
   readonly #executionContextRef: ExecutionContextRef | undefined;
+  readonly #roomKind: MetaRoomKind | undefined;
   readonly #onActiveRunContextChanged:
     | ((context: ToolRunContext | null) => void)
     | undefined;
@@ -336,6 +337,7 @@ export class RunLoop {
   constructor(options: {
     readonly logger: AgentLogger;
     readonly executionContextRef?: ExecutionContextRef;
+    readonly roomKind?: MetaRoomKind;
     readonly provider: AgentProvider;
     /** The activated Runtime, which a public Run failure names. */
     readonly runtimeName?: string;
@@ -369,6 +371,7 @@ export class RunLoop {
   }) {
     this.#logger = options.logger;
     this.#executionContextRef = options.executionContextRef;
+    this.#roomKind = options.roomKind;
     this.#onActiveRunContextChanged = options.onActiveRunContextChanged;
     this.#onActivityChanged = options.onActivityChanged;
     this.#activationFinishedAtMs = options.activationFinishedAtMs;
@@ -1359,7 +1362,7 @@ export class RunLoop {
     await this.#settleRuntimeStatusEvents(execution);
     const runtimeStatusDrainMs = performance.now() - statusDrainStartedAt;
     const terminal = this.#completedTerminal(
-      runId,
+      execution,
       finalResponse,
       replyDelivery,
     );
@@ -1717,19 +1720,29 @@ export class RunLoop {
   }
 
   /**
-   * A Room Agent speaks only through TeamHub message writes. When it tried to
-   * post and none landed, the Room has nothing to show, so a finished Provider
-   * turn is not a succeeded Run. Task Runs report through their final
-   * response and keep it.
+   * A Room Agent speaks only through TeamHub message writes. A finished
+   * Provider turn can leave an undelivered reply. Task Runs report through
+   * their final response and keep it.
    */
   #completedTerminal(
-    runId: string,
+    execution: LocalRunExecution,
     finalResponse: string,
     replyDelivery: ReplyDelivery,
   ): LocalRunTerminal {
-    const undelivered =
-      this.#executionContextRef?.kind === "meta" &&
-      replyDelivery.replyUndelivered;
+    const { runId } = execution;
+    const ref = this.#executionContextRef;
+    const undelivered = ref?.kind === "meta" && replyDelivery.replyUndelivered;
+    const textOnlyDirectReply =
+      ref?.kind === "meta" &&
+      this.#roomKind === "direct" &&
+      this.#runtimeType === "pi" &&
+      !execution.resumesAttempt &&
+      !execution.hasYielded &&
+      !replyDelivery.hasToolActivity &&
+      finalResponse.trim() !== "" &&
+      execution.messages.some((message) =>
+        isTargetedRoomChat(message, ref.roomId),
+      );
     if (replyDelivery.hasFailures) {
       this.#logger.log("warn", "local_run.teamhub_messages_failed", {
         runId,
@@ -1738,7 +1751,11 @@ export class RunLoop {
         finalResponseLength: finalResponse.length,
       });
     }
-    if (!undelivered) {
+    if (textOnlyDirectReply)
+      this.#logger.log("warn", "local_run.text_only_room_reply", {
+        run_id: runId,
+      });
+    if (!undelivered && !textOnlyDirectReply) {
       return { type: "succeeded", finalResponse };
     }
     return {

@@ -66,6 +66,10 @@ take precedence.
   cancellation, and the only Runtime execution path. Do not add a second
   scheduler, execution store, or Runtime executor beside it, and do not
   restore TeamHub Run admission.
+- A fresh Pi Run in a direct Room reports `reply_undelivered` if an initial
+  chat message mentions the Agent and the Run finishes with nonblank private
+  text and no tool activity. The Room shows the failure, not the private text,
+  and the Run is not replayed automatically.
 - Ordinary Room/Meta execution reads effective Agent configuration before a new
   Local Run. Skill saves do not activate idle Contexts. If versions changed,
   reuse graceful activation to resume the same native history; running/steered

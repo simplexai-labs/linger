@@ -26,7 +26,7 @@ const messages: Record<RuntimeExecutionFailure["code"], string> = {
   execution_outcome_unknown:
     "A command was dispatched, but its result could not be confirmed. It was not automatically replayed. Check its effects before retrying.",
   reply_undelivered:
-    "The Agent finished, but its reply did not reach the Room because every TeamHub message it tried to send failed. Check the Agent's connection to TeamHub, then ask again.",
+    "The Agent finished, but its reply did not reach the Room. If you asked it to take an action, check whether it happened before asking again.",
   interrupted:
     "The Run was interrupted before it finished, for example by a restart or by stopping the Agent on its Computer. Part of its work may have taken effect; check the result before asking again.",
   computer_unavailable:

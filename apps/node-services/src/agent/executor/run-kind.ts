@@ -18,11 +18,32 @@ function messageRunKind(origin: QueuedMessageOrigin): RunKind {
   return origin.authorType === "agent" ? "agent_message" : "chat";
 }
 
-function inputRunKinds(message: Message): readonly RunKind[] {
+function queuedNotification(message: Message) {
   const notification = (message as unknown as Record<string, unknown>)
     .acceptedNotification;
+  return isRecord(notification) ? notification : undefined;
+}
+
+export function isTargetedRoomChat(message: Message, roomId: string): boolean {
+  const notification = queuedNotification(message);
+  return (
+    notification?.inboxId === `room:${roomId}` &&
+    notification.targeted === true &&
+    Array.isArray(notification.messages) &&
+    notification.messages.some(
+      (entry: unknown) =>
+        isRecord(entry) &&
+        entry.authorType === "user" &&
+        entry.messageKind === "conversation" &&
+        entry.mentioned === true,
+    )
+  );
+}
+
+function inputRunKinds(message: Message): readonly RunKind[] {
+  const notification = queuedNotification(message);
   // Only a feature's follow-up turn has no Inbox notification in a Meta Context.
-  if (!isRecord(notification)) return ["follow_up"];
+  if (!notification) return ["follow_up"];
   if (
     typeof notification.inboxId === "string" &&
     notification.inboxId.startsWith("taskmeta:")

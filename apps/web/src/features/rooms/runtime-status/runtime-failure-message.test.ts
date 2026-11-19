@@ -46,7 +46,8 @@ describe("Runtime failure messages", () => {
     });
     expect(message).toContain("Pi:");
     expect(message).toContain("reply did not reach the Room");
-    expect(message).toContain("TeamHub");
+    expect(message).toContain("before asking again");
+    expect(message).not.toContain("every TeamHub message");
   });
 
   it("names a failure the Agent Service observed without a Runtime prefix", () => {

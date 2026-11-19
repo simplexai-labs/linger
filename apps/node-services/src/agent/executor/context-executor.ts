@@ -1753,6 +1753,7 @@ export class ContextExecutor<TRuntimeSettings> {
       let retainedExecutionRunId: string | undefined;
       const execution = new RunLoop({
         executionContextRef: this.ref,
+        ...(this.record.roomKind ? { roomKind: this.record.roomKind } : {}),
         activationFinishedAtMs: () => this.#activationFinishedAtMs,
         logger: this.#runtimeLogger,
         provider: activated.provider,
