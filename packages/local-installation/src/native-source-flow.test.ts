@@ -385,6 +385,69 @@ async function restartAfter(
   return { f, result };
 }
 
+test("a BYOK install skips local models and a restart keeps its BYOK source", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  vi.mocked(prepareByokRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "BYOK gateway and runtime profiles are ready.",
+  });
+  const first = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-byok",
+    setupChoice: "codex",
+    byok: {
+      baseUrl: "https://api.example.com",
+      path: "/v1",
+      endpoint: "/responses",
+      protocol: "openai-responses",
+      apiKey: "sk-demo-key",
+      modelId: "gpt-5.4",
+      runtime: "codex",
+    },
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(first.code).toBe(0);
+  expect(prepareByokRuntime).toHaveBeenCalled();
+  expect(prepareLocalModels).not.toHaveBeenCalled();
+  expect(prepareModelGateway).toHaveBeenCalledWith(
+    expect.anything(),
+    { runtime: "codex", modelSource: "byok" },
+    expect.anything(),
+  );
+  // Persist the BYOK model-source.json that localmodels source apply writes.
+  await saveModelSource(f.home, "byok", "codex");
+  vi.mocked(applyNativeSource).mockClear();
+  vi.mocked(prepareModelGateway).mockClear();
+  vi.mocked(restoreByokSource).mockClear();
+  const resumed = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-byok",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(resumed.code).toBe(0);
+  expect(prepareLocalModels).not.toHaveBeenCalled();
+  expect(applyNativeSource).not.toHaveBeenCalled();
+  expect(restoreByokSource).toHaveBeenCalledWith(
+    path.resolve(f.home),
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
+  expect(prepareModelGateway).toHaveBeenCalledWith(
+    expect.anything(),
+    { runtime: "codex", modelSource: "byok" },
+    expect.anything(),
+  );
+});
+
 test.each(["codex", "local-models"] as const)(
   "a restart mounts a BYOK source switched to after choosing %s",
   async (setupChoice) => {
@@ -528,7 +591,6 @@ test("a restart keeps a saved local source as before", async () => {
   expect(applyNativeSource).not.toHaveBeenCalled();
   expect(restoreByokSource).not.toHaveBeenCalled();
 });
-
 test("only TeamHub's process gets the server identity key", async () => {
   const f = await fixture();
   vi.mocked(prepareRuntime).mockResolvedValue({

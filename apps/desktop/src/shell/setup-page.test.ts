@@ -277,9 +277,8 @@ describe("setup page Quick Install recommendation", () => {
       "Local model on hold. Other programs are using the memory it needs. Close other programs. Quick Install sets up Codex now, or choose Check again once memory is free.",
     );
     expect($("local-recheck").hidden).toBe(false);
-    $("local-customize").click();
     // Subscription is active by default when the local model is on hold;
-    // selecting Local model reveals the held card and disables Install.
+    // selecting Local model directly reveals the held card and disables Install.
     expect($("subscription-row").hidden).toBe(false);
     expect($("local-row").hidden).toBe(true);
     document
@@ -301,7 +300,11 @@ describe("setup page Quick Install recommendation", () => {
     await vi.waitFor(() =>
       expect(run).toHaveBeenCalledWith({ op: "local.recheck" }),
     );
-    $("local-customize").click();
+    document
+      .querySelector<HTMLButtonElement>(
+        '[data-plan="source"] [data-value="subscription"]',
+      )!
+      .click();
     $("local-install").click();
     await vi.waitFor(() =>
       expect(installed(run)).toEqual([{ op: "local.start", runtime: "codex" }]),
@@ -519,9 +522,8 @@ describe("setup page Quick Install recommendation", () => {
     );
   });
 
-  it("marks the recommendation under Customize and keeps model sources mutually exclusive", async () => {
+  it("shows model sources directly on first launch and keeps them mutually exclusive", async () => {
     const { run } = await openPage(welcome(capable), "welcome");
-    $("local-customize").click();
     const source = (value: string) =>
       document.querySelector<HTMLButtonElement>(
         `[data-plan="source"] [data-value="${value}"]`,
@@ -530,6 +532,8 @@ describe("setup page Quick Install recommendation", () => {
       document.querySelector<HTMLButtonElement>(
         `[data-plan="runtime"] [data-value="${value}"]`,
       )!;
+    expect($("local-setup").hidden).toBe(false);
+    expect($("local-options").dataset.open).toBe("false");
     expect(source("local").dataset.recommended).toBe("true");
     expect(source("local").getAttribute("aria-checked")).toBe("true");
     expect(source("subscription").dataset.recommended).toBe("false");
@@ -552,7 +556,7 @@ describe("setup page Quick Install recommendation", () => {
         { op: "local.start", runtime: "claude" },
       ]),
     );
-    $("local-customize").click();
+    source("local").click();
     expect($("local-install-label").textContent).toBe("Quick Install");
     expect($("plan-summary").textContent).toBe(
       "Recommended for this computer: Local model + Pi",
@@ -582,9 +586,68 @@ describe("setup page Quick Install recommendation", () => {
     localServer: { ...base.localServer, ...localServer },
   });
 
+  it("lets first-time users skip local models with BYOK directly, even while checking hardware", async () => {
+    const { run, push } = await openPage(
+      welcome({ state: "checking" }),
+      "welcome",
+    );
+    const installButton = $("local-install") as HTMLButtonElement;
+    expect(installButton.disabled).toBe(true);
+    expect(installButton.getAttribute("aria-busy")).toBe("true");
+    expect($("local-skip-hint").hidden).toBe(false);
+
+    // Clicking "Use BYOK instead" immediately skips waiting for the local model probe.
+    $("local-skip-to-byok").click();
+    expect($("byok-row").hidden).toBe(false);
+    expect(installButton.getAttribute("aria-busy")).toBe("false");
+    expect($("local-install-label").textContent).toBe("Install with BYOK");
+    expect(installButton.disabled).toBe(true);
+
+    type("byok-url", "https://api.anthropic.com");
+    type("byok-key", "sk-ant-demo");
+    type("byok-model", "claude-sonnet-4-6");
+
+    // Install is enabled even while hardware check is still running.
+    expect(installButton.disabled).toBe(false);
+
+    // Toggling More options does not discard BYOK inputs.
+    $("local-customize").click();
+    expect($("local-options").dataset.open).toBe("true");
+    $("local-customize").click();
+    expect($("local-options").dataset.open).toBe("false");
+    expect($("byok-row").hidden).toBe(false);
+    expect(($("byok-url") as HTMLInputElement).value).toBe(
+      "https://api.anthropic.com",
+    );
+
+    // When the background hardware check finishes recommending a local model,
+    // the user's BYOK selection stays intact.
+    push(welcome(capable));
+    expect($("byok-row").hidden).toBe(false);
+    expect($("local-install-label").textContent).toBe("Install with BYOK");
+
+    installButton.click();
+    await vi.waitFor(() =>
+      expect(installed(run)).toEqual([
+        {
+          op: "local.start",
+          runtime: "claude",
+          byok: {
+            runtime: "claude",
+            baseUrl: "https://api.anthropic.com",
+            path: "/v1",
+            endpoint: "/messages",
+            protocol: "anthropic",
+            apiKey: "sk-ant-demo",
+            modelId: "claude-sonnet-4-6",
+          },
+        },
+      ]),
+    );
+  });
+
   it("builds the request address from base URL, path and endpoint, with tooltip, refresh, Test and secret scrubbing", async () => {
     const { run } = await openPage(welcome(small), "welcome");
-    $("local-customize").click();
     const byokSource = document.querySelector<HTMLButtonElement>(
       '[data-plan="source"] [data-value="byok"]',
     )!;
@@ -595,6 +658,7 @@ describe("setup page Quick Install recommendation", () => {
     expect($("local-row").hidden).toBe(true);
     expect($("subscription-row").hidden).toBe(true);
     expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect($("local-install-label").textContent).toBe("Install with BYOK");
     // Grey defaults: /v1, and the runtime's own endpoint.
     const path = $("byok-path") as HTMLInputElement;
     const endpoint = $("byok-endpoint") as HTMLInputElement;
@@ -692,7 +756,6 @@ describe("setup page Quick Install recommendation", () => {
 
   it("sends a pasted full address as is, and keeps a failed test until the fields change", async () => {
     const { run } = await openPage(welcome(small), "welcome");
-    $("local-customize").click();
     document
       .querySelector<HTMLButtonElement>(
         '[data-plan="source"] [data-value="byok"]',

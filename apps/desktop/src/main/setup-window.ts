@@ -10,8 +10,6 @@ import {
   type IpcMainInvokeEvent,
   type Session,
 } from "electron";
-import os from "node:os";
-import path from "node:path";
 
 import iconPng from "../../resources/icon.png";
 // The Linger logo with its wordmark, for the page header.
@@ -24,13 +22,15 @@ import setupHtml from "../shell/setup.html";
 import {
   SETUP_IPC,
   type SetupCommand,
-  type SetupLocalAccount,
   type SetupState,
 } from "../shared/setup.js";
 import { appWindow } from "./app-window.js";
 import type { DiagnosticsModule } from "./diagnostics.js";
 import type { EnrollmentModule } from "./enrollment.js";
-import type { LocalServerModule } from "./local-server.js";
+import {
+  setupLocalServerState,
+  type LocalServerModule,
+} from "./local-server.js";
 import {
   SETTINGS_URL,
   type MacPermissions,
@@ -378,8 +378,8 @@ export class SetupWindowModule implements Module {
         label,
         path,
       })),
-      localServer: localServerState(
-        ctx.get<LocalServerModule>("LocalServer"),
+      localServer: setupLocalServerState(
+        ctx.get<LocalServerModule>("LocalServer").status(),
         this.#account?.view(),
       ),
       ...(this.#diagnostics ? { diagnostics: this.#diagnostics } : {}),
@@ -443,52 +443,3 @@ export class SetupWindowModule implements Module {
     });
   }
 }
-
-const localServerState = (
-  local: LocalServerModule,
-  account: SetupLocalAccount | undefined,
-): SetupState["localServer"] => {
-  const {
-    available,
-    phase,
-    message,
-    steps,
-    step,
-    progress,
-    transfer,
-    attempt,
-    localModels,
-    location,
-    keys,
-    signIn,
-    byokCheck,
-    byokModels,
-    legacyBackup,
-  } = local.status();
-  const home = os.homedir();
-  const shown = (folder: string) =>
-    folder === home || folder.startsWith(home + path.sep)
-      ? "~" + folder.slice(home.length)
-      : folder;
-  return {
-    available,
-    phase,
-    message,
-    steps,
-    step,
-    progress,
-    ...(transfer ? { transfer } : {}),
-    attempt,
-    localModels,
-    location: {
-      ...location,
-      path: shown(location.path),
-    },
-    keys,
-    ...(signIn ? { signIn } : {}),
-    ...(byokCheck ? { byokCheck } : {}),
-    ...(byokModels ? { byokModels } : {}),
-    ...(legacyBackup ? { legacyBackup: shown(legacyBackup) } : {}),
-    ...(account ? { account } : {}),
-  };
-};
