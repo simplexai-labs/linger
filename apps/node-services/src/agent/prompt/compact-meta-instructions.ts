@@ -7,7 +7,7 @@ import {
   connectableAppsRule,
   connectedAppsAtRunStart,
 } from "./connected-apps.js";
-import { renderPersonalContextMethod } from "./personal-context-method.js";
+import { renderCompactPersonalContextMethod } from "./personal-context-method.js";
 import { PERSONAL_KNOWLEDGE_POLICY_COMPACT } from "./personal-knowledge-policy.js";
 import { serializePromptData } from "./prompt-data.js";
 
@@ -203,7 +203,10 @@ export function renderCompactMetaInstructions(
     collaboration(input.agentType, input.roomKind),
     authority(input.agentType, input.roomKind),
     environment(input),
-    renderPersonalContextMethod(input.connectedApps, input.connectedAppKeys),
+    renderCompactPersonalContextMethod(
+      input.connectedApps,
+      input.connectedAppKeys,
+    ),
     PERSONAL_KNOWLEDGE_POLICY_COMPACT,
   ]
     .filter(Boolean)

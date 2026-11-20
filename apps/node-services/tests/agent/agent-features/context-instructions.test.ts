@@ -266,6 +266,29 @@ describe("execution Context instructions", () => {
       expect(prompt).not.toContain("profile-data");
     },
   );
+
+  it("renders deterministic compact personal context method significantly smaller than full", () => {
+    const fullDirect = renderComposed(
+      meta("general", "direct"),
+      fullDeployment,
+    )!;
+    const compactDirect = renderComposed(
+      meta("general", "direct"),
+      compactDeployment,
+    )!;
+    const compactDirectRepeat = renderComposed(
+      meta("general", "direct"),
+      compactDeployment,
+    )!;
+    expect(compactDirect).toBe(compactDirectRepeat);
+    expect(compactDirect.length).toBeLessThan(fullDirect.length * 0.4);
+    expect(compactDirect).toContain("<personal-context-method>");
+    expect(compactDirect).toContain(
+      "- calendar (teamhub gcal list / free / read)",
+    );
+    expect(compactDirect).toContain("- mail (teamhub gmail list / read)");
+    expect(compactDirect).not.toContain("teamhub slack");
+  });
 });
 
 describe("context-instructions feature", () => {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -200,13 +201,22 @@ func (p *piRuntime) spawn(ctx context.Context, plan piLaunchPlan, lock *os.File)
 	// The session flags sit right after "--mode rpc".
 	tail := p.args(plan, instructions, mcp.wired())
 	args := append([]string{tail[0], tail[1], "--session-dir", plan.sessionDir, "--session-id", plan.sessionID}, tail[2:]...)
-	env := make(map[string]string, len(p.profile.Env)+1)
+	env := make(map[string]string, len(p.profile.Env)+3)
 	for key, value := range p.profile.Env {
 		env[key] = value
 	}
+	extension := mcp.extension
+	if extension == "" {
+		extension = piManagedExtensionPath(p.profile.ManagedMCPExtension)
+	}
 	if mcp.wired() {
 		env[piMCPConfigEnvKey] = mcp.configPath
-		piExtensionNodePath(env, mcp.extension)
+	}
+	if extension != "" {
+		piExtensionNodePath(env, extension)
+	}
+	if spec.ContextWindow > 0 {
+		env[piContextWindowEnvKey] = strconv.Itoa(spec.ContextWindow)
 	}
 	if p.profile.RetainProcessTemp != nil {
 		if releaseTemp, err = p.profile.RetainProcessTemp(); err != nil {
@@ -264,9 +274,15 @@ func (p *piRuntime) args(plan piLaunchPlan, instructions string, wired bool) []s
 		}
 	}
 	tools := piBaseTools
+	var extension string
 	if wired {
-		args = append(args, "--extension", p.profile.ManagedMCPExtension)
-		tools += ",mcp__*"
+		extension = p.profile.ManagedMCPExtension
+		tools += ",tool_search,mcp__*"
+	} else {
+		extension = piManagedExtensionPath(p.profile.ManagedMCPExtension)
+	}
+	if extension != "" {
+		args = append(args, "--extension", extension)
 	}
 	return append(args, "--tools", tools)
 }

@@ -31,6 +31,7 @@ type piShape struct {
 	settings        string
 	projectSettings string
 	mcp             string
+	contextWindow   int
 }
 
 // mismatches names the fields that keep a parked process from serving spec.
@@ -51,6 +52,7 @@ func (s *piShape) mismatches(want *piShape, spec RunSpec, parkedSession string) 
 	add(s.settings != want.settings, "settings")
 	add(s.projectSettings != want.projectSettings, "project_settings")
 	add(s.mcp != want.mcp, "mcp")
+	add(s.contextWindow != want.contextWindow, "context_window")
 	add(spec.AssignSessionID != "", "create_session")
 	add(spec.ResumeID == "" || spec.ResumeID != parkedSession, "session")
 	return fields
@@ -83,6 +85,7 @@ func piShapeFor(program string, args []string, profile Profile, spec RunSpec, mc
 		settings:        profile.PiConfigDigest,
 		projectSettings: project,
 		mcp:             mcpShape,
+		contextWindow:   spec.ContextWindow,
 	}, nil
 }
 

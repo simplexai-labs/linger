@@ -279,26 +279,32 @@ describe("Local Context Runtime backend", () => {
   });
 
   it.each([
-    [32_768, true],
-    [131_072, true],
-    [262_144, false],
-    [undefined, false],
+    ["codex-default", 32_768, true],
+    ["codex-default", 131_072, true],
+    ["codex-default", 262_144, false],
+    ["codex-default", undefined, false],
+    ["localmodels/qwen3.8-27b", 200_000, true],
+    ["localmodels-library/spark-x2.6-4b:Q8_0", 200_000, true],
+    ["localmodels/spark-x2.6-4b", undefined, true],
   ] as const)(
-    "asks for compact instructions for a %s-token context window: %s",
-    async (contextWindow, compactInstructions) => {
+    "asks for compact instructions for %s with %s-token context window: %s",
+    async (modelId, contextWindow, compactInstructions) => {
       const { backend } = backendFixture(
         viewContent(FIRST).content,
         undefined,
         {
-          id: "codex-default",
-          label: "Codex default",
+          id: modelId,
+          label: modelId,
           ...(contextWindow === undefined ? {} : { contextWindow }),
         },
       );
       expect(
         await backend.preflight?.({
           ref: requestFixture().ref,
-          runtime: requestFixture().runtime,
+          runtime: {
+            ...requestFixture().runtime,
+            model: modelId,
+          },
           signal: requestFixture().signal,
         }),
       ).toEqual({ compactInstructions });
