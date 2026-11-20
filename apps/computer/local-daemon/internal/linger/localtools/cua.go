@@ -80,11 +80,12 @@ type focusRecord struct {
 // Cua catalog and the unavailable-driver catalog add it beside cuaTools.
 const checkPermissionsTool = "check_permissions"
 
-// cuaTools are the Cua 0.35.4 tools an Agent may call. Both platforms ship the
-// same catalog; Cua owns the platform-specific input routes.
+// cuaTools are the Cua 0.35.4 tools the computer server lists. Both platforms
+// ship the same catalog; Cua owns the platform-specific input routes. The
+// inputTools are sent only as run_actions steps, so each request carries one
+// input schema instead of eight.
 var cuaTools = map[string]bool{"list_windows": true, "get_window_state": true, "get_desktop_state": true, "get_screen_size": true, "get_cursor_position": true,
-	"click": true, "double_click": true, "right_click": true, "move_cursor": true, "drag": true, "scroll": true, "type_text": true, "press_key": true, "hotkey": true,
-	"clipboard_read": true, "clipboard_write": true, "launch_app": true, "bring_to_front": true, "set_window_frame": true}
+	"move_cursor": true, "clipboard_read": true, "clipboard_write": true, "launch_app": true, "bring_to_front": true, "set_window_frame": true}
 
 func (m *Manager) openCua(ctx context.Context, op *operation) (*cuaSession, []tool, error) {
 	if !filepath.IsAbs(m.options.CuaPath) {
@@ -128,6 +129,17 @@ func (m *Manager) openCua(ctx context.Context, op *operation) (*cuaSession, []to
 	if err != nil {
 		return session, nil, err
 	}
+	tools, err := cuaCatalog(catalog)
+	if err != nil {
+		return session, nil, err
+	}
+	return session, tools, nil
+}
+
+// cuaCatalog is the computer server's tool list for Cua's catalog: the
+// cuaTools without Cua's session field, in the Computer's macOS wording, then
+// run_actions, which carries every input, and the Computer's own tools.
+func cuaCatalog(catalog []tool) ([]tool, error) {
 	var tools []tool
 	for _, item := range catalog {
 		if !cuaTools[item.Name] && (item.Name != "run_script" || runtime.GOOS != "darwin") {
@@ -135,7 +147,7 @@ func (m *Manager) openCua(ctx context.Context, op *operation) (*cuaSession, []to
 		}
 		var input map[string]any
 		if json.Unmarshal(item.InputSchema, &input) != nil {
-			return session, nil, errors.New("invalid Cua tool schema")
+			return nil, errors.New("invalid Cua tool schema")
 		}
 		if props, ok := input["properties"].(map[string]any); ok {
 			delete(props, "session")
@@ -150,39 +162,29 @@ func (m *Manager) openCua(ctx context.Context, op *operation) (*cuaSession, []to
 			input["required"] = kept
 		}
 		item.InputSchema, _ = json.Marshal(input)
-		if inputTools[item.Name] {
-			if runtime.GOOS == "darwin" {
-				item.Description += macInputResult
-			} else {
-				item.Description += " With pid and window_id, the result ends with what changed in that window since your last read, as text with a new snapshot_id. The read replaces the snapshot, so use the new snapshot's tokens next. A screenshot follows only when the window has no readable tree. Send several inputs planned on one snapshot as one run_actions call."
-			}
-		}
 		if item.Name == "launch_app" && runtime.GOOS == "darwin" {
 			item.Description = "Open a macOS app in the background through Launch Services, as `open -g` does, and return its pid and windows. Optional urls are handed to the app; for Finder, pass a folder to open it in a window."
 			item.InputSchema = schema(map[string]any{"bundle_id": map[string]string{"type": "string", "description": "Preferred, for example com.apple.TextEdit."}, "name": map[string]string{"type": "string", "description": "App name, when the bundle id is unknown."}, "urls": map[string]any{"type": "array", "items": map[string]string{"type": "string"}, "description": "Files or folders to open in the app."},
 				"agent_browser": map[string]string{"type": "boolean", "description": "Open the URLs in the Computer's own browser window, which keeps working while other windows cover it on the user's desktop. Only a site's home page opens there, such as https://www.example.com/. With no bundle_id it is the first installed of Chrome, Edge, Firefox and Safari; a bundle_id of com.google.Chrome, com.microsoft.edgemac, org.mozilla.firefox or com.apple.Safari picks one. In Chrome and Safari it is a window of the Computer's own in the user's everyday browser, with the user's sign-ins; in Chrome it opens one site per call. Edge and Firefox run as separate instances with their own sign-ins."}})
 		}
 		if item.Name == "get_desktop_state" {
-			item.Description += " Read-only whole-screen view; act through the window tools with a pid and window_id. A system privacy prompt about CuaDriver belongs to the user: never answer it, and keep working through the window tools."
+			item.Description += desktopStateNote
 		}
 		if compact, ok := macCompactTools[item.Name]; ok && runtime.GOOS == "darwin" {
-			// Codex shows these tools directly, so the model sees every schema
-			// field; only the fields the Computer routes stay.
+			// Every request carries these definitions, so only the fields the
+			// Computer routes stay, described in a line or two.
 			item.Description, item.InputSchema = compact.description, compact.schema()
 		}
 		if item.Name == "run_script" {
 			item.Description, item.InputSchema = macScriptDescription, macScriptSchema()
 		}
-		if item.Name == "type_text" {
-			item.Description += " In a macOS Open or Save panel, the name field takes a file name only: a slash there becomes a colon in the saved name. To choose the folder, press cmd+shift+g on that window, enter the folder path in the field that opens, press return, then set the name."
-		}
 		tools = append(tools, item)
 	}
 	names := slices.Sorted(maps.Keys(inputTools))
 	step := map[string]any{"type": "object", "properties": map[string]any{"tool": map[string]any{"type": "string", "enum": names}}, "required": []string{"tool"}}
-	batchDescription := "Preferred for two or more inputs you can already plan on one get_window_state snapshot, for example set a field, click Save and press Return. Each step names an input tool with its usual arguments, such as pid, window_id and element_token. Runs the steps in order, stops at the first failed step and says which steps ran, then reads the last step's window once, as one input does. Steps keep their tokens valid for the next steps; a token from an older read is refused."
+	batchDescription := "Sends one or more inputs you can already plan on one get_window_state snapshot, for example set a field, click Save and press Return. Each step names an input tool with its arguments, such as pid, window_id and element_token. Runs the steps in order, stops at the first failed step and says which steps ran, then reads the last step's window once. Steps keep their tokens valid for the next steps; a token from an older read is refused."
 	if runtime.GOOS == "darwin" {
-		batchDescription = "Runs one or more planned inputs in one call, for example cmd+shift+g, type a path and press Return. Each step names an input tool with its usual arguments, such as pid, window_id and element_token. Runs the steps in order and stops at the first failed step and says which steps ran. Inputs keep the read's tokens valid, so later steps can use them; a token from an older read is refused, and a step with role and name is found when it runs. Steps report only whether they were sent. The call then reads the window once and returns what changed: by default the last step's window, or the app's focused window when that step names none; pass read with get_window_state arguments, such as {pid, window_id, query}, to read another window."
+		batchDescription = "Runs one or more planned inputs in one call, for example cmd+shift+g, type a path and press Return. Each step names an input tool with its arguments, such as pid, window_id and element_token. Runs the steps in order and stops at the first failed step and says which steps ran. Inputs keep the read's tokens valid, so later steps can use them; a token from an older read is refused, and a step with role and name is found when it runs. Steps report only whether they were sent. The call then reads the window once and returns what changed: by default the last step's window, or the app's focused window when that step names none; pass read with get_window_state arguments, such as {pid, window_id, query}, to read another window."
 	}
 	batchProperties := map[string]any{"actions": map[string]any{"type": "array", "minItems": 1, "maxItems": maxBatchActions, "items": step}}
 	if runtime.GOOS == "darwin" {
@@ -193,16 +195,7 @@ func (m *Manager) openCua(ctx context.Context, op *operation) (*cuaSession, []to
 		tools = append(tools, tool{Name: "report_blocker", Description: reportBlockerDescription, InputSchema: reportBlockerSchema()})
 	}
 	tools = append(tools, tool{Name: checkPermissionsTool, Description: "Read Cua application permissions without prompting. Also reports an unresolved prior action.", InputSchema: schema(map[string]any{})})
-	return session, tools, nil
-}
-
-// macKeyDescriptions replace Cua's descriptions of the macOS key tools,
-// whose background and restore-the-previous-app delivery the Computer does
-// not use.
-var macKeyDescriptions = map[string]string{
-	"press_key": "Press and release one key, with optional modifiers. Keys: return, tab, escape, up, down, left, right, space, delete, home, end, pageup, pagedown, f1-f12, any letter or digit.",
-	"hotkey":    "Press a key combination such as [\"cmd\", \"s\"]: modifiers (cmd, shift, option, ctrl, fn) first, one other key last.",
-	"type_text": "Type text. It does not press Return, Escape or arrows; use press_key for those.",
+	return tools, nil
 }
 
 // MacToolGuide lists the macOS computer tools' call shapes for every
@@ -212,10 +205,10 @@ const MacToolGuide = `Computer tools on this Mac (MCP server "computer"):
 - launch_app({bundle_id, urls?}) opens an app in the background and returns its pid and windows. list_windows({pid}) lists an app's windows.
 - get_window_state({pid, window_id?, since?: "latest", query?, max_depth?}) reads a window as text; without window_id it reads the app's focused window, such as a sheet or panel just opened. Row [N] is element_token "<snapshot_id>:N". Read a Save or Open sheet with max_depth: 3: its name field, Where and buttons are within that depth, and its file list is slow to walk.
 - run_actions({actions: [...], read?: {pid, window_id, query?}}) sends inputs in order in one call, then reads the window and returns what changed. The read follows the last step's window, or the app's focused window when that step names none; pass read to choose another. Steps:
-  {tool: "click" | "double_click" | "right_click", pid, window_id, element_token, modifier?: ["cmd"]} on a row of the latest read; cmd-clicks add rows to a selection, so one cmd+c copies several files;
-  {tool: "hotkey", pid, keys: ["cmd", "s"]}, {tool: "press_key", pid, key: "return"}, {tool: "type_text", pid, text} go to the app's focused field, such as a sheet, panel or rename field; a new Save sheet's name field already has focus with its text selected, so type the name without clicking, and text fields refuse click;
-  {tool: "scroll", pid, window_id, direction}.
-  A click, scroll or type_text, in a step or alone, can name its target with role and name instead of element_token: the one element with that role whose label or value is exactly name, apart from white space, or nth (from 0) when several match. It is found when it runs, so one batch can cross pages; finding it reads the window, which stales the tokens of your earlier read, so later steps name their targets the same way.
+  {tool: "click" | "double_click" | "right_click", pid, window_id, element_token, modifier?: ["cmd"]} on a row of the latest read; cmd-clicks add rows to a selection, so one cmd+c copies several files; a click with action: "show_alternate_ui" reveals a row's hover-only controls;
+  {tool: "hotkey", pid, keys: ["cmd", "s"]}, {tool: "press_key", pid, key: "return"}, {tool: "type_text", pid, text} go to the app's focused field, such as a sheet, panel or rename field; a new Save sheet's name field already has focus with its text selected, so type the name without clicking, and text fields refuse click; that field takes a file name only, since a slash becomes a colon;
+  {tool: "scroll", pid, window_id, direction}; {tool: "drag", pid, window_id, from_x, from_y, to_x, to_y, delivery_mode: "foreground"} in screenshot pixels, as macOS has no background drag.
+  A click, scroll or type_text step can name its target with role and name instead of element_token: the one element with that role whose label or value is exactly name, apart from white space, or nth (from 0) when several match. It is found when it runs, so one batch can cross pages; finding it reads the window, which stales the tokens of your earlier read, so later steps name their targets the same way.
 - run_script({script}) runs JavaScript that loops, waits and reads between inputs and returns only what you extract. Use it to repeat a flow over several items, such as open each result, read it and close it, in one call instead of a turn per item.
 - bring_to_front({pid, window_id}) raises one window.
 - report_blocker({kind, url}) as soon as a page in the Computer's own browser shows a check only the user may pass (captcha, verification, login_required, rate_limited) or one item that cannot be viewed (content_unavailable). Never try to pass the check.
@@ -230,7 +223,7 @@ Before the first shell screenshot, or when one fails or comes back blank, run ` 
 const browserToolGuide = `Browser tools (MCP server "browser", when present): browser_navigate({url}), browser_snapshot() reads the page with element refs, browser_click({target}) and browser_type({target, text, submit?}) act on a ref from the latest snapshot, browser_tabs({action: "list" | "new" | "select" | "close"}). Each action returns the page snapshot after it, so call browser_snapshot only to read a page you have not changed.`
 
 // macCompactTool is the macOS shape of one Cua tool: the fields the Computer
-// routes, without Cua's delivery modes, scopes and capture ids.
+// routes, without Cua's sessions, capture ids and output files.
 type macCompactTool struct {
 	description string
 	properties  map[string]any
@@ -243,51 +236,46 @@ func (t macCompactTool) schema() json.RawMessage {
 }
 
 var (
-	macPID      = map[string]any{"type": "integer"}
-	macWindowID = map[string]any{"type": "integer", "description": "Omit to use the app's focused window."}
-	macToken    = map[string]any{"type": "string", "description": "\"<snapshot_id>:N\" from the latest read."}
-	macPixel    = map[string]any{"type": "number", "description": "Pixels of the window's latest screenshot."}
-	macString   = map[string]any{"type": "string"}
+	macInteger = map[string]any{"type": "integer"}
+	macNumber  = map[string]any{"type": "number"}
+	macString  = map[string]any{"type": "string"}
+	macBoolean = map[string]any{"type": "boolean"}
 )
-
-// macLocator names an input's target by role and label instead of a token:
-// Cua finds it when the input runs, so it outlives later reads.
-var (
-	macRole  = map[string]any{"type": "string", "description": "Instead of element_token: the element's role from a read, such as AXButton; found when the input runs, and the window needs window_id."}
-	macLabel = map[string]any{"type": "string", "description": "With role: the element's exact label or value as the read shows it."}
-	macNth   = map[string]any{"type": "integer", "description": "With role and name: which of several equal elements, from 0."}
-)
-
-var macPointer = map[string]any{"pid": macPID, "window_id": macWindowID, "element_token": macToken, "x": macPixel, "y": macPixel, "role": macRole, "name": macLabel, "nth": macNth,
-	"modifier":      map[string]any{"type": "array", "items": macString, "description": "Keys held during the click, such as [\"cmd\"] to add a Finder row to the selection; needs window_id."},
-	"action":        map[string]any{"type": "string", "description": "An accessibility action other than press, from the element's actions in the read, such as show_alternate_ui to reveal hover-only controls."},
-	"delivery_mode": map[string]any{"type": "string", "enum": []string{"background", "foreground"}, "description": "Default background. foreground sends a real pointer click at x,y: the Computer brings the window to the front first and the pointer moves. Use it only where a background click had no effect, such as a web page control that reacts only to a real pointer; needs window_id."}}
 
 var macCompactTools = map[string]macCompactTool{
-	"click":        {"Click an element by element_token from the latest get_window_state read, by role and name, or a point x,y of the window's latest screenshot." + macInputResult, macPointer, []string{"pid"}},
-	"double_click": {"Double-click an element by element_token, by role and name, or a point x,y of the window's latest screenshot." + macInputResult, macPointer, []string{"pid"}},
-	"right_click":  {"Right-click an element by element_token, by role and name, or a point x,y, to open its context menu; read the window to see the menu." + macInputResult, macPointer, []string{"pid"}},
-	"hotkey":       {macKeyDescriptions["hotkey"] + macKeyRouting + macInputResult, map[string]any{"pid": macPID, "keys": map[string]any{"type": "array", "items": macString}, "window_id": macWindowID}, []string{"pid", "keys"}},
-	"press_key":    {macKeyDescriptions["press_key"] + macKeyRouting + macInputResult, map[string]any{"pid": macPID, "key": macString, "modifiers": map[string]any{"type": "array", "items": macString}, "window_id": macWindowID, "element_token": macToken}, []string{"pid", "key"}},
-	"type_text":    {macKeyDescriptions["type_text"] + macKeyRouting + macInputResult, map[string]any{"pid": macPID, "text": macString, "window_id": macWindowID, "element_token": macToken, "role": macRole, "name": macLabel, "nth": macNth}, []string{"pid", "text"}},
-	"scroll":       {"Scroll a window, or the element element_token, by amount lines in direction." + macInputResult, map[string]any{"pid": macPID, "window_id": macWindowID, "element_token": macToken, "role": macRole, "name": macLabel, "nth": macNth, "direction": map[string]any{"type": "string", "enum": []string{"up", "down", "left", "right"}}, "amount": map[string]any{"type": "integer"}}, []string{"pid", "direction"}},
 	"get_window_state": {macWindowStateDescription, map[string]any{
-		"pid": macPID, "window_id": macWindowID, "since": map[string]any{"type": "string", "description": "\"latest\" returns only what changed since your last read of this window."},
-		"query": macString, "max_depth": map[string]any{"type": "integer"}, "max_elements": map[string]any{"type": "integer"},
-		"timeout_ms": map[string]any{"type": "integer"}, "include_screenshot": map[string]any{"type": "boolean"},
+		"pid": macInteger, "window_id": map[string]any{"type": "integer", "description": "Omit to use the app's focused window."}, "since": map[string]any{"type": "string", "description": "\"latest\" returns only what changed since your last read of this window."},
+		"query": macString, "max_depth": macInteger, "max_elements": macInteger, "timeout_ms": macInteger, "include_screenshot": macBoolean,
 	}, []string{"pid"}},
+	"list_windows": {"List top-level windows, including minimized, hidden and other-Space ones, with window_id, pid, app_name, title, bounds and z_index (the highest is frontmost; null means unknown). Filter with app or pid: an unfiltered call lists every window on the host.", map[string]any{
+		"app": map[string]any{"type": "string", "description": "Part of the app name, or its bundle id."}, "pid": macInteger, "on_screen_only": map[string]any{"type": "boolean", "description": "Only windows on the current Space."},
+	}, nil},
+	"get_desktop_state": {"Capture the whole screen as an image, with its true size and scale factor; scope \"desktop\" coordinates are its pixels." + desktopStateNote, map[string]any{
+		"max_image_dimension": map[string]any{"type": "integer", "description": "Cap on the long edge in pixels; 0 keeps the full size."},
+	}, nil},
+	"bring_to_front": {"Bring an app, and with window_id that window, to the front and leave it there. Most input does not need it: it takes the foreground from the user and does not give it back.", map[string]any{"pid": macInteger, "window_id": macInteger}, []string{"pid"}},
+	"set_window_frame": {"Move and resize one window, in the coordinates of list_windows bounds, and verify the result.", map[string]any{
+		"pid": macInteger, "window_id": macInteger, "x": macNumber, "y": macNumber, "width": macNumber, "height": macNumber,
+	}, []string{"pid", "window_id", "x", "y", "width", "height"}},
+	"move_cursor": {"Move the agent cursor to x,y. With target {kind: \"window\", pid, window_id}, x,y are window screenshot pixels, and in a background app it also hovers where it can and says so. scope \"desktop\" moves the user's real pointer in get_desktop_state pixels; over a window of an app that is not in front it refuses unless delivery_mode is \"foreground\", which is only for a screen nobody is using or when the user agreed.", map[string]any{
+		"x": macNumber, "y": macNumber,
+		"target":        map[string]any{"type": "object", "properties": map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"window", "desktop"}}, "pid": macInteger, "window_id": macInteger, "display_id": map[string]any{"type": "string", "description": "\"primary\" with kind desktop."}}, "required": []string{"kind"}},
+		"scope":         map[string]any{"type": "string", "enum": []string{"window", "desktop"}},
+		"delivery_mode": map[string]any{"type": "string", "enum": []string{"background", "foreground"}},
+	}, []string{"x", "y"}},
+	"clipboard_read":      {"List the clipboard's types; with include_text, also return its plain text.", map[string]any{"include_text": macBoolean}, nil},
+	"clipboard_write":     {"Replace the clipboard with one value: text, or an image or a file by absolute path.", map[string]any{"text": macString, "image_path": macString, "file_path": macString}, nil},
+	"get_screen_size":     {"Return the main display's size in points and its scale factor.", nil, nil},
+	"get_cursor_position": {"Return the pointer position in screen points from the top left.", nil, nil},
 }
 
 // macWindowStateDescription replaces Cua's, whose reads include a screenshot
 // by default; on macOS the Computer reads text unless pixels are asked for.
 const macWindowStateDescription = "Read a window as text: its accessibility tree as Markdown rows. Row [N] is addressed by element_token \"<snapshot_id>:N\", with snapshot_id from the response header. A read walks at most 500 nodes; narrow it with query (a case-insensitive substring) or raise max_elements. since:\"latest\" returns only what changed since your last read of this window, with a new snapshot_id. Without window_id, reads the app's focused window, including a sheet or panel that an input just opened. A Save or Open sheet shows its controls with max_depth:3; a deeper read also walks its file list and can run out of time. Each read replaces the window's snapshot and stales the old tokens. No screenshot is included; pass include_screenshot:true to see pixels, for example when the tree does not show what you need. A window without a readable tree is returned as a screenshot."
 
-// macKeyRouting describes how the Computer delivers macOS keys.
-const macKeyRouting = " The input goes to the focused field of the app with this pid, as a person's keys do: a sheet, panel or rename field that has focus receives it. Pass only pid to follow the app's focus; also pass window_id to require that this window holds the focus. The Computer first brings the app to the front and leaves it there; if the user has since brought another app forward, nothing is sent."
-
-// macInputResult says what a macOS input returns. As in Codex, an input does
-// not read the window: a chain of inputs reads once, when the Agent asks.
-const macInputResult = " The result reports only whether the input was sent; read the window with get_window_state after the inputs whose effect you need."
+// desktopStateNote keeps the whole-screen capture read-only and leaves the
+// macOS privacy prompts to the user.
+const desktopStateNote = " Read-only whole-screen view; act through the window tools with a pid and window_id. A system privacy prompt about CuaDriver belongs to the user: never answer it, and keep working through the window tools."
 
 // cuaQuietEnvironment keeps the pinned driver offline: no telemetry and no
 // update check. Computer upgrades replace it with a reviewed release.

@@ -721,14 +721,71 @@ func describeBrowserMode(tools []tool, userChrome, chromeRequired, connectable b
 // tools, and this browser leaves automation traces in their pages.
 const siteSkillNote = " When a Skill covers the site, follow its choice of tools, even when it asks for the computer tools instead of these. A social network, a marketplace or another site that watches for automated browsers is used through the computer tools, in the Computer's own window of the user's everyday browser, never through these browser tools: they drive the page in a way such sites detect."
 
+// filterBrowserTools keeps the pinned browser tools, each with a compact
+// schema, since every request carries their definitions.
 func filterBrowserTools(catalog []tool) []tool {
 	var result []tool
 	for _, item := range catalog {
 		if browserTools[item.Name] {
+			item.InputSchema = compactBrowserSchema(item.InputSchema)
 			result = append(result, item)
 		}
 	}
 	return result
+}
+
+// browserFieldNotes replace Playwright's longer descriptions of the fields
+// that several browser tools share.
+var browserFieldNotes = map[string]string{
+	"target":      "A ref from the latest page snapshot, or a unique selector.",
+	"startTarget": "A ref from the latest page snapshot, or a unique selector.",
+	"endTarget":   "A ref from the latest page snapshot, or a unique selector.",
+	"filename":    "File to save it to, relative to the workspace.",
+}
+
+// browserPromptFields only describe a target for a permission prompt that
+// Playwright's own clients show. The Computer's review reads the target's role
+// and label from the page snapshot instead, so the model need not write them.
+var browserPromptFields = []string{"element", "startElement", "endElement"}
+
+// compactBrowserSchema drops the $schema URL and the optional prompt fields
+// and shortens the shared field descriptions, at every depth.
+func compactBrowserSchema(raw json.RawMessage) json.RawMessage {
+	var value map[string]any
+	if json.Unmarshal(raw, &value) != nil {
+		return raw
+	}
+	compactBrowserObject(value)
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return raw
+	}
+	return encoded
+}
+
+func compactBrowserObject(value map[string]any) {
+	delete(value, "$schema")
+	if properties, ok := value["properties"].(map[string]any); ok {
+		required, _ := value["required"].([]any)
+		for _, name := range browserPromptFields {
+			if !slices.Contains(required, any(name)) {
+				delete(properties, name)
+			}
+		}
+		for name, property := range properties {
+			field, ok := property.(map[string]any)
+			if !ok {
+				continue
+			}
+			if note, ok := browserFieldNotes[name]; ok {
+				field["description"] = note
+			}
+			compactBrowserObject(field)
+		}
+	}
+	if items, ok := value["items"].(map[string]any); ok {
+		compactBrowserObject(items)
+	}
 }
 
 func (op *operation) close() error {

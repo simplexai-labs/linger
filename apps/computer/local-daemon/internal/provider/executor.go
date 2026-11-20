@@ -787,16 +787,10 @@ func retireClaudeResident(home string) error {
 	return native.StopParkedClaudeResidentForCredentials(filepath.Join(home, "sessions"))
 }
 
-// codexBatchedInputs are the macOS desktop inputs that Codex sends only as
-// run_actions steps.
-var codexBatchedInputs = []any{"click", "double_click", "right_click", "drag", "scroll", "type_text", "press_key", "hotkey"}
-
 // codexDirectLocalTools gives Codex the Daemon's own computer and browser
 // tools as plain function tools, as Codex's computer-use plugin does with its
 // REPL: outside code mode and never deferred. A call is then a JSON function
 // call, not a script that wraps each tool in text(await tools.mcp__...).
-// Desktop inputs go only through run_actions, Codex's one-script-per-call
-// shape, so the model plans several steps in one call.
 func codexDirectLocalTools(mcpConfig json.RawMessage, localTools []string) (json.RawMessage, error) {
 	if len(mcpConfig) == 0 || len(localTools) == 0 {
 		return mcpConfig, nil
@@ -810,9 +804,6 @@ func codexDirectLocalTools(mcpConfig json.RawMessage, localTools []string) (json
 		name, _, ok := strings.Cut(strings.TrimPrefix(tool, "mcp__"), "__")
 		if settings, found := servers[name].(map[string]any); ok && found {
 			settings["omit_tools_from"] = []any{"code_mode", "deferred"}
-			if name == "computer" {
-				settings["disabled_tools"] = codexBatchedInputs
-			}
 		}
 	}
 	return json.Marshal(parsed)

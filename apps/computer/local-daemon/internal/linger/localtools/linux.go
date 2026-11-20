@@ -24,17 +24,14 @@ func nativeLinuxTools() []tool {
 	direction := map[string]any{"type": "string", "enum": []string{"up", "down"}}
 	steps := map[string]any{"type": "integer", "minimum": 1, "maximum": 100}
 	application := map[string]any{"type": "string", "enum": linuxApplications}
+	// Pointer and key input, such as click, drag and type_text, goes only
+	// through run_actions, whose step schema below lists every field.
 	tools := []tool{
 		{Name: "get_window_state", Description: "Read the active window as text: its title, the focused control and a numbered list of its controls with their names and values. Prefer it to a screenshot; act on the numbers with click_element and set_value. Returns a screenshot too when the window cannot be read as text.", InputSchema: schema(nil)},
 		{Name: "screenshot", Description: "Capture the desktop. Coordinates use the returned image pixels. Use it when the window state does not show what you need.", InputSchema: schema(nil)},
 		{Name: "click_element", Description: "Click a control by its number from the latest window state. A number from a window that has gone fails instead of clicking something else.", InputSchema: schema(map[string]any{"element": element}, "element")},
 		{Name: "set_value", Description: "Replace the whole text of an editable field, chosen by its number from the latest window state, and read it back.", InputSchema: schema(map[string]any{"element": element, "value": str}, "element", "value")},
-		{Name: "click", Description: "Click the desktop at screenshot coordinates.", InputSchema: schema(map[string]any{"x": number, "y": number, "button": button}, "x", "y")},
 		{Name: "move", Description: "Move the pointer on the desktop.", InputSchema: schema(map[string]any{"x": number, "y": number}, "x", "y")},
-		{Name: "drag", Description: "Hold the left mouse button and drag continuously from x,y to to_x,to_y, then release. Coordinates use the current screenshot pixels.", InputSchema: schema(map[string]any{"x": number, "y": number, "to_x": number, "to_y": number}, "x", "y", "to_x", "to_y")},
-		{Name: "type_text", Description: "Type literal text into the focused application. Unicode is supported. In a terminal a final newline runs the command.", InputSchema: schema(map[string]any{"text": str}, "text")},
-		{Name: "press_key", Description: "Press an X11 key combination, for example ctrl+s or Return.", InputSchema: schema(map[string]any{"key": str}, "key")},
-		{Name: "scroll", Description: "Scroll the focused desktop window.", InputSchema: schema(map[string]any{"direction": direction, "steps": steps}, "direction")},
 		{Name: "open_application", Description: "Open an installed application in the signed-in user's desktop. Optional path is an absolute file or folder path. Applications remain open after the tool session ends.", InputSchema: schema(map[string]any{"application": application, "path": str}, "application")},
 		{Name: "open_url", Description: "Open an http(s) URL or a file:// URL inside the user's home in the user's default browser and its existing profile.", InputSchema: schema(map[string]any{"url": str}, "url")},
 	}
@@ -47,7 +44,7 @@ func nativeLinuxTools() []tool {
 		"x": number, "y": number, "to_x": number, "to_y": number, "button": button, "text": str, "key": str,
 		"direction": direction, "steps": steps, "application": application, "path": str, "url": str,
 	}, "required": []string{"tool"}, "additionalProperties": false}
-	return append(tools, tool{Name: "run_actions", Description: "Sends one or more inputs you can already plan, for example open an application, type a command and press Return: runs the steps in order in one call. Each step names a computer tool and its arguments. It waits for a launch to finish before the next step and stops early when another input changes the active window, because later steps were planned for the window you saw." + resultNote,
+	return append(tools, tool{Name: "run_actions", Description: "Sends one or more inputs you can already plan, for example open an application, type a command and press Return: runs the steps in order in one call. Each step names an input and its arguments. It waits for a launch to finish before the next step and stops early when another input changes the active window, because later steps were planned for the window you saw." + resultNote,
 		InputSchema: schema(map[string]any{"actions": map[string]any{"type": "array", "minItems": 1, "maxItems": maxBatchActions, "items": step}}, "actions")})
 }
 

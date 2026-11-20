@@ -10,7 +10,7 @@ import (
 )
 
 // readOnlyLocalTools are the Daemon's own browser and desktop tools whose
-// effect stays on this screen: reading it, or moving the pointer, scrolling,
+// effect stays on this screen: reading it, or moving the pointer,
 // hovering, going back a page, and arranging windows. Clicking, typing, keys,
 // dragging, navigation to a new address, uploads, and dialogs are judged.
 // report_blocker stops the task's own input to the
@@ -29,7 +29,6 @@ var readOnlyLocalTools = map[string]bool{
 	"mcp__computer__get_window_state":        true,
 	"mcp__computer__get_desktop_state":       true,
 	"mcp__computer__clipboard_read":          true,
-	"mcp__computer__scroll":                  true,
 	"mcp__computer__move_cursor":             true,
 	"mcp__computer__bring_to_front":          true,
 	"mcp__computer__set_window_frame":        true,

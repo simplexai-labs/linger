@@ -421,7 +421,7 @@ restores on cancellation; saving and restoring each have a 5-second limit that
 cancellation does not shorten. A file the Agent copied in Finder before typing a
 path therefore stays on the clipboard. No browser call runs during the paste.
 
-A single macOS input tool reports only whether the input was delivered;
+A macOS input step reports only whether the input was delivered;
 `run_actions` reads the window once after the last step. When a Finder list row
 refuses `double_click`'s AXOpen, the Daemon brings the application forward and
 double-clicks again, as a person would; if that still fails, the error suggests
@@ -460,7 +460,7 @@ A screenshot is attached only when the Agent passes `include_screenshot: true`. 
 Screenshots become JPEG of the same size before they reach the Runtime: the Runtime resends earlier screenshots every turn, so a 1 MB PNG slows every later turn. Coordinate clicks keep the same pixel grid.
 macOS also offers `run_script`: Cua runs one JavaScript program in a single call, with loops, waits, reads and input inside the driver, and returns only its value to the model.
 The Daemon admits only background, output-file-free scripts, fits the time limit into the call's remaining time, and cuts the result to its text: the first and last call-log lines and 40000 characters, with no screenshots.
-On macOS, `click` takes `delivery_mode: "foreground"` and `action`: the first for web controls that react only to a real pointer, the second for accessibility actions such as `show_alternate_ui`.
+On macOS, a `click` step takes `delivery_mode: "foreground"` and `action`: the first for web controls that react only to a real pointer, the second for accessibility actions such as `show_alternate_ui`.
 
 Every Operation's developer instructions carry a list of the Computer tools, so
 the model need not search the tool catalog before its first call; macOS uses
@@ -475,10 +475,15 @@ Claude Code defers its own `WebSearch` and `WebFetch` behind `ToolSearch`, so
 every Claude Operation's developer instructions also name them and how to load
 them; Codex's `web_search` is not deferred and gets no such line.
 
-On macOS these tools show only the fields the Computer routes. They hide Cua's `scope` and `capture_id`; only `click` takes `delivery_mode`, as described above.
-Codex does not see the single macOS input tools: the `computer` server hides them
-with `disabled_tools`. All input goes through `run_actions`, with as many steps as
-possible in one call, like consecutive operations in one Codex script.
+Codex and Pi carry every tool definition in every request, so the definitions stay
+short. On macOS the Cua tools show only the fields the Computer routes, in a line
+or two, without Cua's sessions, `capture_id` and output files. The browser tools
+drop Playwright's `$schema` and the `element` fields of its own permission prompt,
+and share one short description of `target` and `filename`. The `computer` server
+lists no single input tool (`click`, `double_click`, `right_click`, `drag`,
+`scroll`, `type_text`, `press_key`, `hotkey`) on any platform: all input goes
+through `run_actions`, with as many steps as possible in one call, like
+consecutive operations in one Codex script.
 `run_actions` sends each step as its own driver call, in order and without pauses, and stops at the first failed step.
 On macOS it always reads the window once after the last step and returns only the
 changes in the same result. By default it reads the last step's window, or the

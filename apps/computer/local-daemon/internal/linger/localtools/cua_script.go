@@ -21,7 +21,7 @@ const macScriptDescription = "Run a JavaScript program that drives apps on this 
 	"- app.query({role?, name?}) finds the elements whose label holds name, ignoring case, {element_token, role, label, frame}; app.waitFor({role?, name?, text?, gone?, timeout_ms?}) waits, at most 10000 ms, until the window shows (or no longer shows) them; text also matches static text\n" +
 	"- app.click(t), doubleClick(t), typeText(text, t?), pressKey(\"escape\", t?), hotkey([\"cmd\",\"s\"]), scroll(t, \"down\", amount?), setValue(t, value), where t is {role, name, nth?}, whose name must equal the label exactly, spaces included (for a long label, query a short part of it and click the element_token it returns), an element_token, a row number of a getState() earlier in this same script (a row of a get_window_state call is its element_token string), or [x, y] pixels of its last screenshot\n" +
 	"- cua.call(tool, args) for click, press_key, type_text, scroll, get_window_state or list_windows with their usual arguments. A script opens no app or URL: call launch_app as its own tool first.\n" +
-	"Inputs go to the app in the background, as the other computer tools do; a control that reacts only to a real pointer needs the click tool with delivery_mode \"foreground\". A failed call throws (catch it to recover), and the error names the line. timeout_ms is the wall-time limit (default 60000, at most 100000); max_calls bounds driver calls (default 100, at most 500). A Skill that ships a script names it with script_file and passes its inputs as args, read in the script as the constant args. Return only what you need, such as extracted text; the result is cut at 40000 characters and carries no screenshots: call get_window_state to look at the window."
+	"Inputs go to the app in the background, as the other computer tools do; a control that reacts only to a real pointer needs a run_actions click with delivery_mode \"foreground\". A failed call throws (catch it to recover), and the error names the line. Return only what you need, such as extracted text; the result is cut at 40000 characters and carries no screenshots: call get_window_state to look at the window."
 
 // scriptTimeoutMs bounds a script below the two-minute limit of one local
 // tool call, so the Computer still answers when the script runs out of time.
@@ -188,7 +188,7 @@ func scriptArguments(ctx context.Context, arguments map[string]any, reviewScope 
 	// whole; the values of args carry page and user text and are not.
 	for _, word := range scriptForbidden {
 		if strings.Contains(script, word) || forbiddenKey(arguments["args"], word) {
-			return fmt.Errorf("COMPUTER_SCRIPT_REFUSED: a script sends input in the background only and writes no files, so it may not use %s; send a foreground click with the click tool: %w", word, errNotSent)
+			return fmt.Errorf("COMPUTER_SCRIPT_REFUSED: a script sends input in the background only and writes no files, so it may not use %s; send a foreground click as a run_actions step: %w", word, errNotSent)
 		}
 	}
 	if strings.TrimSpace(script) == "" {

@@ -31,38 +31,34 @@ var reusableHotkeys = map[string]bool{
 	"cmd+left": true, "cmd+right": true, "cmd+l": true, "cmd+t": true,
 }
 
-// GUIReuseKey names the shape of a desktop navigation call: a movement or
-// dismissal key, a tab or history shortcut, a scroll, or a run_actions batch
-// made only of those. Calls of one shape share an allow verdict within a Run
-// (see Reviewer). Clicks, typing, dragging, scripts and other shortcuts have
-// no shape: each is judged on its own.
+// GUIReuseKey names the shape of a run_actions batch made only of desktop
+// navigation steps: movement or dismissal keys, tab or history shortcuts, and
+// scrolls. Batches of one shape share an allow verdict within a Run (see
+// Reviewer). Clicks, typing, dragging, scripts and other shortcuts have no
+// shape: each is judged on its own.
 func GUIReuseKey(tool, input string) (string, bool) {
 	var arguments map[string]any
 	if json.Unmarshal([]byte(input), &arguments) != nil {
 		return "", false
 	}
-	if tool == "mcp__computer__run_actions" {
-		steps, _ := arguments["actions"].([]any)
-		if len(steps) == 0 {
-			return "", false
-		}
-		keys := make([]string, 0, len(steps))
-		for _, step := range steps {
-			fields, _ := step.(map[string]any)
-			name, _ := fields["tool"].(string)
-			key, ok := stepReuseKey(name, fields)
-			if !ok {
-				return "", false
-			}
-			keys = append(keys, key)
-		}
-		return "run_actions:" + strings.Join(keys, ";"), true
-	}
-	name, ok := strings.CutPrefix(tool, "mcp__computer__")
-	if !ok {
+	if tool != "mcp__computer__run_actions" {
 		return "", false
 	}
-	return stepReuseKey(name, arguments)
+	steps, _ := arguments["actions"].([]any)
+	if len(steps) == 0 {
+		return "", false
+	}
+	keys := make([]string, 0, len(steps))
+	for _, step := range steps {
+		fields, _ := step.(map[string]any)
+		name, _ := fields["tool"].(string)
+		key, ok := stepReuseKey(name, fields)
+		if !ok {
+			return "", false
+		}
+		keys = append(keys, key)
+	}
+	return "run_actions:" + strings.Join(keys, ";"), true
 }
 
 // reusableFields are the arguments a navigation step of each tool may carry.

@@ -11,25 +11,25 @@ func TestGUIReuseKeyNamesNavigationShapesOnly(t *testing.T) {
 	for _, test := range []struct {
 		name, tool, input, key string
 	}{
-		{"click opens or sends", "mcp__computer__click", `{"pid":719,"window_id":433,"element_token":"s5:814"}`, ""},
-		{"scroll", "mcp__computer__scroll", `{"pid":719,"window_id":433,"direction":"down"}`, "scroll@719/433"},
-		{"scroll with an unknown option", "mcp__computer__scroll", `{"pid":719,"window_id":433,"direction":"down","screenshot_out_file":"/tmp/x"}`, ""},
+		{"click opens or sends", "mcp__computer__run_actions", `{"actions":[{"tool":"click","pid":719,"window_id":433,"element_token":"s5:814"}]}`, ""},
+		{"scroll", "mcp__computer__run_actions", `{"actions":[{"tool":"scroll","pid":719,"window_id":433,"direction":"down"}]}`, "run_actions:scroll@719/433"},
+		{"scroll with an unknown option", "mcp__computer__run_actions", `{"actions":[{"tool":"scroll","pid":719,"window_id":433,"direction":"down","screenshot_out_file":"/tmp/x"}]}`, ""},
 		{"batch with an unknown option", "mcp__computer__run_actions", `{"actions":[{"tool":"press_key","pid":719,"key":"escape","capture":true}]}`, ""},
-		{"escape", "mcp__computer__press_key", `{"pid":719,"key":"Escape"}`, "press_key:escape@719/-"},
-		{"tab switch", "mcp__computer__hotkey", `{"pid":719,"keys":["option","cmd","right"]}`, "hotkey:cmd+option+right@719/-"},
+		{"escape", "mcp__computer__run_actions", `{"actions":[{"tool":"press_key","pid":719,"key":"Escape"}]}`, "run_actions:press_key:escape@719/-"},
+		{"tab switch", "mcp__computer__run_actions", `{"actions":[{"tool":"hotkey","pid":719,"keys":["option","cmd","right"]}]}`, "run_actions:hotkey:cmd+option+right@719/-"},
 		{"batch of navigation", "mcp__computer__run_actions", `{"actions":[{"tool":"press_key","pid":719,"window_id":433,"key":"escape"},{"tool":"scroll","pid":719,"window_id":433,"direction":"down"}],"read":{"pid":719}}`, "run_actions:press_key:escape@719/433;scroll@719/433"},
 		{"batch with a click", "mcp__computer__run_actions", `{"actions":[{"tool":"press_key","pid":719,"key":"escape"},{"tool":"click","pid":719,"window_id":433,"element_token":"s5:144"}]}`, ""},
 		{"script", "mcp__computer__run_script", `{"script":"return 1;"}`, ""},
-		{"modified click", "mcp__computer__click", `{"pid":719,"window_id":433,"element_token":"s5:1","modifier":["cmd"]}`, ""},
-		{"typing", "mcp__computer__type_text", `{"pid":719,"text":"hello"}`, ""},
-		{"return submits", "mcp__computer__press_key", `{"pid":719,"key":"return"}`, ""},
-		{"close tab", "mcp__computer__hotkey", `{"pid":719,"keys":["cmd","w"]}`, ""},
+		{"modified click", "mcp__computer__run_actions", `{"actions":[{"tool":"click","pid":719,"window_id":433,"element_token":"s5:1","modifier":["cmd"]}]}`, ""},
+		{"typing", "mcp__computer__run_actions", `{"actions":[{"tool":"type_text","pid":719,"text":"hello"}]}`, ""},
+		{"return submits", "mcp__computer__run_actions", `{"actions":[{"tool":"press_key","pid":719,"key":"return"}]}`, ""},
+		{"close tab", "mcp__computer__run_actions", `{"actions":[{"tool":"hotkey","pid":719,"keys":["cmd","w"]}]}`, ""},
 		{"batch with typing", "mcp__computer__run_actions", `{"actions":[{"tool":"scroll","pid":719,"window_id":433,"direction":"down"},{"tool":"type_text","pid":719,"text":"x"}]}`, ""},
 		{"browser tools", "mcp__browser__browser_click", `{"target":"e5"}`, ""},
-		{"no pid", "mcp__computer__click", `{"x":1,"y":2}`, ""},
-		{"foreground scroll", "mcp__computer__scroll", `{"pid":719,"window_id":433,"direction":"down","delivery_mode":"foreground"}`, ""},
+		{"no pid", "mcp__computer__run_actions", `{"actions":[{"tool":"click","x":1,"y":2}]}`, ""},
+		{"foreground scroll", "mcp__computer__run_actions", `{"actions":[{"tool":"scroll","pid":719,"window_id":433,"direction":"down","delivery_mode":"foreground"}]}`, ""},
 		{"batch with a foreground scroll", "mcp__computer__run_actions", `{"actions":[{"tool":"scroll","pid":719,"window_id":433,"direction":"down"},{"tool":"scroll","pid":719,"window_id":433,"direction":"down","delivery_mode":"foreground"}]}`, ""},
-		{"background scroll", "mcp__computer__scroll", `{"pid":719,"window_id":433,"direction":"down","delivery_mode":"background"}`, "scroll@719/433"},
+		{"background scroll", "mcp__computer__run_actions", `{"actions":[{"tool":"scroll","pid":719,"window_id":433,"direction":"down","delivery_mode":"background"}]}`, "run_actions:scroll@719/433"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			key, ok := GUIReuseKey(test.tool, test.input)
@@ -91,8 +91,8 @@ func TestReviewerReusesAnAllowForTheSameNavigationShape(t *testing.T) {
 
 func TestReviewerDoesNotReuseVerdictsForClicksOrTyping(t *testing.T) {
 	for _, action := range []Action{
-		{Tool: "mcp__computer__type_text", Input: `{"pid":719,"text":"hello"}`},
-		{Tool: "mcp__computer__click", Input: `{"pid":719,"window_id":433,"element_token":"s5:144"}`},
+		{Tool: "mcp__computer__run_actions", Input: `{"actions":[{"tool":"type_text","pid":719,"text":"hello"}]}`},
+		{Tool: "mcp__computer__run_actions", Input: `{"actions":[{"tool":"click","pid":719,"window_id":433,"element_token":"s5:144"}]}`},
 	} {
 		requester := newFakeRequester()
 		reviewer := &Reviewer{Requester: requester}
@@ -102,12 +102,12 @@ func TestReviewerDoesNotReuseVerdictsForClicksOrTyping(t *testing.T) {
 			case id := <-requester.sent:
 				requester.answer(t, id, `{"decision":"allow"}`)
 			case <-time.After(time.Second):
-				t.Fatalf("%s was not judged", action.Tool)
+				t.Fatalf("%s was not judged", action.Input)
 			}
 			<-verdict
 		}
 		if len(requester.requests) != 2 {
-			t.Fatalf("%s reviews = %d, want 2", action.Tool, len(requester.requests))
+			t.Fatalf("%s reviews = %d, want 2", action.Input, len(requester.requests))
 		}
 	}
 }

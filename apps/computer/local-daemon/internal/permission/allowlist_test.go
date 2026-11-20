@@ -18,9 +18,9 @@ func TestLocalWriteToolJudgesEveryNonReadOnlyLocalAction(t *testing.T) {
 		{"mcp__browser__browser_tabs", `{"action":"new"}`, true},
 		{"mcp__browser__browser_tabs", `{"action":"list"}`, false},
 		{"mcp__browser__browser_snapshot", `{}`, false},
-		{"mcp__computer__click", `{"x":1,"y":2}`, true},
-		{"mcp__computer__type_text", `{"text":"hi"}`, true},
-		{"mcp__computer__scroll", `{}`, false},
+		{"mcp__computer__run_actions", `{"actions":[{"tool":"click","x":1,"y":2}]}`, true},
+		{"mcp__computer__run_actions", `{"actions":[{"tool":"scroll","direction":"down"}]}`, true},
+		{"mcp__computer__move_cursor", `{}`, false},
 		{"mcp__linger__send_message", `{}`, false},
 		{"Bash", `{"command":"ls"}`, false},
 	}

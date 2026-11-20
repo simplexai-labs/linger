@@ -27,7 +27,10 @@ import (
 func TestNativeLinuxCatalogAndDragArguments(t *testing.T) {
 	found := false
 	for _, tool := range nativeLinuxTools() {
-		if tool.Name == "drag" {
+		if inputTools[tool.Name] {
+			t.Fatalf("%s is listed outside run_actions", tool.Name)
+		}
+		if tool.Name == "run_actions" && bytes.Contains(tool.InputSchema, []byte(`"drag"`)) && bytes.Contains(tool.InputSchema, []byte(`"to_x"`)) {
 			found = true
 		}
 		if tool.Name == "open_application" && !bytes.Contains(tool.InputSchema, []byte("libreoffice-impress")) {
@@ -35,7 +38,7 @@ func TestNativeLinuxCatalogAndDragArguments(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("missing drag gesture")
+		t.Fatal("missing drag step")
 	}
 	action, err := parseDesktopAction("drag", json.RawMessage(`{"x":10,"y":20,"to_x":30,"to_y":40}`))
 	if err != nil || strings.Join(action.values, ",") != "10,20,30,40" {
