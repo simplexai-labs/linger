@@ -46,6 +46,9 @@ func (s *Service) CreateAgentDocument(
 	if s == nil || s.pool == nil || s.runtime == nil {
 		return CreateAgentDocumentResult{}, ErrRuntimeUnavailable
 	}
+	// The request hash above covers the Markdown as sent, so a retry still
+	// replays; only the stored body drops the repeated title.
+	input.Markdown = stripLeadingTitle(input.Markdown)
 	prepared, err := PrepareImport([]byte(input.Markdown))
 	if err != nil {
 		return CreateAgentDocumentResult{}, markdownError(err)

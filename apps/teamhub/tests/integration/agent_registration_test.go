@@ -785,7 +785,7 @@ func TestTenantAgentDirectoryPaginatesActiveRegistrations(t *testing.T) {
 		}
 		if item.Actor.ID == expected[1].id {
 			skills := agentSkillRegistrationsByID(item.SkillBindings)
-			if len(item.SkillBindings) != 14 || !hasOfficeDefaultSkillRegistrations(skills) || !lacksLev8SearchSkillRegistration(skills) || skills["simplexai_collaborate"].Name != "collaborate" || skills["simplexai_collaborate"].ManifestVersion != "1.0.1" || skills[skillID].Name != skillName || skills[skillID].ManifestVersion != "1.0.0" || skills["simplexai_teamhub_files"].Name != "teamhub-files" || skills["simplexai_teamhub_files"].ManifestVersion != "1.0.3" {
+			if len(item.SkillBindings) != 14 || !hasOfficeDefaultSkillRegistrations(skills) || !lacksLev8SearchSkillRegistration(skills) || skills["simplexai_collaborate"].Name != "collaborate" || skills["simplexai_collaborate"].ManifestVersion != "1.0.1" || skills[skillID].Name != skillName || skills[skillID].ManifestVersion != "1.0.0" || skills["simplexai_teamhub_files"].Name != "teamhub-files" || skills["simplexai_teamhub_files"].ManifestVersion != "1.0.4" {
 				t.Fatalf("active Agent %q Skill bindings=%+v", item.Actor.ID, item.SkillBindings)
 			}
 		}
@@ -846,7 +846,7 @@ func TestTenantHumanRegistersAgentWithInitialSkillBindings(t *testing.T) {
 		t.Fatalf("unexpected registered bindings: %+v", registered)
 	}
 	registeredSkills := agentSkillRegistrationsByID(registered.SkillBindings)
-	if !hasOfficeDefaultSkillRegistrations(registeredSkills) || !lacksLev8SearchSkillRegistration(registeredSkills) || registeredSkills["simplexai_collaborate"].Name != "collaborate" || registeredSkills["simplexai_collaborate"].ManifestVersion != "1.0.1" || registeredSkills[skillID].Name != skillName || registeredSkills[skillID].ManifestVersion != "1.0.0" || registeredSkills["simplexai_teamhub_files"].Name != "teamhub-files" || registeredSkills["simplexai_teamhub_files"].ManifestVersion != "1.0.3" {
+	if !hasOfficeDefaultSkillRegistrations(registeredSkills) || !lacksLev8SearchSkillRegistration(registeredSkills) || registeredSkills["simplexai_collaborate"].Name != "collaborate" || registeredSkills["simplexai_collaborate"].ManifestVersion != "1.0.1" || registeredSkills[skillID].Name != skillName || registeredSkills[skillID].ManifestVersion != "1.0.0" || registeredSkills["simplexai_teamhub_files"].Name != "teamhub-files" || registeredSkills["simplexai_teamhub_files"].ManifestVersion != "1.0.4" {
 		t.Fatalf("unexpected registered Skill bindings: %+v", registered.SkillBindings)
 	}
 

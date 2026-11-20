@@ -83,10 +83,10 @@
 }
 
 .room-document-page-title {
-  font-size: 24px;
-  font-weight: 580;
+  font-size: 40px;
+  font-weight: 700;
   letter-spacing: -0.025em;
-  line-height: 1.4;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
@@ -156,12 +156,13 @@
   visibility: hidden;
 }
 
-/* Town docs type scale, the same in Edit and Read so a heading never jumps
+/* Notion's type scale (page title 40, headings 30, 24, 20, body 16), the
+   same in Edit and Read so a heading never jumps
    between modes (Wiki reading uses it through knowledge-document.css). The
    caret and generated placeholder inherit it through BlockNote's --level. */
 .room-document-blocknote:not([data-knowledge-presentation]) .bn-editor {
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: 16px;
+  line-height: 1.5;
 }
 
 .room-document-blocknote:not([data-knowledge-presentation])
@@ -179,8 +180,8 @@
     [data-level="1"],
     :not([data-level])
   ) {
-  --level: 26px;
-  font-weight: 640;
+  --level: 30px;
+  font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.25;
 }
@@ -188,14 +189,14 @@
 .room-document-blocknote:not([data-knowledge-presentation])
   .bn-editor
   .bn-block-content[data-content-type="heading"][data-level="2"] {
-  --level: 22px;
+  --level: 24px;
   line-height: 1.35;
 }
 
 .room-document-blocknote:not([data-knowledge-presentation])
   .bn-editor
   .bn-block-content[data-content-type="heading"][data-level="3"] {
-  --level: 18px;
+  --level: 20px;
   line-height: 1.4;
 }
 
@@ -214,7 +215,7 @@
   .bn-editor
   .bn-block-content[data-content-type="heading"]
   h1 {
-  font-weight: 640;
+  font-weight: 600;
 }
 
 .room-document-blocknote__view--read-only
@@ -890,6 +891,11 @@
    its rows shrink to fractional heights and the last pixel cannot be scrolled. */
 .room-document-slash-popover .bn-suggestion-menu > * {
   flex-shrink: 0;
+}
+
+/* On the byline the actions keep the row's height, so it does not grow. */
+.room-document-content-lane > .room-document-header-actions {
+  margin-block: -4px;
 }
 
 .room-document-header-actions > button {

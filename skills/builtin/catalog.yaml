@@ -19,11 +19,14 @@ skills:
         version: 1.0.1
         package_path: builtin/collaborate/1.0.1
   - skill_id: simplexai_teamhub_files
-    bootstrap_manifest_id: skill_manifest_simplexai_teamhub_files_1_0_3
+    bootstrap_manifest_id: skill_manifest_simplexai_teamhub_files_1_0_4
     default_agent_types:
       - anotherme
       - general
     manifests:
+      - manifest_id: skill_manifest_simplexai_teamhub_files_1_0_4
+        version: 1.0.4
+        package_path: builtin/teamhub-files/1.0.4
       - manifest_id: skill_manifest_simplexai_teamhub_files_1_0_3
         version: 1.0.3
         package_path: builtin/teamhub-files/1.0.3

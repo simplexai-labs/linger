@@ -149,6 +149,18 @@ function UnifiedDocumentPageView({
     !isEditing && isWikiPage && document
       ? documentLogicalTitle(document)
       : undefined;
+  // An editable Document's title heads the page, so its actions sit on the
+  // byline under it instead of in a bar that would name it a second time.
+  // Only the body tells a mail canvas, which keeps its bar, from a page, so
+  // the actions wait for the editor to read it rather than show in one place
+  // and then move.
+  const bylineLayout =
+    !isWikiPage &&
+    model.canvasTarget !== "gmail" &&
+    !model.error &&
+    (!document ||
+      (document.format === "blocknote" &&
+        document.representation_format !== "html"));
   const wikiLinks = useWikiDocumentLinks(
     client,
     knowledgeTitle !== undefined ? document : undefined,
@@ -158,11 +170,13 @@ function UnifiedDocumentPageView({
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <main className="room-document-main flex min-h-0 min-w-0 flex-1 flex-col bg-app-surface">
-        <UnifiedDocumentPageHeader
-          documentContentRef={documentContentRef}
-          isWikiPage={isWikiPage}
-          model={model}
-        />
+        {bylineLayout ? null : (
+          <UnifiedDocumentPageHeader
+            documentContentRef={documentContentRef}
+            isWikiPage={isWikiPage}
+            model={model}
+          />
+        )}
         <DocumentScrollContainer
           commentLane={Boolean(
             document &&
@@ -180,6 +194,16 @@ function UnifiedDocumentPageView({
           }
         >
           <UnifiedDocumentBody
+            bylineActions={
+              bylineLayout && model.canvasKnown ? (
+                <UnifiedDocumentPageHeader
+                  byline
+                  documentContentRef={documentContentRef}
+                  isWikiPage={isWikiPage}
+                  model={model}
+                />
+              ) : undefined
+            }
             documentContentRef={documentContentRef}
             isWikiPage={isWikiPage}
             knowledgeTitle={knowledgeTitle}

@@ -46,6 +46,9 @@ import type { UnifiedDocumentPageModel } from "./use-unified-document-page-model
 import { MailCanvasStatus } from "./canvas/canvas-mail-status";
 
 interface UnifiedDocumentPageHeaderProps {
+  /** Only the actions, for the byline row under the page title, which
+      already names the Document. */
+  byline?: boolean;
   documentContentRef: MutableRefObject<HTMLDivElement | null>;
   isWikiPage: boolean;
   model: UnifiedDocumentPageModel;
@@ -53,6 +56,7 @@ interface UnifiedDocumentPageHeaderProps {
 
 /** Wires the page model's actions and presence into the Document header. */
 export function UnifiedDocumentPageHeader({
+  byline = false,
   documentContentRef,
   isWikiPage,
   model,
@@ -89,6 +93,7 @@ export function UnifiedDocumentPageHeader({
   } = model;
   return (
     <UnifiedDocumentHeader
+      byline={byline}
       sidebar={sidebar}
       commentsOpen={commentsOpen}
       document={document}
@@ -166,6 +171,7 @@ export function UnifiedDocumentPageHeader({
 }
 
 function UnifiedDocumentHeader({
+  byline,
   sidebar,
   commentsOpen,
   document,
@@ -194,6 +200,7 @@ function UnifiedDocumentHeader({
   treeOpen,
   tenantId,
 }: {
+  byline: boolean;
   sidebar: boolean;
   commentsOpen: boolean;
   document: TeamHubDocument | undefined;
@@ -242,28 +249,124 @@ function UnifiedDocumentHeader({
         }}
       />
     ) : null;
+  const treeButton = !sidebar ? (
+    <>
+      <Button
+        aria-controls={WORKSPACE_TREE_ID}
+        aria-expanded={treeOpen}
+        aria-label="Open Library pages"
+        className="sm:hidden"
+        onClick={onOpenTree}
+        size="icon"
+        title="Library pages"
+        tone="ghost"
+      >
+        <Icon icon={SidebarLeftIcon} />
+      </Button>
+    </>
+  ) : null;
+  const actions = (
+    <>
+      {mailCanvas && session ? (
+        <span className="mr-2 text-xs text-app-muted">
+          <MailCanvasStatus
+            isEditing={isEditing}
+            sent={canvasSent}
+            session={session}
+          />
+        </span>
+      ) : !isWikiPage ? (
+        presence
+      ) : null}
+      {document && !isWikiPage ? (
+        <Button
+          aria-label="Share"
+          size="compactIcon"
+          onClick={onShare}
+          title="Share"
+          tone="ghost"
+        >
+          <Icon icon={Share08Icon} />
+        </Button>
+      ) : null}
+
+      {!sidebar &&
+      !isWikiPage &&
+      document?.status === "active" &&
+      document.capabilities.read &&
+      document.capabilities.comment ? (
+        <Button
+          aria-label="Comments"
+          aria-pressed={commentsOpen}
+          onClick={onComments}
+          size="icon"
+          title="Comments"
+          tone="ghost"
+        >
+          <Icon icon={Comment01Icon} />
+        </Button>
+      ) : null}
+      {!sidebar && !mailCanvas ? (
+        <Button
+          aria-label="Table of contents"
+          aria-pressed={tocOpen}
+          onClick={onToc}
+          size="icon"
+          title="Table of contents"
+          tone="ghost"
+        >
+          <Icon icon={TableOfContentsIcon} />
+        </Button>
+      ) : null}
+      {!sidebar ? actionsMenu : null}
+      {!mailCanvas &&
+      !isWikiPage &&
+      session &&
+      document?.format === "blocknote" &&
+      document.representation_format !== "html" ? (
+        <RoomDocumentActions
+          canEdit={
+            document.status === "active" &&
+            document.capabilities.write &&
+            document.can_edit_native_content &&
+            !canvasSent
+          }
+          isEditing={isEditing}
+          onEditingChange={onEditingChange}
+          session={session}
+        />
+      ) : null}
+      {sidebar ? actionsMenu : null}
+    </>
+  );
+  const breadcrumb =
+    !sidebar && document ? (
+      <div className="sr-only">
+        <UnifiedDocumentBreadcrumb
+          document={document}
+          items={treeItems}
+          sharedDocument={sharedDocument}
+          sharedItems={sharedTreeItems}
+        />
+      </div>
+    ) : null;
+  if (byline) {
+    return (
+      <div className="room-document-header-actions">
+        {breadcrumb}
+        {treeButton}
+        {actions}
+        {rename.dialog}
+      </div>
+    );
+  }
   return (
     <header
       className="room-document-header border-b border-app-border/60"
       data-mail-canvas={mailCanvas || undefined}
     >
       <div className="room-document-header-identity">
-        {!sidebar ? (
-          <>
-            <Button
-              aria-controls={WORKSPACE_TREE_ID}
-              aria-expanded={treeOpen}
-              aria-label="Open Library pages"
-              className="sm:hidden"
-              onClick={onOpenTree}
-              size="icon"
-              title="Library pages"
-              tone="ghost"
-            >
-              <Icon icon={SidebarLeftIcon} />
-            </Button>
-          </>
-        ) : null}
+        {treeButton}
         {mailCanvas ? (
           <span className="flex items-center gap-2 text-sm font-medium text-app-ink">
             <Icon icon={Mail01Icon} size={16} />
@@ -276,93 +379,13 @@ function UnifiedDocumentHeader({
             </span>
           </div>
         ) : null}
-        {!sidebar && document ? (
-          <div className="sr-only">
-            <UnifiedDocumentBreadcrumb
-              document={document}
-              items={treeItems}
-              sharedDocument={sharedDocument}
-              sharedItems={sharedTreeItems}
-            />
-          </div>
-        ) : (
+        {breadcrumb ?? (
           <span className="truncate text-sm font-semibold text-app-ink">
             {sidebar ? "" : "Document"}
           </span>
         )}
       </div>
-      <div className="room-document-header-actions">
-        {mailCanvas && session ? (
-          <span className="mr-2 text-xs text-app-muted">
-            <MailCanvasStatus
-              isEditing={isEditing}
-              sent={canvasSent}
-              session={session}
-            />
-          </span>
-        ) : !isWikiPage ? (
-          presence
-        ) : null}
-        {document && !isWikiPage ? (
-          <Button
-            aria-label="Share"
-            size="compactIcon"
-            onClick={onShare}
-            title="Share"
-            tone="ghost"
-          >
-            <Icon icon={Share08Icon} />
-          </Button>
-        ) : null}
-
-        {!sidebar &&
-        !isWikiPage &&
-        document?.status === "active" &&
-        document.capabilities.read &&
-        document.capabilities.comment ? (
-          <Button
-            aria-label="Comments"
-            aria-pressed={commentsOpen}
-            onClick={onComments}
-            size="icon"
-            title="Comments"
-            tone="ghost"
-          >
-            <Icon icon={Comment01Icon} />
-          </Button>
-        ) : null}
-        {!sidebar && !mailCanvas ? (
-          <Button
-            aria-label="Table of contents"
-            aria-pressed={tocOpen}
-            onClick={onToc}
-            size="icon"
-            title="Table of contents"
-            tone="ghost"
-          >
-            <Icon icon={TableOfContentsIcon} />
-          </Button>
-        ) : null}
-        {!sidebar ? actionsMenu : null}
-        {!mailCanvas &&
-        !isWikiPage &&
-        session &&
-        document?.format === "blocknote" &&
-        document.representation_format !== "html" ? (
-          <RoomDocumentActions
-            canEdit={
-              document.status === "active" &&
-              document.capabilities.write &&
-              document.can_edit_native_content &&
-              !canvasSent
-            }
-            isEditing={isEditing}
-            onEditingChange={onEditingChange}
-            session={session}
-          />
-        ) : null}
-        {sidebar ? actionsMenu : null}
-      </div>
+      <div className="room-document-header-actions">{actions}</div>
       {rename.dialog}
     </header>
   );

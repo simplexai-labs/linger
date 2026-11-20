@@ -352,7 +352,7 @@ teamhub docs create --title <text> (--content <text> | --file <path|->) [flags]
 Create a Native Document in the configured Room or Task.
 
 Options:
-  --title <value>  Required Document title, 1-255 characters.
+  --title <value>  Required Document title, 1-255 characters. It is the page heading, so start the body with its content, not a heading repeating the title.
   --content <value>  Inline Markdown body; outside code, \\n, \\t and \\\\ are decoded. Exclusive with --file, which is never decoded.
   --file <value>  Read the UTF-8 body from a regular file or - for stdin.
   --json  Return machine-readable JSON.
@@ -364,7 +364,7 @@ Examples:
 teamhub docs create --title "Research report" --file ./report.md
 ",
     "schema": "exit 0
-{"command":["docs","create"],"description":"Create a Native Document in the configured Room or Task.","read_only":false,"input_schema":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":255,"description":"Document title."},"markdown":{"type":"string","maxLength":1048576,"description":"Small text-only Markdown body (at most 1 MiB UTF-8). Do not put Base64 or image bytes in this argument."}},"required":["title","markdown"],"additionalProperties":false,"description":"Create one native Document in the configured Room or Task."},"output_schema":{"type":"object","additionalProperties":false,"properties":{"document_id":{"type":"string"},"revision_id":{"type":"string"},"status":{"const":"created"},"duplicate_request":{"type":"boolean"},"reason":{"type":"string","minLength":1}},"required":["document_id","revision_id","status","duplicate_request"],"allOf":[{"if":{"properties":{"duplicate_request":{"const":true}}},"then":{"required":["reason"]},"else":{"not":{"required":["reason"]}}}]},"cli":{"usage":["--title <text> (--content <text> | --file <path|->) [flags]"],"arguments":[],"options":{"--title":{"description":"Required Document title, 1-255 characters."},"--content":{"description":"Inline Markdown body; outside code, \\\\n, \\\\t and \\\\\\\\ are decoded. Exclusive with --file, which is never decoded."},"--file":{"description":"Read the UTF-8 body from a regular file or - for stdin."},"--json":{"description":"Return machine-readable JSON.","boolean":true},"--help":{"description":"Show this offline command reference.","boolean":true},"-h":{"description":"Show help.","boolean":true},"--schema":{"description":"Show offline input and output schemas.","boolean":true},"--operation-id":{"description":"Stable operation identity for recovery."}},"notes":[]}}
+{"command":["docs","create"],"description":"Create a Native Document in the configured Room or Task.","read_only":false,"input_schema":{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":255,"description":"Document title."},"markdown":{"type":"string","maxLength":1048576,"description":"Small text-only Markdown body (at most 1 MiB UTF-8). Do not put Base64 or image bytes in this argument."}},"required":["title","markdown"],"additionalProperties":false,"description":"Create one native Document in the configured Room or Task."},"output_schema":{"type":"object","additionalProperties":false,"properties":{"document_id":{"type":"string"},"revision_id":{"type":"string"},"status":{"const":"created"},"duplicate_request":{"type":"boolean"},"reason":{"type":"string","minLength":1}},"required":["document_id","revision_id","status","duplicate_request"],"allOf":[{"if":{"properties":{"duplicate_request":{"const":true}}},"then":{"required":["reason"]},"else":{"not":{"required":["reason"]}}}]},"cli":{"usage":["--title <text> (--content <text> | --file <path|->) [flags]"],"arguments":[],"options":{"--title":{"description":"Required Document title, 1-255 characters. It is the page heading, so start the body with its content, not a heading repeating the title."},"--content":{"description":"Inline Markdown body; outside code, \\\\n, \\\\t and \\\\\\\\ are decoded. Exclusive with --file, which is never decoded."},"--file":{"description":"Read the UTF-8 body from a regular file or - for stdin."},"--json":{"description":"Return machine-readable JSON.","boolean":true},"--help":{"description":"Show this offline command reference.","boolean":true},"-h":{"description":"Show help.","boolean":true},"--schema":{"description":"Show offline input and output schemas.","boolean":true},"--operation-id":{"description":"Stable operation identity for recovery."}},"notes":[]}}
 ",
   },
   "docs file put": {
@@ -3805,7 +3805,7 @@ teamhub docs create --title <text> (--content <text> | --file <path|->) [flags]
 Create a Native Document in the configured Room or Task.
 
 Options:
-  --title <value>  Required Document title, 1-255 characters.
+  --title <value>  Required Document title, 1-255 characters. It is the page heading, so start the body with its content, not a heading repeating the title.
   --content <value>  Inline Markdown body; outside code, \\n, \\t and \\\\ are decoded. Exclusive with --file, which is never decoded.
   --file <value>  Read the UTF-8 body from a regular file or - for stdin.
   --json  Return machine-readable JSON.

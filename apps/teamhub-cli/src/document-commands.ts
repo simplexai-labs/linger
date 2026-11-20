@@ -281,7 +281,10 @@ export const documentCommandDefinitions: readonly CommandDefinition[] = [
     defaultTarget: "room-or-task",
     usage: ["--title <text> (--content <text> | --file <path|->) [flags]"],
     options: {
-      "--title": { description: "Required Document title, 1-255 characters." },
+      "--title": {
+        description:
+          "Required Document title, 1-255 characters. It is the page heading, so start the body with its content, not a heading repeating the title.",
+      },
       ...bodyOptions,
     },
     examples: [

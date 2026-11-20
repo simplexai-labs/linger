@@ -51,7 +51,7 @@ func TestPlatformExplicitSkillSupportsPublicAgentBindingsButDefaultOnlyDoesNot(t
 	}
 	decode(t, body, &registered)
 	registeredSkills := agentSkillRegistrationsByID(registered.SkillBindings)
-	if registered.Actor.ID == "" || len(registered.SkillBindings) != 14 || !hasOfficeDefaultSkillRegistrations(registeredSkills) || !lacksLev8SearchSkillRegistration(registeredSkills) || registeredSkills["simplexai_collaborate"].Name != "collaborate" || registeredSkills["simplexai_collaborate"].ManifestVersion != "1.0.1" || registeredSkills[skillID].Name != skillName || registeredSkills[skillID].ManifestVersion != "1.0.0" || registeredSkills[skillID].Description != "Platform explicit binding fixture" || registeredSkills["simplexai_teamhub_files"].Name != "teamhub-files" || registeredSkills["simplexai_teamhub_files"].ManifestVersion != "1.0.3" {
+	if registered.Actor.ID == "" || len(registered.SkillBindings) != 14 || !hasOfficeDefaultSkillRegistrations(registeredSkills) || !lacksLev8SearchSkillRegistration(registeredSkills) || registeredSkills["simplexai_collaborate"].Name != "collaborate" || registeredSkills["simplexai_collaborate"].ManifestVersion != "1.0.1" || registeredSkills[skillID].Name != skillName || registeredSkills[skillID].ManifestVersion != "1.0.0" || registeredSkills[skillID].Description != "Platform explicit binding fixture" || registeredSkills["simplexai_teamhub_files"].Name != "teamhub-files" || registeredSkills["simplexai_teamhub_files"].ManifestVersion != "1.0.4" {
 		t.Fatalf("unexpected Platform explicit registration: %+v", registered)
 	}
 

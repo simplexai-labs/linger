@@ -80,7 +80,7 @@ func TestBuiltinCatalogLoadsVersionedPackages(t *testing.T) {
 		}
 	}
 	files := findBuiltinSkill(t, catalog, "simplexai_teamhub_files")
-	if files.BootstrapManifestID != "skill_manifest_simplexai_teamhub_files_1_0_3" ||
+	if files.BootstrapManifestID != "skill_manifest_simplexai_teamhub_files_1_0_4" ||
 		!slices.Equal(files.DefaultAgentTypes, []string{"anotherme", "general"}) {
 		t.Fatalf("TeamHub files catalog entry=%+v", files)
 	}

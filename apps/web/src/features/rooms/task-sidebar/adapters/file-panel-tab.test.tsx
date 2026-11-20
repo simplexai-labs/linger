@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+import { useLayoutEffect } from "react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -55,13 +56,26 @@ beforeEach(() => {
 vi.mock(
   "@/features/rooms/documents/room-document-blocknote-editor-loader",
   () => ({
-    RoomDocumentBlockNoteEditor: ({ editable }: { editable: boolean }) => (
-      <section aria-label="Room Document editor">
-        <div className="bn-editor" data-editable={String(editable)}>
-          Room BlockNote editor
-        </div>
-      </section>
-    ),
+    RoomDocumentBlockNoteEditor: ({
+      editable,
+      onCanvasTargetChange,
+    }: {
+      editable: boolean;
+      onCanvasTargetChange?: (target?: string) => void;
+    }) => {
+      // Like the real editor, report the body's canvas target once mounted.
+      useLayoutEffect(
+        () => onCanvasTargetChange?.(undefined),
+        [onCanvasTargetChange],
+      );
+      return (
+        <section aria-label="Room Document editor">
+          <div className="bn-editor" data-editable={String(editable)}>
+            Room BlockNote editor
+          </div>
+        </section>
+      );
+    },
   }),
 );
 

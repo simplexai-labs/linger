@@ -71,6 +71,8 @@ export function useUnifiedDocumentPageModel(sidebar?: {
     sidebar: Boolean(sidebar),
     actor: data.actor,
     autoFocusTitle: route.autoFocusTitle,
+    // The editor reports the canvas target once it has read the body.
+    canvasKnown: canvasIdentity?.documentId === documentId,
     canvasSent,
     canvasTarget,
     client,
