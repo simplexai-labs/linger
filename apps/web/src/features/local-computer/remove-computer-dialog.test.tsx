@@ -236,6 +236,32 @@ describe("RemoveComputerDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect a computer" }));
     expect(onConnect).toHaveBeenCalledTimes(1);
   });
+
+  it("disambiguates duplicate model labels in the move target summary", () => {
+    const reviewer = agent("actor-reviewer", "Local Reviewer");
+    reviewer.runtime.model = "server/group/wb-gpt-5.5";
+    const target = computer("computer-new", "New Mac", {
+      runtimes: [
+        {
+          models: [
+            { id: "server/group/wb-gpt-5.5", label: "WorkBuddy Site" },
+            { id: "server/group/wb-glm-5.3", label: "WorkBuddy Site" },
+          ],
+          status: "ready",
+          type: "codex",
+        },
+      ],
+    });
+    renderDialog({
+      agents: [reviewer],
+      computers: [oldComputer(), target],
+    });
+    expect(
+      screen.getByText(
+        "Keeps Codex · WorkBuddy Site (server/group/wb-gpt-5.5).",
+      ),
+    ).toBeVisible();
+  });
 });
 
 function renderDialog({

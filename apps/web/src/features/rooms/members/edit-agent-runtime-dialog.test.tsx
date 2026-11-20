@@ -665,6 +665,64 @@ describe("EditAgentRuntimeDialog", () => {
       ).toHaveTextContent("Qwen3 Coder 30B · Unavailable"),
     );
   });
+
+  it("disambiguates duplicate model display labels with their model IDs", async () => {
+    const onSave = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
+    const computer = localComputer("computer-old", "Old Mac", "online");
+    computer.runtimes = [
+      {
+        models: [
+          { id: "server/group/wb-gpt-5.5", label: "WorkBuddy Site" },
+          { id: "server/group/wb-glm-5.3", label: "WorkBuddy Site" },
+          { id: "claude-sonnet-4", label: "Claude Sonnet 4" },
+        ],
+        status: "ready",
+        type: "claude",
+      },
+    ];
+    const registration = localCodexAgent();
+    registration.runtime = {
+      model: "server/group/wb-gpt-5.5",
+      placement: {
+        computer_id: "computer-old",
+        runtime_type: "claude",
+        type: "local",
+        workspace_grant_id: "grant-workspace",
+      },
+    };
+    renderDialog({
+      computersOverride: { items: [computer] },
+      onSave,
+      registration,
+    });
+    const model = await screen.findByRole("combobox", { name: "Agent model" });
+    await waitFor(() =>
+      expect(model).toHaveTextContent(
+        "WorkBuddy Site (server/group/wb-gpt-5.5)",
+      ),
+    );
+    fireEvent.click(model);
+    expect(
+      await screen.findByRole("option", {
+        name: "WorkBuddy Site (server/group/wb-gpt-5.5)",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("option", { name: "Claude Sonnet 4" }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("option", {
+        name: "WorkBuddy Site (server/group/wb-glm-5.3)",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save Runtime" }));
+    expect(onSave).toHaveBeenCalledWith({
+      runtime: {
+        model: "server/group/wb-glm-5.3",
+        placement: registration.runtime.placement,
+      },
+    });
+  });
 });
 
 function renderDialog({

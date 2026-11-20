@@ -15,11 +15,73 @@ import type {
 import { composerMessages } from "../chat/composer.messages";
 import { runtimeModelLabel } from "./runtime-model-label";
 
-interface RuntimeModel {
+export interface RuntimeModelLabelEntry {
   id: string;
   label: string;
+}
+
+interface RuntimeModel extends RuntimeModelLabelEntry {
   allowed_reasoning_effort?: readonly TeamHubAgentReasoningEffort[];
   default_reasoning_effort?: TeamHubAgentReasoningEffort;
+}
+
+function baseRuntimeModelLabel(
+  model: RuntimeModelLabelEntry,
+  t: Translate = translate,
+): string {
+  return runtimeModelLabel(model, t).trim() || model.id;
+}
+
+/**
+ * Builds display labels for one Runtime's model catalog, appending `(<id>)`
+ * only when two or more distinct model IDs resolve to the same display label.
+ */
+export function runtimeModelLabels(
+  models: readonly RuntimeModelLabelEntry[],
+  t: Translate = translate,
+): Map<string, string> {
+  const idsByBase = new Map<string, Set<string>>();
+  for (const model of models) {
+    const base = baseRuntimeModelLabel(model, t);
+    let ids = idsByBase.get(base);
+    if (!ids) {
+      ids = new Set();
+      idsByBase.set(base, ids);
+    }
+    ids.add(model.id);
+  }
+
+  const resolved = new Map<string, string>();
+  for (const model of models) {
+    const base = baseRuntimeModelLabel(model, t);
+    const hasCollision = (idsByBase.get(base)?.size ?? 0) > 1;
+    const display =
+      hasCollision && base !== model.id ? `${base} (${model.id})` : base;
+    resolved.set(model.id, display);
+  }
+  return resolved;
+}
+
+/** Returns Runtime model entries with disambiguated display labels. */
+export function withDisambiguatedModelLabels<T extends RuntimeModelLabelEntry>(
+  models: readonly T[],
+  t: Translate = translate,
+): T[] {
+  const labels = runtimeModelLabels(models, t);
+  return models.map((model) => ({
+    ...model,
+    label: labels.get(model.id) ?? model.id,
+  }));
+}
+
+/** Resolves one model's display label within its Runtime's model catalog. */
+export function resolveRuntimeModelLabel(
+  models: readonly RuntimeModelLabelEntry[] | undefined,
+  modelId: string | undefined,
+  t: Translate = translate,
+): string | undefined {
+  if (!models || !modelId) return undefined;
+  return runtimeModelLabels(models, t).get(modelId);
 }
 
 /** The model and reasoning effort of a new Agent, chosen among the models the
@@ -43,11 +105,12 @@ export function useAgentModelSelection(models: readonly RuntimeModel[]) {
   )
     ? (requestedReasoningEffort as TeamHubAgentReasoningEffort)
     : defaultReasoningEffort;
+  const labels = runtimeModelLabels(models, t);
 
   return {
-    items: models.map((item) => ({
-      value: item.id,
-      label: runtimeModelLabel(item, t),
+    items: models.map(({ id }) => ({
+      value: id,
+      label: labels.get(id) ?? id,
     })),
     model: selectedModel?.id ?? "",
     reasoningEffort,
@@ -103,11 +166,14 @@ export function useResolvedAgentModelLabel(
     ...localComputersQueryOptions(client, tenantId),
     enabled: Boolean(computerId),
   });
-  const catalogModel = computers.data?.items
+  const runtimeModels = computers.data?.items
     .find((item) => item.computer_id === computerId)
-    ?.runtimes.find((item) => item.type === placement?.runtime_type)
-    ?.models.find((item) => item.id === runtime?.model);
-  const catalogLabel = catalogModel && runtimeModelLabel(catalogModel, t);
+    ?.runtimes.find((item) => item.type === placement?.runtime_type)?.models;
+  const catalogLabel = resolveRuntimeModelLabel(
+    runtimeModels,
+    runtime?.model,
+    t,
+  );
   const localModels = useQuery({
     ...localModelsQueryOptions(client, tenantId, computerId ?? ""),
     enabled: Boolean(

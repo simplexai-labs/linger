@@ -30,7 +30,7 @@ import {
 } from "./quick-create-general-agent-page";
 import { AgentCreationProgress } from "./agent-creation-progress";
 import { createAgentMessages } from "./create-agent.messages";
-import { runtimeModelLabel } from "./members/runtime-model-label";
+import { withDisambiguatedModelLabels } from "./members/use-agent-model-selection";
 
 const localRuntimeLabels: Record<TeamHubLocalRuntimeType, string> = {
   claude: "Claude Code",
@@ -123,7 +123,7 @@ export function QuickCreateLocalAgentDialog({
   const modelOptions =
     selectedComputer?.workspace_grants.length &&
     selectedRuntime?.status === "ready"
-      ? selectedRuntime.models
+      ? withDisambiguatedModelLabels(selectedRuntime.models, t)
       : [];
   const selectedModel =
     modelOptions.find((model) => model.id === modelId) ?? modelOptions[0];
@@ -410,7 +410,7 @@ export function QuickCreateLocalAgentDialog({
                     >
                       {modelOptions.map((model) => (
                         <SelectItem key={model.id} value={model.id}>
-                          {runtimeModelLabel(model, t)}
+                          {model.label}
                         </SelectItem>
                       ))}
                     </Select>
