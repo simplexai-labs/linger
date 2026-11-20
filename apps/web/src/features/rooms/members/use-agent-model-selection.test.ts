@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { resetLanguageForTest, setLanguage, translate } from "@/i18n/language";
+import zhCN from "@/i18n/locales/zh-CN.json";
 
 import {
   resolveRuntimeModelLabel,
   runtimeModelLabels,
   withDisambiguatedModelLabels,
 } from "./use-agent-model-selection";
+
+afterEach(() => resetLanguageForTest());
 
 describe("runtimeModelLabels", () => {
   it("keeps unique labels untouched", () => {
@@ -72,6 +77,52 @@ describe("runtimeModelLabels", () => {
     ]);
 
     expect(labels.get("gpt-5.4")).toBe("GPT-5.4");
+  });
+
+  it("resolves secondary collisions introduced by a disambiguation suffix", () => {
+    const labels = runtimeModelLabels([
+      { id: "model-a", label: "Relay Model" },
+      { id: "model-b", label: "Relay Model" },
+      { id: "model-c", label: "Relay Model (model-a)" },
+    ]);
+
+    expect(new Set(labels.values()).size).toBe(3);
+    expect(labels.get("model-a")).toBe("Relay Model (model-a)");
+    expect(labels.get("model-b")).toBe("Relay Model (model-b)");
+    expect(labels.get("model-c")).toBe("Relay Model (model-a) (model-c)");
+  });
+
+  it("falls back to distinct model IDs when colliding labels already match suffixes", () => {
+    const labels = runtimeModelLabels([
+      { id: "a", label: "x (a)" },
+      { id: "x (a)", label: "x (a)" },
+    ]);
+
+    expect(new Set(labels.values()).size).toBe(2);
+    expect(labels.get("a")).toBe("a");
+    expect(labels.get("x (a)")).toBe("x (a)");
+  });
+
+  it("disambiguates against translated stand-in default model labels", async () => {
+    await setLanguage("zh-CN");
+    const translatedDefault = zhCN.runtimeModel.hostDefault.replace(
+      "{app}",
+      "Codex",
+    );
+    const labels = runtimeModelLabels(
+      [
+        { id: "codex-default", label: "Codex default" },
+        { id: "custom/codex-default", label: translatedDefault },
+      ],
+      translate,
+    );
+
+    expect(labels.get("codex-default")).toBe(
+      `${translatedDefault} (codex-default)`,
+    );
+    expect(labels.get("custom/codex-default")).toBe(
+      `${translatedDefault} (custom/codex-default)`,
+    );
   });
 });
 

@@ -33,32 +33,56 @@ function baseRuntimeModelLabel(
 }
 
 /**
- * Builds display labels for one Runtime's model catalog, appending `(<id>)`
- * only when two or more distinct model IDs resolve to the same display label.
+ * Builds unique display labels for one Runtime's model catalog, appending
+ * `(<id>)` when two or more distinct model IDs resolve to the same label and
+ * resolving any secondary collisions introduced by a suffix.
  */
 export function runtimeModelLabels(
   models: readonly RuntimeModelLabelEntry[],
   t: Translate = translate,
 ): Map<string, string> {
-  const idsByBase = new Map<string, Set<string>>();
-  for (const model of models) {
-    const base = baseRuntimeModelLabel(model, t);
-    let ids = idsByBase.get(base);
-    if (!ids) {
-      ids = new Set();
-      idsByBase.set(base, ids);
-    }
-    ids.add(model.id);
-  }
-
+  const uniqueIds: string[] = [];
   const resolved = new Map<string, string>();
   for (const model of models) {
-    const base = baseRuntimeModelLabel(model, t);
-    const hasCollision = (idsByBase.get(base)?.size ?? 0) > 1;
-    const display =
-      hasCollision && base !== model.id ? `${base} (${model.id})` : base;
-    resolved.set(model.id, display);
+    if (!resolved.has(model.id)) {
+      uniqueIds.push(model.id);
+      resolved.set(model.id, baseRuntimeModelLabel(model, t));
+    }
   }
+
+  for (let pass = 0; pass < uniqueIds.length; pass += 1) {
+    const idsByLabel = new Map<string, string[]>();
+    for (const id of uniqueIds) {
+      const label = resolved.get(id) ?? id;
+      let ids = idsByLabel.get(label);
+      if (!ids) {
+        ids = [];
+        idsByLabel.set(label, ids);
+      }
+      ids.push(id);
+    }
+
+    let hadCollision = false;
+    for (const [label, ids] of idsByLabel) {
+      if (ids.length <= 1) continue;
+      hadCollision = true;
+      let changed = false;
+      for (const id of ids) {
+        if (label !== id && !label.endsWith(` (${id})`)) {
+          resolved.set(id, `${label} (${id})`);
+          changed = true;
+        }
+      }
+      if (!changed) {
+        for (const id of ids) {
+          resolved.set(id, id);
+        }
+      }
+    }
+
+    if (!hadCollision) break;
+  }
+
   return resolved;
 }
 
