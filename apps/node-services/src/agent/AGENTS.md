@@ -135,7 +135,9 @@ take precedence.
   accept or refusal, `LOCAL_MODELS_ACTION_TIMEOUT` past the command's
   `expires_at` (at most 30 seconds; the Daemon never answers after that
   deadline, so the outcome is unknown, not refused), or
-  `LOCAL_COMPUTER_OFFLINE`.
+  `LOCAL_COMPUTER_OFFLINE`. `no_autoload: true` is sent only to Computer 0.57.0
+  or later (`FIRST_LOCAL_MODEL_DOWNLOAD_ONLY_COMPUTER_VERSION`) and omitted when
+  not set, because an older Daemon closes the connection on unknown fields.
 - A Computer's model source is the Daemon's too
   (`runner-gateway/runner-local-capabilities.ts`, `modelSource`). Agent Service
   sends `execute` `model_source` only to Computer 0.54.0 or later

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   Copy01Icon,
+  InformationCircleIcon,
   LinkSquare02Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -10,6 +11,7 @@ import { FormFeedback } from "@/components/ui/form-feedback";
 import { Icon } from "@/components/ui/icon";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { Select, SelectItem } from "@/components/ui/select";
+import { relativeTime } from "@/features/local-computer/computer-relative-time";
 import type { TeamHubLocalComputerPage } from "@/features/teamhub/teamhub-types";
 import { cn } from "@/lib/cn";
 
@@ -21,6 +23,7 @@ import {
 } from "./local-model-agents";
 import {
   capabilityCopy,
+  memoryPressureCopy,
   modelErrorCopy,
   modelNoteCopy,
   unavailableCopy,
@@ -28,6 +31,7 @@ import {
 import type { LocalModelPool, LocalModelsView } from "./local-models-queries";
 import {
   contextLabel,
+  downloadMemoryCheck,
   downloadStopped,
   formatGigabytes,
   isModelOnComputer,
@@ -38,10 +42,12 @@ import {
   placeName,
   poolFreeBytes,
   poolLabel,
+  poolMemoryBreakdown,
   poolOf,
   poolOtherBytes,
   safeModelSourceUrl,
   speedLabel,
+  type MemoryBreakdown,
   type ModelEntry,
 } from "./local-models-rules";
 
@@ -127,6 +133,123 @@ function CopyEndpoint({ endpoint, name }: { endpoint: string; name: string }) {
   );
 }
 
+/** Hover/focus/click popover explaining how pool memory and macOS reclaimable space add up. */
+export function MemoryBreakdownPopover({
+  align = "left",
+  breakdown,
+  children,
+  className,
+}: {
+  align?: "left" | "right";
+  breakdown?: MemoryBreakdown;
+  children: ReactNode;
+  className?: string;
+}) {
+  const [hoverOpen, setHoverOpen] = useState(false);
+  const [focusOpen, setFocusOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const containerRef = useRef<HTMLSpanElement>(null);
+  const panelId = useId();
+  const open = Boolean(breakdown) && (pinned || hoverOpen || focusOpen);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setPinned(false);
+        setHoverOpen(false);
+        setFocusOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [open]);
+
+  if (!breakdown) return <>{children}</>;
+
+  return (
+    <span
+      className={cn("relative inline-flex max-w-full items-center", className)}
+      onMouseEnter={() => setHoverOpen(true)}
+      onMouseLeave={() => setHoverOpen(false)}
+      ref={containerRef}
+    >
+      <button
+        aria-controls={open ? panelId : undefined}
+        aria-expanded={open}
+        className="inline-flex max-w-full items-center gap-1 rounded-sm text-left underline decoration-border-hover decoration-dotted underline-offset-4 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onBlur={(event) => {
+          if (!containerRef.current?.contains(event.relatedTarget)) {
+            setFocusOpen(false);
+          }
+        }}
+        onClick={() => {
+          setPinned((current) => !current);
+          setHoverOpen(false);
+        }}
+        onFocus={() => setFocusOpen(true)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            setPinned(false);
+            setHoverOpen(false);
+            setFocusOpen(false);
+          }
+        }}
+        type="button"
+      >
+        {children}
+        <Icon
+          aria-hidden
+          className="shrink-0 text-muted-foreground"
+          icon={InformationCircleIcon}
+          size={14}
+        />
+      </button>
+      {open ? (
+        <div
+          aria-label={breakdown.title}
+          className={cn(
+            "absolute top-full z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card p-3.5 text-left text-xs text-foreground shadow-lg",
+            align === "right" ? "right-0" : "left-0",
+          )}
+          id={panelId}
+          role="region"
+        >
+          <p className="font-medium text-foreground">{breakdown.title}</p>
+          <dl className="mt-2 grid gap-1.5">
+            {breakdown.rows.map((item) => (
+              <div
+                className="flex items-center justify-between gap-3"
+                key={item.label}
+              >
+                <dt className="text-muted-foreground">{item.label}</dt>
+                <dd
+                  className={cn(
+                    "font-medium tabular-nums",
+                    item.tone === "danger"
+                      ? "text-app-danger"
+                      : item.tone === "warning"
+                        ? "text-app-warning"
+                        : "text-foreground",
+                  )}
+                >
+                  {item.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          {breakdown.note ? (
+            <p className="mt-2.5 border-t border-border/70 pt-2 leading-relaxed text-muted-foreground">
+              {breakdown.note}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
 function selectCodeText(element: HTMLElement | null) {
   if (!element) return;
   const selection = window.getSelection();
@@ -204,11 +327,8 @@ export function ModelFacts({
   const speed = speedLabel(model);
   const sourceUrl = safeModelSourceUrl(model.source_url);
   const reclaimable = memoryReclaimable(view, model);
-  const availableNeedsRoom =
-    status === "available" &&
-    pool !== undefined &&
-    poolOtherBytes(pool) > 0 &&
-    poolFreeBytes(pool) < model.memory_bytes;
+  const lowMemory =
+    status === "available" ? downloadMemoryCheck(view, model) : null;
   const computerId = view.computer.computer_id;
   const usedNames = usedByAgentNames(entry, assignableAgents, computerId);
   const idleUsedWarning =
@@ -273,13 +393,14 @@ export function ModelFacts({
           </FormFeedback>
         </div>
       ) : null}
-      {availableNeedsRoom ? (
+      {lowMemory ? (
         <div className="my-1.5">
           <FormFeedback tone="warning">
-            This model can download now, but only{" "}
-            {formatGigabytes(poolFreeBytes(pool))} is free on{" "}
-            {poolLabel(view, pool)}. Close memory-heavy apps and recheck memory
-            before loading it.
+            This model can download now, but it needs{" "}
+            {formatGigabytes(lowMemory.needBytes)} free and only{" "}
+            {formatGigabytes(lowMemory.freeBytes)} is free on{" "}
+            {poolLabel(view, lowMemory.pool)}. Close memory-heavy apps and
+            recheck memory, or download it without loading.
           </FormFeedback>
         </div>
       ) : null}
@@ -445,8 +566,13 @@ function PoolBar({
           />
         ) : null}
       </span>
-      <span className="w-24 shrink-0 text-right text-xs whitespace-nowrap tabular-nums text-muted-foreground">
-        {formatGigabytes(poolFreeBytes(pool))} free
+      <span className="w-28 shrink-0 text-right text-xs whitespace-nowrap tabular-nums text-muted-foreground">
+        <MemoryBreakdownPopover
+          align="right"
+          breakdown={poolMemoryBreakdown(view, pool)}
+        >
+          <span>{formatGigabytes(poolFreeBytes(pool))} free</span>
+        </MemoryBreakdownPopover>
       </span>
     </div>
   );
@@ -454,13 +580,20 @@ function PoolBar({
 
 /** Memory and hardware of one Computer, for people who want the numbers. */
 export function AdvancedDialog({
+  canRecheck = false,
   onClose,
+  onRecheck,
+  rechecking = false,
   view,
 }: {
+  canRecheck?: boolean;
   onClose: () => void;
+  onRecheck?: () => void;
+  rechecking?: boolean;
   view: LocalModelsView;
 }) {
   const host = view.computer.host;
+  const unifiedPool = view.pools.find((pool) => pool.kind === "unified");
   type PoolHolder = LocalModelPool["holders"][number];
   const seenHolderIds = new Set<string>();
   const models: PoolHolder[] = [];
@@ -497,9 +630,28 @@ export function AdvancedDialog({
       <div className="px-5 py-4">
         {view.pools.length ? (
           <>
-            <h3 className="mb-1 text-sm font-medium text-muted-foreground">
-              Memory
-            </h3>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <h3 className="text-sm font-medium text-muted-foreground">
+                  Memory
+                </h3>
+                {view.observed_at ? (
+                  <span className="text-xs text-muted-foreground">
+                    · Checked {relativeTime(view.observed_at)}
+                  </span>
+                ) : null}
+              </div>
+              {canRecheck && onRecheck ? (
+                <Button
+                  loading={rechecking}
+                  onClick={onRecheck}
+                  size="compact"
+                  tone="ghost"
+                >
+                  Recheck memory
+                </Button>
+              ) : null}
+            </div>
             <div className="divide-y divide-border">
               {view.pools.map((pool) => (
                 <PoolBar
@@ -551,6 +703,36 @@ export function AdvancedDialog({
               <Fact bordered={false} label="Memory">
                 {formatGigabytes(host.ram_total_bytes)}
               </Fact>
+              {host.ram_available_bytes !== undefined ? (
+                <Fact label="Reclaimable">
+                  {formatGigabytes(host.ram_available_bytes)} reclaimable & free
+                </Fact>
+              ) : null}
+              {unifiedPool?.reserve_bytes !== undefined &&
+              unifiedPool.reserve_bytes > 0 ? (
+                <Fact label="System reserve">
+                  {formatGigabytes(unifiedPool.reserve_bytes)} kept for macOS &
+                  Linger
+                </Fact>
+              ) : null}
+              {host.metal_working_set_bytes !== undefined ? (
+                <Fact label="Metal GPU limit">
+                  {formatGigabytes(host.metal_working_set_bytes)} per model
+                </Fact>
+              ) : null}
+              {host.memory_pressure && host.memory_pressure !== "normal" ? (
+                <Fact label="Memory pressure">
+                  <span
+                    className={
+                      host.memory_pressure === "critical"
+                        ? "text-app-danger"
+                        : "text-app-warning"
+                    }
+                  >
+                    {memoryPressureCopy(host.memory_pressure)}
+                  </span>
+                </Fact>
+              ) : null}
               {host.gpus.map((gpu) => (
                 <Fact key={gpu.index} label={`GPU ${gpu.index}`}>
                   {gpu.name} · {formatGigabytes(gpu.total_bytes)}

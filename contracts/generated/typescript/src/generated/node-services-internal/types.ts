@@ -1513,12 +1513,14 @@ export interface components {
       | "refresh";
     /** @description Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M. */
     LocalModelId: string;
-    /** @description TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh; unload_first only with load. */
+    /** @description TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh; unload_first only with load; no_autoload only with download. */
     LocalModelActionCommand: {
       request_id: components["schemas"]["Id"];
       action: components["schemas"]["LocalModelActionKind"];
       model_id?: components["schemas"]["LocalModelId"];
       unload_first?: components["schemas"]["LocalModelId"][];
+      /** @description Valid only when action is download; leaves the downloaded model idle without loading it. */
+      no_autoload?: boolean;
       expires_at: components["schemas"]["Timestamp"];
     };
     /**

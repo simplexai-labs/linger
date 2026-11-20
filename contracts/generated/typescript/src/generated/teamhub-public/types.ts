@@ -4551,6 +4551,11 @@ export interface components {
       extension_token: string;
       profile?: components["schemas"]["BrowserProfile"];
     };
+    /**
+     * @description macOS memory pressure level at snapshot time.
+     * @enum {string}
+     */
+    LocalModelMemoryPressure: "normal" | "warn" | "critical";
     LocalModelGpu: {
       index: number;
       uuid?: string;
@@ -4572,6 +4577,17 @@ export interface components {
       engine_label: string;
       /** Format: int64 */
       ram_total_bytes: number;
+      /**
+       * Format: int64
+       * @description Free plus reclaimable unified/system memory reported by the host probe.
+       */
+      ram_available_bytes?: number;
+      /**
+       * Format: int64
+       * @description Metal recommendedMaxWorkingSetSize on Apple Silicon Macs.
+       */
+      metal_working_set_bytes?: number;
+      memory_pressure?: components["schemas"]["LocalModelMemoryPressure"];
       /** Format: int64 */
       disk_free_bytes: number;
       gpus: components["schemas"]["LocalModelGpu"][];
@@ -4605,7 +4621,7 @@ export interface components {
       /** Format: int64 */
       bytes: number;
     };
-    /** @description One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them. */
+    /** @description One place models load into. unified is RAM less OS/Metal reserves; system is 80% of RAM, as localmodels computes them. */
     LocalModelPool: {
       id: components["schemas"]["LocalModelPoolId"];
       /** @enum {string} */
@@ -4616,6 +4632,11 @@ export interface components {
       total_bytes: number;
       /** Format: int64 */
       used_bytes: number;
+      /**
+       * Format: int64
+       * @description Memory kept back for the OS, display, or Metal safety margin.
+       */
+      reserve_bytes?: number;
       holders: components["schemas"]["LocalModelPoolHolder"][];
     };
     /** @description Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M. */
@@ -4785,6 +4806,18 @@ export interface components {
       source_url?: string;
       /** @description Warm prompt-processing speed in tokens/s measured at the last load; absent when unknown. */
       prompt_tokens_per_second?: number;
+      /** @description Whether the model currently fits its pool in live free memory. */
+      fits_now?: boolean;
+      /**
+       * Format: int64
+       * @description Pool-aligned free memory needed to load when fits_now is false.
+       */
+      load_need_bytes?: number;
+      /**
+       * Format: int64
+       * @description Pool-aligned free memory on the planned pool when fits_now is false.
+       */
+      load_free_bytes?: number;
     };
     /** @description An Agent whose runtime model is this model on this Computer. */
     LocalModelUser: {
@@ -4845,12 +4878,14 @@ export interface components {
     LocalModelsErrorResponse: {
       error: components["schemas"]["LocalModelsError"];
     };
-    /** @description A Human's action on one model. The click is the approval; there is no separate confirm step on the Computer. unload_first only with load. */
+    /** @description A Human's action on one model. The click is the approval; there is no separate confirm step on the Computer. unload_first only with load; no_autoload only with download. */
     LocalModelActionRequest: {
       /** @enum {string} */
       action: "download" | "cancel" | "load" | "unload" | "remove";
       /** @description Loaded models in the same pool to unload before the load starts. */
       unload_first?: components["schemas"]["LocalModelId"][];
+      /** @description Valid only when action is download; leaves the downloaded model idle without loading it. */
+      no_autoload?: boolean;
     };
     LocalModelActionAccepted: {
       computer_id: components["schemas"]["Id"];

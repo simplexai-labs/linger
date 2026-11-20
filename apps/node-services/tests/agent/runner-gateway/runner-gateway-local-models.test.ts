@@ -477,4 +477,43 @@ describe("Runner Gateway local models", () => {
     expect(close).toHaveBeenCalledWith(1002, "Runner protocol violation");
     await expect(cancelling).rejects.toBeInstanceOf(LocalComputerOfflineError);
   });
+
+  it("gates no_autoload download on Computer 0.57.0 and forwards it once supported", async () => {
+    const old = await connect(undefined, "0.56.0");
+    await old.report(1);
+    await expect(
+      old.gateway.actOnLocalModels({
+        ...target,
+        action: "download",
+        modelId: "qwen3-4b:Q4_K_M",
+        noAutoload: true,
+        expiresAt: inSeconds(10),
+      }),
+    ).rejects.toBeInstanceOf(LocalComputerCapabilityError);
+
+    const current = await connect(undefined, "0.57.0");
+    await current.report(1);
+    const downloading = current.gateway.actOnLocalModels({
+      ...target,
+      action: "download",
+      modelId: "qwen3-4b:Q4_K_M",
+      noAutoload: true,
+      expiresAt: inSeconds(10),
+    });
+    const request = await current.command();
+    expect(request).toMatchObject({
+      action: "download",
+      model_id: "qwen3-4b:Q4_K_M",
+      no_autoload: true,
+    });
+    await current.connection.receive({
+      type: "executed",
+      kind: "local_models",
+      outcome: "accepted",
+      ...identityOf(request),
+      action: "download",
+      model_id: "qwen3-4b:Q4_K_M",
+    });
+    await expect(downloading).resolves.toEqual({ outcome: "accepted" });
+  });
 });

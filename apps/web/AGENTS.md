@@ -53,19 +53,23 @@ build:assets` to check the initial JS budget.
   Sponsor-owned Agent eligibility and `Pi` runtime switch payloads in
   `local-model-agents.ts` (`Use with <Another Me>`, `Open chat`,
   `Switch Agent…` in `Used by`, and `Make room` automatic Agent handoff once
-  the replacement model loads when `Pi` is ready), and maps every code and enum
-  label to English in `local-models-copy.ts`. Without `?computer=` the desktop
-  app opens its own Computer and a browser prefers an online Computer. Only the
-  Computer's owner can act; actions return at once and progress arrives as
-  `local-models` invalidation hints (while `directory` hints and model-source
-  switches keep `Used by` and Agent registrations synchronized). From the click
-  until a snapshot with another status, error code, or observation time, or a
-  refusal (or while offline), the row shows a requested load or download as
-  started, labels a cancel, unload or remove under way (Cancelling, Unloading,
-  Removing), and spins that action's button, with the row's actions off; a
-  download the Computer accepted can be cancelled before its first progress.
-  Make room filters stale unloaded IDs out of `unload_first`, lists what else
-  holds the pool (components, and other apps from `used_bytes` no holder
+  the replacement model loads when `Pi` is ready), maps every code and enum
+  label to English in `local-models-copy.ts`, checks live download memory via
+  `downloadMemoryCheck` (`DownloadLowMemoryDialog`: `Recheck memory` or
+  `Download only` with `no_autoload`), and exposes `MemoryBreakdownPopover` on
+  the header summary and Details `PoolBar` plus `Recheck memory` in Details.
+  Without `?computer=` the desktop app opens its own Computer and a browser
+  prefers an online Computer. Only the Computer's owner can act; actions return
+  at once and progress arrives as `local-models` invalidation hints (while
+  `directory` hints and model-source switches keep `Used by` and Agent
+  registrations synchronized). From the click until a snapshot with another
+  status, error code, or observation time, or a refusal (or while offline), the
+  row shows a requested load or download as started, labels a cancel, unload or
+  remove under way (Cancelling, Unloading, Removing), and spins that action's
+  button, with the row's actions off; a download the Computer accepted can be
+  cancelled before its first progress. Make room filters stale unloaded IDs out
+  of `unload_first`, lists what else holds the pool (components, and other apps
+  from `used_bytes` no holder
   accounts for) when unloading models cannot free enough, and says a model
   cannot fit only when it needs more than the pool's total. A Computer's detail
   on the Computers page links here and reads no model state itself.

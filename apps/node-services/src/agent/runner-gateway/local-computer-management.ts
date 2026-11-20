@@ -48,6 +48,9 @@ export const FIRST_PI_MODEL_INVOKE_COMPUTER_VERSION = "0.55.0";
 // reports them back. An older Computer closes the connection on a byok input
 // that carries them, so it gets no BYOK command and no `byok_endpoint`.
 export const FIRST_BYOK_ENDPOINT_COMPUTER_VERSION = "0.56.0";
+// The first release that decodes `no_autoload` on `execute` `local_models`.
+// An older Computer rejects the unknown key and closes the connection.
+export const FIRST_LOCAL_MODEL_DOWNLOAD_ONLY_COMPUTER_VERSION = "0.57.0";
 
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 

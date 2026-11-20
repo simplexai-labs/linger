@@ -40,9 +40,10 @@ import {
   isAgentUsingModel,
   usedByAgentNames,
 } from "./local-model-agents";
-import { AdvancedDialog } from "./local-model-details";
+import { AdvancedDialog, MemoryBreakdownPopover } from "./local-model-details";
 import { ModelRow } from "./local-model-row";
 import {
+  DownloadLowMemoryDialog,
   MakeRoomDialog,
   RemoveModelDialog,
   UnloadModelDialog,
@@ -65,8 +66,10 @@ import {
   type LocalModelsView,
 } from "./local-models-queries";
 import {
+  downloadMemoryCheck,
   downloadStopped,
   formatGigabytes,
+  headerMemoryBreakdown,
   loadCheck,
   localSwitchTargets,
   memoryGuidance,
@@ -93,6 +96,7 @@ import {
 
 type Dialog =
   | { kind: "advanced" }
+  | { kind: "downloadLowMemory"; modelId: string }
   | { kind: "makeRoom"; modelId: string }
   | { kind: "remove"; modelId: string }
   | { kind: "unload"; modelId: string };
@@ -324,6 +328,7 @@ function ComputerModels({
     view.viewer_is_owner &&
     view.computer.status === "online",
   );
+  const breakdown = view?.available ? headerMemoryBreakdown(view) : undefined;
   const guidance = view?.available ? memoryGuidance(view) : null;
   const queryErrorCode =
     query.error instanceof TeamHubError ? query.error.code : undefined;
@@ -378,12 +383,16 @@ function ComputerModels({
                 {formatGigabytes(summary.totalBytes)}{" "}
                 {summary.gpu ? "GPU memory" : "memory"} in use
               </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {formatGigabytes(summary.freeBytes)} free
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                <MemoryBreakdownPopover breakdown={breakdown}>
+                  <span className="tabular-nums">
+                    {formatGigabytes(summary.freeBytes)} free
+                  </span>
+                </MemoryBreakdownPopover>
                 {view?.observed_at
                   ? ` · Checked ${relativeTime(view.observed_at)}`
                   : ""}
-              </p>
+              </div>
             </>
           ) : null}
         </div>
@@ -957,6 +966,14 @@ function Library({
     action.mutate(input);
   }
 
+  function download(entry: ModelEntry) {
+    if (downloadMemoryCheck(view, entry.model)) {
+      setDialog({ kind: "downloadLowMemory", modelId: entry.model.id });
+    } else {
+      act({ action: "download", modelId: entry.model.id });
+    }
+  }
+
   function load(entry: ModelEntry) {
     if (loadCheck(view, entry.model))
       setDialog({ kind: "makeRoom", modelId: entry.model.id });
@@ -1120,7 +1137,7 @@ function Library({
                         : undefined
                     }
                     onCancel={() => act({ action: "cancel", modelId })}
-                    onDownload={() => act({ action: "download", modelId })}
+                    onDownload={() => download(entry)}
                     onLoad={() => load(entry)}
                     onRemove={() => setDialog({ kind: "remove", modelId })}
                     onToggle={() =>
@@ -1146,7 +1163,34 @@ function Library({
       )}
 
       {dialog?.kind === "advanced" ? (
-        <AdvancedDialog onClose={() => setDialog(null)} view={view} />
+        <AdvancedDialog
+          canRecheck={!offline && !readOnly}
+          onClose={() => setDialog(null)}
+          onRecheck={onRefresh}
+          rechecking={rechecking}
+          view={view}
+        />
+      ) : null}
+      {dialogEntry && dialog?.kind === "downloadLowMemory" ? (
+        <DownloadLowMemoryDialog
+          check={downloadMemoryCheck(view, dialogEntry.model)}
+          disabled={offline || readOnly || requests.has(dialogEntry.model.id)}
+          entry={dialogEntry}
+          onClose={() => setDialog(null)}
+          onDownloadAndLoad={() =>
+            act({ action: "download", modelId: dialogEntry.model.id })
+          }
+          onDownloadOnly={() =>
+            act({
+              action: "download",
+              modelId: dialogEntry.model.id,
+              noAutoload: true,
+            })
+          }
+          onRecheck={!offline && !readOnly ? onRefresh : undefined}
+          rechecking={rechecking}
+          view={view}
+        />
       ) : null}
       {dialogEntry && makeRoom ? (
         <MakeRoomDialog

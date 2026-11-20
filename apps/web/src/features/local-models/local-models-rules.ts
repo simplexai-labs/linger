@@ -1,6 +1,10 @@
 import { formatBytes } from "@/lib/format-bytes";
 
-import { architectureCopy, capabilityCopy } from "./local-models-copy";
+import {
+  architectureCopy,
+  capabilityCopy,
+  memoryPressureCopy,
+} from "./local-models-copy";
 import type {
   LocalModel,
   LocalModelPool,
@@ -294,7 +298,7 @@ export function memoryGuidance(view: LocalModelsView): MemoryGuidance | null {
       return (
         pool !== undefined &&
         poolOtherBytes(pool) > 0 &&
-        entry.model.memory_bytes > poolFreeBytes(pool)
+        downloadMemoryCheck(view, entry.model) !== null
       );
     });
     if (constrainedAvailable) {
@@ -308,6 +312,33 @@ export function memoryGuidance(view: LocalModelsView): MemoryGuidance | null {
     }
   }
   return null;
+}
+
+export interface DownloadMemoryCheck {
+  freeBytes: number;
+  needBytes: number;
+  pool: LocalModelPool;
+}
+
+/**
+ * Why a downloadable model cannot be auto-loaded immediately after download,
+ * or `null` when its pool has live room now (or no pool applies).
+ */
+export function downloadMemoryCheck(
+  view: LocalModelsView,
+  model: LocalModel,
+): DownloadMemoryCheck | null {
+  if (model.state !== "absent" || !model.availability.downloadable) return null;
+  const pool = poolOf(view, model.pool);
+  if (!pool) return null;
+  if (model.fits_now === true) return null;
+  if (model.fits_now === undefined && poolFreeBytes(pool) >= model.memory_bytes)
+    return null;
+  return {
+    freeBytes: model.load_free_bytes ?? poolFreeBytes(pool),
+    needBytes: model.load_need_bytes ?? model.memory_bytes,
+    pool,
+  };
 }
 
 export interface LoadCheck {
@@ -329,7 +360,9 @@ export function loadCheck(
   model: LocalModel,
 ): LoadCheck | null {
   const pool = poolOf(view, model.pool);
-  if (!pool || poolFreeBytes(pool) >= model.memory_bytes) return null;
+  if (!pool || model.fits_now === true) return null;
+  if (model.fits_now === undefined && poolFreeBytes(pool) >= model.memory_bytes)
+    return null;
   const loaded = modelEntries(view).filter(
     (entry) =>
       entry.status === "loaded" &&
@@ -337,13 +370,156 @@ export function loadCheck(
       entry.model.id !== model.id,
   );
   return {
-    freeBytes: poolFreeBytes(pool),
+    freeBytes: model.load_free_bytes ?? poolFreeBytes(pool),
     kept: pool.holders.filter(
       (holder) => !loaded.some((entry) => entry.model.id === holder.id),
     ),
     loaded,
-    needBytes: model.memory_bytes,
+    needBytes: model.load_need_bytes ?? model.memory_bytes,
     pool,
+  };
+}
+
+export interface MemoryBreakdownRow {
+  label: string;
+  tone?: "default" | "warning" | "danger";
+  value: string;
+}
+
+export interface MemoryBreakdown {
+  note?: string;
+  rows: MemoryBreakdownRow[];
+  title: string;
+}
+
+/** Structured breakdown for a single memory pool hover card and Details view. */
+export function poolMemoryBreakdown(
+  view: LocalModelsView,
+  pool: LocalModelPool,
+): MemoryBreakdown {
+  const host = view.computer.host;
+  const holdersBytes = pool.holders.reduce(
+    (sum, holder) => sum + holder.bytes,
+    0,
+  );
+  const freeBytes = poolFreeBytes(pool);
+  const rows: MemoryBreakdownRow[] = [];
+
+  if (pool.kind === "unified") {
+    if (host) {
+      rows.push({
+        label: "Physical memory",
+        value: formatGigabytes(host.ram_total_bytes),
+      });
+    }
+    if (holdersBytes > 0) {
+      rows.push({
+        label: "Loaded models",
+        value: formatGigabytes(holdersBytes),
+      });
+    }
+    const appsBytes =
+      host?.ram_available_bytes !== undefined
+        ? Math.max(
+            0,
+            host.ram_total_bytes - host.ram_available_bytes - holdersBytes,
+          )
+        : Math.max(0, pool.used_bytes - holdersBytes);
+    rows.push({
+      label: "Used by macOS & apps",
+      value: formatGigabytes(appsBytes),
+    });
+    if (host?.ram_available_bytes !== undefined) {
+      rows.push({
+        label: "Reclaimable & free",
+        value: formatGigabytes(host.ram_available_bytes),
+      });
+    }
+    if (pool.reserve_bytes !== undefined && pool.reserve_bytes > 0) {
+      rows.push({
+        label: "Reserved for macOS & Linger",
+        value: formatGigabytes(pool.reserve_bytes),
+      });
+    }
+    rows.push({
+      label: "Available for models",
+      value: formatGigabytes(freeBytes),
+    });
+    if (host?.metal_working_set_bytes !== undefined) {
+      rows.push({
+        label: "Per-model Metal GPU cap",
+        value: formatGigabytes(host.metal_working_set_bytes),
+      });
+    }
+    if (host?.memory_pressure && host.memory_pressure !== "normal") {
+      rows.push({
+        label: "Memory pressure",
+        tone: host.memory_pressure === "critical" ? "danger" : "warning",
+        value: memoryPressureCopy(host.memory_pressure),
+      });
+    }
+    const note =
+      host?.memory_pressure === "critical"
+        ? "Memory pressure is critical. Close apps and click Recheck memory before loading a model."
+        : host?.memory_pressure === "warn"
+          ? "Memory pressure is elevated. macOS holds back an extra safety buffer so loading models does not freeze apps."
+          : "macOS includes purgeable and file-cached memory in reclaimable headroom; model loading also keeps a macOS safety reserve.";
+    return { note, rows, title: "Unified memory breakdown" };
+  }
+
+  const otherBytes = Math.max(0, pool.used_bytes - holdersBytes);
+  if (pool.kind === "system" && host) {
+    rows.push({
+      label: "Physical memory",
+      value: formatGigabytes(host.ram_total_bytes),
+    });
+  }
+  rows.push({
+    label: pool.kind === "gpu" ? "Total VRAM" : "Model budget",
+    value: formatGigabytes(pool.total_bytes),
+  });
+  if (holdersBytes > 0) {
+    rows.push({
+      label: "Loaded models",
+      value: formatGigabytes(holdersBytes),
+    });
+  }
+  if (otherBytes > 0) {
+    rows.push({
+      label: "Other processes",
+      value: formatGigabytes(otherBytes),
+    });
+  }
+  if (pool.reserve_bytes !== undefined && pool.reserve_bytes > 0) {
+    rows.push({
+      label:
+        pool.kind === "gpu"
+          ? "Driver & safety reserve"
+          : "Reserved for OS & apps",
+      value: formatGigabytes(pool.reserve_bytes),
+    });
+  }
+  rows.push({
+    label: "Free for models",
+    value: formatGigabytes(freeBytes),
+  });
+  return { rows, title: poolLabel(view, pool) };
+}
+
+/** Breakdown shown when hovering or clicking the header memory summary. */
+export function headerMemoryBreakdown(
+  view: LocalModelsView,
+): MemoryBreakdown | undefined {
+  const gpus = view.pools.filter((pool) => pool.kind === "gpu");
+  const pools = gpus.length ? gpus : view.pools;
+  if (!pools.length) return undefined;
+  if (pools.length === 1) return poolMemoryBreakdown(view, pools[0]!);
+  return {
+    rows: pools.map((pool) => ({
+      label: poolLabel(view, pool),
+      value: `${formatGigabytes(poolFreeBytes(pool))} free of ${formatGigabytes(pool.total_bytes)}`,
+    })),
+    title: "GPU memory breakdown",
   };
 }
 

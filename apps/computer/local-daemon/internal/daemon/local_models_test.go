@@ -87,11 +87,21 @@ func TestLocalModelsCommandAnswersAcceptedOrRefused(t *testing.T) {
 	}
 	library.refusal = nil
 
+	event, frame = send(map[string]any{"action": "download", "model_id": "qwen3-4b:Q4_K_M", "no_autoload": true})
+	if event.Type != protocol.EventCapabilityLocalModelsAccepted || frame["outcome"] != "accepted" {
+		t.Fatalf("no_autoload download = %s %v", event.Type, frame)
+	}
+	if got := library.actions[len(library.actions)-1]; got.Name != "download" || !got.NoAutoload {
+		t.Fatalf("action = %+v", got)
+	}
+
 	calls := len(library.actions)
 	for _, invalid := range []map[string]any{
 		{"action": "download", "model_id": "--base-dir=/tmp"},
 		{"action": "refresh", "model_id": "qwen3-4b:Q4_K_M"},
 		{"action": "unload", "model_id": "qwen3-4b:Q4_K_M", "unload_first": []string{"other:Q4"}},
+		{"action": "load", "model_id": "qwen3-4b:Q4_K_M", "no_autoload": true},
+		{"action": "refresh", "no_autoload": false},
 		{"action": "format", "model_id": "qwen3-4b:Q4_K_M"},
 	} {
 		if _, frame := send(invalid); frame["outcome"] != "refused" || frame["refusal"].(map[string]any)["code"] != "MODEL_UNKNOWN" {

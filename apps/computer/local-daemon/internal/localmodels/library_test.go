@@ -666,3 +666,15 @@ func TestAFailedLoadKeepsTheGatewayCauseOnItsRow(t *testing.T) {
 		return model.Error != nil && model.Error.Cause == "" && model.Error.Path == ""
 	})
 }
+
+func TestDownloadNoAutoloadPassesCLIflag(t *testing.T) {
+	tool := Tool{BaseDirectory: "/models"}
+	want := []string{"-P", "-s", "-m", "localmodels", "library", "download", testModel, "--no-autoload", "--base-dir", "/models", "--jsonl"}
+	if got := tool.arguments(Action{Name: ActionDownload, Model: testModel, NoAutoload: true}); !slices.Equal(got, want) {
+		t.Fatalf("arguments(NoAutoload=true) = %v, want %v", got, want)
+	}
+	wantDefault := []string{"-P", "-s", "-m", "localmodels", "library", "download", testModel, "--base-dir", "/models", "--jsonl"}
+	if got := tool.arguments(Action{Name: ActionDownload, Model: testModel}); !slices.Equal(got, wantDefault) {
+		t.Fatalf("arguments(NoAutoload=false) = %v, want %v", got, wantDefault)
+	}
+}

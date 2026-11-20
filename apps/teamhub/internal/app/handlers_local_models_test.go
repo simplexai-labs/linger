@@ -146,6 +146,8 @@ func TestValidLocalModelAction(t *testing.T) {
 		want    bool
 	}{
 		{"download", "qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: "download"}, true},
+		{"download only", "qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: "download", NoAutoload: new(true)}, true},
+		{"no_autoload only with download", "m:1", httpapi.LocalModelActionRequest{Action: "load", NoAutoload: new(true)}, false},
 		{"load making room", "qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: "load", UnloadFirst: list("a:1", "b:2")}, true},
 		{"refresh is not public", "qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: "refresh"}, false},
 		{"bad model id", "../etc", httpapi.LocalModelActionRequest{Action: "unload"}, false},
@@ -207,6 +209,10 @@ func TestValidLocalModelsSnapshot(t *testing.T) {
 			c := teamhubinternal.LocalModelErrorCause("DISK_LOCKED")
 			s.Models[0].State = teamhubinternal.LocalModelStateFailed
 			s.Models[0].Error = &teamhubinternal.LocalModelError{Code: "GATEWAY_REGISTRATION_FAILED", Cause: &c}
+		},
+		"unknown memory_pressure": func(s *teamhubinternal.LocalModelsSnapshot) {
+			p := teamhubinternal.LocalModelMemoryPressure("extreme")
+			s.Host = &teamhubinternal.LocalModelHost{MemoryPressure: &p}
 		},
 		"negative prompt_tokens_per_second": func(s *teamhubinternal.LocalModelsSnapshot) {
 			p := float32(-1)

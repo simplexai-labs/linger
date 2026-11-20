@@ -176,7 +176,8 @@ func (a *App) actOnLocalComputerModel(c *gin.Context) {
 	if request.UnloadFirst != nil {
 		unloadFirst = *request.UnloadFirst
 	}
-	a.forwardLocalModelAction(c, string(request.Action), modelID, unloadFirst, func(computerID string) {
+	noAutoload := request.NoAutoload != nil && *request.NoAutoload
+	a.forwardLocalModelAction(c, string(request.Action), modelID, unloadFirst, noAutoload, func(computerID string) {
 		c.JSON(http.StatusAccepted, httpapi.LocalModelActionAccepted{
 			ComputerId: computerID, ModelId: modelID, Action: httpapi.LocalModelActionAcceptedAction(request.Action),
 		})
@@ -186,14 +187,14 @@ func (a *App) actOnLocalComputerModel(c *gin.Context) {
 // refreshLocalComputerModels asks an owned connected Computer to recheck
 // free memory and models and report a fresh library snapshot.
 func (a *App) refreshLocalComputerModels(c *gin.Context) {
-	a.forwardLocalModelAction(c, "refresh", "", nil, func(computerID string) {
+	a.forwardLocalModelAction(c, "refresh", "", nil, false, func(computerID string) {
 		c.JSON(http.StatusAccepted, httpapi.LocalModelsRefreshAccepted{
 			ComputerId: computerID, Action: httpapi.LocalModelsRefreshAcceptedRefresh,
 		})
 	})
 }
 
-func (a *App) forwardLocalModelAction(c *gin.Context, action string, modelID string, unloadFirst []string, onAccepted func(computerID string)) {
+func (a *App) forwardLocalModelAction(c *gin.Context, action string, modelID string, unloadFirst []string, noAutoload bool, onAccepted func(computerID string)) {
 	tenantID, computerID := c.Param("tenantId"), c.Param("computerId")
 	viewerID, ok := a.spaceHuman(c, tenantID)
 	if !ok {
@@ -224,7 +225,7 @@ func (a *App) forwardLocalModelAction(c *gin.Context, action string, modelID str
 	command := roomagent.LocalModelActionCommand{
 		TenantID: tenantID, OwnerActorID: viewerID, ComputerID: computerID,
 		RequestID: ids.New("local_model_action"), Action: action, ModelID: modelID,
-		UnloadFirst: unloadFirst, ExpiresAt: time.Now().UTC().Add(localModelActionLifetime),
+		UnloadFirst: unloadFirst, NoAutoload: noAutoload, ExpiresAt: time.Now().UTC().Add(localModelActionLifetime),
 	}
 	refusal, err := a.localComputers.ActOnLocalModels(c.Request.Context(), command)
 	switch {
@@ -254,6 +255,9 @@ func (a *App) forwardLocalModelAction(c *gin.Context, action string, modelID str
 
 func validLocalModelAction(modelID string, request httpapi.LocalModelActionRequest) bool {
 	if !localModelIDPattern.MatchString(modelID) || !request.Action.Valid() {
+		return false
+	}
+	if request.NoAutoload != nil && request.Action != httpapi.LocalModelActionRequestDownload {
 		return false
 	}
 	if request.UnloadFirst == nil {
@@ -314,6 +318,9 @@ func (a *App) recordAgentRuntimeLocalModels(c *gin.Context) {
 func validLocalModelsSnapshot(snapshot teamhubinternal.LocalModelsSnapshot) bool {
 	if snapshot.ObservedAt.IsZero() || len(snapshot.Pools) > 65 || len(snapshot.Models) > 256 ||
 		snapshot.Available != (snapshot.Reason == nil) || (snapshot.Reason != nil && !snapshot.Reason.Code.Valid()) {
+		return false
+	}
+	if snapshot.Host != nil && snapshot.Host.MemoryPressure != nil && !snapshot.Host.MemoryPressure.Valid() {
 		return false
 	}
 	for _, pool := range snapshot.Pools {

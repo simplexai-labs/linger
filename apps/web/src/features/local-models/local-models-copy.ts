@@ -235,6 +235,19 @@ export function architectureCopy(
   return architectureLabels[architecture];
 }
 
+const pressureLabels: Record<Schemas["LocalModelMemoryPressure"], string> = {
+  critical: "Critical",
+  normal: "Normal",
+  warn: "Warning",
+};
+
+/** Human-readable macOS memory pressure label. */
+export function memoryPressureCopy(
+  pressure: Schemas["LocalModelMemoryPressure"],
+) {
+  return pressureLabels[pressure];
+}
+
 const modelSourceRefusals: Record<Schemas["ModelSourceErrorCode"], string> = {
   AGENT_HAS_ACTIVE_RUNS: "Agents on this computer are working on tasks.",
   BYOK_AUTH_FAILED: "The endpoint rejected the API key.",

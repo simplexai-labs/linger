@@ -36,11 +36,12 @@ type Tool struct {
 }
 
 // Action is one owner-chosen library action. Model is empty only for
-// refresh; UnloadFirst is only for load.
+// refresh; UnloadFirst is only for load; NoAutoload is only for download.
 type Action struct {
 	Name        string
 	Model       string
 	UnloadFirst []string
+	NoAutoload  bool
 }
 
 // Action names, as the Runner Gateway sends them.
@@ -61,7 +62,11 @@ func (t Tool) arguments(action Action) []string {
 	case ActionRefresh:
 		return append(args, "status", "--base-dir", t.BaseDirectory, "--json")
 	case ActionDownload:
-		return append(args, "download", action.Model, "--base-dir", t.BaseDirectory, "--jsonl")
+		args = append(args, "download", action.Model)
+		if action.NoAutoload {
+			args = append(args, "--no-autoload")
+		}
+		return append(args, "--base-dir", t.BaseDirectory, "--jsonl")
 	case ActionLoad:
 		args = append(args, "load", action.Model)
 		for _, other := range action.UnloadFirst {

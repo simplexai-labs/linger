@@ -81,12 +81,14 @@ and the `LocalModel*` definitions of `runner-gateway/envelope.schema.json`.
 Actions go Web → TeamHub → Agent Service → Computer → `localmodels`:
 
 1. Web posts `actOnLocalComputerModel`
-   (`POST /v0/tenants/{tenantId}/local-computers/{computerId}/local-models/{modelId}/actions`).
+   (`POST /v0/tenants/{tenantId}/local-computers/{computerId}/local-models/{modelId}/actions`)
+   or `refreshLocalComputerModels`
+   (`POST /v0/tenants/{tenantId}/local-computers/{computerId}/local-models`).
    Only the Computer owner may act.
 2. TeamHub calls Node Services `actOnLocalComputerModels`
    (`POST /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-model-actions`).
-3. Agent Service sends `execute` with kind `local_models` (download, cancel,
-   load with `unload_first`, unload, remove, or refresh). The Daemon answers
+3. Agent Service sends `execute` with kind `local_models` (download with optional
+   `no_autoload`, cancel, load with `unload_first`, unload, remove, or refresh). The Daemon answers
    `executed` with outcome `accepted` or `refused` at once and runs the
    `localmodels library` job itself. The ack returns to TeamHub as
    `LocalModelActionAck`; a refusal becomes a `LocalModelsErrorCode`.

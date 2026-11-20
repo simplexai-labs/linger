@@ -1217,13 +1217,16 @@ func (LocalModelGpu) RequiredFields() []string {
 
 // LocalModelHost mirrors the LocalModelHost schema shape.
 type LocalModelHost struct {
-	Platform      string          `json:"platform"`
-	Arch          string          `json:"arch"`
-	OsLabel       string          `json:"os_label"`
-	EngineLabel   string          `json:"engine_label"`
-	RamTotalBytes uint64          `json:"ram_total_bytes"`
-	DiskFreeBytes uint64          `json:"disk_free_bytes"`
-	Gpus          []LocalModelGpu `json:"gpus"`
+	Platform             string          `json:"platform"`
+	Arch                 string          `json:"arch"`
+	OsLabel              string          `json:"os_label"`
+	EngineLabel          string          `json:"engine_label"`
+	RamTotalBytes        uint64          `json:"ram_total_bytes"`
+	RamAvailableBytes    *uint64         `json:"ram_available_bytes,omitempty"`
+	MetalWorkingSetBytes *uint64         `json:"metal_working_set_bytes,omitempty"`
+	MemoryPressure       string          `json:"memory_pressure,omitempty"`
+	DiskFreeBytes        uint64          `json:"disk_free_bytes"`
+	Gpus                 []LocalModelGpu `json:"gpus"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModelHost.
@@ -1250,12 +1253,13 @@ func (LocalModelPoolHolder) RequiredFields() []string { return []string{"kind", 
 
 // LocalModelPool mirrors the LocalModelPool schema shape.
 type LocalModelPool struct {
-	ID         string                 `json:"id"`
-	Kind       string                 `json:"kind"`
-	GpuIndex   *uint64                `json:"gpu_index,omitempty"`
-	TotalBytes uint64                 `json:"total_bytes"`
-	UsedBytes  uint64                 `json:"used_bytes"`
-	Holders    []LocalModelPoolHolder `json:"holders"`
+	ID           string                 `json:"id"`
+	Kind         string                 `json:"kind"`
+	GpuIndex     *uint64                `json:"gpu_index,omitempty"`
+	TotalBytes   uint64                 `json:"total_bytes"`
+	UsedBytes    uint64                 `json:"used_bytes"`
+	ReserveBytes *uint64                `json:"reserve_bytes,omitempty"`
+	Holders      []LocalModelPoolHolder `json:"holders"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModelPool.
@@ -1373,6 +1377,9 @@ type LocalModel struct {
 	License               string                      `json:"license,omitempty"`
 	SourceURL             string                      `json:"source_url,omitempty"`
 	PromptTokensPerSecond *float64                    `json:"prompt_tokens_per_second,omitempty"`
+	FitsNow               *bool                       `json:"fits_now,omitempty"`
+	LoadNeedBytes         *uint64                     `json:"load_need_bytes,omitempty"`
+	LoadFreeBytes         *uint64                     `json:"load_free_bytes,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModel.
@@ -1428,6 +1435,7 @@ type CapabilityLocalModelsExecute struct {
 	Action          string   `json:"action"`
 	ModelID         string   `json:"model_id,omitempty"`
 	UnloadFirst     []string `json:"unload_first,omitempty"`
+	NoAutoload      *bool    `json:"no_autoload,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a CapabilityLocalModelsExecute.

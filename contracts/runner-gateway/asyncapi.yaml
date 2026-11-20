@@ -59,8 +59,8 @@ info:
     Disconnect/timeout means an unknown outcome; the caller must inspect
     effects and must not automatically replay actions.
     execute with kind local_models acts on the Computer's localmodels
-    library (download, cancel, load with unload_first, unload, remove, or
-    refresh). The Computer answers executed with outcome accepted or refused
+    library (download with optional no_autoload, cancel, load with
+    unload_first, unload, remove, or refresh). The Computer answers executed with outcome accepted or refused
     at once and supervises the long-running localmodels job itself; progress
     and outcomes reach the service only as runner.local_models snapshots,
     which the Computer sends after a runner.welcome whose service_features

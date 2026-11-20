@@ -86,14 +86,19 @@ func (d *Daemon) handleLocalModelsCommand(ctx context.Context, stream transport.
 		slog.Info("local_models.command_expired", "action", request.Action, "model", request.ModelID)
 		return nil
 	}
-	action := localmodels.Action{Name: request.Action, Model: request.ModelID, UnloadFirst: request.UnloadFirst}
+	action := localmodels.Action{
+		Name:        request.Action,
+		Model:       request.ModelID,
+		UnloadFirst: request.UnloadFirst,
+		NoAutoload:  request.NoAutoload != nil && *request.NoAutoload,
+	}
 	var refusal *wire.LocalModelActionRefusal
 	switch {
 	case request.RunnerID != d.computerID || !d.ownedBy(request.TenantID, request.OwnerActorID):
 		// The Agent Service routes only the Computer's own owners here.
 		slog.Warn("local_models.command_rejected", "reason", "owner", "action", request.Action)
 		refusal = &wire.LocalModelActionRefusal{Code: localmodels.CodeToolFailed, Detail: "the command does not name this Computer's owner"}
-	case !validLocalModelAction(action):
+	case (request.NoAutoload != nil && request.Action != localmodels.ActionDownload) || !validLocalModelAction(action):
 		slog.Warn("local_models.command_rejected", "reason", "shape", "action", request.Action)
 		refusal = &wire.LocalModelActionRefusal{Code: "MODEL_UNKNOWN", Detail: "the command names no valid model action"}
 	case !d.acceptsLocalModels(stream):
@@ -146,6 +151,9 @@ func (d *Daemon) handleLocalModelsCommand(ctx context.Context, stream transport.
 // validLocalModelAction checks what the wire schema requires, so no value
 // the tool would read as an option reaches its command line.
 func validLocalModelAction(action localmodels.Action) bool {
+	if action.NoAutoload && action.Name != localmodels.ActionDownload {
+		return false
+	}
 	switch action.Name {
 	case localmodels.ActionRefresh:
 		return action.Model == "" && len(action.UnloadFirst) == 0

@@ -20,6 +20,7 @@ import {
   poolLabel,
   poolOf,
   poolOtherBytes,
+  type DownloadMemoryCheck,
   type LoadCheck,
   type ModelEntry,
 } from "./local-models-rules";
@@ -40,6 +41,88 @@ function AffectedAgents({
     </FormFeedback>
   ) : (
     <p className="text-sm text-muted-foreground">No Agent uses this model.</p>
+  );
+}
+
+/** Soft live-memory warning before starting a download that cannot load yet. */
+export function DownloadLowMemoryDialog({
+  check,
+  disabled,
+  entry,
+  onClose,
+  onDownloadAndLoad,
+  onDownloadOnly,
+  onRecheck,
+  rechecking = false,
+  view,
+}: {
+  check: DownloadMemoryCheck | null;
+  disabled: boolean;
+  entry: ModelEntry;
+  onClose: () => void;
+  onDownloadAndLoad: () => void;
+  onDownloadOnly: () => void;
+  onRecheck?: () => void;
+  rechecking?: boolean;
+  view: LocalModelsView;
+}) {
+  const poolName = check ? poolLabel(view, check.pool) : "memory";
+  return (
+    <ModalDialog
+      description={
+        check
+          ? `${entry.model.name} needs ${formatGigabytes(check.needBytes)} free on ${poolName} to load right now, and ${formatGigabytes(check.freeBytes)} is free.`
+          : `Enough memory is now free on ${view.computer.display_name} to download and load ${entry.model.name}.`
+      }
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          {onRecheck ? (
+            <Button
+              disabled={disabled}
+              loading={rechecking}
+              onClick={onRecheck}
+            >
+              Recheck memory
+            </Button>
+          ) : null}
+          {check ? (
+            <Button disabled={disabled} onClick={onDownloadOnly} tone="primary">
+              Download only
+            </Button>
+          ) : (
+            <Button
+              disabled={disabled}
+              onClick={onDownloadAndLoad}
+              tone="primary"
+            >
+              Download and load
+            </Button>
+          )}
+        </>
+      }
+      onClose={onClose}
+      size="md"
+      title={
+        check
+          ? "Not enough free memory to load now"
+          : "Ready to download and load"
+      }
+    >
+      <div className="grid gap-3 px-5 py-4">
+        {check ? (
+          <FormFeedback tone="warning">
+            You can download the weights now without loading them (
+            {formatGigabytes(entry.model.download_bytes)} on disk), or close
+            other apps on {view.computer.display_name} and click Recheck memory.
+          </FormFeedback>
+        ) : (
+          <FormFeedback tone="info">
+            Live memory now has enough room for {entry.model.name}.
+          </FormFeedback>
+        )}
+      </div>
+    </ModalDialog>
   );
 }
 

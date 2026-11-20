@@ -68,6 +68,56 @@ func TestMapStatusKeepsTheModelCardOfARealDev38Status(t *testing.T) {
 	}
 }
 
+func TestMapStatusPreservesMemoryBreakdownAndLiveFitFields(t *testing.T) {
+	raw, err := json.Marshal(map[string]any{
+		"schema": "localmodels.library-status/v1", "tool_version": "0.1.5", "observed_at": "2026-11-19T00:00:00Z",
+		"host": map[string]any{
+			"platform": "darwin", "arch": "arm64", "os_label": "macOS 27.2", "engine_label": "llama.cpp b11370 · Metal",
+			"ram_total_bytes": 24 << 30, "ram_available_bytes": 9 << 30,
+			"metal_working_set_bytes": 18 << 30, "memory_pressure": "warn",
+			"disk_free_bytes": 50 << 30, "gpus": []any{},
+		},
+		"pools": []any{map[string]any{
+			"id": "unified", "total_bytes": 21 << 30, "used_bytes": 15 << 30, "reserve_bytes": 3 << 30, "holders": []any{},
+		}},
+		"models": []any{map[string]any{
+			"id": "qwen3.8-27b-iq3s:UD-IQ3_S", "name": "Qwen3.8 27B (UD-IQ3_S)", "description": "", "quant": "UD-IQ3_S",
+			"context_tokens": 200_000, "vision": true, "download_bytes": 17 << 30, "memory_bytes": 20 << 30,
+			"fit": "unified", "recommended": false, "availability": map[string]any{"downloadable": true},
+			"pool": "unified", "state": "absent",
+			"fits_now": false, "load_need_bytes": 18 << 30, "load_free_bytes": 6 << 30,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := mapStatus(raw, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Host == nil || snapshot.Host.RamAvailableBytes == nil || *snapshot.Host.RamAvailableBytes != 9<<30 ||
+		snapshot.Host.MetalWorkingSetBytes == nil || *snapshot.Host.MetalWorkingSetBytes != 18<<30 ||
+		snapshot.Host.MemoryPressure != "warn" {
+		t.Fatalf("host = %+v", snapshot.Host)
+	}
+	if len(snapshot.Pools) != 1 || snapshot.Pools[0].ReserveBytes == nil || *snapshot.Pools[0].ReserveBytes != 3<<30 {
+		t.Fatalf("pools = %+v", snapshot.Pools)
+	}
+	model := snapshot.Models[0]
+	if model.FitsNow == nil || *model.FitsNow || model.LoadNeedBytes == nil || *model.LoadNeedBytes != 18<<30 ||
+		model.LoadFreeBytes == nil || *model.LoadFreeBytes != 6<<30 {
+		t.Fatalf("model = %+v", model)
+	}
+
+	var invalid map[string]any
+	_ = json.Unmarshal(raw, &invalid)
+	invalid["host"].(map[string]any)["memory_pressure"] = "extreme"
+	bad, _ := json.Marshal(invalid)
+	if _, err := mapStatus(bad, time.Now()); err == nil {
+		t.Fatal("expected error for invalid memory_pressure")
+	}
+}
+
 func TestMapStatusPreservesSubsecondObservedAt(t *testing.T) {
 	encoded, err := os.ReadFile("testdata/library-status-dev38.json")
 	if err != nil {
