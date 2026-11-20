@@ -71,18 +71,45 @@ async function digest(file: string) {
   for await (const chunk of createReadStream(file)) h.update(chunk);
   return h.digest("hex");
 }
-async function regular(root: string, relative: string) {
-  if (!safeRelative(relative)) throw new Error("Unsafe upstream tool path.");
-  let file = root;
-  for (const part of relative.split("/")) {
-    file = path.join(file, part);
-    const s = await lstat(file);
+async function verifyDirectory(
+  directory: string,
+  checkedDirs?: Map<string, Promise<void>>,
+) {
+  if (!checkedDirs) {
+    const s = await lstat(directory);
     if (s.isSymbolicLink())
       throw new Error("Linked upstream tool paths are forbidden.");
+    return;
   }
-  if (!(await lstat(file)).isFile())
+  let pending = checkedDirs.get(directory);
+  if (!pending) {
+    pending = lstat(directory).then((s) => {
+      if (s.isSymbolicLink())
+        throw new Error("Linked upstream tool paths are forbidden.");
+    });
+    checkedDirs.set(directory, pending);
+  }
+  await pending;
+}
+async function regular(
+  root: string,
+  relative: string,
+  checkedDirs?: Map<string, Promise<void>>,
+) {
+  if (!safeRelative(relative)) throw new Error("Unsafe upstream tool path.");
+  const parts = relative.split("/");
+  let current = root;
+  for (let i = 0; i < parts.length - 1; i++) {
+    current = path.join(current, parts[i]!);
+    await verifyDirectory(current, checkedDirs);
+  }
+  const file = path.join(current, parts[parts.length - 1]!);
+  const info = await lstat(file);
+  if (info.isSymbolicLink())
+    throw new Error("Linked upstream tool paths are forbidden.");
+  if (!info.isFile())
     throw new Error("Upstream tool payload must be a regular file.");
-  return file;
+  return { file, info };
 }
 // Size and modification time of each asset when it last matched its
 // checksum. An asset whose stamp still matches is not hashed again: the kit
@@ -122,13 +149,18 @@ async function writeStamps(
 export const LOCALMODELS_KIT_VERIFICATION_FAILED =
   "LOCALMODELS_KIT_VERIFICATION_FAILED";
 // Assets hashed at once.
-const CONCURRENCY = 16;
+const CONCURRENCY = 32;
 async function verify(
   directory: string,
   source: LocalmodelsToolSource,
   known: Stamps = {},
 ) {
-  const manifestFile = await regular(directory, "tool.json");
+  const checkedDirs = new Map<string, Promise<void>>();
+  const { file: manifestFile, info: manifestInfo } = await regular(
+    directory,
+    "tool.json",
+    checkedDirs,
+  );
   const body = await readFile(manifestFile);
   if (createHash("sha256").update(body).digest("hex") !== source.manifestSha256)
     throw new Error("Upstream tool manifest checksum mismatch.");
@@ -147,7 +179,7 @@ async function verify(
     );
   const assets = Object.entries(m.assets);
   const writable: string[] = [];
-  if (process.platform === "win32" && (await lstat(manifestFile)).mode & 0o200)
+  if (process.platform === "win32" && manifestInfo.mode & 0o200)
     writable.push(manifestFile);
   const stamps: Stamps = {};
   let hashed = 0;
@@ -157,8 +189,7 @@ async function verify(
       const [name, expected] = assets[next++]!;
       if (!/^[a-f0-9]{64}$/.test(expected))
         throw new Error("Upstream tool payload checksum mismatch.");
-      const file = await regular(directory, name);
-      const info = await lstat(file);
+      const { file, info } = await regular(directory, name, checkedDirs);
       if (process.platform === "win32" && info.mode & 0o200)
         writable.push(file);
       const stamp: [number, number] = [info.size, info.mtimeMs];
@@ -184,8 +215,10 @@ async function verify(
   );
   if (failure) throw failure.reason;
   return {
-    python: await regular(directory, m.python),
+    python: path.join(directory, ...m.python.split("/")),
+    pythonRel: m.python,
     moduleDir: path.join(directory, m.moduleDir),
+    moduleDirRel: m.moduleDir,
     sourceCommit: m.sourceCommit,
     stamps,
     hashed,
@@ -213,6 +246,7 @@ async function unpack(archive: string, directory: string) {
     cwd: directory,
     strict: true,
     preservePaths: false,
+    noMtime: true,
     filter: (name, entry) => {
       const type =
         "type" in entry
@@ -385,12 +419,19 @@ async function prepareLocalmodelsTool(
       await sealWindowsFiles(tool.writable);
       signal.throwIfAborted();
       await renameRetrying(kit, directory, { signal });
-      // The rename keeps every stamp, so this checks the published kit
-      // without hashing it a second time.
-      const verified = await verify(directory, source, tool.stamps);
+      // Every file and stamp was just verified inside the locked private stage
+      // before this atomic rename, so only confirm the published entry path.
+      const { file: publishedPython } = await regular(
+        directory,
+        tool.pythonRel,
+      );
       await setKitMode(directory, true);
-      await writeStamps(directory, source, verified.stamps);
-      return location(verified);
+      await writeStamps(directory, source, tool.stamps);
+      return {
+        python: publishedPython,
+        moduleDir: path.join(directory, tool.moduleDirRel),
+        sourceCommit: tool.sourceCommit,
+      };
     } finally {
       await rm(stage, { recursive: true, force: true });
       await rm(archive, { force: true });

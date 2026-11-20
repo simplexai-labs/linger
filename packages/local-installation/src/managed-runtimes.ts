@@ -127,6 +127,64 @@ function unavailable(failed?: {
     { code: "LOCALMODELS_RUNTIME_UNAVAILABLE" },
   );
 }
+function isRuntimeDescriptor(value: unknown): value is RuntimeDescriptor {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Partial<RuntimeDescriptor>;
+  return (
+    typeof row.runtime === "string" &&
+    ["codex", "claude", "pi"].includes(row.runtime) &&
+    typeof row.installed === "boolean" &&
+    typeof row.authenticated === "boolean" &&
+    Array.isArray(row.argvPrefix)
+  );
+}
+function parseRuntimeDescriptors(
+  stdout: string,
+): RuntimeDescriptor[] | undefined {
+  const line = stdout.trim().split("\n").at(-1)?.trim();
+  if (!line) return undefined;
+  let value: { schema?: unknown; runtimes?: unknown };
+  try {
+    value = JSON.parse(line) as { schema?: unknown; runtimes?: unknown };
+  } catch {
+    return undefined;
+  }
+  if (
+    value?.schema !== "localmodels.harness-status/v1" ||
+    !Array.isArray(value.runtimes) ||
+    !value.runtimes.every(isRuntimeDescriptor)
+  )
+    return undefined;
+  return value.runtimes;
+}
+function inspectionFromDescriptor(
+  runtime: NativeRuntime,
+  row: RuntimeDescriptor,
+  platform?: NodeJS.Platform,
+): RuntimeInspection {
+  const targetPlatform = platform ?? process.platform;
+  const quote = (value: string) =>
+    targetPlatform === "win32"
+      ? `'${value.replaceAll("'", "''")}'`
+      : `'${value.replaceAll("'", "'\\''")}'`;
+  const login = row.loginCommand;
+  return {
+    runtime,
+    executable: row.executable ?? runtime,
+    installed: row.installed,
+    ready: row.authenticated,
+    loginCommand: login
+      ? `${targetPlatform === "win32" ? "& " : ""}${[login.executable, ...login.args].map(quote).join(" ")}`
+      : "",
+    ...(login
+      ? {}
+      : {
+          loginInstructions:
+            "Choose an API provider and enter its key in Linger.",
+        }),
+    descriptor: row,
+  };
+}
 export async function inspectRuntimeDescriptors(
   home: string,
   options: {
@@ -153,23 +211,9 @@ export async function inspectRuntimeDescriptors(
     options.signal?.throwIfAborted();
     if (result.code !== 0)
       throw unavailable({ args: ["harness", "status"], result });
-    const value = JSON.parse(result.stdout) as {
-      schema: string;
-      runtimes: RuntimeDescriptor[];
-    };
-    if (
-      value.schema !== "localmodels.harness-status/v1" ||
-      !Array.isArray(value.runtimes) ||
-      value.runtimes.some(
-        (row) =>
-          !["codex", "claude", "pi"].includes(row.runtime) ||
-          typeof row.installed !== "boolean" ||
-          typeof row.authenticated !== "boolean" ||
-          !Array.isArray(row.argvPrefix),
-      )
-    )
-      throw unavailable();
-    return value.runtimes;
+    const runtimes = parseRuntimeDescriptors(result.stdout);
+    if (!runtimes) throw unavailable();
+    return runtimes;
   } catch (error) {
     options.signal?.throwIfAborted();
     if ((error as { code?: string })?.code === "COMMAND_TIMEOUT") throw error;
@@ -290,9 +334,11 @@ export async function installNativeRuntime(
           result: applied,
           onEvent: options.onEvent,
         });
+      return applied;
     };
+    let applied: LocalmodelsResult;
     try {
-      await apply();
+      applied = await apply();
     } catch (error) {
       // On Windows the kit's version probe right after unpacking can fail
       // to spawn the fresh executable (antivirus still holds it), which it
@@ -311,15 +357,23 @@ export async function installNativeRuntime(
         message: `The ${runtime} version check failed right after install; retrying once.\n`,
       });
       await delay(3_000, undefined, { signal: options.signal });
-      await apply();
+      applied = await apply();
     }
-    const state = await inspectRuntime(runtime, options, dependencies);
+    // `localmodels harness apply --jsonl` prints the post-install
+    // localmodels.harness-status/v1 document as its final stdout line.
+    // Reusing it avoids a redundant status invocation right after apply.
+    const appliedRow = parseRuntimeDescriptors(applied.stdout)?.find(
+      (item) => item.runtime === runtime,
+    );
+    const state = appliedRow
+      ? inspectionFromDescriptor(runtime, appliedRow, options.platform)
+      : await inspectRuntime(runtime, options, dependencies);
     if (!state.installed) throw unavailable();
     return {
       code: 0,
       state: "ready",
       message: `${runtime} is installed. Authentication will be checked separately.`,
-      details: { executable: state.executable },
+      details: { executable: state.executable, descriptor: state.descriptor },
     };
   } catch (error) {
     options.signal.throwIfAborted();
@@ -354,27 +408,7 @@ export async function inspectRuntime(
   );
   const row = rows.find((item) => item.runtime === runtime);
   if (!row) throw unavailable();
-  const quote = (value: string) =>
-    (options.platform ?? process.platform) === "win32"
-      ? `'${value.replaceAll("'", "''")}'`
-      : `'${value.replaceAll("'", "'\\''")}'`;
-  const login = row.loginCommand;
-  return {
-    runtime,
-    executable: row.executable ?? runtime,
-    installed: row.installed,
-    ready: row.authenticated,
-    loginCommand: login
-      ? `${(options.platform ?? process.platform) === "win32" ? "& " : ""}${[login.executable, ...login.args].map(quote).join(" ")}`
-      : "",
-    ...(login
-      ? {}
-      : {
-          loginInstructions:
-            "Choose an API provider and enter its key in Linger.",
-        }),
-    descriptor: row,
-  };
+  return inspectionFromDescriptor(runtime, row, options.platform);
 }
 export async function prepareRuntime(
   runtime: NativeRuntime,
@@ -414,7 +448,16 @@ export async function prepareRuntime(
       dependencies,
     );
     if (installed.code !== 0) return installed;
-    state = await inspectRuntime(runtime, options, dependencies);
+    const details = installed.details as { descriptor?: unknown } | undefined;
+    state =
+      isRuntimeDescriptor(details?.descriptor) &&
+      details.descriptor.runtime === runtime
+        ? inspectionFromDescriptor(
+            runtime,
+            details.descriptor,
+            options.platform,
+          )
+        : await inspectRuntime(runtime, options, dependencies);
   }
   options.onDescriptor?.(state.descriptor);
   if (state.ready)

@@ -839,6 +839,30 @@ test("uses a configured development localmodels checkout without downloading a k
     }),
   );
 });
+test.skipIf(process.platform === "win32")(
+  "rejects a symlinked ancestor directory inside a kit during verification",
+  async () => {
+    const f = await fixture();
+    const external = path.join(f.home, "external-modules");
+    await mkdir(path.join(external, "localmodels"), { recursive: true });
+    await writeFile(path.join(external, "localmodels/__init__.py"), "package");
+    await rm(path.join(f.directory, "modules"), {
+      recursive: true,
+      force: true,
+    });
+    await symlink(external, path.join(f.directory, "modules"));
+    await expect(
+      ensureLocalmodelsTool(
+        f.home,
+        {},
+        {
+          source: f.source,
+          fetcher: async () => new Response("not the kit", { status: 200 }),
+        },
+      ),
+    ).rejects.toThrow(/checksum|size|SHA|link/i);
+  },
+);
 
 test("maps source apply download stages to model gateway messages", async () => {
   const f = await fixture();
