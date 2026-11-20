@@ -172,10 +172,19 @@ export const createRuntimeQuestion = async (
 };
 
 const RUNTIME_WORKSPACE = "/workspace";
-// Models with at most a 128K-token context window, such as local models, get
-// the compact instructions.
+// Models with at most a 128K-token context window, and localmodels-served
+// models (whose KV window can exceed 128K while active model capacity stays
+// small), get the compact instructions.
 const COMPACT_INSTRUCTIONS_MAX_CONTEXT_WINDOW = 128 * 1024;
 const DEFAULT_RELAY_CAPABILITY_TTL_MS = 24 * 60 * 60 * 1_000;
+
+function isLocalModelsRuntimeModel(modelId: string): boolean {
+  return (
+    modelId === "localmodels-agent" ||
+    modelId.startsWith("localmodels/") ||
+    modelId.startsWith("localmodels-library/")
+  );
+}
 
 export interface LocalContextRuntimeGateway
   extends
@@ -225,8 +234,9 @@ export function createLocalContextRuntimeBackend(
       );
       return {
         compactInstructions:
-          model.contextWindow !== undefined &&
-          model.contextWindow <= COMPACT_INSTRUCTIONS_MAX_CONTEXT_WINDOW,
+          isLocalModelsRuntimeModel(modelId) ||
+          (model.contextWindow !== undefined &&
+            model.contextWindow <= COMPACT_INSTRUCTIONS_MAX_CONTEXT_WINDOW),
       };
     },
     activate: (request) => activateLocalContextRuntime(options, request),

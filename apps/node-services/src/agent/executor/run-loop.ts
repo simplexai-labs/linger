@@ -40,6 +40,7 @@ import type {
 } from "./runtime-status.js";
 import {
   renderInterruptedRunReminder,
+  renderMissingReplyReminder,
   renderRuntimeContinuationReminder,
 } from "../prompt/inbox-notification.js";
 import { runPriorities, COMPACTION_PRIORITY } from "../../model-tasks.js";
@@ -267,7 +268,6 @@ interface LocalRunExecution {
   readonly kind: ReturnType<typeof runKind>;
   readonly resumesAttempt: boolean;
   readonly runContext: ProviderRunContext;
-  readonly initializesRuntimeSession: boolean;
   readonly preparationFailure: { readonly error: unknown } | undefined;
   readonly acceptedAtMonotonicMs: number | undefined;
   readonly inputReceivedAtMs: number | undefined;
@@ -275,6 +275,7 @@ interface LocalRunExecution {
   readonly cancellationLookupMs: number | undefined;
   readonly continuesContext: boolean | undefined;
   readonly profileUpdate: ProfileUpdate | undefined;
+  initializesRuntimeSession: boolean;
   run: AgentRun | null;
   runtimeStatus: RuntimeStatusSession | null;
   runtimeStatusEvents: Promise<void> | null;
@@ -1008,12 +1009,26 @@ export class RunLoop {
     }
     const replyDelivery = new ReplyDelivery();
     replyDelivery.observeInputs(execution.messages);
+    let missingReplyRetried = false;
     let resumeStartRetries = 0;
     for (;;) {
       controller.signal.throwIfAborted();
       try {
-        await this.#runSegment(execution, input, replyDelivery);
-        return;
+        const outcome = await this.#runSegment(
+          execution,
+          input,
+          replyDelivery,
+          !missingReplyRetried,
+        );
+        if (outcome === "completed") return;
+        missingReplyRetried = true;
+        execution.hasYielded = true;
+        execution.initializesRuntimeSession = false;
+        resumeStartRetries = 0;
+        await this.#commitDurably(() =>
+          this.#state.setRuntimeSession(this.#runtimeSession),
+        );
+        input = { type: "text", text: renderMissingReplyReminder() };
       } catch (error) {
         if (
           execution.hasYielded &&
@@ -1048,7 +1063,8 @@ export class RunLoop {
     execution: LocalRunExecution,
     input: AgentInput,
     replyDelivery: ReplyDelivery,
-  ): Promise<void> {
+    allowMissingReplyRetry: boolean,
+  ): Promise<"completed" | "retry_missing_reply"> {
     const { controller, runId, attemptCount } = execution;
     const providerStartAt = performance.now();
     const run = await this.#startProviderRun(execution, input);
@@ -1087,14 +1103,40 @@ export class RunLoop {
     });
     active.acceptingSteers = false;
     await this.#settleProviderSteers(active);
+    execution.removeAbortListener?.();
     controller.signal.throwIfAborted();
+    // Finishing closes TeamHub's status window, so the queued tail of the
+    // Run's status events is offered first. The drained stream also
+    // completes the Run's message delivery record.
+    const statusDrainStartedAt = performance.now();
+    await this.#settleRuntimeStatusEvents(execution);
+    const runtimeStatusDrainMs = performance.now() - statusDrainStartedAt;
+    if (execution.upstreamCanceled) {
+      this.#finishRevokedExecution(execution);
+      return "completed";
+    }
+    if (
+      allowMissingReplyRetry &&
+      this.#executionContextRef?.kind === "meta" &&
+      replyDelivery.replyNotSent
+    ) {
+      controller.signal.throwIfAborted();
+      this.#logger.log("info", "local_run.reply_not_sent_retry", {
+        runId,
+        ...replyDelivery.counts(),
+        finalResponseLength: result.finalResponse.length,
+      });
+      return "retry_missing_reply";
+    }
     execution.providerSucceeded = true;
     await this.#finishSucceededExecution(
       execution,
       result.finalResponse,
       replyDelivery,
       providerCompletedAt,
+      runtimeStatusDrainMs,
     );
+    return "completed";
   }
 
   /**
@@ -1360,14 +1402,9 @@ export class RunLoop {
     finalResponse: string,
     replyDelivery: ReplyDelivery,
     providerCompletedAt: number,
+    runtimeStatusDrainMs: number,
   ): Promise<void> {
     const { runId, attemptCount } = execution;
-    // Finishing closes TeamHub's status window, so the queued tail of the
-    // Run's status events is offered first. The drained stream also
-    // completes the Run's message delivery record.
-    const statusDrainStartedAt = performance.now();
-    await this.#settleRuntimeStatusEvents(execution);
-    const runtimeStatusDrainMs = performance.now() - statusDrainStartedAt;
     const terminal = this.#completedTerminal(
       runId,
       finalResponse,

@@ -76,8 +76,9 @@ take precedence.
   classifies as `message` activities (`reply-delivery.ts`). A Room Run whose
   every write failed finishes failed with `reply_undelivered`. One that never
   tried to write while a Human's Message that mentioned the Agent (a direct
-  chat always does) waits finishes failed with `reply_not_sent`. Its final
-  text is private scratch and is never posted for it.
+  chat always does) waits receives one continuation turn in the same session to
+  send its reply, and finishes failed with `reply_not_sent` if it still never
+  tried. Its final text is private scratch and is never posted for it.
 - Ordinary Room/Meta execution reads effective Agent configuration before a new
   Local Run. Skill saves do not activate idle Contexts. If versions changed,
   reuse graceful activation to resume the same native history; running/steered

@@ -335,6 +335,10 @@ describe("RunLoop", () => {
       input: Message = message("introduce yourself"),
       finalResponse = "I could not deliver the reply: TeamHub returned 404.",
       steered?: Message,
+      continuation?: {
+        readonly events?: readonly RunEvent[];
+        readonly finalResponse?: string;
+      },
     ) => {
       const harness = createHarness(
         undefined,
@@ -345,6 +349,10 @@ describe("RunLoop", () => {
       );
       const run = new FakeRun(events);
       harness.provider.runs.push(run);
+      const secondRun = continuation
+        ? new FakeRun(continuation.events ?? [])
+        : undefined;
+      if (secondRun) harness.provider.runs.push(secondRun);
       const runId = enqueue(harness.state, input);
       try {
         harness.execution.start();
@@ -358,11 +366,16 @@ describe("RunLoop", () => {
           );
         }
         run.complete(finalResponse);
+        if (secondRun) {
+          await vi.waitFor(() => expect(secondRun.waitCalls).toBe(1));
+          secondRun.complete(continuation?.finalResponse ?? "");
+        }
         await vi.waitFor(() =>
           expect(harness.state.getLocalRun(runId)?.status).not.toBe("running"),
         );
         return {
           log: harness.log,
+          provider: harness.provider,
           run: harness.state.getLocalRun(runId),
         };
       } finally {
@@ -471,13 +484,32 @@ describe("RunLoop", () => {
       });
 
     it("fails a Room Run that posted nothing while the Human who mentioned the Agent waits", async () => {
-      const { log, run } = await finishRun(
+      const { log, provider, run } = await finishRun(
         failedRead,
         undefined,
         humanMention("mention"),
         "Doing well, you?",
+        undefined,
+        { events: [], finalResponse: "Still plain text." },
       );
 
+      expect(provider.starts).toHaveLength(2);
+      expect(provider.starts[1]!.input).toMatchObject({ type: "text" });
+      if (provider.starts[1]!.input.type === "text") {
+        expect(provider.starts[1]!.input.text).toContain("<system-reminder>");
+        expect(provider.starts[1]!.input.text).toContain(
+          "teamhub message send",
+        );
+      }
+      expect(log).toHaveBeenCalledWith(
+        "info",
+        "local_run.reply_not_sent_retry",
+        expect.objectContaining({
+          runId: run?.runId,
+          deliveredMessageWrites: 0,
+          finalResponseLength: "Doing well, you?".length,
+        }),
+      );
       expect(run).toMatchObject({
         status: "failed",
         terminal: {
@@ -486,19 +518,20 @@ describe("RunLoop", () => {
         },
       });
       expect(JSON.stringify(run?.terminal)).not.toContain("Doing well");
+      expect(JSON.stringify(run?.terminal)).not.toContain("Still plain text");
       expect(log).toHaveBeenCalledWith(
         "warn",
         "local_run.reply_not_sent",
         expect.objectContaining({
           runId: run?.runId,
           deliveredMessageWrites: 0,
-          finalResponseLength: "Doing well, you?".length,
+          finalResponseLength: "Still plain text.".length,
         }),
       );
     });
 
     it("fails a Room Run that posted nothing after a Human mention was steered into it", async () => {
-      const { run } = await finishRun(
+      const { provider, run } = await finishRun(
         [],
         undefined,
         inboxInput("room-talk", {
@@ -508,11 +541,58 @@ describe("RunLoop", () => {
         }),
         "",
         humanMention("steered-mention"),
+        { events: [], finalResponse: "Still plain text." },
       );
 
+      expect(provider.starts).toHaveLength(2);
       expect(run?.terminal).toMatchObject({
         type: "failed",
         failure: { code: "reply_not_sent" },
+      });
+    });
+
+    it("recovers a Room Run in the same session when the missing-reply continuation sends a message", async () => {
+      const { log, provider, run } = await finishRun(
+        failedRead,
+        undefined,
+        humanMention("mention"),
+        "Draft summary in private scratch.",
+        undefined,
+        { events: messageWrite("send-1", "succeeded"), finalResponse: "" },
+      );
+
+      expect(provider.starts).toHaveLength(2);
+      expect(run).toMatchObject({
+        status: "succeeded",
+        terminal: { type: "succeeded" },
+      });
+      expect(
+        log.mock.calls.filter(
+          (call) => call[1] === "local_run.reply_not_sent_retry",
+        ),
+      ).toHaveLength(1);
+      expect(
+        log.mock.calls.some((call) => call[1] === "local_run.reply_not_sent"),
+      ).toBe(false);
+    });
+
+    it("fails as reply_undelivered when the missing-reply continuation tries to post and fails", async () => {
+      const { provider, run } = await finishRun(
+        [],
+        undefined,
+        humanMention("mention"),
+        "Draft summary in private scratch.",
+        undefined,
+        { events: messageWrite("send-1", "failed"), finalResponse: "" },
+      );
+
+      expect(provider.starts).toHaveLength(2);
+      expect(run).toMatchObject({
+        status: "failed",
+        terminal: {
+          type: "failed",
+          failure: { code: "reply_undelivered", runtime_type: "pi" },
+        },
       });
     });
 

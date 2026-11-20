@@ -279,27 +279,42 @@ describe("Local Context Runtime backend", () => {
   });
 
   it.each([
-    [32_768, true],
-    [131_072, true],
-    [262_144, false],
-    [undefined, false],
+    ["codex-default", 32_768, true],
+    ["codex-default", 131_072, true],
+    ["codex-default", 200_000, false],
+    ["codex-default", 262_144, false],
+    ["codex-default", undefined, false],
+    ["sub2api/deepseek-v4-flash", 1_000_000, false],
+    ["localmodels-agent", 200_000, true],
+    ["localmodels/localmodels-agent", 200_000, true],
+    [
+      "localmodels-library/localmodels-lib-qwen3-6-35b-a3b-ud-iq4-xs/Qwen3.6-35B-A3B-UD-IQ4_XS",
+      200_000,
+      true,
+    ],
+    [
+      "localmodels-library/localmodels-lib-qwen3-6-35b-a3b-ud-iq4-xs/Qwen3.6-35B-A3B-UD-IQ4_XS",
+      undefined,
+      true,
+    ],
   ] as const)(
-    "asks for compact instructions for a %s-token context window: %s",
-    async (contextWindow, compactInstructions) => {
+    "asks for compact instructions for model %s with %s-token context window: %s",
+    async (modelId, contextWindow, compactInstructions) => {
       const { backend } = backendFixture(
         viewContent(FIRST).content,
         undefined,
         {
-          id: "codex-default",
-          label: "Codex default",
+          id: modelId,
+          label: modelId,
           ...(contextWindow === undefined ? {} : { contextWindow }),
         },
       );
+      const baseRequest = requestFixture();
       expect(
         await backend.preflight?.({
-          ref: requestFixture().ref,
-          runtime: requestFixture().runtime,
-          signal: requestFixture().signal,
+          ref: baseRequest.ref,
+          runtime: { ...baseRequest.runtime, model: modelId },
+          signal: baseRequest.signal,
         }),
       ).toEqual({ compactInstructions });
     },

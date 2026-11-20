@@ -152,3 +152,13 @@ export const renderRuntimeContinuationReminder = (
     "Previously sent messages and external operations are already completed. Do not replay them during recovery. If history or files cannot be read, state what is missing rather than inventing continuity.",
     "</system-reminder>",
   ].join("\n");
+
+export function renderMissingReplyReminder(): string {
+  return [
+    "<system-reminder>",
+    "You ended your turn without sending a reply to the Room while a Human who mentioned you is waiting.",
+    "Text outside commands is private scratch and nobody saw it.",
+    "Send your reply now through your shell tool with teamhub message send (or teamhub message card, teamhub message sequence, or teamhub message ask-user when appropriate), then end your turn.",
+    "</system-reminder>",
+  ].join("\n");
+}
