@@ -953,7 +953,24 @@ export class RunnerConnections {
     if (!model) {
       throw new LocalComputerModelError(requirement.runtimeType);
     }
-    assertReasoningEffort(model, reasoningEffort, requirement.runtimeType);
+    const resolvedEffort = assertReasoningEffort(
+      model,
+      reasoningEffort,
+      requirement.runtimeType,
+    );
+    if (
+      reasoningEffort !== undefined &&
+      resolvedEffort !== undefined &&
+      resolvedEffort !== reasoningEffort
+    ) {
+      logAgentEvent("info", "runner.reasoning_effort_fallback", {
+        runner_id: requirement.computerId,
+        runtime_type: requirement.runtimeType,
+        model_id: model.id,
+        requested_reasoning_effort: reasoningEffort,
+        resolved_reasoning_effort: resolvedEffort,
+      });
+    }
     return model;
   }
 

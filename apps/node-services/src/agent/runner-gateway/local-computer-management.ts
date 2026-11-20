@@ -426,6 +426,62 @@ export class LocalComputerBusyError extends Error {
   }
 }
 
+const PREFERRED_DEFAULT_REASONING_EFFORTS: readonly LocalReasoningEffort[] = [
+  "medium",
+  "low",
+  "high",
+];
+
+/**
+ * Selects a valid default reasoning effort from a model's advertised levels:
+ * the explicit default when offered, otherwise medium -> low -> high -> first
+ * non-none level -> first offered level.
+ */
+export function resolveDefaultReasoningEffort(
+  allowed: readonly LocalReasoningEffort[] | undefined,
+  explicitDefault?: LocalReasoningEffort,
+): LocalReasoningEffort | undefined {
+  if (!allowed || allowed.length === 0) return undefined;
+  if (explicitDefault !== undefined && allowed.includes(explicitDefault)) {
+    return explicitDefault;
+  }
+  for (const candidate of PREFERRED_DEFAULT_REASONING_EFFORTS) {
+    if (allowed.includes(candidate)) return candidate;
+  }
+  return allowed.find((effort) => effort !== "none") ?? allowed[0];
+}
+
+/**
+ * Resolves the reasoning effort to run on a connected Computer's model.
+ * Omitted efforts, fallback default "medium" when the model omits "medium",
+ * and Pi local models whose advertised effort list does not contain the stored
+ * value fall back to the model's default effort instead of failing with
+ * `model_not_offered`.
+ */
+export function resolveSupportedReasoningEffort(
+  model: LocalRuntimeModelDefinition,
+  reasoningEffort: LocalReasoningEffort | undefined,
+  runtimeType?: LocalRuntimeType,
+): LocalReasoningEffort | undefined {
+  const allowed = model.allowedReasoningEffort ?? [];
+  // A model without effort levels runs without one.
+  if (allowed.length === 0) return undefined;
+  if (reasoningEffort !== undefined && allowed.includes(reasoningEffort)) {
+    return reasoningEffort;
+  }
+  if (
+    reasoningEffort === undefined ||
+    reasoningEffort === "medium" ||
+    runtimeType === "pi"
+  ) {
+    return resolveDefaultReasoningEffort(allowed, model.defaultReasoningEffort);
+  }
+  throw new LocalComputerModelError(
+    runtimeType ?? "codex",
+    "Local Computer model reasoning effort is unavailable",
+  );
+}
+
 export const resolveRuntimeModel = (
   runtime: RuntimeConfig,
   model: LocalRuntimeModelDefinition | undefined,
@@ -441,23 +497,31 @@ export const resolveRuntimeModel = (
 };
 
 /**
- * Leaves out the reasoning effort for a model that offers none: a CLI that
- * predates effort levels (e.g. an old Claude Code) would reject the flag.
+ * Normalizes a runtime config's reasoning effort against the Computer model's
+ * advertised levels: omits it when the model offers none, and substitutes the
+ * model's default when omitted or falling back from an unavailable default.
  */
 export const withSupportedReasoningEffort = <
-  T extends { readonly reasoning_effort?: LocalReasoningEffort },
+  T extends {
+    readonly type?: LocalRuntimeType;
+    readonly reasoning_effort?: LocalReasoningEffort;
+  },
 >(
   runtime: T,
   model: LocalRuntimeModelDefinition,
 ): T => {
-  if (
-    runtime.reasoning_effort === undefined ||
-    (model.allowedReasoningEffort?.length ?? 0) > 0
-  ) {
+  const resolved = resolveSupportedReasoningEffort(
+    model,
+    runtime.reasoning_effort,
+    runtime.type,
+  );
+  if (resolved === runtime.reasoning_effort) {
     return runtime;
   }
-  const { reasoning_effort: _unsupported, ...rest } = runtime;
-  return rest as T;
+  const { reasoning_effort: _ignored, ...rest } = runtime;
+  return (
+    resolved === undefined ? rest : { ...rest, reasoning_effort: resolved }
+  ) as T;
 };
 
 export const resolveOperationModel = (
@@ -505,22 +569,25 @@ export const runtimeModelCatalogForComputer = (
       ({ runtimeModel }) => runtimeModel === undefined,
     );
     const legacyDefaultIds = new Set(legacyDefaults.map(({ id }) => id));
-    const discovered = (diagnostic?.models ?? []).map((model) => ({
-      id: model.id,
-      label: model.label,
-      ...(legacyDefaultIds.has(model.id) ? {} : { runtimeModel: model.id }),
-      allowedReasoningEffort: model.allowed_reasoning_effort,
-      ...(model.default_reasoning_effort
-        ? { defaultReasoningEffort: model.default_reasoning_effort }
-        : {}),
-      ...(model.context_window !== undefined
-        ? { contextWindow: model.context_window }
-        : runtimeType === "claude" && model.link === "subscription"
-          ? { contextWindow: claudeSubscriptionWindow(model.id) }
-          : {}),
-      ...(model.is_default ? { isDefault: true } : {}),
-      ...(model.link ? { link: model.link } : {}),
-    }));
+    const discovered = (diagnostic?.models ?? []).map((model) => {
+      const defaultReasoningEffort =
+        model.default_reasoning_effort ??
+        resolveDefaultReasoningEffort(model.allowed_reasoning_effort);
+      return {
+        id: model.id,
+        label: model.label,
+        ...(legacyDefaultIds.has(model.id) ? {} : { runtimeModel: model.id }),
+        allowedReasoningEffort: model.allowed_reasoning_effort,
+        ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
+        ...(model.context_window !== undefined
+          ? { contextWindow: model.context_window }
+          : runtimeType === "claude" && model.link === "subscription"
+            ? { contextWindow: claudeSubscriptionWindow(model.id) }
+            : {}),
+        ...(model.is_default ? { isDefault: true } : {}),
+        ...(model.link ? { link: model.link } : {}),
+      };
+    });
     catalog[runtimeType] = diagnostic?.model_catalog_error ? [] : discovered;
   }
   validateRuntimeModelCatalog(catalog);

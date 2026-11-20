@@ -92,6 +92,12 @@ export interface LocalRun {
   terminal?: LocalRunTerminal;
 }
 
+export interface FallbackReplyDeliveryResult {
+  readonly delivered: boolean;
+  readonly alreadySent: boolean;
+  readonly messageId?: string;
+}
+
 export interface ContextRuntimeStatePort {
   /** The Agent Service epoch a Runner execution checkpoint names. */
   executionEpoch?(): string;
@@ -120,6 +126,16 @@ export interface ContextRuntimeStatePort {
     session?: ProviderRuntimeSession,
     stopSignal?: AbortSignal,
   ): RuntimeStateAwaitable<"upstream_canceled" | void>;
+  /**
+   * Idempotently publishes a running Room Run's non-empty final assistant text
+   * when the Agent did not invoke the message command.
+   */
+  deliverFallbackReply?(
+    runId: string,
+    text: string,
+    inboxId?: string,
+    stopSignal?: AbortSignal,
+  ): RuntimeStateAwaitable<FallbackReplyDeliveryResult>;
   /** Resolve only a confirmed upstream cancellation of this revoked execution. */
   reconcileRevokedLocalRun?(
     runId: string,
@@ -626,6 +642,33 @@ class TeamHubContextRuntimeState implements ContextRuntimeStatePort {
       if (!isTransientTerminalFailure(error)) throw error;
     }
     return upstreamCanceled ? "upstream_canceled" : undefined;
+  }
+
+  async deliverFallbackReply(
+    runId: string,
+    text: string,
+    inboxId?: string,
+    stopSignal?: AbortSignal,
+  ): Promise<FallbackReplyDeliveryResult> {
+    this.#assertOpen();
+    const signal = stopSignal
+      ? AbortSignal.any([stopSignal, this.#terminalRecoveryStop.signal])
+      : this.#terminalRecoveryStop.signal;
+    const result = await this.#client.deliverFallbackReply(
+      {
+        context_key: this.#contextKey,
+        epoch: this.#epoch,
+        run_id: runId,
+        text,
+        ...(inboxId ? { inbox_id: inboxId } : {}),
+      },
+      signal,
+    );
+    return {
+      delivered: result.delivered,
+      alreadySent: result.already_sent,
+      ...(result.message_id ? { messageId: result.message_id } : {}),
+    };
   }
 
   async reconcileRevokedLocalRun(

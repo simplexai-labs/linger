@@ -183,5 +183,38 @@ func piEffortSupport(levels map[string]json.RawMessage, defaultLevel string) *Ef
 	if support.Default == "off" {
 		support.Default = "none"
 	}
+	if support.Default == "" || support.Default == "minimal" {
+		support.Default = piFallbackDefaultEffort(support.Options)
+	}
 	return support
+}
+
+func piFallbackDefaultEffort(options []EffortOption) string {
+	has := func(target string) bool {
+		for _, option := range options {
+			if option.Value == target {
+				return true
+			}
+		}
+		return false
+	}
+	for _, preferred := range []string{"medium", "low", "high"} {
+		if has(preferred) {
+			return preferred
+		}
+	}
+	for _, option := range options {
+		if option.Value != "none" && option.Value != "minimal" {
+			return option.Value
+		}
+	}
+	for _, option := range options {
+		if option.Value != "minimal" {
+			return option.Value
+		}
+	}
+	if len(options) > 0 {
+		return options[0].Value
+	}
+	return ""
 }

@@ -198,6 +198,8 @@ paths:
     $ref: ../paths/teamhub-agent-runtime-state.yaml#/requeueRun
   /v0/agent-runtime/runs/finish:
     $ref: ../paths/teamhub-agent-runtime-state.yaml#/finishRun
+  /v0/agent-runtime/runs/fallback-reply:
+    $ref: ../paths/teamhub-agent-runtime-state.yaml#/deliverFallbackReply
   /v0/agent-runtime/runs/cancel:
     $ref: ../paths/teamhub-agent-runtime-state.yaml#/cancelRun
   /v0/agent-runtime/runs/operations:

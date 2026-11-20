@@ -854,12 +854,15 @@ describe("RunnerGateway", () => {
         reasoningEffort,
         agentId: "agent-reviewer",
       };
-      expect(() =>
+      expect(
         gateway.requireLocalPlacement(
           requirement.placement,
           requirement.modelId,
         ),
-      ).toThrow("reasoning effort is unavailable");
+      ).toMatchObject({
+        id: "gpt-6-astra",
+        defaultReasoningEffort: "low",
+      });
       await expect(
         gateway.ensureReadyLocalAgentRunner({
           ...requirement,
@@ -882,6 +885,123 @@ describe("RunnerGateway", () => {
       connection.disconnect();
     },
   );
+
+  it("resolves a valid fallback reasoning effort when default_reasoning_effort is absent or medium is not offered", async () => {
+    const gateway = createTestRunnerGateway({ heartbeatIntervalMs: 1_000 });
+    const peer = new RecordingPeer();
+    const diagnostics = runtimeDiagnostics({
+      ready: ["codex", "claude", "pi"],
+    }).map((diagnostic) =>
+      diagnostic.type === "pi"
+        ? {
+            ...diagnostic,
+            models: [
+              {
+                id: "local/spark-x2.6-4b",
+                label: "Spark-X2.6-4B",
+                allowed_reasoning_effort: ["none", "low", "high"] as const,
+              },
+              {
+                id: "local/qwen3.6-35b-a3b",
+                label: "Qwen3.6-35B-A3B",
+                allowed_reasoning_effort: [
+                  "none",
+                  "low",
+                  "medium",
+                  "high",
+                ] as const,
+              },
+            ],
+          }
+        : { ...diagnostic, models: [] },
+    ) as unknown as RunnerHello["runtime_diagnostics"];
+    const connection = await gateway.acceptConnection(
+      authenticatedPrincipal(),
+      {
+        ...hello(),
+        runtimes: ["codex", "claude", "pi"],
+        runtime_diagnostics: diagnostics,
+        workspace_grants: [
+          {
+            grant_id: "grant-owner",
+            tenant_id: "tenant-acme",
+            label: "Linger workspace",
+            mode: "workspace-write",
+            scope: "owner",
+          },
+        ],
+      },
+      peer,
+    );
+
+    expect(gateway.runtimeModels("runner-local", "pi")).toEqual([
+      expect.objectContaining({
+        id: "local/spark-x2.6-4b",
+        allowedReasoningEffort: ["none", "low", "high"],
+        defaultReasoningEffort: "low",
+      }),
+      expect.objectContaining({
+        id: "local/qwen3.6-35b-a3b",
+        allowedReasoningEffort: ["none", "low", "medium", "high"],
+        defaultReasoningEffort: "medium",
+      }),
+    ]);
+
+    const placement = {
+      type: "local" as const,
+      assignmentRevision: 1,
+      tenantId: "tenant-acme",
+      ownerActorId: "actor-alice",
+      computerId: "runner-local",
+      runtimeType: "pi" as const,
+      workspaceGrantId: "grant-owner",
+    };
+
+    expect(() =>
+      gateway.requireLocalPlacement(placement, "local/spark-x2.6-4b"),
+    ).not.toThrow();
+    expect(() =>
+      gateway.requireLocalPlacement(placement, "local/spark-x2.6-4b", "medium"),
+    ).not.toThrow();
+
+    const readiness = gateway.ensureReadyLocalAgentRunner({
+      placement,
+      modelId: "local/spark-x2.6-4b",
+      reasoningEffort: "medium",
+      agentId: "agent-spark",
+    });
+    await vi.waitFor(() =>
+      expect(peer.sent.at(-1)).toMatchObject({
+        type: "agent_runner.ensure",
+        runtime: {
+          type: "pi",
+          model: "local/spark-x2.6-4b",
+          reasoning_effort: "low",
+        },
+      }),
+    );
+    await acknowledgeEnsuredAgent(connection, peer);
+    await expect(readiness).resolves.toBe(1);
+
+    const omittedReadiness = gateway.ensureReadyLocalAgentRunner({
+      placement,
+      modelId: "local/qwen3.6-35b-a3b",
+      agentId: "agent-qwen",
+    });
+    await vi.waitFor(() =>
+      expect(peer.sent.at(-1)).toMatchObject({
+        type: "agent_runner.ensure",
+        runtime: {
+          type: "pi",
+          model: "local/qwen3.6-35b-a3b",
+          reasoning_effort: "medium",
+        },
+      }),
+    );
+    await acknowledgeEnsuredAgent(connection, peer);
+    await expect(omittedReadiness).resolves.toBe(1);
+    connection.disconnect();
+  });
 
   it("runs without the reasoning effort when the Computer's model offers none", async () => {
     const gateway = createTestRunnerGateway({ heartbeatIntervalMs: 1_000 });

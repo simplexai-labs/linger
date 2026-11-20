@@ -89,3 +89,57 @@ func TestProjectStoredLocalComputerSkipsAComputerWithoutAnOwnerGrant(t *testing.
 		t.Fatalf("listed=%v err=%v", listed, err)
 	}
 }
+
+func TestStoredRuntimeModelsResolvesFallbackDefaultReasoningEffort(t *testing.T) {
+	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	row := storedLocalComputer("online", now)
+	row.RuntimeDiagnostics = []byte(`[
+		{"type":"pi","status":"ready","protocol":"rpc","checked_at":"2026-11-19T00:00:00Z","models":[
+			{"id":"spark","label":"Spark-X2.6-4B","allowed_reasoning_effort":["none","low","high"]},
+			{"id":"qwen","label":"Qwen3.6-35B-A3B","allowed_reasoning_effort":["none","low","medium","high"]},
+			{"id":"high-only","label":"HighOnly","allowed_reasoning_effort":["none","high"]},
+			{"id":"xhigh-only","label":"XHighOnly","allowed_reasoning_effort":["none","xhigh"]},
+			{"id":"none-only","label":"NoneOnly","allowed_reasoning_effort":["none"]},
+			{"id":"no-effort","label":"NoEffort","allowed_reasoning_effort":[]}
+		]}
+	]`)
+	item, listed, err := projectStoredLocalComputer(row, "tenant_1", now)
+	if err != nil || !listed || len(item.Runtimes) != 1 {
+		t.Fatalf("computer=%+v listed=%v err=%v", item, listed, err)
+	}
+	want := map[string]string{
+		"spark":      "low",
+		"qwen":       "medium",
+		"high-only":  "high",
+		"xhigh-only": "xhigh",
+		"none-only":  "none",
+		"no-effort":  "",
+	}
+	for _, model := range item.Runtimes[0].Models {
+		got := ""
+		if model.DefaultReasoningEffort != nil {
+			got = string(*model.DefaultReasoningEffort)
+		}
+		if got != want[model.Id] {
+			t.Fatalf("%s default_reasoning_effort=%q, want %q", model.Id, got, want[model.Id])
+		}
+	}
+
+	medium := httpapi.AgentReasoningEffortMedium
+	high := httpapi.AgentReasoningEffortHigh
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "spark", nil); resolved == nil || *resolved != httpapi.AgentReasoningEffortLow {
+		t.Fatalf("omitted effort on spark=%v, want low", resolved)
+	}
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "spark", &medium); resolved == nil || *resolved != httpapi.AgentReasoningEffortLow {
+		t.Fatalf("unsupported medium on spark=%v, want low", resolved)
+	}
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "spark", &high); resolved == nil || *resolved != httpapi.AgentReasoningEffortHigh {
+		t.Fatalf("supported high on spark=%v, want high", resolved)
+	}
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "qwen", nil); resolved == nil || *resolved != httpapi.AgentReasoningEffortMedium {
+		t.Fatalf("omitted effort on qwen=%v, want medium", resolved)
+	}
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "unlisted", nil); resolved != nil {
+		t.Fatalf("unlisted model effort=%v, want nil", resolved)
+	}
+}

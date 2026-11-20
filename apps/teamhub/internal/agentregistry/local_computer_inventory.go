@@ -209,9 +209,9 @@ func storedRuntimeModels(diagnostic storedRuntimeDiagnostic) []httpapi.AgentMode
 		}
 		if len(allowed) > 0 {
 			model.AllowedReasoningEffort = &allowed
-		}
-		if effort := httpapi.AgentReasoningEffort(stored.DefaultReasoningEffort); slices.Contains(allowed, effort) {
-			model.DefaultReasoningEffort = &effort
+			if effort := resolveDefaultReasoningEffort(allowed, stored.DefaultReasoningEffort); effort != "" {
+				model.DefaultReasoningEffort = &effort
+			}
 		}
 		if stored.IsDefault {
 			model.IsDefault = &stored.IsDefault
@@ -219,6 +219,81 @@ func storedRuntimeModels(diagnostic storedRuntimeDiagnostic) []httpapi.AgentMode
 		models = append(models, model)
 	}
 	return models
+}
+
+// resolveDefaultReasoningEffort picks preferred when allowed, else prefers
+// medium -> low -> high -> first non-none -> first allowed.
+func resolveDefaultReasoningEffort(allowed []httpapi.AgentReasoningEffort, preferred string) httpapi.AgentReasoningEffort {
+	if len(allowed) == 0 {
+		return ""
+	}
+	if effort := httpapi.AgentReasoningEffort(preferred); effort != "" && slices.Contains(allowed, effort) {
+		return effort
+	}
+	for _, candidate := range []httpapi.AgentReasoningEffort{
+		httpapi.AgentReasoningEffortMedium,
+		httpapi.AgentReasoningEffortLow,
+		httpapi.AgentReasoningEffortHigh,
+	} {
+		if slices.Contains(allowed, candidate) {
+			return candidate
+		}
+	}
+	for _, effort := range allowed {
+		if effort != httpapi.AgentReasoningEffortNone {
+			return effort
+		}
+	}
+	return allowed[0]
+}
+
+// storedRuntimeModel looks up one advertised model in a Computer's recorded
+// RuntimeDiagnostics for runtimeType.
+func storedRuntimeModel(raw []byte, runtimeType, modelID string) (httpapi.AgentModel, bool) {
+	runtimes, err := projectStoredRuntimes(raw)
+	if err != nil {
+		return httpapi.AgentModel{}, false
+	}
+	for _, runtime := range runtimes {
+		if string(runtime.Type) != runtimeType {
+			continue
+		}
+		for _, model := range runtime.Models {
+			if model.Id == modelID {
+				return model, true
+			}
+		}
+	}
+	return httpapi.AgentModel{}, false
+}
+
+// resolveRegistrationReasoningEffort fills a missing or unsupported default
+// effort from the target Computer's advertised model catalog so newly created
+// or updated Agents do not start with an unavailable effort.
+func resolveRegistrationReasoningEffort(
+	diagnostics []byte,
+	runtimeType, modelID string,
+	requested *httpapi.AgentReasoningEffort,
+) *httpapi.AgentReasoningEffort {
+	model, found := storedRuntimeModel(diagnostics, runtimeType, modelID)
+	if !found || model.AllowedReasoningEffort == nil || len(*model.AllowedReasoningEffort) == 0 {
+		return requested
+	}
+	allowed := *model.AllowedReasoningEffort
+	if requested != nil && slices.Contains(allowed, *requested) {
+		return requested
+	}
+	if requested == nil || *requested == httpapi.AgentReasoningEffortMedium || runtimeType == string(httpapi.LocalRuntimeTypePi) {
+		defaultEffort := ""
+		if model.DefaultReasoningEffort != nil {
+			defaultEffort = string(*model.DefaultReasoningEffort)
+		}
+		resolved := resolveDefaultReasoningEffort(allowed, defaultEffort)
+		if resolved != "" {
+			return &resolved
+		}
+	}
+	return requested
 }
 
 // ListOwnedLocalComputers lists the Human's Computers as the Runner Gateway

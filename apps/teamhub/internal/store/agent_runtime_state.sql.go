@@ -731,6 +731,30 @@ func (q *Queries) GetAgentLocalRunContextKey(ctx context.Context, runID string) 
 	return context_key, err
 }
 
+const getAgentLocalRunMessage = `-- name: GetAgentLocalRunMessage :one
+SELECT id
+FROM messages
+WHERE tenant_id=$1::text
+  AND local_run_id=$2::text
+  AND author_actor_id=$3::text
+  AND message_kind='conversation'
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetAgentLocalRunMessageParams struct {
+	TenantID      string `json:"tenant_id"`
+	LocalRunID    string `json:"local_run_id"`
+	AuthorActorID string `json:"author_actor_id"`
+}
+
+func (q *Queries) GetAgentLocalRunMessage(ctx context.Context, arg GetAgentLocalRunMessageParams) (string, error) {
+	row := q.db.QueryRow(ctx, getAgentLocalRunMessage, arg.TenantID, arg.LocalRunID, arg.AuthorActorID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getAgentLocalRunReplyDelivered = `-- name: GetAgentLocalRunReplyDelivered :one
 WITH target_run AS (
     SELECT run.run_id, run.started_at, run.finished_at,

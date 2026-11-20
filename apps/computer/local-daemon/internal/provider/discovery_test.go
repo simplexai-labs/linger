@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
 )
 
 func TestDiscoverUsesConfiguredExecutableAndReportsAllRuntimes(t *testing.T) {
@@ -447,6 +449,56 @@ exit 0
 	}
 	if _, err := os.Stat(promptMarker); err != nil {
 		t.Fatal("Claude stream protocol probe did not run")
+	}
+}
+
+func TestNormalizeRuntimeModelsResolvesDefaultReasoningEffort(t *testing.T) {
+	models := normalizeRuntimeModels([]native.ModelOption{
+		{
+			ID:    "spark",
+			Label: "Spark",
+			Effort: &native.EffortSupport{
+				Options: []native.EffortOption{{Value: "none"}, {Value: "low"}, {Value: "high"}},
+			},
+		},
+		{
+			ID:    "qwen",
+			Label: "Qwen",
+			Effort: &native.EffortSupport{
+				Options: []native.EffortOption{{Value: "none"}, {Value: "low"}, {Value: "medium"}, {Value: "high"}},
+			},
+		},
+		{
+			ID:    "explicit-none",
+			Label: "Explicit None",
+			Effort: &native.EffortSupport{
+				Options: []native.EffortOption{{Value: "none"}, {Value: "low"}, {Value: "high"}},
+				Default: "none",
+			},
+		},
+		{
+			ID:    "only-none",
+			Label: "Only None",
+			Effort: &native.EffortSupport{
+				Options: []native.EffortOption{{Value: "none"}},
+			},
+		},
+		{
+			ID:    "no-effort",
+			Label: "No Effort",
+		},
+	})
+	want := map[string]string{
+		"spark":         "low",
+		"qwen":          "medium",
+		"explicit-none": "none",
+		"only-none":     "none",
+		"no-effort":     "",
+	}
+	for _, model := range models {
+		if model.DefaultReasoningEffort != want[model.ID] {
+			t.Fatalf("%s default_reasoning_effort = %q, want %q", model.ID, model.DefaultReasoningEffort, want[model.ID])
+		}
 	}
 }
 

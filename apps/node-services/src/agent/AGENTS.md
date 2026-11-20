@@ -72,16 +72,24 @@ take precedence.
   cancellation, and the only Runtime execution path. Do not add a second
   scheduler, execution store, or Runtime executor beside it, and do not
   restore TeamHub Run admission.
-- A Room Agent speaks only through TeamHub message writes, which the Computer
+- A Room Agent speaks through TeamHub message writes, which the Computer
   classifies as `message` activities (`reply-delivery.ts`). Before failing a
-  Room Run for a missing reply, the Run loop checks TeamHub's persisted reply
-  status (`GET /v0/agent-runtime/runs/reply-status`) so compound scripts,
-  decision cards, presentation sequences, and reactions that activity
-  classification missed are not misreported. A Room Run whose every write
-  failed finishes failed with `reply_undelivered`. One that left no reply while
-  a Human's Message that mentioned the Agent (a direct chat always does) waits
-  finishes failed with `reply_not_sent`. Its final text is private scratch and
-  is never posted for it.
+  Room Run for a missing reply or delivering a fallback reply, the Run loop
+  checks TeamHub's persisted reply status
+  (`GET /v0/agent-runtime/runs/reply-status`) so compound scripts, decision
+  cards, presentation sequences, and reactions that activity classification
+  missed are not misreported or duplicated. A Room Run whose every write failed
+  (with no confirmed persisted reply) finishes failed with `reply_undelivered`.
+  When a Human's Message that mentioned the Agent (a direct chat always does)
+  waits, the Agent never tried to write, and TeamHub confirms no reply landed,
+  the executor surfaces non-empty deliverable final assistant text (excluding
+  pure thinking or empty output) to the target Room or Thread through TeamHub's
+  idempotent `deliverFallbackReply` endpoint; if no deliverable answer text was
+  produced, the reply-status check fails, or fallback delivery fails, the Run
+  finishes failed with `reply_not_sent` (or `response_too_large` when the text
+  exceeds TeamHub's message limit). Turns that do not require a Human reply
+  (unmentioned Room talk, routine wakes, other Agents' mentions) never trigger
+  fallback delivery and keep final text private.
 - Ordinary Room/Meta execution reads effective Agent configuration before a new
   Local Run. Skill saves do not activate idle Contexts. If versions changed,
   reuse graceful activation to resume the same native history; running/steered

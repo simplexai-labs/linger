@@ -10,9 +10,9 @@ import {
 import { logAgentEvent } from "../observability/agent-log.js";
 import {
   findRuntimeModel,
-  LocalComputerModelError,
   LocalRuntimeAuthenticationRequiredError,
   resolveRuntimeModel,
+  resolveSupportedReasoningEffort,
   runtimeModelCatalogForComputer,
   type LocalReasoningEffort,
   type LocalRuntimeModelCatalog,
@@ -264,21 +264,13 @@ export class RunnerOperationPreparation {
   }
 }
 
-export const assertReasoningEffort = (
+export function assertReasoningEffort(
   model: LocalRuntimeModelDefinition,
   reasoningEffort: LocalReasoningEffort | undefined,
   runtimeType: LocalRuntimeType,
-): void => {
-  const allowed = model.allowedReasoningEffort ?? [];
-  // A model without effort levels runs without one (withSupportedReasoningEffort).
-  if (allowed.length === 0) return;
-  if (reasoningEffort === undefined || !allowed.includes(reasoningEffort)) {
-    throw new LocalComputerModelError(
-      runtimeType,
-      "Local Computer model reasoning effort is unavailable",
-    );
-  }
-};
+): LocalReasoningEffort | undefined {
+  return resolveSupportedReasoningEffort(model, reasoningEffort, runtimeType);
+}
 
 const contextRunStartMatches = (
   start: RunnerOperationState["start"],

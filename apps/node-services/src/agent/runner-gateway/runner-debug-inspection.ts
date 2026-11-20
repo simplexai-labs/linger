@@ -14,7 +14,11 @@ import {
   type AgentRunnerDesiredRecord,
   type AgentRunnerDesiredState,
 } from "./agent-runner-desired-state.js";
-import { LocalComputerOfflineError } from "./local-computer-management.js";
+import {
+  findRuntimeModel,
+  LocalComputerOfflineError,
+  resolveRuntimeModel,
+} from "./local-computer-management.js";
 import { isServingConnection } from "./runner-connections.js";
 import type {
   ConnectedRunner,
@@ -60,11 +64,28 @@ export class RunnerDebugInspection {
     // when this process knows it, and otherwise let the Runner authorize the
     // read from its own ready Assignment. The identity is all-or-nothing so the
     // Runner never has to reconcile a half-specified one.
+    const desiredRuntime = (() => {
+      const selectedModel = options.request.runtime.model;
+      if (selectedModel === undefined) return options.request.runtime;
+      const model = findRuntimeModel(
+        this.owners
+          .preparation()
+          .runtimeModelsForComputer(placement.computerId),
+        options.request.runtime.type,
+        selectedModel,
+      );
+      if (!model) return options.request.runtime;
+      try {
+        return resolveRuntimeModel(options.request.runtime, model);
+      } catch {
+        return options.request.runtime;
+      }
+    })();
     const desired = this.owners.lifecycle().desiredReadyOperation({
       computerId: placement.computerId,
       tenantId: placement.tenantId,
       agentId: options.agentId,
-      runtime: options.request.runtime,
+      runtime: desiredRuntime,
       workspaceGrantId: placement.workspaceGrantId,
     });
     const command = parseAgentToDaemonEnvelope({

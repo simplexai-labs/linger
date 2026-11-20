@@ -13,6 +13,7 @@ import {
   type LocalComputer,
   resolveModelOnRuntime,
 } from "./agent-move-target";
+import { resolveDefaultReasoningEffort } from "./use-agent-model-selection";
 
 /** The Computer, Runtime, model, and reasoning an Agent's Runtime settings
  * change to. Choosing another Computer applies the move defaults: the current
@@ -75,11 +76,10 @@ export function useAgentMoveTarget(
     ) {
       return saved;
     }
-    const selectedDefault = selectedModel?.default_reasoning_effort;
-    if (selectedDefault && allowed.includes(selectedDefault)) {
-      return selectedDefault;
-    }
-    return allowed[0];
+    return resolveDefaultReasoningEffort(
+      allowed,
+      selectedModel?.default_reasoning_effort,
+    );
   })();
   const target: AgentMoveTarget | undefined =
     computer && grant && runtimeType && model

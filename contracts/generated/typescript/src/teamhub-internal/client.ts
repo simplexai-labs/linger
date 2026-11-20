@@ -37,6 +37,8 @@ export type RequeueAgentLocalRunRequest =
   components["schemas"]["RequeueAgentLocalRunRequest"];
 export type FinishAgentLocalRunRequest =
   components["schemas"]["FinishAgentLocalRunRequest"];
+export type DeliverAgentLocalRunFallbackReplyRequest =
+  components["schemas"]["DeliverAgentLocalRunFallbackReplyRequest"];
 export type CancelAgentLocalRunRequest =
   components["schemas"]["CancelAgentLocalRunRequest"];
 export type EnqueueAgentSteerRequest =
@@ -362,6 +364,10 @@ export function createTeamHubAgentRuntimeStateClient(options: {
       post("runs/requeue", body, signal),
     finishRun: (body: FinishAgentLocalRunRequest, signal?: AbortSignal) =>
       post("runs/finish", body, signal),
+    deliverFallbackReply: (
+      body: DeliverAgentLocalRunFallbackReplyRequest,
+      signal?: AbortSignal,
+    ) => post("runs/fallback-reply", body, signal),
     cancelRun: (body: CancelAgentLocalRunRequest, signal?: AbortSignal) =>
       post("runs/cancel", body, signal),
     enqueueSteer: (body: EnqueueAgentSteerRequest, signal?: AbortSignal) =>

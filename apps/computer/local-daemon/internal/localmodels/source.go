@@ -552,11 +552,28 @@ func agentRuntimeModel(runtime, target string, catalog []RuntimeModelOption) (st
 		index = max(0, slices.IndexFunc(catalog, func(model RuntimeModelOption) bool { return model.IsDefault }))
 	}
 	model := catalog[index]
-	effort := model.DefaultReasoningEffort
-	if effort == "" && len(model.AllowedReasoningEffort) > 0 {
-		effort = model.AllowedReasoningEffort[0]
-	}
+	effort := resolveDefaultReasoningEffort(model.AllowedReasoningEffort, model.DefaultReasoningEffort)
 	return model.ID, effort
+}
+
+func resolveDefaultReasoningEffort(allowed []string, preferred string) string {
+	if len(allowed) == 0 {
+		return ""
+	}
+	if preferred != "" && slices.Contains(allowed, preferred) {
+		return preferred
+	}
+	for _, candidate := range []string{"medium", "low", "high"} {
+		if slices.Contains(allowed, candidate) {
+			return candidate
+		}
+	}
+	for _, effort := range allowed {
+		if effort != "none" {
+			return effort
+		}
+	}
+	return allowed[0]
 }
 
 func (m *ModelSource) persistRuntimePaths(stdout []byte) {

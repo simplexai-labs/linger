@@ -866,6 +866,37 @@ components:
           $ref: "#/components/schemas/AgentLocalRun"
         session:
           $ref: "#/components/schemas/AgentRuntimeSession"
+    DeliverAgentLocalRunFallbackReplyRequest:
+      type: object
+      additionalProperties: false
+      required: [context_key, epoch, run_id, text]
+      properties:
+        context_key:
+          $ref: "#/components/schemas/AgentRuntimeContextKey"
+        epoch:
+          $ref: "#/components/schemas/AgentServiceEpoch"
+        run_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        text:
+          type: string
+          minLength: 1
+        inbox_id:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    DeliverAgentLocalRunFallbackReplyResult:
+      type: object
+      additionalProperties: false
+      required: [delivered, already_sent]
+      properties:
+        delivered:
+          type: boolean
+        already_sent:
+          type: boolean
+        message_id:
+          type: string
     CancelAgentLocalRunRequest:
       type: object
       additionalProperties: false
@@ -1090,9 +1121,9 @@ components:
         It remains a failed Run and must not be automatically replayed; verify its effects
         before starting another Run. reply_undelivered means a Room Run finished, but every
         message the Agent tried to post failed, so the Room received no reply from it.
-        reply_not_sent means a Room Run finished without trying to post anything while a
-        Human who mentioned the Agent waited for its reply; the Runtime ended the turn in
-        text nobody sees, which is not posted for it.
+        reply_not_sent means a Room Run finished without sending or producing any
+        deliverable reply while a Human who mentioned the Agent waited for its reply
+        (even after a single same-session reminder turn and fallback check).
         interrupted means the Run stopped before it finished for a reason other than a user
         cancellation, such as a restart or a Runner stopped on its Computer; part of its work
         may have taken effect and it is not replayed.

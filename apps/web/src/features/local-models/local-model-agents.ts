@@ -1,3 +1,4 @@
+import { resolveDefaultReasoningEffort } from "@/features/rooms/members/use-agent-model-selection";
 import type {
   TeamHubAgentReasoningEffort,
   TeamHubLocalComputerPage,
@@ -168,13 +169,11 @@ export function buildLocalModelRuntimeUpdate(
       allowed.includes(agent.currentReasoningEffort)
     ) {
       reasoningEffort = agent.currentReasoningEffort;
-    } else if (
-      catalogModel.default_reasoning_effort &&
-      allowed.includes(catalogModel.default_reasoning_effort)
-    ) {
-      reasoningEffort = catalogModel.default_reasoning_effort;
     } else {
-      reasoningEffort = allowed[0];
+      reasoningEffort = resolveDefaultReasoningEffort(
+        allowed,
+        catalogModel.default_reasoning_effort,
+      );
     }
   }
   return {

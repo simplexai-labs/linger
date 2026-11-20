@@ -28,6 +28,7 @@ import {
 } from "./quick-create-general-agent-page";
 import { AgentCreationProgress } from "./agent-creation-progress";
 import { OFFLINE_COMPUTER_HINT } from "./members/agent-move-target";
+import { resolveDefaultReasoningEffort } from "./members/use-agent-model-selection";
 
 const localRuntimeLabels: Record<TeamHubLocalRuntimeType, string> = {
   claude: "Claude Code",
@@ -127,10 +128,10 @@ export function QuickCreateLocalAgentDialog({
   const selectedEffort =
     effort && allowedEfforts.includes(effort)
       ? effort
-      : selectedModel?.default_reasoning_effort &&
-          allowedEfforts.includes(selectedModel.default_reasoning_effort)
-        ? selectedModel.default_reasoning_effort
-        : allowedEfforts[0];
+      : resolveDefaultReasoningEffort(
+          allowedEfforts,
+          selectedModel?.default_reasoning_effort,
+        );
   const pending =
     computers.isPending ||
     (!computers.isFetchedAfterMount && computers.isFetching);

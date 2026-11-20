@@ -6,6 +6,7 @@ import {
   parseExecutionResources,
   type ContextRuntimeStatePort,
   type ExecutionResources,
+  type FallbackReplyDeliveryResult,
   type LocalRun,
   type LocalRunTerminal,
   type MessageSteer,
@@ -21,10 +22,18 @@ interface Input {
   groupId?: string;
   outcome?: "applied" | "uncertain";
 }
+export interface RecordedFallbackReply {
+  readonly runId: string;
+  readonly text: string;
+  readonly inboxId?: string;
+  readonly messageId: string;
+}
+
 interface State {
   inputs: Map<string, Input>;
   runs: Map<string, LocalRun>;
   messageSteers: MessageSteer[];
+  fallbackReplies: RecordedFallbackReply[];
   sequence: number;
   session: RuntimeSession;
   executionResources: ExecutionResources | null;
@@ -48,6 +57,7 @@ export class TestContextRuntimeState implements ContextRuntimeStatePort {
       inputs: new Map(),
       runs: new Map(),
       messageSteers: [],
+      fallbackReplies: [],
       sequence: 0,
       session: null,
       executionResources: null,
@@ -153,6 +163,33 @@ export class TestContextRuntimeState implements ContextRuntimeStatePort {
     run.status = terminal.type;
     run.terminal = structuredClone(terminal);
     if (session) this.setRuntimeSession(session);
+  }
+  deliverFallbackReply(
+    runId: string,
+    text: string,
+    inboxId?: string,
+  ): FallbackReplyDeliveryResult {
+    const run = this.requireRun(runId);
+    if (run.status !== "running")
+      throw new Error(`Local Run "${runId}" is not running`);
+    const existing = this.state.fallbackReplies.find(
+      (entry) => entry.runId === runId,
+    );
+    if (existing) {
+      return {
+        delivered: true,
+        alreadySent: false,
+        messageId: existing.messageId,
+      };
+    }
+    const messageId = `fallback-message-${this.state.fallbackReplies.length + 1}`;
+    this.state.fallbackReplies.push({
+      runId,
+      text,
+      ...(inboxId ? { inboxId } : {}),
+      messageId,
+    });
+    return { delivered: true, alreadySent: false, messageId };
   }
   cancelLocalRun(runId: string) {
     const run = this.state.runs.get(runId);

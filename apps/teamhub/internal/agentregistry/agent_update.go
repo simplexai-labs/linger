@@ -63,10 +63,15 @@ func (s *Service) ExecuteTenantAgentUpdate(
 	runtime := *request.Runtime
 	placement := runtime.Placement
 	computerChanged := *placement.ComputerId != row.ComputerID.String
+	var targetComputer store.LocalComputer
+	var hasTargetComputer bool
 	if computerChanged || *placement.WorkspaceGrantId != row.WorkspaceGrantID.String {
-		if err := requireAgentPlacementTarget(ctx, queries, tenantID, creator.ID, *placement.ComputerId, *placement.WorkspaceGrantId); err != nil {
+		var err error
+		targetComputer, err = requireAgentPlacementTarget(ctx, queries, tenantID, creator.ID, *placement.ComputerId, *placement.WorkspaceGrantId)
+		if err != nil {
 			return httpapi.TenantAgent{}, err
 		}
+		hasTargetComputer = true
 		// Work held by a Computer that is not online can never finish there.
 		// End it before the pending-work gate so the move can proceed.
 		previousOnline, err := agentComputerOnline(ctx, queries, row.ComputerID.String)
@@ -78,6 +83,18 @@ func (s *Service) ExecuteTenantAgentUpdate(
 				return httpapi.TenantAgent{}, err
 			}
 		}
+	} else if computer, err := queries.GetAgentRuntimeLocalComputer(ctx, *placement.ComputerId); err == nil {
+		targetComputer, hasTargetComputer = computer, true
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return httpapi.TenantAgent{}, err
+	}
+	if hasTargetComputer {
+		runtime.ReasoningEffort = resolveRegistrationReasoningEffort(
+			targetComputer.RuntimeDiagnostics,
+			string(*placement.RuntimeType),
+			runtime.Model,
+			runtime.ReasoningEffort,
+		)
 	}
 	pendingLocalWork, err := queries.HasPendingAgentLocalWork(ctx, store.HasPendingAgentLocalWorkParams{TenantID: tenantID, AgentActorID: actorID})
 	if err != nil {

@@ -51,6 +51,12 @@ func TestChooseAnotherMeLocalPlacementUsesAnyReadyRuntime(t *testing.T) {
 		preferred: "pi",
 		want:      anotherMeLocalPlacement{ComputerID: "computer_1", RuntimeType: "pi", WorkspaceGrantID: "grant_files", Model: "localmodels/localmodels-agent"},
 	}, {
+		name: "Pi model without default skips none when medium is absent",
+		runtimes: []httpapi.LocalComputerRuntime{{Type: "pi", Status: "ready", Models: []httpapi.AgentModel{{
+			Id: "localmodels-library/spark", AllowedReasoningEffort: efforts("none", "low", "high"),
+		}}}},
+		want: anotherMeLocalPlacement{ComputerID: "computer_1", RuntimeType: "pi", WorkspaceGrantID: "grant_files", Model: "localmodels-library/spark", ReasoningEffort: "low"},
+	}, {
 		name: "another ready Runtime while the chosen one is not ready",
 		runtimes: []httpapi.LocalComputerRuntime{
 			{Type: "claude", Status: "ready", Models: []httpapi.AgentModel{{Id: "default"}}},

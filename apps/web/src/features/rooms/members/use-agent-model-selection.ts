@@ -16,6 +16,30 @@ interface RuntimeModel {
   default_reasoning_effort?: TeamHubAgentReasoningEffort;
 }
 
+const PREFERRED_REASONING_EFFORTS: readonly TeamHubAgentReasoningEffort[] = [
+  "medium",
+  "low",
+  "high",
+];
+
+/**
+ * Picks the model's explicit default when allowed, else prefers
+ * medium -> low -> high -> first non-none -> first allowed.
+ */
+export function resolveDefaultReasoningEffort(
+  allowed: readonly TeamHubAgentReasoningEffort[] | undefined,
+  explicitDefault?: TeamHubAgentReasoningEffort,
+): TeamHubAgentReasoningEffort | undefined {
+  if (!allowed || allowed.length === 0) return undefined;
+  if (explicitDefault && allowed.includes(explicitDefault)) {
+    return explicitDefault;
+  }
+  for (const preferred of PREFERRED_REASONING_EFFORTS) {
+    if (allowed.includes(preferred)) return preferred;
+  }
+  return allowed.find((effort) => effort !== "none") ?? allowed[0];
+}
+
 /** The model and reasoning effort of a new Agent, chosen among the models the
  * selected Computer Runtime reports; the first model is the default. */
 export function useAgentModelSelection(models: readonly RuntimeModel[]) {
@@ -26,11 +50,10 @@ export function useAgentModelSelection(models: readonly RuntimeModel[]) {
   const selectedModel =
     models.find(({ id }) => id === requestedModel) ?? models[0];
   const reasoningEfforts = [...(selectedModel?.allowed_reasoning_effort ?? [])];
-  const defaultReasoningEffort =
-    selectedModel?.default_reasoning_effort &&
-    reasoningEfforts.includes(selectedModel.default_reasoning_effort)
-      ? selectedModel.default_reasoning_effort
-      : reasoningEfforts[0];
+  const defaultReasoningEffort = resolveDefaultReasoningEffort(
+    reasoningEfforts,
+    selectedModel?.default_reasoning_effort,
+  );
   const reasoningEffort = reasoningEfforts.includes(
     requestedReasoningEffort as TeamHubAgentReasoningEffort,
   )

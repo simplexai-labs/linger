@@ -294,5 +294,45 @@ describe("local-model-agents", () => {
       },
       reasoning_effort: "high",
     });
+
+    const computerWithSparkModel: TeamHubLocalComputerPage["items"][number] = {
+      ...seed.localComputers[0]!,
+      computer_id: "computer-lab",
+      runtimes: [
+        {
+          models: [
+            {
+              allowed_reasoning_effort: ["none", "low", "high"],
+              id: "localmodels-library/spark-x2-6-4b",
+              label: "Spark X2.6 4B",
+            },
+          ],
+          status: "ready",
+          type: "pi",
+        },
+      ],
+    };
+
+    expect(
+      buildLocalModelRuntimeUpdate(
+        {
+          ...baseAgent,
+          currentReasoningEffort: "medium",
+          currentRuntimeType: "pi",
+        },
+        "localmodels-library/spark-x2-6-4b",
+        "computer-lab",
+        computerWithSparkModel,
+      ),
+    ).toEqual({
+      model: "localmodels-library/spark-x2-6-4b",
+      placement: {
+        computer_id: "computer-lab",
+        runtime_type: "pi",
+        type: "local",
+        workspace_grant_id: "grant-rw",
+      },
+      reasoning_effort: "low",
+    });
   });
 });

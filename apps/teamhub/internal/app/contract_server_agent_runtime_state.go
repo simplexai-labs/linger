@@ -295,6 +295,29 @@ func (a *App) finishAgentLocalRun(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+func (a *App) deliverAgentLocalRunFallbackReply(c *gin.Context) {
+	var request teamhubinternal.DeliverAgentLocalRunFallbackReplyRequest
+	if !a.decodeAgentRuntimeStateBody(c, &request) {
+		return
+	}
+	result, err := a.agentRuntimeState.DeliverFallbackReply(c.Request.Context(), agentruntimestate.DeliverFallbackReplyInput{
+		ContextKey: request.ContextKey,
+		Epoch:      request.Epoch,
+		RunID:      request.RunId,
+		Text:       request.Text,
+		InboxID:    stringValue(request.InboxId),
+	})
+	if a.writeAgentRuntimeStateError(c, "deliver Local Run fallback reply", err) {
+		return
+	}
+	response := teamhubinternal.DeliverAgentLocalRunFallbackReplyResult{
+		Delivered:   result.Delivered,
+		AlreadySent: result.AlreadySent,
+		MessageId:   runtimeStringPointer(result.MessageID),
+	}
+	c.JSON(http.StatusOK, response)
+}
+
 func (a *App) cancelAgentLocalRun(c *gin.Context) {
 	var request teamhubinternal.CancelAgentLocalRunRequest
 	if !a.decodeAgentRuntimeStateBody(c, &request) {
@@ -582,6 +605,8 @@ func (a *App) writeAgentRuntimeStateError(c *gin.Context, operation string, err 
 	switch {
 	case errors.Is(err, agentruntimestate.ErrInvalid):
 		status, code, message = http.StatusBadRequest, "INVALID_REQUEST", "Agent Runtime State request is invalid"
+	case errors.Is(err, agentruntimestate.ErrResponseTooLarge):
+		status, code, message = http.StatusBadRequest, "RESPONSE_TOO_LARGE", "Fallback reply exceeds the Room message size limit"
 	case errors.Is(err, agentruntimestate.ErrNotFound):
 		status, code, message = http.StatusNotFound, "NOT_FOUND", "Agent Runtime State was not found"
 	case errors.Is(err, agentruntimestate.ErrIdempotencyConflict):

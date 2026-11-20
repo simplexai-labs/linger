@@ -294,9 +294,7 @@ func normalizeRuntimeModels(catalog []native.ModelOption) []RuntimeModel {
 					model.AllowedReasoningEffort = append(model.AllowedReasoningEffort, effort.Value)
 				}
 			}
-			if slices.Contains(model.AllowedReasoningEffort, entry.Effort.Default) {
-				model.DefaultReasoningEffort = entry.Effort.Default
-			}
+			model.DefaultReasoningEffort = resolveDefaultReasoningEffort(model.AllowedReasoningEffort, entry.Effort.Default)
 		}
 		result = append(result, model)
 		if len(result) == 100 {
@@ -304,6 +302,26 @@ func normalizeRuntimeModels(catalog []native.ModelOption) []RuntimeModel {
 		}
 	}
 	return result
+}
+
+func resolveDefaultReasoningEffort(allowed []string, preferred string) string {
+	if len(allowed) == 0 {
+		return ""
+	}
+	if preferred != "" && slices.Contains(allowed, preferred) {
+		return preferred
+	}
+	for _, candidate := range []string{"medium", "low", "high"} {
+		if slices.Contains(allowed, candidate) {
+			return candidate
+		}
+	}
+	for _, effort := range allowed {
+		if effort != "none" {
+			return effort
+		}
+	}
+	return allowed[0]
 }
 func validRuntimeReasoningEffort(value string) bool {
 	return slices.Contains([]string{"none", "low", "medium", "high", "xhigh", "max", "ultra"}, value)

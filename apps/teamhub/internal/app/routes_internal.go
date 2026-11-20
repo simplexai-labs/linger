@@ -37,6 +37,7 @@ func (a *App) agentServiceRoutes() []contractRoute {
 		route(http.MethodGet, "/v0/agent-runtime/run", teamhubinternal.GetAgentLocalRunParams{}, agentService, a.getAgentLocalRun),
 		route(http.MethodPost, "/v0/agent-runtime/runs/cancel", nil, agentService, a.cancelAgentLocalRun),
 		route(http.MethodPost, "/v0/agent-runtime/runs/claim", nil, agentService, a.claimAgentLocalRun),
+		route(http.MethodPost, "/v0/agent-runtime/runs/fallback-reply", nil, agentService, a.deliverAgentLocalRunFallbackReply),
 		route(http.MethodPost, "/v0/agent-runtime/runs/finish", nil, agentService, a.finishAgentLocalRun),
 		route(http.MethodPost, "/v0/agent-runtime/runs/operations", nil, agentService, a.recordAgentLocalRunOperation),
 		route(http.MethodGet, "/v0/agent-runtime/runs/reply-status", teamhubinternal.GetAgentLocalRunReplyStatusParams{}, agentService, a.getAgentLocalRunReplyStatus),

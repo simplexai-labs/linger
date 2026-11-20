@@ -16,6 +16,8 @@ var (
 	ErrInboxNotAuthorized      = errors.New("agent runtime context cannot receive this inbox")
 	ErrRunnerReceiptRunSettled = fmt.Errorf("runner receipt Local Run is settled: %w", ErrFenced)
 	ErrDependency              = errors.New("agent runtime state dependency failed")
+	// ErrResponseTooLarge reports a fallback reply whose text exceeds the Room message limit.
+	ErrResponseTooLarge = errors.New("fallback reply exceeds the Room message size limit")
 )
 
 // ErrDaemonIdentityInUse means another Computer that was not removed already

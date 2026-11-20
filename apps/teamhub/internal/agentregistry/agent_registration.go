@@ -333,9 +333,16 @@ func insertTenantAgent(ctx context.Context, tx pgx.Tx, queries *store.Queries, t
 		}
 	}
 	placement := request.Runtime.Placement
-	if err := requireAgentPlacementTarget(ctx, queries, tenantID, creatorID, *placement.ComputerId, *placement.WorkspaceGrantId); err != nil {
+	targetComputer, err := requireAgentPlacementTarget(ctx, queries, tenantID, creatorID, *placement.ComputerId, *placement.WorkspaceGrantId)
+	if err != nil {
 		return "", nil, err
 	}
+	request.Runtime.ReasoningEffort = resolveRegistrationReasoningEffort(
+		targetComputer.RuntimeDiagnostics,
+		string(*placement.RuntimeType),
+		request.Runtime.Model,
+		request.Runtime.ReasoningEffort,
+	)
 	if err := queries.AcquireUnifiedSkillPolicyExclusiveLock(ctx); err != nil {
 		return "", nil, err
 	}

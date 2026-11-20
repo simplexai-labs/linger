@@ -1551,6 +1551,42 @@ describe("TeamHub Context Runtime state", () => {
     await state.close();
   });
 
+  it("delivers fallback replies with epoch fencing and optional target inbox", async () => {
+    const deliverFallbackReply = vi.fn<
+      TeamHubRuntimeStateClient["deliverFallbackReply"]
+    >(async () => ({
+      delivered: true,
+      already_sent: false,
+      message_id: "message_fallback_1",
+    }));
+    const { state } = await terminalFixture({ deliverFallbackReply });
+    try {
+      await expect(
+        state.deliverFallbackReply?.(
+          "local-run-1",
+          "Answer from final assistant text.",
+          "thread:thread-9",
+        ),
+      ).resolves.toEqual({
+        delivered: true,
+        alreadySent: false,
+        messageId: "message_fallback_1",
+      });
+      expect(deliverFallbackReply).toHaveBeenCalledWith(
+        {
+          context_key: '["meta","agent-reviewer","room","room-1"]',
+          epoch: "agent-epoch-test",
+          run_id: "local-run-1",
+          text: "Answer from final assistant text.",
+          inbox_id: "thread:thread-9",
+        },
+        expect.any(AbortSignal),
+      );
+    } finally {
+      await state.close();
+    }
+  });
+
   it("reads Local Run reply delivery status from TeamHub", async () => {
     const getRunReplyStatus = vi.fn<
       TeamHubRuntimeStateClient["getRunReplyStatus"]

@@ -519,6 +519,37 @@ finishRun:
       "500":
         $ref: "../components/common.yaml#/components/responses/InternalError"
 
+deliverFallbackReply:
+  post:
+    tags: [Agent Runtime State]
+    operationId: deliverAgentLocalRunFallbackReply
+    summary: Idempotently deliver a Room Run's non-empty final assistant text when the Agent did not invoke the message command.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/agent-runtime-state.yaml#/components/schemas/DeliverAgentLocalRunFallbackReplyRequest"
+    responses:
+      "200":
+        description: Fallback reply was delivered or an earlier reply for this Run already existed.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/agent-runtime-state.yaml#/components/schemas/DeliverAgentLocalRunFallbackReplyResult"
+      "400":
+        $ref: "../components/common.yaml#/components/responses/BadRequest"
+      "401":
+        $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+      "403":
+        $ref: "../components/common.yaml#/components/responses/Forbidden"
+      "404":
+        $ref: "../components/common.yaml#/components/responses/NotFound"
+      "409":
+        $ref: "../components/common.yaml#/components/responses/Conflict"
+      "500":
+        $ref: "../components/common.yaml#/components/responses/InternalError"
+
 cancelRun:
   post:
     tags: [Agent Runtime State]

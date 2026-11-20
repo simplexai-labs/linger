@@ -12,6 +12,8 @@ import type { Message } from "./types.js";
 export class ReplyDelivery {
   readonly #started = new Map<string, "message" | "message_read">();
   #awaitingHuman = false;
+  #targetInboxId?: string;
+  #fallbackDelivered = false;
   #attemptedWrites = 0;
   #failedWrites = 0;
   #deliveredWrites = 0;
@@ -19,7 +21,23 @@ export class ReplyDelivery {
 
   /** Records the inputs the Run took up, at its start or as steers. */
   observeInputs(messages: readonly Message[]): void {
-    if (messages.some(awaitsReply)) this.#awaitingHuman = true;
+    for (const message of messages) {
+      const inboxId = awaitedHumanInboxId(message);
+      if (inboxId !== undefined) {
+        this.#awaitingHuman = true;
+        if (inboxId !== "") this.#targetInboxId = inboxId;
+      }
+    }
+  }
+
+  /** Marks that the executor surfaced the Run's final text via fallback delivery. */
+  markFallbackDelivered(): void {
+    this.#fallbackDelivered = true;
+  }
+
+  /** Authorized Room or Thread Inbox where the waiting Human mentioned the Agent. */
+  get targetInboxId(): string | undefined {
+    return this.#targetInboxId;
   }
 
   observe(event: RunEvent): void {
@@ -51,12 +69,15 @@ export class ReplyDelivery {
   }
 
   /**
-   * A Human who mentioned the Agent is waiting and the Agent never tried to
-   * post. Its Runtime ended the turn in text nobody sees; small models do
-   * this when they answer without calling the message command.
+   * A Human who mentioned the Agent is waiting and neither a message command
+   * nor fallback delivery reached the Room.
    */
   get replyNotSent(): boolean {
-    return this.#awaitingHuman && this.#attemptedWrites === 0;
+    return (
+      this.#awaitingHuman &&
+      this.#attemptedWrites === 0 &&
+      !this.#fallbackDelivered
+    );
   }
 
   get hasFailures(): boolean {
@@ -77,21 +98,37 @@ export class ReplyDelivery {
 }
 
 /**
- * Whether TeamHub queued this input for a Human's Message that mentioned this
- * Agent. A direct chat mentions its Agent too. Room talk the Agent only reads
- * along with, a Routine wake, a Task callback and another Agent's Message may
- * rightly go unanswered.
+ * Strips model thinking wrapper blocks from final assistant text before
+ * fallback Room delivery so pure-thinking or whitespace output stays empty.
  */
-function awaitsReply(message: Message): boolean {
+export function extractDeliverableReplyText(text: string): string {
+  return text
+    .replace(/<(think|thinking)\b[^>]*>[\s\S]*?<\/\1>/giu, "")
+    .replace(/<(think|thinking)\b[^>]*>[\s\S]*$/iu, "")
+    .trim();
+}
+
+/**
+ * Returns the target Inbox ID (or "" when omitted on a synthetic input) when
+ * TeamHub queued this input for a Human's Message that mentioned this Agent,
+ * or undefined when the input does not require a Human reply. Room talk the
+ * Agent only reads along with, a Routine wake, a Task callback and another
+ * Agent's Message may rightly go unanswered.
+ */
+function awaitedHumanInboxId(message: Message): string | undefined {
   const notification = (message as unknown as Record<string, unknown>)
     .acceptedNotification;
   if (!isRecord(notification) || !Array.isArray(notification.messages))
-    return false;
-  return notification.messages.some(
+    return undefined;
+  const awaiting = notification.messages.some(
     (queued) =>
       isRecord(queued) &&
       queued.mentioned === true &&
       queued.authorType === "user" &&
       queued.messageKind === "conversation",
   );
+  if (!awaiting) return undefined;
+  return typeof notification.inboxId === "string"
+    ? notification.inboxId.trim()
+    : "";
 }

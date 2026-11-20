@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -76,5 +77,44 @@ func TestPiCatalogMasksNonContextFailure(t *testing.T) {
 	_, err := DiscoverPiModels(t.Context(), inv)
 	if !errors.Is(err, errPiNoModels) || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("unsafe catalog failure: %v", err)
+	}
+}
+
+func TestPiCatalogResolvesFallbackDefaultReasoningEffort(t *testing.T) {
+	state := piCatalogState{ThinkingLevel: "medium"}
+	state.Model.Provider = "localmodels-library"
+	state.Model.ID = "spark"
+	list, err := piCatalogList(
+		state,
+		[]json.RawMessage{
+			// Default model whose thinkingLevelMap excludes "medium" (Spark-X2.6-4B shape).
+			json.RawMessage(`{"provider":"localmodels-library","id":"spark","name":"Spark-X2.6-4B","reasoning":true,"thinkingLevelMap":{"off":0,"minimal":null,"low":1,"medium":null,"high":2}}`),
+			// Non-default Model Library model with full levels and no explicit default.
+			json.RawMessage(`{"provider":"localmodels-library","id":"qwen36","name":"Qwen3.6-35B-A3B","reasoning":true,"thinkingLevelMap":{"off":0,"minimal":null,"low":1,"medium":2,"high":3}}`),
+			// Non-default model supporting only none and high.
+			json.RawMessage(`{"provider":"localmodels-library","id":"highonly","name":"HighOnly","reasoning":true,"thinkingLevelMap":{"off":0,"minimal":null,"low":null,"medium":null,"high":2}}`),
+			// Non-default model supporting only none and xhigh.
+			json.RawMessage(`{"provider":"localmodels-library","id":"xhighonly","name":"XHighOnly","reasoning":true,"thinkingLevelMap":{"off":0,"minimal":null,"low":null,"medium":null,"high":null,"xhigh":4}}`),
+			// Non-default model supporting only none.
+			json.RawMessage(`{"provider":"localmodels-library","id":"noneonly","name":"NoneOnly","reasoning":true,"thinkingLevelMap":{"off":0,"minimal":null,"low":null,"medium":null,"high":null}}`),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"localmodels-library/spark":     "low",
+		"localmodels-library/qwen36":    "medium",
+		"localmodels-library/highonly":  "high",
+		"localmodels-library/xhighonly": "xhigh",
+		"localmodels-library/noneonly":  "none",
+	}
+	if len(list.Models) != len(want) {
+		t.Fatalf("models = %+v", list.Models)
+	}
+	for _, model := range list.Models {
+		if model.Effort == nil || model.Effort.Default != want[model.ID] {
+			t.Fatalf("%s effort = %+v, want default %q", model.ID, model.Effort, want[model.ID])
+		}
 	}
 }

@@ -6,7 +6,10 @@ import type {
   TeamHubTenantAgentUpdateInput,
 } from "@/features/teamhub/teamhub-types";
 
-import { reasoningEffortLabel } from "./use-agent-model-selection";
+import {
+  reasoningEffortLabel,
+  resolveDefaultReasoningEffort,
+} from "./use-agent-model-selection";
 
 export type LocalComputer = TeamHubLocalComputerPage["items"][number];
 type LocalComputerRuntime = LocalComputer["runtimes"][number];
@@ -77,17 +80,18 @@ export function findReadyRuntime(
   return runtime?.status === "ready" ? runtime : undefined;
 }
 
-/** Keeps the preferred effort when the model allows it, else the model's
- * default, else the first allowed effort. */
+/** Keeps the preferred effort when the model allows it, else resolves a
+ * preferred allowed effort (default -> medium -> low -> high -> first non-none -> first). */
 export function resolveReasoningEffort(
   model: AgentModel | undefined,
   preferred: TeamHubAgentReasoningEffort | undefined,
 ) {
   const allowed = model?.allowed_reasoning_effort ?? [];
   if (preferred && allowed.includes(preferred)) return preferred;
-  const fallback = model?.default_reasoning_effort;
-  if (fallback && allowed.includes(fallback)) return fallback;
-  return allowed[0];
+  return resolveDefaultReasoningEffort(
+    allowed,
+    model?.default_reasoning_effort,
+  );
 }
 
 /** Keeps the Agent's model when the Runtime offers it, otherwise the Runtime's

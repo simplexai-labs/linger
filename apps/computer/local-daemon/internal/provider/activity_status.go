@@ -46,6 +46,8 @@ func activityPresentation(message native.Event) (string, map[string]any, activit
 	}
 	shown := slices.DeleteFunc(slices.Clone(steps), func(step step) bool { return step.quiet })
 	switch {
+	case slices.ContainsFunc(steps, func(step step) bool { return step.kind == native.ActivityMessage }):
+		kind = native.ActivityMessage
 	case len(shown) > 0:
 		kind = shown[len(shown)-1].kind
 	case len(steps) > 0:

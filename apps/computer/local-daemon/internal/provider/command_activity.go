@@ -268,8 +268,8 @@ func numeric(word string) bool { return number.MatchString(word) }
 // commandWord is a TeamHub CLI command or subcommand name.
 var commandWord = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
-// messageSends post to the Room, which shows the message itself.
-var messageSends = map[string]bool{"send": true, "direct": true, "emoji": true, "sequence": true}
+// messageSends post to the Room, which shows the message or card itself.
+var messageSends = map[string]bool{"send": true, "card": true, "direct": true, "emoji": true, "sequence": true, "ask-user": true}
 
 // createsTask reports a script that is one `teamhub task create` call. Its
 // receipt names the Task it created, which the Room links the step to.

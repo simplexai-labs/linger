@@ -484,6 +484,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/agent-runtime/runs/fallback-reply": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Idempotently deliver a Room Run's non-empty final assistant text when the Agent did not invoke the message command. */
+    post: operations["deliverAgentLocalRunFallbackReply"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/agent-runtime/runs/cancel": {
     parameters: {
       query?: never;
@@ -2132,7 +2149,7 @@ export interface components {
     AgentRuntimeSuccessResult: {
       success: boolean;
     };
-    /** @description Public classified failure; contains no native error text, paths, credentials, or task input. Each code is set where the failure is observed, from structured signals only. model_unavailable means the model service refused the selected model for the Runtime's account, so the Agent needs another model or another sign-in. model_not_offered means the Agent's Computer does not offer the selected model for its Runtime, or the model does not support the selected reasoning effort, so the Runtime could not start; the Agent needs a model and reasoning effort that Computer offers. context_too_long means the conversation no longer fits the model's context window. model_service_error means the model service reported a server-side error. timeout means the Runtime hit its local execution deadline. execution_outcome_unknown means a command was dispatched but no validated exit was observed before unexpected transport or Runtime failure. Intentional cancellation, authorization loss or unavailability, and normal retirement do not create this classification. Authorization loss or unavailability includes explicit revocation, authorization checks that fail or time out, and authorization expiry. This code does not currently cover unknown effects caused by control-plane disconnection. It remains a failed Run and must not be automatically replayed; verify its effects before starting another Run. reply_undelivered means a Room Run finished, but every message the Agent tried to post failed, so the Room received no reply from it. reply_not_sent means a Room Run finished without trying to post anything while a Human who mentioned the Agent waited for its reply; the Runtime ended the turn in text nobody sees, which is not posted for it. interrupted means the Run stopped before it finished for a reason other than a user cancellation, such as a restart or a Runner stopped on its Computer; part of its work may have taken effect and it is not replayed. computer_unavailable means the Agent's Computer could not run it: the Computer is unreachable, the Agent's Runner is stopped there, or the Runtime is not enabled. cleanup_unconfirmed means the Runtime process could not be confirmed stopped. response_too_large means the reply exceeded the Room's size limit. unclassified means no structured signal identified the cause. runtime_type is present when the failure belongs to a selected Runtime; it is absent for failures the Agent Service or TeamHub observes without one. */
+    /** @description Public classified failure; contains no native error text, paths, credentials, or task input. Each code is set where the failure is observed, from structured signals only. model_unavailable means the model service refused the selected model for the Runtime's account, so the Agent needs another model or another sign-in. model_not_offered means the Agent's Computer does not offer the selected model for its Runtime, or the model does not support the selected reasoning effort, so the Runtime could not start; the Agent needs a model and reasoning effort that Computer offers. context_too_long means the conversation no longer fits the model's context window. model_service_error means the model service reported a server-side error. timeout means the Runtime hit its local execution deadline. execution_outcome_unknown means a command was dispatched but no validated exit was observed before unexpected transport or Runtime failure. Intentional cancellation, authorization loss or unavailability, and normal retirement do not create this classification. Authorization loss or unavailability includes explicit revocation, authorization checks that fail or time out, and authorization expiry. This code does not currently cover unknown effects caused by control-plane disconnection. It remains a failed Run and must not be automatically replayed; verify its effects before starting another Run. reply_undelivered means a Room Run finished, but every message the Agent tried to post failed, so the Room received no reply from it. reply_not_sent means a Room Run finished without sending or producing any deliverable reply while a Human who mentioned the Agent waited for its reply (even after a single same-session reminder turn and fallback check). interrupted means the Run stopped before it finished for a reason other than a user cancellation, such as a restart or a Runner stopped on its Computer; part of its work may have taken effect and it is not replayed. computer_unavailable means the Agent's Computer could not run it: the Computer is unreachable, the Agent's Runner is stopped there, or the Runtime is not enabled. cleanup_unconfirmed means the Runtime process could not be confirmed stopped. response_too_large means the reply exceeded the Room's size limit. unclassified means no structured signal identified the cause. runtime_type is present when the failure belongs to a selected Runtime; it is absent for failures the Agent Service or TeamHub observes without one. */
     AgentRuntimeExecutionFailure: {
       /** @enum {string} */
       code:
@@ -2201,6 +2218,18 @@ export interface components {
     FinishAgentLocalRunResult: {
       run: components["schemas"]["AgentLocalRun"];
       session?: components["schemas"]["AgentRuntimeSession"];
+    };
+    DeliverAgentLocalRunFallbackReplyRequest: {
+      context_key: components["schemas"]["AgentRuntimeContextKey"];
+      epoch: components["schemas"]["AgentServiceEpoch"];
+      run_id: string;
+      text: string;
+      inbox_id?: string;
+    };
+    DeliverAgentLocalRunFallbackReplyResult: {
+      delivered: boolean;
+      already_sent: boolean;
+      message_id?: string;
     };
     CancelAgentLocalRunRequest: {
       context_key: components["schemas"]["AgentRuntimeContextKey"];
@@ -4306,6 +4335,36 @@ export interface operations {
       };
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      500: components["responses"]["InternalError"];
+    };
+  };
+  deliverAgentLocalRunFallbackReply: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DeliverAgentLocalRunFallbackReplyRequest"];
+      };
+    };
+    responses: {
+      /** @description Fallback reply was delivered or an earlier reply for this Run already existed. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DeliverAgentLocalRunFallbackReplyResult"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       409: components["responses"]["Conflict"];
       500: components["responses"]["InternalError"];

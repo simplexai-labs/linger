@@ -263,6 +263,8 @@ func writeModelSourceJSON(t *testing.T, stateDir string, payload map[string]any)
 func TestAgentRuntimeModelPrefersTargetThenCatalogDefault(t *testing.T) {
 	catalog := []RuntimeModelOption{
 		{ID: "opus", AllowedReasoningEffort: []string{"low", "max"}},
+		{ID: "spark", AllowedReasoningEffort: []string{"none", "low", "high"}},
+		{ID: "qwen", AllowedReasoningEffort: []string{"none", "low", "medium", "high"}},
 		{ID: "default", IsDefault: true, AllowedReasoningEffort: []string{"medium"}, DefaultReasoningEffort: "medium"},
 		{ID: "localmodels-byok"},
 	}
@@ -275,7 +277,9 @@ func TestAgentRuntimeModelPrefersTargetThenCatalogDefault(t *testing.T) {
 		{name: "target missing", runtime: "claude", target: "gone", catalog: catalog, model: "default", effort: "medium"},
 		{name: "no target", runtime: "claude", catalog: catalog, model: "default", effort: "medium"},
 		{name: "first allowed effort", runtime: "claude", target: "opus", catalog: catalog, model: "opus", effort: "low"},
-		{name: "no default", runtime: "codex", catalog: catalog[2:], model: "localmodels-byok"},
+		{name: "local model skips none when medium absent", runtime: "pi", target: "spark", catalog: catalog, model: "spark", effort: "low"},
+		{name: "local model prefers medium over none", runtime: "pi", target: "qwen", catalog: catalog, model: "qwen", effort: "medium"},
+		{name: "no default", runtime: "codex", catalog: catalog[4:], model: "localmodels-byok"},
 		{name: "no catalog keeps target", runtime: "pi", target: "localmodels/qwen", model: "localmodels/qwen"},
 		{name: "no catalog no target", runtime: "codex", model: "codex-default"},
 	} {

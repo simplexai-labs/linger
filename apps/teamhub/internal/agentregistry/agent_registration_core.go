@@ -61,19 +61,19 @@ func CreateAgentRegistration(ctx context.Context, queries *store.Queries, spec A
 // it was not removed, and that the workspace grant is one of its writable
 // grants. A concurrent removal of the Computer waits behind this lock and then
 // finds the Agent there. The Computer may be offline.
-func requireAgentPlacementTarget(ctx context.Context, queries *store.Queries, tenantID, sponsorActorID, computerID, workspaceGrantID string) error {
+func requireAgentPlacementTarget(ctx context.Context, queries *store.Queries, tenantID, sponsorActorID, computerID, workspaceGrantID string) (store.LocalComputer, error) {
 	target, err := queries.LockAgentRuntimeLocalComputer(ctx, computerID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && target.Status == "removed") {
-		return ErrAgentPlacementTargetUnavailable
+		return store.LocalComputer{}, ErrAgentPlacementTargetUnavailable
 	}
 	if err != nil {
-		return err
+		return store.LocalComputer{}, err
 	}
 	if target.OwnerTenantID != tenantID || target.OwnerActorID != sponsorActorID ||
 		!writableWorkspaceGrantExists(target.WorkspaceGrants, workspaceGrantID) {
-		return ErrAgentPlacementTargetUnavailable
+		return store.LocalComputer{}, ErrAgentPlacementTargetUnavailable
 	}
-	return nil
+	return target, nil
 }
 
 func writableWorkspaceGrantExists(raw []byte, grantID string) bool {

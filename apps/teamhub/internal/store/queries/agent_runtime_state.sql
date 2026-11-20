@@ -1541,3 +1541,13 @@ WHERE registration.tenant_id=sqlc.arg(tenant_id)::text
     )
   )
 ORDER BY agent.display_name,registration.agent_management_id;
+
+-- name: GetAgentLocalRunMessage :one
+SELECT id
+FROM messages
+WHERE tenant_id=sqlc.arg(tenant_id)::text
+  AND local_run_id=sqlc.arg(local_run_id)::text
+  AND author_actor_id=sqlc.arg(author_actor_id)::text
+  AND message_kind='conversation'
+ORDER BY created_at DESC, id DESC
+LIMIT 1;

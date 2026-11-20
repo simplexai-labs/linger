@@ -53,16 +53,20 @@ func chooseAnotherMeLocalPlacement(computers []httpapi.LocalComputer, preferredR
 	return anotherMeLocalPlacement{}, errAnotherMeComputerUnavailable
 }
 
-// placementReasoningEffort keeps the model default and otherwise takes the
-// first allowed effort, because a model that offers efforts needs one.
+// placementReasoningEffort keeps the model default and otherwise picks a
+// preferred allowed effort (medium -> low -> high -> first non-none -> first).
 func placementReasoningEffort(model httpapi.AgentModel) string {
-	if model.DefaultReasoningEffort != nil {
-		return string(*model.DefaultReasoningEffort)
-	}
 	if model.AllowedReasoningEffort == nil || len(*model.AllowedReasoningEffort) == 0 {
+		if model.DefaultReasoningEffort != nil {
+			return string(*model.DefaultReasoningEffort)
+		}
 		return ""
 	}
-	return string((*model.AllowedReasoningEffort)[0])
+	preferred := ""
+	if model.DefaultReasoningEffort != nil {
+		preferred = string(*model.DefaultReasoningEffort)
+	}
+	return string(resolveDefaultReasoningEffort(*model.AllowedReasoningEffort, preferred))
 }
 
 func writableWorkspaceGrant(grants []httpapi.LocalComputerWorkspaceGrant) string {
