@@ -39,7 +39,7 @@
     "@linger/voice-runtime": "workspace:*",
     "@linger/wire-contracts": "workspace:*",
     "ajv": "8.17.1",
-    "hono": "^4.12.31",
+    "hono": "^4.13.16",
     "jsdom": "29.1.1",
     "jszip": "3.10.1",
     "mailparser": "3.10.0",
