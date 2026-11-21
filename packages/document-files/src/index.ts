@@ -217,6 +217,7 @@ export async function bundleDocumentImages<T extends DocumentFileSnapshot>(
   signal: AbortSignal,
 ): Promise<T> {
   if (!/\.(?:md|markdown)$/iu.test(snapshot.filePath)) return snapshot;
+  signal.throwIfAborted();
   const tree = parse(snapshot);
   const nodes = images(tree);
   const sources = new Map<string, Promise<Map<string, string>>>();
@@ -236,6 +237,7 @@ export async function bundleDocumentImages<T extends DocumentFileSnapshot>(
       playgroundFilePathSchema.parse(filePath),
       signal,
     );
+    signal.throwIfAborted();
     totalBytes += file.content.length;
     if (totalBytes > MAX_BYTES) throw invalid();
     return file;
@@ -305,6 +307,7 @@ export async function bundleDocumentImages<T extends DocumentFileSnapshot>(
       replaceImage(node, await uri);
     }
   });
+  signal.throwIfAborted();
   if (!changed) return snapshot;
   const content = Buffer.from(processor.stringify(tree));
   if (content.length > MAX_BYTES) throw invalid();
