@@ -236,6 +236,16 @@ func readCodexModelsCache(open func() (*os.File, error), version string) (codexM
 	return codexModelsCacheEntry{data: data, fetchedAt: fetchedAt}, ok
 }
 
+// codexClientVersionMatches accepts exact matches and prerelease/build
+// banners whose Codex binary writes only the base X.Y.Z into models_cache.json.
+func codexClientVersionMatches(cached, expected string) bool {
+	if cached == expected {
+		return true
+	}
+	idx := strings.IndexAny(expected, "-+")
+	return idx > 0 && cached == expected[:idx]
+}
+
 // validCodexModelsCache checks only the fields that select a cache. An empty
 // version accepts any client_version.
 func validCodexModelsCache(data []byte, version string) (time.Time, bool) {
@@ -246,7 +256,7 @@ func validCodexModelsCache(data []byte, version string) (time.Time, bool) {
 	if json.Unmarshal(data, &header) != nil || header.ClientVersion == "" {
 		return time.Time{}, false
 	}
-	if version != "" && header.ClientVersion != version {
+	if version != "" && !codexClientVersionMatches(header.ClientVersion, version) {
 		return time.Time{}, false
 	}
 	fetchedAt, err := time.Parse(time.RFC3339Nano, header.FetchedAt)
