@@ -3,7 +3,7 @@
 `normalizeDocumentContent` converts supported local source bytes to canonical
 Markdown. Source selection uses a recognized MIME essence first, then the
 filename and representation format. Generic or unspecified media types retain
-those fallbacks.
+those fallbacks. Only explicitly registered own keys identify a format; an unknown filename extension cannot shadow a valid representation fallback through inherited object properties.
 
 Text sources accept MIME metadata such as CSV's `header=present` independently
 of the character encoding. Parameters use MIME quoted-string parsing, so

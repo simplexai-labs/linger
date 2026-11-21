@@ -280,12 +280,12 @@ export function isInProcessDocumentSource(
 
 export function codeFenceLanguage(filename: string | undefined): string {
   const extension = fileExtension(filename);
-  return CODE_LANGUAGES[extension] ?? extension ?? "text";
+  return ownValue(CODE_LANGUAGES, extension) ?? extension ?? "text";
 }
 
 function kindFromMediaType(essence: string): DocumentSourceKind | undefined {
   if (!essence || essence === "application/octet-stream") return undefined;
-  const mapped = MEDIA_TYPE_KINDS[essence];
+  const mapped = ownValue(MEDIA_TYPE_KINDS, essence);
   if (mapped) return mapped;
   if (
     essence.startsWith("image/") ||
@@ -312,7 +312,7 @@ function kindFromFilename(
   filename: string | undefined,
 ): DocumentSourceKind | undefined {
   const extension = fileExtension(filename);
-  return extension ? EXTENSION_KINDS[extension] : undefined;
+  return extension ? ownValue(EXTENSION_KINDS, extension) : undefined;
 }
 
 function kindFromRepresentation(
@@ -321,7 +321,8 @@ function kindFromRepresentation(
   const normalized = representationFormat?.trim().toLocaleLowerCase("en-US");
   if (!normalized) return undefined;
   return (
-    REPRESENTATION_KINDS[normalized] ?? EXTENSION_KINDS[normalized] ?? undefined
+    ownValue(REPRESENTATION_KINDS, normalized) ??
+    ownValue(EXTENSION_KINDS, normalized)
   );
 }
 
@@ -361,4 +362,8 @@ function fileExtension(filename: string | undefined): string {
   const separator = basename.lastIndexOf(".");
   if (separator <= 0 || separator === basename.length - 1) return "";
   return basename.slice(separator + 1).toLocaleLowerCase("en-US");
+}
+
+function ownValue<T>(mapping: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(mapping, key) ? mapping[key] : undefined;
 }
