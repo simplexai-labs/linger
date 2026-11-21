@@ -361,21 +361,36 @@ export async function startVoiceService(options: {
   const poll = setInterval(() => void reconcile(), VOICE_RECONCILE_POLL_MS);
   const wantedWorkers = () =>
     VOICE_WORKERS.filter((worker) => entries.get(worker)!.key);
-  const workersReady = async () =>
-    (
-      await Promise.all(
-        wantedWorkers().map(async (worker) => {
-          const entry = entries.get(worker)!;
-          // A replaced worker may still answer until it exits, so only the
-          // child of the current generation counts.
-          return (
-            Boolean(entry.child) &&
-            entry.childGeneration === entry.generation &&
-            (await probeWorker(entry.port!))
-          );
-        }),
+  const workersReady = async () => {
+    const checked = wantedWorkers().map((worker) => {
+      const entry = entries.get(worker)!;
+      return {
+        entry,
+        child: entry.child,
+        generation: entry.generation,
+        port: entry.port,
+      };
+    });
+    const healthy = await Promise.all(
+      checked.map(async ({ entry, child, generation, port }) =>
+        child && entry.childGeneration === generation
+          ? probeWorker(port!)
+          : false,
+      ),
+    );
+    // Reconcile and worker exits can invalidate even a completed probe while
+    // another worker's probe is still pending.
+    return (
+      wantedWorkers().length === checked.length &&
+      checked.every(
+        ({ entry, child, generation }, index) =>
+          healthy[index] &&
+          entry.child === child &&
+          entry.generation === generation &&
+          entry.childGeneration === generation,
       )
-    ).every(Boolean);
+    );
+  };
   /** Reconciles, then waits until every wanted worker can take a job, so the
    * caller's next voice dispatch finds a registered worker. */
   const reconcileAndWait = async () => {
