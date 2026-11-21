@@ -140,3 +140,5 @@ cell become spaces instead of introducing new Markdown rows.
 - The `Dockerfile` builds one image that runs every role: port 4319 for the
   shared listener and 4321 for the Document Runtime. Its health check uses
   both ports' `/healthz`.
+
+The shared BM25 scorer retains per-document counts only for the current query terms while still using every analyzed token for document-length normalization. Document frequency is counted once per document during that pass.
