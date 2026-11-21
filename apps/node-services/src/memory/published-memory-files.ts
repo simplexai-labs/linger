@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { withDirectoryLock } from "./filesystem-lock.js";
+import { assertDirectoryLock, withDirectoryLock } from "./filesystem-lock.js";
 import {
   markMemoryChanged,
   walkFiles,
@@ -154,6 +154,7 @@ export async function publishMemoryWiki(
             .join("/")
             .normalize("NFC");
           if (!files.has(current) && names.has(current.toLowerCase())) {
+            assertDirectoryLock();
             await fs.unlink(file);
             changed = true;
           }
@@ -171,7 +172,9 @@ export async function publishMemoryWiki(
         if (current === content) continue;
         const tmp = path.join(state, randomUUID());
         try {
+          assertDirectoryLock();
           await fs.writeFile(tmp, content, { flag: "wx", mode: 0o600 });
+          assertDirectoryLock();
           await fs.rename(tmp, file);
           changed = true;
         } finally {
@@ -189,6 +192,7 @@ export async function publishMemoryWiki(
                 .normalize("NFC"),
             )
           ) {
+            assertDirectoryLock();
             await fs.unlink(file);
             changed = true;
           }
