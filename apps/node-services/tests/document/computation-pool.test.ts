@@ -155,6 +155,65 @@ describe("Document computation pool", () => {
     }
   });
 
+  it.each(["first", "crash"])(
+    "drains queued work after send failures following %s",
+    async (initial) => {
+      const reports: string[] = [];
+      const pool = createDocumentComputationPool({
+        size: 1,
+        workerUrl: fixtureWorkerUrl,
+        respawnDelayMs: 10,
+        reportError: (message) => reports.push(message),
+      });
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const first = pool
+          .run("materializeRoomDocument", initial as never)
+          .catch((caught: unknown) => caught);
+        const unsent = Array.from({ length: 2 }, () => {
+          const sourceBytes = new Uint8Array([65]);
+          structuredClone(sourceBytes, { transfer: [sourceBytes.buffer] });
+          return pool
+            .run("materializeRoomDocument", {
+              materializationId: "9b5be123-4fd2-4a47-a98d-548879f3fc78",
+              schemaVersion: 1,
+              sourceKind: "markdown",
+              sourceBytes,
+            })
+            .catch((caught: unknown) => caught);
+        });
+        const healthy = pool.run(
+          "materializeRoomDocument",
+          "after send failures" as never,
+        );
+        const results = await Promise.race([
+          Promise.all([first, ...unsent, healthy]),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error("Queued computation did not resume")),
+              2000,
+            );
+          }),
+        ]);
+
+        expect(results.slice(1, 3)).toEqual([
+          expect.objectContaining({ name: "DataCloneError" }),
+          expect.objectContaining({ name: "DataCloneError" }),
+        ]);
+        expect(results[3]).toBe("after send failures");
+        expect(
+          reports.filter((message) => message.includes("input was not sent")),
+        ).toHaveLength(2);
+        await expect(
+          pool.run("materializeRoomDocument", "still available" as never),
+        ).resolves.toBe("still available");
+      } finally {
+        clearTimeout(timeout);
+        await pool.close();
+      }
+    },
+  );
+
   it("retires an idle worker without reporting and spawns a fresh one on demand", async () => {
     const reports: string[] = [];
     const pool = createDocumentComputationPool({

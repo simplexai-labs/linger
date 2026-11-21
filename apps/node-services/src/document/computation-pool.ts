@@ -153,21 +153,24 @@ export function createDocumentComputationPool(options: {
     });
   }
 
-  function assign(slot: Slot, task: Task): void {
+  function assignNext(slot: Slot): void {
     clearTimeout(slot.idleTimer);
     slot.idleTimer = undefined;
-    const id = ++nextId;
-    slot.active = { id, task };
-    try {
-      slot.worker.postMessage({ id, name: task.name, input: task.input });
-    } catch (error) {
-      slot.active = undefined;
-      reportError(`Document computation ${task.name} input was not sent`);
-      task.reject(
-        error instanceof Error
-          ? error
-          : new Error("Document computation input was not sent"),
-      );
+    while (slot.active === undefined && queue.length > 0) {
+      const task = queue.shift()!;
+      const id = ++nextId;
+      slot.active = { id, task };
+      try {
+        slot.worker.postMessage({ id, name: task.name, input: task.input });
+      } catch (error) {
+        slot.active = undefined;
+        reportError(`Document computation ${task.name} input was not sent`);
+        task.reject(
+          error instanceof Error
+            ? error
+            : new Error("Document computation input was not sent"),
+        );
+      }
     }
   }
 
@@ -180,7 +183,7 @@ export function createDocumentComputationPool(options: {
         break;
       }
       if (slot.active === undefined) {
-        assign(slot, queue.shift()!);
+        assignNext(slot);
       }
     }
     while (
@@ -188,7 +191,7 @@ export function createDocumentComputationPool(options: {
       slots.length < options.size &&
       respawnTimers.size === 0
     ) {
-      assign(spawn(), queue.shift()!);
+      assignNext(spawn());
     }
     for (const slot of slots) {
       if (slot.active === undefined && slot.idleTimer === undefined) {

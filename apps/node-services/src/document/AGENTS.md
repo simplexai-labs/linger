@@ -136,6 +136,9 @@ changed`, and each client reconnects with a fresh token. The Runtime counts
   `DocumentComputationError` with the same `code`, so endpoint status mapping
   is unchanged. Inputs and results are structured-cloned; do not transfer
   Node Buffers.
+- A synchronous input-send failure rejects only that task. The available
+  worker continues with the next queued task without waiting for another
+  request or worker event, including after a delayed replacement starts.
 - Workers start on demand when work is queued and exit after 5 minutes idle,
   so an unused Runtime holds no extra isolate. An idle exit is logged at info
   and is not a failure.
