@@ -199,6 +199,11 @@ export async function htmlToMarkdown(
   pageURL: string,
 ): Promise<{ title?: string; markdown: string }> {
   const tree = unified().use(rehypeParse).parse(html) as unknown as HastNode;
+  const baseHref = findAll(tree, "base").find(
+    (node) => typeof node.properties?.href === "string",
+  )?.properties?.href;
+  const baseURL =
+    typeof baseHref === "string" ? resolve(baseHref, pageURL) : undefined;
   const title = plainText(textOf(find(tree, "title")))
     .slice(0, maxTitleCharacters)
     .trim();
@@ -210,7 +215,11 @@ export async function htmlToMarkdown(
     articles[0] ??
     find(tree, "body") ??
     tree;
-  prune(content, content.tagName === "body" || content === tree, pageURL);
+  prune(
+    content,
+    content.tagName === "body" || content === tree,
+    baseURL && webURL(baseURL) ? baseURL : pageURL,
+  );
   const root = { type: "root", children: [content] };
   const mdast = await unified()
     .use(rehypeRemark)
