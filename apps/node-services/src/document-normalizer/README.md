@@ -21,3 +21,8 @@ so CommonMark readers do not display them as literal text.
 The response announces this behavior as normalizer version 3. A version header
 change does not enqueue existing Document Versions for normalization; their
 stored Markdown remains until a text sync runs again.
+
+CSV and TSV output budgets are checked before sparse rows are padded, then per
+rendered row using canonical UTF-8 bytes. Oversized tables fail without building
+the complete expanded cell matrix; accepted output keeps its escaping and NFC
+normalization.
