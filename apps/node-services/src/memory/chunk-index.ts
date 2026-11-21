@@ -51,7 +51,7 @@ const DEFAULT_RESULT_LIMIT = 10;
 /** The Memory scheduler runs a full sync this often, first at startup. */
 export const CHUNK_SYNC_INTERVAL_MS = 60 * 60 * 1_000;
 const DEFAULT_SOURCE_CONCURRENCY = 4;
-const INDEX_PROFILE = "raw-md-v5";
+const INDEX_PROFILE = "raw-md-v7";
 
 export interface IndexedChunkMatch {
   chunkId: string;

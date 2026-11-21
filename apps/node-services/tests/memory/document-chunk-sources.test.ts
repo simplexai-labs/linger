@@ -148,7 +148,7 @@ describe("Document Chunk Raw sources", () => {
         "",
         "Ships in May. Owned by Casey and Kim；よさんはしょうにん。",
         "",
-        "-",
+        "- ",
         "- Keeps [the spec](https://example.com/spec) and [R2](notes.md).",
         "",
       ].join("\n"),
@@ -190,5 +190,21 @@ describe("Document Chunk Raw sources", () => {
         "Launched in May.",
       ].join("\n"),
     );
+  });
+
+  it.each([
+    ["inline code", "Use `values[R1]` and ``lookup(R2)``."],
+    ["fenced code", "```ts\nconst amount = values[R1];\nlookup(R2);\n```"],
+    ["nested fenced code", "> ~~~text\n> values[R1]\n> ~~~"],
+    ["indented code", "    lookup(R2)\n    values[R1]"],
+    ["link paths", "[Read the spec](https://example.test/(R2)/spec)"],
+    ["reference links", "[R1][spec]\n\n[spec]: https://example.test/(R2)/spec"],
+  ])("preserves %s while removing surrounding citations", (_name, literal) => {
+    const body = `# Reference\n\n${literal}\n\nApproved [R3].\n`;
+    const text = sourceSearchText("wiki_page", body);
+    expect(text).toBe(body.replace("Approved [R3].", "Approved."));
+    for (const chunk of chunkSource(text)) {
+      expect(text.slice(chunk.start, chunk.end)).toBe(chunk.content);
+    }
   });
 });

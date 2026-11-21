@@ -3,7 +3,36 @@ import {
   extractDocumentImages,
   bundleDocumentImages,
   prepareDocumentSource,
+  mapMarkdownProse,
 } from "./index.js";
+
+it("rewrites prose while retaining Markdown source spelling and protected text", () => {
+  const markdown = [
+    "# Fact [R1]",
+    "",
+    "**Fact [R1]** and \\*escaped\\* [R1].",
+    "",
+    "`literal [R1]` and [label [R1]](https://example.test/(R1)).",
+    "",
+    "[R1][spec]",
+    "",
+    "[spec]: https://example.test/(R1)",
+    "",
+    "~~~text",
+    "literal [R1]",
+    "~~~",
+    "",
+  ].join("\r\n");
+  const result = mapMarkdownProse(markdown, (text) =>
+    text.replace(/ \[R1\]/gu, ""),
+  );
+  expect(result).toBe(
+    markdown
+      .replace("# Fact [R1]", "# Fact")
+      .replace("**Fact [R1]**", "**Fact**")
+      .replace("\\*escaped\\* [R1]", "\\*escaped\\*"),
+  );
+});
 
 it.each([
   [

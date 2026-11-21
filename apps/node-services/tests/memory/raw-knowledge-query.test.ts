@@ -21,11 +21,13 @@ import {
   storeSessionSource as stageSessionSource,
   documentRawSource,
   wikiPageRawSource,
+  sourceSearchText,
   type DocumentRawSourceInput,
   type RawSource,
 } from "../../src/memory/search/source-store.js";
 import type { SessionlyCollection } from "../../src/memory/types.js";
 import { chunkSource } from "../../src/memory/search/chunks.js";
+import { MemoryChunkIndex } from "../../src/memory/chunk-index.js";
 import { resolveSearchRawSources } from "../../src/memory/search/raw-query.js";
 
 import { RawDatabaseFixture } from "./raw-database-fixture.js";
@@ -455,6 +457,54 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     ]);
     expect(result.items[0]!.content).toContain("37.5");
     expect(result.summaries[0]!.content).toContain("Cobalt budget history");
+  });
+
+  it("returns literal Wiki code through the indexed evidence read path", async () => {
+    const f = await fixture();
+    const markdown =
+      "# Lookup example\n\nUse `lookup(R2)` with `values[R1]`.\n\nApproved [R3].\n";
+    const wiki = wikiPageRawSource({
+      identity,
+      pageKey: "topics/lookup.md",
+      title: "Lookup example",
+      documentId: "wiki_lookup",
+      documentVersionId: "version_lookup",
+      publishedAt: "2026-09-16T00:00:00Z",
+      revision: "revision_1",
+      markdown,
+    });
+    databases.get(f.root)!.put(wiki, markdown);
+    const sql = vi.fn(async () => [{ content: markdown, manifest: wiki }]);
+    const index = new MemoryChunkIndex({ dataRoot: f.root, sql: sql as never });
+    const chunks = chunkSource(sourceSearchText("wiki_page", markdown));
+    try {
+      const result = await queryPersonalKnowledge(
+        f.root,
+        request("lookup R2"),
+        {
+          chunkSearch: {
+            readRawSource: index.readRawSource.bind(index),
+            search: async (input) =>
+              input.originKinds?.includes("wiki")
+                ? chunks.map((chunk) => ({
+                    sourceId: wiki.id,
+                    chunkId: chunk.id,
+                    mergedChunkIds: [chunk.id],
+                    score: 1,
+                  }))
+                : [],
+          },
+        },
+      );
+      expect(result.summaries).toHaveLength(1);
+      expect(result.summaries[0]!.content).toContain(
+        "`lookup(R2)` with `values[R1]`",
+      );
+      expect(result.summaries[0]!.content).not.toContain("[R3]");
+      expect(sql).toHaveBeenCalled();
+    } finally {
+      await index.close();
+    }
   });
 
   it("does not scan an empty list when the other has an indexed match", async () => {
