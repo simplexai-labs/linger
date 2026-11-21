@@ -9,6 +9,38 @@ import {
 
 describe("validateOkfDocument", () => {
   it.each([
+    "okf_version: >-\n  0.1",
+    '"okf_version": "0.1"',
+    'okf_version: "0.\n  1"',
+    '{okf_version: "0.1", title: "Knowledge"}',
+  ])("updates the root version as a YAML field: %s", (metadata) => {
+    const body = "\n# Index\n\nKeep this body exactly.\n";
+    const content = `---\n${metadata}\n---\n${body}`;
+    const updated = setOkfRootIndexVersion(content);
+    expect(parseOkfFrontmatter(updated)).toMatchObject({
+      fields: { okf_version: "0.2" },
+      issues: [],
+    });
+    expect(updated.endsWith(body)).toBe(true);
+    expect(setOkfRootIndexVersion(updated)).toBe(updated);
+  });
+
+  it("retains unrelated root metadata when updating a block scalar version", () => {
+    const updated = setOkfRootIndexVersion(
+      "---\nokf_version: |-\n  0.1\ntitle: Index\ndescription: |\n  First line.\n  Second line.\nextension: { enabled: true }\n---\n\n# Index\n",
+    );
+    expect(parseOkfFrontmatter(updated)).toMatchObject({
+      fields: {
+        okf_version: "0.2",
+        title: "Index",
+        description: "First line.\nSecond line.\n",
+        extension: { enabled: true },
+      },
+      issues: [],
+    });
+  });
+
+  it.each([
     ["sources", "\n  - resource: memory://one\n  - resource: memory://two"],
     ["tags", "\n  - hardware"],
     ["graph", "\n  id: client_example\n  about: [client_example]"],
