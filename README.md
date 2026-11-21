@@ -227,6 +227,8 @@ If Compose ports are busy, the installer offers to select free ports. It saves
 LiveKit's port mappings and matching RTC startup arguments in
 `.local/compose.ports.yml` and enables the override through `.env`. This requires
 Docker Compose 2.24.4 or later. Rerunning the installer reuses those ports.
+When `scripts/install/install.sh` updates a Compose setting, it replaces
+duplicate assignments, including ones written with `export` or spaces around `=`.
 
 ## Learn more
 

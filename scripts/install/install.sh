@@ -163,17 +163,19 @@ set_env_value() {
   local val="$3"
   local tmp_file="$WORK_DIR/env.tmp.$$"
   awk -v k="$key" -v v="$val" '
-    BEGIN { replaced = 0 }
-    {
-      if ($0 ~ "^[[:space:]]*(#[[:space:]]*)?" k "=") {
-        if (!replaced) {
-          print k "=" v
-          replaced = 1
-        }
-        next
-      }
-      print $0
+    BEGIN {
+      assignment = "^[[:space:]]*(export[[:space:]]+)?" k "[[:space:]]*="
+      placeholder = "^[[:space:]]*#[[:space:]]*" k "="
+      replaced = 0
     }
+    $0 ~ assignment || $0 ~ placeholder {
+      if (!replaced) {
+        print k "=" v
+        replaced = 1
+      }
+      next
+    }
+    { print }
     END {
       if (!replaced) {
         print k "=" v

@@ -791,12 +791,16 @@ describe("root install.sh", () => {
     await writeFile(
       path.join(fakeRepo, ".env.example"),
       [
-        "WEB_PUBLIC_ORIGIN=http://localhost:3000",
+        "export WEB_PUBLIC_ORIGIN = 'http://localhost:3000'",
         "AGENT_RUNNER_PUBLIC_GATEWAY_URL=ws://127.0.0.1:4319/v1/runner-gateway",
         "LIVEKIT_URL=ws://127.0.0.1:17880",
         "# POSTGRES_PORT=5432",
         "# TEAMHUB_HTTP_PORT=8080",
         "# WEB_HTTP_PORT=3000",
+        "WEB_HTTP_PORT=2999",
+        '  export WEB_HTTP_PORT = "3000"',
+        "# Keep this comment and the unrelated setting below.",
+        "WEB_HTTP_PORT_BACKUP=3000",
       ].join("\n") + "\n",
     );
 
@@ -838,7 +842,7 @@ for a in "$@"; do
   prev="$a"
 done
 case "$url" in
-  "http://localhost:3001/install/linger-computer.sh")
+  "http://localhost:3000/install/linger-computer.sh"|"http://localhost:3001/install/linger-computer.sh")
     if [ ! -f ${JSON.stringify(serverStartedPath)} ]; then exit 22; fi
     body="# linger-computer-launcher-v2"
     if [ -n "$out" ]; then printf '%s\n' "$body" > "$out"; else printf '%s\n' "$body"; fi
@@ -869,10 +873,20 @@ esac
       "Port(s) already in use: 3000, 17880, 7881, 7882",
     );
     expect(result.stdout).toContain("Nothing was downloaded or changed.");
+    expect(result.stdout).toContain(
+      "Linger server is ready at http://localhost:3001",
+    );
 
     const updatedEnv = await readFile(path.join(fakeRepo, ".env"), "utf8");
-    expect(updatedEnv).toContain("WEB_HTTP_PORT=3001");
-    expect(updatedEnv).toContain("WEB_PUBLIC_ORIGIN=http://localhost:3001");
+    expect(
+      updatedEnv.match(/^[ \t]*(?:export[ \t]+)?WEB_HTTP_PORT[ \t]*=.*$/gm),
+    ).toEqual(["WEB_HTTP_PORT=3001"]);
+    expect(
+      updatedEnv.match(/^[ \t]*(?:export[ \t]+)?WEB_PUBLIC_ORIGIN[ \t]*=.*$/gm),
+    ).toEqual(["WEB_PUBLIC_ORIGIN=http://localhost:3001"]);
+    expect(updatedEnv).toContain(
+      "# Keep this comment and the unrelated setting below.\nWEB_HTTP_PORT_BACKUP=3000",
+    );
     expect(updatedEnv).toContain("LIVEKIT_URL=ws://127.0.0.1:17881");
     expect(updatedEnv).not.toMatch(
       /^LIVEKIT_(HTTP_PORT|RTC_TCP_PORT|RTC_UDP_PORT)=/m,
