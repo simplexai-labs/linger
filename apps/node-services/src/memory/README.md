@@ -14,6 +14,10 @@ Memory browsing entry and do not enter OpenWiki's native graph.
 
 ## Search
 
+TeamHub transport metadata preserves the headers of a supplied `Request`
+unless explicit fetch-init headers replace them. Adding tracing and the
+Memory user agent does not remove the request's authentication or media type.
+
 Memory keeps one index, `memory_index.sources` and `chunks`: Room Sessions, recordings, My pages, imported
 mail, Pocket Notes, the Profile, the published Wiki pages (`wiki`) and the Daily and Weekly reports
 (`period_summary`) are source kinds of it. Chunks and Session Facts use keyword search only (PostgreSQL `simple`

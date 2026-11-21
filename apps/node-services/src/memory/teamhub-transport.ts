@@ -20,7 +20,9 @@ export function teamHubFetch(
   fetcher: TeamHubAgentCallbackFetch = globalThis.fetch,
 ): TeamHubAgentCallbackFetch {
   return (input, init) => {
-    const headers = new Headers(init?.headers);
+    const headers = new Headers(
+      init?.headers ?? (input instanceof Request ? input.headers : undefined),
+    );
     const version =
       process.env.APP_VERSION?.replace(/[^A-Za-z0-9._+-]/gu, "").slice(
         0,
