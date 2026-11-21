@@ -190,6 +190,6 @@ export async function readBodyWithLimit(
       await reader.cancel().catch(() => undefined);
       return undefined;
     }
-    chunks.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+    chunks.push(Buffer.from(value));
   }
 }
