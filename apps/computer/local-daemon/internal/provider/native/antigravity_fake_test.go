@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ import (
 const (
 	agyFakeEnv       = "NATIVE_AGY_FAKE"
 	agyFakeRecordEnv = "AGY_FAKE_RECORD"
+	agyFakeMetaEnv   = "AGY_FAKE_META"
 	// agyFakeCommandEnv names the command a permission request asks for.
 	agyFakeCommandEnv = "AGY_FAKE_COMMAND"
 )
@@ -26,10 +28,12 @@ func init() {
 }
 
 type agyFakeProcess struct {
-	mode   string
-	out    sync.Mutex
-	record *os.File
-	authed bool
+	mode      string
+	geminiDir string
+	logFile   string
+	out       sync.Mutex
+	record    *os.File
+	authed    bool
 	// answers carries the client's responses to the fake's own requests.
 	answers chan map[string]any
 }
@@ -75,11 +79,36 @@ func agyFakeSession(id string) map[string]any {
 }
 
 func agyFake(mode string, args []string) int {
-	if len(args) != 1 || args[0] != "acp" {
+	if len(args) == 0 || args[0] != "acp" {
 		fmt.Fprintln(os.Stderr, "unexpected argv")
 		return 2
 	}
-	f := &agyFakeProcess{mode: mode, answers: make(chan map[string]any, 1)}
+	var geminiDir, logFile string
+	for i := 1; i < len(args); i += 2 {
+		if i+1 >= len(args) {
+			fmt.Fprintln(os.Stderr, "missing flag value")
+			return 2
+		}
+		switch args[i] {
+		case "--gemini-dir":
+			geminiDir = args[i+1]
+			if !filepath.IsAbs(geminiDir) {
+				fmt.Fprintln(os.Stderr, "gemini-dir must be absolute")
+				return 2
+			}
+		case "--log-file":
+			logFile = args[i+1]
+			if !filepath.IsAbs(logFile) {
+				fmt.Fprintln(os.Stderr, "log-file must be absolute")
+				return 2
+			}
+		default:
+			fmt.Fprintln(os.Stderr, "unexpected flag:", args[i])
+			return 2
+		}
+	}
+	f := &agyFakeProcess{mode: mode, geminiDir: geminiDir, logFile: logFile, answers: make(chan map[string]any, 1)}
+	f.writeStartupFiles(args)
 	if path := os.Getenv(agyFakeRecordEnv); path != "" {
 		f.record, _ = os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
 	}
@@ -108,6 +137,38 @@ func agyFake(mode string, args []string) int {
 	return 0
 }
 
+func (f *agyFakeProcess) appDataDir() string {
+	if f.geminiDir != "" {
+		return filepath.Join(f.geminiDir, "antigravity-cli")
+	}
+	return filepath.Join(os.Getenv("HOME"), ".gemini", "antigravity-cli")
+}
+
+func (f *agyFakeProcess) writeStartupFiles(args []string) {
+	logPath := f.logFile
+	if logPath == "" {
+		logPath = filepath.Join(f.appDataDir(), "log", "acp-server.log")
+	}
+	_ = os.MkdirAll(filepath.Dir(logPath), 0o700)
+	_ = os.WriteFile(logPath, []byte("started\n"), 0o600)
+
+	metaPath := os.Getenv(agyFakeMetaEnv)
+	if metaPath == "" {
+		return
+	}
+	token, _ := os.ReadFile(filepath.Join(f.appDataDir(), "antigravity-oauth-token"))
+	settings, _ := os.ReadFile(filepath.Join(f.appDataDir(), "settings.json"))
+	meta, _ := json.Marshal(map[string]any{
+		"args":      args,
+		"geminiDir": f.geminiDir,
+		"logFile":   f.logFile,
+		"home":      os.Getenv("HOME"),
+		"token":     string(token),
+		"settings":  string(settings),
+	})
+	_ = os.WriteFile(metaPath, meta, 0o600)
+}
+
 func (f *agyFakeProcess) handle(id json.RawMessage, method string, params map[string]any) {
 	switch method {
 	case "initialize":
@@ -120,7 +181,19 @@ func (f *agyFakeProcess) handle(id json.RawMessage, method string, params map[st
 			f.fail(id, acpAuthRequired, "Authentication required")
 			return
 		}
+		if f.mode == "token-file" && !f.authed {
+			token, err := os.ReadFile(filepath.Join(f.appDataDir(), "antigravity-oauth-token"))
+			if err != nil || len(token) == 0 {
+				f.fail(id, acpAuthRequired, "Authentication required")
+				return
+			}
+		}
 		sessionID := "fake-session"
+		if method == "session/new" {
+			convDir := filepath.Join(f.appDataDir(), "conversations")
+			_ = os.MkdirAll(convDir, 0o700)
+			_ = os.WriteFile(filepath.Join(convDir, sessionID+".db"), []byte("sqlite"), 0o600)
+		}
 		if method == "session/load" {
 			sessionID, _ = params["sessionId"].(string)
 			if f.mode == "load-error" {

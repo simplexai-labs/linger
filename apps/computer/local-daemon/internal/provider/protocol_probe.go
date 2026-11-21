@@ -80,7 +80,12 @@ func probeRuntimeProtocol(ctx context.Context, runtimeType, executable string, e
 		payload = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"linger-computer-doctor","title":"Linger Computer Doctor","version":"1.0.0"},"capabilities":null}}` + "\n"
 
 	case "antigravity":
-		args = []string{"acp"}
+		probeArgs, release, err := native.PrepareAntigravityProbe(environment)
+		if err != nil {
+			return err
+		}
+		defer release()
+		args = append([]string{"acp"}, probeArgs...)
 		payload = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{}}}` + "\n"
 	case "claude":
 		args = []string{

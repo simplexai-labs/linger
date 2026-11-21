@@ -32,9 +32,9 @@ type acpProcess struct {
 	cancel context.CancelFunc
 }
 
-// startACP launches `agy acp` in dir. handle receives the agent's
-// notifications and requests.
-func startACP(inv Invocation, dir string, logger *slog.Logger, handle func(acpFrame)) (*acpProcess, error) {
+// startACP launches `agy acp` with any additional flags in dir. handle receives
+// the agent's notifications and requests.
+func startACP(inv Invocation, dir string, logger *slog.Logger, handle func(acpFrame), extraArgs ...string) (*acpProcess, error) {
 	stdinRead, stdinWrite, err := os.Pipe()
 	if err != nil {
 		return nil, err
@@ -46,7 +46,8 @@ func startACP(inv Invocation, dir string, logger *slog.Logger, handle func(acpFr
 		return nil, err
 	}
 	procCtx, cancel := context.WithCancel(context.Background())
-	cmd := ownedCommand(procCtx, inv, "acp")
+	args := append([]string{"acp"}, extraArgs...)
+	cmd := ownedCommand(procCtx, inv, args...)
 	cmd.Dir = dir
 	cmd.WaitDelay = antigravityPipeDrain
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdinRead, stdoutWrite, nil

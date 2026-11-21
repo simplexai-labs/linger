@@ -325,6 +325,120 @@ func TestAntigravityProbeListsModelFamiliesWithTheirLevels(t *testing.T) {
 	}
 }
 
+func TestAntigravityProbeIsolatesStateAndSeedsCredentials(t *testing.T) {
+	metaFile := filepath.Join(t.TempDir(), "probe-meta.json")
+	h := newAgyHarness(t, "token-file", map[string]string{agyFakeMetaEnv: metaFile})
+	userAppData := filepath.Join(h.dir, ".gemini", "antigravity-cli")
+	userConvs := filepath.Join(userAppData, "conversations")
+	if err := os.MkdirAll(userConvs, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userAppData, "antigravity-oauth-token"), []byte("oauth-fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userAppData, "settings.json"), []byte(`{"theme":"dark"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userConvs, "real-session.db"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	probe, err := ProbeAntigravity(t.Context(), h.inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probe.AuthenticationRequired || len(probe.Models.Models) != 2 {
+		t.Fatalf("probe=%+v", probe)
+	}
+
+	rawMeta, err := os.ReadFile(metaFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta struct {
+		Args      []string `json:"args"`
+		GeminiDir string   `json:"geminiDir"`
+		LogFile   string   `json:"logFile"`
+		Home      string   `json:"home"`
+		Token     string   `json:"token"`
+		Settings  string   `json:"settings"`
+	}
+	if err := json.Unmarshal(rawMeta, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if meta.Home != h.dir {
+		t.Fatalf("HOME was altered: got %q want %q", meta.Home, h.dir)
+	}
+	if !filepath.IsAbs(meta.GeminiDir) || meta.GeminiDir == filepath.Join(h.dir, ".gemini") {
+		t.Fatalf("unexpected geminiDir: %q", meta.GeminiDir)
+	}
+	if !filepath.IsAbs(meta.LogFile) || filepath.Dir(meta.LogFile) != filepath.Dir(meta.GeminiDir) {
+		t.Fatalf("unexpected logFile: %q (geminiDir=%q)", meta.LogFile, meta.GeminiDir)
+	}
+	if meta.Token != "oauth-fixture" || meta.Settings != `{"theme":"dark"}` {
+		t.Fatalf("seeded files mismatch: token=%q settings=%q", meta.Token, meta.Settings)
+	}
+	if _, err := os.Stat(filepath.Dir(meta.GeminiDir)); !os.IsNotExist(err) {
+		t.Fatalf("temporary probe root was not removed: %q (err=%v)", filepath.Dir(meta.GeminiDir), err)
+	}
+
+	entries, err := os.ReadDir(userConvs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "real-session.db" {
+		t.Fatalf("user conversations dir was polluted: %v", entries)
+	}
+	if _, err := os.Stat(filepath.Join(userAppData, "log")); !os.IsNotExist(err) {
+		t.Fatalf("user log dir was created: err=%v", err)
+	}
+	open := h.requests(t)["session/new"][0]["params"].(map[string]any)
+	if open["cwd"] == h.dir {
+		t.Fatalf("probe session/new cwd must be isolated from HOME: %v", open["cwd"])
+	}
+}
+
+func TestAntigravityProbeHandlesMissingUserGeminiDir(t *testing.T) {
+	h := newAgyHarness(t, "token-file", nil)
+	probe, err := ProbeAntigravity(t.Context(), h.inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !probe.AuthenticationRequired {
+		t.Fatalf("expected authentication_required when no token file exists, got %+v", probe)
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, ".gemini")); !os.IsNotExist(err) {
+		t.Fatalf("probe created .gemini under HOME: err=%v", err)
+	}
+}
+
+func TestAntigravityTurnKeepsDefaultGeminiDir(t *testing.T) {
+	metaFile := filepath.Join(t.TempDir(), "turn-meta.json")
+	h := newAgyHarness(t, "turn", map[string]string{agyFakeMetaEnv: metaFile})
+	run, err := h.runtime.Start(t.Context(), "hi", RunSpec{Dir: h.dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, outcome := drainAgy(t, run); outcome.Status != statusCompleted {
+		t.Fatalf("outcome=%+v", outcome)
+	}
+	rawMeta, err := os.ReadFile(metaFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta struct {
+		Args      []string `json:"args"`
+		GeminiDir string   `json:"geminiDir"`
+		LogFile   string   `json:"logFile"`
+	}
+	if err := json.Unmarshal(rawMeta, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(meta.Args, []string{"acp"}) || meta.GeminiDir != "" || meta.LogFile != "" {
+		t.Fatalf("real turns must keep default agy store: %+v", meta)
+	}
+}
+
 func TestAntigravityRefusesWhatItCannotRun(t *testing.T) {
 	h := newAgyHarness(t, "turn", nil)
 	for name, spec := range map[string]RunSpec{

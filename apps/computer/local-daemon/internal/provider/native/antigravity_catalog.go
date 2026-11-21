@@ -4,10 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
+
+const antigravityProbeSeedLimit = 4 << 20
+
+var antigravityProbeSeedFiles = []string{
+	"antigravity-oauth-token",
+	"settings.json",
+}
 
 // AntigravityProbe is what one ACP session/new tells about the signed-in
 // account: whether a session opens and which models it offers.
@@ -16,21 +28,106 @@ type AntigravityProbe struct {
 	Models                 ModelList
 }
 
-// ProbeAntigravity opens an empty ACP session in the invocation's HOME and
-// closes it again; no prompt is sent, so Antigravity stores no conversation.
+// PrepareAntigravityProbe creates an isolated temporary Gemini data directory
+// and ACP log path for `agy acp` probes so empty probe sessions and ACP logs
+// never accumulate in the user's ~/.gemini/antigravity-cli store (which enforces
+// a fixed conversation cap and evicts real user sessions). HOME/USERPROFILE is
+// left unchanged so OS keyring auth and GEMINI_API_KEY keep working, while
+// file-based OAuth tokens and settings are copied read-only into the probe dir.
+func PrepareAntigravityProbe(env map[string]string) ([]string, func(), error) {
+	geminiDir, logFile, _, release, err := prepareAntigravityProbeDir(env)
+	if err != nil {
+		return nil, nil, err
+	}
+	return []string{"--gemini-dir", geminiDir, "--log-file", logFile}, release, nil
+}
+
+func prepareAntigravityProbeDir(env map[string]string) (string, string, string, func(), error) {
+	root, err := os.MkdirTemp("", "linger-antigravity-probe-")
+	if err != nil {
+		return "", "", "", nil, err
+	}
+	release := func() { _ = os.RemoveAll(root) }
+	if err := privatefs.EnsureDir(root); err != nil {
+		release()
+		return "", "", "", nil, err
+	}
+	geminiDir := filepath.Join(root, "gemini")
+	appDataDir := filepath.Join(geminiDir, "antigravity-cli")
+	workDir := filepath.Join(root, "workspace")
+	for _, dir := range []string{geminiDir, appDataDir, workDir} {
+		if err := privatefs.EnsureDir(dir); err != nil {
+			release()
+			return "", "", "", nil, err
+		}
+	}
+	if home := antigravityProbeHome(env); home != "" {
+		sourceDir := filepath.Join(home, ".gemini", "antigravity-cli")
+		for _, name := range antigravityProbeSeedFiles {
+			if err := copyAntigravityProbeFile(filepath.Join(sourceDir, name), filepath.Join(appDataDir, name)); err != nil {
+				release()
+				return "", "", "", nil, err
+			}
+		}
+	}
+	return geminiDir, filepath.Join(root, "acp.log"), workDir, release, nil
+}
+
+func antigravityProbeHome(env map[string]string) string {
+	if home := env["HOME"]; home != "" {
+		return home
+	}
+	return env["USERPROFILE"]
+}
+
+func copyAntigravityProbeFile(source, destination string) error {
+	file, err := os.Open(source)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read Antigravity probe file %s: %w", filepath.Base(source), err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() > antigravityProbeSeedLimit {
+		return fmt.Errorf("Antigravity probe file %s must be a regular file of at most 4 MiB", filepath.Base(source))
+	}
+	data, err := io.ReadAll(io.LimitReader(file, antigravityProbeSeedLimit+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > antigravityProbeSeedLimit {
+		return fmt.Errorf("Antigravity probe file %s exceeds 4 MiB", filepath.Base(source))
+	}
+	return privatefs.WriteFile(destination, data, true)
+}
+
+// ProbeAntigravity opens an empty ACP session inside a temporary isolated
+// Gemini directory and removes that directory after `agy acp` exits, so
+// probing never persists 0-step conversations or ACP logs under the user's
+// ~/.gemini/antigravity-cli store.
 func ProbeAntigravity(ctx context.Context, inv Invocation) (AntigravityProbe, error) {
 	env := invocationEnvironment(inv)
-	home := env["HOME"]
-	if home == "" {
+	if antigravityProbeHome(env) == "" {
 		return AntigravityProbe{}, errors.New("Antigravity probe requires HOME")
 	}
+	geminiDir, logFile, workDir, release, err := prepareAntigravityProbeDir(env)
+	if err != nil {
+		return AntigravityProbe{}, err
+	}
+	defer release()
+	probeArgs := []string{"--gemini-dir", geminiDir, "--log-file", logFile}
 	var result AntigravityProbe
-	err := withACPProcess(ctx, inv, home, nil, func(conn *acpConn) error {
+	err = withACPProcess(ctx, inv, workDir, probeArgs, nil, func(conn *acpConn) error {
 		if err := acpInitialize(ctx, conn); err != nil {
 			return err
 		}
 		raw, err := acpOpenSession(ctx, conn, env, func() (json.RawMessage, error) {
-			return conn.call(ctx, "session/new", map[string]any{"cwd": home, "mcpServers": []any{}})
+			return conn.call(ctx, "session/new", map[string]any{"cwd": workDir, "mcpServers": []any{}})
 		})
 		if acpNeedsAuth(err) {
 			result.AuthenticationRequired = true
@@ -110,8 +207,8 @@ var antigravityLevels = []string{"low", "medium", "high", "xhigh", "max"}
 
 // withACPProcess runs exchange against a fresh `agy acp` in dir, then
 // reaps the process tree. ctx bounds the exchange only.
-func withACPProcess(ctx context.Context, inv Invocation, dir string, handle func(acpFrame), exchange func(*acpConn) error) error {
-	proc, err := startACP(inv, dir, nil, handle)
+func withACPProcess(ctx context.Context, inv Invocation, dir string, extraArgs []string, handle func(acpFrame), exchange func(*acpConn) error) error {
+	proc, err := startACP(inv, dir, nil, handle, extraArgs...)
 	if err != nil {
 		return err
 	}
