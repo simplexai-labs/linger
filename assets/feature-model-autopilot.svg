@@ -1,0 +1,196 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="1152" viewBox="0 0 1000 1152" role="img" aria-labelledby="title description">
+  <title id="title">Model Autopilot: The smartest model your machine can run</title>
+  <desc id="description">The lab tests model configurations, and the installer selects one for the computer. Six Mac and Linux NVIDIA configurations and four cloud models share a linear SimplexAI score scale from 25 to 80. The 16 GB Mac has no score.</desc>
+  <defs>
+    <style>
+      text { font-family: Arial, Helvetica, sans-serif; fill: #f0f3ff; }
+      .title { font-size: 38px; font-weight: 700; letter-spacing: -1px; }
+      .subtitle { font-size: 23px; fill: #ccd6fd; }
+      .section { font-size: 23px; font-weight: 700; letter-spacing: -.3px; }
+      .heading { font-size: 20px; font-weight: 700; }
+      .label { fill: #bac6ec; font-size: 14px; font-weight: 700; }
+      .body { font-size: 16px; }
+      .detail { fill: #d2dbf2; font-size: 15px; }
+      .hardware { font-size: 18px; font-weight: 700; }
+      .model { fill: #c6d1f1; font-size: 15px; }
+      .score { font-size: 17px; font-weight: 700; }
+      .cloud-name { font-size: 16px; }
+      .cloud-score { fill: #dce4ff; font-size: 16px; font-weight: 700; }
+      .tick { fill: #d6ddf2; font-size: 14px; }
+      .band { font-size: 14px; font-weight: 700; }
+      .note { fill: #d2dbf2; font-size: 15px; }
+      .rule { stroke: #3b496b; }
+      .icon { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+    <g id="flask" class="icon" color="#c9baff">
+      <path d="M8 2h8m-6 1v6l-6 10a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3L14 9V3M7.5 15h9"/>
+    </g>
+    <g id="laptop" class="icon">
+      <rect x="4" y="3.5" width="16" height="12" rx="1.5"/><path d="M4 16l-2 3h20l-2-3"/>
+    </g>
+    <g id="gpu" class="icon">
+      <rect x="2" y="5" width="20" height="12" rx="2"/><circle cx="10" cy="11" r="3.1"/><path d="M16 9h3m-3 4h3M5 17v2h9v-2"/>
+    </g>
+  </defs>
+
+  <rect x=".5" y=".5" width="999" height="1151" rx="23" fill="#263456" stroke="#465577"/>
+  <text class="title" x="34" y="59">Model Autopilot</text>
+  <text class="subtitle" x="320" y="58">The smartest model your machine can run</text>
+
+  <!-- The catalog connects offline research to the installer's recommendation. -->
+  <g id="architecture">
+    <rect x="32" y="86" width="407" height="245" rx="14" fill="#1c2a4a" stroke="#495878"/>
+    <use xlink:href="#flask" transform="translate(51 105)"/>
+    <text class="heading" x="86" y="124">Architecture search</text>
+    <text class="detail" x="86" y="147">In our lab</text>
+    <text class="label" x="54" y="181">Models</text><text class="body" x="142" y="181">49 LLMs</text>
+    <text class="label" x="54" y="208">Engines</text><text class="body" x="142" y="208">llama.cpp + PolyStrata</text>
+    <text class="label" x="54" y="235">Weights</text><text class="body" x="142" y="235">IQ1_M to Q8_0</text>
+    <text class="label" x="54" y="262">Context</text><text class="body" x="142" y="262">64K / 128K / 256K, KV q8 / q4</text>
+    <path class="rule" d="M54 279H416"/>
+    <text class="detail" x="54" y="306">Tested on NVIDIA 8–96 GB and Mac 16–128 GB</text>
+  </g>
+  <g id="catalog">
+    <text class="label" x="478" y="189" text-anchor="middle">Catalog</text>
+    <path d="M448 206h60m-8-6 8 6-8 6" fill="none" stroke="#b2c3fc" stroke-width="2"/>
+  </g>
+  <g id="recommendation">
+    <rect x="518" y="86" width="450" height="245" rx="14" fill="#1c2a4a" stroke="#495878"/>
+    <use xlink:href="#laptop" color="#b4c5fb" transform="translate(538 106)"/>
+    <text class="heading" x="573" y="124">Recommendation</text>
+    <text class="detail" x="573" y="147">On your computer, at install</text>
+    <g fill="#394972">
+      <circle cx="551" cy="177" r="11"/><circle cx="551" cy="212" r="11"/>
+      <circle cx="551" cy="265" r="11"/><circle cx="551" cy="303" r="11"/>
+    </g>
+    <g font-size="13" font-weight="700" text-anchor="middle">
+      <text x="551" y="182">1</text><text x="551" y="217">2</text><text x="551" y="270">3</text><text x="551" y="308">4</text>
+    </g>
+    <g class="body">
+      <text x="573" y="182"><tspan font-weight="700">Detect</tspan> GPU, VRAM, RAM and bandwidth.</text>
+      <text x="573" y="217"><tspan font-weight="700">Fit</tspan> weights and KV for at least 64K context.</text>
+      <text x="573" y="237">MoE experts can stay in RAM.</text>
+      <text x="573" y="270"><tspan font-weight="700">Rank</tspan> by SimplexAI score, then by speed.</text>
+      <text x="573" y="308"><tspan font-weight="700">Install</tspan> and verify with a real question.</text>
+    </g>
+  </g>
+
+  <g id="score-comparison">
+    <rect x="32" y="353" width="936" height="663" rx="14" fill="#192744" stroke="#495878"/>
+    <text class="section" x="54" y="394">What your machine gets</text>
+    <text class="detail" x="55" y="420">Measured local configurations and cloud references</text>
+    <text class="heading" x="440" y="394">SimplexAI score</text>
+
+    <!-- The plot is linear: x = 440 + (score - 25) × 9, spanning scores 25 to 80. -->
+    <g id="bands">
+      <rect x="440" y="412" width="90" height="46" fill="#3c4869"/>
+      <rect x="530" y="412" width="135" height="46" fill="#414f80"/>
+      <rect x="665" y="412" width="90" height="46" fill="#315b62"/>
+      <rect x="755" y="412" width="180" height="46" fill="#655249"/>
+      <g class="band" text-anchor="middle">
+        <text x="485" y="431">Everyday<tspan x="485" dy="16">helper</tspan></text>
+        <text x="597.5" y="431">Capable<tspan x="597.5" dy="16">assistant</tspan></text>
+        <text x="710" y="431">Frontier<tspan x="710" dy="16">class</tspan></text>
+        <text x="845" y="439">Cutting edge</text>
+      </g>
+      <g class="tick" text-anchor="middle">
+        <text x="440" y="479">25</text><text x="530" y="479">35</text><text x="665" y="479">50</text><text x="755" y="479">60</text><text x="935" y="479">80</text>
+      </g>
+      <path d="M440 489v452m90-452v452m135-452v452m90-452v452m180-452v452" fill="none" stroke="#43516e" stroke-dasharray="3 5"/>
+    </g>
+    <text class="label" x="55" y="477">HARDWARE / MODEL</text>
+    <g class="tier">
+      <use xlink:href="#laptop" color="#b3a2fa" transform="translate(53 493) scale(.9)"/>
+      <text class="hardware" x="84" y="507">Mac 16 GB</text>
+      <text class="model" x="84" y="527">Spark-X2.6-4B Q4_K_M</text>
+      <text class="score" x="333" y="514" style="fill:#bfcbe4;font-size:15px">Not ranked</text>
+    </g>
+    <g class="tier">
+      <use xlink:href="#laptop" color="#b3a2fa" transform="translate(53 546) scale(.9)"/>
+      <text class="hardware" x="84" y="560">Mac 24 GB</text>
+      <text class="model" x="84" y="580">Qwen3.8-27B UD-IQ3_S</text>
+      <path d="M440 563H682.1" fill="none" stroke="#b3a2fa" stroke-width="2" opacity=".55"/>
+      <circle class="score-point" cx="682.1" cy="563" r="5.5" fill="#b3a2fa"/>
+      <text class="score" x="695.1" y="569">51.9</text>
+    </g>
+    <g class="tier">
+      <use xlink:href="#laptop" color="#b3a2fa" transform="translate(53 599) scale(.9)"/>
+      <text class="hardware" x="84" y="613">Mac 32 GB</text>
+      <text class="model" x="84" y="633">Qwen3.8-27B UD-Q4_K_M</text>
+      <path d="M440 616H701" fill="none" stroke="#b3a2fa" stroke-width="2" opacity=".55"/>
+      <circle class="score-point" cx="701" cy="616" r="5.5" fill="#b3a2fa"/>
+      <text class="score" x="714" y="622">54.0</text>
+    </g>
+    <g class="tier">
+      <use xlink:href="#gpu" color="#79d1bb" transform="translate(53 652) scale(.9)"/>
+      <text class="hardware" x="84" y="666">Linux NVIDIA 8 GB + 32 GB</text>
+      <text class="model" x="84" y="686">Qwen3.6-35B-A3B UD-Q3_K_M</text>
+      <path d="M440 669H533.6" fill="none" stroke="#79d1bb" stroke-width="2" opacity=".55"/>
+      <circle class="score-point" cx="533.6" cy="669" r="5.5" fill="#79d1bb"/>
+      <text class="score" x="546.6" y="675">35.4</text>
+    </g>
+    <g class="tier">
+      <use xlink:href="#gpu" color="#79d1bb" transform="translate(53 705) scale(.9)"/>
+      <text class="hardware" x="84" y="719">Linux NVIDIA 12 GB + 32 GB</text>
+      <text class="model" x="84" y="739">Qwen3.8-Flash-Next GSQ-RCO Q2_0†</text>
+      <path d="M440 722H730.7" fill="none" stroke="#79d1bb" stroke-width="2" opacity=".55"/>
+      <circle class="score-point" cx="730.7" cy="722" r="5.5" fill="#79d1bb"/>
+      <text class="score" x="743.7" y="728">57.3</text>
+    </g>
+    <g class="tier">
+      <use xlink:href="#gpu" color="#79d1bb" transform="translate(53 758) scale(.9)"/>
+      <text class="hardware" x="84" y="772">Linux NVIDIA 24 GB + 64 GB</text>
+      <text class="model" x="84" y="792">Qwen3.8-27B UD-Q4_K_M</text>
+      <path d="M440 775H701" fill="none" stroke="#79d1bb" stroke-width="2" opacity=".55"/>
+      <circle class="score-point" cx="701" cy="775" r="5.5" fill="#79d1bb"/>
+      <text class="score" x="714" y="781">54.0</text>
+    </g>
+    <path class="rule" d="M54 808h891"/>
+    <text class="label" x="55" y="834">CLOUD REFERENCES</text>
+    <g class="cloud">
+      <text class="cloud-name" x="84" y="860">Gemini 2.5 Pro</text>
+      <path d="M529.1 850.5l4.5 4.5-4.5 4.5-4.5-4.5z" fill="#d4ddfa"/>
+      <text class="cloud-score" x="542.1" y="860">34.9</text>
+    </g>
+    <g class="cloud">
+      <text class="cloud-name" x="84" y="884">Claude Sonnet 4.6</text>
+      <path d="M697.4 874.5l4.5 4.5-4.5 4.5-4.5-4.5z" fill="#d4ddfa"/>
+      <text class="cloud-score" x="710.4" y="884">53.6</text>
+    </g>
+    <g class="cloud">
+      <text class="cloud-name" x="84" y="908">Claude Opus 4.6</text>
+      <path d="M743.3 898.5l4.5 4.5-4.5 4.5-4.5-4.5z" fill="#d4ddfa"/>
+      <text class="cloud-score" x="756.3" y="908">58.7</text>
+    </g>
+    <g class="cloud">
+      <text class="cloud-name" x="84" y="932">GPT-5.5</text>
+      <path d="M779.3 922.5l4.5 4.5-4.5 4.5-4.5-4.5z" fill="#d4ddfa"/>
+      <text class="cloud-score" x="792.3" y="932">62.7</text>
+    </g>
+    <path class="rule" d="M54 950h891"/>
+    <text class="note" x="55" y="977">† Not this machine's default recommendation.</text>
+    <text class="note" x="55" y="999">Not ranked: AIHOT has no third-party results for Spark-X2.6-4B.</text>
+  </g>
+  <g id="score-mix">
+    <text class="heading" x="34" y="1056">How the score is made</text>
+    <text class="detail" x="268" y="1055">Approximate weights, minus compression loss</text>
+    <!-- Segment widths are proportional to the five weights. -->
+    <g>
+      <rect x="34.00" y="1074" width="354.16" height="5" fill="#a799ef"/>
+      <rect x="388.16" y="1074" width="177.08" height="5" fill="#909fee"/>
+      <rect x="565.24" y="1074" width="177.08" height="5" fill="#84b6dc"/>
+      <rect x="742.32" y="1074" width="130.48" height="5" fill="#75c7bb"/>
+      <rect x="872.80" y="1074" width="93.20" height="5" fill="#ddba87"/>
+      <circle cx="38" cy="1099" r="4" fill="#a799ef"/>
+      <text class="body" x="50" y="1104"><tspan font-weight="700">38%</tspan> coding</text>
+      <circle cx="184" cy="1099" r="4" fill="#909fee"/>
+      <text class="body" x="196" y="1104"><tspan font-weight="700">19%</tspan> research</text>
+      <circle cx="338" cy="1099" r="4" fill="#84b6dc"/>
+      <text class="body" x="350" y="1104"><tspan font-weight="700">19%</tspan> professional work</text>
+      <circle cx="566" cy="1099" r="4" fill="#75c7bb"/>
+      <text class="body" x="578" y="1104"><tspan font-weight="700">14%</tspan> knowledge</text>
+      <circle cx="754" cy="1099" r="4" fill="#ddba87"/>
+      <text class="body" x="766" y="1104"><tspan font-weight="700">10%</tspan> human preference</text>
+    </g>
+  </g>
+</svg>
