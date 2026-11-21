@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import {
+import fs, {
   mkdir,
   mkdtemp,
   readFile,
@@ -11,6 +11,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -31,6 +32,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   vi.restoreAllMocks();
+  syncBuiltinESMExports();
   vi.unstubAllEnvs();
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
@@ -416,10 +418,16 @@ describe("managed tools transaction", () => {
     },
   );
 
-  it.each(["available", "unavailable"])(
-    "hard-kills smoke processes that ignore SIGTERM and releases the lock with %s process groups",
-    async (processGroups) => {
-      if (processGroups === "unavailable") {
+  it.each([
+    "available process groups",
+    "unavailable process groups",
+    ...(process.platform === "linux"
+      ? ["unavailable process groups and a missing procfs index"]
+      : []),
+  ])(
+    "hard-kills smoke processes that ignore SIGTERM and releases the lock with %s",
+    async (scenario) => {
+      if (scenario !== "available process groups") {
         const kill = process.kill.bind(process);
         vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
           if (pid < 0)
@@ -428,6 +436,24 @@ describe("managed tools transaction", () => {
             });
           return kill(pid, signal);
         });
+      }
+      let missingIndexReads = 0;
+      const missingIndex =
+        scenario === "unavailable process groups and a missing procfs index";
+      if (missingIndex) {
+        const read = fs.readFile;
+        vi.spyOn(fs, "readFile").mockImplementation((file, options) => {
+          if (/^\/proc\/\d+\/task\/\d+\/children$/u.test(String(file))) {
+            missingIndexReads++;
+            return Promise.reject(
+              Object.assign(new Error("Missing procfs children index"), {
+                code: "ENOENT",
+              }),
+            );
+          }
+          return read(file, options);
+        });
+        syncBuiltinESMExports();
       }
       const f = await fixture();
       await release(f, "first");
@@ -474,6 +500,7 @@ describe("managed tools transaction", () => {
           signal: "SIGKILL",
         });
         expect(await readFile(termFile, "utf8")).toBe("received");
+        if (missingIndex) expect(missingIndexReads).toBeGreaterThan(0);
         const pids: number[] = JSON.parse(await readFile(pidFile, "utf8"));
         for (const pid of pids) {
           // A killed orphan can remain a zombie until init reaps it, on macOS too.

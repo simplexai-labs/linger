@@ -19,6 +19,9 @@ Scripts support existing build, generation, and verification entrypoints.
 ## Important Conventions
 
 - Scripts must be idempotent and safe to rerun.
+- When a managed-tools smoke command times out on Linux and neither process
+  group signaling nor the procfs children index works, take one bounded
+  `ps` PID/PPID snapshot before signaling the owned processes individually.
 - `check-scripts-fast` runs fast-lane files that reference `child_process`
   under `SCRIPT_TEST_PROCESS_TIMEOUT_MS`; pure files keep the 5s Vitest default.
   New process-spawning tests need no per-test timeout for the shared Runner.

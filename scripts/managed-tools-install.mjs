@@ -26,42 +26,48 @@ import { NODE_RUNTIME_VERSION } from "./local-computer-node-distributions.mjs";
 import { writeManagedToolsLaunchers } from "./managed-tools-launchers.mjs";
 
 const tools = ["teamhub", "lev8"];
-async function collectChildren(pid, descendants) {
-  if (!pid) return;
-  if (process.platform === "darwin") {
-    const snapshot = await new Promise((resolve) => {
-      execFile(
-        "/bin/ps",
-        ["-A", "-o", "pid=,ppid="],
-        { timeout: 150, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 },
-        (error, stdout) => resolve(error ? "" : stdout),
-      );
-    });
-    const childrenByParent = new Map();
-    for (const line of snapshot.split("\n")) {
-      const match = /^\s*(\d+)\s+(\d+)\s*$/u.exec(line);
-      if (!match) continue;
-      const childPid = Number(match[1]);
-      const parentPid = Number(match[2]);
-      const children = childrenByParent.get(parentPid) ?? [];
-      children.push(childPid);
-      childrenByParent.set(parentPid, children);
-    }
-    const pending = [pid];
-    while (pending.length > 0) {
-      for (const childPid of childrenByParent.get(pending.pop()) ?? []) {
-        if (childPid === pid || descendants.has(childPid)) continue;
-        descendants.add(childPid);
-        pending.push(childPid);
-      }
-    }
-    return;
+async function collectChildrenFromPs(pid, descendants) {
+  const snapshot = await new Promise((resolve) => {
+    execFile(
+      "/bin/ps",
+      ["-A", "-o", "pid=,ppid="],
+      { timeout: 150, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 },
+      (error, stdout) => resolve(error ? "" : stdout),
+    );
+  });
+  const childrenByParent = new Map();
+  for (const line of snapshot.split("\n")) {
+    const match = /^\s*(\d+)\s+(\d+)\s*$/u.exec(line);
+    if (!match) continue;
+    const childPid = Number(match[1]);
+    const parentPid = Number(match[2]);
+    const children = childrenByParent.get(parentPid) ?? [];
+    children.push(childPid);
+    childrenByParent.set(parentPid, children);
   }
-  if (process.platform !== "linux") return;
+  const pending = [pid];
+  const visited = new Set(pending);
+  while (pending.length > 0) {
+    for (const childPid of childrenByParent.get(pending.pop()) ?? []) {
+      if (visited.has(childPid)) continue;
+      visited.add(childPid);
+      descendants.add(childPid);
+      pending.push(childPid);
+    }
+  }
+}
+// Returns whether any Linux procfs children index was unavailable.
+async function collectChildren(pid, descendants) {
+  if (!pid) return false;
+  if (process.platform === "darwin")
+    await collectChildrenFromPs(pid, descendants);
+  if (process.platform !== "linux") return false;
   const children = await readFile(
     `/proc/${pid}/task/${pid}/children`,
     "utf8",
-  ).catch(() => "");
+  ).catch(() => null);
+  if (children === null) return true;
+  let missingIndex = false;
   for (const childPid of children
     .trim()
     .split(/\s+/u)
@@ -69,8 +75,9 @@ async function collectChildren(pid, descendants) {
     .map(Number)) {
     if (descendants.has(childPid)) continue;
     descendants.add(childPid);
-    await collectChildren(childPid, descendants);
+    if (await collectChildren(childPid, descendants)) missingIndex = true;
   }
+  return missingIndex;
 }
 function commandOutput(command, arguments_, cwd, timeoutMs = 15_000) {
   return new Promise((resolve, reject) => {
@@ -91,14 +98,16 @@ function commandOutput(command, arguments_, cwd, timeoutMs = 15_000) {
         ]),
       );
     const outputLimit = 1024 * 1024;
-    const kill = (signal) => {
-      if (grouped && child.pid) {
-        try {
-          process.kill(-child.pid, signal);
-        } catch {
-          /* Fall back to terminating the direct child. */
-        }
+    const signalGroup = (signal) => {
+      if (!grouped || !child.pid) return false;
+      try {
+        process.kill(-child.pid, signal);
+        return true;
+      } catch {
+        return false;
       }
+    };
+    const signalProcesses = (signal) => {
       for (const pid of descendants) {
         try {
           process.kill(pid, signal);
@@ -111,6 +120,10 @@ function commandOutput(command, arguments_, cwd, timeoutMs = 15_000) {
       } catch {
         /* The deadline still settles. */
       }
+    };
+    const kill = (signal) => {
+      signalGroup(signal);
+      signalProcesses(signal);
     };
     // execFile does not forward detached to spawn. A real owned group is
     // necessary to terminate descendants on platforms without /proc.
@@ -173,12 +186,7 @@ function commandOutput(command, arguments_, cwd, timeoutMs = 15_000) {
     child.stderr.on("data", stderrData);
     const deadline = setTimeout(() => {
       timedOut = true;
-      // Some sandboxes cannot create the requested process group. Capture the
-      // owned descendants before TERM lets their parent exit and orphan them.
-      void collectChildren(child.pid, descendants).finally(() => {
-        if (!terminated) kill("SIGTERM");
-      });
-      setTimeout(() => {
+      const forceKill = () => {
         terminated = true;
         kill("SIGKILL");
         settled = true;
@@ -192,7 +200,21 @@ function commandOutput(command, arguments_, cwd, timeoutMs = 15_000) {
             { ...captured(), killed: true, signal: "SIGKILL" },
           ),
         );
-      }, 250);
+      };
+      const escalation = setTimeout(forceKill, 250);
+      // Capture the descendants before TERM can orphan them. If the group
+      // cannot be signaled and procfs was incomplete, use a bounded snapshot.
+      void collectChildren(child.pid, descendants).then(
+        async (missingIndex) => {
+          if (terminated) return;
+          if (!signalGroup("SIGTERM") && missingIndex) {
+            clearTimeout(escalation);
+            await collectChildrenFromPs(child.pid, descendants);
+            setTimeout(forceKill, 250);
+          }
+          signalProcesses("SIGTERM");
+        },
+      );
     }, timeoutMs);
   });
 }
