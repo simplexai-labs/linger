@@ -81,6 +81,78 @@ describe("Room Document Comment anchor attachment", () => {
     ).toThrow("Comment anchor quote is ambiguous");
   });
 
+  it.each([
+    { name: "bold text", start: 7, length: 7, mark: "bold", value: {} },
+    {
+      name: "linked text",
+      start: 7,
+      length: 14,
+      mark: "link",
+      value: { href: "https://example.com/release" },
+    },
+    {
+      name: "an earlier comment",
+      start: 0,
+      length: 6,
+      mark: "comment",
+      value: { orphan: false, threadId: "thread_earlier" },
+    },
+  ])(
+    "anchors the visible quote alongside $name",
+    ({ start, length, mark, value }) => {
+      const source = new Y.Doc({ gc: true });
+      const replay = new Y.Doc({ gc: true });
+      try {
+        Y.applyUpdate(source, documentState());
+        targetText(source).format(start, length, { [mark]: value });
+        const state = Y.encodeStateAsUpdate(source);
+        const result = attach(state);
+        Y.applyUpdate(replay, state);
+        Y.applyUpdate(replay, result.update);
+
+        const deltas = targetText(replay).toDelta();
+        const marked = deltas.filter(
+          (delta: { attributes?: Record<string, unknown> }) =>
+            Object.values(delta.attributes ?? {}).some(
+              (attribute) =>
+                typeof attribute === "object" &&
+                attribute !== null &&
+                "threadId" in attribute &&
+                attribute.threadId === "thread_release",
+            ),
+        );
+        expect(
+          marked.map((delta: { insert: string }) => delta.insert).join(""),
+        ).toBe("release target");
+        expect(plainText(targetText(replay))).toBe(
+          "Before release target after",
+        );
+        const originalMark = deltas.filter(
+          (delta: { attributes?: Record<string, unknown> }) =>
+            delta.attributes?.[mark] !== undefined,
+        );
+        expect(
+          originalMark
+            .map((delta: { insert: string }) => delta.insert)
+            .join(""),
+        ).toBe("Before release target after".slice(start, start + length));
+        for (const delta of originalMark)
+          expect(delta.attributes[mark]).toEqual(value);
+        expect(result.completeReferences).toEqual({
+          documentAssetIds: ["asset_diagram"],
+          documentThreadIds:
+            mark === "comment"
+              ? ["thread_earlier", "thread_release"]
+              : ["thread_release"],
+        });
+        expect(attach(state).stateBytes).toEqual(result.stateBytes);
+      } finally {
+        source.destroy();
+        replay.destroy();
+      }
+    },
+  );
+
   it("rejects a thread already referenced anywhere in the Document", () => {
     const initial = new Y.Doc({ gc: true });
     Y.applyUpdate(initial, documentState());

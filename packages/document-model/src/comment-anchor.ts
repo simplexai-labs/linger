@@ -160,7 +160,11 @@ function collectBlocks(document: Y.Doc): DocumentBlock[] {
       const textNodes = ownTextNodes(node);
       blocks.push({
         id,
-        text: textNodes.map((text) => text.toString()).join(""),
+        text: textNodes
+          .flatMap((text) =>
+            text.toDelta().map((delta: { insert: string }) => delta.insert),
+          )
+          .join(""),
         textNodes,
       });
     }

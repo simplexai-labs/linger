@@ -23,3 +23,5 @@
 - Replacing or updating blocks may retain the IDs of their removed descendants.
   Check replacement ID collisions against the blocks outside the complete
   replaced subtrees, while keeping all replacement IDs unique.
+- Comment anchor quotes, context and offsets use visible inline text;
+  formatting and existing Comment marks do not add characters or shift ranges.
