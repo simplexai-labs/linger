@@ -37,6 +37,55 @@ const source: RawSource = {
 };
 
 describe("scoped Raw retrieval reliability", () => {
+  it.each([0, 2])(
+    "honors a %s-source budget in the fallback scan",
+    async (maxSources) => {
+      const sources = Array.from({ length: 3 }, (_, index) => ({
+        ...source,
+        id: `source-${index}`,
+      }));
+      const provider = {
+        search: vi.fn(async () => []),
+        resolveRawSources: vi.fn(async () => sources),
+        readRawSource: vi.fn(async () => content),
+      };
+      const result = await searchRawSources("unused", input, provider, [], {
+        fallback: "only",
+        maxSources,
+      });
+      expect(provider.readRawSource).toHaveBeenCalledTimes(maxSources);
+      expect(result.matches).toHaveLength(maxSources);
+      expect(result.limited).toBe(true);
+    },
+  );
+
+  it("reports an indexed result as partial when the source budget excludes a match", async () => {
+    const sources = Array.from({ length: 3 }, (_, index) => ({
+      ...source,
+      id: `source-${index}`,
+    }));
+    const chunk = chunkSource(content)[0]!;
+    const provider = {
+      search: vi.fn(async () =>
+        sources.map((item) => ({
+          sourceId: item.id,
+          chunkId: chunk.id,
+          mergedChunkIds: [chunk.id],
+          score: 1,
+        })),
+      ),
+      resolveRawSources: vi.fn(async () => sources),
+      readRawSource: vi.fn(async () => content),
+    };
+    const result = await searchRawSources("unused", input, provider, [], {
+      fallback: "skip",
+      maxSources: 2,
+    });
+    expect(provider.readRawSource).toHaveBeenCalledTimes(2);
+    expect(result.matches).toHaveLength(2);
+    expect(result.limited).toBe(true);
+  });
+
   it("searches the complete authorized scope before resolving only matching sources", async () => {
     const calls: string[] = [];
     const chunk = chunkSource(content)[0]!;

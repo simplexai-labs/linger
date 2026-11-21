@@ -91,6 +91,7 @@ async function searchAvailableRawSources(
     }
   }
   if (chunkSearch && options.fallback !== "only") {
+    let limited = false;
     const ranked: IndexedChunkMatch[] = await chunkSearch.search({
       agent_id: input.agent_id,
       tenant_id: input.tenant_id,
@@ -124,12 +125,14 @@ async function searchAvailableRawSources(
         if (!source || !inList(source)) continue;
         let chunks = loaded.get(source.id);
         if (!chunks) {
+          if (attempted.has(source.id)) continue;
           if (
-            attempted.has(source.id) ||
-            (options.maxSources !== undefined &&
-              attempted.size >= options.maxSources)
-          )
+            options.maxSources !== undefined &&
+            attempted.size >= options.maxSources
+          ) {
+            limited = true;
             continue;
+          }
           attempted.add(source.id);
           const text = await chunkSearch.readRawSource?.(input, source);
           if (text === undefined) continue;
@@ -145,8 +148,9 @@ async function searchAvailableRawSources(
             score: match.score,
           });
       }
-      if (matches.length > 0) return { matches, limited: false };
+      if (matches.length > 0) return { matches, limited };
     }
+    if (options.fallback === "skip") return { matches: [], limited };
   }
   if (options.fallback === "skip") return { matches: [], limited: false };
   const resolved = await resolveSearchRawSources(
@@ -166,8 +170,15 @@ async function searchAvailableRawSources(
   // A missing derived chunk index can fall back to DB-backed Raw BM25, never local files.
   const documents: Array<{ value: Omit<RawMatch, "score">; text: string }> = [];
   let bytes = 0;
-  let limited = sources.length > RAW_BM25_FALLBACK_MAX_SOURCES;
-  for (const source of sources.slice(0, RAW_BM25_FALLBACK_MAX_SOURCES)) {
+  const sourceLimit = Math.max(
+    0,
+    Math.min(
+      RAW_BM25_FALLBACK_MAX_SOURCES,
+      options.maxSources ?? RAW_BM25_FALLBACK_MAX_SOURCES,
+    ),
+  );
+  let limited = sources.length > sourceLimit;
+  for (const source of sources.slice(0, sourceLimit)) {
     const text = await chunkSearch?.readRawSource?.(input, source);
     if (text === undefined) continue;
     bytes += Buffer.byteLength(text);

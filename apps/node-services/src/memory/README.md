@@ -14,6 +14,10 @@ Memory browsing entry and do not enter OpenWiki's native graph.
 
 ## Search
 
+Each retrieval list's source-read budget applies to indexed and fallback
+searches. If that budget excludes an eligible source, the response reports
+`source_search_limited` instead of presenting the searched subset as complete.
+
 Memory keeps one index, `memory_index.sources` and `chunks`: Room Sessions, recordings, My pages, imported
 mail, Pocket Notes, the Profile, the published Wiki pages (`wiki`) and the Daily and Weekly reports
 (`period_summary`) are source kinds of it. Chunks and Session Facts use keyword search only (PostgreSQL `simple`
