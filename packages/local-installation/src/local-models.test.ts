@@ -296,32 +296,49 @@ async function deployedThenNotReady(reason: string) {
   f.call.mockClear();
   return { ...f, ready };
 }
-test.each(["deployment-unavailable", "pi-extensions-unavailable"])(
-  "a saved binding observed not ready (%s) applies the approved plan again",
+test.each(["deployment-unavailable", "gateway-unavailable"])(
+  "a stopped deployed stack (%s) restarts with stack up without re-planning via stack apply",
   async (reason) => {
     const f = await deployedThenNotReady(reason);
     const original = f.call.getMockImplementation()!;
     f.call.mockImplementation(async (...a) => {
-      // stack apply brings the stack and its Pi back.
-      if (a[1][1] === "apply") Object.assign(f.binding, f.ready);
+      // stack up starts the existing deployment and gateway in place, even
+      // across a localmodels kit upgrade or retired catalog model where stack
+      // apply would fail with STACK_PLAN_CHANGED or STACK_REPLAN_FAILED.
+      if (a[1][0] === "stack" && a[1][1] === "up") {
+        Object.assign(f.binding, f.ready);
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            schema: "localmodels.stack-up/v1",
+            plan_id: f.id,
+            ok: true,
+            parts: [],
+            gateway: "started",
+            notes: [],
+          }),
+          stderr: "",
+        };
+      }
       return original(...a);
     });
     expect(
       await prepareLocalModels(f.instance, f.options, { localmodels: f.call }),
     ).toBeUndefined();
-    const stack = f.call.mock.calls
-      .map(([, args]) => args)
-      .filter((args) => args[0] === "stack");
-    expect(stack).toEqual([
+    const stackCalls = f.call.mock.calls.filter(
+      ([, args]) => args[0] === "stack",
+    );
+    expect(stackCalls.map(([, args]) => args)).toEqual([
       [
         "stack",
-        "apply",
+        "up",
         path.join(f.home, "runtime/localmodels/plan.json"),
-        "--approve",
-        f.id,
-        "--jsonl",
+        "--share-gpu",
+        "--json",
       ],
     ]);
+    // Model startup can take longer than the 120 s metadata command timeout.
+    expect(stackCalls[0]![2]?.timeoutMs).toBeUndefined();
     expect(
       JSON.parse(
         await readFile(
@@ -339,6 +356,223 @@ test.each(["deployment-unavailable", "pi-extensions-unavailable"])(
     );
   },
 );
+test("stack up omits --share-gpu when the deployed plan was approved without GPU sharing", async () => {
+  const f = await fixture();
+  await prepareLocalModels(
+    f.instance,
+    { ...f.options, shareGpu: false },
+    { localmodels: f.call },
+  );
+  await prepareLocalModels(
+    f.instance,
+    { ...f.options, localModelsApproval: f.id },
+    { localmodels: f.call },
+  );
+  const ready = structuredClone(f.binding);
+  f.binding.ready = false;
+  f.binding.pi = null as never;
+  f.binding.reasons = [
+    { code: "deployment-unavailable", message: "stopped" },
+  ] as never;
+  f.call.mockClear();
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (...a) => {
+    if (a[1][0] === "stack" && a[1][1] === "up") {
+      Object.assign(f.binding, ready);
+      return { code: 0, stdout: JSON.stringify({ ok: true }), stderr: "" };
+    }
+    return original(...a);
+  });
+  expect(
+    await prepareLocalModels(f.instance, f.options, { localmodels: f.call }),
+  ).toBeUndefined();
+  expect(
+    f.call.mock.calls
+      .map(([, args]) => args)
+      .filter((args) => args[0] === "stack"),
+  ).toEqual([
+    [
+      "stack",
+      "up",
+      path.join(f.home, "runtime/localmodels/plan.json"),
+      "--json",
+    ],
+  ]);
+});
+test("a saved binding observed not ready (pi-extensions-unavailable) applies the approved plan again", async () => {
+  const f = await deployedThenNotReady("pi-extensions-unavailable");
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (...a) => {
+    // stack apply brings the stack and its Pi back.
+    if (a[1][1] === "apply") Object.assign(f.binding, f.ready);
+    return original(...a);
+  });
+  expect(
+    await prepareLocalModels(f.instance, f.options, { localmodels: f.call }),
+  ).toBeUndefined();
+  const stack = f.call.mock.calls
+    .map(([, args]) => args)
+    .filter((args) => args[0] === "stack");
+  expect(stack).toEqual([
+    [
+      "stack",
+      "apply",
+      path.join(f.home, "runtime/localmodels/plan.json"),
+      "--approve",
+      f.id,
+      "--jsonl",
+    ],
+  ]);
+  expect(
+    JSON.parse(
+      await readFile(
+        path.join(f.home, "runtime/localmodels/binding.json"),
+        "utf8",
+      ),
+    ),
+  ).toEqual(f.ready);
+  expect(f.options.onEvent).toHaveBeenCalledWith(
+    expect.objectContaining({
+      kind: "log",
+      stage: "runtime",
+      message: expect.stringContaining("pi-extensions-unavailable"),
+    }),
+  );
+});
+test("falls back to stack apply when stack up starts services but binding still needs Pi repair", async () => {
+  const f = await deployedThenNotReady("deployment-unavailable");
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (...a) => {
+    if (a[1][0] === "stack" && a[1][1] === "up") {
+      f.binding.reasons = [
+        { code: "pi-extensions-unavailable", message: "missing jiti" },
+      ] as never;
+      return { code: 0, stdout: JSON.stringify({ ok: true }), stderr: "" };
+    }
+    if (a[1][0] === "stack" && a[1][1] === "apply")
+      Object.assign(f.binding, f.ready);
+    return original(...a);
+  });
+  expect(
+    await prepareLocalModels(f.instance, f.options, { localmodels: f.call }),
+  ).toBeUndefined();
+  expect(
+    f.call.mock.calls
+      .filter(([, args]) => args[0] === "stack")
+      .map(([, args]) => `${args[0]} ${args[1]}`),
+  ).toEqual(["stack up", "stack apply"]);
+});
+test("falls back to stack apply when stack up fails due to drift and apply repairs it", async () => {
+  const f = await deployedThenNotReady("deployment-unavailable");
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (...a) => {
+    if (a[1][0] === "stack" && a[1][1] === "up")
+      return {
+        code: 2,
+        stdout: "",
+        stderr:
+          "stack: the deployments on this computer no longer match this plan\n",
+      };
+    if (a[1][0] === "stack" && a[1][1] === "apply")
+      Object.assign(f.binding, f.ready);
+    return original(...a);
+  });
+  expect(
+    await prepareLocalModels(f.instance, f.options, { localmodels: f.call }),
+  ).toBeUndefined();
+  expect(
+    f.call.mock.calls
+      .filter(([, args]) => args[0] === "stack")
+      .map(([, args]) => `${args[0]} ${args[1]}`),
+  ).toEqual(["stack up", "stack apply"]);
+  expect(f.options.onEvent).toHaveBeenCalledWith(
+    expect.objectContaining({
+      kind: "log",
+      stage: "runtime",
+      message: expect.stringContaining(
+        "localmodels stack up exited with code 2",
+      ),
+    }),
+  );
+});
+test.each([
+  [
+    "STACK_REPLAN_FAILED",
+    {
+      schema: "localmodels.stack-error/v1",
+      event: "error",
+      code: "STACK_APPLY_FAILED",
+      category: "guard",
+      causeCode: "STACK_REPLAN_FAILED",
+    },
+    "no longer fits this computer's current memory or model catalog",
+  ],
+  [
+    "STACK_PLAN_CHANGED",
+    {
+      schema: "localmodels.stack-error/v1",
+      event: "error",
+      code: "STACK_APPLY_FAILED",
+      category: "guard",
+      causeCode: "STACK_PLAN_CHANGED",
+      changedFields: ["llm"],
+    },
+    "changed since the plan was approved (llm)",
+  ],
+])(
+  "surfaces structured %s causeCode without raw JSON when upgrade fallback stack apply is rejected",
+  async (causeCode, payload, expectedText) => {
+    const f = await deployedThenNotReady("deployment-unavailable");
+    const original = f.call.getMockImplementation()!;
+    f.call.mockImplementation(async (...a) => {
+      if (a[1][0] === "stack" && a[1][1] === "up")
+        return {
+          code: 2,
+          stdout: "",
+          stderr: "stack: plan has no stack apply record\n",
+        };
+      if (a[1][0] === "stack" && a[1][1] === "apply") {
+        a[2]!.onOutput!(`${JSON.stringify(payload)}\n`);
+        return { code: 2, stdout: "", stderr: "" };
+      }
+      return original(...a);
+    });
+    const result = await prepareLocalModels(f.instance, f.options, {
+      localmodels: f.call,
+    });
+    expect(result).toMatchObject({
+      state: "action_required",
+      details: {
+        code: "LOCAL_MODELS_RECOVERY_REQUIRED",
+        causeCode,
+        reasons: ["deployment-unavailable"],
+      },
+      message: expect.stringContaining(expectedText),
+    });
+    expect(result?.message).not.toContain("localmodels.stack-error/v1");
+    expect(result?.message).not.toContain("{");
+  },
+);
+test("an incompatible saved plan from an older release asks for recovery instead of throwing", async () => {
+  const f = await deployedThenNotReady("deployment-unavailable");
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (...a) =>
+    a[1][0] === "setup" && a[1][1] === "review"
+      ? { code: 2, stdout: "", stderr: "invalid plan schema\n" }
+      : original(...a),
+  );
+  const result = await prepareLocalModels(f.instance, f.options, {
+    localmodels: f.call,
+  });
+  expect(result).toMatchObject({
+    code: 4,
+    state: "action_required",
+    details: {
+      code: "LOCAL_MODELS_RECOVERY_REQUIRED",
+      causeCode: "STACK_PLAN_INVALID",
+    },
+  });
+});
 test("a stack still not ready after applying the approved plan again asks for recovery", async () => {
   const f = await deployedThenNotReady("gateway-unavailable");
   const result = await prepareLocalModels(f.instance, f.options, {
@@ -398,7 +632,8 @@ test("a not-ready binding is never re-applied once resource choices changed", as
   });
   expect(
     f.call.mock.calls.some(
-      ([, args]) => args[0] === "stack" && ["plan", "apply"].includes(args[1]!),
+      ([, args]) =>
+        args[0] === "stack" && ["plan", "up", "apply"].includes(args[1]!),
     ),
   ).toBe(false);
 });
@@ -455,8 +690,8 @@ async function stoppedLocalSetup(mode?: string) {
   }
   const original = f.call.getMockImplementation()!;
   f.call.mockImplementation(async (...a) => {
-    // stack apply brings the stack and its Pi back.
-    if (a[1][0] === "stack" && a[1][1] === "apply")
+    // stack up brings the stopped stack and its gateway back without re-planning.
+    if (a[1][0] === "stack" && a[1][1] === "up")
       Object.assign(f.binding, f.ready);
     return original(...a);
   });
@@ -468,7 +703,7 @@ function commands(f: {
   return f.call.mock.calls.map(([, args]) => `${args[0]} ${args[1]}`);
 }
 test.each([undefined, "local"])(
-  "a stopped local stack is restored while the model source is %s",
+  "a stopped local stack is restored via stack up while the model source is %s",
   async (mode) => {
     const f = await stoppedLocalSetup(mode);
     expect(
@@ -478,7 +713,7 @@ test.each([undefined, "local"])(
       "setup binding",
       "setup review",
       "setup binding",
-      "stack apply",
+      "stack up",
       "setup binding",
       "source apply",
     ]);
@@ -567,7 +802,7 @@ test("a restore waits for a quit-time stop and checks the stack it left", async 
   release();
   await stopping;
   expect(await restoring).toBeUndefined();
-  expect(commands(f)).toContain("stack apply");
+  expect(commands(f)).toContain("stack up");
   expect(commands(f).at(-1)).toBe("source apply");
 });
 test("a restore gives up when the stack stays locked", async () => {
@@ -721,7 +956,8 @@ test("changed resource consent cannot approve an earlier saved plan", async () =
   });
   expect(
     f.call.mock.calls.some(
-      ([, args]) => args[0] === "stack" && ["plan", "apply"].includes(args[1]!),
+      ([, args]) =>
+        args[0] === "stack" && ["plan", "up", "apply"].includes(args[1]!),
     ),
   ).toBe(false);
 });

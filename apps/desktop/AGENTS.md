@@ -227,9 +227,13 @@ Gateway and runs Agents. The daemon exits with the app.
   `local_server.source_newer_than_app`. When the local model stops a resume,
   the start failure names the stack's first known binding reason code
   (`details.reasons`, such as `pi-extensions-unavailable`) in its own words
-  and, by `details.code`, the action that works: Try Again for
-  `LOCAL_MODELS_RECOVERY_REQUIRED` (the resume applies the approved plan
-  again), Set Up Again to review a new plan or choose another runtime. A Quick Install that stopped
+  and, by `details.code` and `details.causeCode`, the action that works:
+  Set Up Again for `LOCAL_MODELS_APPROVAL_REQUIRED` and for
+  `LOCAL_MODELS_RECOVERY_REQUIRED` when `details.causeCode` indicates the saved
+  plan cannot be re-applied without replanning (`STACK_REPLAN_FAILED`,
+  `STACK_PLAN_CHANGED`, `STACK_APPROVAL_MISMATCH`, `STACK_PLAN_INVALID`), and
+  Try Again or Set Up Again for transient `LOCAL_MODELS_RECOVERY_REQUIRED`
+  failures. A Quick Install that stopped
   before the computer enrolled is not resumed: setup shows again and Install
   finishes it, reusing a finished job only while its origin answers (a stopped
   server gets a new job, which starts the services again). The start failure

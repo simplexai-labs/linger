@@ -475,11 +475,17 @@ async function runNativeSource(
     const current = instance;
     return await withInstanceLock(current, async () => {
       const home = path.resolve(current.root, "../..");
+      const explicitLocal =
+        options.setupChoice === "local-models" ||
+        Boolean(options.localModelsApproval) ||
+        Boolean(options.localModelsReplan) ||
+        options.shareGpu !== undefined;
       // A restart reads the choice from setup-choice.json, which a source
       // switched since on the Models page does not update, so a saved BYOK
-      // source keeps its own runtime and gateway.
+      // source keeps its own runtime and gateway, and a local-models choice
+      // switched to BYOK or subscription leaves the local stack stopped.
       const saved =
-        !options.byok && !options.setupChoice
+        !options.byok && !options.setupChoice && !explicitLocal
           ? await readByokEnvironment(home)
           : undefined;
       const restoredByok = saved?.mode === "byok" ? saved : undefined;
@@ -540,26 +546,34 @@ async function runNativeSource(
               },
             );
           } else if (choice === "local-models") {
-            runtimeOutcome = await prepareLocalModels(current, {
-              shareGpu: options.shareGpu,
-              signal,
-              onEvent: emit,
-              localModelsApproval: options.localModelsApproval,
-              localModelsReplan: options.localModelsReplan,
-            });
-            // A person who chose local models just now makes them the
-            // source, replacing one an earlier setup left. A restart reads
-            // the choice from setup-choice.json and passes no approval, so a
-            // source the person switched since on the Models page stays.
-            if (
-              !runtimeOutcome &&
-              (options.setupChoice === "local-models" ||
-                options.localModelsApproval)
-            )
-              runtimeOutcome = await applyNativeSource(home, "local", "pi", {
+            // A restart or app upgrade from the saved setup choice keeps a
+            // model source the person switched to on the Models page (BYOK or
+            // subscription), leaving the local model stack stopped just as
+            // restoreLocalModels does.
+            const switchedAway =
+              !explicitLocal && (saved?.mode ?? "local") !== "local";
+            if (!switchedAway) {
+              runtimeOutcome = await prepareLocalModels(current, {
+                shareGpu: options.shareGpu,
                 signal,
                 onEvent: emit,
+                localModelsApproval: options.localModelsApproval,
+                localModelsReplan: options.localModelsReplan,
               });
+              // A person who chose local models just now makes them the
+              // source, replacing one an earlier setup left. A restart reads
+              // the choice from setup-choice.json and passes no approval, so a
+              // source the person switched since on the Models page stays.
+              if (
+                !runtimeOutcome &&
+                (options.setupChoice === "local-models" ||
+                  options.localModelsApproval)
+              )
+                runtimeOutcome = await applyNativeSource(home, "local", "pi", {
+                  signal,
+                  onEvent: emit,
+                });
+            }
           } else {
             runtimeOutcome = await prepareRuntime(choice, {
               home,

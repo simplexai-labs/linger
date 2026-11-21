@@ -3186,6 +3186,152 @@ describe("LocalServerModule after a restart", () => {
     await f.host.stop("quit");
   });
 
+  it.each([
+    "STACK_REPLAN_FAILED",
+    "STACK_PLAN_CHANGED",
+    "STACK_APPROVAL_MISMATCH",
+    "STACK_PLAN_INVALID",
+  ])(
+    "guides to Set Up Again when an upgraded client cannot re-apply the saved plan (%s)",
+    async (causeCode) => {
+      const root = tempDirectory();
+      const archive = sourceArchive(root);
+      const f = installedBy(archive);
+      const previous = path.join(f.home, "desktop", "source", "previous");
+      writeFileSync(
+        path.join(f.home, "resume-fails"),
+        JSON.stringify({
+          message:
+            "Local model installation or verification did not finish: The saved local model plan no longer fits this computer's current memory or model catalog. Existing resources were preserved.",
+          details: {
+            code: "LOCAL_MODELS_RECOVERY_REQUIRED",
+            causeCode,
+            reasons: ["deployment-unavailable"],
+          },
+        }),
+      );
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("failed"));
+      expect(f.showStartFailed).toHaveBeenCalledWith(
+        "The local model service isn't running. Local model installation or verification did not finish: The saved local model plan no longer fits this computer's current memory or model catalog. Existing resources were preserved. Set Up Again to review a new plan or choose another AI runtime.",
+      );
+      // The older source record stays in place until the upgrade succeeds.
+      expect(
+        JSON.parse(
+          readFileSync(
+            path.join(f.home, "desktop", "local-server.json"),
+            "utf8",
+          ),
+        ),
+      ).toMatchObject({ repo: previous });
+      await f.host.stop("quit");
+    },
+  );
+
+  it("still offers Try Again when a local model resume failure is transient (STACK_APPLY_LOCKED)", async () => {
+    const f = fixture({}, enrolled, (home) => {
+      record(home);
+      writeFileSync(
+        path.join(home, "resume-fails"),
+        JSON.stringify({
+          message:
+            "Local model installation or verification did not finish: Another local model operation is already running. Existing resources were preserved.",
+          details: {
+            code: "LOCAL_MODELS_RECOVERY_REQUIRED",
+            causeCode: "STACK_APPLY_LOCKED",
+            reasons: ["deployment-unavailable"],
+          },
+        }),
+      );
+    });
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("failed"));
+    expect(f.showStartFailed).toHaveBeenCalledWith(
+      "The local model service isn't running. Local model installation or verification did not finish: Another local model operation is already running. Existing resources were preserved. Try Again to apply the approved local model plan again, or Set Up Again to review a new plan or choose another AI runtime.",
+    );
+    await f.host.stop("quit");
+  });
+
+  it("recovers from an upgrade replan failure through Set Up Again by replanning automatically", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const api = installerApi([], {
+      state: "waiting_user",
+      errorCode: "LOCAL_MODELS_RECOVERY_REQUIRED",
+      message: "The saved local model plan no longer fits.",
+    });
+    api.runtime.setupChoice = "local-models";
+    const f = fixture(
+      {
+        sourceArchive: {
+          url: "https://cdn.example/linger.tar.gz",
+          sha256: archive.sha256,
+        },
+        fetch: (async (url: string | URL | Request) => {
+          if (String(url).startsWith("https://cdn.example/"))
+            return new Response(archive.bytes);
+          return new Response(null, { status: 200 });
+        }) as typeof fetch,
+      },
+      enrolled,
+      (home) => {
+        const sources = path.join(home, "desktop", "source");
+        unpackedSource(path.join(sources, "previous"));
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home,
+            repo: path.join(sources, "previous"),
+            origin: "http://localhost:3000",
+            version: "0.1.4",
+          }),
+        );
+        writeFileSync(
+          path.join(home, "resume-fails"),
+          JSON.stringify({
+            message:
+              "Local model installation or verification did not finish: The saved local model plan no longer fits this computer's current memory or model catalog. Existing resources were preserved.",
+            details: {
+              code: "LOCAL_MODELS_RECOVERY_REQUIRED",
+              causeCode: "STACK_REPLAN_FAILED",
+              reasons: ["deployment-unavailable"],
+            },
+          }),
+        );
+      },
+      api,
+    );
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("failed"));
+    expect(f.showStartFailed).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Set Up Again to review a new plan or choose another AI runtime.",
+      ),
+    );
+    // Set Up Again forgets the stale local-server record and opens setup.
+    const opened = vi.fn();
+    f.bus.on("setup.open", opened);
+    f.bus.emit("local-server.reset");
+    await vi.waitFor(() => expect(opened).toHaveBeenCalledOnce());
+    expect(existsSync(path.join(f.home, "desktop", "local-server.json"))).toBe(
+      false,
+    );
+    // Re-installing with local models replans automatically and finishes on
+    // the upgraded client's source package.
+    await f.module.begin({ runtime: "local" });
+    expect(f.api.retried).toEqual([{ localModelsReplan: true }]);
+    expect(f.module.status().phase).toBe("ready");
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
+      ),
+    ).toMatchObject({
+      repo: path.join(f.home, "desktop", "source", archive.sha256.slice(0, 16)),
+      version: APP_VERSION,
+    });
+    await f.host.stop("quit");
+  });
+
   it("starts the services again when the person tries again", async () => {
     const f = fixture({}, enrolled, (home) => {
       record(home);

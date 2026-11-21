@@ -48,22 +48,27 @@ runtime (the local model, for one) is ready, and a run that stops earlier
 leaves the running services and their schema as they were. A successful
 outcome's `details.source` names the checkout the services serve from, and
 `details.origin` the origin they serve at, which the run moves when another
-program took the web port. A
-local model stack whose saved binding is no longer ready (any setup binding
-reason, `pi-extensions-unavailable` from a Pi an earlier localmodels
-installed without extension support included) gets its approved plan applied
-again when the saved plan inputs still match the current choices; only a
-plan the person approved is ever applied, and a stack still not ready ends
+program took the web port. A local model stack whose saved binding is no longer ready and whose saved plan
+inputs still match starts in place with `stack up` first when the binding
+reports a stopped deployment or gateway (`deployment-unavailable` or
+`gateway-unavailable`), so upgrades across `localmodels` kits or retired
+catalog models keep the installed stack running without re-planning; it falls
+back to applying the approved plan again when `stack up` fails or another
+binding reason (such as `pi-extensions-unavailable` from a Pi an earlier
+localmodels installed without extension support) remains. Only a plan the
+person approved is ever applied, and a stack still not ready ends
 `LOCAL_MODELS_RECOVERY_REQUIRED` with the binding's reason codes in
-`details.reasons`. When the services already run, a local-models setup
-whose Computer still uses the local model source (`model-source.json` says
-`local` or does not exist yet) has its stack checked once
-(`restoreLocalModels`), since a quit stops the models but not the services: a
-stack that is not ready gets the same restore, then becomes the model source
-again. A source switched to a subscription or BYOK leaves the stack stopped;
-a saved BYOK source gets its Bifrost gateway mounted again from the saved
-configuration unless it already answers (`restoreByokSource`), and a failure
-is logged and reported in the ready outcome's `details.byokGateway`
+`details.reasons` and any upstream stack guard code in `details.causeCode`.
+When the services already run, a local-models setup whose Computer still uses
+the local model source (`model-source.json` says `local` or does not exist yet)
+has its stack checked once (`restoreLocalModels`), since a quit stops the
+models but not the services: a stack that is not ready gets the same restore,
+then becomes the model source again. Both same-version resume
+(`restoreLocalModels`) and version upgrades from the saved setup choice leave
+the stack stopped when `model-source.json` was switched to `subscription` or
+`byok`; a saved BYOK source gets its Bifrost gateway mounted again from the
+saved configuration unless it already answers (`restoreByokSource`), and a
+failure is logged and reported in the ready outcome's `details.byokGateway`
 without failing the resume.
 A failed installation records the stage that caused it, even when native
 checkout preparation and runtime setup ran in parallel. A BYOK mount failure

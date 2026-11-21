@@ -244,6 +244,28 @@ test("prepares the runtime in full when resuming onto another checkout", async (
   });
 });
 
+test("preserves structured local-model upgrade failure details when moving to a new source tree", async () => {
+  const failed = {
+    code: 4,
+    state: "action_required" as const,
+    message:
+      "Local model installation or verification did not finish: The saved local model plan no longer fits this computer's current memory or model catalog. Existing resources were preserved.",
+    details: {
+      code: "LOCAL_MODELS_RECOVERY_REQUIRED",
+      causeCode: "STACK_REPLAN_FAILED",
+      reasons: ["deployment-unavailable"],
+    },
+  };
+  const run = vi.fn<ResumeEngine["run"]>(async () => failed);
+  expect(
+    await resumeSourceInstance(options, {
+      load: async () =>
+        ({ ...instance, source: { repo: "/old-source" } }) as Instance,
+      engines: native(run, true),
+    }),
+  ).toEqual(failed);
+});
+
 test("reports the source the services serve from", async () => {
   expect(
     await resumeSourceInstance(options, {

@@ -294,6 +294,37 @@ test.skipIf(process.platform === "win32")(
   },
 );
 test.skipIf(process.platform === "win32")(
+  "installing a newer pinned kit preserves the previous release's kit for existing stack deployments",
+  async () => {
+    const older = await fixture();
+    const olderPython = path.join(older.directory, "python/python");
+    const newer = await fixture();
+    const newerBytes = await packed(newer);
+    const newerSource = {
+      ...newer.source,
+      sha256: hash(newerBytes),
+      bytes: newerBytes.length,
+    };
+    const installed = await ensureLocalmodelsTool(
+      older.home,
+      {},
+      { source: newerSource, fetcher: async () => new Response(newerBytes) },
+    );
+    expect(installed.python).toBe(
+      path.join(
+        older.home,
+        "tools/localmodels",
+        newerSource.sha256,
+        "python/python",
+      ),
+    );
+    // Existing deployments created by the earlier release (for example
+    // slot_cache.py on macOS/Linux) reference the previous kit's Python binary
+    // in argv[0]; `stack up` requires it to remain on disk across upgrades.
+    expect((await stat(olderPython)).isFile()).toBe(true);
+  },
+);
+test.skipIf(process.platform === "win32")(
   "downloads the kit from the publisher's mirror when the primary host fails",
   async () => {
     const f = await fixture();

@@ -415,6 +415,60 @@ test.each(["codex", "local-models"] as const)(
   },
 );
 
+test.each(["byok", "subscription"] as const)(
+  "upgrading an instance whose model source was switched to %s leaves local models stopped",
+  async (mode) => {
+    const f = await fixture();
+    vi.mocked(prepareRuntime).mockResolvedValue({
+      code: 0,
+      state: "ready",
+      message: "ok",
+    });
+    await installNativeSource({
+      home: f.home,
+      repo: f.repo,
+      name: "native-upgrade-switched",
+      setupChoice: "local-models",
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    await saveModelSource(f.home, mode, "claude");
+    vi.mocked(prepareLocalModels).mockClear();
+    vi.mocked(applyNativeSource).mockClear();
+    vi.mocked(restoreByokSource).mockClear();
+    // A version upgrade (--resume on a newer checkout) passes no setupChoice.
+    const upgraded = await installNativeSource({
+      home: f.home,
+      repo: f.repo,
+      name: "native-upgrade-switched",
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    expect(upgraded.code).toBe(0);
+    expect(prepareLocalModels).not.toHaveBeenCalled();
+    expect(applyNativeSource).not.toHaveBeenCalled();
+    if (mode === "byok") expect(restoreByokSource).toHaveBeenCalledTimes(1);
+    else expect(restoreByokSource).not.toHaveBeenCalled();
+    // Explicitly choosing local models again via Set Up Again restores them.
+    const explicit = await installNativeSource({
+      home: f.home,
+      repo: f.repo,
+      name: "native-upgrade-switched",
+      setupChoice: "local-models",
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    expect(explicit.code).toBe(0);
+    expect(prepareLocalModels).toHaveBeenCalledTimes(1);
+    expect(applyNativeSource).toHaveBeenCalledWith(
+      path.resolve(f.home),
+      "local",
+      "pi",
+      { signal: expect.any(AbortSignal), onEvent: expect.any(Function) },
+    );
+  },
+);
+
 test("a restart reports a BYOK gateway that did not come back", async () => {
   const byokGateway = {
     code: "BYOK_UNREACHABLE",
@@ -528,7 +582,6 @@ test("a restart keeps a saved local source as before", async () => {
   expect(applyNativeSource).not.toHaveBeenCalled();
   expect(restoreByokSource).not.toHaveBeenCalled();
 });
-
 test("only TeamHub's process gets the server identity key", async () => {
   const f = await fixture();
   vi.mocked(prepareRuntime).mockResolvedValue({

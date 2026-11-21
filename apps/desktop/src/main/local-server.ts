@@ -2679,11 +2679,15 @@ export class LocalServerModule implements Module {
       ms: Date.now() - resumeStartedAt,
     });
     if (outcome.code !== 0) {
-      const { code, reasons } = outcome.details ?? {};
+      const { code, causeCode, reasons } = outcome.details ?? {};
       const action =
-        typeof code === "string" && Object.hasOwn(RESUME_ACTIONS, code)
-          ? RESUME_ACTIONS[code]
-          : undefined;
+        code === "LOCAL_MODELS_RECOVERY_REQUIRED" &&
+        typeof causeCode === "string" &&
+        REPLAN_ONLY_CAUSES.has(causeCode)
+          ? RESUME_REPLAN_ACTION
+          : typeof code === "string" && Object.hasOwn(RESUME_ACTIONS, code)
+            ? RESUME_ACTIONS[code]
+            : undefined;
       const reason = Array.isArray(reasons)
         ? reasons.find(
             (item): item is string =>
@@ -2848,6 +2852,7 @@ interface ResumeOutcome {
     source?: unknown;
     origin?: unknown;
     code?: unknown;
+    causeCode?: unknown;
     reasons?: unknown;
     // Why a saved BYOK source's gateway did not come back: `{ code, message }`.
     byokGateway?: unknown;
@@ -3041,12 +3046,23 @@ const LOCAL_MODEL_FAILURES = new Set([
 // What works from the start-failure page when the local model stops a
 // restart: a restart applies the approved plan again, but only setup can
 // approve a new one or switch the runtime.
+const RESUME_REPLAN_ACTION =
+  "Set Up Again to review a new plan or choose another AI runtime.";
 const RESUME_ACTIONS: Record<string, string> = {
   LOCAL_MODELS_RECOVERY_REQUIRED:
     "Try Again to apply the approved local model plan again, or Set Up Again to review a new plan or choose another AI runtime.",
   LOCAL_MODELS_APPROVAL_REQUIRED:
     "Set Up Again to review the local model plan or choose another AI runtime.",
 };
+// Upstream stack guard codes where re-applying the same saved plan without
+// replanning cannot succeed (for example after a localmodels kit or catalog
+// update, or when the saved plan no longer fits).
+const REPLAN_ONLY_CAUSES = new Set([
+  "STACK_REPLAN_FAILED",
+  "STACK_PLAN_CHANGED",
+  "STACK_APPROVAL_MISMATCH",
+  "STACK_PLAN_INVALID",
+]);
 
 // Why the local model stack was not ready, by the reason code localmodels'
 // setup binding gives.
