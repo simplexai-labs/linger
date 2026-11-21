@@ -14,6 +14,10 @@ Memory browsing entry and do not enter OpenWiki's native graph.
 
 ## Search
 
+Entity-name specificity counts Unicode letters and digits, so accented names
+and names in non-Latin scripts can participate in mention edges and flashback
+recall. Existing short-name, case and ambiguous-name filters still apply.
+
 Memory keeps one index, `memory_index.sources` and `chunks`: Room Sessions, recordings, My pages, imported
 mail, Pocket Notes, the Profile, the published Wiki pages (`wiki`) and the Daily and Weekly reports
 (`period_summary`) are source kinds of it. Chunks and Session Facts use keyword search only (PostgreSQL `simple`

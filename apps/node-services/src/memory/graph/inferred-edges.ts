@@ -40,8 +40,8 @@ const hanPattern = /\p{Script=Han}/u;
 
 /**
  * A page mentions an entity when its body names the entity's title or one
- * of its aliases exactly. Names shorter than 2 Han characters or 4 Latin
- * letters, plain one-word aliases ("Sequence"), and names shared by more than
+ * of its aliases exactly. Names shorter than 2 Han characters or 4 letters or digits
+ * in other scripts, plain one-word aliases ("Sequence"), and names shared by more than
  * one entity are not matched; a one-word Latin name must keep its capitals,
  * so "Epic" the client is not "an epic effort". Directory index pages neither
  * mention nor are mentioned. Each mention counts twice in a heading or in a
@@ -142,7 +142,11 @@ function normalizedName(name: string) {
   const key = name.trim().toLowerCase();
   if (!key) return undefined;
   const cjk = hanPattern.test(key);
-  if (cjk ? [...key].length < 2 : key.replace(/[^a-z0-9]/gu, "").length < 4)
+  if (
+    cjk
+      ? [...key].length < 2
+      : [...key.replace(/[^\p{L}\p{N}]/gu, "")].length < 4
+  )
     return undefined;
   return key;
 }
