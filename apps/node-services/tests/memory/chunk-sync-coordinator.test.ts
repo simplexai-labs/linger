@@ -1,7 +1,71 @@
 import { describe, expect, it, vi } from "vitest";
+import { setImmediate } from "node:timers/promises";
 import { ChunkSyncCoordinator } from "../../src/memory/chunk-sync-coordinator.js";
 
 describe("ChunkSyncCoordinator", () => {
+  it("keeps a failed snapshot exclusive until its active source writes finish", async () => {
+    const coordinator = new ChunkSyncCoordinator(2);
+    const failure = new Error("source could not be read");
+    const fail = deferred();
+    const finish = deferred();
+    const events: string[] = [];
+    let settled = false;
+    const first = coordinator.runAgent("agent_a", "raw", () =>
+      coordinator.mapSources([0, 1, 2], async (source) => {
+        events.push(`source:${source}:start`);
+        if (source === 0) {
+          await fail.promise;
+          throw failure;
+        }
+        await finish.promise;
+        events.push(`source:${source}:write`);
+        return source;
+      }),
+    );
+    const observed = first.catch((error: unknown) => {
+      settled = true;
+      return error;
+    });
+    const next = coordinator.runAgent("agent_a", "raw", async () => {
+      events.push("next:snapshot");
+    });
+    fail.resolve();
+    await setImmediate();
+    try {
+      expect(settled).toBe(false);
+      expect(events).not.toContain("next:snapshot");
+    } finally {
+      finish.resolve();
+      await next;
+      await coordinator.idle();
+    }
+    expect(await observed).toBe(failure);
+    expect(events).toEqual([
+      "source:0:start",
+      "source:1:start",
+      "source:1:write",
+      "next:snapshot",
+    ]);
+  });
+
+  it("preserves even an undefined rejection after other sources drain", async () => {
+    const coordinator = new ChunkSyncCoordinator(2);
+    const finish = deferred();
+    const observed = coordinator
+      .mapSources([0, 1, 2], async (source) => {
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- Rejection values can be absent at this boundary.
+        if (source === 0) return Promise.reject(undefined);
+        await finish.promise;
+        return source;
+      })
+      .then(
+        () => ({ status: "fulfilled" }),
+        (reason: unknown) => ({ status: "rejected", reason }),
+      );
+    finish.resolve();
+    expect(await observed).toEqual({ status: "rejected", reason: undefined });
+  });
+
   it("serializes one Agent, coalesces duplicate triggers and runs other Agents concurrently", async () => {
     const coordinator = new ChunkSyncCoordinator(4);
     let releaseFirst!: () => void;
@@ -70,3 +134,11 @@ describe("ChunkSyncCoordinator", () => {
     expect(maximum).toBe(4);
   });
 });
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
