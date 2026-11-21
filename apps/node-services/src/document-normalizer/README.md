@@ -21,3 +21,5 @@ so CommonMark readers do not display them as literal text.
 The response announces this behavior as normalizer version 3. A version header
 change does not enqueue existing Document Versions for normalization; their
 stored Markdown remains until a text sync runs again.
+
+CSV and TSV records accept LF, CRLF, and CR line endings. Line breaks inside quoted fields remain cell content; a CRLF pair outside quotes ends exactly one record.
