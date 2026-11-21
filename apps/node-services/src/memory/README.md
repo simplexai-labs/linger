@@ -21,6 +21,10 @@ tsvector plus CJK bigrams, ranked with `ts_rank_cd` and then lexically reranked)
 called and there is no vector column. Wiki related pages have no "similar" edges, and flashback matches only names
 and aliases.
 
+Oversized source paragraphs split into chunks bounded by both 3,000 UTF-16
+characters and 500 search-analyzer tokens. Each chunk retains exact source
+offsets and whole Unicode characters, with overlap for continuity.
+
 ## File layout
 
 ```text
