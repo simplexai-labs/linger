@@ -475,9 +475,12 @@ func run(args []string) (resultErr error) {
 	monitorDone := make(chan error, 1)
 	go func() {
 		monitorDone <- provider.MonitorRuntimeDiagnostics(ctx, provider.RuntimeMonitorOptions{
-			Initial:               discovered,
-			Discovery:             currentDiscoveryOptions(),
-			Discover:              discover,
+			Initial:   discovered,
+			Discovery: currentDiscoveryOptions(),
+			Discover:  discover,
+			ShapeDiagnostics: func(diagnostics []provider.RuntimeDiagnostic) []provider.RuntimeDiagnostic {
+				return byokRuntimeCatalogs(diagnostics, localmodels.ReadOverlay(localModelsStateDir))
+			},
 			ResolveDiscovery:      currentDiscoveryOptions,
 			RefreshInterval:       15 * time.Second,
 			FullRefreshEveryTicks: 4,
@@ -898,12 +901,15 @@ func runtimeModelCatalogs(diagnostics []provider.RuntimeDiagnostic) map[string][
 
 // byokRuntimeCatalogs shows a BYOK source as the one model the person entered.
 // The Runtime's own catalog names the gateway route instead, and Claude also
-// lists aliases that all resolve to it.
+// lists aliases that all resolve to it. Discovery keeps a bounded number of
+// models, so the route can fall outside the catalog; the source's model is
+// still the one this Computer serves.
 func byokRuntimeCatalogs(diagnostics []provider.RuntimeDiagnostic, source *localmodels.OverlayState) []provider.RuntimeDiagnostic {
 	if source == nil || source.Mode != "byok" || source.RuntimeModel == "" || source.ModelLabel == "" {
 		return diagnostics
 	}
 	shaped := append([]provider.RuntimeDiagnostic(nil), diagnostics...)
+	found := false
 	for index, diagnostic := range shaped {
 		i := slices.IndexFunc(diagnostic.Models, func(model provider.RuntimeModel) bool { return model.ID == source.RuntimeModel })
 		if i < 0 {
@@ -912,6 +918,19 @@ func byokRuntimeCatalogs(diagnostics []provider.RuntimeDiagnostic, source *local
 		model := diagnostic.Models[i]
 		model.Label, model.IsDefault = source.ModelLabel, true
 		shaped[index].Models = []provider.RuntimeModel{model}
+		found = true
+	}
+	if found {
+		return shaped
+	}
+	for index, diagnostic := range shaped {
+		if diagnostic.Type != source.Runtime {
+			continue
+		}
+		shaped[index].Models = []provider.RuntimeModel{{
+			ID: source.RuntimeModel, Label: source.ModelLabel,
+			AllowedReasoningEffort: []string{}, IsDefault: true,
+		}}
 	}
 	return shaped
 }

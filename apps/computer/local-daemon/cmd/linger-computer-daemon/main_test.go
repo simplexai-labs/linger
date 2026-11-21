@@ -280,6 +280,32 @@ func TestByokRuntimeCatalogsShowTheEnteredModel(t *testing.T) {
 	}
 }
 
+// Discovery keeps at most 100 models, so a BYOK route a Runtime lists late can
+// fall outside the catalog. The Computer still serves that route.
+func TestByokRuntimeCatalogsKeepTheEnteredModelOutsideTheCatalog(t *testing.T) {
+	truncated := []provider.RuntimeDiagnostic{
+		{Type: "pi", Models: []provider.RuntimeModel{{ID: "anthropic/claude-1", Label: "claude-1", IsDefault: true}}},
+	}
+	source := &localmodels.OverlayState{Mode: "byok", Runtime: "pi", RuntimeModel: "localmodels/localmodels-byok", ModelLabel: "vendor/model"}
+
+	shaped := byokRuntimeCatalogs(truncated, source)
+	want := []provider.RuntimeModel{{ID: "localmodels/localmodels-byok", Label: "vendor/model", AllowedReasoningEffort: []string{}, IsDefault: true}}
+	if !reflect.DeepEqual(shaped[0].Models, want) {
+		t.Fatalf("Pi models = %+v, want %+v", shaped[0].Models, want)
+	}
+	if len(truncated[0].Models) != 1 || truncated[0].Models[0].Label != "claude-1" {
+		t.Fatalf("input diagnostics were modified: %+v", truncated[0].Models)
+	}
+	// Only the source's Runtime takes the entered model.
+	mixed := byokRuntimeCatalogs([]provider.RuntimeDiagnostic{
+		{Type: "pi", Models: []provider.RuntimeModel{}},
+		{Type: "claude", Models: []provider.RuntimeModel{{ID: "default", Label: "Default", IsDefault: true}}},
+	}, source)
+	if len(mixed[1].Models) != 1 || mixed[1].Models[0].ID != "default" {
+		t.Fatalf("another Runtime's catalog changed: %+v", mixed[1].Models)
+	}
+}
+
 func TestWithManagedPiPathRespectsConfiguredPiAndClonesSafely(t *testing.T) {
 	if got := withManagedPiPath(nil, ""); got != nil {
 		t.Fatalf("empty managed path returned %v", got)

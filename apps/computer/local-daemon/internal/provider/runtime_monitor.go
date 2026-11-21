@@ -22,6 +22,10 @@ type RuntimeMonitorOptions struct {
 	OnError               func(error)
 	Discover              func(context.Context, DiscoveryOptions) (DiscoveryResult, error)
 	FullRefreshAllowed    func() bool
+	// ShapeDiagnostics narrows a refreshed result to what this Computer
+	// serves. Discover shapes its own results; this covers the auth-only
+	// refresh, which re-reads a Runtime catalog without calling Discover.
+	ShapeDiagnostics func([]RuntimeDiagnostic) []RuntimeDiagnostic
 	// RuntimeBusy reports an active operation. A running operation proves its
 	// Runtime works, so an inconclusive auth probe then keeps the ready state.
 	RuntimeBusy func() bool
@@ -86,6 +90,10 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 		} else {
 			next, err = refreshRuntimeAuthentication(ctx, current, activeDiscovery, tick%options.FullRefreshEveryTicks == 0)
 			if err == nil {
+				if options.ShapeDiagnostics != nil {
+					next.Diagnostics = options.ShapeDiagnostics(next.Diagnostics)
+					next.Installations = installationsFromDiagnostics(next.Diagnostics)
+				}
 				if options.RuntimeBusy != nil && options.RuntimeBusy() {
 					next = retainReadyRuntimesDuringInconclusiveProbes(current, next)
 				}

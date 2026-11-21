@@ -320,3 +320,46 @@ func TestRuntimeMonitorRunsARequestedFullRefreshBeforeItsSchedule(t *testing.T) 
 		t.Fatalf("published = %+v, want the refreshed Pi model list", published)
 	}
 }
+
+// An auth-only refresh re-reads a Runtime catalog without calling Discover, so
+// ShapeDiagnostics has to cover it too.
+func TestRuntimeMonitorShapesAuthOnlyRefreshes(t *testing.T) {
+	initial := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{
+		Type: "pi", Status: "ready", Protocol: "rpc", ExecutablePath: "/bin/false", Version: "pi-test",
+		Models: []RuntimeModel{{ID: "served/model", Label: "served"}},
+	}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	published := make(chan []RuntimeModel, 1)
+	err := MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+		Initial: initial, RefreshInterval: time.Millisecond, FullRefreshEveryTicks: 4,
+		Discovery: DiscoveryOptions{Timeout: time.Second},
+		Discover: func(context.Context, DiscoveryOptions) (DiscoveryResult, error) {
+			t.Fatal("full discovery ran when only an auth-only refresh was due")
+			return DiscoveryResult{}, nil
+		},
+		ShapeDiagnostics: func(diagnostics []RuntimeDiagnostic) []RuntimeDiagnostic {
+			shaped := append([]RuntimeDiagnostic(nil), diagnostics...)
+			for index := range shaped {
+				shaped[index].Models = []RuntimeModel{{ID: "served/model", Label: "served", AllowedReasoningEffort: []string{}}}
+			}
+			return shaped
+		},
+		OnChanged: func(next DiscoveryResult) error {
+			published <- next.Diagnostics[0].Models
+			cancel()
+			return nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("monitor ended with %v", err)
+	}
+	select {
+	case models := <-published:
+		if !reflect.DeepEqual(models, []RuntimeModel{{ID: "served/model", Label: "served", AllowedReasoningEffort: []string{}}}) {
+			t.Fatalf("published models = %+v", models)
+		}
+	default:
+		t.Fatal("auth-only refresh published no shaped diagnostic")
+	}
+}
