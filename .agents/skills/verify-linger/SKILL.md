@@ -1,6 +1,6 @@
 ---
 name: verify-linger
-description: Verify Linger user journeys with existing automatic tests, natural-language scenarios, and retained evidence. Use after behavior changes, to reproduce a workflow, or for core product acceptance. The default helper runs an isolated Document proof; Agent, model, supplier, and audio journeys require their own dependencies.
+description: Verify Linger user journeys with existing automatic tests, natural-language scenarios, and retained evidence across Web, Desktop client, Local Installer, Local Computer, and Local Models/BYOK (Linux, macOS, Windows). Use after behavior changes, to reproduce a workflow, or for core product acceptance.
 ---
 
 # Verify Linger
@@ -12,7 +12,7 @@ Run from the repository root. This skill is for agents; product capability docum
 
 ## Launch
 
-Use Node `>=26.5.0 <27`, pnpm `11.7.0`, Go from `apps/teamhub/go.mod`, Docker Compose, Chromium, `curl`, and `ss` or `lsof`. The helper uses `flock` when available and a checkout-local directory lock otherwise. Check both `node --version` and `pnpm exec node --version`; version-manager shims can select different Node versions. Install the locked dependencies and browser once:
+Use Node `>=26.5.0 <27`, pnpm `11.7.0`, Go from `apps/teamhub/go.mod`, Docker Compose, Chromium, `curl`, `shasum` (or `sha256sum`), and `ss` or `lsof`. The helper uses `flock` when available and a checkout-local directory lock otherwise. Check both `node --version` and `pnpm exec node --version`; version-manager shims can select different Node versions. Install the locked dependencies and browser once:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -30,13 +30,6 @@ The executable prints a unique absolute evidence directory. [The config](playwri
 Default loopback ports are Web `23008`, TeamHub `28089`, control `28088`, and Document Runtime `24328`. PostgreSQL gets a dynamic port. The seeded disposable login is `alice@example.com` with password `teamhub-dev-alice`. The control service prepares a Room and native Document before the proof; it does not perform the edit under test.
 
 The helper locks one run per checkout because builds share checkout-local assets and caches. Parallel work requires separate worktrees and four distinct `PLAYWRIGHT_ROOM_DOCUMENT_{WEB,TEAMHUB,CONTROL,RUNTIME}_PORT` values. The helper checks all four ports before launch and disables reuse. An occupied port is a blocker, not permission to drive its owner. Caller-provided `TEST_DATABASE_URL`, `PLAYWRIGHT_SKIP_WEB_SERVER=1`, and prebuilt `ROOM_DOCUMENT_E2E_*_BINARY` overrides are rejected.
-
-If Vite reports `ENOSPC` for file watchers, confirm the failed run exited and its ports are free, then use process-local polling:
-
-```bash
-CHOKIDAR_USEPOLLING=1 CHOKIDAR_INTERVAL=1000 \
-  .agents/skills/verify-linger/scripts/verify.sh
-```
 
 The ordinary full development command is `pnpm dev`, but it prepares configured databases and starts additional services. This proof only needs the repository's isolated E2E stack.
 
@@ -86,7 +79,7 @@ It requires successful Web, TeamHub, and control health responses plus Runtime r
 
 This skill verifies selected user scenarios; it does not replace the existing
 unit/component, integration, or E2E suites. For a full acceptance run, use the
-existing verification entry points in the [repository guide](../../../AGENTS.md) (`make check`, `make check-e2e`)
+existing verification entry points in the [repository guide](../../../AGENTS.md) (`make check BASE=<target-ref>`, `make check-e2e`)
 and report their results alongside these scenarios. Count discovered, executed,
 and skipped tests separately. A fixture response, an opt-in live test that skipped,
 or a successful source build is not a real Agent execution result.
@@ -105,7 +98,7 @@ The Connected Apps proof replaces the Composio adapter with a disposable HTTP pr
 VERIFY_CONNECTED_APPS=1 .agents/skills/verify-linger/scripts/verify.sh
 ```
 
-The callback origin uses `WEB_PUBLIC_ORIGIN` from the isolated Web port. The proof adds `VERIFY_COMPOSIO_PORT` (default `28087`) to the owned ports, injects a disposable provider key and environment key into TeamHub, and starts TeamHub with `-composio-base-url` pointing at the provider. It runs [apps.spec.ts](apps.spec.ts) against the fixed list of managed apps: filter the Connectors categories, check the mobile layout, connect Linear through the provider popup, reopen it in a fresh session, and disconnect. The page shows only apps listed in its groups, so Google Drive and Facebook stay in the TeamHub catalog without a card. Pending authorization reconciles on the server’s one-minute poll, so allow up to 90 seconds after consent. The provider is an existing adapter-boundary simulation; real OAuth and Agent tool execution are out of scope and the proof must say so in `proof.json`.
+The callback origin uses `WEB_PUBLIC_ORIGIN` from the isolated Web port. The proof adds `VERIFY_COMPOSIO_PORT` (default `28087`) to the owned ports, injects a disposable provider key and environment key into TeamHub, and starts TeamHub with `-composio-base-url` pointing at the provider. It runs [apps.spec.ts](apps.spec.ts) against the fixed list of managed apps: filter the Connectors categories, check the mobile layout, connect Linear through the provider popup, reopen it in a fresh session, and disconnect. The page shows only apps listed in its groups (unless already connected), so Google Drive and Facebook stay in the TeamHub catalog without a card by default. Pending authorization reconciles immediately when the popup completes on `/oauth/composio-complete` (with a 5-second fallback poll for 3 minutes, then 1 minute thereafter). The provider is an existing adapter-boundary simulation; real OAuth and Agent tool execution are out of scope and the proof must say so in `proof.json`.
 
 The Connector CLI proof uses the same isolated stack plus an actual Computer Use session:
 
@@ -136,8 +129,8 @@ checks that a newer identical draft survives, and opens an Online Document card 
 one combined open request while editor code loads in parallel. The Document is edited,
 saved and read in a fresh browser context. No business response is replaced;
 microphone/Voice Runtime and Agent execution are outside this proof. This stack
-reports voice input as unsupported. After the held policy response is released,
-the unavailable indicator must appear while chat state remains intact.
+reports voice input as unsupported (`voice_media_supported: false`). After the held policy response is released,
+voice controls stay hidden while chat state remains intact.
 
 For production-bundle startup measurements against the same owned real services:
 
@@ -173,9 +166,15 @@ send through the composer while that response is held; a separate message read
 must find the message exactly once. Releasing the directory must preserve the
 composer, draft and focus. No business response is fabricated.
 
-For the existing send/Document persistence scenarios on production assets, combine
-`VERIFY_ROOM_STARTUP_PRODUCTION=1 VERIFY_ROOM_STARTUP=1` and select the case with
-`-g 'Room sending releases' --trace=on`.
+`VERIFY_ROOM_STARTUP=1` already builds and serves production Web assets behind the same loopback proxy; combine `VERIFY_ROOM_STARTUP_PRODUCTION=1 VERIFY_ROOM_STARTUP=1` only when you need the longer 300-second startup budget with video off, and select a case with `-g 'Room sending releases' --trace=on`.
+
+For cross-platform Desktop Client, Local Installer, Local Models, and BYOK verification on Linux, macOS, or Windows:
+
+```bash
+node .agents/skills/verify-linger/scripts/verify-local-client.mjs
+```
+
+It runs the host-applicable deterministic checks (`@linger/service-kit` BYOK rules, `@linger/local-installation` including Windows-native ACL/process tests on Windows hosts, `@linger/linger-installer`, `@linger/desktop`, Python packaging unit tests, and Go Daemon `localmodels`/`model_source` tests), then runs an isolated live Local Installer loopback proof (private modes, CSRF Origin rejection, one-time token exchange and replay rejection, `/api/environment`, `/api/instances`, BYOK SSRF refusal, and clean `--stop`). Pass `--smoke-only` to run only the live installer loopback proof. It records `source.txt`, `source.patch`, `changed-files.sha256`, `run.log`, `proof.json`, and `exit-code.txt` under `test-results/verify-linger/local-client.XXXXXX/`, and reports non-host OS checks as `skippedOs`. Electron GUI journeys, real GPU/Metal/CUDA weight downloads, auto-updater swaps, and external BYOK inference remain separate recipes in [Desktop Client and Local Installer](features/desktop-and-installer.md) and [Local Models and BYOK](features/local-models-and-byok.md).
 
 Every Playwright spec in `apps/web/e2e` runs against the real TeamHub and Document Runtime stack; no fixture build exists. UI behavior without a real-stack spec is covered by Web unit tests, which do not prove persistence or Agent execution.
 
@@ -216,7 +215,7 @@ When supplying an external `TEST_DATABASE_URL`, allocate a fresh owned database 
 
 Let the Playwright command finish, including its graceful SIGTERM teardown, after every attempt. To stop an interactive run, press Ctrl-C in its terminal and wait for teardown. Kill only a PID that this run started if the normal path fails. Never kill by process name or stop a shared development Compose project.
 
-The existing database wrapper checks resource labels before removing its exact Compose container, volume, and network. The Runtime harness removes its own temporary fixture directories. Inspect `run.log` for the exact `teamhub-test-*` identity and verify those resources are absent with `docker container inspect`, `docker volume inspect`, and `docker network inspect`. Require those lookups to report not found. Verify the four run ports have no remaining listeners:
+The existing database wrapper checks resource labels before removing its exact Compose container, volume, and network (`docker-compose.test.yml` uses `tmpfs` for PostgreSQL data, so no named volume is created). The Runtime harness removes its own temporary fixture directories. Inspect `run.log` for the exact `teamhub-test-*` identity and verify those resources are absent with `docker container inspect`, `docker network inspect`, and `docker volume ls --quiet --filter "label=com.docker.compose.project=<project>"`. Require the container and network lookups to report not found and the volume query to return empty. Verify the four run ports have no remaining listeners:
 
 ```bash
 ss -ltnp '( sport = :23008 or sport = :28089 or sport = :28088 or sport = :24328 )'
@@ -229,7 +228,7 @@ Substitute the recorded ports if overridden. If teardown was interrupted, report
 
 ## Helpers
 
-`scripts/verify.sh` allocates evidence and invokes Playwright. It accepts Playwright flags and returns its exit code. `scripts/doctor.sh` performs only GET requests and listener inspection. Both are executable; invoke them as shown above. Config and spec files run through Playwright, not as standalone scripts.
+`scripts/verify.sh` allocates evidence and invokes Playwright. It accepts Playwright flags and returns its exit code. `scripts/doctor.sh` performs only GET requests and listener inspection. `scripts/verify-local-client.mjs` runs cross-platform (Linux, macOS, Windows) Desktop, Installer, Local Models, and BYOK checks plus an isolated live Local Installer loopback proof, retaining evidence under `test-results/verify-linger/local-client.XXXXXX/`. All three are executable; invoke them as shown above. Config and spec files run through Playwright, not as standalone scripts.
 
 For requested repairs, follow the user's execution roles, edit scope and round limit.
 Keep original failures and revalidate their business outcomes after each repair.

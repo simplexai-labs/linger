@@ -48,7 +48,11 @@ printf 'Evidence: %s\n' "$VERIFY_LINGER_EVIDENCE"
   node --version
   pnpm --version
   printf 'TEAMHUB_TEST_DATABASE=%s\n' "$TEAMHUB_TEST_DATABASE"
-  printf 'CHOKIDAR_USEPOLLING=%s CHOKIDAR_INTERVAL=%s\n' "${CHOKIDAR_USEPOLLING:-}" "${CHOKIDAR_INTERVAL:-}"
+  printf 'VERIFY_CONNECTED_APPS=%s VERIFY_CONNECTOR_CLI=%s VERIFY_ROOM_STARTUP=%s VERIFY_ROOM_STARTUP_PRODUCTION=%s\n' \
+    "${VERIFY_CONNECTED_APPS:-0}" "${VERIFY_CONNECTOR_CLI:-0}" "${VERIFY_ROOM_STARTUP:-0}" "${VERIFY_ROOM_STARTUP_PRODUCTION:-0}"
+  if [[ -n ${VERIFY_CONNECTED_APPS:-} || -n ${VERIFY_CONNECTOR_CLI:-} ]]; then
+    printf 'VERIFY_COMPOSIO_PORT=%s\n' "${VERIFY_COMPOSIO_PORT:-28087}"
+  fi
   env | LC_ALL=C sort | sed -n '/^PLAYWRIGHT_ROOM_DOCUMENT_.*_PORT=/p'
 } > "$VERIFY_LINGER_EVIDENCE/source.txt"
 git diff --no-ext-diff HEAD > "$VERIFY_LINGER_EVIDENCE/source.patch"
@@ -56,7 +60,11 @@ git diff --no-ext-diff HEAD > "$VERIFY_LINGER_EVIDENCE/source.patch"
   git diff --name-only --diff-filter=d -z HEAD
   git ls-files -z --others --exclude-standard
 } | while IFS= read -r -d '' changed_file; do
-  shasum -a 256 "$changed_file"
+  if command -v shasum >/dev/null; then
+    shasum -a 256 "$changed_file"
+  else
+    sha256sum "$changed_file"
+  fi
 done > "$VERIFY_LINGER_EVIDENCE/changed-files.sha256"
 set +e
 pnpm exec playwright test --config .agents/skills/verify-linger/playwright.config.ts "$@" 2>&1 | tee "$VERIFY_LINGER_EVIDENCE/run.log"

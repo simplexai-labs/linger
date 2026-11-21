@@ -42,10 +42,10 @@ Use the complete Computer bundle or follow the [source-built Computer layout](lo
 A ready Runtime catalog proves discovery, not that the business CLI is installed or a Run can execute.
 Another Me initialization may need additional configured services; a sidebar name alone is not readiness proof.
 A source-built Computer does not prove installation or upgrade of a released package.
-Deployment releases come from the Agent Service image through `/install/`; see [Release Versioning](../../../../apps/computer/AGENTS.md#release-versioning).
+Deployment releases come from the `node-services` image through `/install/`; see [Release Versioning](../../../../apps/computer/AGENTS.md#release-versioning).
 Record the active bundle `app-sha256` against the deployment target; the package version alone is not upgrade evidence.
 The image builds macOS, Linux and `win32-x64` packages; see [Windows install](local-computer.md#windows-install-pairing-and-background-run).
-Check current Computer version floors and complete Daemon/Runtime Registration identities before driving a released Computer.
+Check current Computer version floors (`0.53.0` single-call stop, `0.54.0` `model_source`, `0.55.0` Pi background Memory/Wiki, `0.56.0` BYOK endpoint commands) and complete Daemon/Runtime Registration identities before driving a released Computer.
 The Gateway speaks Runner protocol 2. An older Computer only receives `target_release` and updates itself.
 An old Computer or incomplete identity is not a usable execution environment.
 
@@ -72,15 +72,15 @@ An old conversation must not count as proof that new instructions took effect.
 TeamHub creates Another Me in the transaction that records the Computer online with a ready Runtime, a model and a writable workspace grant (`apps/teamhub/internal/agentregistry/another_me.go`).
 There is no provisioning job, opening generator or Retry route.
 
-**Setup:** A fresh disposable Human with no Computer, and a Computer with a signed-in Codex, Claude Code or Pi.
+**Setup:** A fresh disposable Human with no Computer, and a Computer with a signed-in Codex, Claude Code, Pi, or Antigravity Runtime.
 **Journey:**
 
-1. Before pairing, open the Room list. Expect no Another Me card; `GET /v0/tenants/{tenantId}/another-me` returns an empty object; recording to Another Me is unavailable.
-2. Pair the Computer and start the Daemon. Do not reload by hand; wait for the realtime hint.
-3. Open the Another Me Chat. Send a simple request and wait for the reply.
+1. Before pairing, sign in and confirm `LocalComputerGate` (`Before you start`) overlays the shell outside `/t/{tenantId}/settings/*`; `GET /v0/tenants/{tenantId}/another-me` returns an empty object; recording to Another Me is unavailable.
+2. Pair the Computer and start the Daemon. Do not reload by hand; the gate polls `local-computers` and `another-me` every 3 seconds alongside realtime invalidation and auto-navigates into Another Me (`Linger`) Chat once created.
+3. In Another Me Chat, send a simple request and wait for the reply. When testing cross-Room handoff, also verify `teamhub room handoff` (`POST /api/agent/v1/room-handoffs`) from a human-initiated direct-chat request.
 4. Optional failure branch: make the first creation fail on an owned instance. The Computer must still connect, and a later heartbeat must create Another Me once.
 
-**Pass:** The Another Me card appears without a page reload. Its Chat has the template greeting and the profile setup apps card, both read. The Runtime, model and grant are the Computer's first ready ones.
+**Pass:** The gate clears without a page reload and opens Another Me (`Linger`) Chat with its template greeting (`Hi <name>, I'm Linger — your personal AI.`) and the profile setup apps card, both read. Placement prioritizes the Computer's installation `preferredRuntime` first and the model with `is_default: true` first (plus `default_reasoning_effort` else first allowed effort).
 The starter workspace exists once: Research Analyst, Code Reviewer and a Getting Started Room with the Human, Another Me and Research Analyst. A starter Agent that cannot be placed is skipped and logged.
 Repeated heartbeats do not create a second Another Me or a second starter set. The first request gets a delivered reply.
 **Evidence:** Agent ID, Chat Room ID, starter Agent and Room IDs, Computer ID, and the reply message ID.
@@ -99,7 +99,7 @@ Also run the second variant: keep the placement and continue the same Chat from 
 ## Execution lifecycle
 
 The executor lives in `apps/node-services/src/agent/executor/`: one `ExecutorRegistry` and one `ContextExecutor` per Context.
-The hook-order goldens pin feature timing. Verify these real-environment branches separately and record their current results in the run report: hot and cold reply, steer, Stop (also while a submit is in flight), native question, approval, Activity and status line, Work Item Task Run, idle park and resume, restart recovery, the next message after a Runtime change, and the Memory context-host path.
+The hook-order goldens pin feature timing. Before failing a Room Run with `reply_not_sent` or `reply_undelivered`, `RunLoop` confirms persisted replies via `GET /v0/agent-runtime/runs/reply-status`; when a Run definitely never started (`ProviderRunStartError` outside admission unavailability), the failure omits `runtime_type` so Room messages do not name the Runtime. Verify these real-environment branches separately and record their current results in the run report: hot and cold reply, steer, Stop (also while a submit is in flight), native question, approval, Activity and status line, Work Item Task Run, idle park and resume, restart recovery, the next message after a Runtime change, and the Memory context-host path.
 
 **Reuse:** `pnpm smoke:local-runner`, `pnpm smoke:local-runner:soak`, and Node Services Runner process tests.
 These cover deterministic lifecycle boundaries with simulated TeamHub or model dependencies.
@@ -124,23 +124,23 @@ Report idle reconnect and interrupted-execution recovery separately.
 
 ### Run status and Stop by Run ID
 
-The Dock reads only pushed Run statuses: the `GET /v0/rooms/{roomId}/run-statuses` snapshot plus `agent_run.status_changed` on `/v0/events`. A failed snapshot read retries with 1–30 s backoff.
-Stop calls `POST /v0/rooms/{roomId}/runs/{runId}/cancel` for that row's Run only. The Web keeps no Message receipts and does not poll.
+The Dock reads only pushed Run statuses: the `GET /v0/rooms/{roomId}/run-statuses` snapshot plus `agent_run.status_changed` on `/v0/events` (with a 60-second post-end snapshot reread and `stream.resync` / `resource.invalidated` refreshes). A failed snapshot read retries with 1–30 s backoff.
+Stop calls `POST /v0/rooms/{roomId}/runs/{runId}/cancel` for that row's Run only. Finished Runs with unconfirmed follow-ups stay in the Dock as `Needs attention` (`Follow-up delivery unconfirmed`) with a `Resend` button calling `POST /v0/rooms/{roomId}/runs/{runId}/redeliver-unconfirmed-inputs`. Replied Runs re-enter the Dock when a follow-up joins them. The Web keeps no Message receipts and does not poll.
 `GET /v0/rooms/{roomId}/active-runs` and `POST .../agents/{agentId}/cancel-messages` are deleted; do not use them as entry points.
 Source: `apps/web/src/features/rooms/chat/room-run-controls.tsx`, `apps/web/src/features/teamhub/run-status-transport.ts` and the [Room run-control contract](../../../../contracts/openapi/paths/room-run-control.yaml).
 
 **Journey:** In a Room with two working Agents, wait for the status line to show the chosen Agent and press its named Stop button. Hovering or focusing the line holds that Agent in place. The activity button opens the currently shown Agent's Activity panel; it is not a multi-Agent dropdown. Repeat while that Agent's request is still being submitted. Stop a queued Run. Stop a Run that just ended.
 **Pass:** The page shows Stopping for `cancel_requested`, and Stopped for `canceled` or `already_terminal`. The other Agent's Run keeps going. Before stopping, retain one snapshot with both distinct Agent Run IDs active in the same Room. A second accepted message alone does not prove simultaneous execution. Afterward, correlate the canceled Run with its actor, the other Run with its delivered reply, and a fresh request to the canceled Agent with a new Run. A canceled queued Run never starts the provider. Published messages and saved files stay.
-The Dock shows `Thinking` for a queued Run, then `Working on your request` or the Activity title, and the Agent leaves the Dock on the reply. A failure shows `Run failed` above the composer only. The Thread and Chat show the same state.
+While a Run is queued or in its first segment with no activities yet, the Dock shows animated typing dots (`Starting` tooltip), then the Activity title (`Thinking` only when `status === "thinking"` with no title, or `Working` as fallback), and the Agent leaves the Dock on the reply. Interrupted Runs (`failure.code === "interrupted"`, including `process_interrupted` hard kills) render as `Stopped` in the Dock with a warn line (never prefixed with `Run failed:`) and canceled tone in Activity; pre-event aborted Runs show `Run stopped`. Other failures show `Run failed` above the composer only. The Thread and Chat show the same state.
 **Evidence:** The cancel request's `runId`, the Run status events before and after, and a fresh `run-statuses` read. A network log with no `active-runs` poll. For a submit-in-flight check, hold the actual POST response after the server commits it, leave Room events flowing, click the visible Stop before releasing the receipt, then release the original response. This proves cancellation while the browser awaits acknowledgement, not every server-side submission race. Do not fabricate a successful response.
 **Reuse:** `room-run-controls.test.tsx`, `run-status-transport.test.ts` and `message-timeline-card.test.tsx`. Unit tests do not prove a real Runtime stopped.
 
 ## Related UI checks and sources
 
 Reuse existing browser tests for Agent Info tabs, searchable activity, avatars, Room navigation and responsive layout.
-A Message activity view must refer to that Message's Run; completed activity is not current live activity. For historical activity, hover a message avatar and choose View activity. Agent Info Details/Routines/Connectors are not the history entry. Select one unique user request, correlate its Run through persisted input/reply evidence and the actual runtime-presentation-events request, then inspect the visible summary. Historical navigation may use draftId without a DOM data-run-id attribute; do not require that optional attribute as the business assertion. With more than ten entries, verify Next has distinct entries and Previous restores the first page. Report live updates and full pagination boundaries separately.
+A Message activity view must refer to that Message's Run; completed activity is not current live activity. For historical activity, hover a message avatar and choose View activity. Agent Info Details/Routines/Connectors are not the history entry. Select one unique user request, correlate its Run through persisted input/reply evidence and the actual runtime-presentation-events request, then inspect the visible summary. Historical navigation may use `runStatusId` without a DOM `data-run-id` attribute; do not require that optional attribute as the business assertion. With more than ten entries, verify Next has distinct entries and Previous restores the first page. Report live updates and full pagination boundaries separately.
 Check Agent removal, Sponsor Direct Room removal and unrelated Room access when changing that lifecycle.
-When Computer removal changes, verify that assigned Agents block removal and successful removal revokes that Computer's credentials.
+When Computer removal changes, verify the TeamHub API blocks deletion with `409 LOCAL_COMPUTER_HAS_AGENTS` (or `409 LOCAL_COMPUTER_BUSY` during active Operations) while `RemoveComputerDialog` lets users move or delete assigned General Agents inline (hard-blocking only when an assigned Agent such as Another Me has no other target Computer) and successful removal revokes that Computer's credentials.
 The Collaboration panel reads the current Room's published `team.md`; fixture rendering does not prove Agent publication.
 
 - [Architecture](../../../../docs/architecture.md)
@@ -174,8 +174,9 @@ credential only in private recovery storage and report the unresolved state.
 **Pass:** The account identity and tenant scope remain unchanged. Saved fields survive reload.
 Invalid input does not replace saved state. A signed-out/expired session cannot reuse cached private content.
 A return URL cannot send the user to an unrelated external site.
+Settings exposes four tabs: `Profile` (`/settings/account`), `Security` (`/settings/security`), `Computers` (`/settings/computers`), and `Models` (`/settings/models`, with `/settings/local-models` redirecting). For local model management, BYOK configuration, and `Runtime settings` links to `Settings › Models`, see [Local Models and BYOK](local-models-and-byok.md).
 **Evidence:** Save screenshots and sanitized status/identity reads; never retain entered passwords or session cookies.
-**Reuse:** `room-login-chain.spec.ts` (login, return target, wrong password, logout) and the Settings unit tests; password change is unit-tested only, not real account persistence.
+**Reuse:** `room-login-chain.spec.ts` (login, return target, wrong password, logout), `apps/teamhub/tests/integration/account_password_change_test.go` (real PostgreSQL password-change persistence, `INVALID_CURRENT_PASSWORD`, session revocation, and rate limiting), and the Settings unit tests; browser E2E does not yet cover password change.
 
 ## Agent configuration, Skills and deletion
 

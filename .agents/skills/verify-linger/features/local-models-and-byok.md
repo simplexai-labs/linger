@@ -1,0 +1,148 @@
+# Local Models and BYOK
+
+Verify local model kit installation, hardware and drive inspection, model download/load/unload/remove lifecycle, Pi auto-provisioning, Bring-Your-Own-Key (BYOK) endpoint setup and switching, Desktop quit/resume/uninstall teardown, and model scheduling across Linux, macOS, and Windows.
+
+Use the [shared execution and evidence rules](README.md).
+Desktop app packaging, installer loopback auth, and native service lifecycle live in [Desktop Client and Local Installer](desktop-and-installer.md).
+Standalone CLI Computer installation and desktop/browser MCP tools live in [Local Computer](local-computer.md).
+
+Authoritative references:
+
+- [Local Inference](../../../../docs/local-inference.md)
+- [Model Scheduling](../../../../docs/model-scheduling.md)
+- [Desktop Release](../../../../docs/desktop-release.md)
+- [Local Models contract](../../../../contracts/openapi/components/local-models.yaml)
+- [Model Source / BYOK contract](../../../../contracts/openapi/components/model-source.yaml)
+- [Local Installation engine](../../../../packages/local-installation/AGENTS.md)
+- [Local Computer Daemon](../../../../apps/computer/local-daemon/README.md)
+
+## Architecture and control planes
+
+Linger delegates hardware/VRAM detection, model planning, weight download/verification, PolyStrata/llama.cpp engine execution, harness provisioning, and local Bifrost gateway management to the **pinned, self-contained Python 3.12 `localmodels` kit** (`@simplexai/localmodels-<target>`, pinned in `apps/desktop/distribution/*.json` and `scripts/installs/stack.sh` / `stack.ps1`). Neither system Python nor `uv` is used.
+
+Two control planes operate on that kit:
+
+1. **Setup, Resume, Quit and Uninstall:** Desktop (`LocalServerModule`, `setup.html`) or standalone Installer (`apps/linger-installer`) → `@linger/local-installation` → verified `localmodels` kit (`setup inspect`, `stack plan/apply/down`, `harness status/plan/apply`, `source check/models/apply`, `library status/unload`, `foundations stop`).
+2. **Post-install management:** Web **Settings › Models** (`/t/:tenantId/settings/models`; `/t/:tenantId/settings/local-models` redirects preserving `?computer=`) → TeamHub (`/local-models*`, `/model-source*`) → Agent Service (`execute` kinds `local_models` and `model_source`) → Go Local Computer Daemon (`internal/localmodels/{library,source,pi_runtime}.go`). Library progress flows exclusively via throttled (≤ 1 per 2s) `runner.local_models` snapshots → TeamHub DB → SSE `local-models` invalidation hints.
+
+Computer version floors enforced by Agent Service (`apps/node-services/src/agent/runner-gateway/local-computer-management.ts`):
+
+- `≥ 0.53.0`: stop a single background `model_invoke` call to yield for foreground chat.
+- `≥ 0.54.0`: `model_source` commands.
+- `≥ 0.55.0`: Pi background `model_invoke` for Memory/Wiki (runs on Pi's default model without tools/session; never falls back to Codex or Claude Code).
+- `≥ 0.56.0`: BYOK endpoint addressing (`base_url`, `path`, `endpoint`, `protocol`) and `byok_endpoint` in `runner.welcome` `service_features`.
+
+## Cross-platform matrix (Linux, macOS, Windows)
+
+| Dimension                                    | Linux                                                                                                                                                                                      | macOS                                                                                                                                                | Windows                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shipped targets & `localmodels` kit          | Desktop distribution: `linux-x64` (glibc ≥ 2.35). Standalone `stack.sh` kit: `linux-x64` & `linux-arm64` (`python/bin/python3.12`).                                                        | Desktop distribution: `darwin-arm64` (macOS 14.0+). Standalone `stack.sh` kit: `darwin-arm64` & `darwin-x64` (`python/bin/python3.12`).              | Desktop distribution & `stack.ps1` kit: `win32-x64` (`python/python.exe`). **No `win32-arm64` kit or Desktop distribution.**                                                                                                                                                                                                                                            |
+| Kit mirrors, verification & sealing          | CloudFront → npmjs → `cdn.npmmirror.com` (ordered by `SIMPLEX_REGION` + 24h `region.json`). SHA-256 + `.verified.json` stamp cache. Sealed POSIX `0500`.                                   | Same mirrors and stamp cache. Sealed POSIX `0500` (temporarily `0700` when replacing a damaged kit).                                                 | Same mirrors and stamp cache. Sealed Windows read-only `0400` + owner/SYSTEM ACL (`windowsPrivatePath`); `renameRetrying` handles Defender locks.                                                                                                                                                                                                                       |
+| GPU / memory pools & engines                 | Discrete NVIDIA GPUs (`pool.kind: "gpu"`, `gpu:0..N`) + `system` RAM (80% budget). `llama.cpp` CUDA + PolyStrata/Strata (8/12/24 GB VRAM tiers).                                           | Apple silicon Metal unified memory (`pool.kind: "unified"`, 80% budget). `llama.cpp` Metal + PolyStrata with SSD read-ahead (16/24/32 GB Mac tiers). | Discrete NVIDIA GPUs (`pool.kind: "gpu"`, `gpu:0..N`, CUDA) + `system` RAM (80% budget). `llama.cpp` CUDA + PolyStrata (with 6 GiB RAM expert capping for 8/12 GiB NVIDIA cards); setup surfaces structured NVIDIA CUDA driver blockers when outdated.                                                                                                                  |
+| Selected install drive & path rules          | `--inspect` keeps kit cache under `--home` and checks disk/harness on `--inspect-target <selectedHome>` (`statfs`).                                                                        | Same `--inspect-target` split. **Must use `/private/tmp/...`** for temp test roots; `localmodels` rejects symlinked `/tmp` (`Unsafe runtime root`).  | Same `--inspect-target` split (`D:\Linger` directly on a data drive is accepted; nested folders inheriting Modify fail with `UNSAFE_PARENT_ACCESS` guidance). Short runtime root needed if Windows Long Paths disabled (`RUNTIME_PLAN_REFUSED`). `stack.ps1` falls back from `%LOCALAPPDATA%` to `%USERPROFILE%\.cache\simplex-localmodels\kits` on unsafe parent ACLs. |
+| Process detachment (survives Daemon restart) | `process.Prepare` sets `Setpgid: true`; CLI stdout/stderr go to temp files (never pipes) so downloads, loads, and Bifrost survive Daemon restarts.                                         | Same as Linux (`Setpgid: true`, temp-file JSONL tailing every 100 ms).                                                                               | `process.Prepare` sets `HideWindow: true` + `CREATE_NEW_CONSOLE` **outside** any Job Object so downloads, loads, and Bifrost survive Daemon restarts.                                                                                                                                                                                                                   |
+| Quit, Resume & Uninstall                     | Quit runs detached `--stop-local-models` (unloads library + `stack down`, keeps `foundations`). Resume waits up to 180s on `withLocalModelsLock` and restores local stack or BYOK Bifrost. | Same as Linux; update/relaunch quit leaves local models running.                                                                                     | Quit/Resume same as Linux. NSIS Uninstall & `/update /relaunch` run `--stop` (unloads library + `foundations stop` + `stack down`); fail-closed on damaged kit (`LOCALMODELS_KIT_VERIFICATION_FAILED`).                                                                                                                                                                 |
+| BYOK & secret storage                        | Identical wire/URL rules. Key via stdin only, stored `0600` on Computer, never stored/logged by TeamHub or Agent Service.                                                                  | Same as Linux (`0600`).                                                                                                                              | Same wire/URL rules. Key via stdin only, stored with owner + `SYSTEM` DACL on Computer. Codex background `model_invoke` forces `windows.sandbox="unelevated"`.                                                                                                                                                                                                          |
+
+## Automated checks to reuse first
+
+No Playwright E2E spec currently covers `/t/:tenantId/settings/models`, `local-models` SSE updates, or BYOK form submission against real TeamHub + PostgreSQL; real-stack browser coverage requires the live journeys below.
+
+Run the cross-platform helper first (`node .agents/skills/verify-linger/scripts/verify-local-client.mjs`), or invoke focused suites directly:
+
+| Scope                                    | Focused command                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shared BYOK endpoint & protocol rules    | `pnpm --filter @linger/service-kit exec vitest run src/byok-endpoint.test.ts`                                                                                                                                                                                                                                                                                                                        |
+| Local Installation kit, models & BYOK    | `pnpm --filter @linger/local-installation exec vitest run src/byok-source.test.ts src/local-models.test.ts src/localmodels-tool.test.ts src/localmodels-computer.test.ts src/localmodels-failure.test.ts src/setup-plan.test.ts`                                                                                                                                                                     |
+| Go Daemon `localmodels` & `model_source` | `(cd apps/computer/local-daemon && go test -count=1 ./internal/localmodels ./internal/daemon ./internal/computerconfig -run 'Test(Refresh\|Download\|Load\|Unload\|Cancel\|Job\|Answer\|Following\|AFailed\|Restarted\|PiModel\|ChangeOf\|ToolCommand\|InitialRefresh\|FailedPi\|EnsurePi\|Overlay\|ModelSource\|AgentRuntimeModel\|MapStatus\|LocalModels\|HandleModelSource\|LocalModelsConfig)')` |
+| Desktop pins, setup & resume             | `pnpm --filter @linger/desktop exec vitest run src/main/distribution.test.ts src/main/setup-command.test.ts src/main/local-server.test.ts src/main/local-server-resume.test.ts src/shell/setup-page.test.ts`                                                                                                                                                                                         |
+| Installer CLI, resume, stop & BYOK UI    | `pnpm --filter @linger/linger-installer exec vitest run src/main.test.ts src/server/validation.test.ts src/server/resume.test.ts src/server/stop.test.ts src/web/SetupChoicePanel.test.tsx`                                                                                                                                                                                                          |
+| Web Settings › Models & Room picker      | `pnpm --filter @linger/web test src/features/local-models/local-models-page.test.tsx src/features/local-models/local-models-rules.test.ts src/features/local-models/local-model-agents.test.ts src/features/rooms/chat/direct-agent-model-switch.test.tsx`                                                                                                                                           |
+| Agent Service HTTP, gateway & queue      | `pnpm --filter @linger/node-services exec vitest run --project agent tests/agent/executor/http/local-computer-models-http.test.ts tests/agent/executor/http/local-computer-model-source-http.test.ts tests/agent/runner-gateway/runner-gateway-local-models.test.ts tests/agent/runner-gateway/runner-gateway-model-source.test.ts tests/agent/runner-gateway/model-queue.test.ts`                   |
+| TeamHub Postgres integration             | `apps/teamhub/scripts/with-test-database.sh go test -C apps/teamhub ./tests/integration -run 'TestLocalComputer(Models\|ModelSource)'`                                                                                                                                                                                                                                                               |
+| Windows install script Pester tests      | On Windows x64: `scripts/install/install.tests.ps1` and `pnpm --filter @linger/local-installation exec vitest run src/windows-private.native.test.ts`                                                                                                                                                                                                                                                |
+
+## First-run Local Model setup and drive inspection
+
+**Setup:** Clean isolated `LINGER_DESKTOP_USER_DATA` and `LINGER_HOME` (macOS: `/private/tmp/...`), non-root / non-admin user, on a target matching a supported hardware tier (or a constrained host when verifying the `blocked-now` / `unavailable` branch).
+`LOCALMODELS_DEBUG=simulate:vram_gb=24` exercises planning UI only (simulated models echo prompts and do not satisfy real model weight/answer verification); report simulated planning separately from real hardware deployment.
+
+**Journey:**
+
+1. Launch Desktop setup. Observe cold-cache `localmodels` kit download and SHA-256 verification under `<defaultHome>/tools/localmodels/<sha256>`.
+2. **Selected drive check (Windows secondary drive or Linux extra mount):** Open **Customize** and pick another drive/mount. Confirm inspection re-runs with `--inspect-target <selectedHome>` while kit cache stays in default home, and free disk space reflects the chosen mount. Verify an undersized or read-only folder is refused before install starts.
+3. **Memory held (`blocked-now`) branch:** When testable, occupy GPU/RAM with another process so `setup inspect` returns `blocked-now` (`gpu-memory-required` or `free-memory-required`). Verify Local model shows held state with free vs required memory, Quick Install recommends a non-local runtime instead, and clicking **Check again** after freeing memory transitions to `ready`.
+4. **Pi-only gating:** Under **Customize**, select Codex or Claude Code and confirm Local model is disabled (`aria-disabled`, stating local models are only available with Pi). Switch to Pi and select Local model.
+5. Run installation. Observe `stack apply --jsonl` byte progress, rate, and remaining bytes without premature timeout. Wait until `Linger is ready` (a model counts as installed only after answering a real question).
+6. Open Another Me's Direct Room (placed on Pi via `preferred_runtime`), send a prompt with a unique marker, and confirm a delivered reply from the local model after a fresh browser reload.
+
+**Pass:** Kit is sealed (`0500` POSIX / `0400` + user/SYSTEM ACL Windows) with `.verified.json`; `<targetHome>/runtime/localmodels/{plan.json,plan-inputs.json,binding.json,state/model-source.json}` are owner-only; Computer `config.json` contains all 4 `local_models` paths; **Settings › Models** reports `mode: local`, `runtime: pi`, loaded model with non-zero `tokens_per_second`, and `Another Me` in `used_by`.
+
+**Evidence:** Setup screenshots (inspection, Customize, progress, ready), kit path/permission listing, `daemon status --json`, `GET /v0/tenants/{tenantId}/local-computers/{computerId}/local-models` JSON, persisted Room message ID and Run ID.
+
+## Settings › Models library management
+
+**Setup:** Online Computer (`≥ 0.56.0`) with a verified `localmodels` kit on real TeamHub + Agent Service; owner session plus a second Tenant member session (for the read-only boundary) when available.
+
+**Journey:**
+
+1. Visit legacy `/t/{tenantId}/settings/local-models?computer=<id>` and verify redirect to `/t/{tenantId}/settings/models?computer=<id>`.
+2. Inspect memory header, open **Details** (OS, engine, GPU/unified pools), and click **Recheck memory** (`POST .../local-models/refresh`).
+3. **Download, cancel and Daemon restart continuity:** Start downloading an absent model. Verify progress (`%`, rate, ETA) updates within ~2–4s via SSE `local-models` hints. Click **Cancel** mid-download and confirm transition back to stopped/absent (stopped failures offer **Resume** and **Cancel**/discard rather than Load/Remove). Restart the download, restart only the Go Computer Daemon mid-download, and confirm the out-of-process download continues and resumes reporting progress via `reconcile` polling.
+4. **Load, Make room and Agent assignment:** Load a downloaded (`idle`) model. When memory is tight because another model is loaded, verify **Make room to load** opens, preselects the fewest unused-then-used models to cover the deficit, and offers switching affected Agents once loaded. Confirm **Unload and load**, verify the new model reaches `loaded`, and confirm the Room model picker displays its human-readable name.
+5. **Async Pi auto-provisioning:** When Pi was not installed prior to loading a local model, confirm the Daemon provisions Pi under `runtime/harness` and Pi transitions to `ready` in Settings → Computers without restarting the Daemon.
+6. **Unload and Remove:** Click **Unload** on a model with active `used_by` Agents → verify confirmation dialog, confirm memory is freed, model returns to `idle`, and zero engine child processes remain. Click **Remove** → confirm warning, disk space freed, and state returns to `absent`.
+7. **Read-only and offline boundaries:** Open `/settings/models` as a non-owner Tenant member → confirm catalog/pools render read-only, action buttons, **Recheck memory**, and any `GATEWAY_HOME_NOT_PRIVATE` path detail are hidden, and `POST .../actions` returns `403 LOCAL_MODEL_ACTION_FORBIDDEN`. Stop the Daemon → confirm the last snapshot stays visible with an offline notice and disabled actions.
+
+**Pass:** Actions return `202` (or structured refusal code with disk/memory details), snapshots advance monotonically, fresh reload matches library and Agent state, and no orphan engine process survives unload or removal.
+
+**Evidence:** Screenshots across states, `GET .../local-models` JSON before/after each transition, redacted Daemon `local_models.*` logs, process list before/after unload, and a Room reply using the loaded model.
+
+## BYOK setup and switching
+
+**Setup:** Online Computer at `≥ 0.56.0` (separately verify `< 0.56.0` returns `MODEL_SOURCE_UNAVAILABLE` when testing upgrade gating). Use a disposable test key against a real OpenAI-compatible or Anthropic endpoint — or, for deterministic loopback smoke only, the kit's stub server (`PYTHONPATH=$K/modules $K/python/bin/python3.12 -P -s -m localmodels.debug_stub_server --bind 127.0.0.1 --port 18950 --model stub-model`, which must be labeled as a simulated endpoint in `proof.json` rather than real provider acceptance).
+
+**Journey:**
+
+1. Open **Settings › Models** (and separately test Setup/Installer BYOK panel). Confirm Settings shows only **Local model** and **BYOK** tabs (no Subscription tab).
+2. Switch Runtime across **Claude Code**, **Codex**, and **Pi**: confirm default path is `/v1` and default endpoints update to `/messages` (Anthropic Messages), `/responses` (OpenAI Responses), and `/chat/completions` (OpenAI Chat Completions).
+3. Test custom addressing: enter a custom path (such as `/api/paas/v4`) or omit path/endpoint with `-` / empty beside a full URL. Confirm the preview shows exact `base_url + path + endpoint` and derived wire format with zero probing; confirm invalid path characters (`?`, `#`, spaces, `\`) and SSRF/metadata URLs (`http://169.254.169.254/latest`) are rejected.
+4. Click **List models** (refresh): confirm request targets `base_url + path + /models` and populates the combobox (with context window labels when returned), while still accepting manually typed model IDs.
+5. **Error pass-through:** Test with an invalid API key → confirm the floating danger toast stays visible (does not auto-dismiss) and displays the Computer's exact message with URL and HTTP `401` (`BYOK_AUTH_FAILED`). Test an invalid path/model → confirm HTTP `404` (`BYOK_NOT_FOUND`) with exact URL. Confirm editing inputs clears stale test toasts and changing base URL/path/key clears listed models.
+6. Enter valid endpoint, key, and model → click **Test** → confirm success toast shows `Connected`, model ID, context window, wire format, and exact URL.
+7. **Active-Run guard:** Start a long-running Agent Run on this Computer, then click **Save & Switch to BYOK**. Confirm `409 AGENT_HAS_ACTIVE_RUNS` opens **End running tasks?** listing the busy Agent. Click **Cancel** (no switch); retry and confirm **Terminate tasks & Switch** (`force_terminate: true`).
+8. **Origin-scoped saved-key reuse:** Reload **Settings › Models**. Confirm the API key field is empty with the saved-key hint; change only the model ID on the same origin and save without re-entering the key (`reuse_saved_key: true`). Change the Base URL to a different origin and verify the saved key is not reused across origins.
+9. **Execution and secrecy audit:** Open a Room with an Agent on this Computer, confirm its Runtime catalog lists only the BYOK model, send a prompt, and verify the delivered reply (recording both requested and returned model IDs). Audit TeamHub DB, Agent Service logs, installer logs, and Desktop diagnostics zip to confirm the API key is absent everywhere except the owner-only file on the Computer (`0600` POSIX / user+SYSTEM ACL Windows).
+10. Switch back to **Local model** via `SwitchToLocalNotice` and confirm local model reloads and Agents move back to Pi.
+
+**Pass:** Exact concatenated URL and declared wire format used; Computer's upstream error text preserved; zero API key leakage; leaving Local model unloads local weights; all Agents on the Computer move atomically; fresh Room turn succeeds.
+
+**Evidence:** Screenshots (form, custom path preview, 401/404 failure toast, success toast, busy-Agent dialog), redacted `GET .../model-source` JSON (`key_saved: true`, no `api_key`), Computer credential file permission listing without contents, and persisted Room message ID + Run ID + model identity.
+
+## Quit, reopen resume and uninstall teardown
+
+**Setup:** Installed Desktop app on macOS, Linux, or Windows configured in either Local model mode or BYOK mode.
+
+**Journey:**
+
+1. **Local model Quit → Reopen:** Record model engine, Bifrost, and `foundations` PIDs plus GPU/RAM usage. Click **Quit** (not an update relaunch) and wait for `<home>/installer/local-models-stop.log`. Confirm model engines and Bifrost exit (VRAM/RAM freed) while native collaboration services and `foundations` keep running. Reopen Desktop and confirm `--resume` waits on `withLocalModelsLock`, runs `restoreLocalModels`, restores `ready`, and a fresh Room prompt succeeds.
+2. **BYOK Quit → Reopen (reachable & unreachable upstream):** Switch to BYOK, Quit Desktop (Bifrost exits), then reopen with upstream reachable → confirm `restoreByokSource` remounts Bifrost without re-entering the key and a Room prompt succeeds. Repeat with upstream intentionally blocked/down → confirm Desktop still opens (`local_server.byok_gateway_unavailable` logged) and **Settings › Models** remains reachable to reconfigure.
+3. **Uninstall / Upgrade teardown (especially Windows NSIS):** Run uninstaller (or `installer.js --instance desktop --stop`). Confirm `library unload`, `foundations stop`, and `stack down` leave zero lingering model engine or Bifrost processes. Separately verify fail-closed safety on a damaged pinned kit (`LOCALMODELS_KIT_VERIFICATION_FAILED` stops uninstall with Retry/Cancel instead of silently executing or re-downloading an unverified kit).
+
+## Model scheduling and background Pi Memory/Wiki
+
+Read [Model Scheduling](../../../../docs/model-scheduling.md) and [Local Inference](../../../../docs/local-inference.md#background-memory-and-wiki).
+
+- **Adaptive scheduling & preemption (`≥ 0.53.0`):** Local model and BYOK endpoints start at concurrency `1` and adapt up to `8` (subscriptions run `10..10`), reserving the last slot (`max(1, hard - 1)`) for interactive work. With a background Wiki/Memory `model_invoke` or Task active on a 1-slot local/BYOK endpoint, send a Direct Room chat request: confirm the Computer stops the background call (or yields a resumable Task Run), completes the chat reply first, and then requeues and finishes the background work without losing the session or duplicating publications.
+- **Background Memory/Wiki on Pi (`≥ 0.55.0`):** On a Computer using Pi (Local model or BYOK), verify Memory/Wiki background calls run on Pi's default model without tools or saved sessions. Under Local model, confirm that a **downloaded** (unloaded) model is not sufficient — it must be **loaded**, and an unavailable Pi model waits or fails with a Runtime error rather than silently switching to Codex or Claude Code.
+
+## Sources
+
+- [Local Inference docs](../../../../docs/local-inference.md)
+- [Model Scheduling docs](../../../../docs/model-scheduling.md)
+- [BYOK shared helpers](../../../../packages/service-kit/src/byok-endpoint.ts)
+- [Local Installation model & BYOK modules](../../../../packages/local-installation/src/)
+- [Go Daemon localmodels package](../../../../apps/computer/local-daemon/internal/localmodels/)
+- [Web Settings › Models UI](../../../../apps/web/src/features/local-models/)
+- [Desktop distribution pins](../../../../apps/desktop/distribution/)
+- [Standalone stack install scripts](../../../../scripts/installs/)

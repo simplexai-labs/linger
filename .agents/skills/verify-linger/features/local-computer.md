@@ -1,7 +1,8 @@
 # Local Computer
 
-Verify installation, enrollment, Runner lifecycle and recovery on a user-owned Computer.
+Verify standalone CLI Computer installation, enrollment, Runner lifecycle, desktop/browser MCP tools, and recovery on a user-owned Computer.
 Use the [shared execution and evidence rules](README.md).
+Packaged Desktop app installation, auto-updates, permissions, and the standalone Local Installer live in [Desktop Client and Local Installer](desktop-and-installer.md); local model deployment and BYOK switching live in [Local Models and BYOK](local-models-and-byok.md).
 Agent replies through a Computer are covered by [Agent entry](rooms.md#agent-entry-and-response);
 interruption and reconnect journeys by [Execution lifecycle](rooms.md#execution-lifecycle).
 The [architecture overview](../../../../docs/architecture.md#inside-the-computer-daemon) explains the system for Humans;
@@ -105,7 +106,7 @@ one Local Run and one receipt per input, no unacknowledged events, processes or 
 
 ### Warm history after an idle Computer restart
 
-Finish a real turn and wait for its terminal Run. Keep Node Services running. Restart only the owned Computer daemon, wait for connected and reconciled, then send a fresh request in the same Room. Require one exact delivered reply after a fresh read and a successful terminal Run. If user Chrome was connected, repeat a new random browser challenge after restart; a retained connection label alone is not proof. Preserve failures such as `Agent Runner placement does not match Context View`. Reuse `tests/agent/executor/local-backend.test.ts` for the revision refresh and offline rejection regression.
+Finish a real turn and wait for its terminal Run. Keep Node Services running. Restart only the owned Computer daemon, wait for connected and reconciled, then send a fresh request in the same Room. Require one exact delivered reply after a fresh read and a successful terminal Run. If user Chrome was connected, repeat a new random browser challenge after restart; a retained connection label alone is not proof. Preserve failures such as `Agent Runner placement does not match Context View`. Reuse `apps/node-services/tests/agent/executor/local-backend.test.ts` for the revision refresh and offline rejection regression.
 
 ### Claude live lifecycle
 
@@ -143,7 +144,7 @@ apps/teamhub/scripts/with-test-database.sh sh -c '
 On Linux, `make check-computer` isolates PID and `/proc` through `apps/computer/run-test.sh`.
 `COMPUTER_TEST_ISOLATION=on|off` forces either mode.
 
-For the opt-in `tests/codex-native-compat.test.ts`, point
+For the opt-in `apps/computer/tests/codex-native-compat.test.ts`, point
 `LINGER_CODEX_COMPAT_EXECUTABLE` at the installed Codex entry point.
 It uses a deterministic loopback model and fresh Runtime homes; it does not prove
 real model access. On Linux, native Codex refuses to create its sandbox helper
@@ -187,15 +188,16 @@ Record the active bundle `app-sha256` before and after; a version string alone i
 
 ### Login and account switching
 
-| Situation                            | Expected                                                          | Automated evidence                                                                          |
-| ------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| First `login`                        | New Computer, credential saved                                    | `TestBrowserEnrollmentPersistsOwnerOnlyStateAndStartsTheDaemon`                             |
-| Repeat `login`, same account         | Same `computer_id`, credential generation advances                | `TestSetupRenewsTheExistingComputerIdentity`                                                |
-| Browser signed in as another account | Current account shown; local identity replaced after confirmation | `connect-computer-page.test.tsx` account sign-out test; manual                              |
-| Server already deleted the Computer  | New Computer after confirmation; busy Daemon keeps old identity   | Manual; `TestDaemonStopIdleAndRecovery` covers the idle stop                                |
-| Crash during login                   | Recovery from the pending renewal file, no second rotation        | Manual; `TestSetupRenewsTheExistingComputerIdentity` checks the pending file is cleared     |
-| Two `login` on one state directory   | Second is rejected by the setup lock                              | `TestSetupRejectsAConcurrentSetup`                                                          |
-| Upgrade with an active Operation     | Rollback before start; after start only with a reliable idle stop | metadata, rollback and active Operation tests in `scripts/local-computer-installer.test.ts` |
+| Situation                            | Expected                                                                 | Automated evidence                                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| First `login`                        | New Computer, credential saved                                           | `TestBrowserEnrollmentPersistsOwnerOnlyStateAndStartsTheDaemon`                                     |
+| Repeat `login`, same account         | Same `computer_id`, credential generation advances                       | `TestSetupRenewsTheExistingComputerIdentity`                                                        |
+| Browser signed in as another account | Current account shown; local identity replaced after confirmation        | `apps/web/src/features/local-computer/connect-computer-page.test.tsx` account sign-out test; manual |
+| Set Up Again renewal with orphan     | Renewal by `daemon_id` keeps holding Computer and deletes unbound orphan | `TestAgentRuntimeLocalComputerEnrollmentByDaemonIDRemovesOnlyTheOrphan`                             |
+| Server already deleted the Computer  | New Computer after confirmation; busy Daemon keeps old identity          | Manual; `TestDaemonStopIdleAndRecovery` covers the idle stop                                        |
+| Crash during login                   | Recovery from the pending renewal file, no second rotation               | Manual; `TestSetupRenewsTheExistingComputerIdentity` checks the pending file is cleared             |
+| Two `login` on one state directory   | Second is rejected by the setup lock                                     | `TestSetupRejectsAConcurrentSetup`                                                                  |
+| Upgrade with an active Operation     | Rollback before start; after start only with a reliable idle stop        | metadata, rollback and active Operation tests in `scripts/local-computer-installer.test.ts`         |
 
 ### Windows native
 
@@ -239,19 +241,19 @@ Cross-built binaries, `scripts/check-local-computer-windows.ps1` and Go tests wi
 
 ## Desktop and browser tools
 
-Read [Desktop and Browser](../../../../docs/desktop-and-browser.md) and the [Daemon guide](../../../../apps/computer/local-daemon/README.md#controlled-desktop-and-browser-tools).
-Each Operation gets two Daemon-local MCP tools. `computer` drives the desktop through Cua (macOS, Windows) or the X11 driver (Linux). `browser` runs the pinned Playwright MCP.
+Read [Desktop and Browser](../../../../docs/desktop-and-browser.md), [macOS permissions](../../../../docs/macos.md), and the [Daemon guide](../../../../apps/computer/local-daemon/README.md#controlled-desktop-and-browser-tools).
+Each Operation exposes one Daemon-local MCP server (`computer`) with two public tools: `computer.ui_exec` and `computer.ui_reset`, running inside a bundled QuickJS-WASI sandbox (`apps/computer/local-daemon/internal/uiruntime/`) over private desktop (`ui.window` / `ui.computer.*`, Cua on macOS/Windows or X11 on Linux) and pinned Playwright browser (`ui.page` / `ui.browser.*`) drivers. Reuse `TestBridgeSetupIgnoresGuestCPUBudget`, `TestOversizedDispatchResultRejectsOnlyTheCall`, and `TestUIImageBudgetNeverFailsACompletedAction` for deterministic UI-runtime isolation.
 The browser has three targets:
 
-| Target                 | When                                                             | What to check                                                                                                                                                             |
-| ---------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Isolated Agent browser | Default browser is not Chrome, or the user did not connect       | Profile under `computer-tools/browser-profiles/`; no user sign-ins                                                                                                        |
-| Agent browser window   | `launch_app` with `agent_browser: true` on macOS                 | Computer's own window in the user's Chrome (Edge and Firefox use their own profile). Works behind other windows on the current Space; off-Space refusal tested separately |
-| User's everyday Chrome | User connected through the Playwright Extension (macOS, Windows) | Tasks use the user's sign-ins; disconnect returns to the isolated browser                                                                                                 |
+| Target                 | When                                                                                   | What to check                                                                                                                                                             |
+| ---------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Isolated Agent browser | Linux (always), or macOS/Windows when the default browser is not Chrome                | Profile under `computer-tools/browser-profiles/` (Linux Snap Chrome/Chromium: `~/snap/<name>/common/linger-browser-profiles/`); no user sign-ins                          |
+| Agent browser window   | `launch_app` with `agent_browser: true` on macOS                                       | Computer's own window in the user's Chrome (Edge and Firefox use their own profile). Works behind other windows on the current Space; off-Space refusal tested separately |
+| User's everyday Chrome | Default browser is Chrome on macOS/Windows and user connected via Playwright Extension | Tasks use the user's sign-ins; when disconnected, browser calls return `BROWSER_CONNECTION_REQUIRED` instead of silently falling back to the isolated browser             |
 
-For the Agent browser window, record cold launch and warm operation separately. Do not claim no focus change for the cold launch without foreground samples. The user's Chrome takes no keys from the Computer (`COMPUTER_KEYS_REFUSED`), and a Chrome running without the required flag returns `COMPUTER_BROWSER_RESTART_REQUIRED`; the Daemon never quits it. Restore the original front application before the warm test, then correlate foreground PID samples with the actual tool interval. A single before/after sample cannot prove no intermediate focus change. Do not claim general cross-Space support. `COMPUTER_WINDOW_OFF_SPACE` applies when the off-Space window cannot be read; a previously read window can behave differently. Record stale-view warnings and use an independent result to verify effects. Test this boundary separately, without moving the user’s desktop as a hidden setup step.
+For the Agent browser window, record cold launch and warm operation separately. Do not claim no focus change for the cold launch without foreground samples. The user's Chrome takes no keys from the Computer (`COMPUTER_KEYS_REFUSED`). An already-running Chrome without `--disable-backgrounding-occluded-windows` is used as-is with `pauses_when_covered: true` in `structuredContent`; the Daemon never quits it and the Agent must not ask the user to restart Chrome. Restore the original front application before the warm test, then correlate foreground PID samples with the actual tool interval. A single before/after sample cannot prove no intermediate focus change. Do not claim general cross-Space support. `COMPUTER_WINDOW_OFF_SPACE` applies when the off-Space window cannot be read; a previously read window can behave differently. Record stale-view warnings and use an independent result to verify effects. Test this boundary separately, without moving the user’s desktop as a hidden setup step.
 
-**Real probes (default skipped):** `TestMacDesktopLive`, `TestWindowsDesktopLive`, `TestUserChromeLive` and `TestNativeLinuxDesktopLive`. Their switches and inputs are in the Daemon guide. They prove the driver and Daemon, not the model's tool choice.
+**Real probes (default skipped):** `TestMacDesktopLive`, `TestWindowsDesktopLive`, `TestUserChromeLive`, `TestNativeLinuxDesktopLive`, `TestNativeLinuxOpenURLLive`, `TestNativeLinuxGNOMELive`, and `TestUnifiedUIBrowserLive` (`LINGER_UI_BROWSER_PROBE=1`). Their switches and inputs are in the Daemon guide. They prove the driver and Daemon, not the model's tool choice.
 
 **Agent journey:** Give a ready Agent one desktop task and one browser task with a checkable result. For the desktop, type a unique marker into TextEdit or Notepad and save through the visible dialog. Independently read the saved file. For the browser, serve an owned temporary page with a random visible challenge, a labeled input and a confirmation button. Ask the Agent to read, enter and submit the code, then report the actual confirmation. Keep the expected code out of the request. Inspect native tool results, the persisted reply and a fresh browser read. A public page can change; a memorized title or an exact answer supplied in the request does not prove reading or interaction.
 
@@ -265,11 +267,13 @@ through LaunchServices; it does not promise a new application instance. A probe 
 current text-field token. Never select the first restored window or kill the
 returned application PID as cleanup. A compiled, opt-in-skipped probe is not a
 desktop acceptance result.
+After an unsigned macOS desktop update, stale TCC grants for both `CuaDriver` (`com.trycua.driver`) and `Linger` (`com.simplexai.linger.desktop.preview`) can leave Screen Recording reporting **Not allowed** even while System Settings shows switches on; reset both identities and relaunch Linger per [macOS setup](../../../../docs/macos.md#keep-computer-permissions-after-an-update).
 
 For the browser journey, have the test server return a second random receipt only after a correct form submission. Reopen the Room and match one message by the target Agent, scoped to the message list: the sidebar may preview the same text. Correlate the receipt with the server response, the browser tool calls and the finished Local Run.
 
 Use a unique disposable file and verify its path/title and empty editor before any input. Windows Notepad may restore existing user tabs even when launched by the test. A new PID does not prove those tabs belong to the test. Never select an arbitrary element token, overwrite an existing editor, or force-kill that process as cleanup.
-`TestWindowsDesktopLive` opens a disposable temporary file, sends input only to that window's single Document field, and never kills Notepad. Record its report from a run on the signed-in test desktop; a compiled probe is not a result. Until such a run exists, use the manual Agent journey above for Windows desktop acceptance.
+On Windows, `cua_windows_policy.go` enforces background-only input: `delivery_mode` and `scope` are hidden and refused with `COMPUTER_INPUT_NOT_SENT`, `bring_to_front` and `move_cursor` are dropped, and `double_click`/`right_click` are refused on Chromium/Electron windows (`Chrome_WidgetWin_*`, `CefBrowser*`) including element-token-only targets resolved from prior reads (`TestWindowsInputRefusal`, `TestWindowsTargetWindowFromElementToken`).
+`TestWindowsDesktopLive` opens a disposable temporary file, sends input only to that window's single Document field, checks foreground `scroll` refusal (`COMPUTER_INPUT_NOT_SENT`), and never kills Notepad. Record its report from a run on the signed-in test desktop; a compiled probe is not a result. Until such a run exists, use the manual Agent journey above for Windows desktop acceptance.
 
 For desktop tasks, distinguish launching an application from editing an already-open file. Correlate native tool calls with the saved content.
 For browser proof, correlate the persisted reply author and local_run_id with the same Run's native activity.started/activity.finished events. Require browser navigation to the owned challenge URL, input and submit actions, and their outcomes. Record recovered tool failures instead of presenting the run as failure-free. Check the assigned Computer and platform; a current registration alone cannot establish an old Run's location after a move. Server-side local_mcp_relay logs apply only to calls traversing that relay; do not require them as the sole evidence for Daemon-local browser tools.
@@ -299,11 +303,12 @@ state before retrying. Capture the returned code and visible error separately
 from the wait failure. Check token-file presence without reading its contents.
 
 **Pass:** The state follows the Agent Service route `/v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/browser-connection`. A refused token mid-task gives `token_invalid` and an error, not a silent fallback to the isolated browser.
+When `browser_file_upload` runs in everyday Chrome without "Allow access to file URLs" enabled on the Playwright Extension, expect `BROWSER_FILE_ACCESS_DISABLED` (`TestFileUploadReportsExtensionWithoutFileAccess`, macOS/Windows only); enabling it reloads the extension and closes the file chooser.
 When using the private token-file probe, verify the target page before and after connection-manager restart. Record this separately from a signed-in Room task.
 
 **Deterministic rejection coverage:** `TestRejectedTokenFailsLaterCallsAtOnce` checks that a rejected token does not reopen a connection or hold the profile. `TestRejectedConnectionRecoversAfterReconnect` checks that merely flipping a status does not count as reconnection, and a new connection generation releases the stale relay. `TestBrowserConnectionIsPrivatePerOwnerAndNeverReported` covers owner scoping, private storage and removal. These tests manipulate manager state; they do not rotate a real extension token during a running task.
 
-**Reuse:** `browser-connection-dialog.test.tsx` and `TestUserChromeLive`.
+**Reuse:** `apps/web/src/features/local-computer/browser-connection/browser-connection-dialog.test.tsx` and `TestUserChromeLive`.
 
 ## New Runtime acceptance
 
@@ -373,7 +378,7 @@ A source-built Computer does not prove installation or upgrade of a released pac
 
 A running Operation has no terminal receipt yet.
 Find its `operation_id` from the Run's `run.start` execution receipt,
-then check `runner.operation.accepted` for it in the Computer's `daemon.log` and `active_operations` in `daemon status --json`.
+then check `runner.operation.accepted` for it in the Computer's `daemon.log` and `.daemon.active_operations` in `daemon status --json`.
 Check Agent Service receipts only after the terminal event.
 Tool calls are logged by the Agent Service as `local_mcp_relay.tool_call_started` and `local_mcp_relay.tool_call_finished` JSON events without arguments, bodies or credentials; filter by `runId` (the `local_run_id`) or `operationId`, for example `jq 'select((.event|startswith("local_mcp_relay.tool_call")) and .runId=="<local_run_id>")'`.
 Never print `auth.json`, tokens, Computer credentials or message bodies into evidence.
@@ -392,4 +397,5 @@ When a change adds a business state, error code, recovery or compatibility path,
 
 ### Claude Code gateway catalog and execution
 
-On a dedicated Computer using Claude Code user settings for a gateway, compare the reported model picker with that gateway's catalog. Select a gateway-only model and send a real Room request. Correlate the selected ID, Run, actual provider model and reply. Redact credentials. Checking command flags only proves how discovery launches; it does not prove the gateway handled the selected model. Keep ordinary Windows Room execution separate from the restricted background Wiki invocation.
+On a dedicated Computer using Claude Code user settings for a gateway, compare the reported model picker with that gateway's catalog. Claude model labels are formatted strictly from structured fields (`displayName`, `id`, `resolvedModel`; reuse `TestClaudeCatalogFormatsStructuredLabelsAndDisambiguatesDuplicates`). Select a gateway-only model and send a real Room request. Correlate the selected ID, Run, actual provider model and reply. Redact credentials. Checking command flags only proves how discovery launches; it does not prove the gateway handled the selected model. Keep ordinary Windows Room execution separate from the restricted background Wiki invocation.
+For BYOK endpoint wire-format validation (`openai-chat`, `openai-responses`, `anthropic`, Computer `≥ 0.56.0`, `TestHandleModelSourceCommandRejectsMissingOrUnknownByokProtocol`), local models, and Pi background calls (`≥ 0.55.0`), see [Local Models and BYOK](local-models-and-byok.md). Antigravity (`agy acp`) is also supported as a fourth Runtime where installed.

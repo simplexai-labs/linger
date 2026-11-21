@@ -96,10 +96,10 @@ test("apps: browse connectors, authorize, reopen and disconnect", async ({
     const popupClosed = popup.waitForEvent("close");
     await popup.getByRole("button", { name: "Authorize Linear" }).click();
     await popupClosed;
-    // The popup closes itself after authorization. TeamHub reconciles the
-    // pending connection on its scheduled worker, which snoozes pending
-    // authorization for one minute; a returning user observes the result on
-    // the next page load.
+    // The popup closes itself after redirecting to /oauth/composio-complete,
+    // which immediately wakes TeamHub reconciliation (with a 5-second fallback
+    // poll for 3 minutes and 1 minute thereafter). A returning user observes
+    // the Active status on reload.
     await expect(async () => {
       await page.goto(tenantAppsUrl(page, "?app=linear"));
       await expect(

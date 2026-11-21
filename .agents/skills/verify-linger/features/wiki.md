@@ -17,15 +17,13 @@ the Computer Runtime or the Web; the journeys below do.
 ## Sources, refresh and grounded answers
 
 **Reuse:** Wiki unit tests under `apps/web/src/features/wiki`, Memory SQL tests and the Wiki request-budget test.
-`wiki-home-page.test.tsx`, `wiki-preview-pages.test.ts` and `wiki-refresh-preview.llm-wiki.test.ts` cover the in-place preview and its stream.
-`personal_wiki_dispatcher_test.go` covers preview storage, and `mail_wiki_whitelist_test.go` covers source admission.
-No browser spec proves generation; that needs a real model.
-The live spec's current environment prerequisites are declared in its source.
-It requires an explicitly selected running Web/service environment, not the default Document baseline.
+`wiki-home-page.test.tsx`, `wiki-preview-pages.test.ts`, `wiki-profile-editor.test.tsx`, `wiki-refresh-status.test.tsx`, and `wiki-refresh-preview.llm-wiki.test.ts` cover Profile editing, failure banners, and the in-place preview stream.
+`personal_wiki_dispatcher_test.go` covers preview storage, `wiki_source_whitelist_test.go` covers file-format source admission, and `mail_wiki_whitelist_test.go` covers mail admission and nightly mail sync.
+No browser E2E spec covers Wiki generation; live verification requires an explicitly configured running Web/service environment with a real model rather than the default Document baseline.
 
 **Setup:** Start the actual configured Wiki/Memory services and model dependencies when generation is in scope.
 Use the package launcher or the packaged runtime environment; generation runs on the Another Me's Computer, so it needs the agent role in the same process.
-Connect an owned Computer with a signed-in Codex or Claude Code and confirm the Human has an active Another Me registration.
+Connect an owned Computer with a signed-in Codex, Claude Code, or Pi Runtime (Computer `≥ 0.55.0` for Pi; Antigravity falls back to Claude/Codex) and confirm the Human has an active Another Me registration.
 Current refresh admission requires that registration even for an uploaded source.
 A missing registration returns 404; inspect the response before waiting for generation.
 Record the process time zone. Memory and the Wiki turn the day over at midnight there; Compose containers default to UTC.
@@ -43,7 +41,7 @@ There is no manual refresh, no Wiki Upload or Refresh control, and no public ref
 **Journey:** Add the source through My pages with Import, drop or New file, then read back that source Document.
 Wait until its text is ready; a source whose text is not ready at admission waits for the next night.
 Choose one trigger and record it: the scheduled 00:00 refresh, a meeting refresh, a first mailbox snapshot, or an operator request.
-For an operator request on an owned environment, run `pnpm --filter @linger/node-services memory:wiki-sync --date <date>` in the Memory role's environment.
+For an operator request on an owned environment, run `pnpm --filter @linger/node-services memory:wiki-sync -- --date <date>` in the Memory role's environment.
 It sends the same internal nightly request that Memory sends at 00:00.
 TeamHub keys its replay by date, the Session set, the current revision and the latest failed refresh, not by My pages changes.
 Use a date not yet requested for this Wiki, and require a new refresh ID. A replayed `already_latest` does not admit the new source.
@@ -68,7 +66,7 @@ Failed refresh does not present incomplete output as a successful publication or
 A later successful refresh exposes the updated source content.
 
 **Failed refresh must end:** A refresh that misses a required routed page splits the rejected batch in halves down to one source. A single source that still fails is skipped with a `wiki_sources_skipped` ERROR log, and its frozen version settles with this publication.
-The same version is not retried; a new version of that source is processed again. If an update skips every source, the previous version is published again. Initialization with no passing source fails the whole generation.
+The same version is not retried; a new version of that source is processed again. If an update skips every source with no pending removals, the previous version is published again (if removals were pending, generation fails). Initialization with no passing source fails the whole generation.
 Memory Session triggers stop after five failed runs of one version with `memory_session_trigger_skipped`.
 Source: `apps/node-services/src/llm-wiki/wiki-initialization.ts`, `apps/node-services/src/memory/session-triggers.ts` and the [Memory README](../../../../apps/node-services/src/memory/README.md).
 To verify, use one source that cannot produce its routed page and one good source. Observe the refresh that skips it, then at least one later refresh of the same Wiki.
@@ -125,7 +123,7 @@ the CLI projection, Runtime cost or latency, time-sliced daytime refresh, or the
 ## Agent memory across Rooms
 
 **Setup:** Read [Agent memory](../../../../docs/wiki-and-memory.md#agent-memory).
-Maintenance always runs on the Agent's own Computer with its Codex or Claude Code and needs that Computer online.
+Maintenance always runs on the Agent's own Computer with its Codex, Claude Code, or Pi Runtime and needs that Computer online.
 This is distinct from the Human knowledge maintained by the Memory service.
 
 **Journey:** Give one product Agent a durable test convention in Room A.
@@ -152,10 +150,9 @@ A timer unit test does not prove a real Runtime compacted and reactivated its Co
 
 ## Pocket Notes and current Profile
 
-**Journey:** Create a disposable Pocket Note on a supported past date, reopen it, then delete it through its confirmation dialog.
-Verify its removal after a fresh read; preserve unrelated notes.
-When Profile retrieval is in scope, update a unique fact through Add source or Another Me's personal-profile Skill.
-The Wiki Profile page is read-only; it is not a manual Profile editor.
+**Journey:** Write and autosave a disposable Pocket Note on **today's** date (`PUT /v0/tenants/{tenantId}/me/pocket-notes/today`), then reopen it; today's note is editable and has no delete action (`DELETE .../pocket-notes/<today>` returns HTTP 400). Using an existing or seeded read-only **past-date** Pocket Note in `All notes`, delete it through its `Delete this note?` confirmation dialog (`DELETE /v0/tenants/{tenantId}/me/pocket-notes/{noteDate}`).
+Verify its removal after a fresh read; preserve today's and unrelated notes.
+When Profile retrieval is in scope, update a unique fact through `Edit profile` (`?edit=1` → `POST /v0/tenants/{tenantId}/personal-profile/revisions`), `Add source`, or Another Me's `personal-profile` Skill.
 Files and the Another AI summary need no connection; an app source needs an authorized connection. Connecting an app alone does not generate a Profile.
 Observe the resulting Profile revision and corresponding Raw indexing.
 Query from an authorized Another Me Context without repeating the fact in the question.
@@ -165,22 +162,22 @@ Upload one admitted file and one rejected file, such as a scanned PDF. The rejec
 A file whose text is still being normalized makes the generation wait instead of entering unchecked.
 Mail enters only when its content hash matches an admitted Wiki source Version for that owner.
 With no eligible evidence, the current Profile stays unchanged.
-Reuse `personal_profile_supplement_test.go` and `mail_wiki_whitelist_test.go`.
+Reuse `personal_profile_supplement_test.go`, `wiki_source_whitelist_test.go`, and `mail_wiki_whitelist_test.go`.
 
-**Pass:** Note deletion affects the selected date only.
+**Pass:** Note deletion affects the selected past date only.
 Profile retrieval reflects the current revision after synchronization, without retaining the superseded revision as current knowledge.
 Profile Raw indexing does not imply publication into the OpenWiki page graph.
 
 **Evidence:** Keep note date, Profile revision, admitted and rejected source IDs, indexing state and independently checked query results.
-Reuse the Pocket Note panel tests and Memory Profile indexing tests.
+Reuse `wiki-profile-editor.test.tsx`, `apps/web/src/features/rooms/pocket-notes/pocket-note-launcher.test.tsx`, and Memory Profile indexing tests.
 The UI entry is `apps/web/src/features/rooms/pocket-notes/pocket-note-panel.tsx`.
 
 ## Sources and current entry hints
 
 The current Wiki route is `/t/{tenantId}/library/wiki`.
-The main route opens Profile by default. Use the Wiki tab (`?tab=wiki`) for generated collections.
+The main route opens Profile by default (with `Edit profile` toggling `?edit=1`). Use the Wiki tab (`?tab=wiki`) for generated collections.
 Profile's Add source opens the account source dialog; it is not proof of Wiki publication.
-While a refresh runs, the Wiki tab shows `Another Me is writing your Wiki`; after a failure it shows `Wiki update failed`.
+While a refresh runs, the Wiki tab shows `Another Me is writing your Wiki`; after a failure it shows `Wiki update failed` (appending the actionable `failure_reason` suffix when present, such as `— Your Computer was offline.`, `— Runtime sign-in required.`, `— Runtime incompatible. Update your local CLI or Linger.`, or `— Local Runtime is unavailable.`).
 Pages being generated appear as ordinary section cards that open on the `/t/{tenantId}/wiki-preview` route; there is no separate preview region.
 Do not infer success from a progress message alone.
 Resolve IDs from the current run and clean up only its owned Documents and resources.
@@ -195,10 +192,10 @@ Resolve IDs from the current run and clean up only its owned Documents and resou
 
 Memory runs in the process time zone:
 
-- Every hour, the Wiki task compares the current Profile Revision with the one memory.md last absorbed. It calls the model only when they differ.
+- When a Profile revision is published, TeamHub enqueues River job `personal_profile.memory_sync` (1-minute delay), which calls Memory `POST /internal/v1/profile-memory-syncs` to absorb the new revision into `memory.md`.
 - At 23:30 TeamHub reads new mail for each connected mailbox. It requests no refresh.
-- At 00:00 the nightly run reads the closed day. It proposes memory.md edits, writes the Daily report and Tracking Items, and requests the nightly Wiki refresh.
-- Weekly maintenance writes the Weekly report from that week's Daily reports.
+- At 00:00 the nightly run reads the closed day. It proposes `memory.md` edits, runs proactive dreaming, writes the Daily report and Tracking Items, and requests the nightly Wiki refresh.
+- Weekly maintenance writes the Weekly report from that week's Daily reports and updates `memory.md` (`syncWeeklyMemory`).
 
 Report each scheduled step separately from an explicitly invoked command such as `memory:daily`, `memory:weekly` or `memory:wiki-sync`.
 A missed night is not proved by an explicit command that passed.
@@ -210,7 +207,7 @@ Use a synthetic Profile fact and correlate its published `user_memory_revisions`
 In a fresh Another Me Context, ask a question that requires that fact without repeating it in the prompt. Record the identity version and actual answer.
 Give an explicit correction in conversation. It applies in that conversation at once; other Contexts get it after the nightly run publishes a new version.
 In an already-open Context, verify that the next ordinary input carries `<user-memory-update>` and that the version is acknowledged only after a successful Run.
-Reject a candidate with unsupported quoted evidence in a deterministic test; confirm the previous safe version persists.
+In a deterministic test (`apps/node-services/tests/memory/user-memory.test.ts`), confirm unsupported quoted evidence drops that Session edit and preserves the previous safe version when no valid edits remain.
 Do not count another Agent's memory, a retrieved Document, a reply that repeats the test prompt, or a completed model turn without publication as memory.md delivery.
 
 ### Human Memory pipeline

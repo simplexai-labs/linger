@@ -32,7 +32,7 @@ Commits and due times wake the Task Worker and River; neither polls on a short i
 - `apps/teamhub/tests/integration/task_claim_wake_test.go`: `TestTaskClaimWakesAndNextClaimDelay`, `TestTaskClaimableHintsFollowClaimableTime`, `TestParticipantRunTerminalMakesRunningTaskClaimable`, `TestNonTaskRunTerminalEnqueuesNoTaskJob`, `TestParticipantRunsTerminalEachEnqueueTaskJob`, `TestTaskArchiveAndParticipantRunFinishDoNotDeadlock`, `TestScheduleReconcileKeepsTaskMadeDueDuringLease`, `TestScheduleReconcileAfterHeartbeatOutlastsClaimLease` and `TestTaskReconcileIsCappedAtAttemptDeadline`.
 - `apps/teamhub/tests/integration/river_due_notifier_test.go`: due time, recent-due recheck, step spacing, job finish and `TestEnqueueDocumentTextSyncNotifiesIndexing`.
 - `apps/teamhub/internal/realtime/notification_test.go` (`TestDecodeNotification`) for the hint shapes.
-- `apps/node-services/tests/agent/task-manager/task-worker.test.ts` (`Task Worker idle loop`), `teamhub-task-worker-client.test.ts`, `inbox-source/teamhub-agent-wake-stream.test.ts` and `bootstrap/bootstrap-run-wake.test.ts`.
+- `apps/node-services/tests/agent/task-manager/task-worker.test.ts` (`Task Worker idle loop`), `teamhub-task-worker-client.test.ts`, `apps/node-services/tests/agent/agent-features/inbox-source/teamhub-agent-wake-stream.test.ts` and `apps/node-services/tests/agent/bootstrap/bootstrap-run-wake.test.ts`.
 
 **Journey:** Use the [managed Task](#managed-task-and-work-item) setup with an idle deployment.
 Delegate a short Task through Meta and let the AlterEgo Local Run finish.
@@ -123,16 +123,16 @@ Neither proves a real supplier account was used.
 
 **Setup:** For a real claim, identify the authorized supplier account, Agent grant and allowed target/action.
 Use the current provider and tool prerequisites from the [TeamHub CLI README](../../../../apps/teamhub-cli/README.md).
-The Connectors page lists a fixed set of managed apps from `apps/teamhub/internal/externalsource/catalog.go`, filtered by category.
+The Connectors page (`/t/{tenantId}/apps`, nav label `Connectors`) renders the 16 grouped managed apps from `apps/web/src/features/apps/app-groups.ts` (backed by the 18-app catalog in `apps/teamhub/internal/externalsource/catalog.go`, omitting `googledrive` and `facebook` unless already connected), filtered by category tabs and a `Connected only` toggle.
 It has no search box, provider toolkit sync or paginated catalog; GitLab and HubSpot are not offered.
-Connecting needs a Composio API key from `COMPOSIO_API_KEY` or saved in Apps.
+Connecting needs a Composio API key from `COMPOSIO_API_KEY` or saved in the Connectors setup modal or `Settings → Security → API keys`.
 
 **Journey:** Connect the account from the app's card through the provider popup.
-Pending authorization reconciles on the server's one-minute poll, so allow up to 90 seconds after consent.
-The first active connection grants every currently eligible Agent by default.
-Inspect and change that grant in Agent Info → Connectors; the Apps dialog has no Agent grant section.
+Pending authorization reconciles immediately when the popup lands on `/oauth/composio-complete` (`POST /v0/external-connection-completions`), with a 5-second fallback poll for the first 3 minutes and a 1-minute poll thereafter.
+The first active connection grants only the owner's active `anotherme` Agent(s) by default; general Agents are not auto-granted and require an explicit grant or authorization card.
+Inspect and change Agent grants in `Agent info` → `Connectors`; the Connectors manage dialog has no Agent grant section (it does own `Auto reminders` for app-listening triggers).
 Ask the product Agent for a bounded read of a known supplier object.
-Gmail, Outlook, Slack, Google Calendar, Notion, Google Drive, Figma and GitHub have dedicated `teamhub` commands; other apps use `teamhub apps search` and `teamhub apps execute`.
+Gmail, Outlook, Slack, Google Calendar, Notion, Google Drive, Figma and GitHub have dedicated `teamhub` commands, and `fal` / `higgsfield` use `teamhub image-gen` and `teamhub video-gen`; other apps use `teamhub apps search` and `teamhub apps execute`.
 An Outlook Calendar connection exposes only calendar tools; Outlook mail tools under it return `tool_not_found`.
 If a draft or write is explicitly in scope, perform that exact action and read the resulting object through the supplier.
 Confirmation-class writes wait for the Sponsor's card; see the [TeamHub CLI README](../../../../apps/teamhub-cli/README.md).
@@ -152,13 +152,13 @@ Report app availability, OAuth, tool execution and external write as distinct ou
 
 **Reuse:** `room-routines.spec.ts` covers persisted Routine selection, reopening, editing and one firing through real services.
 
-**Journey:** In an owned environment, create a safe bounded schedule using the current Routine UI or authorized tool.
+**Journey:** In an owned environment, create a safe bounded schedule using the current Routine UI (`Agent info` → `Routines`) or authorized tool (including fixed-grid `every_n_minutes` intervals down to 10 minutes with overlap skipping).
 Reopen it, change it, observe the intended firing, then disable or delete it.
 Check timezone and target Room when scheduling behavior is affected.
-Exercise the Recurring, Paused and Done groups; Done contains elapsed one-time schedules.
+Exercise the `Upcoming` (enabled one-time schedules), `Recurring`, `Paused` and collapsible `Done` (elapsed one-time schedules) groups.
 Pause or enable a Routine, use Undo within the displayed five-second window, and verify the persisted state.
-Delete a disposable ordinary Routine from its row and reopen the list.
-An app-listening Routine offers an enable switch, without the ordinary delete action.
+Delete a disposable editable ordinary Routine from inside its `Edit routine` dialog and reopen the list (only non-editable `every_n_minutes` Routines expose a row-level `Delete routine` button).
+App-listening triggers are not listed inside `Agent info` → `Routines` in production; toggle them via **Connectors** (`AppManageDialog` → `Auto reminders`) or `teamhub apps auto-reminders list|set`.
 
 **Pass:** Saved configuration matches the user's intent.
 The observed event fires under the current schedule without duplicate business effects.
@@ -186,12 +186,12 @@ Default-on proactive review and supplier-dependent event variants have separate 
 ## Ordinary Work Items and Dashboard
 
 **Setup:** Use two disposable members, a source Room, and a normal Work Item rather than a managed Task.
-The Dashboard is a read surface. Create, assign, comment and change status through the public or Agent business API.
+The Dashboard (`/t/{tenantId}/dashboard/{workItemId}`; there is no bare `/dashboard` route) is a read surface. Create, assign, comment and change status through the public Human API (`/v0/tenants/{tenantId}/work-items`, `/v0/work-items/{workItemId}*`) or internal Agent Service API (`/v0/agents/{agentId}/work-items*`, which has no Agent assignment-update endpoint).
 Do not report an API mutation as a UI edit or invent a Dashboard editing control.
 
 **Journey:** Create an item with a unique title; assign it, add a comment and advance its status.
 Open its Dashboard link, apply the Room filter, reopen the item and inspect the current responsible member and status.
-Compare a second Human in the same Tenant: direct reads and Human Work Item commands remain allowed. Compare the personal Dashboard projection separately; absence there is not denied access. Use a different Tenant for a Human denial and require not found without record disclosure. Separately test an Agent with no assignment, creation grant or explicit grant.
+Compare a second Human in the same Tenant: direct reads and Human Work Item commands remain allowed. Compare the personal Dashboard projection (`?scope=personal`) separately; absence there is not denied access (record if `scope=personal` unexpectedly returns all Tenant items as a backend defect). Use a different Tenant for a Human denial and require not found without record disclosure. Separately test an Agent with no assignment, creator grant, description/comment reference grant, or explicit grant.
 Archive only the owned item through its supported operation.
 
 **Pass:** Responsibility, status and comments persist without automatically creating a Local Run or a Task Room.
@@ -200,7 +200,7 @@ Task result links and ordinary item links resolve to their own identities.
 A missing item or denied link gives the actual unavailable state, not another item's cached details.
 
 **Evidence:** Retain mutation receipts, item IDs, before/after execution inventory, two identity reads and Dashboard screenshots.
-**Reuse:** `apps/teamhub/tests/integration/work_item_test.go`, the Work Item contract tests, and `apps/web/src/features/work-items/work-items-page.test.tsx`.
+**Reuse:** `apps/teamhub/tests/integration/work_item_test.go`, `apps/teamhub/tests/integration/work_item_comment_agent_test.go`, `apps/teamhub/internal/app/contract_routes_test.go`, and `apps/web/src/features/work-items/work-items-page.test.tsx`.
 
 ## External action failure and recovery
 
