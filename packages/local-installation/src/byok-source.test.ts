@@ -508,6 +508,83 @@ describe("restoreByokSource", () => {
     expect(args.at(-1)).toBe("--json");
     expect(args).not.toContain("--config-stdin");
     expect(options).not.toHaveProperty("input");
+    expect(options.restoreSavedByok).toBe(true);
+  });
+
+  it("uses normal source apply when no gateway URL was recorded", async () => {
+    const home = await makeHome();
+    await writeSource(home, byokSource(null));
+    const localmodels = vi.fn(ok);
+    await restoreByokSource(
+      home,
+      {
+        signal: new AbortController().signal,
+        onEvent: () => {},
+      },
+      { localmodels },
+    );
+    expect(localmodels).toHaveBeenCalledWith(
+      home,
+      expect.any(Array),
+      expect.objectContaining({ restoreSavedByok: false }),
+    );
+  });
+
+  it.each(["models.json", "settings.json"])(
+    "repairs a healthy gateway's managed Pi profile when %s is missing",
+    async (missing) => {
+      const home = await makeHome();
+      const profile = path.join(home, "pi");
+      await privateDirectory(profile);
+      await Promise.all(
+        ["models.json", "settings.json"].map((name) =>
+          fs.writeFile(path.join(profile, name), "{}"),
+        ),
+      );
+      await writeSource(home, {
+        ...byokSource(),
+        environment: { PI_CODING_AGENT_DIR: profile },
+      });
+      const localmodels = vi.fn(ok);
+      const options = {
+        signal: new AbortController().signal,
+        onEvent: () => {},
+      };
+      const dependencies = {
+        localmodels,
+        fetch: async () => new Response("ok"),
+      };
+      await restoreByokSource(home, options, dependencies);
+      expect(localmodels).not.toHaveBeenCalled();
+      await fs.unlink(path.join(profile, missing));
+      await restoreByokSource(home, options, dependencies);
+      expect(localmodels).toHaveBeenCalledExactlyOnceWith(
+        home,
+        expect.any(Array),
+        expect.objectContaining({ restoreSavedByok: true }),
+      );
+    },
+  );
+
+  it("reports a skipped recovery when the Computer switched model sources", async () => {
+    const home = await makeHome();
+    await writeSource(home, byokSource());
+    const onEvent = vi.fn();
+    await restoreByokSource(
+      home,
+      { signal: new AbortController().signal, onEvent },
+      {
+        fetch: async () => new Response(null, { status: 503 }),
+        localmodels: async () => ({
+          code: 0,
+          stdout: '{"restore":"skipped"}',
+          stderr: "",
+        }),
+      },
+    );
+    expect(onEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({ state: "skipped" }),
+    );
   });
 
   it("leaves a gateway that already answers alone", async () => {

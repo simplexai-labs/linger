@@ -81,6 +81,26 @@ func piCollect(t *testing.T, run *Run) ([]Event, Outcome) {
 	}
 }
 
+func TestPiUpstreamFailureCode(t *testing.T) {
+	// Pi 1.5.2 assistant errorMessage with Bifrost online and the BYOK endpoint offline.
+	const offline = `502: {"error":"dial tcp 127.0.0.1:61532: connect: connection refused","type":"provider_connection_failed","message":"failed to execute HTTP request to provider API"}`
+	for _, tc := range []struct{ name, status, failure, code string }{
+		{"upstream offline", statusFailed, offline, "network_error"},
+		{"different provider failure", statusFailed, `502: {"type":"other"}`, ""},
+		{"plain text", statusFailed, "502: Bad Gateway", ""},
+		{"different HTTP status", statusFailed, `401: {"type":"provider_connection_failed"}`, ""},
+		{"completed", statusCompleted, offline, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			turn := piTurn{proc: &piProcess{}}
+			out := turn.outcomeFor(time.Now(), tc.status, tc.failure)
+			if out.FailureCode != tc.code || out.Error != tc.failure {
+				t.Fatalf("failure code = %q, diagnostic = %q", out.FailureCode, out.Error)
+			}
+		})
+	}
+}
+
 func TestPiSessionLifecycle(t *testing.T) {
 	h := piNewHarness(t, "finish", nil)
 	if _, err := h.runtime.Start(t.Context(), "", RunSpec{PrepareOnly: true, Dir: h.dir}); err == nil {

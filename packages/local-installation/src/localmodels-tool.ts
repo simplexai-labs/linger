@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readdir, readFile, rm, chmod } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { x as extract } from "tar";
 import { downloadInRegion, resolveRegion } from "./region.js";
 import {
@@ -30,7 +31,10 @@ interface ToolManifest {
   moduleDir: string;
   assets: Record<string, string>;
 }
-type Options = ProcessOptions & { onEvent?: (event: InstallerEvent) => void };
+type Options = ProcessOptions & {
+  onEvent?: (event: InstallerEvent) => void;
+  restoreSavedByok?: boolean;
+};
 export function validateToolSource(value: unknown): LocalmodelsToolSource {
   const source = validatePublishedServiceSource(value);
   const extra = value as LocalmodelsToolSource;
@@ -606,15 +610,22 @@ async function runLocalmodelsCommand(
       });
     }
   };
-  const result = await run(
-    tool.python,
-    ["-P", "-s", "-m", "localmodels", ...args],
-    { ...options, cwd: tool.moduleDir, env, onOutput },
-  );
+  const entry = options.restoreSavedByok
+    ? [fileURLToPath(new URL("./restore-byok.py", import.meta.url))]
+    : ["-m", "localmodels"];
+  const result = await run(tool.python, ["-P", "-s", ...entry, ...args], {
+    ...options,
+    cwd: tool.moduleDir,
+    env,
+    onOutput,
+  });
   const seconds = (ms: number) => (ms / 1000).toFixed(1);
+  const operation = options.restoreSavedByok
+    ? "Saved BYOK gateway restore"
+    : `localmodels ${args.slice(0, 2).join(" ")}`;
   options.onEvent?.({
     kind: "log",
-    message: `localmodels ${args.slice(0, 2).join(" ")}: tool checked in ${seconds(checkedAt - startedAt)}s, ran in ${seconds(Date.now() - checkedAt)}s.\n`,
+    message: `${operation}: tool checked in ${seconds(checkedAt - startedAt)}s, ran in ${seconds(Date.now() - checkedAt)}s.\n`,
   });
   return result;
 }

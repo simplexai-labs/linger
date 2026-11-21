@@ -1,0 +1,25 @@
+name: BYOK restore
+on:
+  pull_request:
+    paths:
+      - apps/desktop/distribution/*.json
+      - packages/local-installation/**
+      - .github/workflows/byok-restore.yml
+permissions:
+  contents: read
+jobs:
+  restore:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          go: false
+      - run: pnpm --filter @linger/local-installation test:byok-kit

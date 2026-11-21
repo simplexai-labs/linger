@@ -192,11 +192,15 @@ that check and the quit-time stop share one lock per home
 `restoreByokSource` (`local-models.ts`) brings back a saved BYOK source's
 Bifrost gateway on every resume (warm, or a restart from the saved choice,
 which then prepares the saved runtime and no other source). Under the same
-lock, waiting as the restore check does, it skips a loopback gateway whose
-`/health` answers, otherwise runs `source apply` from the kit's saved
-configuration, so the key never passes through Node. Each re-mount sends
-the kit's one small probe request to the person's endpoint and adds a few
-seconds to a launch after a quit. A failure (`LOCAL_MODELS_BUSY` when the
+lock, it skips a healthy loopback gateway if the saved Pi profile, when
+configured, has both `models.json` and `settings.json`. For a recorded
+gateway, `restore-byok.py` uses the verified kit and saved credentials to
+mount the current BYOK route and regenerate the managed runtime profiles,
+including when upgrading an older route while the upstream is offline.
+If the Computer switched to another source during recovery, the installer marks the stage skipped.
+Missing or invalid source state is reported as a configuration error.
+If the base gateway configuration or matching ownership record is missing,
+the kit's `source apply` establishes the gateway again. A failure (`LOCAL_MODELS_BUSY` when the
 lock never frees) is logged and returned as `details.byokGateway`
 (`{ code, message }`) of a successful resume, so Linger still opens.
 
@@ -338,6 +342,10 @@ endpoint probe of up to about 35 s followed by Bifrost's health wait of up to
 keeps its 90 s wall clock. `prepareByokRuntime` logs elapsed time every 10 s while mounting
 the BYOK gateway (a log line, since the job appends and persists every stage
 event).
+
+The BYOK restore workflow runs `pnpm --filter @linger/local-installation test:byok-kit`
+against the platform distribution pin. It starts a disposable Bifrost, takes the
+upstream offline during resume, and verifies the next routed completion.
 
 Run `pnpm --filter @linger/local-installation check` (`make check-packages`
 runs it too); `make check-installer` runs its consumer, the installer, and

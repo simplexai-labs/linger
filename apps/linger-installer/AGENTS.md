@@ -61,8 +61,9 @@ whose Computer still uses the local model source (`model-source.json` says
 (`restoreLocalModels`), since a quit stops the models but not the services: a
 stack that is not ready gets the same restore, then becomes the model source
 again. A source switched to a subscription or BYOK leaves the stack stopped;
-a saved BYOK source gets its Bifrost gateway mounted again from the saved
-configuration unless it already answers (`restoreByokSource`), and a failure
+a saved BYOK source restores its recorded Bifrost gateway, upgrades its
+route and repairs missing managed Pi profile files even while the upstream
+endpoint is offline. A failure
 is logged and reported in the ready outcome's `details.byokGateway`
 without failing the resume.
 A failed installation records the stage that caused it, even when native

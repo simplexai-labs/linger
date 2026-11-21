@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 )
 
@@ -166,6 +167,15 @@ func (t *piTurn) finish(began time.Time, status, failure string, interrupted boo
 
 func (t *piTurn) outcomeFor(began time.Time, status, failure string) Outcome {
 	outcome := Outcome{Status: status, Error: failure, SessionID: t.proc.sessionID, TurnID: t.id}
+	// Pi carries Bifrost's structured provider error as "<HTTP status>: <JSON>".
+	if body, ok := strings.CutPrefix(failure, "502:"); status == statusFailed && ok {
+		var upstream struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal([]byte(body), &upstream) == nil && upstream.Type == "provider_connection_failed" {
+			outcome.FailureCode = "network_error"
+		}
+	}
 	t.mu.Lock()
 	outcome.Output = t.output
 	outcome.Usage, outcome.LastUsage = maps.Clone(t.usage), maps.Clone(t.lastUsage)

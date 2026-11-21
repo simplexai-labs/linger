@@ -1,9 +1,14 @@
 import { build } from "esbuild";
 import { build as buildWeb } from "vite";
 import path from "node:path";
+import { copyFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 await buildWeb({ configFile: path.join(root, "vite.config.ts"), root });
+await copyFile(
+  path.resolve(root, "../../packages/local-installation/src/restore-byok.py"),
+  path.join(root, "dist/restore-byok.py"),
+);
 await build({
   entryPoints: [
     path.resolve(

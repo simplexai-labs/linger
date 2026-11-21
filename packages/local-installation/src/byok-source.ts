@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import {
   isByokProtocol,
@@ -330,6 +331,7 @@ function applySource(
     signal: AbortSignal;
     timeoutMs?: number;
     idleTimeoutMs?: number;
+    restoreSavedByok?: boolean;
     input?: string;
     onEvent?: (event: InstallerEvent) => void;
   },
@@ -353,17 +355,7 @@ function applySource(
       ...(options.input === undefined ? [] : ["--config-stdin"]),
       "--json",
     ],
-    {
-      signal: options.signal,
-      ...(options.timeoutMs === undefined
-        ? {}
-        : { timeoutMs: options.timeoutMs }),
-      ...(options.idleTimeoutMs === undefined
-        ? {}
-        : { idleTimeoutMs: options.idleTimeoutMs }),
-      ...(options.onEvent ? { onEvent: options.onEvent } : {}),
-      ...(options.input === undefined ? {} : { input: options.input }),
-    },
+    options,
   );
 }
 
@@ -632,27 +624,37 @@ export interface ByokGatewayFailure {
 /**
  * Mounts a saved BYOK source on Bifrost again from the configuration
  * localmodels saved, so the key never passes through Node, unless its
- * loopback gateway already answers. The caller holds the local model lock,
+ * loopback gateway already answers and its managed Pi profile is present.
+ * The caller holds the local model lock,
  * so a quit-time stop cannot take the gateway down between the check and
  * the decision. Returns why it failed, without throwing, except for the
  * caller's abort.
  */
 export async function mountSavedByokSource(
   home: string,
-  source: { runtime: NativeRuntime; gatewayUrl: string | undefined },
+  source: {
+    runtime: NativeRuntime;
+    gatewayUrl: string | undefined;
+    environment: Record<string, string>;
+  },
   options: { signal: AbortSignal; onEvent: (event: InstallerEvent) => void },
   dependencies: {
     localmodels?: typeof runLocalmodels;
     fetch?: typeof fetch;
   } = {},
 ): Promise<ByokGatewayFailure | undefined> {
+  const piProfile = source.environment.PI_CODING_AGENT_DIR;
   if (
     source.gatewayUrl &&
     (await gatewayAnswers(
       source.gatewayUrl,
       options.signal,
       dependencies.fetch ?? fetch,
-    ))
+    )) &&
+    (!piProfile ||
+      ["models.json", "settings.json"].every((name) =>
+        existsSync(path.join(piProfile, name)),
+      ))
   )
     return undefined;
   options.signal.throwIfAborted();
@@ -665,15 +667,30 @@ export async function mountSavedByokSource(
   const fallback = "The BYOK gateway did not start.";
   let failure: InstallOutcome | undefined;
   try {
-    // The kit's apply probes the endpoint once (up to about 35 s) before
-    // Bifrost starts.
     const result = await applySource(
       home,
       "byok",
       source.runtime,
-      { signal: options.signal, timeoutMs: 90_000, onEvent: options.onEvent },
+      {
+        signal: options.signal,
+        timeoutMs: 90_000,
+        onEvent: options.onEvent,
+        restoreSavedByok: Boolean(source.gatewayUrl),
+      },
       dependencies.localmodels ?? runLocalmodels,
     );
+    if (
+      result.code === 0 &&
+      parseToolJson(result.stdout)?.restore === "skipped"
+    ) {
+      options.onEvent({
+        kind: "stage",
+        stage: "runtime",
+        state: "skipped",
+        message: "The active model source changed during BYOK recovery.",
+      });
+      return undefined;
+    }
     if (result.code !== 0)
       failure = sourceApplyFailure(
         result.stdout,

@@ -161,6 +161,9 @@ model.
   with that code; the model's next accepted job, or a row that moved on,
   drops them. They live in memory, so after a Daemon restart the row shows
   only its code.
+- Pi reports a BYOK gateway response with HTTP 502 and the structured error
+  type `provider_connection_failed` to the Room as `network_error`. The
+  runtime diagnostic retains the original error.
 - Pi. The Daemon sets `PI_CODING_AGENT_DIR` on `localmodels` tool calls
   through `OverlayEnvironment` and `workspace.PiSourceEnvironment` so loaded
   models land in the profile Pi probes and runs. When a model is loaded on a
