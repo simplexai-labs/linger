@@ -61,6 +61,7 @@ interface ImageNode {
 }
 interface MarkdownNode {
   type: string;
+  position?: { start: { offset?: number }; end: { offset?: number } };
   children?: MarkdownNode[];
   identifier?: string;
   url?: string;
@@ -75,6 +76,28 @@ function* markdownNodes(tree: Tree): Generator<MarkdownNode> {
     for (let i = children.length - 1; i >= 0; i--) pending.push(children[i]!);
   }
 }
+/** Rewrite only actual inline link source ranges, preserving every surrounding Markdown byte. */
+export function rewriteMarkdownLinkSources(
+  markdown: string,
+  rewrite: (linkSource: string) => string,
+): string {
+  const parts: string[] = [];
+  let offset = 0;
+  for (const node of markdownNodes(processor.parse(markdown))) {
+    if (node.type !== "link") continue;
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (start === undefined || end === undefined || start < offset) continue;
+    parts.push(
+      markdown.slice(offset, start),
+      rewrite(markdown.slice(start, end)),
+    );
+    offset = end;
+  }
+  parts.push(markdown.slice(offset));
+  return parts.join("");
+}
+
 function parse(snapshot: DocumentFileSnapshot) {
   if (snapshot.content.length > MAX_BYTES) throw invalid();
   return processor.parse(

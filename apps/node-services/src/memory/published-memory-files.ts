@@ -1,3 +1,4 @@
+import { rewriteMarkdownLinkSources } from "@linger/document-files";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -83,47 +84,49 @@ function memoryWikiFiles(
   for (const { page, content } of pages) {
     const dest = paths.get(page.path);
     if (!dest) continue;
-    const body = content.replace(
-      /(?<!!)(\[[^\]\n]*\]\()(<[^>]+>|[^\s)]+)(\s+["'][^)]*["'])?\)/gu,
-      (whole, start: string, href: string, title: string | undefined) => {
-        const url = href.replace(/^<|>$/gu, "");
-        if (/^(?:#|[a-z][a-z\d+.-]*:|\/\/)/iu.test(url)) return whole;
-        const split = url.search(/[?#]/u);
-        const name = split < 0 ? url : url.slice(0, split);
-        const suffix = split < 0 ? "" : url.slice(split);
-        if (!name) return whole;
-        const key = path.posix.normalize(
-          name.startsWith("/")
-            ? name.slice(1)
-            : path.posix.join(path.posix.dirname(page.path), name),
-        );
-        const other =
-          paths.get(key) ??
-          paths.get(key + ".md") ??
-          paths.get(path.posix.join(key, "index.md")) ??
-          directories.get(key) ??
-          directories.get(path.posix.join(key, "index.md"));
-        if (!other) {
-          // An unavailable capture has no readable local meeting page.
-          return key.startsWith("sessions/") ? start.slice(1, -2) : whole;
-        }
-        const relative =
-          path.posix.relative(path.posix.dirname(dest), other) || ".";
-        return (
-          start +
-          relative
-            .split("/")
-            .map((part) =>
-              encodeURIComponent(part)
-                .replaceAll("(", "%28")
-                .replaceAll(")", "%29"),
-            )
-            .join("/") +
-          (suffix ?? "") +
-          (title ?? "") +
-          ")"
-        );
-      },
+    const body = rewriteMarkdownLinkSources(content, (link) =>
+      link.replace(
+        /^(\[[\s\S]*\]\()(<[^>]+>|[^\s)]+)(\s+["'][^)]*["'])?\)$/u,
+        (whole, start: string, href: string, title: string | undefined) => {
+          const url = href.replace(/^<|>$/gu, "");
+          if (/^(?:#|[a-z][a-z\d+.-]*:|\/\/)/iu.test(url)) return whole;
+          const split = url.search(/[?#]/u);
+          const name = split < 0 ? url : url.slice(0, split);
+          const suffix = split < 0 ? "" : url.slice(split);
+          if (!name) return whole;
+          const key = path.posix.normalize(
+            name.startsWith("/")
+              ? name.slice(1)
+              : path.posix.join(path.posix.dirname(page.path), name),
+          );
+          const other =
+            paths.get(key) ??
+            paths.get(key + ".md") ??
+            paths.get(path.posix.join(key, "index.md")) ??
+            directories.get(key) ??
+            directories.get(path.posix.join(key, "index.md"));
+          if (!other) {
+            // An unavailable capture has no readable local meeting page.
+            return key.startsWith("sessions/") ? start.slice(1, -2) : whole;
+          }
+          const relative =
+            path.posix.relative(path.posix.dirname(dest), other) || ".";
+          return (
+            start +
+            relative
+              .split("/")
+              .map((part) =>
+                encodeURIComponent(part)
+                  .replaceAll("(", "%28")
+                  .replaceAll(")", "%29"),
+              )
+              .join("/") +
+            (suffix ?? "") +
+            (title ?? "") +
+            ")"
+          );
+        },
+      ),
     );
     files.set(dest, body);
   }

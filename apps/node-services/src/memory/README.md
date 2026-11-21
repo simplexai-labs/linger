@@ -929,3 +929,7 @@ Daily/Weekly are indexed after they are generated. Generation does not wait for 
 indexed at a time per process, and a database advisory lock serializes processes.
 
 Historical Wiki and Daily/Weekly rebuilds use the separate entry in "Production history rebuild".
+
+Publishing the readable Wiki rewrites only actual inline Markdown links. Code
+examples, escaped link syntax and literal unavailable-meeting references retain
+their original text; the existing link target and title rules still apply.
