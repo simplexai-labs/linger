@@ -5,6 +5,7 @@ import type {
   TeamHubLocalRuntimeType,
   TeamHubTenantAgent,
 } from "@/features/teamhub/teamhub-types";
+import { useT } from "@/i18n/use-translation";
 
 import {
   type AgentMoveTarget,
@@ -13,6 +14,7 @@ import {
   type LocalComputer,
   resolveModelOnRuntime,
 } from "./agent-move-target";
+import { withDisambiguatedModelLabels } from "./use-agent-model-selection";
 
 /** The Computer, Runtime, model, and reasoning an Agent's Runtime settings
  * change to. Choosing another Computer applies the move defaults: the current
@@ -22,6 +24,7 @@ export function useAgentMoveTarget(
   registration: TeamHubTenantAgent,
   computers: readonly LocalComputer[] | undefined,
 ) {
+  const t = useT();
   const current = registration.runtime.placement;
   const currentComputerId = current?.computer_id ?? "";
   const [computerId, setComputerId] = useState(currentComputerId);
@@ -43,7 +46,10 @@ export function useAgentMoveTarget(
           (item) => item.grant_id === current?.workspace_grant_id,
         );
   const runtime = computer?.runtimes.find((item) => item.type === runtimeType);
-  const modelOptions = runtime?.status === "ready" ? runtime.models : [];
+  const modelOptions =
+    runtime?.status === "ready"
+      ? withDisambiguatedModelLabels(runtime.models, t)
+      : [];
   // A Runtime chosen before it was ready has no model yet; once the Computer
   // reports it ready, it gets the model it would have had if chosen then.
   const model =

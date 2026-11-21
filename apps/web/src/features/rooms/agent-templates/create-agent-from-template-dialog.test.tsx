@@ -353,6 +353,71 @@ describe("CreateAgentFromTemplateDialog", () => {
       await screen.findByRole("list", { name: "Official templates" }),
     ).toBeVisible();
   });
+
+  it("disambiguates duplicate model display labels in the template setup model picker", async () => {
+    const { createAgent } = await renderDialog((runtime) => {
+      runtime.server.on(
+        "GET",
+        "/v0/tenants/{tenantId}/local-computers",
+        () => ({
+          items: [
+            {
+              active_operations: 0,
+              computer_id: "computer-jenny-mac",
+              display_name: "Jenny's Mac",
+              status: "online",
+              upgrade_required: false,
+              workspace_grants: [
+                {
+                  grant_id: "grant-linger-workspace",
+                  label: "Workspace",
+                  mode: "workspace-write",
+                },
+              ],
+              runtimes: [
+                {
+                  type: "claude",
+                  status: "ready",
+                  models: [
+                    { id: "server/group/wb-gpt-5.5", label: "WorkBuddy Site" },
+                    { id: "server/group/wb-glm-5.3", label: "WorkBuddy Site" },
+                    { id: "claude-sonnet-4", label: "Claude Sonnet 4" },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      );
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Code Reviewer/ }),
+    );
+    const model = await screen.findByRole("combobox", { name: "Agent model" });
+    await waitFor(() =>
+      expect(model).toHaveTextContent(
+        "WorkBuddy Site (server/group/wb-gpt-5.5)",
+      ),
+    );
+    fireEvent.click(model);
+    expect(
+      await screen.findByRole("option", { name: "Claude Sonnet 4" }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("option", {
+        name: "WorkBuddy Site (server/group/wb-glm-5.3)",
+      }),
+    );
+    const submit = screen.getByRole("button", { name: "Create Agent" });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(createAgent).toHaveBeenCalledOnce());
+    const input = createAgent.mock.calls[0]?.[0]
+      .body as TeamHubTenantAgentCreateInput;
+    expect(input.runtime.model).toBe("server/group/wb-glm-5.3");
+  });
 });
 
 async function renderDialog(

@@ -15,11 +15,97 @@ import type {
 import { composerMessages } from "../chat/composer.messages";
 import { runtimeModelLabel } from "./runtime-model-label";
 
-interface RuntimeModel {
+export interface RuntimeModelLabelEntry {
   id: string;
   label: string;
+}
+
+interface RuntimeModel extends RuntimeModelLabelEntry {
   allowed_reasoning_effort?: readonly TeamHubAgentReasoningEffort[];
   default_reasoning_effort?: TeamHubAgentReasoningEffort;
+}
+
+function baseRuntimeModelLabel(
+  model: RuntimeModelLabelEntry,
+  t: Translate = translate,
+): string {
+  return runtimeModelLabel(model, t).trim() || model.id;
+}
+
+/**
+ * Builds unique display labels for one Runtime's model catalog, appending
+ * `(<id>)` when two or more distinct model IDs resolve to the same label and
+ * resolving any secondary collisions introduced by a suffix.
+ */
+export function runtimeModelLabels(
+  models: readonly RuntimeModelLabelEntry[],
+  t: Translate = translate,
+): Map<string, string> {
+  const uniqueIds: string[] = [];
+  const resolved = new Map<string, string>();
+  for (const model of models) {
+    if (!resolved.has(model.id)) {
+      uniqueIds.push(model.id);
+      resolved.set(model.id, baseRuntimeModelLabel(model, t));
+    }
+  }
+
+  for (let pass = 0; pass < uniqueIds.length; pass += 1) {
+    const idsByLabel = new Map<string, string[]>();
+    for (const id of uniqueIds) {
+      const label = resolved.get(id) ?? id;
+      let ids = idsByLabel.get(label);
+      if (!ids) {
+        ids = [];
+        idsByLabel.set(label, ids);
+      }
+      ids.push(id);
+    }
+
+    let hadCollision = false;
+    for (const [label, ids] of idsByLabel) {
+      if (ids.length <= 1) continue;
+      hadCollision = true;
+      let changed = false;
+      for (const id of ids) {
+        if (label !== id && !label.endsWith(` (${id})`)) {
+          resolved.set(id, `${label} (${id})`);
+          changed = true;
+        }
+      }
+      if (!changed) {
+        for (const id of ids) {
+          resolved.set(id, id);
+        }
+      }
+    }
+
+    if (!hadCollision) break;
+  }
+
+  return resolved;
+}
+
+/** Returns Runtime model entries with disambiguated display labels. */
+export function withDisambiguatedModelLabels<T extends RuntimeModelLabelEntry>(
+  models: readonly T[],
+  t: Translate = translate,
+): T[] {
+  const labels = runtimeModelLabels(models, t);
+  return models.map((model) => ({
+    ...model,
+    label: labels.get(model.id) ?? model.id,
+  }));
+}
+
+/** Resolves one model's display label within its Runtime's model catalog. */
+export function resolveRuntimeModelLabel(
+  models: readonly RuntimeModelLabelEntry[] | undefined,
+  modelId: string | undefined,
+  t: Translate = translate,
+): string | undefined {
+  if (!models || !modelId) return undefined;
+  return runtimeModelLabels(models, t).get(modelId);
 }
 
 /** The model and reasoning effort of a new Agent, chosen among the models the
@@ -43,11 +129,12 @@ export function useAgentModelSelection(models: readonly RuntimeModel[]) {
   )
     ? (requestedReasoningEffort as TeamHubAgentReasoningEffort)
     : defaultReasoningEffort;
+  const labels = runtimeModelLabels(models, t);
 
   return {
-    items: models.map((item) => ({
-      value: item.id,
-      label: runtimeModelLabel(item, t),
+    items: models.map(({ id }) => ({
+      value: id,
+      label: labels.get(id) ?? id,
     })),
     model: selectedModel?.id ?? "",
     reasoningEffort,
@@ -103,11 +190,14 @@ export function useResolvedAgentModelLabel(
     ...localComputersQueryOptions(client, tenantId),
     enabled: Boolean(computerId),
   });
-  const catalogModel = computers.data?.items
+  const runtimeModels = computers.data?.items
     .find((item) => item.computer_id === computerId)
-    ?.runtimes.find((item) => item.type === placement?.runtime_type)
-    ?.models.find((item) => item.id === runtime?.model);
-  const catalogLabel = catalogModel && runtimeModelLabel(catalogModel, t);
+    ?.runtimes.find((item) => item.type === placement?.runtime_type)?.models;
+  const catalogLabel = resolveRuntimeModelLabel(
+    runtimeModels,
+    runtime?.model,
+    t,
+  );
   const localModels = useQuery({
     ...localModelsQueryOptions(client, tenantId, computerId ?? ""),
     enabled: Boolean(

@@ -998,6 +998,60 @@ describe("quick Local Agent creation", () => {
     const [first, retry] = await directRoomOpenings(runtime);
     expect(retry).toEqual(first);
   });
+
+  it("disambiguates duplicate model display labels in the local agent model picker", async () => {
+    const runtime = await testRuntime();
+    const inventory =
+      await runtime.client.listTenantLocalComputers("tenant-northstar");
+    const computer = inventory.items[0]!;
+    vi.spyOn(runtime.client, "listTenantLocalComputers").mockResolvedValue({
+      items: [
+        {
+          ...computer,
+          runtimes: [
+            {
+              ...computer.runtimes[0]!,
+              type: "claude",
+              status: "ready",
+              models: [
+                { id: "server/group/wb-gpt-5.5", label: "WorkBuddy Site" },
+                { id: "server/group/wb-glm-5.3", label: "WorkBuddy Site" },
+                { id: "claude-sonnet-4", label: "Claude Sonnet 4" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const create = agentCreations(runtime);
+    renderCreation(runtime, "local");
+    fireEvent.click(
+      await screen.findByRole("combobox", { name: "Local Computer" }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "Jenny's Mac" }));
+    const model = screen.getByRole("combobox", { name: "Model" });
+    expect(model).toHaveTextContent("WorkBuddy Site (server/group/wb-gpt-5.5)");
+    fireEvent.click(model);
+    expect(
+      await screen.findByRole("option", { name: "Claude Sonnet 4" }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("option", {
+        name: "WorkBuddy Site (server/group/wb-glm-5.3)",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await screen.findByText("Agent chat ready");
+    expect(await create.call(0)).toEqual({
+      tenantId: "tenant-northstar",
+      body: expect.objectContaining({
+        runtime: expect.objectContaining({
+          model: "server/group/wb-glm-5.3",
+          placement: expect.objectContaining({ runtime_type: "claude" }),
+        }),
+      }),
+    });
+  });
 });
 
 async function chooseLocalRuntime(name = "Jenny's Mac") {
