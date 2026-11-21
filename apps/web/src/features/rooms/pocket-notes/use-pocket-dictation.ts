@@ -43,7 +43,8 @@ export function usePocketDictation({
   // Dictation transcribes with Soniox. A deployment that runs voice offers it
   // before the key exists; older servers only once Soniox is configured.
   const policy = useVoiceMediaPolicy(tenantId, Boolean(roomId));
-  const supported = policy?.voice_media_supported === true;
+  const supported =
+    (policy?.dictation_supported ?? policy?.voice_media_supported) === true;
   const offered = policy?.voice_available ?? supported;
   const [state, setState] = useState(idle);
   const [level, setLevel] = useState(0);

@@ -41,6 +41,32 @@ the keys against replacement from the app.
   `ffmpeg` and `ffprobe` on `PATH`. Without `livekit-server` on `PATH`,
   `pnpm dev` says so and voice cannot connect.
 
+### Transcribing on this computer
+
+Dictation can run without a Soniox account. Set `VOICE_LOCAL_ASR=on` and point
+`VOICE_LOCAL_ASR_MODEL_DIR` at an extracted
+[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) streaming zipformer
+directory; the bilingual model below is Apache-2.0 and runs on the CPU at about
+25 times realtime on two threads.
+
+```bash
+mkdir -p "$HOME/.local/share/linger/models"
+curl -L -o /tmp/zipformer.tar.bz2 \
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2
+tar xjf /tmp/zipformer.tar.bz2 -C "$HOME/.local/share/linger/models"
+export VOICE_LOCAL_ASR=on
+export VOICE_LOCAL_ASR_MODEL_DIR="$HOME/.local/share/linger/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
+```
+
+A Soniox key, when present, keeps transcription on Soniox; the local engine
+serves dictation only. Recording still needs Soniox because only it labels
+speakers, and a local transcript has no punctuation or casing.
+
+`sherpa-onnx-node` is an optional dependency of `@linger/voice-runtime`. The
+published build targets a newer C++ runtime than Ubuntu 22.04 provides, so the
+dependency is pinned to 1.12.14; a platform without a loadable build keeps
+dictation on Soniox.
+
 A Native installation's LiveKit and ffmpeg listen on `127.0.0.1` only (one TCP
 port for signalling, one UDP port for media), so no media leaves the computer
 except to the speech services (Soniox, xAI) and the voice model Node Services

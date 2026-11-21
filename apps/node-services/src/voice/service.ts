@@ -34,18 +34,36 @@ export interface VoiceWorkerSpawn {
   readonly env: NodeJS.ProcessEnv;
 }
 
-/** Soniox runs transcription and recording; xAI runs Live on its own. */
+/** A worker runs with one provider key, or locally without any key. */
+export type VoiceWorkerBinding =
+  | { readonly kind: "key"; readonly variable: string; readonly key: string }
+  | { readonly kind: "local" };
+
+/**
+ * Soniox runs transcription and recording; xAI runs Live on its own. Without a
+ * Soniox key, an enabled local engine runs the ASR worker for dictation;
+ * recording still needs Soniox because it diarizes speakers.
+ */
 export function workerKeys(
   keys: ProviderKeys,
-): Map<VoiceWorker, { variable: string; key: string }> {
+  localAsr: boolean,
+): Map<VoiceWorker, VoiceWorkerBinding> {
   const soniox = keys.soniox_api_key?.trim();
   const xai = keys.xai_api_key?.trim();
-  const workers = new Map<VoiceWorker, { variable: string; key: string }>();
+  const workers = new Map<VoiceWorker, VoiceWorkerBinding>();
   if (soniox) {
-    workers.set("asr", { variable: "SONIOX_API_KEY", key: soniox });
-    workers.set("recorder", { variable: "SONIOX_API_KEY", key: soniox });
+    const binding = {
+      kind: "key",
+      variable: "SONIOX_API_KEY",
+      key: soniox,
+    } as const;
+    workers.set("asr", binding);
+    workers.set("recorder", binding);
+  } else if (localAsr) {
+    workers.set("asr", { kind: "local" });
   }
-  if (xai) workers.set("live", { variable: "XAI_API_KEY", key: xai });
+  if (xai)
+    workers.set("live", { kind: "key", variable: "XAI_API_KEY", key: xai });
   return workers;
 }
 
@@ -168,8 +186,8 @@ export async function startVoiceService(options: {
   const entries = new Map<
     VoiceWorker,
     {
-      /** The key this worker should run with; absent means stopped. */
-      key?: { variable: string; key: string };
+      /** The binding this worker should run with; absent means stopped. */
+      binding?: VoiceWorkerBinding;
       digest?: string;
       generation: number;
       child?: ChildProcess;
@@ -214,8 +232,8 @@ export async function startVoiceService(options: {
   };
   const start = (worker: VoiceWorker) => {
     const entry = entries.get(worker)!;
-    const key = entry.key;
-    if (stopping || !key) return;
+    const binding = entry.binding;
+    if (stopping || !binding) return;
     const generation = entry.generation;
     const current = () => !stopping && generation === entry.generation;
     const startedAt = Date.now();
@@ -238,9 +256,9 @@ export async function startVoiceService(options: {
       return;
     }
     allocatePort().then((port) => {
-      if (current()) spawnWorker(port, key);
+      if (current()) spawnWorker(port, binding);
     }, restart);
-    function spawnWorker(port: number, key: { variable: string; key: string }) {
+    function spawnWorker(port: number, binding: VoiceWorkerBinding) {
       const workerEntry = fileURLToPath(
         import.meta.resolve("@linger/voice-runtime/worker"),
       );
@@ -262,7 +280,9 @@ export async function startVoiceService(options: {
             ...modelPath,
             SONIOX_API_KEY: "",
             XAI_API_KEY: "",
-            [key.variable]: key.key,
+            ...(binding.kind === "key"
+              ? { [binding.variable]: binding.key }
+              : {}),
             TEAMHUB_BASE_URL: config.teamHubBaseUrl,
             VOICE_WORKER_PORT: String(port),
           },
@@ -290,23 +310,27 @@ export async function startVoiceService(options: {
     }
   };
   const apply = (keys: ProviderKeys) => {
-    const wanted = workerKeys(keys);
+    const wanted = workerKeys(keys, config.localAsr);
     for (const worker of VOICE_WORKERS) {
       const entry = entries.get(worker)!;
-      const key = wanted.get(worker);
-      const digest = key ? sha256Hex(key.key) : undefined;
+      const binding = wanted.get(worker);
+      const digest = !binding
+        ? undefined
+        : binding.kind === "local"
+          ? "local"
+          : sha256Hex(binding.key);
       // An unchanged key leaves a running, restarting or installing worker alone.
       if (digest === entry.digest) continue;
       entry.generation += 1;
       const generation = entry.generation;
       clearTimeout(entry.retry);
       entry.retry = undefined;
-      entry.key = key;
+      entry.binding = binding;
       entry.digest = digest;
       entry.failures = 0;
       options.logger.log("info", "voice.worker_reconciled", {
         worker,
-        action: !key ? "stop" : entry.child ? "replace" : "start",
+        action: !binding ? "stop" : entry.child ? "replace" : "start",
       });
       const child = entry.child;
       if (!child) {
@@ -360,7 +384,7 @@ export async function startVoiceService(options: {
   void reconcile();
   const poll = setInterval(() => void reconcile(), VOICE_RECONCILE_POLL_MS);
   const wantedWorkers = () =>
-    VOICE_WORKERS.filter((worker) => entries.get(worker)!.key);
+    VOICE_WORKERS.filter((worker) => entries.get(worker)!.binding);
   const workersReady = async () =>
     (
       await Promise.all(

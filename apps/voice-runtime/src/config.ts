@@ -7,6 +7,8 @@ export interface VoiceRuntimeConfig {
   teamhubBaseUrl: string;
   teamhubToken: string;
   sonioxApiKey: string;
+  /** An extracted streaming zipformer directory; empty keeps Soniox. */
+  localAsrModelDir: string;
   xaiApiKey: string;
   xaiLiveWebSocketUrl: string;
   xaiLiveAudioTransport?: "binary" | "json";
@@ -62,6 +64,7 @@ export const loadConfig = (
     // Each provider key turns on only its own workers: Soniox transcribes,
     // xAI runs Live.
     sonioxApiKey: env.SONIOX_API_KEY?.trim() ?? "",
+    localAsrModelDir: env.VOICE_LOCAL_ASR_MODEL_DIR?.trim() ?? "",
     xaiApiKey: env.XAI_API_KEY?.trim() ?? "",
     xaiLiveWebSocketUrl:
       env.VOICE_RUNTIME_XAI_LIVE_WEBSOCKET_URL?.trim() ||

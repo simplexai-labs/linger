@@ -129,6 +129,16 @@ describe("Pocket Note dictation session lifecycle", () => {
 describe("Pocket Note dictation availability", () => {
   it.each([
     [{ voice_available: true, voice_media_supported: false }, true, true],
+    // A local transcription engine enables dictation without a Soniox key.
+    [
+      {
+        voice_available: true,
+        voice_media_supported: false,
+        dictation_supported: true,
+      },
+      true,
+      false,
+    ],
     [{ voice_available: false, voice_media_supported: false }, false, true],
     // Older servers do not send voice_available.
     [{ voice_media_supported: false }, false, true],

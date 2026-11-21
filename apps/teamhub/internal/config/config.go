@@ -126,6 +126,12 @@ type VoiceConfig struct {
 	// off whatever keys exist; without LINGER_SECRET_SEED or ffmpeg the App
 	// runs with voice off too.
 	MediaEnabled bool
+	// LocalASR is VOICE_LOCAL_ASR: whether dictation transcribes on this
+	// computer through a local engine instead of Soniox. The voice runtime
+	// reads the same variable with VOICE_LOCAL_ASR_MODEL_DIR; TeamHub reads
+	// it only to report dictation as available, because recording still
+	// needs Soniox.
+	LocalASR bool
 	// XaiAPIKey is the deployment's xAI key for Live. It wins over a key saved
 	// in the product, which then cannot be saved.
 	XaiAPIKey string
@@ -158,6 +164,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := applyVoiceMedia(&cfg); err != nil {
+		return Config{}, err
+	}
+	if err := applyVoiceLocalASR(&cfg); err != nil {
 		return Config{}, err
 	}
 	if err := applyDerivedCredentials(&cfg); err != nil {
@@ -480,6 +489,20 @@ func applyVoiceMedia(cfg *Config) error {
 		cfg.Voice.MediaEnabled = false
 	default:
 		return errors.New("TEAMHUB_VOICE_MEDIA must be on or off")
+	}
+	return nil
+}
+
+// applyVoiceLocalASR reads VOICE_LOCAL_ASR; unset keeps dictation on Soniox.
+func applyVoiceLocalASR(cfg *Config) error {
+	switch strings.TrimSpace(os.Getenv("VOICE_LOCAL_ASR")) {
+	case "":
+	case "on":
+		cfg.Voice.LocalASR = true
+	case "off":
+		cfg.Voice.LocalASR = false
+	default:
+		return errors.New("VOICE_LOCAL_ASR must be on or off")
 	}
 	return nil
 }

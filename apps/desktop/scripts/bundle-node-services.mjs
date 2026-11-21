@@ -30,6 +30,10 @@ export const NODE_SERVICES_EXTERNALS = [
   "officeparser",
   // Development only: source files register it when they run as .ts.
   "tsx",
+  // Dictation's optional native engine: the addon locates its per-platform
+  // package and shared libraries beside its own directory.
+  "sherpa-onnx-node",
+  "sherpa-onnx-*",
 ];
 
 const NODE_SERVICES_ENTRIES = [
