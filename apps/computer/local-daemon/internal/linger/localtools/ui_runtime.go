@@ -284,7 +284,11 @@ func (u *uiExecution) dispatch(ctx context.Context, call uiruntime.Call) (json.R
 		return nil, errors.New("UI action was not dispatched: permission review exhausted the response budget")
 	}
 	u.receipts[index].Status = "dispatched"
-	result, err := u.rpc(ctx, endpoint, "tools/call", map[string]any{"name": name, "arguments": call.Arguments})
+	params := localToolCall{Name: name, Arguments: call.Arguments}
+	if call.FullBrowserSnapshot {
+		params.Metadata = &localToolCallMetadata{FullBrowserSnapshot: true}
+	}
+	result, err := u.rpc(ctx, endpoint, "tools/call", params)
 	if err != nil {
 		if errors.Is(err, errNotSent) {
 			u.receipts[index].Status = "not_dispatched"

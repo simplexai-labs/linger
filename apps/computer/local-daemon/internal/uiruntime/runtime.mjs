@@ -94,7 +94,7 @@ evaluate(
     catch { return 'UI script failed'; }
   };
   const revisions = {browser:0, computer:0};
-  const call = (owner, namespace, method, args) => {
+  const call = (owner, namespace, method, args, fullBrowserSnapshot) => {
     if (owner !== epoch || !active || completed) return Promise.reject(new Error('UI execution is not active'));
     // Serialize before taking an ID: a thrown argument must not leave a gap
     // in the call sequence that the Daemon validates.
@@ -106,7 +106,7 @@ evaluate(
     if (namespace === 'browser' || namespace === 'computer') ++revisions[namespace];
     const id = next;
     const promise = new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
-    queue.push({ type: 'call', id, namespace, method, arguments: argumentsValue });
+    queue.push({ type: 'call', id, namespace, method, arguments: argumentsValue, fullBrowserSnapshot });
     return promise;
   };
   const namespace = (owner, name) => new Proxy(Object.create(null), {
@@ -121,6 +121,9 @@ evaluate(
       return result.content.filter(part => part.type === 'text').map(part => part.text).join('\\n');
     },
     ref(snapshot, role, name) {
+      if (snapshot?._meta?.['linger/browserSnapshotDiff'] === true) {
+        throw new Error('ui.ref requires a full snapshot. Pass the result of ui.browser.snapshot({}).');
+      }
       const prefix = '- ' + role + ' ' + stringify(name) + ' ';
       const refs = [];
       for (const line of this.text(snapshot).split('\\n')) {
@@ -150,7 +153,7 @@ evaluate(
       const view = (snapshot, revision) => {
         const act = async (method, argumentsForView) => {
           if (revision !== revisions.browser) throw new Error('Page observation expired; observe again');
-          const pending = b[method](argumentsForView());
+          const pending = call(owner, 'browser', method, argumentsForView(), true);
           const nextRevision = revisions.browser;
           const result = await pending;
           if (nextRevision !== revisions.browser) throw new Error('Page changed during action; observe again');

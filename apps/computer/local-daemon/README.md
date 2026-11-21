@@ -399,10 +399,12 @@ a named window and check its title. `await target.observe()` returns the visible
 text and actions. Call `view.click(role, name)` on that observation and use its
 returned view for the next step. A newer driver call in the same namespace
 expires the previous observation. In a browser, `view.fill(fields)` resolves
-all named fields against one observation before sending the driver call. If an
-action has no browser snapshot, the helper obtains one. Use `ui.help("browser")`
-or `ui.help("computer")` for the underlying methods. `ui.emit(result)` selects
-text or native images for the model; the script receives opaque image handles.
+all named fields against one observation before sending the driver call. Browser
+view actions request a complete readback in the action result, so the returned
+view can resolve controls. If Playwright sends no snapshot, the helper obtains
+one. Use `ui.help("browser")` or `ui.help("computer")` for the underlying methods.
+`ui.emit(result)` selects text or native images for the model; the script
+receives opaque image handles.
 
 The public tool allows ten minutes. The default script budget is 165 seconds,
 with up to nine minutes per call. Nested calls reserve time to return their
@@ -412,9 +414,15 @@ returned receipts and current state before taking another action.
 
 After actions such as click and type, Playwright
 writes the page snapshot to a file and returns only a link; the Daemon reads the
-file, puts the snapshot back into the result and deletes the file, so the model
-need not call `browser_snapshot` again. Only links under `.linger/browser-output/`
-are replaced.
+file and deletes it. Raw `ui.browser` actions can return a shorter diff against
+the last full read of the same page. Added and removed branches include their
+parent when it has a ref. A navigation, a tab change, or a change that needs
+more context results in a full snapshot. Call `browser_snapshot` without
+arguments for the full page. Pass a full browser snapshot to `ui.ref` to look
+up a unique control. If an action returns a diff, read
+`ui.browser.snapshot({})` before looking up the control. A snapshot of a
+target or limited depth leaves the full-page baseline intact. Only links
+under `.linger/browser-output/` are replaced.
 
 A Codex Context home receives the public entry as a URL server in its projected
 `config.toml`, together with `mcp_oauth_credentials_store = "file"`. Codex

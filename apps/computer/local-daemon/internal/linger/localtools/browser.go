@@ -146,6 +146,7 @@ func (op *operation) nativeBrowserCall(ctx context.Context, name string, args js
 			confirmed = !errors.Is(err, mcpproxy.ErrCleanupUnconfirmed)
 			return nil, err
 		}
+		op.browserObservations = browserObservations{}
 	}
 	result, err := op.requestBrowser(ctx, name, args)
 	confirmed = !errors.Is(err, errOutcomeUnknown)
@@ -166,6 +167,7 @@ func (op *operation) userChromeCall(ctx context.Context, chrome *browserConnecti
 		session, err := op.manager.checkoutUserChrome(ctx, op, chrome)
 		if session != nil {
 			op.browser, op.userChromeSession = session.client, session
+			op.browserObservations = browserObservations{}
 		}
 		if err != nil {
 			*confirmed = !errors.Is(err, mcpproxy.ErrCleanupUnconfirmed)
@@ -554,8 +556,7 @@ var snapshotLink = regexp.MustCompile(`### Snapshot\n- \[Snapshot\]\(([^)\n]+\.y
 
 // requestBrowser calls one Playwright tool. After an action, Playwright
 // saves the page snapshot to a file and links it. The result carries the
-// snapshot itself instead, so the model sees the changed page without
-// spending a call on browser_snapshot.
+// page observation itself so the model can continue from that read.
 func (op *operation) requestBrowser(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
 	result, err := op.browser.request(ctx, "tools/call", map[string]any{"name": name, "arguments": args})
 	if err != nil {
@@ -567,7 +568,8 @@ func (op *operation) requestBrowser(ctx context.Context, name string, args json.
 	}
 	result = inlineSnapshot(result, op.spec.WorkingDirectory, output)
 	op.pages.observe(result)
-	return result, nil
+	fullSnapshot := ctx.Value(fullBrowserSnapshotKey{}) == true
+	return op.browserObservations.observeAction(name, args, result, output, fullSnapshot), nil
 }
 
 // inlineSnapshot replaces a snapshot link with the file's text and removes
