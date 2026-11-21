@@ -143,9 +143,16 @@ export async function readWorkspaceText(
     try {
       const stat = await file.stat();
       if (!stat.isFile() || stat.size > maxBytes) return undefined;
-      const buffer = Buffer.alloc(maxBytes + 1);
+      let buffer = Buffer.allocUnsafe(Math.min(stat.size + 1, maxBytes + 1));
       let size = 0;
-      while (size < buffer.length) {
+      while (size <= maxBytes) {
+        if (size === buffer.length) {
+          const expanded = Buffer.allocUnsafe(
+            Math.min(buffer.length * 2, maxBytes + 1),
+          );
+          buffer.copy(expanded, 0, 0, size);
+          buffer = expanded;
+        }
         const { bytesRead } = await file.read(
           buffer,
           size,

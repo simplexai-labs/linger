@@ -929,3 +929,10 @@ Daily/Weekly are indexed after they are generated. Generation does not wait for 
 indexed at a time per process, and a database advisory lock serializes processes.
 
 Historical Wiki and Daily/Weekly rebuilds use the separate entry in "Production history rebuild".
+
+## Bounded source reads
+
+Workspace source reads allocate from the file's observed size instead of the
+maximum source budget. A file that grows after inspection is read through bounded
+buffer growth, including one byte beyond the configured limit to detect overflow.
+Only bytes actually read become text, so truncation cannot expose unused capacity.
