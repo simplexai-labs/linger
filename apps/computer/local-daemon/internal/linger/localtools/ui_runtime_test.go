@@ -118,6 +118,68 @@ func (f *uiRuntimeFixture) execute(t *testing.T, code string) json.RawMessage {
 	return f.rpc(t, t.Context(), "tools/call", map[string]any{"name": "ui_exec", "arguments": map[string]any{"code": code, "timeout_ms": 30000}})
 }
 
+func TestUnifiedUIPageUsesActionReadbackAndRawBrowserCanCompact(t *testing.T) {
+	const tree = "- main [ref=e1]:\n  - button \"Open\" [ref=e2]\n  - button \"Next\" [ref=e3]"
+	active := strings.Replace(tree, "[ref=e3]", "[active] [ref=e3]", 1)
+	dialog := active + "\n  - dialog \"Confirm\" [ref=e4]:\n    - button \"Close\" [ref=e5]"
+	var observations browserObservations
+	var calls atomic.Uint32
+	want := []struct {
+		name string
+		args string
+		full bool
+		tree string
+	}{
+		{"browser_snapshot", `{}`, false, tree},
+		{"browser_click", `{"target":"e2"}`, true, strings.Replace(tree, "[ref=e2]", "[active] [ref=e2]", 1)},
+		{"browser_click", `{"target":"e3"}`, true, active},
+		{"browser_click", `{"target":"e3"}`, false, active},
+		{"browser_click", `{"target":"e3"}`, false, dialog},
+		{"browser_snapshot", `{}`, false, dialog},
+	}
+	f := newUIRuntimeFixture(t, false, func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
+		index := calls.Add(1) - 1
+		if index >= uint32(len(want)) {
+			return nil, errors.New("unexpected extra browser call")
+		}
+		expected := want[index]
+		full := ctx.Value(fullBrowserSnapshotKey{}) == true
+		if name != expected.name || string(args) != expected.args || full != expected.full {
+			t.Errorf("call %d = %s %s full=%v, want %+v", index, name, args, full, expected)
+			return nil, errors.New("unexpected browser call")
+		}
+		text := snapshotPage("https://shop.example/cart", "Cart", withShopNavigation(expected.tree))
+		return observations.observeAction(name, args, browserResult(t, text), "", full), nil
+	})
+	clear, err := f.set.RegisterToolReviewer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear()
+	got := f.execute(t, `const page = await ui.page(); const initial = await page.observe();
+const opened = await initial.click("button", "Open");
+const next = await opened.click("button", "Next");
+const raw = await ui.browser.click({target:"e3"});
+const changed = await ui.browser.click({target:"e3"});
+let lookup;
+try { lookup = ui.ref(changed, "button", "Close"); }
+catch (error) { lookup = error.message; }
+const snapshot = await ui.browser.snapshot({});
+return {
+  fullView: opened.text.includes('button "Next"') && next.text.includes('### Snapshot\n'),
+  unchanged: ui.text(raw).includes('### Snapshot diff\nno_change'),
+  nestedDiff: ui.text(changed).includes('+ - dialog "Confirm" [ref=e4]:\n      - button "Close" [ref=e5]'),
+  lookup,
+  fullRef: ui.ref(snapshot, "button", "Close"),
+};`)
+	if !strings.Contains(string(got), `"fullView":true`) || !strings.Contains(string(got), `"unchanged":true`) ||
+		!strings.Contains(string(got), `"nestedDiff":true`) || !strings.Contains(string(got), `"fullRef":"e5"`) ||
+		!strings.Contains(string(got), `"lookup":"ui.ref requires a full snapshot. Pass the result of ui.browser.snapshot({})."`) ||
+		calls.Load() != uint32(len(want)) {
+		t.Fatalf("browser actions did not use their own readback: %s (%d calls)", got, calls.Load())
+	}
+}
+
 func TestUnifiedUIStateImagesAndPrivateCapabilities(t *testing.T) {
 	var calls atomic.Int32
 	f := newUIRuntimeFixture(t, false, func(_ context.Context, name string, _ json.RawMessage) (json.RawMessage, error) {

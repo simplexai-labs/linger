@@ -197,8 +197,9 @@ type operation struct {
 	userChromeRejected atomic.Bool
 	// browserCalls admits one browser call of this Operation at a time; see
 	// holdBrowserCalls.
-	browserCalls     chan struct{}
-	browserCallsOnce sync.Once
+	browserCalls        chan struct{}
+	browserCallsOnce    sync.Once
+	browserObservations browserObservations
 	// profileMu guards releaseProfile and chromeSeat while a call waits for
 	// the seat.
 	profileMu      sync.Mutex
@@ -718,6 +719,9 @@ func describeBrowserMode(tools []tool, userChrome, chromeRequired, connectable b
 		}
 		if tools[index].Name == "browser_navigate" {
 			tools[index].Description += siteSkillNote
+		}
+		if tools[index].Name == "browser_snapshot" {
+			tools[index].Description += " Call without arguments for the full page. Same-page actions may return a snapshot diff."
 		}
 	}
 	return tools

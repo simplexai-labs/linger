@@ -55,6 +55,9 @@ type Call struct {
 	Namespace   string
 	Method      string
 	Arguments   json.RawMessage
+	// FullBrowserSnapshot keeps the complete readback for views that resolve
+	// controls from it on the next action.
+	FullBrowserSnapshot bool
 }
 
 // Options contains only locally resolved executable configuration and an
@@ -240,7 +243,11 @@ func (r *Runtime) Exec(hardCtx, schedulingCtx context.Context, code string) (res
 				return result, errors.New("invalid UI callback request")
 			}
 			lastID = msg.ID
-			value, callErr := r.opts.Dispatch(hard, Call{Generation: result.Generation, ExecutionID: execution, ID: msg.ID, Namespace: msg.Namespace, Method: msg.Method, Arguments: msg.Arguments})
+			value, callErr := r.opts.Dispatch(hard, Call{
+				Generation: result.Generation, ExecutionID: execution, ID: msg.ID,
+				Namespace: msg.Namespace, Method: msg.Method, Arguments: msg.Arguments,
+				FullBrowserSnapshot: msg.Namespace == "browser" && msg.FullBrowserSnapshot,
+			})
 			if err = executionCause(hard, schedulingCtx); err != nil {
 				return result, err
 			}
@@ -386,15 +393,16 @@ func (r *Runtime) reapContext(ctx context.Context, c *child) error {
 }
 
 type message struct {
-	Type      string            `json:"type"`
-	Execution uint64            `json:"execution"`
-	ID        uint64            `json:"id"`
-	Namespace string            `json:"namespace"`
-	Method    string            `json:"method"`
-	Arguments json.RawMessage   `json:"arguments"`
-	Value     json.RawMessage   `json:"value"`
-	Output    []json.RawMessage `json:"output"`
-	Error     string            `json:"error"`
+	Type                string            `json:"type"`
+	Execution           uint64            `json:"execution"`
+	ID                  uint64            `json:"id"`
+	Namespace           string            `json:"namespace"`
+	Method              string            `json:"method"`
+	Arguments           json.RawMessage   `json:"arguments"`
+	FullBrowserSnapshot bool              `json:"fullBrowserSnapshot"`
+	Value               json.RawMessage   `json:"value"`
+	Output              []json.RawMessage `json:"output"`
+	Error               string            `json:"error"`
 }
 type child struct {
 	cmd       *exec.Cmd

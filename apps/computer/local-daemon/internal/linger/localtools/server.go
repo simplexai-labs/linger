@@ -33,6 +33,18 @@ type toolServer struct {
 	timeout   time.Duration
 }
 
+type localToolCall struct {
+	Name      string                 `json:"name"`
+	Arguments json.RawMessage        `json:"arguments"`
+	Metadata  *localToolCallMetadata `json:"_meta,omitempty"`
+}
+
+type localToolCallMetadata struct {
+	FullBrowserSnapshot bool `json:"linger/fullBrowserSnapshot"`
+}
+
+type fullBrowserSnapshotKey struct{}
+
 func openToolServer(ctx context.Context, identity mcpproxy.OperationIdentity, tools []tool, call func(context.Context, string, json.RawMessage) (json.RawMessage, error), timeout time.Duration) (*toolServer, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -119,10 +131,7 @@ func (s *toolServer) handle(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		result = map[string]any{"tools": s.tools}
 	case "tools/call":
-		var params struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		}
+		var params localToolCall
 		if json.Unmarshal(request.Params, &params) != nil {
 			err = errors.New("Invalid local tool arguments")
 			break
@@ -177,6 +186,9 @@ func (s *toolServer) handle(w http.ResponseWriter, r *http.Request) {
 		s.callsMu.Unlock()
 		defer func() { s.callsMu.Lock(); delete(s.calls, key); s.callsMu.Unlock() }()
 		ctx = context.WithValue(ctx, toolSchedulingKey{}, scheduling)
+		if params.Metadata != nil && params.Metadata.FullBrowserSnapshot {
+			ctx = context.WithValue(ctx, fullBrowserSnapshotKey{}, true)
+		}
 		if s.identity.BeforeRequest != nil {
 			err = s.identity.BeforeRequest(scheduling)
 			if err != nil {
