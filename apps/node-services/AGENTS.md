@@ -84,6 +84,12 @@ MIME document normalization prefers extractable HTML, then the recorded
 plain-text alternative when HTML has no extractable body. Headers alone do
 not make an empty message indexable.
 
+SVG text extraction decodes the supported named and numeric character
+references once. Text produced by a reference is not parsed as another reference,
+so an encoded ampersand followed by `lt;` remains the literal text `&lt;`.
+HTML conversion uses the office parser's Markdown escaping, which can encode the
+ampersand in literal character-reference text as `&amp;`.
+
 ## Structure
 
 - `tests/<role>/` mirrors `src/<role>/`; host-level tests such as

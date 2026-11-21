@@ -47,21 +47,30 @@ export async function extractDocText(source: Uint8Array): Promise<string> {
 }
 
 export function decodeXmlEntities(value: string): string {
-  return value
-    .replace(/&#x([0-9a-fA-F]+);/gu, (_match, hex: string) => {
-      const code = Number.parseInt(hex, 16);
-      return Number.isSafeInteger(code) ? String.fromCodePoint(code) : "";
-    })
-    .replace(/&#([0-9]+);/gu, (_match, decimal: string) => {
-      const code = Number(decimal);
-      return Number.isSafeInteger(code) ? String.fromCodePoint(code) : "";
-    })
-    .replace(/&nbsp;/giu, " ")
-    .replace(/&quot;/gu, '"')
-    .replace(/&apos;/gu, "'")
-    .replace(/&lt;/gu, "<")
-    .replace(/&gt;/gu, ">")
-    .replace(/&amp;/gu, "&");
+  return value.replace(
+    /&#(?:x([0-9a-fA-F]+)|([0-9]+));|&(?:[Nn][Bb][Ss][Pp]|quot|apos|lt|gt|amp);/gu,
+    (match, hex: string | undefined, decimal: string | undefined) => {
+      if (hex !== undefined || decimal !== undefined) {
+        const code =
+          hex !== undefined ? Number.parseInt(hex, 16) : Number(decimal);
+        return Number.isSafeInteger(code) ? String.fromCodePoint(code) : "";
+      }
+      switch (match) {
+        case "&quot;":
+          return '"';
+        case "&apos;":
+          return "'";
+        case "&lt;":
+          return "<";
+        case "&gt;":
+          return ">";
+        case "&amp;":
+          return "&";
+        default:
+          return " ";
+      }
+    },
+  );
 }
 
 export function escapeMarkdownTableCell(value: string): string {
