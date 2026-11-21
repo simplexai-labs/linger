@@ -2701,8 +2701,8 @@ export class LocalServerModule implements Module {
           .join(" "),
       );
     }
-    // The services run without the BYOK gateway; the person switches or
-    // fixes the source on the Models page, so this only leaves a trace.
+    // The services run without the BYOK gateway; the Computer mounts it
+    // again before the next Run on it, so this only leaves a trace.
     const byokGateway = outcome.details?.byokGateway as
       | { code?: unknown; message?: unknown }
       | null

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -24,8 +25,8 @@ func runFakeSourceTool(state string, args []string) int {
 	}
 	_, _ = os.Stdout.Write(out)
 	if codeBytes, err := os.ReadFile(filepath.Join(state, "source-"+verb+"-exit")); err == nil {
-		if strings.TrimSpace(string(codeBytes)) == "2" {
-			return 2
+		if code, err := strconv.Atoi(strings.TrimSpace(string(codeBytes))); err == nil {
+			return code
 		}
 	}
 	return 0

@@ -140,12 +140,20 @@ func invalidModelInvokeRequest(request modelInvokeRequest) string {
 
 func (d *Daemon) runModelInvoke(ctx context.Context, stream transport.Stream, command protocol.Command, request modelInvokeRequest, entry *modelInvoke, receivedAt time.Time) {
 	slog.Info("runner.model.invoke", "phase", "started", "invoke_id", entry.id)
-	result := d.modelInvoker.Invoke(ctx, provider.ModelInvokeRequest{
-		RuntimeType: command.RuntimeType, Mode: request.Mode, ReasoningEffort: request.ReasoningEffort,
-		Instructions: request.Instructions, Input: request.Input, OutputSchema: request.OutputSchema,
-		WorkspaceFiles: request.WorkspaceFiles, Timeout: time.Duration(request.TimeoutMS) * time.Millisecond,
-		SessionKey: request.SessionKey, MaxOutputChars: request.MaxOutputChars,
-	})
+	var result provider.ModelInvokeResult
+	if _, err := d.ensureModelGateway(ctx, command.RuntimeType); err != nil {
+		result = provider.ModelInvokeResult{Outcome: provider.ModelInvokeUnavailable, Reason: "The model gateway is not running"}
+		if ctx.Err() != nil {
+			result = provider.ModelInvokeResult{Outcome: provider.ModelInvokeCanceled, Reason: "Model invocation was canceled"}
+		}
+	} else {
+		result = d.modelInvoker.Invoke(ctx, provider.ModelInvokeRequest{
+			RuntimeType: command.RuntimeType, Mode: request.Mode, ReasoningEffort: request.ReasoningEffort,
+			Instructions: request.Instructions, Input: request.Input, OutputSchema: request.OutputSchema,
+			WorkspaceFiles: request.WorkspaceFiles, Timeout: time.Duration(request.TimeoutMS) * time.Millisecond,
+			SessionKey: request.SessionKey, MaxOutputChars: request.MaxOutputChars,
+		})
+	}
 	entry.cancel()
 	d.modelInvokeMu.Lock()
 	if d.modelInvokes[entry.id] == entry {

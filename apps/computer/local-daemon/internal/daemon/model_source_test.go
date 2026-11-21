@@ -61,6 +61,8 @@ func (f *fakeModelSourceManager) Apply(ctx context.Context, apply localmodels.Mo
 	}, nil
 }
 
+func (f *fakeModelSourceManager) EnsureGateway(context.Context, string) error { return nil }
+
 func TestHandleModelSourceCommandValidatesOwnerExpiryAndActions(t *testing.T) {
 	manager := &fakeModelSourceManager{}
 	d := &Daemon{

@@ -198,7 +198,9 @@ configuration, so the key never passes through Node. Each re-mount sends
 the kit's one small probe request to the person's endpoint and adds a few
 seconds to a launch after a quit. A failure (`LOCAL_MODELS_BUSY` when the
 lock never frees) is logged and returned as `details.byokGateway`
-(`{ code, message }`) of a successful resume, so Linger still opens.
+(`{ code, message }`) of a successful resume, so Linger still opens; the
+Computer mounts the gateway again before the next Run on it
+(`EnsureGateway` in the Daemon's `internal/localmodels`).
 
 `runProcess` decodes stdout and stderr as separate UTF-8 streams before
 capture and output callbacks, preserving characters split across pipe reads.

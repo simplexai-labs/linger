@@ -20,6 +20,36 @@ type ModelSourceManager interface {
 	TestByok(ctx context.Context, input wire.ByokConfigInput) (wire.ByokTestResult, error)
 	ListByokModels(ctx context.Context, input wire.ByokConfigInput) (wire.ByokModelList, error)
 	Apply(ctx context.Context, apply localmodels.ModelSourceApply) (wire.ModelSourceStatus, error)
+	// EnsureGateway brings back the BYOK gateway runtimeType reaches its
+	// model through when it does not answer.
+	EnsureGateway(ctx context.Context, runtimeType string) error
+}
+
+// ensureModelGateway brings back the model gateway runtimeType runs on, if
+// any, before a Run or model call starts it. On failure it returns the
+// public Run failure code the tool's structured code maps to, empty when
+// none fits, so the Room names the cause instead of a refused connection
+// the Runtime cannot classify.
+func (d *Daemon) ensureModelGateway(ctx context.Context, runtimeType string) (string, error) {
+	if d.modelSource == nil {
+		return "", nil
+	}
+	err := d.modelSource.EnsureGateway(ctx, runtimeType)
+	if err == nil || ctx.Err() != nil {
+		return "", err
+	}
+	var sourceErr *localmodels.ModelSourceError
+	if !errors.As(err, &sourceErr) {
+		return "", err
+	}
+	slog.Warn("runner.model_gateway.unavailable", "runtime_type", runtimeType, "code", sourceErr.Code)
+	switch sourceErr.Code {
+	case "BYOK_UNREACHABLE", "NETWORK_UNAVAILABLE":
+		return "network_error", err
+	case "BYOK_AUTH_FAILED":
+		return "authentication_required", err
+	}
+	return "", err
 }
 
 func (d *Daemon) handleModelSourceCommand(ctx context.Context, stream transport.Stream, command protocol.Command) error {

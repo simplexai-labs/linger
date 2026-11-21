@@ -328,7 +328,8 @@ Gateway and runs Agents. The daemon exits with the app.
   (`total_ms`), and `local_server.resume_failed` (`stage`, `total_ms`,
   redacted `error` bounded to 500 chars with query/hash stripped). A resume
   whose saved BYOK gateway did not come back still succeeds and logs
-  `local_server.byok_gateway_unavailable` (`code`, `message`).
+  `local_server.byok_gateway_unavailable` (`code`, `message`); the Computer
+  mounts the gateway again before the next Run on it.
 - `src/main/voice-window.ts`: the floating voice window. Electron cannot open
   Document Picture-in-Picture windows, so the SPA opens a small native window
   with `window.open("")` under the target `linger-voice-window-<n>`

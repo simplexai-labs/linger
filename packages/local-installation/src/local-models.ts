@@ -609,7 +609,7 @@ export async function restoreByokSource(
   if (failure)
     options.onEvent({
       kind: "log",
-      message: `${failure.message} (${failure.code}) Agents cannot reach the model until the endpoint is reachable and the BYOK source is applied again on the Models page, or Linger restarts.`,
+      message: `${failure.message} (${failure.code}) The Computer mounts the gateway again before the next Run once the endpoint is reachable.`,
     });
   return failure;
 }

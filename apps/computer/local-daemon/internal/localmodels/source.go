@@ -497,27 +497,7 @@ func (m *ModelSource) Apply(ctx context.Context, apply ModelSourceApply) (wire.M
 
 	runCtx, cancel := context.WithTimeout(ctx, m.applyTimeout)
 	defer cancel()
-	args := []string{
-		"-P", "-s", "-m", "localmodels", "source", "apply",
-		"--mode", apply.Mode,
-		"--base-dir", m.tool.BaseDirectory,
-		"--json",
-	}
-	if apply.Runtime != "" {
-		args = append(args, "--runtime", apply.Runtime)
-	}
-	if apply.LocalModelID != "" {
-		args = append(args, "--model", apply.LocalModelID)
-	}
-	if m.harnessRoot != "" {
-		args = append(args, "--harness-root", m.harnessRoot)
-	}
-	if node := m.resolveNodePath(); node != "" {
-		args = append(args, "--node", node)
-	}
-	if len(stdin) > 0 {
-		args = append(args, "--config-stdin")
-	}
+	args := m.applyArgs(apply.Mode, apply.Runtime, apply.LocalModelID, len(stdin) > 0)
 	stdout, exitCode, runErr := m.runTool(runCtx, "source_apply", args, stdin)
 	if runErr != nil {
 		return wire.ModelSourceStatus{}, &ModelSourceError{
@@ -545,6 +525,33 @@ func (m *ModelSource) Apply(ctx context.Context, apply ModelSourceApply) (wire.M
 	}
 	status.RuntimeModel, status.ReasoningEffort = agentRuntimeModel(status.Runtime, status.RuntimeModel, catalogs[status.Runtime])
 	return status, nil
+}
+
+// applyArgs builds one `source apply`. Without a configuration on stdin, a
+// BYOK apply mounts the configuration localmodels saved.
+func (m *ModelSource) applyArgs(mode, runtime, localModelID string, configStdin bool) []string {
+	args := []string{
+		"-P", "-s", "-m", "localmodels", "source", "apply",
+		"--mode", mode,
+		"--base-dir", m.tool.BaseDirectory,
+		"--json",
+	}
+	if runtime != "" {
+		args = append(args, "--runtime", runtime)
+	}
+	if localModelID != "" {
+		args = append(args, "--model", localModelID)
+	}
+	if m.harnessRoot != "" {
+		args = append(args, "--harness-root", m.harnessRoot)
+	}
+	if node := m.resolveNodePath(); node != "" {
+		args = append(args, "--node", node)
+	}
+	if configStdin {
+		args = append(args, "--config-stdin")
+	}
+	return args
 }
 
 // agentRuntimeModel picks the model the Computer's Agents run after a switch:

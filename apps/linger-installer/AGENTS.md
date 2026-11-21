@@ -64,7 +64,8 @@ again. A source switched to a subscription or BYOK leaves the stack stopped;
 a saved BYOK source gets its Bifrost gateway mounted again from the saved
 configuration unless it already answers (`restoreByokSource`), and a failure
 is logged and reported in the ready outcome's `details.byokGateway`
-without failing the resume.
+without failing the resume; the Computer mounts it again before the next Run
+on it.
 A failed installation records the stage that caused it, even when native
 checkout preparation and runtime setup ran in parallel. A BYOK mount failure
 belongs to runtime and keeps the redacted provider error in the job.
