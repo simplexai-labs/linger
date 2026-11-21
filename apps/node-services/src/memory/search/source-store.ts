@@ -131,14 +131,17 @@ export async function readWorkspaceText(
     return undefined;
   try {
     let current = workspaceRoot;
+    let regularFile = false;
     for (const part of ["", ...parts]) {
       if (part) current = path.join(current, part);
       const stat = await fs.lstat(current);
       if (stat.isSymbolicLink()) return undefined;
+      regularFile = stat.isFile();
     }
+    if (!regularFile) return undefined;
     const file = await fs.open(
       current,
-      constants.O_RDONLY | constants.O_NOFOLLOW,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     );
     try {
       const stat = await file.stat();
