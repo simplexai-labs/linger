@@ -113,7 +113,7 @@ function sourceBlocks(content: string): SourceBlock[] {
   };
 
   for (const line of content.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
-    const marker = /^\s{0,3}(`{3,}|~{3,})/u.exec(line)?.[1];
+    const marker = /^ {0,3}(`{3,}|~{3,})([^\r\n]*)(?:\r?\n)?$/u.exec(line);
     const heading = !fence
       ? /^\s{0,3}(#{1,6})\s+(.+?)\s*$/u.exec(line)
       : undefined;
@@ -126,8 +126,15 @@ function sourceBlocks(content: string): SourceBlock[] {
     offset += line.length;
     if (!line.trim()) push(offset);
     if (marker) {
-      if (!fence) fence = marker;
-      else if (marker[0] === fence[0] && marker.length >= fence.length)
+      const run = marker[1]!;
+      const suffix = marker[2]!;
+      if (!fence) {
+        if (run[0] !== "`" || !suffix.includes("`")) fence = run;
+      } else if (
+        run[0] === fence[0] &&
+        run.length >= fence.length &&
+        /^[ \t]*$/u.test(suffix)
+      )
         fence = undefined;
     }
   }
