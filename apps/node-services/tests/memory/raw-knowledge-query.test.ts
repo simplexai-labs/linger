@@ -287,6 +287,50 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     expect(result.items[0]!.content).toContain(first.content.slice(0, 20));
   });
 
+  it("keeps late paragraph evidence in both content and snippet results", async () => {
+    const f = await fixture();
+    const indexed = Array.from({ length: 10 }, (_, index) => {
+      const markdown = `# Evidence ${index}\n\n${"Background detail. ".repeat(90)}The cobalt allowance is 37.5k USD.`;
+      const source = storeDocumentSource(f.root, {
+        ...meetingDocument,
+        documentId: `document_passage_${index}`,
+        textSourceId: `version_passage_${index}`,
+        title: `Evidence ${index}`,
+        markdown,
+      });
+      const chunk = chunkSource(markdown).find((part) =>
+        part.content.includes("cobalt allowance"),
+      )!;
+      return { source, chunk };
+    });
+    const result = await queryPersonalKnowledge(
+      f.root,
+      request("cobalt allowance"),
+      {
+        outputBudgetChars: 10_000,
+        chunkSearch: {
+          search: async (input) =>
+            input.originKinds?.includes("my_pages")
+              ? indexed.map(({ source, chunk }) => ({
+                  sourceId: source.id,
+                  chunkId: chunk.id,
+                  mergedChunkIds: [chunk.id],
+                  score: 1,
+                }))
+              : [],
+        },
+      },
+    );
+    expect(result.items.some((entry) => entry.content)).toBe(true);
+    expect(result.items.some((entry) => entry.snippet)).toBe(true);
+    for (const entry of result.items) {
+      expect(shown(entry)).toContain("The cobalt allowance is 37.5k USD.");
+      expect(entry.evidenceId).toMatch(/^raw_/u);
+      expect(entry.sections).not.toHaveLength(0);
+    }
+    expect(JSON.stringify(result).length).toBeLessThanOrEqual(10_000);
+  });
+
   it("returns Session facts beside Raw candidates without changing them", async () => {
     const fixtureData = await fixture();
     const [source] = await listRawSources(fixtureData.workspace, identity);

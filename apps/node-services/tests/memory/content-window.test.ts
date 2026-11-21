@@ -51,4 +51,109 @@ describe("inline content window", () => {
       `${content.slice(0, 799)}…`,
     );
   });
+
+  it.each([200, 500, 800])(
+    "keeps a late match within a %i-character paragraph window",
+    (budget) => {
+      const content = `${"Background detail. ".repeat(90)}The cobalt allowance is 37.5k USD. ${"More context. ".repeat(30)}`;
+      const window = contentWindow(content, terms("cobalt allowance"), budget);
+      expect(window).toContain("The cobalt allowance is 37.5k USD.");
+      expect(window.length).toBeLessThanOrEqual(budget + 5);
+    },
+  );
+
+  it("keeps the enclosing message heading beside a late paragraph match", () => {
+    const heading = "## 2026-09-15T10:00:00+08:00 · Alice";
+    const content = `${heading}\n\n${"General background. ".repeat(80)}The cobalt allowance is 37.5k USD.`;
+    const window = contentWindow(content, terms("cobalt allowance"), 200);
+    expect(window).toContain(heading);
+    expect(window).toContain("The cobalt allowance is 37.5k USD.");
+    expect(window.length).toBeLessThanOrEqual(205);
+  });
+
+  it("reserves evidence space when a heading exceeds the budget", () => {
+    const content = `## ${"A long heading ".repeat(40)}\n\nThe cobalt allowance is 37.5k USD.`;
+    const window = contentWindow(content, terms("cobalt allowance"), 200);
+    expect(window).toContain("The cobalt allowance is 37.5k USD.");
+    expect(window.length).toBeLessThanOrEqual(205);
+  });
+
+  it.each([
+    ["cobalt", "Ｃｏｂａｌｔ"],
+    ["\u7532\u4e59", "\u4e19\u7532\u4e59\u4e01"],
+  ])("uses the shared analyzer to locate %s", (query, match) => {
+    const content = `${"Background. ".repeat(100)}${match} 37.5k ${"Later. ".repeat(30)}`;
+    const window = contentWindow(content, terms(query), 200);
+    expect(window).toContain(`${match} 37.5k`);
+    expect(window.length).toBeLessThanOrEqual(205);
+  });
+
+  it("does not turn a partial token at a window edge into a match", () => {
+    const content = `${"x".repeat(192)} catalog ${"Background. ".repeat(100)}The cat is named Milo.`;
+    const window = contentWindow(content, terms("cat"), 200);
+    expect(window).toContain("The cat is named Milo.");
+  });
+
+  it("keeps a fitting identifier that straddles overlapping window edges", () => {
+    const identifier = "reference".repeat(14);
+    const content = `${"x ".repeat(45)}${identifier} ${"Background. ".repeat(30)}`;
+    expect(contentWindow(content, terms(identifier), 200)).toContain(
+      identifier,
+    );
+  });
+
+  it("keeps supplementary characters intact at passage boundaries", () => {
+    const content = `${"🌍".repeat(300)} cobalt allowance ${"🌍".repeat(300)}`;
+    const window = contentWindow(content, terms("cobalt allowance"), 200);
+    expect(window).toContain("cobalt allowance");
+    expect(window).not.toMatch(/[\uD800-\uDFFF]/u);
+    expect(window).not.toContain("\uFFFD");
+    expect(window.length).toBeLessThanOrEqual(205);
+  });
+
+  it("marks omitted paragraphs when the last complete paragraph ends with an ellipsis", () => {
+    const first = "cobalt allowance";
+    const ending = "To be continued…";
+    const second = `${"x".repeat(200 - first.length - ending.length - 5)}${ending}`;
+    const content = [first, second, "Later evidence.", "Final context."].join(
+      "\n\n",
+    );
+    expect(contentWindow(content, terms("cobalt allowance"), 200)).toBe(
+      `${first}\n\n${second}\n\n…`,
+    );
+  });
+
+  it.each([".", "…"])(
+    "marks later paragraphs after a leading cut with a %s ending",
+    (ending) => {
+      const first = `${"Background detail. ".repeat(26)}The cobalt allowance is 37.5k USD${ending}`;
+      const content = [first, "Later paragraph.", "Final context."].join(
+        "\n\n",
+      );
+      const window = contentWindow(content, terms("cobalt allowance"), 200);
+      expect(window.startsWith("…")).toBe(true);
+      expect(window.endsWith(`37.5k USD${ending}\n\n…`)).toBe(true);
+      expect(window.length).toBeLessThanOrEqual(200);
+    },
+  );
+
+  it("does not mark later paragraphs when a leading cut reaches the final paragraph", () => {
+    const content = `${"Background detail. ".repeat(26)}The cobalt allowance is 37.5k USD.`;
+    const window = contentWindow(content, terms("cobalt allowance"), 200);
+    expect(window.startsWith("…")).toBe(true);
+    expect(window.endsWith("37.5k USD.")).toBe(true);
+    expect(window).not.toContain("\n\n…");
+  });
+
+  it("keeps one omission marker when the selected passage cuts the paragraph tail", () => {
+    const first = `${"Background detail. ".repeat(30)}The cobalt allowance is 37.5k USD. ${"Further context. ".repeat(30)}`;
+    const window = contentWindow(
+      [first, "Later paragraph."].join("\n\n"),
+      terms("cobalt allowance"),
+      200,
+    );
+    expect(window).toContain("The cobalt allowance is 37.5k USD.");
+    expect(window.endsWith("…")).toBe(true);
+    expect(window).not.toContain("\n\n…");
+  });
 });
