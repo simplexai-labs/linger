@@ -14,6 +14,10 @@ Memory browsing entry and do not enter OpenWiki's native graph.
 
 ## Search
 
+Session text split across model calls keeps Unicode surrogate pairs together,
+so independently encoded parts retain the original text within the existing
+100,000-character part budget.
+
 Memory keeps one index, `memory_index.sources` and `chunks`: Room Sessions, recordings, My pages, imported
 mail, Pocket Notes, the Profile, the published Wiki pages (`wiki`) and the Daily and Weekly reports
 (`period_summary`) are source kinds of it. Chunks and Session Facts use keyword search only (PostgreSQL `simple`
