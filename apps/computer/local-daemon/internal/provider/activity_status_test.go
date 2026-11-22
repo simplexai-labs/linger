@@ -135,6 +135,45 @@ func TestShellWrappersAreUnwrapped(t *testing.T) {
 	}
 }
 
+// Codex on Windows runs each command under the user's PowerShell or cmd and
+// reports the argv quoted by shlex, so its scripts are named like everyone
+// else's while the input keeps the wrapper.
+func TestWindowsShellScriptsAreNamedInsideTheirWrapper(t *testing.T) {
+	for _, test := range []struct {
+		command, kind string
+		steps         []string
+	}{
+		{`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command 'teamhub docs create --title Plan'`, "file_change", []string{"Creating a document"}},
+		{`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'teamhub message send --content hi'`, "message", nil},
+		{`pwsh -NoProfile -Command "teamhub task create --title 'Check fares'"`, "delegation", []string{"Assigning a task"}},
+		{`"C:\\WINDOWS\\system32\\cmd.exe" /c 'git status'`, "command", []string{"Checking changes"}},
+		{`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "cat C:\\work\\notes.md; git status"`, "command", []string{"Reading notes.md", "Checking changes"}},
+		// A PowerShell script is read with PowerShell's quoting, where a
+		// backtick at the end of a line continues it.
+		{"pwsh -NoProfile -Command 'teamhub `\n message send --content hi'", "message", nil},
+		// Printing a send command sends nothing.
+		{`pwsh -NoProfile -Command "Write-Output 'teamhub message send --content ping'"`, "command", nil},
+		// Other PowerShell invocations are not a script to name.
+		{`pwsh -EncodedCommand 'dABlAGEAbQBoAHUAYgA='`, "command", nil},
+		{`pwsh -File send.ps1 'teamhub message send --content ping'`, "command", nil},
+	} {
+		kind, input, status := activityPresentation(native.Event{Kind: native.EventToolCall, ToolName: "exec_command", ActivityKind: native.ActivityCommand, Input: map[string]any{"command": test.command}})
+		if input["command"] != test.command || kind != test.kind || !slices.Equal(status.steps, test.steps) {
+			t.Errorf("%s: got %q %q %q, want the command kept and %q %q", test.command, input["command"], kind, status.steps, test.kind, test.steps)
+		}
+	}
+	// Git Bash is a POSIX shell, unwrapped like bash elsewhere.
+	_, input, status := activityPresentation(native.Event{ActivityKind: native.ActivityCommand, Input: map[string]any{"command": `"C:\\Program Files\\Git\\bin\\bash.exe" -lc 'git status'`}})
+	if input["command"] != "git status" || !slices.Equal(status.steps, []string{"Checking changes"}) {
+		t.Fatalf("got %v %v", input, status)
+	}
+	// A script named like a shell is not one.
+	_, input, status = activityPresentation(native.Event{ActivityKind: native.ActivityCommand, Input: map[string]any{"command": "./bash.sh -c 'rm -rf build'"}})
+	if input["command"] != "./bash.sh -c 'rm -rf build'" || !slices.Equal(status.steps, []string{"Running a script"}) {
+		t.Fatalf("got %v %v", input, status)
+	}
+}
+
 func TestToolCallsAreNamedByWhatTheyWorkOn(t *testing.T) {
 	for _, test := range []struct {
 		name, tool, kind string

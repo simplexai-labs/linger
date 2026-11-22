@@ -699,13 +699,41 @@ func skipPowerShellHereString(script string, start int) (int, bool) {
 	return len(script), true
 }
 
-// shellScript returns the script of `bash -lc '…'`, or the command itself.
-func shellScript(command string) string {
+// shellScript returns the script of a shell wrapper in the forms Codex
+// builds, `bash -lc '…'`, PowerShell's `-Command '…'` with or without
+// `-NoProfile`, and `cmd /c '…'`, or else the command itself. posix is false
+// for a PowerShell or cmd script, whose quoting the POSIX reader only
+// approximates; powerShell is true for a PowerShell script, which
+// simpleCommandsFor reads with PowerShell's quoting.
+func shellScript(command string) (script string, posix, powerShell bool) {
 	words, ok := splitCommand(strings.TrimSpace(command))
-	if ok && len(words) == 3 && slices.Contains([]string{"bash", "sh", "zsh"}, filepath.Base(words[0])) && (words[1] == "-c" || words[1] == "-lc") {
-		return words[2]
+	if !ok || len(words) < 3 {
+		return command, true, false
 	}
-	return command
+	// A shell is named by its file name, in any letter case because a
+	// Windows path may have any, and without an extension Windows finds a
+	// program by, so Git Bash's bash.exe is bash. Both separators are split
+	// so the rule is the same on every OS.
+	shell := strings.ToLower(words[0][strings.LastIndexAny(words[0], `/\`)+1:])
+	if dot := strings.LastIndexByte(shell, '.'); dot > 0 && slices.Contains([]string{".exe", ".cmd", ".bat", ".com"}, shell[dot:]) {
+		shell = shell[:dot]
+	}
+	flags, script := words[1:len(words)-1], words[len(words)-1]
+	switch shell {
+	case "bash", "sh", "zsh":
+		if slices.Equal(flags, []string{"-c"}) || slices.Equal(flags, []string{"-lc"}) {
+			return script, true, false
+		}
+	case "pwsh", "powershell":
+		if slices.Equal(flags, []string{"-Command"}) || slices.Equal(flags, []string{"-NoProfile", "-Command"}) {
+			return script, false, true
+		}
+	case "cmd":
+		if slices.Equal(flags, []string{"/c"}) {
+			return script, false, false
+		}
+	}
+	return command, true, false
 }
 
 // splitCommand splits one shell command into words for display only. It
