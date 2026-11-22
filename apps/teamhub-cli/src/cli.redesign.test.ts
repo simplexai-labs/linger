@@ -174,6 +174,19 @@ describe("redesigned CLI surface", () => {
     expect(result.fetch).not.toHaveBeenCalled();
   });
 
+  it("shows every group's help for -h as for --help", async () => {
+    const groups = new Set<string>();
+    for (const { command } of commandDefinitions)
+      for (let length = 1; length < command.length; length += 1)
+        groups.add(command.slice(0, length).join(" "));
+    for (const group of groups) {
+      const short = await invoke([...group.split(" "), "-h"], undefined, {});
+      const long = await invoke([...group.split(" "), "--help"], undefined, {});
+      expect(short.code, group).toBe(0);
+      expect(short.output, group).toBe(long.output);
+      expect(short.fetch).not.toHaveBeenCalled();
+    }
+  });
   it("keeps root and group help free of Chinese and full-width punctuation", async () => {
     const groups = new Set<string>();
     for (const { command } of commandDefinitions)

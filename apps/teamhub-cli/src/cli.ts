@@ -110,7 +110,7 @@ export async function runCli(
       await dependencies.stdout(help);
       return 0;
     }
-    if (!selected && args.at(-1) === "--help") {
+    if (!selected && ["--help", "-h"].includes(args.at(-1)!)) {
       const help = await helpText(args.slice(0, -1));
       if (help) {
         await dependencies.stdout(help);
