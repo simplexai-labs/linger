@@ -282,3 +282,94 @@ it("tells the desktop client by code why a refused folder kept the keys unsaved"
     vi.resetModules();
   }
 });
+
+it("surfaces a Windows private path refusal on stdout and stderr during --inspect", async () => {
+  const inspect = vi.fn().mockRejectedValue(refused());
+  vi.doMock("@linger/local-installation/setup-plan", () => ({
+    inspectSetup: inspect,
+  }));
+  const argv = process.argv;
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    process.argv = [
+      process.execPath,
+      fileURLToPath(new URL("./main.ts", import.meta.url)),
+      "--home",
+      "refused-home",
+      "--inspect",
+    ];
+    vi.resetModules();
+    await import("./main.js");
+    expect(stderr).toHaveBeenCalledWith(
+      `The check failed (WINDOWS_PRIVATE_PATH_UNSAFE): ${refused().message}\n`,
+    );
+    expect(stdout).toHaveBeenCalledWith(
+      `${JSON.stringify({
+        error: refused().message,
+        refusal: {
+          code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+          reason: "UNSAFE_PARENT_ACCESS",
+        },
+      })}\n`,
+      expect.any(Function),
+    );
+    const done = stdout.mock.calls.at(-1)?.[1] as unknown;
+    expect(typeof done).toBe("function");
+    if (typeof done === "function") done();
+    expect(exit).toHaveBeenCalledWith(1);
+  } finally {
+    process.argv = argv;
+    stdout.mockRestore();
+    stderr.mockRestore();
+    exit.mockRestore();
+    vi.doUnmock("@linger/local-installation/setup-plan");
+    vi.resetModules();
+  }
+});
+
+it("writes null on stdout when --inspect fails without a Windows private path refusal", async () => {
+  const inspect = vi.fn().mockRejectedValue(
+    Object.assign(new Error("The localmodels setup report is unavailable."), {
+      code: "LOCALMODELS_SETUP_UNAVAILABLE",
+    }),
+  );
+  vi.doMock("@linger/local-installation/setup-plan", () => ({
+    inspectSetup: inspect,
+  }));
+  const argv = process.argv;
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    process.argv = [
+      process.execPath,
+      fileURLToPath(new URL("./main.ts", import.meta.url)),
+      "--home",
+      "unavailable-home",
+      "--inspect",
+    ];
+    vi.resetModules();
+    await import("./main.js");
+    expect(stderr).toHaveBeenCalledWith(
+      "The check failed: The localmodels setup report is unavailable.\n",
+    );
+    expect(stdout).toHaveBeenCalledWith("null\n", expect.any(Function));
+    const done = stdout.mock.calls.at(-1)?.[1] as unknown;
+    expect(typeof done).toBe("function");
+    if (typeof done === "function") done();
+    expect(exit).toHaveBeenCalledWith(1);
+  } finally {
+    process.argv = argv;
+    stdout.mockRestore();
+    stderr.mockRestore();
+    exit.mockRestore();
+    vi.doUnmock("@linger/local-installation/setup-plan");
+    vi.resetModules();
+  }
+});

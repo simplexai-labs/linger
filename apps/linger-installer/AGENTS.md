@@ -154,7 +154,9 @@ A missing pinned kit has nothing to stop.
 
 `--inspect` checks without migrating installations. Its optional
 `--inspect-target` selects the home whose disk and runtimes are checked;
-`--home` still owns the inspection tool cache and state.
+`--home` still owns the inspection tool cache and state. When `--home` fails
+Windows private-path validation, `--inspect` reports the `WINDOWS_PRIVATE_PATH_UNSAFE`
+code on stderr and writes `{ error, refusal }` on stdout before exiting nonzero.
 
 Every other mode first converts an install from before the rename to Linger
 (`migrateLegacyInstallation`); `--migrate` does only that and exits, for the

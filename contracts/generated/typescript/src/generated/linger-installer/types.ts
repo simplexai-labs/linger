@@ -693,6 +693,46 @@ export interface components {
         [key: string]: string;
       };
     };
+    SetupReason: {
+      code: string;
+      message: string;
+      /** @description On gpu-memory-required, the card other programs hold memory on. */
+      gpuIndex?: number;
+      /** @description On gpu-memory-required (that card's VRAM) and free-memory-required (RAM), the memory free now. */
+      freeBytes?: number;
+      /** @description The memory the install needs free, for the same resource as freeBytes. */
+      requiredBytes?: number;
+      /** @description On cuda-driver-update-required, the CUDA version the installed NVIDIA driver reports. */
+      detectedCudaVersion?: string;
+      /** @description On cuda-driver-update-required and cuda-driver-version-unknown, the minimum CUDA version the pinned engine requires. */
+      requiredCudaVersion?: string;
+      /** @description On CUDA driver reasons, the installed NVIDIA driver version when known. */
+      driverVersion?: string;
+    };
+    SetupLocalModelsEstimate: {
+      downloadBytes: number | null;
+      diskBytes: number | null;
+      memoryBytes: number | null;
+      durationSeconds: {
+        min: number;
+        max: number;
+      } | null;
+      assumption: string;
+      model: string;
+    };
+    SetupUpgradeGpuApp: {
+      name: string;
+      pids: number[];
+      bytes: number;
+    };
+    /** @description Upstream stack.upgrade, present when freeing memory unlocks a stronger local model than the currently selected plan. */
+    SetupUpgrade: {
+      modelName?: string;
+      selectedGpuIndex: number | null;
+      estimate: components["schemas"]["SetupLocalModelsEstimate"];
+      reasons: components["schemas"]["SetupReason"][];
+      gpuApps?: components["schemas"]["SetupUpgradeGpuApp"][];
+    };
     SetupReport: {
       hardware: {
         platform: string;
@@ -725,39 +765,15 @@ export interface components {
           vramRequiredBytes?: number;
         };
         /** @description Upstream stack.reasons. Clients choose their copy by code and its counts; message is upstream diagnostic text for logs, never shown or matched on. */
-        reasons: {
-          code: string;
-          message: string;
-          /** @description On gpu-memory-required, the card other programs hold memory on. */
-          gpuIndex?: number;
-          /** @description On gpu-memory-required (that card's VRAM) and free-memory-required (RAM), the memory free now. */
-          freeBytes?: number;
-          /** @description The memory the install needs free, for the same resource as freeBytes. */
-          requiredBytes?: number;
-          /** @description On cuda-driver-update-required, the CUDA version the installed NVIDIA driver reports. */
-          detectedCudaVersion?: string;
-          /** @description On cuda-driver-update-required and cuda-driver-version-unknown, the minimum CUDA version the pinned engine requires. */
-          requiredCudaVersion?: string;
-          /** @description On CUDA driver reasons, the installed NVIDIA driver version when known. */
-          driverVersion?: string;
-        }[];
+        reasons: components["schemas"]["SetupReason"][];
         /**
          * @description Present when the upstream plan fits this computer's hardware only once other programs release the memory they hold now (reason free-memory-required); installing plans again against the memory free then.
          * @enum {string}
          */
         basis?: "capacity";
         selectedGpuIndex: number | null;
-        estimate: {
-          downloadBytes: number | null;
-          diskBytes: number | null;
-          memoryBytes: number | null;
-          durationSeconds: {
-            min: number;
-            max: number;
-          } | null;
-          assumption: string;
-          model: string;
-        };
+        estimate: components["schemas"]["SetupLocalModelsEstimate"];
+        upgrade?: components["schemas"]["SetupUpgrade"];
       };
       runtimes: {
         /** @enum {string} */
