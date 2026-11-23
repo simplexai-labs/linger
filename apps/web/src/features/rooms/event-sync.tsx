@@ -184,7 +184,8 @@ async function applyInvalidation(
       ]);
       return;
     case "another-me":
-      // A new Another Me joins the directory and brings its Chat.
+      // A new Another Me joins the directory and brings its Chat; a
+      // change in its failed background calls shows in its Chat banner.
       await Promise.all([
         refreshActiveQueries(queryClient, [
           anotherMeQueryKey(tenantId),

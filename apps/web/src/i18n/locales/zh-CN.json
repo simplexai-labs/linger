@@ -293,6 +293,18 @@
     "instructionsUpdated": "指令已更新",
     "viewInAgentInfo": "在 Agent 信息中查看",
     "replyCount": { "other": "{count} 条回复" },
+    "backgroundFailedIncompatible": {
+      "other": "后台任务已连续失败 {count} 次：Runtime 不兼容，或你的账号不能使用它的模型。请更新本地的 CLI 或 Linger，或检查它的模型设置。"
+    },
+    "backgroundFailedSignIn": {
+      "other": "后台任务已连续失败 {count} 次：需要重新登录 Runtime。"
+    },
+    "backgroundFailedRuntimeUnavailable": {
+      "other": "后台任务已连续失败 {count} 次：你电脑上的 Runtime 不可用。"
+    },
+    "backgroundFailedUnknown": {
+      "other": "后台任务已连续失败 {count} 次。在有任务成功之前，Wiki、记忆和日报可能不是最新的。"
+    },
     "openThread": "打开话题，{replies}",
     "messageThread": "消息话题",
     "thread": "话题",

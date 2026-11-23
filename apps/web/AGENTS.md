@@ -122,6 +122,10 @@ build:assets` to check the initial JS budget.
   uses the red panda portrait on its warm brown tile.
 - The login header uses the transparent horizontal Linger wordmark in
   `public/linger-wordmark.svg`, with the proportions of `assets/logo-horizontal.svg`.
+- The Another Me Chat opens with a danger banner while TeamHub's Another Me
+  carries `background_failure` (three or more failed background model calls
+  in a row), worded from its reason code (an unknown code reads as unknown).
+  It cannot be dismissed and goes once a background call completes.
 - Switching between Meeting and Voice Mode ends the previous session and
   releases its microphone before the new mode starts. Meeting saving can
   continue in the background. The sidebar Meeting entry spins only while a

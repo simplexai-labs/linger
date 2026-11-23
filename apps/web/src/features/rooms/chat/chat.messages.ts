@@ -71,6 +71,26 @@ export const chatMessages = defineMessages("chat", {
   viewInAgentInfo: "View in Agent Info",
   // Threads.
   replyCount: { one: "{count} reply", other: "{count} replies" },
+  backgroundFailedIncompatible: {
+    one: "Background tasks failed {count} time in a row: your Runtime is incompatible, or its model isn't available to your account. Update your local CLI or Linger, or check its model setting.",
+    other:
+      "Background tasks failed {count} times in a row: your Runtime is incompatible, or its model isn't available to your account. Update your local CLI or Linger, or check its model setting.",
+  },
+  backgroundFailedSignIn: {
+    one: "Background tasks failed {count} time in a row: your Runtime needs you to sign in again.",
+    other:
+      "Background tasks failed {count} times in a row: your Runtime needs you to sign in again.",
+  },
+  backgroundFailedRuntimeUnavailable: {
+    one: "Background tasks failed {count} time in a row: the Runtime on your Computer isn't available.",
+    other:
+      "Background tasks failed {count} times in a row: the Runtime on your Computer isn't available.",
+  },
+  backgroundFailedUnknown: {
+    one: "Background tasks failed {count} time in a row. Wiki, Memory and daily reports may be out of date until a task succeeds.",
+    other:
+      "Background tasks failed {count} times in a row. Wiki, Memory and daily reports may be out of date until a task succeeds.",
+  },
   openThread: "Open thread, {replies}",
   messageThread: "Message Thread",
   thread: "Thread",
