@@ -333,7 +333,8 @@ function MemorySummaryCard({
 }) {
   const translation = useTranslation();
   const { t } = translation;
-  const { componentBytes, models, otherBytes } = memorySegments(view);
+  const { componentBytes, models, otherBytes, unaccountedBytes } =
+    memorySegments(view);
   const pct = (bytes: number) =>
     `${summary.totalBytes ? Math.min(100, (bytes / summary.totalBytes) * 100) : 0}%`;
 
@@ -397,6 +398,15 @@ function MemorySummaryCard({
             style={{ width: pct(otherBytes) }}
             title={t(m.otherAppsSize, {
               size: formatGigabytes(otherBytes, t),
+            })}
+          />
+        ) : null}
+        {unaccountedBytes > 0 ? (
+          <span
+            className="h-full bg-muted-foreground/15 transition-[width] duration-200 motion-reduce:transition-none"
+            style={{ width: pct(unaccountedBytes) }}
+            title={t(m.systemAndEngineSize, {
+              size: formatGigabytes(unaccountedBytes, t),
             })}
           />
         ) : null}

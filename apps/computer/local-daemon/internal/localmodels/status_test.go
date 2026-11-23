@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -133,5 +134,53 @@ func TestMapStatusKeepsAndSanitizesEngineMetadata(t *testing.T) {
 	m1 := snapshot.Models[1]
 	if m1.Engine != "" || m1.EngineLabel != "FutureEngine" || m1.Concurrency != nil {
 		t.Fatalf("model 1 sanitized engine metadata = %+v", m1)
+	}
+}
+
+func TestMapStatusPreservesExternalHolders(t *testing.T) {
+	encoded, err := os.ReadFile("testdata/library-status-dev38.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
+	}
+	pools := document["pools"].([]any)
+	gpuPool := pools[0].(map[string]any)
+	gpuPool["external_holders"] = []any{
+		map[string]any{"name": " msedge ", "bytes": float64(188743680), "pids": []any{float64(1234)}},
+		map[string]any{"name": "   ", "bytes": float64(100)},
+	}
+
+	encoded, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := mapStatus(encoded, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Pools) < 2 {
+		t.Fatalf("expected at least 2 pools, got %d", len(snapshot.Pools))
+	}
+	pool0 := snapshot.Pools[0]
+	if len(pool0.ExternalHolders) != 1 {
+		t.Fatalf("expected 1 external holder, got %d: %+v", len(pool0.ExternalHolders), pool0.ExternalHolders)
+	}
+	holder := pool0.ExternalHolders[0]
+	if holder.Name != "msedge" || holder.Bytes != 188743680 {
+		t.Fatalf("unexpected external holder: %+v", holder)
+	}
+
+	if pool1 := snapshot.Pools[1]; pool1.ExternalHolders != nil {
+		t.Fatalf("expected no external holders on pool 1, got %+v", pool1.ExternalHolders)
+	}
+	out, err := json.Marshal(snapshot.Pools[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "external_holders") {
+		t.Fatalf("pool without external holders encoded the field: %s", out)
 	}
 }

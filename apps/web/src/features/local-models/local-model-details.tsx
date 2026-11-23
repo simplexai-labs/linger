@@ -48,6 +48,7 @@ import {
   poolLabel,
   poolOf,
   poolOtherBytes,
+  poolUnaccountedBytes,
   safeModelSourceUrl,
   speedLabel,
   type ModelEntry,
@@ -475,6 +476,7 @@ function PoolBar({
   // used_bytes is the device's real use; on a shared card other processes
   // hold memory that no holder accounts for.
   const otherBytes = poolOtherBytes(pool);
+  const unaccountedBytes = poolUnaccountedBytes(pool);
   const width = (bytes: number) =>
     `${pool.total_bytes ? Math.min(100, (bytes / pool.total_bytes) * 100) : 0}%`;
   return (
@@ -515,6 +517,15 @@ function PoolBar({
             })}
           />
         ) : null}
+        {unaccountedBytes ? (
+          <span
+            className="h-full bg-muted-foreground/15"
+            style={{ width: width(unaccountedBytes) }}
+            title={t(m.systemAndEngineSize, {
+              size: formatGigabytes(unaccountedBytes, t),
+            })}
+          />
+        ) : null}
       </span>
       <span className="w-24 shrink-0 text-right text-xs whitespace-nowrap tabular-nums text-muted-foreground">
         {t(m.memoryFree, { free: formatGigabytes(poolFreeBytes(pool), t) })}
@@ -538,8 +549,10 @@ export function AdvancedDialog({
   const models: PoolHolder[] = [];
   const components: PoolHolder[] = [];
   let hasOtherApps = false;
+  let hasUnaccounted = false;
   for (const pool of view.pools) {
     if (poolOtherBytes(pool) > 0) hasOtherApps = true;
+    if (poolUnaccountedBytes(pool) > 0) hasUnaccounted = true;
     for (const holder of pool.holders) {
       if (seenHolderIds.has(holder.id)) continue;
       seenHolderIds.add(holder.id);
@@ -582,7 +595,7 @@ export function AdvancedDialog({
                 />
               ))}
             </div>
-            {seenHolderIds.size > 0 || hasOtherApps ? (
+            {seenHolderIds.size > 0 || hasOtherApps || hasUnaccounted ? (
               <p className="mt-2.5 flex flex-wrap gap-x-3.5 gap-y-1 px-0.5 text-xs text-muted-foreground">
                 {[...models, ...components].map((holder) => (
                   <span className="flex items-center gap-1.5" key={holder.id}>
@@ -603,6 +616,15 @@ export function AdvancedDialog({
                       className="size-1.5 rounded-full bg-muted-foreground/30"
                     />
                     {t(m.otherApps)}
+                  </span>
+                ) : null}
+                {hasUnaccounted ? (
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      aria-hidden
+                      className="size-1.5 rounded-full bg-muted-foreground/15"
+                    />
+                    {t(m.systemAndEngine)}
                   </span>
                 ) : null}
               </p>

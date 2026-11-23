@@ -7401,6 +7401,9 @@ type LocalModelNoteCode string
 
 // LocalModelPool One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them.
 type LocalModelPool struct {
+	// ExternalHolders Closeable desktop applications holding this pool's memory, as localmodels reports them. Absent when localmodels does not report them; the rest of used_bytes is then not known to be other apps.
+	ExternalHolders *[]LocalModelPoolExternalHolder `json:"external_holders,omitempty"`
+
 	// GpuIndex Present only for kind gpu; matches LocalModelGpu.index.
 	GpuIndex *int                   `json:"gpu_index,omitempty"`
 	Holders  []LocalModelPoolHolder `json:"holders"`
@@ -7414,6 +7417,12 @@ type LocalModelPool struct {
 
 // LocalModelPoolKind defines model for LocalModelPool.Kind.
 type LocalModelPoolKind string
+
+// LocalModelPoolExternalHolder A desktop application outside localmodels holding pool memory, such as a browser, video player, or game, that the user could close.
+type LocalModelPoolExternalHolder struct {
+	Bytes int64  `json:"bytes"`
+	Name  string `json:"name"`
+}
 
 // LocalModelPoolHolder Something holding pool memory. A component is a foundation service such as an embedding, reranker, or speech model; it is never a model row.
 type LocalModelPoolHolder struct {

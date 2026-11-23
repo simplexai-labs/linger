@@ -213,9 +213,32 @@ export function poolHolderBytes(pool: LocalModelPool) {
   return pool.holders.reduce((sum, holder) => sum + holder.bytes, 0);
 }
 
-/** Memory in the pool used by other apps (games, browsers, video players). */
-export function poolOtherBytes(pool: LocalModelPool) {
+function poolResidualBytes(pool: LocalModelPool) {
   return Math.max(0, pool.used_bytes - poolHolderBytes(pool));
+}
+
+/**
+ * Memory in the pool held by other apps (games, browsers, video players)
+ * that the user could close. When localmodels lists those apps, only they
+ * count; an older localmodels lists none, so the whole residual counts.
+ */
+export function poolOtherBytes(pool: LocalModelPool) {
+  const residual = poolResidualBytes(pool);
+  if (pool.external_holders === undefined) return residual;
+  const listed = pool.external_holders.reduce(
+    (sum, holder) => sum + holder.bytes,
+    0,
+  );
+  return Math.min(residual, listed);
+}
+
+/**
+ * Used memory that no holder or listed app accounts for, such as an engine
+ * holding more than its catalog estimate or the driver and desktop. Closing
+ * other apps does not free it.
+ */
+export function poolUnaccountedBytes(pool: LocalModelPool) {
+  return poolResidualBytes(pool) - poolOtherBytes(pool);
 }
 
 /** Free memory plus memory currently held by external apps in one pool. */
@@ -227,11 +250,16 @@ function summarizePools(pools: readonly LocalModelPool[], gpu: boolean) {
   const totalBytes = pools.reduce((sum, pool) => sum + pool.total_bytes, 0);
   const usedBytes = pools.reduce((sum, pool) => sum + pool.used_bytes, 0);
   const otherBytes = pools.reduce((sum, pool) => sum + poolOtherBytes(pool), 0);
+  const unaccountedBytes = pools.reduce(
+    (sum, pool) => sum + poolUnaccountedBytes(pool),
+    0,
+  );
   return {
     freeBytes: Math.max(0, totalBytes - usedBytes),
     gpu,
     otherBytes,
     totalBytes,
+    unaccountedBytes,
     usedBytes,
   };
 }
@@ -261,12 +289,13 @@ export interface MemorySegments {
   componentBytes: number;
   models: MemorySegment[];
   otherBytes: number;
+  unaccountedBytes: number;
 }
 
-/** Breakdown of models, components, and other apps across the same pools `memorySummary` adds up. */
+/** Breakdown of models, components, other apps, and unaccounted use across the same pools `memorySummary` adds up. */
 export function memorySegments(view: LocalModelsView): MemorySegments {
   const { gpu, pools } = summaryPools(view);
-  const { otherBytes } = summarizePools(pools, gpu);
+  const { otherBytes, unaccountedBytes } = summarizePools(pools, gpu);
   const modelTotals = new Map<string, MemorySegment>();
   let componentBytes = 0;
   for (const pool of pools) {
@@ -288,6 +317,7 @@ export function memorySegments(view: LocalModelsView): MemorySegments {
     componentBytes,
     models: [...modelTotals.values()],
     otherBytes,
+    unaccountedBytes,
   };
 }
 

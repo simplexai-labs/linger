@@ -181,6 +181,22 @@ components:
           type: integer
           format: int64
           minimum: 0
+    LocalModelPoolExternalHolder:
+      description: >-
+        A desktop application outside localmodels holding pool memory, such as
+        a browser, video player, or game, that the user could close.
+      type: object
+      additionalProperties: false
+      required: [name, bytes]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        bytes:
+          type: integer
+          format: int64
+          minimum: 0
     LocalModelPool:
       description: >-
         One place models load into. The system and unified budgets are 80% of
@@ -217,6 +233,15 @@ components:
           maxItems: 256
           items:
             $ref: "#/components/schemas/LocalModelPoolHolder"
+        external_holders:
+          description: >-
+            Closeable desktop applications holding this pool's memory, as
+            localmodels reports them. Absent when localmodels does not report
+            them; the rest of used_bytes is then not known to be other apps.
+          type: array
+          maxItems: 256
+          items:
+            $ref: "#/components/schemas/LocalModelPoolExternalHolder"
     LocalModelAvailability:
       type: object
       additionalProperties: false

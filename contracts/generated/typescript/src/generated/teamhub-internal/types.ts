@@ -2594,6 +2594,12 @@ export interface components {
       /** Format: int64 */
       bytes: number;
     };
+    /** @description A desktop application outside localmodels holding pool memory, such as a browser, video player, or game, that the user could close. */
+    LocalModelPoolExternalHolder: {
+      name: string;
+      /** Format: int64 */
+      bytes: number;
+    };
     /** @description One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them. */
     LocalModelPool: {
       id: components["schemas"]["LocalModelPoolId"];
@@ -2606,6 +2612,8 @@ export interface components {
       /** Format: int64 */
       used_bytes: number;
       holders: components["schemas"]["LocalModelPoolHolder"][];
+      /** @description Closeable desktop applications holding this pool's memory, as localmodels reports them. Absent when localmodels does not report them; the rest of used_bytes is then not known to be other apps. */
+      external_holders?: components["schemas"]["LocalModelPoolExternalHolder"][];
     };
     /** @description Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M. */
     LocalModelId: string;

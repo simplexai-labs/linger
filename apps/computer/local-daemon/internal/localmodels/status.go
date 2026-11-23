@@ -80,10 +80,11 @@ type libraryStatus struct {
 	ObservedAt  string               `json:"observed_at"`
 	Host        *wire.LocalModelHost `json:"host"`
 	Pools       []struct {
-		ID         string                      `json:"id"`
-		TotalBytes uint64                      `json:"total_bytes"`
-		UsedBytes  uint64                      `json:"used_bytes"`
-		Holders    []wire.LocalModelPoolHolder `json:"holders"`
+		ID              string                              `json:"id"`
+		TotalBytes      uint64                              `json:"total_bytes"`
+		UsedBytes       uint64                              `json:"used_bytes"`
+		Holders         []wire.LocalModelPoolHolder         `json:"holders"`
+		ExternalHolders []wire.LocalModelPoolExternalHolder `json:"external_holders"`
 	} `json:"pools"`
 	Models []wire.LocalModel          `json:"models"`
 	Debug  *wire.LocalModelsDebugInfo `json:"debug,omitempty"`
@@ -142,8 +143,17 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 				holders[i].Kind = "component"
 			}
 		}
+		// Only these closeable apps count as other apps in the Web; the rest
+		// of used_bytes may be the engine's own memory beyond its holder.
+		var externalHolders []wire.LocalModelPoolExternalHolder
+		for _, holder := range pool.ExternalHolders {
+			if name := clip(strings.TrimSpace(holder.Name), 200); name != "" && len(externalHolders) < 256 {
+				externalHolders = append(externalHolders, wire.LocalModelPoolExternalHolder{Name: name, Bytes: holder.Bytes})
+			}
+		}
 		snapshot.Pools = append(snapshot.Pools, wire.LocalModelPool{
-			ID: pool.ID, Kind: kind, GpuIndex: index, TotalBytes: pool.TotalBytes, UsedBytes: pool.UsedBytes, Holders: holders,
+			ID: pool.ID, Kind: kind, GpuIndex: index, TotalBytes: pool.TotalBytes, UsedBytes: pool.UsedBytes,
+			Holders: holders, ExternalHolders: externalHolders,
 		})
 	}
 	for _, model := range status.Models {

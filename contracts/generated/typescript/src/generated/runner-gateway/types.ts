@@ -1383,6 +1383,10 @@ export interface LocalModelPool {
    * @maxItems 256
    */
   holders: LocalModelPoolHolder[];
+  /**
+   * @maxItems 256
+   */
+  external_holders?: LocalModelPoolExternalHolder[];
 }
 /**
  * Something holding pool memory. A component is a foundation service (embedding, reranker, speech) that is never a model row.
@@ -1390,6 +1394,13 @@ export interface LocalModelPool {
 export interface LocalModelPoolHolder {
   kind: "model" | "component";
   id: string;
+  name: string;
+  bytes: NonNegativeInteger;
+}
+/**
+ * A desktop application outside localmodels holding pool memory, such as a browser, video player, or game, that the user could close.
+ */
+export interface LocalModelPoolExternalHolder {
   name: string;
   bytes: NonNegativeInteger;
 }

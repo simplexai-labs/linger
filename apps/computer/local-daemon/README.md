@@ -268,7 +268,11 @@ downloaded model that Run's Agent names.
   one after connecting) is retried with backoff up to one minute until a read
   succeeds, so a transient failure never ends the watch.
 - Snapshots. `runner.local_models` carries `library-status/v1` mapped to
-  `LocalModelsSnapshot` (pools gain `kind` and `gpu_index`). Structural and
+  `LocalModelsSnapshot` (pools gain `kind` and `gpu_index`, and keep the
+  tool's `external_holders`, the closeable desktop apps it found holding that
+  pool's memory, without their PIDs; the Models page calls only those "Other
+  apps" and shows the rest of `used_bytes` beyond `holders` neutrally, since
+  an engine can hold more than its catalog estimate). Structural and
   security invariants (`id`, unique model IDs, `fit`, `state`, `pool`,
   `pi_model` length, non-negative speeds, HTTPS `source_url`) still fail
   closed as `TOOL_FAILED`, while extensible display and diagnostic enums

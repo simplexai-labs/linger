@@ -2334,6 +2334,23 @@ export const runnerGatewayEnvelopeSchema = {
         },
       },
     },
+    LocalModelPoolExternalHolder: {
+      description:
+        "A desktop application outside localmodels holding pool memory, such as a browser, video player, or game, that the user could close.",
+      type: "object",
+      additionalProperties: false,
+      required: ["name", "bytes"],
+      properties: {
+        name: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+        },
+        bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+      },
+    },
     LocalModelPool: {
       description:
         "One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them.",
@@ -2363,6 +2380,13 @@ export const runnerGatewayEnvelopeSchema = {
           maxItems: 256,
           items: {
             $ref: "#/$defs/LocalModelPoolHolder",
+          },
+        },
+        external_holders: {
+          type: "array",
+          maxItems: 256,
+          items: {
+            $ref: "#/$defs/LocalModelPoolExternalHolder",
           },
         },
       },

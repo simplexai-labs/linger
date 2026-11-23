@@ -188,6 +188,8 @@ export const localModelsMessages = defineMessages("localModels", {
   poolInUse: "{pool}: {used} of {total} in use",
   otherApps: "Other apps",
   otherAppsSize: "Other apps · {size}",
+  systemAndEngine: "System & engine",
+  systemAndEngineSize: "System & engine · {size}",
   hardware: "Hardware",
 
   // Confirmations.

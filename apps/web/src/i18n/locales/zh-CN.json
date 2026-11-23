@@ -1272,6 +1272,8 @@
     "poolInUse": "{pool}：已用 {used}，共 {total}",
     "otherApps": "其他应用",
     "otherAppsSize": "其他应用 · {size}",
+    "systemAndEngine": "系统与引擎",
+    "systemAndEngineSize": "系统与引擎 · {size}",
     "hardware": "硬件",
     "affectedUnload": {
       "other": "{names} 在使用这个模型，重新加载前无法回复。"
