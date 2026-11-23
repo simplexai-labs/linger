@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/realtime"
@@ -68,6 +69,11 @@ VALUES($1,$2,'management-'||$1,'active','Background','Work safely','gpt-5','acto
 		"tenant_id": acmeTenant, "agent_actor_id": anotherMe, "outcome": "skipped",
 	}); status != http.StatusBadRequest {
 		t.Fatalf("unknown outcome status=%d body=%s", status, body)
+	}
+	if status, body := agentRuntimeStateRequest(t, handler, http.MethodPost, "/v0/agent-runtime/another-me/background-calls", teamHubInternalToken, map[string]any{
+		"tenant_id": acmeTenant, "agent_actor_id": anotherMe, "outcome": "failed", "reason": strings.Repeat("x", 65),
+	}); status != http.StatusBadRequest {
+		t.Fatalf("over-long reason status=%d body=%s", status, body)
 	}
 
 	report(anotherMe, "failed", "runtime_unavailable")

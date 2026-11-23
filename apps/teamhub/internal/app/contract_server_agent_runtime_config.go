@@ -2,6 +2,7 @@ package app
 
 import (
 	"net/http"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentruntimestate"
@@ -44,6 +45,10 @@ func (a *App) listAnotherMePlacements(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// anotherMeBackgroundReasonMaxLength is the contract's bound on a reported
+// reason code.
+const anotherMeBackgroundReasonMaxLength = 64
+
 // recordAnotherMeBackgroundCall counts an Another Me's failed background model
 // calls in a row so its Human can see them.
 func (a *App) recordAnotherMeBackgroundCall(c *gin.Context) {
@@ -51,7 +56,8 @@ func (a *App) recordAnotherMeBackgroundCall(c *gin.Context) {
 	if !a.decodeAgentRuntimeStateBody(c, &request) {
 		return
 	}
-	if !request.Outcome.Valid() || request.TenantId == "" || request.AgentActorId == "" {
+	if !request.Outcome.Valid() || request.TenantId == "" || request.AgentActorId == "" ||
+		utf8.RuneCountInString(optionalStringValue(request.Reason)) > anotherMeBackgroundReasonMaxLength {
 		a.writeAgentRuntimeStateError(c, "decode Another Me background call", agentruntimestate.ErrInvalid)
 		return
 	}
