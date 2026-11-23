@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -71,6 +72,34 @@ func TestOutlookCanvasDraftReplacesRecipientsAndAttachments(t *testing.T) {
 	want := []string{"GET /v1.0/me/messages/draft1", "PATCH /v1.0/me/messages/draft1", "GET /v1.0/me/messages/draft1/attachments", "DELETE /v1.0/me/messages/draft1/attachments/old-file", "DELETE /v1.0/me/messages/draft1/attachments/old-image", "POST /v1.0/me/messages/draft1/attachments", "POST /v1.0/me/messages/draft1/attachments"}
 	if strings.Join(calls, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("calls=%v", calls)
+	}
+}
+
+func TestOutlookCanvasRemovesANewDraftWhoseAttachmentFailed(t *testing.T) {
+	for _, existing := range []string{"", "draft1"} {
+		calls := []string{}
+		client := outlookDraftClient(t, func(r *http.Request) (*http.Response, error) {
+			var request proxyRequest
+			_ = json.NewDecoder(r.Body).Decode(&request)
+			calls = append(calls, request.Method+" "+request.Endpoint)
+			switch {
+			case strings.HasSuffix(request.Endpoint, "/attachments") && request.Method == http.MethodPost:
+				return outlookProxyResponse(http.StatusServiceUnavailable, map[string]any{"error": map[string]string{"code": "ServiceUnavailable"}}), nil
+			case strings.HasSuffix(request.Endpoint, "/attachments"):
+				return outlookProxyResponse(http.StatusOK, map[string]any{"value": []any{}}), nil
+			case request.Method == http.MethodDelete:
+				return outlookProxyResponse(http.StatusNoContent, nil), nil
+			default:
+				return outlookProxyResponse(http.StatusOK, map[string]any{"id": "draft1", "isDraft": true}), nil
+			}
+		})
+		_, err := client.SaveOutlookDraft(t.Context(), "ca", existing, OutlookDraftMessage{To: []string{"a@example.test"}, Attachments: []OutlookDraftAttachment{{Name: "file.txt", ContentType: "text/plain", Bytes: []byte("file")}}})
+		deleted := slices.Contains(calls, "DELETE /v1.0/me/messages/draft1")
+		// Only a draft this save created is removed; an existing one stays the
+		// canvas's draft.
+		if err == nil || deleted != (existing == "") {
+			t.Fatalf("existing=%q err=%v calls=%v", existing, err, calls)
+		}
 	}
 }
 

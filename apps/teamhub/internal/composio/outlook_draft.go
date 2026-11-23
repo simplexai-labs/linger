@@ -77,6 +77,11 @@ func (c *Client) SaveOutlookDraft(ctx context.Context, accountID, draftID string
 	}
 	for _, attachment := range message.Attachments {
 		if err := c.uploadOutlookDraftAttachment(ctx, accountID, endpoint, attachment); err != nil {
+			if draftID == "" {
+				// The new draft is never reported, so each retry would leave
+				// another partial draft in Drafts: remove it, best effort.
+				_, _ = c.outlookDraftRequest(context.WithoutCancel(ctx), accountID, endpoint, http.MethodDelete, nil)
+			}
 			return GmailDraft{}, err
 		}
 	}

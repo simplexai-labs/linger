@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -224,6 +225,26 @@ func (m Mailbox) ThreadMessages(ctx context.Context, threadID string) ([]MailMes
 	return response.Data.Thread.Messages, err
 }
 
+// attachmentHostDomains are where Feishu and Lark serve attachment
+// downloads. TeamHub fetches the link itself from inside its own network, and
+// the link comes through the owner's Computer, so it may reach no other host.
+var attachmentHostDomains = []string{"feishu.cn", "larksuite.com", "larkoffice.com", "feishucdn.com", "larksuitecdn.com"}
+
+// maxAttachmentRedirects bounds the redirects an attachment download follows.
+const maxAttachmentRedirects = 3
+
+// attachmentHost reports whether link is an https URL on Feishu's or Lark's
+// attachment domains, on the default port.
+func attachmentHost(link *url.URL) bool {
+	if link.Scheme != "https" || link.User != nil || (link.Port() != "" && link.Port() != "443") {
+		return false
+	}
+	host := strings.ToLower(link.Hostname())
+	return slices.ContainsFunc(attachmentHostDomains, func(domain string) bool {
+		return host == domain || strings.HasSuffix(host, "."+domain)
+	})
+}
+
 // DownloadAttachment returns one attachment's bytes. Feishu hands out a
 // presigned URL, which TeamHub fetches itself: it needs no login.
 func (m Mailbox) DownloadAttachment(ctx context.Context, messageID, attachmentID string) ([]byte, error) {
@@ -246,14 +267,21 @@ func (m Mailbox) DownloadAttachment(ctx context.Context, messageID, attachmentID
 		}
 	}
 	parsed, err := url.Parse(link)
-	if link == "" || err != nil || parsed.Scheme != "https" {
+	if link == "" || err != nil || !attachmentHost(parsed) {
 		return nil, errors.New("Feishu returned no usable attachment link")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
 	if err != nil {
 		return nil, err
 	}
-	response2, err := m.downloads.Do(request)
+	downloads := *m.downloads
+	downloads.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if len(via) >= maxAttachmentRedirects || !attachmentHost(next.URL) {
+			return errors.New("the Feishu attachment link redirected away from Feishu")
+		}
+		return nil
+	}
+	response2, err := downloads.Do(request)
 	if err != nil {
 		return nil, err
 	}

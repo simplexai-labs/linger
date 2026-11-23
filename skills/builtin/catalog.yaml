@@ -108,9 +108,6 @@ skills:
       - manifest_id: skill_manifest_simplexai_canvas_1_0_7
         version: 1.0.7
         package_path: builtin/canvas/1.0.7
-      - manifest_id: skill_manifest_simplexai_canvas_1_0_5
-        version: 1.0.5
-        package_path: builtin/canvas/1.0.5
       - manifest_id: skill_manifest_simplexai_canvas_1_0_4
         version: 1.0.4
         package_path: builtin/canvas/1.0.4

@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -158,24 +159,55 @@ func TestDraftsNameTheMailboxAsTheirSender(t *testing.T) {
 	}
 }
 
-func TestDownloadAttachmentFetchesThePresignedLinkItself(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("file")) }))
-	defer server.Close()
-	computer := &fakeComputer{results: []map[string]any{{"status": "ok", "data": map[string]any{"download_urls": []any{
-		map[string]any{"attachment_id": "a1", "download_url": server.URL + "/a1"},
+// feishuLinks is a client that reaches server for every host, as if it
+// served Feishu's attachment domains.
+func feishuLinks(server *httptest.Server) *http.Client {
+	transport := server.Client().Transport.(*http.Transport).Clone()
+	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+	}
+	transport.TLSClientConfig.ServerName = "example.com"
+	return &http.Client{Transport: transport}
+}
+
+func attachmentLink(link string) *fakeComputer {
+	return &fakeComputer{results: []map[string]any{{"status": "ok", "data": map[string]any{"download_urls": []any{
+		map[string]any{"attachment_id": "a1", "download_url": link},
 	}}}}}
-	data, err := NewMailbox(computer.call, server.Client()).DownloadAttachment(context.Background(), "m1", "a1")
+}
+
+func TestDownloadAttachmentFetchesThePresignedLinkItself(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/elsewhere" {
+			http.Redirect(w, request, "https://attacker.example.com/a1", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("file"))
+	}))
+	defer server.Close()
+	ctx := context.Background()
+	computer := attachmentLink("https://internal-api-drive-stream.feishu.cn/space/api/box/stream/download/authcode/?code=a1")
+	data, err := NewMailbox(computer.call, feishuLinks(server)).DownloadAttachment(ctx, "m1", "a1")
 	if err != nil || string(data) != "file" {
 		t.Fatalf("data = %q, err = %v", data, err)
 	}
 	if computer.calls[0].arguments["path"] != "/open-apis/mail/v1/user_mailboxes/me/messages/m1/attachments/download_url" {
 		t.Fatalf("calls = %#v", computer.calls)
 	}
-	plain := &fakeComputer{results: []map[string]any{{"status": "ok", "data": map[string]any{"download_urls": []any{
-		map[string]any{"attachment_id": "a1", "download_url": "http://example.com/a1"},
-	}}}}}
-	if _, err := NewMailbox(plain.call, server.Client()).DownloadAttachment(context.Background(), "m1", "a1"); err == nil {
-		t.Fatal("a plain-HTTP attachment link was fetched")
+
+	// TeamHub fetches the link from inside its own network: a link anywhere
+	// but Feishu's attachment domains, or a redirect away from them, is refused.
+	for _, link := range []string{
+		"http://internal-api-drive-stream.feishu.cn/a1",
+		server.URL + "/a1",
+		"https://metadata.internal/a1",
+		"https://feishu.cn.attacker.example.com/a1",
+		"https://internal-api-drive-stream.feishu.cn:8443/a1",
+		"https://internal-api-drive-stream.feishu.cn/elsewhere",
+	} {
+		if _, err := NewMailbox(attachmentLink(link).call, feishuLinks(server)).DownloadAttachment(ctx, "m1", "a1"); err == nil {
+			t.Fatalf("the attachment link %s was fetched", link)
+		}
 	}
 }
 
