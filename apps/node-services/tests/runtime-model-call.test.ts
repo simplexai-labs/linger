@@ -1246,6 +1246,23 @@ describe("Background call outcomes", () => {
       expect(onBackgroundOutcome).not.toHaveBeenCalled();
   });
 
+  it("does not report a call the Daemon canceled on every attempt", async () => {
+    vi.useFakeTimers();
+    const { modelCall, invokeModel, onBackgroundOutcome } = reported({
+      outcomes: [
+        { outcome: "canceled", duration_ms: 0 },
+        { outcome: "canceled", duration_ms: 0 },
+      ],
+    });
+    const call = modelCall
+      .text({ kind: "profile", key: "profile", input: "x" })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await call).toMatchObject({ kind: "failed", canceled: true });
+    expect(invokeModel).toHaveBeenCalledTimes(2);
+    expect(onBackgroundOutcome).not.toHaveBeenCalled();
+  });
+
   it("does not report interactive calls or an Agent placed without its actor", async () => {
     const { modelCall, onBackgroundOutcome } = reported({
       outcomes: [

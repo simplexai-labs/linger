@@ -253,6 +253,9 @@ export class ModelCallError extends Error {
   readonly output?: string;
   /** The Daemon's structured outcome when kind is runtime_unavailable. */
   readonly runtimeOutcome?: ModelCallRuntimeOutcome;
+  /** The Daemon stopped the call because its connection closed, it began
+   * shutting down, or the caller cancelled it; the Runtime did not fail. */
+  readonly canceled?: boolean;
 
   constructor(
     readonly kind: ModelCallErrorKind,
@@ -260,11 +263,13 @@ export class ModelCallError extends Error {
     options?: ErrorOptions & {
       readonly output?: string;
       readonly runtimeOutcome?: ModelCallRuntimeOutcome;
+      readonly canceled?: boolean;
     },
   ) {
     super(message, options);
     this.output = options?.output;
     this.runtimeOutcome = options?.runtimeOutcome;
+    if (options?.canceled) this.canceled = true;
   }
 }
 
@@ -1231,6 +1236,7 @@ function backgroundFailureReason(
           ? "runtime_incompatible"
           : "runtime_unavailable";
     case "failed":
+      return error.canceled ? undefined : "unknown";
     case "timed_out":
     case "output_limited":
     case "invalid_output":
@@ -1500,11 +1506,13 @@ function outcomeFailure(
         streamed,
       );
     case "canceled":
-    case "failed":
       return new ModelCallError(
         "failed",
-        `Model invocation ${outcome.outcome}${reason}`,
+        `Model invocation canceled${reason}`,
+        { canceled: true },
       );
+    case "failed":
+      return new ModelCallError("failed", `Model invocation failed${reason}`);
   }
 }
 

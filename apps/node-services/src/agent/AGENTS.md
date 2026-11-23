@@ -47,7 +47,8 @@ take precedence.
   Codex and Claude.
   Each background (non-interactive) call that ran on an Another Me's Computer
   and completed, or failed for a reason other than an offline Computer, a
-  stopped call or a missing Another Me, is reported once per execution to
+  stopped call, a call the Daemon canceled (its connection closed or it is
+  shutting down) or a missing Another Me, is reported once per execution to
   TeamHub's `POST /v0/agent-runtime/another-me/background-calls` with a
   reason code mapped from the error kind and the Daemon's structured outcome,
   never its text. The report is fire-and-forget off the caller's path; a
