@@ -45,7 +45,7 @@ const accountChoice = "account picks one of several connected accounts by its ad
 var AppTools = []Tool{
 	{
 		Name: ToolSaveEmailDraft,
-		Description: "Save an email canvas in this room as a draft in the user's mail app, Gmail or Feishu Mail as the canvas says, or update the draft it was saved as before. It sends nothing. " +
+		Description: "Save an email canvas in this room as a draft in the user's mail app, Gmail, Outlook or Feishu Mail as the canvas says, or update the draft it was saved as before. It sends nothing. " +
 			"Call it when the user wants the email saved as a draft. Then say in one short sentence that it is saved in their drafts. " + accountChoice,
 		Parameters: objectSchema([]string{"document_id"}, map[string]any{
 			"document_id": stringProperty("The canvas, from open_email_canvas"),
@@ -54,7 +54,7 @@ var AppTools = []Tool{
 	},
 	{
 		Name: ToolSendEmailCanvas,
-		Description: "Send an email canvas in this room from the user's mail app, Gmail or Feishu Mail as the canvas says. It saves the canvas as a draft first, so what is sent is exactly the canvas; the canvas's file blocks go as attachments. " +
+		Description: "Send an email canvas in this room from the user's mail app, Gmail, Outlook or Feishu Mail as the canvas says. It saves the canvas as a draft first, so what is sent is exactly the canvas; the canvas's file blocks go as attachments. " +
 			"The canvas is open beside the chat, so the user has seen it: when the user tells you to send it, call with confirmed=true and it is sent, without asking again. When you are not sure they want it sent now, call without confirmed: it returns needs_confirmation with who it goes to, the subject and any attachments; say that and that it cannot be undone, ask, and after they say yes in their next turn call again with confirmed=true. " +
 			"Before the result, say only that you are sending it, never that it was sent. Say it was sent only when the result is sent; outcome_unknown means it may have gone out: never send again, ask the user to check their Sent folder. " +
 			"no_recipients: ask who it goes to and set them with edit_email_canvas first. " + accountChoice,

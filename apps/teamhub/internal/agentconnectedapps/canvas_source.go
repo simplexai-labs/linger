@@ -77,7 +77,7 @@ func (s *Service) acquireDraftLease(ctx context.Context, connectionID, holder st
 		}
 		select {
 		case <-ctx.Done():
-			return &Error{Code: "provider_unavailable", Message: "Another draft save on this Gmail connection is still running; try again shortly.", Retryable: true, cause: ctx.Err()}
+			return &Error{Code: "provider_unavailable", Message: "Another draft save on this mail connection is still running; try again shortly.", Retryable: true, cause: ctx.Err()}
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
@@ -112,7 +112,26 @@ func (s *Service) SaveMailCanvasDraft(ctx context.Context, token, connectionID, 
 	upload, cancel := context.WithTimeout(ctx, draftLeaseDuration-time.Minute)
 	var draft composio.GmailDraft
 	var err error
-	if target == MailCanvasFeishu {
+	if target == MailCanvasOutlook {
+		authorizedTarget, authErr := s.MailCanvasTargetOf(ctx, token, connectionID)
+		if authErr != nil || authorizedTarget != target {
+			cancel()
+			if authErr != nil {
+				return composio.GmailDraft{}, authErr
+			}
+			return composio.GmailDraft{}, ErrInvalid
+		}
+		// Invalidate the old binding before a multi-request replacement, so a
+		// partial attachment upload cannot be sent through an earlier confirmation.
+		if draftID != "" {
+			err = store.New(s.pool).UpsertGmailCanvasDraft(ctx, store.UpsertGmailCanvasDraftParams{ConnectionID: connectionID, DraftID: draftID, DocumentID: built.DocumentID, SourceDigest: digestOf(holder)})
+			if err != nil {
+				cancel()
+				return composio.GmailDraft{}, err
+			}
+		}
+		draft, err = s.saveOutlookDraft(upload, token, connectionID, draftID, built.Outlook)
+	} else if target == MailCanvasFeishu {
 		raw, decodeErr := base64.URLEncoding.DecodeString(built.Raw)
 		if decodeErr != nil {
 			cancel()
@@ -148,7 +167,7 @@ func (s *Service) SaveMailCanvasDraft(ctx context.Context, token, connectionID, 
 	return draft, nil
 }
 
-// canvasSend is the canvas a confirmed Gmail draft send was bound to; both
+// canvasSend is the canvas a confirmed mail draft send was bound to; both
 // fields are empty for a draft that came from no canvas.
 type canvasSend struct{ digest, documentID string }
 
@@ -170,15 +189,19 @@ func (s *Service) recordCanvasSend(ctx context.Context, connection externalsourc
 }
 
 func (s *Service) checkedCanvasSource(ctx context.Context, connection externalsource.AgentToolConnection, action confirmationAction) (canvasSend, error) {
-	if action.ToolSlug != "GMAIL_SEND_DRAFT" && action.ToolSlug != "FEISHU_MAIL_SEND_DRAFT" || s.pool == nil {
+	if action.ToolSlug != "GMAIL_SEND_DRAFT" && action.ToolSlug != "FEISHU_MAIL_SEND_DRAFT" && action.ToolSlug != "OUTLOOK_SEND_DRAFT" || s.pool == nil {
 		return canvasSend{}, nil
 	}
 	name, command := "Gmail", "gmail canvas-draft --update"
 	if action.ToolSlug == "FEISHU_MAIL_SEND_DRAFT" {
 		name, command = "Feishu Mail", "feishu-mail canvas-draft --update"
 	}
+	draftKey := "draft_id"
+	if action.ToolSlug == "OUTLOOK_SEND_DRAFT" {
+		name, command, draftKey = "Outlook", "outlook canvas-draft --update", "message_id"
+	}
 	q := store.New(s.pool)
-	saved, err := q.GetGmailCanvasDraft(ctx, store.GetGmailCanvasDraftParams{ConnectionID: connection.ID, DraftID: str(action.Arguments, "draft_id")})
+	saved, err := q.GetGmailCanvasDraft(ctx, store.GetGmailCanvasDraftParams{ConnectionID: connection.ID, DraftID: str(action.Arguments, draftKey)})
 	if errors.Is(err, pgx.ErrNoRows) {
 		if action.CanvasSourceDigest != "" {
 			return canvasSend{}, unavailableError(err)

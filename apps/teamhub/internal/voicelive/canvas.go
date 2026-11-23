@@ -24,7 +24,7 @@ const MaxEmailBodyRunes = 20000
 const canvasTitleRunes = 80
 
 // emailCanvasDelivery says how a canvas is saved or sent, for both tools.
-const emailCanvasDelivery = "To save it as a draft in the user's mail app (Gmail or Feishu Mail, as the canvas says) use save_email_draft, and to send it send_email_canvas, when those tools are offered; otherwise call start_task with surface apps and a goal that names its document_id as an email canvas and says to save it as a draft or to send it, with irreversible set for a send. "
+const emailCanvasDelivery = "To save it as a draft in the user's mail app (Gmail, Outlook or Feishu Mail, as the canvas says) use save_email_draft, and to send it send_email_canvas, when those tools are offered; otherwise call start_task with surface apps and a goal that names its document_id as an email canvas and says to save it as a draft or to send it, with irreversible set for a send. "
 
 // EmailCanvasTool describes the tool that opens a new canvas.
 var EmailCanvasTool = Tool{
@@ -33,7 +33,7 @@ var EmailCanvasTool = Tool{
 		"Use it whenever the user wants a new email written or drafted, instead of start_task; answering an email someone sent is start_task with surface apps. " +
 		"to and cc hold only email addresses the user gave, separated by commas; leave them empty rather than guess, and ask for them when it is time to send. " +
 		"subject is one line; body is the whole email in the language the user wants it in, plain text with a blank line between paragraphs, written only from what the user said: never invent facts, times or names. " +
-		"It returns document_id and revision_id. Then tell the user in one or two short sentences what you wrote (who it is to and the main points) and that it is open for them to look at and change; read it out in full only when they ask. " +
+		"mail_app_required means several mail apps are connected: ask which to use and call again with app. It returns document_id and revision_id. Then tell the user in one or two short sentences what you wrote (who it is to and the main points) and that it is open for them to look at and change; read it out in full only when they ask. " +
 		"Change it later with edit_email_canvas, and attach a file to it with attach_email_file. " + emailCanvasDelivery +
 		"invalid_recipients means an address is not an email address: ask the user for it. " +
 		"missing_content means the subject or body is empty: the address is fine; ask the user what the email should say, never invent it, then call again with both. " +
@@ -43,7 +43,7 @@ var EmailCanvasTool = Tool{
 		"cc":      stringProperty("Optional carbon-copy email addresses, separated by commas"),
 		"subject": stringProperty("The subject, one line"),
 		"body":    stringProperty("The whole email body"),
-		"app":     map[string]any{"type": "string", "enum": []any{"gmail", "feishu_mail"}, "description": "Optional mail app to send from, when the user names one; leave it out to use the one connected"},
+		"app":     map[string]any{"type": "string", "enum": []any{"gmail", "outlook", "feishu_mail"}, "description": "Optional mail app to send from, when the user names one; leave it out to use the one connected"},
 	}),
 }
 
@@ -91,8 +91,9 @@ type AttachEmailFileArguments struct {
 // The mail apps an email canvas is sent from; a canvas names its app as its
 // target, by the app's catalog key.
 const (
-	EmailCanvasGmail  = "gmail"
-	EmailCanvasFeishu = "feishu_mail"
+	EmailCanvasGmail   = "gmail"
+	EmailCanvasOutlook = "outlook"
+	EmailCanvasFeishu  = "feishu_mail"
 )
 
 // EmailCanvasArguments holds the email the live model wrote.

@@ -27,6 +27,22 @@ export function connectableAppsOnly(keys: readonly string[]): string {
     : `\n- Connected apps: no app has an account you can use yet.${connectableAppsRule(keys)}`;
 }
 
+/**
+ * Routes a new email in a mail app that has a canvas to the canvas, so the
+ * Human sees it beside the chat and sends it from its card. Without this, a
+ * long conversation that already used send or draft keeps using them.
+ */
+export function mailCanvasRule(keys: readonly string[]): string {
+  const apps = [
+    ["gmail", "gmail"],
+    ["outlook", "outlook"],
+    ["feishu_mail", "feishu-mail"],
+  ].filter(([key]) => keys.includes(key!));
+  if (apps.length === 0) return "";
+  const commands = apps.map(([, command]) => `teamhub ${command}`).join(" or ");
+  return ` A new email the Human asks you to write, prepare, draft or send from ${apps.map(([, command]) => command).join(" or ")} goes on a canvas: read the canvas Skill, open the canvas, and let the Human send it from its card. Do not create it with the send or draft command of ${commands}; answer an email someone sent with reply.`;
+}
+
 /** Names the apps the Agent could use when the Run started, by app key. */
 export function connectedAppsAtRunStart(keys: readonly string[]): string {
   return keys.length === 0

@@ -6,6 +6,7 @@ import {
   connectableAppsOnly,
   connectableAppsRule,
   connectedAppsAtRunStart,
+  mailCanvasRule,
 } from "./connected-apps.js";
 import { renderPersonalContextMethod } from "./personal-context-method.js";
 import { PERSONAL_KNOWLEDGE_POLICY_COMPACT } from "./personal-knowledge-policy.js";
@@ -159,7 +160,7 @@ const connectedAppsCommands = (
   connectedAppKeys: readonly string[],
   connectableAppKeys: readonly string[],
 ): string => `
-- Connected apps: gmail, outlook, feishu-mail, outlook-calendar, gcal, gdrive, slack, notion, and figma have their own commands (teamhub gmail --help). For other apps, find the tool with teamhub apps search "<the action in English, with the app name>", then run teamhub apps execute --connectionId <id> --toolSlug <slug> --toolVersion <version> --arguments '<json>'. When this Run started, ${connectedAppsAtRunStart(connectedAppKeys)}; use them without checking first, and check teamhub apps list only when the Human says they connected or disconnected an app during this conversation or a command reports that the account is not connected. Never resend a write whose outcome is unknown; check the app first.${connectableAppsRule(connectableAppKeys)}`;
+- Connected apps: gmail, outlook, feishu-mail, outlook-calendar, gcal, gdrive, slack, notion, and figma have their own commands (teamhub gmail --help). For other apps, find the tool with teamhub apps search "<the action in English, with the app name>", then run teamhub apps execute --connectionId <id> --toolSlug <slug> --toolVersion <version> --arguments '<json>'. When this Run started, ${connectedAppsAtRunStart(connectedAppKeys)}; use them without checking first, and check teamhub apps list only when the Human says they connected or disconnected an app during this conversation or a command reports that the account is not connected. Never resend a write whose outcome is unknown; check the app first.${mailCanvasRule(connectedAppKeys)}${connectableAppsRule(connectableAppKeys)}`;
 
 const commands = (
   agentType: AgentType,

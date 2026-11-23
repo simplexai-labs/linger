@@ -530,10 +530,15 @@ func (s *Service) sendVoiceLiveEmailCanvas(ctx context.Context, session voiceliv
 	}
 	// The yes above is bound to this content, which the draft holds.
 	sendSlug := "GMAIL_SEND_DRAFT"
+	sendArgs := map[string]any{"draft_id": saved.draftID}
+	if canvas.target == agentconnectedapps.MailCanvasOutlook {
+		sendSlug = "OUTLOOK_SEND_DRAFT"
+		sendArgs = map[string]any{"message_id": saved.draftID}
+	}
 	if canvas.target == agentconnectedapps.MailCanvasFeishu {
 		sendSlug = "FEISHU_MAIL_SEND_DRAFT"
 	}
-	status, outcome, output, err := s.voiceLiveWrite(ctx, session, request, app, sendSlug, map[string]any{"draft_id": saved.draftID}, summary,
+	status, outcome, output, err := s.voiceLiveWrite(ctx, session, request, app, sendSlug, sendArgs, summary,
 		func(string) (bool, error) { return true, nil })
 	if output != "" || err != nil {
 		return output, err

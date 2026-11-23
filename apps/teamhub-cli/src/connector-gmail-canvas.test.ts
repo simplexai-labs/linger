@@ -28,7 +28,7 @@ async function fixture(saveDraft?: () => Promise<Response>) {
         status: "ready",
         account: {
           connection_id: "connection_one",
-          app_key: "gmail",
+          app_key: body.app_key ?? "gmail",
           display_name: "Personal",
           identity_label: "owner@example.com",
         },
@@ -64,6 +64,19 @@ async function fixture(saveDraft?: () => Promise<Response>) {
 }
 
 describe("teamhub gmail canvas-draft", () => {
+  it("saves Outlook canvases through the authorized mail draft route", async () => {
+    const f = await fixture();
+    expect(
+      await f.run(["outlook", "canvas-draft", "document_canvas", "--json"]),
+      f.errors.join(""),
+    ).toBe(0);
+    expect(f.calls[0]?.body).toMatchObject({ app_key: "outlook" });
+    expect(f.calls[1]?.body).toEqual({
+      connection_id: "connection_one",
+      document_id: "document_canvas",
+    });
+    expect(f.calls).toHaveLength(2);
+  });
   it("leaves the canvas header to TeamHub and updates the same draft", async () => {
     const f = await fixture();
     expect(

@@ -43,6 +43,11 @@ type Provider interface {
 	SendGmailDraft(context.Context, string, string) (string, error)
 }
 
+type outlookProvider interface {
+	SaveOutlookDraft(context.Context, string, string, composio.OutlookDraftMessage) (composio.GmailDraft, error)
+	SendOutlookDraft(context.Context, string, string) (string, error)
+}
+
 // Service owns the delivery receipt shown in the editor and its queued execution.
 type Service struct {
 	pool        *pgxpool.Pool
@@ -270,8 +275,17 @@ func (s *Service) appName(ctx context.Context, row store.MailCanvasDelivery) str
 	return agentconnectedapps.MailCanvasAppName(connection.Provider)
 }
 
-// saveDraft uploads raw, base64url, as the connection's draft.
-func (s *Service) saveDraft(ctx context.Context, connection externalsource.Connection, draftID, raw string) (string, error) {
+// saveDraft uploads the rendered canvas as the connection's draft.
+func (s *Service) saveDraft(ctx context.Context, connection externalsource.Connection, draftID string, built agentconnectedapps.CanvasDraft) (string, error) {
+	raw := built.Raw
+	if connection.Provider == agentconnectedapps.MailCanvasOutlook {
+		provider, ok := s.provider.(outlookProvider)
+		if !ok || built.Outlook == nil {
+			return "", ErrConnectionUnavailable
+		}
+		saved, err := provider.SaveOutlookDraft(ctx, connection.UpstreamConnectionID, draftID, *built.Outlook)
+		return saved.DraftID, err
+	}
 	if connection.Provider != agentconnectedapps.MailCanvasFeishu {
 		saved, err := s.provider.SaveGmailDraft(ctx, connection.UpstreamConnectionID, draftID, raw)
 		return saved.DraftID, err
@@ -284,6 +298,13 @@ func (s *Service) saveDraft(ctx context.Context, connection externalsource.Conne
 }
 
 func (s *Service) sendDraft(ctx context.Context, connection externalsource.Connection, draftID string) (string, error) {
+	if connection.Provider == agentconnectedapps.MailCanvasOutlook {
+		provider, ok := s.provider.(outlookProvider)
+		if !ok {
+			return "", ErrConnectionUnavailable
+		}
+		return provider.SendOutlookDraft(ctx, connection.UpstreamConnectionID, draftID)
+	}
 	if connection.Provider == agentconnectedapps.MailCanvasFeishu {
 		return s.connections.SendFeishuDraft(ctx, connection.UpstreamConnectionID, draftID)
 	}
@@ -295,7 +316,7 @@ func draftGone(err error) bool {
 	if status, ok := composio.ErrorStatus(err); ok && status == http.StatusNotFound {
 		return true
 	}
-	return feishu.IsNotFound(err)
+	return feishu.IsNotFound(err) || errors.Is(err, composio.ErrOutlookDraftNotEditable)
 }
 
 type deliveryArgs struct {
@@ -360,7 +381,7 @@ func (w *deliveryWorker) Work(ctx context.Context, job *river.Job[deliveryArgs])
 	if draft.SourceDigest != row.SourceDigest {
 		return s.finish(ctx, row, "failed", "The email changed after Send was clicked. Review it and send again.")
 	}
-	savedID, err := s.saveDraft(ctx, connection, row.DraftID, draft.Raw)
+	savedID, err := s.saveDraft(ctx, connection, row.DraftID, draft)
 	if draftGone(err) && row.DraftID != "" {
 		// A mail app may delete a draft once it is sent, so a lost earlier
 		// draft may mean an unconfirmed send went out. The next Send starts a

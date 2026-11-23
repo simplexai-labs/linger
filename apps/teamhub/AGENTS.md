@@ -55,9 +55,14 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   when the card is approved. A Feishu Mail connection imports no mail from
   before it: its snapshot completes empty and the nightly sync reads the inbox
   and sent folders from the connection time on. Its listener polls the inbox
-  against a received-time watermark. Email canvases target `gmail` or
-  `feishu_mail`; both build one RFC 5322 message, which Feishu's draft API
-  takes as is, and the draft bindings and delivery receipts are shared.
+  against a received-time watermark. Email canvases target `gmail`, `outlook` or
+  `feishu_mail`. Gmail and Feishu take one RFC 5322 message; Outlook uses
+  Graph JSON drafts with CID inline images and attachment upload sessions.
+  Outlook updates replace all attachments and invalidate the old source binding
+  before the first write, so partial uploads cannot use an old confirmation.
+  Graph's empty 202 acknowledges sending without supplying a sent message ID;
+  an uncertain send is never replayed automatically. All three share draft
+  bindings and delivery receipts.
 - `internal/<feature>`: business behavior, transactions and data access with
   package tests: `collaboration` (Human Rooms and Messages),
   `agentregistry` (Agents, templates, Skill bindings, Another Me),

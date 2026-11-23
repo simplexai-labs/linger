@@ -11,12 +11,13 @@ import {
 // A canvas becomes a mail draft whose images show in the body: TeamHub reads
 // the canvas, fills the recipients and subject left out from its header,
 // embeds its Document images inline, attaches its file blocks and saves the
-// draft in the connection's mail app, Gmail or Feishu Mail. Sending stays a
+// draft in the connection's mail app, Gmail, Outlook or Feishu Mail. Sending stays a
 // separate, explicit `<app> send --draft`.
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 
 const canvasApps = [
   { app: "gmail", name: "Gmail" },
+  { app: "outlook", name: "Outlook" },
   { app: "feishu-mail", name: "Feishu Mail" },
 ] as const;
 
@@ -24,7 +25,7 @@ export const gmailCanvasCommandDefinitions: readonly CommandDefinition[] =
   canvasApps.map(({ app, name }) =>
     connectorDefinition({
       command: [app, "canvas-draft"],
-      description: `Save the canvas as a ${name} draft with images in the body and file blocks attached; does not send.`,
+      description: `Save the canvas as ${app === "outlook" ? "an" : "a"} ${name} draft with images in the body and file blocks attached; does not send.`,
       readOnly: false,
       usage: [
         `teamhub ${app} canvas-draft <document-id> [--update <draft-id>] [--to <email> ...] [--cc <email> ...] [--subject <text>] [flags]`,

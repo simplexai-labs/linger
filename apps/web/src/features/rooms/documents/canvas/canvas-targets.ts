@@ -32,6 +32,7 @@ const mailFields: CanvasTargetField[] = [
 
 export const canvasTargets: Record<string, CanvasTarget> = {
   gmail: { id: "gmail", label: "Gmail", fields: mailFields },
+  outlook: { id: "outlook", label: "Outlook", fields: mailFields },
   feishu_mail: { id: "feishu_mail", label: "Feishu Mail", fields: mailFields },
 };
 
@@ -40,7 +41,7 @@ export const canvasTargets: Record<string, CanvasTarget> = {
  * that mail app; the target is the app's catalog key.
  */
 export function isMailCanvasTarget(target: string | null | undefined) {
-  return target === "gmail" || target === "feishu_mail";
+  return target === "gmail" || target === "feishu_mail" || target === "outlook";
 }
 
 /** The mail app a mail canvas target sends from, by name. */

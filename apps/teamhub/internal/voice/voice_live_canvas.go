@@ -94,11 +94,11 @@ func (s *Service) openVoiceLiveEmailCanvas(ctx context.Context, session voiceliv
 }
 
 // voiceLiveEmailCanvasTarget picks the mail app a new email canvas is sent
-// from: the one the user named, else Feishu Mail when it is the only mail
-// app with an account the Agent may use, else Gmail.
+// from: the one the user named, or the only connected mail app. Multiple
+// apps require the user to choose rather than silently picking a provider.
 func (s *Service) voiceLiveEmailCanvasTarget(ctx context.Context, session voicelive.Session, named string) (string, string, error) {
 	switch named {
-	case voicelive.EmailCanvasGmail, voicelive.EmailCanvasFeishu:
+	case voicelive.EmailCanvasGmail, voicelive.EmailCanvasFeishu, voicelive.EmailCanvasOutlook:
 		return named, "", nil
 	case "":
 	default:
@@ -115,15 +115,22 @@ func (s *Service) voiceLiveEmailCanvasTarget(ctx context.Context, session voicel
 	if err != nil {
 		return "", "", err
 	}
-	gmail, feishu := false, false
+	targets := map[string]bool{}
 	for _, app := range apps {
-		gmail = gmail || app.AppKey == voicelive.EmailCanvasGmail
-		feishu = feishu || app.AppKey == voicelive.EmailCanvasFeishu
+		if agentconnectedapps.IsMailCanvasTarget(app.AppKey) {
+			targets[app.AppKey] = true
+		}
 	}
-	if feishu && !gmail {
-		return voicelive.EmailCanvasFeishu, "", nil
+	if len(targets) == 0 {
+		return voicelive.EmailCanvasGmail, "", nil
 	}
-	return voicelive.EmailCanvasGmail, "", nil
+	if len(targets) > 1 {
+		return "", voicelive.ErrorOutput("mail_app_required"), nil
+	}
+	for target := range targets {
+		return target, "", nil
+	}
+	return "", "", voicelive.ErrInvalid
 }
 
 // openVoiceLiveCanvas creates a Document the Agent owns in the call's Room

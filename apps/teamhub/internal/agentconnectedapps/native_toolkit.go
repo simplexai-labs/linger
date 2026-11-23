@@ -85,3 +85,10 @@ func (p routedProvider) SaveGmailDraft(ctx context.Context, connectedAccountID, 
 	}
 	return composio.GmailDraft{}, errNoGmailDrafts
 }
+
+func (p routedProvider) SaveOutlookDraft(ctx context.Context, accountID, draftID string, message composio.OutlookDraftMessage) (composio.GmailDraft, error) {
+	if drafts, ok := p.ToolProvider.(outlookDraftProvider); ok {
+		return drafts.SaveOutlookDraft(ctx, accountID, draftID, message)
+	}
+	return composio.GmailDraft{}, errors.New("the connected app provider saves no Outlook drafts")
+}

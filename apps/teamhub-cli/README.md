@@ -84,7 +84,7 @@ Connected application commands may have their own file options. For those option
 
 ## Connected applications
 
-Nine applications have dedicated commands: Gmail, Outlook (mail via `teamhub outlook` and calendar via `teamhub outlook-calendar`), Feishu Mail (`teamhub feishu-mail`), Slack, Google Calendar, Notion, Google Drive, Figma and GitHub, with 64 Connector leaf commands. `teamhub gmail --help` and `teamhub outlook-calendar --help` discover them offline, and each command keeps its own help, examples and Composio support boundary.
+Nine applications have dedicated commands: Gmail, Outlook (mail via `teamhub outlook` and calendar via `teamhub outlook-calendar`), Feishu Mail (`teamhub feishu-mail`), Slack, Google Calendar, Notion, Google Drive, Figma and GitHub. `teamhub gmail --help` and `teamhub outlook-calendar --help` discover them offline, and each command keeps its own help, examples and Composio support boundary.
 Choose an account with `--account <connection ID|full label>`; labels match case-insensitively, connection IDs exactly. A connection ID that no longer matches a delegated account returns `account_ambiguous` with the delegated candidates instead of switching accounts. Without a delegation, the command posts an authorization card in an allowed chat that names the requested label and exits with `authorization_required`; the Agent ends its turn, and the card's result wakes it to run the original command again.
 Mail `--markdown` is converted to HTML by TeamHub; only `--attach` adds attachments.
 
@@ -112,3 +112,7 @@ teamhub web connect tavily
   Relative links and images use the page's first `<base href>` when it resolves to an HTTP(S) URL; otherwise they use the final page URL.
 - `web list` shows each backend's commands, filters, readiness and live quota; `web connect <backend>` posts a key card unless that backend is ready.
 - A backend never falls back to another one. When the requested backend, or the default one, has no key, a rejected key or no keyless searches left, TeamHub posts a key card in the chat and the command exits 4 with `search_key_requested`, the backend and the card in `details`. The Agent ends its turn: a key saved from the card reruns the request and wakes the Agent with its results. A used-up quota (`search_quota_exhausted`) or rate limit (`provider_rate_limited`) lists `ready_backends` to choose from.
+
+Email canvases support Gmail, Outlook and Feishu Mail. New emails open in a
+canvas and the Human sends from its card; replies keep the mail reply command.
+`teamhub outlook canvas-draft` saves a canvas to Outlook without sending.

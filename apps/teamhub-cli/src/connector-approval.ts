@@ -16,6 +16,7 @@ export const connectorWriteApproval: Readonly<Record<string, CommandApproval>> =
     "outlook send": "confirm",
     "outlook reply": "confirm",
     "outlook draft": "allow",
+    "outlook canvas-draft": "allow",
     "outlook archive": "allow",
     "feishu-mail send": "confirm",
     "feishu-mail reply": "confirm",

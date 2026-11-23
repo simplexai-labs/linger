@@ -21,6 +21,16 @@ import (
 // send is final.
 func TestHumanSendsAGmailCanvasOnlyWhenSendIsClicked(t *testing.T) {
 	allowParallelIntegrationTest(t)
+	humanSendsMailCanvasOnlyWhenSendIsClicked(t, "gmail")
+}
+
+func TestHumanSendsAnOutlookCanvasOnlyWhenSendIsClicked(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	humanSendsMailCanvasOnlyWhenSendIsClicked(t, "outlook")
+}
+
+func humanSendsMailCanvasOnlyWhenSendIsClicked(t *testing.T, target string) {
+	t.Helper()
 	var computes atomic.Int32
 	replaced := make(chan string, 32)
 	var bodies *pgxpool.Pool
@@ -35,6 +45,7 @@ func TestHumanSendsAGmailCanvasOnlyWhenSendIsClicked(t *testing.T) {
 		}
 		var request struct {
 			Endpoint string `json:"endpoint"`
+			Method   string `json:"method"`
 		}
 		if json.NewDecoder(r.Body).Decode(&request) != nil {
 			return false
@@ -42,31 +53,48 @@ func TestHumanSendsAGmailCanvasOnlyWhenSendIsClicked(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		data := json.RawMessage(`{"id":"draft-1","message":{"id":"message-1","threadId":"thread-1"}}`)
-		if failNextUpload && !strings.HasSuffix(request.Endpoint, "/drafts/send") {
+		if failNextUpload && !strings.HasSuffix(request.Endpoint, "/send") {
 			failNextUpload = false
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "rejected"}})
 			return true
 		}
-		if draftGone && !strings.HasSuffix(request.Endpoint, "/drafts/send") {
+		if draftGone && !strings.HasSuffix(request.Endpoint, "/send") {
 			draftGone = false
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "not found"}})
 			return true
 		}
-		if failNextSend && strings.HasSuffix(request.Endpoint, "/drafts/send") {
+		if failNextSend && strings.HasSuffix(request.Endpoint, "/send") {
 			failNextSend = false
 			w.WriteHeader(http.StatusBadGateway)
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "upstream"}})
 			return true
 		}
-		if strings.HasSuffix(request.Endpoint, "/drafts/send") {
+		if target == "outlook" && request.Method == http.MethodGet {
+			if strings.HasSuffix(request.Endpoint, "/attachments") {
+				data = json.RawMessage(`{"value":[]}`)
+			} else {
+				data = json.RawMessage(`{"id":"draft-1","isDraft":true}`)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": http.StatusOK, "data": data})
+			return true
+		}
+		if strings.HasSuffix(request.Endpoint, "/send") {
 			sends++
 			data = json.RawMessage(`{"id":"sent-1"}`)
 		} else {
 			saves++
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": http.StatusOK, "data": data})
+		status := http.StatusOK
+		if target == "outlook" {
+			data = json.RawMessage(`{"id":"draft-1","isDraft":true}`)
+			if strings.HasSuffix(request.Endpoint, "/send") {
+				status = http.StatusAccepted
+				data = nil
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": status, "data": data})
 		return true
 	})
 	counts := func() (int, int) {
@@ -79,10 +107,10 @@ func TestHumanSendsAGmailCanvasOnlyWhenSendIsClicked(t *testing.T) {
 		composioFake.configure(cfg)
 	})
 	bodies = env.pool
-	composioFake.seedAccount(t, env.pool, "ca_mail_gmail", "account_alice", "gmail", composio.ConnectionActive)
-	if _, err := env.pool.Exec(t.Context(), `
+	composioFake.seedAccount(t, env.pool, "ca_mail_"+target, "account_alice", target, composio.ConnectionActive)
+	if _, err := env.pool.Exec(t.Context(), strings.ReplaceAll(`
  INSERT INTO external_connections(id,account_id,provider,upstream_connection_id,status,revision,remote_principal_key,identity_label,toolkit_slug,auth_config_id,auto_reminders) VALUES('connection_mail_gmail','account_alice','gmail','ca_mail_gmail','active',1,'gmail:alice@example.test','alice@example.test','gmail','ac_gmail',false);
- INSERT INTO external_connection_agent_grants(id,connection_id,tenant_id,agent_actor_id,represented_human_actor_id,status) VALUES('grant_mail_gmail','connection_mail_gmail','tenant_acme','actor_acme_official','actor_acme_alice','active')`); err != nil {
+ INSERT INTO external_connection_agent_grants(id,connection_id,tenant_id,agent_actor_id,represented_human_actor_id,status) VALUES('grant_mail_gmail','connection_mail_gmail','tenant_acme','actor_acme_official','actor_acme_alice','active')`, "gmail", target)); err != nil {
 		t.Fatal(err)
 	}
 	voice := func(callID, name string, arguments map[string]any) map[string]string {
@@ -124,7 +152,7 @@ func TestHumanSendsAGmailCanvasOnlyWhenSendIsClicked(t *testing.T) {
 	}
 	send := func(documentID, requestID, digest string) (int, []byte) {
 		status, _, body := env.request(alice, http.MethodPost, "/v0/documents/"+documentID+"/mail", map[string]string{
-			"connection_id": "connection_mail_gmail", "request_id": requestID, "source_digest": digest,
+			"connection_id": "connection_mail_" + target, "request_id": requestID, "source_digest": digest,
 		}, "")
 		return status, body
 	}
@@ -252,5 +280,21 @@ func TestHumanSendsAGmailCanvasOnlyWhenSendIsClicked(t *testing.T) {
 	}
 	if status := settle(unsureID); status != "sent" {
 		t.Fatalf("resend after unknown=%s", status)
+	}
+	if target == "outlook" {
+		composioFake.seedAccount(t, env.pool, "ca_second_gmail", "account_alice", "gmail", composio.ConnectionActive)
+		if _, err := env.pool.Exec(t.Context(), `
+ INSERT INTO external_connections(id,account_id,provider,upstream_connection_id,status,identity_label,toolkit_slug,auth_config_id,auto_reminders) VALUES('connection_second_gmail','account_alice','gmail','ca_second_gmail','active','alice@gmail.test','gmail','ac_gmail',false);
+ INSERT INTO external_connection_agent_grants(id,connection_id,tenant_id,agent_actor_id,represented_human_actor_id,status) VALUES('grant_second_gmail','connection_second_gmail','tenant_acme','actor_acme_official','actor_acme_alice','active')`); err != nil {
+			t.Fatal(err)
+		}
+		args := map[string]any{"to": "bob@example.test", "subject": "Choose sender", "body": "Hello"}
+		if output := voice("mail-ambiguous", "open_email_canvas", args); output["error"] != "mail_app_required" {
+			t.Fatalf("ambiguous app=%v", output)
+		}
+		args["app"] = "outlook"
+		if output := voice("mail-explicit", "open_email_canvas", args); output["document_id"] == "" {
+			t.Fatalf("explicit Outlook=%v", output)
+		}
 	}
 }

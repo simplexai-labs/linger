@@ -157,6 +157,11 @@ const options: Record<Action, Json> = {
     ),
   },
 };
+// Gmail, Outlook and Feishu Mail write a new email on a canvas the user sends from its
+// card, so an Agent reading this help reaches for the canvas first.
+const canvasNote =
+  "For a new email the user asks you to write, prepare, draft or send, open a canvas instead (read the canvas Skill); the user sends it from its card.";
+
 export const mailCommandDefinitions: CommandDefinition[] = [
   "gmail",
   "outlook",
@@ -165,7 +170,10 @@ export const mailCommandDefinitions: CommandDefinition[] = [
   actions.map((action) =>
     connectorDefinition({
       command: [app, action],
-      description: summaries[action],
+      description:
+        action === "send" || action === "draft"
+          ? `${summaries[action]} ${canvasNote}`
+          : summaries[action],
       readOnly: ["list", "read", "download"].includes(action),
       options: options[action] as CommandDefinition["options"],
       usage: mailUsage(app, action),

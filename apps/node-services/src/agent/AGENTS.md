@@ -222,3 +222,6 @@ take precedence.
   product SLA; do not mask load contention with retries or by changing product
   Runner, MCP, or WebSocket deadlines.
 - Runtime secrets stay in process environment and must not be logged.
+
+- The connected-apps prompt routes new Gmail, Outlook and Feishu Mail emails
+  to the canvas Skill and the Human's Send card; replies keep the reply command.

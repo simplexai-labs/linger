@@ -80,6 +80,25 @@ function Harness({
 afterEach(() => vi.useRealTimers());
 
 describe("CanvasHeader", () => {
+  it("renders Outlook mail fields and preserves the target when edited", () => {
+    const { editor } = fakeEditor(
+      "canvas: outlook\nto: lisa@acme.com\nsubject: Pricing\nstatus: editing",
+    );
+    render(<Harness editor={editor} />);
+    expect(
+      screen.getByRole("region", { name: "Outlook canvas" }),
+    ).toBeVisible();
+    fireEvent.change(screen.getByLabelText("To"), {
+      target: { value: "bob@acme.com" },
+    });
+    fireEvent.blur(screen.getByLabelText("To"));
+    expect(editor.updateBlock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        content: expect.stringContaining("canvas: outlook"),
+      }),
+    );
+  });
   it("shows the target's fields and writes an edit back into the header block", () => {
     const { editor } = fakeEditor(
       "canvas: gmail\nto: lisa@acme.com\nsubject: Pricing\nstatus: editing",

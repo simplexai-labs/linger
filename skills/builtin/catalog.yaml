@@ -100,11 +100,14 @@ skills:
         version: 1.0.0
         package_path: builtin/proactive-response/1.0.0
   - skill_id: simplexai_canvas
-    bootstrap_manifest_id: skill_manifest_simplexai_canvas_1_0_5
+    bootstrap_manifest_id: skill_manifest_simplexai_canvas_1_0_7
     default_agent_types:
       - anotherme
       - general
     manifests:
+      - manifest_id: skill_manifest_simplexai_canvas_1_0_7
+        version: 1.0.7
+        package_path: builtin/canvas/1.0.7
       - manifest_id: skill_manifest_simplexai_canvas_1_0_5
         version: 1.0.5
         package_path: builtin/canvas/1.0.5

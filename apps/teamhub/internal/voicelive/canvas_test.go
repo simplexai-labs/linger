@@ -91,3 +91,15 @@ func TestFeishuMailCanvasKeepsItsTargetThroughEdits(t *testing.T) {
 		t.Fatalf("edited = %q header=%q problem=%s", markdown, header, problem)
 	}
 }
+
+func TestOutlookCanvasKeepsItsTargetThroughEdits(t *testing.T) {
+	canvas, problem := EmailCanvas(EmailCanvasArguments{To: "li@example.com", Subject: "Quote", Body: "Hi Li"}, EmailCanvasOutlook)
+	if problem != "" || !strings.HasPrefix(canvas.Markdown, "```\ncanvas: outlook\n") {
+		t.Fatalf("canvas = %q problem=%s", canvas.Markdown, problem)
+	}
+	subject := "Quote v2"
+	markdown, header, problem := EditedEmailCanvas(EmailCanvasOutlook, map[string]string{"to": "li@example.com", "subject": "Quote"}, "Hi Li", EditEmailCanvasArguments{Subject: &subject})
+	if problem != "" || !strings.HasPrefix(markdown, "```\ncanvas: outlook\n") || !strings.Contains(header, "subject: Quote v2") {
+		t.Fatalf("edited = %q header=%q problem=%s", markdown, header, problem)
+	}
+}

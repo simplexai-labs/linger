@@ -28,7 +28,7 @@
 - Test state invariants through the collaboration-session interface and test
   the real browser workflow with Playwright. Do not inspect provider or
   IndexedDB internals from component tests.
-- Gmail canvases use the Mail sidebar header, an editable 15px semibold Subject above
+- Gmail, Outlook and Feishu Mail canvases use the Mail sidebar header, an editable 15px semibold Subject above
   the From/To/Cc fields and collaborative body, without the generic Document title or
   author row. The header reads Drafting while an edit is not durable yet,
   Saved once it is, and Sent once delivered; connection and save problems
