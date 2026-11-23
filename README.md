@@ -75,15 +75,15 @@ One command detects your hardware, recommends the best model, installs it and ch
     <th align="center" width="1200">SimplexAI</th>
     <th align="left" width="2700">Compares with</th>
   </tr>
-  <tr><td>Mac 16 GB</td><td>Spark-X2.6-4B Q4_K_M</td><td align="center">—</td><td align="center">Not ranked</td><td>—</td></tr>
-  <tr><td>Mac 24 GB</td><td>Inkling 2 Mini Unsloth Dynamic 3.0 UD-IQ3_XXS</td><td align="center">29.12 short; 26.15 after 8K; 22.28 after 32K; 29.89 for 2 concurrent sessions together</td><td align="center">53.4</td><td>≈ Claude Sonnet 4.6</td></tr>
-  <tr><td>Mac 32 GB</td><td>Inkling 2 Mini Unsloth Dynamic 3.0 UD-Q4_K_M</td><td align="center">—</td><td align="center">54.2</td><td>≈ Claude Sonnet 4.6</td></tr>
-  <tr><td>Linux NVIDIA 8 GB + 32 GB</td><td>Qwen3.6-35B-A3B UD-Q3_K_M</td><td align="center">—</td><td align="center">35.8</td><td>≈ Claude Haiku 4.5</td></tr>
-  <tr><td>Linux NVIDIA 12 GB + 32 GB</td><td>Qwen3.6-35B-A3B UD-Q4_K_M</td><td align="center">—</td><td align="center">36.4</td><td>≈ Claude Haiku 4.5</td></tr>
-  <tr><td>Linux NVIDIA 24 GB + 64 GB</td><td>Qwen3.8-27B UD-Q4_K_M†</td><td align="center">32.5–33.2 single session at 130K; 28–41 per session with two sessions at about 8K</td><td align="center">54.1</td><td>≈ Claude Sonnet 4.6</td></tr>
+  <tr><td>Mac 16 GB</td><td>Spark-X2.6-4B Q4_K_M</td><td align="center">41</td><td align="center">31.5</td><td>≈ Gemini 2.5 Pro</td></tr>
+  <tr><td>Mac 24 GB</td><td>Inkling 2 Mini UD-IQ3_XXS</td><td align="center">29.9</td><td align="center">53.4</td><td>≈ Claude Sonnet 4.6</td></tr>
+  <tr><td>Mac 32 GB</td><td>Inkling 2 Mini UD-Q4_K_M</td><td align="center">30</td><td align="center">54.2</td><td>≈ Claude Sonnet 4.6</td></tr>
+  <tr><td>Linux NVIDIA 8 GB + 32 GB</td><td>Inkling 2 Mini UD-Q3_K_XL</td><td align="center">50</td><td align="center">53.9</td><td>≈ Claude Sonnet 4.6</td></tr>
+  <tr><td>Linux NVIDIA 12 GB + 32 GB</td><td>Inkling 2 Mini UD-Q3_K_XL</td><td align="center">68</td><td align="center">53.9</td><td>≈ Claude Sonnet 4.6</td></tr>
+  <tr><td>Linux NVIDIA 24 GB + 64 GB</td><td>Qwen3.8-Flash-Next GSQ-RCO IQ2_XS†</td><td align="center">128.5</td><td align="center">58.8</td><td>≈ Claude Opus 4.6</td></tr>
 </table>
 
-<sub>Decode speeds were measured in our lab on physical hardware for the listed tiers; tiers marked — are pending physical-device benchmarks. SimplexAI scores sit on the third-party AIHOT scale, where 50 is the reference average, and scores within 3 points count as the same level. † Not this machine's default recommendation. Not ranked: AIHOT has no third-party results for the model. Test conditions, defaults and self-tests are in <a href="docs/local-inference.md#planning">Local inference</a>.</sub>
+Full benchmarks, test conditions, and scoring details: [docs.heylinger.com/hardware/benchmarks](https://docs.heylinger.com/hardware/benchmarks).
 
 <!-- END GENERATED: public-tiers tiers -->
 
