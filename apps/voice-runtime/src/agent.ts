@@ -43,6 +43,7 @@ export default defineAgent({
       languageHints: sonioxLanguageHints,
       diarization,
       dictation,
+      proxy: config.providerProxy,
       onRecovery,
     });
     // The SDK logs rejected shutdown callbacks but otherwise exits the job with 0.

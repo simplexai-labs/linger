@@ -21,6 +21,30 @@ describe("loadConfig", () => {
     ).toMatchObject({ sonioxApiKey: "soniox", xaiApiKey: "xai" });
   });
 
+  it("reads the provider proxy from HTTPS_PROXY or https_proxy", () => {
+    expect(loadConfig(base).providerProxy).toBeUndefined();
+    expect(
+      loadConfig({ ...base, NO_PROXY: "soniox.com" }).providerProxy,
+    ).toBeUndefined();
+    expect(
+      loadConfig({
+        ...base,
+        https_proxy: "http://lower:1",
+        no_proxy: "x.ai",
+      }).providerProxy,
+    ).toEqual({
+      httpsProxy: "http://lower:1",
+      noProxy: "x.ai,.x.ai,localhost,127.0.0.1,::1",
+    });
+    expect(
+      loadConfig({
+        ...base,
+        HTTPS_PROXY: "http://upper:2",
+        https_proxy: "http://lower:1",
+      }).providerProxy?.httpsProxy,
+    ).toBe("http://upper:2");
+  });
+
   it("configures the Grok WebSocket endpoint and audio transport", () => {
     expect(loadConfig(base)).toMatchObject({
       xaiLiveWebSocketUrl: "wss://api.x.ai/v1/realtime",

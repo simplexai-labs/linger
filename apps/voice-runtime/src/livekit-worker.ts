@@ -987,6 +987,8 @@ const networkFailureCodes: Partial<Record<string, string>> = {
   EAI_AGAIN: "network_dns",
   ECONNREFUSED: "network_refused",
   EPROTO: "network_tls",
+  // The proxy in HTTPS_PROXY refused the tunnel (407, 502, ...).
+  ERR_PROXY_TUNNEL: "network_proxy",
 };
 // Node's TLS codes (ERR_TLS_*, ERR_SSL_*) and OpenSSL's certificate
 // verification codes (CERT_HAS_EXPIRED, SELF_SIGNED_CERT_IN_CHAIN, ...).

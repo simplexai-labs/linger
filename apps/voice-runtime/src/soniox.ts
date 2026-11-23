@@ -9,6 +9,7 @@ import {
   speakerIdFromOneBased,
 } from "./asr.js";
 import { ASREventQueue } from "./event-queue.js";
+import { providerAgent, type ProviderProxy } from "./provider-proxy.js";
 import { RecoveringASRStream, type ASRRecovery } from "./recovering-asr.js";
 import { VoiceFailure } from "./voice-failure.js";
 
@@ -23,6 +24,7 @@ export interface SonioxASRConfig {
   webSocketUrl?: string;
   diarization?: boolean;
   dictation?: boolean;
+  proxy?: ProviderProxy;
   onRecovery?: (recovery: ASRRecovery) => void;
 }
 
@@ -187,6 +189,7 @@ export class SonioxASRStream implements ASRStream {
       handshakeTimeout: 5_000,
       maxPayload: 1 << 20,
       headers: { Authorization: `Bearer ${config.apiKey}` },
+      agent: providerAgent(url, config.proxy),
     });
     const stream = new SonioxASRStream(
       socket,

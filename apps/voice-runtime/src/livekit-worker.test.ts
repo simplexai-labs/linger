@@ -51,6 +51,7 @@ describe("VoiceTrackWorker identities", () => {
     ["EAI_AGAIN", "network_dns"],
     ["ECONNREFUSED", "network_refused"],
     ["EPROTO", "network_tls"],
+    ["ERR_PROXY_TUNNEL", "network_proxy"],
     ["ERR_SSL_WRONG_VERSION_NUMBER", "network_tls"],
     ["ERR_TLS_CERT_ALTNAME_INVALID", "network_tls"],
     ["CERT_HAS_EXPIRED", "network_tls"],

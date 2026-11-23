@@ -1,5 +1,7 @@
 import { serviceCredential } from "@linger/service-kit/node";
 
+import { providerProxy, type ProviderProxy } from "./provider-proxy.js";
+
 export interface VoiceRuntimeConfig {
   livekitUrl: string;
   livekitApiKey: string;
@@ -10,6 +12,7 @@ export interface VoiceRuntimeConfig {
   xaiApiKey: string;
   xaiLiveWebSocketUrl: string;
   xaiLiveAudioTransport?: "binary" | "json";
+  providerProxy?: ProviderProxy;
   initializeProcessTimeoutMs: number;
 }
 
@@ -67,6 +70,12 @@ export const loadConfig = (
       env.VOICE_RUNTIME_XAI_LIVE_WEBSOCKET_URL?.trim() ||
       "wss://api.x.ai/v1/realtime",
     xaiLiveAudioTransport: audioTransport,
+    // Only the Soniox and xAI websockets use it. The Desktop's system proxy
+    // arrives as HTTPS_PROXY too, when the person set none.
+    providerProxy: providerProxy(
+      env.HTTPS_PROXY ?? env.https_proxy,
+      env.NO_PROXY ?? env.no_proxy,
+    ),
     initializeProcessTimeoutMs,
   };
   validateUrl(config.livekitUrl, ["ws:", "wss:"], "LIVEKIT_URL");

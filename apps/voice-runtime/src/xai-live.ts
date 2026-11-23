@@ -11,6 +11,7 @@ import {
   type LiveSetup,
   type LiveTool,
 } from "./live-session.js";
+import { providerAgent, type ProviderProxy } from "./provider-proxy.js";
 
 // xAI Grok Voice realtime protocol (OpenAI Realtime style).
 // https://docs.x.ai/developers/model-capabilities/audio/speech-to-speech
@@ -27,6 +28,7 @@ export interface XaiLiveConnection {
   audioTransport?: "binary" | "json";
   handshakeTimeoutMs?: number;
   sessionTimeoutMs?: number;
+  proxy?: ProviderProxy;
 }
 
 /**
@@ -307,6 +309,7 @@ export class XaiLiveSession implements LiveSession {
     const socket = new WebSocket(url, {
       headers: { Authorization: `Bearer ${options.apiKey}` },
       handshakeTimeout: options.handshakeTimeoutMs ?? 5_000,
+      agent: providerAgent(url, options.proxy),
     });
     // Fetched in parallel with the handshake; awaited once the socket is open.
     const setup: Promise<LiveSetup> =

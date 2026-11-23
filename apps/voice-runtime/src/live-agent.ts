@@ -22,6 +22,7 @@ export default defineAgent({
         XaiLiveSession.open({
           apiKey: config.xaiApiKey,
           webSocketUrl: config.xaiLiveWebSocketUrl,
+          proxy: config.providerProxy,
           audioTransport: config.xaiLiveAudioTransport,
           model: "grok-voice-3.0",
           voice: "carina",
