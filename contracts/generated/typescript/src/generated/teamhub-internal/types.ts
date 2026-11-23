@@ -180,6 +180,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/agent-runtime/another-me/background-calls": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Record how one background model call of an Another Me ended.
+     * @description The Agent Service reports each background model call that ran on an Another Me's Computer and either completed or failed for a reason the Human may need to act on. Failures in a row are counted per Another Me and a completed call clears the count; the Human's Another Me shows the count once it reaches three. A call for an Agent that is not an Another Me changes nothing.
+     */
+    post: operations["recordAnotherMeBackgroundCall"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/agent-runtime/deletion-snapshot": {
     parameters: {
       query?: never;
@@ -1900,6 +1920,14 @@ export interface components {
     };
     AnotherMePlacementList: {
       items: components["schemas"]["AnotherMePlacement"][];
+    };
+    RecordAnotherMeBackgroundCallRequest: {
+      tenant_id: components["schemas"]["Id"];
+      agent_actor_id: components["schemas"]["Id"];
+      /** @enum {string} */
+      outcome: "completed" | "failed";
+      /** @description Why a failed call failed, as an AnotherMeBackgroundFailureReason code. A string rather than the enum so a newer Agent Service can send a code this TeamHub does not know; TeamHub records it as unknown. Ignored for a completed call. */
+      reason?: string;
     };
     AgentRuntimeContextRef:
       | {
@@ -3881,6 +3909,31 @@ export interface operations {
       401: components["responses"]["Unauthenticated"];
       500: components["responses"]["InternalError"];
       503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  recordAnotherMeBackgroundCall: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RecordAnotherMeBackgroundCallRequest"];
+      };
+    };
+    responses: {
+      /** @description Recorded. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      500: components["responses"]["InternalError"];
     };
   };
   getAgentRuntimeDeletionSnapshot: {

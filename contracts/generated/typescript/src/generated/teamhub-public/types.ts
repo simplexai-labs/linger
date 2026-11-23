@@ -4502,10 +4502,25 @@ export interface components {
       items: components["schemas"]["TenantAgentAvailabilitySnapshot"][];
       page: components["schemas"]["PageMeta"];
     };
+    /**
+     * @description Why the latest background model call failed: the Runtime is incompatible or its model is not available to the account, the Runtime needs sign-in, the Runtime is unavailable, or a cause the Human cannot act on. Clients show an unknown value as unknown.
+     * @enum {string}
+     */
+    AnotherMeBackgroundFailureReason:
+      | "runtime_incompatible"
+      | "runtime_auth_required"
+      | "runtime_unavailable"
+      | "unknown";
+    /** @description Present while the Another Me's background model calls (Wiki, Memory, daily reports) have failed at least three times in a row; absent again after the next one completes. */
+    AnotherMeBackgroundFailure: {
+      consecutive_failures: number;
+      reason: components["schemas"]["AnotherMeBackgroundFailureReason"];
+    };
     /** @description The Human's Another Me and its live direct Chat. Empty until the Another Me exists; room_id is also absent while the Chat is being deleted. */
     AnotherMe: {
       agent_actor_id?: components["schemas"]["Id"];
       room_id?: components["schemas"]["Id"];
+      background_failure?: components["schemas"]["AnotherMeBackgroundFailure"];
     };
     TenantAgentAvatarUpdateRequest: {
       avatar_key: string;

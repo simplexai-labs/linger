@@ -73,6 +73,26 @@ components:
         status:
           type: string
           enum: [active, updating]
+    RecordAnotherMeBackgroundCallRequest:
+      type: object
+      additionalProperties: false
+      required: [tenant_id, agent_actor_id, outcome]
+      properties:
+        tenant_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        agent_actor_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        outcome:
+          type: string
+          enum: [completed, failed]
+        reason:
+          type: string
+          maxLength: 64
+          description: >-
+            Why a failed call failed, as an AnotherMeBackgroundFailureReason
+            code. A string rather than the enum so a newer Agent Service can
+            send a code this TeamHub does not know; TeamHub records it as
+            unknown. Ignored for a completed call.
     AnotherMePlacementList:
       type: object
       additionalProperties: false

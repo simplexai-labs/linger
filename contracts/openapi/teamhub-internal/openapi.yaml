@@ -139,6 +139,8 @@ paths:
     $ref: ../paths/teamhub-agent-runtime-state.yaml#/configSnapshot
   /v0/agent-runtime/another-me-placements:
     $ref: ../paths/teamhub-agent-runtime-state.yaml#/anotherMePlacements
+  /v0/agent-runtime/another-me/background-calls:
+    $ref: ../paths/teamhub-agent-runtime-state.yaml#/anotherMeBackgroundCalls
   /v0/agent-runtime/deletion-snapshot:
     $ref: ../paths/teamhub-agent-runtime-state.yaml#/deletionSnapshot
   /v0/agent-runtime/contexts:

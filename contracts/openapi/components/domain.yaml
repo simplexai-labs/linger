@@ -658,6 +658,32 @@ components:
           $ref: "./common.yaml#/components/schemas/Id"
         room_id:
           $ref: "./common.yaml#/components/schemas/Id"
+        background_failure:
+          $ref: "#/components/schemas/AnotherMeBackgroundFailure"
+    AnotherMeBackgroundFailure:
+      type: object
+      additionalProperties: false
+      required: [consecutive_failures, reason]
+      description: >-
+        Present while the Another Me's background model calls (Wiki, Memory, daily reports) have
+        failed at least three times in a row; absent again after the next one completes.
+      properties:
+        consecutive_failures:
+          type: integer
+          minimum: 3
+        reason:
+          $ref: "#/components/schemas/AnotherMeBackgroundFailureReason"
+    AnotherMeBackgroundFailureReason:
+      type: string
+      description: >-
+        Why the latest background model call failed: the Runtime is incompatible or its model is not
+        available to the account, the Runtime needs sign-in, the Runtime is unavailable, or a cause
+        the Human cannot act on. Clients show an unknown value as unknown.
+      enum:
+        - runtime_incompatible
+        - runtime_auth_required
+        - runtime_unavailable
+        - unknown
     TenantAgentPage:
       type: object
       additionalProperties: false

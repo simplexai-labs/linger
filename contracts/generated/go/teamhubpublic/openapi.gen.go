@@ -518,6 +518,30 @@ func (e AgentVisibilityScope) Valid() bool {
 	}
 }
 
+// Defines values for AnotherMeBackgroundFailureReason.
+const (
+	AnotherMeBackgroundFailureReasonRuntimeAuthRequired AnotherMeBackgroundFailureReason = "runtime_auth_required"
+	AnotherMeBackgroundFailureReasonRuntimeIncompatible AnotherMeBackgroundFailureReason = "runtime_incompatible"
+	AnotherMeBackgroundFailureReasonRuntimeUnavailable  AnotherMeBackgroundFailureReason = "runtime_unavailable"
+	AnotherMeBackgroundFailureReasonUnknown             AnotherMeBackgroundFailureReason = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AnotherMeBackgroundFailureReason enum.
+func (e AnotherMeBackgroundFailureReason) Valid() bool {
+	switch e {
+	case AnotherMeBackgroundFailureReasonRuntimeAuthRequired:
+		return true
+	case AnotherMeBackgroundFailureReasonRuntimeIncompatible:
+		return true
+	case AnotherMeBackgroundFailureReasonRuntimeUnavailable:
+		return true
+	case AnotherMeBackgroundFailureReasonUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BrowserConnectionStatusBrowser.
 const (
 	BrowserConnectionBrowserChrome BrowserConnectionStatusBrowser = "chrome"
@@ -3211,22 +3235,22 @@ func (e PersonalProfileSourceSelectionKind) Valid() bool {
 
 // Defines values for PersonalWikiFailureReason.
 const (
-	ComputerOffline     PersonalWikiFailureReason = "computer_offline"
-	RuntimeAuthRequired PersonalWikiFailureReason = "runtime_auth_required"
-	RuntimeIncompatible PersonalWikiFailureReason = "runtime_incompatible"
-	RuntimeUnavailable  PersonalWikiFailureReason = "runtime_unavailable"
+	PersonalWikiFailureReasonComputerOffline     PersonalWikiFailureReason = "computer_offline"
+	PersonalWikiFailureReasonRuntimeAuthRequired PersonalWikiFailureReason = "runtime_auth_required"
+	PersonalWikiFailureReasonRuntimeIncompatible PersonalWikiFailureReason = "runtime_incompatible"
+	PersonalWikiFailureReasonRuntimeUnavailable  PersonalWikiFailureReason = "runtime_unavailable"
 )
 
 // Valid indicates whether the value is a known member of the PersonalWikiFailureReason enum.
 func (e PersonalWikiFailureReason) Valid() bool {
 	switch e {
-	case ComputerOffline:
+	case PersonalWikiFailureReasonComputerOffline:
 		return true
-	case RuntimeAuthRequired:
+	case PersonalWikiFailureReasonRuntimeAuthRequired:
 		return true
-	case RuntimeIncompatible:
+	case PersonalWikiFailureReasonRuntimeIncompatible:
 		return true
-	case RuntimeUnavailable:
+	case PersonalWikiFailureReasonRuntimeUnavailable:
 		return true
 	default:
 		return false
@@ -5279,9 +5303,23 @@ type AnotherMe struct {
 	// AgentActorId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	AgentActorId *Id `json:"agent_actor_id,omitempty"`
 
+	// BackgroundFailure Present while the Another Me's background model calls (Wiki, Memory, daily reports) have failed at least three times in a row; absent again after the next one completes.
+	BackgroundFailure *AnotherMeBackgroundFailure `json:"background_failure,omitempty"`
+
 	// RoomId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	RoomId *Id `json:"room_id,omitempty"`
 }
+
+// AnotherMeBackgroundFailure Present while the Another Me's background model calls (Wiki, Memory, daily reports) have failed at least three times in a row; absent again after the next one completes.
+type AnotherMeBackgroundFailure struct {
+	ConsecutiveFailures int `json:"consecutive_failures"`
+
+	// Reason Why the latest background model call failed: the Runtime is incompatible or its model is not available to the account, the Runtime needs sign-in, the Runtime is unavailable, or a cause the Human cannot act on. Clients show an unknown value as unknown.
+	Reason AnotherMeBackgroundFailureReason `json:"reason"`
+}
+
+// AnotherMeBackgroundFailureReason Why the latest background model call failed: the Runtime is incompatible or its model is not available to the account, the Runtime needs sign-in, the Runtime is unavailable, or a cause the Human cannot act on. Clients show an unknown value as unknown.
+type AnotherMeBackgroundFailureReason string
 
 // ArtifactTreeSegment defines model for ArtifactTreeSegment.
 type ArtifactTreeSegment struct {

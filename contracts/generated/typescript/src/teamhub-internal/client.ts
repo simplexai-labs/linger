@@ -293,6 +293,10 @@ export function createTeamHubAgentRuntimeStateClient(options: {
         { tenant_id: owner?.tenantId, owner_actor_id: owner?.ownerActorId },
         signal,
       ),
+    recordAnotherMeBackgroundCall: (
+      body: Schemas["RecordAnotherMeBackgroundCallRequest"],
+      signal?: AbortSignal,
+    ) => post("another-me/background-calls", body, signal),
     getMemory: (agentId: string, signal?: AbortSignal) =>
       get(`agents/${encodeURIComponent(agentId)}/memory`, {}, signal),
     commitMemory: (

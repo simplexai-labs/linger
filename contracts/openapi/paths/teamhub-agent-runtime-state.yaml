@@ -67,6 +67,34 @@ anotherMePlacements:
       "503":
         $ref: "../components/common.yaml#/components/responses/ServiceUnavailable"
 
+anotherMeBackgroundCalls:
+  post:
+    tags: [Agent Runtime State]
+    operationId: recordAnotherMeBackgroundCall
+    summary: Record how one background model call of an Another Me ended.
+    description: >-
+      The Agent Service reports each background model call that ran on an
+      Another Me's Computer and either completed or failed for a reason the
+      Human may need to act on. Failures in a row are counted per Another Me
+      and a completed call clears the count; the Human's Another Me shows the
+      count once it reaches three. A call for an Agent that is not an Another
+      Me changes nothing.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/agent-runtime-state.yaml#/components/schemas/RecordAnotherMeBackgroundCallRequest"
+    responses:
+      "204":
+        description: Recorded.
+      "400":
+        $ref: "../components/common.yaml#/components/responses/BadRequest"
+      "401":
+        $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+      "500":
+        $ref: "../components/common.yaml#/components/responses/InternalError"
+
 deletionSnapshot:
   get:
     tags: [Agent Runtime State]

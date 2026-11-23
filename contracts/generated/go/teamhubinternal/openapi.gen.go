@@ -1433,15 +1433,33 @@ func (e ProactiveWindowMessageAuthor) Valid() bool {
 	}
 }
 
+// Defines values for RecordAnotherMeBackgroundCallRequestOutcome.
+const (
+	RecordAnotherMeBackgroundCallRequestOutcomeCompleted RecordAnotherMeBackgroundCallRequestOutcome = "completed"
+	RecordAnotherMeBackgroundCallRequestOutcomeFailed    RecordAnotherMeBackgroundCallRequestOutcome = "failed"
+)
+
+// Valid indicates whether the value is a known member of the RecordAnotherMeBackgroundCallRequestOutcome enum.
+func (e RecordAnotherMeBackgroundCallRequestOutcome) Valid() bool {
+	switch e {
+	case RecordAnotherMeBackgroundCallRequestOutcomeCompleted:
+		return true
+	case RecordAnotherMeBackgroundCallRequestOutcomeFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RuntimeHumanInteractionCreatedStatus.
 const (
-	Pending RuntimeHumanInteractionCreatedStatus = "pending"
+	RuntimeHumanInteractionCreatedStatusPending RuntimeHumanInteractionCreatedStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the RuntimeHumanInteractionCreatedStatus enum.
 func (e RuntimeHumanInteractionCreatedStatus) Valid() bool {
 	switch e {
-	case Pending:
+	case RuntimeHumanInteractionCreatedStatusPending:
 		return true
 	default:
 		return false
@@ -3889,6 +3907,22 @@ type RecordAgentLocalRunOperationRequest struct {
 	Usage *[]map[string]interface{} `json:"usage,omitempty"`
 }
 
+// RecordAnotherMeBackgroundCallRequest defines model for RecordAnotherMeBackgroundCallRequest.
+type RecordAnotherMeBackgroundCallRequest struct {
+	// AgentActorId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	AgentActorId Id                                          `json:"agent_actor_id"`
+	Outcome      RecordAnotherMeBackgroundCallRequestOutcome `json:"outcome"`
+
+	// Reason Why a failed call failed, as an AnotherMeBackgroundFailureReason code. A string rather than the enum so a newer Agent Service can send a code this TeamHub does not know; TeamHub records it as unknown. Ignored for a completed call.
+	Reason *string `json:"reason,omitempty"`
+
+	// TenantId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	TenantId Id `json:"tenant_id"`
+}
+
+// RecordAnotherMeBackgroundCallRequestOutcome defines model for RecordAnotherMeBackgroundCallRequest.Outcome.
+type RecordAnotherMeBackgroundCallRequestOutcome string
+
 // RecordLocalModelsRequest The latest runner.local_models snapshot of one Computer. TeamHub keeps only the latest per Computer, so an offline Computer still shows what it last reported.
 type RecordLocalModelsRequest struct {
 	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
@@ -4937,6 +4971,9 @@ type ReportVoiceRecordingJSONRequestBody = VoiceRecordingReport
 
 // CommitAgentMemoryJSONRequestBody defines body for CommitAgentMemory for application/json ContentType.
 type CommitAgentMemoryJSONRequestBody = AgentMemoryDocument
+
+// RecordAnotherMeBackgroundCallJSONRequestBody defines body for RecordAnotherMeBackgroundCall for application/json ContentType.
+type RecordAnotherMeBackgroundCallJSONRequestBody = RecordAnotherMeBackgroundCallRequest
 
 // EnsureAgentExecutionContextJSONRequestBody defines body for EnsureAgentExecutionContext for application/json ContentType.
 type EnsureAgentExecutionContextJSONRequestBody = EnsureAgentExecutionContextRequest
