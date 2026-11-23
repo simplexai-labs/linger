@@ -2982,3 +2982,63 @@ test("a cold resume degrades gracefully when local model preparation throws", as
     },
   });
 });
+
+test("the system proxy reaches only TeamHub and node-services, and restarts them when it changes", async () => {
+  const f = await fixture();
+  vi.stubEnv("HTTPS_PROXY", undefined);
+  vi.stubEnv("https_proxy", undefined);
+  vi.stubEnv("NO_PROXY", undefined);
+  vi.stubEnv("no_proxy", undefined);
+  const install = async () => {
+    vi.mocked(startNativeProcess).mockClear();
+    vi.mocked(runProcess).mockClear();
+    const result = await installNativeSource({
+      home: f.home,
+      repo: f.repo,
+      name: "native-flow",
+      setupChoice: "local-models",
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    expect(result.code).toBe(0);
+    return Object.fromEntries(
+      vi
+        .mocked(startNativeProcess)
+        .mock.calls.map(([options]) => [options.name, options]),
+    );
+  };
+  try {
+    const direct = await install();
+    // Without a system proxy the settings are what they were before it.
+    expect(Object.keys(JSON.parse(direct.teamhub!.settings!))).toEqual([
+      "env",
+      "voice",
+      "identity",
+    ]);
+    expect(JSON.parse(direct["node-services"]!.settings!)).toEqual(
+      JSON.parse(direct.web!.settings!),
+    );
+    for (const options of Object.values(direct))
+      expect(options.env.HTTPS_PROXY).toBeUndefined();
+
+    vi.stubEnv("LINGER_SYSTEM_HTTPS_PROXY", "http://127.0.0.1:7890");
+    const proxied = await install();
+    for (const name of ["teamhub", "node-services"]) {
+      expect(proxied[name]!.env).toMatchObject({
+        HTTPS_PROXY: "http://127.0.0.1:7890",
+        NO_PROXY: "localhost,127.0.0.1,::1",
+      });
+      expect(JSON.parse(proxied[name]!.settings!).proxy).toBe(
+        "http://127.0.0.1:7890",
+      );
+      expect(proxied[name]!.settings).not.toBe(direct[name]!.settings);
+    }
+    expect(proxied.web!.env.HTTPS_PROXY).toBeUndefined();
+    expect(proxied.web!.settings).toBe(direct.web!.settings);
+    // The installer's own commands (pnpm, migrations) connect as before.
+    for (const [, , options] of vi.mocked(runProcess).mock.calls)
+      expect(options?.env?.HTTPS_PROXY).toBeUndefined();
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});

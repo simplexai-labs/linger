@@ -77,6 +77,7 @@ import { connectComputer, stopComputer } from "./computer.js";
 import { prepareLocalEnrollment } from "./local-enrollment.js";
 import { lineRedactor, redact } from "./redaction.js";
 import { runProcess } from "./process.js";
+import { systemProxyEnvironment } from "./service-proxy.js";
 import {
   installAppleDeveloperTools,
   needsAppleDeveloperTools,
@@ -839,10 +840,20 @@ async function runNativeSource(
           voice: voice ? voice.bin : "off",
         };
         const settings = JSON.stringify(shared);
+        // The Desktop's system proxy goes only to the two services that call
+        // voice providers (TeamHub checks keys, node-services runs the voice
+        // workers), and a changed proxy restarts them. Without one their
+        // settings stay as they were, so nothing restarts for it.
+        const proxyEnv = systemProxyEnvironment(env);
+        const proxied = proxyEnv.HTTPS_PROXY
+          ? { proxy: proxyEnv.HTTPS_PROXY }
+          : {};
+        const nodeServicesSettings = JSON.stringify({ ...shared, ...proxied });
         // TeamHub also restarts for a new identity key; the digest keeps the
         // key itself out of the process record.
         const teamhubSettings = JSON.stringify({
           ...shared,
+          ...proxied,
           identity: createHash("sha256").update(identityKey).digest("hex"),
         });
         await timed("Protecting the instance data directories", () =>
@@ -1096,12 +1107,24 @@ async function runNativeSource(
             cwd: current.source!.repo,
             env:
               name === "teamhub"
-                ? { ...env, TEAMHUB_LOCAL_IDENTITY_KEY: identityKey }
-                : env,
+                ? {
+                    ...env,
+                    ...proxyEnv,
+                    TEAMHUB_LOCAL_IDENTITY_KEY: identityKey,
+                  }
+                : name === "node-services"
+                  ? { ...env, ...proxyEnv }
+                  : env,
             signal,
             redactions: secrets,
-            // A changed user.env, port, credential or voice tool restarts it.
-            settings: name === "teamhub" ? teamhubSettings : settings,
+            // A changed user.env, port, credential, voice tool or system
+            // proxy restarts it.
+            settings:
+              name === "teamhub"
+                ? teamhubSettings
+                : name === "node-services"
+                  ? nodeServicesSettings
+                  : settings,
             restartOnConfigurationChange: true,
           });
           // Stop the Agent Service only when TeamHub is about to restart for a

@@ -57,6 +57,13 @@ voice key; without them, or when they fail to prepare, TeamHub gets
 `TEAMHUB_VOICE_MEDIA=off` and the install continues. The services' `voice`
 setting tracks only the tools, so a key change never restarts them through
 it. A native process restarts when its generated environment changes.
+The desktop passes the system proxy it resolved for Soniox as
+`LINGER_SYSTEM_HTTPS_PROXY` (`service-proxy.ts`). When the person set no
+`HTTPS_PROXY` themselves, Native gives only TeamHub and node-services
+`HTTPS_PROXY` with loopback added to `NO_PROXY`, and records the proxy in
+their settings, so a changed or removed system proxy restarts them on the
+next start; without one their settings are unchanged. The installer's own
+commands, LiveKit, the local models and the web server never get it.
 
 Adopting a legacy environment keeps nonempty values already set in `user.env`.
 Adoption and saved key updates recognize plain, exported and whitespace-formatted
