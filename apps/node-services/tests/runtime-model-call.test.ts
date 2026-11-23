@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   COMPUTER_OFFLINE_MESSAGE,
   createRuntimeModelCall,
+  createTeamHubBackgroundOutcomeReporter,
   isComputerOffline,
   ModelCallError,
   ModelBudgetSpentError,
   ModelRunBudget,
+  type BackgroundCallOutcome,
   type ModelPlacement,
   type RuntimeModelGateway,
   type RuntimeModelInfo,
@@ -60,6 +62,7 @@ function setup(
     lease?: ModelLease;
     callLog?: ModelCallLog;
     runtimeModels?: RuntimeModelGateway["runtimeModels"];
+    onBackgroundOutcome?: (outcome: BackgroundCallOutcome) => void;
   } = {},
 ) {
   const outcomes = [...(options.outcomes ?? [completed('{"answer":"yes"}')])];
@@ -92,6 +95,9 @@ function setup(
     placements,
     logger,
     ...(options.callLog ? { callLog: options.callLog } : {}),
+    ...(options.onBackgroundOutcome
+      ? { onBackgroundOutcome: options.onBackgroundOutcome }
+      : {}),
     now: () => time,
   });
   return {
@@ -1137,6 +1143,200 @@ describe("Model call invocation log", () => {
       "outcome",
       "runtime_type",
     ]);
+  });
+});
+
+describe("Background call outcomes", () => {
+  afterEach(() => vi.useRealTimers());
+
+  function reported(options: Parameters<typeof setup>[0] = {}) {
+    const onBackgroundOutcome =
+      vi.fn<(outcome: BackgroundCallOutcome) => void>();
+    return {
+      ...setup({ placements: [alice], ...options, onBackgroundOutcome }),
+      onBackgroundOutcome,
+    };
+  }
+
+  it("reports a completed background call once for every caller it served", async () => {
+    const { modelCall, onBackgroundOutcome } = reported({
+      outcomes: [completed("done")],
+    });
+    await Promise.all([
+      modelCall.text({ ...work, input: "x" }),
+      modelCall.text({ ...work, input: "x" }),
+    ]);
+    expect(onBackgroundOutcome.mock.calls).toEqual([
+      [
+        {
+          tenantId: "tenant_1",
+          agentActorId: "another_me_alice",
+          kind: "memory",
+        },
+      ],
+    ]);
+  });
+
+  it.each([
+    ["auth_required", "runtime_auth_required"],
+    ["runtime_incompatible", "runtime_incompatible"],
+    ["runtime_unavailable", "runtime_unavailable"],
+  ] as const)(
+    "reports a Runtime that answers %s as %s",
+    async (outcome, failure) => {
+      const { modelCall, onBackgroundOutcome } = reported({
+        outcomes: [{ outcome, reason: "sk-secret", duration_ms: 0 }],
+      });
+      await expect(modelCall.text({ ...work, input: "x" })).rejects.toThrow();
+      expect(onBackgroundOutcome.mock.calls).toEqual([
+        [
+          {
+            tenantId: "tenant_1",
+            agentActorId: "another_me_alice",
+            kind: "memory",
+            failure,
+          },
+        ],
+      ]);
+    },
+  );
+
+  it("reports a call that fails every attempt once, with an unknown reason", async () => {
+    vi.useFakeTimers();
+    const { modelCall, invokeModel, onBackgroundOutcome } = reported({
+      outcomes: [
+        { outcome: "failed", duration_ms: 0 },
+        { outcome: "timed_out", duration_ms: 0 },
+        { outcome: "failed", duration_ms: 0 },
+      ],
+    });
+    const call = modelCall
+      .text({ ...work, input: "x" })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await call).toBeInstanceOf(ModelCallError);
+    expect(invokeModel).toHaveBeenCalledTimes(3);
+    expect(onBackgroundOutcome.mock.calls).toEqual([
+      [expect.objectContaining({ failure: "unknown" })],
+    ]);
+  });
+
+  it("does not report an offline Computer, a missing Another Me or a stopped call", async () => {
+    const offline = reported({
+      outcomes: [{ outcome: "unavailable", duration_ms: 0 }],
+    });
+    await expect(
+      offline.modelCall.text({ ...work, input: "x" }),
+    ).rejects.toMatchObject({ kind: "computer_offline" });
+
+    const unplaced = reported({ placements: [] });
+    await expect(
+      unplaced.modelCall.text({ ...work, input: "x" }),
+    ).rejects.toMatchObject({ kind: "owner_unresolved" });
+
+    const stopped = reported({ invoke: hanging });
+    const memory = stopped.modelCall
+      .text({ ...work, input: "x" })
+      .catch((error: unknown) => error);
+    await vi.waitFor(() => expect(stopped.invokeModel).toHaveBeenCalled());
+    stopped.modelCall.close();
+    await memory;
+
+    for (const { onBackgroundOutcome } of [offline, unplaced, stopped])
+      expect(onBackgroundOutcome).not.toHaveBeenCalled();
+  });
+
+  it("does not report interactive calls or an Agent placed without its actor", async () => {
+    const { modelCall, onBackgroundOutcome } = reported({
+      outcomes: [
+        { outcome: "runtime_incompatible", duration_ms: 0 },
+        completed("done"),
+      ],
+    });
+    await expect(
+      modelCall.text({ kind: "approval", key: "r", input: "x" }),
+    ).rejects.toThrow();
+    const { agentActorId: _, ...placement } = alice;
+    await modelCall.text({ ...work, input: "x", placement });
+    expect(onBackgroundOutcome).not.toHaveBeenCalled();
+  });
+});
+
+describe("TeamHub background outcome reporter", () => {
+  function reporter(fetch: typeof globalThis.fetch) {
+    const logger = { log: vi.fn() };
+    const report = createTeamHubBackgroundOutcomeReporter({
+      baseUrl: "http://teamhub.test",
+      serviceToken: "service-token",
+      logger,
+      fetch,
+    });
+    return { report, logger };
+  }
+
+  it("posts a failed call's reason code for its Another Me", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () => new Response(null, { status: 204 }),
+    );
+    const { report, logger } = reporter(fetch);
+    report({
+      tenantId: "tenant_1",
+      agentActorId: "another_me_alice",
+      kind: "wiki",
+      failure: "runtime_incompatible",
+    });
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    const [url, init] = fetch.mock.calls[0]!;
+    expect((url as URL).href).toBe(
+      "http://teamhub.test/v0/agent-runtime/another-me/background-calls",
+    );
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({
+      tenant_id: "tenant_1",
+      agent_actor_id: "another_me_alice",
+      outcome: "failed",
+      reason: "runtime_incompatible",
+    });
+    await settled();
+    expect(logger.log).not.toHaveBeenCalled();
+  });
+
+  it("only warns when TeamHub predates the route or cannot be reached", async () => {
+    const answers = [
+      async () => new Response("{}", { status: 404 }),
+      async () => {
+        throw new TypeError("fetch failed");
+      },
+    ];
+    const fetch = vi.fn<typeof globalThis.fetch>(() => answers.shift()!());
+    const { report, logger } = reporter(fetch);
+    const outcome = {
+      tenantId: "tenant_1",
+      agentActorId: "another_me_alice",
+      kind: "memory",
+    } as const;
+    report(outcome);
+    report(outcome);
+    await vi.waitFor(() => expect(logger.log).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetch.mock.calls[0]![1]?.body as string)).toEqual({
+      tenant_id: "tenant_1",
+      agent_actor_id: "another_me_alice",
+      outcome: "completed",
+    });
+    expect(logger.log.mock.calls).toEqual(
+      expect.arrayContaining([
+        [
+          "warn",
+          "model_call.background_report_failed",
+          expect.objectContaining({ kind: "memory", status: 404 }),
+        ],
+        [
+          "warn",
+          "model_call.background_report_failed",
+          expect.objectContaining({ error: expect.any(TypeError) }),
+        ],
+      ]),
+    );
   });
 });
 

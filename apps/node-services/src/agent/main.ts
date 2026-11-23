@@ -5,6 +5,7 @@ import type { HttpHost } from "../http-host.js";
 import {
   createRuntimeModelCall,
   createTeamHubAnotherMePlacementSource,
+  createTeamHubBackgroundOutcomeReporter,
   type ModelCall,
 } from "../runtime-model-call.js";
 import { createModelCallLog } from "../model-call-log.js";
@@ -152,6 +153,11 @@ export async function startAgentService(
         placements: createTeamHubAnotherMePlacementSource({
           baseUrl: roomBaseUrl,
           serviceToken,
+        }),
+        onBackgroundOutcome: createTeamHubBackgroundOutcomeReporter({
+          baseUrl: roomBaseUrl,
+          serviceToken,
+          logger: modelCallLogger,
         }),
         logger: modelCallLogger,
         callLog: createModelCallLog({

@@ -45,6 +45,16 @@ take precedence.
   stays on Pi, on whatever model Pi defaults to, and never falls back to
   Codex or Claude. It serves structured and text calls without tools; workspace mode remains on
   Codex and Claude.
+  Each background (non-interactive) call that ran on an Another Me's Computer
+  and completed, or failed for a reason other than an offline Computer, a
+  stopped call or a missing Another Me, is reported once per execution to
+  TeamHub's `POST /v0/agent-runtime/another-me/background-calls` with a
+  reason code mapped from the error kind and the Daemon's structured outcome,
+  never its text. The report is fire-and-forget off the caller's path; a
+  failed one, including a TeamHub without the route, only logs
+  `model_call.background_report_failed`. TeamHub counts the failures in a row
+  and the Another Me Chat shows a banner from the third until the next
+  completed call.
 - TeamHub owns persisted Agent Runtime configuration, Execution Context,
   accepted input, Inbox cursor, Local Run, RuntimeSession, Runtime status,
   Local Computer and Agent placement state. Agent Runners and Operations live

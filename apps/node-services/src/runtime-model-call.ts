@@ -347,9 +347,29 @@ export type AnotherMePlacementSource = (
   signal?: AbortSignal,
 ) => Promise<readonly ModelPlacement[]>;
 
+/** Why a background call failed, as its Human is told. */
+export type BackgroundFailureReason =
+  | "runtime_incompatible"
+  | "runtime_auth_required"
+  | "runtime_unavailable"
+  | "unknown";
+
+/** How one background call that ran on an Another Me's Computer ended. */
+export interface BackgroundCallOutcome {
+  readonly tenantId: string;
+  readonly agentActorId: string;
+  readonly kind: ModelCallKind;
+  /** Absent for a completed call. */
+  readonly failure?: BackgroundFailureReason;
+}
+
 export interface RuntimeModelCallOptions {
   readonly gateway: RuntimeModelGateway;
   readonly placements: AnotherMePlacementSource;
+  /** Hears each background call that completed or failed on an Another Me's
+   * Computer, once per execution however many attempts it took. It must not
+   * throw or block. */
+  readonly onBackgroundOutcome?: (outcome: BackgroundCallOutcome) => void;
   readonly logger?: Pick<JsonLogger, "log">;
   /** Keeps each call's prompt and reply on local disk. */
   readonly callLog?: ModelCallLog;
@@ -531,6 +551,8 @@ interface Entry {
   readonly controller: AbortController;
   result: Promise<ModelCallAnswer>;
   waiters: number;
+  /** Where the latest attempt ran; absent while none has. */
+  placement?: ModelPlacement;
 }
 
 function targetOf(request: ModelTarget): ModelTarget {
@@ -871,6 +893,7 @@ async function invokeAttempt(
   const { call } = entry;
   const signal = entry.controller.signal;
   const { placement, key } = await resolvePlacement(state, call.target, signal);
+  entry.placement = placement;
   const resolved = resolveTarget(state.options.gateway, placement);
   const runtimeType = entry.chain?.runtimeType ?? resolved.runtimeType;
   const runtimeModels = state.options.gateway.runtimeModels(
@@ -1148,10 +1171,12 @@ function startCall(
   state.entries.set(call.id, entry);
   entry.result = executeCall(state, entry).then(
     (result) => {
+      reportBackgroundOutcome(state, entry, { result });
       settleCall(state, entry, { result });
       return result;
     },
     (error: unknown) => {
+      reportBackgroundOutcome(state, entry, { error });
       settleCall(state, entry, { error });
       throw error;
     },
@@ -1159,6 +1184,64 @@ function startCall(
   // Nobody may be waiting when it fails; settle already reported it.
   entry.result.catch(() => undefined);
   return entry;
+}
+
+/** Reports a background call that ran on an Another Me's Computer and
+ * completed, or failed for a cause its Human may need to act on. A call that
+ * never ran, was stopped, or found the Computer offline says nothing about the
+ * Runtime, and interactive calls fail in front of the Human already. */
+function reportBackgroundOutcome(
+  state: ModelCallState,
+  entry: Entry,
+  outcome: { readonly result: ModelCallAnswer } | { readonly error: unknown },
+): void {
+  const report = state.options.onBackgroundOutcome;
+  const { call, placement } = entry;
+  if (
+    !report ||
+    !placement?.agentActorId ||
+    modelCallPolicies[call.kind].interactive
+  )
+    return;
+  let failure: BackgroundFailureReason | undefined;
+  if ("error" in outcome) {
+    if (entry.controller.signal.aborted) return;
+    failure = backgroundFailureReason(outcome.error);
+    if (!failure) return;
+  }
+  report({
+    tenantId: placement.tenantId,
+    agentActorId: placement.agentActorId,
+    kind: call.kind,
+    ...(failure ? { failure } : {}),
+  });
+}
+
+/** The reason a Human is told, from the error's kind and the Daemon's
+ * structured outcome; undefined for a failure that does not count. */
+function backgroundFailureReason(
+  error: unknown,
+): BackgroundFailureReason | undefined {
+  if (!(error instanceof ModelCallError)) return undefined;
+  switch (error.kind) {
+    case "runtime_unavailable":
+      return error.runtimeOutcome === "auth_required"
+        ? "runtime_auth_required"
+        : error.runtimeOutcome === "runtime_incompatible"
+          ? "runtime_incompatible"
+          : "runtime_unavailable";
+    case "failed":
+    case "timed_out":
+    case "output_limited":
+    case "invalid_output":
+    case "invalid_request":
+      return "unknown";
+    case "computer_offline":
+    case "owner_unresolved":
+    case "pending":
+    case "yielded":
+      return undefined;
+  }
 }
 
 /** Waits for the call's result; the caller's signal only stops this wait.
@@ -1465,6 +1548,50 @@ export function createTeamHubAnotherMePlacementSource(options: {
         runtimeType: item.local_runtime_type,
         agentActorId: item.agent_actor_id,
       }));
+  };
+}
+
+/** How long a background outcome report may take before it is dropped. */
+const BACKGROUND_REPORT_TIMEOUT_MS = 10_000;
+
+/** Sends each background call's outcome to TeamHub, which counts an Another
+ * Me's failures in a row for its Human. Nobody waits on a report: a failed
+ * one, including a TeamHub that predates the route, only logs a warning. */
+export function createTeamHubBackgroundOutcomeReporter(options: {
+  readonly baseUrl: string;
+  readonly serviceToken: string;
+  readonly logger: Pick<JsonLogger, "log">;
+  readonly fetch?: typeof fetch;
+}): (outcome: BackgroundCallOutcome) => void {
+  const client = createTeamHubAgentRuntimeStateClient({
+    baseUrl: options.baseUrl,
+    serviceToken: options.serviceToken,
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+  });
+  return (outcome) => {
+    const failed = (fields: Record<string, unknown>) =>
+      options.logger.log("warn", "model_call.background_report_failed", {
+        kind: outcome.kind,
+        agent_actor_id: outcome.agentActorId,
+        ...fields,
+      });
+    client
+      .recordAnotherMeBackgroundCall(
+        {
+          tenant_id: outcome.tenantId,
+          agent_actor_id: outcome.agentActorId,
+          outcome: outcome.failure ? "failed" : "completed",
+          ...(outcome.failure ? { reason: outcome.failure } : {}),
+        },
+        AbortSignal.timeout(BACKGROUND_REPORT_TIMEOUT_MS),
+      )
+      .then(
+        async (response) => {
+          await response.body?.cancel();
+          if (!response.ok) failed({ status: response.status });
+        },
+        (error: unknown) => failed({ error }),
+      );
   };
 }
 
