@@ -145,6 +145,8 @@ func (t FeishuMailTools) ExecuteTool(ctx context.Context, upstreamID, slug, vers
 	switch {
 	case err == nil:
 		return composio.ToolExecution{Successful: true, Data: data}, nil
+	case errors.Is(err, feishu.ErrMailboxChanged):
+		return refusal("lark-cli on the Computer that runs your Another Me is logged in to a different Feishu mailbox than this connection, so nothing was read or sent. Log lark-cli back in to the connected mailbox, or connect the other mailbox."), nil
 	case feishu.IsAuthFailure(err):
 		// lark-cli refused before Feishu acted: the owner's login no longer works.
 		return composio.ToolExecution{}, errors.Join(ErrNotActive, err)
@@ -558,5 +560,10 @@ func (s *Service) SendFeishuDraft(ctx context.Context, upstreamID, draftID strin
 
 // SaveDraftRaw saves a canvas draft for an Agent's canvas-draft command.
 func (t FeishuMailTools) SaveDraftRaw(ctx context.Context, upstreamID, draftID string, raw []byte) (string, error) {
-	return t.service.SaveFeishuDraft(ctx, upstreamID, draftID, raw)
+	saved, err := t.service.SaveFeishuDraft(ctx, upstreamID, draftID, raw)
+	if feishu.IsAuthFailure(err) {
+		// lark-cli refused before Feishu acted: nothing was saved.
+		return "", errors.Join(ErrNotActive, err)
+	}
+	return saved, err
 }

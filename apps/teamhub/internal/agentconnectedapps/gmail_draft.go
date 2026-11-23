@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	stdimage "image"
 	"image/draw"
@@ -317,6 +318,9 @@ func (s *Service) saveFeishuDraft(ctx context.Context, token, connectionID, draf
 		return composio.GmailDraft{}, err
 	}
 	saved, err := saver.SaveDraftRaw(ctx, connection.UpstreamConnectionID, draftID, raw)
+	if errors.Is(err, externalsource.ErrNotActive) {
+		return composio.GmailDraft{}, mapToolError(err, "execute")
+	}
 	if err != nil {
 		return composio.GmailDraft{}, uncertainExecutionError(err)
 	}

@@ -87,14 +87,30 @@ func (s *Service) feishuMailbox(ctx context.Context, upstreamID string) (feishu.
 	if s.feishu == nil {
 		return feishu.Mailbox{}, ErrUnavailable
 	}
-	accountID, err := store.New(s.pool).GetExternalUpstreamAccount(ctx, upstreamID)
+	queries := store.New(s.pool)
+	accountID, err := queries.GetExternalUpstreamAccount(ctx, upstreamID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return feishu.Mailbox{}, errFeishuUpstreamGone
 	}
 	if err != nil {
 		return feishu.Mailbox{}, err
 	}
-	return s.feishuAccountMailbox(ctx, store.New(s.pool), accountID)
+	mailbox, err := s.feishuAccountMailbox(ctx, queries, accountID)
+	if err != nil {
+		return feishu.Mailbox{}, err
+	}
+	// An identified connection stays bound to its mailbox: lark-cli acts as
+	// whoever is logged in now, which the owner may have switched. A
+	// reauthorization candidate is not bound, so a login to another mailbox
+	// ends it as an identity mismatch.
+	principal, err := queries.GetFeishuUpstreamPrincipal(ctx, upstreamID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return feishu.Mailbox{}, err
+	}
+	if address, ok := strings.CutPrefix(principal, FeishuMailAppKey+":"); ok && address != "" {
+		mailbox = mailbox.BoundTo(address)
+	}
+	return mailbox, nil
 }
 
 // feishuAccountMailbox is the Feishu mailbox of accountID's own lark-cli,

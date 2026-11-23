@@ -816,12 +816,13 @@ type FeishuInboxMessage struct {
 	Received                              time.Time
 }
 
-// FeishuMailFeed reads a Feishu inbox for its listener. TeamHub authorizes
-// Feishu itself, so the feed comes from the connection service, not Composio.
+// FeishuMailFeed reads a Feishu inbox for its listener. TeamHub runs Feishu
+// itself, so the feed comes from the connection service, not Composio.
 type FeishuMailFeed interface {
 	// FeishuInboxSince returns inbox mail received at or after since, newest
-	// first, as far as a bounded number of pages reach.
-	FeishuInboxSince(ctx context.Context, upstreamID string, since time.Time) ([]FeishuInboxMessage, error)
+	// first, from pageToken as far as a bounded number of pages reach. next
+	// is where to read on when mail newer than since remains unread.
+	FeishuInboxSince(ctx context.Context, upstreamID string, since time.Time, pageToken string) (messages []FeishuInboxMessage, next string, err error)
 }
 
 // SetFeishuMailFeed lets Feishu Mail listeners read their inboxes.
@@ -831,6 +832,9 @@ func (s *Service) SetFeishuMailFeed(feed FeishuMailFeed) { s.feishuMail = feed }
 // inbox mail since a received-time watermark. The first poll only records the
 // watermark, so mail from before the listener is not news. Mail received in
 // the watermark's own millisecond is read again; delivery receipts dedup it.
+// A backlog larger than one read is read on from its page over the next
+// polls, and the watermark moves to the backlog's newest mail only once all
+// of it is read, so no mail newer than the old watermark is skipped.
 func fetchFeishuMail(ctx context.Context, feed FeishuMailFeed, ca string, cursor pollCursor) (pollRead, error) {
 	if cursor.Channels == nil {
 		cursor.Channels = map[string]string{}
@@ -843,12 +847,18 @@ func fetchFeishuMail(ctx context.Context, feed FeishuMailFeed, ca string, cursor
 	if err != nil {
 		return pollRead{}, err
 	}
-	messages, err := feed.FeishuInboxSince(ctx, ca, since)
+	// newest is the newest mail this backlog has shown, across its polls.
+	newest := since
+	if seen := cursor.Channels["backlog_newest"]; seen != "" {
+		if newest, err = time.Parse(time.RFC3339Nano, seen); err != nil {
+			return pollRead{}, err
+		}
+	}
+	messages, next, err := feed.FeishuInboxSince(ctx, ca, since, cursor.Channels["backlog_page"])
 	if err != nil {
 		return pollRead{}, err
 	}
 	read := pollRead{cursor: cursor}
-	newest := since
 	for _, m := range messages {
 		if m.Received.Before(since) {
 			continue
@@ -860,6 +870,14 @@ func fetchFeishuMail(ctx context.Context, feed FeishuMailFeed, ca string, cursor
 			MessageID: m.ID, ThreadID: m.ThreadID,
 		})
 	}
+	if next != "" {
+		read.cursor.Channels["backlog_page"] = next
+		read.cursor.Channels["backlog_newest"] = newest.UTC().Format(time.RFC3339Nano)
+		read.nextPoll = time.Minute
+		return read, nil
+	}
+	delete(read.cursor.Channels, "backlog_page")
+	delete(read.cursor.Channels, "backlog_newest")
 	read.cursor.Channels["since"] = newest.UTC().Format(time.RFC3339Nano)
 	return read, nil
 }

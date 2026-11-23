@@ -28,9 +28,11 @@ type fakeFeishu struct {
 	*recordingLocalComputers
 	t  *testing.T
 	mu sync.Mutex
-	// The owner's lark-cli: logged in with every mail scope, the scopes its
-	// app does not enable, and the logins started on it, approved or not.
+	// The owner's lark-cli: logged in with every mail scope, to address, the
+	// scopes its app does not enable, and the logins started on it, approved
+	// or not.
 	loggedIn   bool
+	address    string
 	notEnabled []string
 	logins     map[string]bool
 	targets    []nodeapi.LocalComputerToolCall
@@ -56,7 +58,7 @@ func fakeFeishuMessage(id, from, subject, body string, hoursAgo float64, state i
 
 func newFakeFeishu(t *testing.T) *fakeFeishu {
 	t.Helper()
-	return &fakeFeishu{recordingLocalComputers: &recordingLocalComputers{}, t: t, logins: map[string]bool{}, drafts: map[string][]byte{},
+	return &fakeFeishu{recordingLocalComputers: &recordingLocalComputers{}, t: t, address: "Zhang@Example.com", logins: map[string]bool{}, drafts: map[string][]byte{},
 		mail: map[string]map[string]any{
 			"msg_1":       fakeFeishuMessage("msg_1", "alice@example.com", "Quarterly plan", "Can we meet?", 1, 1),
 			"msg_receipt": fakeFeishuMessage("msg_receipt", "no-reply@shop.example.com", "Your receipt", "Paid", 2, 1),
@@ -92,7 +94,7 @@ func (f *fakeFeishu) CallLocalComputerToolResult(_ context.Context, call nodeapi
 		case len(f.notEnabled) > 0:
 			return map[string]any{"status": "missing_scope", "missing_scopes": anyList(f.notEnabled), "app_missing_scopes": anyList(f.notEnabled), "app_id": "cli_fake", "brand": "feishu"}, nil
 		}
-		return map[string]any{"status": "ok", "address": "Zhang@Example.com"}, nil
+		return map[string]any{"status": "ok", "address": f.address}, nil
 	case "login_start":
 		f.logins[loginID] = false
 		return map[string]any{"status": "ok", "verification_url": "https://accounts.feishu.cn/oauth/v1/device/verify?flow=" + loginID, "expires_in": float64(600)}, nil
@@ -153,7 +155,7 @@ func (f *fakeFeishu) serveMail(method, path string, params, body map[string]any)
 		}
 		return ok(map[string]any{"message": message})
 	case method == http.MethodGet && path == "profile":
-		return ok(map[string]any{"primary_email_address": "Zhang@Example.com"})
+		return ok(map[string]any{"primary_email_address": f.address})
 	case method == http.MethodPost && path == "drafts":
 		raw, err := base64.URLEncoding.DecodeString(fmt.Sprint(body["raw"]))
 		if err != nil {
@@ -203,6 +205,31 @@ func (f *fakeFeishu) setLoggedIn(loggedIn bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.loggedIn = loggedIn
+}
+
+// setAddress logs the owner's lark-cli in to another mailbox.
+func (f *fakeFeishu) setAddress(address string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.address = address
+}
+
+// apiPaths lists the mailbox paths of the api calls made so far.
+func (f *fakeFeishu) apiPaths() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	paths := []string{}
+	for _, call := range f.targets {
+		if call.ToolName == "api" {
+			encoded, _ := json.Marshal(call.Arguments)
+			var arguments struct {
+				Path string `json:"path"`
+			}
+			_ = json.Unmarshal(encoded, &arguments)
+			paths = append(paths, strings.TrimPrefix(arguments.Path, "/open-apis/mail/v1/user_mailboxes/me/"))
+		}
+	}
+	return paths
 }
 
 func (f *fakeFeishu) setNotEnabled(scopes ...string) {
@@ -419,5 +446,16 @@ func TestFeishuMailConnectsThroughTheOwnersLarkCLI(t *testing.T) {
 	checkFeishuConnectionNow(t, env, alice, againID)
 	if againURL != "" || !waitForExternalSource(func() bool { return feishuConnectionStatus(t, env, againID) == "active" }) {
 		t.Fatalf("connection while logged in url=%q status=%s", againURL, feishuConnectionStatus(t, env, againID))
+	}
+
+	// lark-cli acts as whoever is logged in to it now: switched to another
+	// mailbox, it no longer serves this connection, which expires.
+	fake.setAddress("other@example.com")
+	status, _, body = env.request(alice, http.MethodPost, "/v0/external-connections/"+againID+"/status-checks", map[string]int64{"expected_revision": revision(againID)}, "")
+	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusAccepted {
+		t.Fatalf("status check status=%d body=%s", status, body)
+	}
+	if !waitForExternalSource(func() bool { return feishuConnectionStatus(t, env, againID) == "expired" }) {
+		t.Fatalf("status after switching mailboxes = %s", feishuConnectionStatus(t, env, againID))
 	}
 }

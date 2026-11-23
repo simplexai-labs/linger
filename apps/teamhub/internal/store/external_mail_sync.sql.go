@@ -93,6 +93,22 @@ func (q *Queries) GetFeishuMailComputerTarget(ctx context.Context, accountID str
 	return i, err
 }
 
+const getFeishuUpstreamPrincipal = `-- name: GetFeishuUpstreamPrincipal :one
+SELECT coalesce(remote_principal_key,'')::text AS remote_principal_key
+FROM external_connections
+WHERE upstream_connection_id=$1::text
+`
+
+// The identity of the connection a Feishu upstream serves; empty until the
+// connection is identified. A reauthorization candidate is not the
+// connection's upstream yet: its identity is compared when it completes.
+func (q *Queries) GetFeishuUpstreamPrincipal(ctx context.Context, upstreamID string) (string, error) {
+	row := q.db.QueryRow(ctx, getFeishuUpstreamPrincipal, upstreamID)
+	var remote_principal_key string
+	err := row.Scan(&remote_principal_key)
+	return remote_principal_key, err
+}
+
 const getMailSync = `-- name: GetMailSync :one
 SELECT account_id, mail_import_tenant_id::text AS tenant_id, provider, upstream_connection_id,
        coalesce(remote_principal_key, '')::text AS mailbox,

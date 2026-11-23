@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,12 +29,46 @@ type Caller func(ctx context.Context, tool string, arguments map[string]any) (ma
 type Mailbox struct {
 	call      Caller
 	downloads *http.Client
+	identity  *mailboxIdentity
+}
+
+// mailboxIdentity is the address a Mailbox is bound to and the outcome of
+// checking it, shared by the copies of one Mailbox.
+type mailboxIdentity struct {
+	address string
+	once    sync.Once
+	err     error
 }
 
 // NewMailbox builds a Mailbox. downloads fetches the presigned attachment
 // links Feishu hands out, which need no login.
 func NewMailbox(call Caller, downloads *http.Client) Mailbox {
 	return Mailbox{call: call, downloads: downloads}
+}
+
+// BoundTo binds the Mailbox to address, the mailbox its connection was
+// authorized for. lark-cli acts as whoever is logged in to it now, so the
+// first call checks that this is still address and every call fails with
+// ErrMailboxChanged when it is not.
+func (m Mailbox) BoundTo(address string) Mailbox {
+	m.identity = &mailboxIdentity{address: strings.ToLower(strings.TrimSpace(address))}
+	return m
+}
+
+// checkIdentity reads the logged-in mailbox once and compares it with the
+// bound address.
+func (m Mailbox) checkIdentity(ctx context.Context) error {
+	if m.identity == nil || m.identity.address == "" {
+		return nil
+	}
+	m.identity.once.Do(func() {
+		address, err := m.Address(ctx)
+		if err == nil && address != m.identity.address {
+			err = ErrMailboxChanged
+		}
+		m.identity.err = err
+	})
+	return m.identity.err
 }
 
 // APIError is a refusal of the Feishu Open Platform that lark-cli relayed,
@@ -81,6 +116,10 @@ const (
 // to Feishu, or whose login no longer works.
 var ErrAuthorizationRequired = errors.New("the owner's lark-cli needs a Feishu login")
 
+// ErrMailboxChanged reports an owner's lark-cli logged in to another mailbox
+// than the one the connection was authorized for: nothing is read or sent.
+var ErrMailboxChanged = errors.New("the owner's lark-cli is logged in to another Feishu mailbox")
+
 // ScopesMissingError reports a lark-cli login without every mail scope.
 // NotEnabled are the scopes its Feishu app does not enable at all: logging in
 // again cannot grant those until the app's console enables them. AppID and
@@ -125,7 +164,7 @@ const rateLimitCode = 99991400
 func IsAuthFailure(err error) bool {
 	var scopes *ScopesMissingError
 	var apiErr *APIError
-	return errors.Is(err, ErrAuthorizationRequired) || errors.As(err, &scopes) ||
+	return errors.Is(err, ErrAuthorizationRequired) || errors.Is(err, ErrMailboxChanged) || errors.As(err, &scopes) ||
 		errors.As(err, &apiErr) && slices.Contains(authFailureCodes, apiErr.Code)
 }
 
@@ -142,8 +181,17 @@ func IsComputerFailure(err error) bool {
 }
 
 // do sends one mail API request, path relative to the mailbox, and decodes a
-// successful response's data into result's Data field.
+// successful response's data into result's Data field. A bound Mailbox first
+// checks that lark-cli is still logged in to its mailbox.
 func (m Mailbox) do(ctx context.Context, operation, method, path string, query map[string]any, body any, result any) error {
+	if err := m.checkIdentity(ctx); err != nil {
+		return err
+	}
+	return m.request(ctx, operation, method, path, query, body, result)
+}
+
+// request sends one mail API request without the identity check.
+func (m Mailbox) request(ctx context.Context, operation, method, path string, query map[string]any, body any, result any) error {
 	arguments := map[string]any{"method": method, "path": mailboxPath}
 	if path != "" {
 		arguments["path"] = mailboxPath + "/" + path
@@ -218,6 +266,9 @@ func (m Mailbox) Status(ctx context.Context) (string, error) {
 	address, _ := result["address"].(string)
 	if address = strings.ToLower(strings.TrimSpace(address)); address == "" {
 		return "", &ComputerError{Status: "failed", Detail: "lark-cli reported no mailbox address"}
+	}
+	if m.identity != nil && m.identity.address != "" && address != m.identity.address {
+		return "", ErrMailboxChanged
 	}
 	return address, nil
 }

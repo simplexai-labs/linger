@@ -204,9 +204,9 @@ func TestPendingPollEventsDoNotWaitForProvider(t *testing.T) {
 		t.Error("provider contacted with saved events pending")
 		return 503, nil
 	})
-	service := &Service{feishuMail: feishuFeed(func(time.Time) ([]FeishuInboxMessage, error) {
+	service := &Service{feishuMail: feishuFeed(func(time.Time, string) ([]FeishuInboxMessage, string, error) {
 		t.Error("Feishu contacted with saved events pending")
-		return nil, nil
+		return nil, "", nil
 	})}
 	for _, source := range []string{ListenerGmail, ListenerOutlook, ListenerGCal, ListenerOutlookCalendar, ListenerSlack, ListenerFeishuMail} {
 		cursor := pollCursor{V: "checkpoint", PageToken: "next", Pending: []ListenerEvent{{Source: source, EventID: "saved"}}}
@@ -489,21 +489,21 @@ func TestOutlookCalendarRollsWindowBeforeCoverageExpires(t *testing.T) {
 	}
 }
 
-type feishuFeed func(since time.Time) ([]FeishuInboxMessage, error)
+type feishuFeed func(since time.Time, pageToken string) ([]FeishuInboxMessage, string, error)
 
-func (f feishuFeed) FeishuInboxSince(_ context.Context, _ string, since time.Time) ([]FeishuInboxMessage, error) {
-	return f(since)
+func (f feishuFeed) FeishuInboxSince(_ context.Context, _ string, since time.Time, pageToken string) ([]FeishuInboxMessage, string, error) {
+	return f(since, pageToken)
 }
 
 func TestFeishuMailListenerReportsOnlyMailAfterItsWatermark(t *testing.T) {
 	start := time.Now().Add(-time.Hour)
 	var asked []time.Time
-	feed := feishuFeed(func(since time.Time) ([]FeishuInboxMessage, error) {
+	feed := feishuFeed(func(since time.Time, _ string) ([]FeishuInboxMessage, string, error) {
 		asked = append(asked, since)
 		return []FeishuInboxMessage{
 			{ID: "new", ThreadID: "t1", From: "alice@example.com", Subject: "Plan", Body: "Meet Friday?", Received: start.Add(30 * time.Minute)},
 			{ID: "old", Received: start.Add(-time.Minute)},
-		}, nil
+		}, "", nil
 	})
 	// The first poll only records the watermark.
 	first, err := fetchFeishuMail(t.Context(), feed, "ca", pollCursor{})
@@ -520,5 +520,49 @@ func TestFeishuMailListenerReportsOnlyMailAfterItsWatermark(t *testing.T) {
 	}
 	if read.cursor.Channels["since"] != start.Add(30*time.Minute).UTC().Format(time.RFC3339Nano) {
 		t.Fatalf("watermark = %s", read.cursor.Channels["since"])
+	}
+}
+
+func TestFeishuMailBacklogIsReadToTheEndBeforeTheWatermarkMoves(t *testing.T) {
+	start := time.Now().Add(-time.Hour).UTC()
+	stamp := func(minutes int) time.Time { return start.Add(time.Duration(minutes) * time.Minute) }
+	// Newest first, split across two reads: the second read starts from the
+	// page the first one stopped at.
+	pages := map[string]struct {
+		messages []FeishuInboxMessage
+		next     string
+	}{
+		"":       {[]FeishuInboxMessage{{ID: "m3", Received: stamp(30)}, {ID: "m2", Received: stamp(20)}}, "page-2"},
+		"page-2": {[]FeishuInboxMessage{{ID: "m1", Received: stamp(10)}, {ID: "old", Received: stamp(-1)}}, ""},
+	}
+	var asked []string
+	feed := feishuFeed(func(since time.Time, pageToken string) ([]FeishuInboxMessage, string, error) {
+		if !since.Equal(start) {
+			t.Errorf("read since %s, want the unmoved watermark %s", since, start)
+		}
+		asked = append(asked, pageToken)
+		page := pages[pageToken]
+		return page.messages, page.next, nil
+	})
+	cursor := pollCursor{Channels: map[string]string{"since": start.Format(time.RFC3339Nano)}}
+
+	first, err := fetchFeishuMail(t.Context(), feed, "ca", cursor)
+	if err != nil || len(first.events) != 2 || first.nextPoll != time.Minute {
+		t.Fatalf("first read = %+v err=%v", first, err)
+	}
+	if got := first.cursor.Channels; got["since"] != start.Format(time.RFC3339Nano) || got["backlog_page"] != "page-2" || got["backlog_newest"] != stamp(30).Format(time.RFC3339Nano) {
+		t.Fatalf("mid-backlog cursor = %v", got)
+	}
+
+	second, err := fetchFeishuMail(t.Context(), feed, "ca", first.cursor)
+	if err != nil || len(second.events) != 1 || second.events[0].MessageID != "m1" {
+		t.Fatalf("second read = %+v err=%v", second, err)
+	}
+	got := second.cursor.Channels
+	if got["since"] != stamp(30).Format(time.RFC3339Nano) || got["backlog_page"] != "" || got["backlog_newest"] != "" {
+		t.Fatalf("finished cursor = %v", got)
+	}
+	if len(asked) != 2 || asked[0] != "" || asked[1] != "page-2" {
+		t.Fatalf("pages asked = %q", asked)
 	}
 }

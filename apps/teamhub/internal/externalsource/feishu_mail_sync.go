@@ -159,46 +159,37 @@ func headerAddresses(addresses []feishu.MailAddress) string {
 }
 
 // feishuListenerPages bounds how far one listener poll reads back through the
-// inbox; mail older than that between two polls is not reported.
+// inbox; a larger backlog is read on from where the poll stopped.
 const feishuListenerPages = 3
 
 // FeishuInboxSince returns inbox mail received at or after since, newest
-// first, for a Feishu Mail listener.
-func (s *Service) FeishuInboxSince(ctx context.Context, upstreamID string, since time.Time) ([]reminder.FeishuInboxMessage, error) {
+// first, for a Feishu Mail listener, reading from pageToken. next is where the
+// next poll reads on when the backlog was larger than one poll reads. A page
+// token Feishu no longer accepts starts over from the newest mail; the
+// listener drops what it already reported.
+func (s *Service) FeishuInboxSince(ctx context.Context, upstreamID string, since time.Time, pageToken string) ([]reminder.FeishuInboxMessage, string, error) {
 	if s.feishu == nil {
-		return nil, ErrUnavailable
+		return nil, "", ErrUnavailable
 	}
 	mailbox, err := s.feishuMailbox(ctx, upstreamID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	var found []reminder.FeishuInboxMessage
-	token := ""
-	for range feishuListenerPages {
-		ids, next, err := mailbox.ListMessageIDs(ctx, feishu.FolderInbox, false, 20, token)
-		if err != nil {
-			return nil, err
-		}
-		messages, err := mailbox.BatchGetMessages(ctx, ids, "full")
-		if err != nil {
-			return nil, err
-		}
-		older := 0
-		for _, message := range messages {
-			mail := importedFeishuMail(message, false)
-			if mail.Received.Before(since) {
-				older++
-				continue
-			}
-			found = append(found, reminder.FeishuInboxMessage{
-				ID: message.MessageID, ThreadID: message.ThreadID, From: mail.From, To: mail.To, Subject: mail.Subject,
-				Body: composio.PollMailBody(mail.Body, mail.HTML), Received: mail.Received,
-			})
-		}
-		if next == "" || len(messages) == 0 || older > 0 {
-			break
-		}
-		token = next
+	messages, next, err := mailbox.InboxSince(ctx, since, pageToken, feishuListenerPages)
+	var refused *feishu.APIError
+	if pageToken != "" && errors.As(err, &refused) && !feishu.IsAuthFailure(err) {
+		messages, next, err = mailbox.InboxSince(ctx, since, "", feishuListenerPages)
 	}
-	return found, nil
+	if err != nil {
+		return nil, "", err
+	}
+	found := make([]reminder.FeishuInboxMessage, 0, len(messages))
+	for _, message := range messages {
+		mail := importedFeishuMail(message, false)
+		found = append(found, reminder.FeishuInboxMessage{
+			ID: message.MessageID, ThreadID: message.ThreadID, From: mail.From, To: mail.To, Subject: mail.Subject,
+			Body: composio.PollMailBody(mail.Body, mail.HTML), Received: mail.Received,
+		})
+	}
+	return found, next, nil
 }

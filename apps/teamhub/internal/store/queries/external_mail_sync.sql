@@ -51,3 +51,11 @@ LIMIT 1;
 
 -- name: GetExternalUpstreamAccount :one
 SELECT account_id FROM external_connection_upstreams WHERE upstream_id=sqlc.arg(upstream_id)::text;
+
+-- name: GetFeishuUpstreamPrincipal :one
+-- The identity of the connection a Feishu upstream serves; empty until the
+-- connection is identified. A reauthorization candidate is not the
+-- connection's upstream yet: its identity is compared when it completes.
+SELECT coalesce(remote_principal_key,'')::text AS remote_principal_key
+FROM external_connections
+WHERE upstream_connection_id=sqlc.arg(upstream_id)::text;

@@ -311,6 +311,10 @@ func (s *Service) sendDraft(ctx context.Context, connection externalsource.Conne
 	return s.provider.SendGmailDraft(ctx, connection.UpstreamConnectionID, draftID)
 }
 
+// feishuMailboxChanged explains a delivery the owner's lark-cli refused
+// before Feishu acted, because it is logged in to another mailbox.
+const feishuMailboxChanged = "lark-cli on your Computer is logged in to a different Feishu mailbox than this connection. Nothing was sent. Log lark-cli back in to the connected mailbox and send again."
+
 // draftGone reports a saved draft the mail app no longer has.
 func draftGone(err error) bool {
 	if status, ok := composio.ErrorStatus(err); ok && status == http.StatusNotFound {
@@ -389,6 +393,9 @@ func (w *deliveryWorker) Work(ctx context.Context, job *river.Job[deliveryArgs])
 		row.DraftID = ""
 		return s.finish(ctx, row, "failed", "The earlier "+name+" draft is gone, so this email may already have been sent. Check Sent in "+name+"; send again only if it is not there.")
 	}
+	if errors.Is(err, feishu.ErrMailboxChanged) {
+		return s.finish(ctx, row, "failed", feishuMailboxChanged)
+	}
 	if err != nil {
 		return s.finish(ctx, row, "failed", name+" did not accept the upload. Nothing was sent; send again.")
 	}
@@ -405,6 +412,9 @@ func (w *deliveryWorker) Work(ctx context.Context, job *river.Job[deliveryArgs])
 		return err
 	}
 	messageID, err := s.sendDraft(ctx, connection, row.DraftID)
+	if errors.Is(err, feishu.ErrMailboxChanged) {
+		return s.finish(ctx, row, "failed", feishuMailboxChanged)
+	}
 	if err != nil {
 		return s.finish(ctx, row, "unknown", name+" did not confirm delivery. Check Sent before trying again.")
 	}

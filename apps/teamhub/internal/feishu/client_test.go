@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeComputer answers each tool call with the next prepared result and
@@ -174,5 +176,91 @@ func TestDownloadAttachmentFetchesThePresignedLinkItself(t *testing.T) {
 	}}}}}
 	if _, err := NewMailbox(plain.call, server.Client()).DownloadAttachment(context.Background(), "m1", "a1"); err == nil {
 		t.Fatal("a plain-HTTP attachment link was fetched")
+	}
+}
+
+func profile(address string) map[string]any {
+	return map[string]any{"status": "ok", "data": map[string]any{"primary_email_address": address}}
+}
+
+func TestBoundMailboxRefusesAnotherLoggedInMailbox(t *testing.T) {
+	// The owner switched lark-cli to another account after connecting.
+	computer := &fakeComputer{results: []map[string]any{profile("other@example.com")}}
+	mailbox := NewMailbox(computer.call, nil).BoundTo(" Me@Example.com ")
+	ctx := context.Background()
+	if _, _, err := mailbox.ListMessageIDs(ctx, FolderInbox, false, 20, ""); !errors.Is(err, ErrMailboxChanged) || !IsAuthFailure(err) {
+		t.Fatalf("list err = %v", err)
+	}
+	// The check is not repeated, and nothing reaches the other mailbox.
+	if _, err := mailbox.GetMessage(ctx, "m1"); !errors.Is(err, ErrMailboxChanged) {
+		t.Fatalf("read err = %v", err)
+	}
+	if len(computer.calls) != 1 || computer.calls[0].arguments["path"] != mailboxPath+"/profile" {
+		t.Fatalf("calls = %#v", computer.calls)
+	}
+
+	status := &fakeComputer{results: []map[string]any{{"status": "ok", "address": "other@example.com"}}}
+	if _, err := NewMailbox(status.call, nil).BoundTo("me@example.com").Status(ctx); !errors.Is(err, ErrMailboxChanged) {
+		t.Fatalf("status err = %v", err)
+	}
+}
+
+func TestBoundMailboxChecksItsIdentityOnce(t *testing.T) {
+	computer := &fakeComputer{results: []map[string]any{
+		profile("ME@example.com"),
+		{"status": "ok", "data": map[string]any{"items": []any{}}},
+		{"status": "ok", "data": map[string]any{"draft": map[string]any{"id": "d1"}}},
+	}}
+	mailbox := NewMailbox(computer.call, nil).BoundTo("me@example.com")
+	ctx := context.Background()
+	if _, _, err := mailbox.ListMessageIDs(ctx, FolderInbox, false, 20, ""); err != nil {
+		t.Fatalf("list err = %v", err)
+	}
+	// The draft names the bound address as its sender with no second profile read.
+	if _, err := mailbox.CreateDraft(ctx, []byte("To: bob@example.com\r\nSubject: Hi\r\n\r\nHello\r\n")); err != nil {
+		t.Fatalf("draft err = %v", err)
+	}
+	if len(computer.calls) != 3 || computer.calls[0].arguments["path"] != mailboxPath+"/profile" {
+		t.Fatalf("calls = %#v", computer.calls)
+	}
+	sent, err := DecodeBase64URL(computer.calls[2].arguments["data"].(map[string]string)["raw"])
+	if err != nil || !strings.HasPrefix(string(sent), "From: me@example.com\r\n") {
+		t.Fatalf("draft = %q, %v", sent, err)
+	}
+}
+
+func TestInboxSinceNamesThePageToReadOnFrom(t *testing.T) {
+	since := time.UnixMilli(1_000_000)
+	stamp := func(offset int64) string { return strconv.FormatInt(since.UnixMilli()+offset, 10) }
+	page := func(ids []any, next string) map[string]any {
+		return map[string]any{"status": "ok", "data": map[string]any{"items": ids, "has_more": next != "", "page_token": next}}
+	}
+	messages := func(dates ...string) map[string]any {
+		items := make([]any, len(dates))
+		for i, date := range dates {
+			items[i] = map[string]any{"message_id": "m" + strconv.Itoa(i), "internal_date": date}
+		}
+		return map[string]any{"status": "ok", "data": map[string]any{"messages": items}}
+	}
+	ctx := context.Background()
+
+	// Every mail on both pages is new: the backlog goes on past them.
+	backlog := &fakeComputer{results: []map[string]any{
+		page([]any{"m0"}, "p2"), messages(stamp(20)),
+		page([]any{"m0"}, "p3"), messages(stamp(10)),
+	}}
+	found, next, err := NewMailbox(backlog.call, nil).InboxSince(ctx, since, "p1", 2)
+	if err != nil || len(found) != 2 || next != "p3" {
+		t.Fatalf("found %d, next %q, err %v", len(found), next, err)
+	}
+	if backlog.calls[0].arguments["params"].(map[string]any)["page_token"] != "p1" {
+		t.Fatalf("calls = %#v", backlog.calls)
+	}
+
+	// Older mail on the page ends the read, though Feishu has more pages.
+	caughtUp := &fakeComputer{results: []map[string]any{page([]any{"m0", "m1"}, "p2"), messages(stamp(5), stamp(-5))}}
+	found, next, err = NewMailbox(caughtUp.call, nil).InboxSince(ctx, since, "", 2)
+	if err != nil || len(found) != 1 || next != "" || len(caughtUp.calls) != 2 {
+		t.Fatalf("found %d, next %q, err %v, calls %d", len(found), next, err, len(caughtUp.calls))
 	}
 }

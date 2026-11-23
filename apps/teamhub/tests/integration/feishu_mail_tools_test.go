@@ -127,6 +127,21 @@ func TestAgentReadsAndSendsFeishuMailAfterConfirmation(t *testing.T) {
 	if status != http.StatusBadRequest || !strings.Contains(string(body), "invalid_input") {
 		t.Fatalf("folder-wide list status=%d body=%s", status, body)
 	}
+
+	// Logged in to another mailbox, lark-cli is only asked whose it is: the
+	// connection's tools touch nothing in the other mailbox.
+	fake.setAddress("other@example.com")
+	before := len(fake.apiPaths())
+	status, body = postAgentInRoom(t, env, issued.AccessToken, roomID, "/api/agent/v1/apps/tools/execute", map[string]any{
+		"connection_id": connectionID, "tool_slug": externalsource.FeishuMailListMessages, "tool_version": externalsource.FeishuMailToolVersion,
+		"arguments": map[string]any{"folder": "inbox", "page_size": 20},
+	})
+	if status == http.StatusOK || !strings.Contains(string(body), "different Feishu mailbox") {
+		t.Fatalf("list from another mailbox status=%d body=%s", status, body)
+	}
+	if after := fake.apiPaths()[before:]; !slices.Equal(after, []string{"profile"}) {
+		t.Fatalf("calls with another mailbox logged in = %v", after)
+	}
 }
 
 // assertFeishuMailSyncsOnlyNewMail checks that a new Feishu Mail connection

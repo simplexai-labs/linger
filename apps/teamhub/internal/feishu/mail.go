@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/mail"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // MailAddress is one address of a message.
@@ -67,6 +69,50 @@ var ErrSendDisabled = errors.New("Feishu did not send the draft")
 
 // MaxAttachmentBytes bounds one attachment TeamHub downloads for an Agent.
 const MaxAttachmentBytes = 25 << 20
+
+// ReceivedAt is when the message arrived, from its internal date.
+func (m MailMessage) ReceivedAt() (time.Time, bool) {
+	millis, err := strconv.ParseInt(strings.TrimSpace(m.InternalDate), 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return time.UnixMilli(millis), true
+}
+
+// InboxSince reads the inbox newest first, from pageToken and at most pages
+// pages of 20, and returns the messages received at or after since. When the
+// pages run out before mail older than since, next is the page to read on
+// from: the rest of a backlog is still newer than since and must not be
+// skipped. A message without a readable date is left out.
+func (m Mailbox) InboxSince(ctx context.Context, since time.Time, pageToken string, pages int) (found []MailMessage, next string, err error) {
+	token := pageToken
+	for range pages {
+		ids, following, err := m.ListMessageIDs(ctx, FolderInbox, false, 20, token)
+		if err != nil {
+			return nil, "", err
+		}
+		messages, err := m.BatchGetMessages(ctx, ids, "full")
+		if err != nil {
+			return nil, "", err
+		}
+		reachedOlder := false
+		for _, message := range messages {
+			received, ok := message.ReceivedAt()
+			switch {
+			case !ok:
+			case received.Before(since):
+				reachedOlder = true
+			default:
+				found = append(found, message)
+			}
+		}
+		if following == "" || len(ids) == 0 || reachedOlder {
+			return found, "", nil
+		}
+		token = following
+	}
+	return found, token, nil
+}
 
 // ListMessageIDs lists one folder newest first, as message IDs.
 func (m Mailbox) ListMessageIDs(ctx context.Context, folderID string, onlyUnread bool, pageSize int, pageToken string) ([]string, string, error) {
@@ -245,7 +291,7 @@ func (m Mailbox) Address(ctx context.Context) (string, error) {
 			PrimaryEmailAddress string `json:"primary_email_address"`
 		} `json:"data"`
 	}
-	if err := m.do(ctx, "mailbox profile", http.MethodGet, "profile", nil, nil, &response); err != nil {
+	if err := m.request(ctx, "mailbox profile", http.MethodGet, "profile", nil, nil, &response); err != nil {
 		return "", err
 	}
 	address := strings.ToLower(strings.TrimSpace(response.Data.PrimaryEmailAddress))
@@ -266,9 +312,17 @@ func (m Mailbox) withSender(ctx context.Context, raw []byte) ([]byte, error) {
 	if parsed.Header.Get("From") != "" {
 		return raw, nil
 	}
-	address, err := m.Address(ctx)
-	if err != nil {
+	if err = m.checkIdentity(ctx); err != nil {
 		return nil, err
+	}
+	address := ""
+	if m.identity != nil {
+		address = m.identity.address
+	}
+	if address == "" {
+		if address, err = m.Address(ctx); err != nil {
+			return nil, err
+		}
 	}
 	return append([]byte("From: "+address+"\r\n"), raw...), nil
 }

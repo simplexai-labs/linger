@@ -48,14 +48,20 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   without changing the connection, and a listener catches up from its
   watermark later. An Agent tool call does not check the login first: the
   six-hourly reconcile does, and a call that finds it broken fails as not
-  active. Its Agent tools (`FEISHU_MAIL_*`) run in
+  active. lark-cli acts as whoever is logged in to it now, so an identified
+  connection is bound to its mailbox address: its first mail call of an
+  operation reads the logged-in address, and another mailbox refuses every
+  call (`feishu.ErrMailboxChanged`) before anything is read or sent and
+  expires the connection at its next check. Its Agent tools (`FEISHU_MAIL_*`) run in
   `externalsource/feishu_mail_tools.go` behind
   `agentconnectedapps.WithNativeToolkit`, so admission, confirmation cards and
   operation IDs match Composio's tools; a confirmed send runs on the Computer
   when the card is approved. A Feishu Mail connection imports no mail from
   before it: its snapshot completes empty and the nightly sync reads the inbox
   and sent folders from the connection time on. Its listener polls the inbox
-  against a received-time watermark. Email canvases target `gmail`, `outlook` or
+  against a received-time watermark; a backlog larger than one poll reads is
+  read on from its page over the next polls, and the watermark moves past it
+  only once all of it is read. Email canvases target `gmail`, `outlook` or
   `feishu_mail`. Gmail and Feishu take one RFC 5322 message; Outlook uses
   Graph JSON drafts with CID inline images and attachment upload sessions.
   Outlook updates replace all attachments and invalidate the old source binding
