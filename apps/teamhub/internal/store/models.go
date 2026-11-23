@@ -338,6 +338,14 @@ type AgentUsageTotal struct {
 	CompactionCount  int64  `json:"compaction_count"`
 }
 
+type AnotherMeBackgroundFailure struct {
+	AgentActorID        string             `json:"agent_actor_id"`
+	TenantID            string             `json:"tenant_id"`
+	ConsecutiveFailures int32              `json:"consecutive_failures"`
+	Reason              string             `json:"reason"`
+	LastFailedAt        pgtype.Timestamptz `json:"last_failed_at"`
+}
+
 type AuthSession struct {
 	ID            string             `json:"id"`
 	AccountID     string             `json:"account_id"`

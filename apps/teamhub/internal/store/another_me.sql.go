@@ -11,6 +11,51 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearAnotherMeBackgroundFailures = `-- name: ClearAnotherMeBackgroundFailures :one
+DELETE FROM another_me_background_failures
+WHERE agent_actor_id=$1::text
+  AND tenant_id=$2::text
+RETURNING consecutive_failures
+`
+
+type ClearAnotherMeBackgroundFailuresParams struct {
+	AgentActorID string `json:"agent_actor_id"`
+	TenantID     string `json:"tenant_id"`
+}
+
+// Ends the Another Me's run of failed background model calls and returns how
+// long it was; no row comes back when there was none.
+func (q *Queries) ClearAnotherMeBackgroundFailures(ctx context.Context, arg ClearAnotherMeBackgroundFailuresParams) (int32, error) {
+	row := q.db.QueryRow(ctx, clearAnotherMeBackgroundFailures, arg.AgentActorID, arg.TenantID)
+	var consecutive_failures int32
+	err := row.Scan(&consecutive_failures)
+	return consecutive_failures, err
+}
+
+const getAnotherMeBackgroundFailure = `-- name: GetAnotherMeBackgroundFailure :one
+SELECT consecutive_failures,reason
+FROM another_me_background_failures
+WHERE agent_actor_id=$1::text
+  AND tenant_id=$2::text
+`
+
+type GetAnotherMeBackgroundFailureParams struct {
+	AgentActorID string `json:"agent_actor_id"`
+	TenantID     string `json:"tenant_id"`
+}
+
+type GetAnotherMeBackgroundFailureRow struct {
+	ConsecutiveFailures int32  `json:"consecutive_failures"`
+	Reason              string `json:"reason"`
+}
+
+func (q *Queries) GetAnotherMeBackgroundFailure(ctx context.Context, arg GetAnotherMeBackgroundFailureParams) (GetAnotherMeBackgroundFailureRow, error) {
+	row := q.db.QueryRow(ctx, getAnotherMeBackgroundFailure, arg.AgentActorID, arg.TenantID)
+	var i GetAnotherMeBackgroundFailureRow
+	err := row.Scan(&i.ConsecutiveFailures, &i.Reason)
+	return i, err
+}
+
 const getAnotherMeChat = `-- name: GetAnotherMeChat :one
 SELECT registration.actor_id AS agent_actor_id,room.id AS room_id
 FROM agent_registrations registration
@@ -184,4 +229,34 @@ func (q *Queries) ListAnotherMePlacements(ctx context.Context, arg ListAnotherMe
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordAnotherMeBackgroundFailure = `-- name: RecordAnotherMeBackgroundFailure :one
+INSERT INTO another_me_background_failures (agent_actor_id,tenant_id,consecutive_failures,reason,last_failed_at)
+SELECT registration.actor_id,registration.tenant_id,1,$1::text,now()
+FROM agent_registrations registration
+WHERE registration.actor_id=$2::text
+  AND registration.tenant_id=$3::text
+  AND registration.agent_type='anotherme'
+  AND registration.status='active'
+ON CONFLICT (agent_actor_id) DO UPDATE
+SET consecutive_failures=another_me_background_failures.consecutive_failures+1,
+    reason=EXCLUDED.reason,
+    last_failed_at=EXCLUDED.last_failed_at
+RETURNING consecutive_failures
+`
+
+type RecordAnotherMeBackgroundFailureParams struct {
+	Reason       string `json:"reason"`
+	AgentActorID string `json:"agent_actor_id"`
+	TenantID     string `json:"tenant_id"`
+}
+
+// Counts one more background model call of the Another Me that failed in a
+// row. No row comes back for an Agent that is not an active Another Me.
+func (q *Queries) RecordAnotherMeBackgroundFailure(ctx context.Context, arg RecordAnotherMeBackgroundFailureParams) (int32, error) {
+	row := q.db.QueryRow(ctx, recordAnotherMeBackgroundFailure, arg.Reason, arg.AgentActorID, arg.TenantID)
+	var consecutive_failures int32
+	err := row.Scan(&consecutive_failures)
+	return consecutive_failures, err
 }

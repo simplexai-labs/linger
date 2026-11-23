@@ -15,6 +15,7 @@ func (a *App) agentServiceRoutes() []contractRoute {
 		route(http.MethodGet, "/v0/agent-runtime/agents/:agentId/memory", nil, agentService, a.getAgentMemory),
 		route(http.MethodPost, "/v0/agent-runtime/agents/:agentId/memory", nil, agentService, a.commitAgentMemory),
 		route(http.MethodGet, "/v0/agent-runtime/another-me-placements", teamhubinternal.ListAnotherMePlacementsParams{}, agentService, a.listAnotherMePlacements),
+		route(http.MethodPost, "/v0/agent-runtime/another-me/background-calls", nil, agentService, a.recordAnotherMeBackgroundCall),
 		route(http.MethodGet, "/v0/agent-runtime/config", teamhubinternal.GetAgentRuntimeConfigSnapshotParams{}, agentService, a.getAgentRuntimeConfigSnapshotRoute),
 		route(http.MethodGet, "/v0/agent-runtime/context", teamhubinternal.GetAgentExecutionContextParams{}, agentService, a.getAgentExecutionContext),
 		route(http.MethodGet, "/v0/agent-runtime/contexts", teamhubinternal.ListAgentExecutionContextsParams{}, agentService, a.listAgentExecutionContexts),

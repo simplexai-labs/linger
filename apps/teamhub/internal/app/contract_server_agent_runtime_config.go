@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentruntimestate"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
 	"github.com/simplexai-labs/linger/contracts-go/teamhubinternal"
 )
@@ -41,4 +42,23 @@ func (a *App) listAnotherMePlacements(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+// recordAnotherMeBackgroundCall counts an Another Me's failed background model
+// calls in a row so its Human can see them.
+func (a *App) recordAnotherMeBackgroundCall(c *gin.Context) {
+	var request teamhubinternal.RecordAnotherMeBackgroundCallRequest
+	if !a.decodeAgentRuntimeStateBody(c, &request) {
+		return
+	}
+	if !request.Outcome.Valid() || request.TenantId == "" || request.AgentActorId == "" {
+		a.writeAgentRuntimeStateError(c, "decode Another Me background call", agentruntimestate.ErrInvalid)
+		return
+	}
+	err := a.agents.RecordAnotherMeBackgroundCall(c.Request.Context(), request.TenantId, request.AgentActorId,
+		request.Outcome == teamhubinternal.RecordAnotherMeBackgroundCallRequestOutcomeFailed, optionalStringValue(request.Reason))
+	if a.writeAgentRuntimeStateError(c, "record Another Me background call", err) {
+		return
+	}
+	c.Status(http.StatusNoContent)
 }

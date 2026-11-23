@@ -298,6 +298,10 @@ func (s *Service) AnotherMe(ctx context.Context, accountID, tenantID string) (ht
 	if chat.RoomID.Valid {
 		model.RoomId = &chat.RoomID.String
 	}
+	model.BackgroundFailure, err = anotherMeBackgroundFailure(ctx, s.queries, tenantID, chat.AgentActorID)
+	if err != nil {
+		return httpapi.AnotherMe{}, err
+	}
 	return model, nil
 }
 

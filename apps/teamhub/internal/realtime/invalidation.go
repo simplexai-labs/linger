@@ -23,7 +23,8 @@ const (
 	InvalidateDirectory = "directory"
 	// InvalidateAgents: Agent availability, status, or activity changed. The id is the Tenant ID.
 	InvalidateAgents = "agents"
-	// InvalidateAnotherMe: the Tenant's AnotherMe was created. The id is the Tenant ID.
+	// InvalidateAnotherMe: a Human's AnotherMe was created or what it shows of
+	// its failed background calls changed. The id is the Tenant ID.
 	InvalidateAnotherMe = "another-me"
 	// InvalidateComputers: Local Computers changed. The id is the Tenant ID.
 	InvalidateComputers = "computers"
