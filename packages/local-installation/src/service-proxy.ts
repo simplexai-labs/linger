@@ -1,7 +1,9 @@
 // The Desktop passes the system proxy it resolved for Soniox under this name,
-// not as HTTPS_PROXY, so that only the two services that call voice providers
-// get it. The installer's own downloads, pnpm, the local models, LiveKit and
-// the web server keep connecting as they did.
+// not as HTTPS_PROXY, so that only TeamHub and node-services get it: every
+// https call TeamHub makes to the outside (voice keys and file transcription,
+// Composio, web search, connected-app file transfers) and the voice workers'
+// Soniox and xAI websockets. The installer's own downloads, pnpm, the local
+// models, LiveKit and the web server keep connecting as they did.
 export const SYSTEM_PROXY_VARIABLE = "LINGER_SYSTEM_HTTPS_PROXY";
 
 // Services reach each other over loopback, which a proxy must never carry.
@@ -16,6 +18,7 @@ const LOOPBACK = ["localhost", "127.0.0.1", "::1"];
 export function systemProxyEnvironment(
   env: NodeJS.ProcessEnv,
 ): Record<string, string> {
+  // Read by its literal name: the env inventory check finds only literal reads.
   const proxy = env.LINGER_SYSTEM_HTTPS_PROXY?.trim();
   if (!proxy || env.HTTPS_PROXY?.trim() || env.https_proxy?.trim()) return {};
   // Windows treats the two spellings as one variable; never set both.

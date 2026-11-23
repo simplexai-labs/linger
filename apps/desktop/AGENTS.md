@@ -223,7 +223,11 @@ Gateway and runs Agents. The daemon exits with the app.
   node-services only. `DIRECT`, SOCKS, a failure or a timeout pass none,
   and an `HTTPS_PROXY` in the app's own environment wins. It logs
   `local_server.system_proxy` (`source`, `ms`), never the address. A
-  system proxy changed while the app runs applies at the next launch. When another program took the web
+  system proxy changed while the app runs applies at the next launch. A
+  launch whose resolution fails (a PAC or WPAD lookup past the timeout, or a
+  PAC server not up yet) passes none, so TeamHub and node-services restart
+  without the proxy, and the next launch that resolves it restarts them with
+  it again. When another program took the web
   port, the installer moves the services to a free one and reports the new
   origin (`details.origin`, or the setup job's `origin`). The record, the
   window's `serverUrl` and the `savedEnrollments` entry follow it together

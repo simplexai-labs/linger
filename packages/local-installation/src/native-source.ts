@@ -840,10 +840,11 @@ async function runNativeSource(
           voice: voice ? voice.bin : "off",
         };
         const settings = JSON.stringify(shared);
-        // The Desktop's system proxy goes only to the two services that call
-        // voice providers (TeamHub checks keys, node-services runs the voice
-        // workers), and a changed proxy restarts them. Without one their
-        // settings stay as they were, so nothing restarts for it.
+        // The Desktop's system proxy goes only to TeamHub, for every https
+        // call it makes to the outside, and to node-services, whose voice
+        // workers tunnel Soniox and xAI through it; a changed proxy restarts
+        // them. Without one their settings stay as they were, so nothing
+        // restarts for it.
         const proxyEnv = systemProxyEnvironment(env);
         const proxied = proxyEnv.HTTPS_PROXY
           ? { proxy: proxyEnv.HTTPS_PROXY }

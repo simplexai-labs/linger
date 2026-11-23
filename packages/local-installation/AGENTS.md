@@ -60,7 +60,10 @@ it. A native process restarts when its generated environment changes.
 The desktop passes the system proxy it resolved for Soniox as
 `LINGER_SYSTEM_HTTPS_PROXY` (`service-proxy.ts`). When the person set no
 `HTTPS_PROXY` themselves, Native gives only TeamHub and node-services
-`HTTPS_PROXY` with loopback added to `NO_PROXY`, and records the proxy in
+`HTTPS_PROXY` with loopback added to `NO_PROXY`. TeamHub then sends every
+https call to the outside through it (voice key checks and file
+transcription, Composio, web search, connected-app file transfers), and the
+node-services voice workers tunnel Soniox and xAI through it. Native records the proxy in
 their settings, so a changed or removed system proxy restarts them on the
 next start; without one their settings are unchanged. The installer's own
 commands, LiveKit, the local models and the web server never get it.
