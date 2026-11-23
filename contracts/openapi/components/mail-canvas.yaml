@@ -11,7 +11,7 @@ components:
             [draft, queued, uploading, sending, sent, failed, unknown, declined]
         target:
           type: string
-          description: The canvas's mail app, gmail or feishu_mail; Send must use a connection of this app.
+          description: The canvas's mail app, gmail, outlook or feishu_mail; Send must use a connection of this app.
         subject: { type: string }
         to: { type: string }
         error: { type: string }

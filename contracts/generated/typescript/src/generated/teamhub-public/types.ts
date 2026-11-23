@@ -7893,7 +7893,7 @@ export interface components {
         | "failed"
         | "unknown"
         | "declined";
-      /** @description The canvas's mail app, gmail or feishu_mail; Send must use a connection of this app. */
+      /** @description The canvas's mail app, gmail, outlook or feishu_mail; Send must use a connection of this app. */
       target?: string;
       subject: string;
       to: string;

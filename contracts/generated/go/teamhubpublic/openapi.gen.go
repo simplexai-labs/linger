@@ -7535,7 +7535,7 @@ type MailCanvasState struct {
 	Status       MailCanvasStateStatus `json:"status"`
 	Subject      string                `json:"subject"`
 
-	// Target The canvas's mail app, gmail or feishu_mail; Send must use a connection of this app.
+	// Target The canvas's mail app, gmail, outlook or feishu_mail; Send must use a connection of this app.
 	Target *string `json:"target,omitempty"`
 	To     string  `json:"to"`
 }
