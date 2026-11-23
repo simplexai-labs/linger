@@ -1,6 +1,7 @@
 package reminder
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"strconv"
@@ -203,9 +204,13 @@ func TestPendingPollEventsDoNotWaitForProvider(t *testing.T) {
 		t.Error("provider contacted with saved events pending")
 		return 503, nil
 	})
-	for _, source := range []string{ListenerGmail, ListenerOutlook, ListenerGCal, ListenerOutlookCalendar, ListenerSlack} {
+	service := &Service{feishuMail: feishuFeed(func(time.Time) ([]FeishuInboxMessage, error) {
+		t.Error("Feishu contacted with saved events pending")
+		return nil, nil
+	})}
+	for _, source := range []string{ListenerGmail, ListenerOutlook, ListenerGCal, ListenerOutlookCalendar, ListenerSlack, ListenerFeishuMail} {
 		cursor := pollCursor{V: "checkpoint", PageToken: "next", Pending: []ListenerEvent{{Source: source, EventID: "saved"}}}
-		read, err := fetchListenerPoll(t.Context(), provider, "ca", ListenerSpec{Type: source}, cursor)
+		read, err := service.fetchListenerPoll(t.Context(), provider, "ca", ListenerSpec{Type: source}, cursor)
 		if err != nil || len(read.cursor.Pending) != 1 || len(read.events) != 0 || read.nextPoll != time.Minute || read.cursor.PageToken != "next" {
 			t.Fatalf("pending lost for %s: %+v %v", source, read, err)
 		}
@@ -481,5 +486,39 @@ func TestOutlookCalendarRollsWindowBeforeCoverageExpires(t *testing.T) {
 	nextEnd, err := time.Parse(time.RFC3339, read.cursor.Channels["window_end"])
 	if err != nil || nextEnd.Before(time.Now().Add(150*24*time.Hour)) {
 		t.Fatalf("rolled window_end too soon: %q err=%v", read.cursor.Channels["window_end"], err)
+	}
+}
+
+type feishuFeed func(since time.Time) ([]FeishuInboxMessage, error)
+
+func (f feishuFeed) FeishuInboxSince(_ context.Context, _ string, since time.Time) ([]FeishuInboxMessage, error) {
+	return f(since)
+}
+
+func TestFeishuMailListenerReportsOnlyMailAfterItsWatermark(t *testing.T) {
+	start := time.Now().Add(-time.Hour)
+	var asked []time.Time
+	feed := feishuFeed(func(since time.Time) ([]FeishuInboxMessage, error) {
+		asked = append(asked, since)
+		return []FeishuInboxMessage{
+			{ID: "new", ThreadID: "t1", From: "alice@example.com", Subject: "Plan", Body: "Meet Friday?", Received: start.Add(30 * time.Minute)},
+			{ID: "old", Received: start.Add(-time.Minute)},
+		}, nil
+	})
+	// The first poll only records the watermark.
+	first, err := fetchFeishuMail(t.Context(), feed, "ca", pollCursor{})
+	if err != nil || len(first.events) != 0 || !first.cursor.bootstrapped() || len(asked) != 0 {
+		t.Fatalf("bootstrap = %+v err=%v asked=%v", first, err, asked)
+	}
+	cursor := pollCursor{Channels: map[string]string{"since": start.UTC().Format(time.RFC3339Nano)}}
+	read, err := fetchFeishuMail(t.Context(), feed, "ca", cursor)
+	if err != nil || len(read.events) != 1 || read.events[0].MessageID != "new" || read.events[0].Snippet != "Meet Friday?" || read.events[0].Source != ListenerFeishuMail {
+		t.Fatalf("read = %+v err=%v", read, err)
+	}
+	if !MatchEvent(ListenerSpec{Type: ListenerFeishuMail}, read.events[0]) {
+		t.Fatal("a Feishu Mail listener must report every inbox message")
+	}
+	if read.cursor.Channels["since"] != start.Add(30*time.Minute).UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("watermark = %s", read.cursor.Channels["since"])
 	}
 }

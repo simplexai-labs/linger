@@ -3,6 +3,7 @@ package mailcanvas
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/composio"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/document"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/externalsource"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/feishu"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/ids"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/jobs"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
@@ -32,8 +34,8 @@ var ErrForbidden = errors.New("mail canvas delivery is not allowed")
 // ErrAlreadySent means the canvas went out by another path.
 var ErrAlreadySent = errors.New("mail canvas was already sent")
 
-// ErrConnectionUnavailable means the chosen Gmail connection cannot send.
-var ErrConnectionUnavailable = errors.New("gmail connection is unavailable")
+// ErrConnectionUnavailable means the chosen mail connection cannot send.
+var ErrConnectionUnavailable = errors.New("mail connection is unavailable")
 
 // Provider uploads and sends drafts under a currently authorized Gmail connection.
 type Provider interface {
@@ -57,7 +59,9 @@ func New(pool *pgxpool.Pool, documents *document.Service, canvas *agentconnected
 
 // State is the current local draft or persisted delivery receipt.
 type State struct {
-	Status       string `json:"status"`
+	Status string `json:"status"`
+	// Target is the canvas's mail app, which the sending account must match.
+	Target       string `json:"target"`
 	Subject      string `json:"subject"`
 	To           string `json:"to"`
 	Error        string `json:"error,omitempty"`
@@ -87,7 +91,7 @@ func (s *Service) read(ctx context.Context, accountID, documentID string) (docum
 		return doc, agentconnectedapps.CanvasHeader{}, err
 	}
 	header, ok := agentconnectedapps.ReadCanvasHeader(source.Blocks)
-	if !ok || header.Target != "gmail" {
+	if !ok || !agentconnectedapps.IsMailCanvasTarget(header.Target) {
 		return doc, header, document.ErrInvalidInput
 	}
 	return doc, header, nil
@@ -103,7 +107,7 @@ func (s *Service) Get(ctx context.Context, accountID, documentID string) (State,
 	if err != nil {
 		return State{}, err
 	}
-	state := State{Status: "draft", Subject: header.Fields["subject"], To: header.Fields["to"], SourceDigest: digest, CanEdit: doc.CanEditNativeContent}
+	state := State{Status: "draft", Target: header.Target, Subject: header.Fields["subject"], To: header.Fields["to"], SourceDigest: digest, CanEdit: doc.CanEditNativeContent}
 	row, err := store.New(s.pool).GetMailCanvasDelivery(ctx, documentID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return State{}, err
@@ -145,7 +149,7 @@ func (s *Service) Send(ctx context.Context, input SendInput) (State, error) {
 	if _, err := mail.ParseAddressList(header.Fields["to"]); err != nil {
 		return State{}, document.ErrInvalidInput
 	}
-	if _, err := s.connection(ctx, input.AccountID, input.ConnectionID); err != nil {
+	if _, err := s.connection(ctx, input.AccountID, input.ConnectionID, header.Target); err != nil {
 		return State{}, err
 	}
 	reader := s.canvas.ForAccount(input.AccountID)
@@ -164,7 +168,7 @@ func (s *Service) Send(ctx context.Context, input SendInput) (State, error) {
 	}
 	if row, err := q.GetMailCanvasDelivery(ctx, input.DocumentID); err == nil {
 		if row.ID == input.RequestID {
-			return State{Status: row.Status, Subject: header.Fields["subject"], To: header.Fields["to"], Error: row.ErrorMessage, SourceDigest: digest, CanEdit: true}, nil
+			return State{Status: row.Status, Target: header.Target, Subject: header.Fields["subject"], To: header.Fields["to"], Error: row.ErrorMessage, SourceDigest: digest, CanEdit: true}, nil
 		}
 		if !reopenable(row.Status) {
 			return State{}, conflictFor(row.Status)
@@ -185,7 +189,7 @@ func (s *Service) Send(ctx context.Context, input SendInput) (State, error) {
 	if err := tx.Commit(ctx); err != nil {
 		return State{}, err
 	}
-	return State{Status: row.Status, Subject: header.Fields["subject"], To: header.Fields["to"], SourceDigest: digest, CanEdit: true}, nil
+	return State{Status: row.Status, Target: header.Target, Subject: header.Fields["subject"], To: header.Fields["to"], SourceDigest: digest, CanEdit: true}, nil
 }
 
 // reopenable says whether the Human may send or decline again: after a
@@ -224,7 +228,7 @@ func (s *Service) Decline(ctx context.Context, accountID, documentID string) (St
 	if err := q.AcquireAdvisoryTransactionLock(ctx, "mail-canvas:"+documentID); err != nil {
 		return State{}, err
 	}
-	state := State{Status: "declined", Subject: header.Fields["subject"], To: header.Fields["to"], SourceDigest: digest, CanEdit: true}
+	state := State{Status: "declined", Target: header.Target, Subject: header.Fields["subject"], To: header.Fields["to"], SourceDigest: digest, CanEdit: true}
 	if row, err := q.GetMailCanvasDelivery(ctx, documentID); err == nil {
 		if row.Status == "declined" {
 			return state, nil
@@ -241,7 +245,9 @@ func (s *Service) Decline(ctx context.Context, accountID, documentID string) (St
 	return state, tx.Commit(ctx)
 }
 
-func (s *Service) connection(ctx context.Context, accountID, connectionID string) (externalsource.Connection, error) {
+// connection returns an active mail connection of the account; target, when
+// set, is the canvas's mail app, which the connection must match.
+func (s *Service) connection(ctx context.Context, accountID, connectionID, target string) (externalsource.Connection, error) {
 	connection, err := s.connections.GetConnection(ctx, accountID, connectionID)
 	if errors.Is(err, externalsource.ErrNotFound) {
 		return connection, ErrConnectionUnavailable
@@ -249,10 +255,47 @@ func (s *Service) connection(ctx context.Context, accountID, connectionID string
 	if err != nil {
 		return connection, err
 	}
-	if connection.Provider != "gmail" || connection.Status != "active" {
+	if !agentconnectedapps.IsMailCanvasTarget(connection.Provider) || target != "" && connection.Provider != target || connection.Status != "active" {
 		return connection, ErrConnectionUnavailable
 	}
 	return connection, nil
+}
+
+// appName names the mail app of a delivery's connection, for its messages.
+func (s *Service) appName(ctx context.Context, row store.MailCanvasDelivery) string {
+	connection, err := s.connections.GetConnection(ctx, row.AccountID, row.ConnectionID.String)
+	if err != nil {
+		return agentconnectedapps.MailCanvasAppName(agentconnectedapps.MailCanvasGmail)
+	}
+	return agentconnectedapps.MailCanvasAppName(connection.Provider)
+}
+
+// saveDraft uploads raw, base64url, as the connection's draft.
+func (s *Service) saveDraft(ctx context.Context, connection externalsource.Connection, draftID, raw string) (string, error) {
+	if connection.Provider != agentconnectedapps.MailCanvasFeishu {
+		saved, err := s.provider.SaveGmailDraft(ctx, connection.UpstreamConnectionID, draftID, raw)
+		return saved.DraftID, err
+	}
+	message, err := base64.URLEncoding.DecodeString(raw)
+	if err != nil {
+		return "", err
+	}
+	return s.connections.SaveFeishuDraft(ctx, connection.UpstreamConnectionID, draftID, message)
+}
+
+func (s *Service) sendDraft(ctx context.Context, connection externalsource.Connection, draftID string) (string, error) {
+	if connection.Provider == agentconnectedapps.MailCanvasFeishu {
+		return s.connections.SendFeishuDraft(ctx, connection.UpstreamConnectionID, draftID)
+	}
+	return s.provider.SendGmailDraft(ctx, connection.UpstreamConnectionID, draftID)
+}
+
+// draftGone reports a saved draft the mail app no longer has.
+func draftGone(err error) bool {
+	if status, ok := composio.ErrorStatus(err); ok && status == http.StatusNotFound {
+		return true
+	}
+	return feishu.IsNotFound(err)
 }
 
 type deliveryArgs struct {
@@ -291,8 +334,9 @@ func (w *deliveryWorker) Work(ctx context.Context, job *river.Job[deliveryArgs])
 	if row.Status == "uploading" {
 		return s.finish(ctx, row, "failed", "The upload was interrupted. Nothing was sent; send again.")
 	}
+	name := s.appName(ctx, row)
 	if row.Status == "sending" {
-		return s.finish(ctx, row, "unknown", "Sending was interrupted. Check Sent in Gmail before trying again.")
+		return s.finish(ctx, row, "unknown", "Sending was interrupted. Check Sent in "+name+" before trying again.")
 	}
 	if row.Status != "queued" {
 		return nil
@@ -304,43 +348,44 @@ func (w *deliveryWorker) Work(ctx context.Context, job *river.Job[deliveryArgs])
 	if err != nil {
 		return err
 	}
-	connection, err := s.connection(ctx, row.AccountID, row.ConnectionID.String)
+	connection, err := s.connection(ctx, row.AccountID, row.ConnectionID.String, "")
 	if err != nil {
-		return s.finish(ctx, row, "failed", "The Gmail account is unavailable. Reconnect it before sending.")
+		return s.finish(ctx, row, "failed", "The "+name+" account is unavailable. Reconnect it before sending.")
 	}
 	reader := s.canvas.ForAccount(row.AccountID)
-	draft, err := reader.GmailCanvasDraftRaw(ctx, "", "", row.DocumentID, nil, nil, nil)
+	draft, err := reader.MailCanvasDraftRaw(ctx, connection.Provider, "", "", row.DocumentID, nil, nil, nil)
 	if err != nil {
 		return s.finish(ctx, row, "failed", "The email could not be prepared. Check its recipients and attachments.")
 	}
 	if draft.SourceDigest != row.SourceDigest {
 		return s.finish(ctx, row, "failed", "The email changed after Send was clicked. Review it and send again.")
 	}
-	saved, err := s.provider.SaveGmailDraft(ctx, connection.UpstreamConnectionID, row.DraftID, draft.Raw)
-	if status, ok := composio.ErrorStatus(err); ok && status == http.StatusNotFound && row.DraftID != "" {
-		// Gmail deletes a draft once it is sent, so a lost earlier draft may
-		// mean an unconfirmed send went out. The next Send starts a new draft.
+	savedID, err := s.saveDraft(ctx, connection, row.DraftID, draft.Raw)
+	if draftGone(err) && row.DraftID != "" {
+		// A mail app may delete a draft once it is sent, so a lost earlier
+		// draft may mean an unconfirmed send went out. The next Send starts a
+		// new draft.
 		row.DraftID = ""
-		return s.finish(ctx, row, "failed", "The earlier Gmail draft is gone, so this email may already have been sent. Check Sent in Gmail; send again only if it is not there.")
+		return s.finish(ctx, row, "failed", "The earlier "+name+" draft is gone, so this email may already have been sent. Check Sent in "+name+"; send again only if it is not there.")
 	}
 	if err != nil {
-		return s.finish(ctx, row, "failed", "Gmail did not accept the upload. Nothing was sent; send again.")
+		return s.finish(ctx, row, "failed", name+" did not accept the upload. Nothing was sent; send again.")
 	}
-	row.DraftID = saved.DraftID
+	row.DraftID = savedID
 	current, err := reader.SourceDigest(ctx, "", "", row.DocumentID)
 	if err != nil || current != row.SourceDigest {
 		return s.finish(ctx, row, "failed", "The email changed during upload. Nothing was sent. Review it and send again.")
 	}
-	if _, err = s.connection(ctx, row.AccountID, row.ConnectionID.String); err != nil {
-		return s.finish(ctx, row, "failed", "The Gmail account is no longer available. Nothing was sent.")
+	if _, err = s.connection(ctx, row.AccountID, row.ConnectionID.String, connection.Provider); err != nil {
+		return s.finish(ctx, row, "failed", "The "+name+" account is no longer available. Nothing was sent.")
 	}
 	row, err = q.UpdateMailCanvasDelivery(ctx, store.UpdateMailCanvasDeliveryParams{ID: row.ID, ExpectedStatus: "uploading", Status: "sending", DraftID: row.DraftID})
 	if err != nil {
 		return err
 	}
-	messageID, err := s.provider.SendGmailDraft(ctx, connection.UpstreamConnectionID, row.DraftID)
+	messageID, err := s.sendDraft(ctx, connection, row.DraftID)
 	if err != nil {
-		return s.finish(ctx, row, "unknown", "Gmail did not confirm delivery. Check Sent before trying again.")
+		return s.finish(ctx, row, "unknown", name+" did not confirm delivery. Check Sent before trying again.")
 	}
 	row.MessageID = messageID
 	return s.finish(ctx, row, "sent", "")

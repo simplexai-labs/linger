@@ -699,7 +699,8 @@
   font-family: inherit;
 }
 
-.room-document-blocknote[data-canvas-target="gmail"] .bn-editor {
+.room-document-blocknote[data-canvas-target="gmail"] .bn-editor,
+.room-document-blocknote[data-canvas-target="feishu_mail"] .bn-editor {
   min-height: 80px;
   font-size: var(--chat-card-text-size);
   line-height: 1.7;

@@ -58,7 +58,15 @@ components:
       properties:
         app:
           type: string
-          enum: [gmail, outlook, google_calendar, outlook_calendar, slack]
+          enum:
+            [
+              gmail,
+              outlook,
+              google_calendar,
+              outlook_calendar,
+              slack,
+              feishu_mail,
+            ]
           description: Connected app whose new events the Routine hands to proactive judgement.
     Routine:
       type: object

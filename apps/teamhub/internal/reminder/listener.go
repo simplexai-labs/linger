@@ -25,6 +25,9 @@ const (
 	ListenerOutlook         = "outlook"
 	ListenerGCal            = "gcal"
 	ListenerOutlookCalendar = "outlook_calendar"
+	// ListenerFeishuMail watches a Feishu Mail inbox, which TeamHub reads
+	// itself rather than through Composio.
+	ListenerFeishuMail = "feishu_mail"
 )
 
 type ListenerSpec struct {
@@ -90,9 +93,9 @@ func normalizeListener(spec *ListenerSpec) error {
 		if match.Kind != "" {
 			return fmt.Errorf("match.kind is not supported for gmail")
 		}
-	case ListenerOutlook:
+	case ListenerOutlook, ListenerFeishuMail:
 		if match != (ListenerMatch{}) {
-			return fmt.Errorf("outlook listeners take no match")
+			return fmt.Errorf("%s listeners take no match", spec.Type)
 		}
 	case ListenerGCal, ListenerOutlookCalendar:
 		if match != (ListenerMatch{}) {
@@ -154,7 +157,7 @@ func MatchEvent(spec ListenerSpec, event ListenerEvent) bool {
 		return event.IsMention
 	case ListenerGmail:
 		return spec.Match == nil || spec.Match.LabelID == "" || slices.Contains(event.LabelIDs, spec.Match.LabelID)
-	case ListenerOutlook:
+	case ListenerOutlook, ListenerFeishuMail:
 		return true
 	case ListenerGCal, ListenerOutlookCalendar:
 		return slices.Contains(spec.Events, event.EventKind)

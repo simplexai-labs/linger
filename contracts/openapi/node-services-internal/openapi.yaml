@@ -3078,9 +3078,11 @@ components:
           type: string
         server:
           type: string
+          description: feishu_mail runs TeamHub's Feishu Mail calls through the owner's own lark-cli login.
           enum:
             - browser
             - playground
+            - feishu_mail
         tool_name:
           type: string
           minLength: 1

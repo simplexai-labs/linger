@@ -23,7 +23,12 @@ import { commonMessages } from "@/i18n/common.messages";
 import { useT } from "@/i18n/use-translation";
 
 import { AppLogo } from "./app-logo";
-import { appSummary, groupCatalogApps, WEB_SEARCH_FILTER } from "./app-groups";
+import {
+  ANOTHER_ME_ONLY_APPS,
+  appSummary,
+  groupCatalogApps,
+  WEB_SEARCH_FILTER,
+} from "./app-groups";
 import {
   AppManageDialog,
   DisconnectConnectionDialog,
@@ -65,12 +70,14 @@ export function ConnectedAppsPage() {
   const groups = groupCatalogApps(allApps);
   const catalogApps = groups.flatMap((entry) => entry.apps);
   // Apps outside the groups are not offered, but an account already connected
-  // to one stays reachable here so it can be managed or disconnected.
+  // to one stays reachable here so it can be managed or disconnected, unless
+  // it is shared only with AnotherMe.
   const connectedApps = [
     ...catalogApps,
     ...allApps.filter((app) => !catalogApps.includes(app)),
   ].filter(
     (app) =>
+      !ANOTHER_ME_ONLY_APPS.has(app.key) &&
       activeExternalConnections(
         visibleConnections.filter(
           (connection) => connection.provider === app.key,

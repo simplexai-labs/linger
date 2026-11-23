@@ -15,7 +15,7 @@ import (
 	"github.com/simplexai-labs/linger/contracts-go/teamhubinternal"
 )
 
-var voiceLiveMailApps = []string{"gmail", "outlook"}
+var voiceLiveMailApps = []string{"gmail", "outlook", "feishu_mail"}
 
 // voiceLiveAppSession is the Agent credential and one connected account.
 type voiceLiveAppSession struct {
@@ -115,7 +115,21 @@ func (s *Service) runVoiceLiveAppTool(ctx context.Context, session voicelive.Ses
 	switch request.Name {
 	case voicelive.ToolSearchMail:
 		var raw map[string]any
-		if app.connection.AppKey == "gmail" {
+		if app.connection.AppKey == "feishu_mail" {
+			// Feishu lists one folder at a time; only a search reaches every folder.
+			folder := args.Folder
+			if folder != "sent" && (folder != "all" || strings.TrimSpace(args.Query) == "") {
+				folder = "inbox"
+			}
+			arguments := map[string]any{"folder": folder, "page_size": voicelive.AppResultLimit}
+			if query := strings.TrimSpace(args.Query); query != "" {
+				arguments["query"] = query
+			}
+			if bool(args.UnreadOnly) {
+				arguments["unread_only"] = true
+			}
+			raw, output, err = call("FEISHU_MAIL_LIST_MESSAGES", arguments)
+		} else if app.connection.AppKey == "gmail" {
 			raw, output, err = call("GMAIL_FETCH_EMAILS", map[string]any{
 				"query":           voicelive.GmailQuery(args.Query, args.Folder, bool(args.UnreadOnly)),
 				"max_results":     voicelive.AppResultLimit,
@@ -141,12 +155,18 @@ func (s *Service) runVoiceLiveAppTool(ctx context.Context, session voicelive.Ses
 			return "", voicelive.ErrInvalid
 		}
 		slug, arguments := "OUTLOOK_GET_MESSAGE", map[string]any{"message_id": strings.TrimSpace(args.MessageID)}
-		if app.connection.AppKey == "gmail" {
+		switch app.connection.AppKey {
+		case "gmail":
 			slug, arguments["format"] = "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID", "full"
+		case "feishu_mail":
+			slug = "FEISHU_MAIL_GET_MESSAGE"
 		}
 		raw, output, err := call(slug, arguments)
 		if output != "" || err != nil {
 			return output, err
+		}
+		if app.connection.AppKey == "feishu_mail" {
+			raw = voiceLiveRecord(raw["message"])
 		}
 		return voicelive.Output(voicelive.MailMessage(app.connection.AppKey, raw)), nil
 	case voicelive.ToolSearchSlack:
@@ -251,16 +271,25 @@ func (s *Service) voiceLiveMailCanvas(ctx context.Context, session voicelive.Ses
 	if strings.TrimSpace(args.DocumentID) == "" {
 		return voiceLiveAppSession{}, voiceLiveCanvasState{}, agentconnectedapps.CanvasDraft{}, "", voicelive.ErrInvalid
 	}
-	app, output, err := s.voiceLiveApp(ctx, session, []string{"gmail"}, args.Account)
-	if output != "" || err != nil {
-		return app, voiceLiveCanvasState{}, agentconnectedapps.CanvasDraft{}, output, err
-	}
-	canvas, err := s.voiceLiveCanvas(ctx, app.principal, args.DocumentID)
-	if output, handled := voiceLiveCanvasError(err); handled {
-		return app, canvas, agentconnectedapps.CanvasDraft{}, output, nil
+	// The canvas names its mail app, so it is read before an account of
+	// that app is chosen.
+	principal, err := s.voiceLiveAgentPrincipal(ctx, session)
+	if errors.Is(err, errVoiceLiveAgentUnavailable) {
+		return voiceLiveAppSession{}, voiceLiveCanvasState{}, agentconnectedapps.CanvasDraft{}, voicelive.ErrorOutput("agent_unavailable"), nil
 	}
 	if err != nil {
-		return app, canvas, agentconnectedapps.CanvasDraft{}, "", err
+		return voiceLiveAppSession{}, voiceLiveCanvasState{}, agentconnectedapps.CanvasDraft{}, "", err
+	}
+	canvas, err := s.voiceLiveCanvas(ctx, principal, args.DocumentID)
+	if output, handled := voiceLiveCanvasError(err); handled {
+		return voiceLiveAppSession{}, canvas, agentconnectedapps.CanvasDraft{}, output, nil
+	}
+	if err != nil {
+		return voiceLiveAppSession{}, canvas, agentconnectedapps.CanvasDraft{}, "", err
+	}
+	app, output, err := s.voiceLiveApp(ctx, session, []string{canvas.target}, args.Account)
+	if output != "" || err != nil {
+		return app, canvas, agentconnectedapps.CanvasDraft{}, output, err
 	}
 	held, err := s.queries.MailCanvasDeliveryHolds(ctx, args.DocumentID)
 	if err != nil {
@@ -275,7 +304,7 @@ func (s *Service) voiceLiveMailCanvas(ctx context.Context, session voicelive.Ses
 			"detail": "This canvas was sent before. If the user means another email, find its own canvas; never say this one was just sent.",
 		}), nil
 	}
-	built, err := s.canvas.GmailCanvasDraftRaw(ctx, app.principal.TenantID, app.principal.AgentID, args.DocumentID, nil, nil, nil)
+	built, err := s.canvas.MailCanvasDraftRaw(ctx, canvas.target, app.principal.TenantID, app.principal.AgentID, args.DocumentID, nil, nil, nil)
 	var invalid *agentconnectedapps.CanvasDraftError
 	if errors.As(err, &invalid) {
 		return app, canvas, built, voicelive.Output(map[string]string{"error": "canvas_not_mailable", "detail": invalid.Message}), nil
@@ -364,9 +393,9 @@ func (s *Service) storeVoiceLiveCanvasDraft(ctx context.Context, session voiceli
 	if known, ok := s.knownVoiceLiveDraft(key, canvas); ok && draftID == "" {
 		draftID = known.draftID
 	}
-	draft, err := s.agentConnectedApps.SaveGmailCanvasDraft(
+	draft, err := s.agentConnectedApps.SaveMailCanvasDraft(
 		agentconnectedapps.WithOperationID(ctx, voiceLiveInvocationID(session, request)+step),
-		app.token, app.connection.ConnectionID, draftID, built)
+		app.token, app.connection.ConnectionID, canvas.target, draftID, built)
 	var domain *agentconnectedapps.Error
 	if errors.As(err, &domain) {
 		return savedCanvasDraft{}, voicelive.Output(map[string]string{"error": domain.Code, "detail": voicelive.Snippet(domain.Message)}), nil
@@ -431,12 +460,12 @@ func (s *Service) syncVoiceLiveCanvasDraft(session voicelive.Session, request te
 // Skill does after delivering. The email already went where it went, so a
 // canvas the user changed meanwhile only keeps its old lines.
 func (s *Service) recordVoiceLiveCanvasHeader(ctx context.Context, session voicelive.Session, request teamhubinternal.VoiceLiveToolCall, principal agentcredential.Principal, canvas voiceLiveCanvasState, fields map[string]string, step string) {
-	if voicelive.EmailCanvasHeader(fields) == voicelive.EmailCanvasHeader(canvas.fields) {
+	if voicelive.EmailCanvasHeader(canvas.target, fields) == voicelive.EmailCanvasHeader(canvas.target, canvas.fields) {
 		return
 	}
 	change, err := json.Marshal([]map[string]string{{
 		"kind": "edit_document", "parser_version": "markdown-v1", "command": "block_replace",
-		"block_id": canvas.firstBlockID, "content": voicelive.EmailCanvasHeader(fields),
+		"block_id": canvas.firstBlockID, "content": voicelive.EmailCanvasHeader(canvas.target, fields),
 	}})
 	if err != nil {
 		return
@@ -500,7 +529,11 @@ func (s *Service) sendVoiceLiveEmailCanvas(ctx context.Context, session voiceliv
 		return output, err
 	}
 	// The yes above is bound to this content, which the draft holds.
-	status, outcome, output, err := s.voiceLiveWrite(ctx, session, request, app, "GMAIL_SEND_DRAFT", map[string]any{"draft_id": saved.draftID}, summary,
+	sendSlug := "GMAIL_SEND_DRAFT"
+	if canvas.target == agentconnectedapps.MailCanvasFeishu {
+		sendSlug = "FEISHU_MAIL_SEND_DRAFT"
+	}
+	status, outcome, output, err := s.voiceLiveWrite(ctx, session, request, app, sendSlug, map[string]any{"draft_id": saved.draftID}, summary,
 		func(string) (bool, error) { return true, nil })
 	if output != "" || err != nil {
 		return output, err

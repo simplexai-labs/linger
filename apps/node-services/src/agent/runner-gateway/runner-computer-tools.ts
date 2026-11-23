@@ -20,7 +20,7 @@ export interface ComputerToolRequest {
   computerId: string;
   agentId: string;
   toolSessionId: string;
-  server: "browser" | "playground";
+  server: "browser" | "playground" | "feishu_mail";
   toolName: string;
   arguments: Record<string, unknown>;
   /** How long the Computer may take; defaults to one minute. */

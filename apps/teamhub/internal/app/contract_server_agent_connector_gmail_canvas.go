@@ -10,8 +10,9 @@ import (
 	api "github.com/simplexai-labs/linger/contracts-go/teamhubagentapi"
 )
 
-// saveConnectorGmailCanvasDraft saves a canvas as a Gmail draft whose images
-// show in the body and whose file blocks are attachments. Recipients and subject the request leaves out come from
+// saveConnectorGmailCanvasDraft saves a canvas as a draft of the connection's
+// mail app, Gmail or Feishu Mail, whose images show in the body and whose file
+// blocks are attachments. Recipients and subject the request leaves out come from
 // the canvas header. It never sends; send the returned draft separately.
 func (a *App) saveConnectorGmailCanvasDraft(c *gin.Context) {
 	token, ok := a.agentCommandBearer(c)
@@ -28,7 +29,12 @@ func (a *App) saveConnectorGmailCanvasDraft(c *gin.Context) {
 	if a.writeAgentAuthError(c, "save Gmail canvas draft", err) {
 		return
 	}
-	built, err := a.canvas.GmailCanvasDraftRaw(ctx, auth.TenantID, auth.AgentID, input.DocumentId, input.To, input.Cc, input.Subject)
+	// The connection's mail app names the canvas target: Gmail or Feishu Mail.
+	target, err := a.agentConnectedApps.MailCanvasTargetOf(ctx, token, input.ConnectionId)
+	if a.writeAgentConnectedAppsError(c, "save mail canvas draft", err) {
+		return
+	}
+	built, err := a.canvas.MailCanvasDraftRaw(ctx, target, auth.TenantID, auth.AgentID, input.DocumentId, input.To, input.Cc, input.Subject)
 	var invalid *agentconnectedapps.CanvasDraftError
 	if errors.As(err, &invalid) {
 		if invalid.Path == "" {
@@ -46,7 +52,7 @@ func (a *App) saveConnectorGmailCanvasDraft(c *gin.Context) {
 	if input.DraftId != nil {
 		draftID = *input.DraftId
 	}
-	draft, err := a.agentConnectedApps.SaveGmailCanvasDraft(connectorCallContext(c), token, input.ConnectionId, draftID, built)
+	draft, err := a.agentConnectedApps.SaveMailCanvasDraft(connectorCallContext(c), token, input.ConnectionId, target, draftID, built)
 	if a.writeAgentConnectedAppsError(c, "save Gmail canvas draft", err) {
 		return
 	}

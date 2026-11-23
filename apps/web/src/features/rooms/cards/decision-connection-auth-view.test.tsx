@@ -1,9 +1,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import type { TeamHubExternalConnection } from "@/features/teamhub/teamhub-types";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
+import { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import { DecisionCard, type DecisionMessageCard } from "./decision-card";
 
@@ -212,6 +219,42 @@ describe("Chat connection authorization", () => {
     expect(
       await screen.findByRole("button", { name: "Open authorization window" }),
     ).toBeVisible();
+  });
+
+  it("turns missing lark-cli app scopes into steps instead of an error line", async () => {
+    const { runtime, decision } = await setup(card, "alice", false);
+    vi.spyOn(runtime.client, "createExternalConnection").mockRejectedValue(
+      new TeamHubError({
+        code: "FEISHU_SCOPES_NOT_ENABLED",
+        status: 409,
+        message: "The Feishu app your lark-cli uses does not enable them.",
+        details: [
+          { field: "scope", reason: "mail:user_mailbox:readonly" },
+          { field: "scope", reason: "mail:user_mailbox.message:send" },
+          {
+            field: "permissions_url",
+            reason: "https://open.feishu.cn/app/cli_abc/auth",
+          },
+        ],
+      }),
+    );
+    fireEvent.click(await enabledButton("Connect Notion"));
+    expect(
+      await screen.findByText(
+        "The Feishu app your lark-cli uses needs mail permissions first",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: /Open permissions page/ }),
+    ).toHaveAttribute("href", "https://open.feishu.cn/app/cli_abc/auth");
+    expect(
+      within(screen.getByRole("list", { name: "Mail permissions to add" }))
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["mail:user_mailbox:readonly", "mail:user_mailbox.message:send"]);
+    expect(screen.getByRole("button", { name: "Copy" })).toBeVisible();
+    expect(screen.queryByText(/does not enable them/)).not.toBeInTheDocument();
+    expect(decision).not.toHaveBeenCalled();
   });
 
   it("starts a new authorization when the pending link expired", async () => {

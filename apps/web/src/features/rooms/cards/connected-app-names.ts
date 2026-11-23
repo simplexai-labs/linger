@@ -6,6 +6,7 @@ const APP_NAMES: Record<TeamHubExternalAppKey, string> = {
   discord: "Discord",
   facebook: "Facebook",
   fal_ai: "fal.ai",
+  feishu_mail: "Feishu Mail",
   figma: "Figma",
   github: "GitHub",
   gmail: "Gmail",

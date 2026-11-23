@@ -84,9 +84,11 @@ Connected application commands may have their own file options. For those option
 
 ## Connected applications
 
-Eight applications have dedicated commands: Gmail, Outlook (mail via `teamhub outlook` and calendar via `teamhub outlook-calendar`), Slack, Google Calendar, Notion, Google Drive, Figma and GitHub, with 57 Connector leaf commands. `teamhub gmail --help` and `teamhub outlook-calendar --help` discover them offline, and each command keeps its own help, examples and Composio support boundary.
+Nine applications have dedicated commands: Gmail, Outlook (mail via `teamhub outlook` and calendar via `teamhub outlook-calendar`), Feishu Mail (`teamhub feishu-mail`), Slack, Google Calendar, Notion, Google Drive, Figma and GitHub, with 64 Connector leaf commands. `teamhub gmail --help` and `teamhub outlook-calendar --help` discover them offline, and each command keeps its own help, examples and Composio support boundary.
 Choose an account with `--account <connection ID|full label>`; labels match case-insensitively, connection IDs exactly. A connection ID that no longer matches a delegated account returns `account_ambiguous` with the delegated candidates instead of switching accounts. Without a delegation, the command posts an authorization card in an allowed chat that names the requested label and exits with `authorization_required`; the Agent ends its turn, and the card's result wakes it to run the original command again.
 Mail `--markdown` is converted to HTML by TeamHub; only `--attach` adds attachments.
+
+Feishu Mail has the same verbs as Gmail, including `canvas-draft`, but TeamHub runs its tools itself instead of Composio, through the owner's own lark-cli on their Computer. Use these commands rather than lark-cli's own mail commands, which skip the sponsor's card. `send` and `reply` first save a draft and then send it, so the sponsor's card shows exactly what the draft holds. Attachments travel inside the call, about 640 KiB in total. Search text is at most 50 characters, and `list --folder all` needs `--query`, since Feishu lists one folder at a time.
 
 GitHub reads the connected account, its repositories, issues and pull requests at once; `github comment` and `github create-issue` wait for the sponsor's confirmation card.
 

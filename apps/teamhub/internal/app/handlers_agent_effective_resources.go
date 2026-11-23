@@ -13,7 +13,7 @@ import (
 )
 
 func (a *App) getAgentEffectiveResources(c *gin.Context) {
-	result, err := a.agents.EffectiveResources(c.Request.Context(), c.Param("agentId"), a.connectedAppsConfigured(), a.agentConnectedAppKeys)
+	result, err := a.agents.EffectiveResources(c.Request.Context(), c.Param("agentId"), a.connectionProvidersConfigured(), a.agentConnectedAppKeys)
 	switch {
 	case errors.Is(err, skill.ErrConflict), errors.Is(err, skill.ErrDependency):
 		a.writeError(c, http.StatusConflict, "SKILL_SET_CONFLICT", "the Agent Skill configuration could not be loaded")

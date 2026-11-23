@@ -158,5 +158,5 @@ export const chatMessages = defineMessages("chat", {
   emailSendAgain: "Send again",
   emailDontSend: "Don't send",
   emailSendFrom: "Send from",
-  gmailAccount: "Gmail account",
+  mailAccount: "{app} account",
 });

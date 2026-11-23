@@ -15,7 +15,7 @@ import {
 import type { RoomDocumentCollaborationSession } from "../room-document-collaboration";
 import type { RoomDocumentEditor } from "../room-document-comment-schema";
 import { type CanvasDocument, canvasText, readCanvas } from "./canvas-document";
-import { canvasStatusKeys } from "./canvas-targets";
+import { canvasStatusKeys, isMailCanvasTarget } from "./canvas-targets";
 import { canvasMessages } from "./canvas.messages";
 
 /** A target field's label as the target gave it, or worded in the language. */
@@ -101,7 +101,7 @@ export function CanvasHeader({
       }),
     });
   };
-  const mail = canvas.target.id === "gmail";
+  const mail = isMailCanvasTarget(canvas.target.id);
   const showAgentEditing = agentEditing && canvas.status !== "sent";
   const fields =
     canvas.target.fields.length > 0
@@ -122,7 +122,7 @@ export function CanvasHeader({
     >
       {!mail || showAgentEditing ? (
         <div className="flex min-h-8 items-center gap-2 text-xs text-app-muted">
-          {canvas.target.id !== "gmail" ? (
+          {!mail ? (
             <span className="font-medium text-app-ink">
               {canvas.target.label}
             </span>

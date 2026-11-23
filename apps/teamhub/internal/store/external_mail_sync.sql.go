@@ -41,6 +41,58 @@ func (q *Queries) AdvanceMailSync(ctx context.Context, arg AdvanceMailSyncParams
 	return result.RowsAffected(), nil
 }
 
+const getExternalUpstreamAccount = `-- name: GetExternalUpstreamAccount :one
+SELECT account_id FROM external_connection_upstreams WHERE upstream_id=$1::text
+`
+
+func (q *Queries) GetExternalUpstreamAccount(ctx context.Context, upstreamID string) (string, error) {
+	row := q.db.QueryRow(ctx, getExternalUpstreamAccount, upstreamID)
+	var account_id string
+	err := row.Scan(&account_id)
+	return account_id, err
+}
+
+const getFeishuMailComputerTarget = `-- name: GetFeishuMailComputerTarget :one
+SELECT computer.owner_tenant_id::text AS tenant_id,
+       computer.owner_actor_id::text AS owner_actor_id,
+       computer.computer_id::text AS computer_id,
+       registration.agent_management_id::text AS agent_management_id
+FROM actors human
+JOIN agent_registrations registration ON registration.tenant_id=human.tenant_id
+  AND registration.represented_human_actor_id=human.id
+  AND registration.agent_type='anotherme' AND registration.status='active'
+  AND registration.agent_management_id IS NOT NULL
+JOIN local_computers computer ON computer.computer_id=registration.computer_id
+  AND computer.owner_tenant_id=human.tenant_id AND computer.owner_actor_id=human.id
+  AND computer.status='online' AND computer.removed_at IS NULL
+WHERE human.account_id=$1::text AND human.kind='human'
+ORDER BY computer.last_seen_at DESC NULLS LAST, computer.computer_id
+LIMIT 1
+`
+
+type GetFeishuMailComputerTargetRow struct {
+	TenantID          string `json:"tenant_id"`
+	OwnerActorID      string `json:"owner_actor_id"`
+	ComputerID        string `json:"computer_id"`
+	AgentManagementID string `json:"agent_management_id"`
+}
+
+// The Computer whose lark-cli serves an Account's Feishu Mail: one the
+// Account's Human runs their active AnotherMe on and that is online, most
+// recently seen first. Feishu Mail reads and sends through the owner's own
+// lark-cli login.
+func (q *Queries) GetFeishuMailComputerTarget(ctx context.Context, accountID string) (GetFeishuMailComputerTargetRow, error) {
+	row := q.db.QueryRow(ctx, getFeishuMailComputerTarget, accountID)
+	var i GetFeishuMailComputerTargetRow
+	err := row.Scan(
+		&i.TenantID,
+		&i.OwnerActorID,
+		&i.ComputerID,
+		&i.AgentManagementID,
+	)
+	return i, err
+}
+
 const getMailSync = `-- name: GetMailSync :one
 SELECT account_id, mail_import_tenant_id::text AS tenant_id, provider, upstream_connection_id,
        coalesce(remote_principal_key, '')::text AS mailbox,
@@ -84,7 +136,7 @@ func (q *Queries) GetMailSync(ctx context.Context, arg GetMailSyncParams) (GetMa
 const listMailSyncConnections = `-- name: ListMailSyncConnections :many
 SELECT id, revision
 FROM external_connections
-WHERE provider IN ('gmail', 'outlook') AND status = 'active'
+WHERE provider IN ('gmail', 'outlook', 'feishu_mail') AND status = 'active'
   AND mail_import_status = 'completed' AND mail_import_revision = revision
   AND mail_synced_until < $1::timestamptz
 ORDER BY id

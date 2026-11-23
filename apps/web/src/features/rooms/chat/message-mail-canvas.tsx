@@ -28,7 +28,7 @@ import { cn } from "@/lib/cn";
 import { CardActions, CardRowDetails } from "../cards/approval-card-parts";
 import { CardBox, CardDone } from "../cards/card-shell";
 import {
-  progressLabel,
+  progressText,
   useMailCanvasSend,
 } from "../documents/canvas/canvas-mail-send";
 import "../documents/room-document-blocknote.css";
@@ -237,7 +237,10 @@ function MailCardFooter({
     return (
       <CardDone
         icon={Loading03Icon}
-        text={t(progressLabel[status ?? "queued"] ?? chatMessages.emailSending)}
+        text={
+          progressText(status ?? "queued", mail.app, t) ??
+          t(chatMessages.emailSending)
+        }
         tone="muted"
       />
     );
@@ -304,7 +307,8 @@ function MailCardFooter({
           >
             {mail.accounts.map((account) => (
               <SelectItem key={account.id} value={account.id}>
-                {account.identity_label || t(chatMessages.gmailAccount)}
+                {account.identity_label ||
+                  t(chatMessages.mailAccount, { app: mail.app })}
               </SelectItem>
             ))}
           </Select>

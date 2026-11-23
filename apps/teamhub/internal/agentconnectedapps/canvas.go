@@ -56,18 +56,46 @@ type CanvasDraft struct {
 	Attachments []string
 }
 
+// The mail canvas targets: the mail apps a canvas can be drafted and sent in.
+// A target is the catalog key of its app.
+const (
+	MailCanvasGmail  = "gmail"
+	MailCanvasFeishu = "feishu_mail"
+)
+
+// IsMailCanvasTarget reports whether a canvas of target is an email.
+func IsMailCanvasTarget(target string) bool {
+	return target == MailCanvasGmail || target == MailCanvasFeishu
+}
+
+// MailCanvasAppName names a mail canvas target's app to the people reading
+// a message about it.
+func MailCanvasAppName(target string) string {
+	if target == MailCanvasFeishu {
+		return "Feishu Mail"
+	}
+	return "Gmail"
+}
+
 // GmailCanvasDraftRaw builds the Gmail draft of a canvas: its images show in
 // the body and its file blocks go as attachments. Recipients and subject left
 // nil come from the canvas header.
 func (s *Canvas) GmailCanvasDraftRaw(ctx context.Context, tenantID, agentID, documentID string, to, cc *[]string, subject *string) (CanvasDraft, error) {
+	return s.MailCanvasDraftRaw(ctx, MailCanvasGmail, tenantID, agentID, documentID, to, cc, subject)
+}
+
+// MailCanvasDraftRaw builds the draft of a canvas of target as one RFC 5322
+// message, base64url encoded: Gmail and Feishu Mail both take whole messages.
+func (s *Canvas) MailCanvasDraftRaw(ctx context.Context, target, tenantID, agentID, documentID string, to, cc *[]string, subject *string) (CanvasDraft, error) {
 	blocks, sourceDigest, err := s.canvasBlocks(ctx, tenantID, agentID, documentID)
 	if err != nil {
 		return CanvasDraft{}, err
 	}
 	header, isCanvas := ReadCanvasHeader(blocks)
 	if to == nil || cc == nil || subject == nil {
-		if !isCanvas || header.Target != "gmail" {
-			return CanvasDraft{}, &CanvasDraftError{"document_id", "not_gmail_canvas", "This Document is not a Gmail canvas; pass --to, --cc and --subject"}
+		if !isCanvas || header.Target != target {
+			name := MailCanvasAppName(target)
+			return CanvasDraft{}, &CanvasDraftError{"document_id", "not_gmail_canvas", "This Document is not a " + name + " canvas; pass --to, --cc and --subject"}
 		}
 		if to == nil {
 			to = commaList(header.Fields["to"])

@@ -682,6 +682,7 @@ func (e AgentReferenceMessageSegmentTargetType) Valid() bool {
 
 // Defines values for AgentRoutineListenerApp.
 const (
+	FeishuMail      AgentRoutineListenerApp = "feishu_mail"
 	Gmail           AgentRoutineListenerApp = "gmail"
 	GoogleCalendar  AgentRoutineListenerApp = "google_calendar"
 	Outlook         AgentRoutineListenerApp = "outlook"
@@ -692,6 +693,8 @@ const (
 // Valid indicates whether the value is a known member of the AgentRoutineListenerApp enum.
 func (e AgentRoutineListenerApp) Valid() bool {
 	switch e {
+	case FeishuMail:
+		return true
 	case Gmail:
 		return true
 	case GoogleCalendar:

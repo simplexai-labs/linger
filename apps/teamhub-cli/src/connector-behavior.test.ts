@@ -152,7 +152,7 @@ const mail = {
   },
 };
 describe("reviewed Connector command boundaries", () => {
-  it("provides all 59 reviewed leaves as offline help and schemas, excluding removed apps", async () => {
+  it("provides all 67 reviewed leaves as offline help and schemas, excluding removed apps", async () => {
     const f = await fixture("gmail", () => {
       throw new Error("offline must not call provider");
     });
@@ -160,7 +160,7 @@ describe("reviewed Connector command boundaries", () => {
       x.toolName.startsWith("connector_"),
     );
     // Includes the two provider-independent generation commands.
-    expect(commands.length).toBe(59);
+    expect(commands.length).toBe(67);
     for (const command of commands) {
       expect(
         await runCli([...command.command, "--help"], { ...f.deps, env: {} }),

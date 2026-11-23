@@ -104,6 +104,12 @@ Rooms / Chat   checks identity, membership and capability on every call
 Composio       holds the app keys; an approved write runs exactly once
 ```
 
+<sub>Feishu Mail is the exception: Composio has no Feishu toolkit, so TeamHub
+runs it through each person's own lark-cli on the Computer that runs their
+Another Me, and keeps no Feishu credentials. People share it by asking their
+Another Me in chat; it shows among Another Me's connectors, not on the Apps
+page.</sub>
+
 | Concern                    | How                                                                                                                        |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | One definition per command | Help, `--schema` and the permission manifest are generated from the same list                                              |

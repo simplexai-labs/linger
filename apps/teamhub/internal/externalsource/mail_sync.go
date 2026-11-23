@@ -130,7 +130,7 @@ func (s *Service) syncMail(ctx context.Context, args MailSyncArgs) error {
 	for read < composio.MailImportMaxMessages {
 		options.Limit = min(100, composio.MailImportMaxMessages-read)
 		page, err := appProviderCall(ctx, s, job, s.provider, func(callCtx context.Context) (composio.MailImportPage, error) {
-			return s.provider.FetchMailImportPage(callCtx, job.UpstreamConnectionID, job.Provider, options)
+			return s.fetchMailImportPage(callCtx, job.UpstreamConnectionID, job.Provider, options)
 		})
 		if err != nil {
 			return s.mailSyncFailure(ctx, job, err)

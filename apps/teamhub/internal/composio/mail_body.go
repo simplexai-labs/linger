@@ -12,6 +12,15 @@ const pollMailBodyRunes = 8000
 const oversizedMailBody = "[Message body unavailable: provider response exceeded the read limit. Only headers are available.]"
 
 // pollMailBody bounds the cleaned body, not the provider's short preview.
+// PollMailBody cleans a mail body for a listener event exactly as Gmail and
+// Outlook bodies are cleaned, for mailboxes TeamHub reads without Composio.
+func PollMailBody(body string, html bool) string {
+	if html {
+		body = htmlText(body)
+	}
+	return pollMailBody(body, false)
+}
+
 func pollMailBody(body string, truncated bool) string {
 	body = pollTextBody(body, truncated)
 	if body == "" {

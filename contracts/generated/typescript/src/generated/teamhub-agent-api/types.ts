@@ -1104,8 +1104,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Save a canvas Document as a Gmail draft with its images inline.
-     * @description Reads the current canvas the Agent can read. Recipients and subject the request leaves out come from the canvas header: the first block, a code block whose first line is "canvas: gmail", followed by "key: value" lines (case-insensitive; addresses separated by commas only). Converts the body without the header to HTML and embeds its Document images as inline parts (cid), so the draft shows them in the body; its file, video and audio blocks become attachments. Creates a draft, or replaces draft_id in place. Never sends.
+     * Save a canvas Document as a Gmail or Feishu Mail draft with its images inline.
+     * @description Reads the current canvas the Agent can read and saves it as a draft of the connection's mail app, Gmail or Feishu Mail. Recipients and subject the request leaves out come from the canvas header: the first block, a code block whose first line is "canvas: gmail" or "canvas: feishu_mail" (the connection's app), followed by "key: value" lines (case-insensitive; addresses separated by commas only). Converts the body without the header to HTML and embeds its Document images as inline parts (cid), so the draft shows them in the body; its file, video and audio blocks become attachments. Creates a draft, or replaces draft_id in place. Never sends.
      */
     post: operations["saveConnectorGmailCanvasDraft"];
     delete?: never;
@@ -2532,7 +2532,8 @@ export interface components {
         | "outlook"
         | "google_calendar"
         | "outlook_calendar"
-        | "slack";
+        | "slack"
+        | "feishu_mail";
     };
     /** @description A Routine has exactly one of schedule and listener. A listener Routine is an app listener; it can only be paused and enabled, and goes away when the Human revokes AnotherMe's access to the app. */
     AgentRoutine: {
@@ -5288,7 +5289,7 @@ export interface operations {
           };
         };
       };
-      /** @description Invalid request, a Document that is not a Gmail canvas while fields are left out, no subject, unsupported body, images over 5 MiB in total, or attachments over 15 MiB in total */
+      /** @description Invalid request, a Document that is not a canvas of the connection's mail app while fields are left out, no subject, unsupported body, images over 5 MiB in total, or attachments over 15 MiB in total */
       400: {
         headers: {
           [name: string]: unknown;

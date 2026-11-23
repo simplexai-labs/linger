@@ -51,6 +51,8 @@ var listenerApps = map[string]listenerApp{
 	// A calendar-only Outlook Calendar connection watches events without reading mail.
 	"outlook_calendar": {"Outlook Calendar watch", []reminder.ListenerSpec{{Type: reminder.ListenerOutlookCalendar, Events: []string{"created", "updated", "cancelled"}}}},
 	"slack":            {"Slack mention watch", []reminder.ListenerSpec{{Type: reminder.ListenerSlack, Channel: "*", Match: &reminder.ListenerMatch{Kind: "mention"}}}},
+	// Inbox only, like Gmail: TeamHub reads Feishu Mail itself.
+	"feishu_mail": {"Feishu Mail inbox watch", []reminder.ListenerSpec{{Type: reminder.ListenerFeishuMail}}},
 }
 
 // ListenerProviders lists the providers whose connections get a listener.
@@ -202,7 +204,7 @@ func appName(source string) string {
 func EventFromListener(listened reminder.ListenerEvent) (Event, bool) {
 	event := Event{Source: listened.Source, Grant: listened.Grant}
 	switch listened.Source {
-	case reminder.ListenerGmail, reminder.ListenerOutlook:
+	case reminder.ListenerGmail, reminder.ListenerOutlook, reminder.ListenerFeishuMail:
 		event.Kind = "new_mail"
 		event.ExternalID = firstNonEmpty(listened.ThreadID, listened.MessageID, listened.EventID)
 		event.State = firstNonEmpty(listened.MessageID, listened.EventID)

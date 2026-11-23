@@ -767,6 +767,7 @@ func (e InternalErrorCode) Valid() bool {
 // Defines values for LocalComputerToolCallServer.
 const (
 	Browser    LocalComputerToolCallServer = "browser"
+	FeishuMail LocalComputerToolCallServer = "feishu_mail"
 	Playground LocalComputerToolCallServer = "playground"
 )
 
@@ -774,6 +775,8 @@ const (
 func (e LocalComputerToolCallServer) Valid() bool {
 	switch e {
 	case Browser:
+		return true
+	case FeishuMail:
 		return true
 	case Playground:
 		return true
@@ -1936,15 +1939,17 @@ type LocalComputerToolCall struct {
 	ComputerId string                 `json:"computer_id"`
 
 	// DeadlineMs How long the Computer may take; 60000 when omitted.
-	DeadlineMs    *int                        `json:"deadline_ms,omitempty"`
-	OwnerActorId  string                      `json:"owner_actor_id"`
+	DeadlineMs   *int   `json:"deadline_ms,omitempty"`
+	OwnerActorId string `json:"owner_actor_id"`
+
+	// Server feishu_mail runs TeamHub's Feishu Mail calls through the owner's own lark-cli login.
 	Server        LocalComputerToolCallServer `json:"server"`
 	TenantId      string                      `json:"tenant_id"`
 	ToolName      string                      `json:"tool_name"`
 	ToolSessionId string                      `json:"tool_session_id"`
 }
 
-// LocalComputerToolCallServer defines model for LocalComputerToolCall.Server.
+// LocalComputerToolCallServer feishu_mail runs TeamHub's Feishu Mail calls through the owner's own lark-cli login.
 type LocalComputerToolCallServer string
 
 // LocalComputerToolResult defines model for LocalComputerToolResult.

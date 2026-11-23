@@ -58,6 +58,9 @@ func (w *cleanupWorker) Work(ctx context.Context, job *river.Job[CleanupArgs]) e
 
 // upstreamGone reports a Composio account that no longer exists.
 func upstreamGone(err error) bool {
+	if feishuUpstreamGone(err) {
+		return true
+	}
 	status, ok := composio.ErrorStatus(err)
 	return ok && (status == http.StatusNotFound || status == http.StatusGone)
 }

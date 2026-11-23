@@ -351,7 +351,7 @@ var teamhubPhrases = map[string]string{
 
 // connectorApps are the Connectors the TeamHub CLI exposes as commands.
 var connectorApps = map[string]string{
-	"figma": "Figma", "gcal": "Calendar", "gdrive": "Google Drive", "github": "GitHub", "gmail": "Gmail",
+	"feishu-mail": "Feishu Mail", "figma": "Figma", "gcal": "Calendar", "gdrive": "Google Drive", "github": "GitHub", "gmail": "Gmail",
 	"notion": "Notion", "outlook": "Outlook", "slack": "Slack",
 }
 

@@ -1336,8 +1336,11 @@ export interface components {
       computer_id: string;
       agent_id: string;
       tool_session_id: string;
-      /** @enum {string} */
-      server: "browser" | "playground";
+      /**
+       * @description feishu_mail runs TeamHub's Feishu Mail calls through the owner's own lark-cli login.
+       * @enum {string}
+       */
+      server: "browser" | "playground" | "feishu_mail";
       tool_name: string;
       arguments: {
         [key: string]: unknown;

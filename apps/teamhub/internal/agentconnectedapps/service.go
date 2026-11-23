@@ -338,6 +338,11 @@ func (s *Service) execute(ctx context.Context, input ExecuteInput, authorize fun
 		ctx, connection.UpstreamConnectionID, connection.UserID,
 		input.ToolSlug, input.ToolVersion, input.Arguments,
 	)
+	// A native tool refuses malformed arguments, or a connection whose
+	// authorization no longer works, before it calls its provider.
+	if errors.Is(err, externalsource.ErrInvalid) || errors.Is(err, externalsource.ErrNotActive) {
+		return Result{}, mapToolError(err, "execute")
+	}
 	if err != nil {
 		return Result{}, dispatchedError(err)
 	}

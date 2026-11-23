@@ -24,6 +24,8 @@ type ExternalApp struct {
 	// customAuthScheme names the scheme of an app whose auth config TeamHub
 	// creates as custom; empty means a Composio-managed OAuth2 config.
 	customAuthScheme string
+	// selfAuthorized marks an app TeamHub authorizes itself, without Composio.
+	selfAuthorized bool
 }
 
 type connectionIdentity struct {
@@ -31,26 +33,35 @@ type connectionIdentity struct {
 	RemoteTeamID, RemoteTeamName, UserID string
 }
 
-// All applications share the same Composio connection lifecycle. Only the
+// connectionAdapter is the upstream lifecycle a Connection's reconcile,
+// reauthorization and cleanup drive: Composio's for most apps, TeamHub's own
+// for the apps it authorizes itself.
+type connectionAdapter interface {
+	Status(context.Context, string) (composio.ConnectionStatus, error)
+	Identify(context.Context, string, composio.ConnectionStatus) (connectionIdentity, error)
+	Revoke(context.Context, string) error
+}
+
+// All Composio applications share the same connection lifecycle. Only the
 // identity lookup depends on the application.
-type connectionAdapter struct {
+type composioConnection struct {
 	client   *composio.Client
 	toolkit  string
 	identify func(context.Context, string) (connectionIdentity, error)
 }
 
-func (a connectionAdapter) Status(ctx context.Context, upstreamID string) (composio.ConnectionStatus, error) {
+func (a composioConnection) Status(ctx context.Context, upstreamID string) (composio.ConnectionStatus, error) {
 	return a.client.GetConnectionStatusForToolkit(ctx, upstreamID, a.toolkit)
 }
 
-func (a connectionAdapter) Identify(ctx context.Context, upstreamID string, status composio.ConnectionStatus) (connectionIdentity, error) {
+func (a composioConnection) Identify(ctx context.Context, upstreamID string, status composio.ConnectionStatus) (connectionIdentity, error) {
 	if status != composio.ConnectionActive {
 		return connectionIdentity{}, nil
 	}
 	return a.identify(ctx, upstreamID)
 }
 
-func (a connectionAdapter) Revoke(ctx context.Context, upstreamID string) error {
+func (a composioConnection) Revoke(ctx context.Context, upstreamID string) error {
 	return a.client.RevokeConnection(ctx, upstreamID)
 }
 
@@ -144,6 +155,7 @@ const composioLogoBase = "https://logos.composio.dev/api/"
 var curatedApps = []ExternalApp{
 	{Key: "gmail", DisplayName: "Gmail", Description: "Import the last six months, up to 3,000 messages, for Profile and Wiki.", Capabilities: []string{"connect", "personal_wiki_import", "agent_tools"}, AllowsMultipleConnections: true},
 	{Key: "outlook", DisplayName: "Outlook Mail", Description: "Import the last six months, up to 3,000 messages, for Profile and Wiki.", Capabilities: []string{"connect", "personal_wiki_import", "agent_tools"}, AllowsMultipleConnections: true},
+	{Key: FeishuMailAppKey, DisplayName: "Feishu Mail", Description: "Let your Another Me read and send your Feishu or Lark mail through lark-cli on your Computer; new mail syncs to your Wiki each night.", Capabilities: []string{"connect", "agent_tools"}, AllowsMultipleConnections: true, selfAuthorized: true},
 	{Key: "googledrive", DisplayName: "Google Drive", Description: "Let Agents work with your Drive files.", Capabilities: []string{"connect", "agent_tools"}, AllowsMultipleConnections: true},
 	{Key: "slack", DisplayName: "Slack", Description: "Connect workspaces and selected channels.", Capabilities: []string{"connect", "personal_wiki_import", "agent_tools"}, AllowsMultipleConnections: true},
 	{Key: "discord", DisplayName: "Discord", Description: "Connect one installed Discord server and selected channels.", Capabilities: []string{"connect", "personal_wiki_import", "agent_tools"}, AllowsMultipleConnections: true},
@@ -198,9 +210,18 @@ func (s *Service) catalogApp(appKey string) (ExternalApp, bool) {
 	}
 	definition := curatedApps[index]
 	app := definition
-	app.LogoURL = composioLogoBase + toolkitForApp(app.Key)
 	app.Availability = AppAvailabilityUnavailable
 	app.Capabilities = []string{}
+	if definition.selfAuthorized {
+		// Composio does not serve these apps' logos or capabilities.
+		if s.FeishuConfigured() {
+			app.Availability = AppAvailabilityAvailable
+			app.Capabilities = slices.Clone(definition.Capabilities)
+			app.SupportsReauthorization = true
+		}
+		return withProactiveReminders(app), true
+	}
+	app.LogoURL = composioLogoBase + toolkitForApp(app.Key)
 	if s.ProviderConfigured() {
 		app.Availability = AppAvailabilityAvailable
 		app.Capabilities = []string{"connect", "agent_tools"}
@@ -263,14 +284,23 @@ func (s *Service) appIdentity(appKey string) func(context.Context, string) (conn
 		if s.provider != nil {
 			return s.identifyGoogleCalendar
 		}
+	case FeishuMailAppKey:
+		if s.feishu != nil {
+			return func(ctx context.Context, upstreamID string) (connectionIdentity, error) {
+				return feishuConnection{service: s}.Identify(ctx, upstreamID, composio.ConnectionActive)
+			}
+		}
 	}
 	return nil
 }
 
 func (s *Service) connectionAdapter(appKey string) (connectionAdapter, error) {
 	app, ok := s.catalogApp(appKey)
-	if !ok || !s.ProviderConfigured() {
-		return connectionAdapter{}, ErrUnavailable
+	if ok && app.selfAuthorized && s.FeishuConfigured() {
+		return feishuConnection{service: s}, nil
+	}
+	if !ok || app.selfAuthorized || !s.ProviderConfigured() {
+		return nil, ErrUnavailable
 	}
 	identify := s.appIdentity(appKey)
 	if identify == nil {
@@ -279,7 +309,7 @@ func (s *Service) connectionAdapter(appKey string) (connectionAdapter, error) {
 			return connectionIdentity{Label: app.DisplayName + " account", PrincipalKey: "composio:" + id}, nil
 		}
 	}
-	return connectionAdapter{client: s.managed.client, toolkit: toolkitForApp(appKey), identify: identify}, nil
+	return composioConnection{client: s.managed.client, toolkit: toolkitForApp(appKey), identify: identify}, nil
 }
 
 func (s *Service) agentToolsApp(appKey string) (ExternalApp, bool) {

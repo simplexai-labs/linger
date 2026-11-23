@@ -95,14 +95,18 @@ func (s *Service) CreateReauthorization(ctx context.Context, accountID, connecti
 	if err != nil {
 		return Connection{}, err
 	}
-	// Without Composio no app supports Agent tools, so this also rejects an
-	// unconfigured deployment before it reaches the managed auth config.
-	if s.appIdentity(connection.Provider) == nil || !s.SupportsAgentTools(connection.Provider) {
+	// Reauthorization needs a confirmed account identity and a configured
+	// provider, so this also rejects an unconfigured deployment before it
+	// reaches the managed auth config.
+	app, ok := s.catalogApp(connection.Provider)
+	if !ok || app.Availability != AppAvailabilityAvailable || !app.SupportsReauthorization {
 		return Connection{}, ErrUnavailable
 	}
-	managedConfigID, err := s.ensureAuthConfig(ctx, connection.Provider)
-	if err != nil {
-		return Connection{}, err
+	managedConfigID := ""
+	if !app.selfAuthorized {
+		if managedConfigID, err = s.ensureAuthConfig(ctx, connection.Provider); err != nil {
+			return Connection{}, err
+		}
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -139,7 +143,7 @@ func (s *Service) CreateReauthorization(ctx context.Context, accountID, connecti
 			return Connection{}, err
 		}
 	} else {
-		link, err := s.createManagedLinkInTx(ctx, tx, accountID, toolkitForApp(provider), managedConfigID)
+		link, err := s.createLinkInTx(ctx, tx, accountID, provider, managedConfigID)
 		if err != nil {
 			return Connection{}, errors.Join(ErrUnavailable, err)
 		}

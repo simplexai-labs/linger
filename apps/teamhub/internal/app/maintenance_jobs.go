@@ -205,11 +205,12 @@ func (a *App) maintenanceJobs(workers *river.Workers, lifecycleWorkers bool) []*
 }
 
 // connectedAppSweeps registers the connected app sweeps and returns their
-// schedules. They are always scheduled because a Composio API key can be saved
-// after start; until then the reconcile sweep enqueues nothing.
+// schedules. They are always scheduled because a Composio API key or a Feishu
+// app can be saved after start; until then the reconcile sweep enqueues
+// nothing.
 func (a *App) connectedAppSweeps(workers *river.Workers) []*river.PeriodicJob {
 	addSweepWorker[connectionReconcileSweepArgs](workers, func(ctx context.Context) error {
-		if !a.connectedAppsConfigured() {
+		if !a.connectionProvidersConfigured() {
 			return nil
 		}
 		return a.externalSources.EnqueueDueConnectionReconciles(ctx)
@@ -218,7 +219,7 @@ func (a *App) connectedAppSweeps(workers *river.Workers) []*river.PeriodicJob {
 		return a.typedCards.ReconcileConnectionAuthorizations(ctx)
 	})
 	addSweepWorker[mailSyncSweepArgs](workers, func(ctx context.Context) error {
-		if !a.connectedAppsConfigured() {
+		if !a.connectionProvidersConfigured() {
 			return nil
 		}
 		return a.externalSources.EnqueueMailSyncs(ctx, time.Now())

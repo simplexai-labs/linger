@@ -151,6 +151,7 @@ export const routineSchema = z
             "google_calendar",
             "outlook_calendar",
             "slack",
+            "feishu_mail",
           ])
           .describe(
             "Connected app whose new events the Routine hands to proactive judgement.",

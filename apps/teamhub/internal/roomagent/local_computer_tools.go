@@ -30,6 +30,12 @@ type LocalBrowserToolResult struct {
 	IsError bool
 }
 
+// LocalComputerToolResults returns a Computer tool's result whatever its
+// status, for a caller that acts on the fields a refusal carries.
+type LocalComputerToolResults interface {
+	CallLocalComputerToolResult(context.Context, api.LocalComputerToolCall) (map[string]any, error)
+}
+
 // LocalComputerToolError preserves an unavailable or uncertain tool outcome.
 type LocalComputerToolError struct{ Code, Message string }
 
@@ -37,19 +43,30 @@ func (e *LocalComputerToolError) Error() string { return e.Code + ": " + e.Messa
 
 // CallLocalComputerTool dispatches directly to the Computer without creating a model Run.
 func (g *HTTPGateway) CallLocalComputerTool(ctx context.Context, call api.LocalComputerToolCall) (map[string]any, error) {
+	result, err := g.CallLocalComputerToolResult(ctx, call)
+	if err != nil {
+		return nil, err
+	}
+	if status, ok := result["status"].(string); ok && status != "ok" {
+		message, _ := result["detail"].(string)
+		if message == "" {
+			message = "Check the Computer and current operation state before continuing."
+		}
+		return nil, &LocalComputerToolError{Code: status, Message: message}
+	}
+	return result, nil
+}
+
+// CallLocalComputerToolResult dispatches like CallLocalComputerTool but
+// returns the Computer's result whatever its status. An error means no result
+// came back.
+func (g *HTTPGateway) CallLocalComputerToolResult(ctx context.Context, call api.LocalComputerToolCall) (map[string]any, error) {
 	response, err := g.toolClient.CallLocalComputerToolWithResponse(ctx, call)
 	if err != nil {
 		return nil, &LocalComputerToolError{Code: "outcome_unknown", Message: "The Computer may have performed the operation. Check its effect before retrying."}
 	}
 	if response.JSON200 == nil {
 		return nil, &LocalComputerToolError{Code: "computer_unavailable", Message: "The Computer could not accept this tool call."}
-	}
-	if status, ok := response.JSON200.Result["status"].(string); ok && status != "ok" {
-		message, _ := response.JSON200.Result["detail"].(string)
-		if message == "" {
-			message = "Check the Computer and current operation state before continuing."
-		}
-		return nil, &LocalComputerToolError{Code: status, Message: message}
 	}
 	return response.JSON200.Result, nil
 }

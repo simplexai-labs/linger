@@ -17,17 +17,17 @@ export const canvasMessages = defineMessages("canvas", {
   emailStatus: "Email status",
   saved: "Saved",
   drafting: "Drafting",
-  connectedGmailAccount: "Connected Gmail account",
-  gmailAccount: "Gmail account",
+  connectedMailAccount: "Connected {app} account",
+  mailAccount: "{app} account",
 
   // Sending.
   preparing: "Preparing…",
-  uploadingToGmail: "Uploading to Gmail…",
+  uploadingToMail: "Uploading to {app}…",
   sending: "Sending…",
-  connectGmailBeforeSending: "Connect Gmail before sending.",
+  connectMailBeforeSending: "Connect {app} before sending.",
   emailStillLoading: "The email is still loading.",
   emailChanged: "The email changed. Review it and send again.",
-  connectGmailToSend: "Connect Gmail to send",
+  connectMailToSend: "Connect {app} to send",
   saving: "Saving…",
 
   // Attachments.

@@ -3616,6 +3616,7 @@ func (e RoutineChangedPayloadChangeKind) Valid() bool {
 
 // Defines values for RoutineListenerApp.
 const (
+	RoutineListenerAppFeishuMail      RoutineListenerApp = "feishu_mail"
 	RoutineListenerAppGmail           RoutineListenerApp = "gmail"
 	RoutineListenerAppGoogleCalendar  RoutineListenerApp = "google_calendar"
 	RoutineListenerAppOutlook         RoutineListenerApp = "outlook"
@@ -3626,6 +3627,8 @@ const (
 // Valid indicates whether the value is a known member of the RoutineListenerApp enum.
 func (e RoutineListenerApp) Valid() bool {
 	switch e {
+	case RoutineListenerAppFeishuMail:
+		return true
 	case RoutineListenerAppGmail:
 		return true
 	case RoutineListenerAppGoogleCalendar:
@@ -7531,7 +7534,10 @@ type MailCanvasState struct {
 	SourceDigest string                `json:"source_digest"`
 	Status       MailCanvasStateStatus `json:"status"`
 	Subject      string                `json:"subject"`
-	To           string                `json:"to"`
+
+	// Target The canvas's mail app, gmail or feishu_mail; Send must use a connection of this app.
+	Target *string `json:"target,omitempty"`
+	To     string  `json:"to"`
 }
 
 // MailCanvasStateStatus defines model for MailCanvasState.Status.

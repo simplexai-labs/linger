@@ -175,11 +175,13 @@ gmailCanvasDraft:
     operationId: saveConnectorGmailCanvasDraft
     tags: [Agent Business API]
     security: [{ agentBearer: [] }]
-    summary: Save a canvas Document as a Gmail draft with its images inline.
+    summary: Save a canvas Document as a Gmail or Feishu Mail draft with its images inline.
     description: >-
-      Reads the current canvas the Agent can read. Recipients and subject the
+      Reads the current canvas the Agent can read and saves it as a draft of the
+      connection's mail app, Gmail or Feishu Mail. Recipients and subject the
       request leaves out come from the canvas header: the first block, a code
-      block whose first line is "canvas: gmail", followed by "key: value" lines
+      block whose first line is "canvas: gmail" or "canvas: feishu_mail" (the
+      connection's app), followed by "key: value" lines
       (case-insensitive; addresses separated by commas only). Converts the body
       without the header to HTML and embeds its Document images as inline parts
       (cid), so the draft shows them in the body; its file, video and audio
@@ -233,7 +235,7 @@ gmailCanvasDraft:
                   items: { type: string }
       "400":
         description: >-
-          Invalid request, a Document that is not a Gmail canvas while fields
+          Invalid request, a Document that is not a canvas of the connection's mail app while fields
           are left out, no subject, unsupported body, images over 5 MiB in
           total, or attachments over 15 MiB in total
       "401": { description: Invalid Agent identity }

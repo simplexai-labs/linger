@@ -539,6 +539,8 @@ func (a *App) registerFeatures(ctx context.Context, cfg config.Config, deps Deps
 	if err := a.registerExternalApps(ctx, cfg.ExternalApps, deps.Composio, agentAuthorization); err != nil {
 		return err
 	}
+	// Feishu Mail listeners read their inbox through the connection service.
+	a.reminders.SetFeishuMailFeed(a.externalSources)
 	a.registerTasks()
 	a.registerPersonalData(cfg, deps, core.models)
 	if err := a.registerProactive(cfg, deps); err != nil {
@@ -554,7 +556,7 @@ func (a *App) registerFeatures(ctx context.Context, cfg config.Config, deps Deps
 
 func (a *App) registerAgentAuthorization() *agentauth.Service {
 	agentAuthorization := agentauth.New(a.pool)
-	agentAuthorization.SetConnectedApps(a.connectedAppsConfigured)
+	agentAuthorization.SetConnectedApps(a.connectionProvidersConfigured)
 	a.agentAuth = agentAuthorization
 	return agentAuthorization
 }

@@ -50,6 +50,7 @@ import { DocumentActionsMenu } from "./room-document-actions-menu";
 import type { UnifiedDocumentPageModel } from "./use-unified-document-page-model";
 import { MailCanvasStatus } from "./canvas/canvas-mail-status";
 import { documentPageMessages as m } from "./document-page.messages";
+import { isMailCanvasTarget } from "./canvas/canvas-targets";
 
 interface UnifiedDocumentPageHeaderProps {
   /** Only the actions, for the byline row under the page title, which
@@ -107,7 +108,7 @@ export function UnifiedDocumentPageHeader({
       duplicatePending={duplicatePending}
       exportPending={exportPending}
       canvasSent={canvasSent}
-      mailCanvas={model.canvasTarget === "gmail"}
+      mailCanvas={isMailCanvasTarget(model.canvasTarget)}
       isEditing={isEditing}
       onComments={() => setCommentsOpen((value) => !value)}
       onCopyLink={() =>

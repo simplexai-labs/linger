@@ -25,7 +25,12 @@ import {
   usableConnectUrl,
   accountIdentityText,
 } from "@/features/apps/connection-state";
+import {
+  FeishuScopesGuide,
+  isFeishuScopesNotEnabled,
+} from "@/features/apps/feishu-scopes-guide";
 import { openOAuthUrl } from "@/features/apps/oauth-popup";
+import type { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubExternalConnection } from "@/features/teamhub/teamhub-types";
 import { commonMessages } from "@/i18n/common.messages";
@@ -110,6 +115,7 @@ function ConnectionAuthCard({
   children,
   done,
   error,
+  guide,
 }: {
   actions?: ReactNode;
   appKey: string;
@@ -118,6 +124,8 @@ function ConnectionAuthCard({
   children?: ReactNode;
   done?: ReactNode;
   error?: string;
+  /** Steps that replace the error when the Human can fix it themselves. */
+  guide?: ReactNode;
 }) {
   const t = useT();
   return (
@@ -147,7 +155,7 @@ function ConnectionAuthCard({
             />
           ) : null)}
         {actions ? <CardActions>{actions}</CardActions> : null}
-        {error ? <CardError>{error}</CardError> : null}
+        {guide ?? (error ? <CardError>{error}</CardError> : null)}
       </CardBox>
     </>
   );
@@ -197,6 +205,8 @@ function ConnectionAuthorizationActions({
   const [created, setCreated] = useState<TeamHubExternalConnection>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Missing lark-cli app scopes get steps instead of an error line.
+  const [scopesError, setScopesError] = useState<TeamHubError>();
   const [fallbackUrl, setFallbackUrl] = useState("");
   const authorizing = card.status === "authorizing";
   const boundConnectionId = card.connection_auth?.connection_id ?? "";
@@ -269,6 +279,7 @@ function ConnectionAuthorizationActions({
   async function authorize(newAccount: boolean) {
     setBusy(true);
     setError("");
+    setScopesError(undefined);
     try {
       let connection = newAccount ? undefined : selected;
       let connectUrl = "";
@@ -319,11 +330,13 @@ function ConnectionAuthorizationActions({
         queryKey: externalConnectionsQueryKey(),
       });
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : translate(cardsMessages.authorizationNotStarted),
-      );
+      if (isFeishuScopesNotEnabled(cause)) setScopesError(cause);
+      else
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : translate(cardsMessages.authorizationNotStarted),
+        );
     } finally {
       setBusy(false);
     }
@@ -410,6 +423,9 @@ function ConnectionAuthorizationActions({
       appKey={appKey}
       appName={appName}
       card={card}
+      guide={
+        scopesError ? <FeishuScopesGuide error={scopesError} /> : undefined
+      }
       error={
         error ||
         (loadError

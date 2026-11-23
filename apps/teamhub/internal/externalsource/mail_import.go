@@ -15,7 +15,11 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/jobs"
 )
 
-func IsMailProvider(provider string) bool { return provider == "gmail" || provider == "outlook" }
+// IsMailProvider reports an app whose connection syncs its mail into the
+// owner's Personal Wiki.
+func IsMailProvider(provider string) bool {
+	return provider == "gmail" || provider == "outlook" || provider == FeishuMailAppKey
+}
 
 // MailWikiSource is one imported message promoted into the owner's Personal Wiki.
 type MailWikiSource struct {
@@ -158,6 +162,18 @@ func (s *Service) EnsureMailImport(ctx context.Context, accountID, tenantID, con
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if isNoBackfillMailProvider(connection.Provider) {
+		// Nothing before the connection is imported: the snapshot is complete
+		// and empty, and the nightly sync reads from now on. A reauthorized
+		// connection keeps its position, so mail from the gap still syncs.
+		if _, err = tx.Exec(ctx, `UPDATE external_connections SET mail_import_status='completed',mail_import_revision=revision,mail_import_tenant_id=$3,mail_import_error_code=NULL,
+			mail_import_cursor='',mail_import_read=0,mail_import_provider_calls=0,mail_synced_until=coalesce(mail_synced_until,$5)
+			WHERE id=$1 AND account_id=$2 AND status='active' AND revision=$4 AND mail_import_revision IS DISTINCT FROM revision`,
+			connectionID, accountID, tenantID, connection.Revision, end); err != nil {
+			return mapDatabaseError(err)
+		}
+		return tx.Commit(ctx)
+	}
 	tag, err := tx.Exec(ctx, `UPDATE external_connections SET mail_import_status='running',mail_import_revision=revision,mail_import_tenant_id=$3,mail_import_error_code=NULL,
 		mail_import_cursor='',mail_import_read=0,mail_import_provider_calls=0,mail_synced_until=NULL
 		WHERE id=$1 AND account_id=$2 AND status='active' AND revision=$4 AND mail_import_revision IS DISTINCT FROM revision`,
@@ -309,7 +325,7 @@ func (s *Service) executeMailImport(ctx context.Context, job *importRun, args Ma
 	}
 	limit := min(100, composio.MailImportMaxMessages-progress.read)
 	page, err := appProviderCall(ctx, s, job, provider, func(callCtx context.Context) (composio.MailImportPage, error) {
-		return provider.FetchMailImportPage(callCtx, job.UpstreamConnectionID, job.Provider, composio.MailImportPageOptions{Start: args.Start, End: args.End, Cursor: progress.cursor, Limit: limit, BeforeProviderCall: func(ctx context.Context, _ string) error { return s.requireCurrentMailImport(ctx, job) }})
+		return s.fetchMailImportPage(callCtx, job.UpstreamConnectionID, job.Provider, composio.MailImportPageOptions{Start: args.Start, End: args.End, Cursor: progress.cursor, Limit: limit, BeforeProviderCall: func(ctx context.Context, _ string) error { return s.requireCurrentMailImport(ctx, job) }})
 	})
 	if err != nil {
 		return true, s.handleMailProviderError(ctx, job, err)

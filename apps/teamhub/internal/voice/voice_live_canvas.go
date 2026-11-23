@@ -75,7 +75,11 @@ func (s *Service) openVoiceLiveEmailCanvas(ctx context.Context, session voiceliv
 	if voicelive.DecodeArguments(request.Arguments, &args) != nil {
 		return "", voicelive.ErrInvalid
 	}
-	canvas, problem := voicelive.EmailCanvas(args)
+	target, output, err := s.voiceLiveEmailCanvasTarget(ctx, session, args.App)
+	if output != "" || err != nil {
+		return output, err
+	}
+	canvas, problem := voicelive.EmailCanvas(args, target)
 	if problem != "" {
 		return voicelive.ErrorOutput(problem), nil
 	}
@@ -87,6 +91,39 @@ func (s *Service) openVoiceLiveEmailCanvas(ctx context.Context, session voiceliv
 		"status": "opened", "document_id": created.DocumentID, "revision_id": created.RevisionID,
 		"next": "First tell the user in one short sentence what the email says: its subject and main points, in your own words. Then say it is open beside the chat for them to change, and only then ask for anything missing, such as a recipient.",
 	}), nil
+}
+
+// voiceLiveEmailCanvasTarget picks the mail app a new email canvas is sent
+// from: the one the user named, else Feishu Mail when it is the only mail
+// app with an account the Agent may use, else Gmail.
+func (s *Service) voiceLiveEmailCanvasTarget(ctx context.Context, session voicelive.Session, named string) (string, string, error) {
+	switch named {
+	case voicelive.EmailCanvasGmail, voicelive.EmailCanvasFeishu:
+		return named, "", nil
+	case "":
+	default:
+		return "", "", voicelive.ErrInvalid
+	}
+	_, token, err := s.voiceLiveAgent(ctx, session)
+	if errors.Is(err, errVoiceLiveAgentUnavailable) {
+		return "", voicelive.ErrorOutput("agent_unavailable"), nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	apps, err := s.agentConnectedApps.List(ctx, token)
+	if err != nil {
+		return "", "", err
+	}
+	gmail, feishu := false, false
+	for _, app := range apps {
+		gmail = gmail || app.AppKey == voicelive.EmailCanvasGmail
+		feishu = feishu || app.AppKey == voicelive.EmailCanvasFeishu
+	}
+	if feishu && !gmail {
+		return voicelive.EmailCanvasFeishu, "", nil
+	}
+	return voicelive.EmailCanvasGmail, "", nil
 }
 
 // openVoiceLiveCanvas creates a Document the Agent owns in the call's Room
@@ -237,7 +274,7 @@ func (s *Service) voiceLiveCanvasBodySince(ctx context.Context, revisionID strin
 // means another change landed first, after which part of it may be made.
 func (s *Service) applyVoiceLiveEmailEdit(ctx context.Context, session voicelive.Session, request teamhubinternal.VoiceLiveToolCall,
 	principal agentcredential.Principal, canvas voiceLiveCanvasState, args voicelive.EditEmailCanvasArguments, attempt int) (string, bool, error) {
-	_, header, problem := voicelive.EditedEmailCanvas(canvas.fields, canvas.text, args)
+	_, header, problem := voicelive.EditedEmailCanvas(canvas.target, canvas.fields, canvas.text, args)
 	if problem != "" {
 		return voicelive.ErrorOutput(problem), false, nil
 	}
@@ -434,6 +471,8 @@ func voiceLiveCanvasError(err error) (string, bool) {
 
 // voiceLiveCanvasState is one revision of a canvas as the Agent reads it.
 type voiceLiveCanvasState struct {
+	// target is the mail app the canvas is sent from.
+	target                                            string
 	documentID, revisionID, firstBlockID, lastBlockID string
 	hasMedia                                          bool
 	fields                                            map[string]string
@@ -634,11 +673,11 @@ func (s *Service) voiceLiveCanvas(ctx context.Context, principal agentcredential
 	runs, attachmentFirst, attachments, mediaInText := voiceLiveCanvasBody(idBlocks.Blocks)
 	body, text := voiceLiveCanvasText(string(state.markdown))
 	header, ok := agentconnectedapps.ReadCanvasHeader(headerBlocks.Blocks)
-	if !ok || header.Target != "gmail" {
+	if !ok || !agentconnectedapps.IsMailCanvasTarget(header.Target) {
 		return voiceLiveCanvasState{}, errNotEmailCanvas
 	}
 	return voiceLiveCanvasState{
-		documentID: documentID, revisionID: state.revisionID, firstBlockID: state.firstBlockID, lastBlockID: state.lastBlockID,
+		target: header.Target, documentID: documentID, revisionID: state.revisionID, firstBlockID: state.firstBlockID, lastBlockID: state.lastBlockID,
 		hasMedia: state.hasMedia, fields: header.Fields, body: body,
 		text:     text,
 		textRuns: runs, attachmentFirst: attachmentFirst, attachments: attachments, mediaInText: mediaInText,

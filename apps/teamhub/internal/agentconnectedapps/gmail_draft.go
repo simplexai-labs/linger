@@ -248,6 +248,52 @@ func (s *Service) SaveGmailDraft(ctx context.Context, token, connectionID, draft
 	return draft, nil
 }
 
+// MailCanvasTargetOf returns the mail canvas target of a connection the Agent
+// may use: the canvas its draft is built from must name that mail app.
+func (s *Service) MailCanvasTargetOf(ctx context.Context, token, connectionID string) (string, error) {
+	if !connectionIDPattern.MatchString(strings.TrimSpace(connectionID)) {
+		return "", ErrInvalid
+	}
+	if s == nil || s.pool == nil || s.contexts == nil || s.connections == nil {
+		return "", unavailableError(nil)
+	}
+	connection, err := s.authorizeExecution(ctx, token, strings.TrimSpace(connectionID))
+	if err != nil {
+		return "", err
+	}
+	if !IsMailCanvasTarget(connection.AppKey) {
+		return "", ErrInvalid
+	}
+	return connection.AppKey, nil
+}
+
+// saveFeishuDraft saves a whole message as a draft on a Feishu Mail
+// connection the Agent may use, under the same checks as SaveGmailDraft.
+func (s *Service) saveFeishuDraft(ctx context.Context, token, connectionID, draftID string, raw []byte) (draft composio.GmailDraft, err error) {
+	saver, ok := s.provider.(nativeDraftSaver)
+	if !ok || len(raw) == 0 || len(draftID) > 256 {
+		return composio.GmailDraft{}, unavailableError(nil)
+	}
+	connection, err := s.authorizeExecution(ctx, token, connectionID)
+	if err != nil {
+		return composio.GmailDraft{}, err
+	}
+	if connection.AppKey != MailCanvasFeishu {
+		return composio.GmailDraft{}, ErrInvalid
+	}
+	defer func() {
+		s.logCall(ctx, "mail/canvas-draft", connection, "", "", callOutcome(err))
+	}()
+	if err = s.checkConnectionActive(ctx, connection); err != nil {
+		return composio.GmailDraft{}, err
+	}
+	saved, err := saver.SaveDraftRaw(ctx, connection.UpstreamConnectionID, draftID, raw)
+	if err != nil {
+		return composio.GmailDraft{}, uncertainExecutionError(err)
+	}
+	return composio.GmailDraft{DraftID: saved}, nil
+}
+
 // AgentPrincipal returns who is calling, for reading the canvas they draft from.
 func (s *Service) AgentPrincipal(ctx context.Context, token string) (agentauth.Authorization, error) {
 	if s == nil || s.contexts == nil {

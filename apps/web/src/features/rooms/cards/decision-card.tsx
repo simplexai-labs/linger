@@ -198,7 +198,9 @@ function ApprovalDecision({
   const write = card.connector_write;
   const email =
     write?.kind === "message" &&
-    (write.app === "gmail" || write.app === "outlook")
+    (write.app === "gmail" ||
+      write.app === "outlook" ||
+      write.app === "feishu_mail")
       ? write.message
       : undefined;
   const canDecide =

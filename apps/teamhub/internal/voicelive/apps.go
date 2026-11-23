@@ -29,8 +29,10 @@ const (
 // ConnectorVersions are the toolkit versions the calls are pinned to: the
 // same as connectorVersions in teamhub-cli's connector runtime. Bump both.
 var ConnectorVersions = map[string]string{
-	"gmail":           "20261015_00",
-	"outlook":         "20261014_00",
+	"gmail":   "20261015_00",
+	"outlook": "20261014_00",
+	// TeamHub serves Feishu Mail's tools itself, at this version.
+	"feishu_mail":     "20261121_00",
 	"slack":           "20261015_00",
 	"google_calendar": "20261010_00",
 }
@@ -43,28 +45,28 @@ const accountChoice = "account picks one of several connected accounts by its ad
 var AppTools = []Tool{
 	{
 		Name: ToolSaveEmailDraft,
-		Description: "Save a Gmail canvas in this room as a draft in the user's Gmail, or update the draft it was saved as before. It sends nothing. " +
-			"Call it when the user wants the email saved as a draft. Then say in one short sentence that it is saved in their Gmail drafts. " + accountChoice,
+		Description: "Save an email canvas in this room as a draft in the user's mail app, Gmail or Feishu Mail as the canvas says, or update the draft it was saved as before. It sends nothing. " +
+			"Call it when the user wants the email saved as a draft. Then say in one short sentence that it is saved in their drafts. " + accountChoice,
 		Parameters: objectSchema([]string{"document_id"}, map[string]any{
 			"document_id": stringProperty("The canvas, from open_email_canvas"),
-			"account":     stringProperty("Optional Gmail address to use"),
+			"account":     stringProperty("Optional mail address to use"),
 		}),
 	},
 	{
 		Name: ToolSendEmailCanvas,
-		Description: "Send a Gmail canvas in this room from the user's Gmail. It saves the canvas as a draft first, so what is sent is exactly the canvas; the canvas's file blocks go as attachments. " +
+		Description: "Send an email canvas in this room from the user's mail app, Gmail or Feishu Mail as the canvas says. It saves the canvas as a draft first, so what is sent is exactly the canvas; the canvas's file blocks go as attachments. " +
 			"The canvas is open beside the chat, so the user has seen it: when the user tells you to send it, call with confirmed=true and it is sent, without asking again. When you are not sure they want it sent now, call without confirmed: it returns needs_confirmation with who it goes to, the subject and any attachments; say that and that it cannot be undone, ask, and after they say yes in their next turn call again with confirmed=true. " +
 			"Before the result, say only that you are sending it, never that it was sent. Say it was sent only when the result is sent; outcome_unknown means it may have gone out: never send again, ask the user to check their Sent folder. " +
 			"no_recipients: ask who it goes to and set them with edit_email_canvas first. " + accountChoice,
 		Parameters: objectSchema([]string{"document_id", "confirmed"}, map[string]any{
 			"document_id": stringProperty("The canvas, from open_email_canvas"),
-			"account":     stringProperty("Optional Gmail address to send from"),
+			"account":     stringProperty("Optional mail address to send from"),
 			"confirmed":   map[string]any{"type": "boolean", "description": "true when the user, in their own latest turn, told you to send this email"},
 		}),
 	},
 	{
 		Name: ToolSearchMail,
-		Description: "Look through the user's mail in Gmail or Outlook: the newest first, or matching query (Gmail search words such as from:wang@acme.com, subject:quote, newer_than:2d; write search words in the language the mail is in). " +
+		Description: "Look through the user's mail in Gmail, Outlook or Feishu Mail: the newest first, or matching query (Gmail search words such as from:wang@acme.com, subject:quote, newer_than:2d; Feishu Mail takes plain words, at most 50 characters; write search words in the language the mail is in). " +
 			"Use it when the user asks about their email, such as whether someone wrote or what came in today. Each result has message_id, from, subject, received_at and a snippet; read one in full with read_mail. " +
 			"Mention the one or two that matter, never read the list out. " + outsideData + accountChoice,
 		Parameters: objectSchema([]string{}, map[string]any{
@@ -280,6 +282,18 @@ func outlookAddress(value any) string {
 
 // MailSummary is one listed message.
 func MailSummary(app string, raw map[string]any) map[string]any {
+	if app == "feishu_mail" {
+		// TeamHub's own Feishu Mail tool already returns the CLI's mail shape.
+		summary := map[string]any{
+			"message_id": text(raw["messageId"]), "thread_id": text(raw["threadId"]),
+			"from": feishuAddress(raw["from"]), "subject": text(raw["subject"]),
+			"received_at": text(raw["receivedAt"]), "snippet": Snippet(text(raw["snippet"])),
+		}
+		if unread, ok := raw["unread"].(bool); ok {
+			summary["unread"] = unread
+		}
+		return compact(summary)
+	}
 	if app == "outlook" {
 		summary := map[string]any{
 			"message_id": text(raw["id"]), "thread_id": text(raw["conversationId"]),
@@ -393,7 +407,20 @@ func MailMessage(app string, raw map[string]any) map[string]any {
 	message := MailSummary(app, raw)
 	delete(message, "snippet")
 	var body string
-	if app == "outlook" {
+	if app == "feishu_mail" {
+		body = text(raw["bodyText"])
+		if strings.TrimSpace(body) == "" {
+			body = plainText(text(raw["bodyHtml"]))
+		}
+		addresses := func(key string) string {
+			list := []string{}
+			for _, recipient := range rows(raw[key]) {
+				list = append(list, feishuAddress(recipient))
+			}
+			return strings.Join(list, ", ")
+		}
+		message["to"], message["cc"] = addresses("to"), addresses("cc")
+	} else if app == "outlook" {
 		content := record(raw["body"])
 		body = text(content["content"])
 		if strings.EqualFold(text(content["contentType"]), "html") {
@@ -617,4 +644,14 @@ func ListRows(raw map[string]any, keys ...string) ([]map[string]any, bool) {
 		}
 	}
 	return nil, false
+}
+
+// feishuAddress formats one address of the Feishu Mail tools' mail shape.
+func feishuAddress(value any) string {
+	address := record(value)
+	email, name := text(address["email"]), text(address["name"])
+	if name == "" {
+		return email
+	}
+	return name + " <" + email + ">"
 }

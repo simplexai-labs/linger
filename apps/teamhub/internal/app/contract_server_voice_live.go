@@ -13,7 +13,7 @@ import (
 )
 
 func (a *App) getVoiceLiveContext(c *gin.Context) {
-	response, err := a.voice.LiveContext(c.Request.Context(), c.Param("voiceSessionId"), a.connectedAppsConfigured())
+	response, err := a.voice.LiveContext(c.Request.Context(), c.Param("voiceSessionId"), a.connectionProvidersConfigured())
 	if a.writeVoiceLiveError(c, "read live Voice context", err) {
 		return
 	}

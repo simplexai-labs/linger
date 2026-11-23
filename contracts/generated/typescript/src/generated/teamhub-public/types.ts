@@ -6047,7 +6047,8 @@ export interface components {
         | "outlook"
         | "google_calendar"
         | "outlook_calendar"
-        | "slack";
+        | "slack"
+        | "feishu_mail";
     };
     /** @description A Routine has exactly one of cadence and listener. A listener Routine is AnotherMe's app listener; it can only be paused and resumed, and goes away when the Human revokes AnotherMe's access to the app. */
     Routine: {
@@ -7892,6 +7893,8 @@ export interface components {
         | "failed"
         | "unknown"
         | "declined";
+      /** @description The canvas's mail app, gmail or feishu_mail; Send must use a connection of this app. */
+      target?: string;
       subject: string;
       to: string;
       error?: string;

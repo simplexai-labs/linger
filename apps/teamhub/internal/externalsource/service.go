@@ -62,6 +62,7 @@ type Provider interface {
 
 type Service struct {
 	managed             *managedCatalog
+	feishu              *feishuCatalog
 	pool                *pgxpool.Pool
 	provider            Provider
 	contextProvider     *composio.Client
@@ -200,22 +201,25 @@ func (s *Service) CreateConnection(ctx context.Context, accountID, appKey string
 	if !exists || app.Availability != AppAvailabilityAvailable {
 		return Connection{}, ErrUnavailable
 	}
-	adapter, err := s.connectionAdapter(appKey)
-	if err != nil {
+	if _, err := s.connectionAdapter(appKey); err != nil {
 		return Connection{}, err
 	}
+	toolkit := toolkitForApp(appKey)
 	// Resolve the shared Auth Config before pinning a connection transaction.
 	// The transaction then serializes retries without nested pool acquisition.
-	managedConfigID, err := s.ensureAuthConfig(ctx, appKey)
-	if err != nil {
-		return Connection{}, classifyConnectionAuthError(err)
+	managedConfigID := ""
+	if !app.selfAuthorized {
+		var err error
+		if managedConfigID, err = s.ensureAuthConfig(ctx, appKey); err != nil {
+			return Connection{}, classifyConnectionAuthError(err)
+		}
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return Connection{}, err
 	}
 	defer tx.Rollback(ctx)
-	link, err := s.createManagedLinkInTx(ctx, tx, accountID, adapter.toolkit, managedConfigID)
+	link, err := s.createLinkInTx(ctx, tx, accountID, appKey, managedConfigID)
 	if err != nil {
 		return Connection{}, classifyConnectionAuthError(mapConnectionAdapterError(err))
 	}
@@ -233,7 +237,7 @@ func (s *Service) CreateConnection(ctx context.Context, accountID, appKey string
 		) VALUES($1,$2,$3,$4,'pending',$5,$6,nullif($7,''),$8,nullif($9,''),now()+$10::interval)
 		RETURNING created_at,updated_at`,
 		connection.ID, connection.AccountID, connection.Provider, connection.UpstreamConnectionID,
-		link.ExpiresAt, connection.ConnectURL, connection.IdentityLabel, adapter.toolkit, link.AuthConfigID, durationInterval(connectingPoll),
+		link.ExpiresAt, connection.ConnectURL, connection.IdentityLabel, toolkit, link.AuthConfigID, durationInterval(connectingPoll),
 	).Scan(&connection.CreatedAt, &connection.UpdatedAt)
 	if err != nil {
 		return Connection{}, mapDatabaseError(err)

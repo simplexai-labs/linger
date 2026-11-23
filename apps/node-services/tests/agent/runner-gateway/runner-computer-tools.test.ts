@@ -144,6 +144,18 @@ describe("Live native Computer tools", () => {
       ),
     ).toBe(false);
   });
+  it("passes a Feishu Mail call to the owner's Computer", async () => {
+    const { gateway, command } = await connect();
+    void gateway.callComputerTool({
+      ...target,
+      server: "feishu_mail",
+      toolName: "status",
+      arguments: {},
+    });
+    const request = await command();
+    expect(request.server).toBe("feishu_mail");
+    expect(request.tool_name).toBe("status");
+  });
   it("gives the Computer the deadline the caller asks for", async () => {
     const { gateway, command } = await connect();
     void gateway.callComputerTool({ ...target, deadlineMs: 120_000 });

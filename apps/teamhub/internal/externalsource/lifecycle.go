@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/composio"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/feishu"
 	idgen "github.com/simplexai-labs/linger/apps/teamhub/internal/ids"
 )
 
@@ -271,6 +272,13 @@ func connectionIdentityFailurePolicy(provider string, err error) (code string, r
 	var limited *composio.RateLimitError
 	if errors.As(err, &limited) {
 		return "provider_rate_limited", max(time.Minute, limited.RetryAfter), false
+	}
+	var feishuLimited *feishu.RateLimitError
+	if errors.As(err, &feishuLimited) {
+		return "provider_rate_limited", max(time.Minute, feishuLimited.RetryAfter), false
+	}
+	if feishu.IsAuthFailure(err) {
+		return "provider_auth_failed", 6 * time.Hour, true
 	}
 	if provider == "discord" && errors.Is(err, composio.ErrDiscordGuildRequired) {
 		return "discord_guild_required", 6 * time.Hour, false

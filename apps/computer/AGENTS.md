@@ -91,6 +91,15 @@
 - A wire request never supplies a local path, executable, environment, or
   credential. Resolve canonical workspace grants before invoking an
   installed Runtime provider.
+- The `feishu_mail` Computer tool (`localtools.FeishuMail`) runs the owner's
+  own lark-cli for TeamHub's Feishu Mail. It finds lark-cli on PATH or where
+  its installers put it, and runs the native binary beside npm's Node
+  launcher, so Node need not be on a short Daemon PATH. A request names only a
+  method and an API path under `/open-apis/mail/v1/user_mailboxes/me`, never
+  lark-cli's other Feishu scopes. A started login's device code stays in the
+  Daemon's memory under the caller's login name, so a restart drops it and
+  the owner connects again. Results carry lark-cli's error type, subtype and
+  Feishu code, never a decision made from its message.
 - Do not commit runtime state, PID files, sockets, logs, credentials, or build
   output.
 

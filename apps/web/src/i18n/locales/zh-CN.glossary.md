@@ -20,6 +20,7 @@ elsewhere.
 | Base URL, tokens, Dense, MoE         | Model terms people meet in provider documentation. |
 | Local Computer                       | Only when it names the background program.         |
 | Read All, Write All                  | Permission names in Composio's dashboard.          |
+| Lark, lark-cli                       | Names in the Lark and Feishu developer tools.      |
 | Issue                                | Linear's word for a work item.                     |
 
 ## Translated
@@ -34,6 +35,7 @@ elsewhere.
 | Chat                          | 对话                       |                                                   |
 | Library                       | 资料库                     |                                                   |
 | Connectors                    | 连接器                     |                                                   |
+| Feishu                        | 飞书                       | The product; Feishu Mail is 飞书邮箱.             |
 | Settings                      | 设置                       |                                                   |
 | Profile                       | 个人资料                   |                                                   |
 | Security                      | 安全                       |                                                   |

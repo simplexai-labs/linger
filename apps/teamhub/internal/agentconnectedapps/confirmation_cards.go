@@ -15,8 +15,9 @@ import (
 // draftReadTool reads the draft a send-draft call sends. The call names only
 // the draft, so TeamHub reads it to show what will be sent.
 var draftReadTool = map[string]string{
-	"GMAIL_SEND_DRAFT":   "GMAIL_GET_DRAFT",
-	"OUTLOOK_SEND_DRAFT": "OUTLOOK_GET_MESSAGE",
+	"GMAIL_SEND_DRAFT":       "GMAIL_GET_DRAFT",
+	"OUTLOOK_SEND_DRAFT":     "OUTLOOK_GET_MESSAGE",
+	"FEISHU_MAIL_SEND_DRAFT": "FEISHU_MAIL_GET_DRAFT",
 }
 
 const (
@@ -59,7 +60,7 @@ func describeConfirmation(connection externalsource.AgentToolConnection, action 
 			To: to, Cc: strs(args, "cc_emails"), Bcc: strs(args, "bcc_emails"), Subject: str(args, "subject"),
 			Body: truncate(str(args, "body"), maxCardBody), Format: htmlOrText(args["is_html"]),
 		}
-	case "GMAIL_SEND_DRAFT", "OUTLOOK_SEND_DRAFT":
+	case "GMAIL_SEND_DRAFT", "OUTLOOK_SEND_DRAFT", "FEISHU_MAIL_SEND_DRAFT":
 		// The draft's content is read and filled in by the caller.
 		card.Kind, card.Title = "message", "Send an email"
 	case "SLACK_SEND_MESSAGE":
@@ -104,6 +105,17 @@ func describeConfirmation(connection externalsource.AgentToolConnection, action 
 // readDraft reads the draft a send-draft call sends, in the shape the card shows.
 func (s *Service) readDraft(ctx context.Context, connection externalsource.AgentToolConnection, action confirmationAction) (*typedcard.ConnectorWriteMessage, error) {
 	read := draftReadTool[action.ToolSlug]
+	if action.ToolSlug == "FEISHU_MAIL_SEND_DRAFT" {
+		data, err := s.readTool(ctx, connection, read, action.ToolVersion, map[string]any{"draft_id": str(action.Arguments, "draft_id")})
+		if err != nil {
+			return nil, err
+		}
+		message, ok := data["message"].(map[string]any)
+		if !ok {
+			return nil, errDraftUnreadable
+		}
+		return feishuDraftMessage(message), nil
+	}
 	if action.ToolSlug == "GMAIL_SEND_DRAFT" {
 		data, err := s.readTool(ctx, connection, read, action.ToolVersion, map[string]any{"draft_id": str(action.Arguments, "draft_id"), "format": "full"})
 		if err != nil {
@@ -130,6 +142,29 @@ func (s *Service) readDraft(ctx context.Context, connection externalsource.Agent
 		message.Attachments = fileNames(items)
 	}
 	return message, nil
+}
+
+// feishuDraftMessage reads a Feishu draft, which TeamHub's own tool already
+// returns in the CLI's mail shape.
+func feishuDraftMessage(message map[string]any) *typedcard.ConnectorWriteMessage {
+	addresses := func(key string) []string {
+		list, _ := message[key].([]any)
+		emails := make([]string, 0, len(list))
+		for _, item := range list {
+			if entry, ok := item.(map[string]any); ok && str(entry, "email") != "" {
+				emails = append(emails, str(entry, "email"))
+			}
+		}
+		return emails
+	}
+	draft := &typedcard.ConnectorWriteMessage{
+		To: addresses("to"), Cc: addresses("cc"), Bcc: addresses("bcc"), Subject: str(message, "subject"),
+		Body: truncate(str(message, "bodyText"), maxCardBody), Format: "text", Attachments: fileNames(message["attachments"]),
+	}
+	if html := str(message, "bodyHtml"); html != "" {
+		draft.Body, draft.Format = truncate(html, maxCardBody), "html"
+	}
+	return draft
 }
 
 func gmailDraftMessage(message map[string]any) (*typedcard.ConnectorWriteMessage, error) {

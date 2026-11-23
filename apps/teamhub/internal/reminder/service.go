@@ -23,8 +23,9 @@ import (
 )
 
 type Service struct {
-	pool *pgxpool.Pool
-	now  func() time.Time
+	pool       *pgxpool.Pool
+	now        func() time.Time
+	feishuMail FeishuMailFeed
 }
 
 func New(pool *pgxpool.Pool) *Service {

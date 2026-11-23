@@ -12,6 +12,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/assignment"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/clicredential"
 	lingercontext "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/context"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/localtools"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/mcpproxy"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/registration"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport"
@@ -92,19 +93,21 @@ type localToolPrewarmer interface {
 }
 
 type Daemon struct {
-	controlPlane        transport.ControlPlane
-	identityStore       transport.IdentityStore
-	executor            provider.Executor
-	protocolVersion     string
-	computerID          string
-	operationResolver   OperationResolver
-	enabledRuntimes     []string
-	ledger              OperationLedgerStore
-	registrations       registration.Store
-	assignments         assignment.Store
-	contextViews        *lingercontext.ViewStore
-	localSkills         LocalSkillCatalog
-	localTools          LocalToolBinder
+	controlPlane      transport.ControlPlane
+	identityStore     transport.IdentityStore
+	executor          provider.Executor
+	protocolVersion   string
+	computerID        string
+	operationResolver OperationResolver
+	enabledRuntimes   []string
+	ledger            OperationLedgerStore
+	registrations     registration.Store
+	assignments       assignment.Store
+	contextViews      *lingercontext.ViewStore
+	localSkills       LocalSkillCatalog
+	localTools        LocalToolBinder
+	// feishuMail runs TeamHub's Feishu Mail calls through the owner's lark-cli.
+	feishuMail          *localtools.FeishuMail
 	browserConnections  BrowserConnections
 	computerPermissions ComputerPermissions
 	owners              []ComputerOwner
@@ -281,6 +284,7 @@ func New(options Options) (*Daemon, error) {
 		contextViews:         options.ContextViews,
 		localSkills:          options.LocalSkills,
 		localTools:           options.LocalTools,
+		feishuMail:           localtools.NewFeishuMail(),
 		browserConnections:   options.BrowserConnections,
 		computerPermissions:  options.ComputerPermissions,
 		owners:               options.Owners,

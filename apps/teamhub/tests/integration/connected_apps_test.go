@@ -135,13 +135,21 @@ func TestConnectedAppsCatalogAndGenericConnection(t *testing.T) {
 		} `json:"apps"`
 	}
 	decode(t, body, &catalog)
-	wantKeys := []string{"gmail", "outlook", "googledrive", "slack", "discord", "facebook", "github", "google_meet", "google_calendar", "notion", "linear", "figma", "canva", "higgsfield", "fal_ai", "granola", "calendly", "outlook_calendar"}
+	wantKeys := []string{"gmail", "outlook", "feishu_mail", "googledrive", "slack", "discord", "facebook", "github", "google_meet", "google_calendar", "notion", "linear", "figma", "canva", "higgsfield", "fal_ai", "granola", "calendly", "outlook_calendar"}
 	if len(catalog.Apps) != len(wantKeys) {
 		t.Fatalf("catalog apps=%d want=%d body=%s", len(catalog.Apps), len(wantKeys), body)
 	}
 	for index, want := range wantKeys {
 		if catalog.Apps[index].Key != want {
 			t.Fatalf("catalog[%d]=%q want=%q", index, catalog.Apps[index].Key, want)
+		}
+		// Feishu Mail runs through owners' Computers, not Composio, and this
+		// app reaches no Computer.
+		if want == "feishu_mail" {
+			if catalog.Apps[index].Availability != "unavailable" {
+				t.Fatalf("feishu_mail is available without a way to reach Computers: %s", body)
+			}
+			continue
 		}
 		// A configured Composio key makes every app in the fixed list available.
 		if catalog.Apps[index].Availability != "available" {

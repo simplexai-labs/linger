@@ -14,6 +14,10 @@ import { RichMessage, useT } from "@/i18n/use-translation";
 import { AppLogoTile } from "./app-logo";
 import { externalAppsQueryOptions } from "./connected-apps-queries";
 import { connectorMessages as m } from "./connectors.messages";
+import {
+  FeishuScopesGuide,
+  isFeishuScopesNotEnabled,
+} from "./feishu-scopes-guide";
 import { openOAuthUrl } from "./oauth-popup";
 import { ComposioKeyForm } from "./provider-key-form";
 import { ComposioKeyGuide } from "./provider-key-guide";
@@ -96,7 +100,9 @@ export function ConnectAppStatus({
   const t = useT();
   return (
     <>
-      {connection.error && !isComposioKeyRejected(connection.error) ? (
+      {isFeishuScopesNotEnabled(connection.error) ? (
+        <FeishuScopesGuide className={className} error={connection.error} />
+      ) : connection.error && !isComposioKeyRejected(connection.error) ? (
         <p className={cn("text-xs text-app-danger", className)} role="alert">
           {connection.error instanceof Error
             ? connection.error.message

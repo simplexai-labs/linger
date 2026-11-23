@@ -71,7 +71,7 @@ func (a *App) writeMailCanvasError(c *gin.Context, err error) bool {
 	case errors.Is(err, mailcanvas.ErrForbidden):
 		a.writeError(c, http.StatusForbidden, "FORBIDDEN", "You cannot send or change this email.")
 	case errors.Is(err, mailcanvas.ErrConnectionUnavailable):
-		a.writeError(c, http.StatusForbidden, "FORBIDDEN", "The Gmail account is unavailable. Reconnect it before sending.")
+		a.writeError(c, http.StatusForbidden, "FORBIDDEN", "The mail account is unavailable. Reconnect it before sending.")
 	default:
 		return false
 	}

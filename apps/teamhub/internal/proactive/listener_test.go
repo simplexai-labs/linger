@@ -27,6 +27,7 @@ func TestListenerAppsHearOnlyWhatIsNewsToTheHuman(t *testing.T) {
 		{"outlook_calendar", 0, reminder.ListenerEvent{Source: "outlook_calendar", EventKind: "cancelled"}, true},
 		{"slack", 0, reminder.ListenerEvent{Source: "slack", EventKind: "message", IsMention: true}, true},
 		{"slack", 0, reminder.ListenerEvent{Source: "slack", EventKind: "message"}, false},
+		{"feishu_mail", 0, reminder.ListenerEvent{Source: "feishu_mail", EventKind: "message"}, true},
 	} {
 		specs := listenerApps[check.provider].specs
 		if check.ordinal >= len(specs) {
@@ -43,6 +44,10 @@ func TestListenerEventNamesOneMatterPerThreadOrCalendarEvent(t *testing.T) {
 	if !ok || mail.ExternalID != "t1" || mail.State != "m2" || mail.Kind != "new_mail" ||
 		mail.Summary != "Message ID: m2\nThread ID: t1\nLabels: INBOX, UNREAD\nFrom: lisa@example.com\nTo: owner@example.com\nSubject: Quote confirmation" {
 		t.Fatalf("mail=%+v ok=%v", mail, ok)
+	}
+	feishuMail, ok := EventFromListener(reminder.ListenerEvent{Source: "feishu_mail", EventID: "f1", MessageID: "f1", ThreadID: "ft1", From: "li@example.com", Subject: "Quote", Snippet: "Signed"})
+	if !ok || feishuMail.Kind != "new_mail" || feishuMail.ExternalID != "ft1" || feishuMail.State != "f1" {
+		t.Fatalf("Feishu Mail event = %+v", feishuMail)
 	}
 	outlook, ok := EventFromListener(reminder.ListenerEvent{Source: "outlook", EventID: "o1", MessageID: "o1", From: "Director Wang <wang@partner.cn>", Subject: "Contract", Snippet: "Confirm by Thursday"})
 	if !ok || outlook.ExternalID != "o1" || outlook.Source != "outlook" || outlook.Summary != "Message ID: o1\nFrom: Director Wang <wang@partner.cn>\nSubject: Contract\nBody: Confirm by Thursday" {

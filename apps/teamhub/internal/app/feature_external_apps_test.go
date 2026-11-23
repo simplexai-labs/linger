@@ -28,7 +28,7 @@ func TestEffectiveResourcesDigestFollowsConnectedApps(t *testing.T) {
 	if calendar := agentregistry.EffectiveResourcesDigest(skills, true, []string{"gmail", "google_calendar"}); calendar == gmail {
 		t.Fatal("connecting another app keeps the digest")
 	}
-	if (&App{}).connectedAppsConfigured() {
+	if (&App{}).connectionProvidersConfigured() {
 		t.Fatal("an App without external sources has no connected apps")
 	}
 }

@@ -2,6 +2,7 @@ package agentconnectedapps
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"time"
@@ -84,6 +85,12 @@ func (s *Service) acquireDraftLease(ctx context.Context, connectionID, holder st
 
 // SaveGmailCanvasDraft binds the saved draft to the exact canvas source it used.
 func (s *Service) SaveGmailCanvasDraft(ctx context.Context, token, connectionID, draftID string, built CanvasDraft) (composio.GmailDraft, error) {
+	return s.SaveMailCanvasDraft(ctx, token, connectionID, MailCanvasGmail, draftID, built)
+}
+
+// SaveMailCanvasDraft saves a canvas built for target as a draft of the
+// connection's mail app and binds it to the exact canvas source it used.
+func (s *Service) SaveMailCanvasDraft(ctx context.Context, token, connectionID, target, draftID string, built CanvasDraft) (composio.GmailDraft, error) {
 	if built.DocumentID == "" || built.SourceDigest == "" {
 		return composio.GmailDraft{}, ErrInvalid
 	}
@@ -103,7 +110,18 @@ func (s *Service) SaveGmailCanvasDraft(ctx context.Context, token, connectionID,
 		_ = store.New(s.pool).ReleaseGmailCanvasDraftLease(release, store.ReleaseGmailCanvasDraftLeaseParams{ConnectionID: connectionID, Holder: holder})
 	}()
 	upload, cancel := context.WithTimeout(ctx, draftLeaseDuration-time.Minute)
-	draft, err := s.SaveGmailDraft(upload, token, connectionID, draftID, built.Raw)
+	var draft composio.GmailDraft
+	var err error
+	if target == MailCanvasFeishu {
+		raw, decodeErr := base64.URLEncoding.DecodeString(built.Raw)
+		if decodeErr != nil {
+			cancel()
+			return composio.GmailDraft{}, ErrInvalid
+		}
+		draft, err = s.saveFeishuDraft(upload, token, connectionID, draftID, raw)
+	} else {
+		draft, err = s.SaveGmailDraft(upload, token, connectionID, draftID, built.Raw)
+	}
 	cancel()
 	if err != nil {
 		return draft, err
@@ -152,8 +170,12 @@ func (s *Service) recordCanvasSend(ctx context.Context, connection externalsourc
 }
 
 func (s *Service) checkedCanvasSource(ctx context.Context, connection externalsource.AgentToolConnection, action confirmationAction) (canvasSend, error) {
-	if action.ToolSlug != "GMAIL_SEND_DRAFT" || s.pool == nil {
+	if action.ToolSlug != "GMAIL_SEND_DRAFT" && action.ToolSlug != "FEISHU_MAIL_SEND_DRAFT" || s.pool == nil {
 		return canvasSend{}, nil
+	}
+	name, command := "Gmail", "gmail canvas-draft --update"
+	if action.ToolSlug == "FEISHU_MAIL_SEND_DRAFT" {
+		name, command = "Feishu Mail", "feishu-mail canvas-draft --update"
 	}
 	q := store.New(s.pool)
 	saved, err := q.GetGmailCanvasDraft(ctx, store.GetGmailCanvasDraftParams{ConnectionID: connection.ID, DraftID: str(action.Arguments, "draft_id")})
@@ -182,10 +204,10 @@ func (s *Service) checkedCanvasSource(ctx context.Context, connection externalso
 	}
 	current, err := s.canvasSource.SourceDigest(ctx, saved.TenantID, registration.AgentManagementID.String, saved.DocumentID)
 	if err != nil {
-		return canvasSend{}, &Error{Code: "invalid_input", Message: "The email canvas could not be checked. Update the Gmail draft from the canvas and request a new confirmation before sending.", cause: err}
+		return canvasSend{}, &Error{Code: "invalid_input", Message: "The email canvas could not be checked. Update the " + name + " draft from the canvas and request a new confirmation before sending.", cause: err}
 	}
 	if current != saved.SourceDigest || (action.CanvasSourceDigest != "" && current != action.CanvasSourceDigest) {
-		return canvasSend{}, &Error{Code: "invalid_input", Message: "The email canvas changed after the Gmail draft was saved. Update that draft with gmail canvas-draft --update and request a new send confirmation; the old draft was not sent.", Issues: []Issue{{Path: "draft_id", Code: "canvas_draft_stale", Message: "Update the draft from the current canvas, including its attachments, before sending."}}}
+		return canvasSend{}, &Error{Code: "invalid_input", Message: "The email canvas changed after the " + name + " draft was saved. Update that draft with " + command + " and request a new send confirmation; the old draft was not sent.", Issues: []Issue{{Path: "draft_id", Code: "canvas_draft_stale", Message: "Update the draft from the current canvas, including its attachments, before sending."}}}
 	}
 	return canvasSend{digest: current, documentID: saved.DocumentID}, nil
 }

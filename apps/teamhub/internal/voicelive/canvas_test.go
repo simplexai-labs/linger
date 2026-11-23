@@ -11,7 +11,7 @@ func TestEmailCanvasIsTheGmailCanvasShape(t *testing.T) {
 		To:      "amy@example.com； bob@example.org、",
 		Subject: " Next Wed  LA airport pickup\n",
 		Body:    "\nHi Amy,\n\nCan you pick me up at LAX at 9 am next Wednesday?\n",
-	})
+	}, "")
 	if problem != "" {
 		t.Fatalf("problem=%s", problem)
 	}
@@ -34,12 +34,12 @@ func TestEmailCanvasRefusesWhatTheModelMustFix(t *testing.T) {
 		{EmailCanvasArguments{Subject: " ", Body: "b"}, "missing_content"},
 		{EmailCanvasArguments{Subject: "s", Body: strings.Repeat("x", MaxEmailBodyRunes+1)}, "body_too_long"},
 	} {
-		if _, problem := EmailCanvas(check.args); problem != check.problem {
+		if _, problem := EmailCanvas(check.args, ""); problem != check.problem {
 			t.Fatalf("%+v: problem=%q, want %q", check.args, problem, check.problem)
 		}
 	}
 	// The title comes from the subject, bounded.
-	canvas, _ := EmailCanvas(EmailCanvasArguments{Subject: "Q3/Q4 " + strings.Repeat("plan", 60), Body: "b"})
+	canvas, _ := EmailCanvas(EmailCanvasArguments{Subject: "Q3/Q4 " + strings.Repeat("plan", 60), Body: "b"}, "")
 	if utf8.RuneCountInString(canvas.Title) > canvasTitleRunes || !strings.HasPrefix(canvas.Title, "Q3/Q4 ") {
 		t.Fatalf("title=%q", canvas.Title)
 	}
@@ -52,30 +52,42 @@ func TestEditedEmailCanvasKeepsWhatTheChangeLeavesOut(t *testing.T) {
 	}
 	body := "Hi Amy,\n\nCan you pick me up?\n"
 	subject, cc := "Next Wed LA airport pickup", "bob@example.org"
-	markdown, header, problem := EditedEmailCanvas(fields, body, EditEmailCanvasArguments{Subject: &subject, Cc: &cc})
+	markdown, header, problem := EditedEmailCanvas("", fields, body, EditEmailCanvasArguments{Subject: &subject, Cc: &cc})
 	wantHeader := "```\ncanvas: gmail\nto: amy@example.com\ncc: bob@example.org\nsubject: Next Wed LA airport pickup\nstatus: draft\nlink: https://mail.google.com/mail/#drafts\nexternal_id: r-1\nowner: me\n```\n"
 	if problem != "" || markdown != wantHeader+"\nHi Amy,\n\nCan you pick me up?\n" || header != wantHeader {
 		t.Fatalf("problem=%q markdown=%q header=%q", problem, markdown, header)
 	}
 	// A new body replaces the whole body; the header stays.
 	newBody := "Hi Amy,\n\n9 am next Wednesday, barbecue is on me!"
-	markdown, _, _ = EditedEmailCanvas(fields, body, EditEmailCanvasArguments{Body: &newBody})
+	markdown, _, _ = EditedEmailCanvas("", fields, body, EditEmailCanvasArguments{Body: &newBody})
 	if !strings.HasSuffix(markdown, "```\n\nHi Amy,\n\n9 am next Wednesday, barbecue is on me!\n") || !strings.Contains(markdown, "subject: Pickup\n") {
 		t.Fatalf("markdown=%q", markdown)
 	}
 	// A spoken name is not an address, and an empty body is no email.
 	name, empty := "Bob", " "
-	if _, _, problem := EditedEmailCanvas(fields, body, EditEmailCanvasArguments{To: &name}); problem != "invalid_recipients" {
+	if _, _, problem := EditedEmailCanvas("", fields, body, EditEmailCanvasArguments{To: &name}); problem != "invalid_recipients" {
 		t.Fatalf("name as recipient: %q", problem)
 	}
-	if _, _, problem := EditedEmailCanvas(fields, body, EditEmailCanvasArguments{Body: &empty}); problem != "missing_content" {
+	if _, _, problem := EditedEmailCanvas("", fields, body, EditEmailCanvasArguments{Body: &empty}); problem != "missing_content" {
 		t.Fatalf("empty body: %q", problem)
 	}
 	// The check covers the email after the change, so a canvas opened with
 	// no subject is still missing content when only a recipient changes.
 	untitled := map[string]string{"to": "amy@example.com", "subject": ""}
 	to := "carol@example.com"
-	if _, _, problem := EditedEmailCanvas(untitled, body, EditEmailCanvasArguments{To: &to}); problem != "missing_content" {
+	if _, _, problem := EditedEmailCanvas("", untitled, body, EditEmailCanvasArguments{To: &to}); problem != "missing_content" {
 		t.Fatalf("recipient change on an untitled canvas: %q", problem)
+	}
+}
+
+func TestFeishuMailCanvasKeepsItsTargetThroughEdits(t *testing.T) {
+	canvas, problem := EmailCanvas(EmailCanvasArguments{To: "li@example.com", Subject: "Quote", Body: "Hi Li"}, EmailCanvasFeishu)
+	if problem != "" || !strings.HasPrefix(canvas.Markdown, "```\ncanvas: feishu_mail\n") {
+		t.Fatalf("canvas = %q problem=%s", canvas.Markdown, problem)
+	}
+	subject := "Quote v2"
+	markdown, header, problem := EditedEmailCanvas(EmailCanvasFeishu, map[string]string{"to": "li@example.com", "subject": "Quote"}, "Hi Li", EditEmailCanvasArguments{Subject: &subject})
+	if problem != "" || !strings.HasPrefix(markdown, "```\ncanvas: feishu_mail\n") || !strings.Contains(header, "subject: Quote v2") {
+		t.Fatalf("edited = %q header=%q problem=%s", markdown, header, problem)
 	}
 }

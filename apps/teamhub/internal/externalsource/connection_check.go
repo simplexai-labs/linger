@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/composio"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/feishu"
 )
 
 // The pinned session lock covers status, identity, and the resulting product
@@ -188,11 +189,16 @@ func connectionCheckErrorClass(err error) string {
 		return "timeout"
 	}
 	var limited *composio.RateLimitError
-	if errors.As(err, &limited) {
+	var feishuLimited *feishu.RateLimitError
+	if errors.As(err, &limited) || errors.As(err, &feishuLimited) {
 		return "http_429"
 	}
 	if status, ok := composio.ErrorStatus(err); ok {
 		return "http_" + strconv.Itoa(status)
+	}
+	var computer *feishu.ComputerError
+	if errors.As(err, &computer) {
+		return computer.Status
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) {

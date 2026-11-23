@@ -24,7 +24,7 @@ const MaxEmailBodyRunes = 20000
 const canvasTitleRunes = 80
 
 // emailCanvasDelivery says how a canvas is saved or sent, for both tools.
-const emailCanvasDelivery = "To save it in the user's Gmail as a draft use save_email_draft, and to send it send_email_canvas, when those tools are offered; otherwise call start_task with surface apps and a goal that names its document_id as a Gmail canvas and says to save it as a draft or to send it, with irreversible set for a send. "
+const emailCanvasDelivery = "To save it as a draft in the user's mail app (Gmail or Feishu Mail, as the canvas says) use save_email_draft, and to send it send_email_canvas, when those tools are offered; otherwise call start_task with surface apps and a goal that names its document_id as an email canvas and says to save it as a draft or to send it, with irreversible set for a send. "
 
 // EmailCanvasTool describes the tool that opens a new canvas.
 var EmailCanvasTool = Tool{
@@ -43,13 +43,14 @@ var EmailCanvasTool = Tool{
 		"cc":      stringProperty("Optional carbon-copy email addresses, separated by commas"),
 		"subject": stringProperty("The subject, one line"),
 		"body":    stringProperty("The whole email body"),
+		"app":     map[string]any{"type": "string", "enum": []any{"gmail", "feishu_mail"}, "description": "Optional mail app to send from, when the user names one; leave it out to use the one connected"},
 	}),
 }
 
 // EditEmailCanvasTool describes the tool that changes a canvas.
 var EditEmailCanvasTool = Tool{
 	Name: ToolEditEmailCanvas,
-	Description: "Change a Gmail canvas in this room as the user asks: its recipients, subject or body. It changes in the side panel at once. " +
+	Description: "Change an email canvas in this room as the user asks: its recipients, subject or body. It changes in the side panel at once. " +
 		"Put everything one request changes in one call, to, cc, subject and body together; never split it into several calls. " +
 		"Give only what changes: to, cc or subject replace that line, and the canvas title follows the subject, so never rename an email canvas yourself; body replaces the whole body text, so write all of it, keeping what the user did not ask to change. Attached files are not part of the body: they stay attached, listed as attachments, wherever they sat. " +
 		"revision_id is the one the last open_email_canvas or edit_email_canvas result gave for this document_id. " +
@@ -70,7 +71,7 @@ var EditEmailCanvasTool = Tool{
 // AttachEmailFileTool describes the tool that attaches a file to a canvas.
 var AttachEmailFileTool = Tool{
 	Name: ToolAttachEmailFile,
-	Description: "Attach a file to a Gmail canvas in this room, so the email goes out with it: a document or file in this app (one shared in a room or in the Library, such as a deck a task delivered; find its document_id with search_documents) or a file on the user's computer (file, a path under ./playground as ls lists it, such as a task's output). It is added at the end of the canvas at once; never call start_task for this. " +
+	Description: "Attach a file to an email canvas in this room, so the email goes out with it: a document or file in this app (one shared in a room or in the Library, such as a deck a task delivered; find its document_id with search_documents) or a file on the user's computer (file, a path under ./playground as ls lists it, such as a task's output). It is added at the end of the canvas at once; never call start_task for this. " +
 		"Give exactly one of file_document_id and file. It returns the canvas's attachments and revision_id: tell the user in one short sentence what is attached. " +
 		"file_not_supported means the email cannot carry that kind of file (it takes PDF, Office, image, text and ZIP files); file_too_large means it is over 15 MB.",
 	Parameters: objectSchema([]string{"document_id"}, map[string]any{
@@ -87,12 +88,22 @@ type AttachEmailFileArguments struct {
 	File           string `json:"file"`
 }
 
+// The mail apps an email canvas is sent from; a canvas names its app as its
+// target, by the app's catalog key.
+const (
+	EmailCanvasGmail  = "gmail"
+	EmailCanvasFeishu = "feishu_mail"
+)
+
 // EmailCanvasArguments holds the email the live model wrote.
 type EmailCanvasArguments struct {
 	To      string `json:"to"`
 	Cc      string `json:"cc"`
 	Subject string `json:"subject"`
 	Body    string `json:"body"`
+	// App is the mail app the email goes out from; empty lets TeamHub pick
+	// the one connected.
+	App string `json:"app"`
 }
 
 // EditEmailCanvasArguments holds a change to a canvas: nil keeps a value.
@@ -115,7 +126,7 @@ var emailAddress = regexp.MustCompile(`^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$
 // EmailCanvas is the email as a Gmail canvas, in the shape the canvas Skill
 // and Web read: a header code block, then the body. problem names what the
 // live model must fix, such as a recipient that is not an email address.
-func EmailCanvas(args EmailCanvasArguments) (canvas Canvas, problem string) {
+func EmailCanvas(args EmailCanvasArguments, target string) (canvas Canvas, problem string) {
 	subject := strings.Join(strings.Fields(args.Subject), " ")
 	to, toOK := recipients(args.To)
 	cc, ccOK := recipients(args.Cc)
@@ -124,7 +135,7 @@ func EmailCanvas(args EmailCanvasArguments) (canvas Canvas, problem string) {
 	}
 	return Canvas{
 		Title: EmailCanvasTitle(subject),
-		Markdown: emailCanvasMarkdown(map[string]string{
+		Markdown: emailCanvasMarkdown(target, map[string]string{
 			"to": to, "cc": cc, "subject": subject, "status": "editing",
 		}, args.Body),
 	}, ""
@@ -139,7 +150,7 @@ func EmailCanvasTitle(subject string) string {
 
 // EditedEmailCanvas is the canvas Markdown after the change, from the
 // current header fields and body; every field the change leaves out stays.
-func EditedEmailCanvas(fields map[string]string, body string, args EditEmailCanvasArguments) (markdown, header, problem string) {
+func EditedEmailCanvas(target string, fields map[string]string, body string, args EditEmailCanvasArguments) (markdown, header, problem string) {
 	next := map[string]string{}
 	for name, value := range fields {
 		next[name] = value
@@ -162,7 +173,7 @@ func EditedEmailCanvas(fields map[string]string, body string, args EditEmailCanv
 	if problem := emailProblem(next["subject"], body, recipientsOK); problem != "" {
 		return "", "", problem
 	}
-	return emailCanvasMarkdown(next, body), EmailCanvasHeader(next), ""
+	return emailCanvasMarkdown(target, next, body), EmailCanvasHeader(target, next), ""
 }
 
 func emailProblem(subject, body string, recipientsOK bool) string {
@@ -182,12 +193,16 @@ func emailProblem(subject, body string, recipientsOK bool) string {
 // fields a canvas carries follow in name order.
 var canvasFieldOrder = []string{"to", "cc", "subject", "status", "link", "external_id"}
 
-func emailCanvasMarkdown(fields map[string]string, body string) string {
-	return EmailCanvasHeader(fields) + "\n" + strings.TrimSpace(body) + "\n"
+func emailCanvasMarkdown(target string, fields map[string]string, body string) string {
+	return EmailCanvasHeader(target, fields) + "\n" + strings.TrimSpace(body) + "\n"
 }
 
 // EmailCanvasHeader is the canvas header block alone, for changing its lines.
-func EmailCanvasHeader(fields map[string]string) string {
+// target is the canvas's mail app; empty is Gmail.
+func EmailCanvasHeader(target string, fields map[string]string) string {
+	if target == "" {
+		target = EmailCanvasGmail
+	}
 	names := append([]string{}, canvasFieldOrder...)
 	extra := []string{}
 	for name := range fields {
@@ -201,7 +216,7 @@ func EmailCanvasHeader(fields map[string]string) string {
 	}
 	sort.Strings(extra)
 	var header strings.Builder
-	header.WriteString("```\ncanvas: gmail\n")
+	header.WriteString("```\ncanvas: " + target + "\n")
 	for _, name := range append(names, extra...) {
 		// Every line is written, empty or not, so each can be filled in place.
 		header.WriteString(strings.TrimRight(name+": "+oneLine(fields[name]), " ") + "\n")

@@ -305,6 +305,46 @@ func (c *Client) fetchOutlookImportPage(ctx context.Context, accountID string, o
 	return page, nil
 }
 
+// ImportedMail is one message of a mailbox TeamHub reads without Composio,
+// in the parts the Wiki rendering uses. From, To and Cc are header values.
+type ImportedMail struct {
+	ID, ThreadID          string
+	Subject, From, To, Cc string
+	Received              time.Time
+	Body                  string
+	HTML                  bool
+	// Outbound marks mail the mailbox owner sent.
+	Outbound bool
+}
+
+// RenderImportedMail renders mail exactly as Gmail and Outlook mail enters
+// the Wiki. Mail a person did not write to the owner, such as no-reply
+// notifications, is left out: ok is false and there is no error.
+func (c *Client) RenderImportedMail(provider string, mail ImportedMail) (document AppDocument, ok bool, err error) {
+	if !mail.Outbound && filteredSender(mail.From) {
+		return AppDocument{}, false, nil
+	}
+	message := gmailMessage{ID: mail.ID, ThreadID: mail.ThreadID, InternalDate: strconv.FormatInt(mail.Received.UnixMilli(), 10)}
+	message.Payload.MimeType = "text/plain"
+	if mail.HTML {
+		message.Payload.MimeType = "text/html"
+	}
+	message.Payload.Body.Data = base64.RawURLEncoding.EncodeToString([]byte(mail.Body))
+	for _, header := range [][2]string{{"Subject", mail.Subject}, {"From", mail.From}, {"To", mail.To}, {"Cc", mail.Cc}} {
+		message.Payload.Headers = append(message.Payload.Headers, struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		}{header[0], header[1]})
+	}
+	if mail.Outbound {
+		message.LabelIDs = []string{"SENT"}
+	}
+	if document, err = c.renderImportedMail(provider, message); err != nil {
+		return AppDocument{}, false, err
+	}
+	return document, true, nil
+}
+
 func (c *Client) renderImportedMail(provider string, message gmailMessage) (AppDocument, error) {
 	// Bound each message independently; model input selection has its own budget.
 	bodyLimit := min(c.maxBodyBytes, 64<<10)

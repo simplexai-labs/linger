@@ -202,6 +202,9 @@ func toolkitForApp(key string) string {
 	// Composio has no calendar-only Outlook toolkit; its Outlook toolkit covers both.
 	case "outlook_calendar":
 		return "outlook"
+	// TeamHub authorizes Feishu itself; its connections record this slug.
+	case FeishuMailAppKey:
+		return feishuToolkit
 	default:
 		return key
 	}

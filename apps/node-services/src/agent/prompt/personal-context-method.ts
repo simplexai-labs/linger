@@ -46,6 +46,7 @@ const CALENDAR_COMMANDS: Record<string, string> = {
 const MAIL_COMMANDS: Record<string, string> = {
   gmail: "teamhub gmail",
   outlook: "teamhub outlook",
+  feishu_mail: "teamhub feishu-mail",
 };
 const DOCUMENT_SOURCES: Record<string, string> = {
   googledrive: "Drive (teamhub gdrive)",
@@ -63,7 +64,7 @@ const APP_SOURCES: readonly {
       `- calendar (${present.map((key) => CALENDAR_COMMANDS[key]).join(" or ")} list / free / read): scheduled meetings and events, attendees, free time.`,
   },
   {
-    keys: ["gmail", "outlook"],
+    keys: ["gmail", "outlook", "feishu_mail"],
     render: (present) =>
       `- mail (${present.map((key) => MAIL_COMMANDS[key]).join(" or ")} list / read): the latest exchanges with people, including meeting invites, reschedules, confirmations, replies and attachments. Knowledge holds mail only up to its last import; newer mail is only here.`,
   },

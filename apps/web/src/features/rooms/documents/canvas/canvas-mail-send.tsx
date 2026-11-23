@@ -11,12 +11,12 @@ import { externalConnectionsQueryOptions } from "@/features/apps/connected-apps-
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
-import { translate } from "@/i18n/language";
-import type { Message } from "@/i18n/messages";
+import { translate, type Translate } from "@/i18n/language";
 import { useT } from "@/i18n/use-translation";
 import type { RoomDocumentEditor } from "../room-document-comment-schema";
 import { type CanvasDocument, canvasText } from "./canvas-document";
 import { canvasMessages } from "./canvas.messages";
+import { mailCanvasAppName } from "./canvas-targets";
 
 export type MailCanvasState = components["schemas"]["MailCanvasState"];
 
@@ -48,13 +48,23 @@ export function mailCanvasQueryOptions(
   });
 }
 
-export const progressLabel: Partial<
-  Record<MailCanvasState["status"], Message<string>>
-> = {
-  queued: canvasMessages.preparing,
-  uploading: canvasMessages.uploadingToGmail,
-  sending: canvasMessages.sending,
-};
+/** What a delivery in progress is doing; undefined once none is. */
+export function progressText(
+  status: MailCanvasState["status"],
+  app: string,
+  t: Translate,
+): string | undefined {
+  switch (status) {
+    case "queued":
+      return t(canvasMessages.preparing);
+    case "uploading":
+      return t(canvasMessages.uploadingToMail, { app });
+    case "sending":
+      return t(canvasMessages.sending);
+    default:
+      return undefined;
+  }
+}
 
 /**
  * Sending a gmail canvas: what is saved in Linger is uploaded to Gmail and
@@ -69,15 +79,19 @@ export function useMailCanvasSend(
   const t = useT();
   const queryClient = useQueryClient();
   const connections = useQuery(externalConnectionsQueryOptions(client));
+  const mail = useQuery(mailCanvasQueryOptions(client, documentId));
+  // A canvas sends from an account of its own mail app; an older TeamHub
+  // names no target and only has Gmail canvases.
+  const target = mail.data?.target ?? "gmail";
+  const app = mailCanvasAppName(target);
   const accounts =
     connections.data?.connections.filter(
       (connection) =>
-        connection.provider === "gmail" && connection.status === "active",
+        connection.provider === target && connection.status === "active",
     ) ?? [];
   const [chosen, setChosen] = useState<string>();
   const account =
     accounts.find((connection) => connection.id === chosen) ?? accounts[0];
-  const mail = useQuery(mailCanvasQueryOptions(client, documentId));
   const status = mail.data?.status;
   const refresh = useCallback(
     () =>
@@ -89,7 +103,9 @@ export function useMailCanvasSend(
   const mutation = useMutation({
     mutationFn: async () => {
       if (!account)
-        throw new Error(translate(canvasMessages.connectGmailBeforeSending));
+        throw new Error(
+          translate(canvasMessages.connectMailBeforeSending, { app }),
+        );
       if (!mail.data)
         throw new Error(translate(canvasMessages.emailStillLoading));
       // The digest of the email as this card last showed it: if anything
@@ -140,15 +156,16 @@ export function useMailCanvasSend(
     Boolean(mail.data?.to.trim()) &&
     (status === "draft" || status === "failed" || status === "unknown");
   const note = busy
-    ? t(progressLabel[status ?? "queued"] ?? canvasMessages.preparing)
+    ? (progressText(status ?? "queued", app, t) ?? t(canvasMessages.preparing))
     : !account && connections.isSuccess
-      ? t(canvasMessages.connectGmailToSend)
+      ? t(canvasMessages.connectMailToSend, { app })
       : !saved
         ? t(canvasMessages.saving)
         : undefined;
   return {
     account,
     accounts,
+    app,
     busy,
     canEdit,
     canSend,

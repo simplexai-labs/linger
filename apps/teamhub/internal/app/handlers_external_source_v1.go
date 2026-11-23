@@ -3,10 +3,12 @@ package app
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/composio"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/externalsource"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/feishu"
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
 
@@ -84,6 +86,9 @@ func (a *App) createExternalConnection(c *gin.Context) {
 		return
 	}
 	connection, err := a.externalSources.CreateConnection(ctx, currentPrincipal(c).Session.AccountID, request.AppKey)
+	if a.writeFeishuConnectError(c, err) {
+		return
+	}
 	if errors.Is(err, externalsource.ErrManagedKeyForbidden) {
 		a.writeError(c, http.StatusForbidden, "COMPOSIO_CONNECTION_FORBIDDEN", "Composio denied this connection. Check the API key's permissions and confirm this app is available in your Composio project. If the key lacks Write All access, create a new key with Read All and Write All, then update it in Security.")
 		return
@@ -220,10 +225,39 @@ func (a *App) createExternalConnectionReauthorization(c *gin.Context) {
 		return
 	}
 	connection, err := a.externalSources.CreateReauthorization(ctx, currentPrincipal(c).Session.AccountID, c.Param("externalConnectionId"), request.ExpectedRevision)
-	if a.writeExternalSourceError(c, "create external connection reauthorization", err) {
+	if a.writeFeishuConnectError(c, err) || a.writeExternalSourceError(c, "create external connection reauthorization", err) {
 		return
 	}
 	c.JSON(http.StatusAccepted, externalConnectionModel(connection, connection.Status == "pending"))
+}
+
+// writeFeishuConnectError answers a Feishu Mail authorization that could not
+// start on the owner's Computer, with what the owner can do about it.
+func (a *App) writeFeishuConnectError(c *gin.Context, err error) bool {
+	var notEnabled *externalsource.FeishuScopesNotEnabledError
+	var computer *feishu.ComputerError
+	switch {
+	case errors.As(err, &notEnabled):
+		// The Web turns the details into steps: open the app's permissions
+		// page, add each scope, publish a version, connect again.
+		details := make([]httpapi.ErrorDetail, 0, len(notEnabled.Scopes)+1)
+		for _, scope := range notEnabled.Scopes {
+			details = append(details, httpapi.ErrorDetail{Field: "scope", Reason: scope})
+		}
+		if notEnabled.PermissionsURL != "" {
+			details = append(details, httpapi.ErrorDetail{Field: "permissions_url", Reason: notEnabled.PermissionsURL})
+		}
+		a.writeErrorWithDetails(c, http.StatusConflict, "FEISHU_SCOPES_NOT_ENABLED", "The Feishu app your lark-cli uses does not enable these mail permissions: "+strings.Join(notEnabled.Scopes, ", ")+". Enable them as user permissions in its developer console, publish a new version, and connect again.", details)
+	case errors.As(err, &computer) && computer.Status == feishu.StatusComputerOffline:
+		a.writeError(c, http.StatusConflict, "FEISHU_COMPUTER_OFFLINE", "Feishu Mail runs through lark-cli on the Computer that runs your Another Me, and that Computer is offline. Start it and connect again.")
+	case errors.As(err, &computer) && computer.Status == feishu.StatusNotInstalled:
+		a.writeError(c, http.StatusConflict, "LARK_CLI_NOT_INSTALLED", "Install lark-cli on the Computer that runs your Another Me, run lark-cli config init there, and connect again.")
+	case errors.As(err, &computer):
+		a.writeError(c, http.StatusServiceUnavailable, "FEISHU_COMPUTER_UNAVAILABLE", "The Computer that runs your Another Me could not start the Feishu login. Check it is online and connect again.")
+	default:
+		return false
+	}
+	return true
 }
 
 func (a *App) disconnectExternalConnection(c *gin.Context) {
