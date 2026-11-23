@@ -972,10 +972,27 @@ async function runLoadLibraryModel(
   };
 }
 
-// Checks whether the saved local library model is loaded, loading, or idle
-// while the caller holds the local models lock, reloading and applying it when
-// idle. Returns `handled: true` when no generic no-model `source apply` fallback
-// is needed.
+/**
+ * Reports whether a saved `runtime_model` names a local model managed by the
+ * localmodels library or adopted from a local stack (`localmodels/...` or
+ * `localmodels-library/...`, excluding BYOK sentinel IDs).
+ */
+export function isLocalRuntimeModel(runtimeModel: string): boolean {
+  if (
+    runtimeModel === "localmodels-byok" ||
+    runtimeModel.endsWith("/localmodels-byok")
+  )
+    return false;
+  return (
+    runtimeModel.startsWith("localmodels/") ||
+    runtimeModel.startsWith("localmodels-library/")
+  );
+}
+
+// Checks whether the saved local model is loaded, loading, or idle while the
+// caller holds the local models lock, reloading and applying it when idle.
+// Returns `handled: true` when no generic no-model `source apply` fallback is
+// needed.
 async function restoreLibraryModelUnderLock(
   home: string,
   savedRuntimeModel: string,
@@ -983,7 +1000,7 @@ async function restoreLibraryModelUnderLock(
   options: { signal: AbortSignal; onEvent: (e: InstallerEvent) => void },
   dependencies: RestoreDependencies,
 ): Promise<{ handled: boolean; outcome?: InstallOutcome }> {
-  if (!savedRuntimeModel) return { handled: false };
+  if (!isLocalRuntimeModel(savedRuntimeModel)) return { handled: false };
   const invoke = dependencies.localmodels ?? runLocalmodels;
   const library = await observeLibraryModels(home, invoke, options.signal);
   if (!library) return { handled: false };
@@ -1050,9 +1067,7 @@ export async function restoreLocalModels(
   if (!planID && source?.mode !== "local") return;
   const invoke = dependencies.localmodels ?? runLocalmodels;
   const savedRuntimeModel = source?.runtimeModel ?? "";
-  const wantsLibraryModel = savedRuntimeModel.startsWith(
-    "localmodels-library/",
-  );
+  const wantsLocalModel = isLocalRuntimeModel(savedRuntimeModel);
 
   // A quit-time stop may still hold the lock; checking, loading, and applying
   // under the same lock prevents racing with a quit-time unload.
@@ -1106,7 +1121,7 @@ export async function restoreLocalModels(
   const postHeld = await waitForLocalModelsLock(
     home,
     async (): Promise<{ outcome?: InstallOutcome }> => {
-      if (wantsLibraryModel) {
+      if (wantsLocalModel) {
         const restored = await restoreLibraryModelUnderLock(
           home,
           savedRuntimeModel,
@@ -1137,7 +1152,7 @@ export async function restoreLocalModels(
       message:
         "Another local model operation is still running. Try again once it ends.",
       details: {
-        code: wantsLibraryModel
+        code: wantsLocalModel
           ? "LOCAL_MODELS_BUSY"
           : "LOCAL_MODELS_RECOVERY_REQUIRED",
       },

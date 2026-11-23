@@ -587,6 +587,171 @@ test("a restart keeps a saved local source as before", async () => {
   expect(prepareLocalModels).toHaveBeenCalled();
   expect(applyNativeSource).not.toHaveBeenCalled();
   expect(restoreByokSource).not.toHaveBeenCalled();
+  expect(restoreLocalModels).not.toHaveBeenCalled();
+});
+test("a cold resume restores an adopted stack local model when setup-choice is local-models and setup binding is ready", async () => {
+  const f = await fixture();
+  await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    setupChoice: "local-models",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  const planId = "a".repeat(64);
+  const localmodelsRoot = path.join(f.home, "runtime", "localmodels");
+  const state = path.join(localmodelsRoot, "state");
+  await privateDirectory(state);
+  await atomicPrivate(
+    path.join(localmodelsRoot, "plan.json"),
+    JSON.stringify({ schema: "localmodels.stack-plan/v1", plan_id: planId }),
+  );
+  await atomicPrivate(
+    path.join(state, "model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "local",
+      runtime: "pi",
+      runtime_model: "localmodels/localmodels-agent",
+      model_label: "Qwen3.8 27B",
+      gateway_url: "http://127.0.0.1:18480",
+      environment: {},
+    }),
+  );
+  vi.mocked(applyNativeSource).mockClear();
+  vi.mocked(prepareLocalModels).mockClear();
+  vi.mocked(restoreLocalModels).mockClear();
+  const actualLocalModels =
+    await vi.importActual<typeof import("./local-models.js")>(
+      "./local-models.js",
+    );
+  const localmodelsCalls: string[][] = [];
+  const fakeLocalmodels = vi.fn(async (_home: string, args: string[]) => {
+    localmodelsCalls.push(args);
+    if (args[0] === "setup" && args[1] === "binding") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.stack-binding/v1",
+          planId,
+          ready: true,
+          pi: {
+            executable: "/mock/pi",
+            configFingerprint: "b".repeat(64),
+            environment: { PI_CODING_AGENT_DIR: "/mock/pi-agent" },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (args[0] === "library" && args[1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.library-status/v1",
+          models: [
+            {
+              id: "qwen3.8-27b:UD-Q4_K_M",
+              state: "idle",
+              pi_model: "localmodels/localmodels-agent",
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    if (args[0] === "library" && args[1] === "load") {
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    return { code: 0, stdout: "{}", stderr: "" };
+  });
+  vi.mocked(restoreLocalModels).mockImplementationOnce((instance, options) =>
+    actualLocalModels.restoreLocalModels(instance, options, {
+      localmodels: fakeLocalmodels,
+    }),
+  );
+
+  const result = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    resume: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(result.code).toBe(0);
+  expect(
+    (result.details as { localModelsDegraded?: unknown }).localModelsDegraded,
+  ).toBeUndefined();
+  expect(prepareLocalModels).toHaveBeenCalledTimes(1);
+  expect(restoreLocalModels).toHaveBeenCalledTimes(1);
+  expect(localmodelsCalls.map((args) => `${args[0]} ${args[1]}`)).toEqual([
+    "setup binding",
+    "library status",
+    "library load",
+  ]);
+  expect(localmodelsCalls[2]?.slice(0, 3)).toEqual([
+    "library",
+    "load",
+    "qwen3.8-27b:UD-Q4_K_M",
+  ]);
+  expect(applyNativeSource).toHaveBeenCalledWith(
+    path.resolve(f.home),
+    "local",
+    "pi",
+    expect.objectContaining({
+      model: "qwen3.8-27b:UD-Q4_K_M",
+      signal: expect.any(AbortSignal),
+      onEvent: expect.any(Function),
+    }),
+    expect.objectContaining({ localmodels: fakeLocalmodels }),
+  );
+  expect(restoreByokSource).not.toHaveBeenCalled();
+});
+test("a cold resume with setup-choice local-models does not treat a stale BYOK sentinel runtime_model as a local library model", async () => {
+  const f = await fixture();
+  await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    setupChoice: "local-models",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  const state = path.join(f.home, "runtime", "localmodels", "state");
+  await privateDirectory(state);
+  await atomicPrivate(
+    path.join(state, "model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "local",
+      runtime: "pi",
+      runtime_model: "localmodels/localmodels-byok",
+      model_label: null,
+      gateway_url: "http://127.0.0.1:18480",
+      environment: {},
+    }),
+  );
+  vi.mocked(applyNativeSource).mockClear();
+  vi.mocked(prepareLocalModels).mockClear();
+  vi.mocked(restoreLocalModels).mockClear();
+
+  const result = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    resume: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(result.code).toBe(0);
+  expect(
+    (result.details as { localModelsDegraded?: unknown }).localModelsDegraded,
+  ).toBeUndefined();
+  expect(prepareLocalModels).toHaveBeenCalledTimes(1);
+  expect(restoreLocalModels).not.toHaveBeenCalled();
+  expect(applyNativeSource).not.toHaveBeenCalled();
 });
 test("a cold resume preserves a saved local model source even when setup-choice is a subscription runtime", async () => {
   const f = await fixture();

@@ -64,6 +64,7 @@ import {
   writeSetupChoice,
 } from "./setup-selection.js";
 import {
+  isLocalRuntimeModel,
   localModelsDegradedFromError,
   localModelsDegradedFromOutcome,
   prepareLocalModels,
@@ -632,7 +633,8 @@ async function runNativeSource(
                 !runtimeOutcome &&
                 !localModelsDegraded &&
                 !options.localModelsReplan &&
-                restoredLocal?.runtimeModel.startsWith("localmodels-library/")
+                restoredLocal &&
+                isLocalRuntimeModel(restoredLocal.runtimeModel)
               )
                 await restoreSavedLocalModel();
             }

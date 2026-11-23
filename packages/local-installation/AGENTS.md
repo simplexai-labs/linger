@@ -219,8 +219,8 @@ after the desktop's quit stopped them, whenever the active model source is
 quit-time `library unload` reloads that saved model and re-applies the local
 source under the same lock (never guessing an arbitrary idle model when no
 `runtime_model` is saved), while a stopped plan gets the same restore (`stack up`,
-falling back to `stack apply`), verifies whether a saved
-`localmodels-library/` model is loaded, and sets the local source again. Library-model reload failures return a failure outcome that warm
+falling back to `stack apply`), verifies whether a saved local model
+(`localmodels/` or `localmodels-library/`) is loaded, and sets the local source again. Library-model reload failures return a failure outcome that warm
 and cold resume surface in `details.localModelsDegraded` so startup stays usable
 and the person can still reach the Models page. On cold resume, a saved `local`
 source preserves local mode and prepares its runtime instead of letting an older

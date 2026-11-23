@@ -10,6 +10,7 @@ import path from "node:path";
 import os from "node:os";
 import { afterEach, expect, test, vi } from "vitest";
 import {
+  isLocalRuntimeModel,
   localModelsDegradedFromError,
   localModelsDegradedFromOutcome,
   prepareLocalModels,
@@ -989,6 +990,209 @@ test("reloads an unloaded library model after quit even when setup binding repor
     "--model",
     "qwen3.8-27b:UD-Q4_K_M",
   ]);
+});
+test("isLocalRuntimeModel matches adopted localmodels/ and localmodels-library/ models while rejecting BYOK sentinels", () => {
+  expect(isLocalRuntimeModel("localmodels/localmodels-agent")).toBe(true);
+  expect(
+    isLocalRuntimeModel(
+      "localmodels-library/localmodels-lib-qwen3-8-27b/Qwen3.8-27B-UD-Q4_K_M",
+    ),
+  ).toBe(true);
+  expect(isLocalRuntimeModel("")).toBe(false);
+  expect(isLocalRuntimeModel("model")).toBe(false);
+  expect(isLocalRuntimeModel("localmodels-byok")).toBe(false);
+  expect(isLocalRuntimeModel("localmodels/localmodels-byok")).toBe(false);
+  expect(isLocalRuntimeModel("localmodels-library/localmodels-byok")).toBe(
+    false,
+  );
+});
+test("reloads an unloaded adopted stack model (localmodels/localmodels-agent) when setup binding reports ready", async () => {
+  const f = await stoppedLocalSetup("local");
+  Object.assign(f.binding, f.ready);
+  const targetPiModel = "localmodels/localmodels-agent";
+  await writeFile(
+    path.join(f.home, "runtime/localmodels/state/model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "local",
+      runtime: "pi",
+      runtime_model: targetPiModel,
+      model_label: "Qwen3.8 27B",
+      gateway_url: "http://127.0.0.1:18480",
+      environment: {},
+    }),
+    { mode: 0o600 },
+  );
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (...a) => {
+    if (a[1][0] === "library" && a[1][1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.library-status/v1",
+          models: [
+            {
+              id: "qwen3.8-27b:UD-Q4_K_M",
+              state: "idle",
+              pi_model: targetPiModel,
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    if (a[1][0] === "library" && a[1][1] === "load") {
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    if (a[1][0] === "source" && a[1][1] === "apply") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.model-source-status/v1",
+          mode: "local",
+          runtime: "pi",
+          runtime_model: targetPiModel,
+        }),
+        stderr: "",
+      };
+    }
+    return original(...a);
+  });
+  expect(
+    await restoreLocalModels(f.instance, f.options, { localmodels: f.call }),
+  ).toBeUndefined();
+  expect(commands(f)).toEqual([
+    "setup binding",
+    "library status",
+    "library load",
+    "source apply",
+  ]);
+  expect(f.call.mock.calls[2]![1].slice(0, 3)).toEqual([
+    "library",
+    "load",
+    "qwen3.8-27b:UD-Q4_K_M",
+  ]);
+  expect(f.call.mock.calls[3]![1].slice(0, 8)).toEqual([
+    "source",
+    "apply",
+    "--mode",
+    "local",
+    "--runtime",
+    "pi",
+    "--model",
+    "qwen3.8-27b:UD-Q4_K_M",
+  ]);
+});
+test("reloads an idle adopted stack model after stack up and falls back to generic source apply for non-adopted stacks", async () => {
+  // Adopted stack model still idle after stack up: reload and apply with --model.
+  const adopted = await stoppedLocalSetup("local");
+  const targetPiModel = "localmodels/localmodels-agent";
+  await writeFile(
+    path.join(adopted.home, "runtime/localmodels/state/model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "local",
+      runtime: "pi",
+      runtime_model: targetPiModel,
+      model_label: "Qwen3.8 27B",
+      gateway_url: "http://127.0.0.1:18480",
+      environment: {},
+    }),
+    { mode: 0o600 },
+  );
+  const adoptedOriginal = adopted.call.getMockImplementation()!;
+  adopted.call.mockImplementation(async (...a) => {
+    if (a[1][0] === "library" && a[1][1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.library-status/v1",
+          models: [
+            {
+              id: "qwen3.8-27b:UD-Q4_K_M",
+              state: "idle",
+              pi_model: targetPiModel,
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    if (a[1][0] === "library" && a[1][1] === "load") {
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    return adoptedOriginal(...a);
+  });
+  expect(
+    await restoreLocalModels(adopted.instance, adopted.options, {
+      localmodels: adopted.call,
+    }),
+  ).toBeUndefined();
+  expect(commands(adopted)).toEqual([
+    "setup binding",
+    "setup review",
+    "setup binding",
+    "stack up",
+    "setup binding",
+    "library status",
+    "library load",
+    "source apply",
+  ]);
+  expect(adopted.call.mock.calls.at(-1)![1].slice(0, 8)).toEqual([
+    "source",
+    "apply",
+    "--mode",
+    "local",
+    "--runtime",
+    "pi",
+    "--model",
+    "qwen3.8-27b:UD-Q4_K_M",
+  ]);
+
+  // Non-adopted stack (no matching entry in library status): fall back to generic source apply.
+  const nonAdopted = await stoppedLocalSetup("local");
+  await writeFile(
+    path.join(nonAdopted.home, "runtime/localmodels/state/model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "local",
+      runtime: "pi",
+      runtime_model: targetPiModel,
+      model_label: null,
+      gateway_url: "http://127.0.0.1:18480",
+      environment: {},
+    }),
+    { mode: 0o600 },
+  );
+  const nonAdoptedOriginal = nonAdopted.call.getMockImplementation()!;
+  nonAdopted.call.mockImplementation(async (...a) => {
+    if (a[1][0] === "library" && a[1][1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.library-status/v1",
+          models: [],
+        }),
+        stderr: "",
+      };
+    }
+    return nonAdoptedOriginal(...a);
+  });
+  expect(
+    await restoreLocalModels(nonAdopted.instance, nonAdopted.options, {
+      localmodels: nonAdopted.call,
+    }),
+  ).toBeUndefined();
+  expect(commands(nonAdopted)).toEqual([
+    "setup binding",
+    "setup review",
+    "setup binding",
+    "stack up",
+    "setup binding",
+    "library status",
+    "source apply",
+  ]);
+  expect(nonAdopted.call.mock.calls.at(-1)![1]).not.toContain("--model");
 });
 test("restores a switched-to-local model source even when initial setup choice was not local-models and no plan exists", async () => {
   const f = await fixture();

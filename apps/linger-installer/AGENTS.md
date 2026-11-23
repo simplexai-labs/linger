@@ -72,7 +72,7 @@ Computer uses the local model source (`model-source.json` says `local`, or does
 not exist yet on a `local-models` setup) has its stack and saved library model
 checked (`restoreLocalModels`), since a quit stops the models but not the
 services: a stack that is not ready gets the same restore, an unloaded saved
-`localmodels-library/` model is reloaded, and the local source is applied again;
+local model (`localmodels/` or `localmodels-library/`) is reloaded, and the local source is applied again;
 if that restore fails or throws (or a same-checkout cold resume cannot prepare
 the local model stack or reload its saved library model), the failure is logged
 and reported in the ready outcome's `details.localModelsDegraded` without
