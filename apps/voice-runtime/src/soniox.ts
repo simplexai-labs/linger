@@ -36,7 +36,9 @@ interface SonioxToken {
 
 // Soniox's error_code is the HTTP status of the error. These three ask the
 // person to act on their Soniox account, so each has its own failure code.
-// A handshake status is not mapped: a proxy, not Soniox, may have sent it.
+// The key goes with the connection, so Soniox may refuse it on the handshake
+// with the same statuses. A proxy cannot answer inside the TLS tunnel; its
+// own refusal is ERR_PROXY_TUNNEL.
 const sonioxAccountFailures: Partial<Record<number, string>> = {
   401: "asr_auth_rejected",
   402: "asr_balance_exhausted",
@@ -70,15 +72,15 @@ export class SonioxASRProvider implements ASRProvider {
   }
 }
 
+// The key is not in this start request: it goes with the connection, the
+// only way Soniox accepts from 2027-01-15.
 export function sonioxRealtimeSessionConfig(config: {
-  apiKey: string;
   model: string;
   languageHints?: string[];
   diarization?: boolean;
   dictation?: boolean;
 }) {
   return {
-    api_key: config.apiKey,
     model: config.model,
     audio_format: "pcm_s16le",
     sample_rate: 16000,
@@ -179,10 +181,13 @@ export class SonioxASRStream implements ASRStream {
     config: SonioxASRConfig,
     signal: AbortSignal,
   ): Promise<SonioxASRStream> {
-    const socket = new WebSocket(
-      config.webSocketUrl ?? sonioxRealtimeWebSocketUrl,
-      { signal, handshakeTimeout: 5_000, maxPayload: 1 << 20 },
-    );
+    const url = config.webSocketUrl ?? sonioxRealtimeWebSocketUrl;
+    const socket = new WebSocket(url, {
+      signal,
+      handshakeTimeout: 5_000,
+      maxPayload: 1 << 20,
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+    });
     const stream = new SonioxASRStream(
       socket,
       config.dictation === true,
@@ -201,7 +206,7 @@ export class SonioxASRStream implements ASRStream {
             status >= 100 &&
             status <= 599
             ? new VoiceFailure(
-                `asr_http_${status}`,
+                sonioxAccountFailures[status] ?? `asr_http_${status}`,
                 `Soniox ASR handshake returned HTTP ${status}`,
               )
             : new Error("Soniox ASR handshake returned an invalid status"),
@@ -213,7 +218,6 @@ export class SonioxASRStream implements ASRStream {
     await stream.write(
       JSON.stringify(
         sonioxRealtimeSessionConfig({
-          apiKey: config.apiKey,
           model: config.model,
           languageHints: config.languageHints,
           diarization: config.diarization,
