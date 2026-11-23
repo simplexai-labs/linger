@@ -82,6 +82,7 @@ import {
 } from "./navigation.js";
 import { humanTenant, type EnrollmentModule } from "./enrollment.js";
 import { compareVersions } from "./update-manifest.js";
+import { systemProxy } from "./system-proxy.js";
 import type { WindowManagerModule } from "./window-manager.js";
 import {
   installerKeyChanges,
@@ -385,6 +386,9 @@ export interface LocalServerOptions {
   readonly rename?: (from: string, to: string) => Promise<void>;
   // The glibc of this Linux computer; the running one's by default.
   readonly glibcVersion?: string;
+  // Chromium's proxy for a URL (session.resolveProxy); without it the
+  // services get no system proxy.
+  readonly resolveProxy?: (url: string) => Promise<string>;
 }
 
 // The starter Room the server makes for a new owner, with their Agents.
@@ -2339,6 +2343,18 @@ export class LocalServerModule implements Module {
     });
   }
 
+  // The system proxy for the installer runs that start the services, which
+  // pass it to TeamHub and node-services only. Logged without its address.
+  async #systemProxyEnv(): Promise<Record<string, string>> {
+    const startedAt = Date.now();
+    const proxy = await systemProxy(process.env, this.#options.resolveProxy);
+    this.#ctx?.log.info("local_server.system_proxy", {
+      source: proxy.source,
+      ms: Date.now() - startedAt,
+    });
+    return proxy.env;
+  }
+
   // Saves the provider keys with the installer, before it installs; the keys go
   // over stdin, never in arguments or logs.
   async #saveKeys(
@@ -2401,6 +2417,7 @@ export class LocalServerModule implements Module {
     repo: string,
     signal: AbortSignal,
   ): Promise<InstallerApi> {
+    const proxyEnv = await this.#systemProxyEnv();
     const child = spawn(
       node,
       [
@@ -2420,7 +2437,7 @@ export class LocalServerModule implements Module {
         // A detached Windows process otherwise opens its own console window.
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, LINGER_HOME: home },
+        env: { ...process.env, ...proxyEnv, LINGER_HOME: home },
       },
     );
     const log = this.#ctx?.log;
@@ -2803,6 +2820,9 @@ export class LocalServerModule implements Module {
     onStage?: (stage: string) => void,
   ): Promise<{ source?: string; origin?: string }> {
     await this.#adoptSourceKeys(record.home);
+    // Resolved while the Node runtime is checked, so a slow PAC script does
+    // not add to the start.
+    const proxyEnv = this.#systemProxyEnv();
     onStage?.("ensure_node");
     const nodeStartedAt = Date.now();
     const node = await this.#ensureNode(signal);
@@ -2810,6 +2830,11 @@ export class LocalServerModule implements Module {
       stage: "ensure_node",
       ms: Date.now() - nodeStartedAt,
     });
+    const env = {
+      ...process.env,
+      ...(await proxyEnv),
+      LINGER_HOME: record.home,
+    };
     onStage?.("installer_resume");
     const resumeStartedAt = Date.now();
     const outcome = await new Promise<ResumeOutcome>((resolve, reject) => {
@@ -2832,7 +2857,7 @@ export class LocalServerModule implements Module {
           // The pinned Node is a console program; without this Windows
           // opens a console window for it.
           windowsHide: true,
-          env: { ...process.env, LINGER_HOME: record.home },
+          env,
           signal,
         },
       );

@@ -191,6 +191,8 @@ async function main(): Promise<void> {
     // On Linux the sign-in needs to know when no browser opened.
     openExternal: (url) =>
       process.platform === "linux" ? openWithXdg(url) : shell.openExternal(url),
+    // The system proxy (fixed or PAC) the voice services reach Soniox with.
+    resolveProxy: (url) => session.defaultSession.resolveProxy(url),
   });
   // Until this computer is connected, the setup window comes first.
   const needsSetup = !config.get().computerId;

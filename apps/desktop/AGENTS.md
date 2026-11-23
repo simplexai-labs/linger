@@ -214,7 +214,16 @@ Gateway and runs Agents. The daemon exits with the app.
   file and renamed, so a power loss leaves the old record or none) and, while
   the window still uses that origin and the computer is enrolled, restarts the
   services on launch with `installer.js --resume`, which also restarts them
-  when the instance's `user.env` changed. When another program took the web
+  when the instance's `user.env` changed. Before it starts the installer
+  (`--resume`, or the installer that sets up) it asks
+  `session.resolveProxy` for the Soniox websocket URL (`system-proxy.ts`,
+  at most 1.5 s, alongside the Node runtime check) and passes an HTTP
+  proxy, the first choice of a fixed or PAC setting, as
+  `LINGER_SYSTEM_HTTPS_PROXY`; the installer gives it to TeamHub and
+  node-services only. `DIRECT`, SOCKS, a failure or a timeout pass none,
+  and an `HTTPS_PROXY` in the app's own environment wins. It logs
+  `local_server.system_proxy` (`source`, `ms`), never the address. A
+  system proxy changed while the app runs applies at the next launch. When another program took the web
   port, the installer moves the services to a free one and reports the new
   origin (`details.origin`, or the setup job's `origin`). The record, the
   window's `serverUrl` and the `savedEnrollments` entry follow it together
