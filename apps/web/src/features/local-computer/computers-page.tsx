@@ -25,6 +25,7 @@ import { ComputerBrowserConnection } from "./browser-connection/computer-browser
 import { ComputerDetail } from "./computer-detail";
 import { projectAgentAvailabilitySnapshots } from "./agent-availability";
 import { ComputerDirectory } from "./computer-directory";
+import { DesktopIMessageCard } from "./desktop-imessage-card";
 import {
   ConnectComputerDialog,
   NoComputers,
@@ -270,6 +271,7 @@ export function ComputersPage() {
             />
           )}
         </div>
+        <DesktopIMessageCard />
       </main>
 
       {setupOpen ? (

@@ -28,7 +28,7 @@ const setup = (probes: Partial<PermissionProbes>) => {
       },
       appleScript: async (script) => {
         calls.push("osascript");
-        await probes.appleScript?.(script);
+        return (await probes.appleScript?.(script)) ?? "";
       },
     },
   });

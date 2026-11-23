@@ -23,6 +23,65 @@ const savedEnrollment = z.object({
 });
 export type SavedEnrollment = z.infer<typeof savedEnrollment>;
 
+export const IMESSAGE_HANDLES_MAX = 10;
+
+export class IMessageHandlesError extends Error {
+  constructor(
+    readonly code: "invalid_handle" | "too_many_handles",
+    message: string,
+  ) {
+    super(message);
+    this.name = "IMessageHandlesError";
+  }
+}
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_PUNCTUATION = /[\s\-().]/g;
+const E164 = /^\+\d{6,15}$/;
+
+// One iMessage handle in the form senders are compared in: an email
+// lowercased, a phone number as `+` and digits. Undefined when it is neither.
+export function normalizeIMessageHandle(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (trimmed.includes("@"))
+    return EMAIL.test(trimmed) ? trimmed.toLowerCase() : undefined;
+  const phone = trimmed.replace(PHONE_PUNCTUATION, "");
+  return E164.test(phone) ? phone : undefined;
+}
+
+// Normalized and deduplicated in order; throws on the first invalid handle
+// or when more than IMESSAGE_HANDLES_MAX remain.
+export function normalizeIMessageHandles(values: readonly string[]): string[] {
+  const handles: string[] = [];
+  for (const value of values) {
+    const handle = normalizeIMessageHandle(value);
+    if (!handle)
+      throw new IMessageHandlesError(
+        "invalid_handle",
+        `"${value.trim()}" is not a phone number with country code (+...) or an email address.`,
+      );
+    if (!handles.includes(handle)) handles.push(handle);
+  }
+  if (handles.length > IMESSAGE_HANDLES_MAX)
+    throw new IMessageHandlesError(
+      "too_many_handles",
+      `Add at most ${IMESSAGE_HANDLES_MAX} phone numbers or emails.`,
+    );
+  return handles;
+}
+
+// A damaged iMessage block resets only itself: a failure anywhere else in
+// the config falls back to every default, which would drop the enrollment.
+const imessageSettings = z
+  .object({
+    enabled: z.boolean().default(false),
+    // The person's own phone numbers and Apple ID emails, normalized.
+    handles: z.array(z.string()).max(IMESSAGE_HANDLES_MAX).default([]),
+    // Whether the person pressed Allow once, so checking Messages may prompt.
+    automationAsked: z.boolean().default(false),
+  })
+  .catch({ enabled: false, handles: [], automationAsked: false });
+
 // Non-secret desktop settings. The Gateway credential is kept apart
 // (computer-credential.ts). Keys of older versions, such as sandboxMode,
 // are dropped on read.
@@ -47,6 +106,11 @@ const desktopConfig = z.object({
   preventSleep: z.boolean().default(false),
   // macOS permissions whose system prompt was shown once.
   permissionsAsked: z.array(z.enum(["folders", "automation"])).default([]),
+  imessage: imessageSettings.default({
+    enabled: false,
+    handles: [],
+    automationAsked: false,
+  }),
   // The AI runtime the local server's installer set up: its executables
   // (LINGER_<RUNTIME>_PATH) and profiles (CODEX_HOME, CLAUDE_CONFIG_DIR,
   // PI_CODING_AGENT_DIR). The Computer daemon runs with them.

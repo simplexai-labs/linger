@@ -49,6 +49,14 @@ interface AttemptOutcome {
   bytesPerSecond: number;
 }
 
+/** The received bytes do not match the trusted checksum. */
+export class ChecksumMismatchError extends Error {
+  constructor() {
+    super("Download checksum mismatch.");
+    this.name = "ChecksumMismatchError";
+  }
+}
+
 function publicUrl(value: string) {
   const url = new URL(value);
   if (
@@ -383,7 +391,7 @@ export async function downloadVerified(
       );
     if (hash.digest("hex") !== options.digest) {
       completed = 0;
-      throw new Error("Download checksum mismatch.");
+      throw new ChecksumMismatchError();
     }
     options.onProgress?.(completed, size);
     await handle.sync();

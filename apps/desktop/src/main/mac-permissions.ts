@@ -21,14 +21,15 @@ export const SETTINGS_URL: Readonly<Record<PermissionId, string>> = {
 export const PROTECTED_FOLDERS = ["Downloads", "Documents", "Desktop"];
 
 // errAEEventNotPermitted: the user (or a missing usage string) said no.
-const AUTOMATION_DENIED = "-1743";
+export const AUTOMATION_DENIED = "-1743";
 
 export interface PermissionProbes {
   // Resolves when the file opens; rejects with the open error.
   openFile(file: string): Promise<void>;
   listDirectory(directory: string): Promise<void>;
-  // Runs AppleScript; rejects with osascript's error text.
-  appleScript(script: string): Promise<void>;
+  // Runs AppleScript and resolves with its output; rejects with osascript's
+  // error text.
+  appleScript(script: string): Promise<string>;
 }
 
 export const nodeProbes: PermissionProbes = {
@@ -45,13 +46,15 @@ export const nodeProbes: PermissionProbes = {
         "/usr/bin/osascript",
         ["-e", script],
         { timeout: 120_000 },
-        (error, _stdout, stderr) =>
-          error ? reject(new Error(`${stderr}${error.message}`)) : resolve(),
+        (error, stdout, stderr) =>
+          error
+            ? reject(new Error(`${stderr}${error.message}`))
+            : resolve(stdout),
       );
     }),
 };
 
-const denied = (error: unknown): boolean => {
+export const denied = (error: unknown): boolean => {
   const code = (error as NodeJS.ErrnoException).code;
   return code === "EPERM" || code === "EACCES";
 };

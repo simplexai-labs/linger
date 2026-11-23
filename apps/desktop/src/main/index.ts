@@ -29,6 +29,13 @@ import { DesktopIpcModule } from "./desktop-ipc.js";
 import { dialogMessages } from "./dialogs.messages.js";
 import { DiagnosticsModule } from "./diagnostics.js";
 import { EnrollmentModule } from "./enrollment.js";
+import { IMessageModule } from "./imessage.js";
+import { IMessageChannel } from "./imessage-channel.js";
+import { IMessageStateStore } from "./imessage-state.js";
+import { IMessageTeamHubClient } from "./imessage-teamhub.js";
+import { IMsgRpc } from "./imsg-rpc.js";
+import { IMessagePermissions } from "./imessage-permissions.js";
+import { IMsgRuntime } from "./imsg-runtime.js";
 import { LanguageModule } from "./language.js";
 import {
   LocalServerModule,
@@ -283,6 +290,59 @@ async function main(): Promise<void> {
           },
         }
       : undefined;
+  const imessageStateFile = path.join(userData, "imessage", "state.json");
+  const imessage =
+    process.platform === "darwin"
+      ? new IMessageModule({
+          runtime: new IMsgRuntime({
+            root: path.join(userData, "imessage", "imsg"),
+          }),
+          permissions: new IMessagePermissions({
+            home: app.getPath("home"),
+            asked: () => config.get().imessage.automationAsked,
+            enabled: () => config.get().imessage.enabled,
+            markAsked: () => {
+              const imessage = config.get().imessage;
+              if (!imessage.automationAsked)
+                config.update({
+                  imessage: { ...imessage, automationAsked: true },
+                });
+            },
+          }),
+          openExternal: (url) => shell.openExternal(url),
+          // Fresh stores: each reads the file the stopped bridge left.
+          channelState: {
+            clear: () => new IMessageStateStore(imessageStateFile).clear(),
+            resetTarget: () =>
+              new IMessageStateStore(imessageStateFile).resetTarget(),
+          },
+          createBridge: ({ handles, executable, onState }) =>
+            new IMessageChannel({
+              transport: new IMsgRpc({ executable, log }),
+              teamhub: new IMessageTeamHubClient({
+                serverUrl: () => config.get().serverUrl,
+                tenantId: () => config.get().tenantId,
+                cookie: webSessionCookie,
+              }),
+              store: new IMessageStateStore(imessageStateFile),
+              handles,
+              chatUrl: (roomId) => {
+                const { serverUrl, tenantId } = config.get();
+                return serverUrl && tenantId
+                  ? new URL(
+                      `/t/${encodeURIComponent(tenantId)}/rooms/${encodeURIComponent(roomId)}/chat`,
+                      serverUrl,
+                    ).toString()
+                  : undefined;
+              },
+              log,
+              t: language.t,
+              onState,
+              serverUrl: () => config.get().serverUrl,
+              ownerActorId: () => config.get().ownerActorId,
+            }),
+        })
+      : undefined;
   const modules: Module[] = [
     {
       name: "Config",
@@ -344,9 +404,11 @@ async function main(): Promise<void> {
     setup,
     updater,
     new TrayModule({ quit: () => void quit() }),
+    ...(imessage ? [imessage] : []),
     new DesktopIpcModule({
       defaultDisplayName,
       ...(desktopPermissions ? { permissions: desktopPermissions } : {}),
+      imessage: imessage !== undefined,
     }),
   ];
   const host = new ModuleHost(modules, { config, log, bus: new EventBus() });

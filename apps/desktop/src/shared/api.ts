@@ -99,6 +99,63 @@ export interface PreviewViewApi {
   onState(callback: (id: string, state: PreviewViewState) => void): () => void;
 }
 
+export type IMessageRuntimeState =
+  | "missing"
+  | "installing"
+  | "ready"
+  | "failed";
+
+export type IMessageRuntimeError =
+  | "download_failed"
+  | "checksum_mismatch"
+  | "extract_failed"
+  | "executable_missing";
+
+export type IMessageBridgeState =
+  | "stopped"
+  | "starting"
+  | "running"
+  | "signed_out"
+  | "no_another_me"
+  | "other_account"
+  | "error";
+
+export type IMessagePermissionState = "granted" | "denied" | "unknown";
+
+// Chatting with Another Me from Messages on this Mac. `ready` holds when it
+// is enabled, imsg is installed, every check passes and a handle is set.
+export interface IMessageStatus {
+  readonly enabled: boolean;
+  readonly handles: readonly string[];
+  readonly runtime: IMessageRuntimeState;
+  readonly runtimeError?: IMessageRuntimeError;
+  // `messagesNotSetUp`: Messages was never used on this Mac.
+  readonly fullDisk: IMessagePermissionState | "messagesNotSetUp";
+  readonly messagesAutomation: IMessagePermissionState;
+  readonly iMessageSignedIn: "yes" | "no" | "unknown";
+  readonly ready: boolean;
+  readonly bridge: IMessageBridgeState;
+}
+
+export interface IMessagePatch {
+  readonly enabled?: boolean;
+  readonly handles?: readonly string[];
+}
+
+export type IMessageSetResult =
+  | { readonly ok: true; readonly status: IMessageStatus }
+  | {
+      readonly ok: false;
+      readonly code: "invalid_handle" | "too_many_handles";
+      readonly message: string;
+    };
+
+export type IMessageAction =
+  | "request_automation"
+  | "open_full_disk_settings"
+  | "open_automation_settings"
+  | "retry_install";
+
 export interface LingerDesktopApi {
   readonly version: string;
   readonly platform: "darwin" | "win32" | "linux";
@@ -176,6 +233,14 @@ export interface LingerDesktopApi {
   readonly permissions?: {
     act(step: DesktopPermissionStep): Promise<void>;
   };
+  // macOS only.
+  readonly imessage?: {
+    // Checks again before answering.
+    getStatus(): Promise<IMessageStatus>;
+    onStatus(callback: (status: IMessageStatus) => void): () => void;
+    set(patch: IMessagePatch): Promise<IMessageSetResult>;
+    act(action: IMessageAction): Promise<IMessageStatus>;
+  };
 }
 
 export const IPC = {
@@ -190,6 +255,10 @@ export const IPC = {
   settingsSet: "settings.set",
   settingsEvent: "settings.event",
   permissionAct: "permission.act",
+  imessageStatus: "imessage.status",
+  imessageStatusEvent: "imessage.status.event",
+  imessageSet: "imessage.set",
+  imessageAct: "imessage.act",
   localAccountAvailable: "local-account.available",
   localAccountSignIn: "local-account.sign-in",
   updateState: "update.state",

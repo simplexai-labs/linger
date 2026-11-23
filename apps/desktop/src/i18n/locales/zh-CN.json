@@ -377,5 +377,12 @@
     "sendBusy": "诊断信息正在发送中",
     "sendBusyDetail": "请在 Linger 设置窗口中完成或取消那份报告。",
     "ok": "好"
+  },
+  "imessage": {
+    "replyWithNumber": "回复一个数字。",
+    "replyWithNumbers": "回复数字，例如 1,3。",
+    "openToAnswer": "打开 Linger 回答：{link}",
+    "answerChanged": "这个问题已经回答过或已更改。打开 Linger 查看。",
+    "answerFailed": "无法提交这个回答。打开 Linger 回答：{link}"
   }
 }

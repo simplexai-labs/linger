@@ -79,7 +79,8 @@ Gateway and runs Agents. The daemon exits with the app.
 - `src/main/modules.ts`: `Module` interface, typed bus and the host that starts
   modules in dependency layers and stops them in reverse.
 - `src/main/*.ts`: one file per module (Enrollment, WorkspaceGrants,
-  ComputerDaemon, Status, PowerGuard, WindowManager, Tray, DesktopIpc). `status.ts`, `tray-menu.ts` and `tray-icon.ts` hold the pure
+  ComputerDaemon, Status, PowerGuard, WindowManager, Tray, IMessage,
+  DesktopIpc). `status.ts`, `tray-menu.ts` and `tray-icon.ts` hold the pure
   status summary, tray menu and tray icons, drawn from the logo PNGs in
   `resources/tray/` with a status badge.
 - `src/main/local-server.ts`: LocalServer, the setup page's Quick Install
@@ -523,6 +524,84 @@ Gateway and runs Agents. The daemon exits with the app.
   relaunch) and opens CuaDriver's System Settings pane through
   `lingerDesktop.permissions.act` instead; CuaDriver's prompt and restart,
   and every step from another page, go through TeamHub to the daemon.
+- `src/main/imessage.ts`: IMessage (macOS only), chatting with Another Me
+  from Messages. It keeps `imessage` in `config.json` (`enabled`,
+  `automationAsked`, and up to ten `handles`: the person's own phone numbers
+  as `+` and digits and Apple ID emails lowercased, normalized by
+  `normalizeIMessageHandle` in `config.ts`; a damaged block resets only
+  itself), and one status view (`imsg` runtime state, the checks below,
+  `ready`, `bridge`) that it emits as `imessage.changed` and the SPA reads
+  through `lingerDesktop.imessage`; every status read checks again, and a
+  check in flight is shared. `imessage-permissions.ts` reads
+  `~/Library/Messages/chat.db` for Full Disk Access (missing:
+  `messagesNotSetUp`) and, only after the person pressed Allow once
+  (`automationAsked`), counts enabled iMessage accounts in Messages with
+  AppleScript, which both asks to control Messages (`-1743` is denied) and
+  tells whether iMessage is signed in.
+  `imsg-runtime.ts` installs the pinned `imsg` release
+  (https://github.com/openclaw/imsg, MIT; see the root `NOTICE`) when the
+  channel is turned on and on start while it is on: it downloads
+  `imsg-macos.zip` with `downloadVerified`, checks the pinned SHA-256 before
+  unpacking, unpacks with `ditto` (signatures kept, nothing re-signed) and
+  renames the folder to `<userData>/imessage/imsg/<version>/`, then removes
+  other versions. Failures carry a code (`download_failed`,
+  `checksum_mismatch`, `extract_failed`, `executable_missing`) and leave no
+  partial folder. The release's `imsg-bridge-helper.dylib` needs SIP off
+  and is never loaded.
+  Once `ready`, the module runs one bridge (`imessage-channel.ts`); it
+  stops only on a clear negative (turned off, no handles, imsg missing, a
+  check denied, Messages not set up, iMessage signed out) and keeps running
+  through a check that answered `unknown`. While iMessage is off the
+  Messages AppleScript probe never runs. The bridge restarts when the handles change (the
+  stored reply chat and pending card are forgotten in between) and on
+  `server.changed`, which drops the old connection. Turning iMessage off
+  deletes `state.json`, so turning it on again starts at the current end of
+  both Messages and the Chat with no backlog; a quit app that stays on
+  catches up on restart. The first run binds the state to the server and
+  the signed-in Human (`/v0/me`, which must also be the enrolled
+  `ownerActorId` when set); another account or server pauses the bridge as
+  `other_account`, polled like `signed_out`, until iMessage is turned off
+  and on. `imsg-rpc.ts` supervises `imsg rpc`
+  (line-delimited JSON-RPC; restarts with 1 s to 30 s backoff, and when a
+  send poisons its mutation lane) and keeps one `watch.subscribe`, from the
+  current tail on the first start and after the stored row later, again
+  from `resume_after_rowid` after an overflow. Inbound, rows are handled one
+  at a time: only a new (no `type`) one-to-one text not from me, whose
+  sender (or chat identifier) normalizes to a handle and that does not start
+  with the outbound prefix `U+1F916` plus a space, in a chat whose
+  service is iMessage (`chats.get`, cached per chat for the process; SMS,
+  another or no service is skipped, a failed lookup retries), becomes the person's
+  Message in the Another Me Chat (`POST /v0/rooms/{id}/messages`,
+  `Idempotency-Key: imessage:<guid>`); everything else only moves the row
+  cursor. Messages to one's own Apple ID come back as a second inbound row
+  with a new GUID, so the prefix, carried by every text the bridge sends, is
+  the only echo filter. A network, 5xx or 429 failure retries with the same
+  key and holds the cursor; 401 holds it and marks the bridge `signed_out`;
+  another refusal is logged and skipped. Outbound, it follows the Chat with
+  `GET /v0/events?room=<id>:<seq>` (starting at the Chat's
+  `latest_room_seq` for a new Chat, so history is never sent) and sends each
+  conversation Message of Another Me, proactive ones included, as plain
+  text (`imessage-text.ts`: Markdown markers dropped, links as
+  `text (url)`, chunks of at most 3000 characters) to the chat the person
+  last wrote from, or to the first handle. Sends are at most once: the
+  event's `room_seq` is stored as in flight first, only a send imsg proves
+  never started is retried (five tries; while imsg restarts, sends wait up
+  to two minutes without using a try), and an event still in flight after
+  a restart is skipped. A pending question card with one radio or checkbox
+  question owned by the person is sent as numbered options; a reply of
+  numbers within range submits `POST /v0/decisions/{id}`, a 409 says the
+  question changed, another refusal links to the Chat, other text is an ordinary Message, and `card.changed`
+  with a newer version, or any later Another Me Message, forgets the card. Other cards are sent as their
+  title and a link to the Chat. The bridge's own words (reply hints, these
+  links, the 409 notice) come from `imessage.messages.ts` in the shell's
+  language. Cursors and the pending card live in
+  `<userData>/imessage/state.json` (0600; a damaged file starts empty).
+  Signed out (401 or `session.expired`) it probes `/v0/me` every 30 s;
+  without an Another Me it checks every 60 s; an unexpected failure is
+  logged as `imessage.bridge_failed`, shown as `error` and retried. Calls use the window
+  session's cookie, read fresh each time; logs carry no message text,
+  cookies or full handles. Turning iMessage on on two Macs signed in to the
+  same Apple ID makes both reply to every text; this is not detected.
 - `src/main/computer-credential.ts`: the Gateway credential in
   `<userData>/computer/credential.json` (0600).
 - Installs from before the product was renamed Linger move once on start.
