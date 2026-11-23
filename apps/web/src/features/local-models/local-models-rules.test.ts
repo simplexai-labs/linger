@@ -4,7 +4,10 @@ import { translate } from "@/i18n/language";
 
 import {
   actionErrorCopy,
+  concurrencyCopy,
   debugBannerCopy,
+  engineBadgeCopy,
+  engineHintCopy,
   hostBlockerCopy,
   modelErrorCopy,
   modelErrorShortCopy,
@@ -1103,6 +1106,62 @@ describe("hostBlocker, RAM reclaimability, and diagnostics copy", () => {
     );
     expect(modelErrorCopy({ code: "UNKNOWN_ERROR" }, translate)).toContain(
       "Something went wrong",
+    );
+  });
+
+  it("formats structured engine badges, hints, concurrency, and PolyStrata spotlight preference", () => {
+    expect(engineBadgeCopy("polystrata")).toBe("PolyStrata");
+    expect(engineBadgeCopy("llama.cpp")).toBe("llama.cpp");
+    expect(engineBadgeCopy("strata")).toBe("Strata");
+    expect(engineBadgeCopy(undefined)).toBeUndefined();
+
+    expect(engineHintCopy("polystrata", "gpu", translate)).toBe(
+      "Hybrid GPU + RAM expert offload",
+    );
+    expect(engineHintCopy("strata", "gpu", translate)).toBe(
+      "Hybrid GPU + RAM expert scheduling",
+    );
+    expect(engineHintCopy("llama.cpp", "gpu", translate)).toBe(
+      "All-in-VRAM native engine",
+    );
+    expect(engineHintCopy("llama.cpp", "unified", translate)).toBe(
+      "Unified memory native engine",
+    );
+    expect(engineHintCopy("llama.cpp", "system", translate)).toBe(
+      "System memory native engine",
+    );
+    expect(engineHintCopy("llama.cpp", "none", translate)).toBeUndefined();
+    expect(engineHintCopy(undefined, "gpu", translate)).toBeUndefined();
+
+    expect(concurrencyCopy(1, translate)).toBe("1 request at a time");
+    expect(concurrencyCopy(2, translate)).toBe("2 concurrent requests");
+    expect(concurrencyCopy(0, translate)).toBeUndefined();
+    expect(concurrencyCopy(undefined, translate)).toBeUndefined();
+
+    const polyEntry = {
+      ...modelView(
+        localModel({
+          engine: "polystrata",
+          id: "inkling-2-mini-q4-poly:UD-Q4_K_XL",
+          name: "Inkling 2 Mini (UD-Q4_K_XL)",
+          quant: "UD-Q4_K_XL",
+        }),
+      ),
+      status: "available" as const,
+    };
+    const llamaEntry = {
+      ...modelView(
+        localModel({
+          engine: "llama.cpp",
+          id: "inkling-2-mini:UD-Q4_K_M",
+          name: "Inkling 2 Mini (UD-Q4_K_M)",
+          quant: "UD-Q4_K_M",
+        }),
+      ),
+      status: "available" as const,
+    };
+    expect(featuredInklingEntry([llamaEntry, polyEntry])?.model.id).toBe(
+      "inkling-2-mini-q4-poly:UD-Q4_K_XL",
     );
   });
 });

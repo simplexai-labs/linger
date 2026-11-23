@@ -902,6 +902,27 @@ func (e LocalModelDownloadProgressStep) Valid() bool {
 	}
 }
 
+// Defines values for LocalModelEngine.
+const (
+	LocalModelEngineLlamaCpp   LocalModelEngine = "llama.cpp"
+	LocalModelEnginePolystrata LocalModelEngine = "polystrata"
+	LocalModelEngineStrata     LocalModelEngine = "strata"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelEngine enum.
+func (e LocalModelEngine) Valid() bool {
+	switch e {
+	case LocalModelEngineLlamaCpp:
+		return true
+	case LocalModelEnginePolystrata:
+		return true
+	case LocalModelEngineStrata:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalModelErrorCause.
 const (
 	LocalModelErrorCauseGatewayHomeNotPrivate LocalModelErrorCause = "GATEWAY_HOME_NOT_PRIVATE"
@@ -3289,19 +3310,31 @@ type LocalModel struct {
 	Availability LocalModelAvailability  `json:"availability"`
 
 	// Capabilities Capabilities verified by localmodels on this platform.
-	Capabilities  *[]LocalModelCapability     `json:"capabilities,omitempty"`
+	Capabilities *[]LocalModelCapability `json:"capabilities,omitempty"`
+
+	// Concurrency Maximum concurrent request slots configured for this model when loaded.
+	Concurrency   *int                        `json:"concurrency,omitempty"`
 	ContextTokens int64                       `json:"context_tokens"`
 	Description   string                      `json:"description"`
 	Download      *LocalModelDownloadProgress `json:"download,omitempty"`
 	DownloadBytes int64                       `json:"download_bytes"`
 	Endpoint      *LocalModelEndpoint         `json:"endpoint,omitempty"`
-	Error         *LocalModelError            `json:"error,omitempty"`
+
+	// Engine Inference engine family that runs this model entry. Never inferred from name or description.
+	Engine *LocalModelEngine `json:"engine,omitempty"`
+
+	// EngineLabel Display-only engine version and backend for this model, such as PolyStrata 0.2.19-poly.1 · CUDA.
+	EngineLabel *string          `json:"engine_label,omitempty"`
+	Error       *LocalModelError `json:"error,omitempty"`
 
 	// Family Model family for brand presentation; never inferred from name.
 	Family *LocalModelFamily `json:"family,omitempty"`
 
 	// Fit Where the model can live, judged on total capacity so it stays stable across loads. system means localmodels can run it from RAM, slower.
 	Fit LocalModelFit `json:"fit"`
+
+	// HostRamBytes Additional host system RAM used alongside GPU VRAM for hybrid offload engines (such as PolyStrata); absent when all weights stay in the model's primary pool.
+	HostRamBytes *int64 `json:"host_ram_bytes,omitempty"`
 
 	// Id Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
 	Id LocalModelId `json:"id"`
@@ -3411,6 +3444,9 @@ type LocalModelDownloadProgressStep string
 type LocalModelEndpoint struct {
 	BaseUrl string `json:"base_url"`
 }
+
+// LocalModelEngine Inference engine family that runs this model entry. Never inferred from name or description.
+type LocalModelEngine string
 
 // LocalModelError defines model for LocalModelError.
 type LocalModelError struct {

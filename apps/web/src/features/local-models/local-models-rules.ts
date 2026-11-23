@@ -82,20 +82,30 @@ const fitOrder: Record<LocalModel["fit"], number> = {
   unified: 0,
 };
 
+const PREFERRED_POLY_INKLING_ID = "inkling-2-mini-q4-poly:ud-q4_k_xl";
+const PREFERRED_POLY_INKLING_QUANT = "UD-Q4_K_XL";
 const PREFERRED_INKLING_ID = "inkling-2-mini:ud-q4_k_m";
 const PREFERRED_INKLING_QUANT = "UD-Q4_K_M";
 
-function isPreferredInklingVariant(model: LocalModel): boolean {
-  return (
-    model.id.toLowerCase() === PREFERRED_INKLING_ID ||
-    model.quant === PREFERRED_INKLING_QUANT
-  );
+function preferredInklingRank(model: LocalModel): number {
+  const id = model.id.toLowerCase();
+  if (
+    id === PREFERRED_POLY_INKLING_ID ||
+    (model.engine === "polystrata" &&
+      model.quant === PREFERRED_POLY_INKLING_QUANT)
+  ) {
+    return 2;
+  }
+  if (id === PREFERRED_INKLING_ID || model.quant === PREFERRED_INKLING_QUANT) {
+    return 1;
+  }
+  return 0;
 }
 
 /**
  * Picks the best Inkling 2 Mini entry from a Computer's library for the
  * featured spotlight: highest status first, then better hardware fit, then
- * Computer recommendation, preferring UD-Q4_K_M when variants tie.
+ * Computer recommendation, preferring top Q4 variants when ties remain.
  */
 export function featuredInklingEntry(
   entries: readonly ModelEntry[],
@@ -109,8 +119,7 @@ export function featuredInklingEntry(
       modelStatuses.indexOf(a.status) - modelStatuses.indexOf(b.status) ||
       fitOrder[a.model.fit] - fitOrder[b.model.fit] ||
       Number(b.model.recommended) - Number(a.model.recommended) ||
-      Number(isPreferredInklingVariant(b.model)) -
-        Number(isPreferredInklingVariant(a.model)),
+      preferredInklingRank(b.model) - preferredInklingRank(a.model),
   )[0];
 }
 

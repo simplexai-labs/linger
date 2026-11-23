@@ -298,6 +298,7 @@ func TestLocalModelsFramesFollowTheWelcomeServiceFeatures(t *testing.T) {
 
 func TestPublishLocalModelsDowngradesDiagnosticsForOlderServices(t *testing.T) {
 	need, have := uint64(16<<30), uint64(8<<30)
+	conc, hostRAM := uint64(1), uint64(19<<30)
 	rich := wire.LocalModelsSnapshot{
 		Available:  true,
 		ObservedAt: "2026-11-22T00:00:00Z",
@@ -306,6 +307,8 @@ func TestPublishLocalModelsDowngradesDiagnosticsForOlderServices(t *testing.T) {
 		Models: []wire.LocalModel{
 			{
 				ID: "m1:Q4", Name: "M1", Quant: "Q4", Fit: "none", State: "absent",
+				Engine: "polystrata", EngineLabel: "PolyStrata 0.2.19-poly.1 · CUDA",
+				Concurrency: &conc, HostRamBytes: &hostRAM,
 				Availability: wire.LocalModelAvailability{
 					Downloadable: false,
 					Reason: &wire.LocalModelAvailabilityReason{
@@ -332,7 +335,7 @@ func TestPublishLocalModelsDowngradesDiagnosticsForOlderServices(t *testing.T) {
 		},
 	}
 
-	// Without local_models_diagnostics, new fields and codes are downgraded cleanly.
+	// Without local_models_diagnostics or local_models_engine, new fields and codes are downgraded cleanly.
 	streamOld := &browserEventStream{}
 	dOld := &Daemon{computerID: "computer", protocolVersion: protocol.Version, localModelsStream: streamOld}
 	dOld.PublishLocalModels(rich)
@@ -342,6 +345,10 @@ func TestPublishLocalModelsDowngradesDiagnosticsForOlderServices(t *testing.T) {
 	}
 	if oldFrame.LocalModels.Debug != nil {
 		t.Fatalf("legacy service received debug: %+v", oldFrame.LocalModels.Debug)
+	}
+	if oldFrame.LocalModels.Models[0].Engine != "" || oldFrame.LocalModels.Models[0].EngineLabel != "" ||
+		oldFrame.LocalModels.Models[0].Concurrency != nil || oldFrame.LocalModels.Models[0].HostRamBytes != nil {
+		t.Fatalf("legacy service received engine metadata: %+v", oldFrame.LocalModels.Models[0])
 	}
 	r0 := oldFrame.LocalModels.Models[0].Availability.Reason
 	if r0 == nil || r0.Code != "PLATFORM_UNSUPPORTED" || r0.RequiredCuda != "" || r0.DetectedCuda != "" {
@@ -355,19 +362,40 @@ func TestPublishLocalModelsDowngradesDiagnosticsForOlderServices(t *testing.T) {
 		t.Fatalf("legacy error = %+v", oldFrame.LocalModels.Models[2].Error)
 	}
 
-	// With local_models_diagnostics, all diagnostic fields pass through intact.
-	streamNew := &browserEventStream{}
-	dNew := &Daemon{computerID: "computer", protocolVersion: protocol.Version, localModelsStream: streamNew}
-	dNew.localModelsDiagnostics.Store(true)
-	dNew.PublishLocalModels(rich)
-	var newFrame wire.RunnerLocalModels
-	if err := json.Unmarshal(streamNew.events[0].Payload, &newFrame); err != nil {
+	// With local_models_diagnostics alone, diagnostics pass through while engine metadata is still stripped.
+	streamDiag := &browserEventStream{}
+	dDiag := &Daemon{computerID: "computer", protocolVersion: protocol.Version, localModelsStream: streamDiag}
+	dDiag.localModelsDiagnostics.Store(true)
+	dDiag.PublishLocalModels(rich)
+	var diagFrame wire.RunnerLocalModels
+	if err := json.Unmarshal(streamDiag.events[0].Payload, &diagFrame); err != nil {
 		t.Fatal(err)
 	}
-	if newFrame.LocalModels.Debug == nil || newFrame.LocalModels.Debug.Mode != "tiny" ||
-		newFrame.LocalModels.Models[0].Availability.Reason.Code != "DRIVER_UPDATE_REQUIRED" ||
-		newFrame.LocalModels.Models[1].Availability.Reason.MemoryKind != "ram" ||
-		newFrame.LocalModels.Models[2].Error.Code != "UNKNOWN_ERROR" {
-		t.Fatalf("modern frame lost diagnostic fields: %+v", newFrame.LocalModels)
+	if diagFrame.LocalModels.Debug == nil || diagFrame.LocalModels.Debug.Mode != "tiny" ||
+		diagFrame.LocalModels.Models[0].Availability.Reason.Code != "DRIVER_UPDATE_REQUIRED" ||
+		diagFrame.LocalModels.Models[1].Availability.Reason.MemoryKind != "ram" ||
+		diagFrame.LocalModels.Models[2].Error.Code != "UNKNOWN_ERROR" {
+		t.Fatalf("diagnostics frame lost diagnostic fields: %+v", diagFrame.LocalModels)
+	}
+	if diagFrame.LocalModels.Models[0].Engine != "" || diagFrame.LocalModels.Models[0].Concurrency != nil ||
+		diagFrame.LocalModels.Models[0].HostRamBytes != nil {
+		t.Fatalf("diagnostics-only service received engine metadata: %+v", diagFrame.LocalModels.Models[0])
+	}
+
+	// With both local_models_diagnostics and local_models_engine, all fields pass through intact.
+	streamFull := &browserEventStream{}
+	dFull := &Daemon{computerID: "computer", protocolVersion: protocol.Version, localModelsStream: streamFull}
+	dFull.localModelsDiagnostics.Store(true)
+	dFull.localModelsEngine.Store(true)
+	dFull.PublishLocalModels(rich)
+	var fullFrame wire.RunnerLocalModels
+	if err := json.Unmarshal(streamFull.events[0].Payload, &fullFrame); err != nil {
+		t.Fatal(err)
+	}
+	m0 := fullFrame.LocalModels.Models[0]
+	if m0.Engine != "polystrata" || m0.EngineLabel != "PolyStrata 0.2.19-poly.1 · CUDA" ||
+		m0.Concurrency == nil || *m0.Concurrency != 1 ||
+		m0.HostRamBytes == nil || *m0.HostRamBytes != hostRAM {
+		t.Fatalf("full frame lost engine fields: %+v", m0)
 	}
 }

@@ -209,6 +209,7 @@ export const runnerGatewayEnvelopeSchema = {
         "byok_endpoint",
         "local_models_diagnostics",
         "model_invoke_outcomes",
+        "local_models_engine",
       ],
     },
     Timestamp: {
@@ -2580,6 +2581,12 @@ export const runnerGatewayEnvelopeSchema = {
       type: "string",
       enum: ["vision", "tool_use", "reasoning", "coding", "multilingual"],
     },
+    LocalModelEngine: {
+      description:
+        "Inference engine family that runs this model entry. Never inferred from name or description.",
+      type: "string",
+      enum: ["llama.cpp", "polystrata", "strata"],
+    },
     LocalModel: {
       description:
         "One validated chat model of the catalog on this platform, with its state on this Computer. Bytes everywhere; the reader formats them.",
@@ -2740,6 +2747,30 @@ export const runnerGatewayEnvelopeSchema = {
             "Warm prompt-processing speed in tokens/s measured at the last load; absent when unknown.",
           type: "number",
           minimum: 0,
+        },
+        engine: {
+          description:
+            "Inference engine family for this model. Sent only when runner.welcome service_features names local_models_engine.",
+          $ref: "#/$defs/LocalModelEngine",
+        },
+        engine_label: {
+          description:
+            "Display-only engine version and backend for this model. Sent only when runner.welcome service_features names local_models_engine.",
+          type: "string",
+          minLength: 1,
+          maxLength: 120,
+        },
+        concurrency: {
+          description:
+            "Maximum concurrent request slots for this model when loaded. Sent only when runner.welcome service_features names local_models_engine.",
+          type: "integer",
+          minimum: 1,
+          maximum: 64,
+        },
+        host_ram_bytes: {
+          description:
+            "Additional host system RAM used alongside GPU VRAM for hybrid offload engines. Sent only when runner.welcome service_features names local_models_engine.",
+          $ref: "#/$defs/NonNegativeInteger",
         },
       },
     },

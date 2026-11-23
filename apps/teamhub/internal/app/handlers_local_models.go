@@ -340,6 +340,18 @@ func sanitizeLocalModelsSnapshot(snapshot *teamhubinternal.LocalModelsSnapshot) 
 		if model.Architecture != nil && !model.Architecture.Valid() {
 			model.Architecture = nil
 		}
+		if model.Engine != nil && !model.Engine.Valid() {
+			model.Engine = nil
+		}
+		if model.EngineLabel != nil && len(*model.EngineLabel) == 0 {
+			model.EngineLabel = nil
+		}
+		if model.Concurrency != nil && (*model.Concurrency < 1 || *model.Concurrency > 64) {
+			model.Concurrency = nil
+		}
+		if model.HostRamBytes != nil && *model.HostRamBytes < 0 {
+			model.HostRamBytes = nil
+		}
 		if model.Capabilities != nil {
 			filtered := make([]teamhubinternal.LocalModelCapability, 0, len(*model.Capabilities))
 			for _, capability := range *model.Capabilities {
@@ -403,6 +415,15 @@ func validLocalModelsSnapshot(snapshot teamhubinternal.LocalModelsSnapshot) bool
 			return false
 		}
 		if model.Architecture != nil && !model.Architecture.Valid() {
+			return false
+		}
+		if model.Engine != nil && !model.Engine.Valid() {
+			return false
+		}
+		if model.Concurrency != nil && (*model.Concurrency < 1 || *model.Concurrency > 64) {
+			return false
+		}
+		if model.HostRamBytes != nil && *model.HostRamBytes < 0 {
 			return false
 		}
 		if model.Capabilities != nil {

@@ -42,6 +42,7 @@ var (
 	families          = []string{"qwen", "gemma", "llama", "openai", "deepseek", "mistral", "phi", "glm", "kimi", "claude", "grok", "other"}
 	architectures     = []string{"dense", "moe"}
 	capabilities      = []string{"vision", "tool_use", "reasoning", "coding", "multilingual"}
+	engines           = []string{"llama.cpp", "polystrata", "strata"}
 	availabilityCodes = []string{
 		"MEMORY_INSUFFICIENT", "DISK_INSUFFICIENT", "PLATFORM_UNSUPPORTED",
 		"GPU_UNSUPPORTED", "DRIVER_UPDATE_REQUIRED", "RUNTIME_DEPENDENCY_MISSING", "UNAVAILABLE",
@@ -225,6 +226,14 @@ func sanitizeModel(model *wire.LocalModel) {
 	model.ActiveParameters = clip(strings.TrimSpace(model.ActiveParameters), 32)
 	model.License = clip(strings.TrimSpace(model.License), 120)
 	model.SourceURL = strings.TrimSpace(model.SourceURL)
+	model.Engine = strings.TrimSpace(model.Engine)
+	if model.Engine != "" && !slices.Contains(engines, model.Engine) {
+		model.Engine = ""
+	}
+	model.EngineLabel = clip(strings.TrimSpace(model.EngineLabel), 120)
+	if model.Concurrency != nil && (*model.Concurrency < 1 || *model.Concurrency > 64) {
+		model.Concurrency = nil
+	}
 	if model.Family != "" && !slices.Contains(families, model.Family) {
 		model.Family = "other"
 	}

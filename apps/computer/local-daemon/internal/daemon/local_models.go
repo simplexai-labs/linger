@@ -27,6 +27,12 @@ const serviceFeatureByokEndpoint = "byok_endpoint"
 // codes, and debug-mode metadata. Older services close the connection on them.
 const serviceFeatureLocalModelsDiagnostics = "local_models_diagnostics"
 
+// serviceFeatureLocalModelsEngine in runner.welcome's service_features says
+// the Agent Service accepts per-model engine, engine_label, concurrency, and
+// host_ram_bytes fields on LocalModel rows. Older services close the connection
+// on unknown LocalModel properties.
+const serviceFeatureLocalModelsEngine = "local_models_engine"
+
 // LocalModelLibrary runs the actions a Computer owner chooses on this
 // Computer's localmodels library. The Daemon never picks a model itself.
 type LocalModelLibrary interface {
@@ -60,6 +66,9 @@ func (d *Daemon) PublishLocalModels(snapshot wire.LocalModelsSnapshot) {
 	}
 	if !d.localModelsDiagnostics.Load() {
 		snapshot = downgradeLocalModelsSnapshot(snapshot)
+	}
+	if !d.localModelsEngine.Load() {
+		snapshot = stripLocalModelsEngine(snapshot)
 	}
 	d.localModelsRevision++
 	sentAt := time.Now().UTC()
@@ -210,6 +219,24 @@ func downgradeLocalModelsSnapshot(snapshot wire.LocalModelsSnapshot) wire.LocalM
 			copied.Code = downgradeLocalModelErrorCode(copied.Code)
 			model.Error = &copied
 		}
+		models[i] = model
+	}
+	snapshot.Models = models
+	return snapshot
+}
+
+// stripLocalModelsEngine omits per-model engine metadata when talking to an
+// Agent Service that did not announce serviceFeatureLocalModelsEngine.
+func stripLocalModelsEngine(snapshot wire.LocalModelsSnapshot) wire.LocalModelsSnapshot {
+	if len(snapshot.Models) == 0 {
+		return snapshot
+	}
+	models := make([]wire.LocalModel, len(snapshot.Models))
+	for i, model := range snapshot.Models {
+		model.Engine = ""
+		model.EngineLabel = ""
+		model.Concurrency = nil
+		model.HostRamBytes = nil
 		models[i] = model
 	}
 	snapshot.Models = models

@@ -1394,6 +1394,10 @@ type LocalModel struct {
 	License               string                      `json:"license,omitempty"`
 	SourceURL             string                      `json:"source_url,omitempty"`
 	PromptTokensPerSecond *float64                    `json:"prompt_tokens_per_second,omitempty"`
+	Engine                string                      `json:"engine,omitempty"`
+	EngineLabel           string                      `json:"engine_label,omitempty"`
+	Concurrency           *uint64                     `json:"concurrency,omitempty"`
+	HostRamBytes          *uint64                     `json:"host_ram_bytes,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModel.

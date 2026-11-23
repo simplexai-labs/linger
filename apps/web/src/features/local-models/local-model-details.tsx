@@ -24,6 +24,9 @@ import {
 } from "./local-model-agents";
 import {
   capabilityCopy,
+  concurrencyCopy,
+  engineBadgeCopy,
+  engineHintCopy,
   modelErrorCopy,
   modelNoteCopy,
   unavailableCopy,
@@ -226,6 +229,13 @@ export function ModelFacts({
       : undefined;
   const capabilities = modelCapabilities(model);
   const parameters = parametersLabel(model, t);
+  const engineDisplay = model.engine_label ?? engineBadgeCopy(model.engine);
+  const engineHint = engineHintCopy(model.engine, model.fit, t);
+  const concurrency = concurrencyCopy(model.concurrency, t);
+  const hostRam =
+    model.host_ram_bytes && model.host_ram_bytes > 0
+      ? formatGigabytes(model.host_ram_bytes, t)
+      : undefined;
   const speed = speedLabel(model, t);
   const sourceUrl = safeModelSourceUrl(model.source_url);
   const reclaimable = memoryReclaimable(view, model);
@@ -337,11 +347,25 @@ export function ModelFacts({
         {parameters ? (
           <Fact label={t(m.factParameters)}>{parameters}</Fact>
         ) : null}
+        {engineDisplay ? (
+          <Fact label={t(m.factEngine)}>
+            <span className="block">{engineDisplay}</span>
+            {engineHint ? (
+              <span className="block text-xs text-muted-foreground">
+                {engineHint}
+              </span>
+            ) : null}
+          </Fact>
+        ) : null}
+        {concurrency ? (
+          <Fact label={t(m.factConcurrency)}>{concurrency}</Fact>
+        ) : null}
         <Fact label={t(m.factMemory)}>
           {memoryPlace
             ? t(m.memoryOn, { place: memoryPlace, size: memorySize })
             : memorySize}
         </Fact>
+        {hostRam ? <Fact label={t(m.factSystemMemory)}>{hostRam}</Fact> : null}
         <Fact label={t(onComputer ? m.factOnDisk : m.factDownload)}>
           {formatGigabytes(model.download_bytes, t)}
         </Fact>

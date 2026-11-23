@@ -4798,6 +4798,121 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     ).toBeEnabled();
   });
 
+  it("displays structured engine pills and expanded engine, concurrency, and hybrid system memory facts", async () => {
+    const polyModel = localModel({
+      concurrency: 1,
+      engine: "polystrata",
+      engine_label: "PolyStrata 0.2.19-poly.1 · CUDA",
+      host_ram_bytes: gb(19.8),
+      id: "inkling-2-mini-q4-poly:UD-Q4_K_XL",
+      memory_bytes: gb(16.5),
+      name: "Inkling 2 Mini (UD-Q4_K_XL)",
+      pi_model: "localmodels-library/inkling-2-mini-q4-poly",
+      quant: "UD-Q4_K_XL",
+      state: "loaded",
+    });
+    const llamaModel = localModel({
+      concurrency: 2,
+      engine: "llama.cpp",
+      engine_label: "llama.cpp b12588-mix-c0c3de8 · CUDA",
+      id: "inkling-2-mini:UD-Q4_K_M",
+      memory_bytes: gb(21.4),
+      name: "Inkling 2 Mini (UD-Q4_K_M)",
+      quant: "UD-Q4_K_M",
+      recommended: true,
+      state: "absent",
+    });
+    const legacyModel = localModel({
+      id: "qwen3.8-27b:UD-Q4_K_M",
+      name: "Qwen 3.8 27B",
+      quant: "UD-Q4_K_M",
+      state: "absent",
+    });
+    const view = labView({
+      models: [
+        modelView(polyModel),
+        modelView(llamaModel),
+        modelView(legacyModel),
+      ],
+    });
+    view.computer.host!.engine_label =
+      "llama.cpp b11370 · CUDA + PolyStrata 0.2.19-poly.1 · CUDA";
+
+    await renderPage(setup([view]));
+    await findModels();
+
+    const polyCard = card("Inkling 2 Mini (UD-Q4_K_XL)");
+    const llamaCard = card("Inkling 2 Mini (UD-Q4_K_M)");
+    const legacyCard = card("Qwen 3.8 27B");
+
+    const polyBadge = within(polyCard).getByText("PolyStrata");
+    expect(polyBadge).toHaveAttribute("data-engine", "polystrata");
+    expect(polyBadge).toHaveAttribute(
+      "title",
+      "PolyStrata 0.2.19-poly.1 · CUDA",
+    );
+
+    const llamaBadge = within(llamaCard).getByText("llama.cpp");
+    expect(llamaBadge).toHaveAttribute("data-engine", "llama.cpp");
+    expect(llamaBadge).toHaveAttribute(
+      "title",
+      "llama.cpp b12588-mix-c0c3de8 · CUDA",
+    );
+
+    expect(within(legacyCard).queryByText("PolyStrata")).toBeNull();
+    expect(within(legacyCard).queryByText("llama.cpp")).toBeNull();
+
+    // Expand PolyStrata row: Engine, Concurrency, and System memory are shown.
+    fireEvent.click(
+      within(polyCard).getByRole("button", {
+        name: "Inkling 2 Mini (UD-Q4_K_XL)",
+      }),
+    );
+    expect(polyCard).toHaveTextContent("Engine");
+    expect(polyCard).toHaveTextContent("PolyStrata 0.2.19-poly.1 · CUDA");
+    expect(polyCard).toHaveTextContent("Hybrid GPU + RAM expert offload");
+    expect(polyCard).toHaveTextContent("Concurrency");
+    expect(polyCard).toHaveTextContent("1 request at a time");
+    expect(polyCard).toHaveTextContent("System memory");
+    expect(polyCard).toHaveTextContent("19.8 GB");
+
+    // Expand llama.cpp row: Engine and Concurrency are shown, System memory is omitted.
+    fireEvent.click(
+      within(llamaCard).getByRole("button", {
+        name: "Inkling 2 Mini (UD-Q4_K_M)",
+      }),
+    );
+    expect(llamaCard).toHaveTextContent("llama.cpp b12588-mix-c0c3de8 · CUDA");
+    expect(llamaCard).toHaveTextContent("All-in-VRAM native engine");
+    expect(llamaCard).toHaveTextContent("2 concurrent requests");
+    expect(within(llamaCard).queryByText("System memory")).toBeNull();
+
+    // Details dialog surfaces both host engines from host.engine_label.
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent(
+      "Ubuntu 24.04 · llama.cpp b11370 · CUDA + PolyStrata 0.2.19-poly.1 · CUDA",
+    );
+
+    // Chinese locale keeps product engine names and translates labels and hints.
+    await reactAct(async () => {
+      await setLanguage("zh-CN");
+    });
+    expect(llamaCard).toHaveTextContent(zhCN.localModels.engineHintLlamaCpp);
+    expect(llamaCard).toHaveTextContent(
+      zhCN.localModels.concurrencyMultiple.replace("{count}", "2"),
+    );
+    fireEvent.click(
+      within(polyCard).getByRole("button", {
+        name: "Inkling 2 Mini (UD-Q4_K_XL)",
+      }),
+    );
+    expect(polyCard).toHaveTextContent(zhCN.localModels.factEngine);
+    expect(polyCard).toHaveTextContent(zhCN.localModels.engineHintPolystrata);
+    expect(polyCard).toHaveTextContent(zhCN.localModels.concurrencySingle);
+    expect(polyCard).toHaveTextContent(zhCN.localModels.factSystemMemory);
+  });
+
   it("supports keyboard arrow switching on ModelSourceTabs and keeps BYOK focused without memory clutter", async () => {
     const fixture = setup([labView()]);
     fixture.runtime.server.on("GET", switchPath, ({ params }) =>

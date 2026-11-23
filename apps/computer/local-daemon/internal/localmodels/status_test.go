@@ -94,3 +94,44 @@ func TestMapStatusPreservesSubsecondObservedAt(t *testing.T) {
 		t.Fatalf("unavailable observed_at = %q, want 2026-11-17T20:37:38.5Z", missing.ObservedAt)
 	}
 }
+
+func TestMapStatusKeepsAndSanitizesEngineMetadata(t *testing.T) {
+	encoded, err := os.ReadFile("testdata/library-status-dev38.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
+	}
+	rows := document["models"].([]any)
+	first := rows[0].(map[string]any)
+	first["engine"] = "polystrata"
+	first["engine_label"] = "PolyStrata 0.2.19-poly.1 · CUDA"
+	first["concurrency"] = 1
+	first["host_ram_bytes"] = 19800000000
+
+	second := rows[1].(map[string]any)
+	second["engine"] = "future-engine"
+	second["engine_label"] = "FutureEngine"
+	second["concurrency"] = 99
+
+	encoded, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := mapStatus(encoded, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m0 := snapshot.Models[0]
+	if m0.Engine != "polystrata" || m0.EngineLabel != "PolyStrata 0.2.19-poly.1 · CUDA" ||
+		m0.Concurrency == nil || *m0.Concurrency != 1 ||
+		m0.HostRamBytes == nil || *m0.HostRamBytes != 19800000000 {
+		t.Fatalf("model 0 engine metadata = %+v", m0)
+	}
+	m1 := snapshot.Models[1]
+	if m1.Engine != "" || m1.EngineLabel != "FutureEngine" || m1.Concurrency != nil {
+		t.Fatalf("model 1 sanitized engine metadata = %+v", m1)
+	}
+}

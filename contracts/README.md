@@ -106,6 +106,10 @@ Progress and outcomes travel back only as snapshots:
    metadata are sent only when `runner.welcome`'s `service_features` declares
    `local_models_diagnostics` (`FIRST_LOCAL_MODELS_DIAGNOSTICS_COMPUTER_VERSION`,
    `0.58.0`); otherwise the Daemon downgrades them for older Agent Services.
+   Per-model inference engine metadata (`engine`, `engine_label`, `concurrency`,
+   `host_ram_bytes`) is sent only when `runner.welcome`'s `service_features`
+   declares `local_models_engine` (`FIRST_LOCAL_MODELS_ENGINE_COMPUTER_VERSION`,
+   `0.61.0`); otherwise the Daemon strips those fields for older Agent Services.
 2. Agent Service records it through TeamHub `recordAgentRuntimeLocalModels`
    (`POST /v0/agent-runtime/local-computers/local-models`). TeamHub keeps the
    latest snapshot per Computer, so an offline Computer shows what it last

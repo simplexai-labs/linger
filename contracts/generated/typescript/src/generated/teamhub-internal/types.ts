@@ -2722,6 +2722,11 @@ export interface components {
       | "reasoning"
       | "coding"
       | "multilingual";
+    /**
+     * @description Inference engine family that runs this model entry. Never inferred from name or description.
+     * @enum {string}
+     */
+    LocalModelEngine: "llama.cpp" | "polystrata" | "strata";
     /** @description One validated chat model of the catalog on this platform and its state on this Computer. Sizes are bytes; readers format them. */
     LocalModel: {
       id: components["schemas"]["LocalModelId"];
@@ -2773,6 +2778,16 @@ export interface components {
       source_url?: string;
       /** @description Warm prompt-processing speed in tokens/s measured at the last load; absent when unknown. */
       prompt_tokens_per_second?: number;
+      engine?: components["schemas"]["LocalModelEngine"];
+      /** @description Display-only engine version and backend for this model, such as PolyStrata 0.2.19-poly.1 · CUDA. */
+      engine_label?: string;
+      /** @description Maximum concurrent request slots configured for this model when loaded. */
+      concurrency?: number;
+      /**
+       * Format: int64
+       * @description Additional host system RAM used alongside GPU VRAM for hybrid offload engines (such as PolyStrata); absent when all weights stay in the model's primary pool.
+       */
+      host_ram_bytes?: number;
     };
     /** @description Present only when localmodels debug mode (tiny or simulate) is active on the Computer. config_path is shown only to the Computer owner. */
     LocalModelsDebugInfo: {

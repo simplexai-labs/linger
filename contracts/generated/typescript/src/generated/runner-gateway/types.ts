@@ -36,7 +36,8 @@ export type ServiceFeature =
   | "local_models"
   | "byok_endpoint"
   | "local_models_diagnostics"
-  | "model_invoke_outcomes";
+  | "model_invoke_outcomes"
+  | "local_models_engine";
 export type JsonValue =
   | null
   | boolean
@@ -1462,6 +1463,22 @@ export interface LocalModel {
    * Warm prompt-processing speed in tokens/s measured at the last load; absent when unknown.
    */
   prompt_tokens_per_second?: number;
+  /**
+   * Inference engine family for this model. Sent only when runner.welcome service_features names local_models_engine.
+   */
+  engine?: "llama.cpp" | "polystrata" | "strata";
+  /**
+   * Display-only engine version and backend for this model. Sent only when runner.welcome service_features names local_models_engine.
+   */
+  engine_label?: string;
+  /**
+   * Maximum concurrent request slots for this model when loaded. Sent only when runner.welcome service_features names local_models_engine.
+   */
+  concurrency?: number;
+  /**
+   * Additional host system RAM used alongside GPU VRAM for hybrid offload engines. Sent only when runner.welcome service_features names local_models_engine.
+   */
+  host_ram_bytes?: number;
 }
 export interface LocalModelAvailability {
   downloadable: boolean;

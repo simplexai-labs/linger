@@ -33,7 +33,11 @@ import {
   usedByAgentNames,
 } from "./local-model-agents";
 import { ModelFacts } from "./local-model-details";
-import { modelErrorShortCopy, unavailableShortCopy } from "./local-models-copy";
+import {
+  engineBadgeCopy,
+  modelErrorShortCopy,
+  unavailableShortCopy,
+} from "./local-models-copy";
 import { localModelsMessages as m } from "./local-models.messages";
 import type {
   LocalModel,
@@ -268,6 +272,9 @@ function RowStatusLine({
 
 function RowMetadataPills({
   badges,
+  engine,
+  engineBadge,
+  engineTitle,
   featured,
   overflowTitle,
   status,
@@ -275,6 +282,9 @@ function RowMetadataPills({
   usedByTitle,
 }: {
   badges: string[];
+  engine?: LocalModel["engine"];
+  engineBadge?: string;
+  engineTitle?: string;
   featured: boolean;
   overflowTitle?: string;
   status: ModelStatus;
@@ -282,6 +292,7 @@ function RowMetadataPills({
   usedByTitle?: string;
 }) {
   const t = useT();
+  const isAcceleratedEngine = engine === "polystrata" || engine === "strata";
   return (
     <div
       className={cn(
@@ -311,6 +322,20 @@ function RowMetadataPills({
             />
           ) : null}
           {usedBy}
+        </span>
+      ) : null}
+      {engineBadge ? (
+        <span
+          className={cn(
+            "inline-flex h-[22px] items-center rounded-sm px-2 text-xs font-medium",
+            isAcceleratedEngine
+              ? "bg-lavender-500/15 text-lavender-700"
+              : "border border-border bg-card text-secondary-foreground",
+          )}
+          data-engine={engine}
+          title={engineTitle}
+        >
+          {engineBadge}
         </span>
       ) : null}
       {badges.map((badge, index) => (
@@ -445,8 +470,14 @@ export function ModelRow({
     Boolean(model.pi_model) &&
     Boolean(primaryAgent) &&
     Boolean(onAssignAgent);
+  const engineBadge = engineBadgeCopy(model.engine);
+  const engineTitle = model.engine_label ?? engineBadge;
   const { badges, overflowTitle } = collapsedRowBadges(model, t);
-  const hasMeta = showFeaturedPill || Boolean(usedBy) || badges.length > 0;
+  const hasMeta =
+    showFeaturedPill ||
+    Boolean(usedBy) ||
+    Boolean(engineBadge) ||
+    badges.length > 0;
   const damagedFiles =
     status === "failed" &&
     (model.error?.code === "CHECKSUM_MISMATCH" ||
@@ -579,6 +610,9 @@ export function ModelRow({
         {hasMeta ? (
           <RowMetadataPills
             badges={badges}
+            engine={model.engine}
+            engineBadge={engineBadge}
+            engineTitle={engineTitle}
             featured={showFeaturedPill}
             overflowTitle={overflowTitle}
             status={status}

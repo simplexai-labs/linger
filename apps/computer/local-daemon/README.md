@@ -190,7 +190,12 @@ model.
   `RUNTIME_DEPENDENCY_MISSING`, `UNAVAILABLE`, `UNKNOWN_ERROR`, `memory_kind`,
   driver/runtime fields) and optional `debug` metadata are sent only when
   `runner.welcome`'s `service_features` names `local_models_diagnostics` and
-  are downgraded otherwise. It is sent after
+  are downgraded otherwise. Per-model inference engine fields (`engine`,
+  `engine_label`, `concurrency`, `host_ram_bytes`) are sanitized forward-
+  compatibly (unknown `engine` or out-of-range `concurrency` is omitted,
+  `engine_label` is clipped) and sent only when `runner.welcome`'s
+  `service_features` names `local_models_engine` (Computer 0.61.0 or later).
+  The snapshot is sent after
   every welcome, after every action or job end, and at most every 2 seconds
   for progress. When a job enters the `download` phase, the Daemon publishes
   that progress line onto the current snapshot right away so refreshes do not

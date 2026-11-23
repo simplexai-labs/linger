@@ -70,6 +70,9 @@ info:
     seconds while a download or load runs. Extended diagnostic reasons,
     refusal codes, and optional debug-mode metadata travel only after a
     runner.welcome whose service_features names local_models_diagnostics.
+    Per-model inference engine fields (engine, engine_label, concurrency,
+    host_ram_bytes) travel only after a runner.welcome whose service_features
+    names local_models_engine, advertised to Computer 0.61.0 and later.
     execute with kind model_source reads or switches the Computer's model
     source. A BYOK input names its address as base_url, path and endpoint
     with an explicit protocol, and the Computer sends one request there; the

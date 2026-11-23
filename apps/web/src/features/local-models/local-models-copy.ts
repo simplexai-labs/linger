@@ -419,6 +419,55 @@ export function architectureCopy(
     : architecture;
 }
 
+/** Inference engine names read the same in every language. */
+const engineBadgeLabels: Record<Schemas["LocalModelEngine"], string> = {
+  "llama.cpp": "llama.cpp",
+  polystrata: "PolyStrata",
+  strata: "Strata",
+};
+
+/** Compact engine pill label from the structured `engine` field. */
+export function engineBadgeCopy(
+  engine: Schemas["LocalModelEngine"] | undefined,
+): string | undefined {
+  if (!engine) return undefined;
+  return Object.hasOwn(engineBadgeLabels, engine)
+    ? engineBadgeLabels[engine]
+    : undefined;
+}
+
+/** Concise explanation of how this inference engine uses memory, for details. */
+export function engineHintCopy(
+  engine: Schemas["LocalModelEngine"] | undefined,
+  fit: Schemas["LocalModelFit"],
+  t: Translate,
+): string | undefined {
+  switch (engine) {
+    case "polystrata":
+      return t(m.engineHintPolystrata);
+    case "strata":
+      return t(m.engineHintStrata);
+    case "llama.cpp":
+      if (fit === "gpu") return t(m.engineHintLlamaCpp);
+      if (fit === "unified") return t(m.engineHintLlamaCppUnified);
+      if (fit === "system") return t(m.engineHintLlamaCppSystem);
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+/** Human-readable concurrency slot summary from the structured `concurrency` field. */
+export function concurrencyCopy(
+  concurrency: number | undefined,
+  t: Translate,
+): string | undefined {
+  if (concurrency === undefined || concurrency < 1) return undefined;
+  return concurrency === 1
+    ? t(m.concurrencySingle)
+    : t(m.concurrencyMultiple, { count: concurrency });
+}
+
 const modelSourceRefusals: Record<
   Schemas["ModelSourceErrorCode"],
   Message<string>

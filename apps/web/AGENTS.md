@@ -57,12 +57,14 @@ build:assets` to check the initial JS budget.
   `@linger/service-kit/featured-models`, degrading to a partner highlight with
   external links when absent from the catalog),
   renders tinted family icon tiles, Agent
-  usage counts, structured capability/parameter badges (never matched against
+  usage counts, structured engine pills (`PolyStrata` / `llama.cpp` / `Strata`),
+  capability/parameter badges (never matched against
   `name` or `description`), state-distinct cards (`loaded`, `recommended`,
   `failed` with short failure reasons and direct `Remove` for damaged/missing
   files, `unavailable`), download speed/ETA, live Bifrost (`Pi`) `Gateway`
   readiness, and top diagnostic callouts with a two-column model-card facts
-  grid from structured `LocalModel` fields in `local-models-rules.ts`, resolves
+  grid (including `Engine`, `Concurrency`, and hybrid `System memory`) from
+  structured `LocalModel` fields in `local-models-rules.ts`, resolves
   Sponsor-owned Agent eligibility and `Pi` runtime switch payloads in
   `local-model-agents.ts` (`Use with <Another Me>`, `Open chat`,
   `Switch Agent…` in `Used by`, and `Make room` automatic Agent handoff once

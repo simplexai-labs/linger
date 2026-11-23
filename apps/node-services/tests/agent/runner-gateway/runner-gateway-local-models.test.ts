@@ -197,6 +197,17 @@ describe("Runner Gateway local models", () => {
         "byok_endpoint",
         "local_models_diagnostics",
         "model_invoke_outcomes",
+        "local_models_engine",
+      ],
+    ],
+    [
+      "0.61.0",
+      [
+        "local_models",
+        "byok_endpoint",
+        "local_models_diagnostics",
+        "model_invoke_outcomes",
+        "local_models_engine",
       ],
     ],
     [
