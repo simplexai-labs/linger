@@ -281,11 +281,18 @@ func TestInstructionsNameTheRoomAndNeverRefuseBackgroundWork(t *testing.T) {
 	}
 }
 
-func TestInstructionsKeepRepliesContextualAndComplete(t *testing.T) {
+// Bare status words ("Sent.") made the live voice sound cold; the persona
+// keeps replies short without teaching them, as Voice Runtime's tone rule does.
+func TestInstructionsKeepRepliesWarmNotBare(t *testing.T) {
 	text := Instructions("A", "R", UserMemory{})
-	for _, conflict := range []string{"React first", "make it different each time", "Be playful, also on plain tasks", "A lone word"} {
-		if strings.Contains(text, conflict) {
-			t.Fatalf("the persona forces an opening ritual: %q", conflict)
+	for _, want := range []string{"Short is never bare", "React first", "with I as its subject"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the persona misses %q", want)
+		}
+	}
+	for _, bare := range []string{"→ “Sent.”", "is a whole answer", "No reason, no remark", "without forcing a pronoun"} {
+		if strings.Contains(text, bare) {
+			t.Fatalf("the persona teaches bare replies: %q", bare)
 		}
 	}
 }

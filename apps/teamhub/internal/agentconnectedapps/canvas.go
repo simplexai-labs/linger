@@ -284,16 +284,12 @@ func ReadCanvasHeader(blocks []CanvasBlock) (CanvasHeader, bool) {
 // CanvasHeaderFromMarkdown reads the canvas header from a canvas's Markdown,
 // where the first block is written as a fenced code block.
 func CanvasHeaderFromMarkdown(markdown string) (CanvasHeader, bool) {
-	lines := strings.Split(strings.TrimLeft(markdown, "\n"), "\n")
-	if len(lines) == 0 || !strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
+	fence := CanvasHeaderFence.FindString(markdown)
+	if fence == "" {
 		return CanvasHeader{}, false
 	}
-	for end := 1; end < len(lines); end++ {
-		if strings.TrimSpace(lines[end]) == "```" {
-			return readCanvasHeaderText(lines[1:end])
-		}
-	}
-	return CanvasHeader{}, false
+	lines := strings.Split(strings.TrimRight(strings.TrimSpace(fence), "\n"), "\n")
+	return readCanvasHeaderText(lines[1 : len(lines)-1])
 }
 
 func readCanvasHeaderText(lines []string) (CanvasHeader, bool) {

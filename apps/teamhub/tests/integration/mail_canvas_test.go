@@ -203,6 +203,26 @@ func TestHumanSendsAGmailCanvasOnlyWhenSendIsClicked(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	// A delivery whose email lives in another tenant stays out of this one,
+	// whatever account it is filed under.
+	if _, err := env.pool.Exec(t.Context(), `
+ INSERT INTO actors(id,tenant_id,kind,display_name,handle) VALUES('actor_other_agent','tenant_other','agent','Other','other-agent');
+ INSERT INTO documents(id,tenant_id,title,format,owner_actor_id,owner_actor_kind,creator_actor_id,creator_actor_kind,status)
+ VALUES('document_other_mail','tenant_other','Other mail','text','actor_other_agent','agent','actor_other_agent','agent','active');
+ INSERT INTO mail_canvas_deliveries(document_id,id,account_id,connection_id,source_digest,status)
+ VALUES('document_other_mail','delivery_other_mail','account_alice','connection_mail_gmail','sha256:'||repeat('0',64),'sent')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), `INSERT INTO document_texts(document_id,tenant_id,source_kind,source_id,status,markdown,markdown_sha256,search_text)
+ VALUES('document_other_mail','tenant_other','file_version','version_other','ready',$1,repeat('e',64),'Hi')`,
+		"```text\ncanvas: gmail\nto: stranger@other.example\n```\n\nHi"); err != nil {
+		t.Fatal(err)
+	}
+	var scoped teamhubinternal.VoiceLiveContext
+	decode(t, voiceRuntimeCall(t, env, http.MethodGet, "/internal/v1/voice/sessions/"+sessionID+"/live-context", nil, http.StatusOK), &scoped)
+	if strings.Contains(scoped.Instructions, "stranger@other.example") || !strings.Contains(scoped.Instructions, "amy@example.com") {
+		t.Fatalf("live context crosses tenants: %q", scoped.Instructions[:min(len(scoped.Instructions), 1500)])
+	}
 	// The same click replays its receipt; another one cannot send it again.
 	if status, body := send(documentID, "request-send-00000001", draft.SourceDigest); status != http.StatusAccepted || !strings.Contains(string(body), `"sent"`) {
 		t.Fatalf("replayed send=%d %s", status, body)

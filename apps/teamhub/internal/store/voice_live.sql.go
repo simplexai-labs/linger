@@ -876,7 +876,7 @@ FROM (
   (SELECT 1, 'sent', left(text.markdown, 2000), delivery.updated_at
   FROM actors actor
   JOIN mail_canvas_deliveries delivery ON delivery.account_id=actor.account_id AND delivery.status='sent'
-  JOIN document_texts text ON text.document_id=delivery.document_id
+  JOIN document_texts text ON text.document_id=delivery.document_id AND text.tenant_id=$2::text
   WHERE actor.id=$1::text AND actor.tenant_id=$2::text
   ORDER BY delivery.updated_at DESC
   LIMIT 20)
