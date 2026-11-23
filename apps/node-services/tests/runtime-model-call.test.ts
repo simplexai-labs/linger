@@ -1338,6 +1338,36 @@ describe("TeamHub background outcome reporter", () => {
       ]),
     );
   });
+
+  it("only warns when the refused answer's body has already errored", async () => {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+        const body = new ReadableStream({
+          start: (controller) => controller.error(new Error("socket reset")),
+        });
+        return new Response(body, { status: 404 });
+      });
+      const { report, logger } = reporter(fetch);
+      report({
+        tenantId: "tenant_1",
+        agentActorId: "another_me_alice",
+        kind: "memory",
+      });
+      await vi.waitFor(() =>
+        expect(logger.log).toHaveBeenCalledWith(
+          "warn",
+          "model_call.background_report_failed",
+          expect.objectContaining({ status: 404 }),
+        ),
+      );
+      await settled();
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  });
 });
 
 describe("Runner Gateway model invocation adapter", () => {

@@ -1586,8 +1586,9 @@ export function createTeamHubBackgroundOutcomeReporter(options: {
         AbortSignal.timeout(BACKGROUND_REPORT_TIMEOUT_MS),
       )
       .then(
-        async (response) => {
-          await response.body?.cancel();
+        (response) => {
+          // A body that already errored rejects its cancel.
+          void response.body?.cancel().catch(() => undefined);
           if (!response.ok) failed({ status: response.status });
         },
         (error: unknown) => failed({ error }),
