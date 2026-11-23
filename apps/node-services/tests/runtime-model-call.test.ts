@@ -1246,6 +1246,21 @@ describe("Background call outcomes", () => {
       expect(onBackgroundOutcome).not.toHaveBeenCalled();
   });
 
+  it("does not report a call the background backoff held back", async () => {
+    const { modelCall, invokeModel, onBackgroundOutcome } = reported({
+      invoke: async () => ({ outcome: "auth_required", duration_ms: 0 }),
+    });
+    for (const input of ["a", "b", "c"])
+      await expect(modelCall.text({ ...work, input })).rejects.toMatchObject({
+        kind: "runtime_unavailable",
+      });
+    expect(invokeModel).toHaveBeenCalledTimes(2);
+    expect(onBackgroundOutcome.mock.calls).toEqual([
+      [expect.objectContaining({ failure: "runtime_auth_required" })],
+      [expect.objectContaining({ failure: "runtime_auth_required" })],
+    ]);
+  });
+
   it("does not report a call the Daemon canceled on every attempt", async () => {
     vi.useFakeTimers();
     const { modelCall, invokeModel, onBackgroundOutcome } = reported({

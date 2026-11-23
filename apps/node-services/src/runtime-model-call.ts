@@ -556,7 +556,8 @@ interface Entry {
   readonly controller: AbortController;
   result: Promise<ModelCallAnswer>;
   waiters: number;
-  /** Where the latest attempt ran; absent while none has. */
+  /** Where the latest attempt ran; absent when it never reached the
+   * Runtime, such as while the background backoff holds it back. */
   placement?: ModelPlacement;
 }
 
@@ -897,8 +898,8 @@ async function invokeAttempt(
 }> {
   const { call } = entry;
   const signal = entry.controller.signal;
+  entry.placement = undefined;
   const { placement, key } = await resolvePlacement(state, call.target, signal);
-  entry.placement = placement;
   const resolved = resolveTarget(state.options.gateway, placement);
   const runtimeType = entry.chain?.runtimeType ?? resolved.runtimeType;
   const runtimeModels = state.options.gateway.runtimeModels(
@@ -920,6 +921,7 @@ async function invokeAttempt(
     }
     claimedProbe = admission.claimedProbe;
   }
+  entry.placement = placement;
   const startedAt = state.now();
   const callLog = state.options.callLog;
   callLog?.started({
