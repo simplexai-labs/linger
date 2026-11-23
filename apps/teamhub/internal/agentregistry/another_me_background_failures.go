@@ -15,9 +15,10 @@ const AnotherMeBackgroundFailureThreshold = 3
 
 // RecordAnotherMeBackgroundCall counts a failed background model call of an
 // Another Me, or clears the count after a completed one. Browsers are told to
-// refetch the Another Me only when what it shows changes: each failure at or
-// past the threshold, and a completed call that ends such a run. A call for an
-// Agent that is not an active Another Me changes nothing.
+// refetch the Another Me only when the banner it shows appears, changes its
+// reason, or goes; a higher count alone waits for the next fetch, so a run of
+// failures does not refetch the whole Tenant each time. A call for an Agent
+// that is not an active Another Me changes nothing.
 func (s *Service) RecordAnotherMeBackgroundCall(ctx context.Context, tenantID, agentActorID string, failed bool, reason string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -25,15 +26,21 @@ func (s *Service) RecordAnotherMeBackgroundCall(ctx context.Context, tenantID, a
 	}
 	defer tx.Rollback(ctx)
 	queries := s.queries.WithTx(tx)
-	var count int32
+	var changed bool
 	if failed {
-		count, err = queries.RecordAnotherMeBackgroundFailure(ctx, store.RecordAnotherMeBackgroundFailureParams{
-			AgentActorID: agentActorID, TenantID: tenantID, Reason: anotherMeBackgroundFailureReason(reason),
+		reason = anotherMeBackgroundFailureReason(reason)
+		var row store.RecordAnotherMeBackgroundFailureRow
+		row, err = queries.RecordAnotherMeBackgroundFailure(ctx, store.RecordAnotherMeBackgroundFailureParams{
+			AgentActorID: agentActorID, TenantID: tenantID, Reason: reason,
 		})
+		changed = row.ConsecutiveFailures == AnotherMeBackgroundFailureThreshold ||
+			(row.ConsecutiveFailures > AnotherMeBackgroundFailureThreshold && row.PreviousReason != reason)
 	} else {
+		var count int32
 		count, err = queries.ClearAnotherMeBackgroundFailures(ctx, store.ClearAnotherMeBackgroundFailuresParams{
 			AgentActorID: agentActorID, TenantID: tenantID,
 		})
+		changed = count >= AnotherMeBackgroundFailureThreshold
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -41,11 +48,10 @@ func (s *Service) RecordAnotherMeBackgroundCall(ctx context.Context, tenantID, a
 	if err != nil {
 		return err
 	}
-	if count < AnotherMeBackgroundFailureThreshold {
-		return tx.Commit(ctx)
-	}
-	if err := createTenantAnotherMeDeliveries(ctx, queries, tenantID); err != nil {
-		return err
+	if changed {
+		if err := createTenantAnotherMeDeliveries(ctx, queries, tenantID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
 }

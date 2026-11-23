@@ -232,6 +232,11 @@ func (q *Queries) ListAnotherMePlacements(ctx context.Context, arg ListAnotherMe
 }
 
 const recordAnotherMeBackgroundFailure = `-- name: RecordAnotherMeBackgroundFailure :one
+WITH previous AS (
+    SELECT failure.reason
+    FROM another_me_background_failures failure
+    WHERE failure.agent_actor_id=$2::text
+)
 INSERT INTO another_me_background_failures (agent_actor_id,tenant_id,consecutive_failures,reason,last_failed_at)
 SELECT registration.actor_id,registration.tenant_id,1,$1::text,now()
 FROM agent_registrations registration
@@ -243,7 +248,7 @@ ON CONFLICT (agent_actor_id) DO UPDATE
 SET consecutive_failures=another_me_background_failures.consecutive_failures+1,
     reason=EXCLUDED.reason,
     last_failed_at=EXCLUDED.last_failed_at
-RETURNING consecutive_failures
+RETURNING consecutive_failures,coalesce((SELECT previous.reason FROM previous),'')::text AS previous_reason
 `
 
 type RecordAnotherMeBackgroundFailureParams struct {
@@ -252,11 +257,17 @@ type RecordAnotherMeBackgroundFailureParams struct {
 	TenantID     string `json:"tenant_id"`
 }
 
+type RecordAnotherMeBackgroundFailureRow struct {
+	ConsecutiveFailures int32  `json:"consecutive_failures"`
+	PreviousReason      string `json:"previous_reason"`
+}
+
 // Counts one more background model call of the Another Me that failed in a
-// row. No row comes back for an Agent that is not an active Another Me.
-func (q *Queries) RecordAnotherMeBackgroundFailure(ctx context.Context, arg RecordAnotherMeBackgroundFailureParams) (int32, error) {
+// row and returns the reason it held before, empty for a new run. No row
+// comes back for an Agent that is not an active Another Me.
+func (q *Queries) RecordAnotherMeBackgroundFailure(ctx context.Context, arg RecordAnotherMeBackgroundFailureParams) (RecordAnotherMeBackgroundFailureRow, error) {
 	row := q.db.QueryRow(ctx, recordAnotherMeBackgroundFailure, arg.Reason, arg.AgentActorID, arg.TenantID)
-	var consecutive_failures int32
-	err := row.Scan(&consecutive_failures)
-	return consecutive_failures, err
+	var i RecordAnotherMeBackgroundFailureRow
+	err := row.Scan(&i.ConsecutiveFailures, &i.PreviousReason)
+	return i, err
 }

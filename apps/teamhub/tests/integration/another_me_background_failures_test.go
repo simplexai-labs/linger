@@ -11,8 +11,9 @@ import (
 
 // The Agent Service reports how each background model call of an Another Me
 // ended. The Human's Another Me shows the failures in a row from the third on,
-// with the latest reason, and nothing again after a completed call; browsers
-// are told to refetch only when that changes.
+// with the latest reason, and nothing again after a completed call. Browsers
+// are told to refetch only when the banner appears, changes its reason or
+// goes; a higher count alone waits for the next fetch.
 func TestAnotherMeShowsThreeBackgroundCallFailuresInARow(t *testing.T) {
 	allowParallelIntegrationTest(t)
 	env, alice := newAgentRegistrationEnv(t, &recordingAgentManagement{})
@@ -81,19 +82,29 @@ VALUES($1,$2,'management-'||$1,'active','Background','Work safely','gpt-5','acto
 	if got := shown(); got == nil || got.ConsecutiveFailures != 3 || got.Reason != httpapi.AnotherMeBackgroundFailureReasonRuntimeIncompatible {
 		t.Fatalf("third failure shown=%+v", got)
 	}
-	// A code this TeamHub does not know, as a newer Agent Service may send.
-	report(anotherMe, "failed", "provider_quota")
-	if got := shown(); got == nil || got.ConsecutiveFailures != 4 || got.Reason != httpapi.AnotherMeBackgroundFailureReasonUnknown {
+	if got := hints()[anotherMeHint]; got != 1 {
+		t.Fatalf("the banner appearing sent %d Another Me hints, want 1", got)
+	}
+	report(anotherMe, "failed", "runtime_incompatible")
+	if got := shown(); got == nil || got.ConsecutiveFailures != 4 || got.Reason != httpapi.AnotherMeBackgroundFailureReasonRuntimeIncompatible {
 		t.Fatalf("fourth failure shown=%+v", got)
 	}
-	if got := hints()[anotherMeHint]; got != 2 {
-		t.Fatalf("third and fourth failures sent %d Another Me hints, want 2", got)
+	if got := hints()[anotherMeHint]; got != 0 {
+		t.Fatalf("a higher count with the same reason sent %d Another Me hints", got)
+	}
+	// A code this TeamHub does not know, as a newer Agent Service may send.
+	report(anotherMe, "failed", "provider_quota")
+	if got := shown(); got == nil || got.ConsecutiveFailures != 5 || got.Reason != httpapi.AnotherMeBackgroundFailureReasonUnknown {
+		t.Fatalf("fifth failure shown=%+v", got)
+	}
+	if got := hints()[anotherMeHint]; got != 1 {
+		t.Fatalf("a changed reason sent %d Another Me hints, want 1", got)
 	}
 
 	// Another Agent's calls neither count nor clear.
 	report(general, "failed", "unknown")
 	report(general, "completed", "")
-	if got := shown(); got == nil || got.ConsecutiveFailures != 4 {
+	if got := shown(); got == nil || got.ConsecutiveFailures != 5 {
 		t.Fatalf("after another Agent's calls shown=%+v", got)
 	}
 

@@ -52,7 +52,13 @@ WHERE registration.tenant_id=sqlc.arg(tenant_id)::text
 
 -- name: RecordAnotherMeBackgroundFailure :one
 -- Counts one more background model call of the Another Me that failed in a
--- row. No row comes back for an Agent that is not an active Another Me.
+-- row and returns the reason it held before, empty for a new run. No row
+-- comes back for an Agent that is not an active Another Me.
+WITH previous AS (
+    SELECT failure.reason
+    FROM another_me_background_failures failure
+    WHERE failure.agent_actor_id=sqlc.arg(agent_actor_id)::text
+)
 INSERT INTO another_me_background_failures (agent_actor_id,tenant_id,consecutive_failures,reason,last_failed_at)
 SELECT registration.actor_id,registration.tenant_id,1,sqlc.arg(reason)::text,now()
 FROM agent_registrations registration
@@ -64,7 +70,7 @@ ON CONFLICT (agent_actor_id) DO UPDATE
 SET consecutive_failures=another_me_background_failures.consecutive_failures+1,
     reason=EXCLUDED.reason,
     last_failed_at=EXCLUDED.last_failed_at
-RETURNING consecutive_failures;
+RETURNING consecutive_failures,coalesce((SELECT previous.reason FROM previous),'')::text AS previous_reason;
 
 -- name: ClearAnotherMeBackgroundFailures :one
 -- Ends the Another Me's run of failed background model calls and returns how
