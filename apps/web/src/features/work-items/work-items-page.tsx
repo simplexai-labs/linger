@@ -10,7 +10,7 @@ import { formatLocale } from "@/i18n/language";
 import type { Message } from "@/i18n/messages";
 import { useT, useTranslation } from "@/i18n/use-translation";
 import { useCallback, useState, type RefCallback } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { Select, SelectItem } from "@/components/ui/select";
@@ -28,7 +28,7 @@ import {
 } from "./work-item-queries";
 import { capitalize, formatWorkItemDate } from "./work-item-format";
 import { WorkItemDetailDrawer } from "./work-item-detail-drawer";
-import { dashboardPath, dashboardWorkItemPath } from "./work-item-routes";
+import { dashboardWorkItemPath } from "./work-item-routes";
 import { createWorkItemRoomFilterModel } from "./work-item-room-filter";
 import { workItemsMessages as m } from "./work-items.messages";
 
@@ -47,7 +47,6 @@ const dashboardColumns: readonly DashboardColumn[] = [
 export function WorkItemsPage() {
   const t = useT();
   const { client } = useTeamHubRuntime();
-  const navigate = useNavigate();
   const params = useParams();
   const tenantId = requireRoomRouteParam(params.tenantId, "Tenant");
   const focusedWorkItemId = params.workItemId;
@@ -62,12 +61,17 @@ export function WorkItemsPage() {
   const dashboardSearch = roomId
     ? new URLSearchParams({ room: roomId }).toString()
     : "";
+  const [dismissedWorkItemId, setDismissedWorkItemId] = useState<
+    string | undefined
+  >();
+  // The bare /dashboard route is not mounted; dismiss locally so closing the
+  // drawer on /dashboard/:workItemId stays on the work item URL instead of 404.
   const closeDetail = useCallback(() => {
-    void navigate({
-      pathname: dashboardPath(tenantId),
-      search: dashboardSearch,
-    });
-  }, [dashboardSearch, navigate, tenantId]);
+    setDismissedWorkItemId(focusedWorkItemId);
+  }, [focusedWorkItemId]);
+  const openDetail = useCallback(() => {
+    setDismissedWorkItemId(undefined);
+  }, []);
   const workItemsQuery = useQuery(
     tenantWorkItemsDashboardQueryOptions(client, tenantId),
   );
@@ -119,6 +123,10 @@ export function WorkItemsPage() {
   const focusedWorkItem = focusedWorkItemId
     ? items.find((item) => item.id === focusedWorkItemId)
     : undefined;
+  const detailWorkItem =
+    focusedWorkItem && dismissedWorkItemId !== focusedWorkItem.id
+      ? focusedWorkItem
+      : undefined;
   const roomFilter = createWorkItemRoomFilterModel(rooms.items, items, t);
   const filteredItems = items.filter((item) =>
     roomFilter.matches(item, roomId),
@@ -175,6 +183,7 @@ export function WorkItemsPage() {
                     (item) => dashboardColumnFor(item) === column.id,
                   )}
                   key={column.id}
+                  onSelectWorkItem={openDetail}
                   originRoomLabel={roomFilter.originLabel}
                   search={dashboardSearch}
                   tenantId={tenantId}
@@ -182,14 +191,14 @@ export function WorkItemsPage() {
               ))}
             </div>
           </div>
-          {focusedWorkItem ? (
+          {detailWorkItem ? (
             <WorkItemDetailDrawer
-              item={focusedWorkItem}
+              item={detailWorkItem}
               onClose={closeDetail}
-              originRoomLabel={roomFilter.originLabel(focusedWorkItem)}
+              originRoomLabel={roomFilter.originLabel(detailWorkItem)}
               rooms={rooms.items}
               statusBadge={
-                <WorkItemStatus status={dashboardColumnFor(focusedWorkItem)} />
+                <WorkItemStatus status={dashboardColumnFor(detailWorkItem)} />
               }
               tenantId={tenantId}
             />
@@ -295,6 +304,7 @@ function WorkItemColumn({
   focusedCardRef,
   focusedWorkItemId,
   items,
+  onSelectWorkItem,
   originRoomLabel,
   search,
   tenantId,
@@ -303,6 +313,7 @@ function WorkItemColumn({
   focusedCardRef: RefCallback<HTMLAnchorElement>;
   focusedWorkItemId?: string;
   items: TeamHubWorkItem[];
+  onSelectWorkItem: () => void;
   originRoomLabel: (item: TeamHubWorkItem) => string;
   search: string;
   tenantId: string;
@@ -356,6 +367,7 @@ function WorkItemColumn({
                   item.id === focusedWorkItemId ? "location" : undefined
                 }
                 className="work-item-card block px-3 py-2.5 text-app-ink outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
+                onClick={onSelectWorkItem}
                 ref={item.id === focusedWorkItemId ? focusedCardRef : undefined}
                 to={{
                   pathname: dashboardWorkItemPath(tenantId, item.id),

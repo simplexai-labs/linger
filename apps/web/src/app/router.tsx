@@ -291,7 +291,6 @@ export function createAppRoutes(
           },
           path: "profile",
         },
-        createWorkItemDashboardRoute(queryClient, client, "dashboard"),
         createWorkItemDashboardRoute(
           queryClient,
           client,
@@ -356,7 +355,7 @@ export function createAppRoutes(
 function createWorkItemDashboardRoute(
   queryClient: QueryClient,
   client: TeamHubClient,
-  path: "dashboard" | "dashboard/:workItemId",
+  path: "dashboard/:workItemId",
 ): RouteObject {
   return {
     ErrorBoundary: PanelRouteErrorSurface,

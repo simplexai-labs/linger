@@ -6,7 +6,7 @@ export function routeLayoutKey(pathname: string): string {
   );
   if (workspace) return `${workspace[1]}/library`;
   return (
-    pathname.match(/^\/t\/[^/]+\/dashboard(?=\/|$)/)?.[0] ??
+    pathname.match(/^\/t\/[^/]+\/dashboard(?=\/)/)?.[0] ??
     pathname.match(/^\/t\/[^/]+\/settings(?=\/|$)/)?.[0] ??
     pathname.match(/^\/t\/[^/]+\/rooms\/[^/]+(?=\/|$)/)?.[0] ??
     pathname

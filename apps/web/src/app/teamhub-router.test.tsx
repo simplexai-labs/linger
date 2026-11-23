@@ -613,7 +613,7 @@ describe("TeamHub routes", () => {
     expect(screen.getByRole("button", { name: "Open Messages" })).toBeVisible();
   });
 
-  it("resolves bare /t/:tenantId/dashboard without 404", async () => {
+  it("renders the in-shell not-found page for bare /t/:tenantId/dashboard", async () => {
     const runtime = createTestTeamHubRuntime();
     const queryClient = testQueryClient();
     const router = createMemoryRouter(createAppRoutes(queryClient, runtime), {
@@ -623,11 +623,9 @@ describe("TeamHub routes", () => {
     renderApp(queryClient, runtime, router);
 
     expect(
-      await screen.findByRole("heading", { name: "Fixture Dashboard" }),
+      await screen.findByRole("heading", { name: "Page not found" }),
     ).toBeVisible();
-    expect(router.state.location.pathname).toBe(
-      "/t/tenant-northstar/dashboard",
-    );
+    expect(screen.getByRole("button", { name: "Open Messages" })).toBeVisible();
   });
 
   it("preloads the Room chat chunk from /, /t/:tenantId/rooms, and /t/:tenantId/rooms/:roomId loaders", async () => {

@@ -4,7 +4,6 @@ import { Link, useLocation, useParams } from "react-router";
 
 import {
   BookOpen01Icon,
-  CheckListIcon,
   LibrariesIcon,
   Message01Icon,
   Plug01Icon,
@@ -22,7 +21,6 @@ import type {
   TeamHubRoomListItem,
   TeamHubTenant,
 } from "@/features/teamhub/teamhub-types";
-import { dashboardPath } from "@/features/work-items/work-item-routes";
 
 import { navigationMessages } from "./room-navigation.messages";
 import { useRoomActivity } from "./use-room-activity";
@@ -96,9 +94,6 @@ export function RoomNavigation({
       document.data?.from.some(
         (source) => source.binding_kind === "wiki_page",
       ) === true);
-  const dashboardVisible =
-    effectivePathname === `/t/${tenant.id}/dashboard` ||
-    effectivePathname.startsWith(`/t/${tenant.id}/dashboard/`);
   const workspaceVisible =
     !wikiVisible &&
     (effectivePathname.startsWith(`/t/${tenant.id}/library`) ||
@@ -223,13 +218,6 @@ export function RoomNavigation({
               label={t(navigationMessages.wiki)}
               onNavigate={onCloseMobile}
               to={`/t/${tenant.id}/library/wiki`}
-            />
-            <RailLink
-              active={dashboardVisible}
-              icon={<RoomRailGlyph icon={CheckListIcon} />}
-              label={t(navigationMessages.dashboard)}
-              onNavigate={onCloseMobile}
-              to={dashboardPath(tenant.id)}
             />
             <RailLink
               active={effectivePathname === `/t/${tenant.id}/apps`}

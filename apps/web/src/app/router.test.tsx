@@ -76,7 +76,6 @@ describe("Web app route contract", () => {
         "rooms/:roomId",
         "chat",
         "profile",
-        "dashboard",
         "dashboard/:workItemId",
         "documents/:documentId",
         "settings",
@@ -95,7 +94,7 @@ describe("Web app route contract", () => {
     );
     expect(
       matchRoutes(routes, "/t/tenant-a/dashboard")?.at(-1)?.route.path,
-    ).toBe("dashboard");
+    ).toBe("*");
     expect(
       matchRoutes(routes, "/t/tenant-a/dashboard/work-item-a")?.at(-1)?.route
         .path,

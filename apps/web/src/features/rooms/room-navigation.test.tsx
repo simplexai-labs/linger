@@ -98,7 +98,7 @@ describe("Room navigation", () => {
       within(primary)
         .getAllByRole("link")
         .map((link) => link.getAttribute("aria-label")),
-    ).toEqual(["Messages", "Library", "Wiki", "Dashboard", "Connectors"]);
+    ).toEqual(["Messages", "Library", "Wiki", "Connectors"]);
     expect(
       within(navigation).getByRole("button", { name: "Pocket Notes" }),
     ).toBeVisible();
@@ -164,7 +164,7 @@ describe("Room navigation", () => {
         links.map((link) =>
           link.querySelector(".primary-navigation-label")?.textContent?.trim(),
         ),
-      ).toEqual(["Messages", "Library", "Wiki", "Dashboard", "Connectors"]);
+      ).toEqual(["Messages", "Library", "Wiki", "Connectors"]);
       const toolbar = await screen.findByRole("toolbar", {
         name: "Message actions",
       });
@@ -305,14 +305,8 @@ describe("Room navigation", () => {
       within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
       ).getAllByRole("link"),
-    ).toHaveLength(5);
-    for (const label of [
-      "Messages",
-      "Library",
-      "Wiki",
-      "Dashboard",
-      "Connectors",
-    ]) {
+    ).toHaveLength(4);
+    for (const label of ["Messages", "Library", "Wiki", "Connectors"]) {
       expect(
         screen
           .getByRole("link", { name: label })
@@ -402,21 +396,14 @@ describe("Room navigation", () => {
     expect(screen.getByRole("link", { name: "Library" })).toBeVisible();
   });
 
-  it("links to the Work Items Dashboard from the primary navigation rail", async () => {
+  it("keeps the Work Items Dashboard out of the primary navigation rail", async () => {
     const fixture = await navigationFixture();
 
     renderNavigation(fixture, new QueryClient());
 
-    const dashboardLink = screen.getByRole("link", { name: "Dashboard" });
-    expect(dashboardLink).toHaveAttribute(
-      "href",
-      `/t/${fixture.tenant.id}/dashboard`,
-    );
-    fireEvent.click(dashboardLink);
-    expect(dashboardLink).toHaveAttribute("aria-current", "page");
-    expect(screen.getByTestId("location")).toHaveTextContent(
-      `/t/${fixture.tenant.id}/dashboard`,
-    );
+    expect(
+      screen.queryByRole("link", { name: "Dashboard" }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -477,7 +464,6 @@ function renderNavigation(
               path="/t/:tenantId/rooms/:roomId/:view"
             />
             <Route element={navigation} path="/t/:tenantId/library/*" />
-            <Route element={navigation} path="/t/:tenantId/dashboard/*" />
             <Route element={navigation} path="/t/:tenantId/apps" />
             <Route element={navigation} path="/t/:tenantId/computers" />
             <Route element={navigation} path="/t/:tenantId/settings/*" />

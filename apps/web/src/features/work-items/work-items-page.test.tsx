@@ -134,7 +134,7 @@ describe("Dashboard page", () => {
       screen.queryByRole("complementary", { name: "Work Item details" }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/t/tenant-northstar/dashboard",
+      "/t/tenant-northstar/dashboard/workitem-linked",
     );
 
     fireEvent.click(screen.getByRole("link", { name: /Linked task/ }));
