@@ -172,7 +172,7 @@ This journey proves the updater mechanics. The [upgrade from the previous releas
 
 - The app starts without the setup wizard or the start failure page; the account menu and `local-server.json` show the candidate version and its source folder; no process runs from the old app or source folder.
 - Account, Rooms, messages, the Document, Agents, Computer enrollment and the changed settings are kept; the Computer is **Online** without pairing again.
-- The local model is `loaded` and answering through the default gateway; on Windows only Bifrost (`bifrost-http.exe`) serves it, no `magpie.exe` remains, and Pi's default model does not name `magpie/...`. A BYOK source is remounted without entering the key again.
+- The local model is `loaded` and answering through its gateway. A fresh Windows install serves it only through Bifrost (`bifrost-http.exe`), with no `magpie.exe` and no `magpie/...` Pi default. A Windows install that 0.1.7 set up on Magpie may stay on Magpie after the upgrade (a known issue until such installs move to Bifrost), but it must start and its Agents must reply. A BYOK source is remounted without entering the key again.
 - Another Me and the other Agent each deliver a reply to a new marker, with no `ECONNREFUSED` and no Runtime `Update needed`.
 - On macOS, computer use still works; if the build is unsigned, record whether permissions had to be granted again (`docs/macos.md`).
 
