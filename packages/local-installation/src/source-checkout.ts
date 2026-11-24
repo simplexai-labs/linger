@@ -28,6 +28,12 @@ import type { ByokConfiguration } from "./byok-source.js";
 import type { RuntimeDescriptor } from "./managed-runtimes.js";
 import type { InstallerEvent } from "./events.js";
 
+// Loopback WebSocket URL for a native source instance's Runner Gateway; shared
+// between the installer environment and Desktop so both derive the same URL.
+export function localRunnerGatewayUrl(port: number): string {
+  return `ws://127.0.0.1:${port}/v1/runner-gateway`;
+}
+
 // A Native installation of one Linger source checkout: the desktop client's
 // unpacked source package, or a developer's clone.
 export interface SourceInstallOptions {
@@ -321,7 +327,9 @@ export async function prepareSourceConfiguration(
       DOCUMENT_RUNTIME_HTTP_PORT: String(ports.document),
       POSTGRES_PORT: String(ports.postgres),
       WEB_PUBLIC_ORIGIN: instance.origin,
-      AGENT_RUNNER_PUBLIC_GATEWAY_URL: `ws://127.0.0.1:${ports.nodeServices}/v1/runner-gateway`,
+      AGENT_RUNNER_PUBLIC_GATEWAY_URL: localRunnerGatewayUrl(
+        ports.nodeServices,
+      ),
       LINGER_SECRET_SEED: secrets.LINGER_SECRET_SEED!,
       TEAMHUB_SECRET_ENCRYPTION_KEY: secrets.TEAMHUB_SECRET_ENCRYPTION_KEY!,
       TEAMHUB_DATABASE_URL: `postgres://simplexai:${encodeURIComponent(secrets.LINGER_POSTGRES_PASSWORD!)}@127.0.0.1:${ports.postgres}/simplexai?sslmode=disable`,

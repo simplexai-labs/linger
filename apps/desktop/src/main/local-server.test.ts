@@ -31,6 +31,7 @@ import {
 
 import { NODE_RUNTIME_VERSION } from "../../../../scripts/local-computer-node-distributions.mjs";
 import { rename } from "node:fs/promises";
+import { composeProject } from "@linger/local-installation/instance";
 
 import { CredentialStore } from "./computer-credential.js";
 import { EnrollmentModule } from "./enrollment.js";
@@ -505,6 +506,7 @@ const fixture = (
   const loadServer = vi.fn();
   const enroll = vi.fn(async () => {});
   const unenroll = vi.fn(async () => {});
+  const syncLocalGatewayUrl = vi.fn(() => false);
   let context: ModuleContext | undefined;
   const signIn = vi.fn(async () => {});
   // The installed server proves itself unless a test says otherwise.
@@ -554,6 +556,7 @@ const fixture = (
         ...stubModule("Enrollment"),
         enroll,
         unenroll,
+        syncLocalGatewayUrl,
         start: async (ctx: ModuleContext) => {
           context = ctx;
         },
@@ -576,6 +579,7 @@ const fixture = (
     bus,
     enroll,
     unenroll,
+    syncLocalGatewayUrl,
     config: () => context!.config.get(),
     signIn,
     proveServer,
@@ -3478,6 +3482,56 @@ describe("LocalServerModule after a restart", () => {
     expect(f.module.status()).toMatchObject({
       origin: "http://localhost:3001",
     });
+    await f.host.stop("quit");
+  });
+
+  it("syncs the local Runner Gateway URL when node-services moved to a new port on resume", async () => {
+    const writeDesktopInstance = (
+      home: string,
+      webPort: number,
+      nodeServicesPort: number,
+    ) => {
+      const instanceRoot = path.join(home, "instances", LOCAL_INSTANCE);
+      mkdirSync(instanceRoot, { recursive: true, mode: 0o700 });
+      chmodSync(instanceRoot, 0o700);
+      const file = path.join(instanceRoot, "instance.json");
+      writeFileSync(
+        file,
+        JSON.stringify({
+          schemaVersion: 1,
+          name: LOCAL_INSTANCE,
+          mode: "source-native",
+          root: instanceRoot,
+          project: composeProject(instanceRoot, LOCAL_INSTANCE),
+          origin: `http://localhost:${webPort}`,
+          port: webPort,
+          releaseDir: "/source",
+          computerConfig: path.join(instanceRoot, "computer", "config.json"),
+          computerExecutable: "/source/computer/linger-computer",
+          source: {
+            repo: "/source",
+            ports: {
+              web: webPort,
+              teamhub: 59891,
+              nodeServices: nodeServicesPort,
+              document: 59903,
+              postgres: 62622,
+            },
+          },
+        }),
+        { mode: 0o600 },
+      );
+      chmodSync(file, 0o600);
+    };
+    const f = fixture({}, enrolled, (home) => {
+      record(home);
+      writeDesktopInstance(home, 3000, 59894);
+    });
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    expect(f.syncLocalGatewayUrl).toHaveBeenCalledWith(
+      "ws://127.0.0.1:59894/v1/runner-gateway",
+    );
     await f.host.stop("quit");
   });
 

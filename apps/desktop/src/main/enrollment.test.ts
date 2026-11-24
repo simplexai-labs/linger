@@ -638,4 +638,73 @@ describe("EnrollmentModule", () => {
     expect(order).toEqual(["ensureDefault", "computer.changed"]);
     await host.stop("quit");
   });
+
+  it("updates a saved loopback gateway URL and restarts the daemon when node-services moves ports", async () => {
+    const { enrollment, credentials, host, bus } = setupModule(
+      {
+        bundle: {
+          computer_id: "computer_1",
+          tenant_id: "tenant_acme",
+          gateway_url: "ws://127.0.0.1:62620/v1/runner-gateway",
+          gateway_token: TOKEN,
+          credential_expires_at: "2026-11-16T08:00:00Z",
+        },
+      },
+      "http://localhost:3000",
+    );
+    await host.start();
+    await enrollment.enroll();
+    const original = credentials.read()!;
+    const changed = vi.fn();
+    bus.on("computer.changed", changed);
+
+    expect(
+      enrollment.syncLocalGatewayUrl("ws://127.0.0.1:59894/v1/runner-gateway"),
+    ).toBe(true);
+    expect(credentials.read()).toEqual({
+      ...original,
+      gatewayUrl: "ws://127.0.0.1:59894/v1/runner-gateway",
+    });
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(changed).toHaveBeenCalledWith("computer_1");
+
+    // Repeating the same URL is a no-op.
+    expect(
+      enrollment.syncLocalGatewayUrl("ws://127.0.0.1:59894/v1/runner-gateway"),
+    ).toBe(false);
+    expect(changed).toHaveBeenCalledTimes(1);
+    await host.stop("quit");
+  });
+
+  it("never rewrites a remote gateway URL or accepts a non-loopback target", async () => {
+    const { enrollment, credentials, host, bus } = setupModule(
+      {
+        bundle: {
+          computer_id: "computer_1",
+          tenant_id: "tenant_acme",
+          gateway_url: "wss://linger.example.com/v1/runner-gateway",
+          gateway_token: TOKEN,
+          credential_expires_at: "2026-11-16T08:00:00Z",
+        },
+      },
+      "https://linger.example.com",
+    );
+    await host.start();
+    await enrollment.enroll();
+    const original = credentials.read()!;
+    const changed = vi.fn();
+    bus.on("computer.changed", changed);
+
+    expect(
+      enrollment.syncLocalGatewayUrl("ws://127.0.0.1:59894/v1/runner-gateway"),
+    ).toBe(false);
+    expect(
+      enrollment.syncLocalGatewayUrl(
+        "wss://evil.example.com/v1/runner-gateway",
+      ),
+    ).toBe(false);
+    expect(credentials.read()).toEqual(original);
+    expect(changed).not.toHaveBeenCalled();
+    await host.stop("quit");
+  });
 });

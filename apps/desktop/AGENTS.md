@@ -270,10 +270,14 @@ Gateway and runs Agents. The daemon exits with the app.
   origin (`details.origin`, or the setup job's `origin`). The record, the
   window's `serverUrl` and the `savedEnrollments` entry follow it together
   (`setServer` with the previous origin emits `server.moved`, not
-  `server.changed`), so the Computer stays enrolled: it reaches TeamHub
-  through the gateway URL TeamHub gave it, and the session cookies are not
-  port-scoped. The record and `serverUrl` change only together, so a later
-  launch still resumes. A source folder removed since, or
+  `server.changed`), so the Computer stays enrolled and the session cookies
+  are not port-scoped. When `node-services` also (or independently) moved off
+  a taken port, `LocalServer` reads the instance's `source.ports.nodeServices`
+  after resume or a fast-ready move and updates the saved loopback `gatewayUrl`
+  in `credential.json` through `Enrollment.syncLocalGatewayUrl` (emitting
+  `computer.changed` to restart the daemon on the new port without changing the
+  Computer identity or token; remote gateway URLs are never rewritten). The
+  record and `serverUrl` change only together, so a later launch still resumes. A source folder removed since, or
   one the installer no longer accepts as a Linger checkout (such as one the
   earlier Simplex app unpacked, or this package's own folder with files
   missing since), is unpacked again from the app's package first and

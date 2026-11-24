@@ -39,7 +39,10 @@ import { legacyMigrationPending } from "@linger/local-installation/home";
 import { loadInstance } from "@linger/local-installation/instance";
 import { foldersInUse } from "@linger/local-installation/native-process";
 import { normalizeFailurePunctuation } from "@linger/local-installation/localmodels-failure";
-import { validateSourceRepository } from "@linger/local-installation/source-checkout";
+import {
+  localRunnerGatewayUrl,
+  validateSourceRepository,
+} from "@linger/local-installation/source-checkout";
 import type { LegacyInstanceSkipped } from "@linger/local-installation/legacy-migration";
 import {
   type SetupChoice,
@@ -2776,6 +2779,7 @@ export class LocalServerModule implements Module {
               to: moved,
             });
             this.#ready(moved, previous, "port_moved");
+            await this.#syncLocalGateway(currentRecord.home, moved, previous);
             reachable = true;
           }
         }
@@ -2839,6 +2843,11 @@ export class LocalServerModule implements Module {
           from: currentRecord.version,
         });
       this.#ready(origin, currentRecord.origin, "resume_ready");
+      await this.#syncLocalGateway(
+        currentRecord.home,
+        origin,
+        currentRecord.origin,
+      );
       this.#set("ready", "Linger is running on this computer.");
       this.#ctx?.log.info("local_server.resume_succeeded", {
         total_ms: Date.now() - startedAt,
@@ -3203,6 +3212,38 @@ export class LocalServerModule implements Module {
     } catch {
       return undefined;
     }
+  }
+
+  // Reads the desktop instance's current Runner Gateway URL from instance.json.
+  async #readInstanceGatewayUrl(home: string): Promise<string | undefined> {
+    try {
+      const instance = await loadInstance({ name: LOCAL_INSTANCE, home });
+      const port = instance?.source?.ports.nodeServices;
+      return port === undefined ? undefined : localRunnerGatewayUrl(port);
+    } catch {
+      return undefined;
+    }
+  }
+
+  // Keeps the enrolled desktop daemon pointed at this instance's Runner
+  // Gateway when the installer reassigned node-services off a taken port.
+  async #syncLocalGateway(
+    home: string,
+    origin: string,
+    previous?: string,
+  ): Promise<void> {
+    const serverUrl = this.#ctx?.config.get().serverUrl;
+    if (
+      !serverUrl ||
+      (!sameOrigin(serverUrl, origin) &&
+        (!previous || !sameOrigin(serverUrl, previous)))
+    )
+      return;
+    const gatewayUrl = await this.#readInstanceGatewayUrl(home);
+    if (!gatewayUrl) return;
+    this.#ctx
+      ?.get<EnrollmentModule>("Enrollment")
+      .syncLocalGatewayUrl(gatewayUrl);
   }
 
   // Kept in the default home, wherever the installation went.

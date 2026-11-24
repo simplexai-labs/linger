@@ -233,6 +233,21 @@ const isGatewayUrl = (value: unknown): value is string => {
   }
 };
 
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+
+const isLoopbackGatewayUrl = (value: unknown): value is string => {
+  if (!isGatewayUrl(value)) return false;
+  const url = new URL(value);
+  return (
+    LOOPBACK_HOSTS.has(url.hostname.toLowerCase()) &&
+    url.pathname === "/v1/runner-gateway" &&
+    !url.username &&
+    !url.password &&
+    !url.search &&
+    !url.hash
+  );
+};
+
 // The owner the credential is scoped to for the tenant, read from its claims
 // the way the Go daemon reads them (config.go tokenOwners). Not verified
 // here: the gateway checks the signature.
@@ -428,6 +443,32 @@ export class EnrollmentModule implements Module {
         [toOrigin, entry],
       ]),
     });
+  }
+
+  // Updates the saved loopback gateway URL when the local server's
+  // node-services listener moved to a different port, keeping the existing
+  // Computer identity and token, and restarts the daemon to connect there.
+  syncLocalGatewayUrl(gatewayUrl: string): boolean {
+    const ctx = this.#ctx;
+    if (!ctx || !isLoopbackGatewayUrl(gatewayUrl)) return false;
+    const config = ctx.config.get();
+    if (!config.computerId) return false;
+    const credential = this.#options.credentials.read();
+    if (
+      !credential ||
+      credential.computerId !== config.computerId ||
+      !isLoopbackGatewayUrl(credential.gatewayUrl) ||
+      credential.gatewayUrl === gatewayUrl
+    )
+      return false;
+    this.#options.credentials.write({ ...credential, gatewayUrl });
+    ctx.bus.emit("computer.changed", credential.computerId);
+    ctx.log.info("enrollment.gateway_moved", {
+      computer_id: credential.computerId,
+      from: credential.gatewayUrl,
+      to: gatewayUrl,
+    });
+    return true;
   }
 
   // Whether the window holds a valid session for the configured server.
