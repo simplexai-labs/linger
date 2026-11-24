@@ -2,17 +2,17 @@
   "platform": "linux",
   "arch": "x64",
   "localmodelsTool": {
-    "url": "https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/0.1.0.dev54/linux-x64.tgz",
+    "url": "https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/0.1.0.dev56/linux-x64.tgz",
     "mirrors": [
-      "https://registry.npmjs.org/@simplexai/localmodels-linux-x64/-/localmodels-linux-x64-0.1.0-dev.54.tgz",
-      "https://cdn.npmmirror.com/packages/@simplexai/localmodels-linux-x64/0.1.0-dev.54/localmodels-linux-x64-0.1.0-dev.54.tgz"
+      "https://registry.npmjs.org/@simplexai/localmodels-linux-x64/-/localmodels-linux-x64-0.1.0-dev.56.tgz",
+      "https://cdn.npmmirror.com/packages/@simplexai/localmodels-linux-x64/0.1.0-dev.56/localmodels-linux-x64-0.1.0-dev.56.tgz"
     ],
-    "sha256": "5347df27ca7dd0a006080ccfe8b3c8b10ada20d9becb29df4ee12d258b123669",
-    "bytes": 20872763,
-    "sourceCommit": "6da5f15ca9d4078fb789c3a690c29b1606ebc8a1",
-    "manifestSha256": "a24733ac52b9152612ab396fdc4de3942f167f62e3cf0e17343f6efa70d6398f",
+    "sha256": "0cf9b7e2fe80f7fdd21d3493ca20d32b81c206f5ddce8abaa7a61fb7d2d9c648",
+    "bytes": 20892220,
+    "sourceCommit": "8ecf4bb328e1798ff166f1f48919b3b6c3c64270",
+    "manifestSha256": "4f5157c97d7c792caf4751761348fdc00c7e5f81aae894e74c94de343a8ef1eb",
     "runtimeVersions": {
-      "claude": "2.1.311",
+      "claude": "2.1.325",
       "codex": "0.171.0",
       "pi": "1.5.2"
     },
