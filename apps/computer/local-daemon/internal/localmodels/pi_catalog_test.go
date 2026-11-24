@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -85,7 +86,8 @@ func TestTheMergedPiCatalogRemembersWhatPiListedWhileLoaded(t *testing.T) {
 		t.Fatalf("loaded catalog = %+v", loaded[1].Models)
 	}
 	info, err := os.Stat(library.piCatalogPath())
-	if err != nil || info.Mode().Perm() != 0o600 {
+	// Windows reports no Unix permission bits; the file's ACL is not checked here.
+	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("pi-catalog.json %v, %v", info, err)
 	}
 
