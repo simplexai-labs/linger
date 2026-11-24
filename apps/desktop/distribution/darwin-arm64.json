@@ -2,15 +2,15 @@
   "platform": "darwin",
   "arch": "arm64",
   "localmodelsTool": {
-    "url": "https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/0.1.0.dev56/darwin-arm64.tgz",
+    "url": "https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/0.1.0.dev57/darwin-arm64.tgz",
     "mirrors": [
-      "https://registry.npmjs.org/@simplexai/localmodels-darwin-arm64/-/localmodels-darwin-arm64-0.1.0-dev.56.tgz",
-      "https://cdn.npmmirror.com/packages/@simplexai/localmodels-darwin-arm64/0.1.0-dev.56/localmodels-darwin-arm64-0.1.0-dev.56.tgz"
+      "https://registry.npmjs.org/@simplexai/localmodels-darwin-arm64/-/localmodels-darwin-arm64-0.1.0-dev.57.tgz",
+      "https://cdn.npmmirror.com/packages/@simplexai/localmodels-darwin-arm64/0.1.0-dev.57/localmodels-darwin-arm64-0.1.0-dev.57.tgz"
     ],
-    "sha256": "fea3eb395f64a04241d97777a8e2d6522127bb37cf86c7adbdba3b3db858f779",
-    "bytes": 15056583,
-    "sourceCommit": "8ecf4bb328e1798ff166f1f48919b3b6c3c64270",
-    "manifestSha256": "25ad98fae5b21722b7de0e103c5764a555d6a2554409ecab9f86dd2776d87164",
+    "sha256": "ea12b65b4ec502e34f7928675c743e9fd8c2d5ae44810769a3716209e05c7265",
+    "bytes": 15060383,
+    "sourceCommit": "0aafada9017943d22a4b3cecb879ddc59f805a68",
+    "manifestSha256": "55846c3f51f0e970927d08f834a1926cba3f5285a1e70c0f16107dbc3c9b2a40",
     "runtimeVersions": {
       "claude": "2.1.325",
       "codex": "0.171.0",
