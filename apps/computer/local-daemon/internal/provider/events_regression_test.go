@@ -49,6 +49,22 @@ func TestEventProjectionPreservesToolIdentityAndActivityOutcome(t *testing.T) {
 	}
 }
 
+// Codex ends a refused patch and a command whose approval was declined as
+// "declined", with the patch summary or no output.
+func TestDeclinedActivityEndsDeclined(t *testing.T) {
+	for _, step := range []struct{ tool, kind, output string }{
+		{"patch_apply", native.ActivityFileChange, "declined: 1 file changes"},
+		{"exec_command", native.ActivityCommand, ""},
+	} {
+		projection := eventProjection{operationID: "operation"}
+		projection.project(native.Event{Kind: native.EventToolCall, InvocationID: "step", ToolName: step.tool, ActivityKind: step.kind})
+		events := projection.project(native.Event{Kind: native.EventToolOutput, InvocationID: "step", ToolName: step.tool, Status: "declined", Output: step.output})
+		if finished := events[len(events)-1].(map[string]any); finished["type"] != "activity.finished" || finished["outcome"] != "declined" || finished["content"] != nil {
+			t.Errorf("declined %s = %v", step.tool, finished)
+		}
+	}
+}
+
 func TestFailedActivityPublishesItsRedactedError(t *testing.T) {
 	finish := func(status, output string) map[string]any {
 		projection := eventProjection{operationID: "operation"}

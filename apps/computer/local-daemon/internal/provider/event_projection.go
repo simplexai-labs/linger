@@ -157,7 +157,12 @@ func (projection *eventProjection) projectActivity(message native.Event) []any {
 			receipt := projection.receipts[callID]
 			delete(projection.receipts, callID)
 			outcome := "succeeded"
-			if event["is_error"] == true {
+			switch {
+			case message.Status == "declined":
+				// Codex refused the step, as when the permission review
+				// denies it.
+				outcome = "declined"
+			case event["is_error"] == true:
 				outcome = "failed"
 			}
 			finished := map[string]any{"type": "activity.finished", "activity_id": stableEventID("activity", projection.operationID+"\x00"+callID), "outcome": outcome}
