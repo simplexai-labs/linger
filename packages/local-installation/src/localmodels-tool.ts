@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readdir, readFile, rm, chmod } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { sleep } from "@linger/service-kit";
 import { x as extract } from "tar";
@@ -554,14 +555,33 @@ function parseLoopbackBifrostAddress(
   if (!Number.isSafeInteger(port) || port < 1 || port > 65535) return undefined;
   return { addr: `${DEFAULT_BIFROST_HOST}:${port}`, port };
 }
-// owned.json is written by localmodels with the process umask rather than 0600,
-// inside this home's private tools directory.
-async function readOwnedBifrostAddress(
-  toolsDir: string,
-): Promise<LoopbackBifrostAddress | undefined> {
-  const ownedPath = path.join(toolsDir, "owned.json");
+/**
+ * The approved stack plan Quick Install saved for this home. The path is
+ * fixed by the installer, not by localmodels.
+ */
+export function localmodelsPlanFile(home: string): string {
+  return path.join(path.resolve(home), "runtime", "localmodels", "plan.json");
+}
+/**
+ * Records the shared tools directory a home kept from before per-home
+ * isolation; holds that directory's absolute path.
+ */
+export function localmodelsLegacyToolsMarkerFile(home: string): string {
+  return path.join(path.resolve(home), "runtime", "localmodels", "tools-dir");
+}
+/**
+ * localmodels' own default tools directory (its TOOLS_DIR,
+ * ~/.local/share/localmodels/tools on every platform), which every home
+ * shared before Linger gave each home its own.
+ */
+export function legacyLocalmodelsToolsDirectory(): string {
+  return path.join(os.homedir(), ".local", "share", "localmodels", "tools");
+}
+// owned.json and plan.json are written by localmodels with the process umask
+// rather than 0600, so this checks for a regular owned file of bounded size.
+async function readOwnedJson(file: string): Promise<object | undefined> {
   try {
-    const info = await lstat(ownedPath);
+    const info = await lstat(file);
     if (
       !info.isFile() ||
       info.isSymbolicLink() ||
@@ -569,18 +589,103 @@ async function readOwnedBifrostAddress(
       (process.platform !== "win32" && info.uid !== process.getuid?.())
     )
       return undefined;
-    const parsed: unknown = JSON.parse(await readFile(ownedPath, "utf8"));
-    if (!parsed || typeof parsed !== "object") return undefined;
-    const gateway = "gateway" in parsed ? parsed.gateway : undefined;
-    if (!gateway || typeof gateway !== "object") return undefined;
-    const bifrost = "bifrost" in gateway ? gateway.bifrost : undefined;
-    if (!bifrost || typeof bifrost !== "object") return undefined;
-    return parseLoopbackBifrostAddress(
-      "addr" in bifrost ? bifrost.addr : undefined,
-    );
+    const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : undefined;
   } catch {
     return undefined;
   }
+}
+function field(value: unknown, key: string): unknown {
+  return value && typeof value === "object" && key in value
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
+}
+interface OwnedBifrostRecord {
+  address?: LoopbackBifrostAddress;
+  appDir?: string;
+}
+async function readOwnedBifrost(toolsDir: string): Promise<OwnedBifrostRecord> {
+  const owned = await readOwnedJson(path.join(toolsDir, "owned.json"));
+  const bifrost = field(field(owned, "gateway"), "bifrost");
+  const appDir = field(bifrost, "app_dir");
+  return {
+    address: parseLoopbackBifrostAddress(field(bifrost, "addr")),
+    appDir:
+      typeof appDir === "string" && path.isAbsolute(appDir)
+        ? path.normalize(appDir)
+        : undefined,
+  };
+}
+async function readOwnedBifrostAddress(
+  toolsDir: string,
+): Promise<LoopbackBifrostAddress | undefined> {
+  return (await readOwnedBifrost(toolsDir)).address;
+}
+// Deployment names of every service a stack plan deploys, as localmodels'
+// stack_verify.parts lists them.
+function planDeploymentNames(plan: unknown): string[] {
+  const parts = [
+    field(plan, "llm"),
+    field(plan, "llm_fast"),
+    field(plan, "decision"),
+    field(plan, "decision_front"),
+    ...(Array.isArray(field(plan, "aux"))
+      ? (field(plan, "aux") as unknown[])
+      : []),
+  ];
+  return parts
+    .map((part) => field(part, "name"))
+    .filter((name): name is string => typeof name === "string" && !!name);
+}
+/**
+ * The shared tools directory this home still runs from, or undefined when it
+ * uses its own. A home whose plan was applied before per-home isolation keeps
+ * its deployments' ownership, Pi profile and Bifrost in localmodels' default
+ * tools directory; running it against an empty per-home directory reads as
+ * "deployments removed" and the plan as changed, so the home stays where its
+ * plan was applied. Only a deployment the shared owned.json places under this
+ * home's models counts, since names repeat across homes. The choice is
+ * recorded once.
+ */
+export async function legacyLocalmodelsTools(
+  home: string,
+): Promise<string | undefined> {
+  const marker = localmodelsLegacyToolsMarkerFile(home);
+  const recorded = (await readPrivate(marker).catch(() => undefined))?.trim();
+  if (recorded && path.isAbsolute(recorded)) return path.normalize(recorded);
+  if (
+    await readOwnedJson(
+      path.join(localmodelsToolsDirectory(home), "owned.json"),
+    )
+  )
+    return undefined;
+  const names = planDeploymentNames(
+    await readOwnedJson(localmodelsPlanFile(home)),
+  );
+  if (!names.length) return undefined;
+  const legacy = legacyLocalmodelsToolsDirectory();
+  const deployments = field(
+    await readOwnedJson(path.join(legacy, "owned.json")),
+    "deployments",
+  );
+  if (!deployments || typeof deployments !== "object") return undefined;
+  // Deployment names are only <model>-<port>, so another home may own the
+  // same name; only a deployment living under this home's models counts.
+  const base = localmodelsBaseDirectory(home);
+  const ownsHere = (name: string) => {
+    const entry = field(deployments, name);
+    const deployDir = field(entry, "deploy_dir");
+    if (field(entry, "removed") === true || typeof deployDir !== "string")
+      return false;
+    const relative = path.relative(base, deployDir);
+    return (
+      !!relative && !relative.startsWith("..") && !path.isAbsolute(relative)
+    );
+  };
+  if (!names.some(ownsHere)) return undefined;
+  await privateDirectory(path.dirname(marker));
+  await atomicPrivate(marker, `${legacy}\n`);
+  return legacy;
 }
 async function readSavedBifrostAddress(
   addrFile: string,
@@ -719,6 +824,43 @@ function downloadStageMessage(
   return undefined;
 }
 
+// LOCALMODELS_* paths and Bifrost address for one call. A legacy home gets
+// its shared tools directory and only the Bifrost directory and address that
+// directory's owned.json records, so localmodels falls back to its own
+// defaults for the rest exactly as it did when the plan was applied.
+async function localmodelsIsolation(
+  home: string,
+  args: readonly string[],
+  control: RunCommandControl,
+): Promise<NodeJS.ProcessEnv> {
+  const legacy = await legacyLocalmodelsTools(home);
+  if (legacy) {
+    const owned = await readOwnedBifrost(legacy);
+    return {
+      LOCALMODELS_TOOLS_DIR: legacy,
+      ...(owned.appDir ? { LOCALMODELS_BIFROST_DIR: owned.appDir } : {}),
+      ...(owned.address
+        ? { LOCALMODELS_BIFROST_ADDR: owned.address.addr }
+        : {}),
+    };
+  }
+  const tools = localmodelsToolsDirectory(home);
+  const bifrost = localmodelsBifrostDirectory(home);
+  await privateDirectory(tools);
+  await privateDirectory(bifrost);
+  return {
+    LOCALMODELS_TOOLS_DIR: tools,
+    LOCALMODELS_BIFROST_DIR: bifrost,
+    LOCALMODELS_BIFROST_ADDR: await resolveLocalmodelsBifrostAddr(
+      home,
+      {
+        allocate: control.allocateBifrostAddr ?? !isReadOnlyOrStopCommand(args),
+      },
+      control,
+    ),
+  };
+}
+
 async function runLocalmodelsCommand(
   home: string,
   args: string[],
@@ -732,27 +874,15 @@ async function runLocalmodelsCommand(
   if (!tool) throw new Error("The installed localmodels tool kit is missing.");
   const checkedAt = Date.now();
   const state = localmodelsStateDirectory(home);
-  const tools = localmodelsToolsDirectory(home);
-  const bifrost = localmodelsBifrostDirectory(home);
   await privateDirectory(state);
-  await privateDirectory(tools);
-  await privateDirectory(bifrost);
-  const allocateBifrostAddr =
-    control.allocateBifrostAddr ?? !isReadOnlyOrStopCommand(args);
-  const bifrostAddr = await resolveLocalmodelsBifrostAddr(
-    home,
-    { allocate: allocateBifrostAddr },
-    control,
-  );
+  const isolation = await localmodelsIsolation(home, args, control);
   const env: NodeJS.ProcessEnv = {
     ...stripInheritedEnvironment({ ...process.env, ...options.env }),
     // localmodels downloads from the same region and does not probe again.
     SIMPLEX_REGION: await resolveRegion(home, { signal: options.signal }),
     PYTHONPATH: tool.moduleDir,
     LOCALMODELS_STATE: state,
-    LOCALMODELS_TOOLS_DIR: tools,
-    LOCALMODELS_BIFROST_DIR: bifrost,
-    LOCALMODELS_BIFROST_ADDR: bifrostAddr,
+    ...isolation,
     PYTHONNOUSERSITE: "1",
     PYTHONDONTWRITEBYTECODE: "1",
     // Force UTF-8 mode so Python reads and writes UTF-8 state files and stdio

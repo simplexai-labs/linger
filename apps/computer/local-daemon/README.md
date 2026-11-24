@@ -147,9 +147,14 @@ Gateway registration failures can rotate the unowned address for the next
 attempt.
 
 The Daemon clears inherited values for these `LOCALMODELS_*` variables before
-setting them on tool calls. If the home lacks a per-home Bifrost ownership
+setting them on tool calls. When the installer recorded a shared tools
+directory in the sibling `tools-dir` file (a home whose plan was applied
+before per-home isolation), the Daemon uses that directory, the Bifrost
+directory and address its `owned.json` records, and its `gateway-home` Pi
+profile. Otherwise, if the home lacks a per-home Bifrost ownership
 record, the Daemon can locate a legacy gateway through the profile in
-`model-source.json` in local mode or the platform's default legacy tools directory.
+`model-source.json` in local mode or localmodels' default tools directory
+(`~/.local/share/localmodels/tools`, under `USERPROFILE` on Windows).
 It checks the legacy ownership record, any local-mode gateway URL, and the
 Bifrost configuration for a provider registered by a loaded library model.
 While that verification succeeds, the tool uses the legacy gateway and

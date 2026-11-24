@@ -555,3 +555,60 @@ func TestCommandArgsKeepsVerifiedLegacyGatewayWhileLoadedModelsRemain(t *testing
 		t.Fatalf("OverlayEnvironment PI_CODING_AGENT_DIR after unload = %q, want isolated %q", got, isolatedPi)
 	}
 }
+
+func TestCommandArgsFollowsTheInstallerLegacyToolsMarker(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "runtime", "localmodels", "state")
+	legacyTools := filepath.Join(root, "user", ".local", "share", "localmodels", "tools")
+	legacyBifrost := filepath.Join(root, "user", ".local", "share", "localmodels", "bifrost")
+	legacyPi := filepath.Join(legacyTools, "gateway-home", ".pi", "agent")
+	for _, dir := range []string{stateDir, legacyPi} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := privatefs.WriteFile(LegacyToolsMarkerFile(stateDir), []byte(legacyTools+"\n"), false); err != nil {
+		t.Fatal(err)
+	}
+	tool := Tool{
+		Python:          filepath.Join(root, "python"),
+		ModuleDirectory: filepath.Join(root, "modules"),
+		StateDirectory:  stateDir,
+		BaseDirectory:   filepath.Join(root, "models"),
+	}
+	args := []string{"-P", "-s", "-m", "localmodels", "stack", "up"}
+
+	// Without a Bifrost record, localmodels keeps its own Bifrost defaults.
+	cmd := tool.commandArgs(map[string]string{"LOCALMODELS_BIFROST_ADDR": "127.0.0.1:19999"}, args)
+	if got := envValue(t, cmd.Env, "LOCALMODELS_TOOLS_DIR"); got != legacyTools {
+		t.Fatalf("LOCALMODELS_TOOLS_DIR = %q, want legacy %q", got, legacyTools)
+	}
+	entries := envEntries(cmd.Env)
+	if values := entries["LOCALMODELS_BIFROST_DIR"]; len(values) != 0 {
+		t.Fatalf("LOCALMODELS_BIFROST_DIR = %v, want unset", values)
+	}
+	if values := entries["LOCALMODELS_BIFROST_ADDR"]; len(values) != 0 {
+		t.Fatalf("LOCALMODELS_BIFROST_ADDR = %v, want unset", values)
+	}
+	if got := envValue(t, cmd.Env, "PI_CODING_AGENT_DIR"); got != legacyPi {
+		t.Fatalf("PI_CODING_AGENT_DIR = %q, want legacy %q", got, legacyPi)
+	}
+
+	ownedJSON := fmt.Sprintf(
+		`{"schema":"localmodels.owned/v1","deployments":{"qwen3.8-27b-18100":{}},"gateway":{"bifrost":{"addr":"127.0.0.1:18480","app_dir":%q}}}`,
+		legacyBifrost,
+	)
+	if err := os.WriteFile(filepath.Join(legacyTools, "owned.json"), []byte(ownedJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd = tool.commandArgs(nil, args)
+	if got := envValue(t, cmd.Env, "LOCALMODELS_BIFROST_DIR"); got != legacyBifrost {
+		t.Fatalf("LOCALMODELS_BIFROST_DIR = %q, want legacy %q", got, legacyBifrost)
+	}
+	if got := envValue(t, cmd.Env, "LOCALMODELS_BIFROST_ADDR"); got != "127.0.0.1:18480" {
+		t.Fatalf("LOCALMODELS_BIFROST_ADDR = %q, want 127.0.0.1:18480", got)
+	}
+	if _, err := os.Stat(ToolsDirectory(stateDir)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("per-home tools dir created for a legacy home: %v", err)
+	}
+}

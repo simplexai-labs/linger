@@ -201,6 +201,16 @@ that may plan or start Bifrost defaults to `127.0.0.1:18480` when free across
 loopback and local interfaces or allocates and persists an ephemeral port free
 across local interfaces when `18480` is held by another process; stop and
 read-only calls never probe or allocate a port.
+A home whose Quick Install ran before per-home isolation (0.1.6 and earlier)
+keeps its plan's deployments, Pi profile and Bifrost in localmodels' default
+`~/.local/share/localmodels/tools`, so it stays there: when the home has no
+per-home `owned.json`, its `runtime/localmodels/plan.json` names a deployment
+that the shared `owned.json` owns, every call gets that directory as
+`LOCALMODELS_TOOLS_DIR` plus only the Bifrost directory and address its
+`owned.json` records, and the choice is recorded once in
+`<home>/runtime/localmodels/tools-dir` for the installer and the Daemon to
+follow. Isolating such a home would read its deployments as removed and its
+plan as changed, and the upgraded app could not start.
 
 Setup sets the Computer's model source through `localmodels source apply`
 (`byok-source.ts`): BYOK after the Runtime is ready, a local model after the

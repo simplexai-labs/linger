@@ -26,6 +26,7 @@ import {
   ensureLocalmodelsTool,
   localmodelsBifrostAddrFile,
   localmodelsBifrostDirectory,
+  localmodelsLegacyToolsMarkerFile,
   localmodelsStateDirectory,
   localmodelsToolsDirectory,
   resolveLocalmodelsBifrostAddr,
@@ -1422,4 +1423,209 @@ test("stopLocalmodels and read-only commands isolate paths without allocating or
   expect(invokedEnvs).toHaveLength(2);
   for (const env of invokedEnvs)
     expect(env.LOCALMODELS_BIFROST_ADDR).toBe("127.0.0.1:49555");
+});
+
+async function legacyLayout(
+  home: string,
+  deployment: string,
+  deploymentOwner?: string,
+  removed = false,
+) {
+  const userHome = await mkdtemp(path.join(os.tmpdir(), "linger-legacy-home-"));
+  roots.push(userHome);
+  vi.stubEnv("HOME", userHome);
+  vi.stubEnv("USERPROFILE", userHome);
+  const legacyTools = path.join(
+    userHome,
+    ".local",
+    "share",
+    "localmodels",
+    "tools",
+  );
+  const legacyBifrost = path.join(
+    userHome,
+    ".local",
+    "share",
+    "localmodels",
+    "bifrost",
+  );
+  await mkdir(path.join(legacyTools, "gateway-home", ".pi", "agent"), {
+    recursive: true,
+    mode: 0o700,
+  });
+  // The layout a 0.1.6 Quick Install leaves: ownership in the shared tools
+  // directory, the approved plan in the home.
+  await writeFile(
+    path.join(legacyTools, "owned.json"),
+    JSON.stringify({
+      schema: "localmodels.owned/v1",
+      deployments: {
+        "qwen3.8-27b-18100": {
+          deploy_dir: path.join(
+            deploymentOwner ?? home,
+            "runtime",
+            "localmodels",
+            "models",
+            "deployments",
+            "qwen3.8-27b-18100",
+          ),
+          removed,
+        },
+      },
+      gateway: { bifrost: { addr: "127.0.0.1:18480", app_dir: legacyBifrost } },
+    }),
+    { mode: 0o644 },
+  );
+  await mkdir(path.join(home, "runtime", "localmodels"), { recursive: true });
+  await writeFile(
+    path.join(home, "runtime", "localmodels", "plan.json"),
+    JSON.stringify({ llm: { name: deployment }, decision: null, aux: [] }),
+    { mode: 0o644 },
+  );
+  return { legacyTools, legacyBifrost };
+}
+function passedEnvironment(run: ReturnType<typeof vi.fn>, call = 0) {
+  return (
+    run.mock.calls[call] as unknown as [
+      string,
+      string[],
+      { env: NodeJS.ProcessEnv },
+    ]
+  )[2].env;
+}
+
+test("keeps a home whose plan was applied in the shared tools directory on that directory", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  const { legacyTools, legacyBifrost } = await legacyLayout(
+    f.home,
+    "qwen3.8-27b-18100",
+  );
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+  const freePortProbe = vi.fn(async () => 49152);
+  await runLocalmodels(
+    f.home,
+    ["stack", "up", "--json"],
+    {},
+    {
+      run,
+      portFree: async () => true,
+      freePort: freePortProbe,
+    },
+  );
+  const env = passedEnvironment(run);
+  expect(env.LOCALMODELS_TOOLS_DIR).toBe(legacyTools);
+  expect(env.LOCALMODELS_BIFROST_DIR).toBe(legacyBifrost);
+  expect(env.LOCALMODELS_BIFROST_ADDR).toBe("127.0.0.1:18480");
+  expect(freePortProbe).not.toHaveBeenCalled();
+  await expect(stat(localmodelsToolsDirectory(f.home))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+  expect(
+    (await readFile(localmodelsLegacyToolsMarkerFile(f.home), "utf8")).trim(),
+  ).toBe(legacyTools);
+
+  // The recorded choice holds after the plan is replaced.
+  await rm(path.join(f.home, "runtime", "localmodels", "plan.json"));
+  await runLocalmodels(f.home, ["setup", "binding", "--json"], {}, { run });
+  expect(passedEnvironment(run, 1).LOCALMODELS_TOOLS_DIR).toBe(legacyTools);
+});
+
+test("isolates a home whose plan the shared tools directory does not own", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  await legacyLayout(f.home, "inkling-2-mini-q4-poly-18100");
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+  await runLocalmodels(
+    f.home,
+    ["stack", "apply", "--json"],
+    {},
+    {
+      run,
+      portFree: async () => true,
+      freePort: async () => 18480,
+    },
+  );
+  expect(passedEnvironment(run).LOCALMODELS_TOOLS_DIR).toBe(
+    localmodelsToolsDirectory(f.home),
+  );
+  await expect(
+    stat(localmodelsLegacyToolsMarkerFile(f.home)),
+  ).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("keeps a home that owns its per-home tools directory isolated", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  await legacyLayout(f.home, "qwen3.8-27b-18100");
+  const toolsDir = localmodelsToolsDirectory(f.home);
+  await mkdir(toolsDir, { recursive: true, mode: 0o700 });
+  await writeFile(
+    path.join(toolsDir, "owned.json"),
+    JSON.stringify({ schema: "localmodels.owned/v1", deployments: {} }),
+    { mode: 0o644 },
+  );
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+  await runLocalmodels(
+    f.home,
+    ["stack", "up", "--json"],
+    {},
+    {
+      run,
+      portFree: async () => true,
+      freePort: async () => 18480,
+    },
+  );
+  expect(passedEnvironment(run).LOCALMODELS_TOOLS_DIR).toBe(toolsDir);
+  await expect(
+    stat(localmodelsLegacyToolsMarkerFile(f.home)),
+  ).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("isolates a new home whose plan reuses a deployment name another home owns", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  const otherHome = await mkdtemp(path.join(os.tmpdir(), "linger-other-home-"));
+  roots.push(otherHome);
+  await legacyLayout(f.home, "qwen3.8-27b-18100", otherHome);
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+  await runLocalmodels(
+    f.home,
+    ["stack", "apply", "--json"],
+    {},
+    {
+      run,
+      portFree: async () => true,
+      freePort: async () => 18480,
+    },
+  );
+  expect(passedEnvironment(run).LOCALMODELS_TOOLS_DIR).toBe(
+    localmodelsToolsDirectory(f.home),
+  );
+  await expect(
+    stat(localmodelsLegacyToolsMarkerFile(f.home)),
+  ).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("isolates a home whose shared deployment localmodels marked removed", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  await legacyLayout(f.home, "qwen3.8-27b-18100", undefined, true);
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+  await runLocalmodels(
+    f.home,
+    ["stack", "apply", "--json"],
+    {},
+    {
+      run,
+      portFree: async () => true,
+      freePort: async () => 18480,
+    },
+  );
+  expect(passedEnvironment(run).LOCALMODELS_TOOLS_DIR).toBe(
+    localmodelsToolsDirectory(f.home),
+  );
+  await expect(
+    stat(localmodelsLegacyToolsMarkerFile(f.home)),
+  ).rejects.toMatchObject({ code: "ENOENT" });
 });

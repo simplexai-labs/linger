@@ -31,6 +31,7 @@ const (
 	defaultBifrostAddr = "127.0.0.1:18480"
 	maxOwnedFileBytes  = 1 << 20
 	maxAddrFileBytes   = 256
+	maxMarkerFileBytes = 4096
 )
 
 var (
@@ -73,6 +74,16 @@ func BifrostAddrFile(stateDir string) string {
 		return ""
 	}
 	return filepath.Clean(filepath.Join(stateDir, "..", "bifrost-addr"))
+}
+
+// LegacyToolsMarkerFile returns the file in which the installer records the
+// shared tools directory a home kept from before per-home isolation, sibling
+// to a localmodels StateDirectory, or an empty string when stateDir is unset.
+func LegacyToolsMarkerFile(stateDir string) string {
+	if stateDir == "" {
+		return ""
+	}
+	return filepath.Clean(filepath.Join(stateDir, "..", "tools-dir"))
 }
 
 // Tool is where the installer put the localmodels tool and its state, as
@@ -160,8 +171,12 @@ func (t Tool) commandArgs(environment map[string]string, args []string) *exec.Cm
 	legacy := legacyLoadedGateway(t.StateDirectory, environment, overlay)
 	if legacy != nil {
 		effective["LOCALMODELS_TOOLS_DIR"] = legacy.toolsDir
-		effective["LOCALMODELS_BIFROST_DIR"] = legacy.bifrostDir
-		effective["LOCALMODELS_BIFROST_ADDR"] = legacy.addr
+		if legacy.bifrostDir != "" {
+			effective["LOCALMODELS_BIFROST_DIR"] = legacy.bifrostDir
+		}
+		if legacy.addr != "" {
+			effective["LOCALMODELS_BIFROST_ADDR"] = legacy.addr
+		}
 	} else if t.StateDirectory != "" {
 		toolsDir := ToolsDirectory(t.StateDirectory)
 		bifrostDir := BifrostDirectory(t.StateDirectory)
@@ -419,17 +434,15 @@ func toolsDirFromGatewayPiProfile(piDir string) string {
 	return filepath.Dir(gatewayHome)
 }
 
+// defaultLegacyToolsDir is localmodels' own default tools directory,
+// TOOLS_DIR = ~/.local/share/localmodels/tools expanded the way Python's
+// expanduser does: USERPROFILE on Windows, HOME elsewhere.
 func defaultLegacyToolsDir(baseEnv map[string]string) string {
+	homeKey := "HOME"
 	if runtime.GOOS == "windows" {
-		if localAppData := envLookup(baseEnv, "LOCALAPPDATA"); localAppData != "" && filepath.IsAbs(localAppData) {
-			return filepath.Join(filepath.Clean(localAppData), "localmodels", "tools")
-		}
-		if profile := envLookup(baseEnv, "USERPROFILE"); profile != "" && filepath.IsAbs(profile) {
-			return filepath.Join(filepath.Clean(profile), "AppData", "Local", "localmodels", "tools")
-		}
-		return ""
+		homeKey = "USERPROFILE"
 	}
-	home := envLookup(baseEnv, "HOME")
+	home := envLookup(baseEnv, homeKey)
 	if home == "" || !filepath.IsAbs(home) {
 		return ""
 	}
@@ -442,6 +455,9 @@ func defaultLegacyToolsDir(baseEnv map[string]string) string {
 func legacyLoadedGateway(stateDir string, baseEnv map[string]string, overlay *OverlayState) *legacyGateway {
 	if stateDir == "" {
 		return nil
+	}
+	if marked := markedLegacyGateway(stateDir); marked != nil {
+		return marked
 	}
 	isolatedTools := ToolsDirectory(stateDir)
 	if _, _, owned := readOwnedBifrostAddr(isolatedTools); owned {
@@ -497,6 +513,32 @@ func legacyLoadedGateway(stateDir string, baseEnv map[string]string, overlay *Ov
 		}
 	}
 	return nil
+}
+
+// markedLegacyGateway follows the installer's record of a home that still
+// runs from the shared tools directory its plan was applied in, so the Daemon
+// reads the same deployments, Pi profile and Bifrost as the installer. Only
+// what that directory's owned.json records is set; localmodels keeps its own
+// defaults for the rest, as when the plan was applied.
+func markedLegacyGateway(stateDir string) *legacyGateway {
+	raw, err := privatefs.ReadFile(LegacyToolsMarkerFile(stateDir), maxMarkerFileBytes)
+	if err != nil {
+		return nil
+	}
+	toolsDir := strings.TrimSpace(string(raw))
+	if toolsDir == "" || !filepath.IsAbs(toolsDir) {
+		return nil
+	}
+	toolsDir = filepath.Clean(toolsDir)
+	gateway := &legacyGateway{toolsDir: toolsDir}
+	if rec, ok := readOwnedBifrostRecord(toolsDir); ok {
+		gateway.bifrostDir = rec.appDir
+		gateway.addr = rec.addr
+	}
+	if piProfile := filepath.Join(toolsDir, "gateway-home", ".pi", "agent"); dirExists(piProfile) {
+		gateway.piProfile = piProfile
+	}
+	return gateway
 }
 
 func readSavedBifrostAddr(addrFile string) (string, int, bool) {
