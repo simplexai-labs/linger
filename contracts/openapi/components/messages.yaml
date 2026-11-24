@@ -596,6 +596,8 @@ components:
           maxLength: 120
         kind:
           $ref: "./domain.yaml#/components/schemas/RoomKind"
+        channel:
+          $ref: "./domain.yaml#/components/schemas/RoomChannel"
         parent_room_id:
           $ref: "./common.yaml#/components/schemas/Id"
           description: Present for thread Rooms; the Room whose membership authorizes the Message.

@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 import type { components } from "@linger/wire-contracts/teamhub-public/types";
 
 type Schemas = components["schemas"];
@@ -7,11 +9,28 @@ export type TeamHubDecisionCard = Schemas["DecisionRequestedMessageCard"];
 export type TeamHubDecisionRequest = Schemas["DecisionRequest"];
 export type TeamHubMessageCreated = Schemas["MessageSnapshotPayload"];
 export type TeamHubCardChanged = Schemas["CardChangedPayload"];
+export type TeamHubRoomChannel = Schemas["RoomChannel"];
 
 // `status` 0: no response (network, timeout).
 export type TeamHubResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly status: number; readonly code?: string };
+
+export interface DownloadedDocument {
+  readonly bytes: Uint8Array;
+  readonly filename?: string;
+  readonly mediaType?: string;
+}
+
+export interface AttachmentUploadInput {
+  readonly filename: string;
+  readonly mediaType?: string;
+  readonly bytes: Uint8Array;
+}
+
+export interface PostMessageOptions {
+  readonly attachmentUploadIds?: readonly string[];
+}
 
 export interface SseEvent {
   readonly event: string;
@@ -31,12 +50,24 @@ export interface IMessageTeamHub {
   anotherMe(): Promise<
     TeamHubResult<{ agentActorId?: string; roomId?: string }>
   >;
+  openChannelRoom?(
+    channel: TeamHubRoomChannel,
+  ): Promise<TeamHubResult<{ roomId: string }>>;
   latestRoomSeq(roomId: string): Promise<TeamHubResult<number>>;
   postMessage(
     roomId: string,
     idempotencyKey: string,
     text: string,
+    options?: PostMessageOptions,
   ): Promise<TeamHubResult<void>>;
+  uploadAttachment?(
+    roomId: string,
+    input: AttachmentUploadInput,
+  ): Promise<TeamHubResult<{ uploadId: string }>>;
+  downloadDocument?(
+    documentId: string,
+    maxBytes?: number,
+  ): Promise<TeamHubResult<DownloadedDocument>>;
   decide(
     decisionId: string,
     body: TeamHubDecisionRequest,
@@ -59,7 +90,12 @@ export interface IMessageTeamHubOptions {
   readonly requestTimeoutMs?: number;
   // The server sends heartbeat comments; a silent stream is reopened.
   readonly streamIdleMs?: number;
+  readonly wait?: (ms: number) => Promise<void>;
 }
+
+const DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
+const RENDER_RETRY_ATTEMPTS = 3;
+const RENDER_RETRY_MS = 1_000;
 
 // Parses a text/event-stream body into events; comments are dropped.
 export async function* parseSse(
@@ -99,6 +135,58 @@ function errorCode(body: unknown): string | undefined {
   const code = (body as { error?: { code?: unknown } } | undefined)?.error
     ?.code;
   return typeof code === "string" ? code : undefined;
+}
+
+export function filenameFromDisposition(
+  header: string | null,
+): string | undefined {
+  if (!header) return undefined;
+  const star = /filename\*\s*=\s*(?:UTF-8''|utf-8'')([^;\r\n]+)/i.exec(header);
+  if (star?.[1]) {
+    try {
+      const decoded = decodeURIComponent(star[1].trim()).trim();
+      if (decoded) return decoded;
+    } catch {
+      // Fall through to quoted filename parameter.
+    }
+  }
+  const plain =
+    /filename\s*=\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([^;\r\n]+))/i.exec(header);
+  const raw = (plain?.[1] ?? plain?.[2] ?? "").replace(/\\(.)/g, "$1").trim();
+  return raw || undefined;
+}
+
+async function readBoundedBytes(
+  response: Response,
+  maxBytes: number,
+): Promise<Uint8Array | "too_large"> {
+  const declared = Number(response.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel();
+    return "too_large";
+  }
+  if (!response.body) {
+    const buffer = new Uint8Array(await response.arrayBuffer());
+    return buffer.byteLength > maxBytes ? "too_large" : buffer;
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for await (const chunk of response.body) {
+    const part = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+    total += part.byteLength;
+    if (total > maxBytes) {
+      await response.body.cancel();
+      return "too_large";
+    }
+    chunks.push(part);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of chunks) {
+    out.set(part, offset);
+    offset += part.byteLength;
+  }
+  return out;
 }
 
 export class IMessageTeamHubClient implements IMessageTeamHub {
@@ -141,6 +229,26 @@ export class IMessageTeamHubClient implements IMessageTeamHub {
     };
   }
 
+  async openChannelRoom(
+    channel: TeamHubRoomChannel,
+  ): Promise<TeamHubResult<{ roomId: string }>> {
+    const tenantId = this.#options.tenantId();
+    if (!tenantId) return { ok: false, status: 401 };
+    const response = await this.#call(
+      `/v0/tenants/${encodeURIComponent(tenantId)}/another-me/channels/${encodeURIComponent(channel)}`,
+      { method: "POST" },
+    );
+    if (!response.ok) return response;
+    try {
+      const room = (await response.value.json()) as Schemas["Room"];
+      return room?.id
+        ? { ok: true, value: { roomId: room.id } }
+        : { ok: false, status: 0 };
+    } catch {
+      return { ok: false, status: 0 };
+    }
+  }
+
   async latestRoomSeq(roomId: string): Promise<TeamHubResult<number>> {
     const result = await this.#json<Schemas["RoomEventPage"]>(
       `/v0/rooms/${encodeURIComponent(roomId)}/events?after=0&limit=1`,
@@ -154,16 +262,97 @@ export class IMessageTeamHubClient implements IMessageTeamHub {
     roomId: string,
     idempotencyKey: string,
     text: string,
+    options?: PostMessageOptions,
   ): Promise<TeamHubResult<void>> {
+    const attachmentUploadIds = options?.attachmentUploadIds;
     const body: Schemas["MessageCreateRequest"] = {
       raw_message: text,
-      segments: [{ type: "text", content: text }],
+      segments: text ? [{ type: "text", content: text }] : [],
+      ...(attachmentUploadIds && attachmentUploadIds.length > 0
+        ? { attachment_upload_ids: [...attachmentUploadIds] }
+        : {}),
     };
     return this.#send(
       `/v0/rooms/${encodeURIComponent(roomId)}/messages`,
       body,
       { "idempotency-key": idempotencyKey },
     );
+  }
+
+  async uploadAttachment(
+    roomId: string,
+    input: AttachmentUploadInput,
+  ): Promise<TeamHubResult<{ uploadId: string }>> {
+    const form = new FormData();
+    form.set("filename", input.filename);
+    if (input.mediaType) form.set("media_type", input.mediaType);
+    const bytes = new Uint8Array(input.bytes.byteLength);
+    bytes.set(input.bytes);
+    form.set(
+      "content",
+      new Blob([bytes], {
+        type: input.mediaType || "application/octet-stream",
+      }),
+      input.filename,
+    );
+    const response = await this.#call(
+      `/v0/rooms/${encodeURIComponent(roomId)}/message-attachment-uploads`,
+      { method: "POST", body: form },
+    );
+    if (!response.ok) return response;
+    try {
+      const upload =
+        (await response.value.json()) as Schemas["MessageAttachmentUpload"];
+      return upload?.id
+        ? { ok: true, value: { uploadId: upload.id } }
+        : { ok: false, status: 0 };
+    } catch {
+      return { ok: false, status: 0 };
+    }
+  }
+
+  async downloadDocument(
+    documentId: string,
+    maxBytes: number = DEFAULT_MAX_DOWNLOAD_BYTES,
+  ): Promise<TeamHubResult<DownloadedDocument>> {
+    const pathname = `/v0/documents/${encodeURIComponent(documentId)}/downloads`;
+    const wait = this.#options.wait ?? ((ms: number) => delay(ms));
+    for (let attempt = 0; attempt <= RENDER_RETRY_ATTEMPTS; attempt += 1) {
+      const response = await this.#call(pathname, {
+        method: "GET",
+        accept: "*/*",
+      });
+      if (!response.ok) return response;
+      if (response.value.status === 202) {
+        await response.value.body?.cancel();
+        if (attempt === RENDER_RETRY_ATTEMPTS)
+          return { ok: false, status: 202, code: "RENDERING" };
+        await wait(RENDER_RETRY_MS);
+        continue;
+      }
+      let bytes: Uint8Array | "too_large";
+      try {
+        bytes = await readBoundedBytes(response.value, maxBytes);
+      } catch {
+        return { ok: false, status: 0 };
+      }
+      if (bytes === "too_large")
+        return { ok: false, status: 413, code: "TOO_LARGE" };
+      const filename = filenameFromDisposition(
+        response.value.headers.get("content-disposition"),
+      );
+      const rawType = response.value.headers.get("content-type")?.trim();
+      const mediaType = rawType ? rawType.split(";")[0]?.trim() : undefined;
+      return {
+        ok: true,
+        value: {
+          bytes,
+          ...(filename ? { filename } : {}),
+          ...(mediaType ? { mediaType } : {}),
+        },
+      };
+    }
+    return { ok: false, status: 0 };
   }
 
   decide(
@@ -251,7 +440,12 @@ export class IMessageTeamHubClient implements IMessageTeamHub {
 
   async #call(
     pathname: string,
-    init: { method: string; body?: string; headers?: Record<string, string> },
+    init: {
+      method: string;
+      body?: string | FormData;
+      headers?: Record<string, string>;
+      accept?: string;
+    },
   ): Promise<TeamHubResult<Response>> {
     const serverUrl = this.#options.serverUrl();
     const cookie = serverUrl
@@ -264,7 +458,11 @@ export class IMessageTeamHubClient implements IMessageTeamHub {
         new URL(pathname, serverUrl),
         {
           method: init.method,
-          headers: { accept: "application/json", cookie, ...init.headers },
+          headers: {
+            accept: init.accept ?? "application/json",
+            cookie,
+            ...init.headers,
+          },
           redirect: "error",
           signal: AbortSignal.timeout(this.#options.requestTimeoutMs ?? 30_000),
           ...(init.body === undefined ? {} : { body: init.body }),

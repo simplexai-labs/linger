@@ -8,4 +8,5 @@ export const imessageMessages = defineMessages("imessage", {
   answerChanged:
     "This question was already answered or changed. Open Linger to see it.",
   answerFailed: "Couldn't submit this answer. Open Linger to answer: {link}",
+  openDocument: "{name} — open in Linger: {link}",
 });

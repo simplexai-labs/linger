@@ -79,6 +79,11 @@ func resolveAndAdmitMessageMentions(ctx context.Context, queries *store.Queries,
 		} else if direct {
 			return nil, ErrInvalidMention
 		}
+		if channel, channelErr := queries.IsChannelRoom(ctx, roomID); channelErr != nil {
+			return nil, channelErr
+		} else if channel {
+			return nil, ErrInvalidMention
+		}
 		if target.Kind == "agent" {
 			registration, registrationErr := queries.GetActiveAgentRegistrationForAdmission(ctx, store.GetActiveAgentRegistrationForAdmissionParams{
 				ActorID: target.ID, TenantID: tenantID,

@@ -29,6 +29,10 @@ var (
 // be opened again once the deletion finishes.
 var ErrDirectRoomDeleting = errors.New("the direct Room is being deleted")
 
+// ErrChannelRoomDeleting means the pair's channel Room is being deleted. It can
+// be opened again once the deletion finishes.
+var ErrChannelRoomDeleting = errors.New("the channel Room is being deleted")
+
 // Spec is one Room to create. The Human Owner owns it; the Creator is the
 // owner or an Agent. Members join beside them and exclude both.
 type Spec struct {
@@ -145,6 +149,67 @@ func OpenOrCreateDirectRoom(ctx context.Context, queries *store.Queries, spec Di
 	created.Room.DirectHumanActorID = pgtype.Text{String: spec.Human.ID, Valid: true}
 	created.Room.DirectAgentActorID = pgtype.Text{String: spec.Agent.ID, Valid: true}
 	// Only now does the Agent's Room Context see the Room as direct.
+	if err := agentruntimestate.EnsurePerRoomMetaContexts(ctx, queries, spec.Agent.ID); err != nil {
+		return DirectResult{}, err
+	}
+	return DirectResult{Room: created.Room, Created: true}, nil
+}
+
+// ChannelSpec is one Human-Agent external channel pair. Name names a new Room.
+type ChannelSpec struct {
+	TenantID string
+	Channel  string
+	Human    store.Actor
+	Agent    store.Actor
+	Name     string
+}
+
+// OpenOrCreateChannelRoom returns the pair's Channel Room for spec.Channel. It
+// creates one when the pair has none or its last one finished deletion; a Room
+// still being deleted reports ErrChannelRoomDeleting.
+func OpenOrCreateChannelRoom(ctx context.Context, queries *store.Queries, spec ChannelSpec) (DirectResult, error) {
+	if spec.TenantID == "" || spec.Channel == "" || spec.Human.Kind != "human" || spec.Agent.Kind != "agent" {
+		return DirectResult{}, ErrInvalid
+	}
+	if err := tenantmembership.LockAgent(ctx, queries, spec.Agent.ID); err != nil {
+		return DirectResult{}, err
+	}
+	if err := queries.AcquireAdvisoryTransactionLock(ctx, "channel-room|"+spec.TenantID+"|"+spec.Human.ID+"|"+spec.Agent.ID+"|"+spec.Channel); err != nil {
+		return DirectResult{}, err
+	}
+	existing, err := queries.GetChannelRoomByPair(ctx, store.GetChannelRoomByPairParams{
+		TenantID: spec.TenantID, HumanActorID: spec.Human.ID, AgentActorID: spec.Agent.ID, ChannelKind: spec.Channel,
+	})
+	switch {
+	case err == nil && !existing.DeletionStartedAt.Valid:
+		return DirectResult{Room: existing}, nil
+	case err == nil && !existing.DeletedAt.Valid:
+		return DirectResult{}, ErrChannelRoomDeleting
+	case err != nil && !errors.Is(err, pgx.ErrNoRows):
+		return DirectResult{}, err
+	}
+	if err := queries.ReleaseFinishedChannelRoomPair(ctx, store.ReleaseFinishedChannelRoomPairParams{
+		TenantID: spec.TenantID, HumanActorID: spec.Human.ID, AgentActorID: spec.Agent.ID, ChannelKind: spec.Channel,
+	}); err != nil {
+		return DirectResult{}, err
+	}
+	created, err := Create(ctx, queries, Spec{
+		TenantID: spec.TenantID, Name: spec.Name, Creator: spec.Human, Owner: spec.Human,
+		MemberActorIDs: []string{spec.Agent.ID}, AgentsAuthorized: true, SuppressAgentMetaContexts: true,
+	})
+	if err != nil {
+		return DirectResult{}, err
+	}
+	if _, err := queries.MarkChannelRoom(ctx, store.MarkChannelRoomParams{
+		RoomID: created.Room.ID, TenantID: spec.TenantID, ChannelKind: spec.Channel,
+		HumanActorID: spec.Human.ID, AgentActorID: spec.Agent.ID,
+	}); err != nil {
+		return DirectResult{}, err
+	}
+	created.Room.ChannelKind = pgtype.Text{String: spec.Channel, Valid: true}
+	created.Room.ChannelHumanActorID = pgtype.Text{String: spec.Human.ID, Valid: true}
+	created.Room.ChannelAgentActorID = pgtype.Text{String: spec.Agent.ID, Valid: true}
+	// Only now does the Agent's Room Context see the Room as a 1:1 channel Room.
 	if err := agentruntimestate.EnsurePerRoomMetaContexts(ctx, queries, spec.Agent.ID); err != nil {
 		return DirectResult{}, err
 	}

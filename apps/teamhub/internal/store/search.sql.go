@@ -78,7 +78,8 @@ SELECT m.id, m.tenant_id, m.room_id, m.author_actor_id, m.body, m.segments, m.me
        coalesce(direct_peer.display_name,'')::text AS direct_peer_display_name,
        (r.parent_room_id IS NOT NULL)::boolean AS is_thread,
        coalesce(r.parent_room_id,'')::text AS parent_room_id,
-       coalesce(r.root_message_id,'')::text AS root_message_id
+       coalesce(r.root_message_id,'')::text AS root_message_id,
+       coalesce(r.channel_kind,'')::text AS channel_kind
 FROM page
 JOIN messages m ON m.id=page.id
 JOIN rooms r ON r.id=m.room_id
@@ -120,6 +121,7 @@ type SearchTenantMessagesForAccountRow struct {
 	IsThread              bool               `json:"is_thread"`
 	ParentRoomID          string             `json:"parent_room_id"`
 	RootMessageID         string             `json:"root_message_id"`
+	ChannelKind           string             `json:"channel_kind"`
 }
 
 // Keyword search over conversation Messages the caller can read across one
@@ -169,6 +171,7 @@ func (q *Queries) SearchTenantMessagesForAccount(ctx context.Context, arg Search
 			&i.IsThread,
 			&i.ParentRoomID,
 			&i.RootMessageID,
+			&i.ChannelKind,
 		); err != nil {
 			return nil, err
 		}

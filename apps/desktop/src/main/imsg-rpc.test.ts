@@ -106,7 +106,7 @@ describe("IMsgRpc", () => {
   it("subscribes from the tail on the first start", async () => {
     const f = setup();
     await subscribed(f.children[0]!);
-    expect(f.children[0]!.requests[0]!.params).toEqual({});
+    expect(f.children[0]!.requests[0]!.params).toEqual({ attachments: true });
     await f.rpc.stop();
     expect(f.children[0]!.ended).toBe(true);
   });
@@ -115,7 +115,10 @@ describe("IMsgRpc", () => {
     const f = setup(42);
     const child = f.children[0]!;
     await subscribed(child);
-    expect(child.requests[0]!.params).toEqual({ since_rowid: 42 });
+    expect(child.requests[0]!.params).toEqual({
+      attachments: true,
+      since_rowid: 42,
+    });
     // Wait for the subscription id to land.
     await new Promise((resolve) => setImmediate(resolve));
     child.notify("message", {
@@ -139,7 +142,10 @@ describe("IMsgRpc", () => {
       terminal: true,
     });
     await subscribed(child, 2);
-    expect(child.requests[1]!.params).toEqual({ since_rowid: 900 });
+    expect(child.requests[1]!.params).toEqual({
+      attachments: true,
+      since_rowid: 900,
+    });
     await f.rpc.stop();
   });
 
@@ -276,6 +282,26 @@ describe("IMsgRpc", () => {
     expect(await f.rpc.send({ chatId: 1 }, "a")).toMatchObject({
       ok: false,
       retrySafe: false,
+    });
+    await f.rpc.stop();
+  });
+
+  it("passes file when sending an attachment", async () => {
+    const f = setup();
+    const child = f.children[0]!;
+    await subscribed(child);
+    child.onRequest = (r) =>
+      r.method === "send" && child.reply(r.id, { ok: true });
+    expect(
+      await f.rpc.send({ chatId: 5 }, "🤖 report.md", {
+        file: "/tmp/report.md",
+      }),
+    ).toEqual({ ok: true });
+    const sendReq = child.requests.find((r) => r.method === "send")!;
+    expect(sendReq.params).toEqual({
+      chat_id: 5,
+      text: "🤖 report.md",
+      file: "/tmp/report.md",
     });
     await f.rpc.stop();
   });

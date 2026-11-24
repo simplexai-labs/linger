@@ -448,6 +448,39 @@ paths:
           $ref: '../components/common.yaml#/components/responses/Unauthenticated'
         '404':
           $ref: '../components/common.yaml#/components/responses/NotFound'
+  /v0/tenants/{tenantId}/another-me/channels/{channel}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/RoomChannel'
+    post:
+      tags: [Rooms]
+      operationId: openAnotherMeChannel
+      summary: Open or create the Human's Another Me channel Room for an external messaging channel.
+      description: >-
+        Returns the isolated Room shared by the current Human and their Another Me for the named
+        channel, creating it on first use. Messages in this Room keep a separate Agent session from
+        the primary Another Me Chat while remaining visible to Another Me, Memory, and Wiki.
+      responses:
+        '200':
+          description: Existing channel Room returned.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/domain.yaml#/components/schemas/Room'
+        '201':
+          description: Channel Room created.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/domain.yaml#/components/schemas/Room'
+        '400':
+          $ref: '../components/common.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
+        '409':
+          $ref: '../components/common.yaml#/components/responses/Conflict'
   /v0/tenants/{tenantId}/agents/{agentId}/avatar-image:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -5472,3 +5505,9 @@ components:
       required: true
       schema:
         $ref: '../components/common.yaml#/components/schemas/ManifestVersion'
+    RoomChannel:
+      name: channel
+      in: path
+      required: true
+      schema:
+        $ref: '../components/domain.yaml#/components/schemas/RoomChannel'

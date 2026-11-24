@@ -585,6 +585,11 @@ func rejectImmutableRoomSubtype(ctx context.Context, queries *store.Queries, roo
 	} else if direct {
 		return ErrDirectRoomImmutable
 	}
+	if channel, err := queries.IsChannelRoom(ctx, roomID); err != nil {
+		return err
+	} else if channel {
+		return ErrDirectRoomImmutable
+	}
 	if thread, err := queries.IsThreadRoom(ctx, roomID); err != nil {
 		return err
 	} else if thread {

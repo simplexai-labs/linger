@@ -5,7 +5,8 @@ SELECT id, tenant_id, name, description, created_by_actor_id,
        deleted_at, deleted_by_actor_id,
        direct_human_actor_id, direct_agent_actor_id, parent_room_id, root_message_id,
        team_md_raw_markdown, team_md_collaborate_pattern, team_md_document,
-       team_md_revision, team_md_updated_at, team_md_updated_by_actor_id
+       team_md_revision, team_md_updated_at, team_md_updated_by_actor_id,
+       channel_kind, channel_human_actor_id, channel_agent_actor_id
 FROM rooms
 WHERE id = sqlc.arg(id)::text AND deleted_at IS NULL;
 

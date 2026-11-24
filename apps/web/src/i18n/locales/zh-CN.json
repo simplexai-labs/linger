@@ -69,6 +69,8 @@
     "navigation": "Room 导航",
     "messageActions": "消息操作",
     "quickAccess": "快捷入口",
+    "channels": "渠道",
+    "channelIMessage": "iMessage",
     "messages": "消息",
     "hideChatList": "隐藏对话列表",
     "search": "搜索",
@@ -894,7 +896,10 @@
     "saveLocallyFailedDetail": "这条消息无法保存到本地：{detail}",
     "microphoneInUse": "另一个语音输入正在使用麦克风",
     "microphoneHardwareRecording": "硬件录音正在使用麦克风",
-    "microphoneOtherTab": "麦克风正在另一个标签页中使用"
+    "microphoneOtherTab": "麦克风正在另一个标签页中使用",
+    "channelViewOnlyTitle": "只能查看",
+    "channelViewOnlyDescription": "消息已从 {channel} 同步。请在 {channel} 中继续这个对话。",
+    "channelIMessage": "iMessage"
   },
   "computers": {
     "pageTitle": "电脑",

@@ -918,4 +918,44 @@ describe("Room navigation composer focus", () => {
     );
     matchMedia.mockRestore();
   });
+
+  it("groups channel Rooms under Channels and excludes them from Messages", () => {
+    const channelRoom: TeamHubRoomListItem = {
+      ...room("room-imessage", 1, 0),
+      name: "iMessage",
+      channel: "imessage",
+    };
+    const regularRoom = room("room-regular", 0, 0);
+    render(
+      <MemoryRouter initialEntries={["/t/tenant-a/rooms/room-imessage/chat"]}>
+        <RoomSecondaryNavigation
+          activeRoomId="room-imessage"
+          onCloseMobile={() => undefined}
+          onCreateRoom={() => undefined}
+          rooms={[channelRoom, regularRoom]}
+          tenant={{
+            created_at: "2026-07-24T09:00:00Z",
+            id: "tenant-a",
+            name: "Northstar",
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    const channelsSection = screen
+      .getByRole("button", { name: "Channels" })
+      .closest("section")!;
+    expect(
+      within(channelsSection).getByRole("link", { name: "iMessage" }),
+    ).toHaveAttribute("href", "/t/tenant-a/rooms/room-imessage/chat");
+    const messagesSection = screen
+      .getByRole("button", { name: "Messages" })
+      .closest("section")!;
+    expect(
+      within(messagesSection).queryByRole("link", { name: "iMessage" }),
+    ).toBeNull();
+    expect(
+      within(messagesSection).getByRole("link", { name: "room-regular" }),
+    ).toBeVisible();
+  });
 });

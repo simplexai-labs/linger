@@ -1,5 +1,7 @@
+import { Message01Icon } from "@hugeicons/core-free-icons";
 import { lazy, Suspense, type ComponentProps } from "react";
 
+import { Icon } from "@/components/ui/icon";
 import { isRunWorking } from "@/features/teamhub/run-status";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { commonMessages } from "@/i18n/common.messages";
@@ -74,9 +76,23 @@ export function RoomChatComposerSection({
     openActorProfile,
     sendMessage,
   } = actions;
-  return room.participation === "left" ? (
-    <RoomRejoinBanner room={room} />
-  ) : (
+  if (room.participation === "left") {
+    return <RoomRejoinBanner room={room} />;
+  }
+  if (room.channel) {
+    return (
+      <div className="shrink-0">
+        <BackgroundTasksIndicator
+          client={client}
+          roomId={roomId}
+          tenantId={tenantId}
+        />
+        <AgentStreamingStatusDock {...dock} />
+        <ChannelViewOnlyBanner channel={room.channel} roomName={room.name} />
+      </div>
+    );
+  }
+  return (
     <RoomComposerDock
       onRetry={() => void agentDirectory.refetch()}
       outboxError={delivery.outboxError}
@@ -293,5 +309,45 @@ function RoomMessageComposer({
         onRetryAgents={onRetryAgents}
       />
     </>
+  );
+}
+
+interface ChannelViewOnlyBannerProps {
+  channel: string;
+  roomName: string;
+}
+
+/** View-only footer shown in external channel Rooms instead of a composer. */
+export function ChannelViewOnlyBanner({
+  channel,
+  roomName,
+}: ChannelViewOnlyBannerProps) {
+  const t = useT();
+  const channelLabel =
+    channel === "imessage" ? t(composerMessages.channelIMessage) : roomName;
+  return (
+    <div className="px-4 pb-4 pt-2">
+      <div
+        className="mx-auto flex max-w-3xl items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 text-sm shadow-xs"
+        data-testid="channel-view-only-banner"
+      >
+        <span
+          aria-hidden="true"
+          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
+        >
+          <Icon icon={Message01Icon} size={16} />
+        </span>
+        <div className="min-w-0">
+          <p className="font-medium text-foreground">
+            {t(composerMessages.channelViewOnlyTitle)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t(composerMessages.channelViewOnlyDescription, {
+              channel: channelLabel,
+            })}
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }

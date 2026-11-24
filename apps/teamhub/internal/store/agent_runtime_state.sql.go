@@ -1506,7 +1506,8 @@ SELECT
                 SELECT 1 FROM rooms direct
                 WHERE direct.id=$4::text
                   AND direct.tenant_id=registration.tenant_id
-                  AND direct.direct_agent_actor_id IS NOT NULL
+                  AND (direct.direct_agent_actor_id IS NOT NULL
+                    OR direct.channel_agent_actor_id IS NOT NULL)
             ) THEN 'direct' ELSE 'collaboration' END
         ELSE NULL
     END,

@@ -5,7 +5,8 @@ SELECT r.id, r.tenant_id, r.name, r.description, r.created_by_actor_id,
        r.deleted_at, r.deleted_by_actor_id,
        r.direct_human_actor_id, r.direct_agent_actor_id, r.parent_room_id, r.root_message_id,
        r.team_md_raw_markdown, r.team_md_collaborate_pattern, r.team_md_document,
-       r.team_md_revision, r.team_md_updated_at, r.team_md_updated_by_actor_id
+       r.team_md_revision, r.team_md_updated_at, r.team_md_updated_by_actor_id,
+       r.channel_kind, r.channel_human_actor_id, r.channel_agent_actor_id
 FROM rooms r
 JOIN actors caller ON caller.tenant_id=r.tenant_id AND caller.account_id=$2 AND caller.kind='human'
 JOIN rooms access_room
@@ -74,6 +75,7 @@ SELECT r.id, r.tenant_id, r.name, r.description, r.created_by_actor_id,
        (r.parent_room_id IS NOT NULL)::boolean AS is_thread,
        coalesce(r.parent_room_id,'')::text AS parent_room_id,
        coalesce(r.root_message_id,'')::text AS root_message_id,
+       coalesce(r.channel_kind,'')::text AS channel_kind,
        state.pinned_at,
        coalesce(preview.ids,'{}')::text[] AS member_preview_ids,
        coalesce(preview.kinds,'{}')::text[] AS member_preview_kinds,
@@ -148,7 +150,8 @@ RETURNING id, tenant_id, name, description, created_by_actor_id,
           deleted_at, deleted_by_actor_id,
           direct_human_actor_id, direct_agent_actor_id, parent_room_id, root_message_id,
           team_md_raw_markdown, team_md_collaborate_pattern, team_md_document,
-          team_md_revision, team_md_updated_at, team_md_updated_by_actor_id;
+          team_md_revision, team_md_updated_at, team_md_updated_by_actor_id,
+          channel_kind, channel_human_actor_id, channel_agent_actor_id;
 
 -- name: UpdateRoom :one
 UPDATE rooms
@@ -159,7 +162,8 @@ RETURNING id,tenant_id,name,description,created_by_actor_id,next_room_seq,create
           deleted_at,deleted_by_actor_id,
           direct_human_actor_id,direct_agent_actor_id,parent_room_id,root_message_id,
           team_md_raw_markdown,team_md_collaborate_pattern,team_md_document,
-          team_md_revision,team_md_updated_at,team_md_updated_by_actor_id;
+          team_md_revision,team_md_updated_at,team_md_updated_by_actor_id,
+          channel_kind,channel_human_actor_id,channel_agent_actor_id;
 
 -- name: CreateRoomMember :one
 INSERT INTO room_members(room_id,tenant_id,actor_id,role,added_by_actor_id)

@@ -789,6 +789,10 @@ components:
     RoomKind:
       type: string
       enum: [room, direct, thread]
+    RoomChannel:
+      type: string
+      enum: [imessage]
+      description: External messaging channel bridged to this Room.
     RoomParticipationStatus:
       type: string
       enum: [joined, left]
@@ -821,6 +825,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Id"
         kind:
           $ref: "#/components/schemas/RoomKind"
+        channel:
+          $ref: "#/components/schemas/RoomChannel"
         name:
           type: string
           minLength: 1
@@ -889,6 +895,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Id"
         kind:
           $ref: "#/components/schemas/RoomKind"
+        channel:
+          $ref: "#/components/schemas/RoomChannel"
         name:
           type: string
           minLength: 1

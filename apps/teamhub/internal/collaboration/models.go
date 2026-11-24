@@ -72,6 +72,10 @@ func roomModel(room store.Room, creator store.Actor) httpapi.Room {
 		value := room.Description.String
 		model.Description = &value
 	}
+	if room.ChannelKind.Valid && room.ChannelKind.String != "" {
+		channel := httpapi.RoomChannel(room.ChannelKind.String)
+		model.Channel = &channel
+	}
 	return model
 }
 
@@ -144,6 +148,10 @@ func roomListItemModel(row store.ListRoomsForTenantAccountRow, creator store.Act
 		rootMessageID := row.RootMessageID
 		model.ParentRoomId = &parentRoomID
 		model.RootMessageId = &rootMessageID
+	}
+	if row.ChannelKind != "" {
+		channel := httpapi.RoomChannel(row.ChannelKind)
+		model.Channel = &channel
 	}
 	if row.PinnedAt.Valid {
 		pinnedAt := row.PinnedAt.Time

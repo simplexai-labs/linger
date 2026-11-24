@@ -5,6 +5,8 @@ export const roomListMessages = defineMessages("roomList", {
   navigation: "Room navigation",
   messageActions: "Message actions",
   quickAccess: "Quick access",
+  channels: "Channels",
+  channelIMessage: "iMessage",
   messages: "Messages",
   hideChatList: "Hide Chat list",
   search: "Search",

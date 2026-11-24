@@ -54,14 +54,19 @@ func (s *Service) DeleteRoomInTx(ctx context.Context, tx pgx.Tx, accountID, room
 	if authority.Role != string(httpapi.Owner) {
 		return ErrRoomOwnerRequired
 	}
-	if direct, err := queries.IsDirectRoom(ctx, roomID); err != nil {
+	direct, err := queries.IsDirectRoom(ctx, roomID)
+	if err != nil {
 		return err
-	} else if direct {
-		// A Direct Room is immutable because it is the one place a pair
-		// keeps talking. Once its peer Agent is gone the Room can never
-		// carry another message, and its owner is left with a dead entry
-		// no action could clear, so let them retire it. A live peer, and a
-		// Direct Room between two Humans, stay immutable.
+	}
+	channel := false
+	if !direct {
+		channel, err = queries.IsChannelRoom(ctx, roomID)
+		if err != nil {
+			return err
+		}
+	}
+	if direct || channel {
+		// A Direct or Channel Room is immutable while its peer Agent is live.
 		peerActive, peerErr := queries.DirectRoomPeerIsActive(ctx, roomID)
 		if peerErr != nil {
 			return peerErr

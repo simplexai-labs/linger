@@ -89,7 +89,7 @@ function RoomSettingsContent({
   const [leaving, setLeaving] = useState(false);
   const leave = useRoomParticipation(room);
   const t = useT();
-  const groupRoom = room.kind === "room";
+  const groupRoom = room.kind === "room" && !room.channel;
   return (
     <div
       className="workspace-scrollbar h-full overflow-y-auto"

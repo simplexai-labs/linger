@@ -48,7 +48,23 @@ describe("admitInbound", () => {
     ["an unknown sender", { sender: "+19995550100" }, "unknown_sender"],
     ["an echo of a reply", { text: `${OUTBOUND_PREFIX}hi` }, "own_echo"],
     ["an empty text", { text: "  " }, "empty"],
-    ["an attachment only", { text: undefined }, "empty"],
+    ["no text or attachments", { text: undefined }, "empty"],
+    [
+      "a missing attachment only",
+      {
+        text: undefined,
+        attachments: [{ missing: true, original_path: "/tmp/a.png" }],
+      },
+      "empty",
+    ],
+    [
+      "a sticker only",
+      {
+        text: undefined,
+        attachments: [{ is_sticker: true, original_path: "/tmp/a.png" }],
+      },
+      "empty",
+    ],
     ["an edit", { type: "edited" }, "mutation"],
     ["an unsend", { type: "unsent" }, "mutation"],
   ])("skips %s", (_name, extra, reason) => {
@@ -64,7 +80,36 @@ describe("admitInbound", () => {
         row(1, { sender: "+1 (415) 555-0100", text: " hi " }),
         handles,
       ),
-    ).toEqual({ accept: true, text: "hi", chatId: 7 });
+    ).toEqual({ accept: true, text: "hi", attachments: [], chatId: 7 });
+  });
+
+  it("accepts an attachment without text", () => {
+    expect(
+      admitInbound(
+        row(1, {
+          text: undefined,
+          attachments: [
+            {
+              transfer_name: "photo.jpg",
+              mime_type: "image/jpeg",
+              original_path: "/tmp/photo.jpg",
+            },
+          ],
+        }),
+        handles,
+      ),
+    ).toEqual({
+      accept: true,
+      text: "",
+      attachments: [
+        {
+          path: "/tmp/photo.jpg",
+          filename: "photo.jpg",
+          mediaType: "image/jpeg",
+        },
+      ],
+      chatId: 7,
+    });
   });
 
   it("falls back to the chat identifier without a sender", () => {
@@ -779,5 +824,216 @@ describe("IMessageChannel review fixes", () => {
     await vi.waitFor(() => expect(f.state().rowid).toBe(1));
     expect(f.states.at(-1)).toBe("running");
     await f.channel.stop();
+  });
+
+  it("uses the isolated iMessage channel Room and falls back on 404 from an older server", async () => {
+    const channelRoom = "room-imessage";
+    const f = setup();
+    const openChannelRoom = vi.fn(async () => ok({ roomId: channelRoom }));
+    const teamhub: IMessageTeamHub = {
+      ...f.teamhub,
+      openChannelRoom,
+    };
+    const channel = new IMessageChannel({
+      transport: f.transport,
+      teamhub,
+      store: {
+        get: () => f.state(),
+        update: (p) => Object.assign(f.state(), p),
+      },
+      handles: [ME],
+      chatUrl: (id) => `https://linger.test/t/t1/rooms/${id}/chat`,
+      log: silentLog,
+      t: translator("en"),
+      onState: (s) => f.states.push(s),
+      serverUrl: () => "https://linger.test",
+      wait: async () => {},
+    });
+    channel.start();
+    await vi.waitFor(() => expect(f.states).toContain("running"));
+    expect(openChannelRoom).toHaveBeenCalledWith("imessage");
+    expect(f.teamhub.latestRoomSeq).toHaveBeenCalledWith(channelRoom);
+    await channel.stop();
+
+    const legacy = setup();
+    const legacyTeamHub: IMessageTeamHub = {
+      ...legacy.teamhub,
+      openChannelRoom: vi.fn(async () => failed(404)),
+    };
+    const legacyChannel = new IMessageChannel({
+      transport: legacy.transport,
+      teamhub: legacyTeamHub,
+      store: {
+        get: () => legacy.state(),
+        update: (p) => Object.assign(legacy.state(), p),
+      },
+      handles: [ME],
+      chatUrl: (id) => `https://linger.test/t/t1/rooms/${id}/chat`,
+      log: silentLog,
+      t: translator("en"),
+      onState: (s) => legacy.states.push(s),
+      serverUrl: () => "https://linger.test",
+      wait: async () => {},
+    });
+    legacyChannel.start();
+    await vi.waitFor(() => expect(legacy.states).toContain("running"));
+    expect(legacy.teamhub.latestRoomSeq).toHaveBeenCalledWith(ROOM);
+    await legacyChannel.stop();
+  });
+
+  it("sends outbound Document cards as staged files and falls back to a link on error", async () => {
+    const f = setup();
+    const sends: { target: IMsgSendTarget; text: string; file?: string }[] = [];
+    const transport = {
+      ...f.transport,
+      send: vi.fn(
+        async (
+          target: IMsgSendTarget,
+          text: string,
+          options?: { file?: string },
+        ) => {
+          sends.push({
+            target,
+            text,
+            ...(options?.file ? { file: options.file } : {}),
+          });
+          return { ok: true as const };
+        },
+      ),
+    };
+    const downloadDocument = vi
+      .fn()
+      .mockResolvedValueOnce(
+        ok({
+          bytes: new TextEncoder().encode("# Report\nDetails"),
+          filename: "report.md",
+          mediaType: "text/markdown",
+        }),
+      )
+      .mockResolvedValueOnce(failed(404));
+    const cleaned = vi.fn(async () => {});
+    const channel = new IMessageChannel({
+      transport,
+      teamhub: { ...f.teamhub, downloadDocument },
+      store: {
+        get: () => f.state(),
+        update: (p) => Object.assign(f.state(), p),
+      },
+      handles: [ME],
+      chatUrl: (id) => `https://linger.test/t/t1/rooms/${id}/chat`,
+      documentUrl: (id) => `https://linger.test/t/t1/documents/${id}`,
+      log: silentLog,
+      t: translator("en"),
+      onState: (s) => f.states.push(s),
+      serverUrl: () => "https://linger.test",
+      wait: async () => {},
+      stageAttachment: async (filename) => ({
+        filePath: `/tmp/staged/${filename}`,
+        cleanup: cleaned,
+      }),
+    });
+    channel.start();
+    await vi.waitFor(() => expect(f.states).toContain("running"));
+    f.stream().push(
+      message(11, {
+        raw_message: "See the summary attached.report.md",
+        segments: [
+          { type: "text", content: "See the summary attached." },
+          {
+            type: "document",
+            content: "report.md",
+            document_id: "doc_1",
+            presentation: "card",
+          },
+        ],
+        attachments: [],
+      }),
+    );
+    await vi.waitFor(() => expect(f.state().roomSeq).toBe(11));
+    expect(sends).toEqual([
+      {
+        target: { to: ME },
+        text: `${OUTBOUND_PREFIX}See the summary attached.`,
+      },
+      {
+        target: { to: ME },
+        text: `${OUTBOUND_PREFIX}report.md`,
+        file: "/tmp/staged/report.md",
+      },
+    ]);
+
+    f.stream().push(
+      message(12, {
+        raw_message: "Second report.missing.pdf",
+        segments: [
+          { type: "text", content: "Second report." },
+          {
+            type: "document",
+            content: "missing.pdf",
+            document_id: "doc_2",
+            presentation: "card",
+          },
+        ],
+        attachments: [],
+      }),
+    );
+    await vi.waitFor(() => expect(f.state().roomSeq).toBe(12));
+    expect(sends.at(-1)).toEqual({
+      target: { to: ME },
+      text: `${OUTBOUND_PREFIX}missing.pdf — open in Linger: https://linger.test/t/t1/documents/doc_2`,
+    });
+    await channel.stop();
+    expect(cleaned).toHaveBeenCalledOnce();
+  });
+
+  it("uploads inbound attachments before posting the Message", async () => {
+    const f = setup();
+    const uploadAttachment = vi.fn(async () => ok({ uploadId: "up.1" }));
+    const postMessage = vi.fn(async () => ok(undefined));
+    const channel = new IMessageChannel({
+      transport: f.transport,
+      teamhub: { ...f.teamhub, uploadAttachment, postMessage },
+      store: {
+        get: () => f.state(),
+        update: (p) => Object.assign(f.state(), p),
+      },
+      handles: [ME],
+      chatUrl: (id) => `https://linger.test/t/t1/rooms/${id}/chat`,
+      log: silentLog,
+      t: translator("en"),
+      onState: (s) => f.states.push(s),
+      serverUrl: () => "https://linger.test",
+      wait: async () => {},
+      readAttachment: async () => new TextEncoder().encode("img-bytes"),
+    });
+    channel.start();
+    await vi.waitFor(() => expect(f.states).toContain("running"));
+    f.inbound(
+      row(2, {
+        text: "Check this",
+        attachments: [
+          {
+            transfer_name: "pic.png",
+            mime_type: "image/png",
+            original_path: "/tmp/pic.png",
+          },
+        ],
+      }),
+    );
+    await vi.waitFor(() => expect(f.state().rowid).toBe(2));
+    expect(uploadAttachment).toHaveBeenCalledWith(ROOM, {
+      filename: "pic.png",
+      mediaType: "image/png",
+      bytes: new TextEncoder().encode("img-bytes"),
+    });
+    expect(postMessage).toHaveBeenCalledWith(
+      ROOM,
+      "imessage:G-2",
+      "Check this",
+      {
+        attachmentUploadIds: ["up.1"],
+      },
+    );
+    await channel.stop();
   });
 });

@@ -152,7 +152,8 @@ RETURNING id, tenant_id, name, description, created_by_actor_id,
           deleted_at, deleted_by_actor_id,
           direct_human_actor_id, direct_agent_actor_id, parent_room_id, root_message_id,
           team_md_raw_markdown, team_md_collaborate_pattern, team_md_document,
-          team_md_revision, team_md_updated_at, team_md_updated_by_actor_id
+          team_md_revision, team_md_updated_at, team_md_updated_by_actor_id,
+          channel_kind, channel_human_actor_id, channel_agent_actor_id
 `
 
 type CreateRoomParams struct {
@@ -195,6 +196,9 @@ func (q *Queries) CreateRoom(ctx context.Context, arg CreateRoomParams) (Room, e
 		&i.TeamMdRevision,
 		&i.TeamMdUpdatedAt,
 		&i.TeamMdUpdatedByActorID,
+		&i.ChannelKind,
+		&i.ChannelHumanActorID,
+		&i.ChannelAgentActorID,
 	)
 	return i, err
 }
@@ -452,7 +456,8 @@ SELECT r.id, r.tenant_id, r.name, r.description, r.created_by_actor_id,
        r.deleted_at, r.deleted_by_actor_id,
        r.direct_human_actor_id, r.direct_agent_actor_id, r.parent_room_id, r.root_message_id,
        r.team_md_raw_markdown, r.team_md_collaborate_pattern, r.team_md_document,
-       r.team_md_revision, r.team_md_updated_at, r.team_md_updated_by_actor_id
+       r.team_md_revision, r.team_md_updated_at, r.team_md_updated_by_actor_id,
+       r.channel_kind, r.channel_human_actor_id, r.channel_agent_actor_id
 FROM rooms r
 JOIN actors caller ON caller.tenant_id=r.tenant_id AND caller.account_id=$2 AND caller.kind='human'
 JOIN rooms access_room
@@ -495,6 +500,9 @@ func (q *Queries) GetRoomForAccount(ctx context.Context, arg GetRoomForAccountPa
 		&i.TeamMdRevision,
 		&i.TeamMdUpdatedAt,
 		&i.TeamMdUpdatedByActorID,
+		&i.ChannelKind,
+		&i.ChannelHumanActorID,
+		&i.ChannelAgentActorID,
 	)
 	return i, err
 }
@@ -1018,6 +1026,7 @@ SELECT r.id, r.tenant_id, r.name, r.description, r.created_by_actor_id,
        (r.parent_room_id IS NOT NULL)::boolean AS is_thread,
        coalesce(r.parent_room_id,'')::text AS parent_room_id,
        coalesce(r.root_message_id,'')::text AS root_message_id,
+       coalesce(r.channel_kind,'')::text AS channel_kind,
        state.pinned_at,
        coalesce(preview.ids,'{}')::text[] AS member_preview_ids,
        coalesce(preview.kinds,'{}')::text[] AS member_preview_kinds,
@@ -1119,6 +1128,7 @@ type ListRoomsForTenantAccountRow struct {
 	IsThread                       bool               `json:"is_thread"`
 	ParentRoomID                   string             `json:"parent_room_id"`
 	RootMessageID                  string             `json:"root_message_id"`
+	ChannelKind                    string             `json:"channel_kind"`
 	PinnedAt                       pgtype.Timestamptz `json:"pinned_at"`
 	MemberPreviewIds               []string           `json:"member_preview_ids"`
 	MemberPreviewKinds             []string           `json:"member_preview_kinds"`
@@ -1171,6 +1181,7 @@ func (q *Queries) ListRoomsForTenantAccount(ctx context.Context, arg ListRoomsFo
 			&i.IsThread,
 			&i.ParentRoomID,
 			&i.RootMessageID,
+			&i.ChannelKind,
 			&i.PinnedAt,
 			&i.MemberPreviewIds,
 			&i.MemberPreviewKinds,
@@ -1342,7 +1353,8 @@ RETURNING id,tenant_id,name,description,created_by_actor_id,next_room_seq,create
           deleted_at,deleted_by_actor_id,
           direct_human_actor_id,direct_agent_actor_id,parent_room_id,root_message_id,
           team_md_raw_markdown,team_md_collaborate_pattern,team_md_document,
-          team_md_revision,team_md_updated_at,team_md_updated_by_actor_id
+          team_md_revision,team_md_updated_at,team_md_updated_by_actor_id,
+          channel_kind,channel_human_actor_id,channel_agent_actor_id
 `
 
 type UpdateRoomParams struct {
@@ -1377,6 +1389,9 @@ func (q *Queries) UpdateRoom(ctx context.Context, arg UpdateRoomParams) (Room, e
 		&i.TeamMdRevision,
 		&i.TeamMdUpdatedAt,
 		&i.TeamMdUpdatedByActorID,
+		&i.ChannelKind,
+		&i.ChannelHumanActorID,
+		&i.ChannelAgentActorID,
 	)
 	return i, err
 }

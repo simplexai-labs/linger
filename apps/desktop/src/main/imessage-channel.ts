@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import type { Translate } from "../i18n/language.js";
@@ -17,7 +20,9 @@ import { imessageMessages as m } from "./imessage.messages.js";
 import { imessageChunks, imessageText } from "./imessage-text.js";
 import type {
   IMessageTransport,
+  IMsgAttachment,
   IMsgMessage,
+  IMsgSendOptions,
   IMsgSendTarget,
 } from "./imsg-rpc.js";
 import type { Logger } from "./log.js";
@@ -35,13 +40,87 @@ export type BridgeState =
   | "other_account"
   | "error";
 
+export interface InboundAttachment {
+  readonly path: string;
+  readonly filename: string;
+  readonly mediaType?: string;
+}
+
 export type Admission =
-  | { readonly accept: true; readonly text: string; readonly chatId?: number }
+  | {
+      readonly accept: true;
+      readonly text: string;
+      readonly attachments: readonly InboundAttachment[];
+      readonly chatId?: number;
+    }
   | { readonly accept: false; readonly reason: string };
 
-// Which Messages rows become the person's own Messages in their Another Me
-// Chat: new one-to-one texts from one of their handles that the channel did
-// not send itself.
+export interface OutboundDocument {
+  readonly documentId: string;
+  readonly label: string;
+}
+
+const MAX_INBOUND_ATTACHMENTS = 5;
+const MAX_INBOUND_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const MAX_OUTBOUND_DOCUMENT_BYTES = 50 * 1024 * 1024;
+const STAGED_CLEANUP_DELAY_MS = 60_000;
+
+const MEDIA_TYPE_EXTENSIONS: Record<string, string> = {
+  "text/markdown": ".md",
+  "text/plain": ".txt",
+  "text/html": ".html",
+  "text/csv": ".csv",
+  "application/json": ".json",
+  "application/pdf": ".pdf",
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+};
+
+function sanitizeFilename(raw: string, mediaType?: string): string {
+  const base = Array.from(path.basename(raw.replace(/\\/g, "/")), (char) => {
+    const code = char.charCodeAt(0);
+    if (code <= 0x1f || code === 0x7f || '/:*?"<>|'.includes(char)) return "_";
+    return char;
+  })
+    .join("")
+    .trim();
+  let name = base && base !== "." && base !== ".." ? base : "document";
+  if (!path.extname(name) && mediaType) {
+    const ext = MEDIA_TYPE_EXTENSIONS[mediaType.toLowerCase()];
+    if (ext) name += ext;
+  }
+  return name.slice(0, 180);
+}
+
+function inboundAttachments(
+  attachments: readonly IMsgAttachment[] | undefined,
+): InboundAttachment[] {
+  if (!attachments || attachments.length === 0) return [];
+  const out: InboundAttachment[] = [];
+  for (const item of attachments) {
+    if (item.missing || item.is_sticker) continue;
+    const filePath = item.original_path?.trim();
+    if (!filePath) continue;
+    const rawName =
+      item.transfer_name?.trim() ||
+      item.filename?.trim() ||
+      path.basename(filePath);
+    const mediaType = item.mime_type?.trim() || undefined;
+    out.push({
+      path: filePath,
+      filename: sanitizeFilename(rawName, mediaType),
+      ...(mediaType ? { mediaType } : {}),
+    });
+    if (out.length >= MAX_INBOUND_ATTACHMENTS) break;
+  }
+  return out;
+}
+
+// Which Messages rows become the person's own Messages in their iMessage
+// Channel Room: new one-to-one texts or attachments from one of their handles
+// that the channel did not send itself.
 export function admitInbound(
   message: IMsgMessage,
   handles: readonly string[],
@@ -54,14 +133,65 @@ export function admitInbound(
   if (!sender || !handles.includes(sender))
     return { accept: false, reason: "unknown_sender" };
   const text = (message.text ?? "").trim();
-  if (!text) return { accept: false, reason: "empty" };
   if (text.startsWith(OUTBOUND_PREFIX))
     return { accept: false, reason: "own_echo" };
+  const attachments = inboundAttachments(message.attachments);
+  if (!text && attachments.length === 0)
+    return { accept: false, reason: "empty" };
   return {
     accept: true,
     text,
+    attachments,
     ...(typeof message.chat_id === "number" ? { chatId: message.chat_id } : {}),
   };
+}
+
+// Ordered, deduplicated documents and attachments attached to an Agent Message.
+export function outboundDocuments(message: TeamHubMessage): OutboundDocument[] {
+  const seen = new Set<string>();
+  const out: OutboundDocument[] = [];
+  for (const attachment of message.attachments ?? []) {
+    if (!attachment.available || seen.has(attachment.document_id)) continue;
+    seen.add(attachment.document_id);
+    out.push({
+      documentId: attachment.document_id,
+      label: attachment.filename,
+    });
+  }
+  for (const segment of message.segments ?? []) {
+    if (segment.type !== "document" || seen.has(segment.document_id)) continue;
+    seen.add(segment.document_id);
+    out.push({
+      documentId: segment.document_id,
+      label: segment.content,
+    });
+  }
+  return out;
+}
+
+// Message body without trailing document-card labels that are delivered as
+// separate file attachments right after the text.
+export function outboundMessageBody(
+  message: TeamHubMessage,
+  deliveringDocuments: readonly OutboundDocument[],
+): string {
+  if (deliveringDocuments.length === 0 || !message.segments?.length)
+    return message.raw_message;
+  const deliveredIds = new Set(deliveringDocuments.map((d) => d.documentId));
+  let omittedCard = false;
+  const parts: string[] = [];
+  for (const segment of message.segments) {
+    if (
+      segment.type === "document" &&
+      deliveredIds.has(segment.document_id) &&
+      (segment.presentation === "card" || segment.presentation === "canvas")
+    ) {
+      omittedCard = true;
+      continue;
+    }
+    parts.push(segment.content);
+  }
+  return omittedCard ? parts.join("") : message.raw_message;
 }
 
 // The numbers of a numbered reply: one for radio, a comma list for
@@ -142,6 +272,9 @@ export interface IMessageChannelOptions {
   readonly handles: readonly string[];
   // The Chat in the web app, for cards answered there.
   readonly chatUrl: (roomId: string) => string | undefined;
+  // The Document page in the web app, used as fallback when a file cannot be
+  // sent through Messages.
+  readonly documentUrl?: (documentId: string) => string | undefined;
   readonly log: Logger;
   // The shell's language, for the texts the bridge writes itself.
   readonly t: Translate;
@@ -151,6 +284,17 @@ export interface IMessageChannelOptions {
   readonly serverUrl: () => string | undefined;
   readonly ownerActorId?: () => string | undefined;
   readonly wait?: (ms: number, signal: AbortSignal) => Promise<void>;
+  readonly readAttachment?: (
+    filePath: string,
+    maxBytes: number,
+  ) => Promise<Uint8Array | undefined>;
+  readonly stageAttachment?: (
+    filename: string,
+    bytes: Uint8Array,
+  ) => Promise<{
+    readonly filePath: string;
+    readonly cleanup: () => Promise<void>;
+  }>;
 }
 
 const SIGNED_OUT_PROBE_MS = 30_000;
@@ -179,12 +323,54 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   return delay(ms, undefined, { signal }).catch(() => undefined);
 }
 
-// Connects the person's iMessage handles with their Another Me Chat:
-// inbound rows become their Messages, Another Me's Messages go back as
-// texts, and a single-question card takes a numbered reply.
+async function defaultReadAttachment(
+  filePath: string,
+  maxBytes: number,
+): Promise<Uint8Array | undefined> {
+  try {
+    const info = await stat(filePath);
+    if (!info.isFile() || info.size <= 0 || info.size > maxBytes)
+      return undefined;
+    return new Uint8Array(await readFile(filePath));
+  } catch {
+    return undefined;
+  }
+}
+
+async function defaultStageAttachment(
+  filename: string,
+  bytes: Uint8Array,
+): Promise<{
+  readonly filePath: string;
+  readonly cleanup: () => Promise<void>;
+}> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "linger-imsg-"));
+  const filePath = path.join(dir, filename);
+  await writeFile(filePath, bytes, { mode: 0o600 });
+  return {
+    filePath,
+    cleanup: () => rm(dir, { recursive: true, force: true }),
+  };
+}
+
+// Connects the person's iMessage handles with their isolated iMessage Channel
+// Room: inbound rows and attachments become their Messages, Another Me's
+// Messages, attachments, and Documents go back over iMessage, and a
+// single-question card takes a numbered reply.
 export class IMessageChannel {
   readonly #options: IMessageChannelOptions;
   readonly #wait: (ms: number, signal: AbortSignal) => Promise<void>;
+  readonly #readAttachment: (
+    filePath: string,
+    maxBytes: number,
+  ) => Promise<Uint8Array | undefined>;
+  readonly #stageAttachment: (
+    filename: string,
+    bytes: Uint8Array,
+  ) => Promise<{
+    readonly filePath: string;
+    readonly cleanup: () => Promise<void>;
+  }>;
   readonly #stopping = new AbortController();
   #connection: AbortController | undefined;
   #state: BridgeState | undefined;
@@ -195,6 +381,8 @@ export class IMessageChannel {
   #queue: IMsgMessage[] = [];
   // chat_id -> service, for this process.
   readonly #services = new Map<number, string | undefined>();
+  readonly #pendingCleanups = new Set<() => Promise<void>>();
+  readonly #cleanupTimers = new Set<NodeJS.Timeout>();
   #highestSeen: number;
   #draining: Promise<void> | undefined;
   // Inbound rows wait here while the channel is not running.
@@ -206,6 +394,8 @@ export class IMessageChannel {
   constructor(options: IMessageChannelOptions) {
     this.#options = options;
     this.#wait = options.wait ?? abortableDelay;
+    this.#readAttachment = options.readAttachment ?? defaultReadAttachment;
+    this.#stageAttachment = options.stageAttachment ?? defaultStageAttachment;
     this.#highestSeen = options.store.get().rowid ?? 0;
     this.#closeGate();
   }
@@ -233,6 +423,12 @@ export class IMessageChannel {
     await this.#options.transport.stop();
     await this.#loop;
     await this.#draining;
+    for (const timer of this.#cleanupTimers) clearTimeout(timer);
+    this.#cleanupTimers.clear();
+    await Promise.allSettled(
+      Array.from(this.#pendingCleanups, (cleanup) => cleanup()),
+    );
+    this.#pendingCleanups.clear();
   }
 
   get #stopped(): boolean {
@@ -307,7 +503,7 @@ export class IMessageChannel {
     return "retry";
   }
 
-  // One connection to the Another Me Chat; resolves with why it ended.
+  // One connection to the iMessage Channel Room; resolves with why it ended.
   async #session(connected: () => void): Promise<SessionOutcome> {
     const { teamhub, store, log } = this.#options;
     const me = await teamhub.me();
@@ -315,8 +511,23 @@ export class IMessageChannel {
     if (!this.#sameAccount(me.value.actorId)) return "other_account";
     const anotherMe = await teamhub.anotherMe();
     if (!anotherMe.ok) return this.#failed(anotherMe);
-    const { roomId, agentActorId } = anotherMe.value;
-    if (!roomId || !agentActorId) return "no_another_me";
+    const { agentActorId, roomId: directRoomId } = anotherMe.value;
+    if (!agentActorId) return "no_another_me";
+    let roomId: string | undefined;
+    if (teamhub.openChannelRoom) {
+      const channelRoom = await teamhub.openChannelRoom("imessage");
+      if (channelRoom.ok) roomId = channelRoom.value.roomId;
+      else if (
+        channelRoom.status === 404 &&
+        channelRoom.code === "ANOTHER_ME_NOT_FOUND"
+      )
+        return "no_another_me";
+      else if (channelRoom.status === 404 && directRoomId) {
+        // Older TeamHub without channel Rooms falls back to the primary Chat.
+        roomId = directRoomId;
+      } else return this.#failed(channelRoom);
+    } else roomId = directRoomId;
+    if (!roomId) return "no_another_me";
     this.#humanActorId = me.value.actorId;
     this.#roomId = roomId;
     this.#agentActorId = agentActorId;
@@ -438,6 +649,7 @@ export class IMessageChannel {
       log.warn("imessage.send_no_target", { room_seq: roomSeq });
       return;
     }
+    const documents = message.card ? [] : outboundDocuments(message);
     let chunks: string[];
     let pending: PendingCard | undefined;
     if (message.card) {
@@ -454,8 +666,8 @@ export class IMessageChannel {
         chunks = imessageChunks(
           `${message.card.title}\n${this.#options.t(m.openToAnswer, { link: this.#chatLink() })}`,
         );
-    } else chunks = imessageText(message.raw_message);
-    if (chunks.length === 0) return;
+    } else chunks = imessageText(outboundMessageBody(message, documents));
+    if (chunks.length === 0 && documents.length === 0) return;
     // Only the latest Message can be answered by number.
     store.update({ inFlightSeq: roomSeq, pendingCard: null });
     let sent = true;
@@ -465,22 +677,98 @@ export class IMessageChannel {
         break;
       }
     }
+    let filesSent = 0;
+    if (sent && documents.length > 0) {
+      for (const doc of documents) {
+        const ok = await this.#sendDocument(target, doc);
+        if (ok) filesSent += 1;
+      }
+    }
     log.info("imessage.outbound", {
       room_seq: roomSeq,
       chunks: chunks.length,
+      documents: documents.length || undefined,
+      files_sent: filesSent || undefined,
       sent,
       card: pending ? "question" : message.card ? "link" : undefined,
     });
     if (sent && pending) store.update({ pendingCard: pending });
   }
 
+  async #sendDocument(
+    target: IMsgSendTarget,
+    doc: OutboundDocument,
+  ): Promise<boolean> {
+    const { teamhub, log, t } = this.#options;
+    const fallback = async (reason: string): Promise<boolean> => {
+      log.warn("imessage.outbound_document_fallback", {
+        document_id: doc.documentId,
+        reason,
+      });
+      return this.#sendOne(
+        target,
+        `${OUTBOUND_PREFIX}${t(m.openDocument, {
+          name: doc.label,
+          link: this.#documentLink(doc.documentId),
+        })}`,
+      );
+    };
+    if (!teamhub.downloadDocument) return fallback("unsupported");
+    const downloaded = await teamhub.downloadDocument(
+      doc.documentId,
+      MAX_OUTBOUND_DOCUMENT_BYTES,
+    );
+    if (!downloaded.ok) {
+      if (downloaded.status === 401) {
+        this.#signedOut();
+        return false;
+      }
+      return fallback(downloaded.code ?? `http_${String(downloaded.status)}`);
+    }
+    const safeName = sanitizeFilename(
+      downloaded.value.filename || doc.label,
+      downloaded.value.mediaType,
+    );
+    let staged:
+      | { readonly filePath: string; readonly cleanup: () => Promise<void> }
+      | undefined;
+    try {
+      staged = await this.#stageAttachment(safeName, downloaded.value.bytes);
+    } catch {
+      return fallback("stage_failed");
+    }
+    // Sending with the bot prefix caption gives imsg reliable text-based
+    // receipt verification and prevents self-chat echo loops.
+    const ok = await this.#sendOne(target, `${OUTBOUND_PREFIX}${safeName}`, {
+      file: staged.filePath,
+    });
+    this.#scheduleCleanup(staged.cleanup);
+    if (!ok) return fallback("send_failed");
+    return true;
+  }
+
+  #scheduleCleanup(cleanup: () => Promise<void>): void {
+    this.#pendingCleanups.add(cleanup);
+    const timer = setTimeout(() => {
+      this.#cleanupTimers.delete(timer);
+      this.#pendingCleanups.delete(cleanup);
+      void cleanup().catch(() => undefined);
+    }, STAGED_CLEANUP_DELAY_MS);
+    timer.unref();
+    this.#cleanupTimers.add(timer);
+  }
+
   // At most once: only a send imsg proves was never dispatched is retried.
-  async #sendOne(target: IMsgSendTarget, text: string): Promise<boolean> {
+  async #sendOne(
+    target: IMsgSendTarget,
+    text: string,
+    options?: IMsgSendOptions,
+  ): Promise<boolean> {
     const { transport, log } = this.#options;
     let waited = 0;
     for (let attempt = 1; attempt <= SEND_ATTEMPTS; ) {
       if (this.#stopped) return false;
-      const result = await transport.send(target, text);
+      const result = await transport.send(target, text, options);
       if (result.ok) return true;
       if (result.notRunning) {
         // Nothing was dispatched, so waiting for imsg costs no attempt.
@@ -575,6 +863,8 @@ export class IMessageChannel {
     const pending = store.get().pendingCard;
     if (
       pending &&
+      admission.text &&
+      admission.attachments.length === 0 &&
       (!("chatId" in pending.chatTarget) ||
         pending.chatTarget.chatId === admission.chatId)
     ) {
@@ -588,13 +878,62 @@ export class IMessageChannel {
         return step === "done" ? done() : step;
       }
     }
-    const result = await teamhub.postMessage(
-      this.#roomId!,
-      inboundIdempotencyKey(message),
-      admission.text,
-    );
+    const attachmentUploadIds: string[] = [];
+    if (admission.attachments.length > 0 && teamhub.uploadAttachment) {
+      for (const item of admission.attachments) {
+        const bytes = await this.#readAttachment(
+          item.path,
+          MAX_INBOUND_ATTACHMENT_BYTES,
+        );
+        if (!bytes) {
+          log.warn("imessage.inbound_attachment_unreadable", {
+            rowid: message.id,
+          });
+          continue;
+        }
+        const uploaded = await teamhub.uploadAttachment(this.#roomId!, {
+          filename: item.filename,
+          ...(item.mediaType ? { mediaType: item.mediaType } : {}),
+          bytes,
+        });
+        if (uploaded.ok) {
+          attachmentUploadIds.push(uploaded.value.uploadId);
+          continue;
+        }
+        const step = this.#rejected(uploaded);
+        if (step !== "done") return step;
+        log.warn("imessage.inbound_attachment_rejected", {
+          rowid: message.id,
+          status: uploaded.status,
+          code: uploaded.code,
+        });
+      }
+    }
+    if (!admission.text && attachmentUploadIds.length === 0) {
+      log.info("imessage.inbound_skipped", {
+        rowid: message.id,
+        reason: "attachments_unavailable",
+      });
+      return done();
+    }
+    const result =
+      attachmentUploadIds.length > 0
+        ? await teamhub.postMessage(
+            this.#roomId!,
+            inboundIdempotencyKey(message),
+            admission.text,
+            { attachmentUploadIds },
+          )
+        : await teamhub.postMessage(
+            this.#roomId!,
+            inboundIdempotencyKey(message),
+            admission.text,
+          );
     if (result.ok) {
-      log.info("imessage.inbound_posted", { rowid: message.id });
+      log.info("imessage.inbound_posted", {
+        rowid: message.id,
+        attachments: attachmentUploadIds.length || undefined,
+      });
       return done();
     }
     const step = this.#rejected(result);
@@ -668,5 +1007,9 @@ export class IMessageChannel {
 
   #chatLink(): string {
     return (this.#roomId && this.#options.chatUrl(this.#roomId)) || "Linger";
+  }
+
+  #documentLink(documentId: string): string {
+    return this.#options.documentUrl?.(documentId) || this.#chatLink();
   }
 }

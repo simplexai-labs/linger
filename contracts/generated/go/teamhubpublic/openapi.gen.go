@@ -3317,6 +3317,21 @@ func (e RoomBackgroundTaskCancelResultStatus) Valid() bool {
 	}
 }
 
+// Defines values for RoomChannel.
+const (
+	Imessage RoomChannel = "imessage"
+)
+
+// Valid indicates whether the value is a known member of the RoomChannel enum.
+func (e RoomChannel) Valid() bool {
+	switch e {
+	case Imessage:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoomDocumentChangedPayloadKind.
 const (
 	RoomDocumentChangedPayloadKindDocumentCreated RoomDocumentChangedPayloadKind = "document.created"
@@ -7985,6 +8000,9 @@ type MessageSearchPage struct {
 
 // MessageSearchRoom defines model for MessageSearchRoom.
 type MessageSearchRoom struct {
+	// Channel External messaging channel bridged to this Room.
+	Channel *RoomChannel `json:"channel,omitempty"`
+
 	// Id Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	Id   Id       `json:"id"`
 	Kind RoomKind `json:"kind"`
@@ -8470,6 +8488,9 @@ type RevokeDocumentLinkShare struct {
 
 // Room A member-scoped collaboration space. Current Room members can read the complete Room history, including data committed before they joined. Non-members and callers from another Tenant receive the same not-found response even if they know the Room ID.
 type Room struct {
+	// Channel External messaging channel bridged to this Room.
+	Channel *RoomChannel `json:"channel,omitempty"`
+
 	// CreatedAt UTC timestamp in RFC 3339 format with an explicit offset.
 	CreatedAt        Timestamp `json:"created_at"`
 	CreatedBy        ActorRef  `json:"created_by"`
@@ -8528,6 +8549,9 @@ type RoomBackgroundTaskList struct {
 	// Items Oldest first. Waiting for an approval counts as running; a Task leaves the list once it is idle, failed or canceled.
 	Items []RoomBackgroundTask `json:"items"`
 }
+
+// RoomChannel External messaging channel bridged to this Room.
+type RoomChannel string
 
 // RoomCreationDecisionView defines model for RoomCreationDecisionView.
 type RoomCreationDecisionView struct {
@@ -8691,6 +8715,9 @@ type RoomKind string
 
 // RoomListItem Room metadata plus the current Human's durable attention projection. The latest message is omitted until the Room has a Message. Counts exclude Messages authored by the caller and clear only through an explicit monotonic read-state update. Thread rooms are included for current parent Room members who opened the Thread, posted a non-seed reply, or were mentioned.
 type RoomListItem struct {
+	// Channel External messaging channel bridged to this Room.
+	Channel *RoomChannel `json:"channel,omitempty"`
+
 	// CreatedAt UTC timestamp in RFC 3339 format with an explicit offset.
 	CreatedAt        Timestamp `json:"created_at"`
 	CreatedBy        ActorRef  `json:"created_by"`

@@ -166,6 +166,7 @@ func (a *App) publicRoutes() []contractRoute {
 		route(http.MethodPut, "/v0/tenants/:tenantId/agents/:agentId/skill-bindings/:skillId", nil, session, a.putAgentSkillBinding),
 		route(http.MethodPost, "/v0/tenants/:tenantId/agents/:agentId/skill-packages", httpapi.UploadAgentSkillPackageParams{}, session, a.uploadAgentSkillPackage),
 		route(http.MethodGet, "/v0/tenants/:tenantId/another-me", nil, session, a.getAnotherMe),
+		route(http.MethodPost, "/v0/tenants/:tenantId/another-me/channels/:channel", nil, session, a.openAnotherMeChannel),
 		route(http.MethodPost, "/v0/tenants/:tenantId/direct-rooms", nil, session, a.openDirectRoom),
 		route(http.MethodPost, "/v0/tenants/:tenantId/documents", nil, session, a.createDocument),
 		route(http.MethodPost, "/v0/tenants/:tenantId/documents/uploads", httpapi.UploadTenantDocumentParams{}, session, idempotencyKeyRequired, a.uploadDocument),

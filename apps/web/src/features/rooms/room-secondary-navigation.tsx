@@ -4,6 +4,7 @@ import {
   AlertCircleIcon,
   ArrowDown01Icon,
   Cancel01Icon,
+  Message01Icon,
   PinIcon,
   Search01Icon,
   SidebarLeftIcon,
@@ -130,14 +131,22 @@ export function RoomSecondaryNavigation({
     ),
   );
   const anotherMeRoom = rooms.find((room) => room.id === anotherMeRoomId);
+  const channelRooms = rooms
+    .filter((room) => Boolean(room.channel) && visibleRoomIds.has(room.id))
+    .sort(
+      (left, right) =>
+        Date.parse(right.latest_message?.created_at ?? right.created_at) -
+        Date.parse(left.latest_message?.created_at ?? left.created_at),
+    );
   const chats = pinnedFirst(
     rooms
       .filter(
         (room) =>
-          room.kind === "room" ||
-          (room.kind === "direct" &&
-            room.id !== anotherMeRoomId &&
-            room.direct_peer?.kind === "agent"),
+          !room.channel &&
+          (room.kind === "room" ||
+            (room.kind === "direct" &&
+              room.id !== anotherMeRoomId &&
+              room.direct_peer?.kind === "agent")),
       )
       .sort(
         (left, right) =>
@@ -324,6 +333,53 @@ export function RoomSecondaryNavigation({
                 tenantId={tenant.id}
                 working={runningRooms.has(visibleAnotherMeRoom.id)}
               />
+            ) : null}
+            {channelRooms.length > 0 ? (
+              <NavSection title={t(roomListMessages.channels)}>
+                {channelRooms.map((room) => {
+                  const displayName =
+                    room.channel === "imessage"
+                      ? t(roomListMessages.channelIMessage)
+                      : room.name;
+                  return (
+                    <NavRow active={room.id === activeRoomId} key={room.id}>
+                      <Link
+                        aria-current={
+                          room.id === activeRoomId ? "page" : undefined
+                        }
+                        aria-label={displayName}
+                        className={roomNavClass()}
+                        onClick={(event) => completeNavigation(event, room.id)}
+                        to={`/t/${tenant.id}/rooms/${room.id}/chat`}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-foreground"
+                        >
+                          <Icon icon={Message01Icon} size={16} />
+                        </span>
+                        <span className="min-w-0 flex-1 px-1">
+                          <RoomRowTitle pinned={false}>
+                            {displayName}
+                          </RoomRowTitle>
+                          <span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">
+                            {room.latest_message
+                              ? markdownPlainText(
+                                  room.latest_message.raw_message,
+                                )
+                              : t(roomListMessages.noMessages)}
+                          </span>
+                        </span>
+                        <RoomRowStatus
+                          failed={failedRooms.has(room.id)}
+                          room={room}
+                          working={runningRooms.has(room.id)}
+                        />
+                      </Link>
+                    </NavRow>
+                  );
+                })}
+              </NavSection>
             ) : null}
             <NavSection
               action={

@@ -3,6 +3,16 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import type { Logger } from "./log.js";
 
+export interface IMsgAttachment {
+  readonly filename?: string;
+  readonly transfer_name?: string;
+  readonly mime_type?: string;
+  readonly total_bytes?: number;
+  readonly is_sticker?: boolean;
+  readonly missing?: boolean;
+  readonly original_path?: string;
+}
+
 // A Messages row as `imsg rpc` reports it (docs/json.md); only the fields the
 // channel reads.
 export interface IMsgMessage {
@@ -16,11 +26,16 @@ export interface IMsgMessage {
   readonly chat_id?: number;
   readonly chat_identifier?: string;
   readonly text?: string;
+  readonly attachments?: readonly IMsgAttachment[];
 }
 
 export type IMsgSendTarget =
   | { readonly chatId: number }
   | { readonly to: string };
+
+export interface IMsgSendOptions {
+  readonly file?: string;
+}
 
 export type IMsgSendResult =
   | { readonly ok: true }
@@ -41,7 +56,11 @@ export interface IMsgWatch {
 
 export interface IMessageTransport {
   start(watch: IMsgWatch): void;
-  send(target: IMsgSendTarget, text: string): Promise<IMsgSendResult>;
+  send(
+    target: IMsgSendTarget,
+    text: string,
+    options?: IMsgSendOptions,
+  ): Promise<IMsgSendResult>;
   // The chat's service (`iMessage`, `SMS`, ...), undefined when imsg has no
   // such chat or reports none; rejects when the lookup itself failed.
   chatService(chatId: number): Promise<string | undefined>;
@@ -162,11 +181,17 @@ export class IMsgRpc implements IMessageTransport {
     await this.#supervisor;
   }
 
-  async send(target: IMsgSendTarget, text: string): Promise<IMsgSendResult> {
-    const params =
+  async send(
+    target: IMsgSendTarget,
+    text: string,
+    options?: IMsgSendOptions,
+  ): Promise<IMsgSendResult> {
+    const file = options?.file;
+    const params: Record<string, unknown> =
       "chatId" in target
         ? { chat_id: target.chatId, text }
         : { to: target.to, text, service: "imessage" };
+    if (file) params.file = file;
     try {
       await this.#request("send", params);
       return { ok: true };
@@ -287,6 +312,7 @@ export class IMsgRpc implements IMessageTransport {
   #subscribe(sinceRowid: number | undefined): void {
     this.#subscription = undefined;
     this.#request("watch.subscribe", {
+      attachments: true,
       // Omitted on the first start: the watch begins at the current tail, so
       // history is never replayed.
       ...(sinceRowid && sinceRowid > 0 ? { since_rowid: sinceRowid } : {}),

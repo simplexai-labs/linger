@@ -16,19 +16,80 @@ SELECT coalesce((
   SELECT registration.status='active'
   FROM rooms direct
   JOIN agent_registrations registration
-    ON registration.actor_id=direct.direct_agent_actor_id
+    ON registration.actor_id=coalesce(direct.direct_agent_actor_id,direct.channel_agent_actor_id)
    AND registration.tenant_id=direct.tenant_id
   WHERE direct.id=$1::text
 ),true)::boolean
 `
 
-// An Agent syncing its configuration is still a live peer: its direct Room
-// takes messages and cannot be deleted.
+// An Agent syncing its configuration is still a live peer: its direct or
+// channel Room takes messages and cannot be deleted.
 func (q *Queries) DirectRoomPeerIsActive(ctx context.Context, roomID string) (bool, error) {
 	row := q.db.QueryRow(ctx, directRoomPeerIsActive, roomID)
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const getChannelRoomByPair = `-- name: GetChannelRoomByPair :one
+SELECT id,tenant_id,name,description,created_by_actor_id,
+       next_room_seq,created_at,updated_at,
+       deletion_started_at,deletion_started_by_actor_id,
+       deleted_at,deleted_by_actor_id,
+       direct_human_actor_id,direct_agent_actor_id,parent_room_id,root_message_id,
+       team_md_raw_markdown,team_md_collaborate_pattern,team_md_document,
+       team_md_revision,team_md_updated_at,team_md_updated_by_actor_id,
+       channel_kind,channel_human_actor_id,channel_agent_actor_id
+FROM rooms
+WHERE tenant_id=$1::text
+  AND channel_human_actor_id=$2::text
+  AND channel_agent_actor_id=$3::text
+  AND channel_kind=$4::text
+`
+
+type GetChannelRoomByPairParams struct {
+	TenantID     string `json:"tenant_id"`
+	HumanActorID string `json:"human_actor_id"`
+	AgentActorID string `json:"agent_actor_id"`
+	ChannelKind  string `json:"channel_kind"`
+}
+
+func (q *Queries) GetChannelRoomByPair(ctx context.Context, arg GetChannelRoomByPairParams) (Room, error) {
+	row := q.db.QueryRow(ctx, getChannelRoomByPair,
+		arg.TenantID,
+		arg.HumanActorID,
+		arg.AgentActorID,
+		arg.ChannelKind,
+	)
+	var i Room
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedByActorID,
+		&i.NextRoomSeq,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletionStartedAt,
+		&i.DeletionStartedByActorID,
+		&i.DeletedAt,
+		&i.DeletedByActorID,
+		&i.DirectHumanActorID,
+		&i.DirectAgentActorID,
+		&i.ParentRoomID,
+		&i.RootMessageID,
+		&i.TeamMdRawMarkdown,
+		&i.TeamMdCollaboratePattern,
+		&i.TeamMdDocument,
+		&i.TeamMdRevision,
+		&i.TeamMdUpdatedAt,
+		&i.TeamMdUpdatedByActorID,
+		&i.ChannelKind,
+		&i.ChannelHumanActorID,
+		&i.ChannelAgentActorID,
+	)
+	return i, err
 }
 
 const getCurrentDirectRoom = `-- name: GetCurrentDirectRoom :one
@@ -92,7 +153,8 @@ SELECT id,tenant_id,name,description,created_by_actor_id,
        deleted_at,deleted_by_actor_id,
        direct_human_actor_id,direct_agent_actor_id,parent_room_id,root_message_id,
        team_md_raw_markdown,team_md_collaborate_pattern,team_md_document,
-       team_md_revision,team_md_updated_at,team_md_updated_by_actor_id
+       team_md_revision,team_md_updated_at,team_md_updated_by_actor_id,
+       channel_kind,channel_human_actor_id,channel_agent_actor_id
 FROM rooms
 WHERE tenant_id=$1::text
   AND direct_human_actor_id=$2::text
@@ -133,6 +195,9 @@ func (q *Queries) GetDirectRoomByPair(ctx context.Context, arg GetDirectRoomByPa
 		&i.TeamMdRevision,
 		&i.TeamMdUpdatedAt,
 		&i.TeamMdUpdatedByActorID,
+		&i.ChannelKind,
+		&i.ChannelHumanActorID,
+		&i.ChannelAgentActorID,
 	)
 	return i, err
 }
@@ -249,6 +314,19 @@ func (q *Queries) GetVisibleActiveAgentForDirectRoom(ctx context.Context, arg Ge
 	return i, err
 }
 
+const isChannelRoom = `-- name: IsChannelRoom :one
+SELECT EXISTS(
+  SELECT 1 FROM rooms WHERE id=$1::text AND channel_kind IS NOT NULL
+)::boolean
+`
+
+func (q *Queries) IsChannelRoom(ctx context.Context, roomID string) (bool, error) {
+	row := q.db.QueryRow(ctx, isChannelRoom, roomID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const isDirectRoom = `-- name: IsDirectRoom :one
 SELECT EXISTS(
   SELECT 1 FROM rooms WHERE id=$1::text AND direct_agent_actor_id IS NOT NULL
@@ -260,6 +338,36 @@ func (q *Queries) IsDirectRoom(ctx context.Context, roomID string) (bool, error)
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const markChannelRoom = `-- name: MarkChannelRoom :one
+UPDATE rooms
+SET channel_kind=$1::text,
+    channel_human_actor_id=$2::text,
+    channel_agent_actor_id=$3::text
+WHERE id=$4::text AND tenant_id=$5::text
+RETURNING id
+`
+
+type MarkChannelRoomParams struct {
+	ChannelKind  string `json:"channel_kind"`
+	HumanActorID string `json:"human_actor_id"`
+	AgentActorID string `json:"agent_actor_id"`
+	RoomID       string `json:"room_id"`
+	TenantID     string `json:"tenant_id"`
+}
+
+func (q *Queries) MarkChannelRoom(ctx context.Context, arg MarkChannelRoomParams) (string, error) {
+	row := q.db.QueryRow(ctx, markChannelRoom,
+		arg.ChannelKind,
+		arg.HumanActorID,
+		arg.AgentActorID,
+		arg.RoomID,
+		arg.TenantID,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const markDirectRoom = `-- name: MarkDirectRoom :one
@@ -287,6 +395,33 @@ func (q *Queries) MarkDirectRoom(ctx context.Context, arg MarkDirectRoomParams) 
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const releaseFinishedChannelRoomPair = `-- name: ReleaseFinishedChannelRoomPair :exec
+UPDATE rooms
+SET channel_kind=NULL,channel_human_actor_id=NULL,channel_agent_actor_id=NULL
+WHERE tenant_id=$1::text
+  AND channel_human_actor_id=$2::text
+  AND channel_agent_actor_id=$3::text
+  AND channel_kind=$4::text
+  AND deleted_at IS NOT NULL
+`
+
+type ReleaseFinishedChannelRoomPairParams struct {
+	TenantID     string `json:"tenant_id"`
+	HumanActorID string `json:"human_actor_id"`
+	AgentActorID string `json:"agent_actor_id"`
+	ChannelKind  string `json:"channel_kind"`
+}
+
+func (q *Queries) ReleaseFinishedChannelRoomPair(ctx context.Context, arg ReleaseFinishedChannelRoomPairParams) error {
+	_, err := q.db.Exec(ctx, releaseFinishedChannelRoomPair,
+		arg.TenantID,
+		arg.HumanActorID,
+		arg.AgentActorID,
+		arg.ChannelKind,
+	)
+	return err
 }
 
 const releaseFinishedDirectRoomPair = `-- name: ReleaseFinishedDirectRoomPair :exec

@@ -563,27 +563,39 @@ Gateway and runs Agents. The daemon exits with the app.
   `other_account`, polled like `signed_out`, until iMessage is turned off
   and on. `imsg-rpc.ts` supervises `imsg rpc`
   (line-delimited JSON-RPC; restarts with 1 s to 30 s backoff, and when a
-  send poisons its mutation lane) and keeps one `watch.subscribe`, from the
+  send poisons its mutation lane) and keeps one `watch.subscribe` (with
+  `attachments: true`), from the
   current tail on the first start and after the stored row later, again
-  from `resume_after_rowid` after an overflow. Inbound, rows are handled one
-  at a time: only a new (no `type`) one-to-one text not from me, whose
+  from `resume_after_rowid` after an overflow. On session start, the bridge
+  opens the Human's isolated iMessage Channel Room
+  (`POST /v0/tenants/{id}/another-me/channels/imessage`), falling back to
+  the primary Another Me Chat when talking to an older TeamHub (404).
+  Inbound, rows are handled one
+  at a time: only a new (no `type`) one-to-one text or attachment not from me, whose
   sender (or chat identifier) normalizes to a handle and that does not start
   with the outbound prefix `U+1F916` plus a space, in a chat whose
   service is iMessage (`chats.get`, cached per chat for the process; SMS,
   another or no service is skipped, a failed lookup retries), becomes the person's
-  Message in the Another Me Chat (`POST /v0/rooms/{id}/messages`,
+  Message in that Room (`POST /v0/rooms/{id}/message-attachment-uploads` for
+  up to five non-sticker attachments, then `POST /v0/rooms/{id}/messages`,
   `Idempotency-Key: imessage:<guid>`); everything else only moves the row
   cursor. Messages to one's own Apple ID come back as a second inbound row
-  with a new GUID, so the prefix, carried by every text the bridge sends, is
+  with a new GUID, so the prefix, carried by every text and file caption the
+  bridge sends, is
   the only echo filter. A network, 5xx or 429 failure retries with the same
   key and holds the cursor; 401 holds it and marks the bridge `signed_out`;
-  another refusal is logged and skipped. Outbound, it follows the Chat with
-  `GET /v0/events?room=<id>:<seq>` (starting at the Chat's
-  `latest_room_seq` for a new Chat, so history is never sent) and sends each
-  conversation Message of Another Me, proactive ones included, as plain
+  another refusal is logged and skipped. Outbound, it follows the Channel Room with
+  `GET /v0/events?room=<id>:<seq>` (starting at the Room's
+  `latest_room_seq` for a new Room, so history is never sent) and sends each
+  conversation Message of Another Me as plain
   text (`imessage-text.ts`: Markdown markers dropped, links as
   `text (url)`, chunks of at most 3000 characters) to the chat the person
-  last wrote from, or to the first handle. Sends are at most once: the
+  last wrote from, or to the first handle. Available attachments and
+  `document` segments on the Message are downloaded from
+  `GET /v0/documents/{id}/downloads`, staged to a private temporary file,
+  and sent through `imsg rpc` `send` with `file` and a prefixed filename
+  caption; when download or send fails, a fallback text links to the Document
+  in Linger. Sends are at most once: the
   event's `room_seq` is stored as in flight first, only a send imsg proves
   never started is retried (five tries; while imsg restarts, sends wait up
   to two minutes without using a try), and an event still in flight after

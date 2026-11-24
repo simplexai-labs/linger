@@ -287,6 +287,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/tenants/{tenantId}/another-me/channels/{channel}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        channel: components["parameters"]["RoomChannel"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Open or create the Human's Another Me channel Room for an external messaging channel.
+     * @description Returns the isolated Room shared by the current Human and their Another Me for the named channel, creating it on first use. Messages in this Room keep a separate Agent session from the primary Another Me Chat while remaining visible to Another Me, Memory, and Wiki.
+     */
+    post: operations["openAnotherMeChannel"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/tenants/{tenantId}/agents/{agentId}/avatar-image": {
     parameters: {
       query?: never;
@@ -4559,6 +4582,42 @@ export interface components {
       room_id?: components["schemas"]["Id"];
       background_failure?: components["schemas"]["AnotherMeBackgroundFailure"];
     };
+    /**
+     * @description External messaging channel bridged to this Room.
+     * @enum {string}
+     */
+    RoomChannel: "imessage";
+    /**
+     * @description Personal Room participation; leaving preserves membership and its role.
+     * @enum {string}
+     */
+    RoomParticipationStatus: "joined" | "left";
+    /** @enum {string} */
+    RoomKind: "room" | "direct" | "thread";
+    /** @description A member-scoped collaboration space. Current Room members can read the complete Room history, including data committed before they joined. Non-members and callers from another Tenant receive the same not-found response even if they know the Room ID. */
+    Room: {
+      /**
+       * Format: int64
+       * @description Room event watermark captured before reading this projection. Events at or below this watermark are reflected in the response; newer events may also be reflected. Present on authorized Room detail/member reads. Older servers may omit it.
+       */
+      snapshot_room_seq?: number;
+      participation?: components["schemas"]["RoomParticipationStatus"];
+      id: components["schemas"]["Id"];
+      tenant_id: components["schemas"]["Id"];
+      kind: components["schemas"]["RoomKind"];
+      channel?: components["schemas"]["RoomChannel"];
+      name: string;
+      description?: string;
+      created_by: components["schemas"]["ActorRef"];
+      created_at: components["schemas"]["Timestamp"];
+      updated_at: components["schemas"]["Timestamp"];
+      direct_peer?: components["schemas"]["ActorRef"];
+      direct_peer_active?: boolean;
+      /** @description Parent Collaboration Room when kind is thread. Omitted otherwise. */
+      parent_room_id?: components["schemas"]["Id"];
+      /** @description Parent-timeline Message this Thread is rooted at. Present only when kind is thread. */
+      root_message_id?: components["schemas"]["Id"];
+    };
     TenantAgentAvatarUpdateRequest: {
       avatar_key: string;
       /** @description JPEG, PNG, or WebP data URL. An empty string removes the uploaded image; omitting it keeps the current image. */
@@ -5433,13 +5492,6 @@ export interface components {
       items: components["schemas"]["AgentTemplateSkillImport"][];
     };
     /**
-     * @description Personal Room participation; leaving preserves membership and its role.
-     * @enum {string}
-     */
-    RoomParticipationStatus: "joined" | "left";
-    /** @enum {string} */
-    RoomKind: "room" | "direct" | "thread";
-    /**
      * Format: int64
      * @description Monotonically increasing sequence allocated within one Room.
      * @example 42
@@ -5458,6 +5510,7 @@ export interface components {
       id: components["schemas"]["Id"];
       tenant_id: components["schemas"]["Id"];
       kind: components["schemas"]["RoomKind"];
+      channel?: components["schemas"]["RoomChannel"];
       name: string;
       description?: string;
       created_by: components["schemas"]["ActorRef"];
@@ -5491,29 +5544,6 @@ export interface components {
     HumanRoomCreateRequest: {
       name: string;
       description?: string;
-    };
-    /** @description A member-scoped collaboration space. Current Room members can read the complete Room history, including data committed before they joined. Non-members and callers from another Tenant receive the same not-found response even if they know the Room ID. */
-    Room: {
-      /**
-       * Format: int64
-       * @description Room event watermark captured before reading this projection. Events at or below this watermark are reflected in the response; newer events may also be reflected. Present on authorized Room detail/member reads. Older servers may omit it.
-       */
-      snapshot_room_seq?: number;
-      participation?: components["schemas"]["RoomParticipationStatus"];
-      id: components["schemas"]["Id"];
-      tenant_id: components["schemas"]["Id"];
-      kind: components["schemas"]["RoomKind"];
-      name: string;
-      description?: string;
-      created_by: components["schemas"]["ActorRef"];
-      created_at: components["schemas"]["Timestamp"];
-      updated_at: components["schemas"]["Timestamp"];
-      direct_peer?: components["schemas"]["ActorRef"];
-      direct_peer_active?: boolean;
-      /** @description Parent Collaboration Room when kind is thread. Omitted otherwise. */
-      parent_room_id?: components["schemas"]["Id"];
-      /** @description Parent-timeline Message this Thread is rooted at. Present only when kind is thread. */
-      root_message_id?: components["schemas"]["Id"];
     };
     /**
      * @description Product-level Message rendering and behavior category. conversation is Human-visible and Agent-inbox material. agent_runtime is Agent Inbox material and must not appear in the Human timeline, unread, latest_message, or room summary. room_notice is a Human-only timeline line about an Agent creation, a new member, or an Agent identity change; it never reaches an Agent and is not counted as unread or shown as latest_message.
@@ -6035,6 +6065,7 @@ export interface components {
       id: components["schemas"]["Id"];
       name: string;
       kind: components["schemas"]["RoomKind"];
+      channel?: components["schemas"]["RoomChannel"];
       /** @description Present for thread Rooms; the Room whose membership authorizes the Message. */
       parent_room_id?: components["schemas"]["Id"];
       /** @description Present for thread Rooms; the parent Room Message that opens this thread. */
@@ -8810,6 +8841,7 @@ export interface components {
     DocumentAssetId: components["schemas"]["Id"];
     SkillId: components["schemas"]["SkillIdentifier"];
     ManifestVersionPath: components["schemas"]["ManifestVersion"];
+    RoomChannel: components["schemas"]["RoomChannel"];
     Cursor: components["schemas"]["Cursor"];
     Limit: number;
     /** @description Reusing the same key with the same canonical request returns the original result. Reusing it with different input returns 409 IDEMPOTENCY_KEY_REUSED. */
@@ -9222,6 +9254,42 @@ export interface operations {
       };
       401: components["responses"]["Unauthenticated"];
       404: components["responses"]["NotFound"];
+    };
+  };
+  openAnotherMeChannel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        channel: components["parameters"]["RoomChannel"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Existing channel Room returned. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Room"];
+        };
+      };
+      /** @description Channel Room created. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Room"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
     };
   };
   getTenantAgentAvatarImage: {

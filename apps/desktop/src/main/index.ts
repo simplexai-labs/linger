@@ -335,6 +335,15 @@ async function main(): Promise<void> {
                     ).toString()
                   : undefined;
               },
+              documentUrl: (documentId) => {
+                const { serverUrl, tenantId } = config.get();
+                return serverUrl && tenantId
+                  ? new URL(
+                      `/t/${encodeURIComponent(tenantId)}/documents/${encodeURIComponent(documentId)}`,
+                      serverUrl,
+                    ).toString()
+                  : undefined;
+              },
               log,
               t: language.t,
               onState,

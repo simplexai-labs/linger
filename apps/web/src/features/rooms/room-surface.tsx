@@ -544,7 +544,7 @@ function RoomSurfaceContent({
                   onExitAnimationEnd={onPanelExitAnimationEnd}
                   onOpenProfile={openProfile}
                   onOpenRoomSettings={
-                    room.kind === "room" && currentActorIsOwner
+                    room.kind === "room" && !room.channel && currentActorIsOwner
                       ? () =>
                           openPanelTab({
                             kind: "roomSettings",

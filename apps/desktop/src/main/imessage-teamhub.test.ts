@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  filenameFromDisposition,
   IMessageTeamHubClient,
   parseSse,
   TeamHubStreamError,
@@ -114,5 +115,96 @@ describe("IMessageTeamHubClient", () => {
     expect(events).toEqual([{ event: "room.event", data: '{"room_seq":4}' }]);
     const [url] = fetch.mock.calls[0] as unknown as [URL];
     expect(url.searchParams.getAll("room")).toEqual(["r1:3"]);
+  });
+
+  it("opens the isolated Another Me channel Room", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ id: "room_imessage", channel: "imessage" }),
+          {
+            status: 201,
+          },
+        ),
+    );
+    expect(await client(fetch).openChannelRoom("imessage")).toEqual({
+      ok: true,
+      value: { roomId: "room_imessage" },
+    });
+    const [url, init] = fetch.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(String(url)).toBe(
+      "https://linger.test/v0/tenants/t1/another-me/channels/imessage",
+    );
+    expect(init.method).toBe("POST");
+  });
+
+  it("uploads an attachment and posts an attachment-only Message", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "upload.token" }), { status: 201 }),
+      )
+      .mockResolvedValueOnce(new Response("{}", { status: 201 }));
+    const th = client(fetch);
+    const uploaded = await th.uploadAttachment("r1", {
+      filename: "note.txt",
+      mediaType: "text/plain",
+      bytes: new TextEncoder().encode("hello"),
+    });
+    expect(uploaded).toEqual({ ok: true, value: { uploadId: "upload.token" } });
+    const [uploadUrl, uploadInit] = fetch.mock.calls[0] as unknown as [
+      URL,
+      RequestInit,
+    ];
+    expect(String(uploadUrl)).toBe(
+      "https://linger.test/v0/rooms/r1/message-attachment-uploads",
+    );
+    expect(uploadInit.body).toBeInstanceOf(FormData);
+    expect(
+      await th.postMessage("r1", "imessage:G2", "", {
+        attachmentUploadIds: ["upload.token"],
+      }),
+    ).toEqual({ ok: true, value: undefined });
+    const [, postInit] = fetch.mock.calls[1] as unknown as [URL, RequestInit];
+    expect(JSON.parse(postInit.body as string)).toEqual({
+      raw_message: "",
+      segments: [],
+      attachment_upload_ids: ["upload.token"],
+    });
+  });
+
+  it("downloads a Document with 202 rendering retry and filename parsing", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response("report body", {
+          status: 200,
+          headers: {
+            "content-type": "text/markdown; charset=utf-8",
+            "content-disposition":
+              "attachment; filename*=UTF-8''news%20report.md",
+          },
+        }),
+      );
+    const th = new IMessageTeamHubClient({
+      serverUrl: () => "https://linger.test",
+      tenantId: () => "t1",
+      cookie: async () => "sid=1",
+      fetch,
+      wait: async () => {},
+    });
+    const downloaded = await th.downloadDocument("doc_1");
+    expect(downloaded.ok).toBe(true);
+    if (downloaded.ok) {
+      expect(downloaded.value.filename).toBe("news report.md");
+      expect(downloaded.value.mediaType).toBe("text/markdown");
+      expect(new TextDecoder().decode(downloaded.value.bytes)).toBe(
+        "report body",
+      );
+    }
+    expect(filenameFromDisposition('attachment; filename="a.pdf"')).toBe(
+      "a.pdf",
+    );
   });
 });

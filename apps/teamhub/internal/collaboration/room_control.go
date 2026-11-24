@@ -105,6 +105,10 @@ func messageSearchRoomModel(item store.SearchTenantMessagesForAccountRow) httpap
 			room.Name = item.DirectPeerDisplayName
 		}
 	}
+	if item.ChannelKind != "" {
+		channel := httpapi.RoomChannel(item.ChannelKind)
+		room.Channel = &channel
+	}
 	return room
 }
 

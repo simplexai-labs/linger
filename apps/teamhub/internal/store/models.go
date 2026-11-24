@@ -1414,6 +1414,9 @@ type Room struct {
 	TeamMdRevision           pgtype.Int8        `json:"team_md_revision"`
 	TeamMdUpdatedAt          pgtype.Timestamptz `json:"team_md_updated_at"`
 	TeamMdUpdatedByActorID   pgtype.Text        `json:"team_md_updated_by_actor_id"`
+	ChannelKind              pgtype.Text        `json:"channel_kind"`
+	ChannelHumanActorID      pgtype.Text        `json:"channel_human_actor_id"`
+	ChannelAgentActorID      pgtype.Text        `json:"channel_agent_actor_id"`
 }
 
 type RoomAgentMessageCancellation struct {

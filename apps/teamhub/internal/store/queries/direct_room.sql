@@ -32,7 +32,8 @@ SELECT id,tenant_id,name,description,created_by_actor_id,
        deleted_at,deleted_by_actor_id,
        direct_human_actor_id,direct_agent_actor_id,parent_room_id,root_message_id,
        team_md_raw_markdown,team_md_collaborate_pattern,team_md_document,
-       team_md_revision,team_md_updated_at,team_md_updated_by_actor_id
+       team_md_revision,team_md_updated_at,team_md_updated_by_actor_id,
+       channel_kind,channel_human_actor_id,channel_agent_actor_id
 FROM rooms
 WHERE tenant_id=sqlc.arg(tenant_id)::text
   AND direct_human_actor_id=sqlc.arg(human_actor_id)::text
@@ -95,13 +96,13 @@ JOIN agent_registrations registration
 WHERE direct.id=sqlc.arg(room_id)::text;
 
 -- name: DirectRoomPeerIsActive :one
--- An Agent syncing its configuration is still a live peer: its direct Room
--- takes messages and cannot be deleted.
+-- An Agent syncing its configuration is still a live peer: its direct or
+-- channel Room takes messages and cannot be deleted.
 SELECT coalesce((
   SELECT registration.status='active'
   FROM rooms direct
   JOIN agent_registrations registration
-    ON registration.actor_id=direct.direct_agent_actor_id
+    ON registration.actor_id=coalesce(direct.direct_agent_actor_id,direct.channel_agent_actor_id)
    AND registration.tenant_id=direct.tenant_id
   WHERE direct.id=sqlc.arg(room_id)::text
 ),true)::boolean;
@@ -110,3 +111,40 @@ SELECT coalesce((
 SELECT EXISTS(
   SELECT 1 FROM rooms WHERE id=sqlc.arg(room_id)::text AND direct_agent_actor_id IS NOT NULL
 )::boolean;
+
+-- name: IsChannelRoom :one
+SELECT EXISTS(
+  SELECT 1 FROM rooms WHERE id=sqlc.arg(room_id)::text AND channel_kind IS NOT NULL
+)::boolean;
+
+-- name: GetChannelRoomByPair :one
+SELECT id,tenant_id,name,description,created_by_actor_id,
+       next_room_seq,created_at,updated_at,
+       deletion_started_at,deletion_started_by_actor_id,
+       deleted_at,deleted_by_actor_id,
+       direct_human_actor_id,direct_agent_actor_id,parent_room_id,root_message_id,
+       team_md_raw_markdown,team_md_collaborate_pattern,team_md_document,
+       team_md_revision,team_md_updated_at,team_md_updated_by_actor_id,
+       channel_kind,channel_human_actor_id,channel_agent_actor_id
+FROM rooms
+WHERE tenant_id=sqlc.arg(tenant_id)::text
+  AND channel_human_actor_id=sqlc.arg(human_actor_id)::text
+  AND channel_agent_actor_id=sqlc.arg(agent_actor_id)::text
+  AND channel_kind=sqlc.arg(channel_kind)::text;
+
+-- name: ReleaseFinishedChannelRoomPair :exec
+UPDATE rooms
+SET channel_kind=NULL,channel_human_actor_id=NULL,channel_agent_actor_id=NULL
+WHERE tenant_id=sqlc.arg(tenant_id)::text
+  AND channel_human_actor_id=sqlc.arg(human_actor_id)::text
+  AND channel_agent_actor_id=sqlc.arg(agent_actor_id)::text
+  AND channel_kind=sqlc.arg(channel_kind)::text
+  AND deleted_at IS NOT NULL;
+
+-- name: MarkChannelRoom :one
+UPDATE rooms
+SET channel_kind=sqlc.arg(channel_kind)::text,
+    channel_human_actor_id=sqlc.arg(human_actor_id)::text,
+    channel_agent_actor_id=sqlc.arg(agent_actor_id)::text
+WHERE id=sqlc.arg(room_id)::text AND tenant_id=sqlc.arg(tenant_id)::text
+RETURNING id;
