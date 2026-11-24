@@ -804,24 +804,57 @@ describe("IMessageChannel account binding", () => {
     await f.channel.stop();
   });
 
-  it.each([
-    [
-      "another account",
-      { actorId: "human-2", serverUrl: "https://linger.test" },
-      {},
-    ],
-    ["another server", { actorId: HUMAN, serverUrl: "https://old.test" }, {}],
-    ["an enrollment of someone else", {}, { owner: "human-9" }],
-  ])("pauses for %s", async (_name, bound, server) => {
-    const f = setup({ state: bound });
-    Object.assign(f.server, server);
+  it("rebinds seamlessly when the server URL changes (such as a local port move)", async () => {
+    const f = setup({
+      state: {
+        actorId: HUMAN,
+        serverUrl: "http://localhost:3000",
+        roomId: ROOM,
+        roomSeq: 42,
+      },
+    });
     f.channel.start();
-    await vi.waitFor(() => expect(f.states).toContain("other_account"));
-    expect(f.waits).toContain(30_000);
-    expect(f.teamhub.anotherMe).not.toHaveBeenCalled();
-    f.inbound(row(1));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(f.teamhub.postMessage).not.toHaveBeenCalled();
+    await f.running();
+    expect(f.states).not.toContain("other_account");
+    expect(f.state()).toMatchObject({
+      actorId: HUMAN,
+      serverUrl: "https://linger.test",
+      roomId: ROOM,
+      roomSeq: 42,
+    });
+    await f.channel.stop();
+  });
+
+  it("rebinds seamlessly to a different signed-in account from its latest Room end", async () => {
+    const f = setup({
+      latest: 99,
+      state: {
+        actorId: "human-old",
+        serverUrl: "https://old.test",
+        roomId: "room-old",
+        roomSeq: 12,
+        pendingCard: {
+          kind: "approval",
+          chatTarget: { to: ME },
+          messageId: "m-old",
+          decisionId: "d-old",
+          version: 1,
+          title: "Old",
+          decisionKind: "connector_write",
+        },
+      },
+    });
+    f.server.owner = "human-other";
+    f.channel.start();
+    await f.running();
+    expect(f.states).not.toContain("other_account");
+    expect(f.state()).toMatchObject({
+      actorId: HUMAN,
+      serverUrl: "https://linger.test",
+      roomId: ROOM,
+      roomSeq: 99,
+      pendingCard: null,
+    });
     await f.channel.stop();
   });
 });

@@ -77,14 +77,16 @@ export class IMessageModule implements Module {
 
   async start(ctx: ModuleContext): Promise<void> {
     this.#ctx = ctx;
+    const restartOnServerChange = (): void => {
+      if (!this.#bridgeHandles) return;
+      this.#bridgeHandles = "";
+      this.#syncBridge();
+    };
     this.#unsubscribe.push(
-      // A new server drops the old connection; the bridge then pauses
-      // unless it is the server it belongs to.
-      ctx.bus.on("server.changed", () => {
-        if (!this.#bridgeHandles) return;
-        this.#bridgeHandles = "";
-        this.#syncBridge();
-      }),
+      // A server change or local port move drops the old connection and
+      // reconnects against the active server and signed-in account.
+      ctx.bus.on("server.changed", restartOnServerChange),
+      ctx.bus.on("server.moved", restartOnServerChange),
     );
     this.#runtime = (await this.#options.runtime.installed())
       ? "ready"

@@ -587,7 +587,7 @@ export class IMessageChannel {
     const { teamhub, store, log } = this.#options;
     const me = await teamhub.me();
     if (!me.ok) return this.#failed(me);
-    if (!this.#sameAccount(me.value.actorId)) return "other_account";
+    this.#bindAccount(me.value.actorId);
     const anotherMe = await teamhub.anotherMe();
     if (!anotherMe.ok) return this.#failed(anotherMe);
     const { agentActorId, roomId: directRoomId } = anotherMe.value;
@@ -692,20 +692,36 @@ export class IMessageChannel {
     store.update({ roomSeq: event.room_seq, inFlightSeq: null });
   }
 
-  // The bridge belongs to the account and server it first ran for; turning
-  // iMessage off and on is the way to move it.
-  #sameAccount(actorId: string): boolean {
+  // Follow the signed-in account and server seamlessly. When the account
+  // changes, clear the previous Room cursors so the new Room starts at its
+  // current end without replaying history.
+  #bindAccount(actorId: string): void {
     const { store, log } = this.#options;
     const serverUrl = this.#options.serverUrl();
-    const owner = this.#options.ownerActorId?.();
     const bound = store.get();
-    let same = !owner || owner === actorId;
-    if (same && bound.actorId === undefined)
+    if (bound.actorId === undefined) {
       store.update({ actorId, ...(serverUrl ? { serverUrl } : {}) });
-    else if (bound.actorId !== actorId || bound.serverUrl !== serverUrl)
-      same = false;
-    if (!same) log.warn("imessage.other_account", {});
-    return same;
+      return;
+    }
+    const actorChanged = bound.actorId !== actorId;
+    const serverChanged = bound.serverUrl !== serverUrl;
+    if (!actorChanged && !serverChanged) return;
+    log.info("imessage.account_rebound", {
+      actor_changed: actorChanged,
+      server_changed: serverChanged,
+    });
+    if (actorChanged) {
+      store.update({
+        actorId,
+        ...(serverUrl ? { serverUrl } : {}),
+        roomId: undefined,
+        roomSeq: undefined,
+        inFlightSeq: null,
+        pendingCard: null,
+      });
+    } else {
+      store.update({ ...(serverUrl ? { serverUrl } : {}) });
+    }
   }
 
   #target(): IMsgSendTarget | undefined {

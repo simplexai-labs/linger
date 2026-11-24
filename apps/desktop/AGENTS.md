@@ -554,14 +554,13 @@ Gateway and runs Agents. The daemon exits with the app.
   through a check that answered `unknown`. While iMessage is off the
   Messages AppleScript probe never runs. The bridge restarts when the handles change (the
   stored reply chat and pending card are forgotten in between) and on
-  `server.changed`, which drops the old connection. Turning iMessage off
-  deletes `state.json`, so turning it on again starts at the current end of
-  both Messages and the Chat with no backlog; a quit app that stays on
-  catches up on restart. The first run binds the state to the server and
-  the signed-in Human (`/v0/me`, which must also be the enrolled
-  `ownerActorId` when set); another account or server pauses the bridge as
-  `other_account`, polled like `signed_out`, until iMessage is turned off
-  and on. `imsg-rpc.ts` supervises `imsg rpc`
+  `server.changed` / `server.moved`, which drops the old connection and reconnects.
+  Turning iMessage off deletes `state.json`, so turning it on again starts at the
+  current end of both Messages and the Chat with no backlog; a quit app that stays on
+  catches up on restart. The bridge follows the signed-in Human (`/v0/me`) and
+  current server seamlessly: a local server port move updates `serverUrl` in place,
+  and switching accounts clears the previous Room cursors and pending card so the
+  new Room starts at its current end without replaying history. `imsg-rpc.ts` supervises `imsg rpc`
   (line-delimited JSON-RPC; restarts with 1 s to 30 s backoff, and when a
   send poisons its mutation lane) and keeps one `watch.subscribe` (with
   `attachments: true`), from the
