@@ -57,7 +57,7 @@
   },
   "devDependencies": {
     "@hocuspocus/provider": "^4.3.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@linger/teamhub-cli": "workspace:*",
     "@types/jsdom": "^21.1.7",
     "@types/mailparser": "3.9.0",
