@@ -1,15 +1,79 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, type ExecFileException } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { stripVTControlCharacters } from "node:util";
 
 // The source supervisor imports this module directly, before any build.
 const leaseKey = "LINGER_NATIVE_PROCESS_LEASE";
+const MAX_INSPECTION_BUFFER = 16 * 1024 * 1024;
+const STDERR_EXCERPT_LIMIT = 240;
+
+interface ProcessResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+function decodeClixml(text: string): string {
+  const errorStreams = [...text.matchAll(/<S S="Error">([\s\S]*?)<\/S>/g)]
+    .map((match) => match[1] ?? "")
+    .join(" ");
+  const source = errorStreams || text.replace(/^#<\s*CLIXML\s*/i, "");
+  return source
+    .replace(/<[^>]+>/g, " ")
+    .replace(/_x000[da]_/gi, " ")
+    .replace(/_x0009_/gi, " ")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&amp;", "&");
+}
+
+function redactInspectionText(text: string): string {
+  return stripVTControlCharacters(text)
+    .replace(
+      /(\b(?:[A-Z_][\w.-]*[_-])?(?:api[_-]?key|password|passwd|token|secret(?:[_-]seed)?|credential|authorization|cookie|set-cookie)\b["']?\s*[:=]\s*)(?:Bearer\s+[^\s]+|"[^"\n]*"|'[^'\n]*'|[^\s,;}]+)/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/Bearer\s+[^\s"']+/gi, "Bearer [REDACTED]")
+    .replace(
+      /(?<![a-z0-9+.-])([0-9+.-]*[a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi,
+      "$1[REDACTED]@",
+    );
+}
+
+/** Condenses and redacts inspector stderr so failure messages stay safe and readable. */
+export function sanitizeInspectionStderr(stderr: string): string {
+  const raw = stderr.trimStart().startsWith("#< CLIXML")
+    ? decodeClixml(stderr)
+    : stderr;
+  const cleaned = redactInspectionText(raw).replace(/\s+/g, " ").trim();
+  return cleaned.length > STDERR_EXCERPT_LIMIT
+    ? `${cleaned.slice(0, STDERR_EXCERPT_LIMIT - 1)}\u2026`
+    : cleaned;
+}
+
+function formatInspectionFailure(
+  error: ExecFileException,
+  stderr: string,
+): string {
+  const parts: string[] = [];
+  if (typeof error.code === "string" && error.code) parts.push(error.code);
+  else if (typeof error.code === "number") parts.push(`exit ${error.code}`);
+  if (error.killed && error.signal) parts.push(`timed out (${error.signal})`);
+  else if (error.signal) parts.push(`signal ${error.signal}`);
+  const detail = sanitizeInspectionStderr(stderr);
+  if (parts.length && detail) return `${parts.join(", ")}: ${detail}`;
+  return parts.length ? parts.join(", ") : detail;
+}
+
 function runProcess(
   executable: string,
   args: string[],
   options: { timeoutMs: number; locale?: "c" | "inherited" },
-) {
+): Promise<ProcessResult> {
   // Inspectors must not inherit the lease and appear among the owned processes.
   // ps prints lstart in the caller's locale (a zh-CN Mac prints a different
   // number of fields), and a recorded birth must read the same from every
@@ -19,7 +83,7 @@ function runProcess(
       ? { ...process.env }
       : { ...process.env, LC_ALL: "C", LANG: "C" };
   delete env[leaseKey];
-  return new Promise<{ code: number; stdout: string }>((resolve, reject) => {
+  return new Promise<ProcessResult>((resolve, reject) => {
     execFile(
       executable,
       args,
@@ -27,17 +91,21 @@ function runProcess(
       {
         env,
         timeout: options.timeoutMs,
-        maxBuffer: 2_000_000,
+        maxBuffer: MAX_INSPECTION_BUFFER,
         windowsHide: true,
       },
-      (error, stdout) => {
-        if (error && error.code !== 1)
+      (error, stdout, stderr) => {
+        if (error && error.code !== 1) {
+          const detail = formatInspectionFailure(error, stderr);
           reject(
-            new Error("Native process identity could not be inspected.", {
-              cause: error,
-            }),
+            new Error(
+              detail
+                ? `Native process identity could not be inspected (${detail}).`
+                : "Native process identity could not be inspected.",
+              { cause: error },
+            ),
           );
-        else resolve({ code: error ? 1 : 0, stdout });
+        } else resolve({ code: error ? 1 : 0, stdout, stderr });
       },
     );
   });
@@ -45,11 +113,15 @@ function runProcess(
 // Windows has no process groups and no readable foreign environment. The
 // supervisor carries the lease in its command line (the job file name), and
 // what it starts is found through parent links; a creation time older than
-// the parent's means a reused PID, never a child.
-const WINDOWS_PROCESSES = String.raw`
+// the parent's means a reused PID, never a child. Protected, system, and
+// exiting processes can return a null CreationDate, so guard before calling
+// ToFileTimeUtc and project only the fields needed.
+export const WINDOWS_PROCESSES = String.raw`
 $ErrorActionPreference = 'Stop'
-$p = @(Get-CimInstance Win32_Process | ForEach-Object {
-  [pscustomobject]@{ p = $_.ProcessId; q = $_.ParentProcessId; c = $_.CreationDate.ToFileTimeUtc(); l = [string]$_.CommandLine }
+$env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
+$p = @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate,CommandLine | ForEach-Object {
+  $c = if ($_.CreationDate -is [datetime]) { $_.CreationDate.ToFileTimeUtc() } else { 0 }
+  [pscustomobject]@{ p = $_.ProcessId; q = $_.ParentProcessId; c = $c; l = [string]$_.CommandLine }
 })
 [pscustomobject]@{ p = $p } | ConvertTo-Json -Compress -Depth 3
 `;
@@ -71,17 +143,34 @@ export interface WindowsSnapshot {
 type Rows<T> = T | T[] | null | undefined;
 const rows = <T>(value: Rows<T>): T[] =>
   value == null ? [] : Array.isArray(value) ? value : [value];
-function parseWindowsProcesses(stdout: string): WindowsProcess[] {
+
+/** Parses the compact JSON process listing returned by `WINDOWS_PROCESSES`. */
+export function parseWindowsProcesses(stdout: string): WindowsProcess[] {
   const parsed = JSON.parse(stdout) as {
-    p: Rows<{ p: number; q: number; c: number; l: string | null }>;
+    p: Rows<{ p: number; q: number; c: number | null; l: string | null }>;
   };
-  if (!parsed.p) throw new Error("Native processes could not be enumerated.");
+  if (!parsed || parsed.p == null)
+    throw new Error("Native processes could not be enumerated.");
   return rows(parsed.p).map((row) => ({
     pid: row.p,
     parent: row.q,
-    created: row.c,
+    created: typeof row.c === "number" && Number.isFinite(row.c) ? row.c : 0,
     command: row.l ?? "",
   }));
+}
+
+/** Resolves the system Windows PowerShell path so restricted PATH environments still work. */
+export function windowsPowerShellExecutable(
+  systemRoot = process.env.SystemRoot || process.env.WINDIR,
+): string {
+  const root = systemRoot?.trim();
+  return path.win32.join(
+    root || "C:\\Windows",
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
 }
 
 function addWindowsListener(listeners: Map<number, number>, line: string) {
@@ -108,14 +197,37 @@ export async function parseWindowsListeners(
   return listeners;
 }
 
-export async function windowsProcesses(): Promise<WindowsProcess[]> {
-  const result = await runProcess(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_PROCESSES],
-    { timeoutMs: 15_000 },
-  );
-  if (result.code !== 0)
-    throw new Error("Native processes could not be enumerated.");
+export async function windowsProcesses(
+  systemRoot?: string,
+): Promise<WindowsProcess[]> {
+  const executable = windowsPowerShellExecutable(systemRoot);
+  const args = [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    WINDOWS_PROCESSES,
+  ];
+  let result: ProcessResult;
+  try {
+    result = await runProcess(executable, args, { timeoutMs: 15_000 });
+  } catch (error) {
+    const cause =
+      error instanceof Error
+        ? (error.cause as NodeJS.ErrnoException | undefined)
+        : undefined;
+    if (cause?.code !== "ENOENT" || executable === "powershell.exe")
+      throw error;
+    result = await runProcess("powershell.exe", args, { timeoutMs: 15_000 });
+  }
+  if (result.code !== 0) {
+    const detail = sanitizeInspectionStderr(result.stderr);
+    throw new Error(
+      detail
+        ? `Native processes could not be enumerated (exit ${result.code}: ${detail}).`
+        : `Native processes could not be enumerated (exit ${result.code}).`,
+    );
+  }
   return parseWindowsProcesses(result.stdout);
 }
 
@@ -157,7 +269,7 @@ export async function windowsSnapshot(
   systemRoot: string,
 ): Promise<WindowsSnapshot> {
   const [processes, listeners] = await Promise.all([
-    windowsProcesses(),
+    windowsProcesses(systemRoot),
     windowsListeners(systemRoot),
   ]);
   return { processes, listeners };

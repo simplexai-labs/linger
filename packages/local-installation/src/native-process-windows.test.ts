@@ -62,7 +62,17 @@ describe("windowsLeaseTree", () => {
       [
         row(10, 1, 100, `node native-process-worker.mjs livekit.${lease}.job`),
         inspection(20, 10, 200),
+        row(
+          22,
+          10,
+          202,
+          `C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate,CommandLine"`,
+        ),
         row(21, 20, 201, "\\??\\C:\\WINDOWS\\system32\\conhost.exe 0xffffffff"),
+        // Protected or exiting processes whose CreationDate was null get created=0.
+        row(0, 0, 0, ""),
+        row(4, 0, 0, ""),
+        row(25, 10, 0, "exiting.exe"),
       ],
       lease,
     );
