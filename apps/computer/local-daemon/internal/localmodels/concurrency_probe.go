@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -373,24 +372,10 @@ func normalizeEndpointURL(raw string) string {
 // parseLoopbackBaseURL accepts only direct HTTP loopback URLs so probes never
 // leave the Computer or resolve through proxies.
 func parseLoopbackBaseURL(raw string) (string, bool) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
+	parsed, ok := parseLoopbackHTTPURL(raw, false)
+	if !ok {
 		return "", false
 	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil || parsed.Scheme != "http" || parsed.Host == "" || parsed.User != nil ||
-		parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", false
-	}
-	host := parsed.Hostname()
-	if !strings.EqualFold(host, "localhost") {
-		ip := net.ParseIP(host)
-		if ip == nil || !ip.IsLoopback() {
-			return "", false
-		}
-	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/")
-	parsed.RawPath = ""
 	return parsed.String(), true
 }
 

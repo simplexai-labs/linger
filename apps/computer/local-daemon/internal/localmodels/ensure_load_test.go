@@ -595,6 +595,82 @@ func TestActLoadUnloadsHealthCheckFailedModelFirst(t *testing.T) {
 	if loads := callsWithPrefix(fakeRefuse, "load "); len(loads) != 0 {
 		t.Fatalf("started load after unload refusal: %v", loads)
 	}
+
+	// When reset-unload succeeds and the subsequent load is refused, the
+	// snapshot refreshes to idle and runtimeChanged runs so the UI is not stale.
+	fakeLoadRefuse := newFakeTool(t)
+	fakeLoadRefuse.write("status.json", status(failed))
+	fakeLoadRefuse.script("unload", fakeScript{
+		Lines:       []fakeLine{{Line: resultLine(testModel)}},
+		StatusAfter: statusJSON(model(testModel, "idle")),
+	})
+	fakeLoadRefuse.script("load", fakeScript{
+		Lines: []fakeLine{{Line: errorLine(testModel, "LOAD_NO_ROOM", "")}},
+		Exit:  2,
+	})
+	rec := &recorder{}
+	libLoadRefuse := New(Options{
+		Tool: &fakeLoadRefuse.tool, Environment: map[string]string{"LOCALMODELS_FAKE_TOOL": "1", "PATH": os.Getenv("PATH")},
+		JobDirectory: filepath.Join(t.TempDir(), "jobs"), Publish: rec.publish, RuntimeChanged: rec.runtimeChanged,
+		ProgressInterval: 20 * time.Millisecond,
+	})
+	libLoadRefuse.healthCheck = func(context.Context, string) bool { return true }
+	t.Cleanup(libLoadRefuse.Close)
+	libLoadRefuse.Refresh(context.Background())
+	refusal, answered = libLoadRefuse.Act(context.Background(), Action{Name: ActionLoad, Model: testModel}, soon())
+	if !answered || refusal == nil || refusal.Code != "LOAD_NO_ROOM" {
+		t.Fatalf("answered = %v, refusal = %+v", answered, refusal)
+	}
+	waitFor(t, "snapshot refreshed to idle after refused load", func() bool {
+		row := modelState(rec.last(), testModel)
+		rec.mu.Lock()
+		changed := rec.runtimeChanges > 0
+		rec.mu.Unlock()
+		return row != nil && row.State == "idle" && changed
+	})
+}
+
+func TestEnsureLoadedTrustsRefreshedLoadedRowWhenCachedEngineProbeMisses(t *testing.T) {
+	gateway := startHealthServer(t)
+	fake := newFakeTool(t)
+	writeLocalSourceOverlay(t, fake.state, gateway.URL)
+	// Point the engine at a closed port so the fast-path engine probe misses,
+	// while library status still reports the model loaded (e.g. engine slow
+	// under heavy generation). EnsureLoaded must refresh and NOT unload it.
+	closedEngine := startHealthServer(t)
+	closedEngine.Close()
+	fake.write("status.json", status(loadedRowWithBaseURL(closedEngine.URL+"/v1")))
+	library := newEnsureLibrary(t, fake, 0)
+	library.healthCheck = gatewayAnswers
+	library.progressInterval = time.Hour
+	library.Refresh(context.Background())
+	if err := library.awaitSettled(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := library.EnsureLoaded(context.Background(), testPiModel); err != nil {
+		t.Fatal(err)
+	}
+	if unloads := callsWithPrefix(fake, "unload "); len(unloads) != 0 {
+		t.Fatalf("unloaded a model that library status reported loaded: %v", unloads)
+	}
+	if loads := callsWithPrefix(fake, "load "); len(loads) != 0 {
+		t.Fatalf("reloaded a model that library status reported loaded: %v", loads)
+	}
+}
+
+func TestWaitLoadedReturnsImmediatelyForAdoptedLoadAlreadyLoaded(t *testing.T) {
+	fake := newFakeTool(t)
+	fake.write("status.json", status(model(testModel, "loaded")))
+	library := newEnsureLibrary(t, fake, 0)
+	library.Refresh(context.Background())
+	library.mu.Lock()
+	since := library.commits
+	library.mu.Unlock()
+	budget, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := library.waitLoaded(context.Background(), budget, testModel, since, false); err != nil {
+		t.Fatalf("waitLoaded on already-loaded adopted row returned %v", err)
+	}
 }
 
 func TestLoopbackHealthURL(t *testing.T) {
@@ -605,9 +681,10 @@ func TestLoopbackHealthURL(t *testing.T) {
 	}{
 		{"http://127.0.0.1:18101/v1", true, "http://127.0.0.1:18101/health"},
 		{"http://127.0.0.1:18101/v1/", true, "http://127.0.0.1:18101/health"},
+		{"http://127.0.0.2:18101/v1", true, "http://127.0.0.2:18101/health"},
 		{"http://127.0.0.1:47711", false, "http://127.0.0.1:47711/health"},
 		{"http://[::1]:18101/v1", true, "http://[::1]:18101/health"},
-		{"http://localhost:18101/v1", true, "http://localhost:18101/health"},
+		{"http://LOCALHOST:18101/v1", true, "http://LOCALHOST:18101/health"},
 		{"https://127.0.0.1:18101/v1", true, ""},
 		{"http://10.0.0.5:18101/v1", true, ""},
 		{"http://user@127.0.0.1:18101/v1", true, ""},

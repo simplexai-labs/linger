@@ -5,8 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
-	"strings"
 	"time"
 )
 
@@ -109,17 +107,11 @@ func byokGateway(stateDir, runtimeType string) (runtime, healthURL string) {
 	if overlay == nil || overlay.Mode != "byok" || !GatewayRuntime(overlay.Environment, stateDir, runtimeType) {
 		return "", ""
 	}
-	gateway, err := url.Parse(overlay.GatewayURL)
-	if err != nil || gateway.Scheme != "http" || gateway.Port() == "" || gateway.User != nil ||
-		gateway.RawQuery != "" || gateway.Fragment != "" {
+	healthURL = loopbackHealthURL(overlay.GatewayURL, false)
+	if healthURL == "" {
 		return "", ""
 	}
-	switch gateway.Hostname() {
-	case "127.0.0.1", "localhost", "::1":
-	default:
-		return "", ""
-	}
-	return overlay.Runtime, gateway.Scheme + "://" + gateway.Host + strings.TrimRight(gateway.Path, "/") + "/health"
+	return overlay.Runtime, healthURL
 }
 
 func gatewayAnswers(ctx context.Context, healthURL string) bool {

@@ -1173,30 +1173,12 @@ export function isStoppedDownloadErrorCode(code: unknown): boolean {
   return typeof code === "string" && STOPPED_DOWNLOAD_ERROR_CODES.has(code);
 }
 
-// The ids of the models `library status` reports in state, or undefined
-// when its output is not a status report.
-function libraryModelsIn(
+// Parses `library status` JSON output and returns valid model IDs matching
+// include, or undefined when stdout is not a status report.
+function libraryModels(
   stdout: string,
-  state: "loaded" | "loading",
+  include: (model: { id: string; state?: unknown; error?: unknown }) => boolean,
 ): string[] | undefined {
-  try {
-    const models = (JSON.parse(stdout) as { models?: unknown }).models;
-    if (!Array.isArray(models)) return undefined;
-    return models.flatMap((model: { id?: unknown; state?: unknown }) =>
-      model?.state === state &&
-      typeof model.id === "string" &&
-      /^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/.test(model.id)
-        ? [model.id]
-        : [],
-    );
-  } catch {
-    return undefined;
-  }
-}
-// The ids of the models `library status` reports as loaded or failed after a
-// server/load failure (excluding stopped downloads, which hold no library
-// record to unload), or undefined when its output is not a status report.
-function unloadableLibraryModels(stdout: string): string[] | undefined {
   try {
     const models = (JSON.parse(stdout) as { models?: unknown }).models;
     if (!Array.isArray(models)) return undefined;
@@ -1207,20 +1189,36 @@ function unloadableLibraryModels(stdout: string): string[] | undefined {
           !/^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/.test(model.id)
         )
           return [];
-        if (model.state === "loaded") return [model.id];
-        if (model.state === "failed") {
-          const errorCode =
-            model.error && typeof model.error === "object"
-              ? (model.error as { code?: unknown }).code
-              : undefined;
-          return isStoppedDownloadErrorCode(errorCode) ? [] : [model.id];
-        }
-        return [];
+        return include({ id: model.id, state: model.state, error: model.error })
+          ? [model.id]
+          : [];
       },
     );
   } catch {
     return undefined;
   }
+}
+// The ids of the models `library status` reports in state, or undefined
+// when its output is not a status report.
+function libraryModelsIn(
+  stdout: string,
+  state: "loaded" | "loading",
+): string[] | undefined {
+  return libraryModels(stdout, (model) => model.state === state);
+}
+// The ids of the models `library status` reports as loaded or failed after a
+// server/load failure (excluding stopped downloads, which hold no library
+// record to unload), or undefined when its output is not a status report.
+function unloadableLibraryModels(stdout: string): string[] | undefined {
+  return libraryModels(stdout, (model) => {
+    if (model.state === "loaded") return true;
+    if (model.state !== "failed") return false;
+    const errorCode =
+      model.error && typeof model.error === "object"
+        ? (model.error as { code?: unknown }).code
+        : undefined;
+    return !isStoppedDownloadErrorCode(errorCode);
+  });
 }
 // A failed step's structured cause: the library's error code, the tool's
 // error, or its exit status.

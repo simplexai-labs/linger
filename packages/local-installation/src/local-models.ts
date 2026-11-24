@@ -936,6 +936,47 @@ function selectLibraryModel<T extends ObservedLibraryModel>(
   return models.find((model) => model.piModel === runtimeModel);
 }
 
+// Formats a failed `library load` or `library unload` invocation into a
+// structured InstallOutcome and logs the redacted cause.
+function libraryFailureOutcome(
+  verb: "load" | "unload",
+  modelId: string,
+  result: { code: number; stdout: string; stderr: string },
+  errEvent: LibraryLoadErrorEvent | undefined,
+  onEvent: (e: InstallerEvent) => void,
+): InstallOutcome {
+  if (errEvent) {
+    const code = validErrorCode(errEvent.code, "LOCAL_MODEL_LOAD_FAILED");
+    const cause = cleanUserCause(errEvent.message ?? errEvent.detail);
+    onEvent({
+      kind: "log",
+      stage: "runtime",
+      message: `localmodels library ${verb} exited with code ${result.code} (${code})${cause ? `: ${cause}` : ""}.\n`,
+    });
+    return {
+      code: 1,
+      state: "failed",
+      message: formatLocalmodelsFailureMessage(
+        `Could not reload local model ${modelId}`,
+        cause,
+      ),
+      details: { code },
+    };
+  }
+  const { code, cause, log } = localmodelsFailure(["library", verb], result);
+  for (const message of log)
+    onEvent({ kind: "log", stage: "runtime", message });
+  return {
+    code: 1,
+    state: "failed",
+    message: formatLocalmodelsFailureMessage(
+      `Could not reload local model ${modelId}`,
+      cause,
+    ),
+    details: { code: validErrorCode(code, "LOCAL_MODEL_LOAD_FAILED") },
+  };
+}
+
 // Runs `library unload` while the caller holds the local models lock to reset a
 // failed model record before reloading it.
 async function runUnloadLibraryModel(
@@ -957,40 +998,13 @@ async function runUnloadLibraryModel(
     { signal: options.signal, timeoutMs: 120_000 },
   );
   if (result.code === 0) return undefined;
-  const errEvent = parseLibraryLoadError(lastJsonObject(result.stdout));
-  if (errEvent) {
-    const code = validErrorCode(errEvent.code, "LOCAL_MODEL_LOAD_FAILED");
-    const cause = cleanUserCause(errEvent.message ?? errEvent.detail);
-    options.onEvent({
-      kind: "log",
-      stage: "runtime",
-      message: `localmodels library unload exited with code ${result.code} (${code})${cause ? `: ${cause}` : ""}.\n`,
-    });
-    return {
-      code: 1,
-      state: "failed",
-      message: formatLocalmodelsFailureMessage(
-        `Could not reload local model ${modelId}`,
-        cause,
-      ),
-      details: { code },
-    };
-  }
-  const { code, cause, log } = localmodelsFailure(
-    ["library", "unload"],
+  return libraryFailureOutcome(
+    "unload",
+    modelId,
     result,
+    parseLibraryLoadError(lastJsonObject(result.stdout)),
+    options.onEvent,
   );
-  for (const message of log)
-    options.onEvent({ kind: "log", stage: "runtime", message });
-  return {
-    code: 1,
-    state: "failed",
-    message: formatLocalmodelsFailureMessage(
-      `Could not reload local model ${modelId}`,
-      cause,
-    ),
-    details: { code: validErrorCode(code, "LOCAL_MODEL_LOAD_FAILED") },
-  };
 }
 
 // Runs `library load` while the caller holds the local models lock.
@@ -1055,41 +1069,13 @@ async function runLoadLibraryModel(
   if (!lastErrorEvent && result.stdout.trim()) {
     lastErrorEvent = parseLibraryLoadError(lastJsonObject(result.stdout));
   }
-  if (lastErrorEvent) {
-    const code = validErrorCode(lastErrorEvent.code, "LOCAL_MODEL_LOAD_FAILED");
-    const cause = cleanUserCause(
-      lastErrorEvent.message ?? lastErrorEvent.detail,
-    );
-    options.onEvent({
-      kind: "log",
-      stage: "runtime",
-      message: `localmodels library load exited with code ${result.code} (${code})${cause ? `: ${cause}` : ""}.\n`,
-    });
-    return {
-      code: 1,
-      state: "failed",
-      message: formatLocalmodelsFailureMessage(
-        `Could not reload local model ${modelId}`,
-        cause,
-      ),
-      details: { code },
-    };
-  }
-  const { code, cause, log } = localmodelsFailure(["library", "load"], {
-    ...result,
-    stderr: tail || result.stderr,
-  });
-  for (const message of log)
-    options.onEvent({ kind: "log", stage: "runtime", message });
-  return {
-    code: 1,
-    state: "failed",
-    message: formatLocalmodelsFailureMessage(
-      `Could not reload local model ${modelId}`,
-      cause,
-    ),
-    details: { code: validErrorCode(code, "LOCAL_MODEL_LOAD_FAILED") },
-  };
+  return libraryFailureOutcome(
+    "load",
+    modelId,
+    { ...result, stderr: tail || result.stderr },
+    lastErrorEvent,
+    options.onEvent,
+  );
 }
 
 /**

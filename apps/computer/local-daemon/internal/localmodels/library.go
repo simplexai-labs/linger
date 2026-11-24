@@ -625,7 +625,7 @@ func (l *Library) unloadAndStartJob(ctx context.Context, action Action, deadline
 			answer.give(&refusal)
 			return
 		}
-		l.launchJob(action, answer)
+		l.launchJob(action, answer, true)
 	}()
 	return answer.await(ctx, deadline)
 }
@@ -633,13 +633,15 @@ func (l *Library) unloadAndStartJob(ctx context.Context, action Action, deadline
 // startJob starts a download or load and answers from its first event.
 func (l *Library) startJob(ctx context.Context, action Action, deadline time.Time) (*wire.LocalModelActionRefusal, bool) {
 	answer := newPendingAnswer()
-	l.launchJob(action, answer)
+	l.launchJob(action, answer, false)
 	return answer.await(ctx, deadline)
 }
 
 // launchJob spawns a download or load child process and supervises it, giving
-// the first refusal or acceptance to answer.
-func (l *Library) launchJob(action Action, answer *pendingAnswer) {
+// the first refusal or acceptance to answer. When refreshOnRefusal is true (a
+// reset-unload already changed state on disk), any refusal refreshes the
+// snapshot and signals runtimeChanged so the idle state is published.
+func (l *Library) launchJob(action Action, answer *pendingAnswer, refreshOnRefusal bool) {
 	// tail and superviseJob are reserved before the job starts, so no job
 	// starts unsupervised after Close.
 	if !l.track(2) {
@@ -652,6 +654,10 @@ func (l *Library) launchJob(action Action, answer *pendingAnswer) {
 		l.wg.Add(-2)
 		slog.Warn("local_models.job_output_failed", "error", err)
 		answer.give(&wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "the Computer could not start localmodels"})
+		if refreshOnRefusal {
+			l.Refresh(l.ctx)
+			l.runtimeChanged()
+		}
 		return
 	}
 	cmd := l.tool.command(l.environment, action)
@@ -665,6 +671,10 @@ func (l *Library) launchJob(action Action, answer *pendingAnswer) {
 		_ = os.Remove(output.Name())
 		slog.Warn("local_models.job_start_failed", "action", action.Name, "error", err)
 		answer.give(&wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "the Computer could not start localmodels"})
+		if refreshOnRefusal {
+			l.Refresh(l.ctx)
+			l.runtimeChanged()
+		}
 		return
 	}
 	_ = output.Close()
@@ -682,7 +692,7 @@ func (l *Library) launchJob(action Action, answer *pendingAnswer) {
 	}()
 	go func() {
 		defer l.wg.Done()
-		l.superviseJob(action, events, ended, answer)
+		l.superviseJob(action, events, ended, answer, refreshOnRefusal)
 	}()
 }
 
@@ -751,7 +761,7 @@ func (l *Library) tail(path string, exited <-chan int, events chan<- libraryEven
 
 // superviseJob answers the action from its first event, then follows the
 // job to its end.
-func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended <-chan int, answer *pendingAnswer) {
+func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended <-chan int, answer *pendingAnswer, refreshOnRefusal bool) {
 	answered := false
 	accepted := false
 	reply := func(refusal *wire.LocalModelActionRefusal) {
@@ -822,10 +832,13 @@ func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended 
 	}
 	slog.Info("local_models.job_finished", attrs...)
 	if !accepted {
-		if answer.missed() {
-			// Nobody heard the refusal; the snapshot is how the owner sees
-			// that nothing changed.
+		if answer.missed() || refreshOnRefusal {
+			// Nobody heard the refusal, or a reset-unload already moved the
+			// model to idle; publish a fresh snapshot so state stays current.
 			l.Refresh(l.ctx)
+			if refreshOnRefusal {
+				l.runtimeChanged()
+			}
 		}
 		return
 	}
@@ -1106,7 +1119,7 @@ func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
 		return nil
 	}
 	if l.settled() {
-		if known && cached.State == "loaded" && l.loadedEndpointHealthy(ctx, *cached) {
+		if known && cached.State == "loaded" && l.cachedLoadedHealthy(ctx, *cached) {
 			return nil
 		}
 		if err := ctx.Err(); err != nil {
@@ -1155,7 +1168,7 @@ func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
 		return nil
 	}
 	row := snapshot.Models[index]
-	if row.State == "loaded" && l.loadedEndpointHealthy(ctx, row) {
+	if row.State == "loaded" && l.localGatewayHealthy(ctx) {
 		return nil
 	}
 	state := loadState(row)
@@ -1201,10 +1214,8 @@ func (l *Library) ensureByID(ctx context.Context, id, state string, waitedFrom t
 		return ensure.err
 	}
 	l.mu.Lock()
-	var row *wire.LocalModel
-	if r := l.rowLocked(func(model wire.LocalModel) bool { return model.ID == id }); r != nil {
-		row = r
-		state = loadState(*r)
+	if row := l.rowLocked(func(model wire.LocalModel) bool { return model.ID == id }); row != nil {
+		state = loadState(*row)
 	}
 	if _, running := l.jobs[id]; running && state != "loaded" {
 		// A load the Models page just started: wait for it, not a second one.
@@ -1212,7 +1223,7 @@ func (l *Library) ensureByID(ctx context.Context, id, state string, waitedFrom t
 	}
 	l.mu.Unlock()
 	if state == "loaded" {
-		if row == nil || l.loadedEndpointHealthy(ctx, *row) {
+		if l.localGatewayHealthy(ctx) {
 			return nil
 		}
 		state = "failed"
@@ -1247,6 +1258,7 @@ func (l *Library) load(ctx context.Context, id, state string) error {
 	l.mu.Lock()
 	since := l.commits
 	l.mu.Unlock()
+	startedJob := false
 	switch state {
 	case "idle", "failed":
 		refusal, answered := l.Act(budget, Action{Name: ActionLoad, Model: id}, l.now().Add(l.actionTimeout))
@@ -1262,19 +1274,22 @@ func (l *Library) load(ctx context.Context, id, state string) error {
 			}
 			return &LocalModelLoadError{Code: refusal.Code, ModelID: id}
 		}
+		startedJob = true
 	case "loading":
 		// A load this or a previous Daemon started; the Library follows it.
 	default:
 		return &LocalModelLoadError{Code: CodeModelNotDownloaded, ModelID: id}
 	}
-	return l.waitLoaded(ctx, budget, id, since)
+	return l.waitLoaded(ctx, budget, id, since, startedJob)
 }
 
 // waitLoaded waits until id is loaded or its load has ended otherwise. A
 // row that is not loading counts as the outcome only once no supervised job
 // for id runs and the snapshot changed after since and after that job ended:
-// until then it may predate the job's first status.
-func (l *Library) waitLoaded(ctx, budget context.Context, id string, since uint64) error {
+// until then it may predate the job's first status. When requireSettled is
+// true (load started a job), a loaded row also waits for settled so a forced
+// reload on a dead gateway cannot accept the stale pre-unload loaded row.
+func (l *Library) waitLoaded(ctx, budget context.Context, id string, since uint64, requireSettled bool) error {
 	if l.testWaiting != nil {
 		l.testWaiting(id)
 	}
@@ -1291,9 +1306,9 @@ func (l *Library) waitLoaded(ctx, budget context.Context, id string, since uint6
 		l.mu.Unlock()
 		if available {
 			switch {
-			case !settled || (row != nil && row.State == "loading"):
-			case row != nil && row.State == "loaded":
+			case row != nil && row.State == "loaded" && (!requireSettled || settled):
 				return nil
+			case !settled || (row != nil && row.State == "loading"):
 			case row != nil && row.State == "failed" && row.Error != nil && row.Error.Code != "":
 				return &LocalModelLoadError{Code: row.Error.Code, ModelID: id}
 			default:
