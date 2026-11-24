@@ -46,6 +46,18 @@ const setupCommand = z.discriminatedUnion("op", [
     .object({ op: z.literal("server.set"), serverUrl: z.string().max(2048) })
     .strict(),
   z.object({ op: z.literal("external.open"), url: externalUrl }).strict(),
+  z.object({ op: z.literal("driver.open-nvidia-app") }).strict(),
+  z
+    .object({
+      op: z.literal("driver.start-install"),
+      requiredCuda: z
+        .string()
+        .trim()
+        .regex(/^\d+(?:\.\d+){0,2}$/)
+        .optional(),
+    })
+    .strict(),
+  z.object({ op: z.literal("driver.clear-state") }).strict(),
   z
     .object({
       op: z.literal("local.start"),

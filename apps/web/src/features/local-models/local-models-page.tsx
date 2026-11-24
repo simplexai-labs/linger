@@ -63,6 +63,11 @@ import {
   UnloadModelDialog,
 } from "./local-model-dialogs";
 import {
+  UpdateDriverDialog,
+  type DriverUpdateReason,
+} from "./local-model-driver-dialog";
+import { useDesktopDriverUpdate } from "./desktop-driver-update";
+import {
   actionErrorCopy,
   debugBannerCopy,
   hostBlockerCopy,
@@ -88,6 +93,7 @@ import {
   downloadStopped,
   featuredInklingEntry,
   formatGigabytes,
+  hasReadyLocalModels,
   hostBlocker,
   joinList,
   loadCheck,
@@ -132,7 +138,8 @@ type Dialog =
   | { kind: "advanced" }
   | { kind: "makeRoom"; modelId: string }
   | { kind: "remove"; modelId: string }
-  | { kind: "unload"; modelId: string };
+  | { kind: "unload"; modelId: string }
+  | { kind: "updateDriver"; modelId?: string; reason: DriverUpdateReason };
 
 /**
  * The model states each confirmed action applies to, as the row offers it. A
@@ -226,6 +233,10 @@ export function ModelsPage() {
           computer={computer}
           computerId={computer.computer_id}
           displayName={computer.display_name}
+          isLocalDesktop={Boolean(
+            desktop?.status?.computerId &&
+            desktop.status.computerId === computer.computer_id,
+          )}
           key={computer.computer_id}
           onSelectComputer={select}
           ownedComputers={computers}
@@ -456,6 +467,7 @@ function ComputerModels({
   computerId,
   defaultComputerName,
   displayName,
+  isLocalDesktop = false,
   onOpenDefaultComputer,
   onSelectComputer,
   ownedComputers,
@@ -466,6 +478,7 @@ function ComputerModels({
   defaultComputerName?: string;
   /** Absent for a Computer outside the viewer's own inventory. */
   displayName?: string;
+  isLocalDesktop?: boolean;
   onOpenDefaultComputer?: () => void;
   onSelectComputer: (computerId: string) => void;
   ownedComputers: readonly InventoryComputer[];
@@ -823,6 +836,7 @@ function ComputerModels({
             computer={computer}
             dialog={dialog}
             guidance={guidance}
+            isLocalDesktop={isLocalDesktop}
             offline={offline}
             onRefresh={recheckMemory}
             onSwitchToByok={status ? () => changeTab("byok") : undefined}
@@ -920,6 +934,7 @@ function Library({
   computer,
   dialog,
   guidance,
+  isLocalDesktop = false,
   offline: computerOffline,
   onRefresh,
   onSwitchToByok,
@@ -936,6 +951,7 @@ function Library({
   computer?: InventoryComputer;
   dialog: Dialog | null;
   guidance: ReturnType<typeof memoryGuidance>;
+  isLocalDesktop?: boolean;
   offline: boolean;
   onRefresh: () => void;
   onSwitchToByok?: () => void;
@@ -1319,7 +1335,9 @@ function Library({
     !downloadStopped(entry.model) &&
     actionStatuses[action].includes(entry.status);
   const dialogEntry =
-    dialog && dialog.kind !== "advanced" ? find(dialog.modelId) : undefined;
+    dialog && "modelId" in dialog && dialog.modelId
+      ? find(dialog.modelId)
+      : undefined;
   const dialogPool = dialogEntry
     ? poolOf(view, dialogEntry.model.pool)
     : undefined;
@@ -1395,9 +1413,60 @@ function Library({
     entry.model.pi_model !== status.runtime_model &&
     entry.model.id !== status.runtime_model;
 
+  const hasReadyModels = hasReadyLocalModels(entries);
+  const desktopDriver = useDesktopDriverUpdate(
+    isLocalDesktop && !offline && !readOnly,
+  );
+  const driverInstallState = desktopDriver?.installState;
+  const [driverBannerDismissed, setDriverBannerDismissed] = useState(false);
+  const resumedDriverVersionRef = useRef<string | null>(null);
+  const onRefreshRef = useRef(onRefresh);
+  useEffect(() => {
+    onRefreshRef.current = onRefresh;
+  }, [onRefresh]);
+
+  useEffect(() => {
+    if (
+      !isLocalDesktop ||
+      offline ||
+      readOnly ||
+      driverInstallState?.phase !== "completed"
+    ) {
+      return;
+    }
+    if (resumedDriverVersionRef.current === driverInstallState.version) return;
+    resumedDriverVersionRef.current = driverInstallState.version;
+    onRefreshRef.current();
+  }, [driverInstallState, isLocalDesktop, offline, readOnly]);
+
+  const resumeModelEntry =
+    driverInstallState?.phase === "completed" &&
+    driverInstallState.resumeModelId
+      ? find(driverInstallState.resumeModelId)
+      : undefined;
+  const resumeModelDownloadable = Boolean(
+    resumeModelEntry &&
+    resumeModelEntry.model.state === "absent" &&
+    resumeModelEntry.model.availability.downloadable,
+  );
+  const showDriverResumeBanner =
+    !driverBannerDismissed &&
+    (driverInstallState?.phase === "completed" ||
+      driverInstallState?.phase === "reboot_required");
+
+  function dismissDriverBanner() {
+    setDriverBannerDismissed(true);
+    void desktopDriver?.api.clearInstallState?.().catch(() => undefined);
+  }
+
   const renderModelRow = (entry: ModelEntry, inSpotlight = false) => {
     const modelId = entry.model.id;
     const canUseForAgents = canUseModelForAgents(entry);
+    const driverReason =
+      entry.status === "unavailable" &&
+      entry.model.availability.reason?.code === "DRIVER_UPDATE_REQUIRED"
+        ? entry.model.availability.reason
+        : undefined;
     return (
       <ModelRow
         anotherMeChatHref={anotherMeChatHref}
@@ -1407,6 +1476,7 @@ function Library({
         disabled={offline || readOnly || switching || busy(modelId)}
         entry={entry}
         expanded={expandedId === modelId}
+        hasReadyAlternatives={hasReadyModels}
         inSpotlight={inSpotlight}
         key={modelId}
         onAssignAgent={
@@ -1421,14 +1491,26 @@ function Library({
         onCancel={() => act({ action: "cancel", modelId })}
         onDownload={() => act({ action: "download", modelId })}
         onLoad={() => load(entry)}
+        onRecheck={!offline && !readOnly ? onRefresh : undefined}
         onRemove={() => setDialog({ kind: "remove", modelId })}
         onToggle={() =>
           setExpandedId((current) => (current === modelId ? null : modelId))
         }
         onUnload={() => unload(entry)}
+        onUpdateDriver={
+          driverReason
+            ? () =>
+                setDialog({
+                  kind: "updateDriver",
+                  modelId,
+                  reason: driverReason,
+                })
+            : undefined
+        }
         onUseForAgents={
           canUseForAgents ? () => onUseForAgents(modelId) : undefined
         }
+        rechecking={rechecking}
         requested={requests.get(modelId)}
         switchingForAgents={switchingModelId === modelId}
         view={view}
@@ -1500,6 +1582,74 @@ function Library({
                 })}
               </FormFeedback>
             </div>
+          ) : null}
+          {showDriverResumeBanner && driverInstallState ? (
+            <aside
+              aria-label={t(m.driverResumeBannerRegion)}
+              className={cn(
+                "mt-5 flex flex-col items-start justify-between gap-3 rounded-xl border px-4 py-3.5 sm:flex-row sm:items-center",
+                driverInstallState.phase === "completed"
+                  ? "border-[var(--app-status-success-border)] bg-[var(--app-status-success-surface)]"
+                  : "border-[var(--app-status-warning-border)] bg-[var(--app-status-warning-surface)]",
+              )}
+            >
+              <div className="min-w-0 flex-1">
+                <p
+                  className={cn(
+                    "text-sm font-medium",
+                    driverInstallState.phase === "completed"
+                      ? "text-app-success"
+                      : "text-app-warning",
+                  )}
+                >
+                  {driverInstallState.phase === "completed"
+                    ? t(m.driverResumeReadyTitle, {
+                        version: driverInstallState.version,
+                      })
+                    : t(m.driverResumeRebootTitle)}
+                </p>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {driverInstallState.phase === "completed"
+                    ? resumeModelEntry && resumeModelDownloadable
+                      ? t(m.driverResumeReadyModelBody, {
+                          model: resumeModelEntry.model.name,
+                        })
+                      : t(m.driverResumeReadyBody)
+                    : t(m.driverResumeRebootBody, {
+                        version: driverInstallState.version,
+                      })}
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                {driverInstallState.phase === "completed" &&
+                resumeModelEntry &&
+                resumeModelDownloadable ? (
+                  <Button
+                    onClick={() => {
+                      dismissDriverBanner();
+                      act({
+                        action: "download",
+                        modelId: resumeModelEntry.model.id,
+                      });
+                    }}
+                    size="compact"
+                    tone="primary"
+                  >
+                    {t(m.driverResumeDownloadModel, {
+                      model: resumeModelEntry.model.name,
+                    })}
+                  </Button>
+                ) : null}
+                <Button
+                  data-voice-close
+                  onClick={dismissDriverBanner}
+                  size="compact"
+                  tone="secondary"
+                >
+                  {t(m.driverResumeDismiss)}
+                </Button>
+              </div>
+            </aside>
           ) : null}
           {debugCopy ? (
             <aside
@@ -1575,6 +1725,31 @@ function Library({
                     {t(m.switchToByok)}
                   </Button>
                 ) : null
+              ) : blocker.code === "DRIVER_UPDATE_REQUIRED" ? (
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <Button
+                    onClick={() =>
+                      setDialog({
+                        kind: "updateDriver",
+                        reason: blocker,
+                      })
+                    }
+                    size="compact"
+                    tone="primary"
+                  >
+                    {t(m.updateDriverAction)}
+                  </Button>
+                  {!offline && !readOnly ? (
+                    <Button
+                      loading={rechecking}
+                      onClick={onRefresh}
+                      size="compact"
+                      tone="secondary"
+                    >
+                      {t(m.recheckMemory)}
+                    </Button>
+                  ) : null}
+                </div>
               ) : !offline && !readOnly ? (
                 <Button
                   className="shrink-0"
@@ -1641,6 +1816,18 @@ function Library({
 
       {dialog?.kind === "advanced" ? (
         <AdvancedDialog onClose={() => setDialog(null)} view={view} />
+      ) : null}
+      {dialog?.kind === "updateDriver" ? (
+        <UpdateDriverDialog
+          isLocalDesktop={isLocalDesktop}
+          model={dialogEntry?.model}
+          offline={offline}
+          onClose={() => setDialog(null)}
+          onRecheck={!offline && !readOnly ? onRefresh : undefined}
+          reason={dialog.reason}
+          rechecking={rechecking}
+          view={view}
+        />
       ) : null}
       {dialogEntry && makeRoom ? (
         <MakeRoomDialog

@@ -1,6 +1,20 @@
 // Contract between the remote SPA (through preload) and the main process.
 // The SPA detects the desktop shell with `typeof window.lingerDesktop`.
 
+import type {
+  DesktopDriverActionResult,
+  DesktopDriverCapabilities,
+  DesktopDriverInstallRequest,
+  DesktopDriverInstallState,
+} from "@linger/service-kit/nvidia-driver";
+
+export type {
+  DesktopDriverActionResult,
+  DesktopDriverCapabilities,
+  DesktopDriverInstallRequest,
+  DesktopDriverInstallState,
+};
+
 export type RuntimeState =
   | "stopped"
   | "starting"
@@ -176,6 +190,22 @@ export interface LingerDesktopApi {
   readonly permissions?: {
     act(step: DesktopPermissionStep): Promise<void>;
   };
+  // Native NVIDIA driver update helpers (Windows / Linux). Older desktop apps
+  // lack it, so the page falls back to direct browser links and copyable steps.
+  readonly driverUpdate?: {
+    getCapabilities(): Promise<DesktopDriverCapabilities>;
+    openNvidiaApp(): Promise<DesktopDriverActionResult>;
+    openOfficialDownload(): Promise<DesktopDriverActionResult>;
+    openGuide(): Promise<DesktopDriverActionResult>;
+    getInstallState(): Promise<DesktopDriverInstallState>;
+    onInstallState(
+      callback: (state: DesktopDriverInstallState) => void,
+    ): () => void;
+    startInstall(
+      request: DesktopDriverInstallRequest,
+    ): Promise<DesktopDriverActionResult>;
+    clearInstallState?(): Promise<void>;
+  };
 }
 
 export const IPC = {
@@ -190,6 +220,14 @@ export const IPC = {
   settingsSet: "settings.set",
   settingsEvent: "settings.event",
   permissionAct: "permission.act",
+  driverUpdateCapabilities: "driver-update.capabilities",
+  driverUpdateOpenNvidiaApp: "driver-update.open-nvidia-app",
+  driverUpdateOpenDownload: "driver-update.open-download",
+  driverUpdateOpenGuide: "driver-update.open-guide",
+  driverUpdateInstallState: "driver-update.install-state",
+  driverUpdateInstallStateEvent: "driver-update.install-state.event",
+  driverUpdateStartInstall: "driver-update.start-install",
+  driverUpdateClearState: "driver-update.clear-state",
   localAccountAvailable: "local-account.available",
   localAccountSignIn: "local-account.sign-in",
   updateState: "update.state",

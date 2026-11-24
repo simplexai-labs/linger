@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isInkling2MiniModelId } from "@linger/service-kit/featured-models";
+import { minNvidiaDriverForCuda } from "@linger/service-kit/nvidia-driver";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Language } from "../i18n/language.js";
@@ -11,6 +12,8 @@ import zhCN from "../i18n/locales/zh-CN.json" with { type: "json" };
 import { localizePage } from "../i18n/page.js";
 import {
   INKLING_2_MINI_ANNOUNCEMENT_URL,
+  NVIDIA_DRIVER_DOWNLOAD_URL,
+  NVIDIA_DRIVER_GUIDE_URL,
   type SetupCommand,
   type SetupLocalAccount,
   type SetupLocalModelsCheck,
@@ -94,6 +97,9 @@ const openPage = async (
     matchMedia: () => ({ matches: true }),
     lingerSetup: {
       featuredAnnouncementUrl: INKLING_2_MINI_ANNOUNCEMENT_URL,
+      nvidiaDriverDownloadUrl: NVIDIA_DRIVER_DOWNLOAD_URL,
+      nvidiaDriverGuideUrl: NVIDIA_DRIVER_GUIDE_URL,
+      minDriverForCuda: minNvidiaDriverForCuda,
       getState: async () => current,
       onState: (callback: (next: SetupState) => void) => {
         listener = callback;
@@ -452,12 +458,29 @@ describe("setup page Quick Install recommendation", () => {
     };
     const { run } = await openPage(welcome(blockedCuda), "welcome");
     expect($("plan-why").textContent).toBe(
-      "Local model on hold. Your NVIDIA driver supports CUDA 12.1, but local models require CUDA 12.4 or newer. Update your NVIDIA driver, then choose Check again. Quick Install sets up Codex now.",
+      "Local model on hold. Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again. Quick Install sets up Codex now.",
     );
     expect(
       $("plan-why").textContent?.match(/choose Check again/g),
     ).toHaveLength(1);
     expect($("local-recheck").hidden).toBe(false);
+    expect($("local-driver-action").hidden).toBe(false);
+    expect($("local-driver-action").textContent).toBe("Download NVIDIA driver");
+    expect($("local-driver-guide").hidden).toBe(false);
+    $("local-driver-action").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({
+        op: "external.open",
+        url: NVIDIA_DRIVER_DOWNLOAD_URL,
+      }),
+    );
+    $("local-driver-guide").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({
+        op: "external.open",
+        url: NVIDIA_DRIVER_GUIDE_URL,
+      }),
+    );
     $("local-customize").click();
     document
       .querySelector<HTMLButtonElement>(
@@ -470,7 +493,7 @@ describe("setup page Quick Install recommendation", () => {
       "On hold: update your NVIDIA driver, then Check again.",
     );
     expect($("local-model-needs").textContent).toBe(
-      "Your NVIDIA driver supports CUDA 12.1, but local models require CUDA 12.4 or newer. Update your NVIDIA driver, then choose Check again.",
+      "Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
     );
     expect(($("local-model") as HTMLButtonElement).disabled).toBe(true);
     $("local-recheck").click();
@@ -510,7 +533,20 @@ describe("setup page Quick Install recommendation", () => {
             }),
           ],
         },
-        "Your NVIDIA driver supports CUDA 12.1, but local models require CUDA 12.4 or newer. Update your NVIDIA driver, then choose Check again.",
+        "Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
+      ],
+      [
+        {
+          ...small,
+          reasons: [
+            reason({
+              code: "cuda-driver-update-required",
+              detectedCudaVersion: "11.4",
+              requiredCudaVersion: "11.8",
+            }),
+          ],
+        },
+        "Your NVIDIA driver supports CUDA 11.4, but local models require CUDA 11.8 or newer. Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
       ],
       [
         {
@@ -522,7 +558,19 @@ describe("setup page Quick Install recommendation", () => {
             }),
           ],
         },
-        "Your NVIDIA driver is too old for local models (requires CUDA 12.4 or newer). Update your NVIDIA driver, then choose Check again.",
+        "Your NVIDIA driver is too old for local models (requires NVIDIA driver 550+ / CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
+      ],
+      [
+        {
+          ...small,
+          reasons: [
+            reason({
+              code: "cuda-driver-update-required",
+              requiredCudaVersion: "11.8",
+            }),
+          ],
+        },
+        "Your NVIDIA driver is too old for local models (requires CUDA 11.8 or newer). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
       ],
       [
         {
@@ -603,7 +651,7 @@ describe("setup page Quick Install recommendation", () => {
       "welcome",
     );
     expect($("plan-why").textContent).toBe(
-      "Your NVIDIA driver supports CUDA 12.1, but local models require CUDA 12.4 or newer. Update your NVIDIA driver, then choose Check again.",
+      "Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
     );
     expect($("local-recheck").hidden).toBe(false);
     $("local-customize").click();
@@ -616,7 +664,7 @@ describe("setup page Quick Install recommendation", () => {
       "Not available on this computer",
     );
     expect($("local-model-needs").textContent).toBe(
-      "Your NVIDIA driver supports CUDA 12.1, but local models require CUDA 12.4 or newer. Update your NVIDIA driver, then choose Check again.",
+      "Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
     );
     expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
     $("local-recheck").click();
@@ -624,6 +672,36 @@ describe("setup page Quick Install recommendation", () => {
       expect(run).toHaveBeenCalledWith({ op: "local.recheck" }),
     );
     expect(document.body.textContent).not.toContain(TOOL_WORDS);
+  });
+
+  it("offers Open NVIDIA App on Windows when detected and names the required driver branch", async () => {
+    const winState: SetupState = {
+      ...welcome({
+        ...small,
+        blockedNow: true,
+        reasons: [
+          reason({
+            code: "cuda-driver-update-required",
+            detectedCudaVersion: "12.8",
+            requiredCudaVersion: "13.0",
+            driverVersion: "572.83",
+          }),
+        ],
+        recommendation: "codex",
+      }),
+      platform: "win32",
+      driverUpdate: { nvidiaApp: "nvidia_app" },
+    };
+    const { run } = await openPage(winState, "welcome");
+    expect($("plan-why").textContent).toContain(
+      "NVIDIA driver 580+ (CUDA 13.0)",
+    );
+    expect($("local-driver-action").hidden).toBe(false);
+    expect($("local-driver-action").textContent).toBe("Open NVIDIA App");
+    $("local-driver-action").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({ op: "driver.open-nvidia-app" }),
+    );
   });
 
   it("says the stack's memory covers the model and its services", async () => {
@@ -1536,5 +1614,79 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
     );
     expect($("featured-spotlight").hidden).toBe(true);
     expect($("plan-featured-badge").hidden).toBe(true);
+  });
+
+  it("offers one-click driver installation and renders live progress on Windows Setup", async () => {
+    const driverBlocked: SetupLocalModelsCheck = {
+      state: "checked",
+      eligible: false,
+      blockedNow: true,
+      memoryBytes: 32 * GB,
+      diskFreeBytes: 200 * GB,
+      gpu: "NVIDIA GeForce RTX 5060",
+      recommendation: "codex",
+      reasons: [
+        {
+          code: "cuda-driver-update-required",
+          detectedCudaVersion: "12.8",
+          requiredCudaVersion: "13.0",
+          driverVersion: "572.83",
+        },
+      ],
+    };
+    const base = {
+      ...welcome(driverBlocked),
+      platform: "win32" as const,
+      driverUpdate: {
+        nvidiaApp: "nvidia_app" as const,
+        directInstallSupported: true,
+        installState: { phase: "idle" as const },
+      },
+    };
+    const { run, push } = await openPage(base, "welcome");
+
+    expect($("local-driver-install").hidden).toBe(false);
+    expect($("local-driver-install").textContent).toBe("Install driver update");
+    $("local-driver-install").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({
+        op: "driver.start-install",
+        requiredCuda: "13.0",
+      }),
+    );
+
+    push({
+      ...base,
+      driverUpdate: {
+        ...base.driverUpdate,
+        installState: {
+          phase: "downloading",
+          version: "621.24",
+          completedBytes: 512 * 1024 ** 2,
+          totalBytes: 1024 * 1024 ** 2,
+        },
+      },
+    });
+    expect($("local-driver-status").hidden).toBe(false);
+    expect($("local-driver-status").textContent).toContain(
+      "Downloading NVIDIA driver 621.24",
+    );
+    expect(($("local-driver-install") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    push({
+      ...base,
+      driverUpdate: {
+        ...base.driverUpdate,
+        installState: {
+          phase: "reboot_required",
+          version: "621.24",
+        },
+      },
+    });
+    expect($("local-driver-status").textContent).toContain(
+      "NVIDIA driver 621.24 installed. Restart Windows to finish",
+    );
   });
 });

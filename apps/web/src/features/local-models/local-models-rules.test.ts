@@ -1244,4 +1244,64 @@ describe("hostBlocker, RAM reclaimability, and diagnostics copy", () => {
       "inkling-2-mini-q4-poly:UD-Q4_K_XL",
     );
   });
+
+  it("prefers a hardware-fitting driver-update Inkling variant over a VRAM-insufficient Q4 variant", () => {
+    const q4TooBig = {
+      ...modelView(
+        localModel({
+          availability: {
+            downloadable: false,
+            reason: {
+              code: "MEMORY_INSUFFICIENT",
+              have_bytes: gb(8),
+              memory_kind: "vram",
+              need_bytes: gb(20),
+            },
+          },
+          engine: "polystrata",
+          fit: "none",
+          id: "inkling-2-mini-q4-poly:UD-Q4_K_XL",
+          name: "Inkling 2 Mini (UD-Q4_K_XL)",
+          pool: undefined,
+          quant: "UD-Q4_K_XL",
+          recommended: false,
+        }),
+      ),
+      status: "unavailable" as const,
+    };
+    const q3DriverBlocked = {
+      ...modelView(
+        localModel({
+          availability: {
+            downloadable: false,
+            reason: {
+              code: "DRIVER_UPDATE_REQUIRED",
+              detected_cuda: "12.8",
+              driver_version: "572.83",
+              required_cuda: "13.0",
+            },
+          },
+          engine: "polystrata",
+          fit: "none",
+          id: "inkling-2-mini-q3-poly:UD-Q3_K_XL",
+          name: "Inkling 2 Mini (UD-Q3_K_XL)",
+          pool: undefined,
+          quant: "UD-Q3_K_XL",
+          recommended: false,
+        }),
+      ),
+      status: "unavailable" as const,
+    };
+    expect(featuredInklingEntry([q4TooBig, q3DriverBlocked])?.model.id).toBe(
+      "inkling-2-mini-q3-poly:UD-Q3_K_XL",
+    );
+    expect(
+      unavailableCopy(
+        q3DriverBlocked.model.availability.reason,
+        false,
+        translate,
+        "PolyStrata",
+      ),
+    ).toContain("PolyStrata requires NVIDIA driver 580+");
+  });
 });

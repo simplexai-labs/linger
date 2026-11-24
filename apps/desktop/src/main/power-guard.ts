@@ -25,6 +25,7 @@ export class PowerGuardModule implements Module {
   #modelInvokes = 0;
   #modelTail: NodeJS.Timeout | undefined;
   #installing = false;
+  #updatingDriver = false;
   #blocker: number | undefined;
   #lastEmitted:
     | { readonly active: boolean; readonly alwaysOn: boolean }
@@ -54,6 +55,10 @@ export class PowerGuardModule implements Module {
       }),
       ctx.bus.on("local-server.busy", (busy) => {
         this.#installing = busy;
+        this.#apply();
+      }),
+      ctx.bus.on("driver-update.busy", (busy) => {
+        this.#updatingDriver = busy;
         this.#apply();
       }),
       this.#power.onPowerEvent((kind) => {
@@ -104,13 +109,15 @@ export class PowerGuardModule implements Module {
       this.#running > 0 ||
       this.#modelInvokes > 0 ||
       this.#modelTail !== undefined ||
-      this.#installing;
+      this.#installing ||
+      this.#updatingDriver;
     if (want && this.#blocker === undefined) {
       this.#blocker = this.#power.block();
       this.#ctx!.log.info("power.blocking", {
         running: this.#running,
         model_invokes: this.#modelInvokes,
         installing: this.#installing,
+        updating_driver: this.#updatingDriver,
       });
     } else if (!want) {
       this.#release();

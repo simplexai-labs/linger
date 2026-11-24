@@ -3719,6 +3719,20 @@ describe("Model source", () => {
     );
     expect(banner).toHaveTextContent("CUDA 11.8");
     expect(banner).toHaveTextContent("CUDA 12.4");
+    fireEvent.click(
+      within(banner).getByRole("button", { name: "Update driver…" }),
+    );
+    const driverDialog = await screen.findByRole("dialog", {
+      name: "Update NVIDIA driver",
+    });
+    expect(driverDialog).toHaveTextContent("Driver 525.60 · CUDA 11.8");
+    expect(driverDialog).toHaveTextContent("Driver 550+ · CUDA 12.4");
+    fireEvent.click(within(driverDialog).getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Update NVIDIA driver" }),
+      ).toBeNull(),
+    );
     await waitFor(() => expect(fixture.refreshes).toEqual(["computer-lab"]));
     fixture.refreshes.length = 0;
     fireEvent.click(
@@ -5003,5 +5017,226 @@ describe("Featured Inkling 2 Mini spotlight", () => {
       zhCN.localModels.statusProbingConcurrency,
     );
     expect(plainCard).toHaveTextContent(zhCN.localModels.statusLoading);
+  });
+
+  it("features the hardware-fitting Inkling driver-blocked variant and opens UpdateDriverDialog with recheck", async () => {
+    const q4TooBig = localModel({
+      availability: {
+        downloadable: false,
+        reason: {
+          code: "MEMORY_INSUFFICIENT",
+          have_bytes: gb(8),
+          need_bytes: gb(24),
+        },
+      },
+      engine: "polystrata",
+      engine_label: "PolyStrata 0.2.19-poly.1",
+      fit: "none",
+      id: "inkling-2-mini-q4-poly:UD-Q4_K_XL",
+      memory_bytes: gb(19),
+      name: "Inkling 2 Mini (UD-Q4_K_XL)",
+      pool: undefined,
+      quant: "UD-Q4_K_XL",
+      recommended: false,
+      state: "absent",
+    });
+    const q3DriverBlocked = localModel({
+      availability: {
+        downloadable: false,
+        reason: {
+          code: "DRIVER_UPDATE_REQUIRED",
+          detected_cuda: "12.8",
+          driver_version: "572.83",
+          required_cuda: "13.0",
+        },
+      },
+      engine: "polystrata",
+      engine_label: "PolyStrata 0.2.19-poly.1",
+      fit: "none",
+      id: "inkling-2-mini-q3-poly:UD-Q3_K_XL",
+      memory_bytes: gb(8),
+      name: "Inkling 2 Mini (UD-Q3_K_XL)",
+      pool: undefined,
+      quant: "UD-Q3_K_XL",
+      recommended: false,
+      state: "absent",
+    });
+    const loadedSpark = localModel({
+      engine: "llama.cpp",
+      engine_label: "llama.cpp b12588",
+      id: "spark-x2.6-4b:Q8_0",
+      memory_bytes: gb(6.4),
+      name: "Spark-X2.6 4B (Q8_0)",
+      pi_model: "localmodels-library/spark-x2.6-4b",
+      pool: "gpu:0",
+      quant: "Q8_0",
+      state: "loaded",
+    });
+    const win5060 = labView({
+      computer: {
+        ...labView().computer,
+        host: {
+          arch: "x86_64",
+          disk_free_bytes: gb(250),
+          engine_label: "llama.cpp + PolyStrata",
+          gpus: [
+            {
+              free_bytes: gb(7.2),
+              index: 0,
+              name: "NVIDIA GeForce RTX 5060",
+              total_bytes: gb(8),
+              uuid: "GPU-5060",
+            },
+          ],
+          os_label: "Windows 11",
+          platform: "windows",
+          ram_total_bytes: gb(32),
+        },
+      },
+      models: [
+        modelView(q4TooBig),
+        modelView(q3DriverBlocked),
+        modelView(loadedSpark, ["Another Me"]),
+      ],
+      pools: [gpuPool(0, 8)],
+    });
+
+    const fixture = setup([win5060]);
+    await renderPage(fixture);
+    await findModels();
+
+    const spotlight = spotlightRegion();
+    expect(spotlight).toHaveTextContent("Inkling 2 Mini (UD-Q3_K_XL)");
+    expect(spotlight).not.toHaveTextContent("UD-Q4_K_XL");
+
+    // Expand the spotlight row to check engine-scoped guidance and ready-alternatives hint.
+    fireEvent.click(
+      within(spotlight).getByRole("button", {
+        name: "Inkling 2 Mini (UD-Q3_K_XL)",
+      }),
+    );
+    expect(spotlight).toHaveTextContent(
+      "PolyStrata requires NVIDIA driver 580+ (CUDA 13.0). Your driver supports CUDA 12.8 — only the graphics driver needs an update, not CUDA Toolkit.",
+    );
+    expect(spotlight).toHaveTextContent(
+      "Other models on this computer already work without updating your driver.",
+    );
+
+    // Expanded details keep the actionable Update driver button alongside the row action.
+    expect(
+      within(spotlight).getByRole("button", { name: "Update driver…" }),
+    ).toBeInTheDocument();
+
+    // Clicking the compact Update driver action opens the guided dialog.
+    fireEvent.click(
+      within(spotlight).getByRole("button", {
+        name: "Update NVIDIA driver for Inkling 2 Mini (UD-Q3_K_XL)",
+      }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Update NVIDIA driver",
+    });
+    expect(dialog).toHaveTextContent("NVIDIA GeForce RTX 5060");
+    expect(dialog).toHaveTextContent("Driver 572.83 · CUDA 12.8");
+    expect(dialog).toHaveTextContent("Driver 580+ · CUDA 13.0");
+
+    await waitFor(() => expect(fixture.refreshes).toEqual(["computer-lab"]));
+    fixture.refreshes.length = 0;
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Check again" }),
+    );
+    await waitFor(() => expect(fixture.refreshes).toEqual(["computer-lab"]));
+  });
+
+  it("shows post-reboot driver completion banner with direct model download and dismisses cleanly", async () => {
+    const clearInstallState = vi.fn(async () => {});
+    const previousDesktop = (window as { lingerDesktop?: unknown })
+      .lingerDesktop;
+    (window as { lingerDesktop?: unknown }).lingerDesktop = {
+      computer: {
+        enroll: vi.fn(),
+        getStatus: vi.fn(async () => ({
+          activeOperations: 0,
+          bridge: "connected",
+          computerId: "computer-lab",
+          preventSleep: false,
+          runtime: "ready",
+        })),
+        onStatus: vi.fn(() => () => {}),
+        unenroll: vi.fn(),
+      },
+      driverUpdate: {
+        clearInstallState,
+        getCapabilities: vi.fn(async () => ({
+          directInstallSupported: true,
+          nvidiaApp: "nvidia_app",
+          platform: "win32",
+        })),
+        getInstallState: vi.fn(async () => ({
+          phase: "completed",
+          resumeModelId: "inkling-2-mini-q3-poly:UD-Q3_K_XL",
+          version: "621.24",
+        })),
+        onInstallState: vi.fn(() => () => {}),
+        openGuide: vi.fn(),
+        openNvidiaApp: vi.fn(),
+        openOfficialDownload: vi.fn(),
+        startInstall: vi.fn(),
+      },
+      platform: "win32",
+      version: "0.16.20",
+    };
+
+    try {
+      const unlockedInkling = localModel({
+        availability: { downloadable: true },
+        engine: "polystrata",
+        engine_label: "PolyStrata 0.2.19-poly.1",
+        fit: "gpu",
+        id: "inkling-2-mini-q3-poly:UD-Q3_K_XL",
+        memory_bytes: gb(8),
+        name: "Inkling 2 Mini (UD-Q3_K_XL)",
+        pool: "gpu:0",
+        quant: "UD-Q3_K_XL",
+        recommended: true,
+        state: "absent",
+      });
+      const fixture = setup([
+        labView({
+          models: [modelView(unlockedInkling)],
+          pools: [gpuPool(0, 8)],
+        }),
+      ]);
+      await renderPage(fixture);
+      await findModels();
+
+      const banner = await screen.findByRole("complementary", {
+        name: "NVIDIA driver update status",
+      });
+      expect(banner).toHaveTextContent("NVIDIA driver 621.24 is ready");
+      expect(banner).toHaveTextContent(
+        "Your local models have been rechecked — Inkling 2 Mini (UD-Q3_K_XL) is ready to download.",
+      );
+
+      fireEvent.click(
+        within(banner).getByRole("button", {
+          name: "Download Inkling 2 Mini (UD-Q3_K_XL)",
+        }),
+      );
+      await waitFor(() => expect(clearInstallState).toHaveBeenCalledOnce());
+      await waitFor(() =>
+        expect(fixture.actions).toContainEqual({
+          body: { action: "download" },
+          computerId: "computer-lab",
+          modelId: "inkling-2-mini-q3-poly:UD-Q3_K_XL",
+        }),
+      );
+    } finally {
+      if (previousDesktop === undefined) {
+        delete (window as { lingerDesktop?: unknown }).lingerDesktop;
+      } else {
+        (window as { lingerDesktop?: unknown }).lingerDesktop = previousDesktop;
+      }
+    }
   });
 });

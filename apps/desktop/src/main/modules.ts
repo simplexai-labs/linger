@@ -23,6 +23,8 @@ export interface BusEvents {
   // The local server's installer reported new runtime or localmodels paths.
   "computer.runtime": [];
   "diagnostics.changed": [];
+  "driver-update.busy": [busy: boolean];
+  "driver-update.changed": [];
   "grants.changed": [];
   // The shell's language changed; menus, the tray and shell pages redraw.
   "language.changed": [language: Language];

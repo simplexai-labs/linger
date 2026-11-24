@@ -3,6 +3,12 @@
 // this computer and the system permissions it needs.
 
 import { INKLING_2_MINI_ANNOUNCEMENT_URL } from "@linger/service-kit/featured-models";
+import {
+  NVIDIA_DRIVER_DOWNLOAD_URL,
+  NVIDIA_DRIVER_GUIDE_URL,
+  type DesktopDriverInstallState,
+  type DesktopNvidiaAppKind,
+} from "@linger/service-kit/nvidia-driver";
 import type {
   SetupChoice,
   SetupMemory,
@@ -281,19 +287,39 @@ export interface SetupState {
   readonly permissions?: Readonly<
     Record<SetupPermission, SetupPermissionStatus>
   >;
+  // NVIDIA driver update helper capabilities and install state on this computer.
+  readonly driverUpdate?: {
+    readonly nvidiaApp: DesktopNvidiaAppKind;
+    readonly directInstallSupported?: boolean;
+    readonly installState?: DesktopDriverInstallState;
+  };
 }
 
 // Exact HTTPS URLs that the sandboxed setup page may ask the main process to
 // open in the system browser. Any other URL is rejected at the IPC boundary.
-export const SETUP_EXTERNAL_URLS = [INKLING_2_MINI_ANNOUNCEMENT_URL] as const;
+export const SETUP_EXTERNAL_URLS = [
+  INKLING_2_MINI_ANNOUNCEMENT_URL,
+  NVIDIA_DRIVER_DOWNLOAD_URL,
+  NVIDIA_DRIVER_GUIDE_URL,
+] as const;
 
 export type SetupExternalUrl = (typeof SETUP_EXTERNAL_URLS)[number];
 
-export { INKLING_2_MINI_ANNOUNCEMENT_URL };
+export {
+  INKLING_2_MINI_ANNOUNCEMENT_URL,
+  NVIDIA_DRIVER_DOWNLOAD_URL,
+  NVIDIA_DRIVER_GUIDE_URL,
+};
 
 export type SetupCommand =
   | { readonly op: "server.set"; readonly serverUrl: string }
   | { readonly op: "external.open"; readonly url: SetupExternalUrl }
+  | { readonly op: "driver.open-nvidia-app" }
+  | {
+      readonly op: "driver.start-install";
+      readonly requiredCuda?: string;
+    }
+  | { readonly op: "driver.clear-state" }
   | {
       readonly op: "local.start";
       readonly runtime?: SetupLocalRuntime;
@@ -364,6 +390,9 @@ export type SetupCommand =
 
 export interface LingerSetupApi {
   readonly featuredAnnouncementUrl: SetupExternalUrl;
+  readonly nvidiaDriverDownloadUrl: SetupExternalUrl;
+  readonly nvidiaDriverGuideUrl: SetupExternalUrl;
+  minDriverForCuda(requiredCuda: string | undefined): string | undefined;
   getState(): Promise<SetupState>;
   onState(callback: (state: SetupState) => void): () => void;
   run(command: SetupCommand): Promise<SetupState>;

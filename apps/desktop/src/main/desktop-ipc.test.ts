@@ -64,6 +64,22 @@ const fixture = async (
     state: () => "ready",
     running: () => 0,
   };
+  const driverUpdater = {
+    capabilities: vi.fn(() => ({
+      platform: "win32" as const,
+      nvidiaApp: "nvidia_app" as const,
+      directInstallSupported: false,
+    })),
+    openNvidiaApp: vi.fn(async () => ({ ok: true as const })),
+    openOfficialDownload: vi.fn(async () => ({ ok: true as const })),
+    openGuide: vi.fn(async () => ({ ok: true as const })),
+    installState: vi.fn(() => ({ phase: "idle" as const })),
+    startInstall: vi.fn(async () => ({
+      ok: false as const,
+      reason: "unsupported" as const,
+    })),
+    clearInstallState: vi.fn(),
+  };
   const send = vi.fn();
   const windows = {
     ...stubModule("WindowManager"),
@@ -84,7 +100,7 @@ const fixture = async (
       stubModule("WorkspaceGrants"),
       updater as never,
       local as never,
-      new DesktopIpcModule({ defaultDisplayName: "Desk" }),
+      new DesktopIpcModule({ defaultDisplayName: "Desk", driverUpdater }),
     ],
     { serverUrl: SERVER },
     bus,
@@ -100,6 +116,7 @@ const fixture = async (
     host,
     bus,
     diagnostics,
+    driverUpdater,
     language,
     local,
     power,
@@ -326,6 +343,76 @@ describe("DesktopIpcModule settings", () => {
       f.invoke(IPC.settingsSet, SERVER, { serverUrl: "https://evil.example" }),
     ).toThrow();
     expect(f.power.setAlwaysOn).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+});
+
+describe("DesktopIpcModule driverUpdate", () => {
+  it("forwards driver update queries and actions from the server origin", async () => {
+    const f = await fixture();
+    expect(await f.invoke(IPC.driverUpdateCapabilities)).toEqual({
+      platform: "win32",
+      nvidiaApp: "nvidia_app",
+      directInstallSupported: false,
+    });
+    expect(await f.invoke(IPC.driverUpdateOpenNvidiaApp)).toEqual({ ok: true });
+    expect(await f.invoke(IPC.driverUpdateOpenDownload)).toEqual({ ok: true });
+    expect(await f.invoke(IPC.driverUpdateOpenGuide)).toEqual({ ok: true });
+    expect(await f.invoke(IPC.driverUpdateInstallState)).toEqual({
+      phase: "idle",
+    });
+    expect(
+      await f.invoke(IPC.driverUpdateStartInstall, SERVER, {
+        gpuName: "NVIDIA GeForce RTX 5060",
+        requiredCuda: "13.0",
+        resumeModelId: "inkling-2-mini-q3-poly:UD-Q3_K_XL",
+      }),
+    ).toEqual({ ok: false, reason: "unsupported" });
+    expect(f.driverUpdater.openNvidiaApp).toHaveBeenCalledOnce();
+    expect(f.driverUpdater.openOfficialDownload).toHaveBeenCalledOnce();
+    expect(f.driverUpdater.openGuide).toHaveBeenCalledOnce();
+    expect(f.driverUpdater.startInstall).toHaveBeenCalledWith({
+      gpuName: "NVIDIA GeForce RTX 5060",
+      requiredCuda: "13.0",
+      resumeModelId: "inkling-2-mini-q3-poly:UD-Q3_K_XL",
+    });
+
+    await f.invoke(IPC.driverUpdateClearState);
+    expect(f.driverUpdater.clearInstallState).toHaveBeenCalledOnce();
+
+    f.driverUpdater.installState.mockReturnValue({
+      phase: "verifying",
+      version: "621.24",
+    } as never);
+    f.bus.emit("driver-update.changed");
+    expect(f.send).toHaveBeenCalledWith(IPC.driverUpdateInstallStateEvent, {
+      phase: "verifying",
+      version: "621.24",
+    });
+    await f.host.stop("quit");
+  });
+
+  it("rejects untrusted origins and invalid startInstall payloads", async () => {
+    const f = await fixture();
+    for (const channel of [
+      IPC.driverUpdateCapabilities,
+      IPC.driverUpdateOpenNvidiaApp,
+      IPC.driverUpdateOpenDownload,
+      IPC.driverUpdateOpenGuide,
+      IPC.driverUpdateInstallState,
+      IPC.driverUpdateStartInstall,
+      IPC.driverUpdateClearState,
+    ]) {
+      expect(() => f.invoke(channel, "https://evil.example.com")).toThrow(
+        "Not allowed",
+      );
+    }
+    expect(() =>
+      f.invoke(IPC.driverUpdateStartInstall, SERVER, {
+        requiredCuda: "bad;rm -rf /",
+      }),
+    ).toThrow();
+    expect(f.driverUpdater.startInstall).not.toHaveBeenCalled();
     await f.host.stop("quit");
   });
 });

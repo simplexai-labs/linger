@@ -102,9 +102,19 @@ function preferredInklingRank(model: LocalModel): number {
   return 0;
 }
 
+function unavailableReasonPriority(entry: ModelEntry): number {
+  if (entry.status !== "unavailable") return 0;
+  // A hardware-fitting variant that only needs a driver update unlocks as soon
+  // as the driver is updated, unlike variants blocked by VRAM/RAM capacity.
+  return entry.model.availability.reason?.code === "DRIVER_UPDATE_REQUIRED"
+    ? 0
+    : 1;
+}
+
 /**
  * Picks the best Inkling 2 Mini entry from a Computer's library for the
- * featured spotlight: highest status first, then better hardware fit, then
+ * featured spotlight: highest status first, then driver-unlockable unavailable
+ * variants ahead of hardware-insufficient ones, then better hardware fit, then
  * Computer recommendation, preferring top Q4 variants when ties remain.
  */
 export function featuredInklingEntry(
@@ -117,10 +127,23 @@ export function featuredInklingEntry(
   return [...matching].sort(
     (a, b) =>
       modelStatuses.indexOf(a.status) - modelStatuses.indexOf(b.status) ||
+      unavailableReasonPriority(a) - unavailableReasonPriority(b) ||
       fitOrder[a.model.fit] - fitOrder[b.model.fit] ||
       Number(b.model.recommended) - Number(a.model.recommended) ||
       preferredInklingRank(b.model) - preferredInklingRank(a.model),
   )[0];
+}
+
+/** Whether at least one model on this Computer is already usable without a driver update. */
+export function hasReadyLocalModels(entries: readonly ModelEntry[]): boolean {
+  return entries.some(
+    (entry) =>
+      entry.status === "loaded" ||
+      entry.status === "loading" ||
+      entry.status === "idle" ||
+      entry.status === "downloading" ||
+      entry.status === "available",
+  );
 }
 
 /** The library as one list: by status, then recommended, then featured, then by fit. */

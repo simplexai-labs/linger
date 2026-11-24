@@ -398,8 +398,12 @@ export function ModelRow({
   disabled,
   entry,
   expanded,
+  hasReadyAlternatives = false,
   inSpotlight = false,
   onAssignAgent,
+  onRecheck,
+  onUpdateDriver,
+  rechecking = false,
   requested,
   switchingForAgents = false,
   view,
@@ -413,9 +417,13 @@ export function ModelRow({
   disabled: boolean;
   entry: ModelEntry;
   expanded: boolean;
+  hasReadyAlternatives?: boolean;
   /** Rendered inside `FeaturedModelSpotlight`, which already carries the partner header. */
   inSpotlight?: boolean;
   onAssignAgent?: (agent: AssignableLocalModelAgent) => void;
+  onRecheck?: () => void;
+  onUpdateDriver?: () => void;
+  rechecking?: boolean;
   /** An action asked for and not yet in a snapshot. */
   requested?: LocalModelAction;
   switchingForAgents?: boolean;
@@ -703,6 +711,21 @@ export function ModelRow({
             >
               {t(action[0])}
             </Button>
+          ) : status === "unavailable" &&
+            model.availability.reason?.code === "DRIVER_UPDATE_REQUIRED" &&
+            onUpdateDriver ? (
+            <Button
+              aria-label={t(m.updateDriverNamed, { name: model.name })}
+              className="px-2.5"
+              onClick={(event) => {
+                stopRowClick(event);
+                onUpdateDriver();
+              }}
+              size="compact"
+              tone={inSpotlight && !expanded ? "primary" : "secondary"}
+            >
+              {t(m.updateDriver)}
+            </Button>
           ) : null}
           <Button
             aria-hidden
@@ -746,7 +769,11 @@ export function ModelRow({
               disabled={disabled}
               entry={entry}
               hasPrimaryAssignAction={showsPrimaryAssignButton}
+              hasReadyAlternatives={hasReadyAlternatives}
               onAssignAgent={onAssignAgent}
+              onRecheck={onRecheck}
+              onUpdateDriver={onUpdateDriver}
+              rechecking={rechecking}
               view={view}
             />
             {removable || stopped ? (

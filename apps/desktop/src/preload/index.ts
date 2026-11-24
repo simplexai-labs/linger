@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC,
   type ComputerStatus,
+  type DesktopDriverInstallState,
   type DesktopSettings,
   type DesktopUpdateState,
   type LingerDesktopApi,
@@ -104,6 +105,27 @@ const api: LingerDesktopApi = {
   },
   diagnostics: {
     save: () => ipcRenderer.invoke(IPC.diagnosticsSave),
+  },
+  driverUpdate: {
+    getCapabilities: () => ipcRenderer.invoke(IPC.driverUpdateCapabilities),
+    openNvidiaApp: () => ipcRenderer.invoke(IPC.driverUpdateOpenNvidiaApp),
+    openOfficialDownload: () =>
+      ipcRenderer.invoke(IPC.driverUpdateOpenDownload),
+    openGuide: () => ipcRenderer.invoke(IPC.driverUpdateOpenGuide),
+    getInstallState: () => ipcRenderer.invoke(IPC.driverUpdateInstallState),
+    onInstallState: (callback) => {
+      const listener = (
+        _event: unknown,
+        state: DesktopDriverInstallState,
+      ): void => callback(state);
+      ipcRenderer.on(IPC.driverUpdateInstallStateEvent, listener);
+      return () => {
+        ipcRenderer.off(IPC.driverUpdateInstallStateEvent, listener);
+      };
+    },
+    startInstall: (request) =>
+      ipcRenderer.invoke(IPC.driverUpdateStartInstall, request),
+    clearInstallState: () => ipcRenderer.invoke(IPC.driverUpdateClearState),
   },
   ...(process.platform === "darwin"
     ? {

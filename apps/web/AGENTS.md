@@ -54,8 +54,14 @@ build:assets` to check the initial JS budget.
   `Use for Agents` on a loaded row, highlights Thinking Machines' Inkling 2
   Mini in a featured spotlight frame (`featured-model-spotlight.tsx`) wrapping
   the matching `ModelRow` so status and actions stay in one place (matched via
-  `@linger/service-kit/featured-models`, degrading to a partner highlight with
-  external links when absent from the catalog),
+  `@linger/service-kit/featured-models`, preferring a hardware-fitting
+  `DRIVER_UPDATE_REQUIRED` variant over a `MEMORY_INSUFFICIENT` one, and
+  degrading to a partner highlight with external links when absent from the
+  catalog), guides owners through outdated NVIDIA drivers via
+  `UpdateDriverDialog` (`local-model-driver-dialog.tsx`) with engine-scoped
+  driver guidance, signed one-click Windows installation with live progress and
+  post-reboot resume banners (`window.lingerDesktop.driverUpdate`), desktop
+  NVIDIA App launch, copyable Linux commands, and focus-triggered rechecks,
   renders tinted family icon tiles, Agent
   usage counts, structured engine pills (`PolyStrata` / `llama.cpp` / `Strata`),
   capability/parameter badges (never matched against

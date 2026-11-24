@@ -208,9 +208,16 @@ Gateway and runs Agents. The daemon exits with the app.
   (`local_server.inspected`), never to the page. Under Customize the Local
   model card stays visible once the check ends: disabled, "Not available on
   this computer", with that reason. For `cuda-driver-update-required` and
-  `cuda-driver-version-unknown`, the page explains the NVIDIA driver
-  requirement and shows Check again (`local.recheck`) so the user can
-  re-check after updating the driver.
+  `cuda-driver-version-unknown`, the page explains the NVIDIA graphics driver
+  requirement (with required driver branch via `@linger/service-kit/nvidia-driver`),
+  offers one-click verified Windows GeForce RTX driver installation
+  (`driver.start-install`, downloading from NVIDIA's allowlisted CDN, verifying
+  NVIDIA Authenticode signature before elevated silent install, and persisting
+  `pendingDriverUpdate` across reboots), NVIDIA App launch on Windows
+  (`driver.open-nvidia-app`), NVIDIA's official download and upgrade guide links
+  (`SETUP_EXTERNAL_URLS`), and Check again (`local.recheck`), and auto-rechecks
+  when installation completes or the setup window regains focus after a driver
+  action.
   Off macOS the page names the system tray, not the menu bar.
   Under Customize the local model runs only behind Pi: with another runtime
   it is greyed (`aria-disabled`, still focusable), does not toggle, and says
@@ -487,7 +494,14 @@ Gateway and runs Agents. The daemon exits with the app.
   `update` reads the Updater's state (without the release page URL) and runs
   the tray's install and check, for the SPA's account menu; `settings` exposes
   `preventSleep` (`get`, `set`, `onChange`) so Settings › Computers mirrors and
-  stays in sync with the tray's Prevent Sleep toggle.
+  stays in sync with the tray's Prevent Sleep toggle; `driverUpdate`
+  (`src/main/driver-updater.ts`, `src/main/windows-driver-platform.ts`) detects
+  and launches NVIDIA App / GeForce Experience on Windows, opens the allowlisted
+  NVIDIA download/guide URLs, and on Windows x64 runs verified one-click GeForce
+  RTX DCH WHQL downloads (allowlisted CDN, Windows Authenticode check, elevated
+  `-s -noreboot -noeula` install, `PowerGuard` sleep block, and `config.json`
+  `pendingDriverUpdate` post-reboot resume) with `getInstallState` /
+  `onInstallState` / `startInstall` / `clearInstallState`.
 - `src/shared/api.ts`, `src/shared/shell.ts`: preload contract types and IPC
   channel names.
 - `src/main/computer-daemon.ts`: ComputerDaemon. While the computer is

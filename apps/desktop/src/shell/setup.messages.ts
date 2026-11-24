@@ -117,11 +117,38 @@ export const setupMessages = defineMessages("setup", {
     "The Pi runtime required for local models isn't ready right now. Check your connection or permissions.",
   reasonFacts: "Linger couldn't read this computer's memory, disk or GPU.",
   reasonCudaUpdate:
-    "Your NVIDIA driver supports CUDA {has}, but local models require CUDA {needs} or newer. Update your NVIDIA driver, then choose Check again.",
+    "Your NVIDIA driver supports CUDA {has}, but local models require CUDA {needs} or newer. Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
+  reasonCudaUpdateDriver:
+    "Your NVIDIA driver supports CUDA {has}, but local models require NVIDIA driver {driver}+ (CUDA {needs}). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
   reasonCudaTooOldNeeds:
-    "Your NVIDIA driver is too old for local models (requires CUDA {needs} or newer). Update your NVIDIA driver, then choose Check again.",
+    "Your NVIDIA driver is too old for local models (requires CUDA {needs} or newer). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
+  reasonCudaTooOldDriver:
+    "Your NVIDIA driver is too old for local models (requires NVIDIA driver {driver}+ / CUDA {needs}). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
   reasonCudaTooOld:
-    "Your NVIDIA driver is too old for local models. Update your NVIDIA driver, then choose Check again.",
+    "Your NVIDIA driver is too old for local models. Update your NVIDIA graphics driver, then choose Check again.",
+  installDriverUpdate: "Install driver update",
+  openNvidiaApp: "Open NVIDIA App",
+  openGeForceExperience: "Open GeForce Experience",
+  downloadNvidiaDriver: "Download NVIDIA driver",
+  driverUpdateGuide: "Upgrade guide",
+  driverDownloading: "Downloading NVIDIA driver {version}…",
+  driverDownloadingSize:
+    "Downloading NVIDIA driver {version}… {done} of {total}",
+  driverVerifying: "Verifying NVIDIA digital signature for {version}…",
+  driverInstalling:
+    "Installing NVIDIA driver {version}… Your screen may blink briefly.",
+  driverRebootRequired:
+    "NVIDIA driver {version} installed. Restart Windows to finish, then reopen Linger.",
+  driverInstallComplete:
+    "NVIDIA driver {version} installed. Rechecking your computer…",
+  driverUacCancelled:
+    "Administrator permission was cancelled. Try again or update through NVIDIA App.",
+  driverSignatureInvalid:
+    "Downloaded installer failed NVIDIA signature verification and was deleted.",
+  driverUnsupportedGpu:
+    "Automatic install supports GeForce RTX cards. Use NVIDIA App or the official NVIDIA download instead.",
+  driverInstallFailed:
+    "Automatic driver update didn't finish. Use NVIDIA App or download directly from NVIDIA.",
   reasonCudaUnknownNeeds:
     "Linger couldn't read the CUDA version from your NVIDIA driver (requires CUDA {needs} or newer). Update or reinstall your NVIDIA driver, then choose Check again.",
   reasonCudaUnknown:

@@ -1,3 +1,4 @@
+import { minNvidiaDriverForCuda } from "@linger/service-kit/nvidia-driver";
 import type { components } from "@linger/wire-contracts/teamhub-public/types";
 
 import type { Translate } from "@/i18n/language";
@@ -206,6 +207,7 @@ export function unavailableCopy(
   reason: AvailabilityReason | undefined,
   reclaimable: boolean,
   t: Translate,
+  engine?: string,
 ) {
   const sizes =
     reason?.need_bytes === undefined || reason.have_bytes === undefined
@@ -246,8 +248,46 @@ export function unavailableCopy(
       if (reason.gpu_vendor === "amd") return t(m.unavailableGpuAmd);
       if (reason.gpu_vendor === "intel") return t(m.unavailableGpuIntel);
       return t(m.unavailableGpuNone);
-    case "DRIVER_UPDATE_REQUIRED":
+    case "DRIVER_UPDATE_REQUIRED": {
+      const driver = minNvidiaDriverForCuda(reason.required_cuda);
+      if (engine) {
+        if (reason.detected_cuda && reason.required_cuda) {
+          if (driver) {
+            return t(m.unavailableDriverEngineVersionsDriver, {
+              detected: reason.detected_cuda,
+              driver,
+              engine,
+              required: reason.required_cuda,
+            });
+          }
+          return t(m.unavailableDriverEngineVersions, {
+            detected: reason.detected_cuda,
+            engine,
+            required: reason.required_cuda,
+          });
+        }
+        if (reason.required_cuda) {
+          if (driver) {
+            return t(m.unavailableDriverEngineRequiredDriver, {
+              driver,
+              engine,
+              required: reason.required_cuda,
+            });
+          }
+          return t(m.unavailableDriverEngineRequiredOnly, {
+            engine,
+            required: reason.required_cuda,
+          });
+        }
+      }
       if (reason.detected_cuda && reason.required_cuda) {
+        if (driver) {
+          return t(m.unavailableDriverUpdateVersionsDriver, {
+            detected: reason.detected_cuda,
+            driver,
+            required: reason.required_cuda,
+          });
+        }
         return t(m.unavailableDriverUpdateVersions, {
           detected: reason.detected_cuda,
           required: reason.required_cuda,
@@ -259,6 +299,7 @@ export function unavailableCopy(
         });
       }
       return t(m.unavailableDriverUpdateUnknown);
+    }
     case "RUNTIME_DEPENDENCY_MISSING":
       if (reason.missing_libraries?.length) {
         return t(m.unavailableMissingLibraries, {

@@ -69,6 +69,17 @@ const desktopConfig = z.object({
     .refine(isUploadUrl)
     .optional()
     .catch(undefined),
+  // Persisted when a Windows NVIDIA driver update requires a reboot, so the
+  // next launch after reboot can auto-recheck local models and surface a ready
+  // notice for the model the person tried to unlock.
+  pendingDriverUpdate: z
+    .object({
+      targetVersion: z.string().min(1),
+      resumeModelId: z.string().optional(),
+      updatedAt: z.string().min(1),
+    })
+    .optional()
+    .catch(undefined),
   window: z
     .object({
       x: z.number().int(),

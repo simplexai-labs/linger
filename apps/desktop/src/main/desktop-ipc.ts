@@ -14,6 +14,7 @@ import type { ComputerDaemonModule } from "./computer-daemon.js";
 import type { WorkspaceGrant } from "./config.js";
 import { ConnectorOAuth } from "./connector-oauth.js";
 import type { DiagnosticsModule } from "./diagnostics.js";
+import type { DriverUpdaterHost } from "./driver-updater.js";
 import type { EnrollmentModule } from "./enrollment.js";
 import type { LanguageModule } from "./language.js";
 import type { LocalServerModule } from "./local-server.js";
@@ -60,6 +61,22 @@ const permissionStepInput = z.discriminatedUnion("action", [
     .strict(),
 ]);
 
+const driverInstallRequestInput = z
+  .object({
+    gpuName: z.string().trim().min(1).max(200).optional(),
+    requiredCuda: z
+      .string()
+      .trim()
+      .regex(/^\d+(?:\.\d+){0,2}$/)
+      .optional(),
+    resumeModelId: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/)
+      .optional(),
+  })
+  .strict();
+
 const view = (grant: WorkspaceGrant): WorkspaceGrantView => ({ ...grant });
 
 // The page learns what the tray shows; Install opens a release page itself,
@@ -87,14 +104,17 @@ export class DesktopIpcModule implements Module {
   readonly #defaultDisplayName: string;
   // Set on macOS only.
   readonly #permissions: DesktopPermissionHost | undefined;
+  readonly #driverUpdater: DriverUpdaterHost | undefined;
   readonly #unsubscribe: (() => void)[] = [];
 
   constructor(options: {
     defaultDisplayName: string;
     permissions?: DesktopPermissionHost;
+    driverUpdater?: DriverUpdaterHost;
   }) {
     this.#defaultDisplayName = options.defaultDisplayName;
     this.#permissions = options.permissions;
+    this.#driverUpdater = options.driverUpdater;
   }
 
   async start(ctx: ModuleContext): Promise<void> {
@@ -243,6 +263,25 @@ export class DesktopIpcModule implements Module {
         runDesktopPermissionStep(permissions, permissionStepInput.parse(step)),
       );
 
+    const driverUpdater = this.#driverUpdater;
+    if (driverUpdater) {
+      handle(IPC.driverUpdateCapabilities, () => driverUpdater.capabilities());
+      handle(IPC.driverUpdateOpenNvidiaApp, () =>
+        driverUpdater.openNvidiaApp(),
+      );
+      handle(IPC.driverUpdateOpenDownload, () =>
+        driverUpdater.openOfficialDownload(),
+      );
+      handle(IPC.driverUpdateOpenGuide, () => driverUpdater.openGuide());
+      handle(IPC.driverUpdateInstallState, () => driverUpdater.installState());
+      handle(IPC.driverUpdateStartInstall, (request) =>
+        driverUpdater.startInstall(driverInstallRequestInput.parse(request)),
+      );
+      handle(IPC.driverUpdateClearState, () => {
+        driverUpdater.clearInstallState();
+      });
+    }
+
     const push = (): void => {
       windows.webContents()?.send(IPC.computerStatusEvent, status());
     };
@@ -264,6 +303,18 @@ export class DesktopIpcModule implements Module {
           .webContents()
           ?.send(IPC.updateStateEvent, updateView(updater.state())),
       ),
+      ...(driverUpdater
+        ? [
+            ctx.bus.on("driver-update.changed", () =>
+              windows
+                .webContents()
+                ?.send(
+                  IPC.driverUpdateInstallStateEvent,
+                  driverUpdater.installState(),
+                ),
+            ),
+          ]
+        : []),
     );
   }
 

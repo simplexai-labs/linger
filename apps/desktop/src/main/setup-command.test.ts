@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   INKLING_2_MINI_ANNOUNCEMENT_URL,
+  NVIDIA_DRIVER_DOWNLOAD_URL,
+  NVIDIA_DRIVER_GUIDE_URL,
   SETUP_EXTERNAL_URLS,
 } from "../shared/setup.js";
 import { parseSetupCommand } from "./setup-command.js";
@@ -40,6 +42,21 @@ describe("parseSetupCommand", () => {
     expect(parseSetupCommand({ op: "local.recheck" })).toEqual({
       op: "local.recheck",
     });
+    expect(parseSetupCommand({ op: "driver.open-nvidia-app" })).toEqual({
+      op: "driver.open-nvidia-app",
+    });
+    expect(
+      parseSetupCommand({
+        op: "external.open",
+        url: NVIDIA_DRIVER_DOWNLOAD_URL,
+      }),
+    ).toEqual({ op: "external.open", url: NVIDIA_DRIVER_DOWNLOAD_URL });
+    expect(
+      parseSetupCommand({
+        op: "external.open",
+        url: NVIDIA_DRIVER_GUIDE_URL,
+      }),
+    ).toEqual({ op: "external.open", url: NVIDIA_DRIVER_GUIDE_URL });
     expect(parseSetupCommand({ op: "local.signin.start" })).toEqual({
       op: "local.signin.start",
     });
@@ -292,6 +309,27 @@ describe("parseSetupCommand", () => {
         op: "external.open",
         url: INKLING_2_MINI_ANNOUNCEMENT_URL,
         extra: true,
+      }),
+    ).toThrow();
+  });
+
+  it("validates driver update setup commands strictly", () => {
+    expect(
+      parseSetupCommand({
+        op: "driver.start-install",
+        requiredCuda: "13.0",
+      }),
+    ).toEqual({
+      op: "driver.start-install",
+      requiredCuda: "13.0",
+    });
+    expect(parseSetupCommand({ op: "driver.clear-state" })).toEqual({
+      op: "driver.clear-state",
+    });
+    expect(() =>
+      parseSetupCommand({
+        op: "driver.start-install",
+        requiredCuda: "13.0; rm -rf /",
       }),
     ).toThrow();
   });

@@ -712,6 +712,14 @@
         line-height: 1.45;
         font-variant-numeric: tabular-nums;
       }
+      .plan-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        margin-top: 8px;
+      }
       /* What downloads now, or what a long step waits on, under the
          installing bar. */
       .transfer {
@@ -2224,13 +2232,36 @@
             ></button>
           </p>
           <p class="plan-why" id="plan-why" hidden></p>
-          <button
-            class="link quiet"
-            id="local-recheck"
-            type="button"
-            hidden
-            data-t="checkAgain"
-          ></button>
+          <p class="plan-why" id="local-driver-status" hidden></p>
+          <div class="plan-actions" id="local-plan-actions" hidden>
+            <button
+              class="secondary"
+              id="local-driver-install"
+              type="button"
+              hidden
+              data-t="installDriverUpdate"
+            ></button>
+            <button
+              class="secondary"
+              id="local-driver-action"
+              type="button"
+              hidden
+            ></button>
+            <button
+              class="link quiet"
+              id="local-driver-guide"
+              type="button"
+              hidden
+              data-t="driverUpdateGuide"
+            ></button>
+            <button
+              class="link quiet"
+              id="local-recheck"
+              type="button"
+              hidden
+              data-t="checkAgain"
+            ></button>
+          </div>
         </div>
         <aside
           class="spotlight-card"
@@ -3836,13 +3867,25 @@
           case "cuda-driver-update-required": {
             const has = reason.detectedCudaVersion;
             const needs = reason.requiredCudaVersion;
+            const driver = window.lingerSetup.minDriverForCuda?.(needs);
             if (has && needs)
-              return t("reasonCudaUpdate", {
-                has: String(has),
-                needs: String(needs),
-              });
+              return driver
+                ? t("reasonCudaUpdateDriver", {
+                    has: String(has),
+                    needs: String(needs),
+                    driver: String(driver),
+                  })
+                : t("reasonCudaUpdate", {
+                    has: String(has),
+                    needs: String(needs),
+                  });
             if (needs)
-              return t("reasonCudaTooOldNeeds", { needs: String(needs) });
+              return driver
+                ? t("reasonCudaTooOldDriver", {
+                    needs: String(needs),
+                    driver: String(driver),
+                  })
+                : t("reasonCudaTooOldNeeds", { needs: String(needs) });
             return t("reasonCudaTooOld");
           }
           case "cuda-driver-version-unknown":
@@ -4134,9 +4177,84 @@
             !!models.reasons?.some((reason) =>
               RECHECKABLE_REASONS.has(reason.code),
             ));
+        const showDriverActions =
+          models.state === "checked" &&
+          !models.eligible &&
+          cudaDriverHeld(models) &&
+          local.available;
+        const nvidiaApp =
+          state.platform === "win32"
+            ? (state.driverUpdate?.nvidiaApp ?? "none")
+            : "none";
+        const directDriverInstall =
+          state.platform === "win32" &&
+          Boolean(state.driverUpdate?.directInstallSupported);
+        const driverInstallState = state.driverUpdate?.installState ?? {
+          phase: "idle",
+        };
+        const driverInstalling =
+          driverInstallState.phase === "downloading" ||
+          driverInstallState.phase === "verifying" ||
+          driverInstallState.phase === "installing";
+        let driverStatusText = "";
+        if (driverInstallState.phase === "downloading") {
+          driverStatusText =
+            driverInstallState.totalBytes != null
+              ? t("driverDownloadingSize", {
+                  version: driverInstallState.version,
+                  done: size(driverInstallState.completedBytes),
+                  total: size(driverInstallState.totalBytes),
+                })
+              : t("driverDownloading", { version: driverInstallState.version });
+        } else if (driverInstallState.phase === "verifying") {
+          driverStatusText = t("driverVerifying", {
+            version: driverInstallState.version,
+          });
+        } else if (driverInstallState.phase === "installing") {
+          driverStatusText = t("driverInstalling", {
+            version: driverInstallState.version,
+          });
+        } else if (driverInstallState.phase === "reboot_required") {
+          driverStatusText = t("driverRebootRequired", {
+            version: driverInstallState.version,
+          });
+        } else if (driverInstallState.phase === "completed") {
+          driverStatusText = t("driverInstallComplete", {
+            version: driverInstallState.version,
+          });
+        } else if (driverInstallState.phase === "failed") {
+          driverStatusText = t(
+            driverInstallState.code === "UAC_CANCELLED"
+              ? "driverUacCancelled"
+              : driverInstallState.code === "SIGNATURE_INVALID"
+                ? "driverSignatureInvalid"
+                : driverInstallState.code === "UNSUPPORTED_GPU"
+                  ? "driverUnsupportedGpu"
+                  : "driverInstallFailed",
+          );
+        }
         $("local-model").hidden = !shown && !settled;
+        $("local-driver-status").hidden =
+          !showDriverActions || !driverStatusText;
+        $("local-driver-status").textContent = driverStatusText;
+        $("local-driver-install").hidden =
+          !showDriverActions || !directDriverInstall;
+        $("local-driver-install").disabled = busy || driverInstalling;
+        $("local-driver-action").hidden = !showDriverActions;
+        $("local-driver-action").disabled = busy || driverInstalling;
+        $("local-driver-action").textContent = t(
+          nvidiaApp === "nvidia_app"
+            ? "openNvidiaApp"
+            : nvidiaApp === "geforce_experience"
+              ? "openGeForceExperience"
+              : "downloadNvidiaDriver",
+        );
+        $("local-driver-guide").hidden = !showDriverActions;
+        $("local-driver-guide").disabled = busy;
         $("local-recheck").hidden = !canRecheck || !local.available;
-        $("local-recheck").disabled = busy;
+        $("local-recheck").disabled = busy || driverInstalling;
+        $("local-plan-actions").hidden =
+          $("local-recheck").hidden && !showDriverActions;
         if (shown) {
           $("local-sub").textContent = held
             ? heldLine(models)
@@ -4803,6 +4921,52 @@
       );
       $("local-recheck").addEventListener("click", () =>
         run({ op: "local.recheck" }, "local-error"),
+      );
+      $("local-driver-install").addEventListener("click", () => {
+        const models = state?.localServer?.localModels;
+        const reason =
+          models?.state === "checked"
+            ? models.reasons?.find(
+                (entry) =>
+                  entry.code === "cuda-driver-update-required" ||
+                  entry.code === "cuda-driver-version-unknown",
+              )
+            : undefined;
+        void run(
+          {
+            op: "driver.start-install",
+            ...(reason?.requiredCudaVersion
+              ? { requiredCuda: reason.requiredCudaVersion }
+              : {}),
+          },
+          "local-error",
+        );
+      });
+      $("local-driver-action").addEventListener("click", () => {
+        const nvidiaApp =
+          state?.platform === "win32"
+            ? (state.driverUpdate?.nvidiaApp ?? "none")
+            : "none";
+        if (nvidiaApp !== "none") {
+          void run({ op: "driver.open-nvidia-app" }, "local-error");
+        } else {
+          void run(
+            {
+              op: "external.open",
+              url: window.lingerSetup.nvidiaDriverDownloadUrl,
+            },
+            "local-error",
+          );
+        }
+      });
+      $("local-driver-guide").addEventListener("click", () =>
+        run(
+          {
+            op: "external.open",
+            url: window.lingerSetup.nvidiaDriverGuideUrl,
+          },
+          "local-error",
+        ),
       );
       const openFeaturedAnnouncement = () =>
         run(
