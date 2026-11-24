@@ -16,7 +16,6 @@ import { eligibleRoomAgents } from "../agent-admission";
 import {
   teamHubIdentityQueryOptions,
   tenantActorsQueryOptions,
-  tenantAgentAvailabilityQueryOptions,
   tenantAgentsQueryOptions,
 } from "../room-queries";
 import { roomSettingsMessages as m } from "../room-settings.messages";
@@ -55,12 +54,7 @@ export function RoomCreateMembers({
     enabled: open,
     retry: false,
   });
-  const availability = useQuery({
-    ...tenantAgentAvailabilityQueryOptions(client, tenantId),
-    enabled: open,
-    retry: false,
-  });
-  const queries = [identity, actors, agents, availability];
+  const queries = [identity, actors, agents];
   const loading = queries.some((query) => query.isPending);
   const failed = queries.some((query) => query.isError);
   const candidates = owner
@@ -70,7 +64,6 @@ export function RoomCreateMembers({
         ),
         ...eligibleRoomAgents({
           agents: agents.data?.items ?? [],
-          availabilitySnapshots: availability.data?.items ?? [],
           roomMemberIds: new Set([owner.id]),
           sponsorActorId: owner.id,
         }),

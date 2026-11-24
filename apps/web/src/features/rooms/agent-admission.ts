@@ -1,37 +1,28 @@
 import type {
   TeamHubActor,
   TeamHubTenantAgent,
-  TeamHubTenantAgentAvailabilitySnapshot,
 } from "@/features/teamhub/teamhub-types";
 
+/**
+ * The Agents TeamHub lets this Human add to a Room: Workspace Agents and the
+ * Human's own. TeamHub admits an Agent whatever its availability, so one
+ * whose Computer is offline or not ready stays a candidate.
+ */
 export function eligibleRoomAgents({
   agents,
-  availabilitySnapshots,
   roomMemberIds,
   sponsorActorId,
 }: {
   agents: TeamHubTenantAgent[];
-  availabilitySnapshots: TeamHubTenantAgentAvailabilitySnapshot[];
   roomMemberIds: ReadonlySet<string>;
   sponsorActorId?: string;
 }): TeamHubActor[] {
-  const availabilityByActorId = new Map(
-    availabilitySnapshots.map((snapshot) => [snapshot.actor_id, snapshot]),
-  );
-  const eligibleActors: TeamHubActor[] = [];
-  for (const agent of agents) {
-    const localRuntimeReady =
-      agent.runtime.placement?.type !== "local" ||
-      availabilityByActorId.get(agent.actor.id)?.local_runtime_status
-        ?.status === "ready";
-    if (
-      localRuntimeReady &&
-      (agent.visibility_scope === "workspace" ||
-        agent.created_by.id === sponsorActorId) &&
-      !roomMemberIds.has(agent.actor.id)
-    ) {
-      eligibleActors.push(agent.actor);
-    }
-  }
-  return eligibleActors;
+  return agents
+    .filter(
+      (agent) =>
+        (agent.visibility_scope === "workspace" ||
+          agent.created_by.id === sponsorActorId) &&
+        !roomMemberIds.has(agent.actor.id),
+    )
+    .map((agent) => agent.actor);
 }

@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-  TeamHubTenantAgent,
-  TeamHubTenantAgentAvailabilitySnapshot,
-} from "@/features/teamhub/teamhub-types";
+import type { TeamHubTenantAgent } from "@/features/teamhub/teamhub-types";
 
 import { eligibleRoomAgents } from "./agent-admission";
 
@@ -45,7 +42,6 @@ describe("eligibleRoomAgents", () => {
 
     expect(
       eligibleRoomAgents({
-        availabilitySnapshots: [],
         agents: [
           eligible,
           registration("actor-in-room", "actor-me"),
@@ -63,7 +59,7 @@ describe("eligibleRoomAgents", () => {
     ]);
   });
 
-  it("excludes an unavailable Local Agent from Add member candidates", () => {
+  it("keeps a Local Agent whose runtime is not ready", () => {
     const local = registration("agent-local", "actor-me");
     local.runtime = {
       model: "claude-default",
@@ -74,31 +70,13 @@ describe("eligibleRoomAgents", () => {
         workspace_grant_id: "grant-local",
       },
     };
-    const availability: TeamHubTenantAgentAvailabilitySnapshot = {
-      actor_id: local.actor.id,
-      availability: {
-        active_task_count: 0,
-        label: "Needs attention",
-        status: "error",
-      },
-      local_runtime_status: {
-        computer_id: "computer-local",
-        computer_status: "online",
-        display_name: "Local Mac",
-        runtime_type: "claude",
-        status: "authentication_required",
-        error_code: "RUNTIME_AUTHENTICATION_REQUIRED",
-        message: "Claude Code authentication is required",
-      },
-    };
 
     expect(
       eligibleRoomAgents({
         agents: [local],
-        availabilitySnapshots: [availability],
         roomMemberIds: new Set(),
         sponsorActorId: "actor-me",
       }),
-    ).toEqual([]);
+    ).toEqual([local.actor]);
   });
 });
