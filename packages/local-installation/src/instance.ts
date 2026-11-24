@@ -292,11 +292,15 @@ async function writeLocalIdentityKey(root: string): Promise<void> {
 }
 /** The error code when another process holds an instance's lock. */
 export const INSTANCE_BUSY = "INSTANCE_BUSY";
+/** The lock database every instance-scoped operation under `root` takes. */
+export function instanceLockFile(root: string): string {
+  return path.join(root, "operation.sqlite");
+}
 export async function withInstanceLock<T>(
   instance: Instance,
   callback: () => Promise<T>,
 ): Promise<T> {
-  const lockFile = path.join(instance.root, "operation.sqlite");
+  const lockFile = instanceLockFile(instance.root);
   const info = await lstat(lockFile).catch((error) => {
     if (missing(error)) return undefined;
     throw error;

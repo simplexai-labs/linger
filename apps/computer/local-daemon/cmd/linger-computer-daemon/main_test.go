@@ -449,7 +449,7 @@ func TestShapeDiscoveredResultReappliesByokOverlayAcrossPeriodicRefreshes(t *tes
 		}
 		unshaped.Installations = provider.InstallationsFromDiagnostics(unshaped.Diagnostics)
 
-		shaped := shapeDiscoveredResult(unshaped, stateDir, false)
+		shaped := shapeDiscoveredResult(unshaped, stateDir, false, nil)
 		nextProviders, nextRuntimes := providerInstallations(shaped, env, stateDir)
 		providerCatalog.Replace(nextProviders)
 		controller.UpdateDiagnostics(shaped.Diagnostics)
@@ -574,7 +574,7 @@ done
 		}
 	}
 	shape := func(result provider.DiscoveryResult) provider.DiscoveryResult {
-		return shapeDiscoveredResult(result, stateDir, false)
+		return shapeDiscoveredResult(result, stateDir, false, nil)
 	}
 	wantModels := []provider.RuntimeModel{{
 		ID:                     "localmodels/localmodels-byok",

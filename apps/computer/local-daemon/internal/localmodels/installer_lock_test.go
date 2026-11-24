@@ -47,6 +47,33 @@ func quickLockRetry(library *Library) {
 	library.installerLockRetry = 20 * time.Millisecond
 }
 
+// busyProbes returns a channel told of every probe that finds the
+// installer's lock held. Set it before the Library probes.
+func busyProbes(library *Library) <-chan struct{} {
+	probes := make(chan struct{}, 64)
+	library.testInstallerBusy = func() {
+		select {
+		case probes <- struct{}{}:
+		default:
+		}
+	}
+	return probes
+}
+
+// drainAndAwait waits for a probe that started after this call.
+func drainAndAwait(probes <-chan struct{}) {
+	for {
+		select {
+		case <-probes:
+			continue
+		default:
+		}
+		break
+	}
+	<-probes
+	<-probes
+}
+
 func TestARunWaitsForTheInstallersStop(t *testing.T) {
 	fake := newFakeTool(t)
 	fake.write("status.json", status(model(testModel, "loaded")))
@@ -56,10 +83,11 @@ func TestARunWaitsForTheInstallersStop(t *testing.T) {
 	})
 	library := newEnsureLibrary(t, fake, 0)
 	quickLockRetry(library)
+	probes := busyProbes(library)
 	library.Refresh(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- library.EnsureLoaded(context.Background(), testPiModel) }()
-	time.Sleep(200 * time.Millisecond)
+	drainAndAwait(probes)
 	select {
 	case err := <-done:
 		t.Fatalf("returned %v while the installer held its lock", err)
@@ -115,6 +143,7 @@ func TestACancelledRunLeavesTheSharedLockWait(t *testing.T) {
 	release := holdInstallerLock(t, installerLockPath(&fake.tool))
 	library := newEnsureLibrary(t, fake, 0)
 	quickLockRetry(library)
+	probes := busyProbes(library)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	if err := library.EnsureLoaded(ctx, testPiModel); !errors.Is(err, context.DeadlineExceeded) {
@@ -122,7 +151,7 @@ func TestACancelledRunLeavesTheSharedLockWait(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- library.EnsureLoaded(context.Background(), testPiModel) }()
-	time.Sleep(100 * time.Millisecond)
+	drainAndAwait(probes)
 	select {
 	case err := <-done:
 		t.Fatalf("a later Run returned %v while the lock was held", err)
@@ -189,5 +218,18 @@ func TestARunOutsideTheLibraryDoesNotWaitForTheInstaller(t *testing.T) {
 	}
 	if library.settled() {
 		t.Fatal("the probe ended while the installer held its lock")
+	}
+}
+
+// The config names the lock; one an older installer wrote does not, and the
+// installer's layout stands in for it.
+func TestTheInstallerLockPathComesFromTheConfig(t *testing.T) {
+	named := &Tool{StateDirectory: "/home/u/runtime/localmodels/state", LockFile: "/elsewhere/operation.sqlite"}
+	if got := installerLockPath(named); got != "/elsewhere/operation.sqlite" {
+		t.Fatalf("named lock = %q", got)
+	}
+	older := &Tool{StateDirectory: filepath.Join("/home", "u", "runtime", "localmodels", "state")}
+	if got := installerLockPath(older); got != filepath.Join("/home", "u", "runtime", "localmodels", "operation.sqlite") {
+		t.Fatalf("derived lock = %q", got)
 	}
 }

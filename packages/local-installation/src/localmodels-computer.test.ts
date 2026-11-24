@@ -31,6 +31,23 @@ it("carries the tool through an external Computer's runtime environment", () => 
   });
 });
 
+it("carries the installer's lock file when it is known, and reads an environment without it", () => {
+  const lockFile = "/home/u/.linger/runtime/localmodels/operation.sqlite";
+  const withLock = { ...tool, lockFile };
+  const environment = localmodelsToolEnvironment(withLock);
+  expect(environment.LINGER_LOCALMODELS_LOCK_FILE).toBe(lockFile);
+  expect(localmodelsToolFromEnvironment(environment, path.posix)).toEqual(
+    withLock,
+  );
+  expect(localModelsConfig(withLock)).toMatchObject({ lock_file: lockFile });
+  expect(
+    localmodelsToolFromEnvironment(
+      { ...environment, LINGER_LOCALMODELS_LOCK_FILE: "operation.sqlite" },
+      path.posix,
+    ),
+  ).toEqual(tool);
+});
+
 it("names no tool unless all four paths are absolute", () => {
   const environment = localmodelsToolEnvironment(tool);
   expect(localmodelsToolEnvironment(undefined)).toEqual({});
@@ -88,6 +105,8 @@ it("follows the tool source its caller passes, not the process environment", asy
     moduleDirectory: path.join(where, "kit"),
     stateDirectory: path.join(where, "runtime", "localmodels", "state"),
     baseDirectory: path.join(where, "runtime", "localmodels", "models"),
+    // The same file withLocalModelsLock takes.
+    lockFile: path.join(where, "runtime", "localmodels", "operation.sqlite"),
   });
   expect(ensure).toHaveBeenCalledWith(where, {}, { source });
 });

@@ -64,6 +64,9 @@ func TestEnsureLoadedReturnsAtOnceForALoadedModel(t *testing.T) {
 	fake := newFakeTool(t)
 	fake.write("status.json", status(model(testModel, "loaded")))
 	library := newEnsureLibrary(t, fake, 0)
+	// reconcile rereads a failed read in the background; keep it out of
+	// the count.
+	library.progressInterval = time.Hour
 	library.Refresh(context.Background())
 	if err := library.awaitSettled(context.Background()); err != nil {
 		t.Fatal(err)
@@ -170,6 +173,9 @@ func TestEnsureLoadedLetsRunsOutsideTheLibraryProceed(t *testing.T) {
 	fake := newFakeTool(t)
 	fake.write("status.json", status(model(testModel, "idle")))
 	library := newEnsureLibrary(t, fake, 0)
+	// reconcile rereads a failed read in the background; keep it out of
+	// the count.
+	library.progressInterval = time.Hour
 	library.Refresh(context.Background())
 	if err := library.awaitSettled(context.Background()); err != nil {
 		t.Fatal(err)
@@ -319,13 +325,15 @@ func TestARunWaitsForALoadTheModelsPageStarted(t *testing.T) {
 	fake.write("status.json", status(model(testModel, "idle")))
 	release := holdLoad(t, fake)
 	library := newEnsureLibrary(t, fake, 0)
+	waiting := make(chan struct{}, 1)
+	library.testWaiting = func(string) { waiting <- struct{}{} }
 	library.Refresh(context.Background())
 	if refusal, _ := library.Act(context.Background(), Action{Name: ActionLoad, Model: testModel}, soon()); refusal != nil {
 		t.Fatalf("refused: %+v", refusal)
 	}
 	done := make(chan error, 1)
 	go func() { done <- library.EnsureLoaded(context.Background(), testPiModel) }()
-	time.Sleep(100 * time.Millisecond)
+	<-waiting
 	release()
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -371,5 +379,28 @@ func TestAnAcceptedLoadIsRunningWhenActAnswers(t *testing.T) {
 	release()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A library the tool cannot read now does not cost a Run a status read.
+func TestAnUnreadableLibraryCostsARunNoToolCall(t *testing.T) {
+	fake := newFakeTool(t)
+	if err := os.WriteFile(filepath.Join(fake.state, "status-exit"), []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	library := newEnsureLibrary(t, fake, 0)
+	// reconcile rereads a failed read in the background; keep it out of
+	// the count.
+	library.progressInterval = time.Hour
+	library.Refresh(context.Background())
+	if err := library.awaitSettled(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	before := len(fake.calls())
+	if err := library.EnsureLoaded(context.Background(), testPiModel); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.calls()) != before {
+		t.Fatalf("ran the tool: %v", fake.calls()[before:])
 	}
 }

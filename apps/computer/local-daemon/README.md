@@ -131,8 +131,9 @@ spends model quota and is not part of the default tests.
 The Daemon runs the model library of the installer's `localmodels` tool for
 the Local models page. The Computer config's `local_models` section names the
 tool: `python`, `module_directory` (the sealed kit, used as `PYTHONPATH` and
-working directory), `state_directory` (`LOCALMODELS_STATE`) and
-`base_directory` (`--base-dir`). From `state_directory`, the Daemon derives
+working directory), `state_directory` (`LOCALMODELS_STATE`),
+`base_directory` (`--base-dir`) and, optionally, `lock_file` (the
+installer's local-models lock; see Installer lock). From `state_directory`, the Daemon derives
 sibling `tools` (`LOCALMODELS_TOOLS_DIR`), `bifrost`
 (`LOCALMODELS_BIFROST_DIR`), and `bifrost-addr` (`LOCALMODELS_BIFROST_ADDR`).
 The Daemon prefers the address in `<tools>/owned.json`. On start and apply
@@ -177,16 +178,17 @@ downloaded model that Run's Agent names.
   outcome reaches the owner only through snapshots: an accepted job publishes
   its progress, and a late refusal publishes a fresh status read. Command
   handling runs off the connection loop.
-- Before a Run. A Pi Run whose model is a library row's `pi_model` waits
-  until that model is loaded. A model no row of the last readable snapshot
+- Before a Run. A Pi Run whose model is a library row's `pi_model` reaches
+  the Daemon because the Pi catalog lists every downloaded library model
+  (Pi catalog below), and waits until that model is loaded. A model no row of the last readable snapshot
   names (a BYOK or setup-stack model) costs no tool call and no wait; once
   the installer lock wait below has ended, neither does a model that
   snapshot shows loaded. Otherwise the Daemon reads the status once. A downloaded model that is `idle` or `failed` is loaded with
   `library load <model>` and never `--unload`, so the Daemon does not evict
   a model to make room: a load that does not fit is refused, and the Run
   fails with `local_model_unavailable` when the Agent Service's welcome names
-  that service feature, else with `model_unavailable` for an older service,
-  and in both cases the model stays in the Runtime's catalog. A `loading` model, or one whose load the Models page
+  that service feature, else with `model_unavailable` for an older service;
+  neither adds the model to the models a Runtime's login refused. A `loading` model, or one whose load the Models page
   just started, is waited for without a second load. `pi_model` is present
   only while the model is on the Computer; a `failed` row whose download
   stopped (`DOWNLOAD_FAILED`, `NETWORK_UNAVAILABLE`, `DISK_INSUFFICIENT`) is
@@ -199,7 +201,9 @@ downloaded model that Run's Agent names.
   Run start as before.
 - Installer lock. A quit starts the installer's stop after the app is gone;
   it cancels and unloads the library's models while holding the installer's
-  local-models lock, `operation.sqlite` beside the tool's state directory,
+  local-models lock, the config's `lock_file` (for a config an older
+  installer wrote without it, `operation.sqlite` beside the tool's state
+  directory),
   and the installer's resume reloads the saved `runtime_model` under the
   same lock. A relaunch inside either window would read the models as still
   loaded, or start a second load. So once per Daemon, before the first Run
@@ -212,6 +216,21 @@ downloaded model that Run's Agent names.
   regular file of the current user, is not waited for. A restore that takes
   the lock only after the probe is not ordered; its load still shows as
   `loading` once it starts.
+- Pi catalog. localmodels registers a model with Pi only while it is
+  loaded, so after a quit Pi lists none of them, and with no model at all
+  Pi asks for a sign-in. The Daemon adds to the Pi diagnostic it reports
+  every library row with a `pi_model` that is loaded, loading, or
+  downloaded and loadable (not an interrupted download). A model Pi listed
+  while it was loaded keeps that entry (label, reasoning effort, context
+  window), remembered in `state/local-models/pi-catalog.json`; one Pi never
+  listed gets its name, its context size and no reasoning effort. Pi's own
+  entries and its default model stay as Pi reports them. A Pi diagnostic
+  that is `authentication_required` only because its own catalog was empty
+  is reported `ready` once library models fill it. Nothing is added while
+  the library cannot be read, or when Pi runs on a BYOK source. A
+  remembered entry goes when its row leaves the library. A status read whose
+  set of such models differs from the last one, including the first read
+  that finds any, asks for discovery again.
 - Jobs. A download or load runs in its own process group and writes its event
   lines to a file under `state/local-models/jobs`, which the Daemon tails, so
   a Daemon restart neither signals the job nor breaks its output. `cancel` is

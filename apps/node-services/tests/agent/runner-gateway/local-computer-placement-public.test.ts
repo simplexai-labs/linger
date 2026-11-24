@@ -1125,6 +1125,62 @@ describe("RunnerGateway", () => {
     connection.disconnect();
   });
 
+  // The Daemon lists a downloaded local model that is not loaded in its Pi
+  // diagnostic, shaped as a model without reasoning effort, so a Run on it
+  // reaches the Computer, which loads it first.
+  it("places a Pi Agent on a downloaded local model the Computer lists", async () => {
+    const gateway = createTestRunnerGateway({ heartbeatIntervalMs: 1_000 });
+    const piModel =
+      "localmodels-library/localmodels-lib-qwen3-4b-q4-k-m/Qwen3-4B-Q4_K_M";
+    const diagnostics = runtimeDiagnostics({ ready: ["codex", "pi"] }).map(
+      (diagnostic) =>
+        diagnostic.type === "pi"
+          ? {
+              ...diagnostic,
+              models: [
+                {
+                  id: piModel,
+                  label: "Qwen3 4B",
+                  allowed_reasoning_effort: [],
+                  context_window: 32768,
+                },
+              ],
+            }
+          : diagnostic,
+    ) as unknown as RunnerHello["runtime_diagnostics"];
+    const connection = await gateway.acceptConnection(
+      authenticatedPrincipal(),
+      {
+        ...hello(),
+        runtimes: ["codex", "pi"],
+        runtime_diagnostics: diagnostics,
+        workspace_grants: [
+          {
+            grant_id: "grant-owner",
+            tenant_id: "tenant-acme",
+            label: "Linger workspace",
+            mode: "workspace-write",
+            scope: "owner",
+          },
+        ],
+      },
+      new RecordingPeer(),
+    );
+    const placement = {
+      type: "local" as const,
+      assignmentRevision: 1,
+      tenantId: "tenant-acme",
+      ownerActorId: "actor-alice",
+      computerId: "runner-local",
+      runtimeType: "pi" as const,
+      workspaceGrantId: "grant-owner",
+    };
+    expect(() =>
+      gateway.requireLocalPlacement(placement, piModel),
+    ).not.toThrow();
+    connection.disconnect();
+  });
+
   it("maps a discovered Runtime default sentinel back to an omitted provider model", () => {
     const diagnostics = runtimeDiagnostics().map((diagnostic) => ({
       ...diagnostic,

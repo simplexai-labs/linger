@@ -6,6 +6,7 @@ import { sleep } from "@linger/service-kit";
 import {
   atomicPrivate,
   INSTANCE_BUSY,
+  instanceLockFile,
   privateDirectory,
   readPrivate,
   withInstanceLock,
@@ -131,6 +132,17 @@ const RESTARTABLE_BINDING_REASONS = new Set([
 // this long instead of failing.
 const LOCK_BUSY_WINDOW_MS = 2_000;
 const LOCK_BUSY_RETRY_MS = 100;
+function localModelsLockRoot(home: string): string {
+  return path.join(path.resolve(home), "runtime/localmodels");
+}
+/**
+ * The lock database `withLocalModelsLock` takes. The Computer config names
+ * it, so the Daemon waits for a quit-time stop or a resume restore holding
+ * it.
+ */
+export function localModelsLockFile(home: string): string {
+  return instanceLockFile(localModelsLockRoot(home));
+}
 /**
  * Runs `callback` holding the lock every deployment, restore check and
  * quit-time stop of a home's local model stack takes, so none of them sees
@@ -148,9 +160,7 @@ export async function withLocalModelsLock<T>(
     let started = false;
     try {
       return await withInstanceLock(
-        {
-          root: path.join(path.resolve(home), "runtime/localmodels"),
-        } as Instance,
+        { root: localModelsLockRoot(home) } as Instance,
         () => {
           started = true;
           return callback();

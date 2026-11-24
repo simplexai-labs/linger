@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -48,6 +49,9 @@ type LocalModels struct {
 	ModuleDirectory string
 	StateDirectory  string
 	BaseDirectory   string
+	// LockFile is the installer's local-models lock database; empty in a
+	// config an older installer wrote.
+	LockFile string
 }
 
 // Desktop configures a Daemon owned by the Linger Desktop app. The app ships
@@ -95,6 +99,7 @@ type encodedLocalModels struct {
 	ModuleDirectory string `json:"module_directory"`
 	StateDirectory  string `json:"state_directory"`
 	BaseDirectory   string `json:"base_directory"`
+	LockFile        string `json:"lock_file,omitempty"`
 }
 
 type encodedDesktop struct {
@@ -154,6 +159,13 @@ func Load(path string, environment map[string]string) (Config, error) {
 		localModels = &LocalModels{
 			Python: encoded.Python, ModuleDirectory: encoded.ModuleDirectory,
 			StateDirectory: encoded.StateDirectory, BaseDirectory: encoded.BaseDirectory,
+		}
+		// The lock only orders Runs after the installer; a bad path must not
+		// stop the Computer from starting.
+		if encoded.LockFile != "" && !filepath.IsAbs(encoded.LockFile) {
+			slog.Warn("computer_config.local_models_lock_file_ignored", "reason", "not_absolute")
+		} else {
+			localModels.LockFile = encoded.LockFile
 		}
 	}
 	var token string

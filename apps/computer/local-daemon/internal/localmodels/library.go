@@ -40,6 +40,9 @@ const (
 	// defaultEnsureLoadTimeout bounds how long a Run waits for its model to
 	// load before it starts.
 	defaultEnsureLoadTimeout = 10 * time.Minute
+	// firstReadTimeout bounds the status read a Run waits for when the
+	// Library has none yet.
+	firstReadTimeout = 5 * time.Second
 )
 
 // Options configures a Library.
@@ -61,6 +64,9 @@ type Options struct {
 	// RuntimeChanged is told that a model was loaded or unloaded, which
 	// changes the model list Pi reports.
 	RuntimeChanged func()
+	// CatalogChanged is told that the downloaded library models the Pi
+	// catalog lists changed, including on the first read that finds any.
+	CatalogChanged func()
 	// ProgressInterval bounds how often job progress is published.
 	ProgressInterval      time.Duration
 	StatusTimeout         time.Duration
@@ -97,6 +103,7 @@ type Library struct {
 	nodePath              string
 	publish               func(wire.LocalModelsSnapshot)
 	runtimeChanged        func()
+	catalogChanged        func()
 	progressInterval      time.Duration
 	statusTimeout         time.Duration
 	actionTimeout         time.Duration
@@ -120,7 +127,17 @@ type Library struct {
 	current *wire.LocalModelsSnapshot
 	// loaded identifies the loaded models of the last status read; nil
 	// before the first one.
-	loaded       *string
+	loaded *string
+	// testWaiting and testInstallerBusy let tests order goroutines: they
+	// are told when waitLoaded starts and when a lock probe finds the
+	// installer busy. Nil outside tests.
+	testWaiting       func(id string)
+	testInstallerBusy func()
+	// piCatalogMu serializes reads and writes of pi-catalog.json.
+	piCatalogMu sync.Mutex
+	// catalog identifies the models the Pi catalog lists from the last
+	// status read (catalogKey); nil before the first one.
+	catalog      *string
 	piExecutable string
 	piEnsuring   bool
 	piFailures   int
@@ -163,7 +180,7 @@ func New(options Options) *Library {
 	library := &Library{
 		tool: options.Tool, environment: options.Environment, jobDirectory: options.JobDirectory,
 		harnessDirectory: options.HarnessDirectory, nodePath: options.NodePath,
-		publish: options.Publish, runtimeChanged: options.RuntimeChanged,
+		publish: options.Publish, runtimeChanged: options.RuntimeChanged, catalogChanged: options.CatalogChanged,
 		progressInterval: options.ProgressInterval, statusTimeout: options.StatusTimeout, actionTimeout: options.ActionTimeout,
 		ensurePiTimeout: options.EnsurePiTimeout, ensurePiRetryInterval: options.EnsurePiRetryInterval,
 		ensureLoadTimeout: options.EnsureLoadTimeout,
@@ -194,6 +211,9 @@ func New(options Options) *Library {
 	}
 	if library.runtimeChanged == nil {
 		library.runtimeChanged = func() {}
+	}
+	if library.catalogChanged == nil {
+		library.catalogChanged = func() {}
 	}
 	if library.jobDirectory != "" {
 		// Output files of jobs a previous Daemon started are no longer read.
@@ -308,6 +328,7 @@ func (l *Library) Refresh(ctx context.Context) wire.LocalModelsSnapshot {
 		return snapshot
 	}
 	changed := false
+	catalogChanged := false
 	hasLoaded := false
 	l.mu.Lock()
 	if snapshot.Available {
@@ -315,6 +336,12 @@ func (l *Library) Refresh(ctx context.Context) wire.LocalModelsSnapshot {
 		hasLoaded = key != ""
 		changed = l.loaded != nil && *l.loaded != key
 		l.loaded = &key
+		// The Pi catalog the Daemon reports also lists every downloaded
+		// library model, so a finished download or a removal changes it too,
+		// as does the first read that finds any.
+		catalog := catalogKey(snapshot)
+		catalogChanged = (l.catalog == nil && catalog != "") || (l.catalog != nil && *l.catalog != catalog)
+		l.catalog = &catalog
 	}
 	l.mu.Unlock()
 	committed := l.commit(snapshot)
@@ -322,6 +349,9 @@ func (l *Library) Refresh(ctx context.Context) wire.LocalModelsSnapshot {
 	// unload; the Runtime diagnostics must be read again to list it.
 	if changed {
 		l.runtimeChanged()
+	}
+	if catalogChanged {
+		l.catalogChanged()
 	}
 	l.reconcile(committed)
 	l.refreshMu.Unlock()
@@ -975,9 +1005,15 @@ func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
 	// On the path from a person's message to the model's first token: a
 	// ready model, or one outside the library, must cost no tool call.
 	l.mu.Lock()
-	known := l.current != nil && l.current.Available
+	read := l.current != nil
+	known := read && l.current.Available
 	cached := l.rowLocked(func(model wire.LocalModel) bool { return model.PiModel == piModel })
 	l.mu.Unlock()
+	if read && !known {
+		// The library cannot be read now; reconcile rereads it in the
+		// background, and the Run starts as it would without this check.
+		return nil
+	}
 	if known && cached == nil {
 		// pi_model is present while the model is on the Computer, and the
 		// installer's stop changes nothing on disk.
@@ -992,7 +1028,15 @@ func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
 		// about to be unloaded; read the status after it.
 		return err
 	}
-	snapshot := l.Refresh(ctx)
+	readCtx := ctx
+	if !read {
+		// The first read of a Library this Run waits for: a tool that hangs
+		// must not hold the Run for the whole status timeout.
+		var cancel context.CancelFunc
+		readCtx, cancel = context.WithTimeout(ctx, firstReadTimeout)
+		defer cancel()
+	}
+	snapshot := l.Refresh(readCtx)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1109,6 +1153,9 @@ func (l *Library) load(ctx context.Context, id, state string) error {
 // for id runs and the snapshot changed after since and after that job ended:
 // until then it may predate the job's first status.
 func (l *Library) waitLoaded(ctx, budget context.Context, id string, since uint64) error {
+	if l.testWaiting != nil {
+		l.testWaiting(id)
+	}
 	for {
 		l.mu.Lock()
 		changed := l.changed
@@ -1181,6 +1228,44 @@ func loadState(row wire.LocalModel) string {
 		return stateDownloadStopped
 	}
 	return row.State
+}
+
+// InPiCatalog reports whether the row is a model on this Computer that a Pi
+// Run may name: it has a pi_model and is loaded, loading, or downloaded and
+// loadable.
+func InPiCatalog(row wire.LocalModel) bool {
+	if row.PiModel == "" {
+		return false
+	}
+	switch loadState(row) {
+	case "idle", "loading", "loaded", "failed":
+		return true
+	}
+	return false
+}
+
+// catalogKey names the pi_models InPiCatalog accepts.
+func catalogKey(snapshot wire.LocalModelsSnapshot) string {
+	var models []string
+	for _, model := range snapshot.Models {
+		if InPiCatalog(model) {
+			models = append(models, model.PiModel)
+		}
+	}
+	sort.Strings(models)
+	return strings.Join(models, "\x01")
+}
+
+// Snapshot returns a copy of the last library snapshot, or nil before the
+// first read.
+func (l *Library) Snapshot() *wire.LocalModelsSnapshot {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.current == nil {
+		return nil
+	}
+	snapshot := cloneSnapshot(*l.current)
+	return &snapshot
 }
 
 func notDownloaded(state string) bool {

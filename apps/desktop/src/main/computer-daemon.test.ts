@@ -234,6 +234,8 @@ describe("ComputerDaemonModule", () => {
         LINGER_LOCALMODELS_STATE: "/home/me/.linger/runtime/localmodels/state",
         LINGER_LOCALMODELS_BASE_DIR:
           "/home/me/.linger/runtime/localmodels/models",
+        LINGER_LOCALMODELS_LOCK_FILE:
+          "/home/me/.linger/runtime/localmodels/operation.sqlite",
       },
     });
     bus.emit("computer.runtime");
@@ -245,6 +247,7 @@ describe("ComputerDaemonModule", () => {
       module_directory: "/home/me/.linger/tools/localmodels/kit",
       state_directory: "/home/me/.linger/runtime/localmodels/state",
       base_directory: "/home/me/.linger/runtime/localmodels/models",
+      lock_file: "/home/me/.linger/runtime/localmodels/operation.sqlite",
     });
   });
 

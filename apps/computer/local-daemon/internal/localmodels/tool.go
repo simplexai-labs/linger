@@ -82,6 +82,9 @@ type Tool struct {
 	ModuleDirectory string
 	StateDirectory  string
 	BaseDirectory   string
+	// LockFile is the installer's local-models lock; empty when the config
+	// does not name it.
+	LockFile string
 }
 
 // Action is one owner-chosen library action. Model is empty only for

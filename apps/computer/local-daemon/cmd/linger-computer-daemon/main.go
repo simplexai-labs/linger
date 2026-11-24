@@ -163,7 +163,7 @@ func run(args []string) (resultErr error) {
 		}
 	}
 	shapeDiscovered := func(result provider.DiscoveryResult) provider.DiscoveryResult {
-		return shapeDiscoveredResult(result, localModelsStateDir, localModels != nil && localModels.PiProvisionFailed())
+		return shapeDiscoveredResult(result, localModelsStateDir, localModels != nil && localModels.PiProvisionFailed(), localModels)
 	}
 	discover := func(ctx context.Context, options provider.DiscoveryOptions) (provider.DiscoveryResult, error) {
 		result, err := provider.Discover(ctx, options)
@@ -328,7 +328,7 @@ func run(args []string) (resultErr error) {
 	if tool := computer.LocalModels; tool != nil {
 		localModelsTool = &localmodels.Tool{
 			Python: tool.Python, ModuleDirectory: tool.ModuleDirectory,
-			StateDirectory: tool.StateDirectory, BaseDirectory: tool.BaseDirectory,
+			StateDirectory: tool.StateDirectory, BaseDirectory: tool.BaseDirectory, LockFile: tool.LockFile,
 		}
 	}
 	jobDir := filepath.Join(computer.StateDirectory, "local-models", "jobs")
@@ -351,6 +351,12 @@ func run(args []string) (resultErr error) {
 		// calls once it runs.
 		Publish: func(snapshot wire.LocalModelsSnapshot) { localDaemon.PublishLocalModels(snapshot) },
 		RuntimeChanged: func() {
+			select {
+			case runtimeRefresh <- struct{}{}:
+			default:
+			}
+		},
+		CatalogChanged: func() {
 			select {
 			case runtimeRefresh <- struct{}{}:
 			default:
@@ -922,8 +928,12 @@ func runtimeModelCatalogs(diagnostics []provider.RuntimeDiagnostic) map[string][
 // shapeDiscoveredResult applies the persisted BYOK catalog overlay and managed
 // Pi provisioning status without mutating the input, and rebuilds Installations
 // so provider lookup sees the same shaped catalog.
-func shapeDiscoveredResult(result provider.DiscoveryResult, localModelsStateDir string, piProvisionFailed bool) provider.DiscoveryResult {
-	diagnostics := byokRuntimeCatalogs(result.Diagnostics, localmodels.ReadOverlay(localModelsStateDir))
+func shapeDiscoveredResult(result provider.DiscoveryResult, localModelsStateDir string, piProvisionFailed bool, library *localmodels.Library) provider.DiscoveryResult {
+	source := localmodels.ReadOverlay(localModelsStateDir)
+	diagnostics := byokRuntimeCatalogs(result.Diagnostics, source)
+	if library != nil {
+		diagnostics = library.MergePiCatalog(diagnostics, source)
+	}
 	diagnostics = withPiProvisionStatus(diagnostics, piProvisionFailed)
 	return provider.DiscoveryResult{
 		Diagnostics:   diagnostics,
