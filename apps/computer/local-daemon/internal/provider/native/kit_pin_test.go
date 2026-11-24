@@ -8,9 +8,10 @@ import (
 )
 
 // The desktop bundles the localmodels kit that installs the managed Codex,
-// Claude and Pi. Each distribution records the Runtime versions its kit
-// installs; the Daemon must accept every one, or a fresh desktop install gets
-// a Runtime the Daemon refuses.
+// Claude and Pi. Each distribution records, from that kit's release, the
+// Runtime versions it installs and the oldest of each it reuses instead. The
+// Daemon must accept both, or a desktop install gets, or keeps, a Runtime the
+// Daemon refuses.
 func TestDesktopKitInstallsRuntimesTheDaemonAccepts(t *testing.T) {
 	files, err := filepath.Glob("../../../../../desktop/distribution/*.json")
 	if err != nil || len(files) == 0 {
@@ -23,7 +24,8 @@ func TestDesktopKitInstallsRuntimesTheDaemonAccepts(t *testing.T) {
 		}
 		var distribution struct {
 			LocalmodelsTool struct {
-				RuntimeVersions map[string]string `json:"runtimeVersions"`
+				RuntimeVersions  map[string]string `json:"runtimeVersions"`
+				RuntimeBaselines map[string]string `json:"runtimeBaselines"`
 			} `json:"localmodelsTool"`
 		}
 		if err := json.Unmarshal(data, &distribution); err != nil {
@@ -33,6 +35,10 @@ func TestDesktopKitInstallsRuntimesTheDaemonAccepts(t *testing.T) {
 			version := distribution.LocalmodelsTool.RuntimeVersions[kind]
 			if err := RequireVersion(kind, version); err != nil {
 				t.Errorf("%s: localmodels installs %s %q: %v", filepath.Base(file), kind, version, err)
+			}
+			baseline := distribution.LocalmodelsTool.RuntimeBaselines[kind]
+			if err := RequireVersion(kind, baseline); err != nil {
+				t.Errorf("%s: localmodels reuses %s from %q: %v", filepath.Base(file), kind, baseline, err)
 			}
 		}
 	}

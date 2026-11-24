@@ -18,7 +18,13 @@ const read = (target: string) =>
   ) as {
     platform: string;
     arch: string;
-    localmodelsTool: { url: string; sha256: string; sourceCommit: string };
+    localmodelsTool: {
+      url: string;
+      sha256: string;
+      sourceCommit: string;
+      runtimeVersions: Record<string, string>;
+      runtimeBaselines: Record<string, string>;
+    };
     nativeSources: unknown[];
     voiceTools: unknown[];
   };
@@ -31,6 +37,11 @@ const stack = readFileSync(
 );
 const pin = (name: string) =>
   new RegExp(`^${name}='([^']+)'$`, "m").exec(stack)?.[1];
+// The release pins a Runtime set as `claude=2.1.311 codex=0.171.0 pi=1.5.2`.
+const runtimes = (name: string) =>
+  Object.fromEntries(
+    (pin(name) ?? "").split(" ").map((entry) => entry.split("=")),
+  );
 
 describe("desktop distributions", () => {
   // Native installs need PostgreSQL and the voice tools for their target.
@@ -63,6 +74,14 @@ describe("desktop distributions", () => {
       );
       expect(value.localmodelsTool.sourceCommit).toBe(
         pin("STACK_SOURCE_COMMIT"),
+      );
+      // The Daemon's Go tests check these against its Runtime minimums, so
+      // they must be the pinned release's, not a hand-entered copy.
+      expect(value.localmodelsTool.runtimeVersions).toEqual(
+        runtimes("STACK_RUNTIMES"),
+      );
+      expect(value.localmodelsTool.runtimeBaselines).toEqual(
+        runtimes("STACK_RUNTIME_BASELINES"),
       );
       const kit = pin(`STACK_KIT_${target.replace("-", "_")}`);
       if (kit) expect(tool.sha256).toBe(kit);

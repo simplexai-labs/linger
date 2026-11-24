@@ -477,12 +477,13 @@ file and build. For one release:
 3. For a new PostgreSQL or localmodels release, update
    `distribution/<target>.json`: `localmodelsTool` for the localmodels
    release `scripts/installs/stack.sh` pins, and `nativeSources` holding that target's
-   `postgres-<target>.json` object. `localmodelsTool.runtimeVersions` records
-   the Codex, Claude and Pi versions that release installs (`versions` in its
-   `localmodels/runtime-lock.json`, `pi.version` in its `localmodels/tools.json`);
-   the Computer Daemon's Go tests fail when one is below the Daemon's minimum.
-   Nothing checks these values against the kit itself, so the guard is only as
-   good as this entry: read them from the kit of the new pin on every update.
+   `postgres-<target>.json` object. `localmodelsTool.runtimeVersions` and
+   `runtimeBaselines` copy that release's `release.json` fields of the same
+   names: the Codex, Claude and Pi versions it installs, and the oldest of each
+   it reuses instead. `distribution.test.ts` checks them against the
+   `STACK_RUNTIMES` and `STACK_RUNTIME_BASELINES` pins in
+   `scripts/installs/stack.sh`, and the Computer Daemon's Go tests fail when
+   one is below the Daemon's minimum.
 4. Build with `LINGER_DESKTOP_DAEMON_TARGETS` set to the target and the source package
    (`LINGER_SOURCE_ARCHIVE_FILE`, or the URL and SHA256, plus the target's
    `LINGER_SOURCE_DEPENDENCIES_URL` and SHA256) set, then package (`packaging/mac/package.py

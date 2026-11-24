@@ -49,7 +49,9 @@ Each Runtime kind has one minimum version (`native.MinimumVersions`, Codex
 0.166.0); an older installation is reported as `RUNTIME_INCOMPATIBLE` and never
 runs, so the adapters do not branch on a Runtime's version. The localmodels kit
 that installs the managed Runtimes reuses an existing one only at or above its
-own baseline, which must not sit below these minimums. Raise a minimum only
+own baseline, which must not sit below these minimums. The desktop
+distributions record both from the kit's release (`runtimeVersions`,
+`runtimeBaselines`), and a Go test fails when either is below a minimum. Raise a minimum only
 after a kit that installs a release at or above it ships in the desktop
 distribution pins (`apps/desktop/distribution/*.json`).
 The Codex canary workflow (`.github/workflows/codex-canary.yml`) runs the native
