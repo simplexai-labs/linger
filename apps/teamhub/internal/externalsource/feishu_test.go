@@ -75,3 +75,26 @@ func TestFeishuFailuresMapToConnectionOutcomes(t *testing.T) {
 		t.Fatal("a forgotten Feishu upstream must count as revoked")
 	}
 }
+
+func TestFeishuConnectBlockerLetsALoginFixWhatItCan(t *testing.T) {
+	offline := &feishu.ComputerError{Status: feishu.StatusComputerOffline}
+	cases := []struct {
+		name   string
+		status error
+		check  func(error) bool
+	}{
+		{"ready", nil, func(err error) bool { return err == nil }},
+		{"logged out", feishu.ErrAuthorizationRequired, func(err error) bool { return err == nil }},
+		{"scopes a login grants", &feishu.ScopesMissingError{Scopes: []string{"mail:a"}}, func(err error) bool { return err == nil }},
+		{"scopes the app does not enable", &feishu.ScopesMissingError{Scopes: []string{"mail:a"}, NotEnabled: []string{"mail:a"}, AppID: "cli_abc", Brand: "feishu"}, func(err error) bool {
+			var notEnabled *FeishuScopesNotEnabledError
+			return errors.As(err, &notEnabled) && slices.Equal(notEnabled.Scopes, []string{"mail:a"}) && notEnabled.PermissionsURL == "https://open.feishu.cn/app/cli_abc/auth"
+		}},
+		{"offline Computer", offline, func(err error) bool { return errors.Is(err, offline) }},
+	}
+	for _, tc := range cases {
+		if got := feishuConnectBlocker(tc.status); !tc.check(got) {
+			t.Errorf("%s: blocker = %v", tc.name, got)
+		}
+	}
+}

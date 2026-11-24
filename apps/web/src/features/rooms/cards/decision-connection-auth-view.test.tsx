@@ -10,6 +10,8 @@ import type { TeamHubExternalConnection } from "@/features/teamhub/teamhub-types
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
+import { resetLanguageForTest, setLanguage } from "@/i18n/language";
+import zhCN from "@/i18n/locales/zh-CN.json";
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import { DecisionCard, type DecisionMessageCard } from "./decision-card";
@@ -106,7 +108,10 @@ async function enabledButton(name: string) {
 }
 
 describe("Chat connection authorization", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetLanguageForTest();
+  });
 
   it("asks explicit consent for the named general Agent and selected connection", async () => {
     const { decision } = await setup();
@@ -255,6 +260,81 @@ describe("Chat connection authorization", () => {
     expect(screen.getByRole("button", { name: "Copy" })).toBeVisible();
     expect(screen.queryByText(/does not enable them/)).not.toBeInTheDocument();
     expect(decision).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      code: "LARK_CLI_NOT_INSTALLED",
+      title:
+        "lark-cli is not installed on the Computer that runs your Another Me",
+      commands: ["npm install -g @larksuite/cli", "lark-cli config init --new"],
+    },
+    {
+      code: "LARK_CLI_NOT_CONFIGURED",
+      title:
+        "lark-cli on the Computer that runs your Another Me is not set up yet",
+      commands: ["lark-cli config init --new"],
+    },
+    {
+      code: "FEISHU_COMPUTER_OFFLINE",
+      title: "The Computer that runs your Another Me is offline",
+      commands: [],
+    },
+    {
+      code: "FEISHU_COMPUTER_UNAVAILABLE",
+      title: "The Computer that runs your Another Me could not check lark-cli",
+      commands: [],
+    },
+  ])(
+    "turns $code into steps instead of TeamHub's error line",
+    async ({ code, title, commands }) => {
+      const { runtime, decision } = await setup(card, "alice", false);
+      vi.spyOn(runtime.client, "createExternalConnection").mockRejectedValue(
+        new TeamHubError({
+          code,
+          status: 409,
+          message: "TeamHub's own wording of the failure.",
+          // TeamHub names the commands; the card writes none of its own.
+          details: commands.map((command) => ({
+            field: "command",
+            reason: command,
+          })),
+        }),
+      );
+      fireEvent.click(await enabledButton("Connect Notion"));
+      expect(await screen.findByText(title)).toBeVisible();
+      expect(screen.getByText("Then click Connect again.")).toBeVisible();
+      for (const command of commands)
+        expect(screen.getByText(command)).toBeVisible();
+      expect(
+        screen.queryAllByRole("button", { name: "Copy command" }),
+      ).toHaveLength(commands.length);
+      expect(
+        screen.queryByText("TeamHub's own wording of the failure."),
+      ).not.toBeInTheDocument();
+      expect(decision).not.toHaveBeenCalled();
+    },
+  );
+
+  it("gives the lark-cli steps in the reader's language", async () => {
+    await setLanguage("zh-CN");
+    const { runtime } = await setup(card, "alice", false);
+    vi.spyOn(runtime.client, "createExternalConnection").mockRejectedValue(
+      new TeamHubError({
+        code: "LARK_CLI_NOT_INSTALLED",
+        status: 409,
+        message: "TeamHub's own wording of the failure.",
+      }),
+    );
+    fireEvent.click(
+      await enabledButton(zhCN.cards.connectApp.replace("{name}", "Notion")),
+    );
+    expect(
+      await screen.findByText(zhCN.connectors.feishuCliMissingTitle),
+    ).toBeVisible();
+    expect(
+      screen.getByText(zhCN.connectors.feishuCliMissingStepInstall),
+    ).toBeVisible();
   });
 
   it("starts a new authorization when the pending link expired", async () => {

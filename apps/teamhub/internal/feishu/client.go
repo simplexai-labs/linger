@@ -99,6 +99,9 @@ func (e *RateLimitError) Error() string { return "Feishu " + e.Operation + " was
 type ComputerError struct {
 	Status string
 	Detail string
+	// Hint is lark-cli's own advice for its failure, in English, for the
+	// Agent to explain; never shown as product text.
+	Hint string
 }
 
 func (e *ComputerError) Error() string { return "the Feishu Mail Computer call failed: " + e.Status }
@@ -110,6 +113,17 @@ const (
 	// StatusComputerOffline is an owner with no online Computer running their
 	// AnotherMe.
 	StatusComputerOffline = "computer_offline"
+	// StatusNotConfigured is a lark-cli never set up with a Feishu app, which
+	// no login can fix.
+	StatusNotConfigured = "not_configured"
+)
+
+// The commands that install lark-cli and set it up with a Feishu app on the
+// owner's Computer. Every place that tells the Human how, the Agent's steps
+// and the Web's, takes them from here.
+const (
+	InstallCommand = "npm install -g @larksuite/cli"
+	SetupCommand   = "lark-cli config init --new"
 )
 
 // ErrAuthorizationRequired reports an owner whose lark-cli is not logged in
@@ -250,7 +264,8 @@ func statusError(operation string, result map[string]any) error {
 	if status == "" {
 		status = "failed"
 	}
-	return &ComputerError{Status: status, Detail: detail}
+	hint, _ := result["hint"].(string)
+	return &ComputerError{Status: status, Detail: detail, Hint: hint}
 }
 
 // Status checks that the owner's lark-cli is logged in with every mail scope

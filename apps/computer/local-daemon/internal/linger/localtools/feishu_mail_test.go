@@ -116,6 +116,8 @@ func TestFeishuMailFailuresCarryLarkErrorFields(t *testing.T) {
 			map[string]any{"status": "auth_required", "error_type": "authentication", "error_subtype": "unknown", "detail": "m"}},
 		{`{"ok":false,"error":{"type":"api","subtype":"rate_limited","code":99991400,"message":"m"}}`,
 			map[string]any{"status": "failed", "error_type": "api", "error_subtype": "rate_limited", "detail": "m", "code": int64(99991400)}},
+		{`{"ok":false,"error":{"type":"config","subtype":"not_configured","message":"not configured","hint":"run lark-cli config init --new"}}`,
+			map[string]any{"status": "not_configured", "error_type": "config", "error_subtype": "not_configured", "detail": "not configured", "hint": "run lark-cli config init --new"}},
 		{`panic: not json`, map[string]any{"status": "failed"}},
 	}
 	for _, testCase := range cases {
@@ -158,6 +160,24 @@ func TestFeishuMailStatusReportsAnOwnerWhoIsNotLoggedIn(t *testing.T) {
 	answer(t, dir, "auth-check", "", `{"ok":false,"error":{"type":"authentication","subtype":"not_logged_in","message":"m"}}`, 3)
 	if result := tool.Call(context.Background(), "status", nil); result["status"] != "auth_required" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestFeishuMailReportsALarkCLINeverSetUp(t *testing.T) {
+	// Before lark-cli config init, auth check exits 3 with the reason on
+	// stdout, and a login answers it on stdout with exit 0.
+	notConfigured := `{"ok":false,"error":{"type":"config","subtype":"not_configured","message":"not configured","hint":"run lark-cli config init --new"}}`
+	tool, dir := fakeLarkCLI(t)
+	answer(t, dir, "auth-check", notConfigured, "", 3)
+	if result := tool.Call(context.Background(), "status", nil); result["status"] != "not_configured" || result["hint"] != "run lark-cli config init --new" {
+		t.Fatalf("status = %#v", result)
+	}
+	if entries, _ := filepath.Glob(filepath.Join(dir, "api-GET.argv")); len(entries) != 0 {
+		t.Fatal("the mailbox was read before lark-cli was set up")
+	}
+	answer(t, dir, "auth-login", notConfigured, "", 0)
+	if result := tool.Call(context.Background(), "login_start", json.RawMessage(`{"login_id":"feishu_upstream_1"}`)); result["status"] != "not_configured" {
+		t.Fatalf("login = %#v", result)
 	}
 }
 

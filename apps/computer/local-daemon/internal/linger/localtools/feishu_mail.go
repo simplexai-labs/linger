@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 )
 
 // FeishuMailScopes are the user scopes Feishu Mail needs: the mailbox
@@ -153,14 +155,20 @@ func (m *FeishuMail) status(ctx context.Context, binary string) map[string]any {
 	// on stdout, so a report it printed is read whatever the exit code.
 	stdout, failure := m.run(ctx, binary, []string{"auth", "check", "--scope", strings.Join(FeishuMailScopes, " "), "--json"}, nil)
 	var check struct {
-		OK      *bool    `json:"ok"`
-		Missing []string `json:"missing"`
+		OK      *bool           `json:"ok"`
+		Missing []string        `json:"missing"`
+		Error   json.RawMessage `json:"error"`
 	}
 	if json.Unmarshal(stdout, &check) != nil || check.OK == nil {
 		if failure != nil {
 			return failure
 		}
 		return map[string]any{"status": "failed"}
+	}
+	if len(check.Missing) == 0 && len(check.Error) > 0 {
+		// A check that could not run, such as before lark-cli is set up,
+		// reports why on stdout.
+		return larkFailure(stdout)
 	}
 	if len(check.Missing) > 0 {
 		result := map[string]any{"status": "missing_scope", "missing_scopes": check.Missing}
@@ -219,11 +227,19 @@ func (m *FeishuMail) loginStart(ctx context.Context, binary string, arguments js
 		return failure
 	}
 	var started struct {
-		DeviceCode      string `json:"device_code"`
-		VerificationURL string `json:"verification_url"`
-		ExpiresIn       int    `json:"expires_in"`
+		DeviceCode      string          `json:"device_code"`
+		VerificationURL string          `json:"verification_url"`
+		ExpiresIn       int             `json:"expires_in"`
+		Error           json.RawMessage `json:"error"`
 	}
-	if json.Unmarshal(stdout, &started) != nil || started.DeviceCode == "" || started.ExpiresIn <= 0 {
+	if json.Unmarshal(stdout, &started) != nil {
+		return map[string]any{"status": "failed"}
+	}
+	if len(started.Error) > 0 {
+		// A login lark-cli refused, such as before it is set up.
+		return larkFailure(stdout)
+	}
+	if started.DeviceCode == "" || started.ExpiresIn <= 0 {
 		return map[string]any{"status": "failed"}
 	}
 	if link, err := url.Parse(started.VerificationURL); err != nil || link.Scheme != "https" || link.Host == "" {
@@ -313,6 +329,7 @@ func larkFailure(stderr []byte) map[string]any {
 			Subtype       string   `json:"subtype"`
 			Code          int64    `json:"code"`
 			Message       string   `json:"message"`
+			Hint          string   `json:"hint"`
 			MissingScopes []string `json:"missing_scopes"`
 		} `json:"error"`
 	}
@@ -326,8 +343,15 @@ func larkFailure(stderr []byte) map[string]any {
 		status = "missing_scope"
 	case failure.Type == "authorization" || failure.Type == "authentication":
 		status = "auth_required"
+	case failure.Type == "config":
+		// Installed but never set up with a Feishu app: no login can help yet.
+		status = "not_configured"
 	}
 	result := map[string]any{"status": status, "error_type": failure.Type, "error_subtype": failure.Subtype, "detail": failure.Message}
+	if failure.Hint != "" {
+		// lark-cli's own advice, which TeamHub hands the Agent to explain.
+		result["hint"] = failure.Hint
+	}
 	if failure.Code != 0 {
 		result["code"] = failure.Code
 	}
@@ -357,14 +381,16 @@ func feishuMailboxRequestPath(requestPath string) bool {
 // findLarkCLI finds lark-cli on PATH, then where its installers put it. A
 // Computer started from the desktop or a clean environment has a short PATH.
 func findLarkCLI() (string, error) {
-	var candidates []string
-	if found, err := exec.LookPath(larkCLIName); err == nil {
-		candidates = append(candidates, found)
-	}
-	if runtime.GOOS != "windows" {
-		if home, err := os.UserHomeDir(); err == nil {
-			candidates = append(candidates, filepath.Join(home, ".local", "bin", larkCLIName))
+	environment := map[string]string{}
+	for _, entry := range os.Environ() {
+		if name, value, ok := strings.Cut(entry, "="); ok {
+			environment[name] = value
 		}
+	}
+	// Runtime discovery's folders cover npm's global folder on Windows, which
+	// a Daemon started before Node was installed has no PATH entry for.
+	candidates := provider.ExecutableCandidates(larkCLIName, environment)
+	if runtime.GOOS != "windows" {
 		candidates = append(candidates, "/opt/homebrew/bin/"+larkCLIName, "/usr/local/bin/"+larkCLIName)
 	}
 	for _, candidate := range candidates {

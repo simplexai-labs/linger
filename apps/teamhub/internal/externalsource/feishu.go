@@ -156,12 +156,11 @@ func (s *Service) createFeishuLinkInTx(ctx context.Context, tx pgx.Tx, accountID
 	upstreamID := idgen.New("feishu_upstream")
 	link := composio.Link{AuthConfigID: feishuAuthConfigID, ConnectedAccountID: upstreamID, ExpiresAt: time.Now().UTC().Add(feishuLinkLifetime).Truncate(time.Second)}
 	_, err = mailbox.Status(ctx)
-	var missing *feishu.ScopesMissingError
-	switch {
-	case err == nil:
-	case errors.As(err, &missing) && len(missing.NotEnabled) > 0:
-		return composio.Link{}, &FeishuScopesNotEnabledError{Scopes: missing.NotEnabled, PermissionsURL: missing.PermissionsURL()}
-	case feishu.IsAuthFailure(err):
+	if blocked := feishuConnectBlocker(err); blocked != nil {
+		return composio.Link{}, blocked
+	}
+	if err != nil {
+		// Not logged in, or missing scopes a login grants: the login fixes it.
 		login, err := mailbox.StartLogin(ctx, upstreamID)
 		if err != nil {
 			return composio.Link{}, err
@@ -170,13 +169,55 @@ func (s *Service) createFeishuLinkInTx(ctx context.Context, tx pgx.Tx, accountID
 		if login.ExpiresAt.Before(link.ExpiresAt) {
 			link.ExpiresAt = login.ExpiresAt.UTC().Truncate(time.Second)
 		}
-	default:
-		return composio.Link{}, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO external_connection_upstreams(upstream_id,account_id,user_id,toolkit_slug,auth_config_id) VALUES($1,$2,$2,$3,$4)`, upstreamID, accountID, feishuToolkit, feishuAuthConfigID); err != nil {
 		return composio.Link{}, err
 	}
 	return link, nil
+}
+
+// feishuConnectBlocker reports what keeps the owner's Computer from
+// connecting Feishu Mail, from the result of its status check: nothing when
+// lark-cli serves the mailbox already or a lark-cli login would make it, the
+// scopes its Feishu app does not enable, or the Computer's own failure, such
+// as being offline or having no lark-cli.
+func feishuConnectBlocker(statusErr error) error {
+	var missing *feishu.ScopesMissingError
+	switch {
+	case statusErr == nil:
+		return nil
+	case errors.As(statusErr, &missing) && len(missing.NotEnabled) > 0:
+		return &FeishuScopesNotEnabledError{Scopes: missing.NotEnabled, PermissionsURL: missing.PermissionsURL()}
+	case feishu.IsAuthFailure(statusErr):
+		return nil
+	default:
+		return statusErr
+	}
+}
+
+// CheckFeishuConnect reports what keeps humanActorID's Computer from
+// connecting Feishu Mail, before an Agent asks them to connect it: an offline
+// Computer or one without lark-cli (*feishu.ComputerError), or a Feishu app
+// without the mail scopes (*FeishuScopesNotEnabledError). Nil means the
+// connect card can work, with or without a lark-cli login.
+func (s *Service) CheckFeishuConnect(ctx context.Context, tenantID, humanActorID string) error {
+	if s.feishu == nil {
+		return ErrUnavailable
+	}
+	var accountID string
+	err := s.pool.QueryRow(ctx, `SELECT account_id FROM actors WHERE tenant_id=$1 AND id=$2 AND kind='human' AND account_id IS NOT NULL`, tenantID, humanActorID).Scan(&accountID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	mailbox, err := s.feishuAccountMailbox(ctx, store.New(s.pool), accountID)
+	if err != nil {
+		return err
+	}
+	_, err = mailbox.Status(ctx)
+	return feishuConnectBlocker(err)
 }
 
 var errFeishuUpstreamGone = errors.New("the Feishu upstream no longer exists")

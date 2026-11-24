@@ -50,6 +50,34 @@ it("renders one text line per server issue with path, code and message", () => {
   expect(text).not.toContain("room:secret");
 });
 
+it("shows the Agent a Feishu Mail connect refusal's steps in full", () => {
+  const steps =
+    "lark-cli is not installed on the Computer that runs the user's Another Me. Steps for the user, on that Computer: 1. Install it in a terminal: npm install -g @larksuite/cli 2. Set it up: lark-cli config init 3. Tell you when it is done, and you connect again.";
+  const text = renderCommandError(
+    formatCommandError(
+      new CliError(
+        "operation_forbidden",
+        "Feishu Mail cannot be connected yet; no card was posted",
+        {
+          http_status: 409,
+          issues: [
+            {
+              path: "feishu_mail",
+              code: "lark_cli_not_installed",
+              message: steps,
+            },
+          ],
+        },
+        "remote",
+      ),
+      { command: "apps connect" },
+    ),
+  );
+  expect(text).toContain(
+    `Issue: feishu_mail: lark_cli_not_installed: ${steps}`,
+  );
+});
+
 it("keeps version-conflict guidance specific to the attempted resource", () => {
   const error = new CliError(
     "version_conflict",

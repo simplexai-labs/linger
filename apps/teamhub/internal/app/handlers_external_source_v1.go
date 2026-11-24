@@ -251,8 +251,15 @@ func (a *App) writeFeishuConnectError(c *gin.Context, err error) bool {
 	case errors.As(err, &computer) && computer.Status == feishu.StatusComputerOffline:
 		a.writeError(c, http.StatusConflict, "FEISHU_COMPUTER_OFFLINE", "Feishu Mail runs through lark-cli on the Computer that runs your Another Me, and that Computer is offline. Start it and connect again.")
 	case errors.As(err, &computer) && computer.Status == feishu.StatusNotInstalled:
-		a.writeError(c, http.StatusConflict, "LARK_CLI_NOT_INSTALLED", "Install lark-cli on the Computer that runs your Another Me, run lark-cli config init there, and connect again.")
+		// The Web shows the commands from the details as copyable steps.
+		a.writeErrorWithDetails(c, http.StatusConflict, "LARK_CLI_NOT_INSTALLED", "Install lark-cli on the Computer that runs your Another Me, set it up there, and connect again.",
+			[]httpapi.ErrorDetail{{Field: "command", Reason: feishu.InstallCommand}, {Field: "command", Reason: feishu.SetupCommand}})
+	case errors.As(err, &computer) && computer.Status == feishu.StatusNotConfigured:
+		a.writeErrorWithDetails(c, http.StatusConflict, "LARK_CLI_NOT_CONFIGURED", "lark-cli on the Computer that runs your Another Me is not set up with a Feishu app yet. Set it up there and connect again.",
+			[]httpapi.ErrorDetail{{Field: "command", Reason: feishu.SetupCommand}})
 	case errors.As(err, &computer):
+		// The Human sees only that the Computer could not; the log keeps why.
+		a.logger.Warn("feishu_mail.connect_computer_failed", "status", computer.Status, "detail", computer.Detail)
 		a.writeError(c, http.StatusServiceUnavailable, "FEISHU_COMPUTER_UNAVAILABLE", "The Computer that runs your Another Me could not start the Feishu login. Check it is online and connect again.")
 	default:
 		return false

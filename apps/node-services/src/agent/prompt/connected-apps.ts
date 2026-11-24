@@ -13,9 +13,11 @@ export function connectableAppsRule(keys: readonly string[]): string {
 /**
  * Feishu Mail runs through the Human's own lark-cli, which an Agent on their
  * Computer could also call directly. Connecting it turns on watching their
- * inbox, and only teamhub feishu-mail holds a send for the Human's card.
+ * inbox, and only teamhub feishu-mail holds a send for the Human's card. When
+ * their Computer cannot connect it yet, TeamHub posts no card and names the
+ * cause by Issue code with the Human's steps, which the Agent relays.
  */
-const FEISHU_MAIL_RULE = ` Connect feishu_mail only when the Human asks you to share their Feishu Mail with you, since connecting it also starts watching their inbox. Read and send Feishu Mail with teamhub feishu-mail, never with lark-cli mail commands, which skip the Human's confirmation card.`;
+const FEISHU_MAIL_RULE = ` Connect feishu_mail only when the Human asks you to share their Feishu Mail with you, since connecting it also starts watching their inbox. If teamhub apps connect feishu_mail is refused with an Issue whose code is lark_cli_not_installed, lark_cli_not_configured, feishu_computer_offline, feishu_computer_unavailable or feishu_scopes_not_enabled, no card was posted: tell the Human in the conversation's language what is missing and the steps from that Issue as a short numbered list, keeping commands, permission names and links exactly as written, ask them to tell you when it is done, and only then run teamhub apps connect feishu_mail again. Read and send Feishu Mail with teamhub feishu-mail, never with lark-cli mail commands, which skip the Human's confirmation card.`;
 
 /**
  * The Connected apps line when no provider key is configured: no account or

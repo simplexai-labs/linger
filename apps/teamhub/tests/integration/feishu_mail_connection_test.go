@@ -31,11 +31,13 @@ type fakeFeishu struct {
 	// The owner's lark-cli: logged in with every mail scope, to address, the
 	// scopes its app does not enable, and the logins started on it, approved
 	// or not.
-	loggedIn   bool
-	address    string
-	notEnabled []string
-	logins     map[string]bool
-	targets    []nodeapi.LocalComputerToolCall
+	loggedIn      bool
+	notInstalled  bool
+	notConfigured bool
+	address       string
+	notEnabled    []string
+	logins        map[string]bool
+	targets       []nodeapi.LocalComputerToolCall
 	// The mailbox: its messages by ID and folder, saved drafts by ID, the
 	// drafts sent, and the moves made.
 	mail    map[string]map[string]any
@@ -86,6 +88,12 @@ func (f *fakeFeishu) CallLocalComputerToolResult(_ context.Context, call nodeapi
 		f.t.Errorf("arguments do not survive JSON: %v", call.Arguments)
 	}
 	loginID, _ := arguments["login_id"].(string)
+	if f.notInstalled {
+		return map[string]any{"status": "not_installed"}, nil
+	}
+	if f.notConfigured {
+		return map[string]any{"status": "not_configured", "error_type": "config", "hint": "run lark-cli config init --new"}, nil
+	}
 	switch call.ToolName {
 	case "status":
 		switch {
@@ -205,6 +213,20 @@ func (f *fakeFeishu) setLoggedIn(loggedIn bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.loggedIn = loggedIn
+}
+
+// setNotInstalled takes lark-cli off the owner's Computer.
+func (f *fakeFeishu) setNotInstalled(notInstalled bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.notInstalled = notInstalled
+}
+
+// setNotConfigured leaves the owner's lark-cli without a Feishu app.
+func (f *fakeFeishu) setNotConfigured(notConfigured bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.notConfigured = notConfigured
 }
 
 // setAddress logs the owner's lark-cli in to another mailbox.

@@ -26,9 +26,9 @@ import {
   accountIdentityText,
 } from "@/features/apps/connection-state";
 import {
-  FeishuScopesGuide,
-  isFeishuScopesNotEnabled,
-} from "@/features/apps/feishu-scopes-guide";
+  FeishuConnectGuide,
+  isFeishuConnectError,
+} from "@/features/apps/feishu-connect-guide";
 import { openOAuthUrl } from "@/features/apps/oauth-popup";
 import type { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
@@ -205,8 +205,9 @@ function ConnectionAuthorizationActions({
   const [created, setCreated] = useState<TeamHubExternalConnection>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  // Missing lark-cli app scopes get steps instead of an error line.
-  const [scopesError, setScopesError] = useState<TeamHubError>();
+  // A Feishu Mail connection the owner's Computer cannot make yet gets steps
+  // instead of an error line.
+  const [feishuError, setFeishuError] = useState<TeamHubError>();
   const [fallbackUrl, setFallbackUrl] = useState("");
   const authorizing = card.status === "authorizing";
   const boundConnectionId = card.connection_auth?.connection_id ?? "";
@@ -279,7 +280,7 @@ function ConnectionAuthorizationActions({
   async function authorize(newAccount: boolean) {
     setBusy(true);
     setError("");
-    setScopesError(undefined);
+    setFeishuError(undefined);
     try {
       let connection = newAccount ? undefined : selected;
       let connectUrl = "";
@@ -330,7 +331,7 @@ function ConnectionAuthorizationActions({
         queryKey: externalConnectionsQueryKey(),
       });
     } catch (cause) {
-      if (isFeishuScopesNotEnabled(cause)) setScopesError(cause);
+      if (isFeishuConnectError(cause)) setFeishuError(cause);
       else
         setError(
           cause instanceof Error
@@ -424,7 +425,7 @@ function ConnectionAuthorizationActions({
       appName={appName}
       card={card}
       guide={
-        scopesError ? <FeishuScopesGuide error={scopesError} /> : undefined
+        feishuError ? <FeishuConnectGuide error={feishuError} /> : undefined
       }
       error={
         error ||

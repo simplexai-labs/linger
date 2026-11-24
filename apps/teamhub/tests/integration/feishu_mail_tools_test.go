@@ -35,6 +35,7 @@ func TestAgentReadsAndSendsFeishuMailAfterConfirmation(t *testing.T) {
 
 	// Feishu Mail has no setup page: asked for it before it is connected, the
 	// Agent gets a card in the chat, and its Connect starts a lark-cli login.
+	runAliceAnotherMeOnAComputer(t, env)
 	asked := agent("/api/agent/v1/apps/account", map[string]any{"app_key": externalsource.FeishuMailAppKey})
 	cardID, _ := asked["interaction_id"].(string)
 	if asked["status"] != "authorization_required" || cardID == "" {
@@ -184,5 +185,95 @@ func assertFeishuMailSyncsOnlyNewMail(t *testing.T, env *testEnv, connectionID s
 	slices.Sort(want)
 	if !waitForExternalSource(func() bool { return slices.Equal(sources(), want) }) {
 		t.Fatalf("synced Wiki sources = %v, want %v", sources(), want)
+	}
+}
+
+// TestFeishuMailConnectGivesStepsInsteadOfAFailingCard checks that an Agent
+// asked to connect Feishu Mail gets what the Human must do first, by Issue
+// code, when their Computer cannot connect it yet, and that no card is posted
+// whose Connect would fail.
+func TestFeishuMailConnectGivesStepsInsteadOfAFailingCard(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	fake := newFakeFeishu(t)
+	env, alice, issued, roomID := newAgentCLIIdentity(t, starting(app.JobQueue), withAgentManagement(&recordingAgentManagement{}), withFeishuComputer(fake))
+	type refusal struct {
+		Error struct {
+			Code   string `json:"code"`
+			Issues []struct {
+				Path, Code, Message string
+			} `json:"issues"`
+		} `json:"error"`
+		Status string `json:"status"`
+	}
+	connect := func() (int, refusal) {
+		t.Helper()
+		status, body := postAgentInRoom(t, env, issued.AccessToken, roomID, "/api/agent/v1/apps/account", map[string]any{"app_key": externalsource.FeishuMailAppKey})
+		var decoded refusal
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("status=%d body=%s", status, body)
+		}
+		return status, decoded
+	}
+	refused := func(wantStatus int, wantCode, wantIssue string, wantText ...string) {
+		t.Helper()
+		status, decoded := connect()
+		if status != wantStatus || decoded.Error.Code != wantCode || len(decoded.Error.Issues) != 1 ||
+			decoded.Error.Issues[0].Path != externalsource.FeishuMailAppKey || decoded.Error.Issues[0].Code != wantIssue {
+			t.Fatalf("connect = %d %+v, want %d %s %s", status, decoded, wantStatus, wantCode, wantIssue)
+		}
+		for _, text := range wantText {
+			if !strings.Contains(decoded.Error.Issues[0].Message, text) {
+				t.Fatalf("%s steps = %q, want %q", wantIssue, decoded.Error.Issues[0].Message, text)
+			}
+		}
+	}
+
+	// No Computer runs alice's Another Me yet.
+	refused(http.StatusServiceUnavailable, "dependency_unavailable", "feishu_computer_offline", "open Linger")
+	runAliceAnotherMeOnAComputer(t, env)
+	fake.setNotInstalled(true)
+	refused(http.StatusConflict, "operation_forbidden", "lark_cli_not_installed", feishu.InstallCommand, feishu.SetupCommand)
+	webError := func(wantCode string, wantCommands ...string) {
+		t.Helper()
+		status, _, body := env.request(alice, http.MethodPost, "/v0/external-connections", map[string]string{"app_key": externalsource.FeishuMailAppKey}, "")
+		var decoded struct {
+			Error struct {
+				Code    string `json:"code"`
+				Details []struct {
+					Field, Reason string
+				} `json:"details"`
+			} `json:"error"`
+		}
+		decode(t, body, &decoded)
+		var commands []string
+		for _, detail := range decoded.Error.Details {
+			if detail.Field == "command" {
+				commands = append(commands, detail.Reason)
+			}
+		}
+		if status != http.StatusConflict || decoded.Error.Code != wantCode || !slices.Equal(commands, wantCommands) {
+			t.Fatalf("Connect = %d %s, want %s with commands %v", status, body, wantCode, wantCommands)
+		}
+	}
+	// The Web gets the same commands to show as steps.
+	webError("LARK_CLI_NOT_INSTALLED", feishu.InstallCommand, feishu.SetupCommand)
+	fake.setNotInstalled(false)
+	fake.setNotConfigured(true)
+	refused(http.StatusConflict, "operation_forbidden", "lark_cli_not_configured", feishu.SetupCommand, "lark-cli's own hint: run lark-cli config init --new")
+	webError("LARK_CLI_NOT_CONFIGURED", feishu.SetupCommand)
+	fake.setNotConfigured(false)
+	fake.setLoggedIn(true)
+	fake.setNotEnabled("mail:user_mailbox:readonly")
+	refused(http.StatusConflict, "operation_forbidden", "feishu_scopes_not_enabled", "mail:user_mailbox:readonly", "https://open.feishu.cn/app/cli_fake/auth")
+	var cards int
+	if err := env.pool.QueryRow(t.Context(), `SELECT count(*) FROM decisions WHERE room_id=$1`, roomID).Scan(&cards); err != nil || cards != 0 {
+		t.Fatalf("cards posted while connecting could not work = %d, %v", cards, err)
+	}
+
+	// Not logged in is no reason to refuse: the card's Connect starts the login.
+	fake.setNotEnabled()
+	fake.setLoggedIn(false)
+	if status, decoded := connect(); status != http.StatusOK || decoded.Status != "authorization_required" {
+		t.Fatalf("connect while logged out = %d %+v", status, decoded)
 	}
 }

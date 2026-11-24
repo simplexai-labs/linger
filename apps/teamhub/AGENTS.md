@@ -42,8 +42,20 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   keeps its device code, whose Feishu page is the connect URL. The connection's
   pending checks wait on that login, then read the mailbox address as its
   identity. Without an online Computer, lark-cli, or a scope the app enables,
-  connecting answers `FEISHU_COMPUTER_OFFLINE`, `LARK_CLI_NOT_INSTALLED` or
-  `FEISHU_SCOPES_NOT_ENABLED`. Disconnecting leaves the owner's lark-cli login
+  connecting answers `FEISHU_COMPUTER_OFFLINE`, `LARK_CLI_NOT_INSTALLED`,
+  `LARK_CLI_NOT_CONFIGURED` (installed but never set up with a Feishu app) or
+  `FEISHU_SCOPES_NOT_ENABLED`, which the Web shows as steps the Human can
+  follow. The install and setup commands live only in `internal/feishu`
+  (`InstallCommand`, `SetupCommand`) and reach the Web as `command` error
+  details. `teamhub apps connect feishu_mail` checks the owner's Computer the
+  same way before it posts the card (`CheckFeishuConnect`): when Connect could
+  not work, it posts no card and refuses with an Issue whose code
+  (`feishu_computer_offline`, `lark_cli_not_installed`,
+  `lark_cli_not_configured`, `feishu_scopes_not_enabled`,
+  `feishu_computer_unavailable`) names the cause and whose message holds the
+  Human's steps and lark-cli's own hint, which the Agent relays in the chat. A
+  lark-cli that is only logged out still gets the card. Any other Computer
+  failure is logged with the status and detail the Computer sent. Disconnecting leaves the owner's lark-cli login
   alone. While the Computer is offline, polls, syncs and tool calls fail
   without changing the connection, and a listener catches up from its
   watermark later. An Agent tool call does not check the login first: the
