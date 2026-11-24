@@ -952,7 +952,7 @@ func (q *Queries) ListVoiceLiveRecentToolCalls(ctx context.Context, voiceSession
 }
 
 const listVoiceLiveRoomDocuments = `-- name: ListVoiceLiveRoomDocuments :many
-SELECT DISTINCT ON (document.id) document.id::text AS document_id,document.title,
+SELECT DISTINCT ON (document.id) document.id::text AS document_id,document.title,document.format,
   coalesce(search.search_text,'')::text AS body_text,greatest(document.updated_at,(SELECT body.updated_at FROM document_bodies body WHERE body.document_id=document.id))::timestamptz AS updated_at,message.created_at AS shared_at
 FROM messages message
 CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(message.segments)='array' THEN message.segments ELSE '[]'::jsonb END) segment
@@ -974,6 +974,7 @@ type ListVoiceLiveRoomDocumentsParams struct {
 type ListVoiceLiveRoomDocumentsRow struct {
 	DocumentID string             `json:"document_id"`
 	Title      string             `json:"title"`
+	Format     string             `json:"format"`
 	BodyText   string             `json:"body_text"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 	SharedAt   pgtype.Timestamptz `json:"shared_at"`
@@ -993,6 +994,7 @@ func (q *Queries) ListVoiceLiveRoomDocuments(ctx context.Context, arg ListVoiceL
 		if err := rows.Scan(
 			&i.DocumentID,
 			&i.Title,
+			&i.Format,
 			&i.BodyText,
 			&i.UpdatedAt,
 			&i.SharedAt,
@@ -1233,6 +1235,104 @@ func (q *Queries) RenewVoiceLiveLease(ctx context.Context, voiceSessionID string
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const searchVoiceLiveMeetings = `-- name: SearchVoiceLiveMeetings :many
+SELECT c.id AS capture_id, r.name AS room, c.created_at AS started_at,
+       coalesce(media.duration_ms,0)::bigint AS duration_ms,
+       coalesce(c.quick_notes_state,'unavailable')::text AS notes_state,
+       c.quick_notes, coalesce(summary.document_id,'')::text AS wiki_summary_document_id,
+       coalesce(c.transcript_document_id,'')::text AS transcript_document_id
+FROM capture_sessions c
+LEFT JOIN capture_media_outputs media ON media.capture_session_id=c.id AND media.purpose='final'
+JOIN rooms r ON r.id=c.room_id AND r.tenant_id=c.tenant_id
+JOIN active_room_members member ON member.room_id=c.room_id AND member.actor_id=$1::text
+LEFT JOIN LATERAL (
+  SELECT page.document_id,body.search_text FROM personal_wikis wiki
+  JOIN document_wiki_pages page ON page.wiki_id=wiki.id AND page.tenant_id=wiki.tenant_id
+  JOIN document_context_bindings binding ON binding.document_id=page.document_id AND binding.wiki_id=wiki.id
+    AND binding.tenant_id=wiki.tenant_id AND binding.binding_kind='wiki_page' AND binding.status='active'
+  JOIN documents doc ON doc.id=page.document_id AND doc.tenant_id=wiki.tenant_id AND doc.status='active'
+  JOIN document_texts body ON body.document_id=doc.id AND body.source_id=doc.current_version_id
+    AND body.status='ready' AND body.search_text<>''
+  WHERE wiki.tenant_id=c.tenant_id AND wiki.owner_actor_id=$1::text
+    AND wiki.deleted_at IS NULL AND wiki.current_revision_id IS NOT NULL
+    AND page.page_key='sessions/'||split_part(page.page_key,'/',2)||'/'||c.id||'.md'
+  ORDER BY doc.updated_at DESC,page.document_id LIMIT 1
+) summary ON true
+WHERE c.tenant_id=$2::text
+  AND r.deleted_at IS NULL AND r.deletion_started_at IS NULL
+  AND c.hidden_at IS NULL AND c.status='finalized'
+  AND c.room_id=$3::text
+  AND NOT EXISTS (SELECT 1 FROM room_member_states departed
+    WHERE departed.room_id=member.room_id AND departed.actor_id=member.actor_id
+      AND departed.participation_epoch_id=member.membership_epoch_id AND departed.left_at IS NOT NULL)
+  AND (c.created_by_actor_id=member.actor_id OR EXISTS (
+    SELECT 1 FROM messages m WHERE m.room_id=c.room_id AND m.tenant_id=c.tenant_id
+      AND m.message_kind='conversation' AND m.segments @> jsonb_build_array(jsonb_build_object('type','meeting_notes','capture_id',c.id))))
+  AND ($4::timestamptz IS NULL OR c.created_at>=$4)
+  AND ($5::timestamptz IS NULL OR c.created_at<$5)
+  AND ($6::text='' OR strpos(lower(c.quick_notes::text),lower($6))>0
+    OR strpos(lower(summary.search_text),lower($6))>0)
+ORDER BY c.created_at DESC,c.id DESC LIMIT 8
+`
+
+type SearchVoiceLiveMeetingsParams struct {
+	HumanActorID string             `json:"human_actor_id"`
+	TenantID     string             `json:"tenant_id"`
+	RoomID       string             `json:"room_id"`
+	Since        pgtype.Timestamptz `json:"since"`
+	BeforeTime   pgtype.Timestamptz `json:"before_time"`
+	Topic        string             `json:"topic"`
+}
+
+type SearchVoiceLiveMeetingsRow struct {
+	CaptureID             string             `json:"capture_id"`
+	Room                  string             `json:"room"`
+	StartedAt             pgtype.Timestamptz `json:"started_at"`
+	DurationMs            int64              `json:"duration_ms"`
+	NotesState            string             `json:"notes_state"`
+	QuickNotes            []byte             `json:"quick_notes"`
+	WikiSummaryDocumentID string             `json:"wiki_summary_document_id"`
+	TranscriptDocumentID  string             `json:"transcript_document_id"`
+}
+
+// A recording is available before the nightly knowledge index. The Room and
+// date narrow candidates even when the speaker's name is absent from the notes.
+func (q *Queries) SearchVoiceLiveMeetings(ctx context.Context, arg SearchVoiceLiveMeetingsParams) ([]SearchVoiceLiveMeetingsRow, error) {
+	rows, err := q.db.Query(ctx, searchVoiceLiveMeetings,
+		arg.HumanActorID,
+		arg.TenantID,
+		arg.RoomID,
+		arg.Since,
+		arg.BeforeTime,
+		arg.Topic,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchVoiceLiveMeetingsRow{}
+	for rows.Next() {
+		var i SearchVoiceLiveMeetingsRow
+		if err := rows.Scan(
+			&i.CaptureID,
+			&i.Room,
+			&i.StartedAt,
+			&i.DurationMs,
+			&i.NotesState,
+			&i.QuickNotes,
+			&i.WikiSummaryDocumentID,
+			&i.TranscriptDocumentID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const searchVoiceLiveMessagesForAccount = `-- name: SearchVoiceLiveMessagesForAccount :many

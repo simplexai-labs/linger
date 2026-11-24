@@ -116,6 +116,14 @@ const waitForSent = async (sent: Sent[], count: number) => {
     await new Promise((resolve) => setTimeout(resolve, 5));
 };
 
+const afterToolResult = {
+  type: "response.create",
+  response: {
+    instructions: expect.stringContaining("## CURRENT RESPONSE"),
+    metadata: { tool_result: "true" },
+  },
+};
+
 describe("XaiLiveSession", () => {
   it("uses JSON audio for microphone and mute frames", async () => {
     const provider = await fakeProvider();
@@ -380,10 +388,39 @@ describe("XaiLiveSession", () => {
     ]);
     provider.emit({ type: "response.done", response: { status: "completed" } });
     await waitForSent(provider.sent, 4);
-    expect(provider.sent.at(-1)).toEqual({ type: "response.create" });
+    expect(provider.sent.at(-1)).toEqual(afterToolResult);
     await session.close();
   });
 
+  it("withdraws a queued tool-result reply when the user interrupts", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    const calls = collect(session, 2);
+    provider.emit(
+      { type: "response.created", response: { id: "r1" } },
+      {
+        type: "response.function_call_arguments.done",
+        call_id: "c1",
+        name: "lookup",
+        arguments: "{}",
+      },
+    );
+    await calls;
+    session.sendToolResults([{ callId: "c1", output: "done" }]);
+    session.cancel();
+    await waitForSent(provider.sent, 3);
+    const end = collect(session, 1);
+    provider.emit({ type: "response.done", response: { status: "cancelled" } });
+    await end;
+    session.respond();
+    await waitForSent(provider.sent, 4);
+    expect(provider.sent.slice(1)).toEqual([
+      expect.objectContaining({ type: "conversation.item.create" }),
+      { type: "response.cancel" },
+      { type: "response.create" },
+    ]);
+    await session.close();
+  });
   it("tells the reply after a tool result to keep the user's language", async () => {
     const provider = await fakeProvider();
     const session = await open(provider.url);
@@ -411,6 +448,131 @@ describe("XaiLiveSession", () => {
     expect(item.output).toContain(
       `reply in the language of the user's latest words (“${spanishRequest}”)`,
     );
+    await session.close();
+  });
+
+  it("allows another search after a complete meeting result and streams its answer", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    const lookup = collect(session, 3);
+    provider.emit(
+      { type: "response.created", response: { id: "lookup" } },
+      {
+        type: "response.function_call_arguments.done",
+        call_id: "c1",
+        name: "lookup",
+        arguments: "{}",
+      },
+      { type: "response.done", response: { status: "completed" } },
+    );
+    await lookup;
+    session.sendToolResults([
+      {
+        callId: "c1",
+        output:
+          '{"status":"overview_ready","meetings":[{"capture_id":"latest"}]}',
+      },
+    ]);
+    await waitForSent(provider.sent, 3);
+    expect(provider.sent.at(-1)).toEqual(afterToolResult);
+    const response = provider.sent.at(-1)?.response as Record<string, unknown>;
+    expect(provider.sent.at(-1)?.response).not.toHaveProperty(
+      "tool_choice",
+      "none",
+    );
+    const retry = collect(session, 3);
+    provider.emit(
+      { type: "response.created", response: { id: "retry", ...response } },
+      {
+        type: "response.function_call_arguments.done",
+        call_id: "c2",
+        name: "lookup",
+        arguments: '{"before":"latest"}',
+      },
+      { type: "response.done", response: { status: "completed" } },
+    );
+    expect((await retry).map((event) => event.type)).toEqual([
+      "response_started",
+      "function_calls",
+      "response_finished",
+    ]);
+    session.sendToolResults([
+      {
+        callId: "c2",
+        output:
+          '{"status":"overview_ready","meetings":[{"capture_id":"previous"}]}',
+      },
+    ]);
+    await waitForSent(provider.sent, 5);
+    expect(provider.sent.at(-1)).toEqual(afterToolResult);
+    const heard = collect(session, 4);
+    provider.emit(
+      { type: "response.created", response: { id: "answer", ...response } },
+      { type: "response.output_audio_transcript.delta", delta: "Ship Friday." },
+      { type: "response.output_audio.delta", delta: pcmBase64(123) },
+    );
+    expect((await heard).map((event) => event.type)).toEqual([
+      "response_started",
+      "text_delta",
+      "audio_started",
+      "audio_delta",
+    ]);
+    await session.close();
+  });
+
+  it("streams ordinary tool replies before completion and drops trailing audio after the next tool call", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    const start = (id: string) => ({
+      type: "response.created",
+      response: { id, ...afterToolResult.response },
+    });
+    const audio = {
+      type: "response.output_audio.delta",
+      delta: pcmBase64(123),
+    };
+    const retry = collect(session, 3);
+    provider.emit(
+      start("retry"),
+      {
+        type: "response.function_call_arguments.done",
+        call_id: "c2",
+        name: "lookup",
+        arguments: "{}",
+      },
+      {
+        type: "response.output_audio_transcript.delta",
+        delta: "Intermediate.",
+      },
+      audio,
+      { type: "response.done", response: { status: "completed" } },
+    );
+    expect((await retry).map((event) => event.type)).toEqual([
+      "response_started",
+      "function_calls",
+      "response_finished",
+    ]);
+    const answer = collect(session, 4);
+    provider.emit(
+      start("answer"),
+      { type: "response.output_audio_transcript.delta", delta: "Created." },
+      audio,
+    );
+    expect((await answer).map((event) => event.type)).toEqual([
+      "response_started",
+      "text_delta",
+      "audio_started",
+      "audio_delta",
+    ]);
+    session.cancel();
+    const end = collect(session, 1);
+    provider.emit(audio, {
+      type: "response.done",
+      response: { status: "cancelled" },
+    });
+    expect(await end).toEqual([{ type: "response_finished", canceled: true }]);
+    await waitForSent(provider.sent, 2);
+    expect(provider.sent.at(-1)?.type).toBe("response.cancel");
     await session.close();
   });
 
@@ -537,7 +699,7 @@ describe("XaiLiveSession", () => {
           ],
         },
       },
-      { type: "response.create" },
+      afterToolResult,
     ]);
     await session.close();
   });
@@ -657,8 +819,7 @@ describe("XaiLiveSession", () => {
       { type: "response.output_audio.delta", delta: pcmBase64(5) },
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
-    session.cancel();
-    session.truncate(1234.4);
+    session.cancel({ playedMs: 1234.4 });
     provider.emit(
       { type: "response.output_audio.delta", delta: pcmBase64(6) },
       { type: "response.done", response: { status: "cancelled" } },
@@ -689,6 +850,70 @@ describe("XaiLiveSession", () => {
     ]);
     await session.close();
   });
+
+  it.each([false, true])(
+    "keeps local interruptions out of the input until server speech starts (reply finished: %s)",
+    async (finished) => {
+      const provider = await fakeProvider();
+      const session = await open(provider.url);
+      provider.emit(
+        { type: "response.created", response: { id: "r1" } },
+        {
+          type: "response.output_item.added",
+          item: { type: "message", id: "a1" },
+        },
+        { type: "response.output_audio.delta", delta: pcmBase64(5) },
+      );
+      await collect(session, 3);
+      if (finished) {
+        provider.emit({
+          type: "response.done",
+          response: { status: "completed" },
+        });
+        await collect(session, 1);
+      }
+      session.cancel({ localSpeech: true, playedMs: 500 });
+      session.appendAudio(Int16Array.from([7, 8]));
+      await waitForSent(provider.sent, 2);
+      expect(provider.sent.map((event) => event.type)).toEqual([
+        "session.update",
+        "binary",
+      ]);
+      if (!finished)
+        provider.emit({
+          type: "response.output_audio.delta",
+          delta: pcmBase64(6),
+        });
+      provider.emit(
+        { type: "input_audio_buffer.speech_started", item_id: "u2" },
+        {
+          type: "conversation.item.input_audio_transcription.updated",
+          item_id: "u2",
+          transcript: "Wait",
+        },
+        {
+          type: "conversation.item.input_audio_transcription.updated",
+          item_id: "u2",
+          transcript: "Wait for me",
+        },
+      );
+      expect(await collect(session, 3)).toEqual([
+        { type: "speech_started", itemId: "u2" },
+        { type: "transcript_delta", itemId: "u2", text: "Wait" },
+        { type: "transcript_delta", itemId: "u2", text: "Wait for me" },
+      ]);
+      await waitForSent(provider.sent, finished ? 3 : 4);
+      expect(provider.sent.slice(2).map((event) => event.type)).toEqual([
+        ...(finished ? [] : ["conversation.item.create"]),
+        "conversation.item.truncate",
+      ]);
+      expect(provider.sent.at(-1)).toMatchObject({
+        item_id: "a1",
+        audio_end_ms: 500,
+      });
+      await session.close();
+    },
+  );
 
   it("says nothing more when a cut-off reply already called its tool", async () => {
     const provider = await fakeProvider();

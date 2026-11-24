@@ -140,7 +140,6 @@ class FakeSession {
   closeTurn = vi.fn();
   cancel = vi.fn();
   respond = vi.fn();
-  truncate = vi.fn();
   tell = vi.fn();
   repeatUpdate = vi.fn();
   abandon = vi.fn((code: string) =>
@@ -317,12 +316,15 @@ async function harness(
         return {
           async pushPCM(frame: Int16Array) {
             through += 512;
-            // 1 is loud speech; 3 is speech 15 dB quieter.
+            // Speech markers cover the user, a distant voice and a borderline onset.
             return [
               {
                 throughSample: through,
-                speech: frame[0] === 1 || frame[0] === 3,
-                levelDb: frame[0] === 3 ? -35 : -20,
+                speech: [1, 3, 4, 5].includes(frame[0]!),
+                levelDb:
+                  ({ 3: -35, 4: -29, 5: -34 } as Record<number, number>)[
+                    frame[0]!
+                  ] ?? -20,
               },
             ];
           },
@@ -628,6 +630,29 @@ describe("LiveVoiceWorker", () => {
     await test.shutdown();
     expect(test.client.reportLiveReply).toHaveBeenCalledOnce();
   });
+
+  it.each([true, false])(
+    "keeps follow-up search available when a meeting result is ready: %s",
+    async (ready) => {
+      const output = ready
+        ? '{"status":"overview_ready","meetings":[{}]}'
+        : '{"meetings":[]}';
+      const test = await harness({ toolOutput: () => output });
+      await answeredTurn(test, "Let me check.");
+      test.session().emit({
+        type: "function_calls",
+        update: false,
+        calls: [{ callId: "lookup", name: "search_meetings", arguments: "{}" }],
+      });
+      await vi.waitFor(() =>
+        expect(test.session().sendToolResults).toHaveBeenCalledWith(
+          [{ callId: "lookup", output }],
+          { reply: true },
+        ),
+      );
+      await test.shutdown();
+    },
+  );
 
   it("says a turn is done only after its tool rounds, so the browser saves it after any hand-off", async () => {
     const test = await harness({
@@ -982,7 +1007,11 @@ describe("LiveVoiceWorker", () => {
     test.source().queued = 400;
     // The fake VAD hears 32 ms of speech per frame; 200 ms pauses the reply.
     for (let index = 0; index < 6; index++) test.track.frame(1);
-    await vi.waitFor(() => expect(test.session().audio).toHaveLength(6));
+    await vi.waitFor(() =>
+      expect(
+        test.session().audio.filter((frame) => frame[0] === 1),
+      ).toHaveLength(6),
+    );
     expect(test.source().clears).toBe(0);
     test.track.frame(1);
     await vi.waitFor(() => expect(test.source().clears).toBe(1));
@@ -1007,7 +1036,68 @@ describe("LiveVoiceWorker", () => {
     expect(test.source().frames).toHaveLength(2);
   });
 
-  it("resumes an unconfirmed pause where the listener stopped hearing, and pauses that reply no more", async () => {
+  it.each([false, true])(
+    "discards the old audio on sustained local speech even before server confirmation (generation finished: %s)",
+    async (finished) => {
+      const test = await harness();
+      test.source().queueFrames = true;
+      await answeredTurn(test);
+      await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
+      if (finished)
+        test
+          .session()
+          .emit(
+            { type: "audio_done" },
+            { type: "response_finished", canceled: false },
+          );
+      for (let i = 0; i < 7; i++) test.track.frame(1);
+      await vi.waitFor(() => expect(test.source().clears).toBe(1));
+      for (let i = 0; i < 6; i++) test.track.frame(1);
+      test.track.frame(0);
+      for (let i = 0; i < 6; i++) test.track.frame(1);
+      await vi.waitFor(() =>
+        expect(test.ofType("reply_interrupted")).toHaveLength(1),
+      );
+      if (!finished)
+        test
+          .session()
+          .emit(
+            { type: "audio_delta", pcm: pcm(960) },
+            { type: "response_finished", canceled: true },
+          );
+      for (let i = 0; i < 16; i++) test.track.frame(0);
+      test.session().emit(
+        { type: "speech_started", itemId: "item-b" },
+        {
+          type: "transcript_completed",
+          itemId: "item-b",
+          text: "A new question",
+        },
+      );
+      await vi.waitFor(() => expect(test.ofType("user_turn")).toHaveLength(2));
+      expect(test.source().frames).toHaveLength(2);
+      expect(test.session().cancel).toHaveBeenCalledWith({
+        localSpeech: true,
+        playedMs: expect.any(Number),
+      });
+      expect(test.session().cancel).toHaveBeenCalledOnce();
+      expect(test.ofType("reply_interrupted")).toHaveLength(1);
+      test.source().queueFrames = false;
+      test
+        .session()
+        .emit(
+          { type: "response_started" },
+          { type: "audio_started", update: false },
+          { type: "audio_delta", pcm: pcm(480, 4444) },
+        );
+      await vi.waitFor(() =>
+        expect(test.source().frames.at(-1)?.[0]).toBe(4444),
+      );
+      await test.shutdown();
+    },
+  );
+
+  it("resumes unheard audio, ignores immediate echo, and pauses the same reply for a fresh interruption", async () => {
     const test = await harness();
     await answeredTurn(test);
     await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
@@ -1015,15 +1105,17 @@ describe("LiveVoiceWorker", () => {
     test.source().queued = 400;
     for (let index = 0; index < 7; index++) test.track.frame(1);
     await vi.waitFor(() => expect(test.source().clears).toBe(1));
+    const sentBeforeQuiet = test.session().audio.length;
     // 400 ms of local quiet, such as the end of the reply's own echo.
     for (let index = 0; index < 12; index++) test.track.frame(0);
-    await vi.waitFor(() => expect(test.session().audio).toHaveLength(19));
+    await vi.waitFor(() =>
+      expect(test.session().audio).toHaveLength(sentBeforeQuiet + 12),
+    );
     expect(test.source().frames).toHaveLength(2);
     test.track.frame(0);
     await vi.waitFor(() => expect(test.source().frames).toHaveLength(4));
     expect(test.source().frames.slice(2)).toEqual(played);
-    // More of the same reply, and more local speech over it: only server
-    // VAD stops this reply now.
+    // The replay immediately reaches the microphone again.
     test.session().emit({ type: "audio_delta", pcm: pcm(960) });
     await vi.waitFor(() => expect(test.source().frames).toHaveLength(6));
     test.source().queued = 400;
@@ -1037,29 +1129,129 @@ describe("LiveVoiceWorker", () => {
     expect(test.source().clears).toBe(1);
     expect(test.ofType("reply_interrupted")).toHaveLength(0);
     expect(test.session().cancel).not.toHaveBeenCalled();
+    for (let index = 0; index < 3; index++) test.track.frame(0);
+    for (let index = 0; index < 7; index++) test.track.frame(1);
+    await vi.waitFor(() => expect(test.source().clears).toBe(2));
+    expect(test.session().cancel).not.toHaveBeenCalled();
+    test.session().emit({ type: "speech_started", itemId: "item-b" });
+    await vi.waitFor(() =>
+      expect(test.ofType("reply_interrupted")).toHaveLength(1),
+    );
+    expect(test.session().cancel).toHaveBeenCalledOnce();
+    await test.shutdown();
+  });
+
+  it("keeps filtering between reply chunks and releases the microphone after audio ends", async () => {
+    const test = await harness();
+    test.track.frame(1);
+    for (let index = 0; index < 10; index++) test.track.frame(0);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(11));
+    await answeredTurn(test);
+    await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
+    expect(test.source().queued).toBe(0);
+    for (let index = 0; index < 12; index++) test.track.frame(3);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(23));
+    expect(
+      test
+        .session()
+        .audio.slice(11)
+        .every((frame) => frame[0] === 0),
+    ).toBe(true);
+    test.session().emit({ type: "audio_done" });
+    await new Promise((resolve) => setImmediate(resolve));
+    test.track.frame(3);
+    await vi.waitFor(() => expect(test.session().audio.at(-1)?.[0]).toBe(3));
+    await test.shutdown();
+  });
+
+  it("forwards a brief near-level word with its first frame during playback", async () => {
+    const test = await harness();
+    test.track.frame(1);
+    test.track.frame(0);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(2));
+    await answeredTurn(test);
+    await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
+    test.source().queued = 400;
+    // A short word need only peak near the user's level. Its tail is softer.
+    test.track.frame(4);
+    test.track.frame(1);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(4));
+    expect(
+      test
+        .session()
+        .audio.slice(2)
+        .every((frame) => frame[0] === 0),
+    ).toBe(true);
+    test.track.frame(5);
+    await vi.waitFor(() =>
+      expect(
+        test
+          .session()
+          .audio.slice(4)
+          .map((frame) => frame[0]),
+      ).toEqual([4, 1, 5]),
+    );
+    expect(test.source().clears).toBe(0);
+    await test.shutdown();
+  });
+
+  it("holds a borderline interruption until sustained and forwards its buffered onset", async () => {
+    const test = await harness();
+    test.track.frame(1);
+    test.track.frame(0);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(2));
+    await answeredTurn(test);
+    await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
+    test.source().queued = 400;
+    // A weak tail after a borderline syllable cannot open the gate.
+    for (let index = 0; index < 4; index++) test.track.frame(4);
+    for (let index = 0; index < 4; index++) test.track.frame(5);
+    for (let index = 0; index < 24; index++) test.track.frame(0);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(34));
+    expect(
+      test
+        .session()
+        .audio.slice(2)
+        .every((frame) => frame[0] === 0),
+    ).toBe(true);
+    for (let index = 0; index < 6; index++) test.track.frame(4);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(40));
+    expect(
+      test
+        .session()
+        .audio.slice(2)
+        .every((frame) => frame[0] === 0),
+    ).toBe(true);
+    test.track.frame(4);
+    await vi.waitFor(() =>
+      expect(
+        test.session().audio.filter((frame) => frame[0] === 4),
+      ).toHaveLength(7),
+    );
     await test.shutdown();
   });
 
   it("hears quieter speech than the user's own as someone else in the room", async () => {
     const test = await harness();
+    // Learn the user's level before the reply begins.
+    for (let index = 0; index < 5; index++) test.track.frame(1);
+    for (let index = 0; index < 10; index++) test.track.frame(0);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(15));
     await answeredTurn(test);
     await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
     test.source().queued = 400;
-    const start = test.session().audio.length;
-    // The user's level is learned from their own words.
-    for (let index = 0; index < 5; index++) test.track.frame(1);
-    for (let index = 0; index < 10; index++) test.track.frame(0);
+    const beforeDistant = test.session().audio.length;
     // Someone farther away talks over the reply, longer than a pause needs.
     for (let index = 0; index < 12; index++) test.track.frame(3);
     await vi.waitFor(() =>
-      expect(test.session().audio.length).toBe(start + 27),
+      expect(test.session().audio.length).toBe(beforeDistant + 12),
     );
     expect(test.source().clears).toBe(0);
     // It is gated like quiet: the provider hears silence.
     expect(
       test
         .session()
-        .audio.slice(start + 15)
+        .audio.slice(beforeDistant)
         .every((frame) => frame.every((sample) => sample === 0)),
     ).toBe(true);
     await test.shutdown();

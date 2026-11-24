@@ -221,7 +221,7 @@ ORDER BY known.rank, known.at DESC NULLS LAST;
 -- name: ListVoiceLiveRoomDocuments :many
 -- Documents and files shared in a Room's Messages, newest first, with their
 -- indexed text. Being shown in the Room is what lets its members read them.
-SELECT DISTINCT ON (document.id) document.id::text AS document_id,document.title,
+SELECT DISTINCT ON (document.id) document.id::text AS document_id,document.title,document.format,
   coalesce(search.search_text,'')::text AS body_text,greatest(document.updated_at,(SELECT body.updated_at FROM document_bodies body WHERE body.document_id=document.id))::timestamptz AS updated_at,message.created_at AS shared_at
 FROM messages message
 CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(message.segments)='array' THEN message.segments ELSE '[]'::jsonb END) segment
@@ -481,3 +481,44 @@ SELECT EXISTS(
   SELECT 1 FROM work_item_room_links
   WHERE room_id=sqlc.arg(room_id)::text AND link_type='work'
 );
+
+-- name: SearchVoiceLiveMeetings :many
+-- A recording is available before the nightly knowledge index. The Room and
+-- date narrow candidates even when the speaker's name is absent from the notes.
+SELECT c.id AS capture_id, r.name AS room, c.created_at AS started_at,
+       coalesce(media.duration_ms,0)::bigint AS duration_ms,
+       coalesce(c.quick_notes_state,'unavailable')::text AS notes_state,
+       c.quick_notes, coalesce(summary.document_id,'')::text AS wiki_summary_document_id,
+       coalesce(c.transcript_document_id,'')::text AS transcript_document_id
+FROM capture_sessions c
+LEFT JOIN capture_media_outputs media ON media.capture_session_id=c.id AND media.purpose='final'
+JOIN rooms r ON r.id=c.room_id AND r.tenant_id=c.tenant_id
+JOIN active_room_members member ON member.room_id=c.room_id AND member.actor_id=sqlc.arg(human_actor_id)::text
+LEFT JOIN LATERAL (
+  SELECT page.document_id,body.search_text FROM personal_wikis wiki
+  JOIN document_wiki_pages page ON page.wiki_id=wiki.id AND page.tenant_id=wiki.tenant_id
+  JOIN document_context_bindings binding ON binding.document_id=page.document_id AND binding.wiki_id=wiki.id
+    AND binding.tenant_id=wiki.tenant_id AND binding.binding_kind='wiki_page' AND binding.status='active'
+  JOIN documents doc ON doc.id=page.document_id AND doc.tenant_id=wiki.tenant_id AND doc.status='active'
+  JOIN document_texts body ON body.document_id=doc.id AND body.source_id=doc.current_version_id
+    AND body.status='ready' AND body.search_text<>''
+  WHERE wiki.tenant_id=c.tenant_id AND wiki.owner_actor_id=sqlc.arg(human_actor_id)::text
+    AND wiki.deleted_at IS NULL AND wiki.current_revision_id IS NOT NULL
+    AND page.page_key='sessions/'||split_part(page.page_key,'/',2)||'/'||c.id||'.md'
+  ORDER BY doc.updated_at DESC,page.document_id LIMIT 1
+) summary ON true
+WHERE c.tenant_id=sqlc.arg(tenant_id)::text
+  AND r.deleted_at IS NULL AND r.deletion_started_at IS NULL
+  AND c.hidden_at IS NULL AND c.status='finalized'
+  AND c.room_id=sqlc.arg(room_id)::text
+  AND NOT EXISTS (SELECT 1 FROM room_member_states departed
+    WHERE departed.room_id=member.room_id AND departed.actor_id=member.actor_id
+      AND departed.participation_epoch_id=member.membership_epoch_id AND departed.left_at IS NOT NULL)
+  AND (c.created_by_actor_id=member.actor_id OR EXISTS (
+    SELECT 1 FROM messages m WHERE m.room_id=c.room_id AND m.tenant_id=c.tenant_id
+      AND m.message_kind='conversation' AND m.segments @> jsonb_build_array(jsonb_build_object('type','meeting_notes','capture_id',c.id))))
+  AND (sqlc.narg(since)::timestamptz IS NULL OR c.created_at>=sqlc.narg(since))
+  AND (sqlc.narg(before_time)::timestamptz IS NULL OR c.created_at<sqlc.narg(before_time))
+  AND (sqlc.arg(topic)::text='' OR strpos(lower(c.quick_notes::text),lower(sqlc.arg(topic)))>0
+    OR strpos(lower(summary.search_text),lower(sqlc.arg(topic)))>0)
+ORDER BY c.created_at DESC,c.id DESC LIMIT 8;

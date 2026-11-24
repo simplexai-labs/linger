@@ -162,6 +162,8 @@ func (s *Service) executeVoiceLiveTool(ctx context.Context, session voicelive.Se
 		}
 		err = s.queries.CompleteVoiceLiveToolCall(ctx, store.CompleteVoiceLiveToolCallParams{VoiceSessionID: session.ID, CallID: result.CallID, Output: result.Output, State: state})
 		return voicelive.Output(map[string]string{"status": "saved"}), err
+	case voicelive.ToolSearchMeetings:
+		return s.searchVoiceLiveMeetings(ctx, session, request.Arguments)
 	case voicelive.ToolSearchMessages:
 		var args voicelive.SearchArguments
 		if voicelive.DecodeArguments(request.Arguments, &args) != nil || !voicelive.ValidQuery(args.Query) {
@@ -247,7 +249,7 @@ func (s *Service) executeVoiceLiveTool(ctx context.Context, session voicelive.Se
 		if voicelive.DecodeArguments(request.Arguments, &args) != nil {
 			return "", voicelive.ErrInvalid
 		}
-		return s.readVoiceLiveDocument(ctx, session, args)
+		return s.readVoiceLiveDocument(ctx, session, args, voicelive.MaxDocumentRunes)
 	case voicelive.ToolListWorkItems:
 		var args voicelive.ListWorkItemsArguments
 		if voicelive.DecodeArguments(request.Arguments, &args) != nil {
@@ -313,6 +315,8 @@ func (s *Service) executeVoiceLiveTool(ctx context.Context, session voicelive.Se
 		return s.readVoiceLivePocketNotes(ctx, session, request, time.Now())
 	case voicelive.ToolDeletePocketNote:
 		return s.deleteVoiceLivePocketNote(ctx, session, request, time.Now())
+	case voicelive.ToolAddRoomMembers:
+		return s.addVoiceLiveRoomMembers(ctx, session, request)
 	case voicelive.ToolCreateRoom:
 		return s.createVoiceLiveRoom(ctx, session, request)
 	case voicelive.ToolOpenEmailCanvas:
@@ -467,17 +471,11 @@ func (s *Service) createVoiceLiveRoom(ctx context.Context, session voicelive.Ses
 	}
 	var members voicelive.MemberMatch
 	if len(args.Members) > 0 {
-		rows, err := s.queries.ListActorsForTenantAccount(ctx, store.ListActorsForTenantAccountParams{
-			AccountID: session.AccountID, TenantID: session.TenantID, PageLimit: 500,
-		})
+		var err error
+		members, err = s.matchVoiceLiveRoomMembers(ctx, session, args.Members)
 		if err != nil {
 			return "", err
 		}
-		directory := make([]voicelive.DirectoryActor, 0, len(rows))
-		for _, row := range rows {
-			directory = append(directory, voicelive.DirectoryActor{ID: row.ID, Name: strings.TrimSpace(row.DisplayName), Kind: row.Kind})
-		}
-		members = voicelive.MatchMembers(args.Members, directory, session.HumanActorID)
 		if members.Problem != nil {
 			return voicelive.Output(members.Problem), nil
 		}
@@ -756,7 +754,7 @@ func (s *Service) recallVoiceLiveMemory(ctx context.Context, session voicelive.S
 
 // readVoiceLiveDocument reads one Document the Human can read: the given one,
 // the best match for a name, or the one shared last in this Room.
-func (s *Service) readVoiceLiveDocument(ctx context.Context, session voicelive.Session, args voicelive.ReadDocumentArguments) (string, error) {
+func (s *Service) readVoiceLiveDocument(ctx context.Context, session voicelive.Session, args voicelive.ReadDocumentArguments, maxRunes int) (string, error) {
 	documentID := strings.TrimSpace(args.DocumentID)
 	query := strings.TrimSpace(args.Query)
 	// A Document shown in this Room, such as an Agent's canvas draft, is read
@@ -768,7 +766,7 @@ func (s *Service) readVoiceLiveDocument(ctx context.Context, session voicelive.S
 		return "", err
 	}
 	if row, ok := voiceLiveRoomDocument(shared, documentID, query); ok {
-		return s.voiceLiveDocumentOutput(ctx, row.DocumentID, row.Title, row.UpdatedAt.Time, row.BodyText)
+		return s.voiceLiveDocumentOutput(ctx, row.DocumentID, row.Title, row.Format, row.UpdatedAt.Time, row.BodyText, maxRunes)
 	}
 	switch {
 	case documentID != "":
@@ -799,10 +797,13 @@ func (s *Service) readVoiceLiveDocument(ctx context.Context, session voicelive.S
 	if err != nil {
 		return "", err
 	}
-	return s.voiceLiveDocumentOutput(ctx, value.ID, value.Title, value.UpdatedAt, text)
+	return s.voiceLiveDocumentOutput(ctx, value.ID, value.Title, value.Format, value.UpdatedAt, text, maxRunes)
 }
 
-func (s *Service) voiceLiveDocumentOutput(ctx context.Context, documentID, title string, updatedAt time.Time, text string) (string, error) {
+func (s *Service) voiceLiveDocumentOutput(ctx context.Context, documentID, title, format string, updatedAt time.Time, text string, maxRunes int) (string, error) {
+	if format == "m4a" {
+		return voicelive.ErrorOutput("audio_has_no_text"), nil
+	}
 	result := map[string]any{
 		"document_id": documentID, "title": title,
 		"updated_at": updatedAt.In(time.Local).Format("2006-01-02 15:04"),
@@ -819,7 +820,7 @@ func (s *Service) voiceLiveDocumentOutput(ctx context.Context, documentID, title
 		result["text_pending"] = true
 		return voicelive.Output(result), nil
 	}
-	result["text"], result["truncated"] = voicelive.Truncate(text, voicelive.MaxDocumentRunes)
+	result["text"], result["truncated"] = voicelive.Truncate(text, maxRunes)
 	return voicelive.Output(result), nil
 }
 
@@ -1089,7 +1090,7 @@ func (s *Service) ExecuteLiveToolCall(ctx context.Context, request teamhubintern
 	if err != nil {
 		return "", fmt.Errorf("check foreground transition: %w", err)
 	}
-	if switching && request.Name != "list_tasks" && request.Name != "check_task" && request.Name != "recall_memory" && request.Name != "read_document" {
+	if switching && request.Name != "list_tasks" && request.Name != "check_task" && request.Name != voicelive.ToolSearchMeetings && request.Name != "recall_memory" && request.Name != "read_document" {
 		return voicelive.Output(map[string]string{"status": "switching", "detail": "The previous foreground is stopping. This operation was not accepted; retry after the transition."}), nil
 	}
 	digest := sha256.Sum256([]byte(request.TurnId + "\x00" + request.Name + "\x00" + request.Arguments))

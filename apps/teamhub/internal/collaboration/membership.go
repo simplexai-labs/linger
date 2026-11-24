@@ -99,33 +99,83 @@ func (s *Service) PutRoomMember(ctx context.Context, accountID, roomID, targetAc
 		return httpapi.RoomMember{}, nil, err
 	}
 	defer tx.Rollback(ctx)
-	queries := s.queries.WithTx(tx)
-	tenantID, err := queries.GetRoomTenantID(ctx, roomID)
+	result, err := s.putRoomMemberTx(ctx, tx, accountID, roomID, targetActorID, role, by, false)
 	if err != nil {
 		return httpapi.RoomMember{}, nil, err
 	}
-	if err := roomcreation.LockMembership(ctx, queries, roomID); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return httpapi.RoomMember{}, nil, err
 	}
+	return result.member, result.addedAgentIDs, nil
+}
+
+// RoomMemberAdditions identifies requested Actors newly admitted or already present.
+type RoomMemberAdditions struct {
+	Added          []string `json:"added"`
+	AlreadyMembers []string `json:"already_members"`
+}
+
+// AddRoomMembers admits the requested Actors together and preserves existing roles.
+func (s *Service) AddRoomMembers(ctx context.Context, accountID, roomID string, actorIDs []string, by AddedByAgent) (RoomMemberAdditions, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return RoomMemberAdditions{}, err
+	}
+	defer tx.Rollback(ctx)
+	ids := slices.Clone(actorIDs)
+	slices.Sort(ids)
+	result := RoomMemberAdditions{Added: []string{}, AlreadyMembers: []string{}}
+	for _, id := range slices.Compact(ids) {
+		write, err := s.putRoomMemberTx(ctx, tx, accountID, roomID, id, httpapi.Member, by, true)
+		if err != nil {
+			return RoomMemberAdditions{}, err
+		}
+		if write.added {
+			result.Added = append(result.Added, id)
+		} else {
+			result.AlreadyMembers = append(result.AlreadyMembers, id)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return RoomMemberAdditions{}, err
+	}
+	return result, nil
+}
+
+type roomMemberWrite struct {
+	member        httpapi.RoomMember
+	addedAgentIDs []string
+	added         bool
+}
+
+func (s *Service) putRoomMemberTx(ctx context.Context, tx pgx.Tx, accountID, roomID, targetActorID string, role httpapi.RoomMemberRole, by AddedByAgent, addOnly bool) (roomMemberWrite, error) {
+	queries := s.queries.WithTx(tx)
+	tenantID, err := queries.GetRoomTenantID(ctx, roomID)
+	if err != nil {
+		return roomMemberWrite{}, err
+	}
+	if err := roomcreation.LockMembership(ctx, queries, roomID); err != nil {
+		return roomMemberWrite{}, err
+	}
 	if err := rejectImmutableRoomSubtype(ctx, queries, roomID); err != nil {
-		return httpapi.RoomMember{}, nil, err
+		return roomMemberWrite{}, err
 	}
 	authority, err := queries.GetRoomOwnerAuthority(ctx, store.GetRoomOwnerAuthorityParams{
 		ID: roomID, AccountID: textValue(accountID),
 	})
 	if err != nil {
-		return httpapi.RoomMember{}, nil, err
+		return roomMemberWrite{}, err
 	}
 	if authority.TenantID != tenantID {
-		return httpapi.RoomMember{}, nil, pgx.ErrNoRows
+		return roomMemberWrite{}, pgx.ErrNoRows
 	}
 	caller, err := queries.GetActor(ctx, store.GetActorParams{ID: authority.CallerActorID, TenantID: authority.TenantID})
 	if err != nil {
-		return httpapi.RoomMember{}, nil, err
+		return roomMemberWrite{}, err
 	}
 	target, err := queries.GetActor(ctx, store.GetActorParams{ID: targetActorID, TenantID: authority.TenantID})
 	if err != nil {
-		return httpapi.RoomMember{}, nil, err
+		return roomMemberWrite{}, err
 	}
 	// The member write below fires a trigger that locks rooms, so every
 	// membership lock must come first. AnotherMe's membership locks with the
@@ -136,7 +186,7 @@ func (s *Service) PutRoomMember(ctx context.Context, accountID, roomID, targetAc
 			TenantID: authority.TenantID, RepresentedHumanActorID: target.ID,
 		})
 		if registrationErr != nil && !errors.Is(registrationErr, pgx.ErrNoRows) {
-			return httpapi.RoomMember{}, nil, registrationErr
+			return roomMemberWrite{}, registrationErr
 		}
 		if registrationErr == nil && registration.Status == "active" {
 			anotherMeAgentID = registration.ActorID
@@ -147,68 +197,65 @@ func (s *Service) PutRoomMember(ctx context.Context, accountID, roomID, targetAc
 		lockActorIDs = append(lockActorIDs, anotherMeAgentID)
 	}
 	if err := tenantmembership.LockAgents(ctx, queries, lockActorIDs...); err != nil {
-		return httpapi.RoomMember{}, nil, err
+		return roomMemberWrite{}, err
 	}
 	slices.Sort(lockActorIDs)
 	for _, actorID := range lockActorIDs {
 		if err := lockRoomMembershipForUpdate(ctx, queries, roomID, actorID); err != nil {
-			return httpapi.RoomMember{}, nil, err
+			return roomMemberWrite{}, err
 		}
 	}
 	if err := agentruntimestate.LockRoomMembershipContexts(ctx, queries, lockActorIDs, []string{roomID}); err != nil {
-		return httpapi.RoomMember{}, nil, err
+		return roomMemberWrite{}, err
 	}
 	existing, err := queries.GetRoomMemberForUpdate(ctx, store.GetRoomMemberForUpdateParams{RoomID: roomID, ActorID: targetActorID})
-	if err == nil && existing.Role == string(role) {
-		if role != httpapi.Member && authority.Role != string(httpapi.Owner) {
-			return httpapi.RoomMember{}, nil, ErrRoomOwnerRequired
+	if err == nil && (addOnly || existing.Role == string(role)) {
+		if !addOnly && role != httpapi.Member && authority.Role != string(httpapi.Owner) {
+			return roomMemberWrite{}, ErrRoomOwnerRequired
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return httpapi.RoomMember{}, nil, err
-		}
-		return lockedRoomMemberModel(existing), nil, nil
+		return roomMemberWrite{member: lockedRoomMemberModel(existing)}, nil
 	}
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return httpapi.RoomMember{}, nil, err
+		return roomMemberWrite{}, err
 	}
 	isNewMembership := errors.Is(err, pgx.ErrNoRows)
 	if (!isNewMembership || role == httpapi.Owner) && authority.Role != string(httpapi.Owner) {
-		return httpapi.RoomMember{}, nil, ErrRoomOwnerRequired
+		return roomMemberWrite{}, ErrRoomOwnerRequired
 	}
 	if role == httpapi.Owner && target.Kind != "human" {
-		return httpapi.RoomMember{}, nil, ErrAgentCannotOwnRoom
+		return roomMemberWrite{}, ErrAgentCannotOwnRoom
 	}
 	if isNewMembership && target.Kind == "agent" {
 		registration, registrationErr := queries.GetActiveAgentRegistrationForAdmission(ctx, store.GetActiveAgentRegistrationForAdmissionParams{
 			ActorID: target.ID, TenantID: target.TenantID,
 		})
 		if errors.Is(registrationErr, pgx.ErrNoRows) {
-			return httpapi.RoomMember{}, nil, ErrAgentNotRegistered
+			return roomMemberWrite{}, ErrAgentNotRegistered
 		}
 		if registrationErr != nil {
-			return httpapi.RoomMember{}, nil, registrationErr
+			return roomMemberWrite{}, registrationErr
 		}
 		if registration.VisibilityScope != "workspace" && registration.CreatedByActorID != caller.ID {
-			return httpapi.RoomMember{}, nil, ErrAgentSponsorRequired
+			return roomMemberWrite{}, ErrAgentSponsorRequired
 		}
 	}
 	if err == nil && existing.Role == string(httpapi.Owner) && role != httpapi.Owner {
 		owners, countErr := queries.CountRoomOwners(ctx, roomID)
 		if countErr != nil {
-			return httpapi.RoomMember{}, nil, countErr
+			return roomMemberWrite{}, countErr
 		}
 		if owners <= 1 {
-			return httpapi.RoomMember{}, nil, ErrLastRoomOwner
+			return roomMemberWrite{}, ErrLastRoomOwner
 		}
 	}
 
 	// Documents lock before the delivery Accounts that the write below takes.
 	roomDocumentIDs, lockListErr := queries.ListRoomBoundDocumentIDsForLock(ctx, roomID)
 	if lockListErr != nil {
-		return httpapi.RoomMember{}, nil, lockListErr
+		return roomMemberWrite{}, lockListErr
 	}
 	if err := document.Lock(ctx, tx, roomDocumentIDs); err != nil {
-		return httpapi.RoomMember{}, nil, err
+		return roomMemberWrite{}, err
 	}
 
 	eventType := "room.member.added"
@@ -223,13 +270,13 @@ func (s *Service) PutRoomMember(ctx context.Context, accountID, roomID, targetAc
 		membership, err = queries.UpdateRoomMemberRole(ctx, store.UpdateRoomMemberRoleParams{RoomID: roomID, ActorID: target.ID, Role: string(role)})
 	}
 	if err != nil {
-		return httpapi.RoomMember{}, nil, err
+		return roomMemberWrite{}, err
 	}
 	if isNewMembership {
 		if err := document.RecomputeRoomMemberAdmissionAccess(
 			ctx, tx, authority.TenantID, roomID, target.ID, caller.ID,
 		); err != nil {
-			return httpapi.RoomMember{}, nil, err
+			return roomMemberWrite{}, err
 		}
 	}
 	member := roomMemberModel(roomMemberRecord{
@@ -245,13 +292,13 @@ func (s *Service) PutRoomMember(ctx context.Context, accountID, roomID, targetAc
 		Payload: map[string]any{"kind": eventType, "member": member},
 	})
 	if err != nil {
-		return httpapi.RoomMember{}, nil, err
+		return roomMemberWrite{}, err
 	}
 	// addedAgentIDs lists Agents whose membership this call newly created.
 	var addedAgentIDs []string
 	if isNewMembership && target.Kind == "agent" {
 		if err := agentruntimestate.EnsurePerRoomMetaContexts(ctx, queries, target.ID); err != nil {
-			return httpapi.RoomMember{}, nil, err
+			return roomMemberWrite{}, err
 		}
 		addedAgentIDs = append(addedAgentIDs, target.ID)
 	}
@@ -259,7 +306,7 @@ func (s *Service) PutRoomMember(ctx context.Context, accountID, roomID, targetAc
 		if err := queries.CreateRoomMemberState(ctx, store.CreateRoomMemberStateParams{
 			RoomID: roomID, ActorID: target.ID, ReadThroughRoomSeq: seq,
 		}); err != nil {
-			return httpapi.RoomMember{}, nil, err
+			return roomMemberWrite{}, err
 		}
 
 		// A Human's AnotherMe follows them into every Room by default. Keep this
@@ -269,7 +316,7 @@ func (s *Service) PutRoomMember(ctx context.Context, accountID, roomID, targetAc
 				ID: anotherMeAgentID, TenantID: authority.TenantID,
 			})
 			if agentErr != nil {
-				return httpapi.RoomMember{}, nil, agentErr
+				return roomMemberWrite{}, agentErr
 			}
 			if _, agentErr = queries.GetRoomMemberForUpdate(ctx, store.GetRoomMemberForUpdateParams{
 				RoomID: roomID, ActorID: agent.ID,
@@ -279,7 +326,7 @@ func (s *Service) PutRoomMember(ctx context.Context, accountID, roomID, targetAc
 					Role: string(httpapi.Member), AddedByActorID: caller.ID,
 				})
 				if createErr != nil {
-					return httpapi.RoomMember{}, nil, createErr
+					return roomMemberWrite{}, createErr
 				}
 				agentMember := roomMemberModel(roomMemberRecord{
 					roomID: agentMembership.RoomID, tenantID: agentMembership.TenantID,
@@ -297,14 +344,14 @@ func (s *Service) PutRoomMember(ctx context.Context, accountID, roomID, targetAc
 					},
 				})
 				if err != nil {
-					return httpapi.RoomMember{}, nil, err
+					return roomMemberWrite{}, err
 				}
 				if err := agentruntimestate.EnsurePerRoomMetaContexts(ctx, queries, agent.ID); err != nil {
-					return httpapi.RoomMember{}, nil, err
+					return roomMemberWrite{}, err
 				}
 				addedAgentIDs = append(addedAgentIDs, agent.ID)
 			} else if agentErr != nil {
-				return httpapi.RoomMember{}, nil, agentErr
+				return roomMemberWrite{}, agentErr
 			}
 		}
 	}
@@ -314,20 +361,17 @@ func (s *Service) PutRoomMember(ctx context.Context, accountID, roomID, targetAc
 		if by.ActorID != "" {
 			author, err = queries.GetActor(ctx, store.GetActorParams{ID: by.ActorID, TenantID: authority.TenantID})
 			if err != nil {
-				return httpapi.RoomMember{}, nil, err
+				return roomMemberWrite{}, err
 			}
 			if by.Created {
 				notice = messagecreation.AgentCreated(target, nil)
 			}
 		}
 		if _, err := messagecreation.CreateNotice(ctx, queries, authority.TenantID, roomID, author, notice); err != nil {
-			return httpapi.RoomMember{}, nil, err
+			return roomMemberWrite{}, err
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return httpapi.RoomMember{}, nil, err
-	}
-	return member, addedAgentIDs, nil
+	return roomMemberWrite{member: member, addedAgentIDs: addedAgentIDs, added: isNewMembership}, nil
 }
 
 // DeleteRoomMember shares the Room lock with add and role-change, so concurrent operations cannot both remove the last owner.

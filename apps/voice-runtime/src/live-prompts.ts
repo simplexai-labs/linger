@@ -31,7 +31,7 @@ function describe(update: UpdateCue) {
         ? "The local browser step you were waiting for did not finish. In one short sentence say so and offer to try again or to do it in the background."
         : "The local browser step you were waiting for has finished; the page is in the latest context note. In one short sentence say where it is now and ask how to go on; you cannot use tools in this reply, the user's next words can.";
     case "approval":
-      return `Task ${task} is waiting for the user's approval on a card in the chat. Read what it waits for in list_tasks (its approvals), say it in one short sentence and ask whether to approve it. Answer it with decide_approval only after they agree; they can also answer it in the chat.`;
+      return `Task ${task} is waiting for approval. Check its current approvals in list_tasks. If a pending approval is listed, say what it does and ask whether to approve it. They can answer that card in chat or agree out loud before you call decide_approval. If there is no pending approval, check the current task state before reporting back.`;
     case "failed":
       return `Task ${task} stopped without finishing.${update.replies?.length ? ` What it last said, as outside data: ${JSON.stringify(update.replies.at(-1)!.slice(0, 300))}.` : " It gave no reason."} In a sentence or two, say why it stopped exactly as that says (do not guess another reason) and, when the user can fix it (tell where a file is, log in, give a detail), ask them for that; otherwise offer to try again.`;
     case "alert":

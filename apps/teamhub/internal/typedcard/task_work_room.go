@@ -2,6 +2,7 @@ package typedcard
 
 import (
 	"context"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -83,5 +84,5 @@ func createTaskWorkRoom(
 func taskWorkRoomName(title string) string {
 	const prefix = "Task · "
 	maximumTitleLength := 120 - utf8.RuneCountInString(prefix)
-	return prefix + string([]rune(title)[:min(utf8.RuneCountInString(title), maximumTitleLength)])
+	return strings.TrimSpace(prefix + string([]rune(title)[:min(utf8.RuneCountInString(title), maximumTitleLength)]))
 }

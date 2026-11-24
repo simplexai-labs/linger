@@ -102,9 +102,11 @@ const preRollSamples = liveInputRate * 0.3;
  * Local speech this long pauses the reply at once. Server VAD noticed a user
  * talking over the reply about 1 s after they began, local VAD in about
  * 0.2 s (2026-11-10, 75 barge-ins), but local VAD also hears the reply's own
- * echo; the pause becomes a barge-in only when server VAD confirms it.
+ * echo. Continued speech after playout stops provides independent evidence.
  */
 const pauseSpeechSamples = 16_000 * 0.2;
+/** Count voice after silencing playback so its initial echo alone cannot cancel a reply. */
+const confirmPausedSpeechSamples = 16_000 * 0.32;
 /**
  * Speech this far below the user's own level is someone else in the room:
  * Silero hears any voice, near or far. A speaker 15 dB below the user
@@ -126,8 +128,13 @@ const userLevelRise = 0.5;
 const userLevelFall = 0.01;
 /** A pause server VAD has not confirmed resumes after this much local quiet. */
 const resumeQuietSamples = 16_000 * 0.4;
-/** A pause never lasts longer than this. */
-const maximumPauseMs = 2_500;
+/** After playback resumes, wait for a fresh onset beyond its immediate echo. */
+const rearmQuietWindows = 3;
+/** Short utterances close to the learned voice level can reach the provider before a local pause. */
+const nearVoiceMarginDb = 6;
+const shortSpeechSamples = 16_000 * 0.096;
+/** Release a tentative pause if the microphone stops delivering evidence. */
+const pauseIdleTimeoutMs = 2_500;
 /** Reply audio kept after it reaches the track: more than AudioSource's 1 s queue. */
 const heardBackSamples = 24_000 * 1.2;
 /** The local VAD's window, in its 16 kHz samples. */
@@ -228,14 +235,20 @@ interface Reply {
   spokenText?: string;
   finished?: boolean;
   outputStarted?: boolean;
+  /** Further audio chunks may arrive even when the playout queue temporarily drains. */
+  streamingAudio?: boolean;
   endRequested?: boolean;
   /** Tool results not yet returned; the reply continues after them. */
   toolsPending: number;
   /** A tool was called; the next words start a new sentence after it. */
   called?: boolean;
   interrupted: boolean;
-  /** A pause of it ended unconfirmed; only server VAD stops it now. */
-  pauseDeclined?: boolean;
+  /** Quiet windows still needed after resuming before another local pause. */
+  quietWindowsToRearm?: number;
+  /** The provider may hear the rest of this microphone utterance during playback. */
+  inputAdmitted?: boolean;
+  /** This onset has reached the user's near-voice level in at least one window. */
+  nearVoiceOnset?: boolean;
 }
 
 interface Queued {
@@ -245,6 +258,7 @@ interface Queued {
 
 interface Pause {
   reply: Reply;
+  speechSamples: number;
   since: number;
   /** Frames put back at the front of the queue. */
   requeued: number;
@@ -794,7 +808,7 @@ export class LiveVoiceWorker {
         // final; what it says and calls then belongs to this new turn, so a
         // yes said here confirms what an earlier turn asked.
         if (event.itemId) this.ensureTurn(event.itemId);
-        if (this.isPlaying() || this.pendingSpeech)
+        if (this.activePlayback() || this.pendingSpeech)
           this.interrupt(false, "provider");
         return;
       case "transcript_delta":
@@ -861,6 +875,7 @@ export class LiveVoiceWorker {
         this.onReplyAudio(event.pcm);
         return;
       case "audio_done":
+        if (this.reply) this.reply.streamingAudio = false;
         // A reply's tool calls can follow the end of its audio; the reply
         // ends with the provider's response.
         return;
@@ -1066,7 +1081,7 @@ export class LiveVoiceWorker {
       return this.reply;
     }
     const turn = this.latestTurn;
-    if (!turn) return undefined;
+    if (!turn || turn.interrupted) return undefined;
     turn.answered = true;
     clearTimeout(turn.swallowTimer);
     turn.replyDone = false;
@@ -1135,6 +1150,7 @@ export class LiveVoiceWorker {
     }
     const turn = reply.turn;
     if (!reply.speech) turn.firstAudioAt ??= Date.now();
+    reply.streamingAudio = true;
     this.enqueuePlayback(reply, pcm);
     // A pending update may be waiting for a pause in this audio.
     if (this.queuedUpdates.length) this.flushUpdates();
@@ -1177,6 +1193,11 @@ export class LiveVoiceWorker {
         await this.source.captureFrame(
           new AudioFrame(next.pcm, replySampleRate, 1, next.pcm.length),
         );
+        // captureFrame may finish enqueueing after an interruption cleared the track.
+        if (next.reply.interrupted) {
+          this.source.clearQueue();
+          continue;
+        }
         // The await may have let a pause in.
         const paused = this.paused as Pause | undefined;
         if (paused && this.pauses !== pauses) {
@@ -1239,14 +1260,13 @@ export class LiveVoiceWorker {
    * does not confirm resumes where the listener stopped hearing.
    */
   private pausePlayback() {
-    const reply = this.playingReply;
+    const reply = this.activePlayback();
     if (
       this.paused ||
       !this.source ||
       !reply ||
       reply.interrupted ||
-      reply.pauseDeclined ||
-      !this.isPlaying()
+      reply.quietWindowsToRearm !== undefined
     )
       return;
     let unheard = Math.round(
@@ -1261,7 +1281,6 @@ export class LiveVoiceWorker {
         this.playedSamples = Math.max(0, this.playedSamples - frame.pcm.length);
       back.unshift(frame);
     }
-    if (!back.length && !this.playQueue.length) return;
     this.source.clearQueue();
     this.playQueue.unshift(...back);
     this.pauses++;
@@ -1271,11 +1290,12 @@ export class LiveVoiceWorker {
     });
     this.paused = {
       reply,
+      speechSamples: 0,
       since: Date.now(),
       requeued: back.length,
       resumed,
       resume,
-      timer: setTimeout(() => this.resumePlayback("limit"), maximumPauseMs),
+      timer: setTimeout(() => this.resumePlayback("limit"), pauseIdleTimeoutMs),
     };
     log().info(
       {
@@ -1294,9 +1314,9 @@ export class LiveVoiceWorker {
   private resumePlayback(reason: "quiet" | "limit") {
     const paused = this.paused;
     if (!paused) return;
-    // The rest of this reply pauses only for server VAD, so its own echo
-    // cannot keep stopping it.
-    paused.reply.pauseDeclined = true;
+    // Quiet from before resumption cannot distinguish a fresh onset from
+    // the echo of the first frames we replay.
+    paused.reply.quietWindowsToRearm = rearmQuietWindows;
     this.endPause();
     if (!this.playing && this.playQueue.length) this.track(this.playback());
     log().info(
@@ -1325,9 +1345,17 @@ export class LiveVoiceWorker {
     );
   }
 
+  private activePlayback() {
+    if (this.paused) return this.paused.reply;
+    if (this.isPlaying()) return this.playingReply;
+    return this.reply?.streamingAudio && !this.reply.interrupted
+      ? this.reply
+      : undefined;
+  }
+
   // Stops local playback immediately; the provider is told to stop the reply
   // and the browser to freeze its subtitle. Old audio is never replayed.
-  private interrupt(force = false, source?: "provider") {
+  private interrupt(force = false, source?: "provider" | "local") {
     const playing = this.isPlaying();
     if (!force && !playing && !this.pendingSpeech && !this.reply) return;
     if (
@@ -1355,22 +1383,23 @@ export class LiveVoiceWorker {
     this.handedOver = [];
     this.handedOverSamples = 0;
     this.source?.clearQueue();
-    if (this.pendingSpeech && !this.pendingSpeechInterrupted) {
-      this.pendingSpeechInterrupted = true;
-      this.session?.cancel();
-    }
     const turns = new Set<Turn>();
     const playingReply = playing ? this.playingReply : undefined;
     if (playingReply && !playingReply.speech) turns.add(playingReply.turn);
-    if (this.reply) {
-      if (!this.reply.speech) turns.add(this.reply.turn);
-      this.cancelReply(this.reply);
-    } else if (playing) {
-      // The provider keeps a finished reply open until its own playout ends.
-      this.session?.cancel();
-    }
+    if (this.reply && !this.reply.speech) turns.add(this.reply.turn);
+    if (
+      (this.pendingSpeech && !this.pendingSpeechInterrupted) ||
+      (this.reply && !this.reply.interrupted) ||
+      playingReply
+    )
+      this.session?.cancel({
+        playedMs: playingReply ? this.playedMs() : undefined,
+        localSpeech: source === "local",
+      });
+    if (this.pendingSpeech) this.pendingSpeechInterrupted = true;
+    if (this.reply) this.reply.interrupted = true;
+    if (playingReply) playingReply.interrupted = true;
     if (playingReply?.speech) {
-      playingReply.interrupted = true;
       this.requeueUnheardUpdates(playingReply);
       if (playingReply.speechStarted)
         this.publish({
@@ -1379,7 +1408,6 @@ export class LiveVoiceWorker {
           speech_id: playingReply.speech.speechId,
         });
     }
-    if (playingReply) this.session?.truncate(this.playedMs());
     this.playingReply = undefined;
     for (const turn of turns) {
       if (turn.interrupted) continue;
@@ -1508,13 +1536,15 @@ export class LiveVoiceWorker {
     // A line cut off before the tool (a sentence ending in a comma) is finished
     // first, or the user is left with half a sentence.
     const quiet =
-      reply.outputStarted === true &&
-      sentenceEnded(
-        reply.speech ? (reply.spokenText ?? "") : reply.turn.text,
-      ) &&
-      calls.every((_call, index) => settled(index));
-    if (!this.stopped)
+      reply.interrupted ||
+      (reply.outputStarted === true &&
+        sentenceEnded(
+          reply.speech ? (reply.spokenText ?? "") : reply.turn.text,
+        ) &&
+        calls.every((_call, index) => settled(index)));
+    if (!this.stopped) {
       this.session?.sendToolResults(results, { reply: !quiet });
+    }
     return !quiet;
   }
 
@@ -2198,9 +2228,8 @@ export class LiveVoiceWorker {
 
   /**
    * Local VAD gates the microphone, tells whether the user is talking and
-   * pauses the reply when they start. Barge-in and turn ends stay the
-   * server's: the live voice's own echo set local VAD off about 27 times a
-   * minute, server VAD about once.
+   * pauses the reply at speech onset. Both provider speech and sustained voice
+   * while playback is paused can retire the reply. The provider owns turn ends.
    */
   private async detectSpeech(frame: Int16Array, signal?: AbortSignal) {
     if (!this.detector) return;
@@ -2229,8 +2258,15 @@ export class LiveVoiceWorker {
       this.session !== session
     )
       return;
+    const playback = this.activePlayback();
+    if (playback && !playback.inputAdmitted) this.gated = true;
     for (const window of activity) {
-      const speech = this.isUserSpeech(window);
+      const speech = this.isUserSpeech(window, playback);
+      if (playback?.quietWindowsToRearm !== undefined) {
+        if (speech) playback.quietWindowsToRearm = rearmQuietWindows;
+        else if (--playback.quietWindowsToRearm === 0)
+          playback.quietWindowsToRearm = undefined;
+      }
       if (speech) inputMetrics.speechStartedAt ??= receivedAt;
       if (!speech && this.speechRunSamples > 0) this.speechEndedAt = Date.now();
       if (speech && this.quietSince !== undefined) {
@@ -2244,14 +2280,35 @@ export class LiveVoiceWorker {
       this.speechRunSamples = speech
         ? this.speechRunSamples + detectorWindowSamples
         : 0;
+      if (playback && !playback.inputAdmitted) {
+        playback.nearVoiceOnset =
+          speech &&
+          (playback.nearVoiceOnset === true ||
+            (this.userLevelDb !== undefined &&
+              window.levelDb >= this.userLevelDb - nearVoiceMarginDb));
+        playback.inputAdmitted =
+          this.speechRunSamples >=
+          (playback.nearVoiceOnset ? shortSpeechSamples : pauseSpeechSamples);
+      }
       if (speech) {
         this.quietRunSamples = 0;
-        this.gated = false;
+        if (!playback || playback.inputAdmitted) this.gated = false;
       } else {
         this.quietRunSamples += detectorWindowSamples;
-        if (this.quietRunSamples >= quietGateSamples) this.gated = true;
+        if (this.quietRunSamples >= quietGateSamples) {
+          this.gated = true;
+          if (playback) {
+            playback.inputAdmitted = false;
+            playback.nearVoiceOnset = false;
+          }
+        }
       }
-      if (
+      if (this.paused && speech) {
+        this.paused.timer.refresh();
+        this.paused.speechSamples += detectorWindowSamples;
+        if (this.paused.speechSamples >= confirmPausedSpeechSamples)
+          this.interrupt(false, "local");
+      } else if (
         speech &&
         this.speechRunSamples >= pauseSpeechSamples &&
         this.speechRunSamples - detectorWindowSamples < pauseSpeechSamples
@@ -2266,15 +2323,23 @@ export class LiveVoiceWorker {
    * During playback, quieter speech counts as quiet and pauses nothing.
    * Otherwise Silero alone gates input, so a stale level cannot mute a turn.
    */
-  private isUserSpeech({ speech, levelDb }: SpeechActivity) {
+  private isUserSpeech({ speech, levelDb }: SpeechActivity, playback?: Reply) {
     const learned = this.userLevelDb;
+    // Keep the tails of established speech or a short near-level word. A
+    // borderline onset must sustain its level before its tail can pass.
+    const followTail =
+      this.userSpeaking &&
+      (!playback || playback.inputAdmitted || playback.nearVoiceOnset);
     const threshold =
       Math.max(
         faintestSpeechDb,
         learned === undefined ? faintestSpeechDb : learned - otherSpeakerDb,
-      ) - (this.userSpeaking ? levelHysteresisDb : 0);
-    this.userSpeaking = speech && (!this.isPlaying() || levelDb >= threshold);
-    if (this.userSpeaking)
+      ) - (followTail ? levelHysteresisDb : 0);
+    this.userSpeaking = speech && (!playback || levelDb >= threshold);
+    if (
+      this.userSpeaking &&
+      (!playback || playback.inputAdmitted || learned === undefined)
+    )
       this.userLevelDb =
         learned === undefined
           ? levelDb
