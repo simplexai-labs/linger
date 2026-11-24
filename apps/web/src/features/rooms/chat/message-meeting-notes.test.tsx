@@ -148,7 +148,7 @@ describe("MessageMeetingNotes", () => {
       reads += 1;
     });
     await screen.findByText("Pulling the key points out of the transcript…");
-    await vi.advanceTimersByTimeAsync(125_000);
+    await vi.advanceTimersByTimeAsync(305_000);
     await waitFor(() =>
       expect(
         screen.queryByText("Pulling the key points out of the transcript…"),

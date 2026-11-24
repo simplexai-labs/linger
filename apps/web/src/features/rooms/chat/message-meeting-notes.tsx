@@ -30,10 +30,11 @@ export function captureQuickNotesQueryKey(captureId: string) {
 const pendingRefreshMs = 3_000;
 
 /**
- * Past the job's two attempts, notes still pending will not come: the card
- * stops looking and leaves them out.
+ * Past the job's two attempts of up to a minute each, plus time waiting for
+ * a place on the Runtime, notes still pending will not come: the card stops
+ * looking and leaves them out.
  */
-const pendingWindowMs = 120_000;
+const pendingWindowMs = 300_000;
 
 /**
  * A recording's quick notes under its recording and transcript: a progress

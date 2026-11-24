@@ -145,7 +145,7 @@ export const modelCallPolicies: Readonly<
     priority: RECORDING_PRIORITY,
     interactive: true,
     attempts: 1,
-    timeoutMs: 20_000,
+    timeoutMs: 60_000,
   },
   agent_memory: {
     priority: 30,
