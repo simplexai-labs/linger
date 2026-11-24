@@ -35,13 +35,14 @@ counts at the number of units that actually ran while it was timed, not at
 the limit. The confirmed limit grows only through silent background probes:
 once single-unit background calls establish a baseline and no foreground,
 Task, Document or compaction work is active or waiting, the queue temporarily
-runs one more yieldable background call at once (on Computers that can stop a
-model call). If those concurrent background calls stay within 1.3x of the
-lone-unit speed, the confirmed limit promotes by one; if a probe sample slows
-past 1.8x, the probe median exceeds 1.3x, or the endpoint refuses work, the
-probe stops immediately and the confirmed limit stays unchanged. If higher
-work arrives during a probe, the probe aborts at once and swaps out the extra
-background calls so interactive work never pays for an unconfirmed limit. In
+launches one probe wave of yieldable background calls at one unit above the
+confirmed limit (on Computers that can stop a model call), without refilling
+the wave above the steady-state soft limit while it settles. If every call in
+the wave stays within 1.3x of the lone-unit speed, the confirmed limit promotes
+by one; if any colliding probe call slows past 1.3x or the endpoint refuses
+work, the probe stops immediately and the confirmed limit stays unchanged. If
+higher work arrives during a probe, the probe aborts at once and swaps out the
+extra background calls so interactive work never pays for an unconfirmed limit. In
 steady state, when requests at the confirmed limit get clearly slower (past
 1.8x) it gives one back, and when the endpoint refuses work (rate limited,
 overloaded, or a call runs out of time) it halves and holds off probing for a

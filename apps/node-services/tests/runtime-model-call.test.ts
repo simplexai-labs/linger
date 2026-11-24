@@ -1744,4 +1744,86 @@ describe("Structured model invoke outcomes and interactive-isolated background b
     expect(textReply.output).toBe("ok");
     expect(invokeModel).toHaveBeenCalledTimes(3);
   });
+
+  it("clamps background reasoning effort downward on local models that omit medium and caps high background effort", async () => {
+    const piPlacement: ModelPlacement = { ...alice, runtimeType: "pi" };
+    const { modelCall, invokeModel } = setup({
+      placements: [piPlacement],
+      runtimeModels: (_computerId, runtimeType) =>
+        runtimeType === "pi"
+          ? [
+              {
+                id: "localmodels/qwen-27b",
+                isDefault: true,
+                link: "api",
+                allowedReasoningEffort: ["none", "low", "high"],
+              },
+            ]
+          : [],
+    });
+
+    // Background wiki/memory asking for medium on a [none, low, high] model must
+    // clamp downward to low so the Daemon never upgrades it to high.
+    await modelCall.text({
+      kind: "wiki",
+      key: "wiki:effort:1",
+      placement: piPlacement,
+      effort: "medium",
+      input: "route",
+    });
+    expect(invokeModel.mock.calls[0]![1].reasoningEffort).toBe("low");
+
+    // Background call requesting high on an API/local model caps to low when medium is omitted.
+    await modelCall.text({
+      kind: "memory",
+      key: "memory:effort:1",
+      placement: piPlacement,
+      effort: "high",
+      input: "summarize",
+    });
+    expect(invokeModel.mock.calls[1]![1].reasoningEffort).toBe("low");
+
+    // Interactive calls keep their requested effort.
+    await modelCall.text({
+      kind: "voice_ask",
+      key: "voice:effort:1",
+      placement: piPlacement,
+      effort: "medium",
+      input: "question",
+    });
+    expect(invokeModel.mock.calls[2]![1].reasoningEffort).toBe("medium");
+
+    // On a local/API model that supports medium, background high caps to medium
+    // while medium is preserved.
+    const mediumAllowed = setup({
+      placements: [piPlacement],
+      runtimeModels: () => [
+        {
+          id: "localmodels/qwen-27b-med",
+          isDefault: true,
+          link: "api",
+          allowedReasoningEffort: ["none", "low", "medium", "high"],
+        },
+      ],
+    });
+    await mediumAllowed.modelCall.text({
+      kind: "wiki",
+      key: "wiki:effort:2",
+      placement: piPlacement,
+      effort: "medium",
+      input: "batch",
+    });
+    await mediumAllowed.modelCall.text({
+      kind: "memory",
+      key: "memory:effort:2",
+      placement: piPlacement,
+      effort: "high",
+      input: "day-read",
+    });
+    expect(
+      mediumAllowed.invokeModel.mock.calls.map(
+        ([, req]) => req.reasoningEffort,
+      ),
+    ).toEqual(["medium", "medium"]);
+  });
 });

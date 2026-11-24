@@ -301,6 +301,11 @@ export interface RuntimeModelInfo {
   readonly contextWindow?: number;
   /** The model the Runtime runs when none is selected. */
   readonly isDefault?: boolean;
+  /** Allowed reasoning efforts the model advertises; undefined when unknown. */
+  readonly allowedReasoningEffort?: readonly string[];
+  /** How the Runtime reaches the model: through a configured gateway (api)
+   * or the signed-in account (subscription). */
+  readonly link?: "api" | "subscription";
 }
 
 /** The model invocation of the agent role, with its failures already mapped
@@ -439,6 +444,35 @@ function defaultRuntimeModel(
     models.find(({ isDefault }) => isDefault) ??
     (models.length === 1 ? models[0] : undefined)
   );
+}
+
+/**
+ * Resolves the wire reasoning effort for one model call. Interactive calls keep
+ * what they asked for. Background calls on API/local models never run above
+ * medium, and any background call whose requested effort is omitted from the
+ * model's allowed list clamps downward instead of letting the Daemon tie-break
+ * upward to high.
+ */
+function resolveModelCallEffort(
+  requested: ModelCallEffort,
+  interactive: boolean,
+  model: RuntimeModelInfo | undefined,
+): ModelCallEffort {
+  if (interactive) return requested;
+  const target: ModelCallEffort =
+    requested === "high" && model?.link === "api" ? "medium" : requested;
+  const allowed = model?.allowedReasoningEffort;
+  if (!allowed?.length) return target;
+  const normalizedAllowed = new Set(
+    allowed.map((entry) => entry.trim().toLowerCase()),
+  );
+  if (normalizedAllowed.has(target)) return target;
+  const targetIdx = modelCallEfforts.indexOf(target);
+  for (let i = targetIdx - 1; i >= 0; i -= 1) {
+    const lower = modelCallEfforts[i]!;
+    if (normalizedAllowed.has(lower)) return lower;
+  }
+  return target;
 }
 
 function runtimeModelsFingerprint(
@@ -925,10 +959,14 @@ async function invokeAttempt(
     placement.computerId,
     runtimeType,
   );
+  const targetModel =
+    runtimeType === resolved.runtimeType
+      ? resolved.model
+      : defaultRuntimeModel(runtimeModels);
   const wireModel =
     runtimeType === resolved.runtimeType
       ? resolved.wireModel
-      : defaultRuntimeModel(runtimeModels)?.runtimeModel;
+      : targetModel?.runtimeModel;
   const policy = modelCallPolicies[call.kind];
   const breakerKey = backgroundBreakerKey(placement.computerId, runtimeType);
   const modelsFingerprint = `${wireModel ?? ""}\n${runtimeModelsFingerprint(runtimeModels)}`;
@@ -974,7 +1012,11 @@ async function invokeAttempt(
       runtimeType,
       ...(wireModel ? { model: wireModel } : {}),
       mode: call.mode,
-      reasoningEffort: call.effort ?? "low",
+      reasoningEffort: resolveModelCallEffort(
+        call.effort ?? "low",
+        policy.interactive,
+        targetModel,
+      ),
       ...(call.instructions ? { instructions: call.instructions } : {}),
       input,
       ...(call.outputSchema
