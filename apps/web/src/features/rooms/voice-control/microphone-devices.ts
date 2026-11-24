@@ -1,6 +1,7 @@
 import { displayText } from "@linger/service-kit";
 
 import { translate } from "@/i18n/language";
+import type { Message } from "@/i18n/messages";
 import { recordingMessages as m } from "./recording.messages";
 
 export interface VoiceMicrophoneDevice {
@@ -69,14 +70,33 @@ export function describeVoiceMediaError(error: unknown) {
   if (error instanceof VoiceMicrophoneError) {
     return translate(microphoneErrorText[error.code]);
   }
-  if (errorName(error) === "NotAllowedError") {
-    return translate(m.microphoneDenied);
+  if (isMicrophoneRefused(error)) {
+    return describeMicrophoneRefused(m.microphoneDenied);
   }
   if (isVoiceAbortError(error)) {
     return translate(m.microphoneInterrupted);
   }
   const message = errorMessage(error);
   return message || String(error);
+}
+
+/**
+ * A refused microphone. The Mac desktop app gets it from macOS, not from a
+ * browser setting, so it is allowed again in System Settings.
+ */
+export function describeMicrophoneRefused(inBrowser: Message) {
+  const desktop =
+    typeof window === "undefined"
+      ? undefined
+      : (window as { lingerDesktop?: { platform?: string } }).lingerDesktop;
+  return translate(
+    desktop?.platform === "darwin" ? m.microphoneBlockedOnMac : inBrowser,
+  );
+}
+
+/** Whether getUserMedia refused the microphone, by the browser or the system. */
+export function isMicrophoneRefused(error: unknown) {
+  return errorName(error) === "NotAllowedError";
 }
 
 export async function retryOnVoiceMediaAbort<T>(

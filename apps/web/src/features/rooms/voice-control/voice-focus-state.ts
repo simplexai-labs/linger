@@ -14,6 +14,7 @@ import {
   type VoiceControlContextValue,
 } from "./voice-control-context";
 import {
+  describeMicrophoneRefused,
   describeVoiceMediaError,
   matchBoundVoiceMicrophone,
   VoiceMicrophoneError,
@@ -213,7 +214,7 @@ function describeArmFailure(error: unknown): string {
   switch (name) {
     case "NotAllowedError":
     case "SecurityError":
-      return translate(m.microphoneBlocked);
+      return describeMicrophoneRefused(m.microphoneBlocked);
     case "NotFoundError":
       return translate(m.noMicrophone);
     case "NotReadableError":

@@ -1,5 +1,10 @@
 import { VoiceModeDisconnectedError } from "./voice-mode-errors";
 import { translate } from "@/i18n/language";
+import {
+  describeMicrophoneRefused,
+  isMicrophoneRefused,
+} from "@/features/rooms/voice-control/microphone-devices";
+import { recordingMessages } from "@/features/rooms/voice-control/recording.messages";
 import { voiceSessionMessages as m } from "./voice-session.messages";
 
 export type VoiceModeEvent =
@@ -414,5 +419,8 @@ function isRecoverableVoiceError(error: unknown) {
 }
 
 function describe(error: unknown) {
+  // Chromium says only "Permission denied"; say where to allow the microphone.
+  if (isMicrophoneRefused(error))
+    return describeMicrophoneRefused(recordingMessages.microphoneDenied);
   return error instanceof Error ? error.message : translate(m.couldNotContinue);
 }

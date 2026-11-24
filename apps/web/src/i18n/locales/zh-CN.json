@@ -3513,6 +3513,7 @@
     "noMicrophone": "没有可用的麦克风。请连接一个后重新开始录音。",
     "microphoneBusy": "麦克风正被其他应用使用。",
     "microphoneDenied": "麦克风权限被拒绝",
+    "microphoneBlockedOnMac": "Linger 无法使用麦克风。请在“系统设置 › 隐私与安全性 › 麦克风”中允许 Linger，然后重试。",
     "microphoneInterrupted": "麦克风连接中断了",
     "microphoneUnavailable": "无法使用麦克风",
     "noAudioInput": "没有可用的音频输入设备",

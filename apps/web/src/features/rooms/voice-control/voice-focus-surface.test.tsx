@@ -269,6 +269,35 @@ describe("VoiceFocusSurface", () => {
     await vi.waitFor(() => expect(startCapture).toHaveBeenCalledOnce());
   });
 
+  it("points the Mac desktop app to System Settings for a blocked microphone", async () => {
+    const desktop = window as { lingerDesktop?: unknown };
+    desktop.lingerDesktop = { platform: "darwin" };
+    try {
+      render(
+        <VoiceControlContext.Provider
+          value={voiceValue({
+            boundDevice: undefined,
+            captureState: { status: "idle" },
+            discoverDevices: vi.fn(async () => {
+              throw new DOMException("Permission denied", "NotAllowedError");
+            }),
+            listenerStatus: "disabled",
+          })}
+        >
+          <VoiceFocusSurface autoStart onExit={vi.fn()} />
+        </VoiceControlContext.Provider>,
+      );
+      expect(
+        await screen.findByRole("heading", { name: "Recording did not start" }),
+      ).toBeVisible();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Linger can't use the microphone. Allow Linger in System Settings › Privacy & Security › Microphone, then try again.",
+      );
+    } finally {
+      delete desktop.lingerDesktop;
+    }
+  });
+
   it("asks the browser again when the remembered microphone does not connect", async () => {
     const discoverDevices = vi.fn(async () => [microphone]);
     const selectDevice = vi.fn(async () => undefined);

@@ -322,3 +322,38 @@ describe("VoiceMicrophoneError", () => {
     );
   });
 });
+
+describe("a refused microphone", () => {
+  const refused = new DOMException("Permission denied", "NotAllowedError");
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetLanguageForTest();
+  });
+
+  it("says the browser refused it in a browser", () => {
+    expect(describeVoiceMediaError(refused)).toBe(
+      "Microphone permission was denied",
+    );
+  });
+
+  it("points the Mac desktop app to System Settings", async () => {
+    vi.stubGlobal("window", { lingerDesktop: { platform: "darwin" } });
+    expect(describeVoiceMediaError(refused)).toBe(
+      "Linger can't use the microphone. Allow Linger in System Settings › Privacy & Security › Microphone, then try again.",
+    );
+
+    await setLanguage("zh-CN");
+
+    expect(describeVoiceMediaError(refused)).toBe(
+      zhCN.recording.microphoneBlockedOnMac,
+    );
+  });
+
+  it("keeps the browser wording in the desktop app off macOS", () => {
+    vi.stubGlobal("window", { lingerDesktop: { platform: "win32" } });
+    expect(describeVoiceMediaError(refused)).toBe(
+      "Microphone permission was denied",
+    );
+  });
+});

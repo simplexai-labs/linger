@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   VoiceModeController,
   type VoiceModeEvent,
@@ -340,5 +340,34 @@ describe("Voice Mode turn delivery", () => {
     expect(f.controller.getState()).toMatchObject({ status: "error" });
     expect(f.controller.getState().text).toContain("message 8");
     expect(f.close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Voice Mode microphone refusal", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function refusedState() {
+    const f = setup();
+    f.open.mockRejectedValueOnce(
+      new DOMException("Permission denied", "NotAllowedError"),
+    );
+    await f.controller.start();
+    return f.controller.getState();
+  }
+
+  it("says the microphone was refused instead of Chromium's bare text", async () => {
+    expect(await refusedState()).toMatchObject({
+      status: "error",
+      error: "Microphone permission was denied",
+    });
+  });
+
+  it("points the Mac desktop app to System Settings", async () => {
+    vi.stubGlobal("window", { lingerDesktop: { platform: "darwin" } });
+    expect(await refusedState()).toMatchObject({
+      status: "error",
+      error:
+        "Linger can't use the microphone. Allow Linger in System Settings › Privacy & Security › Microphone, then try again.",
+    });
   });
 });
