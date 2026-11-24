@@ -481,6 +481,8 @@ file and build. For one release:
    the Codex, Claude and Pi versions that release installs (`versions` in its
    `localmodels/runtime-lock.json`, `pi.version` in its `localmodels/tools.json`);
    the Computer Daemon's Go tests fail when one is below the Daemon's minimum.
+   Nothing checks these values against the kit itself, so the guard is only as
+   good as this entry: read them from the kit of the new pin on every update.
 4. Build with `LINGER_DESKTOP_DAEMON_TARGETS` set to the target and the source package
    (`LINGER_SOURCE_ARCHIVE_FILE`, or the URL and SHA256, plus the target's
    `LINGER_SOURCE_DEPENDENCIES_URL` and SHA256) set, then package (`packaging/mac/package.py

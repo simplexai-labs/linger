@@ -20,6 +20,8 @@ func TestRequireVersion(t *testing.T) {
 	}{
 		{"codex", "wrapper\n codex-cli 0.166.0", true, false},
 		{"codex", "codex-cli 0.165.9", false, true},
+		{"codex", "codex-cli 0.166.0-alpha.2", false, true},
+		{"codex", "codex-cli 0.166.1-alpha.1", true, false},
 		{"codex", "codex-cli 0.150.1", false, true},
 		{"claude", "v1.99.999 (fixture)", false, true},
 		{"pi", "fixture 1.2.0+build", true, false},

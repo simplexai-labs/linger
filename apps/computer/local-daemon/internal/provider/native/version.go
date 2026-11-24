@@ -117,7 +117,7 @@ func RequireVersion(kind, observed string) error {
 	if !ok {
 		return nil
 	}
-	_, have, err := versionToken(observed)
+	token, have, err := versionToken(observed)
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,10 @@ func RequireVersion(kind, observed string) error {
 	if err != nil {
 		return err
 	}
-	if have.less(want) {
+	// A pre-release precedes its release, so 0.166.0-alpha.2 may lack what
+	// the 0.166.0 minimum stands for.
+	rest := observed[strings.Index(observed, token)+len(token):]
+	if have.less(want) || (have == want && strings.HasPrefix(rest, "-")) {
 		return &VersionTooOldError{Runtime: kind, Found: observed, Required: minimum}
 	}
 	return nil
