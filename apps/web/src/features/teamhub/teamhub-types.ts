@@ -84,6 +84,8 @@ export type TeamHubVoiceProviderKeyStatus =
   components["schemas"]["VoiceProviderKeyStatus"];
 export type TeamHubVoiceConnectionCredential =
   components["schemas"]["VoiceConnectionCredential"];
+export type TeamHubVoiceConnectTimings =
+  components["schemas"]["VoiceConnectTimings"];
 export type TeamHubVoiceCapture = components["schemas"]["VoiceCapture"];
 export type TeamHubVoiceCaptureQuestion =
   components["schemas"]["VoiceCaptureQuestion"];

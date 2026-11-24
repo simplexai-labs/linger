@@ -7,7 +7,10 @@ import type {
 
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
-import type { TeamHubVoiceConnectionCredential } from "@/features/teamhub/teamhub-types";
+import type {
+  TeamHubVoiceConnectionCredential,
+  TeamHubVoiceConnectTimings,
+} from "@/features/teamhub/teamhub-types";
 
 import {
   openBoundMicrophone,
@@ -23,6 +26,53 @@ import { recordingMessages as m } from "./recording.messages";
  * track means and how it is released; every step here has its own limit.
  */
 type LiveKit = typeof import("livekit-client");
+
+type VoiceConnectStage = Exclude<keyof TeamHubVoiceConnectTimings, "outcome">;
+
+/** Times one join attempt; its report is for diagnosis and never blocks it. */
+export interface VoiceConnectClock {
+  /** The attempt's VoiceSession is known: created or resumed. */
+  session(voiceSessionId: string): void;
+  mark(stage: VoiceConnectStage): void;
+  report(
+    client: Pick<TeamHubClient, "api">,
+    outcome: TeamHubVoiceConnectTimings["outcome"],
+  ): void;
+}
+
+/**
+ * Starts timing a join where the user started it. Only the browser sees
+ * these steps, and on a slow network they are where the first seconds go.
+ */
+export function startVoiceConnectClock(): VoiceConnectClock {
+  const started = performance.now();
+  const stages: Partial<Record<VoiceConnectStage, number>> = {};
+  let voiceSessionId: string | undefined;
+  let reported = false;
+  const mark = (stage: VoiceConnectStage) => {
+    stages[stage] ??= Math.min(
+      600_000,
+      Math.round(performance.now() - started),
+    );
+  };
+  return {
+    session(id) {
+      voiceSessionId = id;
+      mark("session_ms");
+    },
+    mark,
+    report(client, outcome) {
+      if (reported || !voiceSessionId) return;
+      reported = true;
+      void client.api
+        .POST("/v0/voice-sessions/{voiceSessionId}/connect-timings", {
+          params: { path: { voiceSessionId } },
+          body: { outcome, ...stages },
+        })
+        .catch(() => undefined);
+    },
+  };
+}
 
 /**
  * Opens the bound microphone, or the system default when that device is gone,
@@ -61,6 +111,9 @@ export async function publishVoiceMicrophone(input: {
   livekit: LiveKit;
   client: Pick<TeamHubClient, "api">;
   voiceSessionId: string;
+  /** The credential the session's creation returned; absent, one is asked. */
+  credential?: TeamHubVoiceConnectionCredential;
+  clock?: VoiceConnectClock;
   microphone: Promise<LocalAudioTrack>;
   signal: AbortSignal;
   observe(
@@ -82,16 +135,19 @@ export async function publishVoiceMicrophone(input: {
   let room: Room | undefined;
   let published = false;
   try {
-    const credential = await bounded(
-      teamHubData(
-        input.client.api.POST(
-          "/v0/voice-sessions/{voiceSessionId}/connection-credentials",
-          { params: { path: { voiceSessionId: input.voiceSessionId } } },
+    const credential =
+      input.credential ??
+      (await bounded(
+        teamHubData(
+          input.client.api.POST(
+            "/v0/voice-sessions/{voiceSessionId}/connection-credentials",
+            { params: { path: { voiceSessionId: input.voiceSessionId } } },
+          ),
         ),
-      ),
-      5_000,
-      signal,
-    );
+        5_000,
+        signal,
+      ));
+    input.clock?.mark("credential_ms");
     room = new livekit.Room({
       adaptiveStream: false,
       disconnectOnPageLeave: true,
@@ -100,13 +156,18 @@ export async function publishVoiceMicrophone(input: {
     input.observe(room, livekit.RoomEvent, credential);
     const [, track] = await Promise.all([
       bounded(
-        room.connect(credential.endpoint, credential.credential, {
-          autoSubscribe: false,
-        }),
+        room
+          .connect(credential.endpoint, credential.credential, {
+            autoSubscribe: false,
+          })
+          .then(() => input.clock?.mark("room_connected_ms")),
         15_000,
         signal,
       ),
-      input.microphone,
+      input.microphone.then((opened) => {
+        input.clock?.mark("microphone_ms");
+        return opened;
+      }),
     ]);
     signal.throwIfAborted();
     track.mediaStreamTrack.addEventListener("ended", () => {
@@ -123,6 +184,7 @@ export async function publishVoiceMicrophone(input: {
       signal,
     );
     signal.throwIfAborted();
+    input.clock?.mark("published_ms");
     published = true;
     return { credential, room, track, publication };
   } finally {

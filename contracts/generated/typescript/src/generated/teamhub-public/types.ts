@@ -1628,6 +1628,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/voice-sessions/{voiceSessionId}/connect-timings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        voiceSessionId: components["parameters"]["VoiceSessionId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Report how long each step of the browser's join took, for diagnosis only.
+     * @description TeamHub only logs the report next to the VoiceSession; nothing reads it back and nothing depends on it. Clients send it once per join attempt, after it is listening or has failed, and ignore any error.
+     */
+    post: operations["reportVoiceConnectTimings"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/voice-sessions/{voiceSessionId}/transcript-events": {
     parameters: {
       query?: never;
@@ -6801,6 +6823,15 @@ export interface components {
       | "closed";
     /** @enum {string} */
     VoiceSessionPurpose: "hardware_control" | "chat_dictation" | "chat_live";
+    VoiceConnectionCredential: {
+      /** Format: uri */
+      endpoint: string;
+      /** @description Short-lived opaque LiveKit participant grant. */
+      credential: string;
+      expires_at: components["schemas"]["Timestamp"];
+      /** Format: int64 */
+      generation: number;
+    };
     VoiceSession: {
       id: components["schemas"]["Id"];
       tenant_id: components["schemas"]["Id"];
@@ -6835,6 +6866,8 @@ export interface components {
       partial_start_offset_ms?: number;
       /** Format: int64 */
       partial_end_offset_ms?: number;
+      /** @description Only in the response that created the session, the first publisher credential, so the client joins without a second request. Absent when it could not be issued; clients then ask connection-credentials, as they do for every later join. */
+      connection_credential?: components["schemas"]["VoiceConnectionCredential"];
     };
     VoiceSessionCreateRequest: {
       purpose: components["schemas"]["VoiceSessionPurpose"];
@@ -6892,14 +6925,40 @@ export interface components {
     VoiceProviderKeyErrorResponse: {
       error: components["schemas"]["VoiceProviderKeyError"];
     };
-    VoiceConnectionCredential: {
-      /** Format: uri */
-      endpoint: string;
-      /** @description Short-lived opaque LiveKit participant grant. */
-      credential: string;
-      expires_at: components["schemas"]["Timestamp"];
-      /** Format: int64 */
-      generation: number;
+    /** @description Milliseconds from the start of one join attempt to each step it reached; a step it never reached is absent. The start is when the client began opening the session, before any request. */
+    VoiceConnectTimings: {
+      /** @enum {string} */
+      outcome: "ready" | "failed" | "cancelled";
+      /**
+       * Format: int64
+       * @description The VoiceSession was created or resumed.
+       */
+      session_ms?: number;
+      /**
+       * Format: int64
+       * @description The publisher credential was in hand.
+       */
+      credential_ms?: number;
+      /**
+       * Format: int64
+       * @description The browser microphone opened, including any permission prompt.
+       */
+      microphone_ms?: number;
+      /**
+       * Format: int64
+       * @description The LiveKit Room connected (signaling, ICE and DTLS).
+       */
+      room_connected_ms?: number;
+      /**
+       * Format: int64
+       * @description The microphone track was published.
+       */
+      published_ms?: number;
+      /**
+       * Format: int64
+       * @description The Runtime confirmed it is listening.
+       */
+      ready_ms?: number;
     };
     /** @enum {string} */
     VoiceTranscriptEventKind: "speech" | "dictation_turn";
@@ -11535,6 +11594,33 @@ export interface operations {
       404: components["responses"]["NotFound"];
       409: components["responses"]["Conflict"];
       503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  reportVoiceConnectTimings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        voiceSessionId: components["parameters"]["VoiceSessionId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["VoiceConnectTimings"];
+      };
+    };
+    responses: {
+      /** @description Report logged. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
     };
   };
   listVoiceTranscriptEvents: {

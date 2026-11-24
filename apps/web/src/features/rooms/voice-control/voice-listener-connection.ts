@@ -33,6 +33,8 @@ import { waitForVoiceInputReady } from "./voice-input-readiness";
 import {
   openVoiceMicrophone,
   publishVoiceMicrophone,
+  startVoiceConnectClock,
+  type VoiceConnectClock,
 } from "./voice-media-connection";
 import { voicePollRetryDelay } from "./voice-poll-retry";
 import { tryAcquireVoicePublisherLease } from "./voice-publisher-lease";
@@ -107,6 +109,7 @@ export async function connectVoiceListener(
     }
     connection.setListenerStatus("enabling");
     controller.signal.throwIfAborted();
+    const clock = startVoiceConnectClock();
     const livekit = await import("livekit-client");
     controller.signal.throwIfAborted();
     // Opening the microphone does not depend on the Room, VoiceSession or
@@ -120,7 +123,13 @@ export async function connectVoiceListener(
     // A superseded or failed connection must never leave it open.
     microphone.catch(() => undefined);
     try {
-      await joinVoiceSession(connection, livekit, microphone);
+      await joinVoiceSession(connection, livekit, microphone, clock);
+    } catch (error) {
+      clock.report(
+        connection.client,
+        controller.signal.aborted ? "cancelled" : "failed",
+      );
+      throw error;
     } finally {
       // Whatever ended this attempt, only the adopted track may stay open.
       void microphone.then(
@@ -147,6 +156,7 @@ async function joinVoiceSession(
   connection: VoiceListenerConnection,
   livekit: LiveKit,
   microphone: Promise<LocalAudioTrack>,
+  clock: VoiceConnectClock,
 ) {
   const { client, controller, refs, tenantId } = connection;
   let policy: TeamHubVoiceMediaPolicy | undefined;
@@ -167,6 +177,7 @@ async function joinVoiceSession(
     }
   }
   const session = await connection.resolveVoiceSession(target.roomId);
+  clock.session(session.id);
   if (controller.signal.aborted || !refs.mountedRef.current) {
     void releaseVoiceSession(client, session, undefined).catch(() => undefined);
     controller.signal.throwIfAborted();
@@ -183,6 +194,8 @@ async function joinVoiceSession(
     livekit,
     client,
     voiceSessionId: session.id,
+    credential: session.connection_credential,
+    clock,
     microphone,
     signal: controller.signal,
     observe(room, RoomEvent, credential) {
@@ -211,6 +224,8 @@ async function joinVoiceSession(
   );
   controller.signal.throwIfAborted();
   if (!refs.mountedRef.current || refs.roomRef.current !== room) return;
+  clock.mark("ready_ms");
+  clock.report(client, "ready");
   connection.setListenerStatus("listening");
 }
 

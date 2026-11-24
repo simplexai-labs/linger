@@ -84,6 +84,11 @@ export function acceptVoice(runtime: TestTeamHubRuntime) {
     )
     .on(
       "POST",
+      "/v0/voice-sessions/{voiceSessionId}/connect-timings",
+      () => undefined,
+    )
+    .on(
+      "POST",
       "/v0/voice-sessions/{voiceSessionId}/connection-credentials",
       ({ params }) => {
         const current = session(params.voiceSessionId!);

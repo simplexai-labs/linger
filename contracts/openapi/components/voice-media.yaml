@@ -205,6 +205,59 @@ components:
           type: integer
           format: int64
           minimum: 1
+        connection_credential:
+          $ref: "#/components/schemas/VoiceConnectionCredential"
+          description:
+            Only in the response that created the session, the first publisher credential, so the client joins
+            without a second request. Absent when it could not be issued; clients then ask connection-credentials,
+            as they do for every later join.
+    VoiceConnectTimings:
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      description: >-
+        Milliseconds from the start of one join attempt to each step it reached; a step it never reached is
+        absent. The start is when the client began opening the session, before any request.
+      properties:
+        outcome:
+          type: string
+          enum: [ready, failed, cancelled]
+        session_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 600000
+          description: The VoiceSession was created or resumed.
+        credential_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 600000
+          description: The publisher credential was in hand.
+        microphone_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 600000
+          description: The browser microphone opened, including any permission prompt.
+        room_connected_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 600000
+          description: The LiveKit Room connected (signaling, ICE and DTLS).
+        published_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 600000
+          description: The microphone track was published.
+        ready_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 600000
+          description: The Runtime confirmed it is listening.
     VoiceDictationCommitRequest:
       type: object
       additionalProperties: false

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -69,7 +70,21 @@ func (a *App) createVoiceSession(c *gin.Context) {
 	if a.writeVoiceMediaError(c, "create VoiceSession", err) {
 		return
 	}
-	c.JSON(http.StatusCreated, voice.VoiceSessionModel(session))
+	response := voice.VoiceSessionModel(session)
+	// The first credential rides on the creation response: on a slow network
+	// a second request costs the client a full round trip before it can join.
+	// Without it the client asks connection-credentials, as for every rejoin.
+	grant, err := a.voiceMedia.IssuePublisherGrant(c.Request.Context(), currentPrincipal(c).Session.AccountID, session.ID)
+	if err != nil {
+		slog.WarnContext(c.Request.Context(), "voice.first_credential_failed", "voice_session_id", session.ID, "error", err)
+	} else {
+		response.CredentialGeneration = grant.Generation
+		response.ConnectionCredential = &httpapi.VoiceConnectionCredential{
+			Endpoint: grant.Endpoint, Credential: grant.Credential,
+			ExpiresAt: grant.ExpiresAt, Generation: grant.Generation,
+		}
+	}
+	c.JSON(http.StatusCreated, response)
 }
 
 func (a *App) commitVoiceDictationTurn(c *gin.Context) {
@@ -156,6 +171,33 @@ func (a *App) createVoiceSessionCredential(c *gin.Context) {
 		Endpoint: grant.Endpoint, Credential: grant.Credential,
 		ExpiresAt: grant.ExpiresAt, Generation: grant.Generation,
 	})
+}
+
+// reportVoiceConnectTimings logs how long the browser's join steps took. Only
+// the browser sees most of them, and on a slow network they are where a
+// voice session's first seconds go.
+func (a *App) reportVoiceConnectTimings(c *gin.Context) {
+	if !a.requireVoiceMedia(c) || !a.ownVoiceSession(c, c.Param("voiceSessionId")) {
+		return
+	}
+	var request httpapi.VoiceConnectTimings
+	if decodeJSON(c, &request) != nil {
+		return
+	}
+	attributes := []any{"voice_session_id", c.Param("voiceSessionId"), "outcome", string(request.Outcome), "user_agent", c.Request.UserAgent()}
+	for _, stage := range []struct {
+		name  string
+		value *int64
+	}{
+		{"session_ms", request.SessionMs}, {"credential_ms", request.CredentialMs}, {"microphone_ms", request.MicrophoneMs},
+		{"room_connected_ms", request.RoomConnectedMs}, {"published_ms", request.PublishedMs}, {"ready_ms", request.ReadyMs},
+	} {
+		if stage.value != nil {
+			attributes = append(attributes, stage.name, *stage.value)
+		}
+	}
+	slog.InfoContext(c.Request.Context(), "voice.client_connect_timings", attributes...)
+	c.Status(http.StatusNoContent)
 }
 
 func (a *App) closeVoiceSession(c *gin.Context) {

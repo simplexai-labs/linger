@@ -4160,6 +4160,27 @@ func (e VoiceCaptureStatus) Valid() bool {
 	}
 }
 
+// Defines values for VoiceConnectTimingsOutcome.
+const (
+	VoiceConnectTimingsOutcomeCancelled VoiceConnectTimingsOutcome = "cancelled"
+	VoiceConnectTimingsOutcomeFailed    VoiceConnectTimingsOutcome = "failed"
+	VoiceConnectTimingsOutcomeReady     VoiceConnectTimingsOutcome = "ready"
+)
+
+// Valid indicates whether the value is a known member of the VoiceConnectTimingsOutcome enum.
+func (e VoiceConnectTimingsOutcome) Valid() bool {
+	switch e {
+	case VoiceConnectTimingsOutcomeCancelled:
+		return true
+	case VoiceConnectTimingsOutcomeFailed:
+		return true
+	case VoiceConnectTimingsOutcomeReady:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for VoiceDictationCommitReceiptStatus.
 const (
 	Accepted VoiceDictationCommitReceiptStatus = "accepted"
@@ -4714,22 +4735,22 @@ func (e WorkItemPriority) Valid() bool {
 
 // Defines values for WorkItemResolution.
 const (
-	Completed  WorkItemResolution = "completed"
-	Duplicate  WorkItemResolution = "duplicate"
-	Failed     WorkItemResolution = "failed"
-	NotPlanned WorkItemResolution = "not_planned"
+	WorkItemResolutionCompleted  WorkItemResolution = "completed"
+	WorkItemResolutionDuplicate  WorkItemResolution = "duplicate"
+	WorkItemResolutionFailed     WorkItemResolution = "failed"
+	WorkItemResolutionNotPlanned WorkItemResolution = "not_planned"
 )
 
 // Valid indicates whether the value is a known member of the WorkItemResolution enum.
 func (e WorkItemResolution) Valid() bool {
 	switch e {
-	case Completed:
+	case WorkItemResolutionCompleted:
 		return true
-	case Duplicate:
+	case WorkItemResolutionDuplicate:
 		return true
-	case Failed:
+	case WorkItemResolutionFailed:
 		return true
-	case NotPlanned:
+	case WorkItemResolutionNotPlanned:
 		return true
 	default:
 		return false
@@ -9836,6 +9857,31 @@ type VoiceCaptureStartRequest struct {
 // VoiceCaptureStatus defines model for VoiceCaptureStatus.
 type VoiceCaptureStatus string
 
+// VoiceConnectTimings Milliseconds from the start of one join attempt to each step it reached; a step it never reached is absent. The start is when the client began opening the session, before any request.
+type VoiceConnectTimings struct {
+	// CredentialMs The publisher credential was in hand.
+	CredentialMs *int64 `json:"credential_ms,omitempty"`
+
+	// MicrophoneMs The browser microphone opened, including any permission prompt.
+	MicrophoneMs *int64                     `json:"microphone_ms,omitempty"`
+	Outcome      VoiceConnectTimingsOutcome `json:"outcome"`
+
+	// PublishedMs The microphone track was published.
+	PublishedMs *int64 `json:"published_ms,omitempty"`
+
+	// ReadyMs The Runtime confirmed it is listening.
+	ReadyMs *int64 `json:"ready_ms,omitempty"`
+
+	// RoomConnectedMs The LiveKit Room connected (signaling, ICE and DTLS).
+	RoomConnectedMs *int64 `json:"room_connected_ms,omitempty"`
+
+	// SessionMs The VoiceSession was created or resumed.
+	SessionMs *int64 `json:"session_ms,omitempty"`
+}
+
+// VoiceConnectTimingsOutcome defines model for VoiceConnectTimings.Outcome.
+type VoiceConnectTimingsOutcome string
+
 // VoiceConnectionCredential defines model for VoiceConnectionCredential.
 type VoiceConnectionCredential struct {
 	// Credential Short-lived opaque LiveKit participant grant.
@@ -9949,7 +9995,8 @@ type VoiceProviderKeyStatusSource string
 // VoiceSession defines model for VoiceSession.
 type VoiceSession struct {
 	// ClosedAt UTC timestamp in RFC 3339 format with an explicit offset.
-	ClosedAt *Timestamp `json:"closed_at,omitempty"`
+	ClosedAt             *Timestamp                 `json:"closed_at,omitempty"`
+	ConnectionCredential *VoiceConnectionCredential `json:"connection_credential,omitempty"`
 
 	// CreatedAt UTC timestamp in RFC 3339 format with an explicit offset.
 	CreatedAt Timestamp `json:"created_at"`
@@ -11239,6 +11286,9 @@ type SaveVoiceProviderKeyJSONRequestBody = SaveVoiceProviderKeyRequest
 
 // StartVoiceCaptureJSONRequestBody defines body for StartVoiceCapture for application/json ContentType.
 type StartVoiceCaptureJSONRequestBody = VoiceCaptureStartRequest
+
+// ReportVoiceConnectTimingsJSONRequestBody defines body for ReportVoiceConnectTimings for application/json ContentType.
+type ReportVoiceConnectTimingsJSONRequestBody = VoiceConnectTimings
 
 // CommitVoiceDictationTurnJSONRequestBody defines body for CommitVoiceDictationTurn for application/json ContentType.
 type CommitVoiceDictationTurnJSONRequestBody = VoiceDictationCommitRequest

@@ -23,6 +23,7 @@ import {
   openVoiceMicrophone,
   publishVoiceMicrophone,
   setVoiceMicrophoneMuted,
+  startVoiceConnectClock,
 } from "@/features/rooms/voice-control/voice-media-connection";
 import {
   acquireVoiceMicrophone,
@@ -68,6 +69,7 @@ export async function openVoiceMode(input: {
   const requests = new VoiceRequestScope();
   const { client, signal } = input;
   signal.throwIfAborted();
+  const clock = startVoiceConnectClock();
   const livekitModulePromise = import("livekit-client");
   const release = await acquireVoiceMicrophone(input.acquireMicrophone, signal);
   let session: TeamHubVoiceSession | undefined;
@@ -132,6 +134,7 @@ export async function openVoiceMode(input: {
       () => undefined,
     );
     session = await bounded(creating, 5_000, signal);
+    clock.session(session.id);
     signal.throwIfAborted();
     if (session.purpose !== "chat_dictation")
       throw new Error(translate(m.dictationNotConfirmed));
@@ -140,6 +143,8 @@ export async function openVoiceMode(input: {
       livekit,
       client,
       voiceSessionId: sessionId,
+      credential: session.connection_credential,
+      clock,
       microphone: opening,
       signal,
       observe(created, RoomEvent, credential) {
@@ -320,6 +325,8 @@ export async function openVoiceMode(input: {
       await waitForVoiceDelay(200, signal);
       signal.throwIfAborted();
     }
+    clock.mark("ready_ms");
+    clock.report(client, "ready");
     const commit = async () => {
       pendingCommitId ??=
         globalThis.crypto?.randomUUID?.() ??
@@ -440,6 +447,7 @@ export async function openVoiceMode(input: {
     cutAudio();
     if (room) await bounded(room.disconnect(), 3_000).catch(() => undefined);
     signal.removeEventListener("abort", cutAudio);
+    clock.report(client, signal.aborted ? "cancelled" : "failed");
     try {
       if (session) await closeVoiceSessionQuietly(client, session.id);
     } finally {

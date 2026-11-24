@@ -231,6 +231,7 @@ func (a *App) publicRoutes() []contractRoute {
 		route(http.MethodGet, "/v0/voice-sessions/:voiceSessionId", nil, session, a.getVoiceSession),
 		route(http.MethodPost, "/v0/voice-sessions/:voiceSessionId/captures", nil, session, a.startVoiceCapture),
 		route(http.MethodPost, "/v0/voice-sessions/:voiceSessionId/connection-credentials", nil, session, a.createVoiceSessionCredential),
+		route(http.MethodPost, "/v0/voice-sessions/:voiceSessionId/connect-timings", nil, session, a.reportVoiceConnectTimings),
 		route(http.MethodPost, "/v0/voice-sessions/:voiceSessionId/dictation-commit", nil, session, a.commitVoiceDictationTurn),
 		route(http.MethodGet, "/v0/voice-sessions/:voiceSessionId/events", httpapi.ListVoiceEventsParams{}, session, a.listVoiceEvents),
 		route(http.MethodGet, "/v0/voice-sessions/:voiceSessionId/events/stream", httpapi.StreamVoiceEventsParams{}, session, a.streamVoiceEvents),

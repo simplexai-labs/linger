@@ -115,9 +115,15 @@ function fixture() {
       status: "accepted",
     })),
     closeVoiceSession: vi.fn<TestRouteHandler>(() => undefined),
+    reportConnectTimings: vi.fn<TestRouteHandler>(() => undefined),
   };
   const server = new TeamHubTestServer()
     .on("POST", "/v0/rooms/{roomId}/voice-sessions", routes.createVoiceSession)
+    .on(
+      "POST",
+      "/v0/voice-sessions/{voiceSessionId}/connect-timings",
+      routes.reportConnectTimings,
+    )
     .on(
       "POST",
       "/v0/voice-sessions/{voiceSessionId}/connection-credentials",

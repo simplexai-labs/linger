@@ -2270,6 +2270,10 @@ paths:
     parameters:
       - $ref: '#/components/parameters/VoiceSessionId'
     $ref: '../paths/teamhub-public-voice-media.yaml#/voiceSessionCredentials'
+  /v0/voice-sessions/{voiceSessionId}/connect-timings:
+    parameters:
+      - $ref: '#/components/parameters/VoiceSessionId'
+    $ref: '../paths/teamhub-public-voice-media.yaml#/voiceSessionConnectTimings'
   /v0/voice-sessions/{voiceSessionId}/transcript-events:
     parameters:
       - $ref: '#/components/parameters/VoiceSessionId'

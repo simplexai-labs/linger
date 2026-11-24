@@ -117,6 +117,32 @@ voiceSessionCredentials:
           $ref: "../components/common.yaml#/components/responses/ServiceUnavailable",
         }
 
+voiceSessionConnectTimings:
+  post:
+    tags: [Capture]
+    operationId: reportVoiceConnectTimings
+    summary: Report how long each step of the browser's join took, for diagnosis only.
+    description: >-
+      TeamHub only logs the report next to the VoiceSession; nothing reads it back and nothing depends on it.
+      Clients send it once per join attempt, after it is listening or has failed, and ignore any error.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/voice-media.yaml#/components/schemas/VoiceConnectTimings"
+    responses:
+      "204":
+        description: Report logged.
+      "400":
+        { $ref: "../components/common.yaml#/components/responses/BadRequest" }
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+      "404":
+        { $ref: "../components/common.yaml#/components/responses/NotFound" }
+
 voiceSessionDictationCommit:
   post:
     tags: [Capture]

@@ -103,9 +103,15 @@ function fixture() {
       input_ready_generation: 1,
     })),
     closeVoiceSession: vi.fn<TestRouteHandler>(() => undefined),
+    reportConnectTimings: vi.fn<TestRouteHandler>(() => undefined),
   };
   const server = new TeamHubTestServer()
     .on("POST", "/v0/rooms/{roomId}/voice-sessions", routes.createVoiceSession)
+    .on(
+      "POST",
+      "/v0/voice-sessions/{voiceSessionId}/connect-timings",
+      routes.reportConnectTimings,
+    )
     .on(
       "POST",
       "/v0/voice-sessions/{voiceSessionId}/connection-credentials",
@@ -165,6 +171,41 @@ describe("live Voice Mode transport", () => {
     expect(
       f.server.requestsTo("GET", "/v0/voice-sessions/{voiceSessionId}"),
     ).toEqual([]);
+  });
+
+  it("joins with the credential the session's creation returned", async () => {
+    media.present = [
+      {
+        ...participant("agent-runtime"),
+        isAgent: true,
+        attributes: { "linger.voice_ready_generation": "1" },
+      },
+    ];
+    const f = fixture();
+    f.routes.createVoiceSession.mockReturnValue({
+      id: "live-session",
+      purpose: "chat_live",
+      connection_credential: {
+        endpoint: "ws://fixture",
+        credential: "fixture-only",
+        expires_at: "2026-11-24T12:00:00Z",
+        generation: 1,
+      },
+    });
+    await openVoiceLive(f.options);
+    expect(f.routes.createVoiceSessionCredential).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(f.routes.reportConnectTimings).toHaveBeenCalledOnce(),
+    );
+    expect(f.routes.reportConnectTimings.mock.lastCall![0].body).toEqual({
+      outcome: "ready",
+      session_ms: expect.any(Number),
+      credential_ms: expect.any(Number),
+      microphone_ms: expect.any(Number),
+      room_connected_ms: expect.any(Number),
+      published_ms: expect.any(Number),
+      ready_ms: expect.any(Number),
+    });
   });
 
   it("opens a chat_live session and subscribes only to the runtime's live reply", async () => {
@@ -345,6 +386,15 @@ describe("live Voice Mode transport", () => {
     );
     expect(f.routes.closeVoiceSession).toHaveBeenCalledOnce();
     expect(f.release).toHaveBeenCalledOnce();
+    expect(f.routes.reportConnectTimings.mock.lastCall![0].body).toEqual(
+      expect.objectContaining({
+        outcome: "failed",
+        published_ms: expect.any(Number),
+      }),
+    );
+    expect(
+      f.routes.reportConnectTimings.mock.lastCall![0].body,
+    ).not.toHaveProperty("ready_ms");
     vi.useRealTimers();
   });
 });

@@ -54,6 +54,11 @@ func TestVoiceSessionsBelongToTheirLoginSession(t *testing.T) {
 		return session
 	}
 	recording := create(alice, roomID, "login-recording", http.StatusCreated)
+	// The creation response carries the first credential, so the client joins
+	// without asking for one.
+	if first := recording.ConnectionCredential; first == nil || first.Generation != 1 || first.Credential == "" || recording.CredentialGeneration != 1 {
+		t.Fatalf("creation must carry the first credential: %+v", recording)
+	}
 	// The same login session still holds one active session at a time.
 	create(alice, otherRoomID, "login-second-recording", http.StatusConflict)
 
@@ -65,6 +70,7 @@ func TestVoiceSessionsBelongToTheirLoginSession(t *testing.T) {
 		{http.MethodGet, "/v0/rooms/" + roomID + "/voice-sessions", nil},
 		{http.MethodGet, "/v0/voice-sessions/" + recording.Id, nil},
 		{http.MethodPost, "/v0/voice-sessions/" + recording.Id + "/connection-credentials", nil},
+		{http.MethodPost, "/v0/voice-sessions/" + recording.Id + "/connect-timings", map[string]any{"outcome": "ready", "ready_ms": 1200}},
 		{http.MethodPost, "/v0/voice-sessions/" + recording.Id + "/captures", map[string]any{"room_id": roomID, "start_offset_ms": 0}},
 		{http.MethodGet, "/v0/voice-sessions/" + recording.Id + "/transcript-events", nil},
 		{http.MethodGet, "/v0/voice-sessions/" + recording.Id + "/events", nil},
@@ -86,6 +92,9 @@ func TestVoiceSessionsBelongToTheirLoginSession(t *testing.T) {
 	}
 	if status, _, body := env.request(otherBrowser, http.MethodPost, "/v0/voice-sessions/"+otherRecording.Id+"/connection-credentials", nil, ""); status != http.StatusCreated {
 		t.Fatalf("own credential=%d %s", status, body)
+	}
+	if status, _, body := env.request(otherBrowser, http.MethodPost, "/v0/voice-sessions/"+otherRecording.Id+"/connect-timings", map[string]any{"outcome": "failed", "credential_ms": 300}, ""); status != http.StatusNoContent {
+		t.Fatalf("own connect timings=%d %s", status, body)
 	}
 	for client, want := range map[*http.Client]string{alice: roomID, otherBrowser: otherRoomID} {
 		status, _, body := env.request(client, http.MethodGet, "/v0/tenants/"+acmeTenant+"/voice-media-policy", nil, "")

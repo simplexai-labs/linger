@@ -31,6 +31,7 @@ import {
   sessionReadinessFailure,
   voiceMicrophoneOptions,
 } from "../voice-media-room";
+import { startVoiceConnectClock } from "@/features/rooms/voice-control/voice-media-connection";
 import { VoiceModeDisconnectedError } from "../voice-mode-errors";
 import { translate } from "@/i18n/language";
 import { voiceSessionMessages as m } from "../voice-session.messages";
@@ -81,6 +82,7 @@ export async function openVoiceLive(input: {
   const requests = new VoiceRequestScope();
   const { client, signal } = input;
   signal.throwIfAborted();
+  const clock = startVoiceConnectClock();
   const livekitModulePromise = import("livekit-client");
   const release = await acquireVoiceMicrophone(input.acquireMicrophone, signal);
   let session: TeamHubVoiceSession | undefined;
@@ -193,25 +195,30 @@ export async function openVoiceLive(input: {
     );
     void creatingTrack.then(
       (created) => {
+        clock.mark("microphone_ms");
         if (closed || signal.aborted) created.stop();
         else track = created;
       },
       () => undefined,
     );
     session = await bounded(creating, 10_000, signal);
+    clock.session(session.id);
     if (session.purpose !== "chat_live")
       throw new Error(translate(m.liveNotConfirmed));
     const sessionId = session.id;
-    const credential = await bounded(
-      teamHubData(
-        client.api.POST(
-          "/v0/voice-sessions/{voiceSessionId}/connection-credentials",
-          { params: { path: { voiceSessionId: sessionId } } },
+    const credential =
+      session.connection_credential ??
+      (await bounded(
+        teamHubData(
+          client.api.POST(
+            "/v0/voice-sessions/{voiceSessionId}/connection-credentials",
+            { params: { path: { voiceSessionId: sessionId } } },
+          ),
         ),
-      ),
-      5_000,
-      signal,
-    );
+        5_000,
+        signal,
+      ));
+    clock.mark("credential_ms");
     signal.throwIfAborted();
     const media = new Room({
       adaptiveStream: false,
@@ -251,9 +258,11 @@ export async function openVoiceLive(input: {
     });
     const [, createdTrack] = await Promise.all([
       bounded(
-        media.connect(credential.endpoint, credential.credential, {
-          autoSubscribe: false,
-        }),
+        media
+          .connect(credential.endpoint, credential.credential, {
+            autoSubscribe: false,
+          })
+          .then(() => clock.mark("room_connected_ms")),
         15_000,
         signal,
       ),
@@ -279,6 +288,7 @@ export async function openVoiceLive(input: {
       signal,
     );
     signal.throwIfAborted();
+    clock.mark("published_ms");
     meter = observeAudioLevel(track.mediaStreamTrack, input.level);
     const microphone: VoiceModeMicrophone = {
       async setMuted(muted) {
@@ -392,6 +402,8 @@ export async function openVoiceLive(input: {
       await waitForVoiceDelay(200, signal);
       signal.throwIfAborted();
     }
+    clock.mark("ready_ms");
+    clock.report(client, "ready");
     return connection;
   } catch (error) {
     closed = true;
@@ -407,6 +419,7 @@ export async function openVoiceLive(input: {
         creating ?? Promise.reject(new Error("Live session was not created")),
         10_000,
       ).catch(() => undefined);
+      clock.report(client, signal.aborted ? "cancelled" : "failed");
       if (session) await closeVoiceSessionQuietly(client, session.id);
     } finally {
       await release();
