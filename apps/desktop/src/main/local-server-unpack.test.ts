@@ -95,7 +95,7 @@ describe("unpackArchive", () => {
     expect(onFallback).toHaveBeenCalledWith(missingTar);
   });
 
-  it("reports an actionable error when tar.exe is missing and fallback fails", async () => {
+  it("reports a platform-appropriate actionable error when tar is missing and fallback fails", async () => {
     const root = tempDirectory();
     const archive = path.join(root, "bundle.bin");
     await writeFile(archive, "not-an-archive");
@@ -104,6 +104,7 @@ describe("unpackArchive", () => {
 
     await expect(
       unpackArchive(archive, out, new AbortController().signal, {
+        platform: "win32",
         command: missingTar,
         runCommand: async () => {
           throw enoent(missingTar);
@@ -111,6 +112,18 @@ describe("unpackArchive", () => {
       }),
     ).rejects.toThrow(
       /Failed to unpack bundle\.bin: C:\\Windows\\System32\\tar\.exe was not found \(ENOENT\).*Restore Windows tar\.exe/,
+    );
+
+    await expect(
+      unpackArchive(archive, out, new AbortController().signal, {
+        platform: "linux",
+        command: "tar",
+        runCommand: async () => {
+          throw enoent("tar");
+        },
+      }),
+    ).rejects.toThrow(
+      /Failed to unpack bundle\.bin: tar was not found \(ENOENT\).*Install tar or reinstall Linger\./,
     );
   });
 

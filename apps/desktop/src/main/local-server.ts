@@ -4437,6 +4437,7 @@ export function tarCommand(
 
 export interface UnpackArchiveOptions {
   readonly command?: string;
+  readonly platform?: NodeJS.Platform;
   readonly runCommand?: typeof run;
   readonly fallback?: typeof extractArchiveFallback;
   readonly onFallback?: (command: string) => void;
@@ -4452,7 +4453,8 @@ export async function unpackArchive(
   signal: AbortSignal,
   options: UnpackArchiveOptions = {},
 ): Promise<void> {
-  const command = options.command ?? tarCommand();
+  const platform = options.platform ?? process.platform;
+  const command = options.command ?? tarCommand(platform);
   const runCommand = options.runCommand ?? run;
   const fallback = options.fallback ?? extractArchiveFallback;
   await removeRetrying(unpacked);
@@ -4487,8 +4489,12 @@ export async function unpackArchive(
         fallbackError instanceof Error
           ? fallbackError.message
           : String(fallbackError);
+      const hint =
+        platform === "win32"
+          ? "Restore Windows tar.exe or reinstall Linger."
+          : "Install tar or reinstall Linger.";
       throw new Error(
-        `Failed to unpack ${path.basename(file)}: ${command} was not found (ENOENT) and the built-in extractor failed (${detail}). Restore Windows tar.exe or reinstall Linger.`,
+        `Failed to unpack ${path.basename(file)}: ${command} was not found (ENOENT) and the built-in extractor failed (${detail}). ${hint}`,
         { cause: fallbackError },
       );
     }

@@ -50,8 +50,8 @@ export async function windowsElevated(
 
 // Slow HDDs and Windows antivirus scanning can hold PostgreSQL in initial
 // data-directory fsync past 30 seconds while the server process stays alive.
-export const POSTGRES_READY_TIMEOUT_MS = 120_000;
-export const POSTGRES_READY_PROGRESS_MS = 15_000;
+const POSTGRES_READY_TIMEOUT_MS = 120_000;
+const POSTGRES_READY_PROGRESS_MS = 15_000;
 
 // Prepares the instance's private PostgreSQL. A database from before Linger
 // is set aside with its data for a fresh one, and `legacyBackup` names the
@@ -63,8 +63,6 @@ export async function prepareNativeDatabase(options: {
   env: NodeJS.ProcessEnv;
   signal: AbortSignal;
   onOutput: (chunk: string) => void;
-  readyTimeoutMs?: number;
-  readyProgressMs?: number;
 }): Promise<{ legacyBackup?: string }> {
   const { instance, postgresBin, signal } = options;
   if (process.getuid?.() === 0)
@@ -215,11 +213,8 @@ export async function prepareNativeDatabase(options: {
       "postgres",
     ];
     const startedAt = Date.now();
-    const readyTimeoutMs = options.readyTimeoutMs ?? POSTGRES_READY_TIMEOUT_MS;
-    const readyProgressMs =
-      options.readyProgressMs ?? POSTGRES_READY_PROGRESS_MS;
-    const deadline = startedAt + readyTimeoutMs;
-    let nextProgressAt = startedAt + readyProgressMs;
+    const deadline = startedAt + POSTGRES_READY_TIMEOUT_MS;
+    let nextProgressAt = startedAt + POSTGRES_READY_PROGRESS_MS;
     for (;;) {
       signal.throwIfAborted();
       if (!(await inspectNativeProcess(instance.root, "postgres")).running)
@@ -233,13 +228,13 @@ export async function prepareNativeDatabase(options: {
       const now = Date.now();
       if (now >= deadline)
         throw new Error(
-          `Native PostgreSQL did not become ready within ${Math.round(readyTimeoutMs / 1000)}s (pg_isready exit ${ready.code}); inspect its instance log.`,
+          `Native PostgreSQL did not become ready within ${Math.round(POSTGRES_READY_TIMEOUT_MS / 1000)}s (pg_isready exit ${ready.code}); inspect its instance log.`,
         );
       if (now >= nextProgressAt) {
         options.onOutput(
           `Waiting for native PostgreSQL to become ready (${Math.floor((now - startedAt) / 1000)}s elapsed)...\n`,
         );
-        nextProgressAt = now + readyProgressMs;
+        nextProgressAt = now + POSTGRES_READY_PROGRESS_MS;
       }
       await delay(200, undefined, { signal });
     }
