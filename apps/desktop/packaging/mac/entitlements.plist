@@ -10,5 +10,9 @@
 	<!-- Without it the hardened runtime refuses Apple Events before asking. -->
 	<key>com.apple.security.automation.apple-events</key>
 	<true/>
+	<!-- Without it the hardened runtime neither asks for the microphone nor
+	     refuses it: voice and recordings get a live track of silence. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
 </dict>
 </plist>

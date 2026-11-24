@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import plistlib
 import shutil
 import subprocess
 import tarfile
@@ -221,6 +222,31 @@ class MacSigningTest(unittest.TestCase):
             "Contents/Resources/node_modules/@img/sharp/sharp.node@0:runtime",
             "Contents/Resources/node_modules/canvas/skia.node:runtime",
         ])
+
+    def test_app_and_helpers_may_ask_for_the_microphone(self):
+        # Under the hardened runtime macOS gives an app without audio-input a
+        # silent microphone and never asks; the prompt shows our text.
+        app = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, app)
+        main = os.path.join(app, "Contents", "MacOS", "Linger")
+        helper = os.path.join(app, "Contents", "Frameworks", "Linger Helper (Renderer).app",
+                              "Contents", "MacOS", "Linger Helper (Renderer)")
+        for path in (main, helper):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as out:
+                out.write(MACHO)
+        args = self.mac.Signing("rcodesign", "id.p12", "id.password").app_args(app)
+        given = {args[i + 1] for i, arg in enumerate(args) if arg == "--entitlements-xml-file"}
+        entitlements = os.path.join(HERE, "mac", "entitlements.plist")
+        self.assertEqual(given, {
+            f"Contents/MacOS/Linger:{entitlements}",
+            f"Contents/Frameworks/Linger Helper (Renderer).app/Contents/MacOS/Linger Helper (Renderer):{entitlements}",
+        })
+        with open(entitlements, "rb") as source:
+            self.assertIs(plistlib.load(source).get("com.apple.security.device.audio-input"), True)
+        usage = self.mac.PRIVACY_USAGE["NSMicrophoneUsageDescription"]
+        self.assertIn("Linger", usage)
+        self.assertNotEqual(usage, "This app needs access to the microphone")
 
     @staticmethod
     def signed_macho(flags, cms):

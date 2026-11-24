@@ -506,6 +506,14 @@ sets no `MACOSX_DEPLOYMENT_TARGET`, so PostgreSQL's minimum is the macOS of
 the host that built it. Check every Mach-O file of a new pinned binary
 (`otool -l`, `minos`) before raising or lowering the value in both places.
 
+The Developer ID signature carries the hardened runtime, which needs an
+entitlement in `packaging/mac/entitlements.plist` for each protected device
+the app uses, and `PRIVACY_USAGE` in `packaging/mac/package.py` holds the prompt
+text macOS shows. Without `com.apple.security.device.audio-input` macOS
+neither asks for the microphone nor refuses it: voice and recordings get a
+live track of silence. An ad-hoc build has no hardened runtime and works
+either way, so check such a change on a Developer ID build.
+
 Windows, Linux x64 and Apple silicon bundle PostgreSQL in the app instead
 (`file` in `distribution/<target>.json`; 35 MB on Windows, 10–12 MB
 elsewhere), so Native works without the CDN. Put the pinned archives in

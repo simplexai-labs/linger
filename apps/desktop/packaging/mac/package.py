@@ -60,9 +60,12 @@ from archive import sha256, tar_gz  # noqa: E402
 import computer_tools  # noqa: E402
 from native_bundle import check_runtime, check_teamhub, refresh  # noqa: E402
 BUNDLE_ID = "com.simplexai.linger.desktop.preview"
-# Prompt text for the privacy permissions tasks need. Without
+# Prompt text for the privacy permissions tasks and voice need. Without
 # NSAppleEventsUsageDescription macOS refuses Apple Events without asking.
+# The microphone text replaces Electron's generic one; the prompt itself also
+# needs the audio-input entitlement in entitlements.plist.
 PRIVACY_USAGE = {
+    "NSMicrophoneUsageDescription": "Linger uses the microphone for voice conversations and meeting recordings you start.",
     "NSAppleEventsUsageDescription": "Tasks you send to Linger can control apps on this Mac for you.",
     "NSDownloadsFolderUsageDescription": "Tasks you send to Linger can read and organize your downloads.",
     "NSDocumentsFolderUsageDescription": "Tasks you send to Linger can read and edit your documents.",
