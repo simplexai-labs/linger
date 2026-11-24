@@ -885,10 +885,11 @@ describe("RunnerGateway", () => {
   });
 
   it("frees a stopped Task's place once its Computer stays silent past the grace", async () => {
+    const cancelTimeoutMs = 10;
     const gateway = createTestRunnerGateway({
       createId: sequenceIds(),
-      operationCancelTimeoutMs: 10,
-      stoppedTaskGraceMs: 20,
+      operationCancelTimeoutMs: cancelTimeoutMs,
+      stoppedTaskGraceMs: 1_000,
     });
     const peer = new RecordingPeer();
     const connection = await acceptReadyConnection(gateway, peer, {
@@ -910,29 +911,49 @@ describe("RunnerGateway", () => {
           runner_pid: 100,
         }),
       );
-      const stopped = expect(task.result).rejects.toMatchObject({
-        code: "cancelled",
-      });
+      let taskSettled = false;
+      const stopped = expect(
+        task.result.finally(() => {
+          taskSettled = true;
+        }),
+      ).rejects.toMatchObject({ code: "cancelled" });
       await task.cancel("user_stop");
-      const chat = gateway.startOperation({
-        ...runTarget(),
-        ...readyContextScope("chat"),
-        runKind: "chat",
-      });
+      let chatStarted = false;
+      const chat = gateway
+        .startOperation({
+          ...runTarget(),
+          ...readyContextScope("chat"),
+          runKind: "chat",
+        })
+        .then((interactive) => {
+          chatStarted = true;
+          return interactive;
+        });
+      const starts = () =>
+        peer.sent
+          .filter((command) => command.type === "operation.start")
+          .map((command) => command.execution_context_key);
+      // Past the cancel timeout but inside the grace, the stopped Task still
+      // holds its places.
+      await new Promise((resolve) => setTimeout(resolve, cancelTimeoutMs * 5));
+      expect(taskSettled).toBe(false);
+      expect(chatStarted).toBe(false);
+      expect(starts()).toEqual([start.execution_context_key]);
       // The Computer never confirms the stop, so the Task's model and
       // Computer places go to the chat after the grace.
       await stopped;
       const interactive = await chat;
       void interactive.result.catch(() => undefined);
-      expect(
-        peer.sent
-          .filter((command) => command.type === "operation.start")
-          .map((command) => command.execution_context_key),
-      ).toEqual([start.execution_context_key, "context-chat"]);
+      expect(starts()).toEqual([start.execution_context_key, "context-chat"]);
       // A late terminal for the released Task is acknowledged and dropped.
       await connection.receive(
         event(start, 2, { type: "operation.cancelled", reason: "user_stop" }),
       );
+      expect(peer.sent.at(-1)).toMatchObject({
+        type: "operation.ack",
+        operation_id: start.operation_id,
+        through_seq: 2,
+      });
     } finally {
       connection.disconnect();
     }
