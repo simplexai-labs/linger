@@ -10,7 +10,10 @@ export const channelsMessages = defineMessages("channels", {
   loadFailed: "Could not load channel settings. Refresh to try again.",
   wechatName: "WeChat",
   wechatDescription:
-    "Connect your personal WeChat through ClawBot (iLink). Supports text messages, WeChat voice transcripts, and numbered question replies.",
+    "Connect your personal WeChat through ClawBot (iLink). Supports text messages, WeChat voice transcripts, files, and question replies.",
+  useWeChat: "Use WeChat",
+  toggleWeChatSettings: "Toggle WeChat settings",
+  accountSection: "Account",
   upcomingTitle: "More channels",
   upcomingDescription:
     "WhatsApp Agents, Telegram, Discord, and Slack share the same server-side channel runtime and can be added here next.",

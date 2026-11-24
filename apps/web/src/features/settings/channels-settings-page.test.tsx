@@ -72,11 +72,11 @@ describe("ChannelsSettingsPage", () => {
 
     renderPage(api);
 
-    const connectBtn = await screen.findByRole("button", {
-      name: "Connect WeChat",
+    const connectSwitch = await screen.findByRole("switch", {
+      name: "Use WeChat",
     });
-    await waitFor(() => expect(connectBtn).not.toBeDisabled());
-    fireEvent.click(connectBtn);
+    await waitFor(() => expect(connectSwitch).not.toBeDisabled());
+    fireEvent.click(connectSwitch);
 
     expect(
       await screen.findByRole("img", { name: "WeChat pairing QR code" }),
@@ -89,7 +89,7 @@ describe("ChannelsSettingsPage", () => {
     expect(await screen.findByText("WeChat connected.")).toBeInTheDocument();
   });
 
-  it("displays connected WeChat status and supports pausing and disconnecting", async () => {
+  it("displays connected WeChat status and supports pausing, collapsing, and disconnecting", async () => {
     const api = {
       GET: vi.fn(async () => ({
         data: {
@@ -120,7 +120,22 @@ describe("ChannelsSettingsPage", () => {
       screen.getByText("Linked account: user_1@im.wechat"),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    // Collapse and re-expand the configuration drawer.
+    const expandBtn = screen.getByRole("button", {
+      name: "Toggle WeChat settings",
+    });
+    expect(expandBtn).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(expandBtn);
+    expect(expandBtn).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Linked account: user_1@im.wechat")).toBeNull();
+    fireEvent.click(expandBtn);
+    expect(
+      screen.getByText("Linked account: user_1@im.wechat"),
+    ).toBeInTheDocument();
+
+    const wechatSwitch = screen.getByRole("switch", { name: "Use WeChat" });
+    expect(wechatSwitch).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(wechatSwitch);
     await waitFor(() =>
       expect(api.PATCH).toHaveBeenCalledWith("/v0/channels/{provider}", {
         params: { path: { provider: "wechat" } },
@@ -172,7 +187,9 @@ describe("ChannelsSettingsPage", () => {
     };
     try {
       renderPage(api);
-      expect(await screen.findByText("Use iMessage")).toBeInTheDocument();
+      expect(
+        await screen.findByRole("switch", { name: "Use iMessage" }),
+      ).toHaveAttribute("aria-checked", "true");
       expect(screen.getByText("me@icloud.com")).toBeInTheDocument();
     } finally {
       win.lingerDesktop = previous;

@@ -5,6 +5,9 @@ export const desktopIMessageMessages = defineMessages("desktopIMessage", {
   label: "iMessage",
   footer: "Chat with Another Me from Messages on this Mac.",
   useIMessage: "Use iMessage",
+  toggleSettings: "Toggle iMessage settings",
+  statusOff: "Off",
+  statusAttention: "Needs attention",
 
   // The bridge's state, under the switch.
   connecting: "Connecting…",

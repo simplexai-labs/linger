@@ -10,7 +10,7 @@ import {
   SettingsRowText,
 } from "@/components/ui/settings-group";
 import { Spinner } from "@/components/ui/spinner";
-import { ChannelBrandIcon } from "@/features/rooms/channel-icon";
+import { ChannelCard } from "@/features/settings/channel-card";
 
 import { useT } from "@/i18n/use-translation";
 
@@ -55,6 +55,41 @@ export function DesktopIMessageCard() {
   return <IMessageCard imessage={imessage} status={imessage.status} />;
 }
 
+function iMessageStatusMeta(
+  status: DesktopIMessageStatus,
+  t: T,
+): {
+  label: string;
+  tone: "danger" | "info" | "neutral" | "success" | "warning";
+  detail?: string;
+} {
+  if (!status.enabled) {
+    return { label: t(m.statusOff), tone: "neutral" };
+  }
+  switch (status.bridge) {
+    case "running":
+      return { label: t(m.connected), tone: "success" };
+    case "starting":
+      return { label: t(m.connecting), tone: "info" };
+    case "stopped":
+      return { label: t(m.finishSetup), tone: "warning" };
+    case "error":
+      return {
+        label: t(m.statusAttention),
+        tone: "danger",
+        detail: t(BRIDGE_LINE[status.bridge]),
+      };
+    case "signed_out":
+    case "no_another_me":
+    case "other_account":
+      return {
+        label: t(m.statusAttention),
+        tone: "warning",
+        detail: t(BRIDGE_LINE[status.bridge]),
+      };
+  }
+}
+
 function IMessageCard({
   imessage,
   status,
@@ -63,45 +98,41 @@ function IMessageCard({
   status: DesktopIMessageStatus;
 }) {
   const t = useT();
+  const statusMeta = iMessageStatusMeta(status, t);
+  const notice =
+    statusMeta.detail || imessage.error ? (
+      <div className="space-y-2">
+        {statusMeta.detail ? (
+          <FormFeedback tone={statusMeta.tone === "danger" ? "danger" : "info"}>
+            {statusMeta.detail}
+          </FormFeedback>
+        ) : null}
+        {imessage.error ? (
+          <FormFeedback tone="danger">{t(ERROR[imessage.error])}</FormFeedback>
+        ) : null}
+      </div>
+    ) : undefined;
+
   return (
-    <div className="flex flex-col gap-4">
-      <SettingsGroup footer={t(m.footer)} label={t(m.label)}>
-        <SettingsRow>
-          <ChannelBrandIcon channel="imessage" size={22} />
-          {/* The bridge line wraps; SettingsRowText would truncate it. */}
-          <span className="min-w-0 flex-1">
-            <SettingsRowText title={t(m.useIMessage)} />
-            {status.enabled ? (
-              <span className="mt-px block text-xs leading-[17px] text-muted-foreground">
-                {t(BRIDGE_LINE[status.bridge])}
-              </span>
-            ) : null}
-          </span>
-          <button
-            aria-checked={status.enabled}
-            aria-label={t(m.useIMessage)}
-            className={`relative h-4 w-7 shrink-0 rounded-full shadow-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${status.enabled ? "bg-primary" : "bg-input"}`}
-            disabled={imessage.pending}
-            onClick={() => void imessage.set({ enabled: !status.enabled })}
-            role="switch"
-            type="button"
-          >
-            <span
-              className={`absolute left-0 top-0.5 size-3 rounded-full bg-card shadow-sm transition-transform duration-150 ${status.enabled ? "translate-x-3.5" : "translate-x-0.5"}`}
-            />
-          </button>
-        </SettingsRow>
-      </SettingsGroup>
-      {status.enabled ? (
-        <>
-          <HandlesEditor imessage={imessage} handles={status.handles} />
-          <Checklist imessage={imessage} status={status} />
-        </>
-      ) : null}
-      {imessage.error ? (
-        <FormFeedback tone="danger">{t(ERROR[imessage.error])}</FormFeedback>
-      ) : null}
-    </div>
+    <ChannelCard
+      channel="imessage"
+      description={t(m.footer)}
+      enabled={status.enabled}
+      expandLabel={t(m.toggleSettings)}
+      hasConfiguration={status.enabled}
+      notice={notice}
+      onToggle={() => void imessage.set({ enabled: !status.enabled })}
+      statusLabel={statusMeta.label}
+      statusTone={statusMeta.tone}
+      switchDisabled={imessage.pending}
+      switchLabel={t(m.useIMessage)}
+      title={t(m.label)}
+    >
+      <div className="flex flex-col gap-4">
+        <HandlesEditor handles={status.handles} imessage={imessage} />
+        <Checklist imessage={imessage} status={status} />
+      </div>
+    </ChannelCard>
   );
 }
 

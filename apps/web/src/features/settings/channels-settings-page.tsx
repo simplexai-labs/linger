@@ -3,15 +3,20 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { components } from "@linger/wire-contracts/teamhub-public/types";
 
 import { Button } from "@/components/ui/button";
+import { FormFeedback } from "@/components/ui/form-feedback";
 import { ModalDialog } from "@/components/ui/modal-dialog";
+import {
+  SettingsGroup,
+  SettingsRow,
+  SettingsRowText,
+} from "@/components/ui/settings-group";
 import { Spinner } from "@/components/ui/spinner";
-import { StatusPill } from "@/components/ui/status-pill";
 import { DesktopIMessageCard } from "@/features/local-computer/desktop-imessage-card";
-import { ChannelBrandIcon } from "@/features/rooms/channel-icon";
 import { teamHubData, teamHubDone } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import { useT } from "@/i18n/use-translation";
 
+import { ChannelCard } from "./channel-card";
 import { channelsMessages } from "./channels.messages";
 import { encodeQrMatrix } from "./qr-code";
 import { SettingsPageHeading } from "./settings-page-heading";
@@ -413,114 +418,109 @@ export function ChannelsSettingsPage() {
   const wechatError = bindingErrorHint(wechatBinding, t);
   const busy = toggleMutation.isPending || disconnectMutation.isPending;
 
+  const wechatNotice =
+    wechatError || actionError ? (
+      <div className="space-y-2">
+        {wechatError ? (
+          <FormFeedback tone="danger">{wechatError}</FormFeedback>
+        ) : null}
+        {actionError ? (
+          <FormFeedback tone="danger">
+            {t(channelsMessages.actionFailed)}
+          </FormFeedback>
+        ) : null}
+      </div>
+    ) : undefined;
+
   return (
-    <div className="mx-auto flex w-full max-w-(--app-settings-width) flex-col gap-8 pb-4">
+    <div className="mx-auto flex w-full max-w-(--app-settings-width) flex-col gap-6 pb-4">
       <SettingsPageHeading
         description={t(channelsMessages.description)}
         title={t(channelsMessages.title)}
       />
 
       {channelsQuery.isError ? (
-        <p className="text-sm text-app-danger" role="alert">
+        <FormFeedback tone="danger">
           {t(channelsMessages.loadFailed)}
-        </p>
+        </FormFeedback>
       ) : null}
 
       {data && !data.available ? (
-        <p className="rounded-xl border border-border bg-background p-4 text-sm text-muted-foreground">
+        <p className="rounded-2xl bg-card px-5 py-4 text-sm text-muted-foreground shadow-outline">
           {t(channelsMessages.unavailable)}
         </p>
       ) : null}
 
-      <section className="rounded-2xl border border-border bg-background p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 space-y-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <ChannelBrandIcon channel="wechat" size={22} />
-              <h2 className="text-base font-medium text-foreground">
-                {t(channelsMessages.wechatName)}
-              </h2>
-              <StatusPill tone={wechatStatus.tone}>
-                {wechatStatus.label}
-              </StatusPill>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {t(channelsMessages.wechatDescription)}
-            </p>
-            {wechatBinding?.remote_user_id ? (
-              <p className="text-xs text-muted-foreground">
-                {t(channelsMessages.accountLabel, {
-                  id: wechatBinding.remote_user_id,
-                })}
-              </p>
-            ) : null}
-          </div>
+      <div className="flex flex-col gap-4">
+        <ChannelCard
+          channel="wechat"
+          description={t(channelsMessages.wechatDescription)}
+          enabled={Boolean(wechatBinding?.enabled)}
+          expandLabel={t(channelsMessages.toggleWeChatSettings)}
+          hasConfiguration={Boolean(wechatBinding)}
+          notice={wechatNotice}
+          onToggle={() => {
+            if (!wechatBinding) {
+              setPairingOpen(true);
+              return;
+            }
+            toggleMutation.mutate(!wechatBinding.enabled);
+          }}
+          statusLabel={wechatStatus.label}
+          statusTone={wechatStatus.tone}
+          switchDisabled={
+            wechatBinding ? busy : !data?.available || channelsQuery.isPending
+          }
+          switchLabel={t(channelsMessages.useWeChat)}
+          title={t(channelsMessages.wechatName)}
+        >
+          {wechatBinding ? (
+            <SettingsGroup label={t(channelsMessages.accountSection)}>
+              <SettingsRow>
+                <SettingsRowText
+                  description={
+                    wechatBinding.remote_user_id
+                      ? t(channelsMessages.accountLabel, {
+                          id: wechatBinding.remote_user_id,
+                        })
+                      : undefined
+                  }
+                  title={t(channelsMessages.wechatName)}
+                />
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    disabled={!data?.available || busy}
+                    onClick={() => setPairingOpen(true)}
+                    size="compact"
+                    tone="secondary"
+                  >
+                    {t(channelsMessages.reconnectWeChat)}
+                  </Button>
+                  <Button
+                    data-voice-risk="never"
+                    disabled={busy}
+                    onClick={() => disconnectMutation.mutate()}
+                    size="compact"
+                    tone="ghost"
+                  >
+                    {disconnectMutation.isPending
+                      ? t(channelsMessages.disconnecting)
+                      : t(channelsMessages.disconnect)}
+                  </Button>
+                </div>
+              </SettingsRow>
+            </SettingsGroup>
+          ) : null}
+        </ChannelCard>
 
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {wechatBinding ? (
-              <>
-                <Button
-                  disabled={busy}
-                  onClick={() => toggleMutation.mutate(!wechatBinding.enabled)}
-                  size="compact"
-                  tone="secondary"
-                >
-                  {wechatBinding.enabled
-                    ? t(channelsMessages.pause)
-                    : t(channelsMessages.resume)}
-                </Button>
-                <Button
-                  disabled={!data?.available || busy}
-                  onClick={() => setPairingOpen(true)}
-                  size="compact"
-                  tone="secondary"
-                >
-                  {t(channelsMessages.reconnectWeChat)}
-                </Button>
-                <Button
-                  data-voice-risk="never"
-                  disabled={busy}
-                  onClick={() => disconnectMutation.mutate()}
-                  size="compact"
-                  tone="ghost"
-                >
-                  {disconnectMutation.isPending
-                    ? t(channelsMessages.disconnecting)
-                    : t(channelsMessages.disconnect)}
-                </Button>
-              </>
-            ) : (
-              <Button
-                disabled={!data?.available || channelsQuery.isPending}
-                onClick={() => setPairingOpen(true)}
-                size="compact"
-                tone="primary"
-              >
-                {t(channelsMessages.connectWeChat)}
-              </Button>
-            )}
-          </div>
-        </div>
+        <DesktopIMessageCard />
+      </div>
 
-        {wechatError ? (
-          <p className="mt-3 text-sm text-app-danger" role="alert">
-            {wechatError}
-          </p>
-        ) : null}
-        {actionError ? (
-          <p className="mt-3 text-sm text-app-danger" role="alert">
-            {t(channelsMessages.actionFailed)}
-          </p>
-        ) : null}
-      </section>
-
-      <DesktopIMessageCard />
-
-      <section className="rounded-2xl border border-dashed border-border bg-background/50 p-5">
+      <section className="rounded-2xl border border-dashed border-border bg-background/50 px-5 py-4">
         <h2 className="text-sm font-medium text-foreground">
           {t(channelsMessages.upcomingTitle)}
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-xs leading-[18px] text-muted-foreground">
           {t(channelsMessages.upcomingDescription)}
         </p>
       </section>
