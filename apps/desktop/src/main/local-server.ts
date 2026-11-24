@@ -46,6 +46,7 @@ import {
   readPublishedTool,
 } from "@linger/local-installation/localmodels-tool";
 import { normalizeFailurePunctuation } from "@linger/local-installation/localmodels-failure";
+import { localmodelsPlanFile } from "@linger/local-installation/localmodels-tool";
 import {
   canBuildNativeServicesFromSource,
   canCompileTeamhubFromSource,
@@ -775,10 +776,29 @@ export class LocalServerModule implements Module {
   // model source is still local. The stop runs on
   // after the app is gone, its output in the installer's folder. An update
   // or an uninstall stops the models with the services instead.
+  // A Quick Install that failed or is still waiting has already started the
+  // engine and the gateway, so a home with a saved local model plan is
+  // stopped too: the plan is saved before anything is deployed. A custom
+  // location the record does not name yet gets a stop of its own.
   async #stopLocalModels(): Promise<void> {
-    if (!(await this.#readRecord()) || !existsSync(this.#installerScript()))
-      return;
-    const directory = path.join(this.#options.home, "installer");
+    if (!existsSync(this.#installerScript())) return;
+    const record = await this.#readRecord();
+    const covered = [this.#options.home, ...(record ? [record.home] : [])];
+    if (record || existsSync(localmodelsPlanFile(this.#options.home)))
+      await this.#spawnLocalModelsStop(this.#options.home);
+    const location = this.#location;
+    if (
+      location &&
+      !covered.some((home) => path.resolve(home) === path.resolve(location)) &&
+      existsSync(localmodelsPlanFile(location))
+    )
+      await this.#spawnLocalModelsStop(location);
+  }
+
+  // `--home` is the default home, which also stops the location its record
+  // names, or a location with no record of its own.
+  async #spawnLocalModelsStop(home: string): Promise<void> {
+    const directory = path.join(home, "installer");
     let output: number;
     try {
       await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -800,7 +820,7 @@ export class LocalServerModule implements Module {
           ...linuxNodeFdHygieneArgs(this.#options.platform),
           this.#installerScript(),
           "--home",
-          this.#options.home,
+          home,
           "--stop-local-models",
         ],
         {
@@ -817,9 +837,7 @@ export class LocalServerModule implements Module {
         }),
       );
       child.unref();
-      this.#ctx?.log.info("local_server.local_models_stopping", {
-        home: this.#options.home,
-      });
+      this.#ctx?.log.info("local_server.local_models_stopping", { home });
     } finally {
       closeSync(output);
     }

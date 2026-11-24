@@ -4756,6 +4756,42 @@ describe("LocalServerModule after a restart", () => {
     });
   });
 
+  it("stops the local models an unfinished Quick Install started when the person quits", async () => {
+    const f = fixture({}, enrolled);
+    // The plan is saved before anything is deployed; the record only once
+    // the installation succeeds.
+    const plan = (home: string) => {
+      mkdirSync(path.join(home, "runtime", "localmodels"), { recursive: true });
+      writeFileSync(
+        path.join(home, "runtime", "localmodels", "plan.json"),
+        "{}",
+      );
+    };
+    plan(f.home);
+    const picked = path.join(f.root, "elsewhere");
+    mkdirSync(picked, { recursive: true });
+    await f.host.start();
+    await f.module.chooseLocation(picked);
+    const location = f.module.status().location.path;
+    expect(location).not.toBe(f.home);
+    plan(location);
+    await f.host.stop("quit");
+    for (const home of [f.home, location])
+      await waitForInstaller(() =>
+        expect(
+          JSON.parse(
+            readFileSync(path.join(home, "stop-local-models.json"), "utf8"),
+          ),
+        ).toEqual({
+          args: ["--home", home, "--stop-local-models"],
+          runAsNode: "1",
+        }),
+      );
+    expect(existsSync(path.join(f.home, "desktop", "local-server.json"))).toBe(
+      false,
+    );
+  });
+
   it("leaves the local models running for an update, and stops none without an installation", async () => {
     const update = fixture({}, enrolled, record);
     await update.host.start();

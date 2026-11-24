@@ -2864,3 +2864,162 @@ print(json.dumps({"ok": True}))
   },
   120_000,
 );
+
+// The gateway an earlier kit started for a Quick Install that never finished:
+// the tools directory records only a Bifrost whose app directory is in the
+// home (debug mode's, under the state directory), on the plan's address.
+async function earlierGateway(
+  home: string,
+  tools: string,
+  appDir?: string,
+  removed?: boolean,
+) {
+  const app =
+    appDir ?? path.join(localmodelsStateDirectory(home), "gateway", "bifrost");
+  await mkdir(tools, { recursive: true, mode: 0o700 });
+  await writeFile(
+    path.join(tools, "owned.json"),
+    JSON.stringify({
+      schema: "localmodels.owned/v1",
+      deployments: {},
+      gateway: {
+        bifrost: {
+          addr: "127.0.0.1:47711",
+          app_dir: app,
+          ...(removed !== undefined ? { removed } : {}),
+        },
+      },
+    }),
+    { mode: 0o644 },
+  );
+  await mkdir(path.join(home, "runtime", "localmodels"), { recursive: true });
+  await writeFile(
+    path.join(home, "runtime", "localmodels", "plan.json"),
+    JSON.stringify({ llm: { name: "qwen3.8-27b-18100" }, aux: [] }),
+    { mode: 0o644 },
+  );
+  return app;
+}
+function stopRun() {
+  const envs: NodeJS.ProcessEnv[] = [];
+  const runProcess = vi.fn<typeof import("./process.js").runProcess>(
+    async (_file, args, options) => {
+      envs.push(options?.env ?? {});
+      return {
+        code: 0,
+        stdout: args.includes("status") ? JSON.stringify({ models: [] }) : "{}",
+        stderr: "",
+      };
+    },
+  );
+  return { envs, runProcess };
+}
+
+test("checks and stops a home on the gateway an earlier kit started in the shared tools directory", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  const userHome = await mkdtemp(path.join(os.tmpdir(), "linger-legacy-home-"));
+  roots.push(userHome);
+  vi.stubEnv("HOME", userHome);
+  vi.stubEnv("USERPROFILE", userHome);
+  const shared = path.join(userHome, ".local", "share", "localmodels", "tools");
+  const app = await earlierGateway(f.home, shared);
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+  await runLocalmodels(f.home, ["setup", "inspect", "--json"], {}, { run });
+  const env = passedEnvironment(run);
+  expect(env.LOCALMODELS_TOOLS_DIR).toBe(shared);
+  expect(env.LOCALMODELS_BIFROST_DIR).toBe(app);
+  expect(env.LOCALMODELS_BIFROST_ADDR).toBe("127.0.0.1:47711");
+  expect(
+    (await readFile(localmodelsLegacyToolsMarkerFile(f.home), "utf8")).trim(),
+  ).toBe(shared);
+
+  const { envs, runProcess } = stopRun();
+  await stopLocalmodels(
+    f.home,
+    { signal: AbortSignal.timeout(5000), keepController: true },
+    { runProcess },
+  );
+  expect(runProcess.mock.calls.map(([, args]) => args.at(-2))).toContain(
+    "down",
+  );
+  for (const stopEnv of envs) {
+    expect(stopEnv.LOCALMODELS_TOOLS_DIR).toBe(shared);
+    expect(stopEnv.LOCALMODELS_BIFROST_DIR).toBe(app);
+  }
+});
+
+test("keeps a home on debug mode's tools directory when its gateway runs from there", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  const userHome = await mkdtemp(path.join(os.tmpdir(), "linger-legacy-home-"));
+  roots.push(userHome);
+  vi.stubEnv("HOME", userHome);
+  vi.stubEnv("USERPROFILE", userHome);
+  const debugTools = path.join(
+    localmodelsStateDirectory(f.home),
+    "gateway",
+    "tools",
+  );
+  const app = await earlierGateway(f.home, debugTools);
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+  await runLocalmodels(f.home, ["stack", "down", "--json"], {}, { run });
+  const env = passedEnvironment(run);
+  expect(env.LOCALMODELS_TOOLS_DIR).toBe(debugTools);
+  expect(env.LOCALMODELS_BIFROST_DIR).toBe(app);
+  expect(env.LOCALMODELS_BIFROST_ADDR).toBe("127.0.0.1:47711");
+});
+
+test("isolates a home when the shared tools directory's gateway belongs to another home", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  const userHome = await mkdtemp(path.join(os.tmpdir(), "linger-legacy-home-"));
+  roots.push(userHome);
+  vi.stubEnv("HOME", userHome);
+  vi.stubEnv("USERPROFILE", userHome);
+  const otherHome = await mkdtemp(path.join(os.tmpdir(), "linger-other-home-"));
+  roots.push(otherHome);
+  await earlierGateway(
+    f.home,
+    path.join(userHome, ".local", "share", "localmodels", "tools"),
+    path.join(
+      otherHome,
+      "runtime",
+      "localmodels",
+      "state",
+      "gateway",
+      "bifrost",
+    ),
+  );
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+  await runLocalmodels(f.home, ["setup", "inspect", "--json"], {}, { run });
+  expect(passedEnvironment(run).LOCALMODELS_TOOLS_DIR).toBe(
+    localmodelsToolsDirectory(f.home),
+  );
+  await expect(
+    stat(localmodelsLegacyToolsMarkerFile(f.home)),
+  ).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("isolates a home whose shared gateway localmodels marked removed", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  const userHome = await mkdtemp(path.join(os.tmpdir(), "linger-legacy-home-"));
+  roots.push(userHome);
+  vi.stubEnv("HOME", userHome);
+  vi.stubEnv("USERPROFILE", userHome);
+  await earlierGateway(
+    f.home,
+    path.join(userHome, ".local", "share", "localmodels", "tools"),
+    undefined,
+    true,
+  );
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+  await runLocalmodels(f.home, ["setup", "inspect", "--json"], {}, { run });
+  expect(passedEnvironment(run).LOCALMODELS_TOOLS_DIR).toBe(
+    localmodelsToolsDirectory(f.home),
+  );
+  await expect(
+    stat(localmodelsLegacyToolsMarkerFile(f.home)),
+  ).rejects.toMatchObject({ code: "ENOENT" });
+});
