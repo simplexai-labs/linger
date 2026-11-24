@@ -126,20 +126,47 @@ const RESTARTABLE_BINDING_REASONS = new Set([
   "deployment-unavailable",
   "gateway-unavailable",
 ]);
+// The Computer Daemon takes and at once releases this lock after it starts,
+// to wait for a quit-time stop; a holder that meets that probe retries for
+// this long instead of failing.
+const LOCK_BUSY_WINDOW_MS = 2_000;
+const LOCK_BUSY_RETRY_MS = 100;
 /**
  * Runs `callback` holding the lock every deployment, restore check and
  * quit-time stop of a home's local model stack takes, so none of them sees
- * the stack half changed. Throws `INSTANCE_BUSY` at once when another holds
- * it; the caller creates `<home>/runtime/localmodels` first.
+ * the stack half changed. Throws `INSTANCE_BUSY` when another still holds it
+ * after a short retry window; the caller creates `<home>/runtime/localmodels`
+ * first.
  */
-export function withLocalModelsLock<T>(
+export async function withLocalModelsLock<T>(
   home: string,
   callback: () => Promise<T>,
+  timing: { busyWindowMs?: number; busyRetryMs?: number } = {},
 ): Promise<T> {
-  return withInstanceLock(
-    { root: path.join(path.resolve(home), "runtime/localmodels") } as Instance,
-    callback,
-  );
+  const deadline = Date.now() + (timing.busyWindowMs ?? LOCK_BUSY_WINDOW_MS);
+  for (;;) {
+    let started = false;
+    try {
+      return await withInstanceLock(
+        {
+          root: path.join(path.resolve(home), "runtime/localmodels"),
+        } as Instance,
+        () => {
+          started = true;
+          return callback();
+        },
+      );
+    } catch (error) {
+      // A callback that ran is never run again, whatever it threw.
+      if (
+        started ||
+        (error as { code?: unknown }).code !== INSTANCE_BUSY ||
+        Date.now() >= deadline
+      )
+        throw error;
+      await sleep(timing.busyRetryMs ?? LOCK_BUSY_RETRY_MS);
+    }
+  }
 }
 // What each stack component downloads, as the setup page names it.
 const DOWNLOADS: Record<string, string> = {
@@ -715,7 +742,8 @@ async function waitForLocalModelsLock<T>(
   const deadline = Date.now() + (dependencies.lockWaitMs ?? LOCK_WAIT_MS);
   for (;;) {
     try {
-      return { value: await lock(home, callback) };
+      // This loop is the wait; the lock's own short retry adds nothing.
+      return { value: await lock(home, callback, { busyWindowMs: 0 }) };
     } catch (error) {
       if ((error as { code?: unknown }).code !== INSTANCE_BUSY) throw error;
       if (Date.now() >= deadline) return undefined;

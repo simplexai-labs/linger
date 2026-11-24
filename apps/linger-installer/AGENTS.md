@@ -103,16 +103,17 @@ running job) and the instance's services, deletes nothing, and prints one
 JSON line with what failed. It needs nothing beside `installer.js`, so
 setup can run it from a copy on an earlier release's `Linger.exe`. It also
 stops what the pinned localmodels kit runs for each home: the model
-library's loaded models, the model controller, and the stack with its
+library's running loads (cancelled) and loaded models, the model controller, and the stack with its
 gateway (`stopLocalmodels`).
 
 `--stop-local-models` is the desktop's quit: in the default home and the
-location `desktop/local-server.json` names, it unloads the model library's
-loaded models and stops the stack with the gateway the localmodels tool
+location `desktop/local-server.json` names, it cancels the model library's
+running loads, unloads its loaded models and stops the stack with the gateway the localmodels tool
 started, and keeps the services and the model controller running. It
 holds each home's local model lock (`withLocalModelsLock`) while it stops,
 so the next launch's restore waits for it; a home whose lock a deployment
-holds is skipped with a log line. A kit that is present but fails verification
+holds is skipped with a log line. Taking the lock retries a busy lock for up
+to 2 s, because the Computer Daemon probes it for a moment after it starts. A kit that is present but fails verification
 is a stop failure, so the helper logs the repair guidance, prints a JSON
 failure and exits nonzero without running or downloading that tool. This
 helper is detached: Linger quits and its log records that the models may

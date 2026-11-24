@@ -86,7 +86,7 @@ func (d *Daemon) finishOperation(ctx context.Context, command protocol.Command, 
 		terminalType = protocol.EventOperationCancelled
 	} else if result.Status != "completed" {
 		terminalType = protocol.EventOperationFailed
-		if d.onModelUnavailable != nil && spec.Model != "" && provider.ClassifyExecutionFailure(spec.Provider, spec.CodexVersion, result.Status, result.FailureCode, result.Diagnostics).Code == "model_unavailable" {
+		if d.onModelUnavailable != nil && spec.Model != "" && !result.ModelLoadFailed && provider.ClassifyExecutionFailure(spec.Provider, spec.CodexVersion, result.Status, result.FailureCode, result.Diagnostics).Code == "model_unavailable" {
 			d.onModelUnavailable(spec.Provider, spec.Model)
 		}
 	}

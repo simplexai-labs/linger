@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -35,6 +37,9 @@ const (
 	maxRereadInterval = time.Minute
 	tailPollInterval  = 100 * time.Millisecond
 	maxEventLine      = 1 << 20
+	// defaultEnsureLoadTimeout bounds how long a Run waits for its model to
+	// load before it starts.
+	defaultEnsureLoadTimeout = 10 * time.Minute
 )
 
 // Options configures a Library.
@@ -62,6 +67,8 @@ type Options struct {
 	ActionTimeout         time.Duration
 	EnsurePiTimeout       time.Duration
 	EnsurePiRetryInterval time.Duration
+	// EnsureLoadTimeout bounds EnsureLoaded's wait for one model.
+	EnsureLoadTimeout time.Duration
 }
 
 // Library runs the localmodels tool for one Computer.
@@ -95,6 +102,7 @@ type Library struct {
 	actionTimeout         time.Duration
 	ensurePiTimeout       time.Duration
 	ensurePiRetryInterval time.Duration
+	ensureLoadTimeout     time.Duration
 	now                   func() time.Time
 	ctx                   context.Context
 	stop                  context.CancelFunc
@@ -128,6 +136,21 @@ type Library struct {
 	// is still the pending one.
 	progressTimerID uint64
 	polling         bool
+	// changed is closed and replaced whenever current changes; commits
+	// counts those changes.
+	changed chan struct{}
+	commits uint64
+	// jobEnded holds, by model, commits at the moment its last supervised
+	// job ended; only a later change reflects that job's outcome.
+	jobEnded map[string]uint64
+	// ensures serializes EnsureLoaded by model ID.
+	ensures map[string]*ensureLoad
+	// settleOnce starts the one installer lock probe; settledCh closes when
+	// it ends.
+	settleOnce         sync.Once
+	settledCh          chan struct{}
+	installerLockWait  time.Duration
+	installerLockRetry time.Duration
 }
 
 type job struct {
@@ -143,7 +166,13 @@ func New(options Options) *Library {
 		publish: options.Publish, runtimeChanged: options.RuntimeChanged,
 		progressInterval: options.ProgressInterval, statusTimeout: options.StatusTimeout, actionTimeout: options.ActionTimeout,
 		ensurePiTimeout: options.EnsurePiTimeout, ensurePiRetryInterval: options.EnsurePiRetryInterval,
-		now: time.Now, ctx: ctx, stop: stop, jobs: make(map[string]*job), causes: make(map[string]*wire.LocalModelError),
+		ensureLoadTimeout: options.EnsureLoadTimeout,
+		now:               time.Now, ctx: ctx, stop: stop, jobs: make(map[string]*job), causes: make(map[string]*wire.LocalModelError),
+		installerLockWait: defaultInstallerLockWait, installerLockRetry: defaultInstallerLockRetry, settledCh: make(chan struct{}),
+		changed: make(chan struct{}), jobEnded: make(map[string]uint64), ensures: make(map[string]*ensureLoad),
+	}
+	if library.ensureLoadTimeout <= 0 {
+		library.ensureLoadTimeout = defaultEnsureLoadTimeout
 	}
 	if library.progressInterval <= 0 {
 		library.progressInterval = defaultProgressInterval
@@ -354,6 +383,7 @@ func (l *Library) commit(snapshot wire.LocalModelsSnapshot) wire.LocalModelsSnap
 	defer l.publishMu.Unlock()
 	l.mu.Lock()
 	l.current = &snapshot
+	l.signalLocked()
 	// Progress lines edit current in place; receivers get their own copy
 	// cloned before mu is released.
 	published := cloneSnapshot(snapshot)
@@ -618,13 +648,15 @@ func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended 
 	reply := func(refusal *wire.LocalModelActionRefusal) {
 		if !answered {
 			answered, accepted = true, refusal == nil
-			answer.give(refusal)
+			// Registered before the answer: a caller that waits for the
+			// accepted job must find it running.
 			if accepted {
 				l.mu.Lock()
 				l.jobs[action.Model] = &job{action: action}
 				delete(l.causes, action.Model)
 				l.mu.Unlock()
 			}
+			answer.give(refusal)
 		}
 	}
 	var final *libraryEvent
@@ -685,6 +717,7 @@ func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended 
 	l.mu.Lock()
 	delete(l.jobs, action.Model)
 	rotateGatewayAddr := false
+	l.jobEnded[action.Model] = l.commits
 	if final != nil && final.Event == "error" {
 		if cause := final.cause(); cause != nil {
 			l.causes[action.Model] = cause
@@ -729,6 +762,7 @@ func (l *Library) phaseStarted(event libraryEvent) {
 	changed := l.loaded != nil && *l.loaded != key
 	l.loaded = &key
 	l.current = &snapshot
+	l.signalLocked()
 	l.publishThrottledLocked()
 	l.mu.Unlock()
 	l.publishMu.Unlock()
@@ -749,6 +783,7 @@ func (l *Library) progress(event libraryEvent) {
 	if l.current == nil || !applyProgress(l.current, event) {
 		return
 	}
+	l.signalLocked()
 	l.publishThrottledLocked()
 }
 
@@ -888,4 +923,274 @@ func (l *Library) hasAdoptedJobLocked(snapshot wire.LocalModelsSnapshot) bool {
 		}
 	}
 	return false
+}
+
+// LocalModelLoadError says why the model a Run names could not be made
+// ready. Code carries the decision; the message is for display only.
+type LocalModelLoadError struct {
+	Code    string
+	ModelID string
+}
+
+func (e *LocalModelLoadError) Error() string {
+	if e.Code == CodeModelNotDownloaded {
+		return fmt.Sprintf("local model %s is not downloaded on this Computer", e.ModelID)
+	}
+	return fmt.Sprintf("local model %s could not be loaded on this Computer (%s)", e.ModelID, e.Code)
+}
+
+// EnsureLoaded codes that are not the tool's own.
+const (
+	CodeModelNotDownloaded = "MODEL_NOT_DOWNLOADED"
+	CodeLoadFailed         = "LOAD_FAILED"
+	CodeLoadTimeout        = "LOAD_TIMEOUT"
+)
+
+// errLibraryClosed ends an EnsureLoaded that Close interrupted.
+var errLibraryClosed = errors.New("local model supervision has stopped")
+
+// ensureLoad serializes EnsureLoaded for one model. turn holds one token
+// while a caller works on the model; finishedAt and err, read and written
+// only by the token's holder, record how its last load attempt ended.
+type ensureLoad struct {
+	turn       chan struct{}
+	finishedAt time.Time
+	err        error
+}
+
+// EnsureLoaded loads the library model whose pi_model is piModel when it is
+// downloaded but not loaded, and waits until it is loaded. It returns nil
+// at once when the last snapshot already shows the model loaded, and nil
+// when piModel names no library model or the library cannot be read, so
+// the Run proceeds as it would without this check. It never downloads a
+// model and never unloads another one to make room: the tool refuses a
+// load that does not fit, and that refusal is the error. A caller that
+// stops waiting leaves the load running, so the next Run finds the model
+// loaded; concurrent callers for one model share one load.
+func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
+	if piModel == "" || l.tool == nil || !l.tool.installed() {
+		return nil
+	}
+	waitedFrom := time.Now()
+	// On the path from a person's message to the model's first token: a
+	// ready model, or one outside the library, must cost no tool call.
+	l.mu.Lock()
+	known := l.current != nil && l.current.Available
+	cached := l.rowLocked(func(model wire.LocalModel) bool { return model.PiModel == piModel })
+	l.mu.Unlock()
+	if known && cached == nil {
+		// pi_model is present while the model is on the Computer, and the
+		// installer's stop changes nothing on disk.
+		return nil
+	}
+	if l.settled() {
+		if known && cached.State == "loaded" {
+			return nil
+		}
+	} else if err := l.awaitSettled(ctx); err != nil {
+		// Until the installer's stop has finished, a cached loaded row may be
+		// about to be unloaded; read the status after it.
+		return err
+	}
+	snapshot := l.Refresh(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !snapshot.Available {
+		return nil
+	}
+	index := slices.IndexFunc(snapshot.Models, func(model wire.LocalModel) bool { return model.PiModel == piModel })
+	if index < 0 || snapshot.Models[index].State == "loaded" {
+		return nil
+	}
+	return l.ensureByID(ctx, snapshot.Models[index].ID, loadState(snapshot.Models[index]), waitedFrom)
+}
+
+// ensureByID loads id, last seen in state, unless it is loaded, and waits
+// for the outcome. Runs for one model take turns, so they share one load.
+// state is loadState of the row; waitedFrom is when the caller started.
+func (l *Library) ensureByID(ctx context.Context, id, state string, waitedFrom time.Time) error {
+	const event = "local_models.ensure_load"
+	if notDownloaded(state) {
+		slog.Warn(event, "phase", "failed", "model", id, "code", CodeModelNotDownloaded, "ms", time.Since(waitedFrom).Milliseconds())
+		return &LocalModelLoadError{Code: CodeModelNotDownloaded, ModelID: id}
+	}
+	l.mu.Lock()
+	if l.closed {
+		l.mu.Unlock()
+		return errLibraryClosed
+	}
+	ensure := l.ensures[id]
+	if ensure == nil {
+		ensure = &ensureLoad{turn: make(chan struct{}, 1)}
+		l.ensures[id] = ensure
+	}
+	l.mu.Unlock()
+	select {
+	case ensure.turn <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-l.ctx.Done():
+		return errLibraryClosed
+	}
+	defer func() { <-ensure.turn }()
+	// A load that finished while this caller waited for its turn failed just
+	// now; starting another at once would fail the same way.
+	if ensure.finishedAt.After(waitedFrom) && ensure.err != nil {
+		return ensure.err
+	}
+	l.mu.Lock()
+	if row := l.rowLocked(func(model wire.LocalModel) bool { return model.ID == id }); row != nil {
+		state = loadState(*row)
+	}
+	if _, running := l.jobs[id]; running && state != "loaded" {
+		// A load the Models page just started: wait for it, not a second one.
+		state = "loading"
+	}
+	l.mu.Unlock()
+	if state == "loaded" {
+		return nil
+	}
+	slog.Info(event, "phase", "started", "model", id, "state", state)
+	err := l.load(ctx, id, state)
+	// Only an outcome of the load itself is shared with queued callers; a
+	// caller whose budget ran out left the load running.
+	if ctx.Err() == nil && loadCodeOf(err) != CodeLoadTimeout {
+		ensure.finishedAt, ensure.err = time.Now(), err
+	}
+	ms := time.Since(waitedFrom).Milliseconds()
+	var loadErr *LocalModelLoadError
+	switch {
+	case err == nil:
+		slog.Info(event, "phase", "succeeded", "model", id, "ms", ms)
+	case errors.As(err, &loadErr):
+		slog.Warn(event, "phase", "failed", "model", id, "code", loadErr.Code, "ms", ms)
+	default:
+		slog.Info(event, "phase", "failed", "model", id, "ms", ms, "error", err)
+	}
+	return err
+}
+
+// load starts a load of id unless one runs, and waits for its outcome. The
+// caller holds id's turn.
+func (l *Library) load(ctx context.Context, id, state string) error {
+	budget, cancel := context.WithTimeout(ctx, l.ensureLoadTimeout)
+	defer cancel()
+	// Read before the load starts: a job that ends before Act returns is
+	// still observed, and jobs and jobEnded keep earlier changes out.
+	l.mu.Lock()
+	since := l.commits
+	l.mu.Unlock()
+	switch state {
+	case "idle", "failed":
+		refusal, answered := l.Act(budget, Action{Name: ActionLoad, Model: id}, l.now().Add(l.actionTimeout))
+		if !answered {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return &LocalModelLoadError{Code: CodeLoadTimeout, ModelID: id}
+		}
+		if refusal != nil {
+			if l.ctx.Err() != nil {
+				return errLibraryClosed
+			}
+			return &LocalModelLoadError{Code: refusal.Code, ModelID: id}
+		}
+	case "loading":
+		// A load this or a previous Daemon started; the Library follows it.
+	default:
+		return &LocalModelLoadError{Code: CodeModelNotDownloaded, ModelID: id}
+	}
+	return l.waitLoaded(ctx, budget, id, since)
+}
+
+// waitLoaded waits until id is loaded or its load has ended otherwise. A
+// row that is not loading counts as the outcome only once no supervised job
+// for id runs and the snapshot changed after since and after that job ended:
+// until then it may predate the job's first status.
+func (l *Library) waitLoaded(ctx, budget context.Context, id string, since uint64) error {
+	for {
+		l.mu.Lock()
+		changed := l.changed
+		available := l.current != nil && l.current.Available
+		row := l.rowLocked(func(model wire.LocalModel) bool { return model.ID == id })
+		_, running := l.jobs[id]
+		settled := !running && l.commits > since
+		if ended, ok := l.jobEnded[id]; ok && l.commits <= ended {
+			settled = false
+		}
+		l.mu.Unlock()
+		if available {
+			switch {
+			case row != nil && row.State == "loaded":
+				return nil
+			case !settled || (row != nil && row.State == "loading"):
+			case row != nil && row.State == "failed" && row.Error != nil && row.Error.Code != "":
+				return &LocalModelLoadError{Code: row.Error.Code, ModelID: id}
+			default:
+				// Unloaded, cancelled, or gone before it was loaded.
+				return &LocalModelLoadError{Code: CodeLoadFailed, ModelID: id}
+			}
+		}
+		select {
+		case <-changed:
+		case <-budget.Done():
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return &LocalModelLoadError{Code: CodeLoadTimeout, ModelID: id}
+		case <-l.ctx.Done():
+			return errLibraryClosed
+		}
+	}
+}
+
+// rowLocked returns a copy of the current snapshot's first row that match
+// accepts, or nil. It runs with mu held.
+func (l *Library) rowLocked(match func(wire.LocalModel) bool) *wire.LocalModel {
+	if l.current == nil {
+		return nil
+	}
+	index := slices.IndexFunc(l.current.Models, match)
+	if index < 0 {
+		return nil
+	}
+	row := l.current.Models[index]
+	return &row
+}
+
+// signalLocked wakes every waitLoaded after current changed. It runs with
+// mu held.
+func (l *Library) signalLocked() {
+	l.commits++
+	close(l.changed)
+	l.changed = make(chan struct{})
+}
+
+// stoppedDownloadCodes mark a failed row as a download that stopped, not a
+// failed load; the Web client's downloadStopped applies the same rule.
+var stoppedDownloadCodes = []string{"DOWNLOAD_FAILED", "NETWORK_UNAVAILABLE", "DISK_INSUFFICIENT"}
+
+// stateDownloadStopped is loadState's name for a stopped download.
+const stateDownloadStopped = "download_stopped"
+
+// loadState is the row's state for loading purposes: a failed row whose
+// download stopped holds no complete model to load.
+func loadState(row wire.LocalModel) string {
+	if row.State == "failed" && row.Error != nil && slices.Contains(stoppedDownloadCodes, row.Error.Code) {
+		return stateDownloadStopped
+	}
+	return row.State
+}
+
+func notDownloaded(state string) bool {
+	return state == "absent" || state == "downloading" || state == stateDownloadStopped
+}
+
+func loadCodeOf(err error) string {
+	var loadErr *LocalModelLoadError
+	if errors.As(err, &loadErr) {
+		return loadErr.Code
+	}
+	return ""
 }

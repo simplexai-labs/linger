@@ -416,3 +416,16 @@ func TestGatewaySessionCompactionKeepsIdentityAndRawRequest(t *testing.T) {
 		}
 	}
 }
+
+// A service feature this release does not know is ignored, not refused, so
+// an Agent Service may name a newer one to every Computer.
+func TestWelcomeAcceptsAnUnknownServiceFeature(t *testing.T) {
+	const welcome = `{"type":"runner.welcome","protocol_version":"2","runner_id":"computer-1","connection_id":"connection-1","connection_epoch":1,"heartbeat_interval_ms":15000,"reconcile_operation_ids":[],"service_features":["local_models","a_future_feature"]}`
+	command, err := decodeGatewayCommand([]byte(welcome))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(command.ServiceFeatures) != 2 || command.ServiceFeatures[1] != "a_future_feature" {
+		t.Fatalf("service_features = %v", command.ServiceFeatures)
+	}
+}

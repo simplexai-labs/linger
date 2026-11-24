@@ -592,6 +592,98 @@ test("unloads the library's models, then stops the controller and the stack thro
     [f.home, ["stack", "down", "--json"]],
   ]);
 });
+// A library whose reads follow `reads` in turn, repeating the last.
+function libraryReads(
+  reads: { id: string; state: string }[][],
+  failCancel?: string,
+) {
+  let index = 0;
+  return vi.fn<typeof runLocalmodels>(async (_home, args) => {
+    if (args[1] === "status")
+      return libraryStatus(reads[Math.min(index++, reads.length - 1)] ?? []);
+    if (args[1] === "cancel" && args[2] === failCancel)
+      return {
+        code: 1,
+        stdout: JSON.stringify({ ok: false, code: "JOB_NOT_FOUND" }),
+        stderr: "",
+      };
+    return { code: 0, stdout: "{}", stderr: "" };
+  });
+}
+const quickCancel = { cancelPollMs: 1, cancelWaitMs: 200 };
+test("cancels a running load, waits until it is no longer loading, then unloads what the last read shows loaded", async () => {
+  const run = libraryReads([
+    [
+      { id: "qwen3-8b:Q4_K_M", state: "loading" },
+      { id: "gemma4-4b:Q4_K_M", state: "loaded" },
+    ],
+    [
+      { id: "qwen3-8b:Q4_K_M", state: "loading" },
+      { id: "gemma4-4b:Q4_K_M", state: "loaded" },
+    ],
+    [
+      { id: "qwen3-8b:Q4_K_M", state: "idle" },
+      { id: "gemma4-4b:Q4_K_M", state: "loaded" },
+    ],
+  ]);
+  await stopLocalmodels(
+    "/home",
+    { signal: AbortSignal.timeout(5000), keepController: true },
+    { run, installed: async () => true, ...quickCancel },
+  );
+  expect(run.mock.calls.map(([, args]) => args.slice(0, 3))).toEqual([
+    ["library", "status", "--base-dir"],
+    ["library", "cancel", "qwen3-8b:Q4_K_M"],
+    ["library", "status", "--base-dir"],
+    ["library", "status", "--base-dir"],
+    ["library", "unload", "gemma4-4b:Q4_K_M"],
+    ["stack", "down", "--json"],
+  ]);
+});
+test("unloads a load that finished before its cancel, without reporting the cancel", async () => {
+  const run = libraryReads(
+    [
+      [{ id: "qwen3-8b:Q4_K_M", state: "loading" }],
+      [{ id: "qwen3-8b:Q4_K_M", state: "loaded" }],
+    ],
+    "qwen3-8b:Q4_K_M",
+  );
+  await stopLocalmodels(
+    "/home",
+    { signal: AbortSignal.timeout(5000), keepController: true },
+    { run, installed: async () => true, ...quickCancel },
+  );
+  expect(run.mock.calls.map(([, args]) => args.slice(0, 3))).toEqual([
+    ["library", "status", "--base-dir"],
+    ["library", "cancel", "qwen3-8b:Q4_K_M"],
+    ["library", "status", "--base-dir"],
+    ["library", "unload", "qwen3-8b:Q4_K_M"],
+    ["stack", "down", "--json"],
+  ]);
+});
+test("reports a model still loading after the wait, with its cancel failure, and still stops the stack", async () => {
+  const run = libraryReads(
+    [
+      [
+        { id: "qwen3-8b:Q4_K_M", state: "loading" },
+        { id: "gemma4-4b:Q4_K_M", state: "loaded" },
+      ],
+    ],
+    "qwen3-8b:Q4_K_M",
+  );
+  await expect(
+    stopLocalmodels(
+      "/home",
+      { signal: AbortSignal.timeout(5000), keepController: true },
+      { run, installed: async () => true, ...quickCancel },
+    ),
+  ).rejects.toThrow(
+    "localmodels library cancel qwen3-8b:Q4_K_M: JOB_NOT_FOUND",
+  );
+  const verbs = run.mock.calls.map(([, args]) => args[1]);
+  expect(verbs.filter((verb) => verb === "status").length).toBeGreaterThan(2);
+  expect(verbs.slice(-2)).toEqual(["unload", "down"]);
+});
 test("a quit keeps the controller and stops only the library's models and the stack", async () => {
   const run = vi.fn<typeof runLocalmodels>(async (_home, args) =>
     args[1] === "status"

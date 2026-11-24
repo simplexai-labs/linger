@@ -474,6 +474,7 @@ export interface RuntimeExecutionFailure {
     | "rate_limited"
     | "model_unavailable"
     | "model_not_offered"
+    | "local_model_unavailable"
     | "context_too_long"
     | "model_service_error"
     | "timeout"

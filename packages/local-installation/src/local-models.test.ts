@@ -1620,6 +1620,57 @@ test("a restore gives up when the stack stays locked", async () => {
     await held;
   }
 });
+// The Computer Daemon probes the lock for a moment after it starts.
+async function holdLocalModelsLock(home: string) {
+  await mkdir(path.join(home, "runtime/localmodels"), { recursive: true });
+  let release!: () => void;
+  let acquired!: () => void;
+  const locked = new Promise<void>((resolve) => (acquired = resolve));
+  const held = withLocalModelsLock(
+    home,
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+        acquired();
+      }),
+  );
+  await locked;
+  return async () => {
+    release();
+    await held;
+  };
+}
+test("the lock waits out a holder that lets go within its retry window", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "local-models-lock-"));
+  roots.push(home);
+  const release = await holdLocalModelsLock(home);
+  setTimeout(() => void release(), 50);
+  const callback = vi.fn(async () => "ran");
+  await expect(
+    withLocalModelsLock(home, callback, {
+      busyWindowMs: 2000,
+      busyRetryMs: 10,
+    }),
+  ).resolves.toBe("ran");
+  expect(callback).toHaveBeenCalledTimes(1);
+});
+test("the lock reports INSTANCE_BUSY after its retry window", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "local-models-lock-"));
+  roots.push(home);
+  const release = await holdLocalModelsLock(home);
+  try {
+    const callback = vi.fn(async () => "ran");
+    await expect(
+      withLocalModelsLock(home, callback, {
+        busyWindowMs: 50,
+        busyRetryMs: 10,
+      }),
+    ).rejects.toMatchObject({ code: "INSTANCE_BUSY" });
+    expect(callback).not.toHaveBeenCalled();
+  } finally {
+    await release();
+  }
+});
 test("a restored stack the model source refuses reports why", async () => {
   const f = await stoppedLocalSetup();
   const original = f.call.getMockImplementation()!;

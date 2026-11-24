@@ -143,6 +143,8 @@ export const runtimeStatusMessages = defineMessages("runtimeStatus", {
     "The model service does not offer the selected model to this Runtime's account. Choose another model for the Agent, or sign the Runtime in with an account that can use it.",
   failureModelNotOffered:
     "The Agent's Computer does not offer its selected model, or the model does not support its reasoning effort. Open the Agent's settings and choose a model and reasoning effort that the Computer offers.",
+  failureLocalModelUnavailable:
+    "The Agent's Computer could not load its local model. Open the Models page on that Computer: it may need more free memory, may not be fully downloaded, or may still be loading. Then try again, or choose another model for the Agent.",
   failureContextTooLong:
     "The conversation no longer fits the model's context window. Start a new chat with the Agent, or choose a model with a larger context window.",
   failureModelServiceError:

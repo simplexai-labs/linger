@@ -42,6 +42,17 @@ describe("Runtime failure messages", () => {
     expect(message).toContain("Open the Agent's settings");
   });
 
+  it("points to the Computer's Models page when the local model could not load", () => {
+    const message = runtimeFailureMessage(translate, {
+      code: "local_model_unavailable",
+      runtime_type: "pi",
+    });
+    expect(message).toContain("Pi:");
+    expect(message).toContain("could not load its local model");
+    expect(message).toContain("Open the Models page");
+    expect(message).not.toMatch(/sign the Runtime in/);
+  });
+
   it("says the Agent finished but its reply did not reach the Room", () => {
     const message = runtimeFailureMessage(translate, {
       code: "reply_undelivered",

@@ -21,6 +21,8 @@ type fakeLocalModels struct {
 	actions    []localmodels.Action
 	refusal    *wire.LocalModelActionRefusal
 	unanswered bool
+	ensured    []string
+	ensureErr  error
 }
 
 func (f *fakeLocalModels) Act(_ context.Context, action localmodels.Action, _ time.Time) (*wire.LocalModelActionRefusal, bool) {
@@ -32,6 +34,13 @@ func (f *fakeLocalModels) Act(_ context.Context, action localmodels.Action, _ ti
 
 func (f *fakeLocalModels) Refresh(context.Context) wire.LocalModelsSnapshot {
 	return wire.LocalModelsSnapshot{}
+}
+
+func (f *fakeLocalModels) EnsureLoaded(_ context.Context, piModel string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ensured = append(f.ensured, piModel)
+	return f.ensureErr
 }
 
 func TestLocalModelsCommandAnswersAcceptedOrRefused(t *testing.T) {

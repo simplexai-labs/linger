@@ -37,7 +37,8 @@ export type ServiceFeature =
   | "byok_endpoint"
   | "local_models_diagnostics"
   | "model_invoke_outcomes"
-  | "local_models_engine";
+  | "local_models_engine"
+  | "local_model_unavailable";
 export type JsonValue =
   | null
   | boolean
@@ -2256,6 +2257,7 @@ export interface RuntimeExecutionFailure {
     | "network_error"
     | "rate_limited"
     | "model_unavailable"
+    | "local_model_unavailable"
     | "context_too_long"
     | "model_service_error"
     | "timeout"

@@ -515,7 +515,10 @@ Gateway and runs Agents. The daemon exits with the app.
   quit a running app). Retry in that prompt runs the stop again. Nothing running: the stop finds nothing and setup goes on. The
   stop also asks the pinned localmodels kit, when that kit is installed in the
   home, to unload every model its model library loaded (`library status`,
-  then `library unload` for each `loaded` model), to end its foundations
+  then `library cancel` for each `loading` model, `library status` every
+  500 ms for up to 10 s until none is loading, and `library unload` for each
+  model the last read shows `loaded`; a model still loading then is a stop
+  failure), to end its foundations
   controller under `runtime/model-services` (`foundations stop`), and to stop
   the stack's processes and the gateway the tool started, the library's
   Bifrost included (`stack down`); it downloads nothing, and Linger does not

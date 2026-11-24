@@ -33,6 +33,7 @@ func TestExecutionFailureClassificationUsesStructuredSignals(t *testing.T) {
 		{"adapter code wins over deadline", "timeout", "session_not_found", native.RuntimeFailureDiagnostics{}, "session_not_found"},
 		{"exit only", "failed", "", native.RuntimeFailureDiagnostics{ExitCode: status(1)}, "execution_failed"},
 		{"empty", "failed", "", native.RuntimeFailureDiagnostics{}, "execution_failed"},
+		{"local model not loaded", "failed", "local_model_unavailable", native.RuntimeFailureDiagnostics{}, "local_model_unavailable"},
 		{"adapter code wins", "failed", "session_not_found", native.RuntimeFailureDiagnostics{Code: "httpConnectionFailed", StatusCode: status(401)}, "session_not_found"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

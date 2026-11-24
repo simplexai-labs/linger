@@ -1093,6 +1093,10 @@ components:
         model_not_offered means the Agent's Computer does not offer the selected model for
         its Runtime, or the model does not support the selected reasoning effort, so the
         Runtime could not start; the Agent needs a model and reasoning effort that Computer offers.
+        local_model_unavailable means the Agent's Computer could not load the Agent's local
+        model (not enough free memory, not fully downloaded, or loading took too long), so the
+        Runtime did not start; the person can manage it on the Computer's Models page or
+        choose another model.
         context_too_long means the conversation no longer fits the model's context window.
         model_service_error means the model service reported a server-side error.
         timeout means the Runtime hit its local execution deadline.
@@ -1130,6 +1134,7 @@ components:
               rate_limited,
               model_unavailable,
               model_not_offered,
+              local_model_unavailable,
               context_too_long,
               model_service_error,
               timeout,

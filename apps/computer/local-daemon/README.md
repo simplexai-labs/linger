@@ -156,7 +156,8 @@ this config, or whose interpreter is gone, reports `available: false` with
 `TOOL_NOT_INSTALLED`. `internal/localmodels` owns the tool calls; the Daemon
 only routes `execute` (kind `local_models`) to it and sends what it publishes.
 The Daemon executes the actions the Computer owner chose; it never picks a
-model.
+model. The only action it takes on its own is loading, before a Run, the
+downloaded model that Run's Agent names.
 
 - Answer. Every action is answered `accepted` or `refused` with a
   `LocalModelActionRefusal`. `localmodels` checks every precondition before
@@ -176,6 +177,41 @@ model.
   outcome reaches the owner only through snapshots: an accepted job publishes
   its progress, and a late refusal publishes a fresh status read. Command
   handling runs off the connection loop.
+- Before a Run. A Pi Run whose model is a library row's `pi_model` waits
+  until that model is loaded. A model no row of the last readable snapshot
+  names (a BYOK or setup-stack model) costs no tool call and no wait; once
+  the installer lock wait below has ended, neither does a model that
+  snapshot shows loaded. Otherwise the Daemon reads the status once. A downloaded model that is `idle` or `failed` is loaded with
+  `library load <model>` and never `--unload`, so the Daemon does not evict
+  a model to make room: a load that does not fit is refused, and the Run
+  fails with `local_model_unavailable` when the Agent Service's welcome names
+  that service feature, else with `model_unavailable` for an older service,
+  and in both cases the model stays in the Runtime's catalog. A `loading` model, or one whose load the Models page
+  just started, is waited for without a second load. `pi_model` is present
+  only while the model is on the Computer; a `failed` row whose download
+  stopped (`DOWNLOAD_FAILED`, `NETWORK_UNAVAILABLE`, `DISK_INSUFFICIENT`) is
+  never loaded, and nothing is ever downloaded. The wait is bounded at 10
+  minutes. A Run cancelled while it waits leaves the load running, so the
+  next Run finds the model loaded, and concurrent Runs for one model share
+  one load; a load that ended in failure while a Run queued behind it gives
+  that Run the same error, but a Run whose own budget ran out does not. A
+  model that is not in the library, or a status read that fails, lets the
+  Run start as before.
+- Installer lock. A quit starts the installer's stop after the app is gone;
+  it cancels and unloads the library's models while holding the installer's
+  local-models lock, `operation.sqlite` beside the tool's state directory,
+  and the installer's resume reloads the saved `runtime_model` under the
+  same lock. A relaunch inside either window would read the models as still
+  loaded, or start a second load. So once per Daemon, before the first Run
+  decision for a library model, the Daemon takes and at once releases that
+  lock (`BEGIN EXCLUSIVE` with no busy wait, then `ROLLBACK`), retrying
+  every second while it is busy, for at most 3 minutes, and then reads the
+  status afresh. A Run that arrives during a restore therefore waits for it,
+  and the restore's load then shows as `loading`, which the Run waits on
+  instead of starting another. A missing lock file, or one that is not a
+  regular file of the current user, is not waited for. A restore that takes
+  the lock only after the probe is not ordered; its load still shows as
+  `loading` once it starts.
 - Jobs. A download or load runs in its own process group and writes its event
   lines to a file under `state/local-models/jobs`, which the Daemon tails, so
   a Daemon restart neither signals the job nor breaks its output. `cancel` is

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readdir, readFile, rm, chmod } from "node:fs/promises";
 import path from "node:path";
+import { sleep } from "@linger/service-kit";
 import { x as extract } from "tar";
 import { downloadInRegion, resolveRegion } from "./region.js";
 import {
@@ -868,10 +869,17 @@ async function runLocalmodelsCommand(
   });
   return result;
 }
+// How often and how long a quit-time stop reads the library after
+// cancelling loads, until none is loading.
+const CANCEL_POLL_MS = 500;
+const CANCEL_WAIT_MS = 10_000;
 /**
  * Stops what the pinned kit runs for a home, through that kit: first every
- * model the model library loaded (`library unload`), whose engines `stack
- * down` leaves running, then, unless `keepController`, the model controller
+ * load the model library is running (`library cancel`), reading the library
+ * every 500 ms for up to 10 s until none is loading, then every model the
+ * last read shows loaded (`library unload`), whose engines `stack down`
+ * leaves running, so a load that finished before its cancel is unloaded. A
+ * model still loading after the wait is a stop failure. Then, unless `keepController`, the model controller
  * under <home>/runtime/model-services, and last the stack's processes and
  * the gateway the tool started (`stack down`), the library's Bifrost
  * included. An uninstall or an install over this release stops all of it; a
@@ -892,6 +900,8 @@ export async function stopLocalmodels(
     run?: typeof runLocalmodels;
     runProcess?: typeof runProcess;
     installed?: (home: string) => Promise<boolean>;
+    cancelPollMs?: number;
+    cancelWaitMs?: number;
   } = {},
 ): Promise<void> {
   let installed: boolean;
@@ -921,7 +931,11 @@ export async function stopLocalmodels(
       ));
   const base = localmodelsBaseDirectory(home);
   const failed: string[] = [];
-  const step = async (args: string[], name = args.slice(0, 2).join(" ")) => {
+  const step = async (
+    args: string[],
+    name = args.slice(0, 2).join(" "),
+    report = true,
+  ) => {
     options.signal.throwIfAborted();
     options.log?.(`Stopping the local models (localmodels ${name}).`);
     const result = await run(home, args, {
@@ -937,7 +951,7 @@ export async function stopLocalmodels(
         stderr: "",
       };
     });
-    if (result.code !== 0)
+    if (report && result.code !== 0)
       failed.push(`localmodels ${name}: ${stopFailure(result)}`);
     return result;
   };
@@ -948,14 +962,61 @@ export async function stopLocalmodels(
     base,
     "--json",
   ]);
-  if (status.code === 0) {
-    const loaded = loadedLibraryModels(status.stdout);
-    if (!loaded) failed.push("localmodels library status: no model list");
-    for (const model of loaded ?? [])
+  const unloadAll = async (models: string[]) => {
+    for (const model of models)
       await step(
         ["library", "unload", model, "--base-dir", base, "--json"],
         `library unload ${model}`,
       );
+  };
+  if (status.code === 0) {
+    let last = status.stdout;
+    const loading = libraryModelsIn(last, "loading");
+    if (!libraryModelsIn(last, "loaded") || !loading)
+      failed.push("localmodels library status: no model list");
+    // A load left running would make its model resident after the app is
+    // gone. A cancel that fails because the load just finished is not a
+    // failure: that model is unloaded below.
+    const cancelFailures = new Map<string, string>();
+    for (const model of loading ?? []) {
+      const name = `library cancel ${model}`;
+      const result = await step(
+        ["library", "cancel", model, "--base-dir", base, "--json"],
+        name,
+        false,
+      );
+      if (result.code !== 0)
+        cancelFailures.set(
+          model,
+          `localmodels ${name}: ${stopFailure(result)}`,
+        );
+    }
+    if (loading?.length) {
+      // A cancelled load leaves loading only once its engine stopped.
+      const deadline =
+        Date.now() + (dependencies.cancelWaitMs ?? CANCEL_WAIT_MS);
+      for (;;) {
+        const again = await step(
+          ["library", "status", "--base-dir", base, "--json"],
+          "library status",
+          false,
+        );
+        if (again.code === 0 && libraryModelsIn(again.stdout, "loading"))
+          last = again.stdout;
+        if (!libraryModelsIn(last, "loading")?.length || Date.now() >= deadline)
+          break;
+        await sleep(
+          dependencies.cancelPollMs ?? CANCEL_POLL_MS,
+          options.signal,
+        );
+      }
+      for (const model of libraryModelsIn(last, "loading") ?? [])
+        failed.push(
+          cancelFailures.get(model) ??
+            `localmodels library cancel ${model}: still loading`,
+        );
+    }
+    await unloadAll(libraryModelsIn(last, "loaded") ?? []);
   }
   if (!options.keepController)
     await step([
@@ -968,14 +1029,17 @@ export async function stopLocalmodels(
   await step(["stack", "down", "--json"]);
   if (failed.length) throw new Error(failed.join("; "));
 }
-// The ids of the models `library status` reports loaded, or undefined when
-// its output is not a status report.
-function loadedLibraryModels(stdout: string): string[] | undefined {
+// The ids of the models `library status` reports in state, or undefined
+// when its output is not a status report.
+function libraryModelsIn(
+  stdout: string,
+  state: "loaded" | "loading",
+): string[] | undefined {
   try {
     const models = (JSON.parse(stdout) as { models?: unknown }).models;
     if (!Array.isArray(models)) return undefined;
     return models.flatMap((model: { id?: unknown; state?: unknown }) =>
-      model?.state === "loaded" &&
+      model?.state === state &&
       typeof model.id === "string" &&
       /^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/.test(model.id)
         ? [model.id]

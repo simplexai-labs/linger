@@ -198,6 +198,7 @@ describe("Runner Gateway local models", () => {
         "local_models_diagnostics",
         "model_invoke_outcomes",
         "local_models_engine",
+        "local_model_unavailable",
       ],
     ],
     [
@@ -208,6 +209,7 @@ describe("Runner Gateway local models", () => {
         "local_models_diagnostics",
         "model_invoke_outcomes",
         "local_models_engine",
+        "local_model_unavailable",
       ],
     ],
     [
@@ -217,14 +219,31 @@ describe("Runner Gateway local models", () => {
         "byok_endpoint",
         "local_models_diagnostics",
         "model_invoke_outcomes",
+        "local_model_unavailable",
       ],
     ],
-    ["0.59.0", ["local_models", "byok_endpoint", "local_models_diagnostics"]],
-    ["0.58.0", ["local_models", "byok_endpoint", "local_models_diagnostics"]],
-    ["0.57.0", ["local_models", "byok_endpoint"]],
-    ["0.56.0", ["local_models", "byok_endpoint"]],
-    ["0.55.0", ["local_models"]],
-    ["0.52.0", ["local_models"]],
+    [
+      "0.59.0",
+      [
+        "local_models",
+        "byok_endpoint",
+        "local_models_diagnostics",
+        "local_model_unavailable",
+      ],
+    ],
+    [
+      "0.58.0",
+      [
+        "local_models",
+        "byok_endpoint",
+        "local_models_diagnostics",
+        "local_model_unavailable",
+      ],
+    ],
+    ["0.57.0", ["local_models", "byok_endpoint", "local_model_unavailable"]],
+    ["0.56.0", ["local_models", "byok_endpoint", "local_model_unavailable"]],
+    ["0.55.0", ["local_models", "local_model_unavailable"]],
+    ["0.52.0", ["local_models", "local_model_unavailable"]],
     ["0.51.0", undefined],
   ])(
     "welcomes a %s Computer with service_features %j",

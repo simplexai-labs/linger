@@ -129,8 +129,12 @@ type Executor struct {
 }
 
 type Result struct {
-	Diagnostics        native.RuntimeFailureDiagnostics
-	FailureCode        string
+	Diagnostics native.RuntimeFailureDiagnostics
+	FailureCode string
+	// ModelLoadFailed says the Daemon could not load a local model before
+	// the Runtime started. The cause is this Computer's resources, not a
+	// provider refusing the model, so the model is not rejected.
+	ModelLoadFailed    bool
 	NativeResume       *native.NativeResumeMeasurement
 	LastUsage          map[string]native.TokenCount
 	CompactionCount    *int64

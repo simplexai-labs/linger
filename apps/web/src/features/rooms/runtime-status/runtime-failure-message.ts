@@ -12,6 +12,7 @@ const messages: Record<RuntimeExecutionFailure["code"], Message<string>> = {
   rate_limited: m.failureRateLimited,
   model_unavailable: m.failureModelUnavailable,
   model_not_offered: m.failureModelNotOffered,
+  local_model_unavailable: m.failureLocalModelUnavailable,
   context_too_long: m.failureContextTooLong,
   model_service_error: m.failureModelServiceError,
   timeout: m.failureTimeout,

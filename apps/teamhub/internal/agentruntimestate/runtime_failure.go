@@ -31,7 +31,7 @@ func terminalRuntimeFailure(raw json.RawMessage) (*PublicRuntimeFailure, error) 
 	}
 	switch failure.Code {
 	case "session_not_found", "protocol_incompatible", "authentication_required", "network_error", "rate_limited",
-		"model_unavailable", "model_not_offered", "context_too_long", "model_service_error", "timeout", "execution_failed",
+		"model_unavailable", "model_not_offered", "local_model_unavailable", "context_too_long", "model_service_error", "timeout", "execution_failed",
 		"execution_outcome_unknown", "reply_undelivered", "reply_not_sent", "interrupted", "computer_unavailable",
 		"cleanup_unconfirmed", "response_too_large", "unclassified":
 	default:

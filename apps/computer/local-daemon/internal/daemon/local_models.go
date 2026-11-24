@@ -33,14 +33,48 @@ const serviceFeatureLocalModelsDiagnostics = "local_models_diagnostics"
 // on unknown LocalModel properties.
 const serviceFeatureLocalModelsEngine = "local_models_engine"
 
+// serviceFeatureLocalModelUnavailable in runner.welcome's service_features
+// says the Agent Service accepts the local_model_unavailable Run failure
+// code. An older service rejects the frame, so the Daemon reports
+// model_unavailable to it instead.
+const serviceFeatureLocalModelUnavailable = "local_model_unavailable"
+
 // LocalModelLibrary runs the actions a Computer owner chooses on this
-// Computer's localmodels library. The Daemon never picks a model itself.
+// Computer's localmodels library. The Daemon never picks a model: on its
+// own it loads only the downloaded model a Run's Agent already names, and it
+// never downloads a model or unloads another one to make room.
 type LocalModelLibrary interface {
 	// Act answers once the tool accepted (nil) or refused the action;
 	// answered is false when the deadline passed before the tool decided.
 	Act(ctx context.Context, action localmodels.Action, deadline time.Time) (refusal *wire.LocalModelActionRefusal, answered bool)
 	// Refresh reads the library and publishes the snapshot.
 	Refresh(ctx context.Context) wire.LocalModelsSnapshot
+	// EnsureLoaded loads the downloaded library model whose pi_model is
+	// piModel when it is not loaded, and waits for it. It returns nil when
+	// piModel names no library model.
+	EnsureLoaded(ctx context.Context, piModel string) error
+}
+
+// ensureLocalModel loads the library model a Pi Run names before the Run
+// starts, so a model a quit unloaded does not fail every Run until someone
+// loads it by hand. On failure it returns the public Run failure code.
+func (d *Daemon) ensureLocalModel(ctx context.Context, runtimeType, model string) (string, error) {
+	if d.localModels == nil || runtimeType != "pi" || model == "" {
+		return "", nil
+	}
+	err := d.localModels.EnsureLoaded(ctx, model)
+	if err == nil || ctx.Err() != nil {
+		return "", err
+	}
+	var loadErr *localmodels.LocalModelLoadError
+	if !errors.As(err, &loadErr) {
+		return "", err
+	}
+	slog.Warn("runner.local_model.unavailable", "runtime_type", runtimeType, "model", loadErr.ModelID, "code", loadErr.Code)
+	if d.localModelUnavailable.Load() {
+		return "local_model_unavailable", err
+	}
+	return "model_unavailable", err
 }
 
 // refreshLocalModels reports the library on a newly welcomed connection.
