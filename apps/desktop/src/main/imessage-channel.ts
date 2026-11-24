@@ -17,6 +17,11 @@ import {
   type TeamHubRoomEvent,
 } from "./imessage-teamhub.js";
 import { imessageMessages as m } from "./imessage.messages.js";
+import {
+  isMarkdownDocument,
+  renderMarkdownDocument,
+  type HtmlToPdfRenderer,
+} from "./imessage-document-render.js";
 import { imessageChunks, imessageText } from "./imessage-text.js";
 import type {
   IMessageTransport,
@@ -261,6 +266,16 @@ export function inboundIdempotencyKey(message: IMsgMessage): string {
   return `imessage:${id.replace(KEY_UNSAFE, "-")}`.slice(0, 128);
 }
 
+// Each inbound attachment upload gets its own deterministic idempotency key.
+export function inboundAttachmentIdempotencyKey(
+  message: IMsgMessage,
+  index: number,
+): string {
+  const suffix = `:att:${String(index)}`;
+  const prefix = inboundIdempotencyKey(message).slice(0, 128 - suffix.length);
+  return `${prefix}${suffix}`;
+}
+
 export function maskHandle(handle: string): string {
   return handle.length <= 4 ? "***" : `***${handle.slice(-2)}`;
 }
@@ -295,6 +310,7 @@ export interface IMessageChannelOptions {
     readonly filePath: string;
     readonly cleanup: () => Promise<void>;
   }>;
+  readonly renderHtmlToPdf?: HtmlToPdfRenderer;
 }
 
 const SIGNED_OUT_PROBE_MS = 30_000;
@@ -725,15 +741,29 @@ export class IMessageChannel {
       }
       return fallback(downloaded.code ?? `http_${String(downloaded.status)}`);
     }
-    const safeName = sanitizeFilename(
-      downloaded.value.filename || doc.label,
-      downloaded.value.mediaType,
-    );
+    let filename = downloaded.value.filename || doc.label;
+    let mediaType = downloaded.value.mediaType;
+    let payloadBytes = downloaded.value.bytes;
+    if (isMarkdownDocument(filename, mediaType)) {
+      const rendered = await renderMarkdownDocument(
+        {
+          markdown: new TextDecoder("utf-8").decode(payloadBytes),
+          downloadedFilename: downloaded.value.filename ?? "",
+          label: doc.label,
+        },
+        this.#options.renderHtmlToPdf,
+        MAX_OUTBOUND_DOCUMENT_BYTES,
+      );
+      filename = rendered.filename;
+      mediaType = rendered.mediaType;
+      payloadBytes = rendered.bytes;
+    }
+    const safeName = sanitizeFilename(filename, mediaType);
     let staged:
       | { readonly filePath: string; readonly cleanup: () => Promise<void> }
       | undefined;
     try {
-      staged = await this.#stageAttachment(safeName, downloaded.value.bytes);
+      staged = await this.#stageAttachment(safeName, payloadBytes);
     } catch {
       return fallback("stage_failed");
     }
@@ -880,7 +910,8 @@ export class IMessageChannel {
     }
     const attachmentUploadIds: string[] = [];
     if (admission.attachments.length > 0 && teamhub.uploadAttachment) {
-      for (const item of admission.attachments) {
+      for (let index = 0; index < admission.attachments.length; index += 1) {
+        const item = admission.attachments[index]!;
         const bytes = await this.#readAttachment(
           item.path,
           MAX_INBOUND_ATTACHMENT_BYTES,
@@ -892,6 +923,7 @@ export class IMessageChannel {
           continue;
         }
         const uploaded = await teamhub.uploadAttachment(this.#roomId!, {
+          idempotencyKey: inboundAttachmentIdempotencyKey(message, index),
           filename: item.filename,
           ...(item.mediaType ? { mediaType: item.mediaType } : {}),
           bytes,

@@ -5310,6 +5310,125 @@ paths:
         '404': { $ref: '../components/common.yaml#/components/responses/NotFound' }
         '409': { $ref: '../components/common.yaml#/components/responses/Conflict' }
         '503': { $ref: '../components/common.yaml#/components/responses/ServiceUnavailable' }
+  /v0/channels:
+    get:
+      tags: [Channels]
+      operationId: listIMChannels
+      summary: List network IM channel bindings for the signed-in Human.
+      responses:
+        '200':
+          description: Supported network IM providers and the Human's current bindings.
+          content:
+            application/json:
+              schema: { $ref: '../components/im-channels.yaml#/components/schemas/IMChannelListResponse' }
+        '401': { $ref: '../components/common.yaml#/components/responses/Unauthenticated' }
+  /v0/channels/{provider}:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        schema: { $ref: '../components/im-channels.yaml#/components/schemas/IMChannelProvider' }
+    patch:
+      tags: [Channels]
+      operationId: updateIMChannel
+      summary: Enable or disable an IM channel binding.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '../components/im-channels.yaml#/components/schemas/IMChannelUpdateRequest' }
+      responses:
+        '200':
+          description: Updated IM channel binding.
+          content:
+            application/json:
+              schema: { $ref: '../components/im-channels.yaml#/components/schemas/IMChannelBinding' }
+        '400': { $ref: '../components/common.yaml#/components/responses/BadRequest' }
+        '401': { $ref: '../components/common.yaml#/components/responses/Unauthenticated' }
+        '404': { $ref: '../components/common.yaml#/components/responses/NotFound' }
+    delete:
+      tags: [Channels]
+      operationId: disconnectIMChannel
+      summary: Disconnect and remove an IM channel binding.
+      responses:
+        '204':
+          description: Channel disconnected.
+        '401': { $ref: '../components/common.yaml#/components/responses/Unauthenticated' }
+        '404': { $ref: '../components/common.yaml#/components/responses/NotFound' }
+  /v0/channels/{provider}/pairings:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        schema: { $ref: '../components/im-channels.yaml#/components/schemas/IMChannelProvider' }
+    post:
+      tags: [Channels]
+      operationId: startIMChannelPairing
+      summary: Start an interactive pairing session (such as QR scan) for an IM channel.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '../components/im-channels.yaml#/components/schemas/IMChannelPairingStartRequest' }
+      responses:
+        '201':
+          description: Pairing session started.
+          content:
+            application/json:
+              schema: { $ref: '../components/im-channels.yaml#/components/schemas/IMChannelPairingSession' }
+        '400': { $ref: '../components/common.yaml#/components/responses/BadRequest' }
+        '401': { $ref: '../components/common.yaml#/components/responses/Unauthenticated' }
+        '503': { $ref: '../components/common.yaml#/components/responses/ServiceUnavailable' }
+  /v0/channels/pairings/{pairingId}:
+    parameters:
+      - name: pairingId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+    get:
+      tags: [Channels]
+      operationId: getIMChannelPairing
+      summary: Poll an active IM channel pairing session and persist the binding once confirmed.
+      responses:
+        '200':
+          description: Current pairing status, with the saved binding once confirmed.
+          content:
+            application/json:
+              schema: { $ref: '../components/im-channels.yaml#/components/schemas/IMChannelPairingSession' }
+        '401': { $ref: '../components/common.yaml#/components/responses/Unauthenticated' }
+        '404': { $ref: '../components/common.yaml#/components/responses/NotFound' }
+        '503': { $ref: '../components/common.yaml#/components/responses/ServiceUnavailable' }
+  /v0/channels/pairings/{pairingId}/verify-code:
+    parameters:
+      - name: pairingId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+    post:
+      tags: [Channels]
+      operationId: submitIMChannelPairingVerifyCode
+      summary: Submit a verification code requested during interactive IM channel pairing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '../components/im-channels.yaml#/components/schemas/IMChannelPairingVerifyRequest' }
+      responses:
+        '200':
+          description: Pairing status after submitting the verification code.
+          content:
+            application/json:
+              schema: { $ref: '../components/im-channels.yaml#/components/schemas/IMChannelPairingSession' }
+        '400': { $ref: '../components/common.yaml#/components/responses/BadRequest' }
+        '401': { $ref: '../components/common.yaml#/components/responses/Unauthenticated' }
+        '404': { $ref: '../components/common.yaml#/components/responses/NotFound' }
+        '503': { $ref: '../components/common.yaml#/components/responses/ServiceUnavailable' }
 components:
   schemas:
     VoiceLiveClientEvent:

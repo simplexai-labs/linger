@@ -1,5 +1,6 @@
 import {
   AiChipIcon,
+  BubbleChatIcon,
   Key01Icon,
   LanguageSkillIcon,
   LaptopIcon,
@@ -46,6 +47,11 @@ export function SettingsLayout() {
             icon={<Icon icon={LaptopIcon} size={14} />}
             label={t(settingsMessages.computers)}
             to="computers"
+          />
+          <SettingsLink
+            icon={<Icon icon={BubbleChatIcon} size={14} />}
+            label={t(settingsMessages.channels)}
+            to="channels"
           />
           <SettingsLink
             icon={<Icon icon={AiChipIcon} size={14} />}

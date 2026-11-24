@@ -13,8 +13,18 @@ import (
 // Room display name.
 func ChannelRoomDisplayName(channel httpapi.RoomChannel) (string, bool) {
 	switch channel {
-	case httpapi.Imessage:
+	case httpapi.RoomChannelImessage:
 		return "iMessage", true
+	case httpapi.RoomChannelWechat:
+		return "WeChat", true
+	case httpapi.RoomChannelWhatsapp:
+		return "WhatsApp", true
+	case httpapi.RoomChannelTelegram:
+		return "Telegram", true
+	case httpapi.RoomChannelDiscord:
+		return "Discord", true
+	case httpapi.RoomChannelSlack:
+		return "Slack", true
 	default:
 		return "", false
 	}

@@ -906,11 +906,14 @@ describe("IMessageChannel review fixes", () => {
       .mockResolvedValueOnce(
         ok({
           bytes: new TextEncoder().encode("# Report\nDetails"),
-          filename: "report.md",
+          filename: "latest.md",
           mediaType: "text/markdown",
         }),
       )
       .mockResolvedValueOnce(failed(404));
+    const renderHtmlToPdf = vi.fn(async () =>
+      new TextEncoder().encode("%PDF-1.7\nrendered"),
+    );
     const cleaned = vi.fn(async () => {});
     const channel = new IMessageChannel({
       transport,
@@ -927,6 +930,7 @@ describe("IMessageChannel review fixes", () => {
       onState: (s) => f.states.push(s),
       serverUrl: () => "https://linger.test",
       wait: async () => {},
+      renderHtmlToPdf,
       stageAttachment: async (filename) => ({
         filePath: `/tmp/staged/${filename}`,
         cleanup: cleaned,
@@ -936,12 +940,12 @@ describe("IMessageChannel review fixes", () => {
     await vi.waitFor(() => expect(f.states).toContain("running"));
     f.stream().push(
       message(11, {
-        raw_message: "See the summary attached.report.md",
+        raw_message: "See the summary attached.Weather Guide",
         segments: [
           { type: "text", content: "See the summary attached." },
           {
             type: "document",
-            content: "report.md",
+            content: "Weather Guide",
             document_id: "doc_1",
             presentation: "card",
           },
@@ -950,6 +954,7 @@ describe("IMessageChannel review fixes", () => {
       }),
     );
     await vi.waitFor(() => expect(f.state().roomSeq).toBe(11));
+    expect(renderHtmlToPdf).toHaveBeenCalledOnce();
     expect(sends).toEqual([
       {
         target: { to: ME },
@@ -957,8 +962,8 @@ describe("IMessageChannel review fixes", () => {
       },
       {
         target: { to: ME },
-        text: `${OUTBOUND_PREFIX}report.md`,
-        file: "/tmp/staged/report.md",
+        text: `${OUTBOUND_PREFIX}Weather Guide.pdf`,
+        file: "/tmp/staged/Weather Guide.pdf",
       },
     ]);
 
@@ -1022,6 +1027,7 @@ describe("IMessageChannel review fixes", () => {
     );
     await vi.waitFor(() => expect(f.state().rowid).toBe(2));
     expect(uploadAttachment).toHaveBeenCalledWith(ROOM, {
+      idempotencyKey: "imessage:G-2:att:0",
       filename: "pic.png",
       mediaType: "image/png",
       bytes: new TextEncoder().encode("img-bytes"),

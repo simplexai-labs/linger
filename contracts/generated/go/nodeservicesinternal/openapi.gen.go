@@ -650,6 +650,69 @@ func (e ExportDocumentResultMediaType) Valid() bool {
 	}
 }
 
+// Defines values for IMChannelPairingStatus.
+const (
+	IMChannelPairingStatusAlreadyConnected  IMChannelPairingStatus = "already_connected"
+	IMChannelPairingStatusConfirmed         IMChannelPairingStatus = "confirmed"
+	IMChannelPairingStatusExpired           IMChannelPairingStatus = "expired"
+	IMChannelPairingStatusFailed            IMChannelPairingStatus = "failed"
+	IMChannelPairingStatusNeedVerifyCode    IMChannelPairingStatus = "need_verify_code"
+	IMChannelPairingStatusScanned           IMChannelPairingStatus = "scanned"
+	IMChannelPairingStatusVerifyCodeBlocked IMChannelPairingStatus = "verify_code_blocked"
+	IMChannelPairingStatusWaitingScan       IMChannelPairingStatus = "waiting_scan"
+)
+
+// Valid indicates whether the value is a known member of the IMChannelPairingStatus enum.
+func (e IMChannelPairingStatus) Valid() bool {
+	switch e {
+	case IMChannelPairingStatusAlreadyConnected:
+		return true
+	case IMChannelPairingStatusConfirmed:
+		return true
+	case IMChannelPairingStatusExpired:
+		return true
+	case IMChannelPairingStatusFailed:
+		return true
+	case IMChannelPairingStatusNeedVerifyCode:
+		return true
+	case IMChannelPairingStatusScanned:
+		return true
+	case IMChannelPairingStatusVerifyCodeBlocked:
+		return true
+	case IMChannelPairingStatusWaitingScan:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for IMChannelProvider.
+const (
+	Discord  IMChannelProvider = "discord"
+	Slack    IMChannelProvider = "slack"
+	Telegram IMChannelProvider = "telegram"
+	Wechat   IMChannelProvider = "wechat"
+	Whatsapp IMChannelProvider = "whatsapp"
+)
+
+// Valid indicates whether the value is a known member of the IMChannelProvider enum.
+func (e IMChannelProvider) Valid() bool {
+	switch e {
+	case Discord:
+		return true
+	case Slack:
+		return true
+	case Telegram:
+		return true
+	case Wechat:
+		return true
+	case Whatsapp:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ImportDocumentRequestSourceKind.
 const (
 	ImportDocumentRequestSourceKindBlank         ImportDocumentRequestSourceKind = "blank"
@@ -1018,28 +1081,28 @@ func (e MemoryEntryKind) Valid() bool {
 
 // Defines values for MemoryRebuildStatusPhase.
 const (
-	Completed    MemoryRebuildStatusPhase = "completed"
-	Failed       MemoryRebuildStatusPhase = "failed"
-	IndexFinal   MemoryRebuildStatusPhase = "index-final"
-	IndexInitial MemoryRebuildStatusPhase = "index-initial"
-	Init         MemoryRebuildStatusPhase = "init"
-	Sessions     MemoryRebuildStatusPhase = "sessions"
+	MemoryRebuildStatusPhaseCompleted    MemoryRebuildStatusPhase = "completed"
+	MemoryRebuildStatusPhaseFailed       MemoryRebuildStatusPhase = "failed"
+	MemoryRebuildStatusPhaseIndexFinal   MemoryRebuildStatusPhase = "index-final"
+	MemoryRebuildStatusPhaseIndexInitial MemoryRebuildStatusPhase = "index-initial"
+	MemoryRebuildStatusPhaseInit         MemoryRebuildStatusPhase = "init"
+	MemoryRebuildStatusPhaseSessions     MemoryRebuildStatusPhase = "sessions"
 )
 
 // Valid indicates whether the value is a known member of the MemoryRebuildStatusPhase enum.
 func (e MemoryRebuildStatusPhase) Valid() bool {
 	switch e {
-	case Completed:
+	case MemoryRebuildStatusPhaseCompleted:
 		return true
-	case Failed:
+	case MemoryRebuildStatusPhaseFailed:
 		return true
-	case IndexFinal:
+	case MemoryRebuildStatusPhaseIndexFinal:
 		return true
-	case IndexInitial:
+	case MemoryRebuildStatusPhaseIndexInitial:
 		return true
-	case Init:
+	case MemoryRebuildStatusPhaseInit:
 		return true
-	case Sessions:
+	case MemoryRebuildStatusPhaseSessions:
 		return true
 	default:
 		return false
@@ -1895,6 +1958,17 @@ type ExportDocumentResult struct {
 // ExportDocumentResultMediaType defines model for ExportDocumentResult.MediaType.
 type ExportDocumentResultMediaType string
 
+// IMChannelPairingStatus Lifecycle state of an interactive IM channel pairing session.
+type IMChannelPairingStatus string
+
+// IMChannelPairingVerifyRequest defines model for IMChannelPairingVerifyRequest.
+type IMChannelPairingVerifyRequest struct {
+	VerifyCode string `json:"verify_code"`
+}
+
+// IMChannelProvider Network IM channel provider identifier.
+type IMChannelProvider string
+
 // Id Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 type Id = string
 
@@ -1931,6 +2005,40 @@ type InsertDocumentBlocksSemanticOperationPosition string
 
 // InternalErrorCode defines model for InternalErrorCode.
 type InternalErrorCode string
+
+// InternalIMChannelPairingPollResult defines model for InternalIMChannelPairingPollResult.
+type InternalIMChannelPairingPollResult struct {
+	Config      *map[string]interface{} `json:"config,omitempty"`
+	Credentials *map[string]interface{} `json:"credentials,omitempty"`
+	ErrorCode   *string                 `json:"error_code,omitempty"`
+	PairingId   string                  `json:"pairing_id"`
+
+	// Provider Network IM channel provider identifier.
+	Provider  IMChannelProvider `json:"provider"`
+	QrCodeUrl *string           `json:"qr_code_url,omitempty"`
+
+	// Status Lifecycle state of an interactive IM channel pairing session.
+	Status IMChannelPairingStatus `json:"status"`
+}
+
+// InternalIMChannelPairingStartRequest defines model for InternalIMChannelPairingStartRequest.
+type InternalIMChannelPairingStartRequest struct {
+	LocalTokens *[]string `json:"local_tokens,omitempty"`
+
+	// Provider Network IM channel provider identifier.
+	Provider IMChannelProvider `json:"provider"`
+}
+
+// InternalIMChannelReconcileResult defines model for InternalIMChannelReconcileResult.
+type InternalIMChannelReconcileResult struct {
+	ActiveBindings int `json:"active_bindings"`
+}
+
+// InternalIMChannelWakeRequest defines model for InternalIMChannelWakeRequest.
+type InternalIMChannelWakeRequest struct {
+	// RoomId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	RoomId Id `json:"room_id"`
+}
 
 // LocalComputerToolCall defines model for LocalComputerToolCall.
 type LocalComputerToolCall struct {
@@ -2995,6 +3103,15 @@ type ReadAgentDebugContextHistoryJSONRequestBody = AgentDebugHistoryRequest
 // CancelAgentRunJSONRequestBody defines body for CancelAgentRun for application/json ContentType.
 type CancelAgentRunJSONRequestBody = CancelAgentRunRequest
 
+// StartNodeIMChannelPairingJSONRequestBody defines body for StartNodeIMChannelPairing for application/json ContentType.
+type StartNodeIMChannelPairingJSONRequestBody = InternalIMChannelPairingStartRequest
+
+// SubmitNodeIMChannelPairingVerifyCodeJSONRequestBody defines body for SubmitNodeIMChannelPairingVerifyCode for application/json ContentType.
+type SubmitNodeIMChannelPairingVerifyCodeJSONRequestBody = IMChannelPairingVerifyRequest
+
+// WakeIMChannelsJSONRequestBody defines body for WakeIMChannels for application/json ContentType.
+type WakeIMChannelsJSONRequestBody = InternalIMChannelWakeRequest
+
 // CallLocalComputerToolJSONRequestBody defines body for CallLocalComputerTool for application/json ContentType.
 type CallLocalComputerToolJSONRequestBody = LocalComputerToolCall
 
@@ -3998,6 +4115,27 @@ type ClientInterface interface {
 	// NotifyAgentRegistrationChanged request
 	NotifyAgentRegistrationChanged(ctx context.Context, agentId ManagedAgentId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// StartNodeIMChannelPairingWithBody request with any body
+	StartNodeIMChannelPairingWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	StartNodeIMChannelPairing(ctx context.Context, body StartNodeIMChannelPairingJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PollNodeIMChannelPairing request
+	PollNodeIMChannelPairing(ctx context.Context, pairingId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SubmitNodeIMChannelPairingVerifyCodeWithBody request with any body
+	SubmitNodeIMChannelPairingVerifyCodeWithBody(ctx context.Context, pairingId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	SubmitNodeIMChannelPairingVerifyCode(ctx context.Context, pairingId string, body SubmitNodeIMChannelPairingVerifyCodeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReconcileIMChannels request
+	ReconcileIMChannels(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// WakeIMChannelsWithBody request with any body
+	WakeIMChannelsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	WakeIMChannels(ctx context.Context, body WakeIMChannelsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// CallLocalComputerToolWithBody request with any body
 	CallLocalComputerToolWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -4513,6 +4651,102 @@ func (c *Client) CancelAgentRun(ctx context.Context, runId RunId, body CancelAge
 
 func (c *Client) NotifyAgentRegistrationChanged(ctx context.Context, agentId ManagedAgentId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewNotifyAgentRegistrationChangedRequest(c.Server, agentId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) StartNodeIMChannelPairingWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartNodeIMChannelPairingRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) StartNodeIMChannelPairing(ctx context.Context, body StartNodeIMChannelPairingJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartNodeIMChannelPairingRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PollNodeIMChannelPairing(ctx context.Context, pairingId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPollNodeIMChannelPairingRequest(c.Server, pairingId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SubmitNodeIMChannelPairingVerifyCodeWithBody(ctx context.Context, pairingId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSubmitNodeIMChannelPairingVerifyCodeRequestWithBody(c.Server, pairingId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SubmitNodeIMChannelPairingVerifyCode(ctx context.Context, pairingId string, body SubmitNodeIMChannelPairingVerifyCodeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSubmitNodeIMChannelPairingVerifyCodeRequest(c.Server, pairingId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ReconcileIMChannels(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReconcileIMChannelsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) WakeIMChannelsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewWakeIMChannelsRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) WakeIMChannels(ctx context.Context, body WakeIMChannelsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewWakeIMChannelsRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5865,6 +6099,194 @@ func NewNotifyAgentRegistrationChangedRequest(server string, agentId ManagedAgen
 	return req, nil
 }
 
+// NewStartNodeIMChannelPairingRequest calls the generic StartNodeIMChannelPairing builder with application/json body
+func NewStartNodeIMChannelPairingRequest(server string, body StartNodeIMChannelPairingJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewStartNodeIMChannelPairingRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewStartNodeIMChannelPairingRequestWithBody generates requests for StartNodeIMChannelPairing with any type of body
+func NewStartNodeIMChannelPairingRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/channels/pairings")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewPollNodeIMChannelPairingRequest generates requests for PollNodeIMChannelPairing
+func NewPollNodeIMChannelPairingRequest(server string, pairingId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "pairingId", pairingId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/channels/pairings/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSubmitNodeIMChannelPairingVerifyCodeRequest calls the generic SubmitNodeIMChannelPairingVerifyCode builder with application/json body
+func NewSubmitNodeIMChannelPairingVerifyCodeRequest(server string, pairingId string, body SubmitNodeIMChannelPairingVerifyCodeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSubmitNodeIMChannelPairingVerifyCodeRequestWithBody(server, pairingId, "application/json", bodyReader)
+}
+
+// NewSubmitNodeIMChannelPairingVerifyCodeRequestWithBody generates requests for SubmitNodeIMChannelPairingVerifyCode with any type of body
+func NewSubmitNodeIMChannelPairingVerifyCodeRequestWithBody(server string, pairingId string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "pairingId", pairingId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/channels/pairings/%s/verify-code", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewReconcileIMChannelsRequest generates requests for ReconcileIMChannels
+func NewReconcileIMChannelsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/channels:reconcile")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewWakeIMChannelsRequest calls the generic WakeIMChannels builder with application/json body
+func NewWakeIMChannelsRequest(server string, body WakeIMChannelsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewWakeIMChannelsRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewWakeIMChannelsRequestWithBody generates requests for WakeIMChannels with any type of body
+func NewWakeIMChannelsRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/channels:wake")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewCallLocalComputerToolRequest calls the generic CallLocalComputerTool builder with application/json body
 func NewCallLocalComputerToolRequest(server string, body CallLocalComputerToolJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -6821,6 +7243,27 @@ type ClientWithResponsesInterface interface {
 	// NotifyAgentRegistrationChangedWithResponse request
 	NotifyAgentRegistrationChangedWithResponse(ctx context.Context, agentId ManagedAgentId, reqEditors ...RequestEditorFn) (*NotifyAgentRegistrationChangedResponse, error)
 
+	// StartNodeIMChannelPairingWithBodyWithResponse request with any body
+	StartNodeIMChannelPairingWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartNodeIMChannelPairingResponse, error)
+
+	StartNodeIMChannelPairingWithResponse(ctx context.Context, body StartNodeIMChannelPairingJSONRequestBody, reqEditors ...RequestEditorFn) (*StartNodeIMChannelPairingResponse, error)
+
+	// PollNodeIMChannelPairingWithResponse request
+	PollNodeIMChannelPairingWithResponse(ctx context.Context, pairingId string, reqEditors ...RequestEditorFn) (*PollNodeIMChannelPairingResponse, error)
+
+	// SubmitNodeIMChannelPairingVerifyCodeWithBodyWithResponse request with any body
+	SubmitNodeIMChannelPairingVerifyCodeWithBodyWithResponse(ctx context.Context, pairingId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SubmitNodeIMChannelPairingVerifyCodeResponse, error)
+
+	SubmitNodeIMChannelPairingVerifyCodeWithResponse(ctx context.Context, pairingId string, body SubmitNodeIMChannelPairingVerifyCodeJSONRequestBody, reqEditors ...RequestEditorFn) (*SubmitNodeIMChannelPairingVerifyCodeResponse, error)
+
+	// ReconcileIMChannelsWithResponse request
+	ReconcileIMChannelsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ReconcileIMChannelsResponse, error)
+
+	// WakeIMChannelsWithBodyWithResponse request with any body
+	WakeIMChannelsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*WakeIMChannelsResponse, error)
+
+	WakeIMChannelsWithResponse(ctx context.Context, body WakeIMChannelsJSONRequestBody, reqEditors ...RequestEditorFn) (*WakeIMChannelsResponse, error)
+
 	// CallLocalComputerToolWithBodyWithResponse request with any body
 	CallLocalComputerToolWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallLocalComputerToolResponse, error)
 
@@ -7641,6 +8084,166 @@ func (r NotifyAgentRegistrationChangedResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r NotifyAgentRegistrationChangedResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type StartNodeIMChannelPairingResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *InternalIMChannelPairingPollResult
+	JSON400      *BadRequest
+	JSON401      *Unauthenticated
+	JSON503      *ServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r StartNodeIMChannelPairingResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StartNodeIMChannelPairingResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r StartNodeIMChannelPairingResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PollNodeIMChannelPairingResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *InternalIMChannelPairingPollResult
+	JSON401      *Unauthenticated
+	JSON404      *NotFound
+}
+
+// Status returns HTTPResponse.Status
+func (r PollNodeIMChannelPairingResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PollNodeIMChannelPairingResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PollNodeIMChannelPairingResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SubmitNodeIMChannelPairingVerifyCodeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *InternalIMChannelPairingPollResult
+	JSON400      *BadRequest
+	JSON401      *Unauthenticated
+	JSON404      *NotFound
+}
+
+// Status returns HTTPResponse.Status
+func (r SubmitNodeIMChannelPairingVerifyCodeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SubmitNodeIMChannelPairingVerifyCodeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SubmitNodeIMChannelPairingVerifyCodeResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ReconcileIMChannelsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *InternalIMChannelReconcileResult
+	JSON401      *Unauthenticated
+}
+
+// Status returns HTTPResponse.Status
+func (r ReconcileIMChannelsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReconcileIMChannelsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReconcileIMChannelsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type WakeIMChannelsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *BadRequest
+	JSON401      *Unauthenticated
+}
+
+// Status returns HTTPResponse.Status
+func (r WakeIMChannelsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r WakeIMChannelsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r WakeIMChannelsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -8530,6 +9133,75 @@ func (c *ClientWithResponses) NotifyAgentRegistrationChangedWithResponse(ctx con
 		return nil, err
 	}
 	return ParseNotifyAgentRegistrationChangedResponse(rsp)
+}
+
+// StartNodeIMChannelPairingWithBodyWithResponse request with arbitrary body returning *StartNodeIMChannelPairingResponse
+func (c *ClientWithResponses) StartNodeIMChannelPairingWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartNodeIMChannelPairingResponse, error) {
+	rsp, err := c.StartNodeIMChannelPairingWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartNodeIMChannelPairingResponse(rsp)
+}
+
+func (c *ClientWithResponses) StartNodeIMChannelPairingWithResponse(ctx context.Context, body StartNodeIMChannelPairingJSONRequestBody, reqEditors ...RequestEditorFn) (*StartNodeIMChannelPairingResponse, error) {
+	rsp, err := c.StartNodeIMChannelPairing(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartNodeIMChannelPairingResponse(rsp)
+}
+
+// PollNodeIMChannelPairingWithResponse request returning *PollNodeIMChannelPairingResponse
+func (c *ClientWithResponses) PollNodeIMChannelPairingWithResponse(ctx context.Context, pairingId string, reqEditors ...RequestEditorFn) (*PollNodeIMChannelPairingResponse, error) {
+	rsp, err := c.PollNodeIMChannelPairing(ctx, pairingId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePollNodeIMChannelPairingResponse(rsp)
+}
+
+// SubmitNodeIMChannelPairingVerifyCodeWithBodyWithResponse request with arbitrary body returning *SubmitNodeIMChannelPairingVerifyCodeResponse
+func (c *ClientWithResponses) SubmitNodeIMChannelPairingVerifyCodeWithBodyWithResponse(ctx context.Context, pairingId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SubmitNodeIMChannelPairingVerifyCodeResponse, error) {
+	rsp, err := c.SubmitNodeIMChannelPairingVerifyCodeWithBody(ctx, pairingId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSubmitNodeIMChannelPairingVerifyCodeResponse(rsp)
+}
+
+func (c *ClientWithResponses) SubmitNodeIMChannelPairingVerifyCodeWithResponse(ctx context.Context, pairingId string, body SubmitNodeIMChannelPairingVerifyCodeJSONRequestBody, reqEditors ...RequestEditorFn) (*SubmitNodeIMChannelPairingVerifyCodeResponse, error) {
+	rsp, err := c.SubmitNodeIMChannelPairingVerifyCode(ctx, pairingId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSubmitNodeIMChannelPairingVerifyCodeResponse(rsp)
+}
+
+// ReconcileIMChannelsWithResponse request returning *ReconcileIMChannelsResponse
+func (c *ClientWithResponses) ReconcileIMChannelsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ReconcileIMChannelsResponse, error) {
+	rsp, err := c.ReconcileIMChannels(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReconcileIMChannelsResponse(rsp)
+}
+
+// WakeIMChannelsWithBodyWithResponse request with arbitrary body returning *WakeIMChannelsResponse
+func (c *ClientWithResponses) WakeIMChannelsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*WakeIMChannelsResponse, error) {
+	rsp, err := c.WakeIMChannelsWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseWakeIMChannelsResponse(rsp)
+}
+
+func (c *ClientWithResponses) WakeIMChannelsWithResponse(ctx context.Context, body WakeIMChannelsJSONRequestBody, reqEditors ...RequestEditorFn) (*WakeIMChannelsResponse, error) {
+	rsp, err := c.WakeIMChannels(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseWakeIMChannelsResponse(rsp)
 }
 
 // CallLocalComputerToolWithBodyWithResponse request with arbitrary body returning *CallLocalComputerToolResponse
@@ -9778,6 +10450,206 @@ func ParseNotifyAgentRegistrationChangedResponse(rsp *http.Response) (*NotifyAge
 			return nil, err
 		}
 		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStartNodeIMChannelPairingResponse parses an HTTP response from a StartNodeIMChannelPairingWithResponse call
+func ParseStartNodeIMChannelPairingResponse(rsp *http.Response) (*StartNodeIMChannelPairingResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StartNodeIMChannelPairingResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest InternalIMChannelPairingPollResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePollNodeIMChannelPairingResponse parses an HTTP response from a PollNodeIMChannelPairingWithResponse call
+func ParsePollNodeIMChannelPairingResponse(rsp *http.Response) (*PollNodeIMChannelPairingResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PollNodeIMChannelPairingResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InternalIMChannelPairingPollResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSubmitNodeIMChannelPairingVerifyCodeResponse parses an HTTP response from a SubmitNodeIMChannelPairingVerifyCodeWithResponse call
+func ParseSubmitNodeIMChannelPairingVerifyCodeResponse(rsp *http.Response) (*SubmitNodeIMChannelPairingVerifyCodeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SubmitNodeIMChannelPairingVerifyCodeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InternalIMChannelPairingPollResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReconcileIMChannelsResponse parses an HTTP response from a ReconcileIMChannelsWithResponse call
+func ParseReconcileIMChannelsResponse(rsp *http.Response) (*ReconcileIMChannelsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReconcileIMChannelsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InternalIMChannelReconcileResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseWakeIMChannelsResponse parses an HTTP response from a WakeIMChannelsWithResponse call
+func ParseWakeIMChannelsResponse(rsp *http.Response) (*WakeIMChannelsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &WakeIMChannelsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
 
 	}
 

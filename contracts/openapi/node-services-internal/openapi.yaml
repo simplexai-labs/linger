@@ -1365,6 +1365,123 @@ paths:
           $ref: ../components/document-errors.yaml#/components/responses/DocumentInternalError
       security:
         - teamHubToRuntimeBearer: []
+  /v1/channels:reconcile:
+    post:
+      operationId: reconcileIMChannels
+      summary: Reconcile running IM channel adapters against TeamHub's enabled bindings.
+      responses:
+        "200":
+          description: Reconcile completed.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/im-channels.yaml#/components/schemas/InternalIMChannelReconcileResult
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+      security:
+        - agentManagementBearer: []
+  /v1/channels:wake:
+    post:
+      operationId: wakeIMChannels
+      summary: Wake IM channel bindings watching a Room so outbound replies deliver without waiting for the fallback poll.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../components/im-channels.yaml#/components/schemas/InternalIMChannelWakeRequest
+      responses:
+        "204":
+          description: Wake accepted.
+        "400":
+          $ref: ../components/common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+      security:
+        - agentManagementBearer: []
+  /v1/channels/pairings:
+    post:
+      operationId: startNodeIMChannelPairing
+      summary: Start an interactive IM channel pairing flow on Node Services.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../components/im-channels.yaml#/components/schemas/InternalIMChannelPairingStartRequest
+      responses:
+        "201":
+          description: Pairing session started.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/im-channels.yaml#/components/schemas/InternalIMChannelPairingPollResult
+        "400":
+          $ref: ../components/common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+        "503":
+          $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
+      security:
+        - agentManagementBearer: []
+  /v1/channels/pairings/{pairingId}:
+    parameters:
+      - name: pairingId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+    get:
+      operationId: pollNodeIMChannelPairing
+      summary: Poll an active IM channel pairing session and return credentials once confirmed.
+      responses:
+        "200":
+          description: Current pairing session state.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/im-channels.yaml#/components/schemas/InternalIMChannelPairingPollResult
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+        "404":
+          $ref: ../components/common.yaml#/components/responses/NotFound
+      security:
+        - agentManagementBearer: []
+  /v1/channels/pairings/{pairingId}/verify-code:
+    parameters:
+      - name: pairingId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+    post:
+      operationId: submitNodeIMChannelPairingVerifyCode
+      summary: Forward a verification code to an active IM channel pairing session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../components/im-channels.yaml#/components/schemas/IMChannelPairingVerifyRequest
+      responses:
+        "200":
+          description: Updated pairing session state.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/im-channels.yaml#/components/schemas/InternalIMChannelPairingPollResult
+        "400":
+          $ref: ../components/common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+        "404":
+          $ref: ../components/common.yaml#/components/responses/NotFound
+      security:
+        - agentManagementBearer: []
 components:
   securitySchemes:
     agentManagementBearer:

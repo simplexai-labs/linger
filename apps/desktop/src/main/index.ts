@@ -1,9 +1,11 @@
 import { existsSync, renameSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  BrowserWindow,
   Notification,
   app,
   desktopCapturer,
@@ -344,6 +346,7 @@ async function main(): Promise<void> {
                     ).toString()
                   : undefined;
               },
+              renderHtmlToPdf,
               log,
               t: language.t,
               onState,
@@ -586,4 +589,35 @@ function moveLegacyUserData(
     userData,
     ...(setAside ? { setAside } : {}),
   };
+}
+
+// Renders self-contained printable HTML to A4 PDF using an offscreen sandboxed
+// window with JavaScript disabled so iMessage attachments open natively on iOS.
+async function renderHtmlToPdf(html: string): Promise<Uint8Array> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "linger-imsg-pdf-"));
+  const htmlPath = path.join(dir, "document.html");
+  let win: BrowserWindow | undefined;
+  try {
+    await writeFile(htmlPath, html, { encoding: "utf8", mode: 0o600 });
+    win = new BrowserWindow({
+      show: false,
+      width: 794,
+      height: 1123,
+      webPreferences: {
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        javascript: false,
+      },
+    });
+    await win.loadFile(htmlPath);
+    const pdf = await win.webContents.printToPDF({
+      pageSize: "A4",
+      printBackground: true,
+    });
+    return new Uint8Array(pdf);
+  } finally {
+    if (win && !win.isDestroyed()) win.destroy();
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }

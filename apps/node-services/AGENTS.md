@@ -3,7 +3,7 @@
 ## Boundary
 
 - This app is one deployable Node process that hosts roles. The roles are `memory`, `llm-wiki`, `agent` (the Agent Service),
-  `document`, and `voice`.
+  `document`, `voice`, and `channels`.
 - `agent`, `memory`, and `llm-wiki` share one HTTP listener
   (`src/http-host.ts`, `NODE_SERVICES_HTTP_ADDRESS` as `host:port`,
   default `127.0.0.1:4319`; `DOCUMENT_RUNTIME_HTTP_ADDRESS`, default
@@ -25,7 +25,13 @@
   and must not install process globals.
 - `NODE_SERVICES_ROLES` selects roles as a comma-separated list. An unset or
   empty value starts every role; an unknown role fails startup. Selected roles
-  always start in the order `memory`, `llm-wiki`, `agent`, `voice`, `document`. Shutdown starts media draining immediately while other roles stop in reverse.
+  always start in the order `memory`, `llm-wiki`, `agent`, `voice`, `channels`, `document`. Shutdown starts media draining immediately while other roles stop in reverse.
+- The `channels` role mounts `/v1/channels` on the shared HTTP listener and
+  supervises network IM protocol adapters (starting with WeChat ClawBot over
+  iLink v2.4.10 long-polling). It holds no local state on disk: credentials,
+  adapter cursors, outbound Room watermarks, and pending question cards live in
+  TeamHub (`im_channel_bindings`) and are read over `teamhub-internal` on
+  startup, `POST /v1/channels:reconcile`, and periodic fallback polls.
   Background work that uses a later role's seam starts from the role's
   `started()`, which the host calls once every selected role has started, and
   stops from `stopping()`, called before the first role stops: Memory's

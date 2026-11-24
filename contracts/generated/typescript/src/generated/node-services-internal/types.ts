@@ -694,6 +694,95 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/channels:reconcile": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Reconcile running IM channel adapters against TeamHub's enabled bindings. */
+    post: operations["reconcileIMChannels"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/channels:wake": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Wake IM channel bindings watching a Room so outbound replies deliver without waiting for the fallback poll. */
+    post: operations["wakeIMChannels"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/channels/pairings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Start an interactive IM channel pairing flow on Node Services. */
+    post: operations["startNodeIMChannelPairing"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/channels/pairings/{pairingId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        pairingId: string;
+      };
+      cookie?: never;
+    };
+    /** Poll an active IM channel pairing session and return credentials once confirmed. */
+    get: operations["pollNodeIMChannelPairing"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/channels/pairings/{pairingId}/verify-code": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        pairingId: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Forward a verification code to an active IM channel pairing session. */
+    post: operations["submitNodeIMChannelPairingVerifyCode"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2084,6 +2173,50 @@ export interface components {
     DisconnectDocumentConnectionsRequest: {
       actor_id?: components["schemas"]["DocumentInternalId"];
     };
+    InternalIMChannelReconcileResult: {
+      active_bindings: number;
+    };
+    InternalIMChannelWakeRequest: {
+      room_id: components["schemas"]["Id"];
+    };
+    /**
+     * @description Network IM channel provider identifier.
+     * @enum {string}
+     */
+    IMChannelProvider: "wechat" | "whatsapp" | "telegram" | "discord" | "slack";
+    InternalIMChannelPairingStartRequest: {
+      provider: components["schemas"]["IMChannelProvider"];
+      local_tokens?: string[];
+    };
+    /**
+     * @description Lifecycle state of an interactive IM channel pairing session.
+     * @enum {string}
+     */
+    IMChannelPairingStatus:
+      | "waiting_scan"
+      | "scanned"
+      | "need_verify_code"
+      | "verify_code_blocked"
+      | "confirmed"
+      | "already_connected"
+      | "expired"
+      | "failed";
+    InternalIMChannelPairingPollResult: {
+      pairing_id: string;
+      provider: components["schemas"]["IMChannelProvider"];
+      status: components["schemas"]["IMChannelPairingStatus"];
+      qr_code_url?: string;
+      error_code?: string;
+      credentials?: {
+        [key: string]: unknown;
+      };
+      config?: {
+        [key: string]: unknown;
+      };
+    };
+    IMChannelPairingVerifyRequest: {
+      verify_code: string;
+    };
     DocumentDurableHead: {
       document_id: components["schemas"]["DocumentInternalId"];
       schema_version: components["schemas"]["SchemaVersion"];
@@ -3418,6 +3551,131 @@ export interface operations {
         content?: never;
       };
       default: components["responses"]["DocumentInternalError"];
+    };
+  };
+  reconcileIMChannels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reconcile completed. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InternalIMChannelReconcileResult"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+    };
+  };
+  wakeIMChannels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InternalIMChannelWakeRequest"];
+      };
+    };
+    responses: {
+      /** @description Wake accepted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+    };
+  };
+  startNodeIMChannelPairing: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InternalIMChannelPairingStartRequest"];
+      };
+    };
+    responses: {
+      /** @description Pairing session started. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InternalIMChannelPairingPollResult"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  pollNodeIMChannelPairing: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        pairingId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current pairing session state. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InternalIMChannelPairingPollResult"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  submitNodeIMChannelPairingVerifyCode: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        pairingId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IMChannelPairingVerifyRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated pairing session state. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InternalIMChannelPairingPollResult"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
     };
   };
 }

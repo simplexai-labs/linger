@@ -147,6 +147,7 @@ describe("IMessageTeamHubClient", () => {
       .mockResolvedValueOnce(new Response("{}", { status: 201 }));
     const th = client(fetch);
     const uploaded = await th.uploadAttachment("r1", {
+      idempotencyKey: "imessage:G2:att:0",
       filename: "note.txt",
       mediaType: "text/plain",
       bytes: new TextEncoder().encode("hello"),
@@ -159,6 +160,9 @@ describe("IMessageTeamHubClient", () => {
     expect(String(uploadUrl)).toBe(
       "https://linger.test/v0/rooms/r1/message-attachment-uploads",
     );
+    expect(
+      (uploadInit.headers as Record<string, string>)["idempotency-key"],
+    ).toBe("imessage:G2:att:0");
     expect(uploadInit.body).toBeInstanceOf(FormData);
     expect(
       await th.postMessage("r1", "imessage:G2", "", {

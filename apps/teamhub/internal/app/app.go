@@ -48,6 +48,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/document"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/documenttext"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/externalsource"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/imchannel"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/jobs"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/mailcanvas"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/mcpcontext"
@@ -170,6 +171,7 @@ type App struct {
 	tracking                       *reminder.TrackingService
 	documentComments               *document.CommentService
 	externalSources                *externalsource.Service
+	imChannels                     *imchannel.Service
 	composioClient                 *composio.Client
 	personalInsights               *personalinsight.Service
 	personalProfile                *personalprofile.Service
@@ -555,6 +557,9 @@ func (a *App) registerFeatures(ctx context.Context, cfg config.Config, deps Deps
 	a.registerAgentTools(cfg, deps, agentAuthorization, core.models)
 	a.registerAccounts(deps)
 	a.registerVoiceService()
+	if err := a.registerIMChannels(cfg); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -749,6 +754,11 @@ func (a *App) StartWorkers(ctx context.Context, skip ...Worker) error {
 			a.presentationSequences.Run(a.workerContext, presentationSequenceBatchSize, func(err error) {
 				a.logger.Error("drive presentation sequences", "error", err)
 			})
+		}()
+		a.workerWG.Add(1)
+		go func() {
+			defer a.workerWG.Done()
+			a.runIMChannelWakeLoop(a.workerContext)
 		}()
 	}
 	return nil

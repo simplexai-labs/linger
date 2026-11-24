@@ -756,6 +756,14 @@ function createSettingsRoute(): RouteObject {
       },
       {
         lazy: async () => ({
+          Component: (
+            await import("@/features/settings/channels-settings-page")
+          ).ChannelsSettingsPage,
+        }),
+        path: "channels",
+      },
+      {
+        lazy: async () => ({
           Component: (await import("@/features/local-models/local-models-page"))
             .ModelsPage,
         }),

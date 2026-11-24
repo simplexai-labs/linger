@@ -17,6 +17,11 @@
       "linger-production": "./dist/byok-endpoint.js",
       "default": "./src/byok-endpoint.ts"
     },
+    "./channel-bridge": {
+      "types": "./src/channel-bridge.ts",
+      "linger-production": "./dist/channel-bridge.js",
+      "default": "./src/channel-bridge.ts"
+    },
     "./featured-models": {
       "types": "./src/featured-models.ts",
       "linger-production": "./dist/featured-models.js",

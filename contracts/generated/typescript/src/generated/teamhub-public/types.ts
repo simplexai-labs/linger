@@ -4149,6 +4149,100 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/channels": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List network IM channel bindings for the signed-in Human. */
+    get: operations["listIMChannels"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/channels/{provider}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider: components["schemas"]["IMChannelProvider"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Disconnect and remove an IM channel binding. */
+    delete: operations["disconnectIMChannel"];
+    options?: never;
+    head?: never;
+    /** Enable or disable an IM channel binding. */
+    patch: operations["updateIMChannel"];
+    trace?: never;
+  };
+  "/v0/channels/{provider}/pairings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider: components["schemas"]["IMChannelProvider"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Start an interactive pairing session (such as QR scan) for an IM channel. */
+    post: operations["startIMChannelPairing"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/channels/pairings/{pairingId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        pairingId: string;
+      };
+      cookie?: never;
+    };
+    /** Poll an active IM channel pairing session and persist the binding once confirmed. */
+    get: operations["getIMChannelPairing"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/channels/pairings/{pairingId}/verify-code": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        pairingId: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Submit a verification code requested during interactive IM channel pairing. */
+    post: operations["submitIMChannelPairingVerifyCode"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4586,7 +4680,13 @@ export interface components {
      * @description External messaging channel bridged to this Room.
      * @enum {string}
      */
-    RoomChannel: "imessage";
+    RoomChannel:
+      | "imessage"
+      | "wechat"
+      | "whatsapp"
+      | "telegram"
+      | "discord"
+      | "slack";
     /**
      * @description Personal Room participation; leaving preserves membership and its role.
      * @enum {string}
@@ -8657,6 +8757,74 @@ export interface components {
     GoogleCalendarPage: {
       calendars: components["schemas"]["GoogleCalendar"][];
       next_page_token?: string;
+    };
+    /**
+     * @description Network IM channel provider identifier.
+     * @enum {string}
+     */
+    IMChannelProvider: "wechat" | "whatsapp" | "telegram" | "discord" | "slack";
+    /**
+     * @description Live operational state of one IM channel binding.
+     * @enum {string}
+     */
+    IMChannelRuntimeStatus:
+      | "starting"
+      | "connected"
+      | "cooldown"
+      | "conflict"
+      | "auth_expired"
+      | "disconnected"
+      | "error";
+    IMChannelBinding: {
+      id: components["schemas"]["Id"];
+      provider: components["schemas"]["IMChannelProvider"];
+      enabled: boolean;
+      display_label?: string;
+      remote_user_id?: string;
+      runtime_status: components["schemas"]["IMChannelRuntimeStatus"];
+      runtime_error_code?: string;
+      cooldown_until?: components["schemas"]["Timestamp"];
+      last_inbound_at?: components["schemas"]["Timestamp"];
+      last_outbound_at?: components["schemas"]["Timestamp"];
+      created_at: components["schemas"]["Timestamp"];
+      updated_at: components["schemas"]["Timestamp"];
+    };
+    IMChannelListResponse: {
+      /** @description True when secret storage and Node Services channel supervision are available. */
+      available: boolean;
+      supported_providers: components["schemas"]["IMChannelProvider"][];
+      bindings: components["schemas"]["IMChannelBinding"][];
+    };
+    IMChannelUpdateRequest: {
+      enabled: boolean;
+    };
+    IMChannelPairingStartRequest: {
+      /** @default false */
+      force: boolean;
+    };
+    /**
+     * @description Lifecycle state of an interactive IM channel pairing session.
+     * @enum {string}
+     */
+    IMChannelPairingStatus:
+      | "waiting_scan"
+      | "scanned"
+      | "need_verify_code"
+      | "verify_code_blocked"
+      | "confirmed"
+      | "already_connected"
+      | "expired"
+      | "failed";
+    IMChannelPairingSession: {
+      pairing_id: string;
+      provider: components["schemas"]["IMChannelProvider"];
+      status: components["schemas"]["IMChannelPairingStatus"];
+      qr_code_url?: string;
+      error_code?: string;
+      binding?: components["schemas"]["IMChannelBinding"];
+    };
+    IMChannelPairingVerifyRequest: {
+      verify_code: string;
     };
   };
   responses: {
@@ -15966,6 +16134,162 @@ export interface operations {
       401: components["responses"]["Unauthenticated"];
       404: components["responses"]["NotFound"];
       409: components["responses"]["Conflict"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  listIMChannels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Supported network IM providers and the Human's current bindings. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IMChannelListResponse"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+    };
+  };
+  disconnectIMChannel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider: components["schemas"]["IMChannelProvider"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Channel disconnected. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  updateIMChannel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider: components["schemas"]["IMChannelProvider"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IMChannelUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated IM channel binding. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IMChannelBinding"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  startIMChannelPairing: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider: components["schemas"]["IMChannelProvider"];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["IMChannelPairingStartRequest"];
+      };
+    };
+    responses: {
+      /** @description Pairing session started. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IMChannelPairingSession"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  getIMChannelPairing: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        pairingId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current pairing status, with the saved binding once confirmed. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IMChannelPairingSession"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  submitIMChannelPairingVerifyCode: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        pairingId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IMChannelPairingVerifyRequest"];
+      };
+    };
+    responses: {
+      /** @description Pairing status after submitting the verification code. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IMChannelPairingSession"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
       503: components["responses"]["ServiceUnavailable"];
     };
   };

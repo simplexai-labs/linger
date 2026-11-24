@@ -340,7 +340,9 @@ export function RoomSecondaryNavigation({
                   const displayName =
                     room.channel === "imessage"
                       ? t(roomListMessages.channelIMessage)
-                      : room.name;
+                      : room.channel === "wechat"
+                        ? t(roomListMessages.channelWeChat)
+                        : room.name;
                   return (
                     <NavRow active={room.id === activeRoomId} key={room.id}>
                       <Link

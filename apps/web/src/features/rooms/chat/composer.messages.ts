@@ -159,9 +159,10 @@ export const composerMessages = defineMessages("composer", {
   microphoneHardwareRecording: "Hardware recording is using the microphone",
   microphoneOtherTab: "The microphone is active in another tab",
 
-  // External channel rooms synced from outside Linger (e.g. iMessage).
+  // External channel rooms synced from outside Linger (e.g. iMessage, WeChat).
   channelViewOnlyTitle: "View only",
   channelViewOnlyDescription:
     "Messages are synced from {channel}. Continue this conversation in {channel}.",
   channelIMessage: "iMessage",
+  channelWeChat: "WeChat",
 });

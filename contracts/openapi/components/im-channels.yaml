@@ -1,0 +1,386 @@
+components:
+  schemas:
+    IMChannelProvider:
+      type: string
+      enum:
+        - wechat
+        - whatsapp
+        - telegram
+        - discord
+        - slack
+      description: Network IM channel provider identifier.
+    IMChannelRuntimeStatus:
+      type: string
+      enum:
+        - starting
+        - connected
+        - cooldown
+        - conflict
+        - auth_expired
+        - disconnected
+        - error
+      description: Live operational state of one IM channel binding.
+    IMChannelPairingStatus:
+      type: string
+      enum:
+        - waiting_scan
+        - scanned
+        - need_verify_code
+        - verify_code_blocked
+        - confirmed
+        - already_connected
+        - expired
+        - failed
+      description: Lifecycle state of an interactive IM channel pairing session.
+    IMChannelBinding:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - provider
+        - enabled
+        - runtime_status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        provider:
+          $ref: "#/components/schemas/IMChannelProvider"
+        enabled:
+          type: boolean
+        display_label:
+          type: string
+        remote_user_id:
+          type: string
+        runtime_status:
+          $ref: "#/components/schemas/IMChannelRuntimeStatus"
+        runtime_error_code:
+          type: string
+        cooldown_until:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+        last_inbound_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+        last_outbound_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+        created_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+    IMChannelListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - available
+        - supported_providers
+        - bindings
+      properties:
+        available:
+          type: boolean
+          description: True when secret storage and Node Services channel supervision are available.
+        supported_providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/IMChannelProvider"
+        bindings:
+          type: array
+          items:
+            $ref: "#/components/schemas/IMChannelBinding"
+    IMChannelPairingStartRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        force:
+          type: boolean
+          default: false
+    IMChannelPairingVerifyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - verify_code
+      properties:
+        verify_code:
+          type: string
+          minLength: 1
+          maxLength: 32
+    IMChannelPairingSession:
+      type: object
+      additionalProperties: false
+      required:
+        - pairing_id
+        - provider
+        - status
+      properties:
+        pairing_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        provider:
+          $ref: "#/components/schemas/IMChannelProvider"
+        status:
+          $ref: "#/components/schemas/IMChannelPairingStatus"
+        qr_code_url:
+          type: string
+        error_code:
+          type: string
+        binding:
+          $ref: "#/components/schemas/IMChannelBinding"
+    IMChannelUpdateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+    InternalIMChannelBinding:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - tenant_id
+        - account_id
+        - human_actor_id
+        - provider
+        - enabled
+        - credentials
+        - config
+        - adapter_state
+        - outbound_room_seq
+        - runtime_status
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        tenant_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        account_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        human_actor_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        provider:
+          $ref: "#/components/schemas/IMChannelProvider"
+        enabled:
+          type: boolean
+        credentials:
+          type: object
+          additionalProperties: true
+        config:
+          type: object
+          additionalProperties: true
+        adapter_state:
+          type: object
+          additionalProperties: true
+        another_me_actor_id:
+          type: string
+        another_me_room_id:
+          type: string
+        outbound_room_id:
+          type: string
+        outbound_room_seq:
+          type: integer
+          format: int64
+          minimum: 0
+        pending_card:
+          type: object
+          additionalProperties: true
+        runtime_status:
+          $ref: "#/components/schemas/IMChannelRuntimeStatus"
+        runtime_error_code:
+          type: string
+        cooldown_until:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+    InternalIMChannelBindingList:
+      type: object
+      additionalProperties: false
+      required:
+        - bindings
+      properties:
+        bindings:
+          type: array
+          items:
+            $ref: "#/components/schemas/InternalIMChannelBinding"
+    InternalIMChannelStatusReport:
+      type: object
+      additionalProperties: false
+      properties:
+        runtime_status:
+          $ref: "#/components/schemas/IMChannelRuntimeStatus"
+        runtime_error_code:
+          type: string
+        clear_error_code:
+          type: boolean
+        cooldown_until:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+        clear_cooldown:
+          type: boolean
+        adapter_state_patch:
+          type: object
+          additionalProperties: true
+        outbound_room_id:
+          type: string
+        outbound_room_seq:
+          type: integer
+          format: int64
+          minimum: 0
+        pending_card:
+          type: object
+          additionalProperties: true
+        clear_pending_card:
+          type: boolean
+        touch_inbound:
+          type: boolean
+        touch_outbound:
+          type: boolean
+    InternalIMChannelInboundRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - external_id
+        - sender_external_id
+        - text
+      properties:
+        external_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        sender_external_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        text:
+          type: string
+          minLength: 1
+          maxLength: 50000
+        adapter_state_patch:
+          type: object
+          additionalProperties: true
+    InternalIMChannelInboundResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - accepted
+        - kind
+      properties:
+        accepted:
+          type: boolean
+        kind:
+          type: string
+          enum:
+            - message
+            - decision
+            - decision_conflict
+            - decision_rejected
+            - no_another_me
+        room_id:
+          type: string
+        reply_hint_code:
+          type: string
+    InternalIMChannelOutboundEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - room_seq
+        - event_type
+      properties:
+        room_seq:
+          type: integer
+          format: int64
+          minimum: 1
+        event_type:
+          type: string
+          enum:
+            - message_created
+            - card_changed
+        message_id:
+          type: string
+        author_actor_id:
+          type: string
+        author_kind:
+          type: string
+        message_kind:
+          type: string
+        raw_message:
+          type: string
+        card:
+          type: object
+          additionalProperties: true
+    InternalIMChannelOutboundPage:
+      type: object
+      additionalProperties: false
+      required:
+        - room_id
+        - another_me_actor_id
+        - human_actor_id
+        - latest_room_seq
+        - has_more
+        - items
+      properties:
+        room_id:
+          type: string
+        another_me_actor_id:
+          type: string
+        human_actor_id:
+          type: string
+        latest_room_seq:
+          type: integer
+          format: int64
+          minimum: 0
+        has_more:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/InternalIMChannelOutboundEvent"
+    InternalIMChannelReconcileResult:
+      type: object
+      additionalProperties: false
+      required:
+        - active_bindings
+      properties:
+        active_bindings:
+          type: integer
+          minimum: 0
+    InternalIMChannelWakeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - room_id
+      properties:
+        room_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+    InternalIMChannelPairingStartRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - provider
+      properties:
+        provider:
+          $ref: "#/components/schemas/IMChannelProvider"
+        local_tokens:
+          type: array
+          items:
+            type: string
+    InternalIMChannelPairingPollResult:
+      type: object
+      additionalProperties: false
+      required:
+        - pairing_id
+        - provider
+        - status
+      properties:
+        pairing_id:
+          type: string
+        provider:
+          $ref: "#/components/schemas/IMChannelProvider"
+        status:
+          $ref: "#/components/schemas/IMChannelPairingStatus"
+        qr_code_url:
+          type: string
+        error_code:
+          type: string
+        credentials:
+          type: object
+          additionalProperties: true
+        config:
+          type: object
+          additionalProperties: true

@@ -791,7 +791,7 @@ components:
       enum: [room, direct, thread]
     RoomChannel:
       type: string
-      enum: [imessage]
+      enum: [imessage, wechat, whatsapp, telegram, discord, slack]
       description: External messaging channel bridged to this Room.
     RoomParticipationStatus:
       type: string

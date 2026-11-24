@@ -1401,6 +1401,80 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/internal/v1/channels/bindings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List all enabled IM channel bindings with decrypted credentials for Node Services channel supervision. */
+    get: operations["listInternalIMChannelBindings"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/internal/v1/channels/bindings/{bindingId}/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        bindingId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Update runtime status, adapter state, cooldown, outbound cursor, or pending card for an IM channel binding. */
+    post: operations["reportInternalIMChannelStatus"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/internal/v1/channels/bindings/{bindingId}/inbound": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        bindingId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Ingest one inbound IM message as the bound Human Actor into their Another Me direct Chat or submit a pending question card answer. */
+    post: operations["ingestInternalIMChannelInbound"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/internal/v1/channels/bindings/{bindingId}/outbound": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        bindingId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    /** Read Another Me direct Chat Room events after a sequence for outbound IM delivery. */
+    get: operations["listInternalIMChannelOutbound"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3447,6 +3521,116 @@ export interface components {
       agent_id: string;
       context: components["schemas"]["McpContextReference"];
       document_comment_runtime?: components["schemas"]["McpDocumentCommentRuntimeProjection"];
+    };
+    /**
+     * @description Network IM channel provider identifier.
+     * @enum {string}
+     */
+    IMChannelProvider: "wechat" | "whatsapp" | "telegram" | "discord" | "slack";
+    /**
+     * @description Live operational state of one IM channel binding.
+     * @enum {string}
+     */
+    IMChannelRuntimeStatus:
+      | "starting"
+      | "connected"
+      | "cooldown"
+      | "conflict"
+      | "auth_expired"
+      | "disconnected"
+      | "error";
+    InternalIMChannelBinding: {
+      id: components["schemas"]["Id"];
+      tenant_id: components["schemas"]["Id"];
+      account_id: components["schemas"]["Id"];
+      human_actor_id: components["schemas"]["Id"];
+      provider: components["schemas"]["IMChannelProvider"];
+      enabled: boolean;
+      credentials: {
+        [key: string]: unknown;
+      };
+      config: {
+        [key: string]: unknown;
+      };
+      adapter_state: {
+        [key: string]: unknown;
+      };
+      another_me_actor_id?: string;
+      another_me_room_id?: string;
+      outbound_room_id?: string;
+      /** Format: int64 */
+      outbound_room_seq: number;
+      pending_card?: {
+        [key: string]: unknown;
+      };
+      runtime_status: components["schemas"]["IMChannelRuntimeStatus"];
+      runtime_error_code?: string;
+      cooldown_until?: components["schemas"]["Timestamp"];
+    };
+    InternalIMChannelBindingList: {
+      bindings: components["schemas"]["InternalIMChannelBinding"][];
+    };
+    InternalIMChannelStatusReport: {
+      runtime_status?: components["schemas"]["IMChannelRuntimeStatus"];
+      runtime_error_code?: string;
+      clear_error_code?: boolean;
+      cooldown_until?: components["schemas"]["Timestamp"];
+      clear_cooldown?: boolean;
+      adapter_state_patch?: {
+        [key: string]: unknown;
+      };
+      outbound_room_id?: string;
+      /** Format: int64 */
+      outbound_room_seq?: number;
+      pending_card?: {
+        [key: string]: unknown;
+      };
+      clear_pending_card?: boolean;
+      touch_inbound?: boolean;
+      touch_outbound?: boolean;
+    };
+    InternalIMChannelInboundRequest: {
+      external_id: string;
+      sender_external_id: string;
+      text: string;
+      adapter_state_patch?: {
+        [key: string]: unknown;
+      };
+    };
+    InternalIMChannelInboundResponse: {
+      accepted: boolean;
+      /** @enum {string} */
+      kind:
+        | "message"
+        | "decision"
+        | "decision_conflict"
+        | "decision_rejected"
+        | "no_another_me";
+      room_id?: string;
+      reply_hint_code?: string;
+    };
+    InternalIMChannelOutboundEvent: {
+      /** Format: int64 */
+      room_seq: number;
+      /** @enum {string} */
+      event_type: "message_created" | "card_changed";
+      message_id?: string;
+      author_actor_id?: string;
+      author_kind?: string;
+      message_kind?: string;
+      raw_message?: string;
+      card?: {
+        [key: string]: unknown;
+      };
+    };
+    InternalIMChannelOutboundPage: {
+      room_id: string;
+      another_me_actor_id: string;
+      human_actor_id: string;
+      /** Format: int64 */
+      latest_room_seq: number;
+      has_more: boolean;
+      items: components["schemas"]["InternalIMChannelOutboundEvent"][];
     };
   };
   responses: {
@@ -5928,6 +6112,111 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["VoiceLiveToolResult"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  listInternalIMChannelBindings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Enabled IM channel bindings. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InternalIMChannelBindingList"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+    };
+  };
+  reportInternalIMChannelStatus: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        bindingId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InternalIMChannelStatusReport"];
+      };
+    };
+    responses: {
+      /** @description Status recorded. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  ingestInternalIMChannelInbound: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        bindingId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InternalIMChannelInboundRequest"];
+      };
+    };
+    responses: {
+      /** @description Inbound message handled. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InternalIMChannelInboundResponse"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  listInternalIMChannelOutbound: {
+    parameters: {
+      query?: {
+        after_seq?: number;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        bindingId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Room events available for outbound delivery. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InternalIMChannelOutboundPage"];
         };
       };
       400: components["responses"]["BadRequest"];

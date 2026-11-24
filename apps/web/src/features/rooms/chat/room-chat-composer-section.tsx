@@ -324,7 +324,11 @@ export function ChannelViewOnlyBanner({
 }: ChannelViewOnlyBannerProps) {
   const t = useT();
   const channelLabel =
-    channel === "imessage" ? t(composerMessages.channelIMessage) : roomName;
+    channel === "imessage"
+      ? t(composerMessages.channelIMessage)
+      : channel === "wechat"
+        ? t(composerMessages.channelWeChat)
+        : roomName;
   return (
     <div className="px-4 pb-4 pt-2">
       <div

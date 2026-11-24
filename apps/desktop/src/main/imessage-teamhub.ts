@@ -23,6 +23,7 @@ export interface DownloadedDocument {
 }
 
 export interface AttachmentUploadInput {
+  readonly idempotencyKey: string;
   readonly filename: string;
   readonly mediaType?: string;
   readonly bytes: Uint8Array;
@@ -297,7 +298,11 @@ export class IMessageTeamHubClient implements IMessageTeamHub {
     );
     const response = await this.#call(
       `/v0/rooms/${encodeURIComponent(roomId)}/message-attachment-uploads`,
-      { method: "POST", body: form },
+      {
+        method: "POST",
+        headers: { "idempotency-key": input.idempotencyKey },
+        body: form,
+      },
     );
     if (!response.ok) return response;
     try {

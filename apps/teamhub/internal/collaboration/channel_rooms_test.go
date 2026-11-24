@@ -10,9 +10,22 @@ import (
 )
 
 func TestChannelRoomDisplayName(t *testing.T) {
-	name, ok := ChannelRoomDisplayName(httpapi.Imessage)
-	if !ok || name != "iMessage" {
-		t.Fatalf("ChannelRoomDisplayName(imessage) = (%q, %v), want (iMessage, true)", name, ok)
+	cases := []struct {
+		channel httpapi.RoomChannel
+		want    string
+	}{
+		{httpapi.RoomChannelImessage, "iMessage"},
+		{httpapi.RoomChannelWechat, "WeChat"},
+		{httpapi.RoomChannelWhatsapp, "WhatsApp"},
+		{httpapi.RoomChannelTelegram, "Telegram"},
+		{httpapi.RoomChannelDiscord, "Discord"},
+		{httpapi.RoomChannelSlack, "Slack"},
+	}
+	for _, tc := range cases {
+		name, ok := ChannelRoomDisplayName(tc.channel)
+		if !ok || name != tc.want {
+			t.Fatalf("ChannelRoomDisplayName(%q) = (%q, %v), want (%q, true)", tc.channel, name, ok, tc.want)
+		}
 	}
 	if _, ok := ChannelRoomDisplayName(httpapi.RoomChannel("unknown")); ok {
 		t.Fatal("ChannelRoomDisplayName(unknown) = true, want false")
@@ -31,7 +44,7 @@ func TestChannelRoomModelsExposeChannel(t *testing.T) {
 	if room.Kind != httpapi.RoomKindRoom {
 		t.Fatalf("room.Kind = %q, want room", room.Kind)
 	}
-	if room.Channel == nil || *room.Channel != httpapi.Imessage {
+	if room.Channel == nil || *room.Channel != httpapi.RoomChannelImessage {
 		t.Fatalf("room.Channel = %v, want imessage", room.Channel)
 	}
 
@@ -40,14 +53,14 @@ func TestChannelRoomModelsExposeChannel(t *testing.T) {
 		CreatedByActorID: creator.ID, NextRoomSeq: 1,
 		CreatedAt: now, UpdatedAt: now, ChannelKind: "imessage",
 	}, creator)
-	if listed.Channel == nil || *listed.Channel != httpapi.Imessage {
+	if listed.Channel == nil || *listed.Channel != httpapi.RoomChannelImessage {
 		t.Fatalf("listed.Channel = %v, want imessage", listed.Channel)
 	}
 
 	hit := messageSearchRoomModel(store.SearchTenantMessagesForAccountRow{
 		RoomID: "room_im", RoomName: "iMessage", ChannelKind: "imessage",
 	})
-	if hit.Channel == nil || *hit.Channel != httpapi.Imessage {
+	if hit.Channel == nil || *hit.Channel != httpapi.RoomChannelImessage {
 		t.Fatalf("hit.Channel = %v, want imessage", hit.Channel)
 	}
 }

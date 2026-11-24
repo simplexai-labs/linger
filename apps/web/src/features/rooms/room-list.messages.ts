@@ -7,6 +7,7 @@ export const roomListMessages = defineMessages("roomList", {
   quickAccess: "Quick access",
   channels: "Channels",
   channelIMessage: "iMessage",
+  channelWeChat: "WeChat",
   messages: "Messages",
   hideChatList: "Hide Chat list",
   search: "Search",

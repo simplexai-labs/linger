@@ -94,6 +94,11 @@ const roles = {
       logger: host.logger,
       http: requireHttp(host),
     }),
+  channels: async (host: RoleHost) =>
+    (await import("./channels/service.js")).startChannelsService({
+      logger: host.logger,
+      http: requireHttp(host),
+    }),
   // The Document Runtime keeps its own port on its own worker thread and logs
   // from that thread; the host logger only records the thread's restarts.
   document: async (host: RoleHost) =>
@@ -110,6 +115,7 @@ const HTTP_ROLES: ReadonlySet<RoleName> = new Set([
   "llm-wiki",
   "agent",
   "voice",
+  "channels",
 ]);
 
 /** An unset or empty NODE_SERVICES_ROLES starts every role. */

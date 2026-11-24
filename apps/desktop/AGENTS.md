@@ -592,10 +592,12 @@ Gateway and runs Agents. The daemon exits with the app.
   `text (url)`, chunks of at most 3000 characters) to the chat the person
   last wrote from, or to the first handle. Available attachments and
   `document` segments on the Message are downloaded from
-  `GET /v0/documents/{id}/downloads`, staged to a private temporary file,
-  and sent through `imsg rpc` `send` with `file` and a prefixed filename
-  caption; when download or send fails, a fallback text links to the Document
-  in Linger. Sends are at most once: the
+  `GET /v0/documents/{id}/downloads`; Markdown Documents are rendered to A4 PDF
+  with an offscreen sandboxed window (falling back to `.txt` if PDF printing
+  fails) and named after the Document title so iOS Messages Quick Look opens
+  them directly, then staged to a private temporary file and sent through
+  `imsg rpc` `send` with `file` and a prefixed filename caption; when download
+  or send fails, a fallback text links to the Document in Linger. Sends are at most once: the
   event's `room_seq` is stored as in flight first, only a send imsg proves
   never started is retried (five tries; while imsg restarts, sends wait up
   to two minutes without using a try), and an event still in flight after

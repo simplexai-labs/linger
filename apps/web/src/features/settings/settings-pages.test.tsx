@@ -169,7 +169,14 @@ describe("Settings surfaces", () => {
       within(settingsNav)
         .getAllByRole("link")
         .map((link) => link.textContent?.replace(/\s+/g, " ").trim()),
-    ).toEqual(["Profile", "Security", "Computers", "Models", "Language"]);
+    ).toEqual([
+      "Profile",
+      "Security",
+      "Computers",
+      "Channels",
+      "Models",
+      "Language",
+    ]);
     expect(
       screen.queryByRole("button", { name: "Log out" }),
     ).not.toBeInTheDocument();
@@ -374,7 +381,14 @@ describe("Settings surfaces", () => {
     const links = within(nav).getAllByRole("link");
     expect(
       links.map((link) => link.textContent?.replace(/\s+/g, " ").trim()),
-    ).toEqual(["Profile", "Security", "Computers", "Models", "Language"]);
+    ).toEqual([
+      "Profile",
+      "Security",
+      "Computers",
+      "Channels",
+      "Models",
+      "Language",
+    ]);
     for (const link of links) {
       expect(link).toHaveClass("shrink-0");
     }

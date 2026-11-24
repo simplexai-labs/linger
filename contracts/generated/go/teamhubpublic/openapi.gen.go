@@ -1928,6 +1928,102 @@ func (e GoogleCalendarAccessRole) Valid() bool {
 	}
 }
 
+// Defines values for IMChannelPairingStatus.
+const (
+	IMChannelPairingStatusAlreadyConnected  IMChannelPairingStatus = "already_connected"
+	IMChannelPairingStatusConfirmed         IMChannelPairingStatus = "confirmed"
+	IMChannelPairingStatusExpired           IMChannelPairingStatus = "expired"
+	IMChannelPairingStatusFailed            IMChannelPairingStatus = "failed"
+	IMChannelPairingStatusNeedVerifyCode    IMChannelPairingStatus = "need_verify_code"
+	IMChannelPairingStatusScanned           IMChannelPairingStatus = "scanned"
+	IMChannelPairingStatusVerifyCodeBlocked IMChannelPairingStatus = "verify_code_blocked"
+	IMChannelPairingStatusWaitingScan       IMChannelPairingStatus = "waiting_scan"
+)
+
+// Valid indicates whether the value is a known member of the IMChannelPairingStatus enum.
+func (e IMChannelPairingStatus) Valid() bool {
+	switch e {
+	case IMChannelPairingStatusAlreadyConnected:
+		return true
+	case IMChannelPairingStatusConfirmed:
+		return true
+	case IMChannelPairingStatusExpired:
+		return true
+	case IMChannelPairingStatusFailed:
+		return true
+	case IMChannelPairingStatusNeedVerifyCode:
+		return true
+	case IMChannelPairingStatusScanned:
+		return true
+	case IMChannelPairingStatusVerifyCodeBlocked:
+		return true
+	case IMChannelPairingStatusWaitingScan:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for IMChannelProvider.
+const (
+	IMChannelProviderDiscord  IMChannelProvider = "discord"
+	IMChannelProviderSlack    IMChannelProvider = "slack"
+	IMChannelProviderTelegram IMChannelProvider = "telegram"
+	IMChannelProviderWechat   IMChannelProvider = "wechat"
+	IMChannelProviderWhatsapp IMChannelProvider = "whatsapp"
+)
+
+// Valid indicates whether the value is a known member of the IMChannelProvider enum.
+func (e IMChannelProvider) Valid() bool {
+	switch e {
+	case IMChannelProviderDiscord:
+		return true
+	case IMChannelProviderSlack:
+		return true
+	case IMChannelProviderTelegram:
+		return true
+	case IMChannelProviderWechat:
+		return true
+	case IMChannelProviderWhatsapp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for IMChannelRuntimeStatus.
+const (
+	IMChannelRuntimeStatusAuthExpired  IMChannelRuntimeStatus = "auth_expired"
+	IMChannelRuntimeStatusConflict     IMChannelRuntimeStatus = "conflict"
+	IMChannelRuntimeStatusConnected    IMChannelRuntimeStatus = "connected"
+	IMChannelRuntimeStatusCooldown     IMChannelRuntimeStatus = "cooldown"
+	IMChannelRuntimeStatusDisconnected IMChannelRuntimeStatus = "disconnected"
+	IMChannelRuntimeStatusError        IMChannelRuntimeStatus = "error"
+	IMChannelRuntimeStatusStarting     IMChannelRuntimeStatus = "starting"
+)
+
+// Valid indicates whether the value is a known member of the IMChannelRuntimeStatus enum.
+func (e IMChannelRuntimeStatus) Valid() bool {
+	switch e {
+	case IMChannelRuntimeStatusAuthExpired:
+		return true
+	case IMChannelRuntimeStatusConflict:
+		return true
+	case IMChannelRuntimeStatusConnected:
+		return true
+	case IMChannelRuntimeStatusCooldown:
+		return true
+	case IMChannelRuntimeStatusDisconnected:
+		return true
+	case IMChannelRuntimeStatusError:
+		return true
+	case IMChannelRuntimeStatusStarting:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalAgentRuntimeStatusComputerStatus.
 const (
 	LocalAgentRuntimeStatusComputerStatusOffline LocalAgentRuntimeStatusComputerStatus = "offline"
@@ -3238,22 +3334,22 @@ func (e PersonalProfileSourceSelectionKind) Valid() bool {
 
 // Defines values for PersonalWikiFailureReason.
 const (
-	PersonalWikiFailureReasonComputerOffline     PersonalWikiFailureReason = "computer_offline"
-	PersonalWikiFailureReasonRuntimeAuthRequired PersonalWikiFailureReason = "runtime_auth_required"
-	PersonalWikiFailureReasonRuntimeIncompatible PersonalWikiFailureReason = "runtime_incompatible"
-	PersonalWikiFailureReasonRuntimeUnavailable  PersonalWikiFailureReason = "runtime_unavailable"
+	ComputerOffline     PersonalWikiFailureReason = "computer_offline"
+	RuntimeAuthRequired PersonalWikiFailureReason = "runtime_auth_required"
+	RuntimeIncompatible PersonalWikiFailureReason = "runtime_incompatible"
+	RuntimeUnavailable  PersonalWikiFailureReason = "runtime_unavailable"
 )
 
 // Valid indicates whether the value is a known member of the PersonalWikiFailureReason enum.
 func (e PersonalWikiFailureReason) Valid() bool {
 	switch e {
-	case PersonalWikiFailureReasonComputerOffline:
+	case ComputerOffline:
 		return true
-	case PersonalWikiFailureReasonRuntimeAuthRequired:
+	case RuntimeAuthRequired:
 		return true
-	case PersonalWikiFailureReasonRuntimeIncompatible:
+	case RuntimeIncompatible:
 		return true
-	case PersonalWikiFailureReasonRuntimeUnavailable:
+	case RuntimeUnavailable:
 		return true
 	default:
 		return false
@@ -3319,13 +3415,28 @@ func (e RoomBackgroundTaskCancelResultStatus) Valid() bool {
 
 // Defines values for RoomChannel.
 const (
-	Imessage RoomChannel = "imessage"
+	RoomChannelDiscord  RoomChannel = "discord"
+	RoomChannelImessage RoomChannel = "imessage"
+	RoomChannelSlack    RoomChannel = "slack"
+	RoomChannelTelegram RoomChannel = "telegram"
+	RoomChannelWechat   RoomChannel = "wechat"
+	RoomChannelWhatsapp RoomChannel = "whatsapp"
 )
 
 // Valid indicates whether the value is a known member of the RoomChannel enum.
 func (e RoomChannel) Valid() bool {
 	switch e {
-	case Imessage:
+	case RoomChannelDiscord:
+		return true
+	case RoomChannelImessage:
+		return true
+	case RoomChannelSlack:
+		return true
+	case RoomChannelTelegram:
+		return true
+	case RoomChannelWechat:
+		return true
+	case RoomChannelWhatsapp:
 		return true
 	default:
 		return false
@@ -4729,22 +4840,22 @@ func (e WorkItemPriority) Valid() bool {
 
 // Defines values for WorkItemResolution.
 const (
-	Completed  WorkItemResolution = "completed"
-	Duplicate  WorkItemResolution = "duplicate"
-	Failed     WorkItemResolution = "failed"
-	NotPlanned WorkItemResolution = "not_planned"
+	WorkItemResolutionCompleted  WorkItemResolution = "completed"
+	WorkItemResolutionDuplicate  WorkItemResolution = "duplicate"
+	WorkItemResolutionFailed     WorkItemResolution = "failed"
+	WorkItemResolutionNotPlanned WorkItemResolution = "not_planned"
 )
 
 // Valid indicates whether the value is a known member of the WorkItemResolution enum.
 func (e WorkItemResolution) Valid() bool {
 	switch e {
-	case Completed:
+	case WorkItemResolutionCompleted:
 		return true
-	case Duplicate:
+	case WorkItemResolutionDuplicate:
 		return true
-	case Failed:
+	case WorkItemResolutionFailed:
 		return true
-	case NotPlanned:
+	case WorkItemResolutionNotPlanned:
 		return true
 	default:
 		return false
@@ -6995,6 +7106,83 @@ type HtmlFragmentSegment struct {
 type HumanRoomCreateRequest struct {
 	Description *string `json:"description,omitempty"`
 	Name        string  `json:"name"`
+}
+
+// IMChannelBinding defines model for IMChannelBinding.
+type IMChannelBinding struct {
+	// CooldownUntil UTC timestamp in RFC 3339 format with an explicit offset.
+	CooldownUntil *Timestamp `json:"cooldown_until,omitempty"`
+
+	// CreatedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	CreatedAt    Timestamp `json:"created_at"`
+	DisplayLabel *string   `json:"display_label,omitempty"`
+	Enabled      bool      `json:"enabled"`
+
+	// Id Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	Id Id `json:"id"`
+
+	// LastInboundAt UTC timestamp in RFC 3339 format with an explicit offset.
+	LastInboundAt *Timestamp `json:"last_inbound_at,omitempty"`
+
+	// LastOutboundAt UTC timestamp in RFC 3339 format with an explicit offset.
+	LastOutboundAt *Timestamp `json:"last_outbound_at,omitempty"`
+
+	// Provider Network IM channel provider identifier.
+	Provider         IMChannelProvider `json:"provider"`
+	RemoteUserId     *string           `json:"remote_user_id,omitempty"`
+	RuntimeErrorCode *string           `json:"runtime_error_code,omitempty"`
+
+	// RuntimeStatus Live operational state of one IM channel binding.
+	RuntimeStatus IMChannelRuntimeStatus `json:"runtime_status"`
+
+	// UpdatedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	UpdatedAt Timestamp `json:"updated_at"`
+}
+
+// IMChannelListResponse defines model for IMChannelListResponse.
+type IMChannelListResponse struct {
+	// Available True when secret storage and Node Services channel supervision are available.
+	Available          bool                `json:"available"`
+	Bindings           []IMChannelBinding  `json:"bindings"`
+	SupportedProviders []IMChannelProvider `json:"supported_providers"`
+}
+
+// IMChannelPairingSession defines model for IMChannelPairingSession.
+type IMChannelPairingSession struct {
+	Binding   *IMChannelBinding `json:"binding,omitempty"`
+	ErrorCode *string           `json:"error_code,omitempty"`
+	PairingId string            `json:"pairing_id"`
+
+	// Provider Network IM channel provider identifier.
+	Provider  IMChannelProvider `json:"provider"`
+	QrCodeUrl *string           `json:"qr_code_url,omitempty"`
+
+	// Status Lifecycle state of an interactive IM channel pairing session.
+	Status IMChannelPairingStatus `json:"status"`
+}
+
+// IMChannelPairingStartRequest defines model for IMChannelPairingStartRequest.
+type IMChannelPairingStartRequest struct {
+	Force *bool `json:"force,omitempty"`
+}
+
+// IMChannelPairingStatus Lifecycle state of an interactive IM channel pairing session.
+type IMChannelPairingStatus string
+
+// IMChannelPairingVerifyRequest defines model for IMChannelPairingVerifyRequest.
+type IMChannelPairingVerifyRequest struct {
+	VerifyCode string `json:"verify_code"`
+}
+
+// IMChannelProvider Network IM channel provider identifier.
+type IMChannelProvider string
+
+// IMChannelRuntimeStatus Live operational state of one IM channel binding.
+type IMChannelRuntimeStatus string
+
+// IMChannelUpdateRequest defines model for IMChannelUpdateRequest.
+type IMChannelUpdateRequest struct {
+	Enabled bool `json:"enabled"`
 }
 
 // Id Opaque, case-sensitive identifier. Clients must not infer type or time from it.
@@ -11023,6 +11211,15 @@ type ChangePasswordJSONRequestBody = PasswordChangeRequest
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
+
+// SubmitIMChannelPairingVerifyCodeJSONRequestBody defines body for SubmitIMChannelPairingVerifyCode for application/json ContentType.
+type SubmitIMChannelPairingVerifyCodeJSONRequestBody = IMChannelPairingVerifyRequest
+
+// UpdateIMChannelJSONRequestBody defines body for UpdateIMChannel for application/json ContentType.
+type UpdateIMChannelJSONRequestBody = IMChannelUpdateRequest
+
+// StartIMChannelPairingJSONRequestBody defines body for StartIMChannelPairing for application/json ContentType.
+type StartIMChannelPairingJSONRequestBody = IMChannelPairingStartRequest
 
 // DecideDecisionJSONRequestBody defines body for DecideDecision for application/json ContentType.
 type DecideDecisionJSONRequestBody = DecisionRequest

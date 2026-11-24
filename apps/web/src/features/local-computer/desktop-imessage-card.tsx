@@ -63,7 +63,7 @@ function IMessageCard({
 }) {
   const t = useT();
   return (
-    <div className="mt-8 flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <SettingsGroup footer={t(m.footer)} label={t(m.label)}>
         <SettingsRow>
           {/* The bridge line wraps; SettingsRowText would truncate it. */}

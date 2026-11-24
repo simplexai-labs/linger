@@ -839,6 +839,28 @@ type GmailCanvasDraftLease struct {
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
 }
 
+type ImChannelBinding struct {
+	ID                string             `json:"id"`
+	TenantID          string             `json:"tenant_id"`
+	AccountID         string             `json:"account_id"`
+	HumanActorID      string             `json:"human_actor_id"`
+	Provider          string             `json:"provider"`
+	Enabled           bool               `json:"enabled"`
+	SealedCredentials []byte             `json:"sealed_credentials"`
+	ConfigJson        []byte             `json:"config_json"`
+	AdapterStateJson  []byte             `json:"adapter_state_json"`
+	OutboundRoomID    pgtype.Text        `json:"outbound_room_id"`
+	OutboundRoomSeq   int64              `json:"outbound_room_seq"`
+	PendingCardJson   []byte             `json:"pending_card_json"`
+	RuntimeStatus     string             `json:"runtime_status"`
+	RuntimeErrorCode  pgtype.Text        `json:"runtime_error_code"`
+	CooldownUntil     pgtype.Timestamptz `json:"cooldown_until"`
+	LastInboundAt     pgtype.Timestamptz `json:"last_inbound_at"`
+	LastOutboundAt    pgtype.Timestamptz `json:"last_outbound_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type LocalComputer struct {
 	ComputerID            string             `json:"computer_id"`
 	DisplayName           string             `json:"display_name"`

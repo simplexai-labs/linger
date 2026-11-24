@@ -12,6 +12,10 @@ func (a *App) agentServiceRoutes() []contractRoute {
 	memoryService := a.requireMemoryService()
 	return []contractRoute{
 		route(http.MethodPost, "/internal/agents/:agentId/access-credentials", nil, agentService, a.issueManagedAgentAccessCredential),
+		route(http.MethodGet, "/internal/v1/channels/bindings", nil, agentService, a.listInternalIMChannelBindings),
+		route(http.MethodPost, "/internal/v1/channels/bindings/:bindingId/inbound", nil, agentService, a.ingestInternalIMChannelInbound),
+		route(http.MethodGet, "/internal/v1/channels/bindings/:bindingId/outbound", teamhubinternal.ListInternalIMChannelOutboundParams{}, agentService, a.listInternalIMChannelOutbound),
+		route(http.MethodPost, "/internal/v1/channels/bindings/:bindingId/status", nil, agentService, a.reportInternalIMChannelStatus),
 		route(http.MethodGet, "/v0/agent-runtime/agents/:agentId/memory", nil, agentService, a.getAgentMemory),
 		route(http.MethodPost, "/v0/agent-runtime/agents/:agentId/memory", nil, agentService, a.commitAgentMemory),
 		route(http.MethodGet, "/v0/agent-runtime/another-me-placements", teamhubinternal.ListAnotherMePlacementsParams{}, agentService, a.listAnotherMePlacements),
