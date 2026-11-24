@@ -15,7 +15,9 @@ import {
   unavailableShortCopy,
 } from "./local-models-copy";
 import {
+  buildModelGroups,
   collapsedRowBadges,
+  compactContextLabel,
   contextLabel,
   downloadPercent,
   downloadStatusDetail,
@@ -32,8 +34,10 @@ import {
   memoryReclaimable,
   memorySegments,
   memorySummary,
+  modelBaseName,
   modelCapabilities,
   modelEntries,
+  modelGroupKey,
   parametersLabel,
   placeName,
   poolLabel,
@@ -540,8 +544,8 @@ describe("local models rules", () => {
     });
     expect(parametersLabel(moe, translate)).toBe("30B · 3B active (MoE)");
     expect(collapsedRowBadges(moe, translate)).toEqual({
-      badges: ["3B active", "Vision", "Tool use", "+2"],
-      overflowTitle: "Reasoning, Coding",
+      badges: ["3B active", "Vision", "Tool use", "+3"],
+      overflowTitle: "Reasoning, Coding, 128K",
     });
 
     const dense = localModel({
@@ -553,7 +557,7 @@ describe("local models rules", () => {
     });
     expect(parametersLabel(dense, translate)).toBe("4B (Dense)");
     expect(collapsedRowBadges(dense, translate)).toEqual({
-      badges: ["4B", "Tool use"],
+      badges: ["4B", "Tool use", "128K"],
     });
 
     // Collapsed badges depend strictly on structured fields, never name or description.
@@ -571,6 +575,7 @@ describe("local models rules", () => {
     expect(
       collapsedRowBadges(
         localModel({
+          context_tokens: 0,
           id: "llama3.3:Q4_K_M",
           name: "Llama 3.3",
           parameters: "70B",
@@ -578,6 +583,8 @@ describe("local models rules", () => {
         translate,
       ),
     ).toEqual({ badges: ["70B"] });
+    expect(compactContextLabel(512, translate)).toBeUndefined();
+    expect(compactContextLabel(204_800, translate)).toBe("200K");
   });
 
   it("identifies models on the computer and formats Agent usage chips", () => {
@@ -977,6 +984,51 @@ describe("featured Inkling 2 Mini rules", () => {
     expect(featuredInklingEntry(modelEntries(iq3Loaded))?.model.id).toBe(
       "inkling-2-mini:UD-IQ3_S",
     );
+
+    // When all Inkling variants are unavailable (e.g. 16 GB Mac), prefer the smallest memory build.
+    const bothUnavailable = labView({
+      models: [
+        modelView(
+          localModel({
+            availability: {
+              downloadable: false,
+              reason: {
+                code: "MEMORY_INSUFFICIENT",
+                have_bytes: gb(10.5),
+                need_bytes: gb(17.9),
+              },
+            },
+            fit: "none",
+            id: "inkling-2-mini:UD-Q4_K_M",
+            memory_bytes: gb(21.4),
+            name: "Inkling 2 Mini (UD-Q4_K_M)",
+            pool: undefined,
+            quant: "UD-Q4_K_M",
+          }),
+        ),
+        modelView(
+          localModel({
+            availability: {
+              downloadable: false,
+              reason: {
+                code: "MEMORY_INSUFFICIENT",
+                have_bytes: gb(10.5),
+                need_bytes: gb(13.5),
+              },
+            },
+            fit: "none",
+            id: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+            memory_bytes: gb(16.8),
+            name: "Inkling 2 Mini (UD-IQ3_XXS)",
+            pool: undefined,
+            quant: "UD-IQ3_XXS",
+          }),
+        ),
+      ],
+    });
+    expect(featuredInklingEntry(modelEntries(bothUnavailable))?.model.id).toBe(
+      "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+    );
   });
 });
 
@@ -1303,5 +1355,170 @@ describe("hostBlocker, RAM reclaimability, and diagnostics copy", () => {
         "PolyStrata",
       ),
     ).toContain("PolyStrata requires NVIDIA driver 580+");
+  });
+
+  it("groups sibling quantizations by structured source_url, moves unavailable spotlight below available, and keeps extra active variants visible", () => {
+    const qwenRepo = "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF";
+    const flashRepo = "https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF";
+    const inklingRepo = "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF";
+
+    expect(
+      modelBaseName(
+        localModel({
+          id: "qwen3.8-27b:UD-Q4_K_M",
+          name: "Qwen3.8 27B (UD-Q4_K_M)",
+          quant: "UD-Q4_K_M",
+        }),
+      ),
+    ).toBe("Qwen3.8 27B");
+    expect(
+      modelBaseName(
+        localModel({
+          id: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+          name: "Inkling 2 Mini (IQ3_XXS)",
+          quant: "UD-IQ3_XXS",
+        }),
+      ),
+    ).toBe("Inkling 2 Mini");
+    expect(
+      modelGroupKey(
+        localModel({
+          id: "qwen3.8-27b:UD-Q4_K_M",
+          name: "Qwen3.8 27B (UD-Q4_K_M)",
+          source_url: qwenRepo,
+        }),
+      ),
+    ).toBe(`source:${qwenRepo.toLowerCase()}`);
+
+    // 16 GB Mac: Ornith fits (recommended), Inkling & Flash Next are unavailable.
+    const mac16Entries = modelEntries(
+      macView({
+        models: [
+          modelView(
+            localModel({
+              engine: "llama.cpp",
+              fit: "unified",
+              id: "ornith-1.5-9b:Q4_K_M",
+              memory_bytes: gb(10.4),
+              name: "Ornith 1.5 9B (Q4_K_M)",
+              pool: "unified",
+              quant: "Q4_K_M",
+              recommended: true,
+              source_url: "https://huggingface.co/unsloth/Ornith-1.5-9B-GGUF",
+            }),
+          ),
+          modelView(
+            localModel({
+              availability: {
+                downloadable: false,
+                reason: {
+                  code: "MEMORY_INSUFFICIENT",
+                  have_bytes: gb(13),
+                  need_bytes: gb(16.2),
+                },
+              },
+              engine: "llama.cpp",
+              fit: "none",
+              id: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+              memory_bytes: gb(16.2),
+              name: "Inkling 2 Mini (UD-IQ3_XXS)",
+              pool: undefined,
+              quant: "UD-IQ3_XXS",
+              source_url: inklingRepo,
+            }),
+          ),
+          modelView(
+            localModel({
+              availability: {
+                downloadable: false,
+                reason: {
+                  code: "MEMORY_INSUFFICIENT",
+                  have_bytes: gb(13),
+                  need_bytes: gb(72),
+                },
+              },
+              engine: "llama.cpp",
+              fit: "none",
+              id: "qwen3.8-flash-next-iq2xs:GSQ-RCO-IQ2_XS",
+              memory_bytes: gb(72),
+              name: "Qwen3.8 Flash Next (GSQ-RCO-IQ2_XS)",
+              pool: undefined,
+              quant: "GSQ-RCO-IQ2_XS",
+              source_url: flashRepo,
+            }),
+          ),
+          modelView(
+            localModel({
+              availability: {
+                downloadable: false,
+                reason: {
+                  code: "MEMORY_INSUFFICIENT",
+                  have_bytes: gb(13),
+                  need_bytes: gb(88),
+                },
+              },
+              engine: "llama.cpp",
+              fit: "none",
+              id: "qwen3.8-flash-next-iq3s:GSQ-RCO-IQ3_S",
+              memory_bytes: gb(88),
+              name: "Qwen3.8 Flash Next (GSQ-RCO-IQ3_S)",
+              pool: undefined,
+              quant: "GSQ-RCO-IQ3_S",
+              source_url: flashRepo,
+            }),
+          ),
+        ],
+      }),
+    );
+    const mac16Sections = buildModelGroups(mac16Entries);
+    expect(mac16Sections.showEngineBadge).toBe(false);
+    expect(mac16Sections.spotlightPosition).toBe("afterAvailable");
+    expect(mac16Sections.available.map((g) => g.defaultEntry.model.id)).toEqual(
+      ["ornith-1.5-9b:Q4_K_M"],
+    );
+    expect(mac16Sections.unavailable).toHaveLength(1);
+    expect(
+      mac16Sections.unavailable[0]!.variants.map((v) => v.model.id),
+    ).toEqual([
+      "qwen3.8-flash-next-iq2xs:GSQ-RCO-IQ2_XS",
+      "qwen3.8-flash-next-iq3s:GSQ-RCO-IQ3_S",
+    ]);
+    expect(mac16Sections.unavailableAllMemory).toBe(true);
+
+    // When two variants of the same model are both active on computer, both surface in onComputer.
+    const dualActiveEntries = modelEntries(
+      macView({
+        models: [
+          modelView(
+            localModel({
+              engine: "llama.cpp",
+              fit: "unified",
+              id: "qwen3.8-27b:UD-Q4_K_M",
+              name: "Qwen3.8 27B (UD-Q4_K_M)",
+              pool: "unified",
+              quant: "UD-Q4_K_M",
+              source_url: qwenRepo,
+              state: "loaded",
+            }),
+          ),
+          modelView(
+            localModel({
+              engine: "llama.cpp",
+              fit: "unified",
+              id: "qwen3.8-27b-iq3s:UD-IQ3_S",
+              name: "Qwen3.8 27B (UD-IQ3_S)",
+              pool: "unified",
+              quant: "UD-IQ3_S",
+              source_url: qwenRepo,
+              state: "downloading",
+            }),
+          ),
+        ],
+      }),
+    );
+    const dualActiveSections = buildModelGroups(dualActiveEntries);
+    expect(
+      dualActiveSections.onComputer.map((g) => g.defaultEntry.model.id),
+    ).toEqual(["qwen3.8-27b:UD-Q4_K_M", "qwen3.8-27b-iq3s:UD-IQ3_S"]);
   });
 });

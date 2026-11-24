@@ -17,6 +17,8 @@ import { Icon } from "@/components/ui/icon";
 export interface SelectItemProps {
   children: ReactNode;
   disabled?: boolean;
+  /** Compact label rendered in the trigger when selected; falls back to `children`. */
+  triggerLabel?: ReactNode;
   value: string;
 }
 
@@ -101,7 +103,9 @@ export function Select({
         <span
           className={`min-w-0 flex-1 truncate ${selectedIndex >= 0 ? "" : "text-app-placeholder"}`}
         >
-          {options[selectedIndex]?.children ?? placeholder}
+          {options[selectedIndex]?.triggerLabel ??
+            options[selectedIndex]?.children ??
+            placeholder}
         </span>
         <Icon
           className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}

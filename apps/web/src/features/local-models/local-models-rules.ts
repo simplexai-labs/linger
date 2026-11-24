@@ -124,14 +124,187 @@ export function featuredInklingEntry(
     isInkling2MiniModelId(entry.model.id),
   );
   if (matching.length <= 1) return matching[0];
-  return [...matching].sort(
-    (a, b) =>
-      modelStatuses.indexOf(a.status) - modelStatuses.indexOf(b.status) ||
-      unavailableReasonPriority(a) - unavailableReasonPriority(b) ||
+  return [...matching].sort((a, b) => {
+    const statusDiff =
+      modelStatuses.indexOf(a.status) - modelStatuses.indexOf(b.status);
+    if (statusDiff !== 0) return statusDiff;
+    const reasonDiff =
+      unavailableReasonPriority(a) - unavailableReasonPriority(b);
+    if (reasonDiff !== 0) return reasonDiff;
+    if (a.status === "unavailable" && b.status === "unavailable") {
+      const aNeed =
+        a.model.availability.reason?.need_bytes ?? a.model.memory_bytes;
+      const bNeed =
+        b.model.availability.reason?.need_bytes ?? b.model.memory_bytes;
+      if (aNeed !== bNeed) return aNeed - bNeed;
+    }
+    return (
       fitOrder[a.model.fit] - fitOrder[b.model.fit] ||
       Number(b.model.recommended) - Number(a.model.recommended) ||
-      preferredInklingRank(b.model) - preferredInklingRank(a.model),
-  )[0];
+      preferredInklingRank(b.model) - preferredInklingRank(a.model)
+    );
+  })[0];
+}
+
+/**
+ * Whether a model is active on the Computer (installed, loading, downloading,
+ * or failed), as opposed to absent from disk (`available` or `unavailable`).
+ */
+export function isActiveOnComputer(status: ModelStatus): boolean {
+  return status !== "available" && status !== "unavailable";
+}
+
+const FEATURED_INKLING_GROUP_KEY = "featured:inkling-2-mini";
+
+/**
+ * Stable grouping key uniting sibling quantizations or engines of the same
+ * logical model. Derived strictly from structured fields (`id` for the featured
+ * Inkling 2 Mini family, else validated `source_url`, else full `id`).
+ */
+export function modelGroupKey(model: LocalModel): string {
+  if (isInkling2MiniModelId(model.id)) return FEATURED_INKLING_GROUP_KEY;
+  const sourceUrl = safeModelSourceUrl(model.source_url);
+  if (sourceUrl) return `source:${sourceUrl.toLowerCase()}`;
+  return `id:${model.id.toLowerCase()}`;
+}
+
+/**
+ * Clean model title for a grouped multi-version card: removes the structured
+ * trailing `(<quant>)` suffix appended by localmodels when a separate version
+ * picker shows the selected quantization.
+ */
+export function modelBaseName(model: LocalModel): string {
+  const name = model.name.trim();
+  if (model.quant) {
+    const suffix = ` (${model.quant})`;
+    if (
+      name.length > suffix.length &&
+      name.toLowerCase().endsWith(suffix.toLowerCase())
+    ) {
+      return name.slice(0, -suffix.length).trimEnd();
+    }
+  }
+  if (
+    isInkling2MiniModelId(model.id) &&
+    name.startsWith("Inkling 2 Mini (") &&
+    name.endsWith(")")
+  ) {
+    return "Inkling 2 Mini";
+  }
+  return model.name;
+}
+
+export interface ModelCardGroup {
+  /** Stable key for React rendering, expand state, and variant selection. */
+  key: string;
+  /** Best-fit variant for this Computer, shown by default. */
+  defaultEntry: ModelEntry;
+  /** All selectable variants in descending suitability order. */
+  variants: ModelEntry[];
+}
+
+export interface LibrarySections {
+  spotlight?: ModelCardGroup;
+  spotlightPosition: "top" | "afterAvailable";
+  onComputer: ModelCardGroup[];
+  available: ModelCardGroup[];
+  unavailable: ModelCardGroup[];
+  /** Show per-row engine pills when multiple engines or an accelerated engine exist. */
+  showEngineBadge: boolean;
+  /** True when every unavailable model failed solely for insufficient memory. */
+  unavailableAllMemory: boolean;
+}
+
+/**
+ * Groups ordered entries into logical model cards and page sections:
+ * Spotlight (Inkling 2 Mini), On this computer, Available to download, and
+ * Unavailable. Extra active variants of the same model stay visible as their
+ * own cards in On this computer so nothing installed or downloading is hidden.
+ */
+export function buildModelGroups(
+  entries: readonly ModelEntry[],
+): LibrarySections {
+  const engines = new Set(
+    entries.map((entry) => entry.model.engine).filter(Boolean),
+  );
+  const showEngineBadge =
+    engines.size > 1 || engines.has("polystrata") || engines.has("strata");
+
+  const grouped = new Map<string, ModelEntry[]>();
+  for (const entry of entries) {
+    const key = modelGroupKey(entry.model);
+    const list = grouped.get(key);
+    if (list) list.push(entry);
+    else grouped.set(key, [entry]);
+  }
+
+  let spotlight: ModelCardGroup | undefined;
+  const onComputer: ModelCardGroup[] = [];
+  const available: ModelCardGroup[] = [];
+  const unavailable: ModelCardGroup[] = [];
+
+  for (const [key, members] of grouped.entries()) {
+    const best =
+      key === FEATURED_INKLING_GROUP_KEY
+        ? (featuredInklingEntry(members) ?? members[0]!)
+        : members[0]!;
+    const ordered = [best, ...members.filter((item) => item !== best)];
+    const extraActive = ordered
+      .slice(1)
+      .filter((item) => isActiveOnComputer(item.status));
+    const extraSet = new Set(extraActive);
+    const primaryVariants = extraActive.length
+      ? ordered.filter((item) => !extraSet.has(item))
+      : ordered;
+    const primaryGroup: ModelCardGroup = {
+      defaultEntry: best,
+      key,
+      variants: primaryVariants,
+    };
+
+    if (key === FEATURED_INKLING_GROUP_KEY) {
+      spotlight = primaryGroup;
+    } else if (isActiveOnComputer(best.status)) {
+      onComputer.push(primaryGroup);
+    } else if (best.status === "available") {
+      available.push(primaryGroup);
+    } else {
+      unavailable.push(primaryGroup);
+    }
+
+    for (const extra of extraActive) {
+      onComputer.push({
+        defaultEntry: extra,
+        key: `active:${extra.model.id}`,
+        variants: [extra],
+      });
+    }
+  }
+
+  const spotlightPosition =
+    spotlight &&
+    spotlight.defaultEntry.status === "unavailable" &&
+    (onComputer.length > 0 || available.length > 0)
+      ? "afterAvailable"
+      : "top";
+
+  const unavailableAllMemory =
+    unavailable.length > 0 &&
+    unavailable.every(
+      (group) =>
+        group.defaultEntry.model.availability.reason?.code ===
+        "MEMORY_INSUFFICIENT",
+    );
+
+  return {
+    available,
+    onComputer,
+    showEngineBadge,
+    spotlight,
+    spotlightPosition,
+    unavailable,
+    unavailableAllMemory,
+  };
 }
 
 /** Whether at least one model on this Computer is already usable without a driver update. */
@@ -692,6 +865,12 @@ export function parametersLabel(model: LocalModel, t: Translate) {
   return scale || architecture;
 }
 
+/** Compact context badge for collapsed model rows: "128K", or undefined below 1K. */
+export function compactContextLabel(tokens: number, t: Translate) {
+  if (tokens < 1024) return undefined;
+  return t(m.contextCompact, { thousands: Math.round(tokens / 1024) });
+}
+
 function allModelBadges(model: LocalModel, t: Translate): string[] {
   const badges: string[] = [];
   if (model.active_parameters) {
@@ -701,6 +880,10 @@ function allModelBadges(model: LocalModel, t: Translate): string[] {
   }
   for (const capability of modelCapabilities(model)) {
     badges.push(capabilityCopy(capability, t));
+  }
+  const context = compactContextLabel(model.context_tokens, t);
+  if (context) {
+    badges.push(context);
   }
   return badges;
 }

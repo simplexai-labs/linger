@@ -1,6 +1,7 @@
 import {
   AiChipIcon,
   Alert02Icon,
+  ArrowDown01Icon,
   InformationCircleIcon,
   RefreshIcon,
 } from "@hugeicons/core-free-icons";
@@ -11,9 +12,17 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 
+import { AutoHeight } from "@/components/ui/auto-height";
 import { Button } from "@/components/ui/button";
 import { FormFeedback } from "@/components/ui/form-feedback";
 import { Icon } from "@/components/ui/icon";
@@ -90,8 +99,8 @@ import {
   type LocalModelsView,
 } from "./local-models-queries";
 import {
+  buildModelGroups,
   downloadStopped,
-  featuredInklingEntry,
   formatGigabytes,
   hasReadyLocalModels,
   hostBlocker,
@@ -104,6 +113,7 @@ import {
   modelEntries,
   poolFreeBytes,
   poolOf,
+  type ModelCardGroup,
   type ModelEntry,
   type ModelStatus,
 } from "./local-models-rules";
@@ -982,7 +992,12 @@ function Library({
     canManageAgents &&
     piReady &&
     (!status?.mode || status.mode === "local");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [selectedVariants, setSelectedVariants] = useState<
+    Record<string, string>
+  >({});
+  const [unavailableOpen, setUnavailableOpen] = useState(false);
+  const unavailablePanelId = useId();
   const [failure, setFailure] = useState<{
     code?: string;
     modelId: string;
@@ -1054,17 +1069,15 @@ function Library({
     () => (view.available ? modelEntries(view) : []),
     [view],
   );
-  const spotlightEntry = useMemo(
-    () => featuredInklingEntry(entries),
-    [entries],
-  );
-  const listEntries = useMemo(
-    () =>
-      spotlightEntry
-        ? entries.filter((entry) => entry.model.id !== spotlightEntry.model.id)
-        : entries,
-    [entries, spotlightEntry],
-  );
+  const sections = useMemo(() => buildModelGroups(entries), [entries]);
+  const hasUsableModels =
+    sections.onComputer.length > 0 ||
+    sections.available.length > 0 ||
+    Boolean(
+      sections.spotlight &&
+      sections.spotlight.defaultEntry.status !== "unavailable",
+    );
+  const showUnavailable = !hasUsableModels || unavailableOpen;
   const find = (modelId: string) =>
     entries.find((entry) => entry.model.id === modelId);
   const mutationKey = localModelActionMutationKey(tenantId, computerId);
@@ -1459,7 +1472,12 @@ function Library({
     void desktopDriver?.api.clearInstallState?.().catch(() => undefined);
   }
 
-  const renderModelRow = (entry: ModelEntry, inSpotlight = false) => {
+  const renderModelGroup = (group: ModelCardGroup, inSpotlight = false) => {
+    const selectedId = selectedVariants[group.key];
+    const entry =
+      (selectedId
+        ? group.variants.find((variant) => variant.model.id === selectedId)
+        : undefined) ?? group.defaultEntry;
     const modelId = entry.model.id;
     const canUseForAgents = canUseModelForAgents(entry);
     const driverReason =
@@ -1475,10 +1493,10 @@ function Library({
         computer={computer}
         disabled={offline || readOnly || switching || busy(modelId)}
         entry={entry}
-        expanded={expandedId === modelId}
+        expanded={expandedKey === group.key}
         hasReadyAlternatives={hasReadyModels}
         inSpotlight={inSpotlight}
-        key={modelId}
+        key={group.key}
         onAssignAgent={
           entry.model.pi_model && canSwitchAgents
             ? (agent) =>
@@ -1493,8 +1511,19 @@ function Library({
         onLoad={() => load(entry)}
         onRecheck={!offline && !readOnly ? onRefresh : undefined}
         onRemove={() => setDialog({ kind: "remove", modelId })}
+        onSelectVariant={
+          group.variants.length > 1
+            ? (nextModelId) =>
+                setSelectedVariants((current) => ({
+                  ...current,
+                  [group.key]: nextModelId,
+                }))
+            : undefined
+        }
         onToggle={() =>
-          setExpandedId((current) => (current === modelId ? null : modelId))
+          setExpandedKey((current) =>
+            current === group.key ? null : group.key,
+          )
         }
         onUnload={() => unload(entry)}
         onUpdateDriver={
@@ -1512,11 +1541,25 @@ function Library({
         }
         rechecking={rechecking}
         requested={requests.get(modelId)}
+        showEngineBadge={sections.showEngineBadge}
         switchingForAgents={switchingModelId === modelId}
+        variants={group.variants}
         view={view}
       />
     );
   };
+
+  const spotlightNode = (
+    <FeaturedModelSpotlight>
+      {sections.spotlight ? renderModelGroup(sections.spotlight, true) : null}
+    </FeaturedModelSpotlight>
+  );
+  const unavailableLabel = t(
+    sections.unavailableAllMemory
+      ? m.sectionNeedsMoreMemory
+      : m.sectionUnavailable,
+    { count: sections.unavailable.length },
+  );
 
   return (
     <>
@@ -1804,11 +1847,63 @@ function Library({
               </EmptyState>
             </>
           ) : (
-            <section aria-label={t(m.title)} className="mt-5 grid gap-2.5">
-              <FeaturedModelSpotlight>
-                {spotlightEntry ? renderModelRow(spotlightEntry, true) : null}
-              </FeaturedModelSpotlight>
-              {listEntries.map((entry) => renderModelRow(entry))}
+            <section aria-label={t(m.title)} className="mt-5 grid gap-4">
+              {sections.spotlightPosition === "top" ? spotlightNode : null}
+              {sections.onComputer.length > 0 ? (
+                <div className="grid gap-2.5">
+                  <h2 className="text-xs font-medium text-muted-foreground">
+                    {t(m.sectionOnComputer)}
+                  </h2>
+                  {sections.onComputer.map((group) => renderModelGroup(group))}
+                </div>
+              ) : null}
+              {sections.available.length > 0 ? (
+                <div className="grid gap-2.5">
+                  <h2 className="text-xs font-medium text-muted-foreground">
+                    {t(m.sectionAvailable)}
+                  </h2>
+                  {sections.available.map((group) => renderModelGroup(group))}
+                </div>
+              ) : null}
+              {sections.spotlightPosition === "afterAvailable"
+                ? spotlightNode
+                : null}
+              {sections.unavailable.length > 0 ? (
+                <div className="grid gap-2.5">
+                  {hasUsableModels ? (
+                    <button
+                      aria-controls={unavailablePanelId}
+                      aria-expanded={showUnavailable}
+                      className="flex items-center gap-1.5 self-start rounded-md py-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+                      onClick={() => setUnavailableOpen((current) => !current)}
+                      type="button"
+                    >
+                      <Icon
+                        className={cn(
+                          "shrink-0 transition-transform duration-200 motion-reduce:transition-none",
+                          !showUnavailable && "-rotate-90",
+                        )}
+                        icon={ArrowDown01Icon}
+                        size={14}
+                      />
+                      <span>{unavailableLabel}</span>
+                    </button>
+                  ) : (
+                    <h2 className="text-xs font-medium text-muted-foreground">
+                      {unavailableLabel}
+                    </h2>
+                  )}
+                  {showUnavailable ? (
+                    <AutoHeight appear={hasUsableModels}>
+                      <div className="grid gap-2.5" id={unavailablePanelId}>
+                        {sections.unavailable.map((group) =>
+                          renderModelGroup(group),
+                        )}
+                      </div>
+                    </AutoHeight>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
           )}
         </>
