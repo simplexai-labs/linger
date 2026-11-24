@@ -1,10 +1,19 @@
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { inflateRawSync } from "node:zlib";
 
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_LOCALMODELS_BYTES,
+  MAX_LOCALMODELS_FILES,
   collectDiagnostics,
   diagnosticsEntry,
   excludedFromDiagnostics,
@@ -57,6 +66,8 @@ describe("excludedFromDiagnostics", () => {
     "C:\\Users\\me\\AppData\\Roaming\\Linger\\Network\\Cookies",
     "/home/me/.linger/instances/desktop/.env.local",
     "/home/me/.linger/instances/desktop/postgres-password",
+    "/home/me/.linger/runtime/localmodels/state/byok.json",
+    "/home/me/.linger/runtime/localmodels/models/deployments/llm/api-key",
   ])("leaves out %s", (file) => {
     expect(excludedFromDiagnostics(file)).toBe(true);
   });
@@ -258,5 +269,171 @@ describe("collectDiagnostics", () => {
     expect(
       entries.get("linger-home/instances/desktop/native/logs/voice.log"),
     ).toContain("live session key [REDACTED] rejected\n");
+  });
+
+  it("bundles recent localmodels stack run records, deployment records, and engine logs with redaction", async () => {
+    const root = tempDirectory();
+    const userHome = path.join(root, "people", "bob");
+    const home = path.join(userHome, ".linger");
+    const output = path.join(root, "out");
+    mkdirSync(output);
+    const localmodels = path.join(home, "runtime", "localmodels");
+    write(
+      path.join(localmodels, "state", "stacks", "abcdef123456.run.json"),
+      JSON.stringify({
+        schema: "localmodels.stack-run/v1",
+        state: "failed",
+        components: [
+          {
+            component: "llm",
+            status: "failed",
+            detail: `llama-server failed in ${home} with Authorization: Bearer lm-secret-token`,
+          },
+        ],
+        api_key: "lm-inline-secret",
+      }),
+    );
+    write(
+      path.join(localmodels, "state", "stacks", "abcdef123456.progress"),
+      JSON.stringify({ schema: "localmodels.stack-apply-progress/v1" }),
+    );
+    write(
+      path.join(localmodels, "state", "stacks", ".apply.lock"),
+      "lock-file\n",
+    );
+    write(
+      path.join(localmodels, "state", "byok.json"),
+      JSON.stringify({ api_key: "byok-secret-never-bundle" }),
+    );
+    write(
+      path.join(localmodels, "state", "deployments", "local", "qwen-llm.json"),
+      JSON.stringify({
+        ok: false,
+        api_key_location: path.join(
+          localmodels,
+          "models",
+          "deployments",
+          "qwen-llm",
+          "api-key",
+        ),
+        steps: [
+          {
+            step: "start",
+            ok: false,
+            stderr: `exec failed at ${path.join(home, "runtime")} api_key=step-secret-999`,
+          },
+        ],
+      }),
+    );
+    write(
+      path.join(localmodels, "models", "deployments", "qwen-llm", "server.log"),
+      `loading model from ${path.join(home, "runtime", "localmodels", "models")}\nBearer server-log-secret\nCUDA out of memory\n`,
+    );
+    write(
+      path.join(localmodels, "models", "deployments", "qwen-llm", "api-key"),
+      "deployment-raw-key\n",
+    );
+    write(
+      path.join(localmodels, "models", "weights", "huge.gguf"),
+      "gguf-bytes",
+    );
+    const outside = path.join(root, "outside-secret.txt");
+    write(outside, "do-not-follow-symlink\n");
+    if (process.platform !== "win32") {
+      symlinkSync(
+        outside,
+        path.join(localmodels, "state", "stacks", "symlinked.run.json"),
+      );
+      mkdirSync(path.join(localmodels, "models", "deployments", "sym-llm"), {
+        recursive: true,
+      });
+      symlinkSync(
+        outside,
+        path.join(
+          localmodels,
+          "models",
+          "deployments",
+          "sym-llm",
+          "server.log",
+        ),
+      );
+    }
+
+    const { file } = await collectDiagnostics({
+      userData: path.join(root, "userData"),
+      homes: [home],
+      output,
+      summary: {},
+      userHome,
+    });
+    const entries = unzip(file);
+    expect([...entries.keys()].sort()).toEqual([
+      "linger-home/runtime/localmodels/models/deployments/qwen-llm/server.log",
+      "linger-home/runtime/localmodels/state/deployments/local/qwen-llm.json",
+      "linger-home/runtime/localmodels/state/stacks/abcdef123456.progress",
+      "linger-home/runtime/localmodels/state/stacks/abcdef123456.run.json",
+      "summary.json",
+    ]);
+    const joined = [...entries.values()].join("\n");
+    expect(joined).not.toContain(userHome);
+    expect(joined).not.toContain("lm-secret-token");
+    expect(joined).not.toContain("lm-inline-secret");
+    expect(joined).not.toContain("byok-secret-never-bundle");
+    expect(joined).not.toContain("step-secret-999");
+    expect(joined).not.toContain("server-log-secret");
+    expect(joined).not.toContain("deployment-raw-key");
+    expect(
+      entries.get(
+        "linger-home/runtime/localmodels/models/deployments/qwen-llm/server.log",
+      ),
+    ).toContain("CUDA out of memory");
+  });
+
+  it("caps localmodels stack run file count and per-file byte size", async () => {
+    const root = tempDirectory();
+    const home = path.join(root, "home");
+    const output = path.join(root, "out");
+    mkdirSync(output);
+    const stacks = path.join(home, "runtime", "localmodels", "state", "stacks");
+    const baseTime = 1_700_000_000;
+    for (let index = 0; index < MAX_LOCALMODELS_FILES + 3; index++) {
+      const target = path.join(stacks, `plan-${index}.run.json`);
+      const body =
+        index === MAX_LOCALMODELS_FILES + 2
+          ? `${"a".repeat(MAX_LOCALMODELS_BYTES + 1024)}\nfinal-failure-line\n`
+          : JSON.stringify({ index });
+      write(target, body);
+      const stamp = new Date((baseTime + index * 10) * 1000);
+      utimesSync(target, stamp, stamp);
+    }
+
+    const { file } = await collectDiagnostics({
+      userData: path.join(root, "userData"),
+      homes: [home],
+      output,
+      summary: {},
+    });
+    const entries = unzip(file);
+    const bundledRuns = [...entries.keys()]
+      .filter((entry) => entry.endsWith(".run.json"))
+      .sort();
+    expect(bundledRuns).toHaveLength(MAX_LOCALMODELS_FILES);
+    expect(bundledRuns).not.toContain(
+      "linger-home/runtime/localmodels/state/stacks/plan-0.run.json",
+    );
+    expect(bundledRuns).not.toContain(
+      "linger-home/runtime/localmodels/state/stacks/plan-1.run.json",
+    );
+    expect(bundledRuns).not.toContain(
+      "linger-home/runtime/localmodels/state/stacks/plan-2.run.json",
+    );
+    const newest = entries.get(
+      `linger-home/runtime/localmodels/state/stacks/plan-${MAX_LOCALMODELS_FILES + 2}.run.json`,
+    )!;
+    expect(newest).toMatch(/^\[first \d+ bytes left out\]\n/);
+    expect(newest).toContain("final-failure-line");
+    expect(Buffer.byteLength(newest, "utf8")).toBeLessThanOrEqual(
+      MAX_LOCALMODELS_BYTES + 128,
+    );
   });
 });

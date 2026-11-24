@@ -381,7 +381,13 @@ Gateway and runs Agents. The daemon exits with the app.
   `control.key`, `credential.json`, `launch.html`, `*.env`, `*.input.json`,
   keys, cookies, databases) never go in, every saved voice key is replaced
   wherever a log printed it, and every text passes through `redact` plus a
-  secret-key JSON filter, and the person's home folder becomes `~`. It
+  secret-key JSON filter, and the person's home folder becomes `~`. It also
+  bundles the newest bounded `localmodels` stack run records
+  (`runtime/localmodels/state/stacks/*.run.json` and `.progress`), local
+  deployment records (`runtime/localmodels/state/deployments/local/*.json`),
+  and deployment engine logs (`runtime/localmodels/models/deployments/*/server.log`),
+  capped in count and byte size and excluding `byok.json`, `api-key`, and model
+  weights. It
   imports no Electron API, so it is tested with Windows paths on any
   platform.
 - `src/main/diagnostics-upload.ts`: "Send Diagnostics" on the setup page, the
