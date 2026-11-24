@@ -915,6 +915,69 @@ describe("XaiLiveSession", () => {
     },
   );
 
+  it("lands a held local interruption when the reply finishes and server speech never starts", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    provider.emit(
+      { type: "response.created", response: { id: "r1" } },
+      {
+        type: "response.output_item.added",
+        item: { type: "message", id: "a1" },
+      },
+      { type: "response.output_audio.delta", delta: pcmBase64(5) },
+    );
+    await collect(session, 3);
+    // A cough the provider never takes for speech.
+    session.cancel({ localSpeech: true, playedMs: 500 });
+    provider.emit({ type: "response.done", response: { status: "completed" } });
+    await waitForSent(provider.sent, 3);
+    // Nothing left to cancel: the cut-off note and the truncation land now.
+    expect(provider.sent.slice(1).map((event) => event.type)).toEqual([
+      "conversation.item.create",
+      "conversation.item.truncate",
+    ]);
+    expect(provider.sent.at(-1)).toMatchObject({
+      item_id: "a1",
+      audio_end_ms: 500,
+    });
+    // Released once, it never lands again at a later speech start.
+    provider.emit({ type: "input_audio_buffer.speech_started", item_id: "u2" });
+    await collect(session, 2);
+    expect(provider.sent).toHaveLength(3);
+    await session.close();
+  });
+
+  it("releases a held truncation when a new response starts first", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    provider.emit(
+      { type: "response.created", response: { id: "r1" } },
+      {
+        type: "response.output_item.added",
+        item: { type: "message", id: "a1" },
+      },
+      { type: "response.output_audio.delta", delta: pcmBase64(5) },
+      { type: "response.done", response: { status: "completed" } },
+    );
+    await collect(session, 4);
+    session.cancel({ localSpeech: true, playedMs: 500 });
+    provider.emit({ type: "response.created", response: { id: "r2" } });
+    await waitForSent(provider.sent, 2);
+    expect(provider.sent.at(-1)).toMatchObject({
+      type: "conversation.item.truncate",
+      item_id: "a1",
+      audio_end_ms: 500,
+    });
+    provider.emit({ type: "input_audio_buffer.speech_started", item_id: "u2" });
+    await collect(session, 2);
+    expect(
+      provider.sent.filter(
+        (event) => event.type === "conversation.item.truncate",
+      ),
+    ).toHaveLength(1);
+    await session.close();
+  });
+
   it("says nothing more when a cut-off reply already called its tool", async () => {
     const provider = await fakeProvider();
     const session = await open(provider.url);

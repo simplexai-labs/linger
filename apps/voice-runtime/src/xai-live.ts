@@ -271,7 +271,13 @@ export class XaiLiveSession implements LiveSession {
   private retrying = false;
   /** The assistant item whose audio plays last, for truncation. */
   private playingItemId?: string;
-  #pendingInputEdit?: () => void;
+  /**
+   * A local barge-in's cancel and truncation, held until the provider's VAD
+   * opens the input; see cancel(). The canceled response finishing, or a new
+   * one starting, also releases it, so a sound the provider never took for
+   * speech cannot leave it to land turns later.
+   */
+  #pendingInputEdit?: { response?: Response; run: () => void };
   /** Calls handed to the worker whose outputs have not come back yet. */
   private readonly pendingCalls = new Set<string>();
   private responseWanted = false;
@@ -502,8 +508,15 @@ export class XaiLiveSession implements LiveSession {
     };
     // Editing the conversation before server VAD opens the input can stall its
     // interim transcripts until the user stops. Silence old output locally now.
-    if (localSpeech) this.#pendingInputEdit = edit;
-    else edit();
+    if (!localSpeech) return edit();
+    this.#releaseInputEdit();
+    this.#pendingInputEdit = { response: active, run: edit };
+  }
+
+  #releaseInputEdit() {
+    const pending = this.#pendingInputEdit;
+    this.#pendingInputEdit = undefined;
+    pending?.run();
   }
 
   private noteCutOff(response: Response) {
@@ -664,6 +677,7 @@ export class XaiLiveSession implements LiveSession {
   async close() {
     if (this.closing) return;
     this.closing = true;
+    this.#pendingInputEdit = undefined;
     this.socket.close(1000);
     this.end();
   }
@@ -716,8 +730,7 @@ export class XaiLiveSession implements LiveSession {
         return;
       case "input_audio_buffer.speech_started": {
         const itemId = text("item_id");
-        this.#pendingInputEdit?.();
-        this.#pendingInputEdit = undefined;
+        this.#releaseInputEdit();
         this.lastInputId = itemId;
         return this.push({ type: "speech_started", itemId });
       }
@@ -742,6 +755,7 @@ export class XaiLiveSession implements LiveSession {
         return;
       }
       case "response.created": {
+        this.#releaseInputEdit();
         const response = event.response as Record<string, unknown> | undefined;
         const metadata = response?.metadata as
           | Record<string, unknown>
@@ -829,6 +843,8 @@ export class XaiLiveSession implements LiveSession {
       case "response.done": {
         const response = this.response;
         this.response = undefined;
+        if (response && this.#pendingInputEdit?.response === response)
+          this.#releaseInputEdit();
         const status = (event.response as Record<string, unknown> | undefined)
           ?.status;
         const canceled = response?.canceled === true || status === "cancelled";

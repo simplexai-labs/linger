@@ -122,10 +122,12 @@ func (s *Service) AddRoomMembers(ctx context.Context, accountID, roomID string, 
 		return RoomMemberAdditions{}, err
 	}
 	defer tx.Rollback(ctx)
-	ids := slices.Clone(actorIDs)
-	slices.Sort(ids)
+	ids := slices.Compact(slices.Sorted(slices.Values(actorIDs)))
+	if err := lockRoomAdmissions(ctx, s.queries.WithTx(tx), roomID, ids); err != nil {
+		return RoomMemberAdditions{}, err
+	}
 	result := RoomMemberAdditions{Added: []string{}, AlreadyMembers: []string{}}
-	for _, id := range slices.Compact(ids) {
+	for _, id := range ids {
 		write, err := s.putRoomMemberTx(ctx, tx, accountID, roomID, id, httpapi.Member, by, true)
 		if err != nil {
 			return RoomMemberAdditions{}, err
@@ -140,6 +142,50 @@ func (s *Service) AddRoomMembers(ctx context.Context, accountID, roomID string, 
 		return RoomMemberAdditions{}, err
 	}
 	return result, nil
+}
+
+// lockRoomAdmissions takes the Room's membership lock and then the Agent lock
+// of every Actor that admitting ids touches, before the first member write
+// takes row locks; putRoomMemberTx takes the same locks again per Actor.
+func lockRoomAdmissions(ctx context.Context, queries *store.Queries, roomID string, ids []string) error {
+	tenantID, err := queries.GetRoomTenantID(ctx, roomID)
+	if err != nil {
+		return err
+	}
+	if err := roomcreation.LockMembership(ctx, queries, roomID); err != nil {
+		return err
+	}
+	var lockActorIDs []string
+	for _, id := range ids {
+		target, err := queries.GetActor(ctx, store.GetActorParams{ID: id, TenantID: tenantID})
+		if err != nil {
+			return err
+		}
+		touched, err := admissionActorIDs(ctx, queries, tenantID, target)
+		if err != nil {
+			return err
+		}
+		lockActorIDs = append(lockActorIDs, touched...)
+	}
+	return tenantmembership.LockAgents(ctx, queries, lockActorIDs...)
+}
+
+// admissionActorIDs is the target and, for a Human, their active AnotherMe
+// Agent, whose membership follows theirs.
+func admissionActorIDs(ctx context.Context, queries *store.Queries, tenantID string, target store.Actor) ([]string, error) {
+	if target.Kind != "human" {
+		return []string{target.ID}, nil
+	}
+	registration, err := queries.GetAnotherMeRegistration(ctx, store.GetAnotherMeRegistrationParams{
+		TenantID: tenantID, RepresentedHumanActorID: target.ID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && registration.Status != "active" {
+		return []string{target.ID}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []string{target.ID, registration.ActorID}, nil
 }
 
 type roomMemberWrite struct {
@@ -180,21 +226,13 @@ func (s *Service) putRoomMemberTx(ctx context.Context, tx pgx.Tx, accountID, roo
 	// The member write below fires a trigger that locks rooms, so every
 	// membership lock must come first. AnotherMe's membership locks with the
 	// target's, in Actor order, before that write.
-	anotherMeAgentID := ""
-	if target.Kind == "human" {
-		registration, registrationErr := queries.GetAnotherMeRegistration(ctx, store.GetAnotherMeRegistrationParams{
-			TenantID: authority.TenantID, RepresentedHumanActorID: target.ID,
-		})
-		if registrationErr != nil && !errors.Is(registrationErr, pgx.ErrNoRows) {
-			return roomMemberWrite{}, registrationErr
-		}
-		if registrationErr == nil && registration.Status == "active" {
-			anotherMeAgentID = registration.ActorID
-		}
+	lockActorIDs, err := admissionActorIDs(ctx, queries, authority.TenantID, target)
+	if err != nil {
+		return roomMemberWrite{}, err
 	}
-	lockActorIDs := []string{targetActorID}
-	if anotherMeAgentID != "" {
-		lockActorIDs = append(lockActorIDs, anotherMeAgentID)
+	anotherMeAgentID := ""
+	if len(lockActorIDs) > 1 {
+		anotherMeAgentID = lockActorIDs[1]
 	}
 	if err := tenantmembership.LockAgents(ctx, queries, lockActorIDs...); err != nil {
 		return roomMemberWrite{}, err
