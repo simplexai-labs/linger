@@ -132,6 +132,9 @@ type Daemon struct {
 	// localModelsEngine holds whether the current Agent Service declared
 	// serviceFeatureLocalModelsEngine in its welcome.
 	localModelsEngine atomic.Bool
+	// localModelsConcurrencyProbe holds whether the current Agent Service
+	// declared serviceFeatureLocalModelsConcurrencyProbe in its welcome.
+	localModelsConcurrencyProbe atomic.Bool
 	// localModelsExternalHolders holds whether the current Agent Service
 	// declared serviceFeatureLocalModelsExternalHolders in its welcome.
 	localModelsExternalHolders atomic.Bool

@@ -77,6 +77,10 @@ export const FIRST_MODEL_INVOKE_MODEL_COMPUTER_VERSION = "0.62.0";
 // the field is omitted for them.
 export const FIRST_PREVIOUS_SESSION_COMPUTER_VERSION = "0.63.0";
 
+// The first release that understands the `local_models_concurrency_probe`
+// welcome feature and gates per-model `concurrency_probing` behind it.
+export const FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION = "0.64.0";
+
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 /** Source builds report `dev` and follow the current wire contract. */
@@ -113,6 +117,8 @@ export interface LocalComputerModel {
   /** How the Runtime reaches the model: through a configured gateway (api)
    * or the signed-in account (subscription). */
   readonly link?: "api" | "subscription";
+  /** Verified effective concurrency reported by the Computer when known. */
+  readonly concurrency?: number;
 }
 
 export type LocalReasoningEffort =

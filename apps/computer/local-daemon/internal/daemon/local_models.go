@@ -33,6 +33,12 @@ const serviceFeatureLocalModelsDiagnostics = "local_models_diagnostics"
 // on unknown LocalModel properties.
 const serviceFeatureLocalModelsEngine = "local_models_engine"
 
+// serviceFeatureLocalModelsConcurrencyProbe in runner.welcome's
+// service_features says the Agent Service accepts per-model
+// concurrency_probing on LocalModel rows. Older services close the connection
+// on unknown LocalModel properties.
+const serviceFeatureLocalModelsConcurrencyProbe = "local_models_concurrency_probe"
+
 // serviceFeatureLocalModelsExternalHolders in runner.welcome's service_features
 // says the Agent Service accepts external_holders on LocalModelPool rows. Older
 // services close the connection on unknown LocalModelPool properties.
@@ -108,6 +114,9 @@ func (d *Daemon) PublishLocalModels(snapshot wire.LocalModelsSnapshot) {
 	}
 	if !d.localModelsEngine.Load() {
 		snapshot = stripLocalModelsEngine(snapshot)
+	}
+	if !d.localModelsConcurrencyProbe.Load() {
+		snapshot = stripLocalModelsConcurrencyProbe(snapshot)
 	}
 	if !d.localModelsExternalHolders.Load() {
 		snapshot = stripLocalModelsExternalHolders(snapshot)
@@ -279,6 +288,22 @@ func stripLocalModelsEngine(snapshot wire.LocalModelsSnapshot) wire.LocalModelsS
 		model.EngineLabel = ""
 		model.Concurrency = nil
 		model.HostRamBytes = nil
+		models[i] = model
+	}
+	snapshot.Models = models
+	return snapshot
+}
+
+// stripLocalModelsConcurrencyProbe omits per-model concurrency_probing when
+// talking to an Agent Service that did not announce
+// serviceFeatureLocalModelsConcurrencyProbe.
+func stripLocalModelsConcurrencyProbe(snapshot wire.LocalModelsSnapshot) wire.LocalModelsSnapshot {
+	if len(snapshot.Models) == 0 {
+		return snapshot
+	}
+	models := make([]wire.LocalModel, len(snapshot.Models))
+	for i, model := range snapshot.Models {
+		model.ConcurrencyProbing = nil
 		models[i] = model
 	}
 	snapshot.Models = models

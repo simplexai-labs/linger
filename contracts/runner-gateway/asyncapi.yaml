@@ -78,6 +78,10 @@ info:
     Per-model inference engine fields (engine, engine_label, concurrency,
     host_ram_bytes) travel only after a runner.welcome whose service_features
     names local_models_engine, advertised to Computer 0.61.0 and later.
+    Per-model concurrency_probing (indicating a post-load max-concurrency probe
+    is running before reporting loaded) travels only after a runner.welcome
+    whose service_features names local_models_concurrency_probe, advertised to
+    Computer 0.64.0 and later.
     execute with kind model_source reads or switches the Computer's model
     source. A BYOK input names its address as base_url, path and endpoint
     with an explicit protocol, and the Computer sends one request there; the

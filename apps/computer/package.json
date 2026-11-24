@@ -1,6 +1,6 @@
 {
   "name": "@linger/computer",
-  "version": "0.63.0",
+  "version": "0.64.0",
   "description": "Local Computer: resident Daemon, control CLI, and Runner Gateway transport.",
   "private": true,
   "type": "module",

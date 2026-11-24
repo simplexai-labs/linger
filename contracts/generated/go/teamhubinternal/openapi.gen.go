@@ -3383,13 +3383,16 @@ type LocalModel struct {
 	// Capabilities Capabilities verified by localmodels on this platform.
 	Capabilities *[]LocalModelCapability `json:"capabilities,omitempty"`
 
-	// Concurrency Maximum concurrent request slots configured for this model when loaded.
-	Concurrency   *int                        `json:"concurrency,omitempty"`
-	ContextTokens int64                       `json:"context_tokens"`
-	Description   string                      `json:"description"`
-	Download      *LocalModelDownloadProgress `json:"download,omitempty"`
-	DownloadBytes int64                       `json:"download_bytes"`
-	Endpoint      *LocalModelEndpoint         `json:"endpoint,omitempty"`
+	// Concurrency Maximum concurrent request slots configured or probed for this model when loaded.
+	Concurrency *int `json:"concurrency,omitempty"`
+
+	// ConcurrencyProbing True while a loaded or loading local model is running its post-load max-concurrency probe before reporting loaded.
+	ConcurrencyProbing *bool                       `json:"concurrency_probing,omitempty"`
+	ContextTokens      int64                       `json:"context_tokens"`
+	Description        string                      `json:"description"`
+	Download           *LocalModelDownloadProgress `json:"download,omitempty"`
+	DownloadBytes      int64                       `json:"download_bytes"`
+	Endpoint           *LocalModelEndpoint         `json:"endpoint,omitempty"`
 
 	// Engine Inference engine family that runs this model entry. Never inferred from name or description.
 	Engine *LocalModelEngine `json:"engine,omitempty"`

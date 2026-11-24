@@ -1194,6 +1194,7 @@
     "statusIdle": "已下载",
     "statusLoaded": "已加载",
     "statusLoading": "加载中",
+    "statusProbingConcurrency": "正在检测最大并发",
     "statusUnavailable": "无法下载",
     "statusDownloadStopped": "下载已停止",
     "endingCancel": "正在取消",

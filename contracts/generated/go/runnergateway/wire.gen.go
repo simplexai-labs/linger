@@ -1410,6 +1410,7 @@ type LocalModel struct {
 	Engine                string                      `json:"engine,omitempty"`
 	EngineLabel           string                      `json:"engine_label,omitempty"`
 	Concurrency           *uint64                     `json:"concurrency,omitempty"`
+	ConcurrencyProbing    *bool                       `json:"concurrency_probing,omitempty"`
 	HostRamBytes          *uint64                     `json:"host_ram_bytes,omitempty"`
 }
 

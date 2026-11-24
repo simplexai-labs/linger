@@ -6,11 +6,29 @@ one runtime on one computer, decides what reaches the model: each unit of work
 waits its turn by priority. Codex runs with its sub-agents turned off, because
 their requests would reach the model beside the Run's own without waiting.
 
-| Endpoint                                           | Starts at | Grows to |
-| -------------------------------------------------- | --------- | -------- |
-| A runtime whose models go through a gateway or key | 1         | 8        |
-| A runtime whose every model is on your account     | 10        | 10       |
-| A computer that does not say how it reaches them   | 1         | 8        |
+| Endpoint                                                       | Starts at | Grows to |
+| -------------------------------------------------------------- | --------- | -------- |
+| A runtime whose models go through a gateway or key             | 1         | 8        |
+| A runtime whose every model is on your account                 | 10        | 10       |
+| A computer that does not say how it reaches them               | 1         | 8        |
+| A local library model probed as single-slot (`concurrency: 1`) | 1         | 1        |
+| A local library model probed at `N >= 2`                       | `N`       | 8        |
+
+When a Computer loads a local library model whose configured concurrency
+exceeds one, its Daemon runs a one-time loopback concurrency probe before
+reporting the model loaded (showing `"Probing max concurrency"` via
+`concurrency_probing: true` while `state: "loading"`). Measured probe outcomes
+(`1` or `2`) are cached by model, engine, placement, context length, configured
+slots, and tool version, and override the raw slot count on the loaded model;
+transient probe errors and timeouts are not cached, omit `concurrency` for
+that load (falling back to `{ initial: 1, max: 8 }`), and retry on the next
+load. Only Computers that negotiate `local_models_concurrency_probe` (`0.64.0`
+or later) have their loaded `concurrency` applied by `ModelQueue`; older
+Computers stay on `{ initial: 1, max: 8 }`. A verified `1` caps the endpoint at
+`{ initial: 1, max: 1 }` without background probing, while a verified `N >= 2`
+sets `{ initial: N, max: 8 }` so the queue starts immediately at `N` and still
+allows adaptive background probing upward (and loading another local model does
+not force an already-loaded model down to `1` or reset what was learned).
 
 The number of units at once adapts to how the endpoint answers. Each request
 counts at the number of units that actually ran while it was timed, not at

@@ -309,6 +309,21 @@ downloaded model that Run's Agent names.
   compatibly (unknown `engine` or out-of-range `concurrency` is omitted,
   `engine_label` is clipped) and sent only when `runner.welcome`'s
   `service_features` names `local_models_engine` (Computer 0.61.0 or later).
+  When `localmodels` reports a `loaded` model with configured
+  `concurrency > 1`, the Daemon runs a one-time loopback concurrency probe
+  (persisting only measured results atomically in `concurrency-probes.json`
+  under the local models cache directory, keyed by model ID, engine, engine
+  label, pool, context tokens, configured concurrency, and tool version;
+  looking up deploy auth bearer tokens and endpoint model names in
+  `<LOCALMODELS_STATE>/library/models/*.json` + `<deploy_dir>/api-key`). While
+  probing runs, the row is overlaid as `state: "loading"` with
+  `concurrency_probing: true` (sent only when `runner.welcome`'s
+  `service_features` names `local_models_concurrency_probe`, Computer 0.64.0
+  or later) and `EnsureLoaded` waits for probing to finish. A measured result
+  sets `concurrency` (`1` or `2`); transient probe errors or timeouts are not
+  cached, omit `concurrency` for that load so scheduling falls back to
+  adaptive limits, and retry on the next load. Models with omitted or `<= 1`
+  configured concurrency skip probing.
   The snapshot is sent after
   every welcome, after every action or job end, and at most every 2 seconds
   for progress. When a job enters the `download` phase, the Daemon publishes

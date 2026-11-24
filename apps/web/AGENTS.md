@@ -83,7 +83,11 @@ build:assets` to check the initial JS budget.
   refusal (or while offline), the row shows a requested load or download as
   started, labels a cancel, unload or remove under way (Cancelling, Unloading,
   Removing), and spins that action's button, with the row's actions off; a
-  download the Computer accepted can be cancelled before its first progress.
+  download the Computer accepted can be cancelled before its first progress. A
+  `loading` row with `concurrency_probing: true` labels its status
+  `Probing max concurrency` (`statusProbingConcurrency`) until the one-time
+  concurrency probe finishes and publishes `loaded` with the verified
+  `concurrency`.
   Make room filters stale unloaded IDs out of `unload_first`, lists what else
   holds the pool (components and other apps) when unloading models cannot free
   enough, and says a model cannot fit only when it needs more than the pool's

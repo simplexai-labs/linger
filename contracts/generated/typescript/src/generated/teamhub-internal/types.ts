@@ -2843,8 +2843,10 @@ export interface components {
       engine?: components["schemas"]["LocalModelEngine"];
       /** @description Display-only engine version and backend for this model, such as PolyStrata 0.2.19-poly.1 · CUDA. */
       engine_label?: string;
-      /** @description Maximum concurrent request slots configured for this model when loaded. */
+      /** @description Maximum concurrent request slots configured or probed for this model when loaded. */
       concurrency?: number;
+      /** @description True while a loaded or loading local model is running its post-load max-concurrency probe before reporting loaded. */
+      concurrency_probing?: boolean;
       /**
        * Format: int64
        * @description Additional host system RAM used alongside GPU VRAM for hybrid offload engines (such as PolyStrata); absent when all weights stay in the model's primary pool.

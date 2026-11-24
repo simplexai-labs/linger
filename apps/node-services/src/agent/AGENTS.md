@@ -199,6 +199,17 @@ take precedence.
   or later (`FIRST_LOCAL_MODELS_ENGINE_COMPUTER_VERSION`); a Daemon talking to
   an older Agent Service strips `engine`, `engine_label`, `concurrency`, and
   `host_ram_bytes` from `LocalModel` rows.
+- Post-load local-model concurrency probing (`local_models_concurrency_probe`
+  in `runner.welcome`'s `service_features`) is advertised only to Computer
+  0.64.0 or later (`FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION`); a
+  Daemon talking to an older Agent Service strips `concurrency_probing` from
+  `LocalModel` rows. `ModelQueue` trusts `LocalModel.concurrency` only from
+  Computers at or above `FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION`:
+  a verified `1` locks `{ initial: 1, max: 1 }`, while a verified `N >= 2`
+  starts at `{ initial: N, max: 8 }` and retains adaptive growth above `N`
+  (older Computers and unprobed/unmeasured loads fall back to
+  `{ initial: 1, max: 8 }`). Loading another model in the library does not drop
+  the endpoint to `1` or reset an existing learned limit.
 - `local_models_external_holders` is advertised to every Computer (a Daemon
   ignores an unknown feature); a Daemon talking to an older Agent Service
   strips `external_holders` from `LocalModelPool` rows.

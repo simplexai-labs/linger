@@ -13,6 +13,7 @@ import {
   type ConcurrencyRange,
   type ModelSignal,
 } from "./adaptive-limit.js";
+import type { LocalModelsSnapshot } from "@linger/wire-contracts/runner-gateway/types";
 import type {
   LocalComputerModel,
   LocalRuntimeType,
@@ -43,19 +44,61 @@ const SUBSCRIPTION_CONCURRENCY: ConcurrencyRange = { initial: 10, max: 10 };
  * are unknown. */
 const API_CONCURRENCY: ConcurrencyRange = { initial: 1, max: 8 };
 
+function probedConcurrencyRange(limit: number): ConcurrencyRange {
+  if (limit <= 1) {
+    return { initial: 1, max: 1 };
+  }
+  return { initial: limit, max: Math.max(limit, API_CONCURRENCY.max) };
+}
+
 /**
  * Units an endpoint runs at once, from where it starts to how far probing may
- * take it. The signed-in account serves many requests and starts high. An
- * API link is often one local model every Agent shares, which answers one
- * more request only by slowing the others, so it starts at one and grows only
- * while requests stay as fast.
+ * take it. The signed-in account serves many requests and starts high. Local
+ * library models on Computers supporting concurrency probing carry a verified
+ * post-load concurrency (`concurrency`): a verified 1 stays capped at 1, while
+ * verified >= 2 starts at that limit and still allows adaptive probing up to
+ * the API ceiling. Other API links start at one and grow only while requests
+ * stay as fast.
  */
 export function endpointConcurrency(
-  models: readonly Pick<LocalComputerModel, "link">[] | undefined,
+  models:
+    | readonly (Pick<LocalComputerModel, "link" | "concurrency"> & {
+        readonly id?: string;
+      })[]
+    | undefined,
+  localModels?: LocalModelsSnapshot,
 ): ConcurrencyRange {
-  return models?.length && models.every(({ link }) => link === "subscription")
-    ? SUBSCRIPTION_CONCURRENCY
-    : API_CONCURRENCY;
+  if (models?.length && models.every(({ link }) => link === "subscription")) {
+    return SUBSCRIPTION_CONCURRENCY;
+  }
+  const explicitConcurrencies =
+    models
+      ?.map((model) => model.concurrency)
+      .filter(
+        (concurrency): concurrency is number =>
+          concurrency !== undefined &&
+          Number.isSafeInteger(concurrency) &&
+          concurrency >= 1,
+      ) ?? [];
+  if (explicitConcurrencies.length > 0) {
+    return probedConcurrencyRange(Math.min(...explicitConcurrencies));
+  }
+  const libraryRows = localModels?.available ? localModels.models : undefined;
+  if (!models?.length && libraryRows?.length) {
+    const loadedConcurrencies = libraryRows
+      .filter((row) => row.state === "loaded")
+      .map((row) => row.concurrency)
+      .filter(
+        (concurrency): concurrency is number =>
+          concurrency !== undefined &&
+          Number.isSafeInteger(concurrency) &&
+          concurrency >= 1,
+      );
+    if (loadedConcurrencies.length > 0) {
+      return probedConcurrencyRange(Math.min(...loadedConcurrencies));
+    }
+  }
+  return API_CONCURRENCY;
 }
 
 interface Waiter {
@@ -275,6 +318,19 @@ export class ModelQueue {
       state.active > cap
     ) {
       this.onInteractiveWait?.(endpoint, priority, state.active - cap);
+    }
+  }
+
+  /** Re-evaluates the endpoint limit after models or local-model probe state change and wakes waiters. */
+  refreshEndpoint(endpoint: ModelEndpoint): void {
+    const key = endpointKey(endpoint);
+    const state = this.#endpoints.get(key);
+    if (state) {
+      this.#drain(state);
+      return;
+    }
+    if (this.#limits.has(key)) {
+      this.#limit(key, endpoint);
     }
   }
 

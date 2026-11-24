@@ -177,10 +177,19 @@ export class RunnerGateway
     this.#compaction = new RunnerSessionCompaction(context, owners);
     this.#modelInvocation = new RunnerModelInvocation(context, owners);
     this.#queue = new ModelQueue(
-      (endpoint) =>
-        endpointConcurrency(
+      (endpoint) => {
+        const connection = this.#connections.getConnection(endpoint.computerId);
+        return endpointConcurrency(
           this.runtimeModels(endpoint.computerId, endpoint.runtimeType),
-        ),
+          endpoint.runtimeType === "pi" &&
+            connection?.connected &&
+            this.#connections.supportsLocalModelsConcurrencyProbe(
+              endpoint.computerId,
+            )
+            ? connection.localModelsSnapshot
+            : undefined,
+        );
+      },
       Date.now,
       // A background model call is below every Run, so it is swapped out first.
       (endpoint, priority, count) => {
@@ -395,9 +404,33 @@ export class RunnerGateway
     computerId: string,
     runtimeType: LocalRuntimeType,
   ): readonly LocalRuntimeModelDefinition[] | undefined {
-    return this.#connections.getConnection(computerId)?.connected
-      ? this.#preparation.runtimeModelsForComputer(computerId)[runtimeType]
-      : undefined;
+    const connection = this.#connections.getConnection(computerId);
+    if (!connection?.connected) return undefined;
+    const models =
+      this.#preparation.runtimeModelsForComputer(computerId)[runtimeType];
+    if (runtimeType !== "pi") return models;
+    if (!this.#connections.supportsLocalModelsConcurrencyProbe(computerId)) {
+      return models;
+    }
+    const snapshot = connection.localModelsSnapshot;
+    if (!snapshot?.available) return models;
+    const loadedConcurrency = new Map<string, number>();
+    for (const row of snapshot.models) {
+      if (
+        row.state === "loaded" &&
+        row.pi_model &&
+        typeof row.concurrency === "number" &&
+        Number.isSafeInteger(row.concurrency) &&
+        row.concurrency >= 1
+      ) {
+        loadedConcurrency.set(row.pi_model, row.concurrency);
+      }
+    }
+    if (loadedConcurrency.size === 0) return models;
+    return models.map((model) => {
+      const concurrency = loadedConcurrency.get(model.id);
+      return concurrency === undefined ? model : { ...model, concurrency };
+    });
   }
 
   supportsDurableCodexSession(runnerId: string): boolean {

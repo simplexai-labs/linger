@@ -438,15 +438,22 @@ export function ModelRow({
   const stopped = status === "failed" && downloadStopped(model);
   const where = placeName(view, model.pool, t);
   const ending = requested && endingLabels[requested];
+  const probingConcurrency =
+    status === "loading" && !started && Boolean(model.concurrency_probing);
   const tag = ending
     ? {
         dot: statusTags[status].dot,
         label: stopped && requested === "cancel" ? m.endingDiscard : ending,
         working: true,
       }
-    : stopped
-      ? { ...statusTags.failed, label: m.statusDownloadStopped }
-      : statusTags[status];
+    : probingConcurrency
+      ? {
+          ...statusTags.loading,
+          label: m.statusProbingConcurrency,
+        }
+      : stopped
+        ? { ...statusTags.failed, label: m.statusDownloadStopped }
+        : statusTags[status];
   const progress = downloadPercent(model);
   const download = formatGigabytes(model.download_bytes, t);
   const recommended = status === "available" && model.recommended;

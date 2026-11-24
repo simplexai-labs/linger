@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { LocalModelsSnapshot } from "@linger/wire-contracts/runner-gateway/types";
 import {
   endpointConcurrency,
   INTERACTIVE_STALL_MS,
@@ -972,6 +973,140 @@ describe("ModelQueue limit", () => {
     await flush();
     expect(reset.value).toBeUndefined();
   });
+
+  it("refreshes waiters when refreshEndpoint raises endpoint concurrency and skips background probing when fixed at 1", async () => {
+    const minutes = (n: number) => vi.advanceTimersByTime(n * 60_000);
+    const seconds = (n: number) => vi.advanceTimersByTime(n * 1_000);
+    const pi: ModelEndpoint = { computerId: "runner-local", runtimeType: "pi" };
+    let range = { initial: 1, max: 1 };
+    const queue = new ModelQueue(
+      () => range,
+      () => Date.now(),
+    );
+
+    // Fast background calls with fixed range { initial: 1, max: 1 } never probe above 1.
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(pi, call("wiki", `b${i}`), signal);
+      seconds(10);
+      queue.observe(pi, callLatency(200));
+      bg.release(done);
+    }
+
+    const first = await queue.acquire(pi, call("wiki", "w1"), signal);
+    const second = track(queue.acquire(pi, run("r2"), signal));
+    await flush();
+    expect(second.value).toBeUndefined();
+
+    // Even after waiting longer than probe idle time, probing remains disabled when max is 1.
+    minutes(1);
+    expect(second.value).toBeUndefined();
+
+    // Once probed concurrency rises to 2 and refreshEndpoint fires, interactive waiter is admitted at once.
+    range = { initial: 2, max: 8 };
+    queue.refreshEndpoint(pi);
+    await flush();
+    expect(second.value).toBeDefined();
+    first.release(done);
+    second.value!.release(done);
+  });
+
+  it("grows adaptively above probed concurrency 2 and preserves learned limit while another model loads", async () => {
+    const seconds = (n: number) => vi.advanceTimersByTime(n * 1_000);
+    const pi: ModelEndpoint = { computerId: "runner-local", runtimeType: "pi" };
+    const piModelA = "localmodels-library/qwen3/Qwen3-4B";
+    const piModelB = "localmodels-library/qwen3/Qwen3-8B";
+    let snapshot = localModelsSnapshot([
+      baseModel({ pi_model: piModelA, state: "loaded", concurrency: 2 }),
+      baseModel({
+        id: "qwen3-8b:Q4_K_M",
+        pi_model: piModelB,
+        state: "idle",
+      }),
+    ]);
+    const queue = new ModelQueue(
+      () =>
+        endpointConcurrency(
+          [
+            { id: piModelA, link: "api", concurrency: 2 },
+            { id: piModelB, link: "api" },
+          ],
+          snapshot,
+        ),
+      () => Date.now(),
+    );
+
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(pi, call("wiki", `b${i}`), signal);
+      seconds(10);
+      queue.observe(pi, callLatency(500));
+      bg.release(done);
+    }
+
+    // Probe 3 starts immediately from initial=2 and promotes confirmed limit to 3.
+    const p1 = await queue.acquire(pi, call("wiki", "p1"), signal);
+    const p2 = track(queue.acquire(pi, call("wiki", "p2"), signal));
+    const p3 = track(queue.acquire(pi, call("wiki", "p3"), signal));
+    await flush();
+    expect(p2.value).toBeDefined();
+    expect(p3.value).toBeDefined();
+    seconds(10);
+    queue.observe(pi, callLatency(520));
+    p1.release(done);
+    queue.observe(pi, callLatency(520));
+    p2.value!.release(done);
+    queue.observe(pi, callLatency(520));
+    p3.value!.release(done);
+    await flush();
+
+    // Loading a second model does not change the range or reset learned concurrency 3.
+    snapshot = localModelsSnapshot([
+      baseModel({ pi_model: piModelA, state: "loaded", concurrency: 2 }),
+      baseModel({
+        id: "qwen3-8b:Q4_K_M",
+        pi_model: piModelB,
+        state: "loading",
+        concurrency_probing: true,
+      }),
+    ]);
+    queue.refreshEndpoint(pi);
+
+    const r1 = await queue.acquire(pi, run("r1"), signal);
+    const r2 = track(queue.acquire(pi, run("r2"), signal));
+    const r3 = track(queue.acquire(pi, run("r3"), signal));
+    await flush();
+    expect(r2.value).toBeDefined();
+    expect(r3.value).toBeDefined();
+    r1.release(done);
+    r2.value!.release(done);
+    r3.value!.release(done);
+  });
+});
+
+const localModelsSnapshot = (
+  models: LocalModelsSnapshot["models"],
+): LocalModelsSnapshot => ({
+  available: true,
+  observed_at: "2026-11-24T00:00:00.000Z",
+  pools: [],
+  models,
+});
+
+const baseModel = (
+  overrides: Partial<LocalModelsSnapshot["models"][number]>,
+): LocalModelsSnapshot["models"][number] => ({
+  id: "qwen3-4b:Q4_K_M",
+  name: "Qwen3 4B",
+  description: "",
+  quant: "Q4_K_M",
+  context_tokens: 32_768,
+  vision: false,
+  download_bytes: 4_000,
+  memory_bytes: 5_000,
+  fit: "gpu",
+  recommended: false,
+  availability: { downloadable: true },
+  state: "loaded",
+  ...overrides,
 });
 
 describe("endpointConcurrency", () => {
@@ -987,5 +1122,87 @@ describe("endpointConcurrency", () => {
     expect(endpointConcurrency([{}])).toEqual(api);
     expect(endpointConcurrency([])).toEqual(api);
     expect(endpointConcurrency(undefined)).toEqual(api);
+  });
+
+  it("caps single-slot verified models at 1, allows adaptive growth from 2, and leaves loaded concurrency intact while another model loads", () => {
+    const piModel = "localmodels-library/qwen3/Qwen3-4B";
+    expect(
+      endpointConcurrency([{ id: piModel, link: "api", concurrency: 2 }]),
+    ).toEqual({ initial: 2, max: 8 });
+    expect(
+      endpointConcurrency([
+        { id: piModel, link: "api", concurrency: 2 },
+        { id: "other", link: "api", concurrency: 1 },
+      ]),
+    ).toEqual({ initial: 1, max: 1 });
+
+    const probingSnapshot = localModelsSnapshot([
+      baseModel({
+        pi_model: piModel,
+        state: "loading",
+        concurrency_probing: true,
+      }),
+    ]);
+    expect(
+      endpointConcurrency([{ id: piModel, link: "api" }], probingSnapshot),
+    ).toEqual({ initial: 1, max: 8 });
+    expect(
+      endpointConcurrency(
+        [{ id: "byok/gpt-4o", link: "api" }],
+        probingSnapshot,
+      ),
+    ).toEqual({ initial: 1, max: 8 });
+    expect(endpointConcurrency(undefined, probingSnapshot)).toEqual({
+      initial: 1,
+      max: 8,
+    });
+
+    const mixedSnapshot = localModelsSnapshot([
+      baseModel({
+        pi_model: piModel,
+        state: "loaded",
+        concurrency: 2,
+      }),
+      baseModel({
+        id: "qwen3-8b:Q4_K_M",
+        pi_model: "localmodels-library/qwen3/Qwen3-8B",
+        state: "loading",
+      }),
+    ]);
+    expect(
+      endpointConcurrency(
+        [
+          { id: piModel, link: "api", concurrency: 2 },
+          { id: "localmodels-library/qwen3/Qwen3-8B", link: "api" },
+        ],
+        mixedSnapshot,
+      ),
+    ).toEqual({ initial: 2, max: 8 });
+    expect(endpointConcurrency(undefined, mixedSnapshot)).toEqual({
+      initial: 2,
+      max: 8,
+    });
+
+    const loadedTwoSnapshot = localModelsSnapshot([
+      baseModel({
+        pi_model: piModel,
+        state: "loaded",
+        concurrency: 2,
+      }),
+    ]);
+    expect(endpointConcurrency(undefined, loadedTwoSnapshot)).toEqual({
+      initial: 2,
+      max: 8,
+    });
+
+    const legacyLoadedSnapshot = localModelsSnapshot([
+      baseModel({
+        pi_model: piModel,
+        state: "loaded",
+      }),
+    ]);
+    expect(
+      endpointConcurrency([{ id: piModel, link: "api" }], legacyLoadedSnapshot),
+    ).toEqual({ initial: 1, max: 8 });
   });
 });

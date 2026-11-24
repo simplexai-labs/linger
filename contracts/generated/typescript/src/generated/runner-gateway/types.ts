@@ -38,6 +38,7 @@ export type ServiceFeature =
   | "local_models_diagnostics"
   | "model_invoke_outcomes"
   | "local_models_engine"
+  | "local_models_concurrency_probe"
   | "local_model_unavailable"
   | "local_models_external_holders";
 export type JsonValue =
@@ -1500,9 +1501,13 @@ export interface LocalModel {
    */
   engine_label?: string;
   /**
-   * Maximum concurrent request slots for this model when loaded. Sent only when runner.welcome service_features names local_models_engine.
+   * Maximum concurrent request slots configured or probed for this model when loaded. Sent only when runner.welcome service_features names local_models_engine.
    */
   concurrency?: number;
+  /**
+   * True while a model is running its post-load max-concurrency probe before reporting loaded. Sent only when runner.welcome service_features names local_models_concurrency_probe.
+   */
+  concurrency_probing?: boolean;
   /**
    * Additional host system RAM used alongside GPU VRAM for hybrid offload engines. Sent only when runner.welcome service_features names local_models_engine.
    */

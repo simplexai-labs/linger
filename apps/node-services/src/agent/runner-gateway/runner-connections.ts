@@ -31,6 +31,7 @@ import {
   FIRST_LOCAL_MODELS_DIAGNOSTICS_COMPUTER_VERSION,
   FIRST_MODEL_INVOKE_OUTCOMES_COMPUTER_VERSION,
   FIRST_LOCAL_MODELS_ENGINE_COMPUTER_VERSION,
+  FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
   FIRST_SERVICE_FEATURES_COMPUTER_VERSION,
   resolveSupportedReasoningEffort,
   type LocalPlacementRequirement,
@@ -96,6 +97,7 @@ export class RunnerConnections {
       | "localModels"
       | "operations"
       | "preparation"
+      | "queue"
     >,
   ) {
     this.#open = context.options.openConnectionsLater !== true;
@@ -488,6 +490,12 @@ export class RunnerConnections {
               )
                 ? (["local_models_engine"] as const)
                 : []),
+              ...(isComputerVersionAtLeast(
+                connection.hello.daemon_version,
+                FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
+              )
+                ? (["local_models_concurrency_probe"] as const)
+                : []),
               // A Computer ignores a feature it does not know, so these
               // need no release gate.
               "local_model_unavailable",
@@ -621,6 +629,12 @@ export class RunnerConnections {
         runtimes: connection.hello.runtimes,
         runtimeDiagnostics: envelope.runtime_diagnostics,
       });
+      for (const diagnostic of envelope.runtime_diagnostics) {
+        this.owners.queue().refreshEndpoint({
+          computerId: connection.runnerId,
+          runtimeType: diagnostic.type,
+        });
+      }
       type Observation = RunnerHello["runtime_registrations"][number];
       const observe = (
         base: Pick<Observation, "tenant_id" | "owner_actor_id">,
@@ -905,6 +919,18 @@ export class RunnerConnections {
         )) &&
       connection.hello.runtime_diagnostics.some(
         ({ type, status }) => type === runtimeType && status === "ready",
+      )
+    );
+  }
+
+  /** Whether the Computer negotiates post-load local-model concurrency probing. */
+  supportsLocalModelsConcurrencyProbe(runnerId: string): boolean {
+    const connection = this.#connections.get(runnerId);
+    return (
+      connection?.connected === true &&
+      isComputerVersionAtLeast(
+        connection.hello.daemon_version,
+        FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
       )
     );
   }

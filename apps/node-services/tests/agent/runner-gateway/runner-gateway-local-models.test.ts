@@ -2,9 +2,12 @@ import type {
   AgentToDaemonEnvelope,
   CapabilityLocalModelsExecute,
   LocalModelsSnapshot,
+  RuntimeDiagnostic,
+  RuntimeDiagnostics,
 } from "@linger/wire-contracts/runner-gateway/types";
 import { parseDaemonToAgentEnvelope } from "@linger/wire-contracts/runner-gateway/validator";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { modelCallPolicies, runPriorities } from "../../../src/model-tasks.js";
 
 import {
   LocalComputerCapabilityError,
@@ -193,6 +196,44 @@ describe("Runner Gateway local models", () => {
   it.each([
     [
       "dev",
+      [
+        "local_models",
+        "byok_endpoint",
+        "local_models_diagnostics",
+        "model_invoke_outcomes",
+        "local_models_engine",
+        "local_models_concurrency_probe",
+        "local_model_unavailable",
+        "local_models_external_holders",
+      ],
+    ],
+    [
+      "0.64.0",
+      [
+        "local_models",
+        "byok_endpoint",
+        "local_models_diagnostics",
+        "model_invoke_outcomes",
+        "local_models_engine",
+        "local_models_concurrency_probe",
+        "local_model_unavailable",
+        "local_models_external_holders",
+      ],
+    ],
+    [
+      "0.63.0",
+      [
+        "local_models",
+        "byok_endpoint",
+        "local_models_diagnostics",
+        "model_invoke_outcomes",
+        "local_models_engine",
+        "local_model_unavailable",
+        "local_models_external_holders",
+      ],
+    ],
+    [
+      "0.62.0",
       [
         "local_models",
         "byok_endpoint",
@@ -587,5 +628,367 @@ describe("runner.local_models external_holders", () => {
     expect(envelope.local_models.pools[0]?.external_holders).toEqual(
       externalHolders,
     );
+  });
+});
+
+describe("runner.local_models concurrency probing and ModelQueue wiring", () => {
+  const piModel =
+    "localmodels-library/localmodels-lib-qwen3-4b-q4-k-m/Qwen3-4B-Q4_K_M";
+
+  const piDiagnostics = (): RuntimeDiagnostics => {
+    const [d0, d1, d2, d3] = runtimeDiagnostics({
+      ready: ["pi"],
+      link: "api",
+    });
+    const withPiModel = (diagnostic: RuntimeDiagnostic): RuntimeDiagnostic =>
+      diagnostic.type === "pi"
+        ? {
+            ...diagnostic,
+            models: [
+              {
+                id: piModel,
+                label: "Qwen3 4B",
+                allowed_reasoning_effort: [],
+                link: "api",
+              },
+            ],
+          }
+        : diagnostic;
+    return [withPiModel(d0), withPiModel(d1), withPiModel(d2), withPiModel(d3)];
+  };
+
+  const connectWithPi = async (daemonVersion = "0.64.0") => {
+    const computerRegistry = createTestLocalComputerRegistry();
+    computerRegistry.enroll({ ...target });
+    const gateway = createTestRunnerGateway({
+      heartbeatIntervalMs: 60_000,
+      computerRegistry,
+    });
+    const sent: AgentToDaemonEnvelope[] = [];
+    const connection = await gateway.acceptConnection(
+      {
+        runnerId: target.computerId,
+        credentialGeneration: 0,
+        tenantOwners: [
+          { tenantId: target.tenantId, ownerActorId: target.ownerActorId },
+        ],
+      },
+      {
+        type: "runner.hello",
+        platform: "linux",
+        protocol_version: "2",
+        daemon_version: daemonVersion,
+        ...currentRunnerIdentity(),
+        capabilities: [...CURRENT_RUNNER_CAPABILITIES],
+        runner_id: target.computerId,
+        display_name: "Studio",
+        connection_nonce: "nonce-probe",
+        sent_at: new Date().toISOString(),
+        runtimes: ["pi"],
+        runtime_diagnostics: piDiagnostics(),
+        workspace_grants: [],
+        agent_runners: [],
+        active_operations: [],
+      },
+      {
+        send: vi.fn(async (envelope: AgentToDaemonEnvelope) => {
+          sent.push(envelope);
+        }),
+        close: vi.fn(),
+      },
+    );
+    connections.push(connection);
+    return { gateway, connection, sent };
+  };
+
+  it("holds ModelQueue at 1 while concurrency_probing and admits 2 once probed loaded snapshot arrives", async () => {
+    const { gateway, connection } = await connectWithPi();
+    const base = snapshot("v1");
+    const probingModel = {
+      ...base.models[0]!,
+      state: "loading" as const,
+      concurrency_probing: true,
+      pi_model: piModel,
+    };
+
+    const parsedProbing = parseDaemonToAgentEnvelope({
+      type: "runner.local_models",
+      protocol_version: "2",
+      runner_id: target.computerId,
+      sent_at: new Date().toISOString(),
+      revision: 1,
+      local_models: {
+        ...base,
+        models: [probingModel, base.models[1]!],
+      },
+    });
+    if (parsedProbing.type !== "runner.local_models") {
+      throw new Error("Unexpected envelope");
+    }
+    expect(parsedProbing.local_models.models[0]?.concurrency_probing).toBe(
+      true,
+    );
+
+    await connection.receive(parsedProbing);
+    expect(
+      gateway.runtimeModels(target.computerId, "pi")?.[0]?.concurrency,
+    ).toBeUndefined();
+
+    const signal = new AbortController().signal;
+    const piEndpoint = {
+      computerId: target.computerId,
+      runtimeType: "pi" as const,
+    };
+    const first = await gateway.acquireModelCall(
+      piEndpoint,
+      { priority: runPriorities.chat, kind: "chat", key: "run-1" },
+      signal,
+    );
+    let secondAdmitted = false;
+    const secondPromise = gateway
+      .acquireModelCall(
+        piEndpoint,
+        { priority: runPriorities.chat, kind: "chat", key: "run-2" },
+        signal,
+      )
+      .then((lease) => {
+        secondAdmitted = true;
+        return lease;
+      });
+    let wikiAdmitted = false;
+    const wikiPromise = gateway
+      .acquireModelCall(
+        piEndpoint,
+        {
+          priority: modelCallPolicies.wiki.priority,
+          kind: "wiki",
+          key: "wiki-1",
+        },
+        signal,
+      )
+      .then((lease) => {
+        wikiAdmitted = true;
+        return lease;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(secondAdmitted).toBe(false);
+    expect(wikiAdmitted).toBe(false);
+
+    await connection.receive({
+      type: "runner.local_models",
+      protocol_version: "2",
+      runner_id: target.computerId,
+      sent_at: new Date().toISOString(),
+      revision: 2,
+      local_models: {
+        ...base,
+        models: [
+          {
+            ...base.models[0]!,
+            state: "loaded",
+            concurrency: 2,
+            pi_model: piModel,
+          },
+          base.models[1]!,
+        ],
+      },
+    });
+
+    expect(
+      gateway.runtimeModels(target.computerId, "pi")?.[0]?.concurrency,
+    ).toBe(2);
+
+    const second = await secondPromise;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(wikiAdmitted).toBe(false);
+
+    first.release({ outcome: "completed" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(wikiAdmitted).toBe(false);
+
+    second.release({ outcome: "completed" });
+    const wiki = await wikiPromise;
+    wiki.release({ outcome: "completed" });
+  });
+
+  it("caps Pi concurrency at 1 when probed loaded model reports concurrency 1", async () => {
+    const { gateway, connection } = await connectWithPi();
+    const base = snapshot("v1");
+    await connection.receive({
+      type: "runner.local_models",
+      protocol_version: "2",
+      runner_id: target.computerId,
+      sent_at: new Date().toISOString(),
+      revision: 1,
+      local_models: {
+        ...base,
+        models: [
+          {
+            ...base.models[0]!,
+            state: "loaded",
+            concurrency: 1,
+            pi_model: piModel,
+          },
+          base.models[1]!,
+        ],
+      },
+    });
+
+    expect(
+      gateway.runtimeModels(target.computerId, "pi")?.[0]?.concurrency,
+    ).toBe(1);
+
+    const signal = new AbortController().signal;
+    const piEndpoint = {
+      computerId: target.computerId,
+      runtimeType: "pi" as const,
+    };
+    const first = await gateway.acquireModelCall(
+      piEndpoint,
+      { priority: runPriorities.chat, kind: "chat", key: "run-1" },
+      signal,
+    );
+    let secondAdmitted = false;
+    const secondPromise = gateway
+      .acquireModelCall(
+        piEndpoint,
+        { priority: runPriorities.chat, kind: "chat", key: "run-2" },
+        signal,
+      )
+      .then((lease) => {
+        secondAdmitted = true;
+        return lease;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(secondAdmitted).toBe(false);
+
+    first.release({ outcome: "completed" });
+    const second = await secondPromise;
+    second.release({ outcome: "completed" });
+  });
+
+  it("ignores unverified concurrency from Computers below 0.64.0 and falls back to API_CONCURRENCY", async () => {
+    const { gateway, connection, sent } = await connectWithPi("0.63.0");
+    const welcome = sent.find((frame) => frame.type === "runner.welcome");
+    expect(welcome?.type).toBe("runner.welcome");
+    if (welcome?.type === "runner.welcome") {
+      expect(welcome.service_features).not.toContain(
+        "local_models_concurrency_probe",
+      );
+    }
+
+    const base = snapshot("v1");
+    await connection.receive({
+      type: "runner.local_models",
+      protocol_version: "2",
+      runner_id: target.computerId,
+      sent_at: new Date().toISOString(),
+      revision: 1,
+      local_models: {
+        ...base,
+        models: [
+          {
+            ...base.models[0]!,
+            state: "loaded",
+            concurrency: 8,
+            pi_model: piModel,
+          },
+          base.models[1]!,
+        ],
+      },
+    });
+
+    expect(
+      gateway.runtimeModels(target.computerId, "pi")?.[0]?.concurrency,
+    ).toBeUndefined();
+
+    const signal = new AbortController().signal;
+    const piEndpoint = {
+      computerId: target.computerId,
+      runtimeType: "pi" as const,
+    };
+    const first = await gateway.acquireModelCall(
+      piEndpoint,
+      { priority: runPriorities.chat, kind: "chat", key: "legacy-run-1" },
+      signal,
+    );
+    let secondAdmitted = false;
+    const secondPromise = gateway
+      .acquireModelCall(
+        piEndpoint,
+        { priority: runPriorities.chat, kind: "chat", key: "legacy-run-2" },
+        signal,
+      )
+      .then((lease) => {
+        secondAdmitted = true;
+        return lease;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(secondAdmitted).toBe(false);
+
+    first.release({ outcome: "completed" });
+    const second = await secondPromise;
+    second.release({ outcome: "completed" });
+  });
+
+  it("keeps loaded model concurrency at 2 when another local model enters loading", async () => {
+    const { gateway, connection } = await connectWithPi("0.64.0");
+    const base = snapshot("v1");
+    await connection.receive({
+      type: "runner.local_models",
+      protocol_version: "2",
+      runner_id: target.computerId,
+      sent_at: new Date().toISOString(),
+      revision: 1,
+      local_models: {
+        ...base,
+        models: [
+          {
+            ...base.models[0]!,
+            state: "loaded",
+            concurrency: 2,
+            pi_model: piModel,
+          },
+          {
+            ...base.models[1]!,
+            state: "loading",
+            concurrency_probing: true,
+            pi_model: "localmodels-library/giant/Giant",
+          },
+        ],
+      },
+    });
+
+    expect(
+      gateway.runtimeModels(target.computerId, "pi")?.[0]?.concurrency,
+    ).toBe(2);
+
+    const signal = new AbortController().signal;
+    const piEndpoint = {
+      computerId: target.computerId,
+      runtimeType: "pi" as const,
+    };
+    const first = await gateway.acquireModelCall(
+      piEndpoint,
+      { priority: runPriorities.chat, kind: "chat", key: "mixed-run-1" },
+      signal,
+    );
+    let secondAdmitted = false;
+    const secondPromise = gateway
+      .acquireModelCall(
+        piEndpoint,
+        { priority: runPriorities.chat, kind: "chat", key: "mixed-run-2" },
+        signal,
+      )
+      .then((lease) => {
+        secondAdmitted = true;
+        return lease;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(secondAdmitted).toBe(true);
+
+    const second = await secondPromise;
+    first.release({ outcome: "completed" });
+    second.release({ outcome: "completed" });
   });
 });

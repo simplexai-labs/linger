@@ -661,10 +661,13 @@ components:
           minLength: 1
           maxLength: 120
         concurrency:
-          description: Maximum concurrent request slots configured for this model when loaded.
+          description: Maximum concurrent request slots configured or probed for this model when loaded.
           type: integer
           minimum: 1
           maximum: 64
+        concurrency_probing:
+          description: True while a loaded or loading local model is running its post-load max-concurrency probe before reporting loaded.
+          type: boolean
         host_ram_bytes:
           description: Additional host system RAM used alongside GPU VRAM for hybrid offload engines (such as PolyStrata); absent when all weights stay in the model's primary pool.
           type: integer
