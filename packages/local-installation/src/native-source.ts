@@ -520,7 +520,7 @@ async function runNativeSource(
       let byokGateway: ByokGatewayFailure | undefined;
       let localModelsDegraded: LocalModelsDegraded | undefined;
       const resumeLocalModels =
-        Boolean(options.resume) &&
+        Boolean(options.resume || options.degradeLocalModels) &&
         !options.setupChoice &&
         !options.localModelsApproval &&
         !options.localModelsReplan;

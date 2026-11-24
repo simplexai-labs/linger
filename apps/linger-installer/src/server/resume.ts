@@ -141,6 +141,10 @@ export async function resumeSourceInstance(
     // A different checkout may pin newer runtimes, so only a resume on the
     // same one may reuse the installed runtime as is.
     ...(sameCheckout ? { resume: true } : {}),
+    // An app update onto a new checkout may find a local model stack it
+    // cannot bring back as saved (for example, one an earlier release
+    // stopped); the person still reaches the workspace and the Models page.
+    degradeLocalModels: true,
     onRuntimeDescriptors: options.onRuntimeDescriptors,
     signal: options.signal,
     onEvent: (event) => {

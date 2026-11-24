@@ -250,7 +250,11 @@ source under the same lock (never guessing an arbitrary idle model when no
 falling back to `stack apply`), verifies whether a saved local model
 (`localmodels/` or `localmodels-library/`) is loaded, and sets the local source again. Library-model reload failures return a failure outcome that warm
 and cold resume surface in `details.localModelsDegraded` so startup stays usable
-and the person can still reach the Models page. On cold resume, a saved `local`
+and the person can still reach the Models page. The first start after an app
+update onto a new checkout passes `degradeLocalModels` without `resume` (it
+installs newer runtimes in full) and degrades the same way, so a stack an
+earlier release left stopped, which the new kit cannot bring back as saved,
+never locks the person out. On cold resume, a saved `local`
 source preserves local mode and prepares its runtime instead of letting an older
 `setup-choice.json` overwrite `model-source.json` back to `subscription`.
 Deployments, that check and the quit-time stop share one lock per home

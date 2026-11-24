@@ -2951,6 +2951,72 @@ test("a cold resume degrades gracefully instead of blocking when local models ca
   expect(logs.join("")).toContain("Linger is starting without local models");
 });
 
+test("an app update degrades a local model stack an earlier release stopped instead of failing the start", async () => {
+  // A 0.1.6 home that was quit before the update: its deployment is marked
+  // removed in the shared tools directory, so the saved plan cannot come back
+  // and the new kit reports it changed.
+  const f = await fixture();
+  const name = "native-flow-local-models-degraded-update";
+  vi.mocked(prepareLocalModels).mockResolvedValueOnce(undefined);
+  const installed = await installNativeSource({
+    ...f,
+    name,
+    setupChoice: "local-models",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(installed.code).toBe(0);
+  const saved = await loadInstance({ name, home: f.home });
+  await stopNativeSource(saved!, new AbortController().signal);
+
+  const changed = {
+    code: 4,
+    state: "action_required" as const,
+    message:
+      "This computer's state or local model runtime changed since the plan was approved (llm, harness).",
+    details: {
+      code: "LOCAL_MODELS_RECOVERY_REQUIRED",
+      causeCode: "STACK_PLAN_CHANGED",
+      reasons: ["deployment-unavailable"],
+    },
+  };
+  vi.mocked(prepareLocalModels).mockResolvedValueOnce(changed);
+  vi.mocked(prepareModelGateway).mockRejectedValueOnce(
+    new Error("local model gateway unavailable"),
+  );
+  const updated = await installNativeSource({
+    ...f,
+    name,
+    externalComputer: true,
+    degradeLocalModels: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(updated).toMatchObject({
+    code: 0,
+    state: "ready",
+    details: {
+      localModelsDegraded: {
+        code: "LOCAL_MODELS_RECOVERY_REQUIRED",
+        reasons: ["deployment-unavailable"],
+      },
+    },
+  });
+
+  // Choosing local models again in setup still fails on the same refusal.
+  vi.mocked(prepareLocalModels).mockResolvedValueOnce(changed);
+  const chosen = await installNativeSource({
+    ...f,
+    name,
+    setupChoice: "local-models",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(chosen.code).toBe(4);
+});
+
 test("a cold resume degrades gracefully when local model preparation throws", async () => {
   const f = await fixture();
   const name = "native-flow-local-models-throw-resume";

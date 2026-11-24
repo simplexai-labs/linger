@@ -81,8 +81,9 @@ not exist yet on a `local-models` setup) has its stack and saved library model
 checked (`restoreLocalModels`), since a quit stops the models but not the
 services: a stack that is not ready gets the same restore, an unloaded saved
 local model (`localmodels/` or `localmodels-library/`) is reloaded, and the local source is applied again;
-if that restore fails or throws (or a same-checkout cold resume cannot prepare
-the local model stack or reload its saved library model), the failure is logged
+if that restore fails or throws (or a cold resume, including the first start after an app update onto a
+new checkout, cannot prepare the local model stack or reload its saved library
+model), the failure is logged
 and reported in the ready outcome's `details.localModelsDegraded` without
 failing the resume, so the person can still reach the workspace and the Models
 page. Resource-choice mismatches omit stale binding reason codes so Quick

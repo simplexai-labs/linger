@@ -53,6 +53,11 @@ export interface SourceInstallOptions {
   // Cold-resume restarts of an existing checkout reuse an installed runtime
   // after one inspection and overlap runtime preparation with service startup.
   resume?: boolean;
+  // A start from the saved setup (a resume, including the first one after an
+  // app update onto a new checkout) reports local models that do not come
+  // back instead of failing, so the person still reaches the workspace and
+  // the Models page.
+  degradeLocalModels?: boolean;
   // Passes runtime descriptors inspected during startup so callers avoid a
   // second runtime status probe.
   onRuntimeDescriptors?: (descriptors: RuntimeDescriptor[]) => void;
