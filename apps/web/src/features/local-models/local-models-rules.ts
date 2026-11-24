@@ -966,6 +966,30 @@ export function modelSourceLabel(url: string) {
   return `${parsed.host}${parsed.pathname.replace(/\/+$/, "")}`;
 }
 
+/**
+ * Normalizes a Computer's shared Bifrost gateway base URL into the
+ * OpenAI-compatible `/v1` endpoint shown alongside each loaded model's own
+ * inference server address.
+ */
+export function sharedGatewayEndpoint(
+  gatewayUrl: string | undefined,
+): string | undefined {
+  if (!gatewayUrl) return undefined;
+  try {
+    const parsed = new URL(gatewayUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return undefined;
+    }
+    const trimmedPath = parsed.pathname.replace(/\/+$/, "");
+    const apiPath = trimmedPath.endsWith("/v1")
+      ? trimmedPath
+      : `${trimmedPath}/v1`;
+    return `${parsed.origin}${apiPath}`;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Candidate local models on disk ordered loaded-first, recommended, then largest. */
 export function localSwitchTargets(view: LocalModelsView): LocalModel[] {
   return view.models

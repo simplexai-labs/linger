@@ -79,8 +79,11 @@ build:assets` to check the initial JS budget.
   capability/parameter/context badges (never matched against
   `name` or `description`), state-distinct cards (`loaded`, `recommended`,
   `failed` with short failure reasons and direct `Remove` for damaged/missing
-  files, `unavailable`), download speed/ETA, live Bifrost (`Pi`) `Gateway`
-  readiness, and top diagnostic callouts with a two-column model-card facts
+  files, `unavailable`), download speed/ETA, live Bifrost (`Pi`) `Shared
+gateway` readiness and shared `/v1` endpoint (from `model-source.status.gateway_url`,
+  also surfaced in Computer `Details`) clearly separated from each model's own
+  `Model server` address, and top diagnostic callouts with a two-column
+  model-card facts
   grid (including `Engine`, `Concurrency`, and hybrid `System memory`) from
   structured `LocalModel` fields in `local-models-rules.ts`, resolves
   Sponsor-owned Agent eligibility and `Pi` runtime switch payloads in

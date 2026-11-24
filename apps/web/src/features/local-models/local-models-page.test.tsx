@@ -1599,8 +1599,23 @@ describe("LocalModelsPage", () => {
     );
   });
 
-  it("shows Bifrost gateway readiness above Endpoint on an expanded loaded model", async () => {
-    const view = labView();
+  it("shows shared Bifrost gateway readiness and endpoint separately from each model server", async () => {
+    const view = labView({
+      models: [
+        ...labView().models,
+        modelView(
+          localModel({
+            endpoint: { base_url: "http://127.0.0.1:18103/v1" },
+            id: "spark-4b:Q4_K_M",
+            memory_bytes: gb(6.7),
+            name: "Spark 4B",
+            pi_model: "localmodels-library/spark-4b",
+            pool: "gpu:1",
+            state: "loaded",
+          }),
+        ),
+      ],
+    });
     const computer = {
       ...inventoryComputer(view),
       runtimes: [
@@ -1611,6 +1626,10 @@ describe("LocalModelsPage", () => {
               id: "localmodels-library/qwen3-coder-30b",
               label: "Qwen3 Coder 30B",
             },
+            {
+              id: "localmodels-library/spark-4b",
+              label: "Spark 4B",
+            },
           ],
           status: "ready" as const,
           type: "pi" as const,
@@ -1618,18 +1637,67 @@ describe("LocalModelsPage", () => {
         },
       ],
     };
-    await renderPage(setup([view], [computer]));
+    const fixture = setup([view], [computer]);
+    fixture.runtime.server.on("GET", modelSourcePath, ({ params }) =>
+      Response.json({
+        computer_id: params.computerId,
+        online: true,
+        status: {
+          byok: { configured: false, key_saved: false },
+          gateway_url: "http://127.0.0.1:18480",
+          mode: "local",
+          runtime: "pi",
+          runtime_model: "localmodels-library/qwen3-coder-30b",
+        },
+        viewer_is_owner: true,
+      }),
+    );
+    await renderPage(fixture);
     await findModels();
 
     fireEvent.click(screen.getByRole("button", { name: "Qwen3 Coder 30B" }));
-    const details = screen.getByRole("region", {
+    const coderDetails = screen.getByRole("region", {
       name: "Qwen3 Coder 30B details",
     });
-    expect(details).toHaveTextContent("GatewayReady · Bifrost (Pi)");
-    expect(details).toHaveTextContent("Endpointhttp://127.0.0.1:18100/v1");
+    expect(coderDetails).toHaveTextContent(
+      "Shared gatewayReady · Bifrost (Pi)http://127.0.0.1:18480/v1",
+    );
+    expect(coderDetails).toHaveTextContent(
+      "Model serverhttp://127.0.0.1:18100/v1",
+    );
+    expect(
+      within(coderDetails).getByRole("button", {
+        name: "Copy shared gateway endpoint",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(coderDetails).getByRole("button", {
+        name: "Copy Qwen3 Coder 30B model server endpoint",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Spark 4B" }));
+    const sparkDetails = screen.getByRole("region", {
+      name: "Spark 4B details",
+    });
+    expect(sparkDetails).toHaveTextContent(
+      "Shared gatewayReady · Bifrost (Pi)http://127.0.0.1:18480/v1",
+    );
+    expect(sparkDetails).toHaveTextContent(
+      "Model serverhttp://127.0.0.1:18103/v1",
+    );
+
+    // Computer Details modal also surfaces the shared Bifrost gateway instance.
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    const dialog = screen.getByRole("dialog", { name: "lab-118 details" });
+    expect(dialog).toHaveTextContent("Gateway");
+    expect(dialog).toHaveTextContent("Shared gatewayhttp://127.0.0.1:18480/v1");
+    expect(dialog).toHaveTextContent(
+      "All loaded local models on this computer share one Bifrost gateway instance.",
+    );
   });
 
-  it("reflects Pi runtime setup, catalog registration, and failure states in the Gateway row", async () => {
+  it("reflects Pi runtime setup, catalog registration, and failure states in the Shared gateway row", async () => {
     const fixture = setup([labView()]);
     await renderPage(fixture);
     await findModels();
@@ -1638,7 +1706,10 @@ describe("LocalModelsPage", () => {
     const details = screen.getByRole("region", {
       name: "Qwen3 Coder 30B details",
     });
-    expect(details).toHaveTextContent("GatewayBifrost · Pi not installed");
+    expect(details).toHaveTextContent(
+      "Shared gatewayBifrost · Pi not installed",
+    );
+    expect(details).toHaveTextContent("Model serverhttp://127.0.0.1:18100/v1");
     expect(
       screen.queryByRole("button", { name: /Use Qwen3 Coder 30B with/u }),
     ).toBeNull();
@@ -1661,7 +1732,9 @@ describe("LocalModelsPage", () => {
       type: "resource.invalidated",
     });
     await waitFor(() =>
-      expect(details).toHaveTextContent("GatewayBifrost · Setting up Pi…"),
+      expect(details).toHaveTextContent(
+        "Shared gatewayBifrost · Setting up Pi…",
+      ),
     );
     expect(
       screen.queryByRole("button", { name: /Use Qwen3 Coder 30B with/u }),
@@ -1682,7 +1755,7 @@ describe("LocalModelsPage", () => {
     });
     await waitFor(() =>
       expect(details).toHaveTextContent(
-        "GatewayBifrost · Registering with Pi…",
+        "Shared gatewayBifrost · Registering with Pi…",
       ),
     );
     expect(
@@ -1703,7 +1776,9 @@ describe("LocalModelsPage", () => {
       type: "resource.invalidated",
     });
     await waitFor(() =>
-      expect(details).toHaveTextContent("GatewayBifrost · Pi unavailable"),
+      expect(details).toHaveTextContent(
+        "Shared gatewayBifrost · Pi unavailable",
+      ),
     );
     await waitFor(() =>
       expect(

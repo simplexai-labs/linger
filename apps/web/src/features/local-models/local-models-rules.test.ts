@@ -42,6 +42,7 @@ import {
   poolOtherBytes,
   poolUnaccountedBytes,
   safeModelSourceUrl,
+  sharedGatewayEndpoint,
   speedLabel,
   usedByBadge,
 } from "./local-models-rules";
@@ -688,6 +689,21 @@ describe("local models rules", () => {
     expect(safeModelSourceUrl("http://example.com/model")).toBeUndefined();
     const safe = safeModelSourceUrl("https://huggingface.co/Qwen/Qwen3-4B/");
     expect(safe).toBe("https://huggingface.co/Qwen/Qwen3-4B/");
+    expect(sharedGatewayEndpoint("http://127.0.0.1:18480")).toBe(
+      "http://127.0.0.1:18480/v1",
+    );
+    expect(sharedGatewayEndpoint("http://127.0.0.1:18480/")).toBe(
+      "http://127.0.0.1:18480/v1",
+    );
+    expect(sharedGatewayEndpoint("http://127.0.0.1:18480/v1/")).toBe(
+      "http://127.0.0.1:18480/v1",
+    );
+    expect(sharedGatewayEndpoint("https://gw.local/proxy")).toBe(
+      "https://gw.local/proxy/v1",
+    );
+    expect(sharedGatewayEndpoint("ftp://127.0.0.1:18480")).toBeUndefined();
+    expect(sharedGatewayEndpoint("not a url")).toBeUndefined();
+    expect(sharedGatewayEndpoint(undefined)).toBeUndefined();
     expect(
       downloadStatusDetail(
         localModel({

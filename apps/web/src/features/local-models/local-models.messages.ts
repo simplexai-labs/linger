@@ -154,14 +154,19 @@ export const localModelsMessages = defineMessages("localModels", {
   discardDownload: "Discard download",
 
   // The details of a model and of a Computer.
-  copyEndpointOf: "Copy {name} endpoint",
-  copiedEndpointOf: "Copied {name} endpoint",
-  copyEndpoint: "Copy endpoint",
+  copyEndpointOf: "Copy {name} model server endpoint",
+  copiedEndpointOf: "Copied {name} model server endpoint",
+  copyEndpoint: "Copy model server endpoint",
+  copyGatewayEndpoint: "Copy shared gateway endpoint",
+  copiedGatewayEndpoint: "Copied shared gateway endpoint",
   gatewayPiNotInstalled: "Bifrost · Pi not installed",
   gatewayReady: "Ready · Bifrost (Pi)",
   gatewayRegistering: "Bifrost · Registering with Pi…",
   gatewaySettingUp: "Bifrost · Setting up Pi…",
   gatewayPiUnavailable: "Bifrost · Pi unavailable",
+  gatewaySection: "Gateway",
+  gatewaySharedNote:
+    "All loaded local models on this computer share one Bifrost gateway instance.",
   factLastDownload: "Last download",
   factLastLoad: "Last load",
   factWhyNot: "Why not",
@@ -182,8 +187,8 @@ export const localModelsMessages = defineMessages("localModels", {
   factLicense: "License",
   factUsedBy: "Used by",
   factSource: "Source",
-  factGateway: "Gateway",
-  factEndpoint: "Endpoint",
+  factGateway: "Shared gateway",
+  factEndpoint: "Model server",
   factFreeDisk: "Free disk",
   memoryOn: "{size} on {place}",
   idleUsedWarning: {
