@@ -504,6 +504,7 @@ func run(args []string) (resultErr error) {
 	go func() {
 		monitorDone <- provider.MonitorRuntimeDiagnostics(ctx, provider.RuntimeMonitorOptions{
 			Initial:               rawDiscovered,
+			InitialPublished:      &discovered,
 			Discovery:             currentDiscoveryOptions(),
 			ResolveDiscovery:      currentDiscoveryOptions,
 			Shape:                 shapeDiscovered,

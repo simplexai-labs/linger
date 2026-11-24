@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,6 +49,29 @@ type PiCatalog struct {
 	// libraryOnly is whether the last merge reported Pi ready only because
 	// library models filled its empty catalog.
 	libraryOnly atomic.Bool
+	// reported holds, by log event, the condition last logged, so a
+	// condition that lasts is logged once, not on every discovery.
+	reportedMu sync.Mutex
+	reported   map[string]string
+}
+
+// report logs event when its condition differs from the one last logged; an
+// empty condition clears it.
+func (c *PiCatalog) report(event, condition string, attrs ...any) {
+	c.reportedMu.Lock()
+	defer c.reportedMu.Unlock()
+	if condition == "" {
+		delete(c.reported, event)
+		return
+	}
+	if c.reported[event] == condition {
+		return
+	}
+	if c.reported == nil {
+		c.reported = make(map[string]string)
+	}
+	c.reported[event] = condition
+	slog.Warn(event, attrs...)
 }
 
 // NewPiCatalog returns the catalog kept in directory, the parent of the
@@ -102,7 +126,7 @@ func (c *PiCatalog) Merge(diagnostics []provider.RuntimeDiagnostic, source *Over
 			if !ok {
 				entry = provider.RuntimeModel{ID: row.PiModel, Label: row.Name, AllowedReasoningEffort: []string{}}
 				if row.ContextTokens > 0 {
-					entry.ContextWindow = int(min(row.ContextTokens, uint64(1<<31-1)))
+					entry.ContextWindow = int(min(row.ContextTokens, uint64(provider.MaxRuntimeModelContextWindow)))
 				}
 			}
 			library = append(library, entry)
@@ -139,11 +163,16 @@ func (c *PiCatalog) Merge(diagnostics []provider.RuntimeDiagnostic, source *Over
 		if entry.AllowedReasoningEffort == nil {
 			entry.AllowedReasoningEffort = []string{}
 		}
+		if !provider.ValidRuntimeModel(entry) {
+			continue
+		}
 		models = append(models, entry)
 	}
+	truncated := ""
 	if dropped > 0 {
-		slog.Warn("local_models.pi_catalog_truncated", "dropped", dropped)
+		truncated = strconv.Itoa(dropped)
 	}
+	c.report("local_models.pi_catalog_truncated", truncated, "dropped", dropped)
 	libraryOnly := len(models) > len(pi.Models) && len(pi.Models) == 0 && pi.Status == "authentication_required" &&
 		pi.Error != nil && pi.Error.Code == "RUNTIME_AUTHENTICATION_REQUIRED"
 	c.libraryOnly.Store(libraryOnly)
@@ -220,14 +249,23 @@ func (c *PiCatalog) read() map[string]provider.RuntimeModel {
 		err = errors.New("unknown schema")
 	}
 	if err != nil {
-		slog.Warn("local_models.pi_catalog_invalid", "error", err)
+		c.report("local_models.pi_catalog_invalid", err.Error(), "error", err)
 		return models
 	}
+	invalid := 0
 	for id, model := range document.Models {
-		if id != "" && model.ID == id {
-			models[id] = model
+		// An entry the catalog could not carry is dropped, never sent.
+		if id == "" || model.ID != id || !provider.ValidRuntimeModel(model) {
+			invalid++
+			continue
 		}
+		models[id] = model
 	}
+	condition := ""
+	if invalid > 0 {
+		condition = "entries:" + strconv.Itoa(invalid)
+	}
+	c.report("local_models.pi_catalog_invalid", condition, "invalid_entries", invalid)
 	return models
 }
 

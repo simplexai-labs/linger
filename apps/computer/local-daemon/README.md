@@ -236,7 +236,7 @@ downloaded model that Run's Agent names.
   catalog, and one goes when its row leaves the library. The runtime
   monitor probes from Pi's own result and adds library models only to what
   it publishes, so an authentication refresh neither keeps a merged model
-  nor undoes the `ready`. A status read whose set of such models differs
+  nor undoes the `ready`; its retain rules treat a Pi published `ready` this way like a natively ready one, so a probe that times out during a load does not report it failed. A remembered entry the catalog schema would refuse is dropped, never sent. A status read whose set of such models differs
   from the last one, including the first read that finds any and the first
   after a failed read, asks for discovery again.
 - Jobs. A download or load runs in its own process group and writes its event

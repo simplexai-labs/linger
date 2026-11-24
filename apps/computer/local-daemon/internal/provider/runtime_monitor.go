@@ -36,6 +36,9 @@ type RuntimeMonitorOptions struct {
 	// example after a local model load changed Pi's model list. The request
 	// waits while FullRefreshAllowed is false.
 	Refresh <-chan struct{}
+	// InitialPublished is what the caller already published for Initial,
+	// such as the hello's diagnostics; nil publishes Shape(Initial).
+	InitialPublished *DiscoveryResult
 }
 
 const transientRuntimeFailureThreshold = 2
@@ -66,6 +69,9 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 	}
 	current := options.Initial
 	published := shape(current)
+	if options.InitialPublished != nil {
+		published = *options.InitialPublished
+	}
 	activeDiscovery := resolveDiscovery()
 	prevEnv := maps.Clone(activeDiscovery.Environment)
 	prevPaths := maps.Clone(activeDiscovery.ConfiguredPaths)
@@ -106,15 +112,15 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 						delete(authenticationFailures, diagnostic.Type)
 					}
 				}
-				next = retainReadyRuntimesDuringTransientFailures(current, next, transientFailures)
+				next = retainReadyRuntimesDuringTransientFailures(current, published, next, transientFailures)
 			}
 		} else {
 			next, err = refreshRuntimeAuthentication(ctx, current, activeDiscovery, tick%options.FullRefreshEveryTicks == 0)
 			if err == nil {
 				if options.RuntimeBusy != nil && options.RuntimeBusy() {
-					next = retainReadyRuntimesDuringInconclusiveProbes(current, next)
+					next = retainReadyRuntimesDuringInconclusiveProbes(current, published, next)
 				}
-				next = retainReadyRuntimesDuringTransientFailures(current, next, authenticationFailures)
+				next = retainReadyRuntimesDuringTransientFailures(current, published, next, authenticationFailures)
 			}
 		}
 		if err != nil {
@@ -142,14 +148,28 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 	}
 }
 
-func retainReadyRuntimesDuringTransientFailures(current, next DiscoveryResult, failures map[string]int) DiscoveryResult {
+// publishedReady reports whether runtimeType was published ready. The
+// retain rules restore the previous unshaped diagnostic but decide on what
+// was published: a Shape can report a Runtime ready that its own probe did
+// not (Pi made ready by the Computer's local models), and a failed probe of
+// that Runtime must be retained just as one of a natively ready Runtime.
+func publishedReady(current, published DiscoveryResult, runtimeType string) bool {
+	for _, result := range []DiscoveryResult{current, published} {
+		if previous := findRuntimeDiagnostic(result.Diagnostics, runtimeType); previous != nil && previous.Status == "ready" {
+			return true
+		}
+	}
+	return false
+}
+
+func retainReadyRuntimesDuringTransientFailures(current, published, next DiscoveryResult, failures map[string]int) DiscoveryResult {
 	diagnostics := append([]RuntimeDiagnostic(nil), next.Diagnostics...)
 	for index := range diagnostics {
 		previous := findRuntimeDiagnostic(current.Diagnostics, diagnostics[index].Type)
 		if previous == nil {
 			continue
 		}
-		if previous.Status == "ready" && !runtimeExecutableChanged(*previous) && previous.ExecutablePath == diagnostics[index].ExecutablePath &&
+		if publishedReady(current, published, diagnostics[index].Type) && !runtimeExecutableChanged(*previous) && previous.ExecutablePath == diagnostics[index].ExecutablePath &&
 			(diagnostics[index].Status == "incompatible" || diagnostics[index].Status == "error") &&
 			(diagnostics[index].Type != "codex" || diagnostics[index].ModelCatalogError == "") {
 			failures[diagnostics[index].Type]++
@@ -167,12 +187,12 @@ func retainReadyRuntimesDuringTransientFailures(current, next DiscoveryResult, f
 // retainReadyRuntimesDuringInconclusiveProbes keeps a ready Runtime ready
 // when its auth probe neither succeeded nor reported a logout, which a busy
 // machine causes by timing the probe out. A real logout still goes through.
-func retainReadyRuntimesDuringInconclusiveProbes(current, next DiscoveryResult) DiscoveryResult {
+func retainReadyRuntimesDuringInconclusiveProbes(current, published, next DiscoveryResult) DiscoveryResult {
 	diagnostics := append([]RuntimeDiagnostic(nil), next.Diagnostics...)
 	changed := false
 	for index := range diagnostics {
 		previous := findRuntimeDiagnostic(current.Diagnostics, diagnostics[index].Type)
-		if previous == nil || previous.Status != "ready" || !diagnostics[index].authProbeFailed {
+		if previous == nil || !publishedReady(current, published, diagnostics[index].Type) || !diagnostics[index].authProbeFailed {
 			continue
 		}
 		diagnostics[index] = *previous

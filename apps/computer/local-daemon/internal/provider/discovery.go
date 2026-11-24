@@ -335,6 +335,34 @@ const (
 	MaxRuntimeModelTextRunes = 160
 )
 
+// MaxRuntimeModelContextWindow is the largest context window a catalog
+// reports, as the Runner Gateway schema bounds it.
+const MaxRuntimeModelContextWindow = maxModelContextWindow
+
+// ValidRuntimeModel reports whether model has the shape normalizeRuntimeModels
+// gives every catalog entry, which the Runner Gateway schema accepts: an ID
+// and a label within the bound, known and distinct reasoning efforts with
+// the default among them, a context window within the bound, and a known
+// link.
+func ValidRuntimeModel(model RuntimeModel) bool {
+	if strings.TrimSpace(model.ID) != model.ID || model.ID == "" || len([]rune(model.ID)) > MaxRuntimeModelTextRunes ||
+		model.Label == "" || len([]rune(model.Label)) > MaxRuntimeModelTextRunes || model.AllowedReasoningEffort == nil {
+		return false
+	}
+	for index, effort := range model.AllowedReasoningEffort {
+		if !validRuntimeReasoningEffort(effort) || slices.Contains(model.AllowedReasoningEffort[:index], effort) {
+			return false
+		}
+	}
+	if model.DefaultReasoningEffort != "" && !slices.Contains(model.AllowedReasoningEffort, model.DefaultReasoningEffort) {
+		return false
+	}
+	if model.ContextWindow < 0 || model.ContextWindow > maxModelContextWindow {
+		return false
+	}
+	return model.Link == "" || model.Link == linkAPI || model.Link == linkSubscription
+}
+
 // ClipRuntimeModelLabel cuts a model label to the catalog bound.
 func ClipRuntimeModelLabel(label string) string {
 	return truncateRunes(label, MaxRuntimeModelTextRunes)

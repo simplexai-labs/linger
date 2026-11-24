@@ -1,9 +1,11 @@
 package localmodels
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -283,16 +285,13 @@ func TestLibraryModelsStayWithinTheCatalogBound(t *testing.T) {
 	}
 	long := strings.Repeat("x", provider.MaxRuntimeModelTextRunes+1)
 	catalog := rememberedCatalog(t,
-		provider.RuntimeModel{ID: "lib/a", Label: strings.Repeat("y", provider.MaxRuntimeModelTextRunes+5), AllowedReasoningEffort: []string{}},
+		provider.RuntimeModel{ID: "lib/a", Label: "A", AllowedReasoningEffort: []string{}},
 		provider.RuntimeModel{ID: "lib/b", AllowedReasoningEffort: []string{}},
 		provider.RuntimeModel{ID: long, AllowedReasoningEffort: []string{}},
 	)
 	got := catalog.Merge(piDiagnostic("ready", own...), nil, nil)[1]
 	if len(got.Models) != provider.MaxRuntimeModels || got.Models[len(got.Models)-1].ID != "lib/a" {
 		t.Fatalf("%d models, last %+v", len(got.Models), got.Models[len(got.Models)-1])
-	}
-	if label := got.Models[len(got.Models)-1].Label; len([]rune(label)) != provider.MaxRuntimeModelTextRunes {
-		t.Fatalf("label has %d runes", len([]rune(label)))
 	}
 }
 
@@ -315,5 +314,47 @@ func TestTheCatalogChangesWhenTheLibraryCanBeReadAgain(t *testing.T) {
 	library.Refresh(context.Background())
 	if changes != 2 {
 		t.Fatalf("%d changes, want the first read and the recovery", changes)
+	}
+}
+
+// A remembered entry the catalog cannot carry is dropped, never sent, and
+// the condition is logged once, not on every discovery.
+func TestInvalidRememberedEntriesAreDroppedAndLoggedOnce(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	valid := provider.RuntimeModel{ID: "lib/valid", Label: "Valid", AllowedReasoningEffort: []string{"high"}, DefaultReasoningEffort: "high"}
+	catalog := rememberedCatalog(t,
+		valid,
+		provider.RuntimeModel{ID: "lib/effort", Label: "Effort", AllowedReasoningEffort: []string{"turbo"}},
+		provider.RuntimeModel{ID: "lib/window", Label: "Window", AllowedReasoningEffort: []string{}, ContextWindow: provider.MaxRuntimeModelContextWindow + 1},
+	)
+	for range 3 {
+		got := catalog.Merge(piDiagnostic("ready"), nil, nil)[1]
+		if !slices.Equal(modelIDs(got), []string{"lib/valid"}) {
+			t.Fatalf("models = %v", modelIDs(got))
+		}
+		for _, model := range got.Models {
+			if !provider.ValidRuntimeModel(model) {
+				t.Fatalf("sent an invalid entry %+v", model)
+			}
+		}
+	}
+	if count := strings.Count(logs.String(), "local_models.pi_catalog_invalid"); count != 1 {
+		t.Fatalf("logged %d times:\n%s", count, logs.String())
+	}
+}
+
+func TestARowDerivedEntryStaysWithinTheBounds(t *testing.T) {
+	fake := newFakeTool(t)
+	row := model(testModel, "idle")
+	row["context_tokens"] = provider.MaxRuntimeModelContextWindow * 10
+	row["name"] = strings.Repeat("y", provider.MaxRuntimeModelTextRunes+5)
+	fake.write("status.json", status(row))
+	got := catalogLibrary(t, fake).MergePiCatalog(piDiagnostic("ready"), nil)[1]
+	if len(got.Models) != 1 || got.Models[0].ContextWindow != provider.MaxRuntimeModelContextWindow ||
+		len([]rune(got.Models[0].Label)) != provider.MaxRuntimeModelTextRunes {
+		t.Fatalf("models = %+v", got.Models)
 	}
 }

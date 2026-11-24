@@ -603,3 +603,68 @@ done
 		t.Fatalf("published = %+v", published)
 	}
 }
+
+// Pi made ready only by a Shape (local models filling its empty catalog) is
+// retained across a failed probe just like a natively ready Pi: the retain
+// rules decide on what was published and restore the unshaped diagnostic.
+func TestRetainRulesFollowThePublishedStatus(t *testing.T) {
+	signedOut := RuntimeDiagnostic{Type: "pi", Status: "authentication_required", ExecutablePath: "/pi", Models: []RuntimeModel{},
+		Error: &DiagnosticError{Code: "RUNTIME_AUTHENTICATION_REQUIRED"}}
+	ready := RuntimeDiagnostic{Type: "pi", Status: "ready", ExecutablePath: "/pi", Models: []RuntimeModel{{ID: "lib/m", AllowedReasoningEffort: []string{}}}}
+	failed := RuntimeDiagnostic{Type: "pi", Status: "error", ExecutablePath: "/pi", Models: []RuntimeModel{}, authProbeFailed: true,
+		Error: &DiagnosticError{Code: "RUNTIME_DIAGNOSTIC_FAILED"}}
+	result := func(diagnostic RuntimeDiagnostic) DiscoveryResult {
+		return DiscoveryResult{Diagnostics: []RuntimeDiagnostic{diagnostic}}
+	}
+	for _, tc := range []struct {
+		name               string
+		current, published RuntimeDiagnostic
+		want               string
+	}{
+		{"ready only through the Shape", signedOut, ready, "authentication_required"},
+		{"natively ready", ready, ready, "ready"},
+		{"signed out and published so", signedOut, signedOut, "error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			busy := retainReadyRuntimesDuringInconclusiveProbes(result(tc.current), result(tc.published), result(failed))
+			if got := busy.Diagnostics[0].Status; got != tc.want {
+				t.Fatalf("inconclusive probe: status %s, want %s", got, tc.want)
+			}
+			transient := retainReadyRuntimesDuringTransientFailures(result(tc.current), result(tc.published), result(failed), map[string]int{})
+			if got := transient.Diagnostics[0].Status; got != tc.want {
+				t.Fatalf("first transient failure: status %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// The monitor's first comparison is against what the caller published, such
+// as the hello, not a fresh Shape of the initial result.
+func TestRuntimeMonitorComparesAgainstTheInitialPublishedResult(t *testing.T) {
+	initial := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{Type: "codex", Status: "not_installed", Models: []RuntimeModel{}}}}
+	hello := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{Type: "codex", Status: "not_installed", Models: []RuntimeModel{{ID: "hello", AllowedReasoningEffort: []string{}}}}}}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	var published []DiscoveryResult
+	err := MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+		Initial:               initial,
+		InitialPublished:      &hello,
+		RefreshInterval:       5 * time.Millisecond,
+		FullRefreshEveryTicks: 1,
+		Discover: func(context.Context, DiscoveryOptions) (DiscoveryResult, error) {
+			return initial, nil
+		},
+		OnChanged: func(next DiscoveryResult) error {
+			published = append(published, next)
+			cancel()
+			return nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("monitor exited with %v", err)
+	}
+	// What discovery finds differs from the hello, so it is published.
+	if len(published) != 1 || len(published[0].Diagnostics[0].Models) != 0 {
+		t.Fatalf("published = %+v", published)
+	}
+}
