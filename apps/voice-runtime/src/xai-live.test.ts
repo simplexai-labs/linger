@@ -4,7 +4,12 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { LiveEvent } from "./live-session.js";
-import { cutOffNote, withLanguage, XaiLiveSession } from "./xai-live.js";
+import {
+  cutOffNote,
+  newCallNote,
+  withLanguage,
+  XaiLiveSession,
+} from "./xai-live.js";
 
 /** A request in a language the code names nowhere. */
 const spanishRequest = "abre Bing y busca noticias de OpenAI";
@@ -228,7 +233,7 @@ describe("XaiLiveSession", () => {
       { role: "user", text: "hi" },
       { role: "assistant", text: "hello" },
     ]);
-    await waitForSent(provider.sent, 3);
+    await waitForSent(provider.sent, 4);
     expect(provider.requests[0]).toEqual({
       url: "/v1/realtime?model=grok-voice-3.0",
       authorization: "Bearer xai-secret",
@@ -259,6 +264,11 @@ describe("XaiLiveSession", () => {
         type: "message",
         role: "assistant",
         content: [{ type: "output_text", text: "hello" }],
+      },
+      {
+        type: "message",
+        role: "system",
+        content: [{ type: "input_text", text: newCallNote }],
       },
     ]);
     await session.close();

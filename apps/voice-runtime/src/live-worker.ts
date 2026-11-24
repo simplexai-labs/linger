@@ -257,7 +257,7 @@ export const browserTools: LiveTool[] = [
   {
     name: "end_voice_mode",
     description:
-      "End this voice conversation and leave voice mode. Call it when the user wants to end the call, says goodbye, is done talking, or asks you to close or quit voice, judged by meaning in any language; interpret misheard words from context. After calling it, say a very short goodbye in the user's language; before calling it, never say you are closing or leaving. Do not call it when the user only wants to close a page, dialog or panel.",
+      "End this voice conversation and leave voice mode. Call it when the user wants to end the call, says goodbye, is done talking, or asks you to close or quit voice, judged by meaning in any language; interpret misheard words from context. After calling it, say a very short goodbye in the user's language; before calling it, never say you are closing or leaving. Do not call it when the user only wants to close a page, dialog or panel, or for a goodbye in messages from before this call.",
     parameters: { type: "object", properties: {} },
   },
   {

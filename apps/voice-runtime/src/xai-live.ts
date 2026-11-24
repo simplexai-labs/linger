@@ -234,6 +234,14 @@ interface Response {
 export const cutOffNote =
   "The user cut your last reply off before you called any tool: nothing it said you would do (starting a task, sending, opening, changing) has been done. If they still want it, call the tool now.";
 
+/**
+ * Closes the replayed Room history. Grok reads the replay as the same
+ * conversation, so a goodbye that ended the previous call ended this one at
+ * its first words unless the history is marked as before this call.
+ */
+export const newCallNote =
+  "A new voice call starts here. Everything above is earlier Room history from before this call: a goodbye or a call that ended there does not end this call. Answer what the user says from now on.";
+
 export class XaiLiveSession implements LiveSession {
   readonly #audioTransport: "binary" | "json";
   private readonly queue: LiveEvent[] = [];
@@ -426,7 +434,8 @@ export class XaiLiveSession implements LiveSession {
       },
     });
     await updated;
-    for (const message of historyPairs(options.history))
+    const history = historyPairs(options.history);
+    for (const message of history)
       this.send({
         type: "conversation.item.create",
         item: {
@@ -440,6 +449,7 @@ export class XaiLiveSession implements LiveSession {
           ],
         },
       });
+    if (history.length > 0) this.system(newCallNote);
   }
 
   appendAudio(frame: Int16Array) {
