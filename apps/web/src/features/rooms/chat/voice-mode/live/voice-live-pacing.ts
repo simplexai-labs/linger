@@ -10,10 +10,12 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 /**
  * How a reply line's words follow the voice: "speaking" while the reply is
  * produced, "said" once all of it was produced but it may still be playing,
- * "cut" when the Human cut it off, so only what was shown stays. A line with
- * none shows all its words.
+ * "cut" when the Human cut it off, so only what was shown stays. "typing" is
+ * the Human's own words as they are transcribed: they arrive a phrase at a
+ * time and flow in quickly rather than at a voice's pace. A line with none
+ * shows all its words.
  */
-export type VoiceLinePacing = "speaking" | "said" | "cut";
+export type VoiceLinePacing = "speaking" | "said" | "cut" | "typing";
 
 /** Before any reply played to the end: between slow and fast speech in any script. */
 const defaultCharsPerSecond = 7;
@@ -27,6 +29,13 @@ const heardQuietMs = 700;
 const finishMs = 200;
 /** A reply shorter than this says too little about the pace. */
 const minLearnMs = 1_500;
+/**
+ * The Human's newly transcribed words flow in easing out: most of a phrase in
+ * this long, the last few at the floor rate below.
+ */
+const typingCatchUpMs = 250;
+/** The Human's last few words still flow in at least this fast. */
+const minTypingCharsPerSecond = 20;
 /** A frame longer than this is a paused page, not time the voice spoke. */
 const maxFrameMs = 100;
 
@@ -95,6 +104,18 @@ export function advancePacedText(
 ): PacedTextState {
   const shown = Math.min(state.shown, frame.length);
   if (frame.pacing === "cut") return { ...state, shown };
+  if (frame.pacing === "typing") {
+    // Transcription arrives a phrase at a time, about once a second; each
+    // phrase flows in before the next one comes.
+    const rate = Math.max(
+      minTypingCharsPerSecond,
+      ((frame.length - shown) * 1000) / typingCatchUpMs,
+    );
+    return {
+      ...state,
+      shown: Math.min(frame.length, shown + (rate * frame.elapsedMs) / 1000),
+    };
+  }
   let { audibleMs, quietMs, finishing } = state;
   // A reply that goes on after a tool round is spoken again.
   if (frame.pacing === "speaking") finishing = false;
@@ -120,8 +141,9 @@ export function advancePacedText(
 }
 
 /**
- * The part of a reply line's text to show now. A line first seen while it is
- * spoken starts empty and follows the voice; any other line shows in full.
+ * The part of a line's text to show now. A line first seen while it is
+ * spoken or transcribed starts empty and flows in; any other line shows in
+ * full.
  */
 export function usePacedText(
   text: string,
@@ -131,13 +153,13 @@ export function usePacedText(
   const characters = Array.from(text);
   const length = characters.length;
   const [shown, setShown] = useState(() =>
-    pacing === "speaking" ? 0 : length,
+    pacing === "speaking" || pacing === "typing" ? 0 : length,
   );
   const state = useRef<PacedTextState>({
     shown,
     audibleMs: 0,
     quietMs: 0,
-    finishing: pacing !== "speaking",
+    finishing: pacing !== "speaking" && pacing !== "typing",
   });
   const latest = useRef({ length, pacing });
   const wake = useRef<() => void>(undefined);
@@ -163,7 +185,8 @@ export function usePacedText(
       const { length, pacing } = latest.current;
       return (
         pacing === "cut" ||
-        (state.current.finishing && state.current.shown >= length)
+        (state.current.shown >= length &&
+          (state.current.finishing || pacing === "typing"))
       );
     };
     const tick = (time: number) => {

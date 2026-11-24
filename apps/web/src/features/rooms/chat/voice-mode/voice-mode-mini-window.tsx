@@ -546,6 +546,8 @@ function MiniWindow({
               <Bubble
                 author={t(commonMessages.you)}
                 own
+                paced
+                pacing="typing"
                 pending
                 text={saying}
               />
@@ -598,14 +600,16 @@ const Bubble = memo(function Bubble({
   agent?: boolean;
   author: string;
   own: boolean;
-  /** The live voice's words, shown as the voice speaks them. */
+  /** Words shown as they are said: the voice's as it speaks them, the Human's as they are transcribed. */
   paced?: boolean;
   pacing?: VoiceLinePacing;
   pending?: boolean;
   text: string;
 }) {
   // A reply the voice starts now eases in; lines already said do not.
-  const [entering] = useState(() => paced && pacing === "speaking");
+  const [entering] = useState(
+    () => paced && (pacing === "speaking" || pacing === "typing"),
+  );
   return (
     <div
       className={`flex flex-col ${own ? "items-end" : "items-start"} ${
@@ -641,7 +645,7 @@ function PacedText({
   const shown = usePacedText(text, pacing, ref);
   // Words already on screen when the line first rendered never fade in.
   const [shownAtStart] = useState(() =>
-    pacing === "speaking" ? 0 : Array.from(text).length,
+    pacing === "speaking" || pacing === "typing" ? 0 : Array.from(text).length,
   );
   const characters = Array.from(shown);
   // The newest characters fade in; each keeps its own element, keyed by its

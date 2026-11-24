@@ -70,6 +70,26 @@ describe("live subtitle pacing", () => {
     expect(resumed.shown).toBeCloseTo(15);
   });
 
+  it("flows the Human's transcribed words in quickly, voice or not", () => {
+    const early = run(start, 4, {
+      pacing: "typing",
+      length: 12,
+      audible: false,
+    });
+    expect(early.shown).toBeGreaterThan(6);
+    expect(early.shown).toBeLessThan(12);
+    const phrase = run(early, 8, {
+      pacing: "typing",
+      length: 12,
+      audible: false,
+    });
+    expect(phrase.shown).toBe(12);
+    const longer = run(phrase, 2, { pacing: "typing", length: 40 });
+    expect(longer.shown).toBeGreaterThan(12);
+    expect(longer.shown).toBeLessThan(40);
+    expect(run(longer, 20, { pacing: "typing", length: 40 }).shown).toBe(40);
+  });
+
   it("learns the pace from replies heard to the end, never too short ones", () => {
     learnVoicePace(60, 500);
     expect(voicePace()).toBe(7);

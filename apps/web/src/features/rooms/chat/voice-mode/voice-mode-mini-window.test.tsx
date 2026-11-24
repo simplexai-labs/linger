@@ -214,6 +214,25 @@ describe("Voice Mode mini window", () => {
     expect(log.querySelectorAll(".voice-live-line-in")).toHaveLength(1);
   });
 
+  it("flows the Human's words in as they are transcribed", async () => {
+    voice.session!.state = {
+      ...voice.session!.state,
+      text: "what is on today",
+      speakingText: "what is on today",
+    };
+    voice.session!.live = { soundOff: false, transcript: [] };
+    renderWindow();
+    const log = await screen.findByRole("log", {
+      name: "Voice Mode conversation",
+    });
+    expect(log).not.toHaveTextContent("what is on today");
+    await waitFor(() => expect(log).toHaveTextContent("what is on today"));
+    expect(log.querySelectorAll(".voice-live-word-in").length).toBeGreaterThan(
+      0,
+    );
+    expect(log.querySelectorAll(".voice-live-line-in")).toHaveLength(1);
+  });
+
   it("shows a reply said before the window opened at once, without fading", async () => {
     voice.session!.live = {
       soundOff: false,
@@ -257,12 +276,19 @@ describe("Voice Mode mini window", () => {
     const log = await screen.findByRole("log", {
       name: "Voice Mode conversation",
     });
+    // Words being said flow in as they are transcribed, a few at a time.
+    await waitFor(() => expect(log).toHaveTextContent("then"));
+    const bubble = (text: string) =>
+      within(log).getByText(
+        (_, element) =>
+          element?.tagName === "P" && element.textContent === text,
+      );
     const order = [
       "Scroll down a bit",
       "Sure, scrolling for you.",
       "The weekly report is in the chat",
       "then",
-    ].map((text) => within(log).getByText(text));
+    ].map(bubble);
     for (const [index, bubble] of order.slice(1).entries())
       expect(
         order[index]!.compareDocumentPosition(bubble) &
