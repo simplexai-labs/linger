@@ -1180,6 +1180,7 @@ describe("Background call outcomes", () => {
   it.each([
     ["auth_required", "runtime_auth_required"],
     ["runtime_incompatible", "runtime_incompatible"],
+    ["unsupported", "runtime_incompatible"],
     ["runtime_unavailable", "runtime_unavailable"],
   ] as const)(
     "reports a Runtime that answers %s as %s",

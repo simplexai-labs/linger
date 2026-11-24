@@ -1234,7 +1234,8 @@ function backgroundFailureReason(
     case "runtime_unavailable":
       return error.runtimeOutcome === "auth_required"
         ? "runtime_auth_required"
-        : error.runtimeOutcome === "runtime_incompatible"
+        : error.runtimeOutcome === "runtime_incompatible" ||
+            error.runtimeOutcome === "unsupported"
           ? "runtime_incompatible"
           : "runtime_unavailable";
     case "failed":
