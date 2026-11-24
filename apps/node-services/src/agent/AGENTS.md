@@ -92,15 +92,21 @@ take precedence.
   persisted reply status (`GET /v0/agent-runtime/runs/reply-status`) for each
   Inbox where a Human mentioned the Agent, so a chat steered in from another
   Inbox needs its own reply, and blocks the Runtime's Stop hook at most once
-  so the model can still send a visible reply in the same turn. Before failing a Room Run for a missing reply (when a
-  Stop hook blocked once or when an older Daemon/Runtime never ran Stop hooks),
-  the Run loop re-checks TeamHub's persisted reply status so compound scripts,
-  decision cards, presentation sequences, and reactions that activity
-  classification missed are not misreported. A Room Run whose every write
-  failed finishes failed with `reply_undelivered`. One that left no reply while
-  a Human's Message that mentioned the Agent (a direct chat always does) waits
-  finishes failed with `reply_not_sent`. Its final text is private scratch and
-  is never posted for it.
+  so the model can still send a visible reply in the same turn. When the Stop
+  hook confirms delivery (`replyConfirmed`), the Run loop skips both
+  `reply_undelivered` and `reply_not_sent` and avoids a redundant post-hoc check.
+  Otherwise (for instance, when a Stop hook blocked once, its check failed, or
+  an older Daemon/Runtime never ran Stop hooks), before failing a Room Run for
+  a missing reply while a Human's Message that mentioned the Agent (a direct
+  chat always does) waits, the Run loop re-checks TeamHub's persisted reply
+  status so compound scripts, decision cards, presentation sequences, and
+  reactions that activity classification missed are not misreported. When no
+  reply reached the Room while such a Human waits, a Run with at least one
+  failed write attempt finishes failed with `reply_undelivered`, and one with
+  no failed write attempt finishes failed with `reply_not_sent`. Runs where no
+  Human waits on a reply are not failed as `reply_undelivered` or
+  `reply_not_sent`. The Runtime's final text is private scratch and is never
+  posted for it.
 - Ordinary Room/Meta execution reads effective Agent configuration before a new
   Local Run. Skill saves do not activate idle Contexts. If versions changed,
   reuse graceful activation to resume the same native history; running/steered
@@ -169,7 +175,7 @@ take precedence.
   `operation.prepare`, and `operation.start`) goes only to Computer 0.57.0 or
   later (`FIRST_STOP_HOOK_COMPUTER_VERSION`), because an older Computer rejects
   unknown envelope fields and closes the connection; Runs on older Computers
-  rely on `RunLoop`'s post-hoc `reply_not_sent` check.
+  rely on `RunLoop`'s post-hoc reply check (`reply_not_sent` / `reply_undelivered`).
 - `local_model_unavailable` in `runner.welcome`'s `service_features` goes to
   every Computer that receives the field: the Go Daemon decodes the list as
   strings and ignores a value it does not know. A Daemon that sees it reports a

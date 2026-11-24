@@ -1136,11 +1136,13 @@ components:
         authorization checks that fail or time out, and authorization expiry. This code
         does not currently cover unknown effects caused by control-plane disconnection.
         It remains a failed Run and must not be automatically replayed; verify its effects
-        before starting another Run. reply_undelivered means a Room Run finished, but every
-        message the Agent tried to post failed, so the Room received no reply from it.
-        reply_not_sent means a Room Run finished without trying to post anything while a
-        Human who mentioned the Agent waited for its reply; the Runtime ended the turn in
-        text nobody sees, which is not posted for it.
+        before starting another Run. reply_undelivered means a Room Run finished while
+        a Human who mentioned the Agent waited for its reply, every message write the
+        Agent tried to post failed, and no reply reached the Room.
+        reply_not_sent means a Room Run finished while a Human who mentioned the Agent
+        waited for its reply and no reply reached the Room without any failed message
+        write attempt (for instance, the Runtime ended the turn in text nobody sees,
+        which is not posted for it).
         interrupted means the Run stopped before it finished for a reason other than a user
         cancellation, such as a restart or a Runner stopped on its Computer; part of its work
         may have taken effect and it is not replayed.

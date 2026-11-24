@@ -452,4 +452,145 @@ describe("RunLoop + room-reply-guard stop hook", () => {
       entries.some((entry) => entry.event === "local_run.stop_hook_recovered"),
     ).toBe(true);
   });
+
+  it("suppresses reply_undelivered and skips fallback reply check when stop hook confirms delivery despite a failed write", async () => {
+    const readReplyStatus = vi.fn(async () => ({ replied: true }));
+    const composed = composeContextFeatures({
+      context: makeMetaContext(),
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
+    });
+    const state = new TestContextRuntimeState({
+      databasePath: ":memory:",
+      ref: ROOM_REF,
+    });
+    const stateReplySpy = vi
+      .spyOn(state, "hasLocalRunReplied")
+      .mockReturnValue(false);
+    const { logger, entries } = createSilentLogger();
+
+    const decisions: Array<{ action: string; reason?: string }> = [];
+    const provider = new StopHookFakeProvider(async (spec, emit) => {
+      emit({
+        type: "activity.started",
+        activityId: "msg-1",
+        kind: "message",
+        title: "bash",
+      });
+      emit({
+        type: "activity.finished",
+        activityId: "msg-1",
+        outcome: "failed",
+      });
+      decisions.push(
+        await spec.onStopHook!(
+          { runtime: "codex", attempt: 0, stopHookActive: false },
+          new AbortController().signal,
+        ),
+      );
+      return { finalResponse: "internal text" };
+    });
+
+    const loop = new RunLoop({
+      logger,
+      executionContextRef: ROOM_REF,
+      provider,
+      runtimeName: "codex",
+      runtimeSession: { threadId: "thread-1" },
+      state,
+      prepareInput: (m) => m,
+      onRunEvent: () => [],
+      onRunBeforeStop: (input, signal) =>
+        composed.evaluateRunBeforeStop(input, signal),
+    });
+
+    const runId = state.enqueueTrustedTurn([
+      makeRoomMessage("m1", "@Helper hi", true),
+    ]);
+    loop.start();
+    await loop.drain({ cancelActive: false });
+    state.close();
+
+    expect(decisions).toEqual([{ action: "allow" }]);
+    expect(readReplyStatus).toHaveBeenCalledTimes(1);
+    expect(stateReplySpy).not.toHaveBeenCalled();
+    expect(state.getLocalRun(runId)?.status).toBe("succeeded");
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "local_run.teamhub_messages_failed",
+        fields: expect.objectContaining({
+          runId,
+          failedMessageWrites: 1,
+          deliveredMessageWrites: 0,
+          replyUndelivered: false,
+        }),
+      }),
+    );
+  });
+
+  it("fails with reply_undelivered when a write failed and the model still sends nothing after a stop-hook block", async () => {
+    const readReplyStatus = vi.fn(async () => ({ replied: false }));
+    const composed = composeContextFeatures({
+      context: makeMetaContext(),
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
+    });
+    const state = new TestContextRuntimeState({
+      databasePath: ":memory:",
+      ref: ROOM_REF,
+    });
+    vi.spyOn(state, "hasLocalRunReplied").mockReturnValue(false);
+    const { logger } = createSilentLogger();
+
+    const provider = new StopHookFakeProvider(async (spec, emit) => {
+      emit({
+        type: "activity.started",
+        activityId: "msg-1",
+        kind: "message",
+        title: "bash",
+      });
+      emit({
+        type: "activity.finished",
+        activityId: "msg-1",
+        outcome: "failed",
+      });
+      const first = await spec.onStopHook!(
+        { runtime: "claude", attempt: 0, stopHookActive: false },
+        new AbortController().signal,
+      );
+      expect(first.action).toBe("block");
+      const second = await spec.onStopHook!(
+        { runtime: "claude", attempt: 1, stopHookActive: true },
+        new AbortController().signal,
+      );
+      expect(second.action).toBe("allow");
+      return { finalResponse: "still private text" };
+    });
+
+    const loop = new RunLoop({
+      logger,
+      executionContextRef: ROOM_REF,
+      provider,
+      runtimeName: "claude",
+      runtimeSession: { threadId: "session-1" },
+      state,
+      prepareInput: (m) => m,
+      onRunEvent: () => [],
+      onRunBeforeStop: (input, signal) =>
+        composed.evaluateRunBeforeStop(input, signal),
+    });
+
+    const runId = state.enqueueTrustedTurn([
+      makeRoomMessage("m1", "@Helper hi", true),
+    ]);
+    loop.start();
+    await loop.drain({ cancelActive: false });
+    state.close();
+
+    const finished = state.getLocalRun(runId);
+    expect(finished?.status).toBe("failed");
+    expect(finished?.terminal).toMatchObject({
+      type: "failed",
+      failure: { code: "reply_undelivered", runtime_type: "claude" },
+    });
+  });
 });

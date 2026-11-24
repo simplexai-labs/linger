@@ -21,7 +21,7 @@ import {
 import type { ExecutionContextRef } from "./context-ref.js";
 import type { RunStopHookEvaluation } from "../agent-features/compose.js";
 import type { RunStopHookInput } from "../agent-features/contracts.js";
-import { ReplyDelivery } from "./reply-delivery.js";
+import { awaitsReply, ReplyDelivery } from "./reply-delivery.js";
 import type {
   ProfileUpdate,
   ContextRuntimeStatePort,
@@ -247,6 +247,7 @@ interface ActiveExecution {
   readonly steerOperations: Set<Promise<void>>;
   readonly replyDelivery: ReplyDelivery;
   readonly observedMessages: Message[];
+  readonly stopHook: { replyConfirmed: boolean; blocked: boolean };
   acceptingSteers: boolean;
 }
 
@@ -301,8 +302,7 @@ interface LocalRunExecution {
   providerSucceeded: boolean;
   hasYielded: boolean;
   readonly observedMessages: Message[];
-  stopHookReplyConfirmed: boolean;
-  stopHookBlocked: boolean;
+  readonly stopHook: { replyConfirmed: boolean; blocked: boolean };
 }
 
 export class RunLoop {
@@ -1008,8 +1008,7 @@ export class RunLoop {
       providerSucceeded: false,
       hasYielded: false,
       observedMessages: [...messages],
-      stopHookReplyConfirmed: false,
-      stopHookBlocked: false,
+      stopHook: { replyConfirmed: false, blocked: false },
     };
     try {
       await this.#runExecution(execution);
@@ -1270,11 +1269,9 @@ export class RunLoop {
                     },
                     signal,
                   );
-                  if (evaluation.replyConfirmed) {
-                    execution.stopHookReplyConfirmed = true;
-                  }
                   if (evaluation.decision.action === "block") {
-                    execution.stopHookBlocked = true;
+                    execution.stopHook.replyConfirmed = false;
+                    execution.stopHook.blocked = true;
                     this.#logger.log("info", "local_run.stop_hook_blocked", {
                       runId: execution.runId,
                       ...(evaluation.blockedBy
@@ -1283,6 +1280,8 @@ export class RunLoop {
                       ...(event.runtime ? { runtime: event.runtime } : {}),
                       attempt: event.attempt,
                     });
+                  } else if (evaluation.replyConfirmed) {
+                    execution.stopHook.replyConfirmed = true;
                   }
                   return evaluation.decision;
                 },
@@ -1450,6 +1449,7 @@ export class RunLoop {
       steerOperations: new Set(),
       replyDelivery,
       observedMessages: execution.observedMessages,
+      stopHook: execution.stopHook,
     };
     this.#activeExecution = active;
     execution.intent.preemption = new AbortController();
@@ -1492,10 +1492,7 @@ export class RunLoop {
       runId,
       finalResponse,
       replyDelivery,
-      {
-        replyConfirmed: execution.stopHookReplyConfirmed,
-        blocked: execution.stopHookBlocked,
-      },
+      execution.stopHook,
     );
     this.#logger.log("info", "local_run.finish_started", {
       runId,
@@ -1873,13 +1870,14 @@ export class RunLoop {
 
   /**
    * A Room Agent speaks only through TeamHub message writes, so a finished
-   * Provider turn is not a succeeded Run when the Room has nothing to show:
-   * the Agent tried to post and none landed, or a Human who mentioned it is
-   * waiting and it never tried. Its final text is private scratch and is not
-   * posted for it. Because activity classification inspects shell text for
-   * display and can miss compound scripts or decision cards, TeamHub confirms
-   * whether a visible reply landed before failing the Run. Task Runs report
-   * through their final response and keep it.
+   * Provider turn is not a succeeded Run when a Human who mentioned it is
+   * waiting and the Room has nothing to show: every write attempt failed
+   * (`reply_undelivered`), or no write reached the Room without a failed write
+   * (`reply_not_sent`). Its final text is private scratch and is not posted for
+   * it. Because activity classification inspects shell text for display and can
+   * miss compound scripts or decision cards, TeamHub confirms whether a visible
+   * reply landed before failing the Run unless the Stop hook already confirmed
+   * delivery. Task Runs report through their final response and keep it.
    */
   async #completedTerminal(
     runId: string,
@@ -1888,7 +1886,8 @@ export class RunLoop {
     stopHook: { readonly replyConfirmed: boolean; readonly blocked: boolean },
   ): Promise<LocalRunTerminal> {
     const roomRun = this.#executionContextRef?.kind === "meta";
-    const suspectedUndelivered = roomRun && replyDelivery.replyUndelivered;
+    const suspectedUndelivered =
+      roomRun && !stopHook.replyConfirmed && replyDelivery.replyUndelivered;
     const suspectedNotSent =
       roomRun && !stopHook.replyConfirmed && replyDelivery.replyNotSent;
     let confirmedReplied = false;
@@ -1907,7 +1906,9 @@ export class RunLoop {
     }
     if (
       stopHook.blocked &&
-      (confirmedReplied || replyDelivery.counts().deliveredMessageWrites > 0)
+      (stopHook.replyConfirmed ||
+        confirmedReplied ||
+        replyDelivery.counts().deliveredMessageWrites > 0)
     ) {
       this.#logger.log("info", "local_run.stop_hook_recovered", { runId });
     }
@@ -2045,6 +2046,9 @@ export class RunLoop {
       target.inputs.push(input);
       target.observedMessages.push(...messages);
       target.replyDelivery.observeInputs(messages);
+      if (messages.some(awaitsReply)) {
+        target.stopHook.replyConfirmed = false;
+      }
       this.#reportActiveRunContext({
         runId: target.runId,
         sourceInboxIds: Object.freeze([...target.sourceInboxIds]),
