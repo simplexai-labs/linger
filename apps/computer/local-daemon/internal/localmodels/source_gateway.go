@@ -75,6 +75,7 @@ func (m *ModelSource) EnsureGateway(ctx context.Context, runtimeType string) err
 
 // remount mounts the saved BYOK source on Bifrost again. The caller holds mu.
 func (m *ModelSource) remount(ctx context.Context, runtime string) error {
+	previousPaths := m.readExecutableRuntimePaths()
 	runCtx, cancel := context.WithTimeout(ctx, m.applyTimeout)
 	defer cancel()
 	stdout, exitCode, err := m.runTool(runCtx, "source_remount", m.applyArgs("byok", runtime, "", false), nil)
@@ -95,7 +96,7 @@ func (m *ModelSource) remount(ctx context.Context, runtime string) error {
 		return parseToolFailure(stdout, "BYOK_GATEWAY_FAILED", "The BYOK gateway could not be started on this Computer.", "")
 	}
 	// The tool rewrites model-source.json without the Runtime paths.
-	m.persistRuntimePaths(stdout)
+	m.persistRuntimePaths(stdout, previousPaths)
 	return nil
 }
 

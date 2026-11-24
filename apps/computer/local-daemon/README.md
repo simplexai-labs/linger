@@ -365,13 +365,19 @@ base URL, path and endpoint and the protocol the owner's client chose; `check`
 sends one request there and `models` lists base URL + path + `/models`. The BYOK
 summary carries `path` and `endpoint` only after a `runner.welcome` that names
 the `byok_endpoint` service feature. `localmodels` writes
-`<state>/model-source.json`; the Daemon only adds the `runtime_paths` that the
-same `apply` reported. It re-reads the file on every discovery tick to overlay
-the Runtimes' environment (`OverlayEnvironment`) and executable paths
-(`OverlayRuntimePaths`), dropping any stale `byok-home` entry in `local` mode
-in favor of the managed `gateway-home` Pi profile, never falling back to cloud
-models in `local` mode (`agentRuntimeModel`), and under BYOK listing only the
-BYOK model in each Runtime's catalog.
+`<state>/model-source.json` without `runtime_paths`; on `source apply`, BYOK
+`remount`, and installer `applySource`, the caller merges valid executable
+non-harness paths from before the rewrite alongside any `runtime_paths` that
+`apply` reported, without pinning paths inside `<home>/runtime/harness`. The
+Daemon re-reads the file on every discovery tick to overlay the Runtimes'
+environment (`OverlayEnvironment`) and executable paths (`OverlayRuntimePaths`),
+scanning `<home>/runtime/harness/bin/<runtime>` and the highest-version
+`<home>/runtime/harness/tools/<runtime>/<version>/<runtime>` on each read so
+managed Runtime updates take effect without rewriting `model-source.json`. It
+also drops any stale `byok-home` entry in `local` mode in favor of the managed
+`gateway-home` Pi profile, never falls back to cloud models in `local` mode
+(`agentRuntimeModel`), and under BYOK lists only the BYOK model in each
+Runtime's catalog.
 
 Before a Run or model call on a Runtime whose profile is the BYOK source's,
 the Daemon checks the saved loopback gateway's `/health` (`EnsureGateway` in
