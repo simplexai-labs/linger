@@ -35,7 +35,7 @@ func TestWindowsAncestorDeleteRightsRespectVolumeRoot(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = validateAncestorDescriptor(sd, test.volumeRoot, func() map[string]bool { return nil })
+			err = validateAncestorDescriptor(sd, test.volumeRoot, nil, func() map[string]bool { return nil })
 			if (err == nil) != test.allowed {
 				t.Fatalf("allowed = %v, error = %v", test.allowed, err)
 			}
@@ -75,29 +75,47 @@ func TestWindowsPrivateOwnerIsUserOrAdministrators(t *testing.T) {
 	}
 }
 
-func TestWindowsAncestorTrustsOnlyCodexSandboxSIDs(t *testing.T) {
+func TestWindowsAncestorTrustsBuiltinAdminAndAdminMembersAndCodexSandboxSIDs(t *testing.T) {
 	sid, err := CurrentSID()
 	if err != nil {
 		t.Fatal(err)
 	}
-	const sandbox = "S-1-5-21-1158770811-2547671072-1736395728-810166692"
+	const (
+		builtinAdmin = "S-1-5-21-3623811015-3361044348-30300820-500"
+		domainAdmins = "S-1-5-21-3623811015-3361044348-30300820-512"
+		localAdmin   = "S-1-5-21-3623811015-3361044348-30300820-1006"
+		sandbox      = "S-1-5-21-1158770811-2547671072-1736395728-810166692"
+		nonAdmin     = "S-1-5-21-1-2-3-1007"
+	)
+	adminMembers := func() map[string]bool { return map[string]bool{localAdmin: true, "S-1-1-0": true} }
 	sandboxSIDs := func() map[string]bool { return map[string]bool{sandbox: true} }
 	for _, test := range []struct {
 		name    string
+		owner   string
 		grantee string
 		allowed bool
 	}{
-		{"Codex sandbox modify", sandbox, true},
-		{"other account modify", "S-1-5-21-1-2-3-4", false},
+		{"built-in Administrator RID 500 ACE", sid.String(), builtinAdmin, true},
+		{"built-in Administrator RID 500 owner", builtinAdmin, sid.String(), true},
+		{"Domain Admins RID 512 ACE", sid.String(), domainAdmins, true},
+		{"direct local admin member ACE", sid.String(), localAdmin, true},
+		{"direct local admin member owner", localAdmin, sid.String(), true},
+		{"Codex sandbox modify", sid.String(), sandbox, true},
+		{"other non-admin account modify", sid.String(), nonAdmin, false},
+		{"other non-admin account owner", nonAdmin, sid.String(), false},
+		{"Everyone modify rejected", sid.String(), "WD", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			sd, err := windows.SecurityDescriptorFromString("O:" + sid.String() + "D:P(A;;FA;;;" + sid.String() + ")(A;OICI;0x1301ff;;;" + test.grantee + ")")
+			sd, err := windows.SecurityDescriptorFromString("O:" + test.owner + "D:P(A;;FA;;;" + sid.String() + ")(A;OICI;0x1301ff;;;" + test.grantee + ")")
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = validateAncestorDescriptor(sd, false, sandboxSIDs)
+			err = validateAncestorDescriptor(sd, false, adminMembers, sandboxSIDs)
 			if (err == nil) != test.allowed {
 				t.Fatalf("allowed = %v, error = %v", test.allowed, err)
+			}
+			if !test.allowed && test.grantee == nonAdmin && !strings.Contains(err.Error(), nonAdmin) {
+				t.Fatalf("error = %v, want offending SID %s", err, nonAdmin)
 			}
 		})
 	}
@@ -249,8 +267,12 @@ func TestWindowsPrivateWriteRejectsReplaceableAncestor(t *testing.T) {
 	if err := windows.SetNamedSecurityInfo(root, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteFile(filepath.Join(private, "secret"), []byte("private"), true); err == nil {
+	err = WriteFile(filepath.Join(private, "secret"), []byte("private"), true)
+	if err == nil {
 		t.Fatal("credential published through replaceable ancestor")
+	}
+	if !strings.Contains(err.Error(), root) || !strings.Contains(err.Error(), "S-1-1-0") {
+		t.Fatalf("error = %v, want offending ancestor path %q and SID S-1-1-0", err, root)
 	}
 }
 

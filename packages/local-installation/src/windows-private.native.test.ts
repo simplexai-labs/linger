@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   closeWindowsPrivateWorker,
+  parseWindowsPrivateFailure,
   WINDOWS_PRIVATE_PREAMBLE,
   WINDOWS_PRIVATE_SCRIPT,
   windowsPowerShellArguments,
+  windowsPrivateLocation,
   windowsPrivatePath,
 } from "./windows-private.js";
 import { runProcess } from "./process.js";
@@ -238,7 +240,10 @@ it.skipIf(process.platform !== "win32")(
       },
     );
     expect(restricted.code).toBe(1);
-    expect(restricted.stdout.trim()).toBe("UNSAFE_OWNER");
+    expect(parseWindowsPrivateFailure(restricted.stdout)).toMatchObject({
+      reason: "UNSAFE_OWNER",
+      sid: "S-1-5-32-544",
+    });
   },
 );
 it.skipIf(process.platform !== "win32")(
@@ -332,24 +337,57 @@ it.skipIf(process.platform !== "win32")(
 );
 
 // Elevated runners return from Test-Administrator before the linked-token
-// check, so this compiles and calls it directly.
+// check, so this builds and calls both Test-Administrator and
+// Test-LinkedTokenAdministrator directly, plus the PowerShell SID classifiers.
 it.skipIf(process.platform !== "win32")(
-  "compiles the linked-token administrator check through the production launch arguments",
+  "runs Test-Administrator, the in-memory linked-token check without Add-Type, and the PowerShell SID classifiers",
   async () => {
-    expect(WINDOWS_PRIVATE_PREAMBLE).toContain('DllImport("advapi32.dll")');
+    expect(WINDOWS_PRIVATE_PREAMBLE).not.toContain("Add-Type");
+    expect(WINDOWS_PRIVATE_PREAMBLE).toContain("DefinePInvokeMethod");
     const powershell = path.win32.join(
       process.env.SystemRoot ?? "C:\\Windows",
       "System32/WindowsPowerShell/v1.0/powershell.exe",
     );
+    const probe = [
+      WINDOWS_PRIVATE_PREAMBLE,
+      "$res = [ordered]@{",
+      "  admin = (Test-Administrator).GetType().FullName",
+      "  linked = (Test-LinkedTokenAdministrator).GetType().FullName",
+      "  rid500 = Test-BuiltinAdminSid 'S-1-5-21-3623811015-3361044348-30300820-500'",
+      "  rid512 = Test-BuiltinAdminSid 'S-1-5-21-3623811015-3361044348-30300820-512'",
+      "  rid513 = Test-BuiltinAdminSid 'S-1-5-21-3623811015-3361044348-30300820-513'",
+      "  everyone = Test-EligibleAdminMemberSid 'S-1-1-0'",
+      "  member1006 = Test-EligibleAdminMemberSid 'S-1-5-21-3623811015-3361044348-30300820-1006'",
+      "  entra = Test-EligibleAdminMemberSid 'S-1-12-1-11-22-33-44'",
+      "}",
+      "[Console]::Out.Write(($res | ConvertTo-Json -Compress))",
+    ].join("\n");
     const result = await runProcess(
       powershell,
-      windowsPowerShellArguments(
-        `${WINDOWS_PRIVATE_PREAMBLE}\n[Console]::Out.Write((Test-LinkedTokenAdministrator).GetType().FullName)`,
-      ),
+      windowsPowerShellArguments(probe),
       { timeoutMs: 30_000 },
     );
     expect(result.code, result.stderr).toBe(0);
-    expect(result.stdout).toBe("System.Boolean");
+    expect(JSON.parse(result.stdout)).toEqual({
+      admin: "System.Boolean",
+      linked: "System.Boolean",
+      rid500: true,
+      rid512: true,
+      rid513: false,
+      everyone: false,
+      member1006: true,
+      entra: true,
+    });
   },
   60_000,
+);
+it.skipIf(process.platform !== "win32")(
+  "validates existing and missing candidate directories with windowsPrivateLocation without creating them",
+  async () => {
+    const root = await fixture();
+    const pending = path.join(root, "not-created-yet", "computer");
+    await expect(windowsPrivateLocation(root)).resolves.toBeUndefined();
+    await expect(windowsPrivateLocation(pending)).resolves.toBeUndefined();
+  },
+  30_000,
 );

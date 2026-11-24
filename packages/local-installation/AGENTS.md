@@ -19,15 +19,26 @@ ancestor counts as well, because its holder can rename that folder, except on
 a volume root, which can be neither renamed nor removed. A folder directly on
 a data drive with the stock root ACL therefore passes, and a folder nested in
 one that inherits Modify for Authenticated Users does not. The Daemon's
-`privatefs` treats the volume root the same way. A refusal leaves the
-installer as its code and reason (`windowsPrivateRefusal`), never as its
-words: in the `startFailure` line on stdout when the installer manager cannot
-start, and in the `--user-keys` outcome. The Desktop setup page branches on
-`UNSAFE_PARENT_ACCESS` to say where to install instead. Repair skips propagation when the protected
-DACL already grants inheritable FullControl to the owner and SYSTEM on a
-directory, or FullControl to both on a file. Private paths with partial rights
-still receive the full repair. Rewriting a directory DACL propagates to its
-existing children and can time out on a large cache tree.
+`privatefs` treats the volume root and trusted ancestor principals the same
+way: ancestors trust the current user, `SYSTEM`, `BUILTIN\Administrators`,
+`TrustedInstaller`, built-in Administrator/Domain/Enterprise Admin SIDs
+(`S-1-5-21-*-*-*-500|512|519`), direct individual/domain/Entra members of local
+`BUILTIN\Administrators` (never broad groups such as `Everyone`, `Users`, or
+`Authenticated Users`), and Codex Windows sandbox principals on access rules.
+Private targets themselves remain strictly owner-only. `windowsPrivateLocation`
+runs the same check non-destructively without creating folders or changing
+ACLs. The PowerShell script checks `$ExecutionContext.SessionState.LanguageMode`
+first, emits Win32 P/Invoke stubs in memory via `Reflection.Emit` instead of
+compiling C# through `Add-Type`, and reports the offending ancestor path and SID
+or sanitized exception/worker diagnostics (never raw stderr prose). A refusal leaves the installer as its code and reason
+(`windowsPrivateRefusal`), never as its words: in the `startFailure` line on
+stdout when the installer manager cannot start, and in the `--user-keys`
+outcome. The Desktop setup page branches on `UNSAFE_PARENT_ACCESS` to say where
+to install instead. Repair skips propagation when the protected DACL already
+grants inheritable FullControl to the owner and SYSTEM on a directory, or
+FullControl to both on a file. Private paths with partial rights still receive
+the full repair. Rewriting a directory DACL propagates to its existing children
+and can time out on a large cache tree.
 
 Launch the fixed private-path scripts with PowerShell `-Command`. Encoding
 the whole script lengthens the Windows command line and can stall startup.

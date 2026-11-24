@@ -3107,6 +3107,116 @@ describe("LocalServerModule", () => {
       await f.host.stop("quit");
     }
   });
+
+  it("pre-checks both the install home and Computer daemon directory on Windows before unpacking", async () => {
+    const checked: string[] = [];
+    const daemonDir = "C:\\Users\\me\\AppData\\Roaming\\Linger\\computer";
+    const winCheckout = (home: string) => {
+      checkout(home);
+      writeFileSync(
+        path.join(path.dirname(home), "installer", "distribution.json"),
+        JSON.stringify({
+          platform: "win32",
+          arch: "x64",
+          nativeSources: [{ target: "win32-x64" }],
+        }),
+      );
+    };
+    const f = fixture(
+      (home) => ({
+        ...withCheckout(home),
+        platform: "win32",
+        arch: "x64",
+        daemonDirectory: daemonDir,
+        checkPrivateLocation: async (directory) => {
+          checked.push(directory);
+          if (directory === daemonDir) {
+            throw Object.assign(
+              new Error(
+                `Windows private path validation failed: ${daemonDir} is inside a folder other accounts on this computer can rename or replace (ancestor: C:\\Users\\me\\AppData\\Roaming, sid: S-1-5-21-1-2-3-1007).`,
+              ),
+              {
+                code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+                reason: "UNSAFE_PARENT_ACCESS",
+              },
+            );
+          }
+        },
+      }),
+      {},
+      winCheckout,
+    );
+    await f.host.start();
+    try {
+      await expect(f.module.begin()).rejects.toThrow(
+        `Desktop Computer directory validation failed: Windows private path validation failed: ${daemonDir}`,
+      );
+      expect(checked).toEqual([f.home, daemonDir]);
+      expect(f.module.status()).toMatchObject({
+        phase: "failed",
+        step: "prepare",
+      });
+      // Daemon directory refusal must not masquerade as an install-location refusal.
+      expect(f.module.status().refusal).toBeUndefined();
+      // Installer never launched because preflight stopped in prepare.
+      expect(existsSync(path.join(f.home, "installer", "args.json"))).toBe(
+        false,
+      );
+    } finally {
+      await f.host.stop("quit");
+    }
+  });
+
+  it("preserves the Windows private-path refusal when home preflight fails", async () => {
+    const winCheckout = (home: string) => {
+      checkout(home);
+      writeFileSync(
+        path.join(path.dirname(home), "installer", "distribution.json"),
+        JSON.stringify({
+          platform: "win32",
+          arch: "x64",
+          nativeSources: [{ target: "win32-x64" }],
+        }),
+      );
+    };
+    const f = fixture(
+      (home) => ({
+        ...withCheckout(home),
+        platform: "win32",
+        arch: "x64",
+        daemonDirectory: "C:\\Users\\me\\AppData\\Roaming\\Linger\\computer",
+        checkPrivateLocation: async () => {
+          throw Object.assign(
+            new Error(
+              "Windows private path validation failed: home is inside a folder other accounts on this computer can rename or replace (ancestor: C:\\Users\\me, sid: S-1-5-21-1-2-3-1007).",
+            ),
+            {
+              code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+              reason: "UNSAFE_PARENT_ACCESS",
+            },
+          );
+        },
+      }),
+      {},
+      winCheckout,
+    );
+    await f.host.start();
+    try {
+      await expect(f.module.begin()).rejects.toThrow(
+        "Windows private path validation failed",
+      );
+      expect(f.module.status()).toMatchObject({
+        phase: "failed",
+        step: "prepare",
+        refusal: {
+          code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+          reason: "UNSAFE_PARENT_ACCESS",
+        },
+      });
+    } finally {
+      await f.host.stop("quit");
+    }
+  });
 });
 
 describe("LocalServerModule install location", () => {
@@ -5031,6 +5141,7 @@ describe("LocalServerModule on Windows", () => {
     const f = fixture(
       {
         platform: "win32",
+        checkPrivateLocation: async () => {},
         sourceArchive: { file, sha256: archive.sha256 },
         rename: async (from, to) => {
           moves.push(path.basename(to));
@@ -5082,6 +5193,7 @@ describe("LocalServerModule on Windows", () => {
     const f = fixture(
       {
         platform: "win32",
+        checkPrivateLocation: async () => {},
         sourceArchive: { file, sha256: archive.sha256 },
         rename: async () => {
           moves++;

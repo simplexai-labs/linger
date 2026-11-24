@@ -69,8 +69,16 @@ func pinParents(path string) (func(), error) {
 		parent = next
 	}
 	handles := []windows.Handle{}
-	// One walk reads the Codex sandbox principals at most once, and only when
-	// an ancestor grants replace rights to an otherwise untrusted SID.
+	// One walk queries local Administrators members and Codex sandbox
+	// principals at most once, and only when an ancestor names an otherwise
+	// untrusted SID.
+	var adminMembers map[string]bool
+	adminMemberSIDs := func() map[string]bool {
+		if adminMembers == nil {
+			adminMembers = localAdminMemberSIDs()
+		}
+		return adminMembers
+	}
 	var sandbox map[string]bool
 	sandboxSIDs := func() map[string]bool {
 		if sandbox == nil {
@@ -102,15 +110,15 @@ func pinParents(path string) (func(), error) {
 		}
 		if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
 			closeAll()
-			return nil, errors.New("private path has an unsafe ancestor")
+			return nil, fmt.Errorf("private path has an unsafe ancestor (%s)", paths[i])
 		}
 		sd, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 		if err == nil {
-			err = validateAncestorDescriptor(sd, filepath.Dir(paths[i]) == paths[i], sandboxSIDs)
+			err = validateAncestorDescriptor(sd, filepath.Dir(paths[i]) == paths[i], adminMemberSIDs, sandboxSIDs)
 		}
 		if err != nil {
 			closeAll()
-			return nil, fmt.Errorf("unsafe private path ancestor: %w", err)
+			return nil, fmt.Errorf("unsafe private path ancestor %s: %w", paths[i], err)
 		}
 	}
 	return closeAll, nil
@@ -233,18 +241,32 @@ func validateDescriptor(sd *windows.SECURITY_DESCRIPTOR, ownerOnly bool) error {
 // Ancestors need not be private, but another account must not be able to
 // replace an existing component. The default C:\ ACL allows creating new
 // directories; that does not grant removal or replacement of an owned child.
-func validateAncestorDescriptor(sd *windows.SECURITY_DESCRIPTOR, volumeRoot bool, sandboxSIDs func() map[string]bool) error {
+func validateAncestorDescriptor(
+	sd *windows.SECURITY_DESCRIPTOR,
+	volumeRoot bool,
+	adminMemberSIDs func() map[string]bool,
+	sandboxSIDs func() map[string]bool,
+) error {
 	user, err := CurrentSID()
 	if err != nil {
 		return err
 	}
-	trusted := func(sid *windows.SID) bool {
-		return sid != nil && (windows.EqualSid(sid, user) || sid.IsWellKnown(windows.WinLocalSystemSid) || sid.IsWellKnown(windows.WinBuiltinAdministratorsSid) ||
-			sid.String() == "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464") // Windows TrustedInstaller
+	userSID := user.String()
+	trustedStatic := func(sid *windows.SID, allowRuleOnly bool) bool {
+		return sid != nil && isTrustedAncestorSID(sid.String(), userSID, nil, nil, allowRuleOnly)
 	}
 	owner, _, err := sd.Owner()
-	if err != nil || !trusted(owner) {
+	if err != nil || owner == nil {
 		return errors.New("ancestor is owned by another user")
+	}
+	if !trustedStatic(owner, false) {
+		var members map[string]bool
+		if adminMemberSIDs != nil {
+			members = adminMemberSIDs()
+		}
+		if !isTrustedAncestorSID(owner.String(), userSID, members, nil, false) {
+			return fmt.Errorf("ancestor is owned by another user (%s)", owner.String())
+		}
 	}
 	dacl, _, err := sd.DACL()
 	if err != nil || dacl == nil {
@@ -270,27 +292,114 @@ func validateAncestorDescriptor(sd *windows.SECURITY_DESCRIPTOR, volumeRoot bool
 		if volumeRoot {
 			replaceMask &^= windows.DELETE
 		}
-		if trusted(sid) || ace.Mask&replaceMask == 0 {
+		if ace.Mask&replaceMask == 0 || trustedStatic(sid, true) {
 			continue
 		}
-		if !sandboxSIDs()[sid.String()] {
-			return fmt.Errorf("ancestor permits another user (%s) to replace private paths", sid.String())
+		sidValue := sid.String()
+		var members map[string]bool
+		if adminMemberSIDs != nil {
+			members = adminMemberSIDs()
+		}
+		if isTrustedAncestorSID(sidValue, userSID, members, nil, true) {
+			continue
+		}
+		var sandbox map[string]bool
+		if sandboxSIDs != nil {
+			sandbox = sandboxSIDs()
+		}
+		if !isTrustedAncestorSID(sidValue, userSID, nil, sandbox, true) {
+			return fmt.Errorf("ancestor permits another user (%s) to replace private paths", sidValue)
 		}
 	}
 	return nil
 }
 
+var (
+	modNetapi32                 = windows.NewLazySystemDLL("netapi32.dll")
+	procNetLocalGroupGetMembers = modNetapi32.NewProc("NetLocalGroupGetMembers")
+)
+
+type localGroupMembersInfo0 struct {
+	SID *windows.SID
+}
+
+// localAdminMemberSIDs returns direct member SIDs of the local
+// BUILTIN\Administrators group (filtered to eligible individual/domain/Entra
+// SIDs). Failures return an empty set so ancestor validation fails closed.
+func localAdminMemberSIDs() map[string]bool {
+	sids := map[string]bool{}
+	adminGroup, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		return sids
+	}
+	groupName, _, _, err := adminGroup.LookupAccount("")
+	if err != nil || groupName == "" {
+		return sids
+	}
+	groupNamePtr, err := windows.UTF16PtrFromString(groupName)
+	if err != nil {
+		return sids
+	}
+	const (
+		maxPreferredLength = ^uint32(0)
+		errorMoreData      = 234
+		maxPages           = 16
+	)
+	var resumeHandle uintptr
+	for page := 0; page < maxPages; page++ {
+		var buf *byte
+		var entriesRead, totalEntries uint32
+		r1, _, _ := procNetLocalGroupGetMembers.Call(
+			0,
+			uintptr(unsafe.Pointer(groupNamePtr)),
+			0,
+			uintptr(unsafe.Pointer(&buf)),
+			uintptr(maxPreferredLength),
+			uintptr(unsafe.Pointer(&entriesRead)),
+			uintptr(unsafe.Pointer(&totalEntries)),
+			uintptr(unsafe.Pointer(&resumeHandle)),
+		)
+		if buf != nil {
+			if r1 == 0 || r1 == errorMoreData {
+				entries := unsafe.Slice((*localGroupMembersInfo0)(unsafe.Pointer(buf)), int(entriesRead))
+				for _, entry := range entries {
+					if entry.SID == nil {
+						continue
+					}
+					value := entry.SID.String()
+					if isEligibleAdminMemberSID(value) {
+						sids[value] = true
+					}
+				}
+			}
+			_ = windows.NetApiBufferFree(buf)
+		}
+		if r1 != errorMoreData {
+			break
+		}
+	}
+	return sids
+}
+
 // codexSandboxSIDs returns the principals the Codex Windows sandbox grants on
 // its writable roots: the sandbox users group and the capability SIDs Codex
-// records in its default home. Linger accepts that a sandboxed Codex command
-// may replace an ancestor such as AppData; private paths themselves stay
-// owner-only.
+// records in its default home or active CODEX_HOME. Linger accepts that a
+// sandboxed Codex command may replace an ancestor such as AppData; private
+// paths themselves stay owner-only.
 func codexSandboxSIDs() map[string]bool {
 	sids := map[string]bool{}
-	profile, err := windows.GetCurrentProcessToken().GetUserProfileDirectory()
-	if err == nil {
-		if data, err := os.ReadFile(filepath.Join(profile, ".codex", "cap_sid")); err == nil {
-			sids = parseCodexCapSIDs(data)
+	var capFiles []string
+	if profile, err := windows.GetCurrentProcessToken().GetUserProfileDirectory(); err == nil && profile != "" {
+		capFiles = append(capFiles, filepath.Join(profile, ".codex", "cap_sid"))
+	}
+	if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" && filepath.IsAbs(codexHome) {
+		capFiles = append(capFiles, filepath.Join(codexHome, "cap_sid"))
+	}
+	for _, capFile := range capFiles {
+		if data, err := os.ReadFile(capFile); err == nil {
+			for sid := range parseCodexCapSIDs(data) {
+				sids[sid] = true
+			}
 		}
 	}
 	if sid, _, _, err := windows.LookupSID("", "CodexSandboxUsers"); err == nil {

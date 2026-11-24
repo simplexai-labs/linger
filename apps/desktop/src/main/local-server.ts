@@ -64,6 +64,7 @@ import {
 import { redact } from "@linger/local-installation/redaction";
 import { isInkling2MiniModelId } from "@linger/service-kit/featured-models";
 import {
+  windowsPrivateLocation,
   windowsPrivateRefusal,
   type WindowsPrivateRefusal,
 } from "@linger/local-installation/windows-private";
@@ -391,6 +392,13 @@ export interface LocalServerOptions {
   readonly pollMs?: number;
   // The free space a picked folder needs; LOCATION_FREE_BYTES by default.
   readonly freeBytes?: number;
+  // Where the Desktop Computer daemon stores its config and state
+  // (<userData>/computer); validated on Windows during setup preflight so
+  // ancestor ACL refusals fail immediately instead of after installation.
+  readonly daemonDirectory?: string;
+  // Checks Windows private-path safety for a candidate directory without
+  // creating it or mutating ACLs; windowsPrivateLocation by default on Windows.
+  readonly checkPrivateLocation?: (directory: string) => Promise<void>;
   // How long setup waits for the Another Me; AGENTS_TIMEOUT_MS by default.
   readonly agentsTimeoutMs?: number;
   // Opens the runtime's sign-in page in the browser.
@@ -1247,6 +1255,34 @@ export class LocalServerModule implements Module {
         );
         if (error) throw new Error(error);
       }
+      // On Windows, pre-check both the install home and the Computer daemon
+      // directory (<userData>/computer) before unpacking so ancestor ACL
+      // refusals fail immediately instead of after installation and enrollment.
+      if ((this.#options.platform ?? process.platform) === "win32") {
+        const checkPrivate =
+          this.#options.checkPrivateLocation ?? windowsPrivateLocation;
+        await this.#timed("private_paths", async () => {
+          await checkPrivate(home);
+          const daemonDirectory = this.#options.daemonDirectory;
+          if (
+            daemonDirectory &&
+            path.resolve(daemonDirectory) !== path.resolve(home)
+          ) {
+            try {
+              await checkPrivate(daemonDirectory);
+            } catch (error) {
+              // Do not tag a daemon-directory refusal as an install-location
+              // refusal; moving the install folder does not move <userData>.
+              const detail =
+                error instanceof Error ? error.message : String(error);
+              throw new Error(
+                `Desktop Computer directory validation failed: ${detail}`,
+                { cause: error },
+              );
+            }
+          }
+        });
+      }
       const node = await this.#timed("node", () => this.#ensureNode(signal));
       const keysChanged = Object.keys(plan.keys ?? {}).length > 0;
       if (keysChanged)
@@ -1413,7 +1449,9 @@ export class LocalServerModule implements Module {
       this.#set(
         "failed",
         message,
-        windowsPrivateRefusal((error as { refusal?: unknown } | null)?.refusal),
+        windowsPrivateRefusal(
+          (error as { refusal?: unknown } | null)?.refusal ?? error,
+        ),
         localServerFailure((error as { code?: unknown } | null)?.code),
       );
       throw error;

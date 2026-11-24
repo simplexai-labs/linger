@@ -177,6 +177,7 @@ async function main(): Promise<void> {
   };
   const localServer = new LocalServerModule({
     home,
+    daemonDirectory,
     version: VERSION,
     macosVersion: () => process.getSystemVersion(),
     installerDirectory: path.join(here, "../installer"),
