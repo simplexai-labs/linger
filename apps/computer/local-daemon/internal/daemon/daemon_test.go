@@ -1675,6 +1675,162 @@ func TestDaemonPublishesMonotonicRuntimeDiagnosticUpdates(t *testing.T) {
 	}
 }
 
+func TestDaemonKeepsDiagnosticsRevisionAboveSeededAndSnapshotObservations(t *testing.T) {
+	device, err := transport.GenerateIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const seededRevision = uint64(1_760_000_000_000)
+	registrations := newTestRegistrations(t)
+	release := make(chan struct{})
+	initialSnapshot := protocol.Command{
+		Type:            protocol.CommandRegistrationSnapshot,
+		CommandID:       "snapshot-initial",
+		ConnectionEpoch: 7,
+		Payload: mustJSON([]transport.RuntimeRegistration{{
+			RegistrationID: "reg-pi",
+			Observation: transport.RegistrationObservation{
+				TenantID:           "tenant-1",
+				OwnerActorID:       "owner-1",
+				ProviderType:       "pi",
+				Status:             "unavailable",
+				Revision:           seededRevision,
+				Capabilities:       []string{},
+				RuntimeDiagnostics: json.RawMessage(`{"status":"not_installed"}`),
+			},
+		}}),
+	}
+	stream := &fakeStream{
+		commands: []protocol.Command{
+			{Type: "runner.welcome", ConnectionEpoch: 7},
+			initialSnapshot,
+		},
+		wait: release,
+	}
+	d, err := newTestDaemon(t, Options{
+		ComputerID:        "computer-1",
+		ControlPlane:      fakeControlPlane{stream: stream},
+		IdentityStore:     fakeStore{value: device},
+		OperationResolver: fakeOperationResolver{},
+		Registrations:     registrations,
+		Runtimes:          []string{"codex"},
+		RuntimeDiagnostics: json.RawMessage(
+			`[{"type":"codex","status":"ready","protocol":"app-server","checked_at":"2026-09-01T00:00:00Z"},{"type":"pi","status":"not_installed","protocol":"rpc","checked_at":"2026-09-01T00:00:00Z"}]`,
+		),
+		RuntimeObservations: []transport.RegistrationObservation{
+			{
+				TenantID:     "tenant-1",
+				OwnerActorID: "owner-1",
+				ProviderType: "codex",
+				Status:       "online",
+				Revision:     seededRevision,
+				Capabilities: []string{"turn"},
+			},
+			{
+				TenantID:     "tenant-1",
+				OwnerActorID: "owner-1",
+				ProviderType: "pi",
+				Status:       "unavailable",
+				Revision:     seededRevision,
+				Capabilities: []string{},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.daemonID = device.DaemonID
+	done := make(chan error, 1)
+	go func() { done <- d.runConnection(context.Background(), device) }()
+	// Wait for EventRuntimeObserved from initialSnapshot as well as EventDaemonHello.
+	waitForEvents(t, stream, 2)
+
+	nextObs := []transport.RegistrationObservation{{
+		TenantID:     "tenant-1",
+		OwnerActorID: "owner-1",
+		ProviderType: "pi",
+		Status:       "online",
+		Revision:     seededRevision + 1,
+		Capabilities: []string{"turn"},
+	}}
+	if err := d.UpdateRuntimeInventory(
+		context.Background(),
+		[]string{"codex", "pi"},
+		json.RawMessage(`[{"type":"codex","status":"ready","protocol":"app-server","checked_at":"2026-09-01T00:00:15Z"},{"type":"pi","status":"ready","protocol":"rpc","checked_at":"2026-09-01T00:00:15Z"}]`),
+		nextObs,
+	); err != nil {
+		t.Fatal(err)
+	}
+	waitForEvents(t, stream, 3)
+	diagEvent := stream.snapshotEvents()[2]
+	if diagEvent.Type != protocol.EventRuntimeDiagnostics || diagEvent.Revision <= seededRevision+1 {
+		t.Fatalf("diagnostics event revision = %d, want > %d (%+v)", diagEvent.Revision, seededRevision+1, diagEvent)
+	}
+
+	// Applying a snapshot at the emitted revision transitions Pi to online in the registration store.
+	if err := d.applyRegistrationSnapshot(context.Background(), stream, protocol.Command{
+		Type:            protocol.CommandRegistrationSnapshot,
+		CommandID:       "snapshot-pi-online",
+		ConnectionEpoch: 7,
+		Payload: mustJSON([]transport.RuntimeRegistration{{
+			RegistrationID: "reg-pi",
+			Observation: transport.RegistrationObservation{
+				TenantID:     "tenant-1",
+				OwnerActorID: "owner-1",
+				ProviderType: "pi",
+				Status:       "online",
+				Revision:     diagEvent.Revision,
+				Capabilities: []string{"turn"},
+			},
+		}}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := registrations.List(context.Background())
+	if err != nil || len(stored) != 1 || stored[0].Status != registration.StatusOnline || stored[0].Revision != diagEvent.Revision {
+		t.Fatalf("stored registrations after snapshot = %+v, err=%v", stored, err)
+	}
+
+	// A snapshot with a still-higher revision also advances diagnosticsRevision for later updates.
+	const jumpedRevision = seededRevision + 500
+	if err := d.applyRegistrationSnapshot(context.Background(), stream, protocol.Command{
+		Type:            protocol.CommandRegistrationSnapshot,
+		CommandID:       "snapshot-jumped",
+		ConnectionEpoch: 7,
+		Payload: mustJSON([]transport.RuntimeRegistration{{
+			RegistrationID: "reg-pi",
+			Observation: transport.RegistrationObservation{
+				TenantID:     "tenant-1",
+				OwnerActorID: "owner-1",
+				ProviderType: "pi",
+				Status:       "online",
+				Revision:     jumpedRevision,
+				Capabilities: []string{"turn"},
+			},
+		}}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.UpdateRuntimeInventory(
+		context.Background(),
+		[]string{"codex", "pi"},
+		json.RawMessage(`[{"type":"codex","status":"ready","protocol":"app-server","checked_at":"2026-09-01T00:00:30Z"},{"type":"pi","status":"ready","protocol":"rpc","checked_at":"2026-09-01T00:00:30Z"}]`),
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	events := stream.snapshotEvents()
+	lastDiag := events[len(events)-1]
+	if lastDiag.Type != protocol.EventRuntimeDiagnostics || lastDiag.Revision <= jumpedRevision {
+		t.Fatalf("post-snapshot diagnostics event revision = %d, want > %d (%+v)", lastDiag.Revision, jumpedRevision, lastDiag)
+	}
+
+	close(release)
+	if err := <-done; !errors.Is(err, io.EOF) {
+		t.Fatalf("runConnection() error = %v", err)
+	}
+}
+
 func TestDaemonDoesNotRetryAuthenticationFailure(t *testing.T) {
 	device, err := transport.GenerateIdentity()
 	if err != nil {

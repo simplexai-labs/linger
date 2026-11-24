@@ -624,13 +624,17 @@ export class RunnerConnections {
       const observe = (
         base: Pick<Observation, "tenant_id" | "owner_actor_id">,
         diagnostic: RunnerHello["runtime_diagnostics"][number],
+        previousRevision = 0,
       ): Observation => {
         const available = connection.hello.runtimes.includes(diagnostic.type);
         return {
           ...base,
           provider_type: diagnostic.type,
           status: available ? ("online" as const) : ("unavailable" as const),
-          revision: envelope.revision,
+          // Keep each registration observation's revision strictly ahead of
+          // its previous value even when the Daemon's diagnostics counter is
+          // lower than the clock-seeded revision sent in runner.hello.
+          revision: Math.max(envelope.revision, previousRevision + 1),
           capabilities: available ? ["turn"] : [],
           runtime_diagnostics: structuredClone(
             diagnostic,
@@ -643,7 +647,10 @@ export class RunnerConnections {
           ({ type }) => type === observation.provider_type,
         );
         return diagnostic
-          ? { ...observation, ...observe(observation, diagnostic) }
+          ? {
+              ...observation,
+              ...observe(observation, diagnostic, observation.revision),
+            }
           : observation;
       });
       // A Computer leaves a Runtime that is not installed out of its hello,

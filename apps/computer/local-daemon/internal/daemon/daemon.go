@@ -284,7 +284,7 @@ func New(options Options) (*Daemon, error) {
 		stateDirectory:       options.StateDirectory,
 		runtimeHomeRoot:      options.RuntimeHomeRoot,
 		runtimeObservations:  append([]transport.RegistrationObservation(nil), options.RuntimeObservations...),
-		diagnosticsRevision:  1,
+		diagnosticsRevision:  nextRevisionAbove(1, options.RuntimeObservations),
 		gatewayState:         "connecting",
 		locallyStopped:       make(map[string]bool),
 		welcomedEpochs:       make(map[uint64]bool),

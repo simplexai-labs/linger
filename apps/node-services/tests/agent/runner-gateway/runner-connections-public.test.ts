@@ -330,6 +330,102 @@ describe("RunnerGateway", () => {
     connection.disconnect();
   });
 
+  it("advances registration revisions monotonically when diagnostics carry a lower revision than hello", async () => {
+    const gateway = createTestRunnerGateway({ heartbeatIntervalMs: 60_000 });
+    const peer = new RecordingPeer();
+    const initialClockRevision = 1_760_000_000_000;
+    const connection = await gateway.acceptConnection(
+      authenticatedPrincipal(),
+      {
+        ...hello(),
+        runtimes: ["codex"],
+        runtime_diagnostics: runtimeDiagnostics({ ready: ["codex"] }),
+        runtime_registrations: [
+          {
+            tenant_id: "tenant-acme",
+            owner_actor_id: "actor-alice",
+            provider_type: "codex",
+            status: "online",
+            revision: initialClockRevision,
+            capabilities: ["turn"],
+            runtime_diagnostics: { status: "ready" },
+          },
+          {
+            tenant_id: "tenant-acme",
+            owner_actor_id: "actor-alice",
+            provider_type: "pi",
+            status: "unavailable",
+            revision: initialClockRevision,
+            capabilities: [],
+            runtime_diagnostics: { status: "not_installed" },
+          },
+        ],
+      },
+      peer,
+    );
+    try {
+      await connection.receive({
+        type: "runner.runtime_diagnostics",
+        protocol_version: "2",
+        runner_id: "runner-local",
+        sent_at: "2026-07-29T00:00:15.000Z",
+        revision: 2,
+        runtime_diagnostics: runtimeDiagnostics({ ready: ["codex", "pi"] }),
+      });
+      const firstUpdate = peer.registrationSnapshots.at(-1)!.registrations;
+      expect(
+        firstUpdate.find(
+          ({ registration_id }) => registration_id === testRegistrationId("pi"),
+        ),
+      ).toMatchObject({
+        observation: {
+          provider_type: "pi",
+          status: "online",
+          revision: initialClockRevision + 1,
+          capabilities: ["turn"],
+        },
+      });
+      expect(
+        firstUpdate.find(
+          ({ registration_id }) =>
+            registration_id === testRegistrationId("codex"),
+        ),
+      ).toMatchObject({
+        observation: {
+          provider_type: "codex",
+          status: "online",
+          revision: initialClockRevision + 1,
+        },
+      });
+
+      await connection.receive({
+        type: "runner.runtime_diagnostics",
+        protocol_version: "2",
+        runner_id: "runner-local",
+        sent_at: "2026-07-29T00:00:30.000Z",
+        revision: 3,
+        runtime_diagnostics: runtimeDiagnostics({
+          ready: ["codex"],
+          authenticationRequired: ["pi"],
+        }),
+      });
+      const secondUpdate = peer.registrationSnapshots.at(-1)!.registrations;
+      expect(
+        secondUpdate.find(
+          ({ registration_id }) => registration_id === testRegistrationId("pi"),
+        ),
+      ).toMatchObject({
+        observation: {
+          provider_type: "pi",
+          status: "online",
+          revision: initialClockRevision + 2,
+        },
+      });
+    } finally {
+      connection.disconnect();
+    }
+  });
+
   it("accepts a receipt for a snapshot that a newer snapshot overtook", async () => {
     const gateway = createTestRunnerGateway({ heartbeatIntervalMs: 1_000 });
     const peer = new RecordingPeer();
