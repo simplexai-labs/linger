@@ -10,16 +10,31 @@ export interface ZipEntry {
   directory: boolean;
   size: number;
 }
+export interface ExtractZipOptions {
+  strip?: number;
+}
+function strippedZipPath(name: string, strip: number): string[] | undefined {
+  const normalized = name.replace(/\/+$/, "");
+  if (!normalized) return undefined;
+  const parts = normalized.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === ".."))
+    throw new Error("Unsafe zip entry.");
+  if (parts[0]?.includes(":")) throw new Error("Unsafe zip entry.");
+  const kept = strip > 0 ? parts.slice(strip) : parts;
+  return kept.length ? kept : undefined;
+}
 /**
- * Minimal reader for verified release zips (Go for Windows): stored and
- * deflated entries only, no ZIP64 and no encryption. The caller has already
+ * Minimal reader for verified release zips (Go and Node for Windows): stored
+ * and deflated entries only, no ZIP64 and no encryption. The caller has already
  * checked the archive digest, so entry CRCs add nothing here.
  */
 export async function extractZip(
   file: string,
   directory: string,
   accept: (entry: ZipEntry) => boolean,
+  options: ExtractZipOptions = {},
 ): Promise<void> {
+  const strip = options.strip ?? 0;
   const data = await readFile(file);
   let end = -1;
   for (let at = data.length - 22; at >= Math.max(0, data.length - 65_557); at--)
@@ -54,7 +69,12 @@ export async function extractZip(
       })
     )
       return;
-    const target = path.join(directory, ...name.split("/"));
+    const parts =
+      strip > 0
+        ? strippedZipPath(name, strip)
+        : name.split("/").filter(Boolean);
+    if (!parts) continue;
+    const target = path.join(directory, ...parts);
     if (directoryEntry) {
       await mkdir(target, { recursive: true, mode: 0o700 });
       continue;

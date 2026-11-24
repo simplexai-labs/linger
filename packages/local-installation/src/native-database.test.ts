@@ -30,6 +30,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  POSTGRES_READY_PROGRESS_MS,
+  POSTGRES_READY_TIMEOUT_MS,
   postgresProgram,
   prepareNativeDatabase,
   windowsElevated,
@@ -362,5 +364,74 @@ describe("prepareNativeDatabase with an existing TeamHub schema", () => {
     expect(stopNativeProcess).not.toHaveBeenCalled();
     expect(setAsideLegacyData).not.toHaveBeenCalled();
     expect(startNativeProcess).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("prepareNativeDatabase readiness wait", () => {
+  it("uses an extended default deadline above 30s for slow disk fsync", () => {
+    expect(POSTGRES_READY_TIMEOUT_MS).toBeGreaterThanOrEqual(120_000);
+    expect(POSTGRES_READY_PROGRESS_MS).toBeGreaterThan(0);
+    expect(POSTGRES_READY_PROGRESS_MS).toBeLessThan(POSTGRES_READY_TIMEOUT_MS);
+  });
+
+  it("logs progress and succeeds when PostgreSQL becomes ready past 30s", async () => {
+    let now = 1_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const logs: string[] = [];
+    let checks = 0;
+    run.mockImplementation(async (command) => {
+      if (path.basename(command) === "pg_isready") {
+        checks += 1;
+        // Advance 20s per check so readiness passes the old 30s cutoff at 40s.
+        now += 20_000;
+        return checks < 3
+          ? {
+              code: 1,
+              stdout: "",
+              stderr: "the database system is starting up",
+            }
+          : ok();
+      }
+      return ok("1");
+    });
+    try {
+      await prepareNativeDatabase({
+        ...options,
+        onOutput: (chunk) => logs.push(chunk),
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+    expect(checks).toBe(3);
+    expect(
+      logs.some((line) =>
+        /Waiting for native PostgreSQL to become ready/.test(line),
+      ),
+    ).toBe(true);
+  });
+
+  it("reports deadline seconds and pg_isready exit code when readiness times out", async () => {
+    let now = 2_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    run.mockImplementation(async (command) => {
+      if (path.basename(command) === "pg_isready") {
+        now += 15_000;
+        return { code: 2, stdout: "", stderr: "no response" };
+      }
+      return ok("1");
+    });
+    try {
+      await expect(
+        prepareNativeDatabase({
+          ...options,
+          readyTimeoutMs: 45_000,
+          readyProgressMs: 15_000,
+        }),
+      ).rejects.toThrow(
+        "Native PostgreSQL did not become ready within 45s (pg_isready exit 2); inspect its instance log.",
+      );
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });

@@ -292,3 +292,14 @@ test("taskkill never targets a supervisor whose identity no longer matches the r
   );
   expect(taskkill.calls).toEqual([]);
 });
+
+test("stop tolerates transient Windows EPERM on TerminateProcess while a process exits", async () => {
+  await record("web", 10);
+  host.processes.push(worker(10, "web"), row(11, 10, 101, "web.exe"));
+  vi.mocked(process.kill).mockImplementationOnce(() => {
+    host.processes = host.processes.filter((entry) => entry.pid !== 11);
+    throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+  });
+  await stopNativeProcess(root, "web");
+  expect(host.processes.map((entry) => entry.pid)).toEqual([1]);
+});

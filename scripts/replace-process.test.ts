@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { windowsCommandLine, windowsLaunch } from "./replace-process.mjs";
+import {
+  formatWindowsSpawnError,
+  windowsCommandLine,
+  windowsLaunch,
+} from "./replace-process.mjs";
 
 describe("windowsCommandLine", () => {
   it("quotes paths with spaces and leaves plain arguments alone", () => {
@@ -36,5 +40,45 @@ describe("windowsLaunch", () => {
       args: [],
       shell: true,
     });
+  });
+});
+
+describe("formatWindowsSpawnError", () => {
+  it("logs executable basename, code, errno, and AV/SmartScreen hint on spawn UNKNOWN", () => {
+    const error = Object.assign(new Error("spawn UNKNOWN"), {
+      code: "UNKNOWN",
+      errno: -4094,
+    });
+    const formatted = formatWindowsSpawnError(
+      "C:\\Users\\Alice\\.simplexai\\bin\\migrate.exe",
+      error,
+    );
+    expect(formatted).toContain("migrate.exe");
+    expect(formatted).not.toContain("Alice");
+    expect(formatted).toContain("code=UNKNOWN");
+    expect(formatted).toContain("errno=-4094");
+    expect(formatted).toMatch(/Windows Defender|antivirus|SmartScreen/i);
+  });
+
+  it("includes AV/SmartScreen hint on EACCES and omits it on ENOENT", () => {
+    const denied = Object.assign(new Error("spawn EACCES"), {
+      code: "EACCES",
+      errno: -4092,
+    });
+    expect(formatWindowsSpawnError("C:\\linger\\teamhub.exe", denied)).toMatch(
+      /teamhub\.exe.*code=EACCES.*errno=-4092.*SmartScreen/i,
+    );
+
+    const missing = Object.assign(new Error("spawn ENOENT"), {
+      code: "ENOENT",
+      errno: -4058,
+    });
+    const formattedMissing = formatWindowsSpawnError(
+      "C:\\linger\\teamhub.exe",
+      missing,
+    );
+    expect(formattedMissing).toContain("teamhub.exe");
+    expect(formattedMissing).toContain("code=ENOENT");
+    expect(formattedMissing).not.toMatch(/SmartScreen/);
   });
 });

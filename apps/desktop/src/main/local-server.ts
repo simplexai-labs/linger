@@ -33,6 +33,7 @@ import {
   readLocalIdentity,
   readLocalLogin,
 } from "@linger/local-installation/account";
+import { extractArchiveFallback } from "@linger/local-installation/archive";
 import { downloadInRegion } from "@linger/local-installation/region";
 import { latestLegacyBackup } from "@linger/local-installation/legacy-database";
 import { legacyMigrationPending } from "@linger/local-installation/home";
@@ -2394,25 +2395,13 @@ export class LocalServerModule implements Module {
     unpacked: string,
     signal: AbortSignal,
   ): Promise<void> {
-    await removeRetrying(unpacked);
-    await mkdir(unpacked, { recursive: true, mode: 0o700 });
-    // Windows' tar may not read zstd; Node's zlib does, and tar reads stdin.
-    if (file.endsWith(".zst")) {
-      await run(
-        tarCommand(),
-        ["-xf", "-", "--strip-components=1"],
-        unpacked,
-        signal,
-        createReadStream(file, { signal }).pipe(createZstdDecompress()),
-      );
-      return;
-    }
-    await run(
-      tarCommand(),
-      ["-xf", path.relative(unpacked, file), "--strip-components=1"],
-      unpacked,
-      signal,
-    );
+    await unpackArchive(file, unpacked, signal, {
+      onFallback: (command) =>
+        this.#ctx?.log.warn("local_server.tar_fallback", {
+          command,
+          archive: path.basename(file),
+        }),
+    });
   }
 
   // Moves a finished `unpacked` folder to `directory`. One that is already
@@ -4436,10 +4425,75 @@ const isFile = async (file: string): Promise<boolean> => {
 
 // Windows' own bsdtar reads both the tar.gz source package and the Node zip;
 // a GNU tar earlier on PATH (Git for Windows) reads neither "C:" paths nor zips.
-const tarCommand = (): string =>
-  process.platform === "win32"
-    ? path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
-    : "tar";
+export function tarCommand(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (platform !== "win32") return "tar";
+  const systemRoot =
+    env.SystemRoot?.trim() || env.windir?.trim() || "C:\\Windows";
+  return path.win32.join(systemRoot, "System32", "tar.exe");
+}
+
+export interface UnpackArchiveOptions {
+  readonly command?: string;
+  readonly runCommand?: typeof run;
+  readonly fallback?: typeof extractArchiveFallback;
+  readonly onFallback?: (command: string) => void;
+}
+
+// Unpacks `file` (stripping its single top-level directory) into an empty
+// `unpacked` folder. If system tar is missing (for example on stripped Windows
+// images without System32\tar.exe), falls back to the pure-Node extractor and
+// surfaces an actionable error if that also fails.
+export async function unpackArchive(
+  file: string,
+  unpacked: string,
+  signal: AbortSignal,
+  options: UnpackArchiveOptions = {},
+): Promise<void> {
+  const command = options.command ?? tarCommand();
+  const runCommand = options.runCommand ?? run;
+  const fallback = options.fallback ?? extractArchiveFallback;
+  await removeRetrying(unpacked);
+  await mkdir(unpacked, { recursive: true, mode: 0o700 });
+  try {
+    // Windows' tar may not read zstd; Node's zlib does, and tar reads stdin.
+    if (file.endsWith(".zst")) {
+      await runCommand(
+        command,
+        ["-xf", "-", "--strip-components=1"],
+        unpacked,
+        signal,
+        createReadStream(file, { signal }).pipe(createZstdDecompress()),
+      );
+      return;
+    }
+    await runCommand(
+      command,
+      ["-xf", path.relative(unpacked, file), "--strip-components=1"],
+      unpacked,
+      signal,
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+    options.onFallback?.(command);
+    await removeRetrying(unpacked);
+    await mkdir(unpacked, { recursive: true, mode: 0o700 });
+    try {
+      await fallback(file, unpacked, { strip: 1, signal });
+    } catch (fallbackError) {
+      const detail =
+        fallbackError instanceof Error
+          ? fallbackError.message
+          : String(fallbackError);
+      throw new Error(
+        `Failed to unpack ${path.basename(file)}: ${command} was not found (ENOENT) and the built-in extractor failed (${detail}). Restore Windows tar.exe or reinstall Linger.`,
+        { cause: fallbackError },
+      );
+    }
+  }
+}
 
 // Resolves once the child exited and closed its stdio, so nothing of it
 // still holds the files it wrote.

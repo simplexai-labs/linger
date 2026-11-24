@@ -143,7 +143,11 @@ never served a connection, holds no data, and is initialized again.
 A running PostgreSQL whose configuration changed restarts like LiveKit and
 TeamHub: a release that repins the PostgreSQL archive unpacks it into a new
 component folder, so the server an earlier release left running differs in
-its executable path and must not stop the install.
+its executable path and must not stop the install. Startup readiness waits up
+to 120 seconds (logging elapsed progress every 15 seconds) while `postgres`
+stays alive so slow disks and Windows antivirus scanning do not time out during
+initial data-directory fsync, while still failing immediately if `postgres`
+exits.
 
 On Windows `postgres.exe` refuses a token with Administrators enabled. When
 the installer runs elevated (Run as administrator, the built-in
@@ -322,7 +326,11 @@ parallel with the process listing; process-only inspections need no port lookup.
 On POSIX, a start that finds the recorded supervisor gone but processes
 still carrying its lease (the app was killed with it) ends them as a stop
 does and starts the service again. A live recorded PID or process group
-without the lease proves nothing and is refused, never signalled.
+without the lease proves nothing and is refused, never signalled; on Linux, a
+stale PID whose `kill(pid, 0)` returns `EPERM` and whose `/proc/<pid>` UID
+differs from the current user is treated as foreign and cleared without
+signalling it, and `EPERM` while signalling a leased process revalidates the
+lease before raising `NATIVE_PROCESS_SIGNAL_DENIED` with the service and PID.
 On macOS every identity check reads `ps` start times in the C locale.
 Linger 0.1.2 recorded them in the locale it ran in; such a record is
 converted once to the C-locale birth when `ps` in the installer's own
