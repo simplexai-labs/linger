@@ -611,6 +611,8 @@ export interface components {
     InstallationJob: {
       /** @description Explicit consent to share currently free GPU memory with existing tasks; defaults to false and never stops other processes. */
       shareGpu?: boolean;
+      /** @description Runtime paths from this completed desktop installation, available when polling the live job. */
+      runtime?: components["schemas"]["InstanceRuntime"];
       runtimeAuth?: {
         /** @enum {string} */
         runtime: "codex" | "claude" | "pi";

@@ -24,6 +24,26 @@ const input = {
     apiKey: "secret-api-key",
   },
 };
+test("the live completed job hands off runtime paths without retaining them in job history", async () => {
+  const runtime = {
+    setupChoice: "pi" as const,
+    environment: { LINGER_PI_PATH: "/managed/pi" },
+  };
+  const { jobs, dir } = await setup(
+    async (_input, _signal, _emit, publishRuntime) => {
+      publishRuntime?.(runtime);
+      return { code: 0, state: "ready", message: "Ready" };
+    },
+  );
+  const job = await jobs.start(input);
+  await jobs.wait(job.id);
+  expect(jobs.get(job.id)?.runtime).toEqual(runtime);
+  expect(jobs.list()[0]?.runtime).toBeUndefined();
+  expect(
+    await readFile(path.join(dir, job.id + ".json"), "utf8"),
+  ).not.toContain("/managed/pi");
+});
+
 test("dependency preparation can run while product installation awaits runtime and deduplicates independently", async () => {
   const { jobs } = await setup(async (value) =>
     value.preparation

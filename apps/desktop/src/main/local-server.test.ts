@@ -708,6 +708,31 @@ describe("LocalServerModule", () => {
     expect(packaging).toContain("LSMinimumSystemVersion=MINIMUM_MACOS");
   });
 
+  it("uses the runtime returned by the completed install without another lookup", async () => {
+    const runtime = {
+      setupChoice: "pi",
+      environment: { LINGER_PI_PATH: "/managed/pi" },
+    };
+    const api = installerApi([], {
+      state: "succeeded",
+      origin: "http://localhost:3000",
+      runtime,
+    });
+    const lookup = vi.spyOn(InstallerApi.prototype, "runtime");
+    try {
+      const f = fixture(withCheckout, {}, checkout, api);
+      await f.host.start();
+      await f.module.begin();
+      expect(f.host.ctx.config.get().runtimeEnvironment).toEqual(
+        runtime.environment,
+      );
+      expect(lookup).not.toHaveBeenCalled();
+      await f.host.stop("quit");
+    } finally {
+      lookup.mockRestore();
+    }
+  });
+
   it("installs from the pinned source, signs in and connects this computer", async () => {
     const root = tempDirectory();
     const archive = sourceArchive(root);
@@ -796,12 +821,16 @@ describe("LocalServerModule", () => {
     // only its runtime stage waits for the sign-in.
     const api = installerApi([], {
       state: "succeeded",
+      setupChoice: "codex",
       origin: "http://localhost:3000",
       stages: [
         { id: "runtime", state: "waiting_user" },
         { id: "computer", state: "skipped" },
       ],
     });
+    const requests = vi.spyOn(api, "handle");
+    const lookups = () =>
+      requests.mock.calls.filter(([url]) => url.pathname.endsWith("/runtime"));
     api.runtime.setupChoice = "codex";
     api.runtime.login = { state: "idle" };
     const openExternal = vi.fn(async () => {});
@@ -814,6 +843,7 @@ describe("LocalServerModule", () => {
     await f.host.start();
     const done = f.module.begin();
     await waitForInstaller(() => expect(f.module.status().step).toBe("signin"));
+    expect(lookups()).toHaveLength(0);
     expect(f.module.status()).toMatchObject({
       phase: "installing",
       message: "Sign in to Codex",
@@ -868,6 +898,7 @@ describe("LocalServerModule", () => {
     // Signing in finishes in the browser; the next check sees it.
     api.runtime.login = { state: "ready" };
     await done;
+    expect(lookups()).toHaveLength(1);
     expect(f.module.status()).toMatchObject({
       phase: "ready",
       signIn: { runtime: "codex", state: "signed_in" },

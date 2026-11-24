@@ -29,6 +29,7 @@ import { publicComputer } from "./public.js";
 import { prepareDependencies } from "@linger/local-installation/dependencies";
 import { readManagedModel } from "@linger/local-installation/managed-codex";
 import type { RunInstallation } from "./jobs.js";
+import type { RuntimeDescriptor } from "@linger/local-installation/managed-runtimes";
 import {
   formatRuntimeLookupTimings,
   instanceRuntime,
@@ -80,23 +81,45 @@ export function coreAdapter(
     },
     setup: () =>
       inspectSetup({ home, signal: AbortSignal.timeout(10 * 60_000) }),
-    run: ((input, signal, onEvent) =>
-      input.preparation
-        ? prepareDependencies({
-            home,
-            dependency: input.preparation,
-            signal,
-            onEvent,
-          })
-        : installNativeSource({
-            ...input,
-            name: input.instance,
-            home,
-            repo: sourceRepo,
-            externalComputer,
-            signal,
-            onEvent,
-          })) as RunInstallation,
+    run: (async (input, signal, onEvent, publishRuntime) => {
+      if (input.preparation)
+        return prepareDependencies({
+          home,
+          dependency: input.preparation,
+          signal,
+          onEvent,
+        });
+      let descriptors: RuntimeDescriptor[] | undefined;
+      const outcome = await installNativeSource({
+        ...input,
+        name: input.instance,
+        home,
+        repo: sourceRepo,
+        externalComputer,
+        signal,
+        onEvent,
+        onRuntimeDescriptors: (value) => {
+          descriptors = value;
+        },
+      });
+      if (
+        externalComputer &&
+        outcome.code === 0 &&
+        publishRuntime &&
+        descriptors?.some((row) => row.runtime === input.setupChoice)
+      ) {
+        // A failed handoff leaves the completed job usable. Desktop can retry the live lookup.
+        const runtime = await instanceRuntime(home, input.instance, {
+          runtimeDescriptors: descriptors,
+          onTimings: (timings) =>
+            process.stderr.write(
+              formatRuntimeLookupTimings(input.instance, timings),
+            ),
+        }).catch(() => undefined);
+        if (runtime) publishRuntime(runtime);
+      }
+      return outcome;
+    }) as RunInstallation,
     environment: () =>
       checkNativeSourceEnvironment({
         repo: sourceRepo,

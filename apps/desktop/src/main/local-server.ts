@@ -1248,7 +1248,7 @@ export class LocalServerModule implements Module {
       for (;;) {
         const nextChoice = job.signInRequired
           ? await this.#timed("await_signin", () =>
-              this.#awaitSignIn(installer, signal),
+              this.#awaitSignIn(installer, signal, job.setupChoice),
             )
           : undefined;
         if (!nextChoice) break;
@@ -1279,8 +1279,10 @@ export class LocalServerModule implements Module {
         .prewarmAssets(job.origin);
       // The desktop's Computer runs the runtime this installer set up, with
       // its profile, rather than whatever its PATH finds.
-      const runtime = await this.#timed("installer_runtime", () =>
-        installer.runtime(signal),
+      const runtime = await this.#timed("installer_runtime", async () =>
+        job.runtime && !job.signInRequired
+          ? job.runtime
+          : installer.runtime(signal),
       );
       const preferredRuntime = setupRuntime(runtime.setupChoice);
       this.#ctx?.config.update({
@@ -1390,9 +1392,12 @@ export class LocalServerModule implements Module {
   async #awaitSignIn(
     installer: InstallerApi,
     signal: AbortSignal,
+    setupChoice?: string,
   ): Promise<LocalRuntime | { readonly byok: SetupByokConfig } | undefined> {
     const runtime =
-      setupRuntime((await installer.runtime(signal)).setupChoice) ?? "pi";
+      setupRuntime(setupChoice) ??
+      setupRuntime((await installer.runtime(signal)).setupChoice) ??
+      "pi";
     this.#signInInstaller = installer;
     this.#switchTo = undefined;
     this.#switchByok = undefined;
@@ -3341,6 +3346,8 @@ export const anotherMeMissing = (
 };
 
 interface Job {
+  readonly runtime?: InstanceRuntime;
+  readonly setupChoice?: string;
   readonly id: string;
   readonly instance: string;
   readonly state: string;
@@ -3616,7 +3623,12 @@ export class InstallerApi {
       transfer?: Transfer,
     ) => void,
     fresh = false,
-  ): Promise<{ readonly origin: string; readonly signInRequired: boolean }> {
+  ): Promise<{
+    readonly origin: string;
+    readonly signInRequired: boolean;
+    readonly setupChoice?: string;
+    readonly runtime?: InstanceRuntime;
+  }> {
     const { items } = await this.#json<{ items: Job[] }>("/api/jobs");
     const latest = items
       .filter((item) => item.instance === LOCAL_INSTANCE && !item.preparation)
@@ -3709,8 +3721,15 @@ export class InstallerApi {
           },
         );
       }
-      if (finished(job))
-        return { origin: job.origin!, signInRequired: signInRequired(job) };
+      if (finished(job)) {
+        const live = job === latest ? undefined : job;
+        return {
+          origin: job.origin!,
+          signInRequired: signInRequired(job),
+          setupChoice: live?.runtime?.setupChoice ?? live?.setupChoice,
+          runtime: live?.runtime,
+        };
+      }
       const planId = job.localModelsPlan?.planId;
       if (
         job.state === "waiting_user" &&
