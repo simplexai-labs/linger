@@ -15,9 +15,17 @@
 // features/local-models-and-byok.md#sleep-wake-and-quit.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -82,7 +90,22 @@ const runTimeoutSeconds = Number(options["run-timeout-seconds"]);
 const evidenceBase = path.join(repoRoot, "test-results", "verify-linger");
 mkdirSync(evidenceBase, { recursive: true, mode: 0o700 });
 const evidence = mkdtempSync(path.join(evidenceBase, "sleep-quit."));
-const ownerFile = path.join(home, "instances", "desktop", "local-account.json");
+// The installer's owner account; room-journey.mjs reads its own field names
+// from a private copy outside the evidence folder.
+const account = JSON.parse(
+  readFileSync(
+    path.join(home, "instances", "desktop", "local-account.json"),
+    "utf8",
+  ),
+);
+const owner = {
+  owner_email: account.owner_email ?? account.email,
+  owner_password: account.owner_password ?? account.password,
+};
+const ownerDir = mkdtempSync(path.join(tmpdir(), "linger-sleep-quit-"));
+const ownerFile = path.join(ownerDir, "owner.json");
+writeFileSync(ownerFile, JSON.stringify(owner), { mode: 0o600 });
+process.on("exit", () => rmSync(ownerDir, { recursive: true, force: true }));
 const stopLog = path.join(home, "installer", "local-models-stop.log");
 
 const log = (event, fields = {}) =>
@@ -191,26 +214,34 @@ function snapshot() {
   const isApp = (p) =>
     exeOf(p.cmd).startsWith(appText) || lower(p.cmd).startsWith(appText);
   const main = all.filter((p) => isApp(p) && !p.cmd.includes("--type="));
-  const daemon = all.filter((p) =>
-    /linger-computer-daemon(\.exe)?"?\s+--config/.test(p.cmd),
-  );
-  const services = descendants(
-    all.filter((p) => p.cmd.includes("native-process-worker")),
+  const mainPids = new Set(main.map((p) => p.pid));
+  // The app's own daemon: other Computers on the host run the same binary.
+  const daemon = all.filter(
+    (p) =>
+      mainPids.has(p.ppid) &&
+      /linger-computer-daemon(\.exe)?"?\s+--config/.test(p.cmd),
   );
   const mine = (p) => lower(p.cmd).includes(homeText);
+  // localmodels may keep its gateway binary in the user's data folder.
+  const userText = lower(path.dirname(home));
+  const services = descendants(
+    all.filter((p) => mine(p) && p.cmd.includes("native-process-worker")),
+  );
   const servicePids = new Set(services.map((p) => p.pid));
   const controller = all.filter(
     (p) => mine(p) && /localmodels\s+foundations\b/.test(p.cmd),
   );
+  const isGateway = (p) =>
+    /^bifrost-http/i.test(path.basename(exeOf(p.cmd).split(" ")[0])) &&
+    lower(p.cmd).includes(userText);
+  const isModelTool = (p) =>
+    mine(p) &&
+    /[/\\](tools|runtime)[/\\](localmodels|model-services)[/\\]/i.test(p.cmd);
   const localModelRoots = all.filter(
     (p) =>
       !servicePids.has(p.pid) &&
       !controller.includes(p) &&
-      (/bifrost/i.test(p.cmd) ||
-        (mine(p) &&
-          /[/\\](tools|runtime)[/\\](localmodels|model-services)[/\\]/i.test(
-            p.cmd,
-          ))),
+      (isGateway(p) || isModelTool(p)),
   );
   const daemonTree = descendants(daemon).filter(
     (p) => !daemon.includes(p) && !localModelRoots.includes(p),
@@ -223,6 +254,11 @@ function snapshot() {
     ...new Set(group.flatMap((p) => [...(ports.get(p.pid) ?? [])])),
   ];
   const appTree = descendants(main);
+  // Processes that must outlive a freeze or a quit: per-request children
+  // (database backends, tool calls) come and go.
+  const serving = [...services, ...controller, ...localModels]
+    .filter((p) => ports.has(p.pid))
+    .map((p) => p.pid);
   return {
     at: new Date().toISOString(),
     main,
@@ -232,6 +268,7 @@ function snapshot() {
     services,
     controller,
     localModels,
+    serving,
     ports: {
       app: portsOf(appTree.filter(isApp)),
       services: portsOf(services),
@@ -332,7 +369,6 @@ let session;
 async function api(route, body) {
   const origin = baseUrl();
   if (!session) {
-    const owner = JSON.parse(readFileSync(ownerFile, "utf8"));
     const response = await fetch(`${origin}/v0/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -402,14 +438,6 @@ async function online(timeoutMs) {
   return found ? Date.now() - started : undefined;
 }
 
-async function localModels() {
-  const c = await computer();
-  if (!c?.computer_id) return undefined;
-  return api(
-    `/v0/tenants/{tenant}/local-computers/${encodeURIComponent(c.computer_id)}/local-models`,
-  ).catch(() => undefined);
-}
-
 // A real Run on the Computer's Pi with its default local model.
 function journey() {
   const lines = [];
@@ -458,7 +486,36 @@ function journey() {
   return { sent, done };
 }
 
+// The status TeamHub shows for the Run a journey started: active, completed
+// or aborted; "timeout" when it stays active.
+async function runStatus(result, timeoutMs) {
+  const sent = result.lines
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return undefined;
+      }
+    })
+    .find((entry) => entry?.phase === "sent");
+  if (!sent) return "not_sent";
+  const route = `/v0/rooms/${encodeURIComponent(sent.room_id)}/runtime-presentation-runs?message_id=${encodeURIComponent(sent.message_id)}`;
+  const status = await waitFor(
+    async () => {
+      const page = await api(route).catch(() => undefined);
+      const run = page?.items?.find((item) => item.agent?.id === sent.agent_id);
+      return run && run.status !== "active" ? run.status : undefined;
+    },
+    timeoutMs,
+    3000,
+  );
+  return status ?? "timeout";
+}
+
 // --- Phases ---------------------------------------------------------------
+
+// room-journey.mjs outcomes of a Run that replied as asked.
+const COMPLETED = ["room_observed", "verified"];
 
 const results = [];
 let step = 0;
@@ -496,10 +553,22 @@ async function record(name, run) {
   log("phase.finished", { phase: id, status: result.status });
 }
 
+// Starts a journey once the Computer is online, and once more when the first
+// attempt fails before it sends its message (TeamHub still waking up).
+async function startJourney() {
+  await online(180_000);
+  const first = journey();
+  if (await first.sent) return first;
+  await first.done;
+  await delay(5_000);
+  await online(60_000);
+  return journey();
+}
+
 async function runCheck(check, label) {
-  const { done } = journey();
+  const { done } = await startJourney();
   const result = await done;
-  check(label, result.outcome === "completed", {
+  check(label, COMPLETED.includes(result.outcome), {
     outcome: result.outcome,
     tail: result.lines.slice(-2),
   });
@@ -515,7 +584,8 @@ const everything = (s) => [
   ...pids(s.localModels),
 ];
 
-async function freezeFor(ids, check) {
+async function freezeFor(s, check) {
+  const ids = everything(s);
   freeze(ids);
   log("freeze", { pids: ids.length, ms: freezeMs });
   try {
@@ -524,9 +594,14 @@ async function freezeFor(ids, check) {
     thaw(ids);
     log("thaw", { pids: ids.length });
   }
-  check("every frozen process survived", ids.every(alive), {
-    lost: ids.filter((pid) => !alive(pid)),
-  });
+  const lasting = [...pids(s.main), ...pids(s.daemon), ...s.serving];
+  check(
+    "the app, daemon and serving processes survived",
+    lasting.every(alive),
+    {
+      lost: lasting.filter((pid) => !alive(pid)),
+    },
+  );
 }
 
 const phases = {
@@ -546,7 +621,7 @@ const phases = {
 
   // Lid close or system sleep with the whole stack on this computer.
   async "freeze-all"({ before, check }) {
-    await freezeFor(everything(before), check);
+    await freezeFor(before, check);
     const ms = await online(180_000);
     check("Computer is online again after thaw", ms !== undefined, { ms });
     const after = snapshot();
@@ -583,17 +658,20 @@ const phases = {
 
   // Sleep in the middle of a Run.
   async "run-across-freeze"({ check, note }) {
-    const run = journey();
+    const run = await startJourney();
     const sent = await run.sent;
     check("Run started", sent);
-    await delay(10_000);
-    await freezeFor(everything(snapshot()), check);
+    await delay(2_000);
+    await freezeFor(snapshot(), check);
     const result = await run.done;
-    note(`in-flight Run ended as ${result.outcome}`);
+    // room-journey.mjs gives up when TeamHub is frozen under its requests;
+    // the Run's own status says how it ended.
+    const status = await runStatus(result, runTimeoutSeconds * 1000);
+    note(`in-flight Run: journey ${result.outcome}, Run status ${status}`);
     check(
       "the in-flight Run reaches a terminal state",
-      ["completed", "aborted"].includes(result.outcome),
-      { outcome: result.outcome, tail: result.lines.slice(-2) },
+      status === "completed" || status === "aborted",
+      { status, tail: result.lines.slice(-2) },
     );
     await runCheck(check, "the next Run completes");
   },
@@ -601,13 +679,13 @@ const phases = {
   // The model engine dies in the middle of a Run (driver reset after
   // resume, out-of-memory kill).
   async "engine-kill"({ check, note }) {
-    const run = journey();
+    const run = await startJourney();
     check("Run started", await run.sent);
-    await delay(8_000);
+    await delay(3_000);
     const s = snapshot();
     const ports = listeningPorts();
     const engines = s.localModels.filter(
-      (p) => ports.has(p.pid) && !/bifrost/i.test(p.cmd),
+      (p) => ports.has(p.pid) && !/bifrost-http/i.test(p.cmd),
     );
     note(
       `killed engines: ${engines.map((p) => p.cmd.slice(0, 160)).join(" | ")}`,
@@ -615,18 +693,19 @@ const phases = {
     check("found a model engine to kill", engines.length > 0);
     for (const p of engines) kill(p.pid);
     const result = await run.done;
+    const status = await runStatus(result, runTimeoutSeconds * 1000);
+    note(`in-flight Run: journey ${result.outcome}, Run status ${status}`);
     check(
       "the in-flight Run reaches a terminal state",
-      ["completed", "aborted"].includes(result.outcome),
-      { outcome: result.outcome, tail: result.lines.slice(-2) },
+      status === "completed" || status === "aborted",
+      { status, tail: result.lines.slice(-2) },
     );
     await runCheck(check, "the next Run loads the model again and completes");
   },
 
   async quit({ before, check, note }) {
-    const stopLogBefore = existsSync(stopLog)
-      ? readFileSync(stopLog, "utf8")
-      : "";
+    // The app rewrites the log on every quit; its text can repeat.
+    const quitAt = Date.now();
     if (options["quit-command"]) {
       spawnSync(options["quit-command"], { shell: true, stdio: "inherit" });
     } else if (isWindows) {
@@ -647,9 +726,9 @@ const phases = {
       )) === true,
     );
     const outcome = await waitFor(() => {
-      if (!existsSync(stopLog)) return undefined;
+      if (!existsSync(stopLog) || statSync(stopLog).mtimeMs < quitAt - 1000)
+        return undefined;
       const text = readFileSync(stopLog, "utf8");
-      if (text === stopLogBefore) return undefined;
       const line = text.trim().split("\n").at(-1);
       try {
         return JSON.parse(line);
@@ -676,7 +755,9 @@ const phases = {
     check("their ports are free", held.length === 0, { held });
     check(
       "the collaboration services keep running",
-      pids(before.services).every(alive),
+      before.serving
+        .filter((pid) => pids(before.services).includes(pid))
+        .every(alive),
     );
     const leftovers = snapshot();
     check("no daemon is left", leftovers.daemon.length === 0, {
@@ -721,17 +802,19 @@ const phases = {
     check("Computer is online after relaunch", ms !== undefined, { ms });
     const s = snapshot();
     check("one daemon", s.daemon.length === 1, { daemon: pids(s.daemon) });
-    const models = await waitFor(
-      async () => {
-        const view = await localModels();
-        return view?.models?.some((m) => m.state === "loaded")
-          ? view
-          : undefined;
+    // Runs reach the model through the stack's gateway; the library's
+    // per-model state is a separate view and may stay idle.
+    const serving = await waitFor(
+      () => {
+        const ports = snapshot().ports.localModels;
+        return ports.length > 1 ? ports : undefined;
       },
       300_000,
       5_000,
     );
-    check("the local model is loaded again", models !== undefined);
+    check("the model engine and gateway listen again", serving !== undefined, {
+      ports: serving,
+    });
     await runCheck(check, "a Run after relaunch completes");
   },
 };
