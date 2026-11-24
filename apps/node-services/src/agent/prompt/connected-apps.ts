@@ -13,9 +13,7 @@ export function connectableAppsRule(keys: readonly string[]): string {
 /**
  * Feishu Mail runs through the Human's own lark-cli, which an Agent on their
  * Computer could also call directly. Connecting it turns on watching their
- * inbox, and only teamhub feishu-mail holds a send for the Human's card. When
- * their Computer cannot connect it yet, TeamHub posts no card and names the
- * cause by Issue code with the Human's steps, which the Agent relays.
+ * inbox, and only teamhub feishu-mail holds a send for the Human's card.
  */
 const FEISHU_MAIL_RULE = ` Connect feishu_mail only when the Human asks you to share their Feishu Mail with you, since connecting it also starts watching their inbox. Read and send Feishu Mail with teamhub feishu-mail, never with lark-cli mail commands, which skip the Human's confirmation card.`;
 

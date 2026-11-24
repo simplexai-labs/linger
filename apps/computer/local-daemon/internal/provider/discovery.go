@@ -390,15 +390,9 @@ func resolveExecutableEntry(ctx context.Context, kind, name string, options Disc
 	if path == "" {
 		path = os.Getenv("PATH")
 	}
-	for _, directory := range executableDirectories(path, options.Environment) {
-		if !filepath.IsAbs(directory) {
-			continue
-		}
-		for _, filename := range executableNames(name) {
-			candidate := filepath.Join(directory, filename)
-			if _, err := canonicalExecutable(candidate); err == nil {
-				return candidate, nil
-			}
+	for _, candidate := range executableCandidates(name, path, options.Environment) {
+		if _, err := canonicalExecutable(candidate); err == nil {
+			return candidate, nil
 		}
 	}
 	if bundle := applicationBundles[kind]; bundle != "" && runtime.GOOS == "darwin" {

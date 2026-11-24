@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/computerconfig"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 )
 
@@ -77,12 +78,7 @@ type feishuLogin struct {
 // NewFeishuMail returns a FeishuMail that looks for lark-cli on every call,
 // so installing it later needs no restart.
 func NewFeishuMail() *FeishuMail {
-	environment := map[string]string{}
-	for _, entry := range os.Environ() {
-		if name, value, ok := strings.Cut(entry, "="); ok {
-			environment[name] = value
-		}
-	}
+	environment := computerconfig.ProcessEnvironment()
 	return &FeishuMail{resolve: findLarkCLI, env: childEnvironment(environment), now: time.Now, logins: map[string]feishuLogin{}}
 }
 
@@ -376,12 +372,7 @@ func feishuMailboxRequestPath(requestPath string) bool {
 // findLarkCLI finds lark-cli on PATH, then where its installers put it. A
 // Computer started from the desktop or a clean environment has a short PATH.
 func findLarkCLI() (string, error) {
-	environment := map[string]string{}
-	for _, entry := range os.Environ() {
-		if name, value, ok := strings.Cut(entry, "="); ok {
-			environment[name] = value
-		}
-	}
+	environment := computerconfig.ProcessEnvironment()
 	// Runtime discovery's folders cover npm's global folder on Windows, which
 	// a Daemon started before Node was installed has no PATH entry for.
 	candidates := provider.ExecutableCandidates(larkCLIName, environment)

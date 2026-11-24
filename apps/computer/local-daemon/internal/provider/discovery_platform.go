@@ -48,8 +48,12 @@ func executableDirectories(pathValue string, environment map[string]string) []st
 // on Windows). Local tools that run another CLI find it the same way.
 func ExecutableCandidates(name string, environment map[string]string) []string {
 	environment = platformEnvironment(environment)
+	return executableCandidates(name, environment["PATH"], environment)
+}
+
+func executableCandidates(name, path string, environment map[string]string) []string {
 	var candidates []string
-	for _, directory := range executableDirectories(environment["PATH"], environment) {
+	for _, directory := range executableDirectories(path, environment) {
 		if !filepath.IsAbs(directory) {
 			continue
 		}
