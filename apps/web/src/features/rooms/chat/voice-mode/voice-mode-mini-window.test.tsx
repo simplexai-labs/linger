@@ -185,72 +185,53 @@ describe("Voice Mode mini window", () => {
     expect(voice.setMuted).not.toHaveBeenCalled();
   });
 
-  it("shows a reply still being spoken as the voice says it", async () => {
+  it("glides after new lines until the Human scrolls up", async () => {
+    const observed: (() => void)[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          observed.push(callback);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
     voice.session!.live = {
       soundOff: false,
-      transcript: [
-        { id: "lt_1", speaker: "you", text: "What is on today" },
-        {
-          id: "lt_1:reply",
-          speaker: "live",
-          text: "Two meetings, then the launch review.",
-          pending: true,
-          pacing: "speaking",
-        },
-      ],
+      transcript: [{ id: "lt_1", speaker: "you", text: "What is next" }],
     };
     renderWindow();
     const log = await screen.findByRole("log", {
       name: "Voice Mode conversation",
     });
-    // The words arrive before they are spoken; they follow the voice.
-    expect(log).not.toHaveTextContent("launch review");
-    await waitFor(() => expect(log).toHaveTextContent("Two m"));
-    // The newest words fade in, and the reply eased in as the voice started;
-    // the Human's line, already said, does neither.
-    expect(log.querySelectorAll(".voice-live-word-in").length).toBeGreaterThan(
-      0,
-    );
-    expect(log.querySelectorAll(".voice-live-line-in")).toHaveLength(1);
-  });
-
-  it("flows the Human's words in as they are transcribed", async () => {
-    voice.session!.state = {
-      ...voice.session!.state,
-      text: "what is on today",
-      speakingText: "what is on today",
-    };
-    voice.session!.live = { soundOff: false, transcript: [] };
-    renderWindow();
-    const log = await screen.findByRole("log", {
-      name: "Voice Mode conversation",
+    let scrollHeight = 400;
+    Object.defineProperty(log, "scrollHeight", { get: () => scrollHeight });
+    Object.defineProperty(log, "clientHeight", { value: 100 });
+    const scrollTo = vi.fn((options: ScrollToOptions) => {
+      log.scrollTop = options.top ?? 0;
     });
-    expect(log).not.toHaveTextContent("what is on today");
-    await waitFor(() => expect(log).toHaveTextContent("what is on today"));
-    expect(log.querySelectorAll(".voice-live-word-in").length).toBeGreaterThan(
-      0,
-    );
-    expect(log.querySelectorAll(".voice-live-line-in")).toHaveLength(1);
-  });
-
-  it("shows a reply said before the window opened at once, without fading", async () => {
-    voice.session!.live = {
-      soundOff: false,
-      transcript: [
-        {
-          id: "lt_1:reply",
-          speaker: "live",
-          text: "Two meetings today.",
-        },
-      ],
+    log.scrollTo = scrollTo as unknown as typeof log.scrollTo;
+    const grow = (height: number) => {
+      scrollHeight = height;
+      observed.forEach((callback) => callback());
     };
-    renderWindow();
-    const log = await screen.findByRole("log", {
-      name: "Voice Mode conversation",
-    });
-    expect(log).toHaveTextContent("Two meetings today.");
-    expect(log.querySelector(".voice-live-word-in")).toBeNull();
-    expect(log.querySelector(".voice-live-line-in")).toBeNull();
+    grow(420);
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 320, behavior: "smooth" });
+    // On its way down the glide passes short of the bottom and keeps following.
+    log.scrollTop = 200;
+    fireEvent.scroll(log);
+    log.scrollTop = 260;
+    fireEvent.scroll(log);
+    grow(440);
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 340, behavior: "smooth" });
+    // Scrolling up leaves the newest words where they are.
+    log.scrollTop = 100;
+    fireEvent.scroll(log);
+    scrollTo.mockClear();
+    grow(460);
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 
   it("shows a live call as it was said, with words still being said last", async () => {
@@ -276,19 +257,12 @@ describe("Voice Mode mini window", () => {
     const log = await screen.findByRole("log", {
       name: "Voice Mode conversation",
     });
-    // Words being said flow in as they are transcribed, a few at a time.
-    await waitFor(() => expect(log).toHaveTextContent("then"));
-    const bubble = (text: string) =>
-      within(log).getByText(
-        (_, element) =>
-          element?.tagName === "P" && element.textContent === text,
-      );
     const order = [
       "Scroll down a bit",
       "Sure, scrolling for you.",
       "The weekly report is in the chat",
       "then",
-    ].map(bubble);
+    ].map((text) => within(log).getByText(text));
     for (const [index, bubble] of order.slice(1).entries())
       expect(
         order[index]!.compareDocumentPosition(bubble) &

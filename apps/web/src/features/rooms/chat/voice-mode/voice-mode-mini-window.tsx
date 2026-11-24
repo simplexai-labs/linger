@@ -42,7 +42,6 @@ import { roomMessagesInfiniteQueryOptions } from "../../room-queries";
 import { useRoomRunStatusCollection } from "../../runtime-status/use-room-run-statuses";
 import { ActorAvatar } from "../../members/actor-avatar";
 import { voiceModeStatusLabel } from "./voice-mode-presentation";
-import { usePacedText, type VoiceLinePacing } from "./live/voice-live-pacing";
 import styles from "./voice-mode.module.css";
 import { registerVoiceWindow, type VoiceWindowAction } from "./voice-ui-bridge";
 import {
@@ -259,9 +258,8 @@ function MiniWindow({
   /** A follow scroll is gliding down to the newest words. */
   const glidingRef = useRef(false);
   const lastTopRef = useRef(0);
-  // Follows the conversation as it grows, words revealed while the voice
-  // speaks included, gliding down a line at a time. A Human who scrolled up
-  // stays where they are.
+  // Follows the conversation as it grows, gliding down to new lines instead
+  // of snapping on every packet. A Human who scrolled up stays where they are.
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
     const content = contentRef.current;
@@ -501,8 +499,6 @@ function MiniWindow({
                   }
                   key={line.id}
                   own={line.speaker === "you"}
-                  paced={line.speaker === "live"}
-                  pacing={line.pacing}
                   pending={line.pending}
                   text={line.text}
                 />
@@ -546,8 +542,6 @@ function MiniWindow({
               <Bubble
                 author={t(commonMessages.you)}
                 own
-                paced
-                pacing="typing"
                 pending
                 text={saying}
               />
@@ -587,35 +581,22 @@ function MiniWindow({
 }
 
 // Each line renders again only when its own words change, not on every
-// word of the line being said.
+// packet of the line being said.
 const Bubble = memo(function Bubble({
   agent = false,
   author,
   own,
-  paced = false,
-  pacing,
   pending = false,
   text,
 }: {
   agent?: boolean;
   author: string;
   own: boolean;
-  /** Words shown as they are said: the voice's as it speaks them, the Human's as they are transcribed. */
-  paced?: boolean;
-  pacing?: VoiceLinePacing;
   pending?: boolean;
   text: string;
 }) {
-  // A reply the voice starts now eases in; lines already said do not.
-  const [entering] = useState(
-    () => paced && (pacing === "speaking" || pacing === "typing"),
-  );
   return (
-    <div
-      className={`flex flex-col ${own ? "items-end" : "items-start"} ${
-        entering ? "voice-live-line-in" : ""
-      }`}
-    >
+    <div className={`flex flex-col ${own ? "items-end" : "items-start"}`}>
       {own ? null : (
         <span className="mb-0.5 px-1 text-[12px] text-app-muted">{author}</span>
       )}
@@ -628,47 +609,11 @@ const Bubble = memo(function Bubble({
               : "rounded-2xl bg-muted px-3 py-1.5 text-foreground"
         } ${pending ? "opacity-70" : ""}`}
       >
-        {paced ? <PacedText pacing={pacing} text={text} /> : text}
+        {text}
       </p>
     </div>
   );
 });
-
-function PacedText({
-  pacing,
-  text,
-}: {
-  pacing: VoiceLinePacing | undefined;
-  text: string;
-}) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const shown = usePacedText(text, pacing, ref);
-  // Words already on screen when the line first rendered never fade in.
-  const [shownAtStart] = useState(() =>
-    pacing === "speaking" || pacing === "typing" ? 0 : Array.from(text).length,
-  );
-  const characters = Array.from(shown);
-  // The newest characters fade in; each keeps its own element, keyed by its
-  // place, until its fade has run, then joins the plain text before it.
-  const fadeFrom = Math.max(shownAtStart, characters.length - fadingCharacters);
-  return (
-    <span ref={ref}>
-      {characters.length
-        ? characters.slice(0, fadeFrom).join("")
-        : // Before the first word is heard, the line shows that the voice
-          // is about to speak.
-          "\u2026"}
-      {characters.slice(fadeFrom).map((character, offset) => (
-        <span className="voice-live-word-in" key={fadeFrom + offset}>
-          {character}
-        </span>
-      ))}
-    </span>
-  );
-}
-
-/** More than the characters a voice says during one fade. */
-const fadingCharacters = 6;
 
 /** Conversation Messages sent since this session started, oldest first. */
 export function sessionMessages(

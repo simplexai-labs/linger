@@ -9,7 +9,6 @@ import {
   readPageTargets,
   runPageAction,
 } from "./voice-live-page-tools";
-import type { VoiceLinePacing } from "./voice-live-pacing";
 import { readVoicePage, type VoicePageState } from "./voice-page-reader";
 
 const voiceLivePageTools = { pageReady, readPageTargets, runPageAction };
@@ -24,8 +23,6 @@ export interface VoiceLiveLine {
   text: string;
   /** Still being said. */
   pending?: boolean;
-  /** How the words follow the voice; absent, they show at once. */
-  pacing?: VoiceLinePacing;
 }
 
 /**
@@ -69,8 +66,6 @@ interface LiveTurn {
   /** The reply text was first shown. */
   shown: boolean;
   heard: boolean;
-  /** The runtime said the turn's whole reply was produced. */
-  done?: boolean;
   /** Settles once the turn's whole reply ended, or the turn was continued. */
   settled: Promise<void>;
   settle: () => void;
@@ -190,19 +185,13 @@ export function createVoiceLiveArbiter(options: {
     transcript.splice(0, Math.max(0, transcript.length - transcriptLines));
     options.onTranscript([...transcript]);
   };
-  const showReply = (
-    turnId: string,
-    turn: LiveTurn,
-    saying: boolean,
-    pacing: VoiceLinePacing | undefined,
-  ) => {
+  const showReply = (turnId: string, turn: LiveTurn, saying: boolean) => {
     if (!turn.reply) return;
     writeLine({
       id: `${turnId}:reply`,
       speaker: "live",
       text: turn.reply,
       ...(saying ? { pending: true } : {}),
-      ...(pacing ? { pacing } : {}),
     });
     if (turn.shown) return;
     turn.shown = true;
@@ -339,20 +328,7 @@ export function createVoiceLiveArbiter(options: {
         else if (event.type === "reply_done" && event.text)
           updates.set(id, event.text);
         const words = updates.get(id)!;
-        // Runtime announces an update once its audio starts and never says
-        // when that audio ends, so a said update finishes once it falls quiet.
-        if (words)
-          writeLine({
-            id,
-            speaker: "live",
-            text: words,
-            pacing:
-              event.type === "reply_interrupted"
-                ? "cut"
-                : event.type === "reply_done"
-                  ? "said"
-                  : "speaking",
-          });
+        if (words) writeLine({ id, speaker: "live", text: words });
         if (event.type === "reply_done" || event.type === "reply_interrupted")
           updates.delete(id);
         return;
@@ -375,14 +351,7 @@ export function createVoiceLiveArbiter(options: {
         clearTimeout(endTimer);
         endTimer = setTimeout(endVoiceMode, endVoiceModeTailMs);
       }
-      if (event.type === "playout_done") {
-        // The reply's audio drained: every word of it has been heard.
-        const turn = event.turn_id ? turns.get(event.turn_id) : undefined;
-        if (turn && !turn.interrupted)
-          showReply(event.turn_id!, turn, !turn.done, undefined);
-        return;
-      }
-      if (!event.turn_id) return;
+      if (event.type === "playout_done" || !event.turn_id) return;
       const turn =
         event.type === "reply_delta" || event.type === "reply_done"
           ? ensureTurn(event.turn_id)
@@ -392,26 +361,19 @@ export function createVoiceLiveArbiter(options: {
       if (event.type === "reply_interrupted") {
         turn.interrupted = true;
         turn.settle();
-        showReply(event.turn_id, turn, false, "cut");
+        showReply(event.turn_id, turn, false);
         return;
       }
       if (event.type === "reply_done") {
         turn.settle();
-        turn.done = true;
         if (!turn.interrupted && event.text) turn.reply = event.text;
-        // Produced in full, but its audio may still be playing.
-        showReply(
-          event.turn_id,
-          turn,
-          false,
-          turn.interrupted ? "cut" : "said",
-        );
+        showReply(event.turn_id, turn, false);
         return;
       }
       if (turn.interrupted) return;
       if (event.type === "reply_delta") {
         turn.reply += event.text ?? "";
-        showReply(event.turn_id, turn, true, "speaking");
+        showReply(event.turn_id, turn, true);
       }
     },
     /** The reply playback just became audible. */

@@ -1437,37 +1437,6 @@ a[href][aria-disabled="true"],
   }
 }
 
-/* Live voice subtitles: a reply line eases in as the voice starts, and each
-   word it says fades in, so words revealed at speech pace read as one moving
-   edge rather than a character popping in at a time. */
-.voice-live-line-in {
-  animation: voice-live-line-in 240ms ease-out both;
-}
-
-.voice-live-word-in {
-  animation: voice-live-word-in 200ms ease-out both;
-}
-
-@keyframes voice-live-line-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-}
-
-@keyframes voice-live-word-in {
-  from {
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .voice-live-line-in,
-  .voice-live-word-in {
-    animation: none;
-  }
-}
-
 /* Template cards settle in on open, staggered by their position in the grid so
    the shelf reads as one list arriving rather than a block appearing. */
 .template-card-enter {

@@ -32,7 +32,6 @@ import {
   voiceMicrophoneOptions,
 } from "../voice-media-room";
 import { VoiceModeDisconnectedError } from "../voice-mode-errors";
-import { noteReplyAudible, resetReplyAudible } from "./voice-live-pacing";
 import { translate } from "@/i18n/language";
 import { voiceSessionMessages as m } from "../voice-session.messages";
 
@@ -111,7 +110,6 @@ export async function openVoiceLive(input: {
     input.microphone?.(undefined);
     replyMeter?.();
     replyMeter = undefined;
-    resetReplyAudible();
     if (audio) {
       audio.srcObject = null;
       audio.remove();
@@ -178,7 +176,6 @@ export async function openVoiceLive(input: {
       const now = level > audibleLevel;
       if (now && !audible) input.audible?.();
       audible = now;
-      noteReplyAudible(now);
     });
   };
   try {
