@@ -52,6 +52,12 @@ that installs the managed Runtimes reuses an existing one only at or above its
 own baseline, which must not sit below these minimums. Raise a minimum only
 after a kit that installs a release at or above it ships in the desktop
 distribution pins (`apps/desktop/distribution/*.json`).
+The Codex canary workflow (`.github/workflows/codex-canary.yml`) runs the native
+Codex compatibility tests daily against npm's newest stable Codex, because a
+user's own newer Codex reaches the Daemon before any kit locks it. The
+localmodels kit opens a lock update merge request for each new stable Codex at
+least seven days old; it should merge only after the canary passes on that
+version.
 It performs bounded protocol and authentication probes.
 A protocol probe passes once the Runtime answers the handshake, however the
 process exits after its input closes. When the handshake fails, the daemon log
