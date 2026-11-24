@@ -22,8 +22,10 @@ permissions:
   contents: read
   issues: write
 
+# One group per tested version, so a manual run for one Codex never cancels
+# the run for another, or the daily run.
 concurrency:
-  group: codex-canary-${{ github.ref }}
+  group: codex-canary-${{ github.ref }}-${{ inputs.version || 'latest' }}
   cancel-in-progress: true
 
 jobs:
