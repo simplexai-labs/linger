@@ -440,11 +440,7 @@ export class ComputerDaemonModule implements Module {
         this.#setConnection(connectionState(status.gateway_state));
       if (typeof status.active_operations === "number")
         this.#setRunning(status.active_operations);
-      if (
-        typeof status.active_model_invokes === "number" &&
-        Number.isFinite(status.active_model_invokes) &&
-        status.active_model_invokes >= 0
-      )
+      if (typeof status.active_model_invokes === "number")
         this.#setModelInvokes(status.active_model_invokes);
     });
     child.onExit((code, reason) => {

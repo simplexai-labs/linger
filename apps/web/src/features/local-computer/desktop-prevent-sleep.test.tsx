@@ -93,4 +93,33 @@ describe("DesktopPreventSleep", () => {
     unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
   });
+
+  it("ignores a stale initial get response after a newer onChange update", async () => {
+    let resolveGet!: (value: { preventSleep: boolean }) => void;
+    let listener: ((settings: { preventSleep?: boolean }) => void) | undefined;
+    const get = vi.fn(
+      () =>
+        new Promise<{ preventSleep: boolean }>((resolve) => {
+          resolveGet = resolve;
+        }),
+    );
+    const set = vi.fn();
+    const onChange = vi.fn(
+      (callback: (settings: { preventSleep?: boolean }) => void) => {
+        listener = callback;
+        return () => {};
+      },
+    );
+    setDesktop({ settings: { get, set, onChange } });
+
+    render(<DesktopPreventSleep />);
+    act(() => listener?.({ preventSleep: true }));
+    const toggle = await screen.findByRole("switch", { name: "Prevent sleep" });
+    expect(toggle).toBeChecked();
+
+    await act(async () => {
+      resolveGet({ preventSleep: false });
+    });
+    expect(toggle).toBeChecked();
+  });
 });

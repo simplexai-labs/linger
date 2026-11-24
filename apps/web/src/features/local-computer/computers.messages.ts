@@ -43,7 +43,7 @@ export const computersMessages = defineMessages("computers", {
   power: "Power",
   preventSleep: "Prevent sleep",
   preventSleepHint:
-    "Stay awake while plugged in with the screen locked so scheduled midnight Memory and Wiki tasks run on time.",
+    "Keep this computer awake while locked so scheduled midnight Memory and Wiki tasks run on time (recommended while plugged in).",
   preventSleepFailed: "Could not update sleep setting. Try again.",
   access: "Access",
   advanced: "Advanced",

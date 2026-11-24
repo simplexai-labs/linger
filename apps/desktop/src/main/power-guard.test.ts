@@ -11,7 +11,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const setup = async (preventSleep = false) => {
+const setup = async (
+  preventSleep = false,
+  initial: { readonly running?: number; readonly modelInvokes?: number } = {},
+) => {
   const blocks: number[] = [];
   let powerListener: ((kind: "suspend" | "resume") => void) | undefined;
   let next = 0;
@@ -29,8 +32,13 @@ const setup = async (preventSleep = false) => {
       return () => (powerListener = undefined);
     },
   };
+  const daemon = {
+    ...stubModule("ComputerDaemon"),
+    running: () => initial.running ?? 0,
+    modelInvokes: () => initial.modelInvokes ?? 0,
+  };
   const guard = new PowerGuardModule(power);
-  const host = testHost([stubModule("ComputerDaemon"), guard], {
+  const host = testHost([daemon, guard], {
     preventSleep,
   });
   await host.start();
@@ -122,6 +130,23 @@ describe("PowerGuard module", () => {
     expect(guard.active()).toBe(false);
     expect(blocks).toEqual([]);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("seeds active background model invocations on start and arms the tail on completion", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { host, guard, blocks } = await setup(false, { modelInvokes: 1 });
+    expect(guard.active()).toBe(true);
+    expect(blocks).toEqual([1]);
+
+    host.ctx.bus.emit("runtime.model_activity", 0);
+    vi.advanceTimersByTime(MODEL_ACTIVITY_TAIL_MS - 1);
+    expect(guard.active()).toBe(true);
+    expect(blocks).toEqual([1]);
+
+    vi.advanceTimersByTime(1);
+    expect(guard.active()).toBe(false);
+    expect(blocks).toEqual([]);
+    await host.stop("quit");
   });
 
   it("blocks sleep while a local server installation or resume is busy", async () => {

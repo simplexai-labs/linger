@@ -44,18 +44,25 @@ export function DesktopPreventSleep({
   useEffect(() => {
     if (typeof api?.get !== "function" || typeof api.set !== "function") return;
     let active = true;
+    let receivedUpdate = false;
     void api
       .get()
       .then((next) => {
-        if (active && typeof next?.preventSleep === "boolean")
+        if (
+          active &&
+          !receivedUpdate &&
+          typeof next?.preventSleep === "boolean"
+        )
           setPreventSleep(next.preventSleep);
       })
       .catch(() => undefined);
     const off =
       typeof api.onChange === "function"
         ? api.onChange((next) => {
-            if (typeof next?.preventSleep === "boolean")
+            if (typeof next?.preventSleep === "boolean") {
+              receivedUpdate = true;
               setPreventSleep(next.preventSleep);
+            }
           })
         : undefined;
     return () => {

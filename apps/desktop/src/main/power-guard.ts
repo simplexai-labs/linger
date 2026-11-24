@@ -37,11 +37,9 @@ export class PowerGuardModule implements Module {
 
   async start(ctx: ModuleContext): Promise<void> {
     this.#ctx = ctx;
-    const daemon = ctx.get<Module & Partial<ComputerDaemonModule>>(
-      "ComputerDaemon",
-    );
-    this.#running = daemon.running?.() ?? 0;
-    this.#modelInvokes = daemon.modelInvokes?.() ?? 0;
+    const daemon = ctx.get<ComputerDaemonModule>("ComputerDaemon");
+    this.#running = daemon.running();
+    this.#modelInvokes = daemon.modelInvokes();
     this.#unsubscribe.push(
       ctx.bus.on("runtime.activity", (running) => {
         this.#running = running;

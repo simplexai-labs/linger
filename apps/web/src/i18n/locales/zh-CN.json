@@ -929,7 +929,7 @@
     "manageLocalModelsHint": "下载并加载在这台电脑上运行的模型",
     "power": "电源",
     "preventSleep": "防止休眠",
-    "preventSleepHint": "插电锁屏时保持唤醒，保证午夜 Memory / Wiki 定时任务按时运行。",
+    "preventSleepHint": "锁屏时保持唤醒，保证午夜 Memory / Wiki 定时任务按时运行（建议插电使用）。",
     "preventSleepFailed": "无法更新休眠设置，请重试。",
     "access": "访问权限",
     "advanced": "高级",
