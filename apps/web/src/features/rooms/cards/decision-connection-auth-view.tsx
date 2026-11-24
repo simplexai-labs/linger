@@ -453,7 +453,11 @@ function ConnectionAuthorizationActions({
       appKey={appKey}
       appName={appName}
       card={card}
-      guide={guideError ? <FeishuConnectGuide error={guideError} /> : undefined}
+      guide={
+        guideError ? (
+          <FeishuConnectGuide className="mt-3" error={guideError} />
+        ) : undefined
+      }
       error={
         error ||
         (setupError instanceof Error && !guideError
