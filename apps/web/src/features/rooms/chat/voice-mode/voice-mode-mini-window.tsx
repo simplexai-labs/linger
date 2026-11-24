@@ -13,6 +13,7 @@ import {
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Icon } from "@/components/ui/icon";
 import {
+  memo,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -41,6 +42,7 @@ import { roomMessagesInfiniteQueryOptions } from "../../room-queries";
 import { useRoomRunStatusCollection } from "../../runtime-status/use-room-run-statuses";
 import { ActorAvatar } from "../../members/actor-avatar";
 import { voiceModeStatusLabel } from "./voice-mode-presentation";
+import { usePacedText, type VoiceLinePacing } from "./live/voice-live-pacing";
 import styles from "./voice-mode.module.css";
 import { registerVoiceWindow, type VoiceWindowAction } from "./voice-ui-bridge";
 import {
@@ -252,14 +254,25 @@ function MiniWindow({
     [],
   );
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
-  const contentVersion = transcript
-    ? `${transcript.length}:${transcript.at(-1)?.text.length}:${saying.length}`
-    : `${turns.length}:${turns.at(-1)?.id}:${replying.length}:${live.length}`;
+  // Follows the conversation as it grows, words revealed while the voice
+  // speaks included, and pins before the frame is painted. A Human who
+  // scrolled up stays where they are.
   useLayoutEffect(() => {
-    const element = scrollRef.current;
-    if (element && followRef.current) element.scrollTop = element.scrollHeight;
-  }, [contentVersion]);
+    const scroller = scrollRef.current;
+    const content = contentRef.current;
+    const view = scroller?.ownerDocument.defaultView;
+    if (!scroller || !content || !view || !("ResizeObserver" in view)) return;
+    const pin = () => {
+      if (followRef.current) scroller.scrollTop = scroller.scrollHeight;
+    };
+    pin();
+    const observer = new view.ResizeObserver(pin);
+    observer.observe(content);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [pip]);
 
   const state = session.state;
   const muted = session.muted;
@@ -438,7 +451,7 @@ function MiniWindow({
         <div
           aria-label={t(m.conversation)}
           aria-live="polite"
-          className="workspace-scrollbar min-h-24 flex-1 space-y-2 overflow-y-auto px-3 py-3"
+          className="workspace-scrollbar min-h-24 flex-1 overflow-y-auto px-3 py-3"
           onScroll={(event) => {
             const element = event.currentTarget;
             followRef.current =
@@ -448,65 +461,75 @@ function MiniWindow({
           ref={scrollRef}
           role="log"
         >
-          {(transcript ? transcript.length : turns.length || replying.length) ||
-          live ? null : (
-            <p className="py-4 text-center text-xs text-app-muted">
-              {t(m.empty)}
-            </p>
-          )}
-          {transcript ? (
-            transcript.map((line) => (
-              <Bubble
-                agent={line.speaker !== "you"}
-                author={
-                  line.speaker === "you"
-                    ? t(commonMessages.you)
-                    : session.target.recipient?.display_name || t(m.reply)
-                }
-                key={line.id}
-                own={line.speaker === "you"}
-                pending={line.pending}
-                text={line.text}
-              />
-            ))
-          ) : (
-            <>
-              {turns.map((message) => (
+          <div className="space-y-2" ref={contentRef}>
+            {(transcript
+              ? transcript.length
+              : turns.length || replying.length) || live ? null : (
+              <p className="py-4 text-center text-xs text-app-muted">
+                {t(m.empty)}
+              </p>
+            )}
+            {transcript ? (
+              transcript.map((line) => (
                 <Bubble
-                  agent={message.author.kind === "agent"}
-                  author={message.author.display_name}
-                  key={message.id}
-                  own={
-                    currentActorId
-                      ? message.author.id === currentActorId
-                      : message.author.kind === "human"
+                  agent={line.speaker !== "you"}
+                  author={
+                    line.speaker === "you"
+                      ? t(commonMessages.you)
+                      : session.target.recipient?.display_name || t(m.reply)
                   }
-                  text={message.raw_message}
+                  key={line.id}
+                  own={line.speaker === "you"}
+                  paced={line.speaker === "live"}
+                  pacing={line.pacing}
+                  pending={line.pending}
+                  text={line.text}
                 />
-              ))}
-              {replying.map((run) => (
-                <Bubble
-                  agent
-                  author={run.agent.display_name}
-                  key={run.id}
-                  own={false}
-                  pending
-                  text={t(m.working)}
-                />
-              ))}
-              {heard ? (
-                <Bubble
-                  author={t(commonMessages.you)}
-                  own
-                  pending
-                  text={heard}
-                />
-              ) : null}
-            </>
-          )}
-          {saying ? (
-            <Bubble author={t(commonMessages.you)} own pending text={saying} />
-          ) : null}
+              ))
+            ) : (
+              <>
+                {turns.map((message) => (
+                  <Bubble
+                    agent={message.author.kind === "agent"}
+                    author={message.author.display_name}
+                    key={message.id}
+                    own={
+                      currentActorId
+                        ? message.author.id === currentActorId
+                        : message.author.kind === "human"
+                    }
+                    text={message.raw_message}
+                  />
+                ))}
+                {replying.map((run) => (
+                  <Bubble
+                    agent
+                    author={run.agent.display_name}
+                    key={run.id}
+                    own={false}
+                    pending
+                    text={t(m.working)}
+                  />
+                ))}
+                {heard ? (
+                  <Bubble
+                    author={t(commonMessages.you)}
+                    own
+                    pending
+                    text={heard}
+                  />
+                ) : null}
+              </>
+            )}
+            {saying ? (
+              <Bubble
+                author={t(commonMessages.you)}
+                own
+                pending
+                text={saying}
+              />
+            ) : null}
+          </div>
         </div>
         {notice ? (
           <p
@@ -540,16 +563,23 @@ function MiniWindow({
   );
 }
 
-function Bubble({
+// Each line renders again only when its own words change, not on every
+// word of the line being said.
+const Bubble = memo(function Bubble({
   agent = false,
   author,
   own,
+  paced = false,
+  pacing,
   pending = false,
   text,
 }: {
   agent?: boolean;
   author: string;
   own: boolean;
+  /** The live voice's words, shown as the voice speaks them. */
+  paced?: boolean;
+  pacing?: VoiceLinePacing;
   pending?: boolean;
   text: string;
 }) {
@@ -567,10 +597,24 @@ function Bubble({
               : "rounded-2xl bg-muted px-3 py-1.5 text-foreground"
         } ${pending ? "opacity-70" : ""}`}
       >
-        {text}
+        {paced ? <PacedText pacing={pacing} text={text} /> : text}
       </p>
     </div>
   );
+});
+
+function PacedText({
+  pacing,
+  text,
+}: {
+  pacing: VoiceLinePacing | undefined;
+  text: string;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const shown = usePacedText(text, pacing, ref);
+  // Before the first word is heard, the line shows that the voice is about
+  // to speak.
+  return <span ref={ref}>{shown || "\u2026"}</span>;
 }
 
 /** Conversation Messages sent since this session started, oldest first. */

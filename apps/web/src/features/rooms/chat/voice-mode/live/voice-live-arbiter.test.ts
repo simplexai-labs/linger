@@ -91,10 +91,74 @@ describe("voice live arbiter", () => {
         },
       ]),
     );
+    // Produced in full; its words keep following the voice until it ends.
     expect(f.transcript()).toEqual([
       { id: "lt_1", speaker: "you", text: "Research the pricing for me" },
-      { id: "lt_1:reply", speaker: "live", text: "OK, let me check." },
+      {
+        id: "lt_1:reply",
+        speaker: "live",
+        text: "OK, let me check.",
+        pacing: "said",
+      },
     ]);
+  });
+
+  it("paces a reply while it is spoken and shows it whole once its audio ends", () => {
+    const f = fixture();
+    f.arbiter.prepareTurn("lt_1", "What is on today?");
+    const reply = () => f.transcript().find((line) => line.id === "lt_1:reply");
+    f.arbiter.receive({ type: "reply_delta", turn_id: "lt_1", text: "Two" });
+    expect(reply()).toMatchObject({ pacing: "speaking", pending: true });
+    f.arbiter.receive({
+      type: "reply_done",
+      turn_id: "lt_1",
+      text: "Two meetings.",
+    });
+    expect(reply()).toMatchObject({ pacing: "said", text: "Two meetings." });
+    f.arbiter.receive({ type: "playout_done", turn_id: "lt_1" });
+    expect(reply()).toEqual({
+      id: "lt_1:reply",
+      speaker: "live",
+      text: "Two meetings.",
+    });
+  });
+
+  it("keeps a cut-off reply cut, even when its playback ends afterwards", () => {
+    const f = fixture();
+    f.arbiter.prepareTurn("lt_1", "Read me the plan");
+    const reply = () => f.transcript().find((line) => line.id === "lt_1:reply");
+    f.arbiter.receive({
+      type: "reply_delta",
+      turn_id: "lt_1",
+      text: "First, the launch",
+    });
+    f.arbiter.receive({ type: "reply_interrupted", turn_id: "lt_1" });
+    f.arbiter.receive({ type: "playout_done", turn_id: "lt_1" });
+    f.arbiter.receive({
+      type: "reply_done",
+      turn_id: "lt_1",
+      text: "First, the launch moves.",
+    });
+    expect(reply()).toMatchObject({ pacing: "cut", text: "First, the launch" });
+  });
+
+  it("paces a background update from its first audio until it is said", () => {
+    const f = fixture();
+    const update = () => f.transcript().find((line) => line.id === "sp_1");
+    f.arbiter.receive({
+      type: "speech_started",
+      turn_id: "lt_1",
+      speech_id: "sp_1",
+      text: "The report is ready.",
+    });
+    expect(update()).toMatchObject({ pacing: "speaking" });
+    f.arbiter.receive({
+      type: "reply_done",
+      turn_id: "lt_1",
+      speech_id: "sp_1",
+      text: "The report is ready.",
+    });
+    expect(update()).toMatchObject({ pacing: "said" });
   });
 
   it("never saves the live model's words as the Human's", async () => {

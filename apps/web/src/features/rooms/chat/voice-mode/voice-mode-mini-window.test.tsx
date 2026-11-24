@@ -185,6 +185,29 @@ describe("Voice Mode mini window", () => {
     expect(voice.setMuted).not.toHaveBeenCalled();
   });
 
+  it("shows a reply still being spoken as the voice says it", async () => {
+    voice.session!.live = {
+      soundOff: false,
+      transcript: [
+        { id: "lt_1", speaker: "you", text: "What is on today" },
+        {
+          id: "lt_1:reply",
+          speaker: "live",
+          text: "Two meetings, then the launch review.",
+          pending: true,
+          pacing: "speaking",
+        },
+      ],
+    };
+    renderWindow();
+    const log = await screen.findByRole("log", {
+      name: "Voice Mode conversation",
+    });
+    // The words arrive before they are spoken; they follow the voice.
+    expect(log).not.toHaveTextContent("launch review");
+    await waitFor(() => expect(log).toHaveTextContent("Two m"));
+  });
+
   it("shows a live call as it was said, with words still being said last", async () => {
     voice.session!.state = {
       ...voice.session!.state,
