@@ -69,6 +69,12 @@ export const setupMessages = defineMessages("setup", {
   subscriptionHint: "Sign in with your ChatGPT or Claude subscription.",
   locationHint:
     "Go back and set the install location to the drive itself (Linger installs into {folder}) or an empty folder directly on the drive.",
+  locationDriveRootHint:
+    "Permissions on {drive} allow other accounts (such as Everyone) to replace folders there. Go back and use the default location, pick another drive, or remove Full Control for other accounts in {drive} Properties → Security.",
+  locationPickNestedHint:
+    "Other accounts can rename or replace a folder above this path. Choose {drive} itself (Linger installs into {folder}) or an empty folder directly on {drive}.",
+  locationPickDriveRootHint:
+    "Permissions on {drive} allow other accounts (such as Everyone) to replace folders there. Keep the default location, pick another drive, or remove Full Control for other accounts in {drive} Properties → Security.",
 
   // Featured partner model spotlight (Inkling 2 Mini by Thinking Machines).
   featuredModelName: "Inkling 2 Mini",

@@ -3098,19 +3098,51 @@
         value.length <= 46
           ? value
           : value.slice(0, 18) + "…" + value.slice(-27);
+      // Classifies a Windows drive path as either nested inside a folder on the
+      // drive (e.g. D:\Software\Linger) or directly on the drive root (e.g.
+      // F:\Linger or F:\).
+      const windowsDriveLocation = (value) => {
+        const nested = /^([A-Za-z]:\\)[^\\]+\\[^\\]/.exec(value);
+        if (nested) return { drive: nested[1], nested: true };
+        const root = /^([A-Za-z]:\\)[^\\]*\\?$/.exec(value);
+        if (root) return { drive: root[1], nested: false };
+        return undefined;
+      };
       // Where to install instead, when the installer refused the location
-      // because another account could rename a folder on the way to it; the
-      // message, shown below, says why. A folder directly on the drive is
-      // refused for the drive's own permissions, which choosing the drive
-      // again would not change, so that case gets no hint.
+      // because another account could rename or replace a parent folder; the
+      // message, shown below, says why. Nested paths point to the drive root;
+      // a folder directly on the drive explains the drive root's own
+      // permissions (such as Everyone Full Control on stock NTFS data drives).
       const locationHint = (local) => {
-        const [, drive] =
-          /^([A-Za-z]:\\)[^\\]+\\[^\\]/.exec(local.location.path) ?? [];
-        return drive &&
-          local.refusal?.code === "WINDOWS_PRIVATE_PATH_UNSAFE" &&
-          local.refusal.reason === "UNSAFE_PARENT_ACCESS"
-          ? t("locationHint", { folder: drive + "Linger" })
-          : "";
+        if (
+          local.refusal?.code !== "WINDOWS_PRIVATE_PATH_UNSAFE" ||
+          local.refusal.reason !== "UNSAFE_PARENT_ACCESS"
+        )
+          return "";
+        const target = windowsDriveLocation(local.location.path);
+        if (!target) return "";
+        return target.nested
+          ? t("locationHint", { folder: target.drive + "Linger" })
+          : t("locationDriveRootHint", { drive: target.drive });
+      };
+      // Actionable guidance when a candidate install folder is refused while
+      // picking on Windows; falls back to the raw error for other causes.
+      const locationErrorText = (location) => {
+        if (
+          location.refusal?.code === "WINDOWS_PRIVATE_PATH_UNSAFE" &&
+          location.refusal.reason === "UNSAFE_PARENT_ACCESS" &&
+          location.rejectedPath
+        ) {
+          const target = windowsDriveLocation(location.rejectedPath);
+          if (target)
+            return target.nested
+              ? t("locationPickNestedHint", {
+                  drive: target.drive,
+                  folder: target.drive + "Linger",
+                })
+              : t("locationPickDriveRootHint", { drive: target.drive });
+        }
+        return location.error || "";
       };
       // Why the installation stopped: in the page's words when the main
       // process names the reason, else the message it passed on.
@@ -4370,13 +4402,14 @@
             ? model.diskBytes
             : 0;
         const neededBytes = baseNeededBytes + modelDiskBytes;
+        const locationError = locationErrorText(location);
         const spaceLow =
-          !location.error &&
+          !locationError &&
           location.freeBytes != null &&
           neededBytes > 0 &&
           location.freeBytes < neededBytes;
-        const locationWarning = location.error
-          ? location.error
+        const locationWarning = locationError
+          ? locationError
           : spaceLow
             ? t("locationSpaceLow", {
                 needed: String(Math.ceil(neededBytes / GiB)),
@@ -4430,7 +4463,7 @@
         $("plan-line").hidden = !local.available;
         $("welcome-eyebrow").hidden = !local.available;
         const shownLocationPath =
-          location.error && location.rejectedPath
+          locationError && location.rejectedPath
             ? location.rejectedPath
             : location.path;
         $("install-location").hidden = !local.available;
@@ -4441,7 +4474,7 @@
         $("location-sub").title = locationWarning;
         $("location-sub").hidden = !locationWarning;
         $("location-sub").dataset.warn = String(!!locationWarning);
-        $("location-reset").hidden = !location.custom && !location.error;
+        $("location-reset").hidden = !location.custom && !locationError;
         for (const input of document.querySelectorAll("[data-key]")) {
           const provider = input.dataset.key;
           const saved = local.keys[provider];
