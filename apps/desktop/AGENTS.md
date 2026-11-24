@@ -25,7 +25,10 @@ Gateway and runs Agents. The daemon exits with the app.
   `packaging/mac/Dockerfile` and `rcodesign` (ad-hoc signature). Add
   `--developer-id P12 --developer-id-password FILE` for a Developer ID
   signature with the hardened runtime, and `--notary-key JSON` to notarize and
-  staple; see the script's docstring. Notarizing needs the bundled macOS
+  staple the DMG in one Apple submission (stapling `Linger.app` separately for
+  `--update-archive`; `Linger.app` inside the DMG is notarized by Apple with
+  the DMG submission but not separately stapled); see the script's docstring.
+  Notarizing needs the bundled macOS
   archives Developer ID signed first: the Sign macOS native archives workflow
   runs `packaging/mac/sign_native_archives.py` with the release secrets (see
   [Bundled archives](../../docs/desktop-release.md#bundled-archives)).

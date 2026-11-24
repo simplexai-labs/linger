@@ -213,6 +213,18 @@ describe("desktop-release.sh manifest", () => {
     expect(existsSync(join(dir, "manifest.json"))).toBe(false);
   });
 
+  it("refuses a missing key when DESKTOP_REQUIRE_UPDATE_KEY=true", () => {
+    const dir = release();
+
+    const result = run(["manifest", dir, version], {
+      DESKTOP_REQUIRE_UPDATE_KEY: "true",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("DESKTOP_UPDATE_KEY_PEM is required");
+    expect(existsSync(join(dir, "manifest.json"))).toBe(false);
+  });
+
   it("refuses a key installed apps would not accept", () => {
     const dir = release();
     // The throwaway key against this checkout's UPDATE_PUBLIC_KEY.
@@ -273,6 +285,30 @@ describe("desktop-release.sh build", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("cannot download");
     expect(result.stdout + result.stderr).not.toContain("private-deps-folder");
+  });
+
+  it("refuses unsigned darwin-arm64 packaging when DESKTOP_REQUIRE_MACOS_SIGNING=true", () => {
+    const root = folder();
+    mkdirSync(join(root, "scripts/ci"), { recursive: true });
+    mkdirSync(join(root, "apps/desktop/dist/installer"), { recursive: true });
+    copyFileSync(script, join(root, "scripts/ci/desktop-release.sh"));
+    writeFileSync(
+      join(root, "apps/desktop/package.json"),
+      `${JSON.stringify({ name: "@linger/desktop", version: "0.0.0" }, null, 2)}\n`,
+    );
+
+    const result = run(
+      ["package", "darwin-arm64"],
+      {
+        DESKTOP_VERSION: "1.0.0",
+        DESKTOP_REQUIRE_MACOS_SIGNING: "true",
+        RELEASE_OUT: folder(),
+      },
+      join(root, "scripts/ci/desktop-release.sh"),
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("DESKTOP_REQUIRE_MACOS_SIGNING");
   });
 });
 
