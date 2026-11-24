@@ -160,19 +160,7 @@ func TestVoiceLiveCreatesADocumentAndOpensIt(t *testing.T) {
 func TestVoiceLiveCreatesAnAgentAfterConfirmation(t *testing.T) {
 	allowParallelIntegrationTest(t)
 	env, _, roomID, sessionID := newVoiceLiveRoom(t)
-	// The new Agent runs where the call's Agent does: Alice's computer, which
-	// must still offer its workspace.
-	if _, err := env.pool.Exec(t.Context(), `
-INSERT INTO local_computers(computer_id,display_name,status,owner_tenant_id,owner_actor_id,runtime_inventory,workspace_grants,runtime_diagnostics,last_seen_at)
-SELECT r.computer_id,'Alice Mac','online',r.tenant_id,'actor_acme_alice','["codex"]',
-       jsonb_build_array(jsonb_build_object('grant_id',r.workspace_grant_id,'tenant_id',r.tenant_id,'scope','owner','label','Workspace','mode','workspace-write')),
-       jsonb_build_array(jsonb_build_object('type','codex','status','ready','protocol','app-server','checked_at',to_jsonb(now()),
-           'models',jsonb_build_array(jsonb_build_object('id',r.runtime_model,'label','Model',
-               'allowed_reasoning_effort',jsonb_build_array('low','medium','high','xhigh'),'default_reasoning_effort','high')))),
-       now()
-FROM agent_registrations r WHERE r.actor_id='actor_acme_official' AND r.created_by_actor_id='actor_acme_alice'`); err != nil {
-		t.Fatal(err)
-	}
+	prepareLiveAgentComputer(t, env)
 	call := liveToolCaller(t, env, sessionID)
 	agent := map[string]any{"name": "Weekly Report Helper", "description": "Compile my weekly report every Friday", "prompt": "Every Friday, compile the user's weekly report from this week's messages and documents."}
 	asked := call("lt_ask", "agent-1", "create_agent", agent)
@@ -196,6 +184,94 @@ FROM agent_registrations r WHERE r.actor_id='actor_acme_official' AND r.created_
 	if bad := call("lt_bad", "agent-4", "create_agent", map[string]any{"name": "x", "prompt": " "}); bad["error"] != "invalid_agent" {
 		t.Fatalf("no prompt=%v", bad)
 	}
+}
+
+func prepareLiveAgentComputer(t *testing.T, env *testEnv) {
+	t.Helper()
+	// The new Agent runs where the call's Agent does: Alice's computer, which
+	// must still offer its workspace.
+	if _, err := env.pool.Exec(t.Context(), `
+INSERT INTO local_computers(computer_id,display_name,status,owner_tenant_id,owner_actor_id,runtime_inventory,workspace_grants,runtime_diagnostics,last_seen_at)
+SELECT r.computer_id,'Alice Mac','online',r.tenant_id,'actor_acme_alice','["codex"]',
+       jsonb_build_array(jsonb_build_object('grant_id',r.workspace_grant_id,'tenant_id',r.tenant_id,'scope','owner','label','Workspace','mode','workspace-write')),
+       jsonb_build_array(jsonb_build_object('type','codex','status','ready','protocol','app-server','checked_at',to_jsonb(now()),
+           'models',jsonb_build_array(jsonb_build_object('id',r.runtime_model,'label','Model',
+               'allowed_reasoning_effort',jsonb_build_array('low','medium','high','xhigh'),'default_reasoning_effort','high')))),
+       now()
+FROM agent_registrations r WHERE r.actor_id='actor_acme_official' AND r.created_by_actor_id='actor_acme_alice'`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVoiceLiveAddsExistingAgentsToRoom(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	env, alice, _, sessionID := newVoiceLiveRoom(t)
+	prepareLiveAgentComputer(t, env)
+	target := env.createRoom(alice, acmeTenant, "Food Hunt", "food-hunt")
+	call := liveToolCaller(t, env, sessionID)
+	ids := []string{}
+	for i, name := range []string{"Restaurant Scout", "Menu Planner"} {
+		key := strconv.Itoa(i)
+		args := map[string]any{"name": name, "prompt": "Help plan team meals."}
+		if preview := call("lt_preview"+key, "create-preview"+key, "create_agent", args); preview["status"] != "needs_confirmation" {
+			t.Fatal(preview)
+		}
+		args["confirmed"] = true
+		created := call("lt_create"+key, "create-yes"+key, "create_agent", args)
+		id, _ := created["actor_id"].(string)
+		if id == "" {
+			t.Fatal(created)
+		}
+		ids = append(ids, id)
+	}
+	args := map[string]any{"room_id": target, "actor_ids": []string{ids[0], "actor_acme_alice", ids[0]}, "members": []string{"Menu Planner"}}
+	preview := call("lt_ask", "add-ask", "add_room_members", args)
+	summary, _ := preview["summary"].(string)
+	if preview["status"] != "needs_confirmation" || !strings.Contains(summary, "Food Hunt") || !strings.Contains(summary, "Restaurant Scout") || !strings.Contains(summary, "Menu Planner") {
+		t.Fatal(preview)
+	}
+	args["confirmed"] = true
+	if same := call("lt_ask", "add-early", "add_room_members", args); same["status"] != "awaiting_answer" {
+		t.Fatal(same)
+	}
+	count := func() int {
+		return countRows(t, env, `SELECT count(*) FROM active_room_members WHERE room_id=$1 AND actor_id=ANY($2::text[])`, target, ids)
+	}
+	if count() != 0 {
+		t.Fatal("Members admitted before confirmation")
+	}
+	delete(args, "members")
+	args["actor_ids"] = []string{ids[1], "actor_acme_alice", ids[0]}
+	added := call("lt_yes", "add-yes", "add_room_members", args)
+	if added["status"] != "updated" || len(added["added"].([]any)) != 2 || len(added["already_members"].([]any)) != 1 || count() != 2 {
+		t.Fatal(added)
+	}
+	again := call("lt_yes", "add-retry", "add_room_members", args)
+	if again["status"] != "updated" || len(again["added"].([]any)) != 0 || len(again["already_members"].([]any)) != 3 {
+		t.Fatal(again)
+	}
+	if countRows(t, env, `SELECT count(*) FROM active_room_members WHERE room_id=$1 AND actor_id='actor_acme_alice' AND role='owner'`, target) != 1 {
+		t.Fatal("Existing owner role was changed")
+	}
+
+	// The second admission loses its permission after the preview. The first must roll back.
+	seedPeerHumanActor(t, env.pool)
+	other := env.createRoom(alice, acmeTenant, "Another Group", "other-group")
+	args = map[string]any{"room_id": other, "actor_ids": ids}
+	if preview := call("lt_other", "other-ask", "add_room_members", args); preview["status"] != "needs_confirmation" {
+		t.Fatal(preview)
+	}
+	if _, err := env.pool.Exec(t.Context(), `UPDATE agent_registrations SET created_by_actor_id='actor_acme_bob', visibility_scope='sponsor' WHERE actor_id=$1`, max(ids[0], ids[1])); err != nil {
+		t.Fatal(err)
+	}
+	args["confirmed"] = true
+	if refused := call("lt_other_yes", "other-yes", "add_room_members", args); refused["error"] != "agent_sponsor_required" {
+		t.Fatal(refused)
+	}
+	if countRows(t, env, `SELECT count(*) FROM active_room_members WHERE room_id=$1 AND actor_id=ANY($2::text[])`, other, ids) != 0 {
+		t.Fatal("Partial admission after permission failure")
+	}
+
 }
 
 // liveSlack is the Slack behind the fake Composio.
@@ -504,5 +580,164 @@ func TestVoiceLiveKeepsOutOfATaskWorkingRoomUnasked(t *testing.T) {
 	own := call("lt_open", "open-own", "page_action", map[string]any{"action": "open_room", "target": roomID})
 	if asked["status"] != "admitted" || own["status"] != "admitted" {
 		t.Fatalf("asked=%v own=%v", asked, own)
+	}
+}
+
+func TestVoiceLiveSearchMeetingsBeyondChatHistory(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	env, _, _, sessionID := newVoiceLiveRoom(t)
+	// Recording and Live each need their own authenticated device session.
+	alice := env.login("alice", alicePassword)
+	captureID, audioID, roomID := seedFinalizedLiveKitCapture(t, env, alice, "old_meeting", "account_alice")
+	if _, err := env.pool.Exec(t.Context(), `UPDATE capture_sessions SET created_at='2026-10-09 12:00:00Z',
+		quick_notes_state='ready', quick_notes='{"title":"Launch review","sections":[{"heading":"Plan","bullets":["Ship Friday"]}]}'
+		WHERE id=$1`, captureID); err != nil {
+		t.Fatal(err)
+	}
+	// No message for this recording is in the call's history.
+	search := func(callID string, args map[string]string) string {
+		t.Helper()
+		encoded, err := json.Marshal(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result teamhubinternal.VoiceLiveToolResult
+		decode(t, voiceRuntimeCall(t, env, http.MethodPost, "/internal/v1/voice/live-tool-calls", map[string]any{
+			"voice_session_id": sessionID, "turn_id": "lt_meetings", "call_id": callID, "name": "search_meetings", "arguments": string(encoded),
+		}, http.StatusOK), &result)
+		return result.Output
+	}
+	if got := search("recent", nil); got != `{"meetings":[]}` {
+		t.Fatalf("different room: %s", got)
+	}
+	if got := search("by-date", map[string]string{"room_id": roomID, "event_from": "2026-10-08", "event_to": "2026-10-10"}); !strings.Contains(got, "Ship Friday") {
+		t.Fatalf("date lookup: %s", got)
+	}
+	if got := search("before", map[string]string{"room_id": roomID, "event_to": "2026-10-07"}); got != `{"meetings":[]}` {
+		t.Fatalf("before recording: %s", got)
+	}
+	if got := search("by-topic", map[string]string{"room_id": roomID, "topic": "launch"}); !strings.Contains(got, captureID) {
+		t.Fatalf("topic lookup: %s", got)
+	}
+	if got := search("overview", map[string]string{"room_id": roomID, "overview": "single"}); !strings.Contains(got, `"status":"overview_ready"`) || !strings.Contains(got, `"duration_ms":1000`) {
+		t.Fatalf("complete overview: %s", got)
+	}
+	if got := search("details", map[string]string{"room_id": roomID}); strings.Contains(got, "overview_ready") {
+		t.Fatalf("details must permit follow-up: %s", got)
+	}
+	// The published page remains usable when Quick Notes failed.
+	summaryID := uploadSearchDocument(t, env, alice, "voice-wiki-summary", "summary.md")
+	var wikiID string
+	if err := env.pool.QueryRow(t.Context(), `INSERT INTO personal_wikis(id,tenant_id,owner_actor_id,current_revision_id,published_at)
+		VALUES('live_meeting_wiki','tenant_acme','actor_acme_alice','published',now())
+		ON CONFLICT (tenant_id,owner_actor_id) WHERE deleted_at IS NULL DO UPDATE SET current_revision_id='published',published_at=now()
+		RETURNING id`).Scan(&wikiID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), `INSERT INTO document_context_bindings(id,tenant_id,document_id,binding_kind,wiki_id,status)
+		VALUES('live_meeting_page','tenant_acme',$1,'wiki_page',$2,'active')`, summaryID, wikiID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), `INSERT INTO document_wiki_pages(wiki_id,tenant_id,page_key,document_id)
+		VALUES($1,'tenant_acme','sessions/2026-10-09/'||$2||'.md',$3)`, wikiID, captureID, summaryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), `INSERT INTO document_texts(document_id,tenant_id,source_kind,source_id,status,markdown,markdown_sha256,search_text)
+		SELECT id,tenant_id,'file_version',current_version_id,'ready','Reduce latency',repeat('e',64),'Reduce latency' FROM documents WHERE id=$1
+		ON CONFLICT(document_id) DO UPDATE SET source_id=excluded.source_id,status='ready',search_text=excluded.search_text`, summaryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), `UPDATE capture_sessions SET quick_notes_state='failed',quick_notes=NULL WHERE id=$1`, captureID); err != nil {
+		t.Fatal(err)
+	}
+	if got := search("wiki", map[string]string{"room_id": roomID, "topic": "latency"}); !strings.Contains(got, `"wiki_summary_document_id":"`+summaryID+`"`) || !strings.Contains(got, `"text":"Reduce latency"`) || strings.Contains(got, audioID) {
+		t.Fatalf("published meeting summary: %s", got)
+	}
+	call := liveToolCaller(t, env, sessionID)
+	if got := call("lt_meetings", "read-summary", "read_document", map[string]any{"document_id": summaryID}); got["text"] != "Reduce latency" {
+		t.Fatalf("summary read: %v", got)
+	}
+	// A complete summary can exceed the ordinary document preview. A partial
+	// preview must still let the model request another source.
+	for _, tc := range []struct {
+		size  int
+		ready bool
+	}{{4470, true}, {6500, false}} {
+		if _, err := env.pool.Exec(t.Context(), `UPDATE document_texts SET search_text=repeat('a',$2) WHERE document_id=$1`, summaryID, tc.size); err != nil {
+			t.Fatal(err)
+		}
+		got := call("lt_meetings", fmt.Sprintf("wiki-overview-%d", tc.size), "search_meetings", map[string]any{"room_id": roomID, "overview": "single"})
+		if (got["status"] == "overview_ready") != tc.ready {
+			t.Fatalf("overview for %d-character wiki: %v", tc.size, got["status"])
+		}
+	}
+	if got := call("lt_meetings", "read-audio", "read_document", map[string]any{"document_id": audioID}); got["error"] != "audio_has_no_text" {
+		t.Fatalf("audio read: %v", got)
+	}
+	transcriptID := uploadSearchDocument(t, env, alice, "voice-meeting-transcript", "transcript.md")
+	if _, err := env.pool.Exec(t.Context(), `INSERT INTO document_texts(document_id,tenant_id,source_kind,source_id,status,markdown,markdown_sha256,search_text)
+		SELECT id,tenant_id,'file_version',current_version_id,'ready','Ship on Friday',repeat('f',64),'Ship on Friday' FROM documents WHERE id=$1
+		ON CONFLICT(document_id) DO UPDATE SET source_id=excluded.source_id,status='ready',search_text=excluded.search_text`, transcriptID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), `UPDATE capture_sessions SET transcript_document_id=doc.id,transcript_document_version_id=doc.current_version_id
+		FROM documents doc WHERE capture_sessions.id=$1 AND doc.id=$2`, captureID, transcriptID); err != nil {
+		t.Fatal(err)
+	}
+	exact := call("lt_meetings", "quote", "search_meetings", map[string]any{"room_id": roomID, "exact_words": true})
+	if raw, _ := json.Marshal(exact); !strings.Contains(string(raw), `"text":"Ship on Friday"`) || strings.Contains(string(raw), `"wiki_summary":`) {
+		t.Fatalf("exact words: %s", raw)
+	}
+	if _, err := env.pool.Exec(t.Context(), `UPDATE personal_wikis SET current_revision_id=NULL,published_at=NULL WHERE id=$1`, wikiID); err != nil {
+		t.Fatal(err)
+	}
+	if got := search("transcript-only", map[string]string{"room_id": roomID}); !strings.Contains(got, `"text":"Ship on Friday"`) || strings.Contains(got, summaryID) {
+		t.Fatalf("transcript fallback: %s", got)
+	}
+	if _, err := env.pool.Exec(t.Context(), `UPDATE voice_sessions SET status='closed', closed_at=now()
+      WHERE id=(SELECT voice_session_id FROM capture_sessions WHERE id=$1)`, captureID); err != nil {
+		t.Fatal(err)
+	}
+	second, _, _ := seedFinalizedLiveKitCapture(t, env, alice, "other_meeting", "account_alice")
+	if _, err := env.pool.Exec(t.Context(), `UPDATE capture_sessions SET quick_notes_state='ready', quick_notes='{"sections":[{"bullets":["Check launch"]}]}' WHERE id=$1`, second); err != nil {
+		t.Fatal(err)
+	}
+	if got := search("ambiguous", map[string]string{"room_id": roomID, "overview": "single"}); strings.Contains(got, "overview_ready") {
+		t.Fatalf("ambiguous overview: %s", got)
+	}
+	if got := search("newest", map[string]string{"room_id": roomID, "overview": "latest"}); !strings.Contains(got, "overview_ready") || strings.Contains(got, captureID) {
+		t.Fatalf("newest overview: %s", got)
+	}
+	if _, err := env.pool.Exec(t.Context(), `UPDATE capture_sessions SET quick_notes='{"title":"No notes yet"}' WHERE id=$1`, second); err != nil {
+		t.Fatal(err)
+	}
+	if got := search("title-only", map[string]string{"room_id": roomID, "overview": "latest"}); strings.Contains(got, "overview_ready") {
+		t.Fatalf("title-only overview: %s", got)
+	}
+	if _, err := env.pool.Exec(t.Context(), `UPDATE capture_sessions SET hidden_at=now() WHERE id=$1`, second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), `UPDATE capture_sessions SET hidden_at=now() WHERE id=$1`, captureID); err != nil {
+		t.Fatal(err)
+	}
+	if got := search("hidden", map[string]string{"room_id": roomID}); got != `{"meetings":[]}` {
+		t.Fatalf("hidden recording: %s", got)
+	}
+}
+
+func TestVoiceLiveRolledBackTaskStartReportsFailure(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	env, _, _, sessionID := newVoiceLiveRoom(t)
+	call := liveToolCaller(t, env, sessionID)
+	args := map[string]any{"goal": "Send the finished brief", "surface": "workspace", "irreversible": true}
+	pending := call("ask", "prepare", "start_task", args)
+	args["confirmation_id"] = pending["confirmation_id"]
+	// Reject the last insert after the confirmation and delegated task were written.
+	if _, err := env.pool.Exec(t.Context(), `ALTER TABLE voice_live_tasks ADD CHECK (false) NOT VALID`); err != nil {
+		t.Fatal(err)
+	}
+	got := call("answer", "confirmed", "start_task", args)
+	if got["error"] != "task_not_started" || countRows(t, env, `SELECT count(*) FROM voice_live_confirmations WHERE voice_session_id=$1 AND used_at IS NOT NULL`, sessionID) != 0 {
+		t.Fatalf("rolled-back task: %v", got)
 	}
 }

@@ -16,6 +16,12 @@ DESKTOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NATIVE = os.path.join(DESKTOP, "dist", "installer", "native")
 SOURCE = os.path.join(DESKTOP, "dist", "installer", "source")
 TEAMHUB_COMMANDS = ("teamhub", "migrate", "account")
+MACHO_MAGIC = {b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe"}
+
+
+def _is_macho(path):
+    with open(path, "rb") as source:
+        return source.read(4) in MACHO_MAGIC
 
 
 def matches(path, item):
@@ -102,8 +108,12 @@ def refresh(native, target):
     with open(files_path) as file:
         files = json.load(file)
     for name, item in files["files"].items():
-        item["sha256"] = sha256(os.path.join(root, name))
-        item["bytes"] = os.path.getsize(os.path.join(root, name))
+        full = os.path.join(root, name)
+        size = os.path.getsize(full)
+        # rcodesign only rewrites Mach-O files; skip re-hashing untouched JS/data files.
+        if size != item["bytes"] or _is_macho(full):
+            item["sha256"] = sha256(full)
+            item["bytes"] = size
     _write_json(files_path, files, 1)
     for key in ("directory", "node"):
         item = manifest[key]

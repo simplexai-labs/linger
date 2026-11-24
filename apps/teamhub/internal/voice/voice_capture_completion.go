@@ -2,7 +2,6 @@ package voice
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -52,18 +51,19 @@ func (s *Service) CompleteCaptureStep(ctx context.Context, captureID string) (ti
 }
 
 func (s *Service) completeLiveKitCapture(ctx context.Context, row store.GetPendingLiveKitCaptureCompletionRow) error {
-	if !row.AccountID.Valid || !row.DocumentVersionID.Valid {
+	if !row.AccountID.Valid {
 		return errLiveKitCaptureCompletionAuthorityIncomplete
 	}
-	version, err := s.documents.GetVersion(ctx, row.AccountID.String, row.DocumentVersionID.String)
-	if err != nil {
-		return err
+	// A Capture finalized from its live transcript alone has no audio.
+	var audio *document.Version
+	if row.DocumentVersionID.Valid {
+		version, err := s.documents.GetVersion(ctx, row.AccountID.String, row.DocumentVersionID.String)
+		if err != nil {
+			return err
+		}
+		audio = &version
 	}
-	body, err := json.Marshal(documentVersionModel(version))
-	if err != nil {
-		return err
-	}
-	_, err = s.completeCaptureRecording(ctx, row.AccountID.String, row.ID, body)
+	_, err := s.completeCaptureRecording(ctx, row.AccountID.String, row.ID, audio)
 	return err
 }
 

@@ -249,6 +249,216 @@ test("concurrent starts replace a waiting job with one new job", async () => {
   expect(jobs.get(a.id)?.state).toBe("succeeded");
 });
 
+// A run that keeps working on the first choice until it is stopped, as the
+// local model download does, and finishes any later one.
+function switchingRun() {
+  const runs: Array<string | undefined> = [];
+  const signals: AbortSignal[] = [];
+  let firstEnded = false;
+  const startedAfterFirstEnded: boolean[] = [];
+  const run: ConstructorParameters<typeof JobManager>[1] = async (
+    input,
+    signal,
+    emit,
+  ) => {
+    runs.push(input.setupChoice);
+    signals.push(signal);
+    if (runs.length === 1) {
+      emit({
+        kind: "stage",
+        stage: "runtime",
+        state: "running",
+        message:
+          input.setupChoice === "local-models"
+            ? "Downloading the local model…"
+            : "Installing the runtime…",
+        progress: { completed: 232, total: 16_100, unit: "bytes" },
+      });
+      await new Promise<void>((_resolve, reject) =>
+        signal.addEventListener("abort", () =>
+          // Stopping takes a moment; the next choice waits for it.
+          setTimeout(() => {
+            firstEnded = true;
+            reject(signal.reason);
+          }, 20),
+        ),
+      );
+    }
+    startedAfterFirstEnded.push(firstEnded);
+    return { state: "ready", code: 0, message: "Complete" };
+  };
+  return { run, runs, signals, startedAfterFirstEnded };
+}
+
+test("choosing a subscription stops the local model job instead of following it", async () => {
+  const fake = switchingRun();
+  const { jobs } = await setup(fake.run);
+  const local = await jobs.start({
+    instance: "default",
+    setupChoice: "local-models",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(jobs.get(local.id)?.message).toBe("Downloading the local model…");
+  // The same choice again, or a start that names none, follows the running
+  // job.
+  expect(
+    (await jobs.start({ instance: "default", setupChoice: "local-models" })).id,
+  ).toBe(local.id);
+  expect((await jobs.start({ instance: "default" })).id).toBe(local.id);
+  // The person quits part way, reopens and picks the subscription.
+  const [codex, again] = await Promise.all([
+    jobs.start({ instance: "default", setupChoice: "codex" }),
+    jobs.start({ instance: "default", setupChoice: "codex" }),
+  ]);
+  expect(codex.id).not.toBe(local.id);
+  expect(codex.setupChoice).toBe("codex");
+  expect(again.id).toBe(codex.id);
+  await jobs.wait(codex.id);
+  expect(fake.signals[0]?.aborted).toBe(true);
+  expect(jobs.get(local.id)?.state).toBe("canceled");
+  expect(jobs.get(codex.id)?.state).toBe("succeeded");
+  // The subscription ran once, after the local model work had ended, and no
+  // later run was for the local model.
+  expect(fake.runs).toEqual(["local-models", "codex"]);
+  expect(fake.startedAfterFirstEnded).toEqual([true]);
+  expect(jobs.list()[0]?.id).toBe(codex.id);
+});
+
+test("choosing the local model after a subscription replaces the subscription job", async () => {
+  const fake = switchingRun();
+  const { jobs } = await setup(fake.run);
+  const codex = await jobs.start({ instance: "default", setupChoice: "codex" });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const local = await jobs.start({
+    instance: "default",
+    setupChoice: "local-models",
+  });
+  expect(local.id).not.toBe(codex.id);
+  expect(local.setupChoice).toBe("local-models");
+  await jobs.wait(local.id);
+  expect(jobs.get(codex.id)?.state).toBe("canceled");
+  expect(jobs.get(local.id)?.state).toBe("succeeded");
+  expect(fake.runs).toEqual(["codex", "local-models"]);
+  expect(fake.startedAfterFirstEnded).toEqual([true]);
+});
+
+// A run whose first job is starting the services, a step that only stops at
+// its end, and stays there until `finish` is called.
+function servicesRun() {
+  const runs: Array<string | undefined> = [];
+  let finish!: () => void;
+  const finished = new Promise<void>((resolve) => (finish = resolve));
+  let firstEnded = false;
+  const startedAfterFirstEnded: boolean[] = [];
+  const run: ConstructorParameters<typeof JobManager>[1] = async (
+    input,
+    _signal,
+    emit,
+  ) => {
+    runs.push(input.setupChoice);
+    if (runs.length === 1) {
+      emit({
+        kind: "stage",
+        stage: "services",
+        state: "running",
+        message: "Starting the services…",
+      });
+      await finished;
+      firstEnded = true;
+    } else startedAfterFirstEnded.push(firstEnded);
+    return { state: "ready", code: 0, message: "Complete" };
+  };
+  return { run, runs, finish, startedAfterFirstEnded };
+}
+
+const settled = <T>(value: Promise<T>, ms = 1_000) =>
+  Promise.race([
+    value,
+    new Promise<never>((_resolve, reject) =>
+      setTimeout(() => reject(new Error(`not settled in ${ms} ms`)), ms),
+    ),
+  ]);
+
+test("a start that replaces a job starting its services answers at once and runs after it", async () => {
+  const fake = servicesRun();
+  const { jobs } = await setup(fake.run);
+  const codex = await jobs.start({ instance: "default", setupChoice: "codex" });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(jobs.get(codex.id)?.stage).toBe("services");
+  // The person quit while the services were starting, reopened and chose
+  // the local model. The request is answered while the Codex job goes on.
+  const [local, again] = await settled(
+    Promise.all([
+      jobs.start({ instance: "default", setupChoice: "local-models" }),
+      jobs.start({ instance: "default", setupChoice: "local-models" }),
+    ]),
+  );
+  expect(local.id).not.toBe(codex.id);
+  expect(local).toMatchObject({ state: "queued", setupChoice: "local-models" });
+  expect(again.id).toBe(local.id);
+  expect((await settled(jobs.start({ instance: "default" }))).id).toBe(
+    local.id,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(jobs.get(codex.id)).toMatchObject({
+    state: "waiting_user",
+    message: "Stopping after the current step.",
+  });
+  expect(jobs.get(local.id)?.state).toBe("queued");
+  expect(jobs.busy).toBe(true);
+  expect(fake.runs).toEqual(["codex"]);
+  fake.finish();
+  await jobs.wait(local.id);
+  expect(jobs.get(codex.id)?.state).toBe("canceled");
+  expect(jobs.get(local.id)?.state).toBe("succeeded");
+  expect(fake.runs).toEqual(["codex", "local-models"]);
+  expect(fake.startedAfterFirstEnded).toEqual([true]);
+  expect(jobs.busy).toBe(false);
+});
+
+test("choosing again while a replacement waits still runs after the first job", async () => {
+  const fake = servicesRun();
+  const { jobs } = await setup(fake.run);
+  const codex = await jobs.start({ instance: "default", setupChoice: "codex" });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const local = await settled(
+    jobs.start({ instance: "default", setupChoice: "local-models" }),
+  );
+  // Back to the subscription before the Codex job has ended.
+  const claude = await settled(
+    jobs.start({ instance: "default", setupChoice: "claude" }),
+  );
+  expect(claude.id).not.toBe(local.id);
+  expect(jobs.get(local.id)?.state).toBe("canceled");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(jobs.get(claude.id)?.state).toBe("queued");
+  expect(fake.runs).toEqual(["codex"]);
+  fake.finish();
+  await jobs.wait(claude.id);
+  expect(jobs.get(claude.id)?.state).toBe("succeeded");
+  expect(jobs.get(codex.id)?.state).toBe("canceled");
+  // The canceled local model job never ran.
+  expect(fake.runs).toEqual(["codex", "claude"]);
+  expect(fake.startedAfterFirstEnded).toEqual([true]);
+});
+
+test("shutdown stops a replacement that is still waiting before it runs", async () => {
+  const fake = servicesRun();
+  const { jobs } = await setup(fake.run);
+  const codex = await jobs.start({ instance: "default", setupChoice: "codex" });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const local = await settled(
+    jobs.start({ instance: "default", setupChoice: "local-models" }),
+  );
+  const stopped = jobs.shutdown();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  fake.finish();
+  await settled(stopped);
+  expect(jobs.get(codex.id)?.state).toBe("canceled");
+  expect(jobs.get(local.id)?.state).toBe("canceled");
+  expect(fake.runs).toEqual(["codex"]);
+});
+
 test("shutdown cancels owned work and flushes final state before releasing ownership", async () => {
   const { jobs, dir } = await setup(async (_input, signal) => {
     await new Promise<void>((_resolve, reject) =>

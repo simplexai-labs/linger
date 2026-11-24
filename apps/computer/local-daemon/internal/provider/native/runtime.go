@@ -5,12 +5,17 @@ package native
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/permission"
 )
+
+// ErrSessionNotFound reports that a retained native session cannot be resumed
+// on this Computer.
+var ErrSessionNotFound = errors.New("native session not found")
 
 // Kinds lists the Runtime kinds this package can open.
 var Kinds = []string{"claude", "codex", "pi", "antigravity"}
@@ -86,17 +91,12 @@ type Profile struct {
 }
 
 type RunSpec struct {
-	Dir             string
-	Model           string
-	Budget          time.Duration
-	ResumeID        string
-	AssignSessionID string
-	ResumeRequired  bool
-	// FreshSession, when set, lets a Runtime that reported its turn started
-	// before its retained session loaded continue in a new session when the
-	// session is gone, as the executor does for one that reported nothing.
-	// The Runtime calls it before it opens the new session.
-	FreshSession          func()
+	Dir                   string
+	Model                 string
+	Budget                time.Duration
+	ResumeID              string
+	AssignSessionID       string
+	ResumeRequired        bool
 	PrepareOnly           bool
 	WarmMCP               bool
 	MCPReady              func(context.Context) error

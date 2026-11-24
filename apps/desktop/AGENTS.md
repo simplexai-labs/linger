@@ -25,7 +25,10 @@ Gateway and runs Agents. The daemon exits with the app.
   `packaging/mac/Dockerfile` and `rcodesign` (ad-hoc signature). Add
   `--developer-id P12 --developer-id-password FILE` for a Developer ID
   signature with the hardened runtime, and `--notary-key JSON` to notarize and
-  staple; see the script's docstring. Notarizing needs the bundled macOS
+  staple the DMG in one Apple submission (stapling `Linger.app` separately for
+  `--update-archive`; `Linger.app` inside the DMG is notarized by Apple with
+  the DMG submission but not separately stapled); see the script's docstring.
+  Notarizing needs the bundled macOS
   archives Developer ID signed first: the Sign macOS native archives workflow
   runs `packaging/mac/sign_native_archives.py` with the release secrets (see
   [Bundled archives](../../docs/desktop-release.md#bundled-archives)).
@@ -125,7 +128,14 @@ Gateway and runs Agents. The daemon exits with the app.
   Desktop config. After sign-in, when reusing a completed job, or when the installer
   omits the runtime, it reads `GET /api/instances/desktop/runtime` for the current
   environment. The job's setup choice identifies the runtime for sign-in when available.
-  Desktop also saves the runtime its `setupChoice` runs (`local-models` runs
+  On Windows that lookup can take minutes (#385, #549): the
+  desktop waits for it while the installer answers, asks again after a
+  dropped connection (the installer joins the running lookup), and gives up
+  only after `RUNTIME_LOOKUP_LIMIT_MS` (10 minutes) with the typed `failure`
+  `runtime_lookup_timed_out` or, once unreachable for the reconnect window,
+  `runtime_lookup_unreachable`; the setup page words both. After 15 seconds
+  the status carries `waiting: "runtime"` and the page says what the bar
+  waits on. Desktop also saves the runtime its `setupChoice` runs (`local-models` runs
   on Pi) as `preferredRuntime`. The daemon config carries that as
   `preferred_runtime`, and the daemon marks that runtime's diagnostic
   `preferred`, so TeamHub creates Another Me and the starter Agents on it
@@ -268,7 +278,9 @@ Gateway and runs Agents. The daemon exits with the app.
   new folder (`details.source`) and the origin answers does it record that
   folder and prune the older one; otherwise the older services keep running
   from their folder, the record keeps naming it, and the start failure page's
-  Retry moves them again. An app older than the recorded version
+  Retry moves them again. A prune never removes a folder a running process
+  still starts from (`foldersInUse`; when processes cannot be listed, it
+  removes nothing) and logs `local_server.source_in_use` instead. An app older than the recorded version
   (a downgrade) leaves the services on their newer source and logs
   `local_server.source_newer_than_app`. When local models fail to come back on a
   resume, the installer still brings up the services and reports
@@ -299,7 +311,15 @@ Gateway and runs Agents. The daemon exits with the app.
   mid-download without toggling the saved `preventSleep` preference. A Quick Install that stopped
   before the computer enrolled is not resumed: setup shows again and Install
   finishes it, reusing a finished job only while its origin answers (a stopped
-  server gets a new job, which starts the services again). The start failure
+  server gets a new job, which starts the services again). It follows a
+  running or finished job only when that job's `setupChoice` is what the
+  person chose now (`local-models` for the local model; any but
+  `local-models` for the installer's pick); otherwise it asks for a new job.
+  The installer answers at once with that job `queued` and runs it once it
+  has stopped the earlier one, such as a local model download that kept
+  running after a quit or services still starting; setup polls the queued
+  job like any other, so a subscription chosen since never shows the earlier
+  download. The start failure
   page's Set Up Again forgets the record (`local-server.json`), clears the
   active enrollment while keeping per-origin `savedEnrollments` in
   `config.json` (`legacy_data_set_aside` clears `savedEnrollments` as well),
@@ -400,7 +420,18 @@ Gateway and runs Agents. The daemon exits with the app.
   redacted `error` bounded to 500 chars with query/hash stripped). A resume
   whose saved BYOK gateway did not come back still succeeds and logs
   `local_server.byok_gateway_unavailable` (`code`, `message`); the Computer
-  mounts the gateway again before the next Run on it.
+  mounts the gateway again before the next Run on it. Once ready, a server
+  the window shows can still stop: its supervisor restarts it, and the
+  desktop resumes it like a launch when it does not answer
+  (`local_server.unreachable_resume` with `trigger`): at once on
+  `local-server.retry`, and after `UNREACHABLE_GRACE_MS` (longer than the
+  supervisor's restart delays) on `local-server.unreachable` (WindowManager
+  emits it when it shows `offline.html` for a failed load) or the
+  `WATCH_MS` watch. Those two resume at most once a minute, and only after
+  `UNREACHABLE_PROBES` checks in a row spread over the grace went unanswered,
+  each allowed `UNREACHABLE_PROBE_TIMEOUT_MS` (longer than the launch's 1 s
+  fast check), so a server slowed by heavy load is not taken for a stopped
+  one; a resume that fails shows the start failure page as on launch.
 - `src/main/voice-window.ts`: the floating voice window. Electron cannot open
   Document Picture-in-Picture windows, so the SPA opens a small native window
   with `window.open("")` under the target `linger-voice-window-<n>`
@@ -454,7 +485,9 @@ Gateway and runs Agents. The daemon exits with the app.
   English. Errors from transfers and servers stay in English.
 - `src/preload/index.ts`: the only SPA API, `window.lingerDesktop`. Its
   `update` reads the Updater's state (without the release page URL) and runs
-  the tray's install and check, for the SPA's account menu.
+  the tray's install and check, for the SPA's account menu; `settings` exposes
+  `preventSleep` (`get`, `set`, `onChange`) so Settings › Computers mirrors and
+  stays in sync with the tray's Prevent Sleep toggle.
 - `src/shared/api.ts`, `src/shared/shell.ts`: preload contract types and IPC
   channel names.
 - `src/main/computer-daemon.ts`: ComputerDaemon. While the computer is
@@ -464,7 +497,14 @@ Gateway and runs Agents. The daemon exits with the app.
   credential in `LINGER_COMPUTER_TOKEN` (`gateway.token_env`). The config's
   `desktop` section puts the daemon in Desktop mode: no self-update, it exits
   when its stdin closes, and it reports `{"type":"status",...}` lines on
-  stdout, which drive the tray and the SPA status. Its log goes to
+  stdout (`gateway_state`, `active_operations`, `active_model_invokes`).
+  `active_operations` drives the tray busy state, quit confirmation, idle
+  restarts, updater waiting and the SPA status (`runtime.activity`);
+  `active_model_invokes` (omitted by older daemons, treated as `0`) emits
+  `runtime.model_activity` for `PowerGuard` only, so background model calls
+  (Memory, Wiki) hold `prevent-app-suspension` while running and through a
+  short release tail (`MODEL_ACTIVITY_TAIL_MS`) without marking the Computer
+  busy. Its log goes to
   `<userData>/logs/computer-daemon.log`. Crashes and launch failures retry
   with backoff. The Desktop reports the reason after three consecutive
   attempts fail before the daemon reports a status. The exit log

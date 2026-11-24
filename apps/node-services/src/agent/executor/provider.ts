@@ -139,9 +139,16 @@ export type RuntimeStopHookDecision =
   | { readonly action: "allow" }
   | { readonly action: "block"; readonly reason: string };
 
+export interface PreviousRuntimeSession {
+  readonly providerType: "codex" | "claude" | "pi" | "antigravity";
+  readonly sessionId: string;
+}
+
 export interface ExecutionSpec {
   /** Process-local monotonic acceptance time; never persisted or sent over the wire. */
   acceptedAtMonotonicMs?: number;
+  /** Superseded native session whose local transcript a fresh start may export to ./playground/.previous-context.md. */
+  previousSession?: PreviousRuntimeSession;
   /** What queued the Run, for model scheduling; never sent over the wire. */
   runKind?: RunKind;
   /** The Run's live queue priority; absent, its kind's. */

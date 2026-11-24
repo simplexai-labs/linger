@@ -222,4 +222,20 @@ func TestCodexSessionsRunTheCatalogDefaultWhenConfigNamesNoModel(t *testing.T) {
 		!strings.Contains(strings.Join(launch.Args, " "), `--config model="gpt-account-default"`) {
 		t.Fatalf("app-server launches %s", launches)
 	}
+
+	// An explicit request model overrides a model set in config.toml.
+	writeCodexConfig(t, fixture, "model = \"unsupported-local-model\"\n")
+	request.Model = "gpt-explicit"
+	if result := fixture.invoker.Invoke(context.Background(), request); result.Outcome != ModelInvokeCompleted {
+		t.Fatalf("explicit model result %+v", result)
+	}
+	launches, err = os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines = strings.Split(strings.TrimSpace(string(launches)), "\n")
+	if len(lines) != 3 || json.Unmarshal([]byte(lines[2]), &launch) != nil ||
+		!strings.Contains(strings.Join(launch.Args, " "), `--config model="gpt-explicit"`) {
+		t.Fatalf("app-server launches after explicit model %s", launches)
+	}
 }

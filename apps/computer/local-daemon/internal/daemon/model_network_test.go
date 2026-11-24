@@ -117,7 +117,7 @@ type endpointModelInvoker struct {
 // check would silently fall back to the route.
 var _ modelEndpointResolver = provider.ModelInvoker{}
 
-func (e endpointModelInvoker) ModelEndpoints(context.Context, string) []*url.URL {
+func (e endpointModelInvoker) ModelEndpoints(context.Context, string, string) []*url.URL {
 	var parsed []*url.URL
 	for _, endpoint := range e.endpoints {
 		value, _ := url.Parse(endpoint)
@@ -183,7 +183,7 @@ func TestModelNetworkCheckFollowsWhatTheRuntimeReaches(t *testing.T) {
 				modelInvoker: endpointModelInvoker{endpoints: tc.endpoints},
 				dialNetwork:  dials.dial,
 			}
-			if got := d.modelNetworkUnavailable(context.Background(), "codex"); got != tc.wantUnavailable {
+			if got := d.modelNetworkUnavailable(context.Background(), "codex", ""); got != tc.wantUnavailable {
 				t.Fatalf("unavailable = %v, want %v", got, tc.wantUnavailable)
 			}
 			if got := dials.snapshot(); !slices.Equal(got, tc.wantDials) {

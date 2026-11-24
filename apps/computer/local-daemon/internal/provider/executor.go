@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/permission"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/protocol"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
@@ -32,11 +31,7 @@ const operationProviderPrepareKind = "internal.provider.prepare"
 
 type OperationSpec struct {
 	// A continuation prompt requires the exact native history of the interrupted Task.
-	ResumeAfterYield bool
-	// SessionMoved is called when a started Run continues in a new native
-	// session because its retained one is gone. The Run announced the old
-	// session, so it must not yield to it.
-	SessionMoved      func()
+	ResumeAfterYield  bool
 	HumanInteractions bool
 	// PermissionReview sends the Runtime's own permission prompts to the
 	// Runtime permission review (Agent Service declares it per Run).
@@ -54,6 +49,7 @@ type OperationSpec struct {
 	Model                string
 	Prompt               string
 	ResumeSessionID      string
+	PreviousSession      *PreviousSession
 	Timeout              time.Duration
 	Environment          map[string]string
 	ExtraArgs            []string
@@ -579,7 +575,6 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 			AssignSessionID:       spec.CreateProviderSessionID,
 			ResumeID:              spec.ResumeSessionID,
 			ResumeRequired:        spec.ResumeSessionID != "",
-			FreshSession:          freshSession(spec),
 			Budget:                spec.Timeout,
 			ComputerArgs:          append([]string(nil), spec.ExtraArgs...),
 			AgentArgs:             append([]string(nil), spec.CustomArgs...),
@@ -595,13 +590,26 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 			ClaudePolicy:          claudePolicy,
 			Readiness:             readiness,
 		}
-		session, err := backend.Start(executionCtx, spec.Prompt, runSpec)
+		prompt := spec.Prompt
+		if spec.PreviousSession != nil && spec.ResumeSessionID == "" && spec.OperationKind == "run.start" {
+			exportCtx, cancelExport := context.WithTimeout(executionCtx, previousContextExportTimeout)
+			relPath, exported := exportPreviousContext(exportCtx, e.RuntimeHomeRoot, spec)
+			cancelExport()
+			if exported {
+				prompt = injectPreviousContextHint(prompt, relPath)
+			}
+		}
+		session, err := backend.Start(executionCtx, prompt, runSpec)
 		if err != nil {
 			execution.mu.Lock()
 			execution.done = true
 			execution.mu.Unlock()
 			close(execution.ready)
-			finish(Result{Status: "failed", Error: err.Error()})
+			failureCode := ""
+			if errors.Is(err, native.ErrSessionNotFound) {
+				failureCode = "session_not_found"
+			}
+			finish(Result{Status: "failed", FailureCode: failureCode, Error: err.Error()})
 			return
 		}
 		execution.mu.Lock()
@@ -609,9 +617,6 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 		execution.mu.Unlock()
 		close(execution.ready)
 		var executionFailure string
-		var providerResult native.Outcome
-		var ok bool
-		freshSession := false
 		if spec.OperationKind == "run.start" && spec.Provider != "codex" && spec.Provider != "claude" && spec.Provider != "pi" && spec.Provider != "antigravity" {
 			payload, marshalErr := json.Marshal(map[string]any{
 				"type": "run.started", "turn_id": stableEventID("turn", spec.TaskID),
@@ -626,64 +631,34 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 		}
 		emittedResponseText := false
 		projection := eventProjection{operationID: spec.TaskID, canYield: spec.OperationKind == "run.start"}
-		for {
-			emittedEvent := false
-			for message := range session.Events {
-				if executionFailure != "" {
+		for message := range session.Events {
+			if executionFailure != "" {
+				continue
+			}
+			if spec.OperationKind == "run.start" && message.Kind == native.EventStatus && message.Status == "running" && message.TurnID == "" {
+				continue
+			}
+			if message.Kind == native.EventText && (message.Body != "" || message.Output != "") {
+				emittedResponseText = true
+			}
+			for _, projected := range projection.project(message) {
+				payload, marshalErr := json.Marshal(projected)
+				if marshalErr != nil {
+					executionFailure = fmt.Sprintf("marshal provider event: %v", marshalErr)
+					cancelExecution()
 					continue
 				}
-				if spec.OperationKind == "run.start" && message.Kind == native.EventStatus && message.Status == "running" && message.TurnID == "" {
-					continue
-				}
-				if message.Kind == native.EventText && (message.Body != "" || message.Output != "") {
-					emittedResponseText = true
-				}
-				for _, projected := range projection.project(message) {
-					emittedEvent = true
-					payload, marshalErr := json.Marshal(projected)
-					if marshalErr != nil {
-						executionFailure = fmt.Sprintf("marshal provider event: %v", marshalErr)
-						cancelExecution()
-						continue
-					}
-					if emitErr := emit(ctx, protocol.Event{
-						Type:    protocol.EventOperationEvent,
-						SentAt:  time.Now().UTC(),
-						Payload: payload,
-					}); emitErr != nil {
-						executionFailure = fmt.Sprintf("emit provider event: %v", emitErr)
-						cancelExecution()
-					}
+				if emitErr := emit(ctx, protocol.Event{
+					Type:    protocol.EventOperationEvent,
+					SentAt:  time.Now().UTC(),
+					Payload: payload,
+				}); emitErr != nil {
+					executionFailure = fmt.Sprintf("emit provider event: %v", emitErr)
+					cancelExecution()
 				}
 			}
-			providerResult, ok = <-session.Outcome
-			if !ok || freshSession || emittedEvent || executionFailure != "" || executionCtx.Err() != nil ||
-				!startsFreshSession(spec, providerResult) {
-				break
-			}
-			// The retained session is not in this Computer's runtime home, for
-			// example one an earlier Local Computer created elsewhere. Nothing
-			// reached the Room yet, so the Run continues in a new session once;
-			// its terminal result carries the new identity the server keeps.
-			freshSession = true
-			runSpec.ResumeID, runSpec.ResumeRequired, runSpec.AssignSessionID = "", false, ""
-			if spec.Provider == "claude" || spec.Provider == "pi" {
-				runSpec.AssignSessionID = uuid.NewString()
-			}
-			logger.Warn("runtime.session.fresh_start", "provider", spec.Provider, "reason", providerResult.FailureCode)
-			slog.Warn("runner.operation.fresh_session", "operation_id", spec.TaskID, "provider", spec.Provider,
-				"agent_id", spec.AgentID, "reason", providerResult.FailureCode)
-			if session, err = backend.Start(executionCtx, spec.Prompt, runSpec); err != nil {
-				execution.mu.Lock()
-				execution.done = true
-				execution.mu.Unlock()
-				finish(Result{Status: "failed", Error: err.Error()})
-				return
-			}
-			execution.mu.Lock()
-			execution.session = session
-			execution.mu.Unlock()
 		}
+		providerResult, ok := <-session.Outcome
 		execution.mu.Lock()
 		execution.done = true
 		execution.mu.Unlock()
@@ -880,28 +855,8 @@ func (spec OperationSpec) ReviewsPermissions() bool {
 	return spec.PermissionReview && spec.OperationKind == "run.start"
 }
 
-// freshSession lets a started Run continue in a new native session, except
-// one resuming after a yield, whose prompt continues the old session.
-func freshSession(spec OperationSpec) func() {
-	if spec.ResumeAfterYield {
-		return nil
-	}
-	return func() {
-		if spec.SessionMoved != nil {
-			spec.SessionMoved()
-		}
-	}
-}
-
 // UsesStopHook reports whether this Operation asks Agent Service before a
 // Runtime finishes its turn.
 func (spec OperationSpec) UsesStopHook() bool {
 	return spec.StopHook && spec.OperationKind == "run.start"
-}
-
-// startsFreshSession reports whether a Run whose retained native session the
-// Runtime refused may continue in a new session instead of failing.
-func startsFreshSession(spec OperationSpec, result native.Outcome) bool {
-	return !spec.ResumeAfterYield && spec.OperationKind == "run.start" && spec.ResumeSessionID != "" &&
-		result.Status != "completed" && result.FailureCode == "session_not_found"
 }

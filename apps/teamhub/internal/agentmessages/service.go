@@ -184,9 +184,14 @@ type historyCursor struct {
 	MessageID string    `json:"message_id"`
 }
 
-func encodeCursor(message Message) string {
-	raw, _ := json.Marshal(historyCursor{Time: message.CreatedAt, MessageID: message.MessageID})
+// EncodeCursor encodes a (created_at, message_id) seek position for `teamhub message read --cursor`.
+func EncodeCursor(createdAt time.Time, messageID string) string {
+	raw, _ := json.Marshal(historyCursor{Time: createdAt, MessageID: messageID})
 	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func encodeCursor(message Message) string {
+	return EncodeCursor(message.CreatedAt, message.MessageID)
 }
 func readParams(reader Reader, cursor string, limit int) (store.ReadAgentHistoryMessagesParams, error) {
 	params := store.ReadAgentHistoryMessagesParams{TenantID: reader.TenantID, ActorID: reader.ActorID,

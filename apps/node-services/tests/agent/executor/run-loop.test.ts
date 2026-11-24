@@ -97,14 +97,10 @@ describe("RunLoop", () => {
       if (input.type === "text") {
         expect(input.text.includes("new native session")).toBe(expected);
         if (expected) {
-          expect(input.text).toContain("teamhub message read without a target");
-          expect(input.text).toContain("teamhub message read --thread <id>");
-          expect(input.text).toContain("task:, meta: and taskmeta:");
-          expect(input.text).toContain("--inbox <exact-inbox-id>");
+          expect(input.text).toContain("teamhub message read");
           expect(input.text).not.toContain("--room");
-          expect(input.text).toContain("latest relevant human decision");
           expect(input.text).toContain("room:room-1");
-          expect(input.text).toContain("Do not replay");
+          expect(input.text).toContain("do not replay");
         }
       }
       run.complete("done");
@@ -311,7 +307,7 @@ describe("RunLoop", () => {
   describe("Room reply delivery", () => {
     const messageWrite = (
       id: string,
-      outcome: "succeeded" | "failed",
+      outcome?: "succeeded" | "failed" | "canceled" | "declined",
     ): RunEvent[] => [
       {
         type: "activity.started",
@@ -319,7 +315,9 @@ describe("RunLoop", () => {
         kind: "message",
         title: "bash",
       },
-      { type: "activity.finished", activityId: id, outcome },
+      ...(outcome
+        ? [{ type: "activity.finished" as const, activityId: id, outcome }]
+        : []),
     ];
     const failedRead: RunEvent[] = [
       {
@@ -376,70 +374,6 @@ describe("RunLoop", () => {
       }
     };
 
-    it("fails a Room Run whose every message write failed as reply_undelivered", async () => {
-      const { log, run } = await finishRun([
-        ...messageWrite("send-1", "failed"),
-        ...failedRead,
-        ...messageWrite("send-2", "failed"),
-      ]);
-
-      expect(run).toMatchObject({
-        status: "failed",
-        terminal: {
-          type: "failed",
-          failure: { code: "reply_undelivered", runtime_type: "pi" },
-        },
-      });
-      expect(JSON.stringify(run?.terminal)).not.toContain("404");
-      expect(log).toHaveBeenCalledWith(
-        "warn",
-        "local_run.teamhub_messages_failed",
-        expect.objectContaining({
-          runId: run?.runId,
-          failedMessageWrites: 2,
-          deliveredMessageWrites: 0,
-          failedMessageReads: 1,
-          replyUndelivered: true,
-        }),
-      );
-    });
-
-    it("keeps a Room Run succeeded when a later message write was delivered", async () => {
-      const { log, run } = await finishRun([
-        ...messageWrite("send-1", "failed"),
-        ...messageWrite("send-2", "succeeded"),
-      ]);
-
-      expect(run).toMatchObject({
-        status: "succeeded",
-        terminal: { type: "succeeded" },
-      });
-      expect(log).toHaveBeenCalledWith(
-        "warn",
-        "local_run.teamhub_messages_failed",
-        expect.objectContaining({
-          failedMessageWrites: 1,
-          deliveredMessageWrites: 1,
-          replyUndelivered: false,
-        }),
-      );
-    });
-
-    it("keeps a Room Run succeeded when the Agent chose not to reply", async () => {
-      const { log, run } = await finishRun(failedRead);
-
-      expect(run?.terminal).toMatchObject({ type: "succeeded" });
-      expect(log).toHaveBeenCalledWith(
-        "warn",
-        "local_run.teamhub_messages_failed",
-        expect.objectContaining({
-          failedMessageWrites: 0,
-          failedMessageReads: 1,
-          replyUndelivered: false,
-        }),
-      );
-    });
-
     // TeamHub freezes each Inbox Message's sender, kind and whether it
     // mentioned this Agent into the queued input.
     const inboxInput = (
@@ -474,6 +408,130 @@ describe("RunLoop", () => {
         messageKind: "conversation",
         mentioned: true,
       });
+
+    it("fails a Room Run whose every message write failed while a Human waits as reply_undelivered", async () => {
+      const { log, run } = await finishRun(
+        [
+          ...messageWrite("send-1", "failed"),
+          ...failedRead,
+          ...messageWrite("send-2", "failed"),
+        ],
+        undefined,
+        humanMention("mention"),
+      );
+
+      expect(run).toMatchObject({
+        status: "failed",
+        terminal: {
+          type: "failed",
+          failure: { code: "reply_undelivered", runtime_type: "pi" },
+        },
+      });
+      expect(JSON.stringify(run?.terminal)).not.toContain("404");
+      expect(log).toHaveBeenCalledWith(
+        "warn",
+        "local_run.teamhub_messages_failed",
+        expect.objectContaining({
+          runId: run?.runId,
+          failedMessageWrites: 2,
+          deliveredMessageWrites: 0,
+          failedMessageReads: 1,
+          replyUndelivered: true,
+        }),
+      );
+    });
+
+    it("keeps a Room Run succeeded when a later message write was delivered", async () => {
+      const { log, run } = await finishRun(
+        [
+          ...messageWrite("send-1", "failed"),
+          ...messageWrite("send-2", "succeeded"),
+        ],
+        undefined,
+        humanMention("mention"),
+      );
+
+      expect(run).toMatchObject({
+        status: "succeeded",
+        terminal: { type: "succeeded" },
+      });
+      expect(log).toHaveBeenCalledWith(
+        "warn",
+        "local_run.teamhub_messages_failed",
+        expect.objectContaining({
+          failedMessageWrites: 1,
+          deliveredMessageWrites: 1,
+          replyUndelivered: false,
+        }),
+      );
+    });
+
+    it("keeps a Room Run succeeded when the Agent chose not to reply", async () => {
+      const { log, run } = await finishRun(failedRead);
+
+      expect(run?.terminal).toMatchObject({ type: "succeeded" });
+      expect(log).toHaveBeenCalledWith(
+        "warn",
+        "local_run.teamhub_messages_failed",
+        expect.objectContaining({
+          failedMessageWrites: 0,
+          failedMessageReads: 1,
+          replyUndelivered: false,
+        }),
+      );
+    });
+
+    it("keeps a Room Run succeeded when message writes failed without a waiting Human mention", async () => {
+      const { log, run } = await finishRun(
+        messageWrite("send-1", "failed"),
+        undefined,
+        inboxInput("room-talk", {
+          authorType: "user",
+          messageKind: "conversation",
+          mentioned: false,
+        }),
+      );
+
+      expect(run).toMatchObject({
+        status: "succeeded",
+        terminal: { type: "succeeded" },
+      });
+      expect(log).toHaveBeenCalledWith(
+        "warn",
+        "local_run.teamhub_messages_failed",
+        expect.objectContaining({
+          failedMessageWrites: 1,
+          deliveredMessageWrites: 0,
+          replyUndelivered: false,
+        }),
+      );
+    });
+
+    it("fails a Room Run as reply_not_sent when a Human waits and a started message write never completed or failed", async () => {
+      const { log, run } = await finishRun(
+        messageWrite("send-1", "canceled"),
+        undefined,
+        humanMention("mention"),
+        "Private scratch.",
+      );
+
+      expect(run).toMatchObject({
+        status: "failed",
+        terminal: {
+          type: "failed",
+          failure: { code: "reply_not_sent", runtime_type: "pi" },
+        },
+      });
+      expect(log).toHaveBeenCalledWith(
+        "warn",
+        "local_run.reply_not_sent",
+        expect.objectContaining({
+          runId: run?.runId,
+          failedMessageWrites: 0,
+          deliveredMessageWrites: 0,
+        }),
+      );
+    });
 
     it("fails a Room Run that posted nothing while the Human who mentioned the Agent waits", async () => {
       const { log, run } = await finishRun(

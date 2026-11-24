@@ -125,6 +125,7 @@ type ModelInvokeFile struct {
 // ModelInvokeRequest is one decoded execute model_invoke command.
 type ModelInvokeRequest struct {
 	RuntimeType     string
+	Model           string
 	Mode            string
 	ReasoningEffort string
 	Instructions    string
@@ -373,7 +374,7 @@ func (m ModelInvoker) sessionInvoke(ctx context.Context, request ModelInvokeRequ
 	}
 	environment["CODEX_HOME"] = home
 	args := []string{"--config", `web_search="disabled"`}
-	named := codexDefaultModel(prepared.Model, installed.DefaultModel)
+	named := codexInvokeModel(request.Model, prepared.Model, installed.DefaultModel)
 	if named != "" {
 		args = append(args, "--config", fmt.Sprintf("model=%q", named))
 	}
@@ -493,7 +494,7 @@ func codexModelInvocation(request ModelInvokeRequest, environment map[string]str
 	if prepared.AuthenticationMissing {
 		return modelInvocation{}, modelInvokeUnavailableError{ModelInvokeAuthRequired, "Codex is not signed in"}
 	}
-	named := codexDefaultModel(prepared.Model, installed.DefaultModel)
+	named := codexInvokeModel(request.Model, prepared.Model, installed.DefaultModel)
 	environment["CODEX_HOME"] = home
 	schemaPath := ""
 	if request.Mode == ModelInvokeStructured {
@@ -521,12 +522,15 @@ func codexModelInvocation(request ModelInvokeRequest, environment map[string]str
 	}, nil
 }
 
-// codexDefaultModel is the model a call names on the command line: the
-// Runtime catalog's default for the signed-in account, and only when
-// config.toml selects no model. Without one, Codex runs its built-in default,
-// which the account may not offer; the catalog lists only what it can use,
-// and Agent runs choose from the same catalog.
-func codexDefaultModel(configured, catalogDefault string) string {
+// codexInvokeModel is the model a Codex call names explicitly on the command
+// line. An explicit request model always wins so background calls follow the
+// Agent's configured model and override config.toml. When a legacy caller
+// names none, a model configured in config.toml still decides; otherwise the
+// Runtime catalog's default for the signed-in account is used.
+func codexInvokeModel(requested, configured, catalogDefault string) string {
+	if model := strings.TrimSpace(requested); model != "" {
+		return model
+	}
 	if configured != "" {
 		return ""
 	}
@@ -694,10 +698,12 @@ func claudeModelInvocation(request ModelInvokeRequest, environment map[string]st
 		}
 		return nil
 	}
+	requestedModel := strings.TrimSpace(request.Model)
 	return modelInvocation{
-		args:        claudeModelInvokeArgs(request.Mode, request.ReasoningEffort, request.OutputSchema),
+		args:        claudeModelInvokeArgs(request.Mode, request.ReasoningEffort, requestedModel, request.OutputSchema),
 		environment: prepared,
 		stdout:      stdout,
+		model:       requestedModel,
 		release:     release,
 		reply: func() (ModelInvokeResult, error) {
 			if err := parse(); err != nil {
@@ -744,8 +750,11 @@ func claudeModelInvocation(request ModelInvokeRequest, environment map[string]st
 // claudeModelInvokeArgs builds the claude -p argv. --safe-mode turns off
 // CLAUDE.md, Skills, hooks, MCP servers and plugins while sign-in still works;
 // the prompt is read from stdin.
-func claudeModelInvokeArgs(mode, effort string, schema json.RawMessage) []string {
+func claudeModelInvokeArgs(mode, effort, model string, schema json.RawMessage) []string {
 	args := []string{"-p", "--output-format", "json"}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
 	if mode == ModelInvokeStructured {
 		args = append(args, "--json-schema", string(schema))
 	}

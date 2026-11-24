@@ -85,31 +85,36 @@ packed around it.
 
 <!-- BEGIN GENERATED: public-tiers tiers, from llm-inference-lab docs/public-tiers.json; run scripts/public_tiers_sync.py there, do not edit here -->
 
-| Machine                    | Model           | Quant                          | Context | Decode, tok/s                                                                          | SimplexAI  | Compares with       |
-| -------------------------- | --------------- | ------------------------------ | ------- | -------------------------------------------------------------------------------------- | ---------- | ------------------- |
-| Mac 16 GB                  | Spark-X2.6-4B   | Q4_K_M                         | 64K     | —                                                                                      | Not ranked | —                   |
-| Mac 24 GB                  | Inkling 2 Mini  | Unsloth Dynamic 3.0 UD-IQ3_XXS | 64K     | 29.12 short; 26.15 after 8K; 22.28 after 32K; 29.89 for 2 concurrent sessions together | 53.4       | ≈ Claude Sonnet 4.6 |
-| Mac 32 GB                  | Inkling 2 Mini  | Unsloth Dynamic 3.0 UD-Q4_K_M  | 128K    | —                                                                                      | 54.2       | ≈ Claude Sonnet 4.6 |
-| Linux NVIDIA 8 GB + 32 GB  | Qwen3.6-35B-A3B | UD-Q3_K_M                      | 64K     | —                                                                                      | 35.8       | ≈ Claude Haiku 4.5  |
-| Linux NVIDIA 12 GB + 32 GB | Qwen3.6-35B-A3B | UD-Q4_K_M                      | 64K     | —                                                                                      | 36.4       | ≈ Claude Haiku 4.5  |
-| Linux NVIDIA 24 GB + 64 GB | Qwen3.8-27B†    | UD-Q4_K_M                      | 128K    | 32.5–33.2 single session at 130K; 28–41 per session with two sessions at about 8K      | 54.1       | ≈ Claude Sonnet 4.6 |
+| Machine                    | Model               | Quant                                             | Context | Decode, tok/s                                                                          | SimplexAI    | Compares with       |
+| -------------------------- | ------------------- | ------------------------------------------------- | ------- | -------------------------------------------------------------------------------------- | ------------ | ------------------- |
+| Mac 16 GB                  | Spark-X2.6-4B       | Q4_K_M                                            | 64K     | ~41 (est.)                                                                             | ~31.5 (est.) | ≈ Gemini 2.5 Pro    |
+| Mac 24 GB                  | Inkling 2 Mini      | Unsloth Dynamic 3.0 UD-IQ3_XXS                    | 64K     | 29.12 short; 26.15 after 8K; 22.28 after 32K; 29.89 for 2 concurrent sessions together | 53.4         | ≈ Claude Sonnet 4.6 |
+| Mac 32 GB                  | Inkling 2 Mini      | Unsloth Dynamic 3.0 UD-Q4_K_M                     | 128K    | ~30 (est.)                                                                             | 54.2         | ≈ Claude Sonnet 4.6 |
+| Linux NVIDIA 8 GB + 32 GB  | Inkling 2 Mini      | Unsloth Dynamic 3.0 UD-Q3_K_XL (Mainline_Support) | 64K     | ~50 (est.)                                                                             | 53.9         | ≈ Claude Sonnet 4.6 |
+| Linux NVIDIA 12 GB + 32 GB | Inkling 2 Mini      | Unsloth Dynamic 3.0 UD-Q3_K_XL (Mainline_Support) | 64K     | ~68 (est.)                                                                             | 53.9         | ≈ Claude Sonnet 4.6 |
+| Linux NVIDIA 24 GB + 64 GB | Qwen3.8-Flash-Next† | GSQ-RCO IQ2_XS                                    | 256K    | 126.7 median; 128.5 at 8K; 117.1 at 32K                                                | 58.8         | ≈ Claude Opus 4.6   |
 
-Decode speeds were measured in our lab on physical hardware for the listed tiers; tiers marked — are pending physical-device benchmarks. SimplexAI scores sit on the third-party AIHOT scale, where 50 is the reference average, and scores within 3 points count as the same level.
+Decode speeds for physical-hardware tiers were measured in our lab; entries marked (est.) are reference estimates anchored to physical consumer devices and will be replaced as dedicated tier hardware is benchmarked. SimplexAI scores sit on the third-party AIHOT scale, where 50 is the reference average, and scores within 3 points count as the same level.
 
-Test conditions:
+Test conditions and reference basis:
 
-- Mac 24 GB: Physical Apple M6 Mac mini with 24 GB unified memory (12 GPU cores); llama.cpp b12588 Metal, 64K shared window across 2 slots, q8_0 KV, exclusive run.
-- Linux NVIDIA 24 GB + 64 GB: A real RTX 4090 D 24 GB card; the two sessions share one 128K window (about 8K each when both ran); llama.cpp r3 build of 2026-10-25, KV q8_0/q4_0 and q8_0/q8_0 (the ranges cover both); the two sessions overlapped only in part, so per-session numbers are approximate; not a rerun of the current installer recipe.
+- Mac 16 GB (estimate): Anchored to the same base Apple M6 silicon (physical 24 GB Mac mini running the 16 GB 64K×2 recipe at 38.87–41.35 tok/s single-session, 2.51 GiB footprint); pending direct 16 GB Mac verification.
+- Mac 24 GB (measured): Physical Apple M6 Mac mini with 24 GB unified memory (12 GPU cores); llama.cpp b12588 Metal, 64K shared window across 2 slots, q8_0 KV, exclusive run.
+- Mac 32 GB (estimate): Bandwidth-scaled estimate for typical 32–36 GB Apple Silicon Pro Macs (273–307 GB/s), anchored to our physical M6 24 GB UD-IQ3_XXS measurement (29.12 tok/s) and accounting for UD-Q4_K_M's larger active weights (~25 tok/s on base M6 32 GB); pending direct 32 GB Mac benchmarks.
+- Linux NVIDIA 8 GB + 32 GB (estimate): Anchored to PolyStrata's physical RTX 4070 Laptop 8 GB (i7-14700HX, 32 GB RAM, Windows) run of Inkling 2 Mini UD-Q3_K_XL at 47.7–50.0 tok/s with default offload settings (37.8–41.8 tok/s without lossy flags); pending direct Linux 8 GB hardware benchmarks.
+- Linux NVIDIA 12 GB + 32 GB (estimate): Anchored to PolyStrata community measurements on a physical RTX 3060 12 GB (32 GB RAM, UD-Q3_K_XL at 68.2 tok/s) and VRAM expert-residency scaling from 8 GB (1,977 vs 896 of 3,072 experts resident); pending direct Linux 12 GB hardware benchmarks.
+- Linux NVIDIA 24 GB + 64 GB (measured): A real RTX 4090 D 24 GB card; Strata v0.2.4 (engine 0.1.48, co-located with d3-nano, RSI1 baseline config, 6 requests); not the current CLI default recipe.
 
-Not ranked (Mac 16 GB): AIHOT has no third-party results for Spark-X2.6-4B. Our own self-test: SciCode subproblems 28.2% (82/291), read on AIHOT's SciCode scale as 22.1 (12.5–30.8). Self-test, not a SimplexAI score: Q4_K_M on an M5 Ultra with 256 GiB (llama.cpp b11370, 4 sessions of 192K, not the 16 GB setup), thinking on, 16,384 output tokens per turn (25 of 65 problems hit the cap and count as failed), one pass@1; the interval covers resampling the problems only; the vendor reports 36.8% unquantized.
+Estimated score (Mac 16 GB): AIHOT has no third-party results for Spark-X2.6-4B yet. Interim estimate (~31.5) reconciling our Q4_K_M SciCode self-test (28.2% subproblems, 22.1 on AIHOT's SciCode scale with 25/65 cap truncations) with AIHOT-scale projections of vendor unquantized benchmarks (~34 before Q4 retention); pending third-party AIHOT ranking.
 
-† Linux NVIDIA 24 GB + 64 GB: the table shows Qwen3.8-27B UD-Q4_K_M; the default recommendation for this machine is Inkling 2 Mini UD-Q4_K_M.
+† Linux NVIDIA 24 GB + 64 GB: the table shows Qwen3.8-Flash-Next GSQ-RCO IQ2_XS; the default recommendation for this machine is Inkling 2 Mini UD-Q4_K_XL.
 
 <!-- END GENERATED: public-tiers tiers -->
 
 The table lists one configuration per tier, with physical-device decode speeds where
-measured. For the plan setup makes on every Mac and NVIDIA tier, on Windows as well
-as Linux, and the smaller model it picks when memory is busy, see
+measured and physical-reference estimates where marked `(est.)`. For the plan setup
+makes on every Mac and NVIDIA tier, on Windows as well as Linux, and the smaller
+model it picks when memory is busy, see
 [Hardware compatibility](https://docs.heylinger.com/hardware/compatibility).
 
 Once the plan is approved, each model counts as installed only after it answers a real question.

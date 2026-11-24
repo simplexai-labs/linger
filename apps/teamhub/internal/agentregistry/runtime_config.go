@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -158,10 +159,15 @@ func (s *Service) AnotherMePlacements(ctx context.Context, filter store.ListAnot
 	}
 	response := teamhubinternal.AnotherMePlacementList{Items: make([]teamhubinternal.AnotherMePlacement, 0, len(rows))}
 	for _, row := range rows {
+		var runtimeModel *string
+		if model := strings.TrimSpace(row.RuntimeModel); model != "" {
+			runtimeModel = &model
+		}
 		response.Items = append(response.Items, teamhubinternal.AnotherMePlacement{
 			TenantId: row.TenantID, OwnerActorId: row.OwnerActorID, AgentId: row.AgentID,
 			AgentActorId: row.AgentActorID, ComputerId: row.ComputerID,
 			LocalRuntimeType: teamhubinternal.LocalRuntimeType(row.LocalRuntimeType),
+			RuntimeModel:     runtimeModel,
 			Status:           teamhubinternal.AnotherMePlacementStatus(row.Status),
 		})
 	}

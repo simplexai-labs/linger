@@ -5,12 +5,12 @@ inputs:
   target:
     description: Desktop build target (darwin-arm64, linux-x64, or win32-x64).
     required: true
-  installer:
-    description: Standalone installer suffix uploaded alongside the platform artifact.
-    required: true
   docker-image:
     description: Packaging Docker image name (dmgtool or wintool), or empty when none is needed.
     default: ""
+  require-macos-signing:
+    description: When true, fail darwin-arm64 packaging instead of ad-hoc signing if Developer ID or notary secrets are missing.
+    default: "false"
   ghcr-token:
     description: Token used to log in to ghcr.io for pulling prebuilt packaging images.
     default: ""
@@ -63,9 +63,9 @@ runs:
       with:
         node-version-file: .node-version
         cache: pnpm
-    # Reuse main's shared GOMODCACHE (populated by CI's check action) and fall
-    # back to main's go-desktop build cache so fresh desktop-v* tags start with
-    # warm Go modules and cross-compiled stdlib/daemon packages.
+    # Reuse main's shared GOMODCACHE (populated by CI's check action) and roll
+    # the per-target Go build cache forward per commit SHA (pruning stale
+    # entries before save so the cache never freezes on an unchanged go.sum).
     - uses: actions/setup-go@v7
       with:
         go-version-file: apps/teamhub/go.mod
@@ -75,17 +75,26 @@ runs:
         path: ~/go/pkg/mod
         key: gomod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}
         restore-keys: gomod-${{ runner.os }}-${{ runner.arch }}-
-    - uses: actions/cache@v6
+    - id: gobuild
+      uses: actions/cache/restore@v6
       with:
         path: ~/.cache/go-build
-        key: desktop-gobuild-${{ inputs.target }}-${{ steps.versions.outputs.go }}-${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}
+        key: desktop-gobuild-${{ inputs.target }}-${{ steps.versions.outputs.go }}-${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}-${{ github.sha }}
         restore-keys: |
+          desktop-gobuild-${{ inputs.target }}-${{ steps.versions.outputs.go }}-${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}-
           desktop-gobuild-${{ inputs.target }}-${{ steps.versions.outputs.go }}-
           go-desktop-${{ runner.os }}-${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}-
+    - name: Backdate Go build cache for post-build pruning
+      shell: bash
+      run: |
+        if [ -d ~/.cache/go-build ]; then
+          find ~/.cache/go-build -type f -exec touch -m -d '2 hours ago' {} +
+        fi
     - shell: bash
-      run: pnpm install --frozen-lockfile
+      run: pnpm install --frozen-lockfile --ignore-scripts
     # Pinned binary downloads reused across releases: Electron, Cua driver,
-    # native PostgreSQL + voice tools, and the pinned Node.js distribution.
+    # native PostgreSQL + voice tools, rcodesign, and the pinned Node.js
+    # distribution.
     - uses: actions/cache@v6
       with:
         path: |
@@ -93,8 +102,10 @@ runs:
           ~/.cache/linger-computer-tools
           ${{ env.LINGER_NATIVE_POSTGRES_DIR }}
           .linger-runtime/node-distributions
-        key: desktop-downloads-${{ inputs.target }}-${{ hashFiles('apps/desktop/package.json', 'apps/desktop/distribution/*.json', 'scripts/local-computer-node-distributions.mjs', 'apps/computer/scripts/bundle-computer-tools.mjs') }}
-        restore-keys: desktop-downloads-${{ inputs.target }}-
+        key: desktop-downloads-${{ inputs.target }}-${{ env.APPLE_CODESIGN_VERSION }}-${{ hashFiles('apps/desktop/package.json', 'apps/desktop/distribution/*.json', 'scripts/local-computer-node-distributions.mjs', 'apps/computer/scripts/bundle-computer-tools.mjs') }}
+        restore-keys: |
+          desktop-downloads-${{ inputs.target }}-${{ env.APPLE_CODESIGN_VERSION }}-
+          desktop-downloads-${{ inputs.target }}-
     - name: Log in to GHCR for packaging images
       if: inputs.docker-image != ''
       shell: bash
@@ -108,16 +119,31 @@ runs:
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin ||
             echo "::warning::Could not log in to ghcr.io; packaging will build Docker images locally if pull fails."
         fi
+    # pigz unlocks multi-core gzip compression in apps/desktop/packaging/archive.py
+    # for the 300-400 MB macOS update and Linux archives.
+    - name: Install pigz
+      if: inputs.target != 'win32-x64'
+      shell: bash
+      run: |
+        if ! command -v pigz >/dev/null; then
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 update -q &&
+            sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 install -y -q pigz
+        fi
     - name: Install rcodesign
       if: inputs.target == 'darwin-arm64'
       shell: bash
       run: |
         set -euo pipefail
         name="apple-codesign-$APPLE_CODESIGN_VERSION-x86_64-unknown-linux-musl"
-        curl -fsSL --retry 3 -o "$RUNNER_TEMP/rcodesign.tar.gz" \
-          "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F$APPLE_CODESIGN_VERSION/$name.tar.gz"
-        echo "$APPLE_CODESIGN_SHA256  $RUNNER_TEMP/rcodesign.tar.gz" | sha256sum -c -
-        tar -xzf "$RUNNER_TEMP/rcodesign.tar.gz" -C "$RUNNER_TEMP"
+        cached="$HOME/.cache/linger-desktop/tools/$name.tar.gz"
+        mkdir -p "$(dirname "$cached")"
+        if [ ! -f "$cached" ] || ! echo "$APPLE_CODESIGN_SHA256  $cached" | sha256sum -c - >/dev/null 2>&1; then
+          curl -fsSL --retry 3 -o "$cached.part" \
+            "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F$APPLE_CODESIGN_VERSION/$name.tar.gz"
+          echo "$APPLE_CODESIGN_SHA256  $cached.part" | sha256sum -c -
+          mv "$cached.part" "$cached"
+        fi
+        tar -xzf "$cached" -C "$RUNNER_TEMP"
         echo "RCODESIGN=$RUNNER_TEMP/$name/rcodesign" >>"$GITHUB_ENV"
     - name: Install osslsigncode
       if: inputs.target == 'win32-x64'
@@ -169,7 +195,20 @@ runs:
         # The hosted diagnostics receiver this build carries; a secret so
         # the address stays masked. Without it Send Diagnostics is hidden.
         LINGER_DIAGNOSTICS_UPLOAD_URL: ${{ inputs.diagnostics-upload-url }}
+        DESKTOP_REQUIRE_MACOS_SIGNING: ${{ inputs.require-macos-signing }}
       run: scripts/ci/desktop-release.sh build ${{ inputs.target }}
+    - name: Prune unused Go build cache entries
+      if: success() && steps.gobuild.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        if [ -d ~/.cache/go-build ]; then
+          find ~/.cache/go-build -type f -mmin +60 -delete
+        fi
+    - uses: actions/cache/save@v6
+      if: ${{ !cancelled() && steps.gobuild.outputs.cache-hit != 'true' }}
+      with:
+        path: ~/.cache/go-build
+        key: ${{ steps.gobuild.outputs.cache-primary-key }}
     - name: Record Windows Setup digest
       if: inputs.target == 'win32-x64'
       shell: bash
@@ -180,37 +219,48 @@ runs:
       if: always()
       shell: bash
       run: rm -rf "$RUNNER_TEMP/signing"
+    # Upload every release file once without wrapping it in a second zip:
+    # testers download the bare installer directly and downstream jobs
+    # download the exact same artifact by filename.
     - uses: actions/upload-artifact@v7
-      if: inputs.target != 'win32-x64'
+      if: inputs.target == 'darwin-arm64'
       with:
-        name: desktop-${{ inputs.target }}
-        path: ${{ env.RELEASE_OUT }}/assets/
+        path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-macos-arm64.dmg
+        archive: false
         if-no-files-found: error
-        compression-level: 0
+        retention-days: 14
+    - uses: actions/upload-artifact@v7
+      if: inputs.target == 'darwin-arm64'
+      with:
+        path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-macos-arm64.app.tar.gz
+        archive: false
+        if-no-files-found: error
+        retention-days: 14
+    - uses: actions/upload-artifact@v7
+      if: inputs.target == 'linux-x64'
+      with:
+        path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-linux-x64.tar.gz
+        archive: false
+        if-no-files-found: error
         retention-days: 14
     - uses: actions/upload-artifact@v7
       if: inputs.target == 'win32-x64'
       with:
-        name: desktop-win32-x64
-        path: |
-          ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-windows-x64-setup.exe
-          ${{ env.RELEASE_OUT }}/assets/windows-setup.sha256
+        path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-windows-x64-setup.exe
+        archive: false
         if-no-files-found: error
-        compression-level: 0
         retention-days: 14
     - uses: actions/upload-artifact@v7
       if: inputs.target == 'win32-x64'
       with:
-        name: desktop-win32-x64-portable
         path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-windows-x64-portable.zip
+        archive: false
         if-no-files-found: error
-        compression-level: 0
         retention-days: 14
-    # The installer again on its own, not zipped, so a tester downloads
-    # only the file they run instead of every package for the platform.
     - uses: actions/upload-artifact@v7
+      if: inputs.target == 'win32-x64'
       with:
-        path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-${{ inputs.installer }}
+        path: ${{ env.RELEASE_OUT }}/assets/windows-setup.sha256
         archive: false
         if-no-files-found: error
         retention-days: 14

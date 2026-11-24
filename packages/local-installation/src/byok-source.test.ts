@@ -805,3 +805,307 @@ describe("source apply timeouts and progress", () => {
     expect(apply?.[2]).not.toHaveProperty("idleTimeoutMs");
   });
 });
+
+describe("runtime_paths persistence across model-source apply", () => {
+  const exeName = (runtime: string) =>
+    process.platform === "win32" ? `${runtime}.exe` : runtime;
+
+  async function writeExecutable(filePath: string): Promise<string> {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, "#!/bin/sh\n", { mode: 0o700 });
+    return path.normalize(filePath);
+  }
+
+  async function readModelSourceJson(
+    home: string,
+  ): Promise<Record<string, unknown>> {
+    const raw = await fs.readFile(
+      path.join(home, "runtime", "localmodels", "state", "model-source.json"),
+      "utf8",
+    );
+    return JSON.parse(raw) as Record<string, unknown>;
+  }
+
+  it("persists stdout and non-harness previous runtime_paths without pinning harness paths in model-source.json", async () => {
+    const home = await makeHome();
+    const stateDir = path.join(home, "runtime", "localmodels", "state");
+    await privateDirectory(stateDir);
+    const customCodex = await writeExecutable(
+      path.join(home, "custom", exeName("codex")),
+    );
+    const oldHarnessPi = await writeExecutable(
+      path.join(
+        home,
+        "runtime",
+        "harness",
+        "tools",
+        "pi",
+        "0.9.0",
+        exeName("pi"),
+      ),
+    );
+    await writeExecutable(
+      path.join(
+        home,
+        "runtime",
+        "harness",
+        "tools",
+        "pi",
+        "0.10.0",
+        exeName("pi"),
+      ),
+    );
+    const claudeFromStdout = await writeExecutable(
+      path.join(home, "stdout-bin", exeName("claude")),
+    );
+    await writeSource(home, {
+      schema: "localmodels.model-source/v1",
+      mode: "byok",
+      runtime: "codex",
+      runtime_model: "localmodels-byok",
+      model_label: "vendor/model",
+      gateway_url: "http://127.0.0.1:18480",
+      environment: {},
+      runtime_paths: {
+        codex: customCodex,
+        pi: oldHarnessPi,
+      },
+    });
+
+    const outcome = await applyNativeSource(
+      home,
+      "local",
+      "pi",
+      { signal: new AbortController().signal },
+      {
+        localmodels: async () => {
+          // Simulate localmodels rewriting model-source.json without runtime_paths.
+          await atomicPrivate(
+            path.join(stateDir, "model-source.json"),
+            JSON.stringify({
+              schema: "localmodels.model-source/v1",
+              mode: "local",
+              runtime: "pi",
+              runtime_model: "localmodels-library/qwen3.8",
+              model_label: null,
+              gateway_url: "http://127.0.0.1:18480",
+              environment: { PI_CODING_AGENT_DIR: "/abs/gateway-pi" },
+            }),
+          );
+          return {
+            code: 0,
+            stdout: JSON.stringify({
+              schema: "localmodels.model-source-status/v1",
+              mode: "local",
+              runtime: "pi",
+              runtime_paths: { claude: claudeFromStdout },
+            }),
+            stderr: "",
+          };
+        },
+      },
+    );
+    expect(outcome).toBeUndefined();
+    const persisted = await readModelSourceJson(home);
+    expect(persisted).toMatchObject({
+      schema: "localmodels.model-source/v1",
+      mode: "local",
+      runtime: "pi",
+      runtime_model: "localmodels-library/qwen3.8",
+      environment: { PI_CODING_AGENT_DIR: "/abs/gateway-pi" },
+      runtime_paths: {
+        codex: customCodex,
+        claude: claudeFromStdout,
+      },
+    });
+  });
+
+  it("drops stale missing paths, persists non-harness descriptor paths, and skips harness descriptor paths", async () => {
+    const home = await makeHome();
+    const stateDir = path.join(home, "runtime", "localmodels", "state");
+    await privateDirectory(stateDir);
+    const descriptorPi = await writeExecutable(
+      path.join(home, "managed", exeName("pi")),
+    );
+    const harnessPi = await writeExecutable(
+      path.join(
+        home,
+        "runtime",
+        "harness",
+        "tools",
+        "pi",
+        "1.0.0",
+        exeName("pi"),
+      ),
+    );
+    await writeSource(home, {
+      schema: "localmodels.model-source/v1",
+      mode: "subscription",
+      runtime: "pi",
+      runtime_model: "",
+      model_label: null,
+      gateway_url: null,
+      environment: {},
+      runtime_paths: {
+        pi: path.join(home, "deleted", exeName("pi")),
+        codex: path.join(home, "deleted", exeName("codex")),
+      },
+    });
+
+    const outcome = await prepareByokRuntime(
+      {
+        baseUrl: "https://api.example.com",
+        path: "/v1",
+        endpoint: "/chat/completions",
+        protocol: "openai-chat",
+        apiKey: "sk-test",
+        modelId: "gpt-4o",
+        runtime: "pi",
+      },
+      {
+        home,
+        signal: new AbortController().signal,
+        onEvent: () => {},
+      },
+      {
+        prepareNative: async (_rt, opts) => {
+          opts.onDescriptor?.({
+            runtime: "pi",
+            executable: descriptorPi,
+            argvPrefix: [],
+            installed: true,
+            authenticated: false,
+            authMode: null,
+            loginCommand: null,
+          });
+          return { code: 0, state: "ready", message: "ok" };
+        },
+        localmodels: async () => {
+          await atomicPrivate(
+            path.join(stateDir, "model-source.json"),
+            JSON.stringify({
+              schema: "localmodels.model-source/v1",
+              mode: "byok",
+              runtime: "pi",
+              runtime_model: "localmodels-byok",
+              model_label: "gpt-4o",
+              gateway_url: "http://127.0.0.1:18480",
+              environment: {},
+            }),
+          );
+          return {
+            code: 0,
+            stdout: JSON.stringify({
+              schema: "localmodels.model-source-status/v1",
+              mode: "byok",
+              runtime: "pi",
+            }),
+            stderr: "",
+          };
+        },
+      },
+    );
+    expect(outcome.state).toBe("ready");
+    const persisted = await readModelSourceJson(home);
+    expect(persisted.runtime_paths).toEqual({ pi: descriptorPi });
+
+    // Harness executables passed via descriptor must not be pinned in model-source.json.
+    const harnessOutcome = await prepareByokRuntime(
+      {
+        baseUrl: "https://api.example.com",
+        path: "/v1",
+        endpoint: "/chat/completions",
+        protocol: "openai-chat",
+        apiKey: "sk-test",
+        modelId: "gpt-4o",
+        runtime: "pi",
+      },
+      {
+        home,
+        signal: new AbortController().signal,
+        onEvent: () => {},
+      },
+      {
+        prepareNative: async (_rt, opts) => {
+          opts.onDescriptor?.({
+            runtime: "pi",
+            executable: harnessPi,
+            argvPrefix: [],
+            installed: true,
+            authenticated: false,
+            authMode: null,
+            loginCommand: null,
+          });
+          return { code: 0, state: "ready", message: "ok" };
+        },
+        localmodels: async () => {
+          await atomicPrivate(
+            path.join(stateDir, "model-source.json"),
+            JSON.stringify({
+              schema: "localmodels.model-source/v1",
+              mode: "byok",
+              runtime: "pi",
+              runtime_model: "localmodels-byok",
+              model_label: "gpt-4o",
+              gateway_url: "http://127.0.0.1:18480",
+              environment: {},
+            }),
+          );
+          return {
+            code: 0,
+            stdout: JSON.stringify({
+              schema: "localmodels.model-source-status/v1",
+              mode: "byok",
+              runtime: "pi",
+            }),
+            stderr: "",
+          };
+        },
+      },
+    );
+    expect(harnessOutcome.state).toBe("ready");
+    const harnessPersisted = await readModelSourceJson(home);
+    expect(harnessPersisted.runtime_paths).toBeUndefined();
+  });
+
+  it("preserves non-harness runtime_paths across restoreByokSource remount and drops harness paths", async () => {
+    const home = await makeHome();
+    const stateDir = path.join(home, "runtime", "localmodels", "state");
+    await privateDirectory(stateDir);
+    const customCodex = await writeExecutable(
+      path.join(home, "custom", exeName("codex")),
+    );
+    const harnessPi = await writeExecutable(
+      path.join(
+        home,
+        "runtime",
+        "harness",
+        "tools",
+        "pi",
+        "1.3.0",
+        exeName("pi"),
+      ),
+    );
+    await writeSource(home, {
+      ...byokSource(null),
+      runtime_paths: { codex: customCodex, pi: harnessPi },
+    });
+
+    const failure = await restoreByokSource(
+      home,
+      { signal: new AbortController().signal, onEvent: () => {} },
+      {
+        localmodels: async () => {
+          await atomicPrivate(
+            path.join(stateDir, "model-source.json"),
+            JSON.stringify(byokSource("http://127.0.0.1:18480")),
+          );
+          return { code: 0, stdout: "{}", stderr: "" };
+        },
+      },
+    );
+    expect(failure).toBeUndefined();
+    const persisted = await readModelSourceJson(home);
+    expect(persisted.runtime_paths).toEqual({ codex: customCodex });
+  });
+});

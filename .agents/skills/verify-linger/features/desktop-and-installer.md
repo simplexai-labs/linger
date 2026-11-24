@@ -114,7 +114,7 @@ Never run live verification against a developer's real `~/.simplexai`, `<appData
 1. Confirm OS-specific window chrome: macOS native traffic lights (`data-desktop-chrome="inset"`), Windows `titleBarOverlay`, Linux custom `titlebar.html` controls.
 2. Close the main window: verify the app remains alive in the tray (or Dock on macOS) and relaunching the executable focuses the single existing instance instead of starting a second one.
 3. Click **Quit** from tray/menu: verify the app exits and detached `installer.js --stop-local-models` runs while core collaboration services stay running (see [Local Models and BYOK](local-models-and-byok.md#quit-reopen-resume-and-uninstall-teardown)).
-4. Relaunch Desktop: verify `--resume` reconnects to the existing instance without re-entering setup.
+4. Relaunch Desktop: verify `--resume` reconnects to the existing instance without re-entering setup. For sleep and wake, force quit and quitting mid-Run or mid-download, run [Sleep, wake and quit](local-models-and-byok.md#sleep-wake-and-quit).
 5. Simulate an unavailable local server so `offline.html?failed=...` appears; test **Try Again**, **Show Logs**, **Save Diagnostics**, and **Set Up Again**. Confirm **Set Up Again** returns to Welcome while preserving instance data and `savedEnrollments` (and renews the holding Computer without leaving an orphan — see [Login and account switching](local-computer.md#login-and-account-switching)).
 
 ### Auto-updater and in-place upgrade
@@ -130,6 +130,55 @@ Never run live verification against a developer's real `~/.simplexai`, `<appData
    - **Linux & Windows Portable (`download`):** tray and account menu show **Download Linger `<version>`…** / **Download Update** and open the release page without attempting in-place swap.
 
 **Pass:** Version advances, `Updating Linger` switches the local server to the newer source package (downgrades remain blocked), and persisted Rooms/Documents remain readable after restart.
+
+This journey proves the updater mechanics. The [upgrade from the previous release](#upgrade-from-the-previous-release) below proves that a real install survives the upgrade.
+
+### Upgrade from the previous release
+
+**Required for every release and release candidate** on each shipped target (`darwin-arm64`, `linux-x64`, `win32-x64`). A fresh-install pass does not substitute for it, and a target that was not upgraded is reported as blocked, not passed.
+
+**Why it matters:** existing users reach a new version only by upgrading an install that already holds state: native services and supervisors started by the old app, its source folder, a saved local-model plan and gateway, Pi and Runtime settings, and OS permission grants. A fresh install has none of that state, so fresh-install checks passed while each of these upgrades broke:
+
+- #174 (Linux, 0.1.3 RC1/RC2): service supervisors kept running from the old app folder after an upgrade or re-extract.
+- #175, #210 (0.1.3 RCs): the new app ran on the old services; when moving them failed, Try Again pruned the folder they ran from and Linger stopped serving on every relaunch.
+- #179 (macOS, non-English locale): services started by 0.1.2 failed 0.1.3's process identity check.
+- #320 (0.1.4 → 0.1.5): stopped local models could not be replanned by the newer `localmodels` kit (`STACK_REPLAN_FAILED`).
+- #344 (0.1.3 → 0.1.4 auto-update, macOS): Screen Recording stayed on in System Settings but was refused, so computer use failed.
+- #512 (0.1.5 → 0.1.6, macOS): resume refused to stop a local-model service the earlier release had started and left the old TeamHub and node-services running, so the Computer could not connect.
+- #579, #605 (WHI-973, Windows): after an upgrade and Quit → Reopen, local models were split between the legacy Magpie gateway and Bifrost, `magpie.exe serve` was not restarted, Pi's `settings.json` still pointed at Magpie, and the default Agent failed with `ECONNREFUSED`.
+- #590: a cold `--stop` → `--resume` did not reload an adopted local model, so Pi had no model.
+- #603 (macOS): a PostgreSQL left running by the earlier release no longer matched the repinned archive, and setup stopped at the services step.
+
+**Setup:**
+
+- The previous published stable release (`gh release list --repo simplexai-labs/linger`; Releases → Latest) and the candidate, both digest-checked against their `SHA256SUMS.txt`.
+- A host or VM per target that never ran the candidate, as the user the product supports (non-root; Windows standard user). Upgrade needs the default data locations, so use a disposable machine or account instead of isolated `LINGER_DESKTOP_USER_DATA`/`LINGER_HOME` overrides, and never a developer's real install.
+- On a machine a person also uses, never change per-user shared state for an install or upgrade test: the `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Linger` key, `%USERPROFILE%\.local\share\localmodels` and `~/.local/share/localmodels`, or `~/.pi`. Run those tests under a separate OS user or in a VM instead. The Windows NSIS `-setup.exe`, including one the person runs by hand, installs into the folder the Uninstall key names, so pointing that key at a test install sends the person's own upgrade there and stops their services. Releases up to 0.1.6 write the shared `localmodels` directories whatever `LINGER_HOME` says, and place models on GPUs regardless of `CUDA_VISIBLE_DEVICES`.
+- For the in-app update to a candidate, which is a prerelease and so never reaches the default feed: an owned HTTPS host with a trusted certificate serving the candidate's own signed `manifest.json` and `manifest.json.sig` at `<feed>/latest/download/` and its package at `<feed>/download/desktop-v<version>/`, named by `updateFeedUrl` in the old app's `config.json`.
+
+**Journey:**
+
+1. Install the previous release the way users do and run **Quick Install** with **Local model** where the hardware supports it (otherwise BYOK; record which). Sign in, confirm the default gateway serves the model (Bifrost on every platform for new installs; on Windows also repeat with an install that an earlier release set up on Magpie, when one is available), send a unique marker to Another Me and to one other Agent, and get replies. Create a Document and change a few settings (Room model, a Computer setting, a saved BYOK key when used).
+2. Record the baseline: app version, `local-server.json` source folder, service and model PIDs with their executable paths, gateway process and port, `GET .../local-models` and `GET .../model-source` JSON, and Pi's default model.
+3. Upgrade with services and the local model still running, by each path users take:
+   - **macOS:** in-app **Restart to Update** (`app-bundle`), and separately drag the new `Linger.app` from the `.dmg` over the old one.
+   - **Windows:** in-app **Restart to Update** (`/update /relaunch`), and separately run the new `-setup.exe` over the running install.
+   - **Linux:** extract the new `.tar.gz` over the old folder and, separately, into a new folder, then launch it.
+4. On the first launch, confirm `Updating Linger` moves the services to the new source without Set Up Again, then use the app.
+5. **Quit → Reopen** from the tray or menu, then a **cold restart**: reboot, or `installer.js --instance desktop --stop` followed by a relaunch.
+6. Repeat steps 1–5 from a release two or more versions older (a skipped version) when that release still supports the same update path.
+
+**Pass after each upgrade, Quit → Reopen and cold restart:**
+
+- The app starts without the setup wizard or the start failure page; the account menu and `local-server.json` show the candidate version and its source folder; no process runs from the old app or source folder.
+- Account, Rooms, messages, the Document, Agents, Computer enrollment and the changed settings are kept; the Computer is **Online** without pairing again.
+- The local model is `loaded` and answering through its gateway. A fresh Windows install serves it only through Bifrost (`bifrost-http.exe`), with no `magpie.exe` and no `magpie/...` Pi default. A Windows install that 0.1.7 set up on Magpie may stay on Magpie after the upgrade (a known issue until such installs move to Bifrost), but it must start and its Agents must reply. A BYOK source is remounted without entering the key again.
+- Another Me and the other Agent each deliver a reply to a new marker, with no `ECONNREFUSED` and no Runtime `Update needed`.
+- On macOS, computer use still works; if the build is unsigned, record whether permissions had to be granted again (`docs/macos.md`).
+
+**Evidence:** for each target and upgrade path, the from and to versions and digests, the baseline and after records from step 2, `daemon status --json`, the process list with executable paths, persisted message and Run IDs of the replies, a **Save Diagnostics** archive, and screenshots of `Updating Linger`, the account menu version and Settings › Models. Record a failure on the first launch even when Try Again or a reboot later recovers it.
+
+**Automation:** `verify-local-client.mjs` and the unit suites cover the resume logic but install no previous release. `scripts/acceptance/room-journey.mjs` checks the Agent reply after each step. `scripts/smoke-local-runner.sh` covers only an in-place Computer bundle upgrade, not Desktop. The Desktop release-to-release upgrade itself has no automation yet.
 
 ### Floating Voice Mode and Recording window
 

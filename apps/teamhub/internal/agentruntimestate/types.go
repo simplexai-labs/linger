@@ -179,6 +179,27 @@ type ClaimedLocalRun struct {
 	// ContinuesContext reports that the Context received input before this
 	// Run's first input.
 	ContinuesContext bool `json:"continues_context"`
+	// RecentMessages carries up to five recent product messages preceding this
+	// Run's first input when the Context has no persisted Runtime Session.
+	RecentMessages *RecentMessages `json:"recent_messages,omitempty"`
+}
+
+// RecentMessage is one bounded product message preceding a fresh Run's first input.
+type RecentMessage struct {
+	MessageID  string    `json:"message_id"`
+	Author     string    `json:"author"`
+	AuthorKind string    `json:"author_kind"`
+	Body       string    `json:"body"`
+	Truncated  bool      `json:"truncated,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// RecentMessages holds the recent product-message slice and pagination cursor
+// attached to a fresh Run claim.
+type RecentMessages struct {
+	InboxID    string          `json:"inbox_id"`
+	Messages   []RecentMessage `json:"messages"`
+	NextCursor string          `json:"next_cursor,omitempty"`
 }
 
 type ProfileUpdate struct {
@@ -218,6 +239,7 @@ type ClearRuntimeSessionInput struct {
 	Epoch                                string `json:"epoch"`
 	ConfigurationRevision                int64  `json:"configuration_revision"`
 	ExpectedCurrentConfigurationRevision *int64 `json:"expected_current_configuration_revision,omitempty"`
+	RecoveryReason                       string `json:"recovery_reason,omitempty"`
 }
 
 type ClearRuntimeSessionResult struct {

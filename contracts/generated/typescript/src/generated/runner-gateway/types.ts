@@ -38,6 +38,7 @@ export type ServiceFeature =
   | "local_models_diagnostics"
   | "model_invoke_outcomes"
   | "local_models_engine"
+  | "local_models_concurrency_probe"
   | "local_model_unavailable"
   | "local_models_external_holders";
 export type JsonValue =
@@ -1054,6 +1055,10 @@ export interface ModelInvoke {
   owner_actor_id: Id;
   agent_id: Id;
   runtime_type: "codex" | "claude" | "pi";
+  /**
+   * Explicit provider model to run on this Runtime. Omitted leaves selection to the Runtime's own default; sent only to a Computer release that decodes it.
+   */
+  model?: string;
   mode: "structured" | "text" | "workspace";
   reasoning_effort: "low" | "medium" | "high";
   instructions?: string;
@@ -1083,10 +1088,18 @@ export interface ContextRunStartRequest {
   runtime: RuntimeConfig;
   session_options: SessionOptions;
   session: OpaqueObject;
+  previous_session?: PreviousRuntimeSession;
   input: AgentInput;
   run_context: ContextRunContext;
   cli_run_context?: CliRunContext;
   run_resources: LocalRunResources;
+}
+/**
+ * Identifies the superseded native session of this Context so a fresh run.start can export its local transcript into ./playground/.previous-context.md.
+ */
+export interface PreviousRuntimeSession {
+  provider_type: "codex" | "claude" | "pi" | "antigravity";
+  session_id: string;
 }
 export interface AgentInput {
   type: "text";
@@ -1488,9 +1501,13 @@ export interface LocalModel {
    */
   engine_label?: string;
   /**
-   * Maximum concurrent request slots for this model when loaded. Sent only when runner.welcome service_features names local_models_engine.
+   * Maximum concurrent request slots configured or probed for this model when loaded. Sent only when runner.welcome service_features names local_models_engine.
    */
   concurrency?: number;
+  /**
+   * True while a model is running its post-load max-concurrency probe before reporting loaded. Sent only when runner.welcome service_features names local_models_concurrency_probe.
+   */
+  concurrency_probing?: boolean;
   /**
    * Additional host system RAM used alongside GPU VRAM for hybrid offload engines. Sent only when runner.welcome service_features names local_models_engine.
    */

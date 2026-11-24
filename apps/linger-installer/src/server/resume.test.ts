@@ -44,9 +44,31 @@ test("starts the saved instance again without new input", async () => {
       repo: "/source",
       externalComputer: true,
       resume: true,
+      degradeLocalModels: true,
     }),
   );
   expect(run.mock.calls[0]![0]).not.toHaveProperty("password");
+});
+
+test("an app update onto a new checkout starts in full but keeps local models optional", async () => {
+  const run = vi.fn<typeof installNativeSource>(async () => ({
+    code: 0,
+    state: "ready",
+    message: "ok",
+  }));
+  await resumeSourceInstance(
+    { ...options, sourceRepo: "/source-next" },
+    {
+      load: async () => instance,
+      engines: native(run, true),
+    },
+  );
+  const started = run.mock.calls[0]![0];
+  expect(started).toMatchObject({
+    repo: "/source-next",
+    degradeLocalModels: true,
+  });
+  expect(started).not.toHaveProperty("resume");
 });
 
 test("forwards runtime descriptors reported during resume", async () => {

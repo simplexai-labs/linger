@@ -36,6 +36,7 @@ import {
   inspectNativeProcess,
   nativeConfigurationChanged,
   reclaimNativeOrphans,
+  SERVICE_RESTART_POLICY,
   startNativeProcess,
   stopNativeProcess,
   type NativeService,
@@ -519,7 +520,7 @@ async function runNativeSource(
       let byokGateway: ByokGatewayFailure | undefined;
       let localModelsDegraded: LocalModelsDegraded | undefined;
       const resumeLocalModels =
-        Boolean(options.resume) &&
+        Boolean(options.resume || options.degradeLocalModels) &&
         !options.setupChoice &&
         !options.localModelsApproval &&
         !options.localModelsReplan;
@@ -1129,6 +1130,9 @@ async function runNativeSource(
                   ? nodeServicesSettings
                   : settings,
             restartOnConfigurationChange: true,
+            // Its supervisor brings it back when it exits unasked, so the
+            // window does not wait on a dead port until the next launch.
+            restartOnExit: SERVICE_RESTART_POLICY,
           });
           // Stop the Agent Service only when TeamHub is about to restart for a
           // changed configuration, so its graceful shutdown can requeue

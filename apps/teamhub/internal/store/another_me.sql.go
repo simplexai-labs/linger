@@ -172,6 +172,7 @@ SELECT registration.tenant_id,
        registration.actor_id AS agent_actor_id,
        registration.computer_id::text AS computer_id,
        registration.local_runtime_type::text AS local_runtime_type,
+       registration.runtime_model,
        registration.status
 FROM agent_registrations registration
 WHERE registration.agent_type='anotherme'
@@ -198,6 +199,7 @@ type ListAnotherMePlacementsRow struct {
 	AgentActorID     string `json:"agent_actor_id"`
 	ComputerID       string `json:"computer_id"`
 	LocalRuntimeType string `json:"local_runtime_type"`
+	RuntimeModel     string `json:"runtime_model"`
 	Status           string `json:"status"`
 }
 
@@ -219,6 +221,7 @@ func (q *Queries) ListAnotherMePlacements(ctx context.Context, arg ListAnotherMe
 			&i.AgentActorID,
 			&i.ComputerID,
 			&i.LocalRuntimeType,
+			&i.RuntimeModel,
 			&i.Status,
 		); err != nil {
 			return nil, err

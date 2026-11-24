@@ -130,11 +130,12 @@ const publisher = { identity: `publisher-${sessionId}` };
 const ttsDir = mkdtempSync(join(tmpdir(), "live-audio-"));
 const ttsCache = new Map<string, Int16Array>();
 /** The words as 24 kHz mono PCM, the rate the worker reads the track at. */
-function speech(text: string) {
-  let pcm = ttsCache.get(text);
+function speech(text: string, voice = "Samantha") {
+  const key = voice + ":" + text;
+  let pcm = ttsCache.get(key);
   if (!pcm) {
     const aiff = join(ttsDir, `${ttsCache.size}.aiff`);
-    execFileSync("say", ["-v", "Samantha", "-o", aiff, text]);
+    execFileSync("say", ["-v", voice, "-o", aiff, text]);
     const raw = execFileSync(
       "ffmpeg",
       [
@@ -153,7 +154,7 @@ function speech(text: string) {
       { maxBuffer: 1 << 26 },
     );
     pcm = new Int16Array(raw.buffer, raw.byteOffset, raw.length / 2).slice();
-    ttsCache.set(text, pcm);
+    ttsCache.set(key, pcm);
   }
   return pcm;
 }
@@ -212,7 +213,7 @@ function distantSpeech(text: string, belowDb: number) {
     );
     distantCache.set(key, pcm);
   }
-  return pcm;
+  return { text: `(distant) ${text}`, pcm };
 }
 const userReference = "Research pricing for Notion, Linear and Feishu for me";
 /** How much quieter than the user another person in the room is. */
@@ -245,6 +246,9 @@ class Call {
   /** The worker's hint callback: TeamHub's push of a change. */
   changed?: () => void;
   private mic: Int16Array[] = [];
+  nonSilentInputMs = 0;
+  /** Delay only provider input; the real local detector still hears the microphone on time. */
+  providerInputDelayMs = 0;
   private pump?: ReturnType<typeof setInterval>;
   private source?: InstanceType<typeof rtc.AudioSource>;
   private shutdown?: () => Promise<void>;
@@ -374,6 +378,22 @@ class Call {
               });
           },
         );
+        const appendAudio = session.appendAudio.bind(session);
+        const delayed: Int16Array[] = [];
+        let delayedSamples = 0;
+        session.appendAudio = (frame) => {
+          if (this.providerInputDelayMs) {
+            delayed.push(frame);
+            delayedSamples += frame.length;
+            if (delayedSamples <= this.providerInputDelayMs * 24)
+              return appendAudio(new Int16Array(frame.length));
+            frame = delayed.shift()!;
+            delayedSamples -= frame.length;
+          }
+          if (frame.some((sample) => sample !== 0))
+            this.nonSilentInputMs += frame.length / 24;
+          return appendAudio(frame);
+        };
         const spied = session as unknown as Record<
           string,
           (...args: unknown[]) => unknown
@@ -488,7 +508,10 @@ class Call {
 
   private onPublished(event: Record<string, unknown>) {
     const { type } = event;
-    if (type === "user_partial") return;
+    if (type === "user_partial") {
+      if (event.text) this.note("user_partial");
+      return;
+    }
     this.note(String(type), {
       ...(event.speech_id ? { speech: event.speech_id } : {}),
       ...(typeof event.text === "string" ? { text: event.text } : {}),
@@ -518,21 +541,23 @@ class Call {
 
   /** Speaks the segments (text, or a silent gap in ms) and resolves when done. */
   async say(
-    ...segments: Array<string | number | { distant: string; belowDb: number }>
+    ...segments: Array<string | number | { text: string; pcm: Int16Array }>
   ) {
     this.note("mic_start", {
       text: segments
-        .map((s) => (typeof s === "object" ? `(distant) ${s.distant}` : s))
-        .filter((s) => typeof s === "string")
+        .map((segment) =>
+          typeof segment === "object" ? segment.text : segment,
+        )
+        .filter((segment) => typeof segment === "string")
         .join(" … "),
     });
     for (const segment of segments) {
       const pcm =
         typeof segment === "number"
           ? new Int16Array(segment * 24)
-          : typeof segment === "object"
-            ? distantSpeech(segment.distant, segment.belowDb)
-            : speech(segment);
+          : typeof segment === "string"
+            ? speech(segment)
+            : segment.pcm;
       for (let offset = 0; offset < pcm.length; offset += 480) {
         const frame = new Int16Array(480);
         frame.set(pcm.subarray(offset, offset + 480));
@@ -658,6 +683,100 @@ function talkedOver(call: Call, from: number, to: number) {
   );
 }
 
+// Both utterances use the same voice; only the interruption is 4 dB softer.
+async function quietInterruption(call: Call, text: string) {
+  const voice = "Tingting";
+  const question =
+    "\u8bf7\u8be6\u7ec6\u4ecb\u7ecd\u4e09\u79cd\u9002\u5408\u5468\u672b\u505a\u7684\u83dc\u3002";
+  const gain = 10 ** (-4 / 20);
+  const interruption = speech(text, voice).map((sample) =>
+    Math.round(sample * gain),
+  );
+  await call.say({ text: question, pcm: speech(question, voice) });
+  const asked = call.at();
+  if (
+    !(await call.wait(() => call.firstSoundAfter(asked) !== undefined, 20_000))
+  )
+    throw new Error("Reply audio never started");
+  await sleep(800);
+  await call.wait(() => call.playing(), 5_000);
+  const start = call.at();
+  const inputBefore = call.nonSilentInputMs;
+  const playingAtStart = call.playing();
+  await call.say({ text, pcm: interruption });
+  await call.wait(() => call.entries("user_turn", start).length > 0, 8_000);
+  await call.settle();
+  const clear = call.firstClearAfter(start);
+  return {
+    playingAtStart,
+    forwardedMs: Math.round(call.nonSilentInputMs - inputBefore),
+    interrupted: call.entries("reply_interrupted", start).length > 0,
+    clearedAfterMs: clear === undefined ? null : Math.round(clear - start),
+    transcribed: call
+      .entries("user_turn", start)
+      .some(
+        (entry) => typeof entry.text === "string" && entry.text.trim() !== "",
+      ),
+  };
+}
+
+async function measureBargeIn(call: Call, inputDelayMs: number) {
+  const voice = "Tingting";
+  const question =
+    "\u8bf7\u8be6\u7ec6\u4ecb\u7ecd\u4e09\u79cd\u9002\u5408\u5468\u672b\u505a\u7684\u83dc\u3002";
+  const correction =
+    inputDelayMs === 0
+      ? "\u7b49\u4e00\u4e0b\uff0c\u6211\u518d\u8865\u5145\u4e00\u70b9\uff0c\u6211\u4eec\u8fd9\u6b21\u8981\u53bb\u7684\u5730\u65b9\u6bd4\u8f83\u51b7\uff0c\u800c\u4e14\u8fd8\u4f1a\u4e0b\u96ea\uff0c\u8bf7\u6839\u636e\u5929\u6c14\u6362\u4e00\u4e2a\u5efa\u8bae\u3002"
+      : "\u7b49\u4e00\u4e0b\uff0c\u6211\u4e0d\u5403\u8fa3\uff0c\u7ed9\u6211\u6362\u4e00\u4e2a\u6e05\u6de1\u70b9\u7684\u3002";
+  const pcm = speech(correction, voice);
+  await call.say({ text: question, pcm: speech(question, voice) });
+  const asked = call.at();
+  if (
+    !(await call.wait(
+      () => call.firstSoundAfter(asked) !== undefined && call.playing(),
+      20_000,
+    ))
+  )
+    throw new Error("Reply audio never started");
+  await sleep(700);
+  const start = call.at();
+  const playingAtStart = call.playing();
+  call.providerInputDelayMs = inputDelayMs;
+  await call.say({ text: correction, pcm });
+  const micEnd = call.at();
+  await call.wait(() => call.entries("user_turn", start).length > 0, 18_000);
+  const clear = call.firstClearAfter(start);
+  const server = call
+    .entries("xai", start)
+    .find((e) => e.event === "input_audio_buffer.speech_started");
+  const stopped = call.entries("reply_interrupted", start)[0];
+  const partials = call
+    .entries("user_partial", start)
+    .filter((event) => event.t < micEnd);
+  return {
+    partialsWhileSpeaking: partials.length,
+    firstPartialMs: partials[0] ? partials[0].t - start : null,
+    playingAtStart,
+    clearedAfterMs: clear === undefined ? null : Math.round(clear - start),
+    interruptedAfterMs: stopped ? stopped.t - start : null,
+    providerAfterMs: server ? server.t - start : null,
+    oldAudioAfterClearMs:
+      clear === undefined
+        ? null
+        : Math.round(
+            call.soundBetween(
+              clear,
+              inputDelayMs
+                ? Math.min(server?.t ?? Infinity, start + inputDelayMs)
+                : micEnd,
+            ) * 1000,
+          ),
+    transcribed: call
+      .entries("user_turn", start)
+      .some((e) => typeof e.text === "string" && e.text.trim() !== ""),
+  };
+}
+
 const scenarios: Record<
   string,
   (call: Call) => Promise<Record<string, unknown>>
@@ -754,8 +873,14 @@ const scenarios: Record<
       updateSec: update ? +call.soundBetween(update.t).toFixed(1) : 0,
     };
   },
+  quietAcknowledgment: (call) => quietInterruption(call, "\u55ef"),
+  quietCorrection: (call) =>
+    quietInterruption(call, "\u7b49\u4e00\u4e0b\uff0c\u6211\u4e0d\u5403\u8fa3"),
+  lateBargeIn: (call) => measureBargeIn(call, 6_000),
+  interruptionCaptions: (call) => measureBargeIn(call, 0),
   // The user talks over the live voice; it stops at once.
   async bargeIn(call) {
+    speech("Wait, stop for a moment");
     await call.say(
       "Explain in detail why so many SaaS products charge per seat",
     );
@@ -794,11 +919,12 @@ const scenarios: Record<
     await call.wait(() => call.firstSoundAfter(asked) !== undefined, 20_000);
     await sleep(2_000);
     const start = call.at();
-    await call.say({
-      distant:
+    await call.say(
+      distantSpeech(
         "Did anyone see where I left the charger, I think it was on the desk next to the window",
-      belowDb: distantDb,
-    });
+        distantDb,
+      ),
+    );
     const end = call.at();
     await call.settle();
     return {
@@ -814,17 +940,24 @@ const scenarios: Record<
   },
   // A short aside nearby while the live voice replies.
   async backgroundAside(call) {
+    const aside = distantSpeech("Yeah, okay, sure", distantDb);
     await call.say(
       "Explain in detail why so many SaaS products charge per seat",
     );
     const asked = call.at();
     await call.wait(() => call.firstSoundAfter(asked) !== undefined, 20_000);
     await sleep(2_000);
+    await call.wait(() => call.playing(), 5_000);
     const start = call.at();
-    await call.say({ distant: "Yeah, okay, sure", belowDb: distantDb });
+    const playingAtStart = call.playing();
+    const inputBefore = call.nonSilentInputMs;
+    await call.say(aside);
     const end = call.at();
+    await call.wait(() => call.entries("user_turn", start).length > 0, 8_000);
     await call.settle();
     return {
+      playingAtStart,
+      forwardedMs: Math.round(call.nonSilentInputMs - inputBefore),
       interrupted: call.entries("reply_interrupted", start).length > 0,
       providerHeard: call
         .entries("xai", start)

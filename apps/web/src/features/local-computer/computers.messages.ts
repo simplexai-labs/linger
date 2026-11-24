@@ -40,6 +40,11 @@ export const computersMessages = defineMessages("computers", {
   localModels: "Local models",
   manageLocalModels: "Manage local models",
   manageLocalModelsHint: "Download and load models that run on this computer",
+  power: "Power",
+  preventSleep: "Prevent sleep",
+  preventSleepHint:
+    "Keep this computer awake while locked so scheduled midnight Memory and Wiki tasks run on time (recommended while plugged in).",
+  preventSleepFailed: "Could not update sleep setting. Try again.",
   access: "Access",
   advanced: "Advanced",
   update: "Update",

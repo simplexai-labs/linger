@@ -110,6 +110,10 @@ Progress and outcomes travel back only as snapshots:
    `host_ram_bytes`) is sent only when `runner.welcome`'s `service_features`
    declares `local_models_engine` (`FIRST_LOCAL_MODELS_ENGINE_COMPUTER_VERSION`,
    `0.61.0`); otherwise the Daemon strips those fields for older Agent Services.
+   Per-model `concurrency_probing` is sent only when `runner.welcome`'s
+   `service_features` declares `local_models_concurrency_probe`
+   (`FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION`, `0.64.0`);
+   otherwise the Daemon strips it for older Agent Services.
    Pool `external_holders` is sent only when `service_features` declares
    `local_models_external_holders` (to every Computer, which ignores unknown
    features); otherwise the Daemon strips it. `[]` means localmodels found no

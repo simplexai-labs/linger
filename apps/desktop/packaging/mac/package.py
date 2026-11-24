@@ -15,9 +15,14 @@ Without --developer-id the app gets an ad-hoc signature and macOS asks the
 user to confirm the first launch. --developer-id signs the app, its helpers
 and the DMG with that Developer ID Application certificate, with the hardened
 runtime and entitlements.plist. --notary-key, the App Store Connect
-API key from `rcodesign encode-app-store-connect-api-key`, then notarizes the
-app and the DMG and staples both tickets, so Gatekeeper opens the DMG
-directly. Key and password files are only passed to rcodesign.
+API key from `rcodesign encode-app-store-connect-api-key`, then notarizes and
+staples the DMG in one Apple submission (which also notarizes the nested
+Linger.app). When --update-archive is set, the already-issued ticket is stapled
+onto Linger.app before packing the update archive. Linger.app inside the DMG is
+notarized by Apple but not separately stapled, so dragging it out of the DMG
+and launching it for the first time completely offline relies on online ticket
+lookup (or macOS's DMG ticket). Key and password files are only passed to
+rcodesign.
 
 The Go daemon goes to Contents/Resources/computer/ and is signed with the
 app like every other Mach-O file. The browser and computer-control tools it
@@ -39,7 +44,6 @@ signed app the installed app replaces itself with. The release's signed
 manifest lists it (scripts/ci/desktop-release.sh manifest).
 """
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import plistlib
@@ -50,6 +54,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
 import zipfile
 
@@ -398,6 +403,19 @@ class Signing:
             run(self.rcodesign, "notary-submit", "--api-key-file", self.notary_key,
                 "--wait", "--max-wait-seconds", "3600", "--staple", path)
 
+    def staple(self, path, attempts=5, delay_seconds=5):
+        """Attaches Apple's already-issued notarization ticket to path."""
+        if not self.notary_key:
+            return
+        for attempt in range(1, attempts + 1):
+            try:
+                run(self.rcodesign, "staple", path)
+                return
+            except subprocess.CalledProcessError:
+                if attempt == attempts:
+                    raise
+                time.sleep(delay_seconds)
+
 
 def build_dmg(stage, workdir, output, volume_name):
     size = sum(os.path.getsize(os.path.join(root, f)) for root, _, files in os.walk(stage)
@@ -431,6 +449,27 @@ def update_archive(app, output):
     """The signed bundle as Linger.app/ in a tar.gz; tar keeps its symlinks."""
     tar_gz(os.path.dirname(app), os.path.basename(app), output)
     print(f"{output} {os.path.getsize(output)} sha256={sha256(output)}", flush=True)
+
+
+def emit_outputs(stage, app, workdir, out_dir, version, arch, signing, include_update_archive):
+    """Produces the signed/notarized DMG and optional update archive.
+
+    Submits only the DMG to Apple's notary service (notarizing both the DMG
+    and its nested Linger.app in one pass and stapling the DMG). When
+    --update-archive is set, staples that already-issued ticket onto Linger.app
+    before packing the update archive. Linger.app inside the DMG is notarized
+    by Apple but does not carry a separately stapled ticket.
+    """
+    output = os.path.join(out_dir, f"Linger-{version}-{arch}.dmg")
+    build_dmg(stage, workdir, output, f"Linger {version}")
+    signing.sign_dmg(output)
+    signing.notarize(output)
+    print(f"{output} {os.path.getsize(output)} sha256={sha256(output)}", flush=True)
+    if include_update_archive:
+        signing.staple(app)
+        archive = os.path.join(out_dir, f"Linger-{version}-{arch}.app.tar.gz")
+        update_archive(app, archive)
+        computer_tools.check_archive(archive, "Linger.app/Contents/Resources/", f"darwin-{arch}")
 
 
 def main():
@@ -467,30 +506,8 @@ def main():
             if args.notary_key:
                 check_bundled_archives(app)
             signing.sign_app(app, f"darwin-{arch}")
-            # The stapled app carries its ticket into the DMG and the update.
-            signing.notarize(app)
             computer_tools.check(os.path.join(app, RESOURCES), f"darwin-{arch}")
-            output = os.path.join(args.out, f"Linger-{version}-{arch}.dmg")
-
-            def make_dmg():
-                build_dmg(stage, workdir, output, f"Linger {version}")
-                signing.sign_dmg(output)
-                signing.notarize(output)
-                print(f"{output} {os.path.getsize(output)} sha256={sha256(output)}", flush=True)
-
-            def make_update():
-                archive = os.path.join(args.out, f"Linger-{version}-{arch}.app.tar.gz")
-                update_archive(app, archive)
-                computer_tools.check_archive(archive, "Linger.app/Contents/Resources/", f"darwin-{arch}")
-
-            if args.update_archive:
-                # Both only read the signed, stapled bundle.
-                with ThreadPoolExecutor(max_workers=2) as pool:
-                    futures = [pool.submit(make_dmg), pool.submit(make_update)]
-                    for future in futures:
-                        future.result()
-            else:
-                make_dmg()
+            emit_outputs(stage, app, workdir, args.out, version, arch, signing, args.update_archive)
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
 

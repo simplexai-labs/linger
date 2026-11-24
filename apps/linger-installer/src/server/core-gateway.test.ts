@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   managedEnvironment: vi.fn(),
   localModelsEnvironment: vi.fn(),
   localmodelsTool: vi.fn(),
+  install: vi.fn(),
 }));
 vi.mock("@linger/local-installation/managed-codex", () => ({
   managedRuntimeEnvironment: mocks.managedEnvironment,
@@ -67,6 +68,7 @@ vi.mock("@linger/local-installation/computer", () => ({
   stopComputer: mocks.stopComputer,
 }));
 vi.mock("@linger/local-installation/native-source", () => ({
+  installNativeSource: mocks.install,
   stopNativeSource: mocks.stopNative,
 }));
 vi.mock("./runtime-login.js", () => ({
@@ -199,4 +201,71 @@ it("reports the localmodels tool for the desktop Computer's model library", asyn
       LINGER_LOCALMODELS_BASE_DIR: "/test/runtime/localmodels/models",
     },
   });
+});
+
+it("answers runtime lookups from the install's descriptors, one probe at a time", async () => {
+  mocks.runtime = "pi";
+  mocks.localModelsEnvironment.mockResolvedValue({});
+  mocks.install.mockImplementation(
+    async (options: {
+      onRuntimeDescriptors: (descriptors: unknown[]) => void;
+    }) => {
+      options.onRuntimeDescriptors([
+        {
+          runtime: "pi",
+          executable: "/test/runtime/pi",
+          argvPrefix: [],
+          installed: true,
+          authenticated: true,
+          authMode: "api_key",
+          loginCommand: null,
+          environment: { PI_CODING_AGENT_DIR: "/test/runtime/pi-agent" },
+        },
+      ]);
+      return { state: "ready", code: 0, message: "Ready." };
+    },
+  );
+  const adapter = coreAdapter("/test", "/checkout", true);
+  await adapter.run(
+    { instance: "default" } as Parameters<typeof adapter.run>[0],
+    new AbortController().signal,
+    () => {},
+  );
+  const first = adapter.runtime("default");
+  const again = adapter.runtime("default");
+  await expect(first).resolves.toEqual({
+    setupChoice: "pi",
+    environment: {
+      LINGER_PI_PATH: "/test/runtime/pi",
+      PI_CODING_AGENT_DIR: "/test/runtime/pi-agent",
+    },
+  });
+  expect(await again).toBe(await first);
+  expect(mocks.localmodelsTool).toHaveBeenCalledTimes(1);
+  expect(mocks.managedEnvironment).not.toHaveBeenCalled();
+});
+
+it("probes the runtime again once another install starts", async () => {
+  mocks.runtime = "pi";
+  mocks.localModelsEnvironment.mockResolvedValue({});
+  mocks.managedEnvironment.mockResolvedValue({
+    LINGER_PI_PATH: "/test/probed/pi",
+  });
+  mocks.install.mockResolvedValue({
+    state: "failed",
+    code: 1,
+    message: "Failed.",
+  });
+  const adapter = coreAdapter("/test", "/checkout", true);
+  await adapter.runtime("default");
+  await adapter.run(
+    { instance: "default" } as Parameters<typeof adapter.run>[0],
+    new AbortController().signal,
+    () => {},
+  );
+  await expect(adapter.runtime("default")).resolves.toEqual({
+    setupChoice: "pi",
+    environment: { LINGER_PI_PATH: "/test/probed/pi" },
+  });
+  expect(mocks.managedEnvironment).toHaveBeenCalledTimes(2);
 });

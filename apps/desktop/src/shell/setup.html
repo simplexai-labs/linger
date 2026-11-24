@@ -712,7 +712,8 @@
         line-height: 1.45;
         font-variant-numeric: tabular-nums;
       }
-      /* What downloads now, under the installing bar. */
+      /* What downloads now, or what a long step waits on, under the
+         installing bar. */
       .transfer {
         display: grid;
         gap: 2px;
@@ -2283,6 +2284,7 @@
             <strong id="installing-transfer-label"></strong
             ><span id="installing-transfer-bytes"></span>
           </p>
+          <p class="transfer" id="installing-waiting" hidden></p>
           <ol class="checks" id="installing-checks"></ol>
         </div>
         <div
@@ -2891,6 +2893,14 @@
           ? t("locationHint", { folder: drive + "Linger" })
           : "";
       };
+      // Why the installation stopped: in the page's words when the main
+      // process names the reason, else the message it passed on.
+      const failureText = (local) =>
+        local.failure === "runtime_lookup_timed_out"
+          ? t("runtimeLookupTimedOut")
+          : local.failure === "runtime_lookup_unreachable"
+            ? t("runtimeLookupUnreachable")
+            : local.message;
       // Quick Install installs what the localmodels tool recommends for this
       // computer once it has checked; until then (or when it cannot check)
       // the installer picks. The tool's local-models pick runs through Pi,
@@ -4262,6 +4272,14 @@
             return i ? [" · ", part] : [part];
           }),
         );
+        // A step that runs a while with the bar standing still says what
+        // it is waiting on.
+        const waiting =
+          !failed && !starting && !transfer && local.waiting === "runtime";
+        $("installing-waiting").hidden = !waiting;
+        $("installing-waiting").textContent = waiting
+          ? t("waitingRuntime")
+          : "";
         $("installing-checks").hidden = starting;
         const checks = $("installing-checks");
         if (checks.children.length !== steps.length)
@@ -4289,7 +4307,7 @@
           item.lastChild.textContent = stepTime(index, item.dataset.state);
         });
         const problem = $("installing-error");
-        const message = failed ? local.message : "";
+        const message = failed ? failureText(local) : "";
         if (problem.textContent !== message) {
           problem.textContent = message;
           detailsOpen = false;

@@ -31,6 +31,7 @@ import { test as base, vi, type TestContext } from "vitest";
 import {
   NATIVE_PROCESS_IDENTITY_UNVERIFIED,
   NATIVE_PROCESS_REPLACED,
+  foldersInUse,
   nativeConfigurationChanged,
   startNativeProcess,
   inspectNativeProcess,
@@ -740,3 +741,181 @@ test("reports a configuration change only for a running recorded process", async
     }
   },
 );
+
+const fastRestart = {
+  delaysMs: [100, 200],
+  windowMs: 10_000,
+  limit: 3,
+  armAfterMs: 300,
+};
+const webLog = (root: string) =>
+  readFile(path.join(root, "native/logs/web.log"), "utf8").catch(() => "");
+const supervisorLines = async (root: string) =>
+  (await webLog(root))
+    .split("\n")
+    .filter((line) => line.startsWith("[linger-supervisor] web "));
+test("restarts a supervised service that exits unasked and logs each exit", async (context) => {
+  const { expect } = context;
+  const root = await fixture(context);
+  // The first run kills itself once it has run long enough to count as up;
+  // the restarted one stays.
+  const state = await startNativeProcess({
+    root,
+    name: "web",
+    executable: process.execPath,
+    args: [
+      "-e",
+      "const fs=require('node:fs');const first=!fs.existsSync('ran');fs.writeFileSync('ran','');console.log('service-up');if(first)setTimeout(()=>process.kill(process.pid,'SIGKILL'),500);setInterval(()=>{},1000)",
+    ],
+    cwd: root,
+    env: process.env,
+    restartOnExit: fastRestart,
+  });
+  await expect
+    .poll(() => supervisorLines(root))
+    .toEqual([
+      expect.stringMatching(/^\[linger-supervisor\] web started pid=\d+$/),
+      expect.stringMatching(
+        /^\[linger-supervisor\] web exited code=null signal=SIGKILL uptime_ms=\d+ restarting_in_ms=100$/,
+      ),
+      expect.stringMatching(
+        /^\[linger-supervisor\] web restarted pid=\d+ attempt=1$/,
+      ),
+    ]);
+  await expect
+    .poll(async () => (await webLog(root)).match(/service-up/g)?.length)
+    .toBe(2);
+  // The supervisor, and so the record, stays the same.
+  expect(await inspectNativeProcess(root, "web")).toEqual({
+    running: true,
+    pid: state.pid,
+  });
+  await stopNativeProcess(root, "web");
+  expect((await inspectNativeProcess(root, "web")).running).toBe(false);
+  expect((await supervisorLines(root)).at(-1)).toMatch(
+    /^\[linger-supervisor\] web exited code=\S+ signal=\S+ uptime_ms=\d+ restart=no reason=stop_requested$/,
+  );
+  expect(await readdir(path.join(root, "native/processes"))).toEqual([]);
+});
+test("never restarts a service an intended stop ends", async (context) => {
+  const { expect } = context;
+  const root = await fixture(context);
+  await startNativeProcess({
+    root,
+    name: "web",
+    executable: process.execPath,
+    args: [
+      "-e",
+      "process.on('SIGINT',()=>process.exit(0));console.log('service-up');setInterval(()=>{},1000)",
+    ],
+    cwd: root,
+    env: process.env,
+    restartOnExit: { ...fastRestart, armAfterMs: 0 },
+  });
+  // Stop only once the service handles SIGINT, so it exits on its own.
+  await expect.poll(() => webLog(root)).toContain("service-up");
+  await stopNativeProcess(root, "web");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const lines = await supervisorLines(root);
+  expect(lines).toHaveLength(2);
+  expect(lines[1]).toMatch(
+    /^\[linger-supervisor\] web exited code=0 signal=null uptime_ms=\d+ restart=no reason=stop_requested$/,
+  );
+  expect((await inspectNativeProcess(root, "web")).running).toBe(false);
+});
+test("a stop during the restart delay ends the supervisor without a restart", async (context) => {
+  const { expect } = context;
+  const root = await fixture(context);
+  await startNativeProcess({
+    root,
+    name: "web",
+    executable: process.execPath,
+    args: ["-e", "setTimeout(()=>process.exit(1),400)"],
+    cwd: root,
+    env: process.env,
+    restartOnExit: { ...fastRestart, delaysMs: [3_000] },
+  });
+  await expect
+    .poll(async () => (await supervisorLines(root)).at(-1))
+    .toMatch(/restarting_in_ms=3000$/);
+  await stopNativeProcess(root, "web");
+  expect((await inspectNativeProcess(root, "web")).running).toBe(false);
+  await new Promise((resolve) => setTimeout(resolve, 3_500));
+  expect((await supervisorLines(root)).join("\n")).not.toContain("restarted");
+});
+test("gives up after the crash-loop limit and leaves the service stopped", async (context) => {
+  const { expect } = context;
+  const root = await fixture(context);
+  await startNativeProcess({
+    root,
+    name: "web",
+    executable: process.execPath,
+    args: ["-e", "setTimeout(()=>process.exit(3),400)"],
+    cwd: root,
+    env: process.env,
+    restartOnExit: fastRestart,
+  });
+  await expect
+    .poll(() => inspectNativeProcess(root, "web"))
+    .toMatchObject({ running: false });
+  const lines = await supervisorLines(root);
+  expect(lines.filter((line) => line.includes(" exited "))).toEqual([
+    expect.stringMatching(
+      /code=3 signal=null uptime_ms=\d+ restarting_in_ms=100$/,
+    ),
+    expect.stringMatching(
+      /code=3 signal=null uptime_ms=\d+ restarting_in_ms=200$/,
+    ),
+    expect.stringMatching(
+      /code=3 signal=null uptime_ms=\d+ restart=no reason=crash_loop$/,
+    ),
+  ]);
+  expect(lines.at(-1)).toBe(
+    "[linger-supervisor] web gave up restarting after 3 exits within 10000 ms",
+  );
+});
+test.for([
+  ["startup", fastRestart],
+  ["not_supervised", undefined],
+] as const)(
+  "logs an exit it does not restart (%s)",
+  async ([reason, restartOnExit], context) => {
+    const { expect } = context;
+    const root = await fixture(context);
+    await startNativeProcess({
+      root,
+      name: "web",
+      executable: process.execPath,
+      args: ["-e", "setTimeout(()=>process.exit(2),50)"],
+      cwd: root,
+      env: process.env,
+      ...(restartOnExit ? { restartOnExit } : {}),
+    });
+    await expect
+      .poll(() => inspectNativeProcess(root, "web"))
+      .toMatchObject({ running: false });
+    expect((await supervisorLines(root)).at(-1)).toMatch(
+      new RegExp(
+        `^\\[linger-supervisor\\] web exited code=2 signal=null uptime_ms=\\d+ restart=no reason=${reason}$`,
+      ),
+    );
+  },
+);
+posix("names the folders a running process starts from", async (context) => {
+  const { expect } = context;
+  const root = await fixture(context);
+  const used = path.join(root, "used");
+  const unused = path.join(root, "unused");
+  const child = spawn(
+    process.execPath,
+    ["-e", "setInterval(()=>{},1000)", path.join(used, "server.mjs")],
+    { stdio: "ignore" },
+  );
+  context.onTestFinished(() => {
+    child.kill("SIGKILL");
+  });
+  await new Promise((resolve) => child.once("spawn", resolve));
+  expect(await foldersInUse([used, unused, `${used}-other`])).toEqual(
+    new Set([used]),
+  );
+});

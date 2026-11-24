@@ -69,16 +69,17 @@
 - On Windows an npm-launched Runtime starts on the Node the bundle ships in
   `runtime/bin`, so an engine requirement a Runtime declares is independent of
   the Node installed on the machine; the machine's `PATH` stays the user's.
-- A Pi background model call uses one ephemeral RPC turn with no tools on
-  whatever model Pi's profile selects by default, local or remote; the Daemon
-  does not check which.
-- A Codex background model call runs the model its `config.toml` selects (the
-  active profile's or the top-level `model`). When it selects none, the call
-  names the model Codex's own catalog marks as the default for the signed-in
-  account, the catalog Agent runs choose from; the Daemon passes that default
-  on and never picks among models. Codex's built-in default may be one the
-  account cannot use. A call the provider rejects with `model_not_found` is
-  reported as `runtime_incompatible`, not as a transient failure.
+- Background model calls (`execute` `model_invoke`) follow the same model as
+  Agent Runs when the Agent Service supplies `model` (Computer `0.62.0` or
+  later), passing it explicitly to Codex (`-m` / `--config model=...`), Claude
+  (`--model`), and Pi (`--model`), normalizing reasoning effort against that
+  model, and calling `ensureLocalModel` for Pi library models on demand.
+- For legacy callers that omit `model`, a Pi background model call runs on
+  whatever model Pi's profile selects by default (refused when no library model
+  is loaded), and a Codex call runs the model its `config.toml` selects or the
+  signed-in account's catalog default when `config.toml` names none. A call the
+  provider rejects with `model_not_found` is reported as
+  `runtime_incompatible`, not as a transient failure.
 - Codex turn cleanup keeps receiving a process's notifications after its
   Operation detaches, so a retried stop sees the turn complete. After an
   invalid-request interrupt rejection the Daemon also accepts an idle status on

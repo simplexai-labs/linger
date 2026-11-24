@@ -53,6 +53,9 @@ type Options struct {
 	Environment map[string]string
 	// JobDirectory holds the output file of each running download or load.
 	JobDirectory string
+	// ProbeCacheDirectory holds concurrency-probes.json. When empty, New falls
+	// back to filepath.Dir(JobDirectory), then Tool.StateDirectory.
+	ProbeCacheDirectory string
 	// HarnessDirectory holds the on-demand Pi runtime provisioned when a
 	// local model is loaded on a Computer without Pi.
 	HarnessDirectory string
@@ -143,6 +146,9 @@ type Library struct {
 	piFailures   int
 	piRetryAt    time.Time
 	jobs         map[string]*job
+	probes       map[string]*activeProbe
+	probeUnknown map[string]probeFingerprint
+	prober       *concurrencyProber
 	// causes holds, by model, the cause the last job's error line gave. The
 	// tool's status keeps only the code, so each read puts the cause back on
 	// a row that still fails with that code.
@@ -184,10 +190,23 @@ func New(options Options) *Library {
 		progressInterval: options.ProgressInterval, statusTimeout: options.StatusTimeout, actionTimeout: options.ActionTimeout,
 		ensurePiTimeout: options.EnsurePiTimeout, ensurePiRetryInterval: options.EnsurePiRetryInterval,
 		ensureLoadTimeout: options.EnsureLoadTimeout,
-		now:               time.Now, ctx: ctx, stop: stop, jobs: make(map[string]*job), causes: make(map[string]*wire.LocalModelError),
+		now:               time.Now, ctx: ctx, stop: stop, jobs: make(map[string]*job), probes: make(map[string]*activeProbe), probeUnknown: make(map[string]probeFingerprint),
+		causes:            make(map[string]*wire.LocalModelError),
 		installerLockWait: defaultInstallerLockWait, installerLockRetry: defaultInstallerLockRetry, settledCh: make(chan struct{}),
 		changed: make(chan struct{}), jobEnded: make(map[string]uint64), ensures: make(map[string]*ensureLoad),
 	}
+	probeCacheDir := options.ProbeCacheDirectory
+	if probeCacheDir == "" && options.JobDirectory != "" {
+		probeCacheDir = filepath.Dir(options.JobDirectory)
+	}
+	toolStateDir := ""
+	if options.Tool != nil {
+		toolStateDir = options.Tool.StateDirectory
+	}
+	if probeCacheDir == "" {
+		probeCacheDir = toolStateDir
+	}
+	library.prober = newConcurrencyProber(probeCacheDir, toolStateDir)
 	if library.ensureLoadTimeout <= 0 {
 		library.ensureLoadTimeout = defaultEnsureLoadTimeout
 	}
@@ -326,6 +345,11 @@ func (l *Library) Refresh(ctx context.Context) wire.LocalModelsSnapshot {
 		// A read cut short by its caller says nothing about the library.
 		l.refreshMu.Unlock()
 		return snapshot
+	}
+	if snapshot.Available {
+		l.reconcileProbes(&snapshot)
+	} else {
+		l.cancelAllProbes()
 	}
 	changed := false
 	catalogChanged := false
@@ -490,6 +514,10 @@ func (l *Library) runAction(ctx context.Context, action Action, deadline time.Ti
 	answer := newPendingAnswer()
 	go func() {
 		defer l.wg.Done()
+		cancelledProbe := false
+		if action.Name == ActionUnload || action.Name == ActionRemove {
+			cancelledProbe = l.cancelProbe(action.Model)
+		}
 		runCtx, cancel := context.WithTimeout(l.ctx, l.actionTimeout)
 		defer cancel()
 		stdout, exitCode, err := l.runOnce(runCtx, action)
@@ -503,9 +531,10 @@ func (l *Library) runAction(ctx context.Context, action Action, deadline time.Ti
 			if action.Name != ActionCancel {
 				l.runtimeChanged()
 			}
-		case answer.missed():
-			// Nobody heard the refusal; the snapshot is how the owner sees
-			// that nothing changed.
+		case answer.missed() || cancelledProbe:
+			// Nobody heard the refusal, or an active concurrency probe was
+			// cancelled before the refused call: refresh so the owner sees
+			// accurate state.
 			l.Refresh(l.ctx)
 		}
 	}()
@@ -685,6 +714,12 @@ func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended 
 			// accepted job must find it running.
 			if accepted {
 				l.mu.Lock()
+				if action.Name == ActionLoad {
+					l.cancelProbeLocked(action.Model)
+					for _, unloadModel := range action.UnloadFirst {
+						l.cancelProbeLocked(unloadModel)
+					}
+				}
 				l.jobs[action.Model] = &job{action: action}
 				delete(l.causes, action.Model)
 				l.mu.Unlock()
@@ -779,16 +814,18 @@ func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended 
 func (l *Library) phaseStarted(event libraryEvent) {
 	l.refreshMu.Lock()
 	snapshot := l.read(l.ctx)
-	l.refreshMu.Unlock()
 	if l.ctx.Err() != nil {
+		l.refreshMu.Unlock()
 		return
 	}
 	if !snapshot.Available {
+		l.refreshMu.Unlock()
 		l.progress(event)
 		l.reconcile(snapshot)
 		return
 	}
 	applyProgress(&snapshot, event)
+	l.reconcileProbes(&snapshot)
 	l.publishMu.Lock()
 	l.mu.Lock()
 	key := loadedKey(snapshot)
@@ -799,6 +836,7 @@ func (l *Library) phaseStarted(event libraryEvent) {
 	l.publishThrottledLocked()
 	l.mu.Unlock()
 	l.publishMu.Unlock()
+	l.refreshMu.Unlock()
 	// A model unloaded first leaves Pi's catalog.
 	if changed {
 		l.runtimeChanged()
@@ -875,9 +913,9 @@ func applyProgress(snapshot *wire.LocalModelsSnapshot, event libraryEvent) bool 
 				rate := bytesValue(event.BytesPerSecond)
 				progress.BytesPerSecond = &rate
 			}
-			model.State, model.Download, model.Endpoint, model.Error, model.Note = "downloading", progress, nil, nil, nil
+			model.State, model.Download, model.Endpoint, model.ConcurrencyProbing, model.Error, model.Note = "downloading", progress, nil, nil, nil, nil
 		case "load", "warm":
-			model.State, model.Download, model.Endpoint, model.Error, model.Note = "loading", nil, nil, nil, nil
+			model.State, model.Download, model.Endpoint, model.ConcurrencyProbing, model.Error, model.Note = "loading", nil, nil, nil, nil, nil
 		default:
 			return false
 		}
@@ -949,6 +987,9 @@ func (l *Library) needsRereadLocked(snapshot wire.LocalModelsSnapshot) bool {
 func (l *Library) hasAdoptedJobLocked(snapshot wire.LocalModelsSnapshot) bool {
 	for _, model := range snapshot.Models {
 		if model.State != "downloading" && model.State != "loading" {
+			continue
+		}
+		if _, probing := l.probes[model.ID]; probing {
 			continue
 		}
 		if _, supervised := l.jobs[model.ID]; !supervised {

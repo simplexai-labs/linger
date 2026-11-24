@@ -229,6 +229,10 @@ func TestValidLocalModelsSnapshot(t *testing.T) {
 			r := int64(-1)
 			s.Models[0].HostRamBytes = &r
 		},
+		"concurrency_probing outside loading": func(s *teamhubinternal.LocalModelsSnapshot) {
+			p := true
+			s.Models[0].ConcurrencyProbing = &p
+		},
 	} {
 		var copied teamhubinternal.LocalModelsSnapshot
 		if err := json.Unmarshal([]byte(storedLocalModelsSnapshotJSON), &copied); err != nil {
@@ -276,11 +280,13 @@ func TestSanitizeLocalModelsSnapshotForwardCompatibility(t *testing.T) {
 	badEngine := teamhubinternal.LocalModelEngine("future_engine")
 	badConcurrency := 0
 	badHostRam := int64(-5)
+	probingOnFailed := true
 	snapshot.Models[0].Family = &badFamily
 	snapshot.Models[0].Architecture = &badArch
 	snapshot.Models[0].Capabilities = &badCaps
 	snapshot.Models[0].Engine = &badEngine
 	snapshot.Models[0].Concurrency = &badConcurrency
+	snapshot.Models[0].ConcurrencyProbing = &probingOnFailed
 	snapshot.Models[0].HostRamBytes = &badHostRam
 	snapshot.Models[0].State = teamhubinternal.LocalModelStateFailed
 	snapshot.Models[0].Error = &teamhubinternal.LocalModelError{Code: "FUTURE_CODE", Cause: &badCause, Path: &path}
@@ -295,11 +301,38 @@ func TestSanitizeLocalModelsSnapshotForwardCompatibility(t *testing.T) {
 		snapshot.Models[0].Architecture != nil ||
 		snapshot.Models[0].Engine != nil ||
 		snapshot.Models[0].Concurrency != nil ||
+		snapshot.Models[0].ConcurrencyProbing != nil ||
 		snapshot.Models[0].HostRamBytes != nil ||
 		snapshot.Models[0].Capabilities == nil || !slices.Equal(*snapshot.Models[0].Capabilities, []teamhubinternal.LocalModelCapability{teamhubinternal.LocalModelCapabilityVision}) ||
 		snapshot.Models[0].Error.Code != teamhubinternal.UNKNOWNERROR || snapshot.Models[0].Error.Cause != nil || snapshot.Models[0].Error.Path != nil ||
 		snapshot.Models[2].Note != nil ||
 		snapshot.Models[3].Availability.Reason.Code != teamhubinternal.LocalModelAvailabilityUnavailable {
 		t.Fatalf("unexpected sanitized models: %+v", snapshot.Models)
+	}
+}
+
+func TestLocalModelsViewPassesThroughConcurrencyProbingWhileLoading(t *testing.T) {
+	probingSnapshot := strings.Replace(storedLocalModelsSnapshotJSON,
+		`"state":"idle"`,
+		`"state":"loading","concurrency_probing":true`, 1)
+	var internal teamhubinternal.LocalModelsSnapshot
+	if err := json.Unmarshal([]byte(probingSnapshot), &internal); err != nil {
+		t.Fatal(err)
+	}
+	if !validLocalModelsSnapshot(internal) {
+		t.Fatal("loading snapshot with concurrency_probing=true was rejected")
+	}
+	record := agentruntimestate.LocalModelsRecord{
+		ComputerID: "computer_1", DisplayName: "Studio", Status: "online",
+		Owner:    agentruntimestate.LocalComputerOwner{TenantID: "tenant_1", OwnerActorID: "actor_owner"},
+		Snapshot: json.RawMessage(probingSnapshot),
+	}
+	view, err := localModelsView(record, "actor_owner", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	probingModel := view.Models[2].Model
+	if probingModel.State != httpapi.LocalModelStateLoading || probingModel.ConcurrencyProbing == nil || !*probingModel.ConcurrencyProbing {
+		t.Fatalf("probing model = %+v, want state=loading concurrency_probing=true", probingModel)
 	}
 }

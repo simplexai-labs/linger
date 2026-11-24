@@ -1043,6 +1043,65 @@ describe("setup page download progress", () => {
   });
 });
 
+describe("setup page slow runtime lookup", () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = () => {};
+  });
+  const withLocal = (
+    phase: SetupState["localServer"]["phase"],
+    fields: Partial<SetupState["localServer"]>,
+  ): SetupState => {
+    const base = state(phase);
+    return { ...base, localServer: { ...base.localServer, ...fields } };
+  };
+
+  it("says what the bar waits on while the installer checks the runtime", async () => {
+    const { push } = await openPage(withLocal("installing", {}));
+    expect($("installing-waiting").hidden).toBe(true);
+    push(withLocal("installing", { waiting: "runtime" }));
+    expect($("installing-waiting").hidden).toBe(false);
+    expect($("installing-waiting").textContent).toBe(
+      "Checking the AI runtime on this computer. On some computers this takes a few minutes; the bar moves on once it finishes.",
+    );
+    push(withLocal("installing", {}));
+    expect($("installing-waiting").hidden).toBe(true);
+  });
+
+  it("words a runtime lookup that did not finish, with Try Again", async () => {
+    await openPage(
+      withLocal("failed", {
+        message:
+          "Checking the AI runtime on this computer did not finish in time.",
+        failure: "runtime_lookup_timed_out",
+      }),
+    );
+    expect($("installing-waiting").hidden).toBe(true);
+    expect($("installing-error").textContent).toBe(
+      "Checking the AI runtime did not finish in 10 minutes. Try Again picks up the same check; if it stops again, save diagnostics and send them to Linger support.",
+    );
+    expect($("installing-actions").hidden).toBe(false);
+    expect($("local-retry").hidden).toBe(false);
+  });
+
+  it("words both in Chinese", async () => {
+    const { push } = await openPage(
+      withLocal("installing", { waiting: "runtime" }),
+      "installing",
+      "zh-CN",
+    );
+    expect($("installing-waiting").textContent).toBe(zhCN.setup.waitingRuntime);
+    push(
+      withLocal("failed", {
+        message: "Lost the connection to the installer.",
+        failure: "runtime_lookup_unreachable",
+      }),
+    );
+    expect($("installing-error").textContent).toBe(
+      zhCN.setup.runtimeLookupUnreachable,
+    );
+  });
+});
+
 describe("setup page Send Diagnostics", () => {
   // A failure scrolls its actions into view, which jsdom lacks.
   beforeEach(() => {

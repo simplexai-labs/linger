@@ -4958,4 +4958,50 @@ describe("Featured Inkling 2 Mini spotlight", () => {
       screen.getByText("22.5 GB of 48 GB GPU memory in use"),
     ).toBeVisible();
   });
+
+  it("shows probing max concurrency label while a loading model runs its post-load probe", async () => {
+    const probingModel = localModel({
+      concurrency_probing: true,
+      engine: "llama.cpp",
+      engine_label: "llama.cpp b12588-mix-c0c3de8 · CUDA",
+      id: "qwen3-coder-30b:Q4_K_M",
+      memory_bytes: gb(21.4),
+      name: "Qwen3 Coder 30B",
+      quant: "Q4_K_M",
+      state: "loading",
+    });
+    const plainLoadingModel = localModel({
+      engine: "polystrata",
+      id: "qwen3-4b:Q4_K_M",
+      memory_bytes: gb(4),
+      name: "Qwen3 4B",
+      quant: "Q4_K_M",
+      state: "loading",
+    });
+
+    await renderPage(
+      setup([
+        labView({
+          models: [modelView(probingModel), modelView(plainLoadingModel)],
+        }),
+      ]),
+    );
+    await findModels();
+
+    const probingCard = card("Qwen3 Coder 30B");
+    const plainCard = card("Qwen3 4B");
+
+    expect(probingCard).toHaveTextContent("Probing max concurrency");
+    expect(within(probingCard).queryByText("Loading")).toBeNull();
+    expect(plainCard).toHaveTextContent("Loading");
+    expect(within(plainCard).queryByText("Probing max concurrency")).toBeNull();
+
+    await reactAct(async () => {
+      await setLanguage("zh-CN");
+    });
+    expect(probingCard).toHaveTextContent(
+      zhCN.localModels.statusProbingConcurrency,
+    );
+    expect(plainCard).toHaveTextContent(zhCN.localModels.statusLoading);
+  });
 });

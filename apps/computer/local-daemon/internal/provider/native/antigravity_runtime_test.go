@@ -516,28 +516,18 @@ func TestAntigravityStartsAResumedRunBeforeTheSessionLoads(t *testing.T) {
 	drainAgy(t, run)
 }
 
-func TestAntigravityContinuesAnEarlyStartedRunInANewSession(t *testing.T) {
+func TestAntigravityReturnsSessionNotFoundWhenResumedSessionIsMissing(t *testing.T) {
 	h := newAgyHarness(t, "unknown-session", nil)
-	moved := 0
-	run, err := h.runtime.Start(t.Context(), "again", RunSpec{Dir: h.dir, ResumeID: "moved-session", ExposeTurnStarted: true, FreshSession: func() { moved++ }})
+	run, err := h.runtime.Start(t.Context(), "again", RunSpec{Dir: h.dir, ResumeID: "moved-session", ExposeTurnStarted: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, outcome := drainAgy(t, run)
-	if outcome.Status != statusCompleted || outcome.SessionID != "fake-session" {
-		t.Fatalf("outcome=%+v", outcome)
+	_, outcome := drainAgy(t, run)
+	if outcome.Status != statusFailed || outcome.FailureCode != "session_not_found" {
+		t.Fatalf("outcome=%+v, want failed session_not_found", outcome)
 	}
-	var starts []Event
-	for _, event := range events {
-		if event.Kind == EventStatus && event.TurnID != "" {
-			starts = append(starts, event)
-		}
-	}
-	if len(starts) != 1 || starts[0].SessionID != "moved-session" || moved != 1 {
-		t.Fatalf("turn-started events=%+v, moved %d times", starts, moved)
-	}
-	if requests := h.requests(t); len(requests["session/new"]) != 1 || len(requests["session/prompt"]) != 1 {
-		t.Fatalf("requests=%v", requests)
+	if requests := h.requests(t); len(requests["session/new"]) != 0 || len(requests["session/prompt"]) != 0 {
+		t.Fatalf("requests=%v, want no silent session/new or session/prompt", requests)
 	}
 }
 

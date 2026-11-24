@@ -498,6 +498,7 @@ const localServerState = (
     step,
     progress,
     transfer,
+    waiting,
     attempt,
     localModels,
     location,
@@ -507,6 +508,7 @@ const localServerState = (
     byokModels,
     legacyBackup,
     refusal,
+    failure,
   } = local.status();
   const home = os.homedir();
   const shown = (folder: string) =>
@@ -522,6 +524,7 @@ const localServerState = (
     step,
     progress,
     ...(transfer ? { transfer } : {}),
+    ...(waiting ? { waiting } : {}),
     attempt,
     localModels,
     location: {
@@ -534,6 +537,7 @@ const localServerState = (
     ...(byokModels ? { byokModels } : {}),
     ...(legacyBackup ? { legacyBackup: shown(legacyBackup) } : {}),
     ...(refusal ? { refusal } : {}),
+    ...(failure ? { failure } : {}),
     ...(account ? { account } : {}),
   };
 };

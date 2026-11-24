@@ -21,8 +21,10 @@ import { modelCallPolicies, type ModelCallKind } from "./model-tasks.js";
 type AnotherMePlacement = components["schemas"]["AnotherMePlacement"];
 
 /**
- * Background model calls use the Daemon's one-shot model invocation and the
- * selected Runtime's default model. The request names no endpoint, key or model.
+ * Background model calls use the Daemon's one-shot model invocation with the
+ * placed Agent's configured model (or the selected Runtime's catalog default
+ * on cross-Runtime fallback or when unconfigured). The request names no
+ * endpoint or key.
  */
 
 export type ModelCallEffort = ModelInvoke["reasoning_effort"];
@@ -45,6 +47,8 @@ export interface ModelPlacement extends ModelOwner {
   readonly agentId: string;
   readonly computerId: string;
   readonly runtimeType: LocalRuntimeType;
+  /** The model configured for this Agent on its local Runtime. */
+  readonly model?: string;
   /** The Another Me's own actor; TeamHub placements always carry it. */
   readonly agentActorId?: string;
 }
@@ -291,6 +295,8 @@ export interface ModelQueueWork {
 /** One model a Computer reports for a Runtime. */
 export interface RuntimeModelInfo {
   readonly id: string;
+  /** Provider model sent over the Gateway; omitted selects the host Runtime default. */
+  readonly runtimeModel?: string;
   /** Context length in tokens; undefined when unknown. */
   readonly contextWindow?: number;
   /** The model the Runtime runs when none is selected. */
@@ -307,6 +313,7 @@ export interface RuntimeModelGateway {
       readonly ownerActorId: string;
       readonly agentId: string;
       readonly runtimeType: ModelInvoke["runtime_type"];
+      readonly model?: ModelInvoke["model"];
       readonly mode: ModelInvoke["mode"];
       readonly reasoningEffort: ModelCallEffort;
       readonly instructions?: string;
@@ -788,8 +795,9 @@ async function resolvePlacement(
 
 /** Pi stays on Pi, even when it is unavailable. Codex and Claude retain
  * their same-Computer fallback. Antigravity has no model.invoke, so it uses
- * Claude, falling back to Codex. Invocations use the selected Runtime's
- * default. */
+ * Claude, falling back to Codex. Invocations follow the placed Agent's
+ * configured model on its own Runtime, falling back to the target Runtime's
+ * catalog default on cross-Runtime fallback or when unconfigured. */
 function resolveTarget(
   gateway: RuntimeModelGateway,
   placement: ModelPlacement,
@@ -797,6 +805,7 @@ function resolveTarget(
   readonly runtimeType: ModelInvoke["runtime_type"];
   readonly offline: boolean;
   readonly model?: RuntimeModelInfo;
+  readonly wireModel?: string;
 } {
   const preferred =
     placement.runtimeType === "antigravity" ? "claude" : placement.runtimeType;
@@ -808,11 +817,21 @@ function resolveTarget(
       ? fallback
       : preferred;
   const models = gateway.runtimeModels(placement.computerId, runtimeType);
-  const model = defaultRuntimeModel(models);
+  const configured =
+    runtimeType === placement.runtimeType && placement.model
+      ? models?.find(({ id }) => id === placement.model)
+      : undefined;
+  const fallbackModel = defaultRuntimeModel(models);
+  const model =
+    configured?.runtimeModel !== undefined
+      ? configured
+      : (fallbackModel ?? configured);
+  const wireModel = model?.runtimeModel;
   return {
     runtimeType,
     offline: models === undefined,
     ...(model ? { model } : {}),
+    ...(wireModel ? { wireModel } : {}),
   };
 }
 
@@ -906,9 +925,13 @@ async function invokeAttempt(
     placement.computerId,
     runtimeType,
   );
+  const wireModel =
+    runtimeType === resolved.runtimeType
+      ? resolved.wireModel
+      : defaultRuntimeModel(runtimeModels)?.runtimeModel;
   const policy = modelCallPolicies[call.kind];
   const breakerKey = backgroundBreakerKey(placement.computerId, runtimeType);
-  const modelsFingerprint = runtimeModelsFingerprint(runtimeModels);
+  const modelsFingerprint = `${wireModel ?? ""}\n${runtimeModelsFingerprint(runtimeModels)}`;
   let claimedProbe = false;
   if (!policy.interactive) {
     const admission = admitBackgroundCall(state, breakerKey, modelsFingerprint);
@@ -949,6 +972,7 @@ async function invokeAttempt(
       ownerActorId: placement.ownerActorId,
       agentId: placement.agentId,
       runtimeType,
+      ...(wireModel ? { model: wireModel } : {}),
       mode: call.mode,
       reasoningEffort: call.effort ?? "low",
       ...(call.instructions ? { instructions: call.instructions } : {}),
@@ -1380,7 +1404,8 @@ async function runModelChain<T>(
       targetOf(spec),
       controller.signal,
     );
-    const { runtimeType } = resolveTarget(state.options.gateway, placement);
+    const resolved = resolveTarget(state.options.gateway, placement);
+    const { runtimeType } = resolved;
     const policy = modelCallPolicies[spec.kind];
     const acquire = (key: string, signal: AbortSignal) =>
       state.options.gateway.acquireModelCall(
@@ -1400,9 +1425,18 @@ async function runModelChain<T>(
       },
       releaseUnused,
     };
+    const { model: _previousModel, ...placementBase } = placement;
+    const chainModel =
+      runtimeType === placement.runtimeType
+        ? placement.model
+        : resolved.model?.id;
     const inChain = {
       kind: spec.kind,
-      placement: { ...placement, runtimeType },
+      placement: {
+        ...placementBase,
+        runtimeType,
+        ...(chainModel ? { model: chainModel } : {}),
+      },
     };
     let previous: Promise<unknown> = Promise.resolve();
     const step = (call: (key: string) => CallRequest, stepName: string) => {
@@ -1557,6 +1591,9 @@ export function createTeamHubAnotherMePlacementSource(options: {
         agentId: item.agent_id,
         computerId: item.computer_id,
         runtimeType: item.local_runtime_type,
+        ...(typeof item.runtime_model === "string" && item.runtime_model
+          ? { model: item.runtime_model }
+          : {}),
         agentActorId: item.agent_actor_id,
       }));
   };

@@ -46,6 +46,7 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
@@ -59,14 +60,29 @@ jobs:
           INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
           PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
           HAS_RELEASE_TOKEN: ${{ secrets.LINGER_RELEASE_TOKEN != '' }}
+          HAS_MACOS_DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 != '' && secrets.MACOS_DEVELOPER_ID_PASSWORD != '' }}
+          HAS_MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY_JSON != '' }}
+          HAS_UPDATE_KEY: ${{ secrets.DESKTOP_UPDATE_KEY_PEM != '' }}
         run: |
           set -euo pipefail
           scripts/ci/desktop-release.sh version "$INPUT" | tee -a "$GITHUB_OUTPUT"
           echo "publish=$PUBLISH" >>"$GITHUB_OUTPUT"
-          # Stop before an hour of building when the release could not be published.
+          # Stop before building when the release could not be published or
+          # when an official simplexai-labs/linger release lacks required
+          # signing/update credentials.
           if [ "$PUBLISH" = true ] && [ "$RELEASE_REPO" != "$GITHUB_REPOSITORY" ] && [ "$HAS_RELEASE_TOKEN" != true ]; then
             echo "::error::Publishing to $RELEASE_REPO from $GITHUB_REPOSITORY needs the LINGER_RELEASE_TOKEN secret, a token with contents write access to $RELEASE_REPO (see docs/desktop-release.md)."
             exit 1
+          fi
+          if [ "$PUBLISH" = true ] && [ "$RELEASE_REPO" = simplexai-labs/linger ]; then
+            missing=()
+            [ "$HAS_MACOS_DEVELOPER_ID" = true ] || missing+=(MACOS_DEVELOPER_ID_P12_BASE64/MACOS_DEVELOPER_ID_PASSWORD)
+            [ "$HAS_MACOS_NOTARY_KEY" = true ] || missing+=(MACOS_NOTARY_KEY_JSON)
+            [ "$HAS_UPDATE_KEY" = true ] || missing+=(DESKTOP_UPDATE_KEY_PEM)
+            if [ "${#missing[@]}" -gt 0 ]; then
+              echo "::error::Publishing to $RELEASE_REPO requires secrets: ${missing[*]} (see docs/desktop-release.md)."
+              exit 1
+            fi
           fi
           echo "Release repository: $RELEASE_REPO"
 
@@ -83,13 +99,10 @@ jobs:
       fail-fast: false
       matrix:
         target: [darwin-arm64, linux-x64]
-        # The file a tester downloads and runs, uploaded on its own below.
         include:
           - target: darwin-arm64
-            installer: macos-arm64.dmg
             docker_image: dmgtool
           - target: linux-x64
-            installer: linux-x64.tar.gz
             docker_image: ""
     env:
       DESKTOP_VERSION: ${{ needs.prepare.outputs.version }}
@@ -100,8 +113,8 @@ jobs:
       - uses: ./.github/actions/desktop-build
         with:
           target: ${{ matrix.target }}
-          installer: ${{ matrix.installer }}
           docker-image: ${{ matrix.docker_image }}
+          require-macos-signing: ${{ needs.prepare.outputs.publish == 'true' && env.RELEASE_REPO == 'simplexai-labs/linger' }}
           ghcr-token: ${{ github.token }}
           diagnostics-upload-url: ${{ secrets.LINGER_DIAGNOSTICS_UPLOAD_URL }}
           macos-developer-id-p12-base64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
@@ -127,7 +140,6 @@ jobs:
       - uses: ./.github/actions/desktop-build
         with:
           target: win32-x64
-          installer: windows-x64-setup.exe
           docker-image: wintool
           ghcr-token: ${{ github.token }}
           diagnostics-upload-url: ${{ secrets.LINGER_DIAGNOSTICS_UPLOAD_URL }}
@@ -144,8 +156,14 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
-          name: desktop-win32-x64
+          name: Linger-${{ needs.prepare.outputs.version }}-windows-x64-setup.exe
           path: candidate
+          skip-decompress: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-setup.sha256
+          path: candidate
+          skip-decompress: true
       - name: Smoke the packaged Pi runtime with its managed MCP extension
         shell: powershell
         env:
@@ -159,23 +177,32 @@ jobs:
     needs: [prepare, build, build-win32, windows-smoke]
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          pattern: desktop-*
+          pattern: Linger-${{ needs.prepare.outputs.version }}-*
           path: release
           merge-multiple: true
+          skip-decompress: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-setup.sha256
+          path: release
+          skip-decompress: true
       - name: Verify the Windows Setup that passed smoke
         working-directory: release
         run: sha256sum -c windows-setup.sha256 && rm windows-setup.sha256
-      # The signed update manifest over every platform's package. Without
-      # the key the release still goes out, with a warning and no manifest.
+      # The signed update manifest over every platform's package. Official
+      # simplexai-labs/linger releases require the key (prepare checks early);
+      # forks without the key still publish with a warning and no manifest.
       - name: Sign the update manifest
         env:
           DESKTOP_UPDATE_KEY_PEM: ${{ secrets.DESKTOP_UPDATE_KEY_PEM }}
+          DESKTOP_REQUIRE_UPDATE_KEY: ${{ env.RELEASE_REPO == 'simplexai-labs/linger' }}
         shell: bash
         run: |
           set -euo pipefail

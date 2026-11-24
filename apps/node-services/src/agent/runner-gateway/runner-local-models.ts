@@ -101,7 +101,10 @@ export class RunnerLocalModels {
 
   constructor(
     private readonly context: RunnerGatewayContext,
-    private readonly owners: Pick<RunnerGatewayControllers, "connections">,
+    private readonly owners: Pick<
+      RunnerGatewayControllers,
+      "connections" | "queue"
+    >,
   ) {}
 
   receiveSnapshot(
@@ -117,6 +120,11 @@ export class RunnerLocalModels {
       return;
     }
     connection.localModelsRevision = frame.revision;
+    connection.localModelsSnapshot = frame.local_models;
+    this.owners.queue().refreshEndpoint({
+      computerId: connection.runnerId,
+      runtimeType: "pi",
+    });
     const queue = this.#queues.get(connection.runnerId);
     if (queue) {
       queue.next = frame.local_models;

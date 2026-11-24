@@ -36,6 +36,10 @@ export interface SetupLocalServer {
   // in all, and the rate when the source reports one. partial: the counts
   // cover only the file downloading now, so nothing says what remains.
   readonly transfer?: SetupTransfer & { readonly label: string };
+  // While installing: what a step that has run a while still waits on;
+  // runtime: the installer is checking the AI runtime it set up, which on
+  // Windows can take minutes with the bar standing still.
+  readonly waiting?: "runtime";
   // Which installation this is; timers and the bar start over with each.
   readonly attempt: number;
   // Whether this computer can serve a local model; checked as the setup
@@ -66,6 +70,10 @@ export interface SetupLocalServer {
   // While failed because the installer refused a folder as not private
   // (Windows): its code and reason, for the page to say what to do.
   readonly refusal?: WindowsPrivateRefusal;
+  // While failed for a reason the page words itself: checking the AI
+  // runtime did not finish in time, or the installer stopped answering
+  // while it ran.
+  readonly failure?: "runtime_lookup_timed_out" | "runtime_lookup_unreachable";
 }
 
 export type SetupByokProtocol =

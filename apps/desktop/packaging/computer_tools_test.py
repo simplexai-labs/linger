@@ -17,6 +17,7 @@ import zipfile
 
 import archive
 import computer_tools
+import native_bundle
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MACHO = b"\xcf\xfa\xed\xfe" + b"\0" * 28
@@ -321,6 +322,147 @@ class MacSigningTest(unittest.TestCase):
             self.assertEqual(tar.extractfile("./LICENSE").read(), b"text")
             self.assertEqual(members["./bin/ff"].linkname, "ffmpeg")
         self.assertEqual(self.mac.unsigned_archive_files(output), [])
+
+    def test_emit_outputs_notarizes_dmg_once_then_staples_app_for_update_archive(self):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root)
+        stage = os.path.join(root, "stage")
+        app = os.path.join(stage, "Linger.app")
+        out_dir = os.path.join(root, "out")
+        os.makedirs(os.path.join(app, "Contents"))
+        os.makedirs(out_dir)
+        with open(os.path.join(app, "Contents", "Info.plist"), "wb") as out:
+            out.write(b"plist")
+
+        events = []
+
+        class FakeSigning:
+            notary_key = "notary.json"
+
+            def sign_dmg(self, dmg):
+                events.append(("sign_dmg", os.path.basename(dmg)))
+
+            def notarize(self, path):
+                events.append(("notarize", os.path.basename(path)))
+
+            def staple(self, path):
+                events.append(("staple", os.path.basename(path)))
+
+        orig_build_dmg = self.mac.build_dmg
+        orig_update_archive = self.mac.update_archive
+        orig_check_archive = self.mac.computer_tools.check_archive
+
+        def fake_build_dmg(dmg_stage, dmg_workdir, output, volume_name):
+            self.assertEqual(dmg_stage, stage)
+            self.assertEqual(dmg_workdir, root)
+            events.append(("build_dmg", os.path.basename(output)))
+            with open(output, "wb") as out:
+                out.write(b"dmg")
+
+        def fake_update_archive(target_app, output):
+            self.assertEqual(target_app, app)
+            events.append(("update_archive", os.path.basename(output)))
+            with open(output, "wb") as out:
+                out.write(b"tar.gz")
+
+        def fake_check_archive(archive_path, prefix, target):
+            events.append(("check_archive", os.path.basename(archive_path), target))
+
+        try:
+            self.mac.build_dmg = fake_build_dmg
+            self.mac.update_archive = fake_update_archive
+            self.mac.computer_tools.check_archive = fake_check_archive
+            self.mac.emit_outputs(stage, app, root, out_dir, "1.2.3", "arm64", FakeSigning(), True)
+        finally:
+            self.mac.build_dmg = orig_build_dmg
+            self.mac.update_archive = orig_update_archive
+            self.mac.computer_tools.check_archive = orig_check_archive
+
+        self.assertEqual(events, [
+            ("build_dmg", "Linger-1.2.3-arm64.dmg"),
+            ("sign_dmg", "Linger-1.2.3-arm64.dmg"),
+            ("notarize", "Linger-1.2.3-arm64.dmg"),
+            ("staple", "Linger.app"),
+            ("update_archive", "Linger-1.2.3-arm64.app.tar.gz"),
+            ("check_archive", "Linger-1.2.3-arm64.app.tar.gz", "darwin-arm64"),
+        ])
+
+    def test_signing_staple_retries_transient_lookup_errors(self):
+        calls = []
+        orig_run = self.mac.run
+
+        def fake_run(*args, **kwargs):
+            calls.append(args)
+            if len(calls) < 3:
+                raise subprocess.CalledProcessError(1, args)
+
+        try:
+            self.mac.run = fake_run
+            # Without a notary key, staple is a no-op.
+            self.mac.Signing("rcodesign").staple("/tmp/Linger.app", attempts=3, delay_seconds=0)
+            self.assertEqual(calls, [])
+            # With a notary key, transient CloudKit ticket lookup errors retry.
+            signing = self.mac.Signing("rcodesign", "id.p12", "id.password", "notary.json")
+            signing.staple("/tmp/Linger.app", attempts=3, delay_seconds=0)
+        finally:
+            self.mac.run = orig_run
+
+        self.assertEqual(calls, [
+            ("rcodesign", "staple", "/tmp/Linger.app"),
+            ("rcodesign", "staple", "/tmp/Linger.app"),
+            ("rcodesign", "staple", "/tmp/Linger.app"),
+        ])
+
+    def test_native_bundle_refresh_rehashes_signed_macho_and_keeps_untouched_files(self):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root)
+        runtime_dir = os.path.join(root, "runtime-darwin-arm64")
+        runtime_files_dir = os.path.join(runtime_dir, "runtime")
+        node_bin = os.path.join(runtime_dir, "node", "bin", "node")
+        os.makedirs(runtime_files_dir)
+        os.makedirs(os.path.dirname(node_bin))
+
+        addon = os.path.join(runtime_files_dir, "addon.node")
+        script_file = os.path.join(runtime_files_dir, "index.js")
+        with open(addon, "wb") as out:
+            out.write(MACHO)
+        with open(script_file, "wb") as out:
+            out.write(b"export const ok = true;\n")
+        with open(node_bin, "wb") as out:
+            out.write(MACHO)
+
+        files_json = os.path.join(runtime_files_dir, "files.json")
+        with open(files_json, "w") as out:
+            json.dump({
+                "schema": 1,
+                "target": "darwin-arm64",
+                "files": {
+                    "addon.node": {"bytes": os.path.getsize(addon), "sha256": sha256(addon)},
+                    "index.js": {"bytes": os.path.getsize(script_file), "sha256": sha256(script_file)},
+                },
+            }, out)
+        with open(os.path.join(runtime_dir, "manifest.json"), "w") as out:
+            json.dump({
+                "schema": 1,
+                "target": "darwin-arm64",
+                "layout": "directory",
+                "directory": {"file": "runtime/files.json", "bytes": os.path.getsize(files_json), "sha256": sha256(files_json)},
+                "node": {"file": "node/bin/node", "bytes": os.path.getsize(node_bin), "sha256": sha256(node_bin)},
+            }, out)
+
+        # Simulate rcodesign rewriting only Mach-O binaries.
+        signed_addon = self.signed_macho(0x10000, b"cms")
+        with open(addon, "wb") as out:
+            out.write(signed_addon)
+        with open(node_bin, "wb") as out:
+            out.write(signed_addon)
+
+        native_bundle.refresh(root, "darwin-arm64")
+        native_bundle.check_runtime("darwin-arm64", native=root)
+        with open(files_json) as source:
+            refreshed = json.load(source)["files"]
+        self.assertEqual(refreshed["addon.node"]["sha256"], sha256(addon))
+        self.assertEqual(refreshed["index.js"]["sha256"], sha256(script_file))
 
 
 class ArchiveHelperTest(unittest.TestCase):

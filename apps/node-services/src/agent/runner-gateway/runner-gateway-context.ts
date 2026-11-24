@@ -10,6 +10,7 @@ import type {
   DebugInspected,
   DebugHistoryInspectionRequest,
   DebugHistoryInspectionResult,
+  LocalModelsSnapshot,
   RunnerCapability,
   RunnerHello,
 } from "@linger/wire-contracts/runner-gateway/types";
@@ -238,6 +239,8 @@ export interface ConnectedRunner {
   pendingRegistrationSnapshots?: Set<string>;
   /** The last runner.local_models revision; 0 until the connection sends one. */
   localModelsRevision: number;
+  /** The latest runner.local_models snapshot reported on this connection. */
+  localModelsSnapshot?: LocalModelsSnapshot;
 }
 
 export interface AgentRunnerStateWaiter {

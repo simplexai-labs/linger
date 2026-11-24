@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/localmodels"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/protocol"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 )
@@ -50,6 +51,12 @@ func (f *fakeModelInvoker) calls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.requests)
+}
+
+func (f *fakeModelInvoker) lastRequest() provider.ModelInvokeRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.requests[len(f.requests)-1]
 }
 
 func modelInvokeFixture(t *testing.T, invoker ModelInvoker) (*Daemon, *fakeStream) {
@@ -156,6 +163,47 @@ func TestModelInvokeRunsEveryCallItReceives(t *testing.T) {
 	}
 	if invoker.calls() != len(running) {
 		t.Fatalf("calls = %d", invoker.calls())
+	}
+}
+
+func TestActiveModelInvokeCountTracksInFlightCalls(t *testing.T) {
+	invoker := newFakeModelInvoker()
+	d, stream := modelInvokeFixture(t, invoker)
+	if got := d.ActiveModelInvokeCount(); got != 0 {
+		t.Fatalf("initial active model invokes = %d", got)
+	}
+	for _, id := range []string{"invoke-a", "invoke-b"} {
+		if err := d.handleModelInvoke(context.Background(), stream, modelInvokeCommand(id, nil)); err != nil {
+			t.Fatal(err)
+		}
+		<-invoker.started
+	}
+	if got := d.ActiveModelInvokeCount(); got != 2 {
+		t.Fatalf("in-flight active model invokes = %d", got)
+	}
+	if got := d.ActiveOperationCount(); got != 0 {
+		t.Fatalf("model invokes must not count as active operations, got %d", got)
+	}
+	cancel := protocol.Command{
+		Type: protocol.CommandModelInvokeCancel, CommandID: "cancel-invoke-a", RunnerID: "computer-1", ConnectionEpoch: 1,
+		Payload: mustJSON(map[string]any{"invoke_id": "invoke-a", "reason": "scheduler_yield"}),
+	}
+	if err := d.cancelModelInvoke(cancel); err != nil {
+		t.Fatal(err)
+	}
+	if payload := waitForModelInvoked(t, stream, "invoke-a"); payload["outcome"] != "canceled" {
+		t.Fatalf("payload = %v", payload)
+	}
+	if got := d.ActiveModelInvokeCount(); got != 1 {
+		t.Fatalf("remaining active model invokes = %d", got)
+	}
+	close(invoker.release)
+	if payload := waitForModelInvoked(t, stream, "invoke-b"); payload["outcome"] != "completed" {
+		t.Fatalf("payload = %v", payload)
+	}
+	d.WaitForOperations()
+	if got := d.ActiveModelInvokeCount(); got != 0 {
+		t.Fatalf("final active model invokes = %d", got)
 	}
 }
 
@@ -653,5 +701,75 @@ func TestModelInvokeRefusesAPiWithNoLoadedModel(t *testing.T) {
 	close(invoker.release)
 	if payload := waitForModelInvoked(t, stream, "invoke-codex"); payload["outcome"] != "completed" {
 		t.Fatalf("payload = %v", payload)
+	}
+}
+
+// A Pi model call that names its model loads it on demand through the local
+// model library, matching a Pi Run, even when no model was loaded yet.
+func TestModelInvokeLoadsNamedPiLocalModelOnDemand(t *testing.T) {
+	invoker := newFakeModelInvoker()
+	d, stream := modelInvokeFixture(t, invoker)
+	library := &fakeLocalModels{}
+	d.localModels = library
+	d.modelInvokeUnready = func(runtimeType string) bool { return runtimeType == "pi" }
+
+	command := modelInvokeCommand("invoke-pi-named", map[string]any{"model": localRunModel})
+	command.RuntimeType = "pi"
+	if err := d.handleModelInvoke(context.Background(), stream, command); err != nil {
+		t.Fatal(err)
+	}
+	<-invoker.started
+	close(invoker.release)
+	if payload := waitForModelInvoked(t, stream, "invoke-pi-named"); payload["outcome"] != "completed" {
+		t.Fatalf("payload = %v", payload)
+	}
+	if len(library.ensured) != 1 || library.ensured[0] != localRunModel {
+		t.Fatalf("EnsureLoaded calls = %v", library.ensured)
+	}
+	if got := invoker.lastRequest().Model; got != localRunModel {
+		t.Fatalf("invoked model = %q, want %q", got, localRunModel)
+	}
+
+	// A load refusal surfaces as runtime_unavailable without starting Pi.
+	library.ensureErr = &localmodels.LocalModelLoadError{Code: "LOAD_NO_ROOM", ModelID: "qwen3-4b:Q4_K_M"}
+	failedCommand := modelInvokeCommand("invoke-pi-oom", map[string]any{"model": localRunModel})
+	failedCommand.RuntimeType = "pi"
+	if err := d.handleModelInvoke(context.Background(), stream, failedCommand); err != nil {
+		t.Fatal(err)
+	}
+	payload := waitForModelInvoked(t, stream, "invoke-pi-oom")
+	if payload["outcome"] != "runtime_unavailable" || !strings.Contains(payload["reason"].(string), "LOAD_NO_ROOM") {
+		t.Fatalf("load failure payload = %v", payload)
+	}
+	if invoker.calls() != 1 {
+		t.Fatalf("invoker calls = %d, want 1", invoker.calls())
+	}
+}
+
+// Effort normalization clamps against the requested model's advertised levels
+// rather than the Runtime's default model.
+func TestModelInvokeNormalizesEffortForRequestedModel(t *testing.T) {
+	invoker := newFakeModelInvoker()
+	d, stream := modelInvokeFixture(t, invoker)
+	d.runtimeDiagnostics = mustJSON([]provider.RuntimeDiagnostic{{
+		Type: "codex", Status: "ready",
+		Models: []provider.RuntimeModel{
+			{ID: "gpt-default", IsDefault: true, AllowedReasoningEffort: []string{"low", "medium"}, DefaultReasoningEffort: "low"},
+			{ID: "gpt-high-only", AllowedReasoningEffort: []string{"high"}, DefaultReasoningEffort: "high"},
+		},
+	}})
+	if err := d.handleModelInvoke(context.Background(), stream, modelInvokeCommand("invoke-effort", map[string]any{
+		"model":            "gpt-high-only",
+		"reasoning_effort": "low",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	<-invoker.started
+	close(invoker.release)
+	if payload := waitForModelInvoked(t, stream, "invoke-effort"); payload["outcome"] != "completed" {
+		t.Fatalf("payload = %v", payload)
+	}
+	if got := invoker.lastRequest(); got.Model != "gpt-high-only" || got.ReasoningEffort != "high" {
+		t.Fatalf("request = %+v; want model gpt-high-only and effort high", got)
 	}
 }

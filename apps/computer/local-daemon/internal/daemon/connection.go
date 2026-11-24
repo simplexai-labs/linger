@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	mathrand "math/rand/v2"
 	"slices"
 	"sort"
@@ -102,6 +103,8 @@ func (d *Daemon) connectionHello(ctx context.Context, deviceIdentity transport.I
 		return transport.Hello{}, err
 	}
 	runtimes, runtimeDiagnostics, runtimeObservations := d.runtimeInventory()
+	registrations := d.enabledRegistrationObservations(mergeRegistrationObservations(runtimeObservations, registrationObservations(knownRegistrations)))
+	d.advanceDiagnosticsRevisionAbove(registrations)
 	hello = transport.Hello{
 		ProtocolVersion:    d.protocolVersion,
 		RunnerID:           d.computerID,
@@ -114,7 +117,7 @@ func (d *Daemon) connectionHello(ctx context.Context, deviceIdentity transport.I
 		RuntimeDiagnostics: runtimeDiagnostics,
 		WorkspaceGrants:    append(json.RawMessage(nil), d.workspaceGrants...),
 		Capabilities:       d.capabilities(),
-		Registrations:      d.enabledRegistrationObservations(mergeRegistrationObservations(runtimeObservations, registrationObservations(knownRegistrations))),
+		Registrations:      registrations,
 		AgentRunners:       agentRunners,
 		ActiveOperations:   activeOperations,
 	}
@@ -338,6 +341,7 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 	d.byokEndpoint.Store(slices.Contains(command.ServiceFeatures, serviceFeatureByokEndpoint))
 	d.localModelsDiagnostics.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsDiagnostics))
 	d.localModelsEngine.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsEngine))
+	d.localModelsConcurrencyProbe.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsConcurrencyProbe))
 	d.localModelsExternalHolders.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsExternalHolders))
 	d.modelInvokeOutcomes.Store(slices.Contains(command.ServiceFeatures, serviceFeatureModelInvokeOutcomes))
 	d.localModelUnavailable.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelUnavailable))
@@ -395,7 +399,7 @@ func (d *Daemon) UpdateRuntimeInventory(ctx context.Context, runtimes []string, 
 	if observations != nil {
 		d.runtimeObservations = append([]transport.RegistrationObservation(nil), observations...)
 	}
-	d.diagnosticsRevision++
+	d.diagnosticsRevision = nextRevisionAbove(saturatingIncrement(d.diagnosticsRevision), d.runtimeObservations)
 	revision := d.diagnosticsRevision
 	d.inventoryMu.Unlock()
 
@@ -418,6 +422,32 @@ func (d *Daemon) runtimeInventory() ([]string, json.RawMessage, []transport.Regi
 	return append([]string(nil), d.runtimes...), append(json.RawMessage(nil), d.runtimeDiagnostics...), append([]transport.RegistrationObservation(nil), d.runtimeObservations...)
 }
 
+func nextRevisionAbove(minimum uint64, observations []transport.RegistrationObservation) uint64 {
+	next := max(minimum, 1)
+	for _, observation := range observations {
+		if observation.Revision >= next {
+			next = saturatingIncrement(observation.Revision)
+		}
+	}
+	return next
+}
+
+func saturatingIncrement(revision uint64) uint64 {
+	if revision == math.MaxUint64 {
+		return math.MaxUint64
+	}
+	return revision + 1
+}
+
+func (d *Daemon) advanceDiagnosticsRevisionAbove(observations []transport.RegistrationObservation) {
+	if len(observations) == 0 {
+		return
+	}
+	d.inventoryMu.Lock()
+	d.diagnosticsRevision = nextRevisionAbove(d.diagnosticsRevision, observations)
+	d.inventoryMu.Unlock()
+}
+
 func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 	d.connectionMu.Lock()
 	if d.diagnosticsStream == stream {
@@ -428,6 +458,7 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 		d.localModelsStream = nil
 		d.localModelsDiagnostics.Store(false)
 		d.localModelsEngine.Store(false)
+		d.localModelsConcurrencyProbe.Store(false)
 		d.localModelsExternalHolders.Store(false)
 		d.localModelUnavailable.Store(false)
 	}
@@ -611,6 +642,7 @@ func (d *Daemon) applyRegistrationSnapshot(ctx context.Context, stream transport
 		}
 	}
 	d.authorityRevision++
+	var maxRevision uint64
 	for _, item := range snapshot {
 		observation := registration.Observation{
 			RegistrationID: item.RegistrationID,
@@ -621,9 +653,18 @@ func (d *Daemon) applyRegistrationSnapshot(ctx context.Context, stream transport
 			Status: registration.Status(item.Observation.Status), Revision: item.Observation.Revision,
 			Capabilities: append([]string{}, item.Observation.Capabilities...),
 		}
-		if _, err := d.registrations.Apply(ctx, observation); err != nil {
+		applied, err := d.registrations.Apply(ctx, observation)
+		if err != nil {
 			return d.finishFailure(ctx, stream, command, operationCodeExecutionFailed, err.Error())
 		}
+		maxRevision = max(maxRevision, item.Observation.Revision, applied.Revision)
+	}
+	if maxRevision > 0 {
+		d.inventoryMu.Lock()
+		if maxRevision >= d.diagnosticsRevision {
+			d.diagnosticsRevision = saturatingIncrement(maxRevision)
+		}
+		d.inventoryMu.Unlock()
 	}
 	payload := mustJSON(struct {
 		Count int `json:"count"`

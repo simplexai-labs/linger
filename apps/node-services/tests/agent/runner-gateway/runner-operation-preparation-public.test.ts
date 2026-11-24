@@ -1094,4 +1094,65 @@ describe("RunnerGateway", () => {
     );
     await operation.result;
   });
+
+  it.each([
+    { daemonVersion: "0.62.0", expected: undefined },
+    {
+      daemonVersion: "0.63.0",
+      expected: { provider_type: "codex", session_id: "thread-prev" },
+    },
+  ])(
+    "gates previous_session on operation.start by Computer version ($daemonVersion)",
+    async ({ daemonVersion, expected }) => {
+      const gateway = createTestRunnerGateway({
+        heartbeatIntervalMs: 1_000,
+        createId: sequenceIds(),
+      });
+      const peer = new RecordingPeer();
+      const connection = await acceptReadyConnection(
+        gateway,
+        peer,
+        { ...contextHello(), daemon_version: daemonVersion },
+        defaultAgentPlacement({ workspaceGrantId: "grant-owner" }),
+      );
+      const context = localContextViewIdentity();
+      const baseTarget = contextRunTarget(context, []);
+      const operation = await gateway.startOperation({
+        ...baseTarget,
+        request: {
+          ...baseTarget.request,
+          previous_session: {
+            provider_type: "codex",
+            session_id: "thread-prev",
+          },
+        },
+      });
+      const start = peer.sent.find(
+        (envelope) => envelope.type === "operation.start",
+      );
+      if (start?.type !== "operation.start") {
+        throw new Error("Expected operation.start");
+      }
+      expect(start.request.previous_session).toEqual(expected);
+
+      await connection.receive(
+        event(start, 1, {
+          type: "operation.accepted",
+          command_id: start.command_id,
+          runner_pid: 100,
+        }),
+      );
+      await connection.receive(
+        event(start, 2, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "done",
+            session: { thread_id: "thread-1" },
+          },
+        }),
+      );
+      await operation.result;
+    },
+  );
 });

@@ -27,7 +27,9 @@ overrides:
 patchedDependencies:
   "@hocuspocus/server@4.3.0": patches/@hocuspocus__server@4.3.0.patch
   # Voice uses no LiveKit turn detection; the local EOT runner would start a
-  # full inference process per worker.
+  # full inference process per worker. The worker also pings its LiveKit
+  # connection and reconnects once pongs stop: LiveKit keeps a worker it can
+  # no longer write to registered, so every job assigned to it would fail.
   "@livekit/agents@1.7.1": patches/@livekit__agents@1.7.1.patch
   "deepagents@1.12.0": patches/deepagents@1.12.0.patch
   # Playwright MCP drops focus emulation on CDP connections, the user's Chrome

@@ -106,10 +106,14 @@ the recorded process group disappears.
 The Daemon accepts `execute` (kind `model_invoke`). `internal/daemon/model_invoke.go`
 handles admission and a concurrency limit of 3 (beyond it the reply is `busy`;
 `priority` only orders the Agent side's queue, and the Daemon accepts it without
-distinguishing), cancels on disconnect and drain, and checks before sending that
+distinguishing), cancels on disconnect and drain, loads a named Pi library model
+on demand through `ensureLocalModel` (matching `run.start`), clamps reasoning
+effort against the requested model, and checks before sending that
 the encoded `executed` (kind `model_invoke`) fits the 4 MiB frame limit (otherwise
-it reports `failed`). `internal/provider/model_invoke.go` runs one `codex exec` or
-`claude -p` in a temporary directory: the prompt goes through stdin, tools and
+it reports `failed`). `internal/provider/model_invoke.go` and
+`internal/provider/pi_model_invoke.go` run one `codex exec`, `claude -p`, or
+ephemeral `pi` RPC turn in a temporary directory, passing the requested `model`
+explicitly when supplied: the prompt goes through stdin, tools and
 user customization are off, and it refuses workspace files at the root named
 `AGENTS.md`, `AGENTS.override.md` or `CLAUDE.md` and anything under `.codex` or
 `.claude` at any depth. `internal/workspace/codex_invoke_home.go` prepares a
@@ -310,6 +314,21 @@ downloaded model that Run's Agent names.
   compatibly (unknown `engine` or out-of-range `concurrency` is omitted,
   `engine_label` is clipped) and sent only when `runner.welcome`'s
   `service_features` names `local_models_engine` (Computer 0.61.0 or later).
+  When `localmodels` reports a `loaded` model with configured
+  `concurrency > 1`, the Daemon runs a one-time loopback concurrency probe
+  (persisting only measured results atomically in `concurrency-probes.json`
+  under the local models cache directory, keyed by model ID, engine, engine
+  label, pool, context tokens, configured concurrency, and tool version;
+  looking up deploy auth bearer tokens and endpoint model names in
+  `<LOCALMODELS_STATE>/library/models/*.json` + `<deploy_dir>/api-key`). While
+  probing runs, the row is overlaid as `state: "loading"` with
+  `concurrency_probing: true` (sent only when `runner.welcome`'s
+  `service_features` names `local_models_concurrency_probe`, Computer 0.64.0
+  or later) and `EnsureLoaded` waits for probing to finish. A measured result
+  sets `concurrency` (`1` or `2`); transient probe errors or timeouts are not
+  cached, omit `concurrency` for that load so scheduling falls back to
+  adaptive limits, and retry on the next load. Models with omitted or `<= 1`
+  configured concurrency skip probing.
   The snapshot is sent after
   every welcome, after every action or job end, and at most every 2 seconds
   for progress. When a job enters the `download` phase, the Daemon publishes
@@ -370,13 +389,19 @@ base URL, path and endpoint and the protocol the owner's client chose; `check`
 sends one request there and `models` lists base URL + path + `/models`. The BYOK
 summary carries `path` and `endpoint` only after a `runner.welcome` that names
 the `byok_endpoint` service feature. `localmodels` writes
-`<state>/model-source.json`; the Daemon only adds the `runtime_paths` that the
-same `apply` reported. It re-reads the file on every discovery tick to overlay
-the Runtimes' environment (`OverlayEnvironment`) and executable paths
-(`OverlayRuntimePaths`), dropping any stale `byok-home` entry in `local` mode
-in favor of the managed `gateway-home` Pi profile, never falling back to cloud
-models in `local` mode (`agentRuntimeModel`), and under BYOK listing only the
-BYOK model in each Runtime's catalog.
+`<state>/model-source.json` without `runtime_paths`; on `source apply`, BYOK
+`remount`, and installer `applySource`, the caller merges valid executable
+non-harness paths from before the rewrite alongside any `runtime_paths` that
+`apply` reported, without pinning paths inside `<home>/runtime/harness`. The
+Daemon re-reads the file on every discovery tick to overlay the Runtimes'
+environment (`OverlayEnvironment`) and executable paths (`OverlayRuntimePaths`),
+scanning `<home>/runtime/harness/bin/<runtime>` and the highest-version
+`<home>/runtime/harness/tools/<runtime>/<version>/<runtime>` on each read so
+managed Runtime updates take effect without rewriting `model-source.json`. It
+also drops any stale `byok-home` entry in `local` mode in favor of the managed
+`gateway-home` Pi profile, never falls back to cloud models in `local` mode
+(`agentRuntimeModel`), and under BYOK lists only the BYOK model in each
+Runtime's catalog.
 
 Before a Run or model call on a Runtime whose profile is the BYOK source's,
 the Daemon checks the saved loopback gateway's `/health` (`EnsureGateway` in
@@ -503,19 +528,18 @@ for a browser sign-in when signed out.
   stored is not a usable session: `session/load` accepts it, but the prompt
   then fails, so Linger never assigns one. A stored session replays at least
   the prompt that made it, so a load that replays no prompt, or that
-  Antigravity refuses, finds no session. A resumed Run reports its
+  Antigravity refuses, finds no session and returns `session_not_found` so Agent
+  Service can clear the persisted session and restart the Run cleanly in a fresh
+  native session with recent messages. A resumed Run still reports its
   turn-started event before `session/load`, because loading takes seconds
-  and the Room shows the Agent working from that event. The executor can then
-  no longer start a fresh session, so the adapter opens `session/new` in the
-  same process and the terminal result carries the new session. Such a Run
-  announced the old session, so the Daemon declines every scheduler yield for
-  it, including the one Agent Service resends after a reconnect, and lets it
-  finish. Agent Service sends a later Stop as its own cancel with its own
-  reason. An Agent Service released before this sends no such cancel, so its
-  Stop cannot end such a Run. A Run that resumes after a yield ends as
-  `session_not_found` instead. A Run yields to
+  and the Room shows the Agent working from that event. A Run yields to
   the scheduler only after native work, because its session holds no prompt
   before that.
+- On a fresh `run.start` that names `previous_session` (Computer 0.63.0 or
+  later), the provider executor reads the superseded native session through
+  `runtimehistory`, writes a bounded, redacted Markdown tail to
+  `./playground/.previous-context.md`, and appends that path to the turn's
+  `<system-reminder>` only when the file was written.
 - A tool call is named by Antigravity's own tool name, such as
   `run_command`; its title is the whole command line, which the call's
   redacted input already shows.

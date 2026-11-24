@@ -349,6 +349,9 @@ func sanitizeLocalModelsSnapshot(snapshot *teamhubinternal.LocalModelsSnapshot) 
 		if model.Concurrency != nil && (*model.Concurrency < 1 || *model.Concurrency > 64) {
 			model.Concurrency = nil
 		}
+		if model.ConcurrencyProbing != nil && (!*model.ConcurrencyProbing || model.State != teamhubinternal.LocalModelStateLoading) {
+			model.ConcurrencyProbing = nil
+		}
 		if model.HostRamBytes != nil && *model.HostRamBytes < 0 {
 			model.HostRamBytes = nil
 		}
@@ -421,6 +424,9 @@ func validLocalModelsSnapshot(snapshot teamhubinternal.LocalModelsSnapshot) bool
 			return false
 		}
 		if model.Concurrency != nil && (*model.Concurrency < 1 || *model.Concurrency > 64) {
+			return false
+		}
+		if model.ConcurrencyProbing != nil && *model.ConcurrencyProbing && model.State != teamhubinternal.LocalModelStateLoading {
 			return false
 		}
 		if model.HostRamBytes != nil && *model.HostRamBytes < 0 {

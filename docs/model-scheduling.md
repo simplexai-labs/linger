@@ -6,22 +6,51 @@ one runtime on one computer, decides what reaches the model: each unit of work
 waits its turn by priority. Codex runs with its sub-agents turned off, because
 their requests would reach the model beside the Run's own without waiting.
 
-| Endpoint                                           | Starts at | Grows to |
-| -------------------------------------------------- | --------- | -------- |
-| A runtime whose models go through a gateway or key | 1         | 8        |
-| A runtime whose every model is on your account     | 10        | 10       |
-| A computer that does not say how it reaches them   | 1         | 8        |
+| Endpoint                                                       | Starts at | Grows to |
+| -------------------------------------------------------------- | --------- | -------- |
+| A runtime whose models go through a gateway or key             | 1         | 8        |
+| A runtime whose every model is on your account                 | 10        | 10       |
+| A computer that does not say how it reaches them               | 1         | 8        |
+| A local library model probed as single-slot (`concurrency: 1`) | 1         | 1        |
+| A local library model probed at `N >= 2`                       | `N`       | 8        |
 
-The number of units at once adapts to how the endpoint answers. While work
-waits and requests come back about as fast as with one unit running, the
-queue tries one more. When requests get clearly slower it gives one back, and
-when the endpoint refuses work (rate limited, overloaded, or a call runs out
-of time) it halves and holds off raising for a minute. Speed is compared per
+When a Computer loads a local library model whose configured concurrency
+exceeds one, its Daemon runs a one-time loopback concurrency probe before
+reporting the model loaded (showing `"Probing max concurrency"` via
+`concurrency_probing: true` while `state: "loading"`). Measured probe outcomes
+(`1` or `2`) are cached by model, engine, placement, context length, configured
+slots, and tool version, and override the raw slot count on the loaded model;
+transient probe errors and timeouts are not cached, omit `concurrency` for
+that load (falling back to `{ initial: 1, max: 8 }`), and retry on the next
+load. Only Computers that negotiate `local_models_concurrency_probe` (`0.64.0`
+or later) have their loaded `concurrency` applied by `ModelQueue`; older
+Computers stay on `{ initial: 1, max: 8 }`. A verified `1` caps the endpoint at
+`{ initial: 1, max: 1 }` without background probing, while a verified `N >= 2`
+sets `{ initial: N, max: 8 }` so the queue starts immediately at `N` and still
+allows adaptive background probing upward (and loading another local model does
+not force an already-loaded model down to `1` or reset what was learned).
+
+The number of units at once adapts to how the endpoint answers. Each request
+counts at the number of units that actually ran while it was timed, not at
+the limit. The confirmed limit grows only through silent background probes:
+once single-unit background calls establish a baseline and no foreground,
+Task, Document or compaction work is active or waiting, the queue temporarily
+runs one more yieldable background call at once (on Computers that can stop a
+model call). If those concurrent background calls stay within 1.3x of the
+lone-unit speed, the confirmed limit promotes by one; if a probe sample slows
+past 1.8x, the probe median exceeds 1.3x, or the endpoint refuses work, the
+probe stops immediately and the confirmed limit stays unchanged. If higher
+work arrives during a probe, the probe aborts at once and swaps out the extra
+background calls so interactive work never pays for an unconfirmed limit. In
+steady state, when requests at the confirmed limit get clearly slower (past
+1.8x) it gives one back, and when the endpoint refuses work (rate limited,
+overloaded, or a call runs out of time) it halves and holds off probing for a
+minute. Speed is compared per
 thousand new prompt tokens, so a long prompt does not look like a busy
-endpoint. A number it had to come down from is not tried again for five
-minutes; if that retry is too slow as well, the wait doubles, up to half an
-hour. What it learns lasts until the service restarts or the runtime's models
-change.
+endpoint. A number that failed a probe or had to be given back is not probed
+again for five minutes; if that retry fails as well, the wait doubles, up to
+half an hour. What it learns lasts until the service restarts or the runtime's
+models change.
 
 The current adaptive limit is the hard limit. Ordinary work can start while
 the total running count is below the soft limit, `max(1, hard - 1)`.

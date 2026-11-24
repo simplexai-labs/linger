@@ -12,7 +12,6 @@ import type { Message } from "./types.js";
 export class ReplyDelivery {
   readonly #started = new Map<string, "message" | "message_read">();
   #awaitingHuman = false;
-  #attemptedWrites = 0;
   #failedWrites = 0;
   #deliveredWrites = 0;
   #failedReads = 0;
@@ -24,7 +23,6 @@ export class ReplyDelivery {
 
   observe(event: RunEvent): void {
     if (event.type === "activity.started") {
-      if (event.kind === "message") this.#attemptedWrites += 1;
       if (event.kind === "message" || event.kind === "message_read")
         this.#started.set(event.activityId, event.kind);
       return;
@@ -43,20 +41,30 @@ export class ReplyDelivery {
   }
 
   /**
-   * The Agent tried to post and no attempt reached the Room. An Agent that
-   * never tried chose not to reply, which is not a delivery failure.
+   * A Human who mentioned the Agent is waiting, every write attempt failed,
+   * and no write reached the Room.
    */
   get replyUndelivered(): boolean {
-    return this.#failedWrites > 0 && this.#deliveredWrites === 0;
+    return (
+      this.#awaitingHuman &&
+      this.#failedWrites > 0 &&
+      this.#deliveredWrites === 0
+    );
   }
 
   /**
-   * A Human who mentioned the Agent is waiting and the Agent never tried to
-   * post. Its Runtime ended the turn in text nobody sees; small models do
-   * this when they answer without calling the message command.
+   * A Human who mentioned the Agent is waiting and no write reached the Room
+   * without any failed write attempt (the Agent never posted, or a write
+   * activity did not finish as delivered or failed). Its Runtime ended the
+   * turn in text nobody sees; small models do this when they answer without
+   * calling the message command.
    */
   get replyNotSent(): boolean {
-    return this.#awaitingHuman && this.#attemptedWrites === 0;
+    return (
+      this.#awaitingHuman &&
+      this.#deliveredWrites === 0 &&
+      this.#failedWrites === 0
+    );
   }
 
   get hasFailures(): boolean {

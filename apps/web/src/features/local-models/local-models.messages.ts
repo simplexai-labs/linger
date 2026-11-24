@@ -98,6 +98,7 @@ export const localModelsMessages = defineMessages("localModels", {
   statusIdle: "Downloaded",
   statusLoaded: "Loaded",
   statusLoading: "Loading",
+  statusProbingConcurrency: "Probing max concurrency",
   statusUnavailable: "Can't download",
   statusDownloadStopped: "Download stopped",
   endingCancel: "Cancelling",

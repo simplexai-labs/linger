@@ -7,15 +7,19 @@ import (
 	"log/slog"
 )
 
-// InvokePiModel runs a single tool-free RPC turn on Pi's default model, with
-// the same Pi profile and event handling as managed execution but no
-// persistent session. It returns the model Pi ran.
-func InvokePiModel(ctx context.Context, profile Profile, dir, instructionsFile, prompt, effort string) (Outcome, string, error) {
+// InvokePiModel runs a single tool-free RPC turn on Pi, using model when
+// specified (or Pi's default model when omitted), with the same Pi profile
+// and event handling as managed execution but no persistent session. It
+// returns the model Pi ran.
+func InvokePiModel(ctx context.Context, profile Profile, dir, instructionsFile, model, prompt, effort string) (Outcome, string, error) {
 	thinking, err := piThinkingLevel(effort)
 	if err != nil {
 		return Outcome{}, "", err
 	}
 	args := append([]string{"--mode", "rpc", "--no-session", "--no-tools"}, PiRPCResourceArgs(instructionsFile)...)
+	if model != "" && model != piDefaultModel {
+		args = append(args, "--model", model)
+	}
 	if thinking != "" {
 		args = append(args, "--thinking", thinking)
 	}
@@ -53,9 +57,9 @@ func InvokePiModel(ctx context.Context, profile Profile, dir, instructionsFile, 
 		}
 	}
 	cancelProbe()
-	model := ""
+	reportedModel := ""
 	if catalog.Model.ID != "" {
-		model = catalog.Model.Provider + "/" + catalog.Model.ID
+		reportedModel = catalog.Model.Provider + "/" + catalog.Model.ID
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -67,5 +71,5 @@ func InvokePiModel(ctx context.Context, profile Profile, dir, instructionsFile, 
 	go turn.drive(prompt)
 	for range turn.events {
 	}
-	return <-turn.outcome, model, nil
+	return <-turn.outcome, reportedModel, nil
 }

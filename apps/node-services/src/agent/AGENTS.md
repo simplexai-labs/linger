@@ -92,15 +92,21 @@ take precedence.
   persisted reply status (`GET /v0/agent-runtime/runs/reply-status`) for each
   Inbox where a Human mentioned the Agent, so a chat steered in from another
   Inbox needs its own reply, and blocks the Runtime's Stop hook at most once
-  so the model can still send a visible reply in the same turn. Before failing a Room Run for a missing reply (when a
-  Stop hook blocked once or when an older Daemon/Runtime never ran Stop hooks),
-  the Run loop re-checks TeamHub's persisted reply status so compound scripts,
-  decision cards, presentation sequences, and reactions that activity
-  classification missed are not misreported. A Room Run whose every write
-  failed finishes failed with `reply_undelivered`. One that left no reply while
-  a Human's Message that mentioned the Agent (a direct chat always does) waits
-  finishes failed with `reply_not_sent`. Its final text is private scratch and
-  is never posted for it.
+  so the model can still send a visible reply in the same turn. When the Stop
+  hook confirms delivery (`replyConfirmed`), the Run loop skips both
+  `reply_undelivered` and `reply_not_sent` and avoids a redundant post-hoc check.
+  Otherwise (for instance, when a Stop hook blocked once, its check failed, or
+  an older Daemon/Runtime never ran Stop hooks), before failing a Room Run for
+  a missing reply while a Human's Message that mentioned the Agent (a direct
+  chat always does) waits, the Run loop re-checks TeamHub's persisted reply
+  status so compound scripts, decision cards, presentation sequences, and
+  reactions that activity classification missed are not misreported. When no
+  reply reached the Room while such a Human waits, a Run with at least one
+  failed write attempt finishes failed with `reply_undelivered`, and one with
+  no failed write attempt finishes failed with `reply_not_sent`. Runs where no
+  Human waits on a reply are not failed as `reply_undelivered` or
+  `reply_not_sent`. The Runtime's final text is private scratch and is never
+  posted for it.
 - Ordinary Room/Meta execution reads effective Agent configuration before a new
   Local Run. Skill saves do not activate idle Contexts. If versions changed,
   reuse graceful activation to resume the same native history; running/steered
@@ -169,7 +175,7 @@ take precedence.
   `operation.prepare`, and `operation.start`) goes only to Computer 0.57.0 or
   later (`FIRST_STOP_HOOK_COMPUTER_VERSION`), because an older Computer rejects
   unknown envelope fields and closes the connection; Runs on older Computers
-  rely on `RunLoop`'s post-hoc `reply_not_sent` check.
+  rely on `RunLoop`'s post-hoc reply check (`reply_not_sent` / `reply_undelivered`).
 - `local_model_unavailable` in `runner.welcome`'s `service_features` goes to
   every Computer that receives the field: the Go Daemon decodes the list as
   strings and ignores a value it does not know. A Daemon that sees it reports a
@@ -193,9 +199,33 @@ take precedence.
   or later (`FIRST_LOCAL_MODELS_ENGINE_COMPUTER_VERSION`); a Daemon talking to
   an older Agent Service strips `engine`, `engine_label`, `concurrency`, and
   `host_ram_bytes` from `LocalModel` rows.
+- Post-load local-model concurrency probing (`local_models_concurrency_probe`
+  in `runner.welcome`'s `service_features`) is advertised only to Computer
+  0.64.0 or later (`FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION`); a
+  Daemon talking to an older Agent Service strips `concurrency_probing` from
+  `LocalModel` rows. `ModelQueue` trusts `LocalModel.concurrency` only from
+  Computers at or above `FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION`:
+  a verified `1` locks `{ initial: 1, max: 1 }`, while a verified `N >= 2`
+  starts at `{ initial: N, max: 8 }` and retains adaptive growth above `N`
+  (older Computers and unprobed/unmeasured loads fall back to
+  `{ initial: 1, max: 8 }`). Loading another model in the library does not drop
+  the endpoint to `1` or reset an existing learned limit.
 - `local_models_external_holders` is advertised to every Computer (a Daemon
   ignores an unknown feature); a Daemon talking to an older Agent Service
   strips `external_holders` from `LocalModelPool` rows.
+- Explicit model selection on `execute` `model_invoke` (`model`) is sent only
+  to Computer 0.62.0 or later (`FIRST_MODEL_INVOKE_MODEL_COMPUTER_VERSION`),
+  because an older Computer rejects unknown envelope fields and closes the
+  connection. Background calls resolve the placed Agent's configured model on
+  its Runtime and fall back to the target Runtime's catalog default on
+  cross-Runtime fallback or when unconfigured.
+- `previous_session` on `operation.start` goes only to Computer 0.63.0 or later
+  (`FIRST_PREVIOUS_SESSION_COMPUTER_VERSION`), because older Computers reject
+  unknown envelope fields and close the connection. On `session_not_found` or
+  `context_too_long`, `RunLoop` requeues the Run once, clears the persisted
+  Runtime Session with `recovery_reason`, and reactivates in a fresh native
+  session so the Run resumes with inlined recent messages and (on Computer
+  0.63.0+) an exported `./playground/.previous-context.md` transcript.
 - Default unit, integration, and fixture smoke tests use deterministic adapters
   and do not call a live model provider. Explicitly named live suites such as
   `smoke:local-runner:live` may use an authenticated provider and must remain

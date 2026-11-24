@@ -22,6 +22,7 @@ SELECT registration.tenant_id,
        registration.actor_id AS agent_actor_id,
        registration.computer_id::text AS computer_id,
        registration.local_runtime_type::text AS local_runtime_type,
+       registration.runtime_model,
        registration.status
 FROM agent_registrations registration
 WHERE registration.agent_type='anotherme'

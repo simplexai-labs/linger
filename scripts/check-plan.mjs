@@ -74,29 +74,21 @@ export const TARGETS = [
     target: "check-teamhub-cli",
     lane: "fast",
     ci: "teamhub-cli",
-    paths: ["apps/teamhub-cli/", "packages/", "contracts/"],
+    packages: ["apps/teamhub-cli"],
+    paths: ["contracts/"],
   },
   {
     target: "check-installer",
     lane: "fast",
     ci: "installer",
-    paths: [
-      "apps/linger-installer/",
-      "packages/",
-      "contracts/generated/typescript/",
-    ],
+    packages: ["apps/linger-installer"],
   },
   {
     target: "check-desktop",
     lane: "fast",
     ci: "desktop",
-    paths: [
-      "apps/desktop/",
-      "apps/computer/local-daemon/",
-      "apps/computer/package.json",
-      "packages/",
-      "contracts/generated/typescript/",
-    ],
+    packages: ["apps/desktop"],
+    paths: ["apps/computer/local-daemon/", "apps/computer/package.json"],
   },
   {
     target: "check-teamhub",
@@ -148,7 +140,7 @@ export const TARGETS = [
     target: "check-web",
     lane: "heavy",
     ci: "web",
-    paths: ["apps/web/", "packages/", "contracts/generated/typescript/"],
+    packages: ["apps/web"],
   },
   {
     // Tests read daemon sources, run daemon Go tests, and read these

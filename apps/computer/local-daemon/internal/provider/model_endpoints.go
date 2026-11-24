@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"cmp"
 	"context"
 	"net/url"
 	"strings"
@@ -22,7 +23,7 @@ const (
 // custom provider or gateway it is set up with, otherwise the vendor's
 // built-in hosts. It is empty when they are unknown, as for Pi whose default
 // model is on a built-in provider.
-func (m ModelInvoker) ModelEndpoints(ctx context.Context, runtimeType string) []*url.URL {
+func (m ModelInvoker) ModelEndpoints(ctx context.Context, runtimeType, model string) []*url.URL {
 	if m.Lookup == nil {
 		return nil
 	}
@@ -30,7 +31,7 @@ func (m ModelInvoker) ModelEndpoints(ctx context.Context, runtimeType string) []
 	if err != nil || !ok {
 		return nil
 	}
-	return modelEndpoints(runtimeType, installed.Environment, installed.DefaultModel)
+	return modelEndpoints(runtimeType, installed.Environment, cmp.Or(model, installed.DefaultModel))
 }
 
 func modelEndpoints(runtimeType string, environment map[string]string, defaultModel string) []*url.URL {

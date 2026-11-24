@@ -54,14 +54,10 @@ export interface LiveSession {
   appendAudio(frame: Int16Array): void | Promise<void>;
   mute(): void;
   unmute(): void;
-  cancel(): void;
+  /** Drop old output immediately. Local speech waits for provider onset before editing the conversation. */
+  cancel(options?: { playedMs?: number; localSpeech?: boolean }): void;
   /** Asks for a reply to the conversation so far. */
   respond(): void;
-  /**
-   * Tells the model the user heard only the first `audioMs` of the reply that
-   * is playing, so its memory of the call matches what was said.
-   */
-  truncate(audioMs: number): void;
   /**
    * Says an update the model composes from the cue and what it already knows
    * of the call; with allowTools it may first call tools, and the response

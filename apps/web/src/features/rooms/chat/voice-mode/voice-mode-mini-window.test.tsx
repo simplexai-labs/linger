@@ -104,9 +104,11 @@ function LocationProbe() {
 }
 
 function renderWindow() {
-  return render(
-    <QueryClientProvider client={new QueryClient()}>
-      <TeamHubRuntimeProvider runtime={createTestTeamHubRuntime()}>
+  const client = new QueryClient();
+  const runtime = createTestTeamHubRuntime();
+  const tree = () => (
+    <QueryClientProvider client={client}>
+      <TeamHubRuntimeProvider runtime={runtime}>
         <MemoryRouter
           initialEntries={["/t/tenant-northstar/rooms/room-other/chat"]}
         >
@@ -114,8 +116,11 @@ function renderWindow() {
           <LocationProbe />
         </MemoryRouter>
       </TeamHubRuntimeProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(tree());
+  // The session stand-in has no subscribers: render again to show a change.
+  return Object.assign(view, { refresh: () => view.rerender(tree()) });
 }
 
 /** A stand-in for the browser's picture-in-picture window. */
@@ -183,6 +188,123 @@ describe("Voice Mode mini window", () => {
     );
     expect(voice.setSoundOff).toHaveBeenCalledWith(true);
     expect(voice.setMuted).not.toHaveBeenCalled();
+  });
+
+  it("fades in each phrase of a reply as it arrives, and nothing already said", async () => {
+    voice.session!.live = {
+      soundOff: false,
+      transcript: [
+        { id: "lt_0:reply", speaker: "live", text: "Said before." },
+        {
+          id: "lt_1:reply",
+          speaker: "live",
+          text: "Two meetings,",
+          pending: true,
+        },
+      ],
+    };
+    const view = renderWindow();
+    const log = await screen.findByRole("log", {
+      name: "Voice Mode conversation",
+    });
+    const fading = () =>
+      [...log.querySelectorAll("span.voice-live-fade-in")].map(
+        (span) => span.textContent,
+      );
+    expect(log).toHaveTextContent("Two meetings,");
+    expect(fading()).toEqual([]);
+    voice.session!.live = {
+      soundOff: false,
+      transcript: [
+        { id: "lt_0:reply", speaker: "live", text: "Said before." },
+        {
+          id: "lt_1:reply",
+          speaker: "live",
+          text: "Two meetings, then the review.",
+          pending: true,
+        },
+      ],
+    };
+    view.refresh();
+    expect(log).toHaveTextContent("Two meetings, then the review.");
+    expect(fading()).toEqual([" then the review."]);
+    // The bubble being said faded in as it appeared; the earlier one did not.
+    expect(log.querySelectorAll("div.voice-live-fade-in")).toHaveLength(1);
+  });
+
+  it("opens at the newest words without gliding through the call", async () => {
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(900);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(100);
+    // jsdom has no element scrollTo; a stand-in shows whether one glides.
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+    try {
+      voice.session!.live = {
+        soundOff: false,
+        transcript: [{ id: "lt_1", speaker: "you", text: "What is next" }],
+      };
+      renderWindow();
+      const log = await screen.findByRole("log", {
+        name: "Voice Mode conversation",
+      });
+      expect(log.scrollTop).toBe(800);
+      expect(scrollTo).not.toHaveBeenCalled();
+    } finally {
+      delete (HTMLElement.prototype as { scrollTo?: unknown }).scrollTo;
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("glides after new lines until the Human scrolls up", async () => {
+    const observed: (() => void)[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          observed.push(callback);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    voice.session!.live = {
+      soundOff: false,
+      transcript: [{ id: "lt_1", speaker: "you", text: "What is next" }],
+    };
+    renderWindow();
+    const log = await screen.findByRole("log", {
+      name: "Voice Mode conversation",
+    });
+    let scrollHeight = 400;
+    Object.defineProperty(log, "scrollHeight", { get: () => scrollHeight });
+    Object.defineProperty(log, "clientHeight", { value: 100 });
+    const scrollTo = vi.fn((options: ScrollToOptions) => {
+      log.scrollTop = options.top ?? 0;
+    });
+    log.scrollTo = scrollTo as unknown as typeof log.scrollTo;
+    const grow = (height: number) => {
+      scrollHeight = height;
+      observed.forEach((callback) => callback());
+    };
+    grow(420);
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 320, behavior: "smooth" });
+    // On its way down the glide passes short of the bottom and keeps following.
+    log.scrollTop = 200;
+    fireEvent.scroll(log);
+    log.scrollTop = 260;
+    fireEvent.scroll(log);
+    grow(440);
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 340, behavior: "smooth" });
+    // Scrolling up leaves the newest words where they are.
+    log.scrollTop = 100;
+    fireEvent.scroll(log);
+    scrollTo.mockClear();
+    grow(460);
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 
   it("shows a live call as it was said, with words still being said last", async () => {

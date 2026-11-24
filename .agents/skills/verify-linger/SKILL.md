@@ -6,6 +6,7 @@ description: Verify Linger user journeys with existing automatic tests, natural-
 # Verify Linger
 
 Read [the feature map](features/README.md), then the affected journey.
+For a Desktop release or release candidate, the [upgrade from the previous release](features/desktop-and-installer.md#upgrade-from-the-previous-release) is required on every shipped target.
 The map contains user goals, prerequisites, expected outcomes, evidence, and automatic checks to reuse.
 Keep stable product goals while verifying entry paths against the selected revision.
 Run from the repository root. This skill is for agents; product capability documentation remains in `docs/` and each app's `AGENTS.md`.

@@ -65,7 +65,7 @@ data: [DONE]
 			t.Fatal(err)
 		}
 	}
-	write("models.json", fmt.Sprintf(`{"providers":{"local-fixture":{"baseUrl":%q,"api":"openai-completions","apiKey":"fixture","models":[{"id":"fixture"}]}}}`, server.URL+"/v1"))
+	write("models.json", fmt.Sprintf(`{"providers":{"local-fixture":{"baseUrl":%q,"api":"openai-completions","apiKey":"fixture","models":[{"id":"fixture"},{"id":"fixture-alt"}]}}}`, server.URL+"/v1"))
 	write("settings.json", `{"defaultProvider":"local-fixture","defaultModel":"fixture"}`)
 	invoker := ModelInvoker{
 		TempBase: root,
@@ -96,6 +96,20 @@ data: [DONE]
 			}
 		})
 	}
+	t.Run("explicit model overrides Pi default", func(t *testing.T) {
+		request := ModelInvokeRequest{
+			RuntimeType: "pi", Model: "local-fixture/fixture-alt", Mode: ModelInvokeText,
+			ReasoningEffort: "low", Instructions: "Fixture instructions.", Input: "Fixture source.", Timeout: 15 * time.Second,
+		}
+		result := invoker.Invoke(t.Context(), request)
+		if result.Outcome != ModelInvokeCompleted || result.Text != textReply || result.Model != "local-fixture/fixture-alt" {
+			t.Fatalf("Pi explicit model invocation = %+v", result)
+		}
+		payload := <-payloads
+		if !strings.Contains(payload, `"model":"fixture-alt"`) {
+			t.Fatalf("unexpected request payload for explicit model: %s", payload)
+		}
+	})
 	t.Run("file tools are not enabled", func(t *testing.T) {
 		result := invoker.Invoke(t.Context(), ModelInvokeRequest{RuntimeType: "pi", Mode: ModelInvokeWorkspace, Input: "Must not be sent.", Timeout: 15 * time.Second})
 		if result.Outcome != ModelInvokeUnsupported || !strings.Contains(result.Reason, "file tools") {

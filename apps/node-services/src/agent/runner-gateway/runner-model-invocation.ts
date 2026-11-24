@@ -1,8 +1,4 @@
-import {
-  isModelCallKind,
-  modelCallPolicies,
-  type ModelLease,
-} from "../../model-tasks.js";
+import { isBackgroundModelCall, type ModelLease } from "../../model-tasks.js";
 import type {
   ModelInvoke,
   ModelInvoked,
@@ -39,6 +35,7 @@ export interface RunnerModelInvokeRequest {
   /** The owner's Agent on this Computer; the Daemon refuses it when locally stopped. */
   readonly agentId: string;
   readonly runtimeType: ModelInvoke["runtime_type"];
+  readonly model?: ModelInvoke["model"];
   readonly mode: ModelInvoke["mode"];
   readonly reasoningEffort: ModelInvoke["reasoning_effort"];
   readonly instructions?: string;
@@ -191,21 +188,23 @@ export class RunnerModelInvocation {
   }
 
   /**
-   * Swaps out the lowest-priority background call below priority on endpoint:
-   * the Computer stops it, and its reply frees the place for the waiting work.
-   * One at a time. Returns whether a swap is under way.
+   * Swaps out up to count lowest-priority background calls below priority on
+   * endpoint: the Computer stops them, and their replies free places for the
+   * waiting work. Returns how many calls on endpoint are now yielding.
    */
-  yieldCall(endpoint: ModelEndpoint, priority: number): boolean {
+  yieldCall(endpoint: ModelEndpoint, priority: number, count = 1): number {
     const calls = [...this.#inFlight].filter(
       ([, call]) =>
         call.runnerId === endpoint.computerId &&
         call.runtimeType === endpoint.runtimeType,
     );
-    if (calls.some(([, call]) => call.yielding)) return true;
+    const alreadyYielding = calls.filter(([, call]) => call.yielding).length;
+    if (alreadyYielding >= count) return alreadyYielding;
     const connections = this.owners.connections();
-    const lowest = calls
+    const candidates = calls
       .filter(
         ([, call]) =>
+          !call.yielding &&
           call.yieldable &&
           call.priority > priority &&
           connections.supportsModelInvokeCancel(
@@ -213,23 +212,24 @@ export class RunnerModelInvocation {
             call.connectionEpoch,
           ),
       )
-      .sort(([, a], [, b]) => b.priority - a.priority)[0];
-    if (!lowest) return false;
-    const [invokeId, call] = lowest;
-    call.yielding = true;
-    const command = parseAgentToDaemonEnvelope({
-      type: "cancel",
-      target: "model_invoke",
-      protocol_version: RUNNER_GATEWAY_PROTOCOL_VERSION,
-      command_id: this.context.createId(),
-      invoke_id: invokeId,
-      runner_id: call.runnerId,
-      connection_epoch: call.connectionEpoch,
-      reason: "scheduler_yield",
-    });
-    // A lost connection stops every call on it and rejects its waiters.
-    connections.sendToCurrentRunner(command).catch(() => undefined);
-    return true;
+      .sort(([, a], [, b]) => b.priority - a.priority)
+      .slice(0, count - alreadyYielding);
+    for (const [invokeId, call] of candidates) {
+      call.yielding = true;
+      const command = parseAgentToDaemonEnvelope({
+        type: "cancel",
+        target: "model_invoke",
+        protocol_version: RUNNER_GATEWAY_PROTOCOL_VERSION,
+        command_id: this.context.createId(),
+        invoke_id: invokeId,
+        runner_id: call.runnerId,
+        connection_epoch: call.connectionEpoch,
+        reason: "scheduler_yield",
+      });
+      // A lost connection stops every call on it and rejects its waiters.
+      connections.sendToCurrentRunner(command).catch(() => undefined);
+    }
+    return alreadyYielding + candidates.length;
   }
 
   rejectWaitersForComputer(runnerId: string): void {
@@ -264,6 +264,11 @@ export class RunnerModelInvocation {
     connectionEpoch: number,
     request: RunnerModelInvokeRequest,
   ): ModelInvoke {
+    const includeModel =
+      request.model !== undefined &&
+      this.owners
+        .connections()
+        .supportsModelInvokeModel(computerId, connectionEpoch);
     const command = parseAgentToDaemonEnvelope({
       type: "execute",
       kind: "model_invoke",
@@ -276,6 +281,7 @@ export class RunnerModelInvocation {
       owner_actor_id: request.ownerActorId,
       agent_id: request.agentId,
       runtime_type: request.runtimeType,
+      ...(includeModel ? { model: request.model } : {}),
       mode: request.mode,
       reasoning_effort: request.reasoningEffort,
       ...(request.instructions ? { instructions: request.instructions } : {}),
@@ -332,8 +338,7 @@ export class RunnerModelInvocation {
         connectionEpoch: command.connection_epoch,
         runtimeType: command.runtime_type,
         priority,
-        yieldable:
-          isModelCallKind(kind) && !modelCallPolicies[kind].interactive,
+        yieldable: isBackgroundModelCall(kind),
         lease,
         timer,
         yielding: false,
@@ -412,6 +417,7 @@ function modelSignal(
     type: "latency",
     source: "call",
     latencyMs: outcome.duration_ms,
+    endedMsAgo: 0,
     workTokens:
       Math.max(input_tokens - cached_input_tokens, 0) +
       OUTPUT_TOKEN_WEIGHT * output_tokens,

@@ -37,6 +37,7 @@ import { downloadInRegion } from "@linger/local-installation/region";
 import { latestLegacyBackup } from "@linger/local-installation/legacy-database";
 import { legacyMigrationPending } from "@linger/local-installation/home";
 import { loadInstance } from "@linger/local-installation/instance";
+import { foldersInUse } from "@linger/local-installation/native-process";
 import { normalizeFailurePunctuation } from "@linger/local-installation/localmodels-failure";
 import { validateSourceRepository } from "@linger/local-installation/source-checkout";
 import type { LegacyInstanceSkipped } from "@linger/local-installation/legacy-migration";
@@ -285,6 +286,17 @@ export interface RuntimeSignIn {
 // finished it in time; ended: the login stopped without a sign-in.
 export type RuntimeLoginReason = "unavailable" | "timed_out" | "ended";
 
+// Why an installation stopped, for failures the setup page words itself:
+// the runtime lookup outlasted RUNTIME_LOOKUP_LIMIT_MS, or the installer
+// stopped answering while it ran.
+export type LocalServerFailure =
+  | "runtime_lookup_timed_out"
+  | "runtime_lookup_unreachable";
+
+// What a running step still waits on once it has taken a while; the page
+// says so, since the bar does not move meanwhile.
+export type LocalServerWaiting = "runtime";
+
 // Codex's two logins: browser calls back to this computer, so the browser
 // must run here; device shows a code to enter in any browser, which needs
 // device-code sign-in turned on in the person's ChatGPT settings.
@@ -306,6 +318,8 @@ export interface LocalServerStatus {
   readonly progress: number;
   // While the current step downloads: what and how far.
   readonly transfer?: Transfer & { readonly label: string };
+  // While installing: what a step that has run a while still waits on.
+  readonly waiting?: LocalServerWaiting;
   // Which installation this is; each Install or Try Again starts a new one.
   readonly attempt: number;
   readonly localModels: LocalModelsCheck;
@@ -326,6 +340,8 @@ export interface LocalServerStatus {
   // While failed because the installer refused a folder as not private
   // (Windows): its code and reason.
   readonly refusal?: WindowsPrivateRefusal;
+  // While failed for a reason the page words itself.
+  readonly failure?: LocalServerFailure;
   // While ready after a degraded resume where local models could not be restored.
   readonly localModelsDegraded?: LocalModelsDegradedStatus;
 }
@@ -389,6 +405,11 @@ export interface LocalServerOptions {
   // Chromium's proxy for a URL (session.resolveProxy); without it the
   // services get no system proxy.
   readonly resolveProxy?: (url: string) => Promise<string>;
+  // How often the running server the window shows is checked, and how long
+  // one that does not answer gets to come back by itself before a resume;
+  // WATCH_MS and UNREACHABLE_GRACE_MS by default.
+  readonly watchMs?: number;
+  readonly unreachableGraceMs?: number;
 }
 
 // The starter Room the server makes for a new owner, with their Agents.
@@ -399,6 +420,19 @@ const SIGN_IN_POLL_MS = 3_000;
 // How long one check that the installed server still answers as itself
 // serves the pages that ask whether to offer the owner account.
 const SERVER_CHECK_TTL_MS = 2_000;
+const WATCH_MS = 30_000;
+// Longer than a service supervisor's restart delays (1, 2 and 5 seconds)
+// plus a web start, so a restart it has under way is not doubled.
+const UNREACHABLE_GRACE_MS = 20_000;
+// A ready server counts as stopped only after this many unanswered checks in
+// a row, spread over the grace, each waiting longer than a launch's fast
+// check: one under heavy load (such as local model inference) can answer
+// slowly for a while, and resuming it would send the window to Starting.
+const UNREACHABLE_PROBES = 3;
+const UNREACHABLE_PROBE_TIMEOUT_MS = 5_000;
+// A server that keeps going away is resumed at most this often on its own;
+// Retry is never held back.
+const RECOVERY_INTERVAL_MS = 60_000;
 
 // The instance the desktop installs.
 export const LOCAL_INSTANCE = "desktop";
@@ -485,10 +519,16 @@ export class LocalServerModule implements Module {
   #location: string | undefined;
   #locationError: string | undefined;
   #refusal: WindowsPrivateRefusal | undefined;
+  #failure: LocalServerFailure | undefined;
+  #waiting: LocalServerWaiting | undefined;
   #localModelsDegraded: LocalModelsDegradedStatus | undefined;
   #node: Promise<string> | undefined;
   #abort = new AbortController();
   #offRetry: (() => void) | undefined;
+  #offUnreachable: (() => void) | undefined;
+  #watch: ReturnType<typeof setInterval> | undefined;
+  #recovering = false;
+  #recoveredAt: number | undefined;
   #offReset: (() => void) | undefined;
   #offDaemon: (() => void) | undefined;
   #offDaemonConnection: (() => void) | undefined;
@@ -563,6 +603,10 @@ export class LocalServerModule implements Module {
       this.#daemonConnection = undefined;
     });
     this.#offRetry = ctx.bus.on("local-server.retry", () => {
+      if (this.#phase === "ready") {
+        void this.#recoverUnreachable("retry", 0, false);
+        return;
+      }
       if (this.#phase !== "failed") return;
       void this.#readRecord().then((latest) => {
         const target = latest ?? record;
@@ -576,10 +620,21 @@ export class LocalServerModule implements Module {
       record = undefined;
       void this.#reset();
     });
+    const grace = this.#options.unreachableGraceMs ?? UNREACHABLE_GRACE_MS;
+    this.#offUnreachable = ctx.bus.on("local-server.unreachable", () => {
+      void this.#recoverUnreachable("load_failed", grace, true);
+    });
+    this.#watch = setInterval(
+      () => void this.#recoverUnreachable("watch", grace, true),
+      this.#options.watchMs ?? WATCH_MS,
+    );
+    this.#watch.unref?.();
   }
 
   async stop(reason: StopReason): Promise<void> {
     this.#offRetry?.();
+    this.#offUnreachable?.();
+    clearInterval(this.#watch);
     this.#offReset?.();
     this.#offDaemon?.();
     this.#offDaemonConnection?.();
@@ -708,6 +763,9 @@ export class LocalServerModule implements Module {
       step: this.#step,
       progress: this.#progress,
       ...(this.#transfer ? { transfer: this.#transfer } : {}),
+      ...(this.#waiting && this.#phase === "installing"
+        ? { waiting: this.#waiting }
+        : {}),
       attempt: this.#attempt,
       localModels: this.#check,
       location: {
@@ -724,6 +782,7 @@ export class LocalServerModule implements Module {
       ...(this.#byokModels ? { byokModels: this.#byokModels } : {}),
       ...(this.#legacyBackup ? { legacyBackup: this.#legacyBackup } : {}),
       ...(this.#refusal ? { refusal: this.#refusal } : {}),
+      ...(this.#failure ? { failure: this.#failure } : {}),
       ...(this.#localModelsDegraded
         ? { localModelsDegraded: this.#localModelsDegraded }
         : {}),
@@ -1282,7 +1341,7 @@ export class LocalServerModule implements Module {
       const runtime = await this.#timed("installer_runtime", async () =>
         job.runtime && !job.signInRequired
           ? job.runtime
-          : installer.runtime(signal),
+          : this.#runtimeOf(installer, signal),
       );
       const preferredRuntime = setupRuntime(runtime.setupChoice);
       this.#ctx?.config.update({
@@ -1355,6 +1414,7 @@ export class LocalServerModule implements Module {
         "failed",
         message,
         windowsPrivateRefusal((error as { refusal?: unknown } | null)?.refusal),
+        localServerFailure((error as { code?: unknown } | null)?.code),
       );
       throw error;
     } finally {
@@ -1396,7 +1456,7 @@ export class LocalServerModule implements Module {
   ): Promise<LocalRuntime | { readonly byok: SetupByokConfig } | undefined> {
     const runtime =
       setupRuntime(setupChoice) ??
-      setupRuntime((await installer.runtime(signal)).setupChoice) ??
+      setupRuntime((await this.#runtimeOf(installer, signal)).setupChoice) ??
       "pi";
     this.#signInInstaller = installer;
     this.#switchTo = undefined;
@@ -1709,11 +1769,31 @@ export class LocalServerModule implements Module {
     );
   }
 
-  // A refusal stays only with the failure it caused.
+  // The runtime the installation set up. On Windows the installer's lookup
+  // can run for minutes with nothing to report, so after a while the page
+  // says what it waits on.
+  async #runtimeOf(
+    installer: InstallerApi,
+    signal: AbortSignal,
+  ): Promise<InstanceRuntime> {
+    const slow = setTimeout(() => {
+      this.#waiting = "runtime";
+      this.#ctx?.bus.emit("local-server.changed");
+    }, RUNTIME_LOOKUP_HINT_MS);
+    try {
+      return await installer.runtime(signal);
+    } finally {
+      clearTimeout(slow);
+      this.#waiting = undefined;
+    }
+  }
+
+  // A refusal or a failure reason stays only with the failure it caused.
   #set(
     phase: LocalServerPhase,
     message: string,
     refusal?: WindowsPrivateRefusal,
+    failure?: LocalServerFailure,
   ): void {
     // A failure stays on the step it happened in.
     if (phase !== "installing" && phase !== "ready" && phase !== "failed") {
@@ -1725,6 +1805,7 @@ export class LocalServerModule implements Module {
     this.#phase = phase;
     this.#message = message;
     this.#refusal = phase === "failed" ? refusal : undefined;
+    this.#failure = phase === "failed" ? failure : undefined;
     if (phase !== "ready") this.#localModelsDegraded = undefined;
     this.#ctx?.bus.emit("local-server.changed");
   }
@@ -2204,12 +2285,24 @@ export class LocalServerModule implements Module {
     if (this.#options.checkout) return;
     const parent = path.join(home, "desktop", "source");
     const kept = keep.flatMap((item) => (item ? [path.basename(item)] : []));
-    for (const entry of await readdir(parent).catch(() => [] as string[]))
-      if (!kept.includes(entry))
-        await rm(path.join(parent, entry), {
-          recursive: true,
-          force: true,
-        }).catch(() => undefined);
+    const prunable = (
+      await readdir(parent).catch(() => [] as string[])
+    ).flatMap((entry) =>
+      kept.includes(entry) ? [] : [path.join(parent, entry)],
+    );
+    if (!prunable.length) return;
+    // A service still running from a folder (its restart onto the kept one
+    // has not happened, or failed) would lose its files under it.
+    const inUse = await foldersInUse(prunable);
+    for (const folder of prunable) {
+      if (inUse.has(folder)) {
+        this.#ctx?.log.info("local_server.source_in_use", {
+          source: path.basename(folder),
+        });
+        continue;
+      }
+      await rm(folder, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
   // Downloads a verified archive and unpacks its single top-level folder
@@ -2787,9 +2880,59 @@ export class LocalServerModule implements Module {
     ctx.bus.emit("setup.open");
   }
 
+  // The services can stop while the window shows them. Their supervisors
+  // restart them, so one that does not answer first gets `graceMs` to come
+  // back, checked again during it; one still silent after that (its
+  // supervisor gave up or was ended too) is resumed like a launch: the
+  // installer starts what is not running.
+  async #recoverUnreachable(
+    trigger: "retry" | "load_failed" | "watch",
+    graceMs: number,
+    throttled: boolean,
+  ): Promise<void> {
+    if (this.#recovering || this.#resuming || this.#phase !== "ready") return;
+    if (
+      throttled &&
+      this.#recoveredAt !== undefined &&
+      Date.now() - this.#recoveredAt < RECOVERY_INTERVAL_MS
+    )
+      return;
+    this.#recovering = true;
+    try {
+      let record = await this.#windowRecord();
+      if (!record || (await this.#stillAnswers(record.origin))) return;
+      const checks = graceMs > 0 ? UNREACHABLE_PROBES - 1 : 0;
+      for (let check = 0; check < checks; check++) {
+        await delay(graceMs / checks, undefined, {
+          signal: this.#abort.signal,
+        });
+        if (this.#resuming) return;
+        record = await this.#windowRecord();
+        if (!record || (await this.#stillAnswers(record.origin))) return;
+      }
+      this.#recoveredAt = Date.now();
+      this.#ctx?.log.warn("local_server.unreachable_resume", { trigger });
+      await this.#resume(record, this.#abort.signal);
+    } catch {
+      // Aborted by stop.
+    } finally {
+      this.#recovering = false;
+    }
+  }
+
   // Whether the services already answer, such as after only the app quit.
   #reachable(origin: string): Promise<boolean> {
     return answers(this.#options.fetch ?? fetch, origin);
+  }
+
+  // Whether a ready server still answers, given more time than a launch's
+  // fast check.
+  #stillAnswers(origin: string): Promise<boolean> {
+    return answers(
+      this.#options.fetch ?? fetch,
+      origin,
+      UNREACHABLE_PROBE_TIMEOUT_MS,
+    );
   }
 
   // Whether the services run another source package than this app brings,
@@ -3390,12 +3533,13 @@ const STAGES: Record<string, readonly [LocalServerStep, number, number]> = {
 async function answers(
   fetcher: typeof fetch,
   origin: string,
+  timeoutMs = 1_000,
 ): Promise<boolean> {
   try {
     await fetcher(origin, {
       method: "HEAD",
       redirect: "manual",
-      signal: AbortSignal.timeout(1_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     return true;
   } catch {
@@ -3528,9 +3672,25 @@ export interface Reconnect {
 }
 
 const RECONNECT: Reconnect = { windowMs: 60_000, maxBackoffMs: 5_000 };
-// The runtime lookup runs a 120-second harness probe, with private file and
-// pinned tool checks before and after it.
-const INSTALLER_RUNTIME_TIMEOUT_MS = 180_000;
+// The runtime lookup runs a harness status probe (120 s at most) with
+// private folder and pinned tool checks around it; on Windows each of those
+// is a PowerShell ACL request of up to 30 s, so a slow machine takes a few
+// minutes and the worst case of every inner limit stays near seven. The
+// installer runs one lookup per instance and keeps its answer, so waiting
+// costs nothing and asking again joins it. This limit only ends a lookup
+// that has stopped making progress; it is not a performance budget.
+export const RUNTIME_LOOKUP_LIMIT_MS = 10 * 60_000;
+// When the setup page starts saying what the bar is waiting on.
+export const RUNTIME_LOOKUP_HINT_MS = 15_000;
+
+const FAILURES: ReadonlySet<string> = new Set<LocalServerFailure>([
+  "runtime_lookup_timed_out",
+  "runtime_lookup_unreachable",
+]);
+const localServerFailure = (code: unknown): LocalServerFailure | undefined =>
+  typeof code === "string" && FAILURES.has(code)
+    ? (code as LocalServerFailure)
+    : undefined;
 
 const TRANSIENT_CODES = new Set([
   "ECONNRESET",
@@ -3540,6 +3700,9 @@ const TRANSIENT_CODES = new Set([
   "UND_ERR_SOCKET",
   "UND_ERR_CONNECT_TIMEOUT",
   "UND_ERR_CLOSED",
+  // fetch stops waiting for response headers after 300 s; the installer may
+  // still be working on the answer.
+  "UND_ERR_HEADERS_TIMEOUT",
 ]);
 
 // The code of a transport failure worth retrying, found on the error or its
@@ -3637,6 +3800,10 @@ export class InstallerApi {
     if (
       !fresh &&
       latest &&
+      // A job for another choice is the person's earlier answer: after a quit
+      // part way through the local model download, choosing a subscription
+      // must not follow that download. The installer replaces it.
+      runsPlan(latest, plan) &&
       (["queued", "running"].includes(latest.state) ||
         // A finished one only while its instance is still there; its data
         // may have been removed since. Its services must still run too: after
@@ -3823,25 +3990,54 @@ export class InstallerApi {
   }
 
   // The runtime the installation set up, with the paths of its executable
-  // and profile.
+  // and profile. The installer answers once its lookup ends, and asking
+  // again joins the running one, so a dropped connection is asked again
+  // like a job poll; only RUNTIME_LOOKUP_LIMIT_MS in all ends the wait.
   async runtime(signal: AbortSignal): Promise<InstanceRuntime> {
-    const deadline = AbortSignal.timeout(INSTALLER_RUNTIME_TIMEOUT_MS);
-    try {
-      return await this.#json(
-        `/api/instances/${LOCAL_INSTANCE}/runtime`,
-        undefined,
-        "GET",
-        AbortSignal.any([signal, deadline]),
-      );
-    } catch (error) {
-      if (!signal.aborted && deadline.aborted)
-        throw new Error(
-          "The installer timed out while reading the selected runtime.",
-          {
-            cause: error,
-          },
+    const deadline = AbortSignal.timeout(RUNTIME_LOOKUP_LIMIT_MS);
+    const either = AbortSignal.any([signal, deadline]);
+    let since: number | undefined;
+    let wait = this.#pollMs;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.#json(
+          `/api/instances/${LOCAL_INSTANCE}/runtime`,
+          undefined,
+          "GET",
+          either,
         );
-      throw error;
+      } catch (error) {
+        if (signal.aborted) throw error;
+        if (deadline.aborted)
+          throw Object.assign(
+            new Error(
+              "Checking the AI runtime on this computer did not finish in time.",
+              { cause: error },
+            ),
+            { code: "runtime_lookup_timed_out" },
+          );
+        const code = transientCode(error);
+        if (!code) throw error;
+        this.#log?.warn("local_server.installer_unreachable", {
+          stage: "runtime",
+          code,
+          attempt,
+        });
+        // A lookup that outlasted fetch's wait for an answer is still
+        // running in the installer: ask again at once to join it.
+        if (code === "UND_ERR_HEADERS_TIMEOUT") continue;
+        since ??= Date.now();
+        if (Date.now() - since >= this.#reconnect.windowMs)
+          throw Object.assign(
+            new Error(
+              "Lost the connection to the installer while checking the AI runtime.",
+              { cause: error },
+            ),
+            { code: "runtime_lookup_unreachable" },
+          );
+        await delay(wait, undefined, { signal });
+        wait = Math.min(wait * 2, this.#reconnect.maxBackoffMs);
+      }
     }
   }
 
@@ -3960,6 +4156,16 @@ const recommended = (report: { recommendation?: string }) =>
   report.recommendation === "local-models"
     ? "pi"
     : (report.recommendation ?? "codex");
+
+// Whether the job installs what the plan asks for. The installer picks for
+// "recommended", which never deploys the local model (see `recommended`).
+// A job that names no choice used the saved one and is followed as before.
+const runsPlan = (job: Job, plan: LocalServerPlan): boolean =>
+  !job.setupChoice ||
+  (plan.runtime === "recommended"
+    ? job.setupChoice !== "local-models"
+    : job.setupChoice ===
+      (plan.runtime === "local" ? "local-models" : plan.runtime));
 
 export interface SetCookie {
   readonly name: string;

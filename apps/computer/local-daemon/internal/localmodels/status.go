@@ -175,6 +175,9 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 		if model.State != "loaded" {
 			model.Endpoint = nil
 		}
+		// concurrency_probing is owned by the Daemon's post-load probe and
+		// never comes from localmodels directly.
+		model.ConcurrencyProbing = nil
 		if model.Error != nil {
 			model.Error.Detail = clip(model.Error.Detail, 4000)
 		}

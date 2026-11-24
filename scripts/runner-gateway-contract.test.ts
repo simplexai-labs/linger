@@ -1472,6 +1472,9 @@ describe("Runner Gateway contract", () => {
       parseAgentToDaemonEnvelope({ ...modelInvoke, runtime_type: "pi" }),
     ).toMatchObject({ runtime_type: "pi", mode: "structured" });
     expect(
+      parseAgentToDaemonEnvelope({ ...modelInvoke, model: "gpt-5" }),
+    ).toMatchObject({ runtime_type: "codex", model: "gpt-5" });
+    expect(
       parseAgentToDaemonEnvelope({
         ...withoutProperty(modelInvoke, "output_schema"),
         runtime_type: "pi",
@@ -1486,7 +1489,8 @@ describe("Runner Gateway contract", () => {
       { ...modelInvoke, input: "" },
       { ...modelInvoke, timeout_ms: 999 },
       { ...modelInvoke, timeout_ms: 14_400_001 },
-      { ...modelInvoke, model: "gpt-5" },
+      { ...modelInvoke, model: "" },
+      { ...modelInvoke, model: "x".repeat(161) },
       { ...modelInvoke, execution_context_key: "context-1" },
       withoutProperty(modelInvoke, "owner_actor_id"),
       withoutProperty(modelInvoke, "reasoning_effort"),

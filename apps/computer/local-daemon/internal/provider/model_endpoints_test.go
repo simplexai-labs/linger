@@ -109,14 +109,14 @@ base_url = "https://lab.example/v1"
 		}
 		return ModelInvokeRuntime{ExecutablePath: "/bin/codex", Environment: map[string]string{"CODEX_HOME": home}}, true, nil
 	}}
-	got := invoker.ModelEndpoints(context.Background(), "codex")
+	got := invoker.ModelEndpoints(context.Background(), "codex", "")
 	if len(got) != 1 || got[0].String() != "https://lab.example" {
 		t.Fatalf("endpoints = %v", got)
 	}
-	if got := invoker.ModelEndpoints(context.Background(), "claude"); got != nil {
+	if got := invoker.ModelEndpoints(context.Background(), "claude", ""); got != nil {
 		t.Fatalf("missing Runtime endpoints = %v, want none", got)
 	}
-	if got := (ModelInvoker{}).ModelEndpoints(context.Background(), "codex"); got != nil {
+	if got := (ModelInvoker{}).ModelEndpoints(context.Background(), "codex", ""); got != nil {
 		t.Fatalf("endpoints without a lookup = %v, want none", got)
 	}
 }

@@ -40,6 +40,21 @@ describe("realtime page chain rule", () => {
 });
 
 describe("realtime session rules", () => {
+  it("keeps session guardrails but drops the opening preamble after a tool", () => {
+    const rules = realtimeInstructions(
+      "Room policy",
+      [],
+      new Date(),
+      "after_tool",
+    );
+    expect(rules).toContain("Room policy");
+    expect(rules).toContain(
+      "NEVER set confirmed to true before the user clearly agrees",
+    );
+    expect(rules).toContain("only its native function call now");
+    expect(rules).not.toContain("Before the first tool the user waits on");
+  });
+
   it("follows the persona with one place per kind of request and the absolute rules", () => {
     const rules = realtimeInstructions("## Role & Persona\nbase", [
       { name: "page_action" },
@@ -64,7 +79,7 @@ describe("realtime session rules", () => {
       rules.indexOf("## CRITICAL INSTRUCTIONS"),
     );
     for (const want of [
-      "recall_memory, also when that page is open on the screen",
+      "For a gap about their past or Wiki, use recall_memory",
       "It reaches nothing outside this app",
       "surface web for websites",
       "desktop for apps and files on their computer",
@@ -85,6 +100,7 @@ describe("realtime session rules", () => {
       { name: "list_routines" },
       { name: "change_routine" },
       { name: "create_agent" },
+      { name: "add_room_members" },
       { name: "search_slack" },
       { name: "slack_inbox" },
       { name: "send_slack" },
@@ -94,6 +110,7 @@ describe("realtime session rules", () => {
       "create_routine; which ones exist is list_routines",
       "with no phone notification",
       "create_agent, with complete instructions",
+      "use add_room_members with that room ID",
       "slack_inbox for what came to them",
       "Sending a Slack message is send_slack",
       "Slack is send_slack, and replying or posting in Feishu",
@@ -104,6 +121,7 @@ describe("realtime session rules", () => {
       "create_document",
       "create_routine",
       "create_agent",
+      "add_room_members",
       "send_slack",
     ])
       expect(without).not.toContain(tool);

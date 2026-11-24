@@ -26,6 +26,12 @@ const sameStep = (a: Event, b: Event) =>
   a.progress?.unit === b.progress?.unit;
 const active = (job: Job) =>
   ["queued", "running", "waiting_user"].includes(job.state);
+// What the person chose to install: a runtime, the local model
+// ("local-models"), or a runtime behind their own key.
+const choiceOf = (input: Input) =>
+  input.byok
+    ? `byok:${input.byok.runtime ?? input.setupChoice ?? ""}`
+    : input.setupChoice;
 function validOutcome(value: unknown): value is {
   state: string;
   code: number;
@@ -108,6 +114,8 @@ export class JobManager {
       task?: Promise<void>;
       cancelRequested?: boolean;
       executing?: boolean;
+      // Queued behind the job it replaced, until that one has ended.
+      waiting?: boolean;
     }
   >();
   private listeners = new Map<string, Set<(event: Event) => void>>();
@@ -171,7 +179,10 @@ export class JobManager {
   }
   get busy() {
     return [...this.records.values()].some(
-      (record) => record.starting || (active(record.job) && record.executing),
+      (record) =>
+        record.starting ||
+        record.waiting ||
+        (active(record.job) && record.executing),
     );
   }
   private timers = new Map<string, NodeJS.Timeout>();
@@ -285,22 +296,32 @@ export class JobManager {
       listener(structuredClone(event));
   }
   async start(input: Input): Promise<Job> {
-    const existing = [...this.records.values()].find(
+    const current = [...this.records.values()].filter(
       (record) =>
         record.job.instance === input.instance &&
         record.job.preparation === input.preparation &&
         active(record.job),
     );
+    // One still stopping for a replacement is not the current job.
+    const existing =
+      current.find((record) => !record.cancelRequested) ?? current[0];
     // A job that ran to the end and now waits for the person mutates
     // nothing; a new start is their answer, so it replaces that job and
     // checks the computer again instead of returning the stale outcome.
+    // A start that chooses another runtime (or the local model) is the
+    // person's latest choice too: it stops the running job, which keeps the
+    // download of a local model chosen before, and runs once that has ended
+    // and left the instance. A start without a choice follows the running job.
     // cancel() marks it canceled before its first await and the new record
     // is set in the same step, so a concurrent start gets the new job back.
-    const replaced =
-      existing?.job.state === "waiting_user" && !existing.executing
+    const stopping =
+      existing &&
+      ((existing.job.state === "waiting_user" && !existing.executing) ||
+        (choiceOf(input) !== undefined &&
+          choiceOf(input) !== choiceOf(existing.input)))
         ? this.cancel(existing.job.id)
         : undefined;
-    if (existing && !replaced) return structuredClone(existing.job);
+    if (existing && !stopping) return structuredClone(existing.job);
     const id = randomUUID(),
       // Preserve successor order even when jobs are created within one clock tick.
       at = new Date(
@@ -349,10 +370,11 @@ export class JobManager {
       task: undefined as Promise<void> | undefined,
       cancelRequested: false,
       executing: false,
+      waiting: false,
     };
     this.records.set(id, record);
     record.starting = (async () => {
-      await replaced;
+      await stopping;
       await privateWrite(path.join(this.directory, `${id}.input.json`), input);
       await this.persist(id);
     })();
@@ -364,9 +386,21 @@ export class JobManager {
     } finally {
       record.starting = undefined;
     }
-    if (record.cancelRequested) return structuredClone(job);
-    record.executing = true;
-    record.task = this.execute(id).catch(() => {
+    // The replaced job may be in a step that only stops at its end (services,
+    // account or computer), which can take minutes, so the caller gets the
+    // queued job now and it runs once that job has ended and left the
+    // instance. The task covers the wait, so a start that replaces this job
+    // in turn also waits for the earlier one.
+    record.task = (async () => {
+      if (existing) {
+        record.waiting = true;
+        await existing.task;
+        record.waiting = false;
+      }
+      if (record.cancelRequested) return;
+      record.executing = true;
+      await this.execute(id);
+    })().catch(() => {
       record.executing = false;
       record.job.state = "failed";
       record.job.errorCode = "STORAGE_UNAVAILABLE";
@@ -578,7 +612,7 @@ export class JobManager {
   }
   async shutdown() {
     const running = [...this.records.values()].filter(
-      (record) => record.starting || record.executing,
+      (record) => record.starting || record.waiting || record.executing,
     );
     const cancellations = await Promise.allSettled(
       running.map((record) => this.cancel(record.job.id)),

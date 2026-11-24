@@ -9,7 +9,7 @@ overrides:
 
 patchedDependencies:
   '@hocuspocus/server@4.3.0': c6b938c4b952964ade14a2e8099774cb3f489c06a7522ed2264f158b14387b70
-  '@livekit/agents@1.7.1': a2a99608ccad5c400634accbbb04b77a0f96bba6949baaa6c88b4568f7526753
+  '@livekit/agents@1.7.1': 385866550b874ed2031bc8c42dee77e0640e895900484da8c2ee94b0a4f24332
   deepagents@1.12.0: 7a922549743b0a521c959c1d7400ddb6cad1ca8c43c7692e2dc8847bd3f2ea25
   playwright-core@1.64.0-alpha-1790635538000: 78d5eb47c9c7095d8c87a9f21aba2d7f240636ea9a759299d3f99d7f7f9bcd5e
 
@@ -435,7 +435,7 @@ importers:
         version: link:../../contracts/generated/typescript
       '@livekit/agents':
         specifier: 1.7.1
-        version: 1.7.1(patch_hash=a2a99608ccad5c400634accbbb04b77a0f96bba6949baaa6c88b4568f7526753)(@aws-sdk/credential-provider-node@3.972.85)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.4)(@types/node@26.0.1)(typescript@6.0.3)(zod@4.4.3)
+        version: 1.7.1(patch_hash=385866550b874ed2031bc8c42dee77e0640e895900484da8c2ee94b0a4f24332)(@aws-sdk/credential-provider-node@3.972.85)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.4)(@types/node@26.0.1)(typescript@6.0.3)(zod@4.4.3)
       '@livekit/local-inference':
         specifier: 0.2.7
         version: 0.2.7
@@ -9168,7 +9168,7 @@ snapshots:
 
   '@lifeomic/attempt@3.1.0': {}
 
-  '@livekit/agents@1.7.1(patch_hash=a2a99608ccad5c400634accbbb04b77a0f96bba6949baaa6c88b4568f7526753)(@aws-sdk/credential-provider-node@3.972.85)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.4)(@types/node@26.0.1)(typescript@6.0.3)(zod@4.4.3)':
+  '@livekit/agents@1.7.1(patch_hash=385866550b874ed2031bc8c42dee77e0640e895900484da8c2ee94b0a4f24332)(@aws-sdk/credential-provider-node@3.972.85)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.4)(@types/node@26.0.1)(typescript@6.0.3)(zod@4.4.3)':
     dependencies:
       '@bufbuild/protobuf': 1.10.1
       '@livekit/av': 10.0.0

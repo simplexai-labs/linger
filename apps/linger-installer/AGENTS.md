@@ -22,7 +22,15 @@ A closed native sign-in input reports failure without stopping the installer;
 retry starts a new owned login process.
 A start returns the instance's running or queued job; a job that finished its
 run and waits for the person (`waiting_user`, e.g. `LOCAL_MODELS_UNAVAILABLE`)
-is canceled and replaced, so Try Again checks the computer again.
+is canceled and replaced, so Try Again checks the computer again. A start that
+names another choice (`setupChoice`, or BYOK for another runtime) than the
+active job's is the person's latest choice: it cancels that job (stopping a
+local model download chosen before, which the manager keeps running after the
+desktop quits) and runs once it has ended. The start answers at once with the
+new `queued` job: the earlier job may be in a step that only stops at its end
+(services, account, computer), which can take minutes, so the new job waits for
+it in the background and shutdown or a cancel stops it before it runs. A start
+without a choice follows the active job.
 An idle desktop-owned manager steps aside when the desktop relaunches the same
 instance with another checkout. Every installation runs natively from the
 source checkout `--source-repo` names. Start failures print their real cause
@@ -73,8 +81,9 @@ not exist yet on a `local-models` setup) has its stack and saved library model
 checked (`restoreLocalModels`), since a quit stops the models but not the
 services: a stack that is not ready gets the same restore, an unloaded saved
 local model (`localmodels/` or `localmodels-library/`) is reloaded, and the local source is applied again;
-if that restore fails or throws (or a same-checkout cold resume cannot prepare
-the local model stack or reload its saved library model), the failure is logged
+if that restore fails or throws (or a cold resume, including the first start after an app update onto a
+new checkout, cannot prepare the local model stack or reload its saved library
+model), the failure is logged
 and reported in the ready outcome's `details.localModelsDegraded` without
 failing the resume, so the person can still reach the workspace and the Models
 page. Resource-choice mismatches omit stale binding reason codes so Quick
@@ -110,6 +119,14 @@ and reloading saved jobs omit the runtime so a later setup reads current paths.
 When the handoff fails, the job still succeeds without `runtime`, stderr gets
 one `{"event":"installer.runtime_handoff_failed","instance","message"}` line,
 and the desktop falls back to `GET /api/instances/{name}/runtime`.
+
+`GET /api/instances/{name}/runtime` runs one lookup per instance at a time
+(`runtime-lookup.ts`): a second request joins the running one, and a finished
+answer is kept for 10 minutes, so a desktop that stopped waiting picks up the
+late result on Try Again or its next launch instead of starting the lookup
+over. Starting or finishing an install, or saving a runtime key, forgets it.
+The runtime descriptors an install inspected answer the lookup in place of a
+second status probe, as on the resume path.
 
 `--stop` (with `--instance`) is the desktop uninstall's and Windows setup's: it stops the
 manager the desktop started for that instance (its `/api/stop` cancels a

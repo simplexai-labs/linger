@@ -44,6 +44,7 @@ type modelInvoke struct {
 
 type modelInvokeRequest struct {
 	InvokeID        string                     `json:"invoke_id"`
+	Model           string                     `json:"model"`
 	Mode            string                     `json:"mode"`
 	ReasoningEffort string                     `json:"reasoning_effort"`
 	Instructions    string                     `json:"instructions"`
@@ -68,7 +69,7 @@ func (d *Daemon) handleModelInvoke(ctx context.Context, stream transport.Stream,
 	}
 	receivedAt := time.Now()
 	slog.Info("runner.model.invoke", "phase", "received", "invoke_id", request.InvokeID,
-		"agent_id", command.AgentID, "runtime_type", command.RuntimeType, "mode", request.Mode)
+		"agent_id", command.AgentID, "runtime_type", command.RuntimeType, "model", request.Model, "mode", request.Mode)
 	d.admissionMu.Lock()
 	result := d.modelInvokeBlocked(command, request)
 	var entry *modelInvoke
@@ -115,9 +116,10 @@ func (d *Daemon) modelInvokeBlocked(command protocol.Command, request modelInvok
 	if d.modelInvoker == nil {
 		return provider.ModelInvokeResult{Outcome: provider.ModelInvokeRuntimeUnavailable, Reason: "Model invocation is unavailable"}
 	}
-	if d.modelInvokeUnready != nil && d.modelInvokeUnready(command.RuntimeType) {
-		// Pi lists the Computer's downloaded local models so a Run can load
-		// one, but a model call names no model and none is loaded.
+	if request.Model == "" && d.modelInvokeUnready != nil && d.modelInvokeUnready(command.RuntimeType) {
+		// Pi lists the Computer's downloaded local models so a Run or model
+		// call that names one can load it, but a legacy call that names no
+		// model cannot run when none is loaded.
 		return provider.ModelInvokeResult{Outcome: provider.ModelInvokeRuntimeUnavailable, Reason: "The Runtime has no loaded model"}
 	}
 	if reason := invalidModelInvokeRequest(request); reason != "" {
@@ -159,15 +161,17 @@ func (d *Daemon) runModelInvoke(ctx context.Context, stream transport.Stream, co
 	var result provider.ModelInvokeResult
 	if failureCode, err := d.ensureModelGateway(ctx, command.RuntimeType); err != nil {
 		result = modelGatewayInvokeFailure(ctx, failureCode, err)
+	} else if failureCode, err := d.ensureLocalModel(ctx, command.RuntimeType, request.Model); err != nil {
+		result = localModelInvokeFailure(ctx, failureCode, err)
 	} else {
-		effort := d.normalizeModelInvokeEffort(command.RuntimeType, request.ReasoningEffort)
+		effort := d.normalizeModelInvokeEffort(command.RuntimeType, request.Model, request.ReasoningEffort)
 		result = d.modelInvoker.Invoke(ctx, provider.ModelInvokeRequest{
-			RuntimeType: command.RuntimeType, Mode: request.Mode, ReasoningEffort: effort,
+			RuntimeType: command.RuntimeType, Model: request.Model, Mode: request.Mode, ReasoningEffort: effort,
 			Instructions: request.Instructions, Input: request.Input, OutputSchema: request.OutputSchema,
 			WorkspaceFiles: request.WorkspaceFiles, Timeout: time.Duration(request.TimeoutMS) * time.Millisecond,
 			SessionKey: request.SessionKey, MaxOutputChars: request.MaxOutputChars,
 		})
-		result = d.networkUnavailableModelInvoke(ctx, entry.id, command.RuntimeType, result)
+		result = d.networkUnavailableModelInvoke(ctx, entry.id, command.RuntimeType, request.Model, result)
 	}
 	entry.cancel()
 	d.modelInvokeMu.Lock()
@@ -178,6 +182,20 @@ func (d *Daemon) runModelInvoke(ctx context.Context, stream transport.Stream, co
 	if err := d.sendModelInvoked(context.WithoutCancel(ctx), stream, command, entry.id, result, time.Since(receivedAt)); err != nil {
 		slog.Debug("runner.model.invoke receipt unavailable", "invoke_id", entry.id)
 	}
+}
+
+// localModelInvokeFailure answers a Pi model call whose library model could
+// not be loaded, matching ensureLocalModel on a Run.
+func localModelInvokeFailure(ctx context.Context, _ string, err error) provider.ModelInvokeResult {
+	if ctx.Err() != nil {
+		return provider.ModelInvokeResult{Outcome: provider.ModelInvokeCanceled, Reason: "Model invocation was canceled"}
+	}
+	reason := "The local model could not be loaded"
+	var loadErr *localmodels.LocalModelLoadError
+	if errors.As(err, &loadErr) && loadErr.Code != "" {
+		reason += " (" + loadErr.Code + ")"
+	}
+	return provider.ModelInvokeResult{Outcome: provider.ModelInvokeRuntimeUnavailable, Reason: reason}
 }
 
 // modelGatewayInvokeFailure answers a model call whose Runtime's gateway
@@ -204,9 +222,10 @@ func modelGatewayInvokeFailure(ctx context.Context, failureCode string, err erro
 }
 
 // normalizeModelInvokeEffort clamps requested reasoning effort for Codex and
-// Claude against the Runtime's discovered default model. Pi clamps live from
-// its own get_state model metadata inside InvokePiModel.
-func (d *Daemon) normalizeModelInvokeEffort(runtimeType, requested string) string {
+// Claude against the requested model (falling back to the Runtime's discovered
+// default model when omitted). Pi clamps live from its own get_state model
+// metadata inside InvokePiModel.
+func (d *Daemon) normalizeModelInvokeEffort(runtimeType, requestedModel, requested string) string {
 	if runtimeType != "codex" && runtimeType != "claude" {
 		return requested
 	}
@@ -224,7 +243,7 @@ func (d *Daemon) normalizeModelInvokeEffort(runtimeType, requested string) strin
 		if diag.Type != runtimeType {
 			continue
 		}
-		model, ok := defaultRuntimeModel(diag.Models)
+		model, ok := runtimeModelForEffort(diag.Models, requestedModel)
 		if !ok || len(model.AllowedReasoningEffort) == 0 {
 			return requested
 		}
@@ -240,6 +259,17 @@ func (d *Daemon) normalizeModelInvokeEffort(runtimeType, requested string) strin
 		return normalized
 	}
 	return requested
+}
+
+func runtimeModelForEffort(models []provider.RuntimeModel, requestedModel string) (provider.RuntimeModel, bool) {
+	if requestedModel != "" {
+		for _, model := range models {
+			if model.ID == requestedModel {
+				return model, true
+			}
+		}
+	}
+	return defaultRuntimeModel(models)
 }
 
 func filterModelInvokeEfforts(runtimeType string, efforts []string) []string {

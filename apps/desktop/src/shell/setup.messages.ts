@@ -201,6 +201,12 @@ export const setupMessages = defineMessages("setup", {
   stepConnect: "Connecting this computer",
   stepAgents: "Preparing your agents",
   stepRunning: "{step}…",
+  waitingRuntime:
+    "Checking the AI runtime on this computer. On some computers this takes a few minutes; the bar moves on once it finishes.",
+  runtimeLookupTimedOut:
+    "Checking the AI runtime did not finish in 10 minutes. Try Again picks up the same check; if it stops again, save diagnostics and send them to Linger support.",
+  runtimeLookupUnreachable:
+    "Lost the connection to the installer while checking the AI runtime. Try Again to reconnect; your data is kept.",
   showDetails: "Show Details",
   hideDetails: "Hide Details",
   showLogs: "Show Logs",

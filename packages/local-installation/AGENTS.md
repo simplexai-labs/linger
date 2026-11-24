@@ -250,7 +250,11 @@ source under the same lock (never guessing an arbitrary idle model when no
 falling back to `stack apply`), verifies whether a saved local model
 (`localmodels/` or `localmodels-library/`) is loaded, and sets the local source again. Library-model reload failures return a failure outcome that warm
 and cold resume surface in `details.localModelsDegraded` so startup stays usable
-and the person can still reach the Models page. On cold resume, a saved `local`
+and the person can still reach the Models page. The first start after an app
+update onto a new checkout passes `degradeLocalModels` without `resume` (it
+installs newer runtimes in full) and degrades the same way, so a stack an
+earlier release left stopped, which the new kit cannot bring back as saved,
+never locks the person out. On cold resume, a saved `local`
 source preserves local mode and prepares its runtime instead of letting an older
 `setup-choice.json` overwrite `model-source.json` back to `subscription`.
 Deployments, that check and the quit-time stop share one lock per home
@@ -326,6 +330,24 @@ whose command line names a job file in this instance's process directory
 under a lease no record holds, once its environment proves that lease; an
 attempt that failed or was killed before keeping a record would otherwise
 leave PostgreSQL holding `postmaster.pid` against every retry.
+
+The supervisor writes one `[linger-supervisor] <name>` line to the service's
+log when it starts the service and for every exit (code, signal, uptime and
+whether it restarts). A start with `restartOnExit` (TeamHub, node-services and
+web, at `SERVICE_RESTART_POLICY`) makes the supervisor itself start the service
+again when it exits unasked, after 1, 2 and then 5 seconds, ending first what
+the exited service left under the lease. The supervisor owns the service and
+outlives the app, so this also covers a headless install and a closed window.
+An exit within the first 10 seconds of the first run is a startup failure the
+installer reports, never restarted; five exits within a minute end
+supervision with a `gave up restarting` line, the supervisor exits, and the
+next resume starts the service as one that is not running. Every intended
+stop (`stopNativeProcess`, a configuration restart, quit, uninstall,
+`reclaimNativeOrphans`) first writes `<name>.<lease>.stop` beside the record;
+the supervisor reads it before deciding and again right before restarting,
+and the POSIX stop also kills what holds the lease after the supervisor, so a
+restart racing the stop cannot outlive it. PostgreSQL and LiveKit are not
+restarted; their exits are logged with `reason=not_supervised`.
 
 Native runtime and localmodels kit verification (`native-runtime.ts` and
 `localmodels-tool.ts`) stop assigning files on the first mismatch and wait

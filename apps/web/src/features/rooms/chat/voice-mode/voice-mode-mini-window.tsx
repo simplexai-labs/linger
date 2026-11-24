@@ -13,6 +13,8 @@ import {
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Icon } from "@/components/ui/icon";
 import {
+  Fragment,
+  memo,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -252,14 +254,37 @@ function MiniWindow({
     [],
   );
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
-  const contentVersion = transcript
-    ? `${transcript.length}:${transcript.at(-1)?.text.length}:${saying.length}`
-    : `${turns.length}:${turns.at(-1)?.id}:${replying.length}:${live.length}`;
+  /** A follow scroll is gliding down to the newest words. */
+  const glidingRef = useRef(false);
+  const lastTopRef = useRef(0);
+  // Follows the conversation as it grows, gliding down to new lines instead
+  // of snapping on every packet. A Human who scrolled up stays where they are.
   useLayoutEffect(() => {
-    const element = scrollRef.current;
-    if (element && followRef.current) element.scrollTop = element.scrollHeight;
-  }, [contentVersion]);
+    const scroller = scrollRef.current;
+    const content = contentRef.current;
+    const view = scroller?.ownerDocument.defaultView;
+    if (!scroller || !content || !view || !("ResizeObserver" in view)) return;
+    const pin = (glide: boolean) => {
+      if (!followRef.current) return;
+      const top = scroller.scrollHeight - scroller.clientHeight;
+      if (top - scroller.scrollTop < 1) return;
+      glidingRef.current =
+        glide &&
+        typeof scroller.scrollTo === "function" &&
+        !view.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      if (glidingRef.current) scroller.scrollTo({ top, behavior: "smooth" });
+      else scroller.scrollTop = top;
+    };
+    // Opening the window, or moving it into or out of picture-in-picture,
+    // shows the newest words at once; only words added afterwards glide.
+    pin(false);
+    const observer = new view.ResizeObserver(() => pin(true));
+    observer.observe(content);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [pip]);
 
   const state = session.state;
   const muted = session.muted;
@@ -438,75 +463,93 @@ function MiniWindow({
         <div
           aria-label={t(m.conversation)}
           aria-live="polite"
-          className="workspace-scrollbar min-h-24 flex-1 space-y-2 overflow-y-auto px-3 py-3"
+          className="workspace-scrollbar min-h-24 flex-1 overflow-y-auto px-3 py-3"
           onScroll={(event) => {
             const element = event.currentTarget;
-            followRef.current =
-              element.scrollHeight - element.scrollTop - element.clientHeight <
-              24;
+            const top = element.scrollTop;
+            const atBottom =
+              element.scrollHeight - top - element.clientHeight < 24;
+            // A follow glide passes through positions short of the bottom
+            // on its way down; only moving up leaves the newest words.
+            if (atBottom) {
+              followRef.current = true;
+              glidingRef.current = false;
+            } else if (!glidingRef.current || top < lastTopRef.current) {
+              followRef.current = false;
+              glidingRef.current = false;
+            }
+            lastTopRef.current = top;
           }}
           ref={scrollRef}
           role="log"
         >
-          {(transcript ? transcript.length : turns.length || replying.length) ||
-          live ? null : (
-            <p className="py-4 text-center text-xs text-app-muted">
-              {t(m.empty)}
-            </p>
-          )}
-          {transcript ? (
-            transcript.map((line) => (
-              <Bubble
-                agent={line.speaker !== "you"}
-                author={
-                  line.speaker === "you"
-                    ? t(commonMessages.you)
-                    : session.target.recipient?.display_name || t(m.reply)
-                }
-                key={line.id}
-                own={line.speaker === "you"}
-                pending={line.pending}
-                text={line.text}
-              />
-            ))
-          ) : (
-            <>
-              {turns.map((message) => (
+          <div className="space-y-2" ref={contentRef}>
+            {(transcript
+              ? transcript.length
+              : turns.length || replying.length) || live ? null : (
+              <p className="py-4 text-center text-xs text-app-muted">
+                {t(m.empty)}
+              </p>
+            )}
+            {transcript ? (
+              transcript.map((line) => (
                 <Bubble
-                  agent={message.author.kind === "agent"}
-                  author={message.author.display_name}
-                  key={message.id}
-                  own={
-                    currentActorId
-                      ? message.author.id === currentActorId
-                      : message.author.kind === "human"
+                  agent={line.speaker !== "you"}
+                  author={
+                    line.speaker === "you"
+                      ? t(commonMessages.you)
+                      : session.target.recipient?.display_name || t(m.reply)
                   }
-                  text={message.raw_message}
+                  key={line.id}
+                  own={line.speaker === "you"}
+                  pending={line.pending}
+                  text={line.text}
                 />
-              ))}
-              {replying.map((run) => (
-                <Bubble
-                  agent
-                  author={run.agent.display_name}
-                  key={run.id}
-                  own={false}
-                  pending
-                  text={t(m.working)}
-                />
-              ))}
-              {heard ? (
-                <Bubble
-                  author={t(commonMessages.you)}
-                  own
-                  pending
-                  text={heard}
-                />
-              ) : null}
-            </>
-          )}
-          {saying ? (
-            <Bubble author={t(commonMessages.you)} own pending text={saying} />
-          ) : null}
+              ))
+            ) : (
+              <>
+                {turns.map((message) => (
+                  <Bubble
+                    agent={message.author.kind === "agent"}
+                    author={message.author.display_name}
+                    key={message.id}
+                    own={
+                      currentActorId
+                        ? message.author.id === currentActorId
+                        : message.author.kind === "human"
+                    }
+                    text={message.raw_message}
+                  />
+                ))}
+                {replying.map((run) => (
+                  <Bubble
+                    agent
+                    author={run.agent.display_name}
+                    key={run.id}
+                    own={false}
+                    pending
+                    text={t(m.working)}
+                  />
+                ))}
+                {heard ? (
+                  <Bubble
+                    author={t(commonMessages.you)}
+                    own
+                    pending
+                    text={heard}
+                  />
+                ) : null}
+              </>
+            )}
+            {saying ? (
+              <Bubble
+                author={t(commonMessages.you)}
+                own
+                pending
+                text={saying}
+              />
+            ) : null}
+          </div>
         </div>
         {notice ? (
           <p
@@ -540,7 +583,9 @@ function MiniWindow({
   );
 }
 
-function Bubble({
+// Each line renders again only when its own words change, not on every
+// packet of the line being said.
+const Bubble = memo(function Bubble({
   agent = false,
   author,
   own,
@@ -553,8 +598,15 @@ function Bubble({
   pending?: boolean;
   text: string;
 }) {
+  // A line still being said when it first shows fades in; lines already
+  // said when the window opens show at once.
+  const [entering] = useState(pending);
   return (
-    <div className={`flex flex-col ${own ? "items-end" : "items-start"}`}>
+    <div
+      className={`flex flex-col ${own ? "items-end" : "items-start"} ${
+        entering ? "voice-live-fade-in" : ""
+      }`}
+    >
       {own ? null : (
         <span className="mb-0.5 px-1 text-[12px] text-app-muted">{author}</span>
       )}
@@ -567,10 +619,74 @@ function Bubble({
               : "rounded-2xl bg-muted px-3 py-1.5 text-foreground"
         } ${pending ? "opacity-70" : ""}`}
       >
-        {text}
+        <FadingText text={text} />
       </p>
     </div>
   );
+});
+
+interface TextPiece {
+  id: number;
+  text: string;
+  fade: boolean;
+}
+
+/**
+ * A line's words as they arrive: each newly arrived phrase shows whole and
+ * fades in, while the words before it stay as they were.
+ */
+function FadingText({ text }: { text: string }) {
+  const [pieces, setPieces] = useState<TextPiece[]>(() => [
+    { id: 0, text, fade: false },
+  ]);
+  const [seen, setSeen] = useState(text);
+  if (text !== seen) {
+    setSeen(text);
+    setPieces(nextTextPieces(pieces, seen, text));
+  }
+  return pieces.map((piece) =>
+    piece.fade ? (
+      <span className="voice-live-fade-in" key={piece.id}>
+        {piece.text}
+      </span>
+    ) : (
+      <Fragment key={piece.id}>{piece.text}</Fragment>
+    ),
+  );
+}
+
+/**
+ * Keeps the pieces the new text still starts with and adds what changed as
+ * one fading piece. A transcription that revised earlier words fades in from
+ * the first word it changed.
+ */
+function nextTextPieces(
+  pieces: readonly TextPiece[],
+  before: string,
+  after: string,
+): TextPiece[] {
+  let common = 0;
+  const limit = Math.min(before.length, after.length);
+  while (common < limit && before[common] === after[common]) common++;
+  // Never split a character made of two UTF-16 units.
+  const previous = after.charCodeAt(common - 1);
+  if (common > 0 && previous >= 0xd800 && previous <= 0xdbff) common--;
+  const kept: TextPiece[] = [];
+  let offset = 0;
+  for (const piece of pieces) {
+    if (offset >= common) break;
+    const take = Math.min(piece.text.length, common - offset);
+    kept.push(
+      take === piece.text.length
+        ? piece
+        : { ...piece, text: piece.text.slice(0, take) },
+    );
+    offset += piece.text.length;
+  }
+  const added = after.slice(common);
+  if (!added) return kept;
+  const id = pieces.reduce((largest, piece) => Math.max(largest, piece.id), 0);
+  return [...kept, { id: id + 1, text: added, fade: true }];
 }
 
 /** Conversation Messages sent since this session started, oldest first. */

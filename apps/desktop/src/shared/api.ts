@@ -27,6 +27,7 @@ export interface WorkspaceGrantView {
 export interface DesktopSettings {
   readonly serverUrl: string;
   readonly displayName: string;
+  readonly preventSleep: boolean;
 }
 
 // Signing in with the owner account of the Linger this app installed; the
@@ -114,7 +115,11 @@ export interface LingerDesktopApi {
   };
   readonly settings: {
     get(): Promise<DesktopSettings>;
-    set(patch: { displayName?: string }): Promise<DesktopSettings>;
+    set(patch: {
+      displayName?: string;
+      preventSleep?: boolean;
+    }): Promise<DesktopSettings>;
+    onChange(callback: (settings: DesktopSettings) => void): () => void;
   };
   // The owner account of the Linger installed on this computer.
   readonly localAccount: {
@@ -183,6 +188,7 @@ export const IPC = {
   workspaceRevoke: "workspace.revoke",
   settingsGet: "settings.get",
   settingsSet: "settings.set",
+  settingsEvent: "settings.event",
   permissionAct: "permission.act",
   localAccountAvailable: "local-account.available",
   localAccountSignIn: "local-account.sign-in",

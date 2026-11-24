@@ -417,10 +417,12 @@ describe("WindowManagerModule", () => {
 
   it("reloads on retry after start-failed or remote offline failure", async () => {
     const remote = "https://remote.example.com";
-    const { manager, host } = setup(
+    const { manager, host, bus } = setup(
       { serverUrl: remote },
       { localServerResumable: async () => false },
     );
+    const unreachable = vi.fn();
+    bus.on("local-server.unreachable", unreachable);
     await host.start();
 
     const content = contentView().webContents;
@@ -436,6 +438,8 @@ describe("WindowManagerModule", () => {
     expect(content.loadURL).toHaveBeenLastCalledWith(
       `app://offline/?server=${encodeURIComponent(remote)}&error=ERR_NAME_NOT_RESOLVED`,
     );
+    // The local server, when it is the one shown, checks itself.
+    expect(unreachable).toHaveBeenCalledOnce();
 
     manager.loadServer("retry");
     expect(content.loadURL).toHaveBeenLastCalledWith(remote);

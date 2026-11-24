@@ -46,7 +46,7 @@ func TestToolCatalogMatchesContract(t *testing.T) {
 			t.Fatalf("tool %q parameters are not a JSON Schema object", tool.Name)
 		}
 	}
-	writes := []string{ToolSendMessage, ToolAppendPocketNote, ToolDeletePocketNote, ToolCreateRoom, ToolCreateRoutine, ToolCreateAgent, ToolSendSlack, ToolDecideApproval}
+	writes := []string{ToolSendMessage, ToolAppendPocketNote, ToolDeletePocketNote, ToolCreateRoom, ToolAddRoomMembers, ToolCreateRoutine, ToolCreateAgent, ToolSendSlack, ToolDecideApproval}
 	for _, tool := range served {
 		if !slices.Contains(writes, tool.Name) {
 			continue
@@ -274,7 +274,7 @@ func TestMatchMembersResolvesSpokenNames(t *testing.T) {
 
 func TestInstructionsNameTheRoomAndNeverRefuseBackgroundWork(t *testing.T) {
 	text := Instructions("Ann's Another Me", "Weekly r\u00e9sum\u00e9", UserMemory{})
-	for _, want := range []string{"Ann's Another Me", "room \"Weekly r\u00e9sum\u00e9\"", "Never say you cannot do something that background work can do", "never fill the gap with what happens to be on the screen"} {
+	for _, want := range []string{"Ann's Another Me", "room \"Weekly r\u00e9sum\u00e9\"", "Never say you cannot do something that background work can do", "check another available source silently", "Never fill the gap with what happens to be on the screen"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("instructions miss %q", want)
 		}

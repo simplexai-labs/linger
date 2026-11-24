@@ -23,12 +23,13 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicemedia"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicetranscription"
-	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
 
 const captureCompletionIdempotencyKey = "capture-completion-v1"
 
 const captureCompletionMessage = "I've organized the recording and transcript for you."
+
+const captureCompletionWithoutAudioMessage = "The audio of this recording could not be saved. I've organized its live transcript for you."
 
 var errCaptureCompletionCommitOutcomeUnknown = errors.New("Capture completion commit outcome is unknown")
 
@@ -36,19 +37,27 @@ var errCaptureCompletionAgentUnavailable = errors.New("Capture Direct Room Agent
 
 var errCaptureTranscriptIncomplete = errors.New("Capture transcript is incomplete")
 
+// completeCaptureRecording writes the transcript Document and completion
+// Message of a finalized Capture. A nil audio is a Capture whose recorder saved
+// no audio and that finalized from its live transcript.
 func (s *Service) completeCaptureRecording(
 	ctx context.Context,
 	accountID, sessionID string,
-	audioBody []byte,
+	audio *document.Version,
 ) (idempotency.Result, error) {
-	var audio httpapi.DocumentVersion
-	if err := json.Unmarshal(audioBody, &audio); err != nil {
-		return idempotency.Result{}, err
+	audioVersionID := ""
+	resultBody := []byte("{}")
+	if audio != nil {
+		audioVersionID = audio.ID
+		var err error
+		if resultBody, err = json.Marshal(documentVersionModel(*audio)); err != nil {
+			return idempotency.Result{}, err
+		}
 	}
 	operation := "completeCaptureSession:" + sessionID
 	requestHash := idempotency.HashRequest(struct {
 		AudioVersionID string `json:"audio_version_id"`
-	}{AudioVersionID: audio.Id})
+	}{AudioVersionID: audioVersionID})
 	if replay, found, err := idempotency.Replay(
 		ctx, s.pool, idempotency.AccountKey(accountID, operation, captureCompletionIdempotencyKey), requestHash,
 	); err != nil || found {
@@ -61,16 +70,15 @@ func (s *Service) completeCaptureRecording(
 	if err != nil {
 		return idempotency.Result{}, err
 	}
-	if session.Status != "finalized" || !session.DocumentVersionID.Valid || !session.DocumentID.Valid ||
-		session.DocumentVersionID.String != audio.Id || session.DocumentID.String != audio.DocumentId {
+	if !captureAudioMatches(session, audio) {
 		return idempotency.Result{}, errors.New("Capture completion audio authority is invalid")
 	}
-	audioVersion, err := s.documents.GetVersion(ctx, accountID, audio.Id)
-	if err != nil {
-		return idempotency.Result{}, err
-	}
-	if _, err := s.queries.GetFinalCaptureMediaOutput(ctx, sessionID); err != nil {
-		return idempotency.Result{}, err
+	generatedAt := session.UpdatedAt.Time
+	if audio != nil {
+		if _, err := s.queries.GetFinalCaptureMediaOutput(ctx, sessionID); err != nil {
+			return idempotency.Result{}, err
+		}
+		generatedAt = audio.CreatedAt
 	}
 	if !session.TranscriptStartOffsetMs.Valid || !session.TranscriptEndOffsetMs.Valid {
 		return idempotency.Result{}, errCaptureTranscriptIncomplete
@@ -82,7 +90,7 @@ func (s *Service) completeCaptureRecording(
 	if acceptedOffsetMS < session.TranscriptEndOffsetMs.Int64 {
 		return idempotency.Result{}, errCaptureTranscriptIncomplete
 	}
-	rendered, err := s.renderCaptureTranscript(ctx, session, audioVersion.CreatedAt)
+	rendered, err := s.renderCaptureTranscript(ctx, session, generatedAt)
 	if err != nil {
 		return idempotency.Result{}, err
 	}
@@ -95,7 +103,7 @@ func (s *Service) completeCaptureRecording(
 		return idempotency.Result{}, err
 	}
 	result, err := s.commitCaptureCompletion(
-		ctx, accountID, operation, requestHash, session, audioVersion, object, audioBody,
+		ctx, accountID, operation, requestHash, session, audio, object, resultBody,
 	)
 	if err != nil && !storageReplay && !errors.Is(err, errCaptureCompletionCommitOutcomeUnknown) {
 		if cleanupErr := artifactstore.DeleteDetached(ctx, s.artifacts, object.Key); cleanupErr != nil {
@@ -105,14 +113,31 @@ func (s *Service) completeCaptureRecording(
 	return result, err
 }
 
+// captureAudioMatches reports whether a finalized Capture holds exactly this
+// audio, or, for a nil audio, none.
+func captureAudioMatches(session store.CaptureSession, audio *document.Version) bool {
+	if session.Status != "finalized" {
+		return false
+	}
+	if audio == nil {
+		return !session.DocumentVersionID.Valid && !session.DocumentID.Valid
+	}
+	return session.DocumentVersionID.Valid && session.DocumentID.Valid &&
+		session.DocumentVersionID.String == audio.ID && session.DocumentID.String == audio.DocumentID
+}
+
 func renderCaptureTranscriptFrom(
 	segments []store.VoiceTranscriptSegment,
 	baseOffsetMS int64,
 	gapRanges []voicemedia.MediaTimeRange,
 	generatedAt time.Time,
+	withoutAudio bool,
 ) string {
 	var output strings.Builder
 	output.WriteString(captureTranscriptHeading(generatedAt))
+	if withoutAudio {
+		output.WriteString("> The audio of this recording could not be saved. This transcript comes from live transcription.\n\n")
+	}
 	normalizedGaps := captureTranscriptTimeRanges(gapRanges)
 	if len(normalizedGaps) > 0 {
 		gapDurationMS := int64(0)
@@ -265,9 +290,9 @@ func (s *Service) commitCaptureCompletion(
 	accountID, operation string,
 	requestHash []byte,
 	session store.CaptureSession,
-	audioVersion document.Version,
+	audio *document.Version,
 	object artifactstore.Object,
-	audioBody []byte,
+	resultBody []byte,
 ) (idempotency.Result, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -289,8 +314,7 @@ func (s *Service) commitCaptureCompletion(
 	lockedSession, err := queries.GetCaptureSessionForAccount(ctx, store.GetCaptureSessionForAccountParams{
 		ID: session.ID, AccountID: textValue(accountID),
 	})
-	if err != nil || lockedSession.Status != "finalized" || !lockedSession.DocumentVersionID.Valid ||
-		lockedSession.DocumentVersionID.String != audioVersion.ID {
+	if err != nil || !captureAudioMatches(lockedSession, audio) {
 		return idempotency.Result{}, errors.Join(errors.New("Capture completion authority changed"), err)
 	}
 	version, err := s.documents.CreateStoredRoomUploadTx(ctx, tx, document.StoredRoomUploadInput{
@@ -315,13 +339,13 @@ func (s *Service) commitCaptureCompletion(
 		peer, peerErr := queries.GetVoiceNotifyDirectPeerForAccount(ctx, store.GetVoiceNotifyDirectPeerForAccountParams{
 			AccountID: accountID, RoomID: session.RoomID, TargetAgentID: direct.AgentActorID,
 		})
-		if peerErr != nil || !peer.Active || (audioVersion.CreatedBy.Kind == "agent" && audioVersion.CreatedBy.ID != peer.ID) || (version.CreatedBy.Kind == "agent" && version.CreatedBy.ID != peer.ID) {
+		if peerErr != nil || !peer.Active || (audio != nil && audio.CreatedBy.Kind == "agent" && audio.CreatedBy.ID != peer.ID) || (version.CreatedBy.Kind == "agent" && version.CreatedBy.ID != peer.ID) {
 			return idempotency.Result{}, errors.Join(errCaptureCompletionAgentUnavailable, peerErr)
 		}
 		// The recording and transcript go out now; quick notes follow under
 		// them once written, without holding this Message.
 		withNotes := s.quickNotes != nil
-		content, normalizeErr := messagecreation.Normalize(captureCompletionSegments(session.ID, audioVersion, version, withNotes))
+		content, normalizeErr := messagecreation.Normalize(captureCompletionSegments(session.ID, audio, version, withNotes))
 		if normalizeErr != nil {
 			return idempotency.Result{}, normalizeErr
 		}
@@ -331,7 +355,7 @@ func (s *Service) commitCaptureCompletion(
 				ID: peer.ID, TenantID: peer.TenantID, Kind: peer.Kind, DisplayName: peer.DisplayName,
 				AccountID: peer.AccountID, Handle: peer.Handle, CreatedAt: peer.CreatedAt,
 			},
-			AttachmentVersionIDs: []string{audioVersion.ID, version.ID},
+			AttachmentVersionIDs: captureCompletionAttachments(audio, version),
 		})
 		if messageErr != nil {
 			return idempotency.Result{}, messageErr
@@ -347,13 +371,13 @@ func (s *Service) commitCaptureCompletion(
 	} else if !errors.Is(directErr, pgx.ErrNoRows) {
 		return idempotency.Result{}, directErr
 	}
-	if err = idempotency.Save(ctx, tx, idempotency.AccountKey(accountID, operation, captureCompletionIdempotencyKey), requestHash, idempotency.Record{ResourceID: version.ID, Status: http.StatusCreated, Body: audioBody}); err != nil {
+	if err = idempotency.Save(ctx, tx, idempotency.AccountKey(accountID, operation, captureCompletionIdempotencyKey), requestHash, idempotency.Record{ResourceID: version.ID, Status: http.StatusCreated, Body: resultBody}); err != nil {
 		return idempotency.Result{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return idempotency.Result{}, errors.Join(errCaptureCompletionCommitOutcomeUnknown, err)
 	}
-	return idempotency.Result{Status: http.StatusCreated, Body: audioBody}, nil
+	return idempotency.Result{Status: http.StatusCreated, Body: resultBody}, nil
 }
 
 func captureTranscriptObjectKey(sessionID string) string {
@@ -362,14 +386,20 @@ func captureTranscriptObjectKey(sessionID string) string {
 }
 
 // captureCompletionSegments is the completion Message: the recording and
-// transcript cards, then the quick notes the Capture will hold.
-func captureCompletionSegments(captureID string, audio, transcript document.Version, withNotes bool) []messagecreation.Segment {
-	segments := []messagecreation.Segment{
-		{Type: "text", Content: captureCompletionMessage + "\n"},
-		{Type: "document", Content: audio.Filename, DocumentID: audio.DocumentID, Presentation: "card"},
-		{Type: "text", Content: "\n"},
-		{Type: "document", Content: transcript.Filename, DocumentID: transcript.DocumentID, Presentation: "card"},
+// transcript cards, then the quick notes the Capture will hold. A nil audio
+// leaves only the transcript card and says the audio was not saved.
+func captureCompletionSegments(captureID string, audio *document.Version, transcript document.Version, withNotes bool) []messagecreation.Segment {
+	segments := []messagecreation.Segment{{Type: "text", Content: captureCompletionWithoutAudioMessage + "\n"}}
+	if audio != nil {
+		segments = []messagecreation.Segment{
+			{Type: "text", Content: captureCompletionMessage + "\n"},
+			{Type: "document", Content: audio.Filename, DocumentID: audio.DocumentID, Presentation: "card"},
+			{Type: "text", Content: "\n"},
+		}
 	}
+	segments = append(segments,
+		messagecreation.Segment{Type: "document", Content: transcript.Filename, DocumentID: transcript.DocumentID, Presentation: "card"},
+	)
 	if withNotes {
 		segments = append(segments,
 			messagecreation.Segment{Type: "text", Content: "\n"},
@@ -394,5 +424,12 @@ func (s *Service) renderCaptureTranscript(ctx context.Context, session store.Cap
 	if err != nil {
 		return "", err
 	}
-	return renderCaptureTranscriptFrom(segments, session.TranscriptStartOffsetMs.Int64, captureGapExclusionRanges(mediaRanges), generatedAt), nil
+	return renderCaptureTranscriptFrom(segments, session.TranscriptStartOffsetMs.Int64, captureGapExclusionRanges(mediaRanges), generatedAt, !session.DocumentVersionID.Valid), nil
+}
+
+func captureCompletionAttachments(audio *document.Version, transcript document.Version) []string {
+	if audio == nil {
+		return []string{transcript.ID}
+	}
+	return []string{audio.ID, transcript.ID}
 }

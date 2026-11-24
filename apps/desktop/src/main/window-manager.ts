@@ -721,7 +721,11 @@ export class WindowManagerModule implements Module {
         )
           return;
         if (resumable) this.showStarting();
-        else this.#loadOffline(description);
+        else {
+          this.#loadOffline(description);
+          // A local server that stopped is started again from there.
+          this.#ctx!.bus.emit("local-server.unreachable");
+        }
       });
     });
     contents.on("did-finish-load", () => {

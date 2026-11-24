@@ -12,6 +12,7 @@ import (
 // Business tools TeamHub executes with the session Human's authority. Voice
 // Runtime adds the browser-side read_page, page_action and end_voice_mode tools.
 const (
+	ToolSearchMeetings   = "search_meetings"
 	ToolSearchMessages   = "search_messages"
 	ToolFindRooms        = "find_rooms"
 	ToolListWorkItems    = "list_work_items"
@@ -22,6 +23,7 @@ const (
 	ToolReadPocketNotes  = "read_pocket_notes"
 	ToolDeletePocketNote = "delete_pocket_note"
 	ToolCreateRoom       = "create_room"
+	ToolAddRoomMembers   = "add_room_members"
 	ToolReadDocument     = "read_document"
 	ToolCheckReminders   = "check_reminders"
 )
@@ -58,10 +60,22 @@ func stringProperty(description string) map[string]any {
 var Tools = append([]Tool{
 	{
 		Name:        ToolSearchMessages,
-		Description: "Search chat messages the user can see by keyword. Searches only the current Room by default; all_rooms=true searches every Room the user is in.",
+		Description: "Find a substring in chat message bodies. Attached notes and transcript text live on the recording. Searches only the current Room by default; all_rooms=true searches every Room the user is in.",
 		Parameters: objectSchema([]string{"query"}, map[string]any{
 			"query":     stringProperty("Keywords to search for"),
 			"all_rooms": map[string]any{"type": "boolean", "description": "Whether to search all Rooms"},
+		}),
+	},
+	{
+		Name:        ToolSearchMeetings,
+		Description: "Find recorded meetings newest first, with Quick Notes and references to the same meeting's published Wiki summary and transcript when available. An empty call lists recent recordings in this room. For an overview use the first available text: Quick Notes (notes), wiki_summary, then transcript_excerpt. The newest match includes the best available body. When a source lacks the answer, read only the next available source, one at a time. Use the document IDs when needed. Set exact_words only if the user explicitly requests verbatim wording. The audio attachment has no readable text. A missing name in the notes does not exclude a meeting.",
+		Parameters: objectSchema(nil, map[string]any{
+			"topic":       stringProperty("Optional word or phrase in the notes or Wiki summary"),
+			"overview":    map[string]any{"type": "string", "enum": []string{"single", "latest"}, "description": "Set only when the entire request is a brief overview of one meeting, optionally with its time or duration. Use latest only when the user specifically asks for the newest match. Omit for detailed questions, quotes, comparisons, or follow-up actions."},
+			"exact_words": map[string]any{"type": "boolean", "description": "True only for an explicit request to quote what someone said. Omit when asking for facts, decisions or an overview."},
+			"event_from":  stringProperty("Optional first recording date, YYYY-MM-DD"),
+			"event_to":    stringProperty("Optional last recording date, YYYY-MM-DD"),
+			"room_id":     stringProperty("Optional accessible room from find_rooms; defaults to the call's room"),
 		}),
 	},
 	{
@@ -91,7 +105,7 @@ var Tools = append([]Tool{
 			"With no arguments it reads the document or file most recently shared in the current room (such as a freshly delivered report); fill document_id when known (search_documents results include it), or query with the file or document name. " +
 			"It returns title and text (up to 3000 characters; truncated=true means there is more); the canvas: lines at the top of a canvas are fields such as recipient and subject. Summarize the key points when reading, and read sentence by sentence only when asked. " +
 			"images lists the image file names in the document: you cannot see image content, so only say how many there are and their names; when the user wants an image described, judged or changed, start a task for it with start_task. " +
-			"text_pending=true means the body is not ready yet, so read again a little later; document_not_found means it was not found or the user may not view it.",
+			"audio_has_no_text means the audio file has no text body; for a meeting, use search_meetings. text_pending=true means the document body is not ready yet; use another available source before retrying; document_not_found means it was not found or the user may not view it.",
 		Parameters: objectSchema([]string{}, map[string]any{
 			"document_id": stringProperty("Optional document ID"),
 			"query":       stringProperty("Optional part of the document name"),
@@ -99,7 +113,7 @@ var Tools = append([]Tool{
 	},
 	{
 		Name:        ToolSearchDocuments,
-		Description: "Search documents and canvases shared in rooms by keyword and return titles and snippets. It does not search the Wiki, knowledge base or memory: when the user asks about the Wiki, knowledge base, memory, daily or weekly reports, meeting notes, project pages or someone's page, use recall_memory.",
+		Description: "Search documents and canvases shared in rooms by keyword and return titles and snippets. It does not search the Wiki, knowledge base or memory: when the user asks about the Wiki, knowledge base, memory, daily or weekly reports, project pages or someone's page, use recall_memory.",
 		Parameters: objectSchema([]string{"query"}, map[string]any{
 			"query": stringProperty("Keywords to search for"),
 		}),
@@ -133,7 +147,7 @@ var Tools = append([]Tool{
 		Description: "Create a collaboration Room (group chat) as the user, who becomes its owner. Call it when the user asks to create a group, a new room or a project group. " +
 			"name is required: if the user did not give one, ask what to call it; never make one up. members is optional: fill in the colleagues or Agents to add, as the user called them; if none were mentioned, leave it empty and do not ask. " +
 			"This is a write: read back the room name and members and ask the user to confirm, and only then set confirmed=true; it is created only when the result is created, after which you may ask whether to open it. " +
-			"On room_name_taken, say a room with that name exists and ask whether to use another name; on member_not_found or member_ambiguous, ask which person was meant using candidates; never guess.",
+			"On room_name_taken, use find_rooms to locate the existing room if the user meant to add members there; ask for a different name only if they want a new room; on member_not_found or member_ambiguous, ask which person was meant using candidates; never guess.",
 		Parameters: objectSchema([]string{"name", "confirmed"}, map[string]any{
 			"name":        stringProperty("Room name as the user said it, at most 120 characters"),
 			"description": stringProperty("Optional room description, only when the user said what it is for"),
@@ -143,6 +157,17 @@ var Tools = append([]Tool{
 				"description": "Optional names of people or Agents to add, not including the user",
 			},
 			"confirmed": map[string]any{"type": "boolean", "description": "Whether the user has confirmed out loud"},
+		}),
+	},
+	{
+		Name: ToolAddRoomMembers,
+		Description: "Add existing people or Agents to an existing group room as the user. Use the room_id from create_room or find_rooms and actor_ids from context or create_agent. When only names are known, pass them in members; clarify ambiguous matches. " +
+			"First call with confirmed=false. Ask once using the returned room and member names. On the user's agreement in a later turn call with the same IDs and confirmed=true. Report membership only after status=updated.",
+		Parameters: objectSchema([]string{"room_id", "confirmed"}, map[string]any{
+			"room_id":   stringProperty("Existing target group Room ID"),
+			"members":   map[string]any{"type": "array", "maxItems": MaxRoomMembers, "items": map[string]any{"type": "string"}, "description": "Spoken member names when their Actor IDs are unknown"},
+			"actor_ids": map[string]any{"type": "array", "minItems": 1, "maxItems": MaxRoomMembers, "items": map[string]any{"type": "string"}, "description": "Existing Actor IDs to admit"},
+			"confirmed": map[string]any{"type": "boolean", "description": "Whether the user confirmed the returned proposal"},
 		}),
 	},
 	{
@@ -171,10 +196,10 @@ var Tools = append([]Tool{
 		Name: ToolRecallMemory,
 		Description: "Look up the user's own personal memory and Wiki (knowledge base), covering meeting notes, contacts, project pages and daily or weekly reports (overviews, decisions, to-dos) as well as the original chats, meetings and documents (details, exact words). " +
 			"Use it when the user asks what is in their Wiki, knowledge base, memory or weekly reports, or about someone's page; never open the Wiki on the page to browse it, and never use search_documents for this. " +
-			"Call it first whenever the answer depends on the user's own past (what was discussed or decided, who said what, what to follow up, progress, preferences, or advice for them personally); never answer from impression, and do not call it for small talk or common knowledge. " +
+			"Use it for missing facts about the user's past. Use the supplied conversation, notes and prior tool results when they already establish the answer. " +
 			"Do not copy the user's sentence into query: write “key person/project/event + what is asked”, such as “<person> follow-ups” or “Q3 budget decision”, in the user's language. " +
 			"For two people or two things, look each up separately. Only fill event_from/event_to when the question names a time (last week, early September, today, just now; set both to today's date for today or just now); never for something said before or the latest status. " +
-			"When status is weak or empty, look up once more with different words (only the name, a synonym or the project name); if still nothing, try search_messages; only then say plainly that you found nothing, and never answer from what the open page shows instead. A weak result is only a lead: never present it as the answer. memory_unavailable means the user's memory cannot be searched right now: say so in a sentence. " +
+			"When status is weak or empty, look up once more with different words (only the name, a synonym or the project name); if still missing, check the relevant original source. Report what that search covered. A weak result is only a lead: never present it as the answer. memory_unavailable means the user's memory cannot be searched right now: say so in a sentence. " +
 			"When the dates include today, the result's today holds today's Pocket Notes not yet in memory (pocket_note) and today's messages in the user's rooms (messages, oldest first); answer from it, even when the memory part is memory_unavailable.",
 		Parameters: objectSchema([]string{"query"}, map[string]any{
 			"query":      stringProperty("The question to recall, in the user's meaning, keeping any time phrase"),
@@ -239,7 +264,7 @@ type ReadPocketNotesArguments struct {
 	DateTo   string `json:"date_to"`
 }
 
-// MaxRoomMembers bounds the people a spoken create_room invites at once.
+// MaxRoomMembers bounds the people invited in one Live room operation.
 const MaxRoomMembers = 20
 
 // CreateRoomArguments holds the proposed Room and invited member names.

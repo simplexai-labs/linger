@@ -26,11 +26,14 @@ const canvasTitleRunes = 80
 // emailCanvasDelivery says how a canvas is saved or sent, for both tools.
 const emailCanvasDelivery = "To save it as a draft in the user's mail app (Gmail, Outlook or Feishu Mail, as the canvas says) use save_email_draft, and to send it send_email_canvas, when those tools are offered; otherwise call start_task with surface apps and a goal that names its document_id as an email canvas and says to save it as a draft or to send it, with irreversible set for a send. "
 
-// misheardRecipient lets a recipient the speech model misheard resolve to an
-// address the user really uses, said back so a wrong match is caught before
-// sending. The name and the domain are matched apart: a known name at a new
-// domain (digits heard as letters) matched no whole listed address.
-const misheardRecipient = "Speech is often misheard, letters and digits most, so an address you heard may be off by a character or two. Check the part before @ and the domain each against the addresses listed in About the User: a part within a character or two of a listed one, or that sounds like it, is that listed part, even when the other part differs. Write it as listed, keep the other part as the user said it, and say the address back so the user can correct it. When the user means an address they used before, write that listed address. "
+// misheardRecipient leaves matching a misheard address to TeamHub, which
+// compares it with the addresses the user used before; a model that matched
+// on its own spliced parts of two addresses and asked twice.
+const misheardRecipient = "Write each address the user spells out as a plain email address (name@domain, with at said as @ and dot as .), keeping their spelling: do not swap it for an address they used before yourself, since the result says check_recipient when it may be a misheard one of those. When the user names someone they emailed before without saying an address, write that listed address. "
+
+// recipientConfirmed is the flag that keeps a recipient the user stood by
+// after a known one was suggested instead.
+var recipientConfirmed = map[string]any{"type": "boolean", "description": "True keeps the addresses as written: only after you or a check_recipient result suggested another address and the user, in their own words, said these are right"}
 
 // EmailCanvasTool describes the tool that opens a new canvas.
 var EmailCanvasTool = Tool{
@@ -45,11 +48,12 @@ var EmailCanvasTool = Tool{
 		"missing_content means the subject or body is empty: the address is fine; ask the user what the email should say, never invent it, then call again with both. " +
 		"body_too_long means the body is too long: shorten it. invalid_email means the app refused the email as written: rewrite it plainer and call again.",
 	Parameters: objectSchema([]string{"subject", "body"}, map[string]any{
-		"to":      stringProperty("Optional recipient email addresses, separated by commas. " + misheardRecipient),
-		"cc":      stringProperty("Optional carbon-copy email addresses, separated by commas. " + misheardRecipient),
-		"subject": stringProperty("The subject, one line"),
-		"body":    stringProperty("The whole email body"),
-		"app":     map[string]any{"type": "string", "enum": []any{"gmail", "outlook", "feishu_mail"}, "description": "Optional mail app to send from, when the user names one; leave it out to use the one connected"},
+		"to":        stringProperty("Optional recipient email addresses, separated by commas. " + misheardRecipient),
+		"cc":        stringProperty("Optional carbon-copy email addresses, separated by commas. " + misheardRecipient),
+		"subject":   stringProperty("The subject, one line"),
+		"body":      stringProperty("The whole email body"),
+		"confirmed": recipientConfirmed,
+		"app":       map[string]any{"type": "string", "enum": []any{"gmail", "outlook", "feishu_mail"}, "description": "Optional mail app to send from, when the user names one; leave it out to use the one connected"},
 	}),
 }
 
@@ -71,6 +75,7 @@ var EditEmailCanvasTool = Tool{
 		"cc":          stringProperty("Optional new carbon-copy email addresses, separated by commas. " + misheardRecipient),
 		"subject":     stringProperty("Optional new subject, one line"),
 		"body":        stringProperty("Optional new whole email body"),
+		"confirmed":   recipientConfirmed,
 	}),
 }
 
@@ -104,10 +109,11 @@ const (
 
 // EmailCanvasArguments holds the email the live model wrote.
 type EmailCanvasArguments struct {
-	To      string `json:"to"`
-	Cc      string `json:"cc"`
-	Subject string `json:"subject"`
-	Body    string `json:"body"`
+	Confirmed LooseBool `json:"confirmed"`
+	To        string    `json:"to"`
+	Cc        string    `json:"cc"`
+	Subject   string    `json:"subject"`
+	Body      string    `json:"body"`
 	// App is the mail app the email goes out from; empty lets TeamHub pick
 	// the one connected.
 	App string `json:"app"`
@@ -115,12 +121,13 @@ type EmailCanvasArguments struct {
 
 // EditEmailCanvasArguments holds a change to a canvas: nil keeps a value.
 type EditEmailCanvasArguments struct {
-	DocumentID string  `json:"document_id"`
-	RevisionID string  `json:"revision_id"`
-	To         *string `json:"to"`
-	Cc         *string `json:"cc"`
-	Subject    *string `json:"subject"`
-	Body       *string `json:"body"`
+	Confirmed  LooseBool `json:"confirmed"`
+	DocumentID string    `json:"document_id"`
+	RevisionID string    `json:"revision_id"`
+	To         *string   `json:"to"`
+	Cc         *string   `json:"cc"`
+	Subject    *string   `json:"subject"`
+	Body       *string   `json:"body"`
 }
 
 // Canvas is a canvas Document's title and Markdown.

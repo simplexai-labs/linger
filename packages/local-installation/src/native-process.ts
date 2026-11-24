@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,12 +47,45 @@ export interface NativeProcessState {
   pid?: number;
 }
 const leaseKey = "LINGER_NATIVE_PROCESS_LEASE";
+/**
+ * How the supervisor restarts a service that exits without being asked to:
+ * after `delaysMs[n - 1]` for the n-th exit within `windowMs` (the last
+ * delay repeats), giving up at the `limit`-th. A service that exits before
+ * it has run for `armAfterMs` is not restarted: that is a startup failure,
+ * which the installer reports.
+ */
+export interface NativeRestartPolicy {
+  delaysMs: number[];
+  windowMs: number;
+  limit: number;
+  armAfterMs: number;
+}
+export const SERVICE_RESTART_POLICY: NativeRestartPolicy = {
+  delaysMs: [1_000, 2_000, 5_000],
+  windowMs: 60_000,
+  limit: 5,
+  armAfterMs: 10_000,
+};
 function paths(root: string, name: NativeService) {
   if (!services.has(name)) throw new Error("Invalid native service");
   return {
     record: path.join(root, "native", "processes", `${name}.json`),
     log: path.join(root, "native", "logs", `${name}.log`),
   };
+}
+/**
+ * Written before every intended stop signals a supervisor, which reads it
+ * before each restart; the name derives from its job file
+ * (`<name>.<lease>.job`), which the supervisor knows.
+ */
+function stopRequest(root: string, name: NativeService, lease: string) {
+  return path.join(root, "native", "processes", `${name}.${lease}.stop`);
+}
+// Only its presence counts, so appending nothing inside the private processes
+// directory is enough: it changes no file a link could point at, and skips
+// the ACL check a private write costs on Windows.
+async function requestStop(file: string) {
+  await writeFile(file, "", { flag: "a", mode: 0o600 });
 }
 async function stored(
   root: string,
@@ -259,6 +292,11 @@ export async function startNativeProcess(
      * part of the configuration.
      */
     withoutAdministrators?: boolean;
+    /**
+     * Restart the service when it exits unasked. How it is supervised is not
+     * part of the configuration, so a running service keeps its supervisor.
+     */
+    restartOnExit?: NativeRestartPolicy;
   },
 ): Promise<NativeProcessState> {
   options.signal?.throwIfAborted();
@@ -298,6 +336,9 @@ export async function startNativeProcess(
         `Native ${options.name} process identity cannot be verified; refusing to replace it.`,
       );
     await rm(location.record, { force: true });
+    await rm(stopRequest(options.root, options.name, existing.lease), {
+      force: true,
+    });
   }
   await privateDirectory(path.dirname(location.record));
   await privateDirectory(path.dirname(location.log));
@@ -310,11 +351,13 @@ export async function startNativeProcess(
   await atomicPrivate(
     job,
     JSON.stringify({
+      name: options.name,
       executable: options.executable,
       args: options.args,
       cwd: options.cwd,
       env: { ...options.env, [leaseKey]: lease },
       ...(options.withoutAdministrators ? { withoutAdministrators: true } : {}),
+      ...(options.restartOnExit ? { restart: options.restartOnExit } : {}),
       log: location.log,
       redactions: [
         ...new Set(
@@ -493,10 +536,14 @@ export async function stopNativeProcess(
 ): Promise<void> {
   const record = await stored(root, name);
   if (!record) return;
+  // Before any signal, so the supervisor never restarts what this ends.
+  const request = stopRequest(root, name, record.lease);
+  await requestStop(request);
   if (process.platform === "win32")
     await stopWindowsTree(name, record.lease, record);
   else await stopLease(name, record, interruptMs);
   await rm(paths(root, name).record, { force: true });
+  await rm(request, { force: true });
 }
 /**
  * macOS and Linux: ends the supervisor holding the lease and everything
@@ -573,8 +620,15 @@ async function stopLease(
   }
   const owner = owned.find((candidate) => candidate.pid === record.pid);
   if (owner) await signalOwned(owner, "SIGKILL");
-  for (let count = 0; count < 30 && (await groupLive(record.pid)); count++)
+  // A supervisor that checked for the stop request just before it was
+  // written may have restarted its service since the last listing; with the
+  // supervisor gone nothing restarts it again.
+  for (let count = 0; count < 30; count++) {
+    owned = await nativeLeaseProcesses(record.lease);
+    if (!owned.length && !(await groupLive(record.pid))) break;
+    for (const candidate of owned) await signalOwned(candidate, "SIGKILL");
     await delay(100);
+  }
   if (
     (await groupLive(record.pid)) ||
     (await nativeLeaseProcesses(record.lease)).length
@@ -829,6 +883,34 @@ export async function reclaimNativeOrphans(
   }
 }
 
+/**
+ * The ones of `folders` that a running process of this user starts from: its
+ * command line names a path inside one. When processes cannot be listed,
+ * every folder counts as in use, so nothing a service needs is removed.
+ */
+export async function foldersInUse(
+  folders: readonly string[],
+): Promise<Set<string>> {
+  let commands: string[];
+  try {
+    commands =
+      process.platform === "win32"
+        ? (await windowsProcesses()).map((entry) => entry.command)
+        : (await ownCommands()).map((entry) => entry.command);
+  } catch {
+    return new Set(folders);
+  }
+  const used = await Promise.all(
+    folders.map(async (folder) => {
+      // A service may run from the resolved path of a linked folder.
+      const names = [folder, await realpath(folder).catch(() => folder)];
+      return commands.some((command) =>
+        names.some((name) => command.includes(name + path.sep)),
+      );
+    }),
+  );
+  return new Set(folders.filter((_, index) => used[index]));
+}
 /** Each process of this user with its command line (macOS and Linux). */
 async function ownCommands(): Promise<Array<{ pid: number; command: string }>> {
   if (process.platform === "linux") {
@@ -883,7 +965,10 @@ async function reclaimUnrecordedLeases(
     const [, name, lease] = job as unknown as [string, NativeService, string];
     const birth = await observed(pid, lease);
     if (!birth) continue;
+    const request = stopRequest(root, name, lease);
+    await requestStop(request);
     await stopLease(name, { pid, birth, lease }, 12_000);
+    await rm(request, { force: true });
     ended.push(pid);
   }
   return ended;

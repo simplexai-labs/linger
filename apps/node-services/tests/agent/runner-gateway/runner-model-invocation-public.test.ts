@@ -308,36 +308,96 @@ describe("RunnerGateway model invocation", () => {
     }
   });
 
-  it("starts a second call at once after calls kept answering as fast while others waited", async () => {
+  it("promotes concurrency after a silent background probe stays as fast, and aborts a probe when interactive work arrives", async () => {
     const { gateway, peer, connection } = await connect();
     try {
-      const results = Array.from({ length: 6 }, (_, i) =>
-        gateway.invokeModel(
-          "runner-local",
-          request({ input: `ask ${i}`, queue: queued("approval") }),
-        ),
-      );
       const usage = {
         input_tokens: 4_000,
         cached_input_tokens: 0,
         output_tokens: 100,
       };
-      for (let answered = 0; answered < 4; answered++) {
+      // Build the single-unit baseline with three background calls.
+      for (let i = 0; i < 3; i++) {
+        const pending = gateway.invokeModel(
+          "runner-local",
+          request({ input: `base ${i}`, queue: queued("memory") }),
+        );
         await vi.waitFor(() =>
-          expect(sentInvocations(peer)).toHaveLength(answered + 1),
+          expect(sentInvocations(peer)).toHaveLength(i + 1),
         );
         await invoked(
           connection,
-          sentInvocations(peer)[answered]!,
+          sentInvocations(peer)[i]!,
           "completed",
           usage,
         );
+        await pending;
       }
-      // Four answers at one place, as fast each time: the endpoint gets two.
+
+      // Two waiting background calls trigger a silent probe for two.
+      const probeA = gateway.invokeModel(
+        "runner-local",
+        request({ input: "probe A", queue: queued("memory") }),
+      );
+      const probeB = gateway.invokeModel(
+        "runner-local",
+        request({ input: "probe B", queue: queued("memory") }),
+      );
+      await vi.waitFor(() => expect(sentInvocations(peer)).toHaveLength(5));
+      const [cmdA, cmdB] = sentInvocations(peer).slice(3);
+
+      // Interactive work arriving mid-probe aborts it and yields both probing calls.
+      probeA.catch(() => undefined);
+      probeB.catch(() => undefined);
+      const ask = gateway.invokeModel(
+        "runner-local",
+        request({ input: "urgent ask", queue: queued("voice_ask") }),
+      );
+      await vi.waitFor(() => expect(sentCancels(peer)).toHaveLength(2));
+      expect(sentCancels(peer).map((cancel) => cancel.invoke_id)).toEqual(
+        expect.arrayContaining([cmdA!.invoke_id, cmdB!.invoke_id]),
+      );
+      await invoked(connection, cmdA!, "canceled");
+      await invoked(connection, cmdB!, "canceled");
+      await expect(probeA).rejects.toBeInstanceOf(
+        RunnerModelInvokeYieldedError,
+      );
+      await expect(probeB).rejects.toBeInstanceOf(
+        RunnerModelInvokeYieldedError,
+      );
       await vi.waitFor(() => expect(sentInvocations(peer)).toHaveLength(6));
-      for (const command of sentInvocations(peer).slice(4))
+      expect(sentInvocations(peer)[5]!.input).toBe("urgent ask");
+      await invoked(connection, sentInvocations(peer)[5]!, "completed", usage);
+      await ask;
+
+      // Once foreground work finishes, a clean background probe promotes to two.
+      const p1 = gateway.invokeModel(
+        "runner-local",
+        request({ input: "probe 1", queue: queued("memory") }),
+      );
+      const p2 = gateway.invokeModel(
+        "runner-local",
+        request({ input: "probe 2", queue: queued("memory") }),
+      );
+      await vi.waitFor(() => expect(sentInvocations(peer)).toHaveLength(8));
+      const [run1, run2] = sentInvocations(peer).slice(6);
+      await invoked(connection, run1!, "completed", usage);
+      await invoked(connection, run2!, "completed", usage);
+      await Promise.all([p1, p2]);
+
+      // Confirmed limit is now two: two interactive calls run at once.
+      const a1 = gateway.invokeModel(
+        "runner-local",
+        request({ input: "ask 1", queue: queued("approval") }),
+      );
+      const a2 = gateway.invokeModel(
+        "runner-local",
+        request({ input: "ask 2", queue: queued("approval") }),
+      );
+      await vi.waitFor(() => expect(sentInvocations(peer)).toHaveLength(10));
+      for (const command of sentInvocations(peer).slice(8))
         await invoked(connection, command, "completed", usage);
-      await expect(Promise.all(results)).resolves.toHaveLength(6);
+      await Promise.all([a1, a2]);
     } finally {
       connection.disconnect();
     }
@@ -833,6 +893,48 @@ describe("RunnerGateway model invocation", () => {
       await expect(pending).resolves.toMatchObject({ outcome: "completed" });
     } finally {
       connection.disconnect();
+    }
+  });
+
+  it("sends explicit model only to Computers at or above 0.62.0", async () => {
+    const current = await connect({
+      ...invokingHello(),
+      daemon_version: "0.62.0",
+    });
+    try {
+      const pending = current.gateway.invokeModel(
+        "runner-local",
+        request({ model: "gpt-5.4" }),
+      );
+      await vi.waitFor(() =>
+        expect(sentInvocations(current.peer)).toHaveLength(1),
+      );
+      const [command] = sentInvocations(current.peer);
+      expect(command!.model).toBe("gpt-5.4");
+      await invoked(current.connection, command!);
+      await expect(pending).resolves.toMatchObject({ outcome: "completed" });
+    } finally {
+      current.connection.disconnect();
+    }
+
+    const older = await connect({
+      ...invokingHello(),
+      daemon_version: "0.61.0",
+    });
+    try {
+      const pending = older.gateway.invokeModel(
+        "runner-local",
+        request({ model: "gpt-5.4" }),
+      );
+      await vi.waitFor(() =>
+        expect(sentInvocations(older.peer)).toHaveLength(1),
+      );
+      const [command] = sentInvocations(older.peer);
+      expect(command!.model).toBeUndefined();
+      await invoked(older.connection, command!);
+      await expect(pending).resolves.toMatchObject({ outcome: "completed" });
+    } finally {
+      older.connection.disconnect();
     }
   });
 
