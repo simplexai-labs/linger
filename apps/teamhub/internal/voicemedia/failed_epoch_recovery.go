@@ -77,6 +77,20 @@ func (s *Service) recoverFailedMediaEpoch(ctx context.Context, epoch store.Voice
 	}
 	if duration == 0 {
 		recorded, readErr := q.GetLatestRecordedVoiceMediaEpoch(ctx, capture.ID)
+		if errors.Is(readErr, pgx.ErrNoRows) && stopRequested {
+			// No recorder saved audio, but the live transcript may cover the whole
+			// Capture; materialization finalizes it from that or fails it.
+			if err = q.FailVoiceMediaEpochForTranscriptOnly(ctx, epoch.ID); err != nil {
+				return err
+			}
+			if err = q.RequestVoiceCaptureMaterialization(ctx, capture.ID); err != nil {
+				return err
+			}
+			if err = enqueue(ctx, tx, CaptureMaterializeArgs{CaptureSessionID: capture.ID}); err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
+		}
 		if errors.Is(readErr, pgx.ErrNoRows) {
 			if err = q.FailVoiceMediaEpochWithoutMedia(ctx, epoch.ID); err != nil {
 				return err

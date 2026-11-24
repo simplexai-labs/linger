@@ -342,6 +342,15 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   session can close. Never fail an epoch whose recorder may still write its
   staging: it keeps its owed stop. A shutdown or not-yet-due deferral spends
   nothing.
+- A stopped Capture whose recorder saved no audio is not failed outright: its
+  epoch fails with `audio_unavailable` and materialization finalizes the
+  Capture from its live transcript, without an audio Document, once that
+  transcript has speech, kept its integrity and is covered up to its frozen
+  end (Stop, or the earlier end of the input track). Completion then writes the
+  transcript Document, the completion Message (transcript card only) and Quick
+  Notes, and the Meeting Wiki picks it up as any finalized recording. The
+  Meetings browser still lists only recordings with audio. Without speech,
+  integrity or coverage within the transcript wait, the Capture fails.
 - Voice: `TEAMHUB_VOICE_MEDIA` (`on` by default) builds the voice media plane
   over LiveKit; `off`, a missing `LINGER_SECRET_SEED`, or missing ffmpeg keep
   voice off (the last two log `voice.media_unavailable`) without stopping

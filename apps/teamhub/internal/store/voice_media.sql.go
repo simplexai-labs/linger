@@ -989,6 +989,21 @@ func (q *Queries) FailUnsettledVoiceCapture(ctx context.Context, epochID string)
 	return i, err
 }
 
+const failVoiceMediaEpochForTranscriptOnly = `-- name: FailVoiceMediaEpochForTranscriptOnly :exec
+UPDATE voice_media_epochs
+SET observed_state='failed',desired_state='sealed',last_failure_code='audio_unavailable',
+    restart_retry_at=NULL,updated_at=clock_timestamp()
+WHERE id=$1 AND observed_state IN ('requested','active','sealing','unknown','failed')
+`
+
+// A stopped Capture whose recorder saved no audio keeps finalizing: its
+// materialization finalizes it from the live transcript or fails it. Its own
+// code keeps reconciliation from recovering the epoch again.
+func (q *Queries) FailVoiceMediaEpochForTranscriptOnly(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, failVoiceMediaEpochForTranscriptOnly, id)
+	return err
+}
+
 const failVoiceMediaEpochWithoutMedia = `-- name: FailVoiceMediaEpochWithoutMedia :exec
 WITH target AS MATERIALIZED (
   SELECT epoch.id,epoch.capture_session_id,voice.id AS voice_session_id
@@ -1099,6 +1114,28 @@ func (q *Queries) FinalizeLiveKitCapture(ctx context.Context, arg FinalizeLiveKi
 		&i.QuickNotes,
 	)
 	return i, err
+}
+
+const freezeTranscriptOnlyVoiceTranscript = `-- name: FreezeTranscriptOnlyVoiceTranscript :exec
+UPDATE capture_sessions capture
+SET transcript_end_offset_ms=least(
+      capture.transcript_start_offset_ms+floor(extract(epoch FROM (capture.stop_requested_at-capture.created_at))*1000)::bigint,
+      voice.last_input_ended_ms),
+    updated_at=clock_timestamp()
+FROM voice_sessions voice
+WHERE capture.id=$1 AND voice.id=capture.voice_session_id
+  AND capture.status='finalizing' AND capture.stop_requested_at IS NOT NULL
+  AND NOT capture.transcript_integrity_lost AND capture.transcript_end_offset_ms IS NULL
+  AND capture.transcript_start_offset_ms IS NOT NULL
+  AND voice.last_input_ended_ms>=coalesce(voice.last_input_started_ms,0)
+  AND voice.last_input_ended_ms>capture.transcript_start_offset_ms
+`
+
+// Without audio, the transcript ends at Stop, or where the input track ended
+// before it. The input must have ended, so its last finals have arrived.
+func (q *Queries) FreezeTranscriptOnlyVoiceTranscript(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, freezeTranscriptOnlyVoiceTranscript, id)
+	return err
 }
 
 const getActiveLiveKitCaptureForAccountRoom = `-- name: GetActiveLiveKitCaptureForAccountRoom :one
@@ -1447,8 +1484,6 @@ JOIN active_room_members member ON member.room_id=capture.room_id AND member.act
 JOIN rooms room ON room.id=capture.room_id AND room.deleted_at IS NULL
 WHERE capture.id=$1
   AND capture.status='finalized'
-  AND capture.document_id IS NOT NULL
-  AND capture.document_version_id IS NOT NULL
   AND capture.transcript_document_id IS NULL
   AND capture.transcript_document_version_id IS NULL
   AND capture.voice_completion_failed_at IS NULL
@@ -1528,8 +1563,8 @@ SELECT capture.id AS capture_session_id,capture.tenant_id,capture.room_id,captur
 FROM capture_sessions capture
 JOIN actors actor ON actor.id=capture.created_by_actor_id AND actor.tenant_id=capture.tenant_id
 JOIN LATERAL (
-  SELECT min(start_offset_ms)::bigint AS start_offset_ms,
-         max(end_offset_ms)::bigint AS end_offset_ms
+  SELECT coalesce(min(start_offset_ms),0)::bigint AS start_offset_ms,
+         coalesce(max(end_offset_ms),0)::bigint AS end_offset_ms
   FROM capture_media_ranges
   WHERE capture_session_id=capture.id AND kind='media'
 ) range ON true

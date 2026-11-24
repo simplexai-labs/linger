@@ -486,7 +486,7 @@ SELECT EXISTS(
 -- A recording is available before the nightly knowledge index. The Room and
 -- date narrow candidates even when the speaker's name is absent from the notes.
 SELECT c.id AS capture_id, r.name AS room, c.created_at AS started_at,
-       coalesce(media.duration_ms,0)::bigint AS duration_ms,
+       coalesce(media.duration_ms,c.transcript_end_offset_ms-c.transcript_start_offset_ms,0)::bigint AS duration_ms,
        coalesce(c.quick_notes_state,'unavailable')::text AS notes_state,
        c.quick_notes, coalesce(summary.document_id,'')::text AS wiki_summary_document_id,
        coalesce(c.transcript_document_id,'')::text AS transcript_document_id

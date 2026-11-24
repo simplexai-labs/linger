@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,6 +23,13 @@ const voiceTranscriptFinalizeTimeout = time.Minute
 const materializationTimeout = 30 * time.Minute
 
 var errTranscriptRecoveryQueued = errors.New("voice transcript recovery queued")
+
+// errNoSpeechWithoutAudio ends a Capture that has neither audio nor speech.
+var errNoSpeechWithoutAudio = errors.New("voice capture has no audio and no speech")
+
+// epochFailureAudioUnavailable marks the epoch of a stopped Capture whose
+// recorder saved no audio; the Capture finalizes from its live transcript.
+const epochFailureAudioUnavailable = "audio_unavailable"
 
 const (
 	voiceMaterializationFailureDocumentNotFound = "document_not_found"
@@ -54,7 +62,7 @@ func (s *Service) materializeStep(ctx context.Context, captureID string) (time.D
 	switch {
 	case errors.Is(processErr, errTranscriptRecoveryQueued):
 		return time.Second, release(0, true)
-	case errors.Is(processErr, ErrTranscriptIntegrityLost):
+	case errors.Is(processErr, ErrTranscriptIntegrityLost), errors.Is(processErr, errNoSpeechWithoutAudio):
 		return settled(s.failTranscriptFinalization(context.WithoutCancel(ctx), captureID))
 	case errors.Is(processErr, ErrTranscriptIncomplete):
 		if transcriptWaitExpired(claim.MaterializeRequestedAt.Time, time.Now()) {
@@ -162,7 +170,17 @@ func (s *Service) processMaterialization(ctx context.Context, captureID string) 
 	if err != nil {
 		return err
 	}
-	if !job.AccountID.Valid || job.EndOffsetMs <= job.StartOffsetMs {
+	if !job.AccountID.Valid {
+		return ErrCaptureConflict
+	}
+	latest, err := s.queries.GetLatestVoiceMediaEpochForCapture(ctx, captureID)
+	if err != nil {
+		return err
+	}
+	if latest.ObservedState == "failed" && latest.LastFailureCode.String == epochFailureAudioUnavailable {
+		return s.finalizeWithoutAudio(ctx, job)
+	}
+	if job.EndOffsetMs <= job.StartOffsetMs {
 		return ErrCaptureConflict
 	}
 	var source store.CaptureMediaOutput
@@ -276,6 +294,77 @@ func (s *Service) processMaterialization(ctx context.Context, captureID string) 
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// finalizeWithoutAudio finalizes a Capture whose recorder saved no audio from
+// its live transcript, once that transcript provably covers the Capture.
+func (s *Service) finalizeWithoutAudio(ctx context.Context, job store.GetVoiceMediaMaterializationContextRow) error {
+	params := store.GetCaptureSessionForAccountParams{ID: job.CaptureSessionID, AccountID: job.AccountID}
+	capture, err := s.queries.GetCaptureSessionForAccount(ctx, params)
+	if err != nil {
+		return err
+	}
+	if capture.TranscriptIntegrityLost {
+		return ErrTranscriptIntegrityLost
+	}
+	// Without any speech there is nothing to keep; fail now rather than wait
+	// for coverage that may never come.
+	speech, err := s.queries.ListCaptureTranscriptSegments(ctx, store.ListCaptureTranscriptSegmentsParams{
+		CaptureSessionID: capture.ID, StartOffsetMs: capture.RequestedTranscriptStartOffsetMs, EndOffsetMs: math.MaxInt64,
+	})
+	if err != nil {
+		return err
+	}
+	if len(speech) == 0 {
+		return errNoSpeechWithoutAudio
+	}
+	if !capture.TranscriptEndOffsetMs.Valid {
+		if err = s.queries.FreezeTranscriptOnlyVoiceTranscript(ctx, capture.ID); err != nil {
+			return err
+		}
+		if capture, err = s.queries.GetCaptureSessionForAccount(ctx, params); err != nil {
+			return err
+		}
+	}
+	acceptedOffsetMS, err := s.queries.GetCaptureTranscriptAcceptedOffset(ctx, capture.ID)
+	if err != nil {
+		return err
+	}
+	if !voiceTranscriptCoversCapture(capture.TranscriptStartOffsetMs.Valid, capture.TranscriptEndOffsetMs, acceptedOffsetMS) {
+		return ErrTranscriptIncomplete
+	}
+	segments, err := s.queries.ListLiveKitCaptureCompletionSegments(ctx, capture.ID)
+	if err != nil {
+		return err
+	}
+	if len(segments) == 0 {
+		return errNoSpeechWithoutAudio
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	queries := s.queries.WithTx(tx)
+	if _, err = queries.FinalizeLiveKitCapture(ctx, store.FinalizeLiveKitCaptureParams{ID: capture.ID}); err != nil {
+		return err
+	}
+	if err = roomevent.AppendCaptureSessionChanged(
+		ctx, queries, job.TenantID, job.RoomID, job.CreatedByActorID, capture.ID, "finalized",
+	); err != nil {
+		return err
+	}
+	if err = enqueue(ctx, tx,
+		CaptureCompletionArgs{CaptureSessionID: capture.ID},
+		StagingCleanupArgs{CaptureSessionID: capture.ID},
+	); err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "voice capture finalized without audio", "capture_session_id", capture.ID)
+	return nil
 }
 
 func voiceTranscriptCoversCapture(

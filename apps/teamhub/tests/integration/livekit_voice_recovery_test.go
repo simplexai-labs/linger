@@ -447,6 +447,14 @@ func TestLiveKitVoiceFinalizingCanFailAfterMediaFailure(t *testing.T) {
 					t.Fatalf("reconcile missing recorder: %v", err)
 				}
 			}
+			// A stopped Capture without audio is materialized from its live
+			// transcript; with no speech at all, that fails it.
+			stoppedWithoutAudio := name == "absent-recorder" || name == "lost-recorder" || name == "recover-stranded-finalizing"
+			if stoppedWithoutAudio {
+				if _, err := service.RunJobStepForTest(t.Context(), voicemedia.CaptureMaterializeArgs{CaptureSessionID: capture.ID}); err != nil {
+					t.Fatalf("materialize a Capture without audio or speech: %v", err)
+				}
+			}
 			current, err := q.GetCaptureSessionForAccount(t.Context(), store.GetCaptureSessionForAccountParams{ID: capture.ID, AccountID: textForVoiceTest("account_alice")})
 			if name == "recorder-recovered" || name == "lost-recorder-recent-stop" {
 				if err != nil || current.Status != "finalizing" {
@@ -457,9 +465,13 @@ func TestLiveKitVoiceFinalizingCanFailAfterMediaFailure(t *testing.T) {
 			if err != nil || current.Status != "failed" {
 				t.Fatalf("Capture status=%s err=%v", current.Status, err)
 			}
-			closing, err := q.GetVoiceSessionForAccount(t.Context(), store.GetVoiceSessionForAccountParams{ID: voice.ID, AccountID: "account_alice"})
-			if err != nil || closing.Status != "closing" {
-				t.Fatalf("VoiceSession status=%s err=%v", closing.Status, err)
+			// A stopped Capture leaves its VoiceSession to the client's release;
+			// one failed while recording closes it.
+			if !stoppedWithoutAudio {
+				closing, err := q.GetVoiceSessionForAccount(t.Context(), store.GetVoiceSessionForAccountParams{ID: voice.ID, AccountID: "account_alice"})
+				if err != nil || closing.Status != "closing" {
+					t.Fatalf("VoiceSession status=%s err=%v", closing.Status, err)
+				}
 			}
 			if terminal, err := service.EndCapture(t.Context(), voicemedia.EndCaptureRequest{AccountID: "account_alice", CaptureSessionID: capture.ID}); err != nil || terminal.Status != "failed" {
 				t.Fatalf("terminal Stop status=%s err=%v", terminal.Status, err)

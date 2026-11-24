@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/document"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/messagecreation"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
 )
 
 func TestLiveKitCaptureCompletionFailureCode(t *testing.T) {
@@ -90,11 +93,11 @@ func TestCaptureCompletionSegmentsPutQuickNotesAfterTheFiles(t *testing.T) {
 	t.Parallel()
 	audio := document.Version{DocumentID: "document_audio", Filename: "source.m4a"}
 	transcript := document.Version{DocumentID: "document_transcript", Filename: "transcript.md"}
-	plain, err := messagecreation.Normalize(captureCompletionSegments("capture_1", audio, transcript, false))
+	plain, err := messagecreation.Normalize(captureCompletionSegments("capture_1", &audio, transcript, false))
 	if err != nil || plain.Segments[0].Content != captureCompletionMessage+"\n" || len(plain.Segments) != 4 {
 		t.Fatalf("without notes: %+v err=%v", plain, err)
 	}
-	content, err := messagecreation.Normalize(captureCompletionSegments("capture_1", audio, transcript, true))
+	content, err := messagecreation.Normalize(captureCompletionSegments("capture_1", &audio, transcript, true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,5 +105,46 @@ func TestCaptureCompletionSegmentsPutQuickNotesAfterTheFiles(t *testing.T) {
 	if len(content.Segments) != 6 || content.Segments[1].DocumentID != "document_audio" || content.Segments[3].DocumentID != "document_transcript" ||
 		last.Type != "meeting_notes" || last.CaptureID != "capture_1" || last.Content == "" {
 		t.Fatalf("with notes: %+v", content.Segments)
+	}
+}
+
+func TestCaptureCompletionWithoutAudioOffersOnlyTheTranscript(t *testing.T) {
+	t.Parallel()
+	transcript := document.Version{ID: "version_transcript", DocumentID: "document_transcript", Filename: "transcript.md"}
+	content, err := messagecreation.Normalize(captureCompletionSegments("capture_1", nil, transcript, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content.Segments) != 4 || content.Segments[0].Content != captureCompletionWithoutAudioMessage+"\n" ||
+		content.Segments[1].DocumentID != "document_transcript" || content.Segments[3].Type != "meeting_notes" {
+		t.Fatalf("segments: %+v", content.Segments)
+	}
+	if got := captureCompletionAttachments(nil, transcript); len(got) != 1 || got[0] != "version_transcript" {
+		t.Fatalf("attachments=%v", got)
+	}
+}
+
+func TestCaptureAudioMatchesRequiresTheSameAudioOrNone(t *testing.T) {
+	t.Parallel()
+	audio := document.Version{ID: "version_audio", DocumentID: "document_audio"}
+	withAudio := store.CaptureSession{Status: "finalized",
+		DocumentID:        pgtype.Text{String: "document_audio", Valid: true},
+		DocumentVersionID: pgtype.Text{String: "version_audio", Valid: true}}
+	withoutAudio := store.CaptureSession{Status: "finalized"}
+	for _, scenario := range []struct {
+		name    string
+		session store.CaptureSession
+		audio   *document.Version
+		want    bool
+	}{
+		{"same audio", withAudio, &audio, true},
+		{"no audio on either", withoutAudio, nil, true},
+		{"audio expected but missing", withoutAudio, &audio, false},
+		{"audio present but not passed", withAudio, nil, false},
+		{"not finalized", store.CaptureSession{Status: "finalizing"}, nil, false},
+	} {
+		if got := captureAudioMatches(scenario.session, scenario.audio); got != scenario.want {
+			t.Errorf("%s: got %v, want %v", scenario.name, got, scenario.want)
+		}
 	}
 }
