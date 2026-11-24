@@ -1052,20 +1052,27 @@ describe("IMessageChannel review fixes", () => {
         segments: [
           { type: "text", content: "Second report." },
           {
-            type: "document",
+            type: "file",
             content: "missing.pdf",
+            filename: "missing.pdf",
+            media_type: "application/pdf",
             document_id: "doc_2",
-            presentation: "card",
           },
         ],
         attachments: [],
       }),
     );
     await vi.waitFor(() => expect(f.state().roomSeq).toBe(12));
-    expect(sends.at(-1)).toEqual({
-      target: { to: ME },
-      text: `${OUTBOUND_PREFIX}missing.pdf — open in Linger: https://linger.test/t/t1/documents/doc_2`,
-    });
+    expect(sends.slice(-2)).toEqual([
+      {
+        target: { to: ME },
+        text: `${OUTBOUND_PREFIX}Second report.`,
+      },
+      {
+        target: { to: ME },
+        text: `${OUTBOUND_PREFIX}missing.pdf — open in Linger: https://linger.test/t/t1/documents/doc_2`,
+      },
+    ]);
     await channel.stop();
     expect(cleaned).toHaveBeenCalledOnce();
   });

@@ -188,7 +188,7 @@ const compactExternalChannelNote = (
 ): string => {
   if (!channel) return "";
   const label = channel === "imessage" ? "iMessage" : "WeChat";
-  return `\nExternal channel (${label}): do not send HTML chat cards (html_fragment); use plain text, Documents, or attached files instead. Question and approval cards work via text reply; OAuth, API keys, and computer permissions must be finished in Linger on the computer.`;
+  return `\nExternal channel (${label}): do not send HTML chat cards (html_fragment); use plain text, Documents, or attached files instead. Reactions are not shown there, so reply with text instead of reacting only. Question and approval cards work via text reply; OAuth, API keys, and computer permissions must be finished in Linger on the computer.`;
 };
 
 const environment = (input: MetaInstructionsInput): string =>

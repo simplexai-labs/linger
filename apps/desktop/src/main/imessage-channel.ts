@@ -177,6 +177,14 @@ export function outboundDocuments(message: TeamHubMessage): OutboundDocument[] {
     });
   }
   for (const segment of message.segments ?? []) {
+    if (segment.type === "file" && !seen.has(segment.document_id)) {
+      seen.add(segment.document_id);
+      out.push({
+        documentId: segment.document_id,
+        label: segment.filename || segment.content,
+      });
+      continue;
+    }
     if (segment.type !== "document" || seen.has(segment.document_id)) continue;
     seen.add(segment.document_id);
     out.push({
@@ -187,8 +195,8 @@ export function outboundDocuments(message: TeamHubMessage): OutboundDocument[] {
   return out;
 }
 
-// Message body without trailing document-card labels that are delivered as
-// separate file attachments right after the text.
+// Message body without trailing file or document-card labels that are delivered
+// as separate file attachments right after the text.
 export function outboundMessageBody(
   message: TeamHubMessage,
   deliveringDocuments: readonly OutboundDocument[],
@@ -199,6 +207,10 @@ export function outboundMessageBody(
   let omittedCard = false;
   const parts: string[] = [];
   for (const segment of message.segments) {
+    if (segment.type === "file" && deliveredIds.has(segment.document_id)) {
+      omittedCard = true;
+      continue;
+    }
     if (
       segment.type === "document" &&
       deliveredIds.has(segment.document_id) &&

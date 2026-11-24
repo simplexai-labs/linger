@@ -432,10 +432,10 @@ describe("ChannelSupervisor", () => {
     await new Promise((r) => setTimeout(r, 30));
 
     expect(adapter.sentMedia).toHaveLength(2);
-    expect(adapter.sentMedia[0]!.filename).toBe("Trip Plan.txt");
-    expect(adapter.sentMedia[0]!.mediaType).toBe("text/plain");
+    expect(adapter.sentMedia[0]!.filename).toBe("Trip Plan.md");
+    expect(adapter.sentMedia[0]!.mediaType).toBe("text/markdown");
     expect(new TextDecoder().decode(adapter.sentMedia[0]!.bytes)).toBe(
-      "Trip Plan\n\n- Boat tour",
+      "# Trip Plan\n\n- **Boat** tour",
     );
     expect(adapter.sentMedia[1]!.filename).toBe("slides.pptx");
     expect(Array.from(adapter.sentMedia[1]!.bytes)).toEqual([80, 75, 3, 4]);
@@ -449,6 +449,29 @@ describe("ChannelSupervisor", () => {
           r.outbound_room_seq === 23 &&
           r.pending_card?.kind === "approval" &&
           r.pending_card?.decisionId === "dec_appr",
+      ),
+    ).toBe(true);
+
+    // 5. card_changed without card.status clears pending_card (e.g. answered in Desktop/Web).
+    outboundPage = {
+      room_id: "room_1",
+      another_me_actor_id: "act_am",
+      human_actor_id: "act_human",
+      latest_room_seq: 24,
+      has_more: false,
+      items: [
+        {
+          room_seq: 24,
+          event_type: "card_changed",
+          message_id: "m_23",
+        },
+      ],
+    };
+    supervisor.wakeRoom("room_1");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(
+      reports.some(
+        (r) => r.outbound_room_seq === 24 && r.clear_pending_card === true,
       ),
     ).toBe(true);
 

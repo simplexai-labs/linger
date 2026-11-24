@@ -454,3 +454,32 @@ func TestIngestInboundMultiQuestionOtherAndApproval(t *testing.T) {
 		t.Fatalf("approval = %+v, cmd=%+v, err=%v", approved, fd.lastCmd, err)
 	}
 }
+
+func TestProjectRoomEventStripsFileSegments(t *testing.T) {
+	payload := json.RawMessage(`{
+		"kind": "message.created",
+		"message": {
+			"id": "msg_1",
+			"message_kind": "conversation",
+			"raw_message": "Your slides are ready.trip.pptx",
+			"author": {"id": "act_am", "kind": "agent"},
+			"attachments": [
+				{"document_id": "doc_1", "filename": "trip.pptx", "media_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "available": true}
+			],
+			"segments": [
+				{"type": "text", "content": "Your slides are ready."},
+				{"type": "file", "content": "trip.pptx", "filename": "trip.pptx", "media_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "document_id": "doc_1"}
+			]
+		}
+	}`)
+	ev, ok := projectRoomEvent(61, "message.created", payload)
+	if !ok {
+		t.Fatal("expected event to project")
+	}
+	if ev.RawMessage != "Your slides are ready." {
+		t.Fatalf("expected file segment stripped from RawMessage, got %q", ev.RawMessage)
+	}
+	if len(ev.Documents) != 1 || ev.Documents[0].DocumentID != "doc_1" || ev.Documents[0].Filename != "trip.pptx" {
+		t.Fatalf("unexpected projected documents: %+v", ev.Documents)
+	}
+}

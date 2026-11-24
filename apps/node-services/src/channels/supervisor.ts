@@ -1,6 +1,5 @@
 import {
   channelIdempotencyKey,
-  channelPlainText,
   channelText,
   formatPendingCard,
   formatUnsupportedCardNotice,
@@ -42,16 +41,15 @@ function isMarkdownFile(filename: string, mediaType?: string): boolean {
 function readableDocumentFilename(
   downloadedFilename: string | undefined,
   fallbackLabel: string,
-  asPlainText: boolean,
+  markdown: boolean,
 ): string {
   const preferred =
     downloadedFilename && downloadedFilename.toLowerCase() !== "latest.md"
       ? downloadedFilename
       : fallbackLabel;
   const safe = (preferred.trim() || "document").replace(/[\\/:*?"<>|]/g, "_");
-  if (!asPlainText) return safe;
-  const stem = safe.replace(/\.(md|markdown)$/i, "");
-  return stem.toLowerCase().endsWith(".txt") ? stem : `${stem}.txt`;
+  if (!markdown) return safe;
+  return /\.(md|markdown)$/i.test(safe) ? safe : `${safe}.md`;
 }
 
 export type AdapterFactory = (
@@ -465,7 +463,11 @@ export class ChannelSupervisor {
       await this.#teamHub.reportStatus(runner.bindingId, {
         outbound_room_id: runner.roomId,
         outbound_room_seq: runner.outboundSeq,
-        ...(status && status !== "pending" ? { clear_pending_card: true } : {}),
+        // TeamHub card.changed events omit card.status and only fire when a
+        // card advances past pending (e.g. answered in Web/Desktop).
+        ...(!status || status !== "pending"
+          ? { clear_pending_card: true }
+          : {}),
       });
       return true;
     }
@@ -615,35 +617,18 @@ export class ChannelSupervisor {
 
     const rawName = downloaded.filename || fallbackName;
     const rawMediaType = downloaded.mediaType || fallbackMediaType;
-    let payloadBytes = downloaded.bytes;
-    let filename: string;
-    let mediaType: string | undefined;
-
-    if (isMarkdownFile(rawName, rawMediaType)) {
-      const plain = channelPlainText(
-        new TextDecoder("utf-8").decode(downloaded.bytes),
-        { includeLinkUrls: runner.adapter.capabilities.supportsClickableLinks },
-      );
-      payloadBytes = new TextEncoder().encode(plain);
-      filename = readableDocumentFilename(
-        downloaded.filename,
-        fallbackName,
-        true,
-      );
-      mediaType = "text/plain";
-    } else {
-      filename = readableDocumentFilename(
-        downloaded.filename,
-        fallbackName,
-        false,
-      );
-      mediaType = rawMediaType;
-    }
+    const markdown = isMarkdownFile(rawName, rawMediaType);
+    const filename = readableDocumentFilename(
+      downloaded.filename,
+      fallbackName,
+      markdown,
+    );
+    const mediaType = rawMediaType || (markdown ? "text/markdown" : undefined);
 
     const outcome = await this.#sendMediaWithRetry(runner, {
       filename,
       ...(mediaType ? { mediaType } : {}),
-      bytes: payloadBytes,
+      bytes: downloaded.bytes,
       roomSeq,
     });
     if (!outcome.ok) {

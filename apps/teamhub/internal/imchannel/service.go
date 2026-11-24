@@ -1038,6 +1038,8 @@ func projectRoomEvent(roomSeq int64, eventType string, rawPayload json.RawMessag
 				Segments []struct {
 					Type         string `json:"type"`
 					Content      string `json:"content"`
+					Filename     string `json:"filename"`
+					MediaType    string `json:"media_type"`
 					DocumentID   string `json:"document_id"`
 					Presentation string `json:"presentation"`
 				} `json:"segments"`
@@ -1072,6 +1074,22 @@ func projectRoomEvent(roomSeq int64, eventType string, rawPayload json.RawMessag
 		for _, seg := range payload.Message.Segments {
 			if seg.Type == "html_fragment" {
 				hasHTML = true
+			}
+			if seg.Type == "file" && seg.DocumentID != "" {
+				if _, dup := seenDocs[seg.DocumentID]; !dup {
+					seenDocs[seg.DocumentID] = struct{}{}
+					name := seg.Filename
+					if name == "" {
+						name = seg.Content
+					}
+					docs = append(docs, OutboundDocument{
+						DocumentID: seg.DocumentID,
+						Filename:   name,
+						MediaType:  seg.MediaType,
+					})
+				}
+				omittedCard = true
+				continue
 			}
 			if seg.Type == "document" && seg.DocumentID != "" {
 				if _, dup := seenDocs[seg.DocumentID]; !dup {

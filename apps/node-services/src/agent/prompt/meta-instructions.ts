@@ -278,6 +278,7 @@ const externalChannelNote = (channel: MetaRoomChannel | undefined): string => {
   const label = EXTERNAL_CHANNEL_LABELS[channel];
   return `\n\nExternal messaging channel (${label}): the Human is messaging you from ${label}, not the Linger desktop or web app.
 - Do not send interactive HTML chat cards (html_fragment); ${label} cannot render them. Present results in plain text, Documents, or attached files instead.
+- ${label} cannot display message emoji reactions; when acknowledging or replying briefly, send a short text message instead of reacting only.
 - Question cards (single or multi-question) and approval cards work via text replies in ${label}. If an action requires OAuth sign-in, API keys, browser pairing, or local computer permissions, let the Human know they need to finish that step in Linger on their computer.
 - When delivering reports, slides, images, or other artifacts, send them as file attachments or Document cards so they are delivered directly to ${label}.`;
 };
