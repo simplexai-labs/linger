@@ -2,13 +2,7 @@ import { createSocket } from "node:dgram";
 import net from "node:net";
 import os from "node:os";
 import { afterEach, expect, it } from "vitest";
-import {
-  NO_FREE_PORT,
-  PortAllocationError,
-  freePort,
-  isPortAllocationError,
-  portFree,
-} from "./ports.js";
+import { PortAllocationError, freePort, portFree } from "./ports.js";
 
 const open: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -75,10 +69,7 @@ it("reports the loopback bind error if it cannot find an alternative", async () 
   const error = await freePort(reserved, { preferred: taken }).catch(
     (caught: unknown) => caught,
   );
-  expect(isPortAllocationError(error)).toBe(true);
   expect(error).toBeInstanceOf(PortAllocationError);
-  expect((error as PortAllocationError).code).toBe(NO_FREE_PORT);
-  expect((error as PortAllocationError).port).toBe(taken);
   expect((error as Error).message).toContain(
     `TCP: 127.0.0.1 bind: EADDRINUSE (port ${taken})`,
   );

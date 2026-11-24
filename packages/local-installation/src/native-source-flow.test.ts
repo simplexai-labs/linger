@@ -2289,6 +2289,51 @@ test("voice stays off and the install continues when LiveKit UDP port allocation
   expect(events).toContain("UDP: 127.0.0.1 bind: EADDRINUSE (port 54321)");
 });
 
+test("voice still stays off on LiveKit port exhaustion even when checkout .env defines LIVEKIT_URL", async () => {
+  const f = await fixture();
+  await writeFile(
+    path.join(f.repo, ".env"),
+    "LIVEKIT_URL=ws://127.0.0.1:17880\n",
+  );
+  const bin = path.join(f.home, "voice");
+  vi.mocked(prepareNativeVoiceTools).mockResolvedValue({
+    bin,
+    livekit: path.join(bin, "livekit-server"),
+  });
+  vi.mocked(readLiveKitSettings).mockResolvedValue({
+    httpPort: 30000,
+    rtcPort: 30001,
+    apiKey: "APIabcdef123456",
+    apiSecret: "s".repeat(64),
+  });
+  vi.mocked(prepareLiveKitSettings).mockRejectedValueOnce(
+    new PortAllocationError("udp", "127.0.0.1 bind: EADDRINUSE", 54_322),
+  );
+  const events: string[] = [];
+  const outcome = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-voice-checkout-env",
+    setupChoice: "pi",
+    externalComputer: false,
+    signal: new AbortController().signal,
+    onEvent: (event) => events.push(event.message),
+  });
+  expect(outcome.code, outcome.message).toBe(0);
+  const services = vi
+    .mocked(startNativeProcess)
+    .mock.calls.map(([options]) => options)
+    .filter((options) => options.name !== "postgres");
+  for (const options of services)
+    expect(JSON.parse(options.settings!).voice).toBe("off");
+  expect(startNativeLiveKit).not.toHaveBeenCalled();
+  const teamhub = services.find((options) => options.name === "teamhub")!;
+  expect(teamhub.env.TEAMHUB_VOICE_MEDIA).toBe("off");
+  expect(events.join("")).toContain(
+    "Voice stays off: LiveKit could not reserve a local port",
+  );
+});
+
 test("non-port LiveKit configuration errors still fail preflight", async () => {
   const f = await fixture();
   vi.mocked(prepareLiveKitSettings).mockRejectedValueOnce(

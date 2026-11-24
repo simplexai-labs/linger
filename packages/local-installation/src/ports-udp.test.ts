@@ -83,12 +83,7 @@ vi.mock("node:dgram", () => ({
   },
 }));
 
-import {
-  NO_FREE_PORT,
-  PortAllocationError,
-  freePort,
-  isPortAllocationError,
-} from "./ports.js";
+import { PortAllocationError, freePort } from "./ports.js";
 
 beforeEach(() => {
   mockDgram.events = [];
@@ -198,20 +193,14 @@ describe("freePort UDP dual-stack probing", () => {
     expect(mockDgram.openUdp4.size).toBe(0);
   });
 
-  it("throws a structured PortAllocationError with attempted port details when all UDP binds fail", async () => {
+  it("throws a PortAllocationError with attempted port details when all UDP binds fail", async () => {
     mockDgram.onBind = () => ({ errorCode: "EADDRINUSE" });
 
     const error = await freePort(new Set(), { protocol: "udp" }).catch(
       (caught: unknown) => caught,
     );
-    expect(isPortAllocationError(error)).toBe(true);
     expect(error).toBeInstanceOf(PortAllocationError);
-    const allocationError = error as PortAllocationError;
-    expect(allocationError.code).toBe(NO_FREE_PORT);
-    expect(allocationError.protocol).toBe("udp");
-    expect(allocationError.port).toBeGreaterThanOrEqual(10_240);
-    expect(allocationError.port).toBeLessThanOrEqual(49_151);
-    expect(allocationError.message).toMatch(
+    expect((error as Error).message).toMatch(
       /No free local port is available on this computer\. UDP: 127\.0\.0\.1 bind: EADDRINUSE \(port \d+\)\./,
     );
     expect(mockDgram.openUdp4.size).toBe(0);

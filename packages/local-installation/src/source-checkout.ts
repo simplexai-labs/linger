@@ -13,6 +13,7 @@ import {
   liveKitEnvironment,
   prepareLiveKitSettings,
   readLiveKitSettings,
+  type LiveKitSettings,
 } from "./native-livekit.js";
 import { readUserEnvironment } from "./user-environment.js";
 import { localAccountProvisioned } from "./account.js";
@@ -22,7 +23,7 @@ import {
   reclaimNativeOrphans,
   type NativeService,
 } from "./native-process.js";
-import { freePort, isPortAllocationError, portFree } from "./ports.js";
+import { PortAllocationError, freePort, portFree } from "./ports.js";
 import type { SetupChoice } from "./setup-plan.js";
 import type { ByokConfiguration } from "./byok-source.js";
 import type { RuntimeDescriptor } from "./managed-runtimes.js";
@@ -153,6 +154,7 @@ export async function prepareSourceConfiguration(
   instance: Instance;
   env: NodeJS.ProcessEnv;
   warnings: string[];
+  liveKit?: LiveKitSettings;
 }> {
   const repo = await validateSourceRepository(repository);
   const instance = await initializeInstance({ ...options, releaseDir: repo });
@@ -310,17 +312,15 @@ export async function prepareSourceConfiguration(
       (await readPrivate(path.join(instance.root, "services.env")))!,
     );
     const ports = instance.source.ports;
-    let liveKitEnv: Record<string, string> = {};
+    let liveKit: LiveKitSettings | undefined;
     try {
-      liveKitEnv = liveKitEnvironment(
-        await prepareLiveKitSettings(
-          instance.root,
-          await reservedPorts(),
-          (message) => warnings.push(message),
-        ),
+      liveKit = await prepareLiveKitSettings(
+        instance.root,
+        await reservedPorts(),
+        (message) => warnings.push(message),
       );
     } catch (error) {
-      if (!isPortAllocationError(error)) throw error;
+      if (!(error instanceof PortAllocationError)) throw error;
       warnings.push(
         `Voice stays off: LiveKit could not reserve a local port (${error.message}).\n`,
       );
@@ -355,7 +355,7 @@ export async function prepareSourceConfiguration(
       HOST: "127.0.0.1,::1",
       // Native runs its own LiveKit on loopback with this instance's ports
       // and keys when port reservation succeeds.
-      ...liveKitEnv,
+      ...(liveKit ? liveKitEnvironment(liveKit) : {}),
     };
     const quote = (value: string) => {
       if (!/[\r\n\0]/.test(value)) {
@@ -386,6 +386,6 @@ export async function prepareSourceConfiguration(
     if (entries.some(([key, value]) => parsed[key] !== value))
       throw new Error("Source environment contains unsupported characters.");
     await atomicPrivate(envFile, text);
-    return { instance, env: generated, warnings };
+    return { instance, env: generated, warnings, liveKit };
   });
 }

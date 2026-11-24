@@ -790,7 +790,6 @@ async function runNativeSource(
               packages: !offline,
             }),
         );
-        const voiceConfigured = Boolean(configured.env.LIVEKIT_URL);
         const voiceTools = await timed("Preparing the voice tools", () =>
           prepareNativeVoiceTools({
             home,
@@ -813,7 +812,7 @@ async function runNativeSource(
             message:
               "Voice stays off: this installation has no voice tools for this computer.\n",
           });
-        const voice = voiceConfigured ? voiceTools : undefined;
+        const voice = configured.liveKit ? voiceTools : undefined;
         // node-services downloads its voice model packages from the region's
         // registry first, and nothing it starts probes again.
         const region = await resolveRegion(home, { signal });

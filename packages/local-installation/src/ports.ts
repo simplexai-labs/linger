@@ -20,15 +20,8 @@ const NON_EPHEMERAL_MAX = 49_151;
 
 type Protocol = "tcp" | "udp";
 
-export const NO_FREE_PORT = "NO_FREE_PORT";
-
-/** Structured error thrown when no free local port can be allocated. */
+/** Error thrown when no free local port can be allocated. */
 export class PortAllocationError extends Error {
-  readonly code = NO_FREE_PORT;
-  readonly protocol: Protocol;
-  readonly port?: number;
-  readonly conflict?: string;
-
   constructor(protocol: Protocol, conflict?: string, port?: number) {
     const detail = conflict
       ? port !== undefined
@@ -39,21 +32,7 @@ export class PortAllocationError extends Error {
       `No free local port is available on this computer. ${protocol.toUpperCase()}: ${detail}.`,
     );
     this.name = "PortAllocationError";
-    this.protocol = protocol;
-    this.port = port;
-    this.conflict = conflict;
   }
-}
-
-/** Whether an error is a structured local port allocation failure. */
-export function isPortAllocationError(
-  error: unknown,
-): error is PortAllocationError {
-  return (
-    error instanceof PortAllocationError ||
-    (error instanceof Error &&
-      (error as { code?: unknown }).code === NO_FREE_PORT)
-  );
 }
 
 export interface PortCheckOptions {
@@ -144,20 +123,6 @@ function bindConflict(
   });
 }
 
-async function udpSecondaryConflict(
-  port: number,
-  options: PortCheckOptions = {},
-): Promise<string | undefined> {
-  const ipv6Conflict = await bindConflict(port, "::1", "udp", true);
-  if (ipv6Conflict) return ipv6Conflict;
-  if (!options.allInterfaces) return undefined;
-  for (const external of nonLoopbackLocalHosts()) {
-    const conflict = await bindConflict(port, external, "udp", true);
-    if (conflict) return conflict;
-  }
-  return undefined;
-}
-
 // macOS lets a program bind one address under another program's listener on
 // every address, so a successful bind does not prove nobody answers there.
 function answers(port: number, host: string): Promise<boolean> {
@@ -182,7 +147,7 @@ async function portConflict(
     const ipv4 = await bindUdp(port, "127.0.0.1");
     if (ipv4.error) return formatBindError("127.0.0.1", ipv4.error, false);
     try {
-      return await udpSecondaryConflict(port, options);
+      return await bindConflict(port, "::1", "udp", true);
     } finally {
       await closeUdpSocket(ipv4.socket!);
     }
@@ -226,21 +191,18 @@ function ephemeralTcp(): Promise<number> {
 
 async function freeUdpPort(
   reserved: Set<number>,
-  options: {
-    preferred?: number;
-    allInterfaces?: boolean;
-  },
+  preferred?: number,
 ): Promise<number> {
   let lastConflict: string | undefined;
   let lastPort: number | undefined;
-  if (options.preferred !== undefined && !reserved.has(options.preferred)) {
-    const conflict = await portConflict(options.preferred, "udp", options);
+  if (preferred !== undefined && !reserved.has(preferred)) {
+    const conflict = await portConflict(preferred, "udp");
     if (conflict === undefined) {
-      reserved.add(options.preferred);
-      return options.preferred;
+      reserved.add(preferred);
+      return preferred;
     }
     lastConflict = conflict;
-    lastPort = options.preferred;
+    lastPort = preferred;
   }
   // Hold the OS-assigned IPv4 UDP socket open while probing ::1 instead of
   // closing and rebinding 127.0.0.1:port, which fails with EADDRINUSE on
@@ -259,7 +221,7 @@ async function freeUdpPort(
         const { port } = socket.address();
         try {
           if (!reserved.has(port)) {
-            const conflict = await udpSecondaryConflict(port, options);
+            const conflict = await bindConflict(port, "::1", "udp", true);
             if (conflict === undefined) {
               reserved.add(port);
               return port;
@@ -276,7 +238,7 @@ async function freeUdpPort(
     const candidate = randomInt(NON_EPHEMERAL_MIN, NON_EPHEMERAL_MAX + 1);
     if (reserved.has(candidate) || triedNonEphemeral.has(candidate)) continue;
     triedNonEphemeral.add(candidate);
-    const conflict = await portConflict(candidate, "udp", options);
+    const conflict = await portConflict(candidate, "udp");
     if (conflict === undefined) {
       reserved.add(candidate);
       return candidate;
@@ -300,7 +262,7 @@ export async function freePort(
   } = {},
 ): Promise<number> {
   const protocol = options.protocol ?? "tcp";
-  if (protocol === "udp") return freeUdpPort(reserved, options);
+  if (protocol === "udp") return freeUdpPort(reserved, options.preferred);
   let port = options.preferred;
   let lastConflict: string | undefined;
   let lastPort: number | undefined;
