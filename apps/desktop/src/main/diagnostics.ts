@@ -3,6 +3,7 @@ import {
   lstat,
   mkdir,
   open,
+  readFile,
   readdir,
   rename,
   rm,
@@ -167,6 +168,35 @@ const newestRegularFiles = async (
     .sort();
 };
 
+const MAX_SECRET_FILE_BYTES = 4 * 1024;
+
+// Per-deployment localmodels bearer keys stay out of the zip as files, and
+// their values are also scrubbed from every bundled text in case an engine or
+// step record echoes `--api-key <value>` in argv form.
+const localmodelsSecretValues = async (home: string): Promise<string[]> => {
+  const keyFiles = await listFiles(
+    path.join(home, "runtime", "localmodels", "models", "deployments"),
+    1,
+    (file) => path.basename(file) === "api-key",
+  );
+  const secrets = await Promise.all(
+    keyFiles.map(async (file) => {
+      const info = await lstat(file).catch(() => undefined);
+      if (
+        !info ||
+        info.isSymbolicLink() ||
+        !info.isFile() ||
+        info.size === 0 ||
+        info.size > MAX_SECRET_FILE_BYTES
+      )
+        return undefined;
+      const value = (await readFile(file, "utf8").catch(() => "")).trim();
+      return value.length >= 4 ? value : undefined;
+    }),
+  );
+  return secrets.filter((value): value is string => Boolean(value));
+};
+
 const localmodelsFiles = async (
   home: string,
   prefix: string,
@@ -182,13 +212,11 @@ const localmodelsFiles = async (
     0,
     (file) => /\.json$/.test(file),
   );
-  const deploymentRoot = path.join(root, "models", "deployments");
-  const deploymentEntries = await readdir(deploymentRoot, {
-    withFileTypes: true,
-  }).catch(() => []);
-  const serverLogs = deploymentEntries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(deploymentRoot, entry.name, "server.log"));
+  const serverLogs = await listFiles(
+    path.join(root, "models", "deployments"),
+    1,
+    (file) => path.basename(file) === "server.log",
+  );
   const selected = [
     ...(await newestRegularFiles(stackRuns, MAX_LOCALMODELS_FILES)),
     ...(await newestRegularFiles(deployments, MAX_LOCALMODELS_FILES)),
@@ -297,7 +325,14 @@ export const collectDiagnostics = async (
   const added = new Set<string>();
   const homes = [...new Set(options.homes.map((home) => path.resolve(home)))];
   // The saved keys themselves, wherever a service printed them.
-  const keys = homes.flatMap((home) => savedSecretValues(home, LOCAL_INSTANCE));
+  const keys = [
+    ...new Set([
+      ...homes.flatMap((home) => savedSecretValues(home, LOCAL_INSTANCE)),
+      ...(
+        await Promise.all(homes.map((home) => localmodelsSecretValues(home)))
+      ).flat(),
+    ]),
+  ];
   const withoutHome = homeRedactor(options.userHome ?? os.homedir());
   const addText = (entry: string, text: string) => {
     if (added.has(entry)) return;

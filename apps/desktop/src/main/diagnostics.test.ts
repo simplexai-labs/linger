@@ -316,6 +316,7 @@ describe("collectDiagnostics", () => {
           "qwen-llm",
           "api-key",
         ),
+        argv: ["llama-server", "--api-key", "deployment-raw-key"],
         steps: [
           {
             step: "start",
@@ -327,7 +328,12 @@ describe("collectDiagnostics", () => {
     );
     write(
       path.join(localmodels, "models", "deployments", "qwen-llm", "server.log"),
-      `loading model from ${path.join(home, "runtime", "localmodels", "models")}\nBearer server-log-secret\nCUDA out of memory\n`,
+      [
+        `exec llama-server --port 8081 --api-key deployment-raw-key -m ${path.join(home, "runtime", "localmodels", "models", "m.gguf")}`,
+        "Bearer server-log-secret",
+        "CUDA out of memory",
+        "",
+      ].join("\n"),
     );
     write(
       path.join(localmodels, "models", "deployments", "qwen-llm", "api-key"),
@@ -382,6 +388,11 @@ describe("collectDiagnostics", () => {
     expect(joined).not.toContain("step-secret-999");
     expect(joined).not.toContain("server-log-secret");
     expect(joined).not.toContain("deployment-raw-key");
+    expect(
+      entries.get(
+        "linger-home/runtime/localmodels/models/deployments/qwen-llm/server.log",
+      ),
+    ).toContain("--api-key [REDACTED]");
     expect(
       entries.get(
         "linger-home/runtime/localmodels/models/deployments/qwen-llm/server.log",
