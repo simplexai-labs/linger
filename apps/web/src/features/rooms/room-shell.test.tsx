@@ -178,6 +178,33 @@ describe("Room shell Account menu", () => {
     expect(screen.getByText("Shell content")).toBeVisible();
   });
 
+  it("opens global search from a shortcut pressed as the shell first appears", async () => {
+    await act(async () => {
+      await import("@/features/search/global-search-dialog");
+    });
+    // Press the shortcut from the mutation that paints the shell, before any
+    // passive effect could run, so a late-armed listener drops the keystroke.
+    let pressed = false;
+    const observer = new MutationObserver(() => {
+      if (pressed) return;
+      if (!screen.queryByRole("button", { name: "Open Room navigation" })) {
+        return;
+      }
+      pressed = true;
+      fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      await renderAccountShell({
+        initialEntry: "/t/tenant-northstar/rooms/room-all/chat",
+      });
+    } finally {
+      observer.disconnect();
+    }
+    expect(pressed).toBe(true);
+    expect(await screen.findByRole("dialog", { name: "Search" })).toBeVisible();
+  });
+
   it("lets Live voice switch pages and open a search already filled in", async () => {
     await renderAccountShell({
       initialEntry: "/t/tenant-northstar/rooms/room-all/chat",
