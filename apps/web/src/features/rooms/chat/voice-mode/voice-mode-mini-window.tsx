@@ -256,16 +256,27 @@ function MiniWindow({
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
+  /** A follow scroll is gliding down to the newest words. */
+  const glidingRef = useRef(false);
+  const lastTopRef = useRef(0);
   // Follows the conversation as it grows, words revealed while the voice
-  // speaks included, and pins before the frame is painted. A Human who
-  // scrolled up stays where they are.
+  // speaks included, gliding down a line at a time. A Human who scrolled up
+  // stays where they are.
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
     const content = contentRef.current;
     const view = scroller?.ownerDocument.defaultView;
     if (!scroller || !content || !view || !("ResizeObserver" in view)) return;
     const pin = () => {
-      if (followRef.current) scroller.scrollTop = scroller.scrollHeight;
+      if (!followRef.current) return;
+      const top = scroller.scrollHeight - scroller.clientHeight;
+      if (top - scroller.scrollTop < 1) return;
+      const glide =
+        typeof scroller.scrollTo === "function" &&
+        !view.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      glidingRef.current = glide;
+      if (glide) scroller.scrollTo({ top, behavior: "smooth" });
+      else scroller.scrollTop = top;
     };
     pin();
     const observer = new view.ResizeObserver(pin);
@@ -454,9 +465,19 @@ function MiniWindow({
           className="workspace-scrollbar min-h-24 flex-1 overflow-y-auto px-3 py-3"
           onScroll={(event) => {
             const element = event.currentTarget;
-            followRef.current =
-              element.scrollHeight - element.scrollTop - element.clientHeight <
-              24;
+            const top = element.scrollTop;
+            const atBottom =
+              element.scrollHeight - top - element.clientHeight < 24;
+            // A follow glide passes through positions short of the bottom
+            // on its way down; only moving up leaves the newest words.
+            if (atBottom) {
+              followRef.current = true;
+              glidingRef.current = false;
+            } else if (!glidingRef.current || top < lastTopRef.current) {
+              followRef.current = false;
+              glidingRef.current = false;
+            }
+            lastTopRef.current = top;
           }}
           ref={scrollRef}
           role="log"
@@ -583,8 +604,14 @@ const Bubble = memo(function Bubble({
   pending?: boolean;
   text: string;
 }) {
+  // A reply the voice starts now eases in; lines already said do not.
+  const [entering] = useState(() => paced && pacing === "speaking");
   return (
-    <div className={`flex flex-col ${own ? "items-end" : "items-start"}`}>
+    <div
+      className={`flex flex-col ${own ? "items-end" : "items-start"} ${
+        entering ? "voice-live-line-in" : ""
+      }`}
+    >
       {own ? null : (
         <span className="mb-0.5 px-1 text-[12px] text-app-muted">{author}</span>
       )}
@@ -612,10 +639,32 @@ function PacedText({
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const shown = usePacedText(text, pacing, ref);
-  // Before the first word is heard, the line shows that the voice is about
-  // to speak.
-  return <span ref={ref}>{shown || "\u2026"}</span>;
+  // Words already on screen when the line first rendered never fade in.
+  const [shownAtStart] = useState(() =>
+    pacing === "speaking" ? 0 : Array.from(text).length,
+  );
+  const characters = Array.from(shown);
+  // The newest characters fade in; each keeps its own element, keyed by its
+  // place, until its fade has run, then joins the plain text before it.
+  const fadeFrom = Math.max(shownAtStart, characters.length - fadingCharacters);
+  return (
+    <span ref={ref}>
+      {characters.length
+        ? characters.slice(0, fadeFrom).join("")
+        : // Before the first word is heard, the line shows that the voice
+          // is about to speak.
+          "\u2026"}
+      {characters.slice(fadeFrom).map((character, offset) => (
+        <span className="voice-live-word-in" key={fadeFrom + offset}>
+          {character}
+        </span>
+      ))}
+    </span>
+  );
 }
+
+/** More than the characters a voice says during one fade. */
+const fadingCharacters = 6;
 
 /** Conversation Messages sent since this session started, oldest first. */
 export function sessionMessages(

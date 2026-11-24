@@ -206,6 +206,32 @@ describe("Voice Mode mini window", () => {
     // The words arrive before they are spoken; they follow the voice.
     expect(log).not.toHaveTextContent("launch review");
     await waitFor(() => expect(log).toHaveTextContent("Two m"));
+    // The newest words fade in, and the reply eased in as the voice started;
+    // the Human's line, already said, does neither.
+    expect(log.querySelectorAll(".voice-live-word-in").length).toBeGreaterThan(
+      0,
+    );
+    expect(log.querySelectorAll(".voice-live-line-in")).toHaveLength(1);
+  });
+
+  it("shows a reply said before the window opened at once, without fading", async () => {
+    voice.session!.live = {
+      soundOff: false,
+      transcript: [
+        {
+          id: "lt_1:reply",
+          speaker: "live",
+          text: "Two meetings today.",
+        },
+      ],
+    };
+    renderWindow();
+    const log = await screen.findByRole("log", {
+      name: "Voice Mode conversation",
+    });
+    expect(log).toHaveTextContent("Two meetings today.");
+    expect(log.querySelector(".voice-live-word-in")).toBeNull();
+    expect(log.querySelector(".voice-live-line-in")).toBeNull();
   });
 
   it("shows a live call as it was said, with words still being said last", async () => {
