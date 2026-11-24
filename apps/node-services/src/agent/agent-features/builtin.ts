@@ -107,7 +107,7 @@ export interface BuiltinFeatureServices {
   /** Another Me reply rhythm and its offer settings; absent disables it. */
   readonly replyRhythm?: { readonly settings?: ReplyRhythmSettings };
   /** Confirms persisted Room replies on Runtime stop; absent disables it. */
-  readonly roomReplyGuard?: Pick<RoomReplyGuardFeatureDeps, "hasRunReplied">;
+  readonly roomReplyGuard?: Pick<RoomReplyGuardFeatureDeps, "readReplyStatus">;
   /**
    * Domain merger for per-message text contributions. Defaults to the
    * prompt-domain notification-sentinel merger.

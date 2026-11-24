@@ -104,6 +104,13 @@ as `local_server.installer_runtime_timings`, keyed on that event name and
 field shape, which are its contract. The route's response body does not carry
 these timings.
 
+A desktop-owned install uses the selected runtime descriptor to return the
+paths on its live completed job and emits the same timings event. Listing jobs
+and reloading saved jobs omit the runtime so a later setup reads current paths.
+When the handoff fails, the job still succeeds without `runtime`, stderr gets
+one `{"event":"installer.runtime_handoff_failed","instance","message"}` line,
+and the desktop falls back to `GET /api/instances/{name}/runtime`.
+
 `--stop` (with `--instance`) is the desktop uninstall's and Windows setup's: it stops the
 manager the desktop started for that instance (its `/api/stop` cancels a
 running job) and the instance's services, deletes nothing, and prints one

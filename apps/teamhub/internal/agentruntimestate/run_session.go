@@ -362,22 +362,43 @@ func (s *Service) GetLocalRun(ctx context.Context, contextKey, runID string) (Lo
 	return localRunFromRow(ctx, queries, row)
 }
 
-// GetLocalRunReplyStatus reports whether TeamHub persisted a visible reply for
-// the Local Run in its collaboration Room.
-func (s *Service) GetLocalRunReplyStatus(ctx context.Context, contextKey, runID string) (bool, error) {
+// LocalRunReplyStatus is where TeamHub persisted a visible reply for a Local
+// Run.
+type LocalRunReplyStatus struct {
+	// Replied reports a reply attributed to the Run, or written by its Agent in
+	// the Context's Room or its Threads while the Run ran.
+	Replied bool
+	// RepliedInboxIDs are the Inboxes that hold such a reply: the Room or
+	// Thread it is in and each Task whose work Room that is.
+	RepliedInboxIDs []string
+}
+
+// GetLocalRunReplyStatus reports whether, and in which Inboxes, TeamHub
+// persisted a visible reply for the Local Run.
+func (s *Service) GetLocalRunReplyStatus(ctx context.Context, contextKey, runID string) (LocalRunReplyStatus, error) {
 	if s == nil || s.pool == nil || contextKey == "" || runID == "" {
-		return false, ErrInvalid
+		return LocalRunReplyStatus{}, ErrInvalid
 	}
-	replied, err := store.New(s.pool).GetAgentLocalRunReplyDelivered(ctx, store.GetAgentLocalRunReplyDeliveredParams{
+	queries := store.New(s.pool)
+	replied, err := queries.GetAgentLocalRunReplyDelivered(ctx, store.GetAgentLocalRunReplyDeliveredParams{
 		ContextKey: contextKey, RunID: runID,
 	})
 	if isNoRows(err) {
-		return false, ErrNotFound
+		return LocalRunReplyStatus{}, ErrNotFound
 	}
 	if err != nil {
-		return false, err
+		return LocalRunReplyStatus{}, err
 	}
-	return replied, nil
+	inboxIDs, err := queries.ListAgentLocalRunReplyInboxes(ctx, store.ListAgentLocalRunReplyInboxesParams{
+		ContextKey: contextKey, RunID: runID,
+	})
+	if err != nil {
+		return LocalRunReplyStatus{}, err
+	}
+	if inboxIDs == nil {
+		inboxIDs = []string{}
+	}
+	return LocalRunReplyStatus{Replied: replied, RepliedInboxIDs: inboxIDs}, nil
 }
 
 func (s *Service) ContextHasPendingWork(ctx context.Context, contextKey string) (bool, error) {

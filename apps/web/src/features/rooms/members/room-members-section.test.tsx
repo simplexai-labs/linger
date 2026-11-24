@@ -109,22 +109,14 @@ describe("RoomMembersSection", () => {
     );
   });
 
-  it("surfaces Agent availability failures and retries both Agent snapshots", async () => {
+  it("keeps Agents listed without a status when Agent availability fails", async () => {
     const runtime = await runtimeWithOnlyCurrentMember();
-    const listTenantAgentAvailability = vi
-      .fn()
-      .mockReturnValueOnce(
-        teamHubErrorResponse(
-          503,
-          "AGENT_AVAILABILITY_UNAVAILABLE",
-          "Availability unavailable.",
-        ),
-      )
-      .mockReturnValue({ items: [], page: { has_more: false } });
-    runtime.server.on(
-      "GET",
-      "/v0/tenants/{tenantId}/agent-availability",
-      listTenantAgentAvailability,
+    runtime.server.on("GET", "/v0/tenants/{tenantId}/agent-availability", () =>
+      teamHubErrorResponse(
+        503,
+        "AGENT_AVAILABILITY_UNAVAILABLE",
+        "Availability unavailable.",
+      ),
     );
 
     await renderPanel(runtime);
@@ -133,21 +125,11 @@ describe("RoomMembersSection", () => {
     const dialog = screen.getByRole("dialog", { name: "Add Room member" });
 
     expect(
-      await within(dialog).findByText("Your agents are unavailable"),
+      await within(dialog).findByRole("button", { name: /Lev8 GTM/ }),
     ).toBeVisible();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Retry" }));
-
-    await waitFor(() =>
-      expect(listTenantAgentAvailability).toHaveBeenCalledTimes(2),
-    );
     expect(
-      runtime.server.requestsTo("GET", "/v0/tenants/{tenantId}/agents"),
-    ).toHaveLength(2);
-    await waitFor(() =>
-      expect(
-        within(dialog).queryByText("Your agents are unavailable"),
-      ).not.toBeInTheDocument(),
-    );
+      within(dialog).queryByText("Your agents are unavailable"),
+    ).not.toBeInTheDocument();
   });
 
   it("lets a non-owner add eligible members without exposing removal", async () => {
@@ -254,18 +236,26 @@ describe("RoomMembersSection", () => {
     expect(onOpenProfile).toHaveBeenCalledWith("actor-codex");
   });
 
-  it("offers Tenant Humans, Workspace Agents, and the current Human's private Agents", async () => {
+  it("offers Tenant Humans, Workspace Agents whatever their availability, and the current Human's private Agents", async () => {
     const runtime = createTestTeamHubRuntime();
     acceptRoomMembers(runtime);
 
     const { unmount } = await renderPanel(runtime);
     await screen.findByRole("region", { name: "Room members" });
     fireEvent.click(await screen.findByRole("button", { name: "Add member" }));
+    const fullRoomDialog = screen.getByRole("dialog", {
+      name: "Add Room member",
+    });
     expect(
-      within(screen.getByRole("dialog", { name: "Add Room member" })).getByText(
+      await within(fullRoomDialog).findByRole("button", {
+        name: /Offline Local Reviewer.*Agent.*Offline/,
+      }),
+    ).toBeVisible();
+    expect(
+      within(fullRoomDialog).queryByText(
         "Every Tenant Actor is already in this Room.",
       ),
-    ).toBeVisible();
+    ).not.toBeInTheDocument();
 
     unmount();
     await renderPanel(runtime, { roomId: "room-dm-codex" });
@@ -278,7 +268,12 @@ describe("RoomMembersSection", () => {
       within(dialog).getByRole("button", { name: /Jenny's Delegate.*Yours/ }),
     ).toBeVisible();
     expect(
-      within(dialog).getByRole("button", { name: /Lev8 GTM/ }),
+      within(dialog).getByRole("button", { name: /Lev8 GTM.*Agent/ }),
+    ).toBeVisible();
+    expect(
+      await within(dialog).findByRole("button", {
+        name: /Offline Local Reviewer.*Agent.*Offline/,
+      }),
     ).toBeVisible();
     expect(
       within(dialog).queryByText("@jenny_delegate"),

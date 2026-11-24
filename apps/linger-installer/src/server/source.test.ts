@@ -5,6 +5,7 @@ import {
   installNativeSource,
   checkNativeSourceEnvironment,
 } from "@linger/local-installation/native-source";
+import * as handoff from "./instance-runtime.js";
 import { validateInput } from "./validation.js";
 vi.mock("@linger/local-installation/native-source", () => ({
   installNativeSource: vi.fn(async () => ({
@@ -75,6 +76,114 @@ it("routes browser installs and environment checks to the native source core", a
     expect.objectContaining({ repo: "/checkout" }),
   );
   expect((await adapter.config("source")).releaseAvailable).toBe(true);
+});
+it("hands the selected install descriptor to the desktop job", async () => {
+  const descriptor = {
+    runtime: "pi" as const,
+    executable: "/managed/pi",
+    installed: true,
+    authenticated: true,
+    authMode: "api_key",
+    argvPrefix: [],
+    environment: {},
+    loginCommand: null,
+  };
+  const runtime = {
+    setupChoice: "pi" as const,
+    environment: { LINGER_PI_PATH: "/managed/pi" },
+  };
+  const assemble = vi
+    .spyOn(handoff, "instanceRuntime")
+    .mockResolvedValue(runtime);
+  try {
+    vi.mocked(installNativeSource).mockImplementationOnce(async (options) => {
+      options.onRuntimeDescriptors?.([descriptor]);
+      return { code: 0, state: "ready", message: "Ready" };
+    });
+    const publish = vi.fn();
+    await coreAdapter("/home", "/checkout", true).run(
+      { instance: "desktop", setupChoice: "pi" },
+      new AbortController().signal,
+      vi.fn(),
+      publish,
+    );
+    expect(assemble).toHaveBeenCalledWith("/home", "desktop", {
+      runtimeDescriptors: [descriptor],
+      onTimings: expect.any(Function),
+    });
+    expect(publish).toHaveBeenCalledWith(runtime);
+  } finally {
+    assemble.mockRestore();
+  }
+});
+it("leaves the desktop on the live lookup when no handoff can be made", async () => {
+  const descriptor = (runtime: "pi" | "claude") => ({
+    runtime,
+    executable: `/managed/${runtime}`,
+    installed: true,
+    authenticated: true,
+    authMode: "api_key",
+    argvPrefix: [],
+    environment: {},
+    loginCommand: null,
+  });
+  const stderr = vi
+    .spyOn(process.stderr, "write")
+    .mockImplementation(() => true);
+  const assemble = vi.spyOn(handoff, "instanceRuntime");
+  try {
+    const cases = [
+      // BYOK local models install the claude runtime under another choice.
+      {
+        setupChoice: "local-models" as const,
+        descriptor: descriptor("claude"),
+        outcome: { code: 0, state: "ready", message: "Ready" },
+      },
+      {
+        setupChoice: "pi" as const,
+        descriptor: descriptor("pi"),
+        outcome: { code: 1, state: "failed", message: "Failed" },
+      },
+      {
+        setupChoice: "pi" as const,
+        descriptor: descriptor("pi"),
+        outcome: { code: 0, state: "ready", message: "Ready" },
+        rejects: true,
+      },
+    ];
+    for (const item of cases) {
+      assemble.mockReset();
+      if (item.rejects)
+        assemble.mockRejectedValueOnce(new Error("argvPrefix unsupported"));
+      vi.mocked(installNativeSource).mockImplementationOnce(async (options) => {
+        options.onRuntimeDescriptors?.([item.descriptor]);
+        return item.outcome;
+      });
+      const publish = vi.fn();
+      await coreAdapter("/home", "/checkout", true).run(
+        { instance: "desktop", setupChoice: item.setupChoice },
+        new AbortController().signal,
+        vi.fn(),
+        publish,
+      );
+      expect(publish).not.toHaveBeenCalled();
+      expect(assemble).toHaveBeenCalledTimes(item.rejects ? 1 : 0);
+    }
+    const failures = stderr.mock.calls
+      .map(([line]) => String(line))
+      .filter((line) => line.includes("installer.runtime_handoff_failed"))
+      .map((line) => JSON.parse(line) as unknown);
+    expect(failures).toEqual([
+      {
+        event: "installer.runtime_handoff_failed",
+        instance: "desktop",
+        message: "argvPrefix unsupported",
+      },
+    ]);
+  } finally {
+    assemble.mockRestore();
+    stderr.mockRestore();
+  }
 });
 it("rejects the retired Docker and release preparations", () => {
   for (const preparation of ["docker", "release"])

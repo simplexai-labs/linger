@@ -444,7 +444,7 @@ getRunReplyStatus:
       - $ref: "#/components/parameters/LocalRunId"
     responses:
       "200":
-        description: Whether TeamHub recorded a visible reply for the Local Run.
+        description: Whether, and in which Inboxes, TeamHub recorded a visible reply for the Local Run.
         content:
           application/json:
             schema:

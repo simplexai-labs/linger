@@ -1082,6 +1082,9 @@ components:
         shareGpu:
           type: boolean
           description: Explicit consent to share currently free GPU memory with existing tasks; defaults to false and never stops other processes.
+        runtime:
+          $ref: "#/components/schemas/InstanceRuntime"
+          description: Runtime paths from this completed desktop installation, available when polling the live job.
         runtimeAuth:
           type: object
           additionalProperties: false

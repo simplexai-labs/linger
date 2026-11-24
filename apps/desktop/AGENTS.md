@@ -103,8 +103,11 @@ Gateway and runs Agents. The daemon exits with the app.
   which lists `base + path + /models` and sends one request to
   `base + path + endpoint` in the format the page derived from that address.
   Then it saves the installed runtime's executable and profile paths
-  (`GET /api/instances/desktop/runtime`) as `runtimeEnvironment` in the
-  Desktop config, and the runtime its `setupChoice` runs (`local-models` runs
+  from the live completed job as `runtimeEnvironment` in the
+  Desktop config. After sign-in, when reusing a completed job, or when the installer
+  omits the runtime, it reads `GET /api/instances/desktop/runtime` for the current
+  environment. The job's setup choice identifies the runtime for sign-in when available.
+  Desktop also saves the runtime its `setupChoice` runs (`local-models` runs
   on Pi) as `preferredRuntime`. The daemon config carries that as
   `preferred_runtime`, and the daemon marks that runtime's diagnostic
   `preferred`, so TeamHub creates Another Me and the starter Agents on it

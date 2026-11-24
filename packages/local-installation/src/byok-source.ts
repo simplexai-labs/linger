@@ -496,6 +496,7 @@ export async function prepareByokRuntime(
     signal: AbortSignal;
     onEvent: (event: InstallerEvent) => void;
     env?: NodeJS.ProcessEnv;
+    onDescriptor?: (descriptor: RuntimeDescriptor) => void;
   },
   dependencies: {
     localmodels?: typeof runLocalmodels;

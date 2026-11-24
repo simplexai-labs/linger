@@ -1159,6 +1159,89 @@ describe("RunnerGateway", () => {
     }
   });
 
+  it("aborts a waiting startOperation on preemptSignal without sending operation.start, and ignores it once sent", async () => {
+    const gateway = createTestRunnerGateway({ createId: sequenceIds() });
+    const peer = new RecordingPeer();
+    const connection = await acceptReadyConnection(
+      gateway,
+      peer,
+      {
+        ...hello([], 1),
+        runtime_diagnostics: runtimeDiagnostics({
+          link: "api",
+          ready: ["codex"],
+        }),
+      },
+      defaultAgentPlacement(),
+    );
+    try {
+      const target = runTarget();
+      const first = await gateway.startOperation({
+        ...target,
+        runKind: "routine",
+      });
+      first.result.catch(() => undefined);
+      expect(
+        peer.sent.filter((command) => command.type === "operation.start"),
+      ).toHaveLength(1);
+
+      const stop = new AbortController();
+      const preempt = new AbortController();
+      const waiting = gateway.startOperation({
+        ...target,
+        ...readyContextScope("waiting"),
+        runKind: "follow_up",
+        signal: stop.signal,
+        preemptSignal: preempt.signal,
+      });
+      const reason = new Error("preempted");
+      preempt.abort(reason);
+      await expect(waiting).rejects.toBe(reason);
+      expect(
+        peer.sent.filter((command) => command.type === "operation.start"),
+      ).toHaveLength(1);
+
+      // Once start is sent, aborting preemptSignal does not cancel it.
+      const firstStart = peer.sent.find(
+        (command) => command.type === "operation.start",
+      )!;
+      await connection.receive(
+        event(firstStart, 1, {
+          type: "operation.accepted",
+          command_id: firstStart.command_id,
+          runner_pid: 100,
+        }),
+      );
+      await connection.receive(
+        event(firstStart, 2, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "done",
+            session: { thread_id: "thread-1" },
+          },
+        }),
+      );
+      const latePreempt = new AbortController();
+      const started = await gateway.startOperation({
+        ...target,
+        ...readyContextScope("started"),
+        runKind: "follow_up",
+        preemptSignal: latePreempt.signal,
+      });
+      started.result.catch(() => undefined);
+      expect(
+        peer.sent.filter((command) => command.type === "operation.start"),
+      ).toHaveLength(2);
+      latePreempt.abort(new Error("late preempt"));
+      expect(peer.sent.some((command) => command.type === "cancel")).toBe(
+        false,
+      );
+    } finally {
+      connection.disconnect();
+    }
+  });
+
   it("rejects a capacity reservation for an offline Computer instead of waiting", async () => {
     const gateway = createTestRunnerGateway({ createId: sequenceIds() });
     await expect(

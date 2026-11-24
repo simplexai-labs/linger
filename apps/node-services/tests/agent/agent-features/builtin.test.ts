@@ -84,7 +84,7 @@ const fullServices = () => ({
     },
   },
   roomReplyGuard: {
-    hasRunReplied: vi.fn(async () => true),
+    readReplyStatus: vi.fn(async () => ({ replied: true })),
   },
   agentMemory: {
     agentMemory: {

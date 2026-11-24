@@ -14,6 +14,7 @@ export type RunInstallation = (
   input: Input,
   signal: AbortSignal,
   emit: (event: CoreEvent) => void,
+  publishRuntime?: (runtime: NonNullable<Job["runtime"]>) => void,
 ) => Promise<unknown>;
 const PROGRESS_PERSIST_MS = 1_000;
 // Two events of the same step and message, differing only in progress.
@@ -99,6 +100,7 @@ export class JobManager {
     string,
     {
       job: Job;
+      runtime?: Job["runtime"];
       events: Event[];
       input: Input;
       controller: AbortController;
@@ -159,8 +161,13 @@ export class JobManager {
   }
 
   get(id: string) {
-    const job = this.records.get(id)?.job;
-    return job ? structuredClone(job) : undefined;
+    const record = this.records.get(id);
+    if (!record) return undefined;
+    const job = structuredClone(record.job);
+    // Only a client following this live job gets its runtime. History and disk omit the handoff.
+    if (job.state === "succeeded" && record.runtime)
+      job.runtime = structuredClone(record.runtime);
+    return job;
   }
   get busy() {
     return [...this.records.values()].some(
@@ -389,6 +396,9 @@ export class JobManager {
           )
             record.controller.abort();
           this.emit(id, event);
+        },
+        (runtime) => {
+          record.runtime = runtime;
         },
       );
       const outcome = validOutcome(result) ? result : undefined;

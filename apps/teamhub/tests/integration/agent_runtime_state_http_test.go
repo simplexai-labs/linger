@@ -328,7 +328,8 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		path := "/v0/agent-runtime/runs/reply-status?context_key=" + url.QueryEscape(contextKey) + "&local_run_id=" + url.QueryEscape(runID)
 		return agentRuntimeStateRequest(t, handler, http.MethodGet, path, teamHubInternalToken, nil)
 	}
-	assertReplied := func(runID string, want bool) {
+	// inboxes are the Inboxes where the reply landed, in order.
+	assertReplied := func(runID string, want bool, inboxes ...string) {
 		t.Helper()
 		code, raw := queryReplyStatus(runID)
 		if code != http.StatusOK {
@@ -338,6 +339,9 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		decode(t, raw, &result)
 		if result.Replied != want {
 			t.Fatalf("reply status for %s replied=%v, want %v", runID, result.Replied, want)
+		}
+		if result.RepliedInboxIds == nil || !slices.Equal(*result.RepliedInboxIds, append([]string{}, inboxes...)) {
+			t.Fatalf("reply status for %s inboxes=%s, want %v", runID, raw, inboxes)
 		}
 	}
 	startRun := func(inputID string) string {
@@ -408,7 +412,7 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 	}
 	assertReplied(run1, false)
 	insertRuntimeRunMessageFixture(t, pool, roomID, "msg-run1-reply", run1, "Direct reply")
-	assertReplied(run1, true)
+	assertReplied(run1, true, "room:"+roomID)
 	finishRun(run1)
 
 	// Run 2: attributed presentation sequence counts even before items deliver into messages.
@@ -419,7 +423,7 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		VALUES('seq-run2','tenant_acme',$1,'actor_acme_official',$2,'pending')`, roomID, run2); err != nil {
 		t.Fatalf("insert attributed sequence: %v", err)
 	}
-	assertReplied(run2, true)
+	assertReplied(run2, true, "room:"+roomID)
 	finishRun(run2)
 
 	// Run 3: unattributed presentation sequence created during the Run counts.
@@ -430,7 +434,7 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		VALUES('seq-run3-unattributed','tenant_acme',$1,'actor_acme_official',NULL,'pending',clock_timestamp())`, roomID); err != nil {
 		t.Fatalf("insert unattributed sequence: %v", err)
 	}
-	assertReplied(run3, true)
+	assertReplied(run3, true, "room:"+roomID)
 	finishRun(run3)
 
 	// Run 4: unattributed conversation message written during the Run counts.
@@ -442,7 +446,7 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		       '[{"type":"text","content":"Early reply"}]'::jsonb,'conversation',NULL,clock_timestamp())`, roomID); err != nil {
 		t.Fatalf("insert unattributed message: %v", err)
 	}
-	assertReplied(run4, true)
+	assertReplied(run4, true, "room:"+roomID)
 	finishRun(run4)
 
 	// Run 5: emoji reaction in a Thread of the Room written during the Run counts.
@@ -453,8 +457,37 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		VALUES('reply-status-thread-msg','tenant_acme',$1,'actor_acme_official','thumbs_up',clock_timestamp())`, threadID); err != nil {
 		t.Fatalf("insert thread reaction: %v", err)
 	}
-	assertReplied(run5, true)
+	// A reply in a Thread answers that Thread's Inbox, not the Room's.
+	assertReplied(run5, true, "thread:"+threadID)
+	insertRuntimeRunMessageFixture(t, pool, roomID, "msg-run5-room-reply", run5, "Room reply")
+	assertReplied(run5, true, "room:"+roomID, "thread:"+threadID)
 	finishRun(run5)
+
+	// Run 6: a Task's work Room delivers its Messages on the Task's Inbox, so
+	// a reply in that Room answers the Task's Inbox too; a reply in one of its
+	// Threads does not.
+	const taskID = "http-reply-status-task"
+	// The Task, its first generation and that generation's participant
+	// reference each other, so they are written in one transaction.
+	if _, err := pool.Exec(t.Context(), `
+		INSERT INTO work_items(id,tenant_id,number,kind,title,created_by_actor_id,updated_by_actor_id,state,task_execution_generation,task_execution_status,task_execution_revision,task_desired_control,task_control_revision,task_control_settled_revision,task_execution_updated_at,task_next_reconcile_at,task_lease_generation)
+		VALUES('http-reply-status-task','tenant_acme',98766,'task','reply status task','actor_acme_alice','actor_acme_alice','in_progress',1,'idle',1,'run',0,0,now(),now(),0);
+		INSERT INTO task_execution_generations(task_id,tenant_id,generation,result_agent_actor_id,spec,spec_hash)
+		VALUES('http-reply-status-task','tenant_acme',1,'actor_acme_official','{}',decode(repeat('00',32),'hex'));
+		INSERT INTO task_execution_participants(task_id,tenant_id,generation,actor_id,agent_management_id,execution_context_ref)
+		VALUES('http-reply-status-task','tenant_acme',1,'actor_acme_official','`+testRuntimeAgentID+`',
+		       jsonb_build_object('kind','alter_ego','agentId','`+testRuntimeAgentID+`','taskId','http-reply-status-task'));
+		INSERT INTO work_item_room_links(work_item_id,tenant_id,link_type,room_id,linked_by_actor_id)
+		VALUES('http-reply-status-task','tenant_acme','work','http-reply-status-room','actor_acme_alice')`); err != nil {
+		t.Fatalf("seed Task work Room: %v", err)
+	}
+	run6 := startRun("reply-run-6")
+	assertReplied(run6, false)
+	insertRuntimeRunMessageFixture(t, pool, threadID, "msg-run6-thread-reply", run6, "Thread reply")
+	assertReplied(run6, true, "thread:"+threadID)
+	insertRuntimeRunMessageFixture(t, pool, roomID, "msg-run6-room-reply", run6, "Room reply")
+	assertReplied(run6, true, "room:"+roomID, "task:"+taskID, "thread:"+threadID)
+	finishRun(run6)
 }
 
 func agentRuntimeStateRequest(

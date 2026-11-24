@@ -59,12 +59,14 @@ function makeRoomMessage(options: {
   readonly mentioned: boolean;
   readonly authorType?: string;
   readonly messageKind?: string;
+  readonly inboxId?: string;
 }): Message {
   return {
     messageId: "msg-1",
     rawMessage: "hello",
     segments: [{ type: "text", content: "hello" }],
     acceptedNotification: {
+      ...(options.inboxId ? { inboxId: options.inboxId } : {}),
       messages: [
         {
           mentioned: options.mentioned,
@@ -79,7 +81,7 @@ function makeRoomMessage(options: {
 describe("room-reply-guard feature", () => {
   it("matches only meta (Room) Contexts and advertises hasRunStopHooks", () => {
     const feature = createRoomReplyGuardFeature({
-      hasRunReplied: async () => true,
+      readReplyStatus: async () => ({ replied: true }),
     });
     const meta = composeContextFeatures({
       context: makeContext("meta"),
@@ -103,10 +105,10 @@ describe("room-reply-guard feature", () => {
   });
 
   it("allows without querying TeamHub when no Human mention awaits a reply", async () => {
-    const hasRunReplied = vi.fn(async () => false);
+    const readReplyStatus = vi.fn(async () => ({ replied: false }));
     const composed = composeContextFeatures({
       context: makeContext("meta"),
-      features: [createRoomReplyGuardFeature({ hasRunReplied })],
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
     });
 
     const result = await composed.evaluateRunBeforeStop(
@@ -123,14 +125,14 @@ describe("room-reply-guard feature", () => {
     );
 
     expect(result).toEqual({ decision: { action: "allow" } });
-    expect(hasRunReplied).not.toHaveBeenCalled();
+    expect(readReplyStatus).not.toHaveBeenCalled();
   });
 
   it("allows when TeamHub confirms a reply landed for the Run", async () => {
-    const hasRunReplied = vi.fn(async () => true);
+    const readReplyStatus = vi.fn(async () => ({ replied: true }));
     const composed = composeContextFeatures({
       context: makeContext("meta"),
-      features: [createRoomReplyGuardFeature({ hasRunReplied })],
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
     });
 
     const result = await composed.evaluateRunBeforeStop(
@@ -147,8 +149,8 @@ describe("room-reply-guard feature", () => {
       decision: { action: "allow" },
       replyConfirmed: true,
     });
-    expect(hasRunReplied).toHaveBeenCalledTimes(1);
-    expect(hasRunReplied).toHaveBeenCalledWith(
+    expect(readReplyStatus).toHaveBeenCalledTimes(1);
+    expect(readReplyStatus).toHaveBeenCalledWith(
       '["meta","agent-1","room","room-1"]',
       "run-1",
       expect.any(AbortSignal),
@@ -156,10 +158,10 @@ describe("room-reply-guard feature", () => {
   });
 
   it("blocks once with a reminder when no reply landed, then allows subsequent stop attempts", async () => {
-    const hasRunReplied = vi.fn(async () => false);
+    const readReplyStatus = vi.fn(async () => ({ replied: false }));
     const composed = composeContextFeatures({
       context: makeContext("meta"),
-      features: [createRoomReplyGuardFeature({ hasRunReplied })],
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
     });
     const input: RunStopHookInput = {
       runId: "run-1",
@@ -185,7 +187,7 @@ describe("room-reply-guard feature", () => {
       new AbortController().signal,
     );
     expect(second).toEqual({ decision: { action: "allow" } });
-    expect(hasRunReplied).toHaveBeenCalledTimes(1);
+    expect(readReplyStatus).toHaveBeenCalledTimes(1);
 
     composed.onRunTerminal({
       runId: "run-1",
@@ -193,11 +195,88 @@ describe("room-reply-guard feature", () => {
     });
   });
 
-  it("allows immediately when stopHookActive is already true", async () => {
-    const hasRunReplied = vi.fn(async () => false);
+  it("blocks once until every Inbox where a Human mentioned the Agent has a reply", async () => {
+    const readReplyStatus = vi.fn(async () => ({
+      replied: true,
+      repliedInboxIds: ["room:room-1"],
+    }));
     const composed = composeContextFeatures({
       context: makeContext("meta"),
-      features: [createRoomReplyGuardFeature({ hasRunReplied })],
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
+    });
+
+    const result = await composed.evaluateRunBeforeStop(
+      {
+        runId: "run-inboxes",
+        attempt: 0,
+        stopHookActive: false,
+        inputs: [
+          makeRoomMessage({ mentioned: true, inboxId: "room:room-1" }),
+          makeRoomMessage({ mentioned: false, inboxId: "thread:thread-2" }),
+          makeRoomMessage({ mentioned: true, inboxId: "thread:thread-1" }),
+        ],
+      },
+      new AbortController().signal,
+    );
+
+    expect(result).toEqual({
+      decision: {
+        action: "block",
+        reason: expect.stringContaining(
+          "these have no reply from you yet: thread:thread-1.",
+        ),
+      },
+      blockedBy: ROOM_REPLY_GUARD_FEATURE_ID,
+    });
+    expect(
+      (result.decision as { readonly reason: string }).reason,
+    ).not.toContain("room:room-1");
+  });
+
+  it("confirms a reply only in the Inbox that holds it", async () => {
+    const replies = (repliedInboxIds?: readonly string[]) =>
+      composeContextFeatures({
+        context: makeContext("meta"),
+        features: [
+          createRoomReplyGuardFeature({
+            readReplyStatus: async () => ({
+              replied: true,
+              ...(repliedInboxIds ? { repliedInboxIds } : {}),
+            }),
+          }),
+        ],
+      }).evaluateRunBeforeStop(
+        {
+          runId: "run-one-inbox",
+          attempt: 0,
+          stopHookActive: false,
+          inputs: [
+            makeRoomMessage({ mentioned: true, inboxId: "room:room-1" }),
+          ],
+        },
+        new AbortController().signal,
+      );
+
+    await expect(replies(["room:room-1"])).resolves.toEqual({
+      decision: { action: "allow" },
+      replyConfirmed: true,
+    });
+    await expect(replies(["thread:thread-1"])).resolves.toEqual({
+      decision: { action: "block", reason: ROOM_REPLY_REMINDER },
+      blockedBy: ROOM_REPLY_GUARD_FEATURE_ID,
+    });
+    // A TeamHub that reports no Inboxes counts a reply anywhere.
+    await expect(replies()).resolves.toEqual({
+      decision: { action: "allow" },
+      replyConfirmed: true,
+    });
+  });
+
+  it("allows immediately when stopHookActive is already true", async () => {
+    const readReplyStatus = vi.fn(async () => ({ replied: false }));
+    const composed = composeContextFeatures({
+      context: makeContext("meta"),
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
     });
 
     const result = await composed.evaluateRunBeforeStop(
@@ -211,16 +290,16 @@ describe("room-reply-guard feature", () => {
     );
 
     expect(result).toEqual({ decision: { action: "allow" } });
-    expect(hasRunReplied).not.toHaveBeenCalled();
+    expect(readReplyStatus).not.toHaveBeenCalled();
   });
 
   it("fails open when TeamHub reply-status check throws", async () => {
-    const hasRunReplied = vi.fn(async () => {
+    const readReplyStatus = vi.fn(async () => {
       throw new Error("teamhub unreachable");
     });
     const composed = composeContextFeatures({
       context: makeContext("meta"),
-      features: [createRoomReplyGuardFeature({ hasRunReplied })],
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
     });
 
     const result = await composed.evaluateRunBeforeStop(

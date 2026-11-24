@@ -2191,6 +2191,113 @@ func (q *Queries) ListAgentLocalRunInputs(ctx context.Context, runID string) ([]
 	return items, nil
 }
 
+const listAgentLocalRunReplyInboxes = `-- name: ListAgentLocalRunReplyInboxes :many
+WITH target_run AS (
+    SELECT run.run_id, run.started_at, run.finished_at,
+           context.tenant_id, context.agent_actor_id, context.room_id
+    FROM agent_local_runs run
+    JOIN agent_execution_contexts context ON context.context_key=run.context_key
+    WHERE run.context_key=$1::text
+      AND run.run_id=$2::text
+      AND context.room_id IS NOT NULL
+),
+room_scope AS (
+    SELECT target_run.room_id AS id
+    FROM target_run
+    UNION ALL
+    SELECT thread.id
+    FROM target_run
+    JOIN rooms thread
+      ON thread.parent_room_id=target_run.room_id
+     AND thread.deleted_at IS NULL
+),
+reply_room AS (
+    SELECT message.room_id
+    FROM target_run
+    JOIN messages message ON message.local_run_id=target_run.run_id
+    WHERE message.message_kind='conversation'
+    UNION
+    SELECT sequence.room_id
+    FROM target_run
+    JOIN agent_presentation_sequences sequence ON sequence.local_run_id=target_run.run_id
+    UNION
+    SELECT message.room_id
+    FROM target_run
+    JOIN messages message
+      ON message.tenant_id=target_run.tenant_id
+     AND message.author_actor_id=target_run.agent_actor_id
+    WHERE target_run.started_at IS NOT NULL
+      AND message.message_kind='conversation'
+      AND message.local_run_id IS NULL
+      AND message.created_at>=target_run.started_at
+      AND (target_run.finished_at IS NULL OR message.created_at<=target_run.finished_at)
+      AND message.room_id IN (SELECT id FROM room_scope)
+    UNION
+    SELECT sequence.room_id
+    FROM target_run
+    JOIN agent_presentation_sequences sequence
+      ON sequence.tenant_id=target_run.tenant_id
+     AND sequence.agent_actor_id=target_run.agent_actor_id
+    WHERE target_run.started_at IS NOT NULL
+      AND sequence.local_run_id IS NULL
+      AND sequence.created_at>=target_run.started_at
+      AND (target_run.finished_at IS NULL OR sequence.created_at<=target_run.finished_at)
+      AND sequence.room_id IN (SELECT id FROM room_scope)
+    UNION
+    SELECT reaction.room_id
+    FROM target_run
+    JOIN message_reactions reaction
+      ON reaction.tenant_id=target_run.tenant_id
+     AND reaction.actor_id=target_run.agent_actor_id
+    WHERE target_run.started_at IS NOT NULL
+      AND reaction.created_at>=target_run.started_at
+      AND (target_run.finished_at IS NULL OR reaction.created_at<=target_run.finished_at)
+      AND reaction.room_id IN (SELECT id FROM room_scope)
+)
+SELECT (CASE WHEN room.parent_room_id IS NULL THEN 'room:' ELSE 'thread:' END||room.id)::text AS inbox_id
+FROM target_run
+JOIN rooms room ON room.tenant_id=target_run.tenant_id
+WHERE room.id IN (SELECT room_id FROM reply_room)
+UNION
+SELECT ('task:'||link.work_item_id)::text
+FROM target_run
+JOIN work_item_room_links link
+  ON link.tenant_id=target_run.tenant_id
+ AND link.link_type='work'
+WHERE link.room_id IN (SELECT room_id FROM reply_room)
+ORDER BY inbox_id
+`
+
+type ListAgentLocalRunReplyInboxesParams struct {
+	ContextKey string `json:"context_key"`
+	RunID      string `json:"run_id"`
+}
+
+// The Inboxes that hold a visible reply from the Run, counted as in
+// GetAgentLocalRunReplyDelivered. A reply answers the Inbox of the Room or
+// Thread it is in and the Inbox of each Task whose work Room that is, the
+// inverse of agent_inbox_resource_room. A Run that took up mentions from
+// several Inboxes must answer in each of them.
+func (q *Queries) ListAgentLocalRunReplyInboxes(ctx context.Context, arg ListAgentLocalRunReplyInboxesParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listAgentLocalRunReplyInboxes, arg.ContextKey, arg.RunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var inbox_id string
+		if err := rows.Scan(&inbox_id); err != nil {
+			return nil, err
+		}
+		items = append(items, inbox_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentPerRoomMetaContextCandidates = `-- name: ListAgentPerRoomMetaContextCandidates :many
 SELECT registration.tenant_id,registration.actor_id AS agent_actor_id,
        registration.agent_management_id,membership.room_id,
@@ -3544,11 +3651,12 @@ SELECT run.run_id, run.context_key, run.status, run.terminal, run.created_at, ru
 FROM agent_local_runs run
 WHERE run.context_key=$1::text AND run.status='queued'
   AND agent_document_run_claimable(run.run_id,run.context_key)
-ORDER BY created_at,run_id
+ORDER BY agent_local_run_serves_chat(run.run_id) DESC,created_at,run_id
 LIMIT 1
 FOR UPDATE
 `
 
+// A queued Run that serves a Meta chat goes first; the rest keep arrival order.
 func (q *Queries) LockNextQueuedAgentLocalRun(ctx context.Context, contextKey string) (AgentLocalRun, error) {
 	row := q.db.QueryRow(ctx, lockNextQueuedAgentLocalRun, contextKey)
 	var i AgentLocalRun

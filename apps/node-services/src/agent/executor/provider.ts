@@ -148,6 +148,12 @@ export interface ExecutionSpec {
   priority?: RunPriority;
   /** Revalidate the live claim after readmission and before resuming its native session. */
   beforeYieldResume?: () => Promise<void>;
+  /**
+   * Gives back the place of a Run that has not been sent to its Runtime:
+   * aborting it stops the waits before the start, and the start rejects with
+   * its reason. It has no effect once the start is sent.
+   */
+  preemptSignal?: AbortSignal;
   /** Evaluated before a Runtime finishes a turn when stop interception is active. */
   onStopHook?: (
     event: RuntimeStopHookEvent,

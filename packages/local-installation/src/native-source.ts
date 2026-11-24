@@ -579,6 +579,8 @@ async function runNativeSource(
             runtimeOutcome = await prepareByokRuntime(
               { ...options.byok, runtime: byokRuntime },
               {
+                onDescriptor: (descriptor) =>
+                  options.onRuntimeDescriptors?.([descriptor]),
                 home,
                 signal,
                 onEvent: emit,

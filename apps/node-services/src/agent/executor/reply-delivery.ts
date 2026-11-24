@@ -96,3 +96,23 @@ export function awaitsReply(message: Message): boolean {
       queued.messageKind === "conversation",
   );
 }
+
+/** The Inboxes in which these inputs await a reply, in input order. */
+export function awaitedReplyInboxIds(
+  messages: readonly Message[],
+): readonly string[] {
+  const inboxIds = messages
+    .filter(awaitsReply)
+    .map(
+      (message) =>
+        (message as unknown as { acceptedNotification: { inboxId?: unknown } })
+          .acceptedNotification.inboxId,
+    );
+  return [
+    ...new Set(
+      inboxIds.filter(
+        (inboxId): inboxId is string => typeof inboxId === "string",
+      ),
+    ),
+  ];
+}

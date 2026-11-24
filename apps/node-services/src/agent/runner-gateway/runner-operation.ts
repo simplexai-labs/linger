@@ -52,6 +52,8 @@ interface RunnerOperationTargetBase {
   readonly beforeYieldResume?: () => Promise<void>;
   /** Stops the Run waiting for its turn in the model queue. */
   readonly signal?: AbortSignal;
+  /** Stops the waits only, up to the moment the start is sent. */
+  readonly preemptSignal?: AbortSignal;
   readonly tenantId: string;
   readonly ownerActorId?: string;
   readonly runnerId: string;
