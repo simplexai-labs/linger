@@ -27,6 +27,7 @@ const SelectPopup = lazy(() =>
 );
 
 export function Select({
+  align,
   "aria-describedby": ariaDescribedBy,
   "aria-invalid": ariaInvalid,
   autoFocus,
@@ -40,6 +41,7 @@ export function Select({
   value,
   variant = "field",
 }: {
+  align?: "auto" | "left" | "right";
   "aria-describedby"?: string;
   "aria-invalid"?: boolean;
   autoFocus?: boolean;
@@ -116,6 +118,7 @@ export function Select({
       {open ? (
         <Suspense fallback={null}>
           <SelectPopup
+            align={align}
             id={listboxId}
             onChoose={(option) => {
               onValueChange(option.value);

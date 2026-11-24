@@ -194,6 +194,13 @@ export function unavailableShortCopy(
               need: formatGigabytes(reason.need_bytes, t),
             });
       }
+      if (reason.memory_kind === "vram") {
+        return reason.need_bytes === undefined
+          ? t(m.shortNeedsVram)
+          : t(m.shortNeedsVramSize, {
+              need: formatGigabytes(reason.need_bytes, t),
+            });
+      }
       return reason.need_bytes === undefined
         ? t(m.shortNeedsMemory)
         : t(m.shortNeedsSize, { need: formatGigabytes(reason.need_bytes, t) });
@@ -230,6 +237,18 @@ export function unavailableCopy(
           reclaimable
             ? m.unavailableSystemMemoryReclaimable
             : m.unavailableSystemMemory,
+        );
+      }
+      if (reason.memory_kind === "vram") {
+        if (sizes)
+          return t(
+            reclaimable
+              ? m.unavailableVramSizesReclaimable
+              : m.unavailableVramSizes,
+            sizes,
+          );
+        return t(
+          reclaimable ? m.unavailableVramReclaimable : m.unavailableVram,
         );
       }
       if (sizes)

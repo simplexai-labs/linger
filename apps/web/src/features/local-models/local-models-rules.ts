@@ -82,40 +82,81 @@ const fitOrder: Record<LocalModel["fit"], number> = {
   unified: 0,
 };
 
-const PREFERRED_POLY_INKLING_ID = "inkling-2-mini-q4-poly:ud-q4_k_xl";
-const PREFERRED_POLY_INKLING_QUANT = "UD-Q4_K_XL";
-const PREFERRED_INKLING_ID = "inkling-2-mini:ud-q4_k_m";
-const PREFERRED_INKLING_QUANT = "UD-Q4_K_M";
+const PREFERRED_POLY_Q4_INKLING_ID = "inkling-2-mini-q4-poly:ud-q4_k_xl";
+const PREFERRED_POLY_Q4_INKLING_QUANT = "UD-Q4_K_XL";
+const PREFERRED_INKLING_Q4_ID = "inkling-2-mini:ud-q4_k_m";
+const PREFERRED_INKLING_Q4_QUANT = "UD-Q4_K_M";
+const PREFERRED_POLY_Q3_INKLING_ID = "inkling-2-mini-q3-poly:ud-q3_k_xl";
+const PREFERRED_POLY_Q3_INKLING_QUANT = "UD-Q3_K_XL";
+const PREFERRED_INKLING_IQ3_ID = "inkling-2-mini-iq3xxs:ud-iq3_xxs";
+const PREFERRED_INKLING_IQ3_QUANT = "UD-IQ3_XXS";
+const PREFERRED_POLY_Q2_INKLING_ID = "inkling-2-mini-q2-poly:ud-q2_k_xl";
+const PREFERRED_POLY_Q2_INKLING_QUANT = "UD-Q2_K_XL";
 
 function preferredInklingRank(model: LocalModel): number {
   const id = model.id.toLowerCase();
   if (
-    id === PREFERRED_POLY_INKLING_ID ||
+    id === PREFERRED_POLY_Q4_INKLING_ID ||
     (model.engine === "polystrata" &&
-      model.quant === PREFERRED_POLY_INKLING_QUANT)
+      model.quant === PREFERRED_POLY_Q4_INKLING_QUANT)
+  ) {
+    return 5;
+  }
+  if (
+    id === PREFERRED_INKLING_Q4_ID ||
+    model.quant === PREFERRED_INKLING_Q4_QUANT
+  ) {
+    return 4;
+  }
+  if (
+    id === PREFERRED_POLY_Q3_INKLING_ID ||
+    (model.engine === "polystrata" &&
+      model.quant === PREFERRED_POLY_Q3_INKLING_QUANT)
+  ) {
+    return 3;
+  }
+  if (
+    id === PREFERRED_INKLING_IQ3_ID ||
+    model.quant === PREFERRED_INKLING_IQ3_QUANT
   ) {
     return 2;
   }
-  if (id === PREFERRED_INKLING_ID || model.quant === PREFERRED_INKLING_QUANT) {
+  if (
+    id === PREFERRED_POLY_Q2_INKLING_ID ||
+    (model.engine === "polystrata" &&
+      model.quant === PREFERRED_POLY_Q2_INKLING_QUANT)
+  ) {
     return 1;
   }
   return 0;
 }
 
-function unavailableReasonPriority(entry: ModelEntry): number {
-  if (entry.status !== "unavailable") return 0;
-  // A hardware-fitting variant that only needs a driver update unlocks as soon
-  // as the driver is updated, unlike variants blocked by VRAM/RAM capacity.
-  return entry.model.availability.reason?.code === "DRIVER_UPDATE_REQUIRED"
-    ? 0
-    : 1;
+function isActionableUnavailableReason(model: LocalModel): boolean {
+  const code = model.availability.reason?.code;
+  return (
+    code === "DRIVER_UPDATE_REQUIRED" || code === "RUNTIME_DEPENDENCY_MISSING"
+  );
+}
+
+function memoryShortfallBytes(model: LocalModel): number {
+  const reason = model.availability.reason;
+  if (
+    reason?.code === "MEMORY_INSUFFICIENT" &&
+    reason.need_bytes !== undefined &&
+    reason.have_bytes !== undefined
+  ) {
+    return Math.max(0, reason.need_bytes - reason.have_bytes);
+  }
+  return reason?.need_bytes ?? model.memory_bytes;
 }
 
 /**
  * Picks the best Inkling 2 Mini entry from a Computer's library for the
- * featured spotlight: highest status first, then driver-unlockable unavailable
- * variants ahead of hardware-insufficient ones, then better hardware fit, then
- * Computer recommendation, preferring top Q4 variants when ties remain.
+ * featured spotlight: highest status first, then better hardware fit, then
+ * Computer recommendation, preferring top variants when ties remain. When all
+ * variants are unavailable, actionable driver/runtime upgrades come first
+ * (preserving Computer suitability order), followed by the smallest memory
+ * shortfall.
  */
 export function featuredInklingEntry(
   entries: readonly ModelEntry[],
@@ -128,10 +169,14 @@ export function featuredInklingEntry(
     const statusDiff =
       modelStatuses.indexOf(a.status) - modelStatuses.indexOf(b.status);
     if (statusDiff !== 0) return statusDiff;
-    const reasonDiff =
-      unavailableReasonPriority(a) - unavailableReasonPriority(b);
-    if (reasonDiff !== 0) return reasonDiff;
     if (a.status === "unavailable" && b.status === "unavailable") {
+      const aActionable = isActionableUnavailableReason(a.model);
+      const bActionable = isActionableUnavailableReason(b.model);
+      if (aActionable !== bActionable) return aActionable ? -1 : 1;
+      if (aActionable && bActionable) return 0;
+      const shortfallDiff =
+        memoryShortfallBytes(a.model) - memoryShortfallBytes(b.model);
+      if (shortfallDiff !== 0) return shortfallDiff;
       const aNeed =
         a.model.availability.reason?.need_bytes ?? a.model.memory_bytes;
       const bNeed =

@@ -120,6 +120,9 @@ export const localModelsMessages = defineMessages("localModels", {
   recommended: "Recommended",
   runsSlower: "runs slower",
   availableDetailWithMemory: "{download} · {memory} memory",
+  availableDetailWithVram: "{download} · {vram} VRAM",
+  availableDetailWithVramAndRam: "{download} · {vram} VRAM + {ram} RAM",
+  loadedMemoryHybrid: "{vram} VRAM + {ram} RAM",
   sectionOnComputer: "On this computer",
   sectionAvailable: "Available to download",
   sectionNeedsMoreMemory: {
@@ -426,6 +429,8 @@ export const localModelsMessages = defineMessages("localModels", {
   shortNeedsMemory: "needs more memory",
   shortNeedsDiskSize: "needs {need} of disk",
   shortNeedsSize: "needs {need}",
+  shortNeedsVram: "needs more VRAM",
+  shortNeedsVramSize: "needs {need} VRAM",
   shortNeedsSystemMemory: "needs more system memory",
   shortNeedsSystemMemorySize: "needs {need} RAM",
   shortUnavailable: "unavailable",
@@ -436,6 +441,14 @@ export const localModelsMessages = defineMessages("localModels", {
     "Needs {need} of memory; this computer has {have} for models.",
   unavailableMemorySizesReclaimable:
     "Needs {need} of memory; this computer has {have} for models. Close memory-heavy apps and recheck memory.",
+  unavailableVram:
+    "This computer doesn't have enough GPU memory (VRAM) for it.",
+  unavailableVramReclaimable:
+    "This computer doesn't have enough GPU memory (VRAM) for it. Close memory-heavy apps and recheck memory.",
+  unavailableVramSizes:
+    "Needs {need} of GPU memory (VRAM); this computer has {have} available.",
+  unavailableVramSizesReclaimable:
+    "Needs {need} of GPU memory (VRAM); this computer has {have} available. Close memory-heavy apps and recheck memory.",
   unavailableSystemMemory:
     "This computer doesn't have enough system memory (RAM) for it.",
   unavailableSystemMemoryReclaimable:

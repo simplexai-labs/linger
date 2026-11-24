@@ -50,6 +50,7 @@ export function useAnchoredSelectPopup({
   const [position, setPosition] = useState({
     anchored: false,
     left: 0,
+    maxWidth: 0,
     side: "bottom" as "bottom" | "top",
     top: 0,
     width: 0,
@@ -70,27 +71,43 @@ export function useAnchoredSelectPopup({
       height: window.innerHeight,
       width: window.innerWidth,
     });
-    const width = resolveWidth?.({
+    const resolvedWidth = resolveWidth?.({
       triggerWidth: frame.trigger.width,
       viewportWidth: frame.viewport.width,
     });
+    const maxViewportWidth = Math.max(0, frame.viewport.width - 16);
+    const measuredWidth = popupRef.current?.offsetWidth ?? 0;
+    const placementWidth =
+      resolvedWidth ??
+      (measuredWidth > frame.trigger.width
+        ? Math.min(measuredWidth, maxViewportWidth || measuredWidth)
+        : undefined);
     const next = selectPopupPosition(
       frame.trigger,
       frame.viewport,
       popupRef.current?.offsetHeight,
-      { align, width },
+      { align, width: placementWidth },
     );
+    const styleWidth = resolvedWidth ?? frame.trigger.width;
     const anchored = Boolean(origin);
     const side: "bottom" | "top" =
       next.top < frame.trigger.top ? "top" : "bottom";
     setPosition((current) =>
       current.anchored === anchored &&
       current.left === next.left &&
+      current.maxWidth === maxViewportWidth &&
       current.side === side &&
       current.top === next.top &&
-      current.width === next.width
+      current.width === styleWidth
         ? current
-        : { anchored, side, ...next },
+        : {
+            anchored,
+            left: next.left,
+            maxWidth: maxViewportWidth,
+            side,
+            top: next.top,
+            width: styleWidth,
+          },
     );
   });
 
@@ -142,6 +159,9 @@ export function useAnchoredSelectPopup({
   const style: CSSProperties = {
     inset: "auto",
     left: position.left,
+    ...(position.maxWidth > 0 && !fixedWidth
+      ? { maxWidth: position.maxWidth }
+      : {}),
     position: position.anchored ? "absolute" : "fixed",
     top: position.top,
     // At least as wide as its trigger unless the caller sets a fixed width.
@@ -162,6 +182,7 @@ export function useAnchoredSelectPopup({
 }
 
 export function SelectPopup({
+  align,
   id,
   onChoose,
   onClose,
@@ -169,6 +190,7 @@ export function SelectPopup({
   triggerRef,
   value,
 }: {
+  align?: SelectPopupPositionOptions["align"];
   id: string;
   onChoose: (option: SelectItemProps) => void;
   onClose: (focusTrigger?: boolean) => void;
@@ -179,6 +201,7 @@ export function SelectPopup({
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const { popupRef, portalRoot, position, style, supportsPopover } =
     useAnchoredSelectPopup({
+      align,
       layoutKey: options.length,
       onClose,
       triggerRef,

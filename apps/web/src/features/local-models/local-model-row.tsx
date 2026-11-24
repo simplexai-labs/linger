@@ -242,7 +242,7 @@ function RowStatusLine({
       ) : null}
       <span
         className={cn(
-          "min-w-0 tabular-nums @md:truncate",
+          "min-w-0 leading-snug tabular-nums",
           tag.working && "town-shimmer-text",
         )}
       >
@@ -274,11 +274,39 @@ function RowStatusLine({
   );
 }
 
+function availableDetailCopy(model: LocalModel, t: Translate): string {
+  const download = formatGigabytes(model.download_bytes, t);
+  if (model.memory_bytes <= 0) return download;
+  const memory = formatGigabytes(model.memory_bytes, t);
+  if (model.fit === "gpu") {
+    if (model.host_ram_bytes && model.host_ram_bytes > 0) {
+      return t(m.availableDetailWithVramAndRam, {
+        download,
+        ram: formatGigabytes(model.host_ram_bytes, t),
+        vram: memory,
+      });
+    }
+    return t(m.availableDetailWithVram, { download, vram: memory });
+  }
+  return t(m.availableDetailWithMemory, { download, memory });
+}
+
+function loadedMemoryCopy(model: LocalModel, t: Translate): string {
+  const memory = formatGigabytes(model.memory_bytes, t);
+  if (model.host_ram_bytes && model.host_ram_bytes > 0) {
+    return t(m.loadedMemoryHybrid, {
+      ram: formatGigabytes(model.host_ram_bytes, t),
+      vram: memory,
+    });
+  }
+  return memory;
+}
+
 function variantDetailCopy(entry: ModelEntry, t: Translate): string {
   const { model, status } = entry;
   if (status === "loaded") {
     return model.memory_bytes > 0
-      ? [t(m.statusLoaded), formatGigabytes(model.memory_bytes, t)].join(" · ")
+      ? [t(m.statusLoaded), loadedMemoryCopy(model, t)].join(" · ")
       : t(m.statusLoaded);
   }
   if (status === "idle") return t(m.statusIdle);
@@ -293,14 +321,7 @@ function variantDetailCopy(entry: ModelEntry, t: Translate): string {
       t(m.statusUnavailable)
     );
   }
-  const download = formatGigabytes(model.download_bytes, t);
-  const base =
-    model.memory_bytes > 0
-      ? t(m.availableDetailWithMemory, {
-          download,
-          memory: formatGigabytes(model.memory_bytes, t),
-        })
-      : download;
+  const base = availableDetailCopy(model, t);
   return model.recommended ? `${base} · ${t(m.recommended)}` : base;
 }
 
@@ -505,14 +526,7 @@ export function ModelRow({
         ? { ...statusTags.failed, label: m.statusDownloadStopped }
         : statusTags[status];
   const progress = downloadPercent(model);
-  const download = formatGigabytes(model.download_bytes, t);
-  const availableSummary =
-    model.memory_bytes > 0
-      ? t(m.availableDetailWithMemory, {
-          download,
-          memory: formatGigabytes(model.memory_bytes, t),
-        })
-      : download;
+  const availableSummary = availableDetailCopy(model, t);
   const recommended = status === "available" && model.recommended;
   const featured = isInkling2MiniModelId(model.id);
   const showFeaturedPill = featured && !inSpotlight;
@@ -526,6 +540,11 @@ export function ModelRow({
     ? new Set(variants!.map((variant) => variant.model.engine).filter(Boolean))
     : undefined;
   const showVariantEngine = Boolean(variantEngines && variantEngines.size > 1);
+  const hasDuplicateQuant = hasVariants
+    ? new Set(
+        variants!.map((variant) => variant.model.quant || variant.model.name),
+      ).size < variants!.length
+    : false;
   const brand = modelBrand(model);
   const computerId = view.computer.computer_id;
   const usedNames = usedByAgentNames(entry, assignableAgents, computerId);
@@ -568,10 +587,7 @@ export function ModelRow({
       : usedNames.length
         ? t(m.loadToAnswer)
         : null,
-    loaded: [
-      placeTitle(view, model.pool, t),
-      formatGigabytes(model.memory_bytes, t),
-    ]
+    loaded: [placeTitle(view, model.pool, t), loadedMemoryCopy(model, t)]
       .filter(Boolean)
       .join(" · "),
     loading: where ?? null,
@@ -711,6 +727,7 @@ export function ModelRow({
         >
           {hasVariants && variants && onSelectVariant ? (
             <Select
+              align="right"
               aria-label={t(m.chooseVersion, { name: displayName })}
               className="max-w-44 shrink-0"
               onValueChange={onSelectVariant}
@@ -722,21 +739,24 @@ export function ModelRow({
                 const engineCopy = showVariantEngine
                   ? engineBadgeCopy(variant.model.engine)
                   : undefined;
-                const label = engineCopy
+                const optionLabel = engineCopy
                   ? t(m.variantLabelWithEngine, {
                       engine: engineCopy,
                       quant: quantLabel,
                     })
                   : quantLabel;
+                const triggerLabel = hasDuplicateQuant
+                  ? optionLabel
+                  : quantLabel;
                 return (
                   <SelectItem
                     key={variant.model.id}
-                    triggerLabel={label}
+                    triggerLabel={triggerLabel}
                     value={variant.model.id}
                   >
                     {t(m.variantOptionDetail, {
                       detail: variantDetailCopy(variant, t),
-                      label,
+                      label: optionLabel,
                     })}
                   </SelectItem>
                 );

@@ -70,9 +70,12 @@ build:assets` to check the initial JS budget.
   while keeping any extra active on-computer variants visible, splits the list
   into `On this computer`, `Available to download`, and a collapsible
   unavailable/needs-more-memory disclosure (auto-expanded when nothing fits),
-  renders tinted family icon tiles, download + memory size on available rows,
-  Agent usage counts, structured engine pills (`PolyStrata` / `llama.cpp` /
-  `Strata`, hiding redundant `llama.cpp` pills on single-engine hosts),
+  renders tinted family icon tiles, download + memory/VRAM (and hybrid
+  VRAM + RAM for PolyStrata) footprints on available and loaded rows,
+  explicit VRAM vs RAM shortfall copy (`memory_kind`), Agent usage counts,
+  structured engine pills (`PolyStrata` / `llama.cpp` / `Strata`, hiding
+  redundant `llama.cpp` pills on single-engine hosts while keeping multi-engine
+  version switcher pills compact when quantizations are distinct),
   capability/parameter/context badges (never matched against
   `name` or `description`), state-distinct cards (`loaded`, `recommended`,
   `failed` with short failure reasons and direct `Remove` for damaged/missing

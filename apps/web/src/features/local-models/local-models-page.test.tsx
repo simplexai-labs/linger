@@ -34,6 +34,7 @@ import {
   labView,
   localModel,
   macView,
+  memoryPool,
   modelView,
 } from "./local-models-test-support";
 
@@ -288,8 +289,8 @@ describe("LocalModelsPage", () => {
     expect(statuses()).toEqual([
       "Qwen3 Coder 30B: Loaded · GPU 0 · 21.4 GB",
       "Gemma 3 27B: Downloaded",
-      "GPT-OSS 20B: Not downloaded · 12.1 GB · 14.3 GB memory",
-      "Gemma 3 4B: Not downloaded · 3.3 GB · 4.1 GB memory",
+      "GPT-OSS 20B: Not downloaded · 12.1 GB · 14.3 GB VRAM",
+      "Gemma 3 4B: Not downloaded · 3.3 GB · 4.1 GB VRAM",
       "Llama 3.3 70B: Not downloaded · 42.5 GB · 46 GB memory · runs slower",
     ]);
     expect(within(card("GPT-OSS 20B")).getByText("Recommended")).toBeVisible();
@@ -4319,11 +4320,11 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     // Inkling 2 Mini renders once inside the spotlight at the top of Models,
     // without duplicating controls or a second row below.
     expect(statuses()).toEqual([
-      "Inkling 2 Mini: Not downloaded · 16.5 GB · 19.2 GB memory",
+      "Inkling 2 Mini: Not downloaded · 16.5 GB · 19.2 GB VRAM",
       "Qwen3 Coder 30B: Loaded · GPU 0 · 21.4 GB",
       "Gemma 3 27B: Downloaded",
-      "GPT-OSS 20B: Not downloaded · 12.1 GB · 14.3 GB memory",
-      "Gemma 3 4B: Not downloaded · 3.3 GB · 4.1 GB memory",
+      "GPT-OSS 20B: Not downloaded · 12.1 GB · 14.3 GB VRAM",
+      "Gemma 3 4B: Not downloaded · 3.3 GB · 4.1 GB VRAM",
       "Llama 3.3 70B: Not downloaded · 42.5 GB · 46 GB memory · runs slower",
     ]);
     expect(
@@ -4409,7 +4410,7 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     );
     await waitFor(() =>
       expect(statusOf("Inkling 2 Mini")).toBe(
-        "Not downloaded · 16.5 GB · 19.2 GB memory",
+        "Not downloaded · 16.5 GB · 19.2 GB VRAM",
       ),
     );
     const recommendedRow = within(spotlight).getByRole("article");
@@ -4734,7 +4735,7 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     await findModels();
 
     expect(statuses()).toEqual([
-      "Inkling 2 Mini: Not downloaded · 16.5 GB · 19.2 GB memory",
+      "Inkling 2 Mini: Not downloaded · 16.5 GB · 19.2 GB VRAM",
     ]);
     expect(screen.queryByText("Featured")).not.toBeInTheDocument();
     const versionPicker = within(spotlightRegion()).getByRole("combobox", {
@@ -4761,7 +4762,7 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     });
     fireEvent.click(iq3Option);
     expect(statuses()).toEqual([
-      "Inkling 2 Mini: Not downloaded · 11.4 GB · 13.5 GB memory",
+      "Inkling 2 Mini: Not downloaded · 11.4 GB · 13.5 GB VRAM",
     ]);
 
     // 6. On a 16 GB GPU where Q4 is unavailable, spotlight defaults to sibling IQ3_XXS.
@@ -4811,7 +4812,7 @@ describe("Featured Inkling 2 Mini spotlight", () => {
         name: "Choose version for Inkling 2 Mini",
       }),
     ).toHaveTextContent("UD-IQ3_XXS");
-    expect(gpu16Spotlight).toHaveTextContent("11.4 GB · 13.5 GB memory");
+    expect(gpu16Spotlight).toHaveTextContent("11.4 GB · 13.5 GB VRAM");
     fireEvent.click(
       within(gpu16Spotlight).getByRole("button", {
         name: "Download Inkling 2 Mini (IQ3_XXS)",
@@ -4923,13 +4924,24 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     expect(inklingCard).toHaveTextContent("19.8 GB");
 
     // Switching to the sibling llama.cpp variant keeps details open and updates engine facts.
+    // The collapsed pill trigger stays compact (quant only) while dropdown options list both engine & VRAM/RAM.
+    expect(statusOf("Inkling 2 Mini")).toBe(
+      "Loaded · GPU 0 · 16.5 GB VRAM + 19.8 GB RAM",
+    );
     const versionPicker = within(inklingCard).getByRole("combobox", {
       name: "Choose version for Inkling 2 Mini",
     });
-    expect(versionPicker).toHaveTextContent("UD-Q4_K_XL · PolyStrata");
+    expect(versionPicker).toHaveTextContent("UD-Q4_K_XL");
     fireEvent.click(versionPicker);
+    expect(
+      await screen.findByRole("option", {
+        name: /UD-Q4_K_XL · PolyStrata · Loaded · 16\.5 GB VRAM \+ 19\.8 GB RAM/u,
+      }),
+    ).toBeVisible();
     fireEvent.click(
-      await screen.findByRole("option", { name: /UD-Q4_K_M · llama\.cpp/u }),
+      await screen.findByRole("option", {
+        name: /UD-Q4_K_M · llama\.cpp · 10 GB · 21\.4 GB VRAM · Recommended/u,
+      }),
     );
     const llamaBadge = within(inklingCard).getByText("llama.cpp");
     expect(llamaBadge).toHaveAttribute("data-engine", "llama.cpp");
@@ -5218,6 +5230,264 @@ describe("Featured Inkling 2 Mini spotlight", () => {
           modelId: "qwen3.8-27b-iq3s:UD-IQ3_S",
         },
       ]),
+    );
+  });
+
+  it("shows hybrid VRAM + RAM footprints on Windows/Linux NVIDIA PolyStrata rows and actionable driver-upgrade spotlights", async () => {
+    const win24 = labView({
+      computer: {
+        ...labView().computer,
+        computer_id: "computer-win24",
+        display_name: "Win RTX 4090",
+        host: {
+          ...labView().computer.host!,
+          engine_label:
+            "llama.cpp b12588 · CUDA + PolyStrata 0.2.19-poly.1 · CUDA",
+          gpus: [
+            {
+              free_bytes: gb(23),
+              index: 0,
+              name: "RTX 4090",
+              total_bytes: gb(24),
+            },
+          ],
+          os_label: "Windows 11",
+          platform: "windows",
+          ram_total_bytes: gb(64),
+        },
+      },
+      models: [
+        modelView(
+          localModel({
+            active_parameters: "3.4B",
+            capabilities: ["vision"],
+            concurrency: 1,
+            context_tokens: 131_072,
+            download_bytes: gb(17),
+            engine: "polystrata",
+            engine_label: "PolyStrata 0.2.19-poly.1 · CUDA",
+            fit: "gpu",
+            host_ram_bytes: gb(5.7),
+            id: "inkling-2-mini-q4-poly:UD-Q4_K_XL",
+            memory_bytes: gb(21.1),
+            name: "Inkling 2 Mini (UD-Q4_K_XL)",
+            pool: "gpu:0",
+            quant: "UD-Q4_K_XL",
+            recommended: true,
+            source_url: "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF",
+            vision: true,
+          }),
+        ),
+        modelView(
+          localModel({
+            active_parameters: "3.4B",
+            capabilities: ["vision"],
+            concurrency: 2,
+            context_tokens: 131_072,
+            download_bytes: gb(16.5),
+            engine: "llama.cpp",
+            engine_label: "llama.cpp b12588 · CUDA",
+            fit: "gpu",
+            id: "inkling-2-mini:UD-Q4_K_M",
+            memory_bytes: gb(22),
+            name: "Inkling 2 Mini (UD-Q4_K_M)",
+            pool: "gpu:0",
+            quant: "UD-Q4_K_M",
+            source_url: "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF",
+            vision: true,
+          }),
+        ),
+        modelView(
+          localModel({
+            capabilities: ["vision"],
+            context_tokens: 131_072,
+            download_bytes: gb(16.2),
+            engine: "llama.cpp",
+            family: "qwen",
+            fit: "gpu",
+            id: "qwen3.8-27b:UD-Q4_K_M",
+            memory_bytes: gb(21.7),
+            name: "Qwen3.8 27B (UD-Q4_K_M)",
+            parameters: "27B",
+            pool: "gpu:0",
+            quant: "UD-Q4_K_M",
+            source_url: "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF",
+            vision: true,
+          }),
+        ),
+        modelView(
+          localModel({
+            context_tokens: 199_680,
+            download_bytes: gb(4.2),
+            engine: "llama.cpp",
+            family: "other",
+            fit: "gpu",
+            id: "spark-x2.6-4b:Q8_0",
+            memory_bytes: gb(8.9),
+            name: "Spark-X2.6 4B (Q8_0)",
+            parameters: "4B",
+            pool: "gpu:0",
+            quant: "Q8_0",
+            source_url: "https://huggingface.co/unsloth/Spark-X2.6-4B-GGUF",
+          }),
+        ),
+      ],
+      pools: [gpuPool(0, 24), memoryPool("system", 51.2)],
+    });
+
+    await renderPage(setup([win24]));
+    await findModels();
+
+    expect(statuses()).toEqual([
+      "Inkling 2 Mini: Not downloaded · 17 GB · 21.1 GB VRAM + 5.7 GB RAM",
+      "Qwen3.8 27B: Not downloaded · 16.2 GB · 21.7 GB VRAM",
+      "Spark-X2.6 4B: Not downloaded · 4.2 GB · 8.9 GB VRAM",
+    ]);
+    const inklingCard = card("Inkling 2 Mini");
+    expect(within(inklingCard).getByText("Recommended")).toBeVisible();
+    expect(within(inklingCard).getByText("PolyStrata")).toBeVisible();
+    const picker = within(inklingCard).getByRole("combobox", {
+      name: "Choose version for Inkling 2 Mini",
+    });
+    expect(picker).toHaveTextContent("UD-Q4_K_XL");
+    fireEvent.click(picker);
+    expect(
+      await screen.findByRole("option", {
+        name: /UD-Q4_K_XL · PolyStrata · 17 GB · 21\.1 GB VRAM \+ 5\.7 GB RAM · Recommended/u,
+      }),
+    ).toBeVisible();
+    expect(
+      await screen.findByRole("option", {
+        name: /UD-Q4_K_M · llama\.cpp · 16\.5 GB · 22 GB VRAM/u,
+      }),
+    ).toBeVisible();
+
+    // 12 GB Windows on CUDA 12.8: Spark 4B recommended first, unavailable Spotlight
+    // surfaces actionable driver-update PolyStrata Q3 below, and disclosure shows VRAM shortfalls.
+    cleanup();
+    const win12Old = labView({
+      computer: {
+        ...labView().computer,
+        computer_id: "computer-win12",
+        display_name: "Win RTX 3060",
+        host: {
+          ...labView().computer.host!,
+          gpus: [
+            {
+              free_bytes: gb(11),
+              index: 0,
+              name: "RTX 3060",
+              total_bytes: gb(12),
+            },
+          ],
+          os_label: "Windows 11",
+          platform: "windows",
+          ram_total_bytes: gb(32),
+        },
+      },
+      models: [
+        modelView(
+          localModel({
+            context_tokens: 199_680,
+            download_bytes: gb(4.2),
+            engine: "llama.cpp",
+            fit: "gpu",
+            id: "spark-x2.6-4b:Q8_0",
+            memory_bytes: gb(8.9),
+            name: "Spark-X2.6 4B (Q8_0)",
+            parameters: "4B",
+            pool: "gpu:0",
+            quant: "Q8_0",
+            recommended: true,
+            source_url: "https://huggingface.co/unsloth/Spark-X2.6-4B-GGUF",
+          }),
+        ),
+        modelView(
+          localModel({
+            availability: {
+              downloadable: false,
+              reason: {
+                code: "DRIVER_UPDATE_REQUIRED",
+                detected_cuda: "12.8",
+                required_cuda: "13.0",
+              },
+            },
+            engine: "polystrata",
+            fit: "none",
+            id: "inkling-2-mini-q3-poly:UD-Q3_K_XL",
+            memory_bytes: gb(5),
+            name: "Inkling 2 Mini (UD-Q3_K_XL)",
+            pool: undefined,
+            quant: "UD-Q3_K_XL",
+            source_url: "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF",
+          }),
+        ),
+        modelView(
+          localModel({
+            availability: {
+              downloadable: false,
+              reason: {
+                code: "MEMORY_INSUFFICIENT",
+                have_bytes: gb(11),
+                memory_kind: "vram",
+                need_bytes: gb(13.7),
+              },
+            },
+            engine: "llama.cpp",
+            fit: "none",
+            id: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+            memory_bytes: gb(13.7),
+            name: "Inkling 2 Mini (UD-IQ3_XXS)",
+            pool: undefined,
+            quant: "UD-IQ3_XXS",
+            source_url: "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF",
+          }),
+        ),
+        modelView(
+          localModel({
+            availability: {
+              downloadable: false,
+              reason: {
+                code: "MEMORY_INSUFFICIENT",
+                have_bytes: gb(11),
+                memory_kind: "vram",
+                need_bytes: gb(13.4),
+              },
+            },
+            engine: "llama.cpp",
+            family: "qwen",
+            fit: "none",
+            id: "qwen3.8-27b-iq3s:UD-IQ3_S",
+            memory_bytes: gb(13.4),
+            name: "Qwen3.8 27B (UD-IQ3_S)",
+            parameters: "27B",
+            pool: undefined,
+            quant: "UD-IQ3_S",
+            source_url: "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF",
+          }),
+        ),
+      ],
+      pools: [gpuPool(0, 12), memoryPool("system", 25.6)],
+    });
+
+    await renderPage(setup([win12Old]));
+    await findModels();
+
+    expect(statuses()).toEqual([
+      "Spark-X2.6 4B: Not downloaded · 4.2 GB · 8.9 GB VRAM",
+      "Inkling 2 Mini: Can't download · driver update needed",
+    ]);
+    expect(
+      within(spotlightRegion()).getByRole("combobox", {
+        name: "Choose version for Inkling 2 Mini",
+      }),
+    ).toHaveTextContent("UD-Q3_K_XL");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "1 model needs more memory" }),
+    );
+    expect(statuses()).toContain(
+      "Qwen3.8 27B: Can't download · needs 13.4 GB VRAM",
     );
   });
 

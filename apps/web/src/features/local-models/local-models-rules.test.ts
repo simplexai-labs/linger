@@ -1187,6 +1187,28 @@ describe("hostBlocker, RAM reclaimability, and diagnostics copy", () => {
       ),
     ).toBe("needs 16 GB RAM");
     expect(
+      unavailableShortCopy(
+        {
+          code: "MEMORY_INSUFFICIENT",
+          memory_kind: "vram",
+          need_bytes: gb(13.7),
+        },
+        translate,
+      ),
+    ).toBe("needs 13.7 GB VRAM");
+    expect(
+      unavailableCopy(
+        {
+          code: "MEMORY_INSUFFICIENT",
+          have_bytes: gb(8),
+          memory_kind: "vram",
+          need_bytes: gb(13.7),
+        },
+        false,
+        translate,
+      ),
+    ).toContain("GPU memory (VRAM)");
+    expect(
       unavailableCopy(
         {
           code: "MEMORY_INSUFFICIENT",
@@ -1294,6 +1316,122 @@ describe("hostBlocker, RAM reclaimability, and diagnostics copy", () => {
     };
     expect(featuredInklingEntry([llamaEntry, polyEntry])?.model.id).toBe(
       "inkling-2-mini-q4-poly:UD-Q4_K_XL",
+    );
+
+    // Among unavailable Inkling variants on a 12 GB CUDA 12.8 card, actionable
+    // driver upgrades beat hard memory misses and keep backend order (q3 before q4).
+    const driverQ3 = {
+      ...modelView(
+        localModel({
+          availability: {
+            downloadable: false,
+            reason: {
+              code: "DRIVER_UPDATE_REQUIRED",
+              detected_cuda: "12.8",
+              required_cuda: "13.0",
+            },
+          },
+          engine: "polystrata",
+          fit: "none",
+          id: "inkling-2-mini-q3-poly:UD-Q3_K_XL",
+          memory_bytes: gb(5),
+          name: "Inkling 2 Mini (UD-Q3_K_XL)",
+          pool: undefined,
+          quant: "UD-Q3_K_XL",
+        }),
+      ),
+      status: "unavailable" as const,
+    };
+    const driverQ4 = {
+      ...modelView(
+        localModel({
+          availability: {
+            downloadable: false,
+            reason: {
+              code: "DRIVER_UPDATE_REQUIRED",
+              detected_cuda: "12.8",
+              required_cuda: "13.0",
+            },
+          },
+          engine: "polystrata",
+          fit: "none",
+          id: "inkling-2-mini-q4-poly:UD-Q4_K_XL",
+          memory_bytes: gb(19),
+          name: "Inkling 2 Mini (UD-Q4_K_XL)",
+          pool: undefined,
+          quant: "UD-Q4_K_XL",
+        }),
+      ),
+      status: "unavailable" as const,
+    };
+    const memMissIq3 = {
+      ...modelView(
+        localModel({
+          availability: {
+            downloadable: false,
+            reason: {
+              code: "MEMORY_INSUFFICIENT",
+              have_bytes: gb(11),
+              memory_kind: "vram",
+              need_bytes: gb(13.7),
+            },
+          },
+          engine: "llama.cpp",
+          fit: "none",
+          id: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+          memory_bytes: gb(13.7),
+          name: "Inkling 2 Mini (UD-IQ3_XXS)",
+          pool: undefined,
+          quant: "UD-IQ3_XXS",
+        }),
+      ),
+      status: "unavailable" as const,
+    };
+    expect(
+      featuredInklingEntry([memMissIq3, driverQ3, driverQ4])?.model.id,
+    ).toBe("inkling-2-mini-q3-poly:UD-Q3_K_XL");
+
+    // On an 8 GB VRAM / 16 GB RAM host, compare actual shortfall (4 GB RAM < 6.7 GB VRAM).
+    const ramShortQ2 = {
+      ...modelView(
+        localModel({
+          availability: {
+            downloadable: false,
+            reason: {
+              code: "MEMORY_INSUFFICIENT",
+              have_bytes: gb(16),
+              memory_kind: "ram",
+              need_bytes: gb(20),
+            },
+          },
+          engine: "polystrata",
+          fit: "none",
+          id: "inkling-2-mini-q2-poly:UD-Q2_K_XL",
+          memory_bytes: gb(5),
+          name: "Inkling 2 Mini (UD-Q2_K_XL)",
+          pool: undefined,
+          quant: "UD-Q2_K_XL",
+        }),
+      ),
+      status: "unavailable" as const,
+    };
+    const vramShortIq3 = {
+      ...memMissIq3,
+      model: {
+        ...memMissIq3.model,
+        availability: {
+          downloadable: false,
+          reason: {
+            code: "MEMORY_INSUFFICIENT" as const,
+            have_bytes: gb(7),
+            memory_kind: "vram" as const,
+            need_bytes: gb(13.7),
+          },
+        },
+      },
+    };
+    expect(featuredInklingEntry([vramShortIq3, ramShortQ2])?.model.id).toBe(
+      "inkling-2-mini-q2-poly:UD-Q2_K_XL",
     );
   });
 
