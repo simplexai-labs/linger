@@ -154,13 +154,25 @@ describe("local repository gate", { timeout: 60_000 }, () => {
     expect(result.stderr).toContain("Usage: BASE=<target-ref>");
   });
 
-  it("runs commitlint, the env inventory, changed-file format and lint, and the repository checks", () => {
+  it("runs commitlint, the env inventory, changed-file format and lint, and skips script tests when scripts are untouched", () => {
     const result = runGate();
     expect(result.status).toBe(0);
     expect(result.commands).toEqual([
       expect.stringMatching(/^pnpm exec commitlint --from \S+ --to \S+/),
       "pnpm env:inventory:check",
       "pnpm exec prettier --check apps/web/src/example.ts",
+      "make check-docs",
+    ]);
+  });
+
+  it("runs check-scripts-fast when a script or script-tested path changes", () => {
+    const result = runGate({ changedPath: "scripts/new.mjs" });
+    expect(result.status).toBe(0);
+    expect(result.commands).toEqual([
+      expect.stringMatching(/^pnpm exec commitlint --from \S+ --to \S+/),
+      "pnpm env:inventory:check",
+      "pnpm exec prettier --check scripts/new.mjs",
+      "pnpm exec eslint scripts/new.mjs",
       "make check-scripts-fast check-docs",
     ]);
   });
@@ -171,6 +183,7 @@ describe("local repository gate", { timeout: 60_000 }, () => {
     });
     expect(ideographs.status).not.toBe(0);
     expect(ideographs.stderr).toContain("English-only");
+    expect(ideographs.commands).not.toContain("make check-docs");
     expect(ideographs.commands).not.toContain(
       "make check-scripts-fast check-docs",
     );
@@ -291,7 +304,7 @@ describe("local repository gate", { timeout: 60_000 }, () => {
   it("diffs from the merge base when the target ref moved ahead", () => {
     const result = runGate({ advancedTarget: true });
     expect(result.status).toBe(0);
-    expect(result.commands.at(-1)).toBe("make check-scripts-fast check-docs");
+    expect(result.commands.at(-1)).toBe("make check-docs");
     expect(result.commands[0]).toContain(`--from ${result.base} `);
   });
 });

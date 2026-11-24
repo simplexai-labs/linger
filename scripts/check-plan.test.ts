@@ -172,12 +172,27 @@ describe("local plan", () => {
       "check-repository",
       "check-docs",
       "check-packages",
-      "check-teamhub-cli",
       "check-installer",
       "check-desktop",
       "check-scripts-fast",
-      "check-web",
     ]);
+    expect(ci(["packages/local-installation/src/index.ts"])).toMatchObject({
+      packages: "true",
+      installer: "true",
+      desktop: "true",
+      web: "false",
+      "teamhub-cli": "false",
+    });
+  });
+
+  it("scopes packages/document-model to the apps that actually depend on it", () => {
+    expect(ci(["packages/document-model/src/index.ts"])).toMatchObject({
+      packages: "true",
+      web: "true",
+      installer: "false",
+      desktop: "false",
+      "teamhub-cli": "false",
+    });
   });
 
   it("includes the TeamHub CLI that Node Services depends on", () => {
@@ -214,7 +229,6 @@ describe("local plan", () => {
       "check-repository",
       "check-docs",
       "check-packages",
-      "check-teamhub-cli",
       "check-installer",
       "check-desktop",
       "check-scripts-fast",

@@ -43,4 +43,20 @@ pnpm env:inventory:check
 bash "$script_root/check-changed-files.sh" "$base" "$head_sha" \
   "$script_root/app-linted-paths.txt"
 
-make check-scripts-fast check-docs
+# Run the script test suite when the range is empty (push baseline or force
+# push) or when check-plan selects check-scripts-fast for the changed files;
+# any planning error fails closed and runs it.
+run_scripts_fast=true
+if [[ "$base" != "$head_sha" ]]; then
+  if planned="$(git diff --name-only "$base" "$head_sha" | node "$script_root/../check-plan.mjs" --files-from - --format make 2>/dev/null)"; then
+    if [[ " $planned " != *" check-scripts-fast "* ]]; then
+      run_scripts_fast=false
+    fi
+  fi
+fi
+
+if [[ "$run_scripts_fast" == true ]]; then
+  make check-scripts-fast check-docs
+else
+  make check-docs
+fi
