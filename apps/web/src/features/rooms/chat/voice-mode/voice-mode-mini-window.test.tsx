@@ -232,6 +232,32 @@ describe("Voice Mode mini window", () => {
     expect(log.querySelectorAll("div.voice-live-fade-in")).toHaveLength(1);
   });
 
+  it("opens at the newest words without gliding through the call", async () => {
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(900);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(100);
+    // jsdom has no element scrollTo; a stand-in shows whether one glides.
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+    try {
+      voice.session!.live = {
+        soundOff: false,
+        transcript: [{ id: "lt_1", speaker: "you", text: "What is next" }],
+      };
+      renderWindow();
+      const log = await screen.findByRole("log", {
+        name: "Voice Mode conversation",
+      });
+      expect(log.scrollTop).toBe(800);
+      expect(scrollTo).not.toHaveBeenCalled();
+    } finally {
+      delete (HTMLElement.prototype as { scrollTo?: unknown }).scrollTo;
+      vi.restoreAllMocks();
+    }
+  });
+
   it("glides after new lines until the Human scrolls up", async () => {
     const observed: (() => void)[] = [];
     vi.stubGlobal(

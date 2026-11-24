@@ -266,19 +266,21 @@ function MiniWindow({
     const content = contentRef.current;
     const view = scroller?.ownerDocument.defaultView;
     if (!scroller || !content || !view || !("ResizeObserver" in view)) return;
-    const pin = () => {
+    const pin = (glide: boolean) => {
       if (!followRef.current) return;
       const top = scroller.scrollHeight - scroller.clientHeight;
       if (top - scroller.scrollTop < 1) return;
-      const glide =
+      glidingRef.current =
+        glide &&
         typeof scroller.scrollTo === "function" &&
         !view.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-      glidingRef.current = glide;
-      if (glide) scroller.scrollTo({ top, behavior: "smooth" });
+      if (glidingRef.current) scroller.scrollTo({ top, behavior: "smooth" });
       else scroller.scrollTop = top;
     };
-    pin();
-    const observer = new view.ResizeObserver(pin);
+    // Opening the window, or moving it into or out of picture-in-picture,
+    // shows the newest words at once; only words added afterwards glide.
+    pin(false);
+    const observer = new view.ResizeObserver(() => pin(true));
     observer.observe(content);
     observer.observe(scroller);
     return () => observer.disconnect();
