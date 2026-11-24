@@ -111,9 +111,6 @@ describe("windowsPowerShellExecutable", () => {
     expect(windowsPowerShellExecutable("D:\\Windows")).toBe(
       "D:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
     );
-    expect(windowsPowerShellExecutable("  C:\\WINNT  ")).toBe(
-      "C:\\WINNT\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-    );
     expect(windowsPowerShellExecutable("")).toBe(
       "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
     );
@@ -166,33 +163,6 @@ describe("windowsProcesses", () => {
       "-Command",
     ]);
     expect(mockExec.calls[0]?.options.maxBuffer).toBe(16 * 1024 * 1024);
-  });
-
-  it("falls back to bare powershell.exe when the full system path returns ENOENT", async () => {
-    mockExec.handler = (file) => {
-      if (file !== "powershell.exe") {
-        const error = Object.assign(new Error("spawn ENOENT"), {
-          code: "ENOENT",
-        }) as ExecFileException;
-        return { error, stdout: "", stderr: "" };
-      }
-      return {
-        error: null,
-        stdout: JSON.stringify({
-          p: [{ p: 42, q: 4, c: 100, l: "node.exe" }],
-        }),
-        stderr: "",
-      };
-    };
-
-    const result = await windowsProcesses("C:\\MissingWindows");
-    expect(result).toEqual([
-      { pid: 42, parent: 4, created: 100, command: "node.exe" },
-    ]);
-    expect(mockExec.calls.map((call) => call.file)).toEqual([
-      "C:\\MissingWindows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-      "powershell.exe",
-    ]);
   });
 
   it("reports sanitized cause and stderr when process inspection fails", async () => {

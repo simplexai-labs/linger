@@ -2,12 +2,12 @@ import { execFile, spawn, type ExecFileException } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { stripVTControlCharacters } from "node:util";
+import { excerptLine, redact } from "@linger/local-installation/redaction";
 
-// The source supervisor imports this module directly, before any build.
+// The source supervisor imports this module directly, before any build, so
+// intra-package imports use the package self-reference in exports.
 const leaseKey = "LINGER_NATIVE_PROCESS_LEASE";
 const MAX_INSPECTION_BUFFER = 16 * 1024 * 1024;
-const STDERR_EXCERPT_LIMIT = 240;
 
 interface ProcessResult {
   code: number;
@@ -31,28 +31,12 @@ function decodeClixml(text: string): string {
     .replaceAll("&amp;", "&");
 }
 
-function redactInspectionText(text: string): string {
-  return stripVTControlCharacters(text)
-    .replace(
-      /(\b(?:[A-Z_][\w.-]*[_-])?(?:api[_-]?key|password|passwd|token|secret(?:[_-]seed)?|credential|authorization|cookie|set-cookie)\b["']?\s*[:=]\s*)(?:Bearer\s+[^\s]+|"[^"\n]*"|'[^'\n]*'|[^\s,;}]+)/gi,
-      "$1[REDACTED]",
-    )
-    .replace(/Bearer\s+[^\s"']+/gi, "Bearer [REDACTED]")
-    .replace(
-      /(?<![a-z0-9+.-])([0-9+.-]*[a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi,
-      "$1[REDACTED]@",
-    );
-}
-
 /** Condenses and redacts inspector stderr so failure messages stay safe and readable. */
 export function sanitizeInspectionStderr(stderr: string): string {
   const raw = stderr.trimStart().startsWith("#< CLIXML")
     ? decodeClixml(stderr)
     : stderr;
-  const cleaned = redactInspectionText(raw).replace(/\s+/g, " ").trim();
-  return cleaned.length > STDERR_EXCERPT_LIMIT
-    ? `${cleaned.slice(0, STDERR_EXCERPT_LIMIT - 1)}\u2026`
-    : cleaned;
+  return excerptLine(redact(raw).replace(/\s+/g, " ").trim());
 }
 
 function formatInspectionFailure(
@@ -161,11 +145,10 @@ export function parseWindowsProcesses(stdout: string): WindowsProcess[] {
 
 /** Resolves the system Windows PowerShell path so restricted PATH environments still work. */
 export function windowsPowerShellExecutable(
-  systemRoot = process.env.SystemRoot || process.env.WINDIR,
+  systemRoot = process.env.SystemRoot ?? "C:\\Windows",
 ): string {
-  const root = systemRoot?.trim();
   return path.win32.join(
-    root || "C:\\Windows",
+    systemRoot || "C:\\Windows",
     "System32",
     "WindowsPowerShell",
     "v1.0",
@@ -200,26 +183,11 @@ export async function parseWindowsListeners(
 export async function windowsProcesses(
   systemRoot?: string,
 ): Promise<WindowsProcess[]> {
-  const executable = windowsPowerShellExecutable(systemRoot);
-  const args = [
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-Command",
-    WINDOWS_PROCESSES,
-  ];
-  let result: ProcessResult;
-  try {
-    result = await runProcess(executable, args, { timeoutMs: 15_000 });
-  } catch (error) {
-    const cause =
-      error instanceof Error
-        ? (error.cause as NodeJS.ErrnoException | undefined)
-        : undefined;
-    if (cause?.code !== "ENOENT" || executable === "powershell.exe")
-      throw error;
-    result = await runProcess("powershell.exe", args, { timeoutMs: 15_000 });
-  }
+  const result = await runProcess(
+    windowsPowerShellExecutable(systemRoot),
+    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_PROCESSES],
+    { timeoutMs: 15_000 },
+  );
   if (result.code !== 0) {
     const detail = sanitizeInspectionStderr(result.stderr);
     throw new Error(
