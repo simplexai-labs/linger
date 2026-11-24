@@ -1915,6 +1915,8 @@ export interface components {
       agent_actor_id: components["schemas"]["Id"];
       computer_id: components["schemas"]["Id"];
       local_runtime_type: components["schemas"]["LocalRuntimeType"];
+      /** @description The model configured for the Another Me on its local Runtime. */
+      runtime_model?: string;
       /** @enum {string} */
       status: "active" | "updating";
     };

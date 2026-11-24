@@ -658,6 +658,7 @@ export class AgentMemoryCoordinator {
       agentId,
       computerId,
       runtimeType: runtime,
+      ...(ghost.runtime.model ? { model: ghost.runtime.model } : {}),
     };
     // Looked up once per pass, and only when a stage is built or run. An
     // offline Computer fails the pass as the model call would, so no stage

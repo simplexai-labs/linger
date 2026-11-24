@@ -101,10 +101,14 @@ the recorded process group disappears.
 The Daemon accepts `execute` (kind `model_invoke`). `internal/daemon/model_invoke.go`
 handles admission and a concurrency limit of 3 (beyond it the reply is `busy`;
 `priority` only orders the Agent side's queue, and the Daemon accepts it without
-distinguishing), cancels on disconnect and drain, and checks before sending that
+distinguishing), cancels on disconnect and drain, loads a named Pi library model
+on demand through `ensureLocalModel` (matching `run.start`), clamps reasoning
+effort against the requested model, and checks before sending that
 the encoded `executed` (kind `model_invoke`) fits the 4 MiB frame limit (otherwise
-it reports `failed`). `internal/provider/model_invoke.go` runs one `codex exec` or
-`claude -p` in a temporary directory: the prompt goes through stdin, tools and
+it reports `failed`). `internal/provider/model_invoke.go` and
+`internal/provider/pi_model_invoke.go` run one `codex exec`, `claude -p`, or
+ephemeral `pi` RPC turn in a temporary directory, passing the requested `model`
+explicitly when supplied: the prompt goes through stdin, tools and
 user customization are off, and it refuses workspace files at the root named
 `AGENTS.md`, `AGENTS.override.md` or `CLAUDE.md` and anything under `.codex` or
 `.claude` at any depth. `internal/workspace/codex_invoke_home.go` prepares a

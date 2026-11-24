@@ -66,6 +66,11 @@ export const FIRST_MODEL_INVOKE_OUTCOMES_COMPUTER_VERSION = "0.60.0";
 // fields behind it.
 export const FIRST_LOCAL_MODELS_ENGINE_COMPUTER_VERSION = "0.61.0";
 
+// The first release that decodes an explicit `model` on `execute`
+// `model_invoke`. An older Computer rejects the unknown field and closes the
+// connection, so the field is omitted for it.
+export const FIRST_MODEL_INVOKE_MODEL_COMPUTER_VERSION = "0.62.0";
+
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 /** Source builds report `dev` and follow the current wire contract. */

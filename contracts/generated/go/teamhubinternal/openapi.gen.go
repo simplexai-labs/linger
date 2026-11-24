@@ -3026,7 +3026,10 @@ type AnotherMePlacement struct {
 	LocalRuntimeType LocalRuntimeType `json:"local_runtime_type"`
 
 	// OwnerActorId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-	OwnerActorId Id                       `json:"owner_actor_id"`
+	OwnerActorId Id `json:"owner_actor_id"`
+
+	// RuntimeModel The model configured for the Another Me on its local Runtime.
+	RuntimeModel *string                  `json:"runtime_model,omitempty"`
 	Status       AnotherMePlacementStatus `json:"status"`
 
 	// TenantId Opaque, case-sensitive identifier. Clients must not infer type or time from it.

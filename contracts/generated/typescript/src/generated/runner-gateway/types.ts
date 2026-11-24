@@ -1054,6 +1054,10 @@ export interface ModelInvoke {
   owner_actor_id: Id;
   agent_id: Id;
   runtime_type: "codex" | "claude" | "pi";
+  /**
+   * Explicit provider model to run on this Runtime. Omitted leaves selection to the Runtime's own default; sent only to a Computer release that decodes it.
+   */
+  model?: string;
   mode: "structured" | "text" | "workspace";
   reasoning_effort: "low" | "medium" | "high";
   instructions?: string;

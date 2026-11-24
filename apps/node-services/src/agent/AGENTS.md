@@ -196,6 +196,12 @@ take precedence.
 - `local_models_external_holders` is advertised to every Computer (a Daemon
   ignores an unknown feature); a Daemon talking to an older Agent Service
   strips `external_holders` from `LocalModelPool` rows.
+- Explicit model selection on `execute` `model_invoke` (`model`) is sent only
+  to Computer 0.62.0 or later (`FIRST_MODEL_INVOKE_MODEL_COMPUTER_VERSION`),
+  because an older Computer rejects unknown envelope fields and closes the
+  connection. Background calls resolve the placed Agent's configured model on
+  its Runtime and fall back to the target Runtime's catalog default on
+  cross-Runtime fallback or when unconfigured.
 - Default unit, integration, and fixture smoke tests use deterministic adapters
   and do not call a live model provider. Explicitly named live suites such as
   `smoke:local-runner:live` may use an authenticated provider and must remain

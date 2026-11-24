@@ -2553,6 +2553,7 @@ type ModelInvoke struct {
 	OwnerActorID    string            `json:"owner_actor_id"`
 	AgentID         string            `json:"agent_id"`
 	RuntimeType     string            `json:"runtime_type"`
+	Model           string            `json:"model,omitempty"`
 	Mode            string            `json:"mode"`
 	ReasoningEffort string            `json:"reasoning_effort"`
 	Instructions    string            `json:"instructions,omitempty"`

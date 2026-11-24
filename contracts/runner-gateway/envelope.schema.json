@@ -4723,6 +4723,12 @@
         "runtime_type": {
           "enum": ["codex", "claude", "pi"]
         },
+        "model": {
+          "description": "Explicit provider model to run on this Runtime. Omitted leaves selection to the Runtime's own default; sent only to a Computer release that decodes it.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
         "mode": {
           "enum": ["structured", "text", "workspace"]
         },

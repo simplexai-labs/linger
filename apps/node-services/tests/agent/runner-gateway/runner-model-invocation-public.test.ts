@@ -896,6 +896,48 @@ describe("RunnerGateway model invocation", () => {
     }
   });
 
+  it("sends explicit model only to Computers at or above 0.62.0", async () => {
+    const current = await connect({
+      ...invokingHello(),
+      daemon_version: "0.62.0",
+    });
+    try {
+      const pending = current.gateway.invokeModel(
+        "runner-local",
+        request({ model: "gpt-5.4" }),
+      );
+      await vi.waitFor(() =>
+        expect(sentInvocations(current.peer)).toHaveLength(1),
+      );
+      const [command] = sentInvocations(current.peer);
+      expect(command!.model).toBe("gpt-5.4");
+      await invoked(current.connection, command!);
+      await expect(pending).resolves.toMatchObject({ outcome: "completed" });
+    } finally {
+      current.connection.disconnect();
+    }
+
+    const older = await connect({
+      ...invokingHello(),
+      daemon_version: "0.61.0",
+    });
+    try {
+      const pending = older.gateway.invokeModel(
+        "runner-local",
+        request({ model: "gpt-5.4" }),
+      );
+      await vi.waitFor(() =>
+        expect(sentInvocations(older.peer)).toHaveLength(1),
+      );
+      const [command] = sentInvocations(older.peer);
+      expect(command!.model).toBeUndefined();
+      await invoked(older.connection, command!);
+      await expect(pending).resolves.toMatchObject({ outcome: "completed" });
+    } finally {
+      older.connection.disconnect();
+    }
+  });
+
   it("rejects a prompt over 3 MiB before it reaches the Computer", async () => {
     const { gateway, peer, connection } = await connect();
     try {

@@ -261,7 +261,7 @@ func TestInvokePiModelClampsViaRPCState(t *testing.T) {
 				piFakeEnv:    "invoke-clamp",
 				piFakeLogEnv: commandsFile,
 			},
-		}, t.TempDir(), "", "hello", "medium")
+		}, t.TempDir(), "", "", "hello", "medium")
 		if err != nil || outcome.Status != statusCompleted || model != "localmodels/Spark-X2.6-4B-Q8_0" {
 			t.Fatalf("InvokePiModel = %+v, %q, %v", outcome, model, err)
 		}
@@ -282,7 +282,7 @@ func TestInvokePiModelClampsViaRPCState(t *testing.T) {
 				piFakeEnv:    "invoke-clamp",
 				piFakeLogEnv: commandsFile,
 			},
-		}, t.TempDir(), "", "hello", "low")
+		}, t.TempDir(), "", "", "hello", "low")
 		if err != nil || outcome.Status != statusCompleted || model != "localmodels/Spark-X2.6-4B-Q8_0" {
 			t.Fatalf("InvokePiModel = %+v, %q, %v", outcome, model, err)
 		}

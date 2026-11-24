@@ -42,15 +42,16 @@ VALUES($1,$2,'management-'||$1,$3,'Models','Work safely','gpt-5',coalesce(nullif
 	if status, body := agentRuntimeStateRequest(t, handler, http.MethodGet, "/v0/agent-runtime/another-me-placements", "", nil); status != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated list status=%d body=%s", status, body)
 	}
-	placement := func(tenantID, owner, actorID, runtime, status string) teamhubinternal.AnotherMePlacement {
+	placement := func(tenantID, owner, actorID, runtime, model, status string) teamhubinternal.AnotherMePlacement {
 		return teamhubinternal.AnotherMePlacement{
 			TenantId: tenantID, OwnerActorId: owner, AgentId: "management-" + actorID, AgentActorId: actorID,
 			ComputerId: "computer_fixture", LocalRuntimeType: teamhubinternal.LocalRuntimeType(runtime),
-			Status: teamhubinternal.AnotherMePlacementStatus(status),
+			RuntimeModel: &model,
+			Status:       teamhubinternal.AnotherMePlacementStatus(status),
 		}
 	}
 	want := []teamhubinternal.AnotherMePlacement{
-		placement(acmeTenant, "actor_acme_alice", "actor_models_alice_anotherme", "claude", "active"),
+		placement(acmeTenant, "actor_acme_alice", "actor_models_alice_anotherme", "claude", "gpt-5", "active"),
 	}
 	if got := list("?tenant_id=" + acmeTenant); !reflect.DeepEqual(got, want) {
 		t.Fatalf("tenant placements=%+v want=%+v", got, want)
@@ -62,7 +63,7 @@ VALUES($1,$2,'management-'||$1,$3,'Models','Work safely','gpt-5',coalesce(nullif
 	for _, item := range want {
 		found := false
 		for _, listed := range all {
-			found = found || listed == item
+			found = found || reflect.DeepEqual(listed, item)
 		}
 		if !found {
 			t.Fatalf("unfiltered list misses %+v: %+v", item, all)

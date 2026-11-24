@@ -36,7 +36,7 @@ func invokePiModel(ctx context.Context, request ModelInvokeRequest, installed Mo
 	defer cancel()
 	answer, model, err := native.InvokePiModel(
 		invokeCtx, native.Profile{Program: installed.ExecutablePath, Env: environment},
-		work, instructionsFile, request.Input, request.ReasoningEffort,
+		work, instructionsFile, request.Model, request.Input, request.ReasoningEffort,
 	)
 	switch {
 	case invokeCtx.Err() != nil:

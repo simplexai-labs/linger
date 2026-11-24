@@ -42,8 +42,11 @@ info:
     the playground.
     execute with kind model_invoke is a one-shot model call on the Computer's
     Codex, Claude or Pi Runtime that has no Context, takes no execution slot
-    and is not in the Operation ledger. A Pi call runs on Pi's default model and
-    has no workspace tools. The service sends Pi calls only to a
+    and is not in the Operation ledger. Its optional model selects the provider
+    model explicitly (sent only to a Computer release that decodes it),
+    matching Agent Runs and loading a named Pi library model on demand; when
+    omitted, the Runtime uses its default. A Pi call has no workspace tools.
+    The service sends Pi calls only to a
     Computer release that can decode them. The Agent Service's model scheduler
     decides when a call is sent; the Daemon runs every call it receives. Its
     optional session_key lets a Daemon answer the structured Codex calls of

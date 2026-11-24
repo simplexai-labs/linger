@@ -35,6 +35,7 @@ export interface RunnerModelInvokeRequest {
   /** The owner's Agent on this Computer; the Daemon refuses it when locally stopped. */
   readonly agentId: string;
   readonly runtimeType: ModelInvoke["runtime_type"];
+  readonly model?: ModelInvoke["model"];
   readonly mode: ModelInvoke["mode"];
   readonly reasoningEffort: ModelInvoke["reasoning_effort"];
   readonly instructions?: string;
@@ -263,6 +264,11 @@ export class RunnerModelInvocation {
     connectionEpoch: number,
     request: RunnerModelInvokeRequest,
   ): ModelInvoke {
+    const includeModel =
+      request.model !== undefined &&
+      this.owners
+        .connections()
+        .supportsModelInvokeModel(computerId, connectionEpoch);
     const command = parseAgentToDaemonEnvelope({
       type: "execute",
       kind: "model_invoke",
@@ -275,6 +281,7 @@ export class RunnerModelInvocation {
       owner_actor_id: request.ownerActorId,
       agent_id: request.agentId,
       runtime_type: request.runtimeType,
+      ...(includeModel ? { model: request.model } : {}),
       mode: request.mode,
       reasoning_effort: request.reasoningEffort,
       ...(request.instructions ? { instructions: request.instructions } : {}),

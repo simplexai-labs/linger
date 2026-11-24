@@ -24,7 +24,7 @@ const modelNetworkUnavailableReason = "The Local Computer cannot reach the netwo
 // endpoints a model call on a Runtime connects to, read from that Runtime's
 // own configuration.
 type modelEndpointResolver interface {
-	ModelEndpoints(ctx context.Context, runtimeType string) []*url.URL
+	ModelEndpoints(ctx context.Context, runtimeType, model string) []*url.URL
 }
 
 // routeProbeAddresses are documentation addresses (RFC 5737 and RFC 3849).
@@ -36,10 +36,10 @@ var routeProbeAddresses = []string{"192.0.2.1:9", "[2001:db8::1]:9"}
 // unavailable when this Computer cannot reach the network the call needed,
 // so the caller waits for the Computer as it does for a disconnected one
 // instead of spending attempts. Any other result is returned unchanged.
-func (d *Daemon) networkUnavailableModelInvoke(ctx context.Context, invokeID, runtimeType string, result provider.ModelInvokeResult) provider.ModelInvokeResult {
+func (d *Daemon) networkUnavailableModelInvoke(ctx context.Context, invokeID, runtimeType, model string, result provider.ModelInvokeResult) provider.ModelInvokeResult {
 	if ctx.Err() != nil ||
 		(result.Outcome != provider.ModelInvokeFailed && result.Outcome != provider.ModelInvokeTimedOut) ||
-		!d.modelNetworkUnavailable(ctx, runtimeType) {
+		!d.modelNetworkUnavailable(ctx, runtimeType, model) {
 		return result
 	}
 	slog.Warn("runner.model.invoke", "phase", "network_unavailable", "invoke_id", invokeID,
@@ -56,7 +56,7 @@ func (d *Daemon) networkUnavailableModelInvoke(ctx context.Context, invokeID, ru
 // configuration names (a custom provider's or gateway's base URL, else the
 // vendor's hosts), nor the proxy the environment chooses for each, accepts a
 // connection; a Runtime whose endpoints are unknown falls back to the route.
-func (d *Daemon) modelNetworkUnavailable(ctx context.Context, runtimeType string) bool {
+func (d *Daemon) modelNetworkUnavailable(ctx context.Context, runtimeType, model string) bool {
 	mode := ""
 	if d.modelSource != nil {
 		mode = d.modelSource.GatewayMode(runtimeType)
@@ -69,7 +69,7 @@ func (d *Daemon) modelNetworkUnavailable(ctx context.Context, runtimeType string
 	}
 	var endpoints []*url.URL
 	if resolver, ok := d.modelInvoker.(modelEndpointResolver); ok {
-		endpoints = resolver.ModelEndpoints(ctx, runtimeType)
+		endpoints = resolver.ModelEndpoints(ctx, runtimeType, model)
 	}
 	if len(endpoints) == 0 {
 		return !d.routeAvailable(ctx)
