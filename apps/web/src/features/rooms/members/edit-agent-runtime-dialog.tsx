@@ -338,10 +338,40 @@ function RuntimeSetupGuidance({
   runtime: LocalComputer["runtimes"][number];
 }) {
   const t = useT();
+  if (computer.upgrade_required)
+    return (
+      <p className="text-sm text-app-danger" role="alert">
+        {localRuntimeMessage(
+          { error_code: "LOCAL_COMPUTER_UPGRADE_REQUIRED" },
+          runtime.type,
+          computer.display_name,
+          t,
+        )}
+      </p>
+    );
   if (runtime.status === "not_installed")
     return (
       <div role="status">
         <LocalRuntimeInstallGuidance
+          computerName={computer.display_name}
+          platform={computer.platform}
+          runtimeTypes={[runtime.type]}
+        />
+      </div>
+    );
+  if (runtime.status === "incompatible")
+    return (
+      <div className="space-y-1.5" role="status">
+        <p className="text-sm text-app-danger" title={runtime.message}>
+          {localRuntimeMessage(
+            runtime,
+            runtime.type,
+            computer.display_name,
+            t,
+          ) ?? t(agentRuntimeMessages.installAndSignIn)}
+        </p>
+        <LocalRuntimeInstallGuidance
+          action="update"
           computerName={computer.display_name}
           platform={computer.platform}
           runtimeTypes={[runtime.type]}

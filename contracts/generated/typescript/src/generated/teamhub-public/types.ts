@@ -4508,7 +4508,8 @@ export interface components {
       | "RUNTIME_AUTHENTICATION_REQUIRED"
       | "RUNTIME_INCOMPATIBLE"
       | "RUNTIME_DIAGNOSTIC_FAILED"
-      | "LOCAL_COMPUTER_OFFLINE";
+      | "LOCAL_COMPUTER_OFFLINE"
+      | "LOCAL_COMPUTER_UPGRADE_REQUIRED";
     LocalAgentRuntimeStatus: {
       computer_id: components["schemas"]["Id"];
       display_name: string;

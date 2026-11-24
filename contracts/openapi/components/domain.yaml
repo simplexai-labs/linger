@@ -205,6 +205,7 @@ components:
           RUNTIME_INCOMPATIBLE,
           RUNTIME_DIAGNOSTIC_FAILED,
           LOCAL_COMPUTER_OFFLINE,
+          LOCAL_COMPUTER_UPGRADE_REQUIRED,
         ]
     LocalAgentRuntimeStatus:
       type: object

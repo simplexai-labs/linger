@@ -1034,6 +1034,36 @@ describe("quick Local Agent creation", () => {
     const [first, retry] = await directRoomOpenings(runtime);
     expect(retry).toEqual(first);
   });
+
+  it("shows update guidance when creating a Local Agent on an incompatible Antigravity runtime", async () => {
+    const runtime = await testRuntime();
+    runtime.seed.localComputers = [
+      {
+        ...runtime.seed.localComputers[0]!,
+        platform: "darwin",
+        runtimes: [
+          {
+            error_code: "RUNTIME_INCOMPATIBLE",
+            message: "antigravity version 1.5.9 is below minimum 1.5.12",
+            models: [],
+            status: "incompatible",
+            type: "antigravity",
+            version: "1.5.9",
+          },
+        ],
+      },
+    ];
+    renderCreation(runtime, "local");
+    fireEvent.click(
+      await screen.findByRole("combobox", { name: "Local Computer" }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "Jenny's Mac" }));
+    expect(await screen.findByText("agy update")).toBeVisible();
+    expect(
+      screen.queryByText("The npm commands need Node.js."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+  });
 });
 
 async function chooseLocalRuntime(name = "Jenny's Mac") {

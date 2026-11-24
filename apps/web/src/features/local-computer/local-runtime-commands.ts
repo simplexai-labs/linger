@@ -70,3 +70,13 @@ export function installCommand(
     ? "npm install -g @openai/codex"
     : "npm install -g @earendil-works/pi-coding-agent";
 }
+
+// Antigravity's install scripts exit without upgrading when `agy` is already
+// installed, so an outdated installation updates through `agy update`.
+export function updateCommand(
+  runtimeType: TeamHubLocalRuntimeType,
+  platform: ComputerPlatform | undefined,
+): string {
+  if (runtimeType === "antigravity") return "agy update";
+  return installCommand(runtimeType, platform);
+}

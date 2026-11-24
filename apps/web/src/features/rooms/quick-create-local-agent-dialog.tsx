@@ -452,7 +452,8 @@ export function QuickCreateLocalAgentDialog({
                   </Select>
                 </label>
                 {!selectedModel && !loginRuntime ? (
-                  selectedRuntime?.type === "pi" ? (
+                  selectedRuntime?.type === "pi" &&
+                  selectedRuntime.status !== "incompatible" ? (
                     <p className="text-xs text-muted-foreground" role="status">
                       <RichMessage
                         message={createAgentMessages.downloadModel}
@@ -463,6 +464,16 @@ export function QuickCreateLocalAgentDialog({
                     selectedRuntime?.status === "not_installed" ? (
                     <div role="status">
                       <LocalRuntimeInstallGuidance
+                        computerName={selectedComputer.display_name}
+                        platform={selectedComputer.platform}
+                        runtimeTypes={[selectedRuntime.type]}
+                      />
+                    </div>
+                  ) : selectedComputer &&
+                    selectedRuntime?.status === "incompatible" ? (
+                    <div role="status">
+                      <LocalRuntimeInstallGuidance
+                        action="update"
                         computerName={selectedComputer.display_name}
                         platform={selectedComputer.platform}
                         runtimeTypes={[selectedRuntime.type]}

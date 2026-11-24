@@ -254,6 +254,9 @@ function AppSetup({
   const missing = appOrder.filter(
     (app) => appStatus(computer, app) === "not_installed",
   );
+  const outdated = appOrder.filter(
+    (app) => appStatus(computer, app) === "incompatible",
+  );
   const signIn = appOrder.filter(
     (app) => appStatus(computer, app) === "authentication_required",
   );
@@ -277,11 +280,19 @@ function AppSetup({
         </div>
       ))}
       {signIn.length === 0 ? (
-        <LocalRuntimeInstallGuidance
-          computerName={computer.display_name}
-          platform={computer.platform}
-          runtimeTypes={missing}
-        />
+        <>
+          <LocalRuntimeInstallGuidance
+            action="update"
+            computerName={computer.display_name}
+            platform={computer.platform}
+            runtimeTypes={outdated}
+          />
+          <LocalRuntimeInstallGuidance
+            computerName={computer.display_name}
+            platform={computer.platform}
+            runtimeTypes={missing}
+          />
+        </>
       ) : null}
       <p className="text-xs text-muted-foreground">
         <RichMessage

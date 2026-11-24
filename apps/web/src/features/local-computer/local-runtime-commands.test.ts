@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { expect, it } from "vitest";
-import { loginCommands, signInCommand } from "./local-runtime-commands";
+import {
+  installCommand,
+  loginCommands,
+  signInCommand,
+  updateCommand,
+} from "./local-runtime-commands";
 
 const desktop = {
   status: {
@@ -69,4 +74,22 @@ it("keeps the native command inside Desktop until it reports its Computer", () =
   };
   expect(signInCommand("pi", computer, { status: undefined })).toBe("pi");
   expect(signInCommand("pi", computer, desktop)).toBe("pi");
+});
+
+it("updates Antigravity through agy update while other runtimes reuse their install command", () => {
+  expect(installCommand("antigravity", "darwin")).toBe(
+    "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+  );
+  expect(installCommand("antigravity", "win32")).toBe(
+    "irm https://antigravity.google/cli/install.ps1 | iex",
+  );
+  expect(updateCommand("antigravity", "darwin")).toBe("agy update");
+  expect(updateCommand("antigravity", "win32")).toBe("agy update");
+  expect(updateCommand("claude", "darwin")).toBe(
+    installCommand("claude", "darwin"),
+  );
+  expect(updateCommand("codex", "linux")).toBe(
+    installCommand("codex", "linux"),
+  );
+  expect(updateCommand("pi", "win32")).toBe(installCommand("pi", "win32"));
 });

@@ -252,6 +252,70 @@ describe("Local Computer gate", () => {
       ).toBeNull();
     });
   });
+
+  it("shows update guidance when an installed AI app is incompatible", async () => {
+    await renderShell({
+      ...newMac,
+      platform: "darwin",
+      runtimes: [
+        {
+          error_code: "RUNTIME_INCOMPATIBLE",
+          message: "antigravity version 1.5.9 is below minimum 1.5.12",
+          models: [],
+          status: "incompatible",
+          type: "antigravity",
+          version: "1.5.9",
+        },
+      ],
+    });
+
+    const gate = await screen.findByRole("dialog", {
+      name: "Connect your computer",
+    });
+    expect(await within(gate).findByText("agy update")).toBeVisible();
+    expect(
+      within(gate).getByText(
+        "Update a Runtime on New Mac as the OS user that runs Local Computer. It appears here within a minute.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("shows the Node.js hint once when both outdated and missing npm runtimes are listed", async () => {
+    await renderShell({
+      ...newMac,
+      platform: "darwin",
+      runtimes: [
+        {
+          error_code: "RUNTIME_INCOMPATIBLE",
+          message: "codex version 0.90.0 is below minimum 0.100.0",
+          models: [],
+          status: "incompatible",
+          type: "codex",
+          version: "0.90.0",
+        },
+        {
+          error_code: "RUNTIME_NOT_INSTALLED",
+          message: "Runtime executable not found",
+          models: [],
+          status: "not_installed",
+          type: "pi",
+        },
+      ],
+    });
+
+    const gate = await screen.findByRole("dialog", {
+      name: "Connect your computer",
+    });
+    expect(
+      await within(gate).findByText("npm install -g @openai/codex"),
+    ).toBeVisible();
+    expect(
+      within(gate).getByText("npm install -g @earendil-works/pi-coding-agent"),
+    ).toBeVisible();
+    expect(
+      within(gate).getAllByText("The npm commands need Node.js."),
+    ).toHaveLength(1);
+  });
 });
 
 async function renderShell(

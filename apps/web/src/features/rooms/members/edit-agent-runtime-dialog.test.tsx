@@ -190,6 +190,56 @@ describe("EditAgentRuntimeDialog", () => {
     expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
   });
 
+  it("tells the owner to update an incompatible Antigravity CLI with agy update", async () => {
+    const computer = localComputer("computer-old", "Old Mac", "online", {
+      platform: "darwin",
+    });
+    computer.runtimes = [
+      ...computer.runtimes,
+      {
+        error_code: "RUNTIME_INCOMPATIBLE",
+        message: "antigravity version 1.5.9 is below minimum 1.5.12",
+        models: [],
+        status: "incompatible",
+        type: "antigravity",
+        version: "1.5.9",
+      },
+    ];
+    renderDialog({ computersOverride: { items: [computer] }, onSave: vi.fn() });
+    const runtime = await screen.findByRole("combobox", {
+      name: "Agent runtime",
+    });
+    fireEvent.click(runtime);
+    fireEvent.click(
+      await screen.findByRole("option", {
+        name: "Antigravity · Update needed",
+      }),
+    );
+    const notice = screen.getByText("Antigravity on Old Mac needs an update.");
+    expect(notice).toBeVisible();
+    expect(notice).toHaveAttribute(
+      "title",
+      "antigravity version 1.5.9 is below minimum 1.5.12",
+    );
+    expect(screen.getByText("agy update")).toBeVisible();
+    expect(
+      screen.queryByText("The npm commands need Node.js."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
+  });
+
+  it("reports a Linger Computer upgrade instead of an AI app update when upgrade_required is set", async () => {
+    const computer = localComputer("computer-old", "Old Mac", "online", {
+      platform: "darwin",
+      upgrade_required: true,
+    });
+    renderDialog({ computersOverride: { items: [computer] }, onSave: vi.fn() });
+    expect(
+      await screen.findByText("Old Mac needs a Linger update."),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
+  });
+
   it("picks a model once the chosen runtime turns ready while open", async () => {
     const onSave = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
     const computer = localComputer("computer-old", "Old Mac", "online");

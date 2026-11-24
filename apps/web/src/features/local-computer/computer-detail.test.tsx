@@ -165,3 +165,42 @@ it("shows the desktop Prevent sleep switch only for this computer", async () => 
   );
   expect(screen.queryByRole("switch", { name: "Prevent sleep" })).toBeNull();
 });
+
+it("shows agy update instead of the install script when updating an outdated Antigravity CLI", () => {
+  const computer: TeamHubLocalComputerPage["items"][number] = {
+    computer_id: "mac-1",
+    display_name: "Studio Mac",
+    status: "online",
+    platform: "darwin",
+    upgrade_required: false,
+    active_operations: 0,
+    workspace_grants: [],
+    runtimes: [
+      {
+        type: "antigravity",
+        status: "incompatible",
+        version: "1.5.9",
+        error_code: "RUNTIME_INCOMPATIBLE",
+        message: "antigravity version 1.5.9 is below minimum 1.5.12",
+        models: [],
+      },
+    ],
+  };
+  render(
+    <ComputerDetail
+      agents={[]}
+      agentAvailabilities={new Map()}
+      computer={computer}
+      onOpenAgent={vi.fn()}
+      onRemove={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Update Antigravity" }));
+  expect(
+    screen.getByRole("dialog", { name: /Update Antigravity/ }),
+  ).toBeVisible();
+  expect(screen.getAllByText("agy update").length).toBeGreaterThan(0);
+  expect(
+    screen.queryByText(/antigravity\.google\/cli\/install\.sh/),
+  ).not.toBeInTheDocument();
+});

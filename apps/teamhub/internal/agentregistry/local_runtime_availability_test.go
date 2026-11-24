@@ -87,6 +87,14 @@ func TestPersistedLocalRuntimeObservationSeparatesConnectionFromDiagnostics(t *t
 			if result.Status != tc.runtime || result.ConnectionStatus != tc.connection || result.ComputerStatus != tc.computer || !result.ObservedAt.Equal(observation.LastSeenAt.Time) {
 				t.Fatalf("observation=%+v", result)
 			}
+			if tc.stored == "upgrade_required" {
+				if result.ErrorCode != string(httpapi.LocalRuntimeDiagnosticErrorCodeLOCALCOMPUTERUPGRADEREQUIRED) {
+					t.Fatalf("error code = %q, want %q", result.ErrorCode, httpapi.LocalRuntimeDiagnosticErrorCodeLOCALCOMPUTERUPGRADEREQUIRED)
+				}
+				if !httpapi.LocalRuntimeDiagnosticErrorCode(result.ErrorCode).Valid() {
+					t.Fatalf("error code %q is not in the contract enum", result.ErrorCode)
+				}
+			}
 			available := availabilityWithLocalRuntimeStatus(httpapi.TenantAgentAvailability{Status: httpapi.TenantAgentAvailabilityStatusOnline, ActiveTaskCount: 2}, result)
 			if tc.connection != "connected" && available.Status == httpapi.TenantAgentAvailabilityStatusOnline {
 				t.Fatal("stale observation presented as live")

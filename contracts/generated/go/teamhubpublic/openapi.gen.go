@@ -2684,6 +2684,7 @@ func (e LocalModelsViewUnavailableReasonCode) Valid() bool {
 // Defines values for LocalRuntimeDiagnosticErrorCode.
 const (
 	LocalRuntimeDiagnosticErrorCodeLOCALCOMPUTEROFFLINE          LocalRuntimeDiagnosticErrorCode = "LOCAL_COMPUTER_OFFLINE"
+	LocalRuntimeDiagnosticErrorCodeLOCALCOMPUTERUPGRADEREQUIRED  LocalRuntimeDiagnosticErrorCode = "LOCAL_COMPUTER_UPGRADE_REQUIRED"
 	LocalRuntimeDiagnosticErrorCodeRUNTIMEAUTHENTICATIONREQUIRED LocalRuntimeDiagnosticErrorCode = "RUNTIME_AUTHENTICATION_REQUIRED"
 	LocalRuntimeDiagnosticErrorCodeRUNTIMEDIAGNOSTICFAILED       LocalRuntimeDiagnosticErrorCode = "RUNTIME_DIAGNOSTIC_FAILED"
 	LocalRuntimeDiagnosticErrorCodeRUNTIMEINCOMPATIBLE           LocalRuntimeDiagnosticErrorCode = "RUNTIME_INCOMPATIBLE"
@@ -2694,6 +2695,8 @@ const (
 func (e LocalRuntimeDiagnosticErrorCode) Valid() bool {
 	switch e {
 	case LocalRuntimeDiagnosticErrorCodeLOCALCOMPUTEROFFLINE:
+		return true
+	case LocalRuntimeDiagnosticErrorCodeLOCALCOMPUTERUPGRADEREQUIRED:
 		return true
 	case LocalRuntimeDiagnosticErrorCodeRUNTIMEAUTHENTICATIONREQUIRED:
 		return true

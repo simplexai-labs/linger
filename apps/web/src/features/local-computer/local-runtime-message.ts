@@ -24,6 +24,8 @@ export function localRuntimeMessage(
       return t(m.signInRequired, { app, computer });
     case "RUNTIME_INCOMPATIBLE":
       return t(m.needsUpdate, { app, computer });
+    case "LOCAL_COMPUTER_UPGRADE_REQUIRED":
+      return t(m.computerNeedsUpdate, { computer });
     case "LOCAL_COMPUTER_OFFLINE":
       return t(m.computerOffline, { computer });
     default:

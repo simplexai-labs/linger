@@ -89,7 +89,7 @@ func projectLocalRuntimeObservation(agent store.ListTenantAgentsForAccountRow, o
 		}
 	}
 	if observation.Status == "upgrade_required" {
-		result.Status, result.ErrorCode, result.Message = "incompatible", "RUNTIME_INCOMPATIBLE", "Local Computer needs an upgrade"
+		result.Status, result.ErrorCode, result.Message = "incompatible", "LOCAL_COMPUTER_UPGRADE_REQUIRED", "Local Computer needs an upgrade"
 	}
 	if result.ConnectionStatus == "offline" {
 		result.Status, result.ErrorCode, result.Message = "error", "LOCAL_COMPUTER_OFFLINE", "Local Computer is offline"

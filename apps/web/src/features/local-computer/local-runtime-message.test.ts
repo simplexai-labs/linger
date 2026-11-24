@@ -41,6 +41,64 @@ describe("localRuntimeMessage", () => {
     ).toBe("Studio Mac is offline.");
   });
 
+  it("distinguishes an outdated AI app from a Computer that needs a Linger update", async () => {
+    expect(
+      localRuntimeMessage(
+        {
+          error_code: "RUNTIME_INCOMPATIBLE",
+          message: "antigravity version 1.5.9 is below minimum 1.5.12",
+        },
+        "antigravity",
+        "Studio Mac",
+        translate,
+      ),
+    ).toBe("Antigravity on Studio Mac needs an update.");
+    expect(
+      localRuntimeMessage(
+        {
+          error_code: "LOCAL_COMPUTER_UPGRADE_REQUIRED",
+          message: "Local Computer needs an upgrade",
+        },
+        "antigravity",
+        "Studio Mac",
+        translate,
+      ),
+    ).toBe("Studio Mac needs a Linger update.");
+
+    await setLanguage("zh-CN");
+    expect(
+      localRuntimeMessage(
+        {
+          error_code: "RUNTIME_INCOMPATIBLE",
+          message: "antigravity version 1.5.9 is below minimum 1.5.12",
+        },
+        "antigravity",
+        "Studio Mac",
+        translate,
+      ),
+    ).toBe(
+      zhCN.localRuntimeMessage.needsUpdate
+        .replace("{computer}", "Studio Mac")
+        .replace("{app}", "Antigravity"),
+    );
+    expect(
+      localRuntimeMessage(
+        {
+          error_code: "LOCAL_COMPUTER_UPGRADE_REQUIRED",
+          message: "Local Computer needs an upgrade",
+        },
+        "antigravity",
+        "Studio Mac",
+        translate,
+      ),
+    ).toBe(
+      zhCN.localRuntimeMessage.computerNeedsUpdate.replace(
+        "{computer}",
+        "Studio Mac",
+      ),
+    );
+  });
+
   it("keeps the Runtime's diagnostic as TeamHub sent it", async () => {
     await setLanguage("zh-CN");
     expect(

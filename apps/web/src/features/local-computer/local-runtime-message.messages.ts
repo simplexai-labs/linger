@@ -9,7 +9,8 @@ export const localRuntimeMessageMessages = defineMessages(
   {
     notInstalled: "{app} is not installed on {computer}.",
     signInRequired: "{app} on {computer} needs you to sign in.",
-    needsUpdate: "{computer} needs an update to run {app}.",
+    needsUpdate: "{app} on {computer} needs an update.",
+    computerNeedsUpdate: "{computer} needs a Linger update.",
     computerOffline: "{computer} is offline.",
   },
 );

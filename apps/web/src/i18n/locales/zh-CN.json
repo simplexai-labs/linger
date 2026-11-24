@@ -222,6 +222,8 @@
     "antigravitySignIn": "Antigravity 也可以使用 Gemini API key：为 Local Computer 设置 GEMINI_API_KEY 即可。",
     "installRuntime": "请以运行 Local Computer 的系统用户身份，在 {computer} 上安装一个 Runtime。安装后一分钟内会显示在这里。",
     "installRuntimePowerShell": "请以运行 Local Computer 的系统用户身份，在 {computer} 上用 PowerShell 安装一个 Runtime。安装后一分钟内会显示在这里。",
+    "updateRuntime": "请以运行 Local Computer 的系统用户身份，在 {computer} 上更新 Runtime。更新后一分钟内会显示在这里。",
+    "updateRuntimePowerShell": "请以运行 Local Computer 的系统用户身份，在 {computer} 上用 PowerShell 更新 Runtime。更新后一分钟内会显示在这里。",
     "runtimeCommand": "{app}：<code>{command}</code>",
     "npmNeedsNode": "npm 命令需要先安装 Node.js。",
     "desktopConnectIntro": "连接这台电脑，就能用它上面安装的 Codex 或 Claude Code 运行 Agent。",
@@ -2987,7 +2989,8 @@
   "localRuntimeMessage": {
     "notInstalled": "{computer} 上未安装 {app}。",
     "signInRequired": "需要在 {computer} 上登录 {app}。",
-    "needsUpdate": "{computer} 需要更新后才能运行 {app}。",
+    "needsUpdate": "{computer} 上的 {app} 需要更新。",
+    "computerNeedsUpdate": "{computer} 需要更新 Linger。",
     "computerOffline": "{computer} 已离线。"
   },
   "cardPrompts": {

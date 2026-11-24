@@ -52,6 +52,10 @@ export const computerSetupMessages = defineMessages("computerSetup", {
     "Install a Runtime on {computer} as the OS user that runs Local Computer. It appears here within a minute.",
   installRuntimePowerShell:
     "Install a Runtime on {computer} as the OS user that runs Local Computer, in PowerShell. It appears here within a minute.",
+  updateRuntime:
+    "Update a Runtime on {computer} as the OS user that runs Local Computer. It appears here within a minute.",
+  updateRuntimePowerShell:
+    "Update a Runtime on {computer} as the OS user that runs Local Computer, in PowerShell. It appears here within a minute.",
   runtimeCommand: "{app}: <code>{command}</code>",
   npmNeedsNode: "The npm commands need Node.js.",
   desktopConnectIntro:
