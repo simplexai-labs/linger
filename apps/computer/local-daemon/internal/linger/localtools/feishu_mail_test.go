@@ -117,7 +117,7 @@ func TestFeishuMailFailuresCarryLarkErrorFields(t *testing.T) {
 		{`{"ok":false,"error":{"type":"api","subtype":"rate_limited","code":99991400,"message":"m"}}`,
 			map[string]any{"status": "failed", "error_type": "api", "error_subtype": "rate_limited", "detail": "m", "code": int64(99991400)}},
 		{`{"ok":false,"error":{"type":"config","subtype":"not_configured","message":"not configured","hint":"run lark-cli config init --new"}}`,
-			map[string]any{"status": "not_configured", "error_type": "config", "error_subtype": "not_configured", "detail": "not configured", "hint": "run lark-cli config init --new"}},
+			map[string]any{"status": "not_configured", "error_type": "config", "error_subtype": "not_configured", "detail": "not configured"}},
 		{`panic: not json`, map[string]any{"status": "failed"}},
 	}
 	for _, testCase := range cases {
@@ -169,7 +169,7 @@ func TestFeishuMailReportsALarkCLINeverSetUp(t *testing.T) {
 	notConfigured := `{"ok":false,"error":{"type":"config","subtype":"not_configured","message":"not configured","hint":"run lark-cli config init --new"}}`
 	tool, dir := fakeLarkCLI(t)
 	answer(t, dir, "auth-check", notConfigured, "", 3)
-	if result := tool.Call(context.Background(), "status", nil); result["status"] != "not_configured" || result["hint"] != "run lark-cli config init --new" {
+	if result := tool.Call(context.Background(), "status", nil); result["status"] != "not_configured" {
 		t.Fatalf("status = %#v", result)
 	}
 	if entries, _ := filepath.Glob(filepath.Join(dir, "api-GET.argv")); len(entries) != 0 {

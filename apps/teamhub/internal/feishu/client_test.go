@@ -297,10 +297,10 @@ func TestInboxSinceNamesThePageToReadOnFrom(t *testing.T) {
 	}
 }
 
-func TestComputerFailuresKeepLarkCLIsHint(t *testing.T) {
-	err := statusError("status check", map[string]any{"status": StatusNotConfigured, "detail": "not configured", "hint": "run lark-cli config init --new"})
+func TestUnconfiguredLarkCLIIsNotAnAuthorizationFailure(t *testing.T) {
+	err := statusError("status check", map[string]any{"status": StatusNotConfigured, "detail": "not configured"})
 	var computer *ComputerError
-	if !errors.As(err, &computer) || computer.Status != StatusNotConfigured || computer.Hint != "run lark-cli config init --new" || IsAuthFailure(err) {
+	if !errors.As(err, &computer) || computer.Status != StatusNotConfigured || IsAuthFailure(err) {
 		t.Fatalf("err = %#v", err)
 	}
 }

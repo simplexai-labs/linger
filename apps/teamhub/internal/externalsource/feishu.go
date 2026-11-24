@@ -195,22 +195,11 @@ func feishuConnectBlocker(statusErr error) error {
 	}
 }
 
-// CheckFeishuConnect reports what keeps humanActorID's Computer from
-// connecting Feishu Mail, before an Agent asks them to connect it: an offline
-// Computer or one without lark-cli (*feishu.ComputerError), or a Feishu app
-// without the mail scopes (*FeishuScopesNotEnabledError). Nil means the
-// connect card can work, with or without a lark-cli login.
-func (s *Service) CheckFeishuConnect(ctx context.Context, tenantID, humanActorID string) error {
+// CheckFeishuConnect checks whether the account's Computer can start Feishu Mail
+// authorization without starting a login or creating a connection.
+func (s *Service) CheckFeishuConnect(ctx context.Context, accountID string) error {
 	if s.feishu == nil {
 		return ErrUnavailable
-	}
-	var accountID string
-	err := s.pool.QueryRow(ctx, `SELECT account_id FROM actors WHERE tenant_id=$1 AND id=$2 AND kind='human' AND account_id IS NOT NULL`, tenantID, humanActorID).Scan(&accountID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
-	}
-	if err != nil {
-		return err
 	}
 	mailbox, err := s.feishuAccountMailbox(ctx, store.New(s.pool), accountID)
 	if err != nil {

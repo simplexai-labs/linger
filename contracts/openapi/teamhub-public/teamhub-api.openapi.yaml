@@ -5155,6 +5155,17 @@ paths:
             application/json:
               schema: { $ref: '../components/external-sources.yaml#/components/schemas/ExternalAppList' }
         '401': { $ref: '../components/common.yaml#/components/responses/Unauthenticated' }
+  /v0/external-apps/feishu-mail/setup:
+    get:
+      tags: [External Sources]
+      operationId: checkFeishuMailSetup
+      summary: Check whether the signed-in account can start Feishu Mail authorization.
+      responses:
+        '204':
+          description: The Computer can start authorization.
+        '401': { $ref: '../components/common.yaml#/components/responses/Unauthenticated' }
+        '409': { $ref: '../components/common.yaml#/components/responses/Conflict' }
+        '503': { $ref: '../components/common.yaml#/components/responses/ServiceUnavailable' }
   /v0/external-apps/provider-key:
     put:
       tags: [External Sources]

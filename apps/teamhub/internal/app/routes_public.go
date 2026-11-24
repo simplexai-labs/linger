@@ -65,6 +65,7 @@ func (a *App) publicRoutes() []contractRoute {
 		route(http.MethodPost, "/v0/documents/:documentId/versions", httpapi.UploadDocumentVersionParams{}, session, idempotencyKeyRequired, a.uploadDocumentVersionRoute),
 		route(http.MethodGet, "/v0/events", httpapi.StreamEventsParams{}, session, a.streamEvents),
 		route(http.MethodGet, "/v0/external-apps", nil, session, a.listExternalApps),
+		route(http.MethodGet, "/v0/external-apps/feishu-mail/setup", nil, session, a.checkFeishuMailSetup),
 		route(http.MethodPut, "/v0/external-apps/provider-key", nil, session, a.saveExternalProviderKey),
 		route(http.MethodPost, "/v0/external-connection-completions", nil, session, a.completeExternalConnectionAuthorization),
 		route(http.MethodGet, "/v0/external-connections", nil, session, a.listExternalConnections),

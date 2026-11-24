@@ -14,21 +14,6 @@ describe("connectable apps rule", () => {
     expect(rule).toContain("never with lark-cli mail commands");
   });
 
-  it("relays the steps of a Feishu Mail connect refusal by its Issue code", () => {
-    const rule = connectableAppsRule(["feishu_mail"]);
-    for (const code of [
-      "lark_cli_not_installed",
-      "lark_cli_not_configured",
-      "feishu_computer_offline",
-      "feishu_computer_unavailable",
-      "feishu_scopes_not_enabled",
-    ])
-      expect(rule).toContain(code);
-    expect(rule).toContain(
-      "tell the Human in the conversation's language what is missing and the steps from that Issue",
-    );
-  });
-
   it("says nothing of Feishu Mail when it cannot be connected", () => {
     expect(connectableAppsRule(["gmail"])).not.toContain("feishu");
     expect(connectableAppsRule([])).toBe("");

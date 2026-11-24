@@ -107,6 +107,10 @@ export function useCreateExternalConnection({
       reauthorize.mutate(connection);
     },
     resume,
+    clearError() {
+      createConnection.reset();
+      reauthorize.reset();
+    },
     clearBlockedConnectUrl() {
       setBlockedConnectUrl("");
     },

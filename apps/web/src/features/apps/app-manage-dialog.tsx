@@ -35,6 +35,12 @@ import {
 } from "./connection-state";
 import { connectorMessages as m } from "./connectors.messages";
 
+import {
+  FeishuConnectGuide,
+  isFeishuConnectError,
+  useFeishuMailSetup,
+} from "./feishu-connect-guide";
+
 export function AppManageDialog({
   app,
   connections,
@@ -59,6 +65,16 @@ export function AppManageDialog({
       externalConnectionNeedsAttention(connection),
   );
   const canConnect = connectFlow.canStart(app);
+  const checksFeishuSetup = app.key === "feishu_mail" && canConnect;
+  const setup = useFeishuMailSetup(checksFeishuSetup);
+  const connectionError = connectFlow.connection.error;
+  const failedConnect =
+    checksFeishuSetup && isFeishuConnectError(connectionError);
+  const setupError = checksFeishuSetup ? setup.error : undefined;
+  const canAuthorize =
+    canConnect &&
+    (!checksFeishuSetup ||
+      (!setup.isFetching && !setup.isPending && !setupError && !failedConnect));
   const supportsAutoReminders = app.capabilities.includes(
     "proactive_reminders",
   );
@@ -73,14 +89,26 @@ export function AppManageDialog({
         title={app.display_name}
       >
         <div className="px-5 py-4">
-          {canConnect ? (
+          {setupError || failedConnect ? (
+            <Button
+              disabled={setup.isFetching || connectFlow.connection.isPending}
+              onClick={() => {
+                connectFlow.connection.clearError();
+                void setup.refetch();
+              }}
+              size="compact"
+              tone="secondary"
+            >
+              {t(m.feishuCheckAgain)}
+            </Button>
+          ) : canConnect ? (
             <Button
               aria-label={
                 established.length
                   ? t(m.addAnotherAccount, { app: app.display_name })
                   : t(m.connectApp, { app: app.display_name })
               }
-              disabled={connectFlow.connection.isPending}
+              disabled={!canAuthorize || connectFlow.connection.isPending}
               onClick={() =>
                 connectFlow.start(
                   app,
@@ -98,12 +126,21 @@ export function AppManageDialog({
               {t(m.connect)}
             </Button>
           )}
+          {setupError && !failedConnect ? (
+            isFeishuConnectError(setupError) ? (
+              <FeishuConnectGuide className="mt-3" error={setupError} />
+            ) : (
+              <p className="mt-3 text-xs text-app-danger" role="alert">
+                {setupError.message}
+              </p>
+            )
+          ) : null}
           <ConnectAppStatus className="mt-3" flow={connectFlow} />
           {rows.length ? (
             <div className="mt-4 divide-y divide-border border-t border-border">
               {rows.map((connection) => (
                 <ConnectionRow
-                  canReconnect={canConnect}
+                  canReconnect={canAuthorize}
                   connection={connection}
                   key={connection.id}
                   supportsAutoReminders={supportsAutoReminders}

@@ -157,16 +157,12 @@ export const connectorMessages = defineMessages("connectors", {
   feishuScopesList: "Mail permissions to add",
   feishuScopesStepPublish:
     "Create a new version and publish it. Your admin may need to approve it.",
-  feishuScopesStepConnect:
-    "Click Connect again and authorize on the Feishu page that opens.",
 
   // Steps when the Computer that runs Another Me cannot connect Feishu Mail
   feishuCliMissingTitle:
     "lark-cli is not installed on the Computer that runs your Another Me",
   feishuCliMissingStepInstall:
     "On that Computer, open a terminal and install lark-cli:",
-  feishuCliStepSetup:
-    "Set it up with a Feishu app. It prints a link: open it in a browser to finish.",
   feishuCliNotSetUpTitle:
     "lark-cli on the Computer that runs your Another Me is not set up yet",
   feishuCliNotSetUpStepRun:
@@ -179,7 +175,8 @@ export const connectorMessages = defineMessages("connectors", {
     "The Computer that runs your Another Me could not check lark-cli",
   feishuComputerUnavailableStepCheck:
     "Make sure Linger on that Computer is online and up to date.",
-  feishuStepConnectAgain: "Then click Connect again.",
+
+  feishuCheckAgain: "Check again",
 
   // Web search backends, beside the app groups. Backend names, descriptions
   // and free tier text come from TeamHub.

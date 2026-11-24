@@ -329,7 +329,6 @@ func larkFailure(stderr []byte) map[string]any {
 			Subtype       string   `json:"subtype"`
 			Code          int64    `json:"code"`
 			Message       string   `json:"message"`
-			Hint          string   `json:"hint"`
 			MissingScopes []string `json:"missing_scopes"`
 		} `json:"error"`
 	}
@@ -348,10 +347,6 @@ func larkFailure(stderr []byte) map[string]any {
 		status = "not_configured"
 	}
 	result := map[string]any{"status": status, "error_type": failure.Type, "error_subtype": failure.Subtype, "detail": failure.Message}
-	if failure.Hint != "" {
-		// lark-cli's own advice, which TeamHub hands the Agent to explain.
-		result["hint"] = failure.Hint
-	}
 	if failure.Code != 0 {
 		result["code"] = failure.Code
 	}

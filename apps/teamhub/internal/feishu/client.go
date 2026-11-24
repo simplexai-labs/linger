@@ -99,9 +99,6 @@ func (e *RateLimitError) Error() string { return "Feishu " + e.Operation + " was
 type ComputerError struct {
 	Status string
 	Detail string
-	// Hint is lark-cli's own advice for its failure, in English, for the
-	// Agent to explain; never shown as product text.
-	Hint string
 }
 
 func (e *ComputerError) Error() string { return "the Feishu Mail Computer call failed: " + e.Status }
@@ -119,8 +116,7 @@ const (
 )
 
 // The commands that install lark-cli and set it up with a Feishu app on the
-// owner's Computer. Every place that tells the Human how, the Agent's steps
-// and the Web's, takes them from here.
+// owner's Computer. The Web receives the command for the current setup step.
 const (
 	InstallCommand = "npm install -g @larksuite/cli"
 	SetupCommand   = "lark-cli config init --new"
@@ -264,8 +260,7 @@ func statusError(operation string, result map[string]any) error {
 	if status == "" {
 		status = "failed"
 	}
-	hint, _ := result["hint"].(string)
-	return &ComputerError{Status: status, Detail: detail, Hint: hint}
+	return &ComputerError{Status: status, Detail: detail}
 }
 
 // Status checks that the owner's lark-cli is logged in with every mail scope

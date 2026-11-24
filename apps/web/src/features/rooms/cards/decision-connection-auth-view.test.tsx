@@ -41,6 +41,7 @@ async function setup(
   status: "active" | "pending" = "active",
   others: Partial<TeamHubExternalConnection>[] = [],
   canConnectNew = true,
+  configure?: (runtime: ReturnType<typeof createTestTeamHubRuntime>) => void,
 ) {
   const runtime = createTestTeamHubRuntime();
   if (!canConnectNew) {
@@ -76,6 +77,7 @@ async function setup(
       status: "pending",
       connect_url: "https://connect.example.test/resume",
     });
+  configure?.(runtime);
   const decision = vi.fn().mockResolvedValue(undefined);
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -267,7 +269,7 @@ describe("Chat connection authorization", () => {
       code: "LARK_CLI_NOT_INSTALLED",
       title:
         "lark-cli is not installed on the Computer that runs your Another Me",
-      commands: ["npm install -g @larksuite/cli", "lark-cli config init --new"],
+      commands: ["npm install -g @larksuite/cli"],
     },
     {
       code: "LARK_CLI_NOT_CONFIGURED",
@@ -303,7 +305,6 @@ describe("Chat connection authorization", () => {
       );
       fireEvent.click(await enabledButton("Connect Notion"));
       expect(await screen.findByText(title)).toBeVisible();
-      expect(screen.getByText("Then click Connect again.")).toBeVisible();
       for (const command of commands)
         expect(screen.getByText(command)).toBeVisible();
       expect(
@@ -316,25 +317,111 @@ describe("Chat connection authorization", () => {
     },
   );
 
-  it("gives the lark-cli steps in the reader's language", async () => {
-    await setLanguage("zh-CN");
+  it("shows the server message when an older server omits the command", async () => {
     const { runtime } = await setup(card, "alice", false);
     vi.spyOn(runtime.client, "createExternalConnection").mockRejectedValue(
       new TeamHubError({
         code: "LARK_CLI_NOT_INSTALLED",
         status: 409,
-        message: "TeamHub's own wording of the failure.",
+        message: "Unable to connect.",
+        serverMessage: "Install lark-cli and run lark-cli config init.",
       }),
     );
-    fireEvent.click(
-      await enabledButton(zhCN.cards.connectApp.replace("{name}", "Notion")),
+    fireEvent.click(await enabledButton("Connect Notion"));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Install lark-cli and run lark-cli config init.",
     );
+  });
+
+  it("rechecks setup in the same card before connecting any account", async () => {
+    await setLanguage("zh-CN");
+    const feishuCard = { ...card, connection_auth: { app_key: "feishu_mail" } };
+    const install = "npm install -g @larksuite/cli";
+    const init = "lark-cli config init --new";
+    let state = 0;
+    const { connection, decision, runtime } = await setup(
+      feishuCard,
+      "alice",
+      false,
+      "active",
+      [],
+      true,
+      (runtime) => {
+        const notion = runtime.seed.externalSources.apps.find(
+          (app) => app.key === "notion",
+        )!;
+        runtime.seed.externalSources.apps.push({
+          ...notion,
+          key: "feishu_mail",
+          display_name: "Feishu Mail",
+        });
+        runtime.server.on("GET", "/v0/external-apps/feishu-mail/setup", () => {
+          if (state === 2) return new Response(null, { status: 204 });
+          return Response.json(
+            {
+              error: {
+                code:
+                  state === 0
+                    ? "LARK_CLI_NOT_INSTALLED"
+                    : "LARK_CLI_NOT_CONFIGURED",
+                message: "Feishu Mail setup required.",
+                request_id: "test-setup",
+                details: [
+                  { field: "command", reason: state === 0 ? install : init },
+                ],
+              },
+            },
+            { status: 409 },
+          );
+        });
+      },
+    );
+    const recheck = zhCN.connectors.feishuCheckAgain;
     expect(
       await screen.findByText(zhCN.connectors.feishuCliMissingTitle),
     ).toBeVisible();
+    expect(screen.getByText(install)).toBeVisible();
+    expect(screen.queryByText(init)).not.toBeInTheDocument();
+
+    state = 1;
+    fireEvent.click(await enabledButton(recheck));
     expect(
-      screen.getByText(zhCN.connectors.feishuCliMissingStepInstall),
+      await screen.findByText(zhCN.connectors.feishuCliNotSetUpTitle),
     ).toBeVisible();
+    expect(screen.getByText(init)).toBeVisible();
+    expect(screen.queryByText(install)).not.toBeInTheDocument();
+
+    state = 2;
+    fireEvent.click(await enabledButton(recheck));
+    const connect = await enabledButton(
+      zhCN.cards.connectApp.replace("{name}", "Feishu Mail"),
+    );
+    expect(screen.queryByText(init)).not.toBeInTheDocument();
+    expect(
+      runtime.server.requestsTo("GET", "/v0/external-apps/feishu-mail/setup"),
+    ).toHaveLength(3);
+    expect(
+      runtime.server.requestsTo("POST", "/v0/external-connections"),
+    ).toHaveLength(0);
+    expect(decision).not.toHaveBeenCalled();
+
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    runtime.server.on("POST", "/v0/external-connections", () => ({
+      ...connection,
+      provider: "feishu_mail",
+      status: "pending",
+      connect_url: "https://connect.example.test/feishu",
+    }));
+    fireEvent.click(connect);
+    await waitFor(() => expect(decision).toHaveBeenCalledOnce());
+    expect(
+      runtime.server.requestsTo("POST", "/v0/external-connections"),
+    ).toHaveLength(1);
+    expect(open).toHaveBeenCalledWith(
+      "https://connect.example.test/feishu",
+      "linger_composio_oauth",
+      expect.any(String),
+    );
   });
 
   it("starts a new authorization when the pending link expired", async () => {

@@ -92,7 +92,7 @@ func (f *fakeFeishu) CallLocalComputerToolResult(_ context.Context, call nodeapi
 		return map[string]any{"status": "not_installed"}, nil
 	}
 	if f.notConfigured {
-		return map[string]any{"status": "not_configured", "error_type": "config", "hint": "run lark-cli config init --new"}, nil
+		return map[string]any{"status": "not_configured", "error_type": "config"}, nil
 	}
 	switch call.ToolName {
 	case "status":

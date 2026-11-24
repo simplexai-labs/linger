@@ -102,7 +102,7 @@
   lark-cli's other Feishu scopes. A started login's device code stays in the
   Daemon's memory under the caller's login name, so a restart drops it and
   the owner connects again. Results carry lark-cli's error type, subtype,
-  Feishu code and its own hint, never a decision made from its message; a
+  Feishu code, never a decision made from its message; a
   `config` error, a lark-cli never set up with a Feishu app, is
   `not_configured`.
 - Do not commit runtime state, PID files, sockets, logs, credentials, or build

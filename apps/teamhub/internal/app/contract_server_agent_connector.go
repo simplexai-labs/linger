@@ -13,7 +13,6 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentauth"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentconnectedapps"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/externalsource"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/feishu"
 	idgen "github.com/simplexai-labs/linger/apps/teamhub/internal/ids"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
 	api "github.com/simplexai-labs/linger/contracts-go/teamhubagentapi"
@@ -172,9 +171,6 @@ func (a *App) postConnectorCard(c *gin.Context, token, action, prompt string, co
 		a.writeAgentAPIError(c, 403, api.AgentApiErrorCodeForbidden, "Run this command from an eligible Room or Task chat to request account authorization")
 		return "", typedcard.CreateResult{}, false
 	}
-	if command.ConnectionAuth != nil && command.ConnectionAuth.AppKey == externalsource.FeishuMailAppKey && a.refuseFeishuConnect(c, auth) {
-		return "", typedcard.CreateResult{}, false
-	}
 	digest := sha256.Sum256([]byte(roomID + "\x00" + auth.AgentActorID + "\x00" + prompt))
 	// A fresh key allows a new request after denial/expiry; the service deduplicates
 	// pending cards under the same membership lock used by grant decisions.
@@ -190,80 +186,6 @@ func (a *App) postConnectorCard(c *gin.Context, token, action, prompt string, co
 		return "", typedcard.CreateResult{}, false
 	}
 	return roomID, result, true
-}
-
-// refuseFeishuConnect checks the Human's Computer before a Feishu Mail card is
-// posted. When the card's Connect could not work, it answers with what the
-// Human must do first as an issue, which the CLI shows the Agent, so the Agent
-// gives the steps in the chat instead of a card that fails when clicked. It
-// reports whether it answered.
-func (a *App) refuseFeishuConnect(c *gin.Context, auth agentauth.Authorization) bool {
-	err := a.externalSources.CheckFeishuConnect(c.Request.Context(), auth.TenantID, auth.SponsorActorID)
-	if err == nil {
-		return false
-	}
-	var notEnabled *externalsource.FeishuScopesNotEnabledError
-	var computer *feishu.ComputerError
-	status, code := http.StatusConflict, api.AgentApiErrorCodeOperationForbidden
-	var reason, steps string
-	switch {
-	case errors.As(err, &notEnabled):
-		reason = "feishu_scopes_not_enabled"
-		page := "the app's permissions page in the Feishu developer console"
-		if notEnabled.PermissionsURL != "" {
-			page += " (" + notEnabled.PermissionsURL + ")"
-		}
-		// An issue holds at most 1024 characters, so a long list is cut short.
-		for shown := len(notEnabled.Scopes); shown > 0; shown-- {
-			scopes := strings.Join(notEnabled.Scopes[:shown], ", ")
-			if shown < len(notEnabled.Scopes) {
-				scopes += fmt.Sprintf(" and %d more", len(notEnabled.Scopes)-shown)
-			}
-			steps = "The Feishu app that lark-cli uses on the user's Computer does not enable these mail permissions: " + scopes +
-				". Steps for the user: 1. Open " + page + ". 2. Add each of these permissions as a user permission. 3. Publish a new version of the app. 4. Tell you when it is done, and you connect again."
-			if utf8.RuneCountInString(steps) <= 1024 {
-				break
-			}
-		}
-	case errors.As(err, &computer) && computer.Status == feishu.StatusComputerOffline:
-		status, code, reason = http.StatusServiceUnavailable, api.AgentApiErrorCodeDependencyUnavailable, "feishu_computer_offline"
-		steps = "Feishu Mail runs through lark-cli on the Computer that runs the user's Another Me, and that Computer is offline. Steps for the user: 1. On that Computer, open Linger and make sure it is signed in and online. 2. Tell you when it is done, and you connect again."
-	case errors.As(err, &computer) && computer.Status == feishu.StatusNotInstalled:
-		reason = "lark_cli_not_installed"
-		steps = "lark-cli is not installed on the Computer that runs the user's Another Me. Steps for the user, on that Computer: 1. Install it in a terminal: " + feishu.InstallCommand +
-			" 2. Set it up with a Feishu app: " + feishu.SetupCommand + " (it prints a link to open in a browser). 3. Tell you when it is done, and you connect again."
-	case errors.As(err, &computer) && computer.Status == feishu.StatusNotConfigured:
-		reason = "lark_cli_not_configured"
-		steps = "lark-cli is installed on the Computer that runs the user's Another Me but not set up with a Feishu app yet. Steps for the user, on that Computer: 1. In a terminal, run: " + feishu.SetupCommand +
-			" (it prints a link to open in a browser to finish). 2. Tell you when it is done, and you connect again."
-		steps += larkHint(computer.Hint)
-	case errors.As(err, &computer):
-		status, code, reason = http.StatusServiceUnavailable, api.AgentApiErrorCodeDependencyUnavailable, "feishu_computer_unavailable"
-		a.logger.Warn("feishu_mail.connect_check_computer_failed", "status", computer.Status, "detail", computer.Detail)
-		steps = "The Computer that runs the user's Another Me could not check lark-cli. Steps for the user: 1. Make sure Linger on that Computer is online and up to date. 2. Tell you when it is done, and you connect again."
-		steps += larkHint(computer.Hint)
-	default:
-		// The card still works for what this check cannot tell; its Connect
-		// reports the problem itself.
-		a.logger.Warn("feishu_mail.connect_check_failed", "error", err)
-		return false
-	}
-	a.writeAgentAPIErrorWithIssues(c, status, code, "Feishu Mail cannot be connected yet; no card was posted",
-		[]api.AgentApiErrorIssue{{Path: externalsource.FeishuMailAppKey, Code: reason, Message: steps}})
-	return true
-}
-
-// larkHint appends lark-cli's own advice to an Issue's steps, cut short so the
-// Issue stays within its 1024 characters.
-func larkHint(hint string) string {
-	hint = strings.TrimSpace(hint)
-	if hint == "" {
-		return ""
-	}
-	if runes := []rune(hint); len(runes) > 400 {
-		hint = string(runes[:400]) + "…"
-	}
-	return " lark-cli's own hint: " + hint
 }
 
 func selectConnectorAccount(connections []agentconnectedapps.ConnectedApp, app, selector string) (*agentconnectedapps.ConnectedApp, []agentconnectedapps.ConnectedApp) {

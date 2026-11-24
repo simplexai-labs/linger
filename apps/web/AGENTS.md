@@ -199,6 +199,9 @@ build:assets` to check the initial JS budget.
   From/To/Cc/Bcc headers, followed by the full body and attachments. An empty
   Cc row reads None; Bcc appears only when populated. Email
   actions are Send and Don't send; declining does not request a reason.
+- Feishu Mail setup in the connection card and app management dialog reads the
+  same account-scoped status. Rechecking does not create a connection or
+  open OAuth. The connect action starts authorization after setup is ready.
 - A mail canvas (`gmail` or `feishu_mail` target) message segment renders as its email card
   (`rooms/chat/message-mail-canvas.tsx`), laid out like a message approval:
   subject row with open-in-panel and expand controls, recipient line, then

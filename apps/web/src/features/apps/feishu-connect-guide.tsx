@@ -1,7 +1,10 @@
+import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { CopyValueButton } from "@/features/local-computer/computer-setup-instructions";
+import { teamHubDone } from "@/features/teamhub/teamhub-api";
+import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { commonMessages } from "@/i18n/common.messages";
 import { useT } from "@/i18n/use-translation";
@@ -27,6 +30,30 @@ export function isFeishuConnectError(error: unknown): error is TeamHubError {
   );
 }
 
+export function useFeishuMailSetup(enabled: boolean) {
+  const { client } = useTeamHubRuntime();
+  return useQuery({
+    enabled,
+    queryKey: ["teamhub", "feishu-mail-setup"],
+    queryFn: async ({ signal }) => {
+      try {
+        await teamHubDone(
+          client.api.GET("/v0/external-apps/feishu-mail/setup", { signal }),
+        );
+      } catch (error) {
+        // Older TeamHub versions check setup when the Human clicks Connect.
+        if (
+          !(error instanceof TeamHubError && [404, 405].includes(error.status))
+        )
+          throw error;
+      }
+      return true;
+    },
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
 /**
  * The steps for a Feishu Mail connection the owner's Computer cannot make
  * yet: install and set up lark-cli, bring the Computer online, or enable the
@@ -40,10 +67,19 @@ export function FeishuConnectGuide({
   error: TeamHubError;
 }) {
   const t = useT();
-  // TeamHub names the commands, install first, so they are written once.
-  const [first, second] = (error.details ?? [])
-    .filter((detail) => detail.field === "command")
-    .map((detail) => detail.reason);
+  const command = error.details?.find(
+    (detail) => detail.field === "command",
+  )?.reason;
+  if (
+    !command &&
+    ["LARK_CLI_NOT_INSTALLED", "LARK_CLI_NOT_CONFIGURED"].includes(error.code)
+  ) {
+    return (
+      <p className={cn("text-xs text-app-danger", className)} role="alert">
+        {error.serverMessage ?? error.message}
+      </p>
+    );
+  }
   switch (error.code) {
     case "FEISHU_SCOPES_NOT_ENABLED":
       return <FeishuScopesGuide className={className} error={error} />;
@@ -52,13 +88,8 @@ export function FeishuConnectGuide({
         <GuideBox className={className} title={t(m.feishuCliMissingTitle)}>
           <li>
             {t(m.feishuCliMissingStepInstall)}
-            <Command value={first} />
+            <Command value={command} />
           </li>
-          <li>
-            {t(m.feishuCliStepSetup)}
-            <Command value={second} />
-          </li>
-          <li>{t(m.feishuStepConnectAgain)}</li>
         </GuideBox>
       );
     case "LARK_CLI_NOT_CONFIGURED":
@@ -66,16 +97,14 @@ export function FeishuConnectGuide({
         <GuideBox className={className} title={t(m.feishuCliNotSetUpTitle)}>
           <li>
             {t(m.feishuCliNotSetUpStepRun)}
-            <Command value={first} />
+            <Command value={command} />
           </li>
-          <li>{t(m.feishuStepConnectAgain)}</li>
         </GuideBox>
       );
     case "FEISHU_COMPUTER_OFFLINE":
       return (
         <GuideBox className={className} title={t(m.feishuComputerOfflineTitle)}>
           <li>{t(m.feishuComputerOfflineStepOpen)}</li>
-          <li>{t(m.feishuStepConnectAgain)}</li>
         </GuideBox>
       );
     default:
@@ -85,7 +114,6 @@ export function FeishuConnectGuide({
           title={t(m.feishuComputerUnavailableTitle)}
         >
           <li>{t(m.feishuComputerUnavailableStepCheck)}</li>
-          <li>{t(m.feishuStepConnectAgain)}</li>
         </GuideBox>
       );
   }
@@ -203,7 +231,6 @@ function FeishuScopesGuide({
         </Button>
       </li>
       <li>{t(m.feishuScopesStepPublish)}</li>
-      <li>{t(m.feishuScopesStepConnect)}</li>
     </GuideBox>
   );
 }

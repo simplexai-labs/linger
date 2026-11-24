@@ -74,6 +74,15 @@ func externalProviderKeyModel(status externalsource.ManagedKeyStatus) httpapi.Ex
 	return httpapi.ExternalProviderKeyStatus{Source: httpapi.ExternalProviderKeyStatusSource(status.Source), CanSave: status.CanSave}
 }
 
+func (a *App) checkFeishuMailSetup(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	err := a.externalSources.CheckFeishuConnect(c.Request.Context(), currentPrincipal(c).Session.AccountID)
+	if a.writeFeishuConnectError(c, err) || a.writeExternalSourceError(c, "check Feishu Mail setup", err) {
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (a *App) createExternalConnection(c *gin.Context) {
 	var request httpapi.CreateExternalConnectionRequest
 	if decodeJSON(c, &request) != nil {
@@ -253,7 +262,7 @@ func (a *App) writeFeishuConnectError(c *gin.Context, err error) bool {
 	case errors.As(err, &computer) && computer.Status == feishu.StatusNotInstalled:
 		// The Web shows the commands from the details as copyable steps.
 		a.writeErrorWithDetails(c, http.StatusConflict, "LARK_CLI_NOT_INSTALLED", "Install lark-cli on the Computer that runs your Another Me, set it up there, and connect again.",
-			[]httpapi.ErrorDetail{{Field: "command", Reason: feishu.InstallCommand}, {Field: "command", Reason: feishu.SetupCommand}})
+			[]httpapi.ErrorDetail{{Field: "command", Reason: feishu.InstallCommand}})
 	case errors.As(err, &computer) && computer.Status == feishu.StatusNotConfigured:
 		a.writeErrorWithDetails(c, http.StatusConflict, "LARK_CLI_NOT_CONFIGURED", "lark-cli on the Computer that runs your Another Me is not set up with a Feishu app yet. Set it up there and connect again.",
 			[]httpapi.ErrorDetail{{Field: "command", Reason: feishu.SetupCommand}})

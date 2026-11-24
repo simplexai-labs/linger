@@ -4017,6 +4017,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/external-apps/feishu-mail/setup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Check whether the signed-in account can start Feishu Mail authorization. */
+    get: operations["checkFeishuMailSetup"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/external-apps/provider-key": {
     parameters: {
       query?: never;
@@ -15710,6 +15727,27 @@ export interface operations {
         };
       };
       401: components["responses"]["Unauthenticated"];
+    };
+  };
+  checkFeishuMailSetup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The Computer can start authorization. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthenticated"];
+      409: components["responses"]["Conflict"];
+      503: components["responses"]["ServiceUnavailable"];
     };
   };
   saveExternalProviderKey: {
