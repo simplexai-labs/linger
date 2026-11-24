@@ -29,6 +29,7 @@ import { requestUrlText } from "@linger/service-kit";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   clearResumeLocalModels,
+  configuredDevTool,
   ensureLocalmodelsTool,
   localmodelsBifrostAddrFile,
   localmodelsBifrostDirectory,
@@ -1064,6 +1065,58 @@ test("forwards safe extraction and verification stages after Harness downloads f
   });
   expect(JSON.stringify(onEvent.mock.calls)).not.toContain("private-secret");
 });
+test("configuredDevTool validates partial, relative, POSIX, and Windows dev overrides", () => {
+  expect(configuredDevTool({})).toBeUndefined();
+  expect(
+    configuredDevTool({
+      LINGER_LOCALMODELS_DEV_PYTHON: "  ",
+      LINGER_LOCALMODELS_DEV_MODULE_DIR: "",
+    }),
+  ).toBeUndefined();
+  expect(() =>
+    configuredDevTool({
+      LINGER_LOCALMODELS_DEV_PYTHON: "/opt/venv/bin/python",
+    }),
+  ).toThrow(/set together/i);
+  expect(() =>
+    configuredDevTool({
+      LINGER_LOCALMODELS_DEV_MODULE_DIR: "/src/llm-inference-lab",
+    }),
+  ).toThrow(/set together/i);
+  expect(() =>
+    configuredDevTool({
+      LINGER_LOCALMODELS_DEV_PYTHON: "python3",
+      LINGER_LOCALMODELS_DEV_MODULE_DIR: "/src/llm-inference-lab",
+    }),
+  ).toThrow(/absolute paths/i);
+  expect(
+    configuredDevTool(
+      {
+        LINGER_LOCALMODELS_DEV_PYTHON: " /opt/venv/bin/python ",
+        LINGER_LOCALMODELS_DEV_MODULE_DIR: "/src/llm-inference-lab",
+      },
+      path.posix,
+    ),
+  ).toEqual({
+    python: "/opt/venv/bin/python",
+    moduleDir: "/src/llm-inference-lab",
+    sourceCommit: "0".repeat(40),
+  });
+  expect(
+    configuredDevTool(
+      {
+        LINGER_LOCALMODELS_DEV_PYTHON: "C:\\lab\\.venv\\Scripts\\python.exe",
+        LINGER_LOCALMODELS_DEV_MODULE_DIR: "C:\\lab",
+      },
+      path.win32,
+    ),
+  ).toEqual({
+    python: "C:\\lab\\.venv\\Scripts\\python.exe",
+    moduleDir: "C:\\lab",
+    sourceCommit: "0".repeat(40),
+  });
+});
+
 test("uses a configured development localmodels checkout without downloading a kit", async () => {
   const f = await fixture();
   vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", "");

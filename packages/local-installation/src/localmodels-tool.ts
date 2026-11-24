@@ -518,7 +518,12 @@ async function prepareLocalmodelsTool(
     }
   }
 }
-type ToolLocation = Awaited<ReturnType<typeof prepareLocalmodelsTool>>;
+export interface LocalmodelsToolLocation {
+  python: string;
+  moduleDir: string;
+  sourceCommit: string;
+}
+type ToolLocation = LocalmodelsToolLocation;
 const preparing = new Map<string, Promise<ToolLocation>>();
 const verifiedToolSession = new AsyncLocalStorage<Map<string, ToolLocation>>();
 
@@ -533,11 +538,23 @@ export function withLocalmodelsToolCache<T>(run: () => Promise<T>): Promise<T> {
   return verifiedToolSession.run(new Map(), run);
 }
 
-function configuredDevTool(): ToolLocation | undefined {
-  const python = process.env.LINGER_LOCALMODELS_DEV_PYTHON?.trim();
-  const moduleDir = process.env.LINGER_LOCALMODELS_DEV_MODULE_DIR?.trim();
-  if (!python || !moduleDir) return undefined;
-  if (!path.isAbsolute(python) || !path.isAbsolute(moduleDir))
+/**
+ * Reads the optional development localmodels checkout override from env.
+ * Rejects partial or relative values so installer and Desktop fail fast
+ * with the same contract.
+ */
+export function configuredDevTool(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  platformPath: typeof path = path,
+): LocalmodelsToolLocation | undefined {
+  const python = env.LINGER_LOCALMODELS_DEV_PYTHON?.trim();
+  const moduleDir = env.LINGER_LOCALMODELS_DEV_MODULE_DIR?.trim();
+  if (!python && !moduleDir) return undefined;
+  if (!python || !moduleDir)
+    throw new Error(
+      "LINGER_LOCALMODELS_DEV_PYTHON and LINGER_LOCALMODELS_DEV_MODULE_DIR must be set together.",
+    );
+  if (!platformPath.isAbsolute(python) || !platformPath.isAbsolute(moduleDir))
     throw new Error(
       "LINGER_LOCALMODELS_DEV_PYTHON and LINGER_LOCALMODELS_DEV_MODULE_DIR must be absolute paths.",
     );
@@ -616,12 +633,28 @@ const STRIPPED_LOCALMODELS_ENVIRONMENT = new Set([
 const resolvingBifrostAddr = new Map<string, Promise<string>>();
 
 /** LOCALMODELS_STATE of every call for this home. */
-export function localmodelsStateDirectory(home: string): string {
-  return path.join(path.resolve(home), "runtime", "localmodels", "state");
+export function localmodelsStateDirectory(
+  home: string,
+  platformPath: typeof path = path,
+): string {
+  return platformPath.join(
+    platformPath.resolve(home),
+    "runtime",
+    "localmodels",
+    "state",
+  );
 }
 /** Where this home's models live: every call's --base-dir. */
-export function localmodelsBaseDirectory(home: string): string {
-  return path.join(path.resolve(home), "runtime", "localmodels", "models");
+export function localmodelsBaseDirectory(
+  home: string,
+  platformPath: typeof path = path,
+): string {
+  return platformPath.join(
+    platformPath.resolve(home),
+    "runtime",
+    "localmodels",
+    "models",
+  );
 }
 /** LOCALMODELS_TOOLS_DIR of every call for this home. */
 export function localmodelsToolsDirectory(home: string): string {

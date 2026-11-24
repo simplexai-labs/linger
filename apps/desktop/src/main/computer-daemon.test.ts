@@ -94,6 +94,7 @@ const setup = (
     permissions?: ComputerDaemonOptions["permissions"];
     relaunch?: () => void;
     protect?: ComputerDaemonOptions["protect"];
+    devLocalmodels?: ComputerDaemonOptions["devLocalmodels"];
   } = {},
 ) => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "computer-daemon-"));
@@ -147,6 +148,9 @@ const setup = (
     ...(options.permissions ? { permissions: options.permissions } : {}),
     ...(options.relaunch ? { relaunch: options.relaunch } : {}),
     ...(options.protect ? { protect: options.protect } : {}),
+    ...(options.devLocalmodels
+      ? { devLocalmodels: options.devLocalmodels }
+      : {}),
   });
   return { daemon, ctx, bus, config, children, credentials, directory, spawn };
 };
@@ -268,6 +272,84 @@ describe("ComputerDaemonModule", () => {
     });
     expect(daemon.state()).toBe("starting");
     expect(daemon.connection()).toBe("connecting");
+  });
+
+  it("writes local_models from devLocalmodels even without Quick Install runtimeEnvironment", async () => {
+    const devHome = mkdtempSync(path.join(os.tmpdir(), "desktop-dev-home-"));
+    const devPython = path.join(devHome, "lab", ".venv", "bin", "python");
+    const devModule = path.join(devHome, "lab");
+    const stateDirectory = path.join(
+      devHome,
+      "runtime",
+      "localmodels",
+      "state",
+    );
+    const baseDirectory = path.join(
+      devHome,
+      "runtime",
+      "localmodels",
+      "models",
+    );
+    const { daemon, ctx, children } = setup({
+      devLocalmodels: {
+        python: devPython,
+        moduleDirectory: devModule,
+        stateDirectory,
+        baseDirectory,
+      },
+    });
+    try {
+      await daemon.start(ctx);
+      await vi.waitFor(() => expect(children).toHaveLength(1));
+      const written = JSON.parse(readFileSync(children[0]!.configFile, "utf8"));
+      expect(written.local_models).toEqual({
+        python: devPython,
+        module_directory: devModule,
+        state_directory: stateDirectory,
+        base_directory: baseDirectory,
+      });
+    } finally {
+      await daemon.stop();
+      rmSync(devHome, { recursive: true, force: true });
+    }
+  });
+
+  it("overrides python and module_directory when devLocalmodels is active over an installed runtimeEnvironment", async () => {
+    const devHome = mkdtempSync(path.join(os.tmpdir(), "desktop-dev-home-"));
+    const customState = path.join(devHome, "custom-state");
+    const customModels = path.join(devHome, "custom-models");
+    const devPython = path.join(devHome, "lab", ".venv", "bin", "python");
+    const devModule = path.join(devHome, "lab");
+    const { daemon, ctx, config, children } = setup({
+      devLocalmodels: {
+        python: devPython,
+        moduleDirectory: devModule,
+        stateDirectory: path.join(devHome, "runtime", "localmodels", "state"),
+        baseDirectory: path.join(devHome, "runtime", "localmodels", "models"),
+      },
+    });
+    config.update({
+      runtimeEnvironment: {
+        LINGER_LOCALMODELS_PYTHON: path.join(devHome, "kit", "python"),
+        LINGER_LOCALMODELS_MODULE_DIR: path.join(devHome, "kit", "mod"),
+        LINGER_LOCALMODELS_STATE: customState,
+        LINGER_LOCALMODELS_BASE_DIR: customModels,
+      },
+    });
+    try {
+      await daemon.start(ctx);
+      await vi.waitFor(() => expect(children).toHaveLength(1));
+      const written = JSON.parse(readFileSync(children[0]!.configFile, "utf8"));
+      expect(written.local_models).toEqual({
+        python: devPython,
+        module_directory: devModule,
+        state_directory: customState,
+        base_directory: customModels,
+      });
+    } finally {
+      await daemon.stop();
+      rmSync(devHome, { recursive: true, force: true });
+    }
   });
 
   it("runs the runtime the local server's installer set up", async () => {

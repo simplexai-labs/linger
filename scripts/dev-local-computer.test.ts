@@ -103,6 +103,36 @@ describe("dev Local Computer lifecycle script", () => {
     expect(config.runtime_paths.codex).toBe(codexFixturePath);
   }, 30_000);
 
+  it("writes local_models when dev localmodels override variables are set", async () => {
+    const root = await createTemporaryRoot();
+    const configPath = path.join(root, "computer.json");
+    const devHome = path.join(root, "dev-home");
+    const devPython = path.join(root, "lab", ".venv", "bin", "python");
+    const devModule = path.join(root, "lab");
+    await seedRegistration(root);
+
+    await runScript("config", {
+      ...configurationEnvironment(root, configPath),
+      LINGER_HOME: devHome,
+      LINGER_LOCALMODELS_DEV_PYTHON: devPython,
+      LINGER_LOCALMODELS_DEV_MODULE_DIR: devModule,
+    });
+
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      local_models?: {
+        python: string;
+        module_directory: string;
+        state_directory: string;
+        base_directory: string;
+      };
+    };
+    expect(config.local_models).toEqual({
+      python: devPython,
+      module_directory: devModule,
+      state_directory: path.join(devHome, "runtime", "localmodels", "state"),
+      base_directory: path.join(devHome, "runtime", "localmodels", "models"),
+    });
+  }, 30_000);
   it("registers once through TeamHub as the local owner and reuses the stored credential", async () => {
     const root = await createTemporaryRoot();
     const configPath = path.join(root, "computer.json");
