@@ -108,14 +108,24 @@ export function coreAdapter(
         publishRuntime &&
         descriptors?.some((row) => row.runtime === input.setupChoice)
       ) {
-        // A failed handoff leaves the completed job usable. Desktop can retry the live lookup.
+        // A failed handoff leaves the completed job usable. Desktop can retry the live lookup,
+        // so the failure is only reported on stderr, which Desktop logs.
         const runtime = await instanceRuntime(home, input.instance, {
           runtimeDescriptors: descriptors,
           onTimings: (timings) =>
             process.stderr.write(
               formatRuntimeLookupTimings(input.instance, timings),
             ),
-        }).catch(() => undefined);
+        }).catch((error: unknown) => {
+          process.stderr.write(
+            `${JSON.stringify({
+              event: "installer.runtime_handoff_failed",
+              instance: input.instance,
+              message: error instanceof Error ? error.message : String(error),
+            })}\n`,
+          );
+          return undefined;
+        });
         if (runtime) publishRuntime(runtime);
       }
       return outcome;

@@ -116,6 +116,75 @@ it("hands the selected install descriptor to the desktop job", async () => {
     assemble.mockRestore();
   }
 });
+it("leaves the desktop on the live lookup when no handoff can be made", async () => {
+  const descriptor = (runtime: "pi" | "claude") => ({
+    runtime,
+    executable: `/managed/${runtime}`,
+    installed: true,
+    authenticated: true,
+    authMode: "api_key",
+    argvPrefix: [],
+    environment: {},
+    loginCommand: null,
+  });
+  const stderr = vi
+    .spyOn(process.stderr, "write")
+    .mockImplementation(() => true);
+  const assemble = vi.spyOn(handoff, "instanceRuntime");
+  try {
+    const cases = [
+      // BYOK local models install the claude runtime under another choice.
+      {
+        setupChoice: "local-models" as const,
+        descriptor: descriptor("claude"),
+        outcome: { code: 0, state: "ready", message: "Ready" },
+      },
+      {
+        setupChoice: "pi" as const,
+        descriptor: descriptor("pi"),
+        outcome: { code: 1, state: "failed", message: "Failed" },
+      },
+      {
+        setupChoice: "pi" as const,
+        descriptor: descriptor("pi"),
+        outcome: { code: 0, state: "ready", message: "Ready" },
+        rejects: true,
+      },
+    ];
+    for (const item of cases) {
+      assemble.mockReset();
+      if (item.rejects)
+        assemble.mockRejectedValueOnce(new Error("argvPrefix unsupported"));
+      vi.mocked(installNativeSource).mockImplementationOnce(async (options) => {
+        options.onRuntimeDescriptors?.([item.descriptor]);
+        return item.outcome;
+      });
+      const publish = vi.fn();
+      await coreAdapter("/home", "/checkout", true).run(
+        { instance: "desktop", setupChoice: item.setupChoice },
+        new AbortController().signal,
+        vi.fn(),
+        publish,
+      );
+      expect(publish).not.toHaveBeenCalled();
+      expect(assemble).toHaveBeenCalledTimes(item.rejects ? 1 : 0);
+    }
+    const failures = stderr.mock.calls
+      .map(([line]) => String(line))
+      .filter((line) => line.includes("installer.runtime_handoff_failed"))
+      .map((line) => JSON.parse(line) as unknown);
+    expect(failures).toEqual([
+      {
+        event: "installer.runtime_handoff_failed",
+        instance: "desktop",
+        message: "argvPrefix unsupported",
+      },
+    ]);
+  } finally {
+    assemble.mockRestore();
+    stderr.mockRestore();
+  }
+});
 it("rejects the retired Docker and release preparations", () => {
   for (const preparation of ["docker", "release"])
     expect(() => validateInput({ instance: "default", preparation })).toThrow(
