@@ -2910,6 +2910,38 @@ func (q *Queries) ListRetirableWorkRoomPerRoomMetaContexts(ctx context.Context, 
 	return items, nil
 }
 
+const listRoomChannelsByIDs = `-- name: ListRoomChannelsByIDs :many
+SELECT id, channel_kind::text AS channel_kind
+FROM rooms
+WHERE id = ANY($1::text[])
+  AND channel_kind IS NOT NULL
+`
+
+type ListRoomChannelsByIDsRow struct {
+	ID          string `json:"id"`
+	ChannelKind string `json:"channel_kind"`
+}
+
+func (q *Queries) ListRoomChannelsByIDs(ctx context.Context, roomIds []string) ([]ListRoomChannelsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listRoomChannelsByIDs, roomIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRoomChannelsByIDsRow{}
+	for rows.Next() {
+		var i ListRoomChannelsByIDsRow
+		if err := rows.Scan(&i.ID, &i.ChannelKind); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRuntimeAgentExecutionContexts = `-- name: ListRuntimeAgentExecutionContexts :many
 SELECT context.context_key, context.tenant_id, context.agent_actor_id,
     context.agent_management_id, context.context_kind, context.task_id,

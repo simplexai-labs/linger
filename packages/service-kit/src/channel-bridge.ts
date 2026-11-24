@@ -160,7 +160,54 @@ export interface DecisionCardLike {
   readonly version?: number;
   readonly decision_owner?: { readonly id?: string };
   readonly question?: { readonly questions?: readonly QuestionCardItem[] };
+  readonly runtime_permission?: {
+    readonly title?: string;
+    readonly rationale?: string;
+    readonly tool?: string;
+  };
+  readonly connector_write?: {
+    readonly title?: string;
+    readonly summary?: string;
+    readonly app_name?: string;
+  };
+  readonly agent_change?: {
+    readonly action?: string;
+    readonly agent_name?: string;
+  };
+  readonly room_creation?: {
+    readonly name?: string;
+    readonly description?: string;
+  };
 }
+
+export interface PendingQuestionStep {
+  readonly id: string;
+  readonly prompt: string;
+  readonly input: "radio" | "checkbox";
+  readonly options: readonly QuestionCardOption[];
+}
+
+export interface PendingQuestionCardState {
+  readonly kind: "question";
+  readonly decisionId: string;
+  readonly version: number;
+  readonly title: string;
+  readonly questions: readonly PendingQuestionStep[];
+  readonly currentIndex: number;
+  readonly answers: Readonly<Record<string, string | readonly string[]>>;
+}
+
+export interface PendingApprovalCardState {
+  readonly kind: "approval";
+  readonly decisionId: string;
+  readonly version: number;
+  readonly title: string;
+  readonly decisionKind: string;
+}
+
+export type PendingCardState =
+  | PendingQuestionCardState
+  | PendingApprovalCardState;
 
 export interface FormattedQuestionCard {
   readonly text: string;
@@ -176,15 +223,310 @@ export interface QuestionCardHints {
   readonly replyWithNumbers: string;
 }
 
+export interface CardFormattingHints {
+  readonly replyRadioOrOther: string;
+  readonly replyCheckboxOrOther: string;
+  readonly approveOption: string;
+  readonly denyOption: string;
+  readonly replyApproveOrDeny: string;
+  readonly openLingerToReview: (title: string, url?: string) => string;
+}
+
 const DEFAULT_QUESTION_HINTS: QuestionCardHints = {
   replyWithNumber: "Reply with a number.",
   replyWithNumbers: "Reply with numbers, e.g. 1,3.",
 };
 
+const DEFAULT_CARD_HINTS: CardFormattingHints = {
+  replyRadioOrOther: "Reply with a number, or type your own answer.",
+  replyCheckboxOrOther:
+    "Reply with numbers (e.g. 1,3), or type your own answer.",
+  approveOption: "Approve",
+  denyOption: "Deny",
+  replyApproveOrDeny: "Reply 1 to approve or 2 to deny.",
+  openLingerToReview: (title, url) =>
+    url ? `${title} — open Linger: ${url}` : `Open Linger to review: ${title}`,
+};
+
+const APPROVAL_CARD_KINDS = new Set([
+  "runtime_permission",
+  "connector_write",
+  "agent_change",
+  "room_creation",
+]);
+
+/** Returns true when a URL points to a reachable non-loopback host for mobile links. */
+export function isReachableExternalUrl(rawUrl: string | undefined): boolean {
+  if (!rawUrl?.trim()) return false;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return false;
+    }
+    const host = parsed.hostname.toLowerCase();
+    return (
+      host !== "localhost" &&
+      host !== "127.0.0.1" &&
+      host !== "::1" &&
+      host !== "[::1]" &&
+      !host.endsWith(".localhost")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns true when a card Message's raw_message is only TeamHub's generated
+ * mention + title placeholder so IM bridges avoid sending a duplicate line.
+ */
+export function isCardPlaceholderMessage(
+  rawMessage: string | undefined,
+  card: DecisionCardLike | undefined,
+): boolean {
+  if (!card?.title?.trim()) return false;
+  const trimmed = (rawMessage ?? "").trim();
+  if (!trimmed) return true;
+  const withoutLeadingMention = trimmed.replace(/^@\S+\s+/, "").trim();
+  const title = card.title.trim();
+  return (
+    withoutLeadingMention === title ||
+    withoutLeadingMention === `Approval needed: ${title}`
+  );
+}
+
+/** Formats the active question step of a single- or multi-question card. */
+export function formatQuestionStep(
+  state: PendingQuestionCardState,
+  hints: Partial<CardFormattingHints> = {},
+): string {
+  const h = { ...DEFAULT_CARD_HINTS, ...hints };
+  const question = state.questions[state.currentIndex];
+  if (!question) return "";
+  const total = state.questions.length;
+  const header =
+    total > 1
+      ? `${state.title} (${String(state.currentIndex + 1)}/${String(total)})`
+      : state.title;
+  const lines = [header];
+  if (question.prompt.trim() && question.prompt.trim() !== state.title.trim()) {
+    lines.push(question.prompt.trim());
+  }
+  question.options.forEach((option, index) => {
+    lines.push(`${String(index + 1)}. ${option.label}`);
+  });
+  lines.push(
+    question.input === "radio" ? h.replyRadioOrOther : h.replyCheckboxOrOther,
+  );
+  return lines.join("\n");
+}
+
+/**
+ * Formats a pending Decision Card that can be answered over plain-text IM:
+ * - question cards (1..N radio/checkbox questions, including custom "Other" text)
+ * - approval cards (runtime_permission, connector_write, agent_change, room_creation)
+ * Cards needing OAuth, API keys, browser pairing, or macOS permissions return undefined.
+ */
+export function formatPendingCard(
+  card: DecisionCardLike,
+  humanActorId: string | undefined,
+  hints: Partial<CardFormattingHints> = {},
+): { readonly state: PendingCardState; readonly text: string } | undefined {
+  if (card.status !== "pending") return undefined;
+  if (!humanActorId || card.decision_owner?.id !== humanActorId) {
+    return undefined;
+  }
+  if (!card.decision_id || typeof card.version !== "number" || !card.title) {
+    return undefined;
+  }
+  const h = { ...DEFAULT_CARD_HINTS, ...hints };
+
+  if (card.kind === "question") {
+    const rawQuestions = card.question?.questions ?? [];
+    if (rawQuestions.length === 0) return undefined;
+    const steps: PendingQuestionStep[] = [];
+    for (const q of rawQuestions) {
+      if (q.input !== "radio" && q.input !== "checkbox") return undefined;
+      const options = q.options ?? [];
+      if (options.length === 0) return undefined;
+      steps.push({
+        id: q.id,
+        prompt: q.prompt,
+        input: q.input,
+        options: options.map((opt) => ({ id: opt.id, label: opt.label })),
+      });
+    }
+    const state: PendingQuestionCardState = {
+      kind: "question",
+      decisionId: card.decision_id,
+      version: card.version,
+      title: card.title,
+      questions: steps,
+      currentIndex: 0,
+      answers: {},
+    };
+    return { state, text: formatQuestionStep(state, h) };
+  }
+
+  if (card.kind && APPROVAL_CARD_KINDS.has(card.kind)) {
+    const lines = [card.title];
+    const detail = approvalCardDetail(card);
+    if (detail) lines.push(detail);
+    lines.push(`1. ${h.approveOption}`);
+    lines.push(`2. ${h.denyOption}`);
+    lines.push(h.replyApproveOrDeny);
+    const state: PendingApprovalCardState = {
+      kind: "approval",
+      decisionId: card.decision_id,
+      version: card.version,
+      title: card.title,
+      decisionKind: card.kind,
+    };
+    return { state, text: lines.join("\n") };
+  }
+
+  return undefined;
+}
+
+function approvalCardDetail(card: DecisionCardLike): string | undefined {
+  if (card.kind === "runtime_permission" && card.runtime_permission) {
+    const parts = [
+      card.runtime_permission.rationale?.trim(),
+      card.runtime_permission.tool?.trim()
+        ? `Tool: ${card.runtime_permission.tool.trim()}`
+        : undefined,
+    ].filter((part): part is string => Boolean(part));
+    return parts.join("\n") || undefined;
+  }
+  if (card.kind === "connector_write" && card.connector_write) {
+    const summary = card.connector_write.summary?.trim();
+    if (summary && summary !== card.title?.trim()) return summary;
+  }
+  if (
+    card.kind === "room_creation" &&
+    card.room_creation?.description?.trim()
+  ) {
+    return card.room_creation.description.trim();
+  }
+  return undefined;
+}
+
+/** Formats a safe fallback notice for cards that must be completed in Linger. */
+export function formatUnsupportedCardNotice(
+  card: DecisionCardLike,
+  chatUrl: string | undefined,
+  hints: Partial<CardFormattingHints> = {},
+): string | undefined {
+  if (card.status !== "pending" || !card.title?.trim()) return undefined;
+  const h = { ...DEFAULT_CARD_HINTS, ...hints };
+  const safeUrl = isReachableExternalUrl(chatUrl) ? chatUrl : undefined;
+  return h.openLingerToReview(card.title.trim(), safeUrl);
+}
+
+export type PendingCardAdvanceResult =
+  | {
+      readonly action: "next_question";
+      readonly nextState: PendingQuestionCardState;
+      readonly nextPrompt: string;
+    }
+  | {
+      readonly action: "submit_question";
+      readonly decisionId: string;
+      readonly version: number;
+      readonly answers: Readonly<Record<string, string | readonly string[]>>;
+    }
+  | {
+      readonly action: "decide_approval";
+      readonly decisionId: string;
+      readonly version: number;
+      readonly decision: "approve" | "deny";
+    }
+  | { readonly action: "passthrough" };
+
+/**
+ * Interprets a user's plain-text IM reply against the active pending card:
+ * - question cards accept 1-based option numbers or custom free text ("Other")
+ * - multi-question cards advance one question at a time before submitting all answers
+ * - approval cards accept 1 (approve) or 2 (deny); any other text passes through as chat
+ */
+export function advancePendingCard(
+  state: PendingCardState,
+  rawText: string,
+  hints: Partial<CardFormattingHints> = {},
+): PendingCardAdvanceResult {
+  const trimmed = rawText.trim();
+  if (!trimmed) return { action: "passthrough" };
+
+  if (state.kind === "approval") {
+    if (trimmed === "1") {
+      return {
+        action: "decide_approval",
+        decisionId: state.decisionId,
+        version: state.version,
+        decision: "approve",
+      };
+    }
+    if (trimmed === "2") {
+      return {
+        action: "decide_approval",
+        decisionId: state.decisionId,
+        version: state.version,
+        decision: "deny",
+      };
+    }
+    return { action: "passthrough" };
+  }
+
+  const current = state.questions[state.currentIndex];
+  if (!current) return { action: "passthrough" };
+
+  const picks = parseNumberedAnswer(
+    trimmed,
+    current.input,
+    current.options.length,
+  );
+  let answerValue: string | readonly string[];
+  if (picks) {
+    answerValue =
+      current.input === "radio"
+        ? current.options[picks[0]! - 1]!.id
+        : picks.map((n) => current.options[n - 1]!.id);
+  } else {
+    // Free-text "Other..." response accepted by TeamHub for every question card.
+    answerValue =
+      current.input === "radio"
+        ? trimmed.slice(0, 10_000)
+        : [trimmed.slice(0, 200)];
+  }
+
+  const nextAnswers: Record<string, string | readonly string[]> = {
+    ...state.answers,
+    [current.id]: answerValue,
+  };
+  const nextIndex = state.currentIndex + 1;
+  if (nextIndex < state.questions.length) {
+    const nextState: PendingQuestionCardState = {
+      ...state,
+      currentIndex: nextIndex,
+      answers: nextAnswers,
+    };
+    return {
+      action: "next_question",
+      nextState,
+      nextPrompt: formatQuestionStep(nextState, hints),
+    };
+  }
+  return {
+    action: "submit_question",
+    decisionId: state.decisionId,
+    version: state.version,
+    answers: nextAnswers,
+  };
+}
+
 /**
  * Formats a single-question radio/checkbox Decision Card for plain-text IM
- * reply. Other card kinds stay in Linger because IM cannot safely carry
- * irreversible approvals or credentials.
+ * reply. Retained for compatibility; prefer formatPendingCard for full support.
  */
 export function formatQuestionCard(
   card: DecisionCardLike,

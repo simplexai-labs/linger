@@ -237,7 +237,6 @@ components:
       required:
         - external_id
         - sender_external_id
-        - text
       properties:
         external_id:
           type: string
@@ -249,8 +248,13 @@ components:
           maxLength: 256
         text:
           type: string
-          minLength: 1
           maxLength: 50000
+        attachment_upload_ids:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            minLength: 1
         adapter_state_patch:
           type: object
           additionalProperties: true
@@ -268,6 +272,7 @@ components:
           enum:
             - message
             - decision
+            - question_step
             - decision_conflict
             - decision_rejected
             - no_another_me
@@ -275,6 +280,31 @@ components:
           type: string
         reply_hint_code:
           type: string
+        next_prompt:
+          type: string
+    InternalIMChannelOutboundDocument:
+      type: object
+      additionalProperties: false
+      required:
+        - document_id
+        - filename
+      properties:
+        document_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        filename:
+          type: string
+          minLength: 1
+        media_type:
+          type: string
+    InternalIMChannelAttachmentUploadResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          minLength: 1
     InternalIMChannelOutboundEvent:
       type: object
       additionalProperties: false
@@ -304,6 +334,12 @@ components:
         card:
           type: object
           additionalProperties: true
+        documents:
+          type: array
+          items:
+            $ref: "#/components/schemas/InternalIMChannelOutboundDocument"
+        has_html_fragment:
+          type: boolean
     InternalIMChannelOutboundPage:
       type: object
       additionalProperties: false

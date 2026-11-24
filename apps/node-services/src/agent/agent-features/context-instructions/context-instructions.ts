@@ -3,7 +3,10 @@ import type {
   AgentSponsorIdentity,
   AgentType,
 } from "../../executor/types.js";
-import type { MetaRoomKind } from "../../executor/context-ref.js";
+import type {
+  MetaRoomChannel,
+  MetaRoomKind,
+} from "../../executor/context-ref.js";
 import { renderAgentInstructions } from "../../prompt/agent-instructions.js";
 import { renderBehaviorPattern } from "../../prompt/behavior-pattern.js";
 import { renderCompactMetaInstructions } from "../../prompt/compact-meta-instructions.js";
@@ -46,18 +49,21 @@ export type ExecutionContextDeveloperInstructionsInput =
           readonly contextKind: "meta";
           readonly roomId: string;
           readonly roomKind: MetaRoomKind;
+          readonly roomChannel?: MetaRoomChannel;
           readonly taskId?: never;
         }
       | {
           readonly contextKind: "alter_ego";
           readonly roomId?: never;
           readonly roomKind?: never;
+          readonly roomChannel?: never;
           readonly taskId: string;
         }
       | {
           readonly contextKind: "document";
           readonly roomId?: never;
           readonly roomKind?: never;
+          readonly roomChannel?: never;
           readonly taskId?: never;
         }
     );
@@ -78,6 +84,9 @@ export const assembleExecutionContextDeveloperInstructions = (
         : {}),
       roomId: input.roomId,
       roomKind: input.roomKind,
+      ...(input.roomChannel !== undefined
+        ? { roomChannel: input.roomChannel }
+        : {}),
       connectedApps: input.connectedApps,
       connectedAppKeys: input.connectedAppKeys,
       connectableAppKeys: input.connectableAppKeys,

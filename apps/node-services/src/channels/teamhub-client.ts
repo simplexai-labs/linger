@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 import type { components } from "@linger/wire-contracts/teamhub-internal/types";
 
 export type InternalIMChannelBinding =
@@ -12,6 +14,19 @@ export type InternalIMChannelOutboundEvent =
   components["schemas"]["InternalIMChannelOutboundEvent"];
 export type InternalIMChannelOutboundPage =
   components["schemas"]["InternalIMChannelOutboundPage"];
+
+export interface DownloadedChannelDocument {
+  readonly bytes: Uint8Array;
+  readonly filename?: string;
+  readonly mediaType?: string;
+}
+
+export interface ChannelAttachmentUploadInput {
+  readonly idempotencyKey: string;
+  readonly filename: string;
+  readonly mediaType?: string;
+  readonly bytes: Uint8Array;
+}
 
 export interface ChannelsTeamHubClient {
   listEnabledBindings(): Promise<
@@ -30,6 +45,15 @@ export interface ChannelsTeamHubClient {
     afterSeq: number,
     limit?: number,
   ): Promise<InternalIMChannelOutboundPage | undefined>;
+  downloadDocument?(
+    bindingId: string,
+    documentId: string,
+    maxBytes?: number,
+  ): Promise<DownloadedChannelDocument | undefined>;
+  uploadAttachment?(
+    bindingId: string,
+    input: ChannelAttachmentUploadInput,
+  ): Promise<string | undefined>;
 }
 
 export interface HttpChannelsTeamHubOptions {
@@ -39,6 +63,38 @@ export interface HttpChannelsTeamHubOptions {
 }
 
 const REQUEST_TIMEOUT_MS = 10_000;
+const MEDIA_TIMEOUT_MS = 60_000;
+const DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
+const RENDER_RETRY_ATTEMPTS = 8;
+const RENDER_RETRY_MS = 1_500;
+
+function parseDispositionFilename(header: string | null): string | undefined {
+  if (!header) return undefined;
+  const star = /filename\*\s*=\s*UTF-8''([^;\r\n]+)/i.exec(header);
+  if (star?.[1]) {
+    try {
+      const decoded = decodeURIComponent(star[1].trim());
+      if (decoded) return decoded;
+    } catch {
+      // Fall through to plain filename parameter.
+    }
+  }
+  const plain = /filename\s*=\s*(?:"([^"]+)"|([^;\r\n]+))/i.exec(header);
+  return (plain?.[1] ?? plain?.[2])?.trim() || undefined;
+}
+
+async function readBoundedBytes(
+  res: Response,
+  maxBytes: number,
+): Promise<Uint8Array | undefined> {
+  const lengthHeader = Number(res.headers.get("content-length"));
+  if (Number.isFinite(lengthHeader) && lengthHeader > maxBytes) {
+    await res.body?.cancel();
+    return undefined;
+  }
+  const buf = new Uint8Array(await res.arrayBuffer());
+  return buf.byteLength <= maxBytes ? buf : undefined;
+}
 
 /** Calls TeamHub's teamhub-internal IM channel routes using the shared internal bearer token. */
 export class HttpChannelsTeamHubClient implements ChannelsTeamHubClient {
@@ -106,9 +162,80 @@ export class HttpChannelsTeamHubClient implements ChannelsTeamHubClient {
     return (await res.json()) as InternalIMChannelOutboundPage;
   }
 
+  async downloadDocument(
+    bindingId: string,
+    documentId: string,
+    maxBytes = DEFAULT_MAX_DOWNLOAD_BYTES,
+  ): Promise<DownloadedChannelDocument | undefined> {
+    const path = `/internal/v1/channels/bindings/${encodeURIComponent(bindingId)}/documents/${encodeURIComponent(documentId)}`;
+    for (let attempt = 0; attempt <= RENDER_RETRY_ATTEMPTS; attempt += 1) {
+      const res = await this.#request(
+        path,
+        { method: "GET" },
+        MEDIA_TIMEOUT_MS,
+      );
+      if (!res) return undefined;
+      if (res.status === 202) {
+        await res.body?.cancel();
+        if (attempt === RENDER_RETRY_ATTEMPTS) return undefined;
+        await delay(RENDER_RETRY_MS);
+        continue;
+      }
+      if (!res.ok) return undefined;
+      const bytes = await readBoundedBytes(res, maxBytes);
+      if (!bytes) return undefined;
+      const mediaType =
+        res.headers.get("content-type")?.split(";")[0]?.trim() || undefined;
+      const filename = parseDispositionFilename(
+        res.headers.get("content-disposition"),
+      );
+      return {
+        bytes,
+        ...(filename ? { filename } : {}),
+        ...(mediaType ? { mediaType } : {}),
+      };
+    }
+    return undefined;
+  }
+
+  async uploadAttachment(
+    bindingId: string,
+    input: ChannelAttachmentUploadInput,
+  ): Promise<string | undefined> {
+    const form = new FormData();
+    form.set("filename", input.filename);
+    if (input.mediaType) form.set("media_type", input.mediaType);
+    const bytes = new Uint8Array(input.bytes.byteLength);
+    bytes.set(input.bytes);
+    form.set(
+      "content",
+      new Blob([bytes], {
+        type: input.mediaType || "application/octet-stream",
+      }),
+      input.filename,
+    );
+    const res = await this.#request(
+      `/internal/v1/channels/bindings/${encodeURIComponent(bindingId)}/attachments`,
+      {
+        method: "POST",
+        headers: { "idempotency-key": input.idempotencyKey },
+        body: form,
+      },
+      MEDIA_TIMEOUT_MS,
+    );
+    if (!res?.ok) return undefined;
+    try {
+      const body = (await res.json()) as { id?: string };
+      return body.id || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async #request(
     path: string,
     init: RequestInit,
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<Response | undefined> {
     try {
       const headers = new Headers(init.headers);
@@ -116,7 +243,7 @@ export class HttpChannelsTeamHubClient implements ChannelsTeamHubClient {
       return await this.#fetchImpl(new URL(path, this.#baseUrl), {
         ...init,
         headers,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       return undefined;

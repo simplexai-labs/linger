@@ -14,16 +14,30 @@ export interface ChannelCapabilities {
   readonly supportsMarkdown: boolean;
 }
 
+export interface InboundChannelAttachment {
+  readonly filename: string;
+  readonly mediaType?: string;
+  readonly bytes: Uint8Array;
+}
+
 export interface InboundChannelMessage {
   readonly externalId: string;
   readonly senderExternalId: string;
   readonly text: string;
+  readonly attachments?: readonly InboundChannelAttachment[];
   readonly receivedAtMs: number;
   readonly adapterStatePatch?: Record<string, unknown>;
 }
 
 export interface OutboundChannelMessage {
   readonly text: string;
+  readonly roomSeq: number;
+}
+
+export interface OutboundChannelMedia {
+  readonly filename: string;
+  readonly mediaType?: string;
+  readonly bytes: Uint8Array;
   readonly roomSeq: number;
 }
 
@@ -59,6 +73,7 @@ export interface ChannelAdapter {
   readonly capabilities: ChannelCapabilities;
   start(ctx: AdapterRunContext): Promise<void>;
   sendText(message: OutboundChannelMessage): Promise<SendOutcome>;
+  sendMedia?(media: OutboundChannelMedia): Promise<SendOutcome>;
   setTyping?(active: boolean): Promise<void>;
 }
 

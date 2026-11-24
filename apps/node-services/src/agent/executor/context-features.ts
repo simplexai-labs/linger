@@ -88,6 +88,9 @@ export function composeExecutorFeatures(input: {
     agentName: ghost.agent.name,
     agent: ghost.agent,
     ...(record.roomKind !== undefined ? { roomKind: record.roomKind } : {}),
+    ...(record.roomChannel !== undefined
+      ? { roomChannel: record.roomChannel }
+      : {}),
     capabilities: ghost.permissionReview ? ["permissionReview"] : [],
     signal: binding.signal,
     activeRunId: () => binding.activeRunId(),

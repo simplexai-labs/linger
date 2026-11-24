@@ -10,11 +10,45 @@ import path from "node:path";
 
 import { z } from "zod";
 
-const pendingCard = z.object({
-  chatTarget: z.union([
-    z.object({ chatId: z.number().int() }),
-    z.object({ to: z.string().min(1) }),
-  ]),
+const chatTarget = z.union([
+  z.object({ chatId: z.number().int() }),
+  z.object({ to: z.string().min(1) }),
+]);
+
+const pendingQuestionStep = z.object({
+  id: z.string().min(1),
+  prompt: z.string(),
+  input: z.enum(["radio", "checkbox"]),
+  options: z
+    .array(z.object({ id: z.string().min(1), label: z.string() }))
+    .min(1),
+});
+
+const pendingQuestionCard = z.object({
+  kind: z.literal("question"),
+  chatTarget,
+  messageId: z.string().min(1),
+  decisionId: z.string().min(1),
+  version: z.number().int(),
+  title: z.string(),
+  questions: z.array(pendingQuestionStep).min(1),
+  currentIndex: z.number().int().min(0),
+  answers: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
+});
+
+const pendingApprovalCard = z.object({
+  kind: z.literal("approval"),
+  chatTarget,
+  messageId: z.string().min(1),
+  decisionId: z.string().min(1),
+  version: z.number().int(),
+  title: z.string(),
+  decisionKind: z.string().min(1),
+});
+
+// Legacy single-question shape retained for upgrade compatibility with existing state.json.
+const legacyPendingCard = z.object({
+  chatTarget,
   messageId: z.string().min(1),
   decisionId: z.string().min(1),
   version: z.number().int(),
@@ -22,6 +56,12 @@ const pendingCard = z.object({
   input: z.enum(["radio", "checkbox"]),
   optionIds: z.array(z.string().min(1)).min(1),
 });
+
+const pendingCard = z.union([
+  pendingQuestionCard,
+  pendingApprovalCard,
+  legacyPendingCard,
+]);
 export type PendingCard = z.infer<typeof pendingCard>;
 
 const channelState = z.object({

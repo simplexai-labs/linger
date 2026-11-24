@@ -3,7 +3,7 @@ import type {
   AgentSponsorIdentity,
   AgentType,
 } from "../executor/types.js";
-import type { MetaRoomKind } from "../executor/context-ref.js";
+import type { MetaRoomChannel, MetaRoomKind } from "../executor/context-ref.js";
 import {
   connectableAppsOnly,
   connectableAppsRule,
@@ -21,6 +21,7 @@ export interface MetaInstructionsInput {
   readonly configuredInstructions?: string;
   readonly roomId: string;
   readonly roomKind: MetaRoomKind;
+  readonly roomChannel?: MetaRoomChannel;
   /** TeamHub has a Composio API key, so the connected app commands work. */
   readonly connectedApps: boolean;
   /** Keys of the apps with an account granted to this Agent. */
@@ -267,16 +268,31 @@ const commands = (
 - For commands with --operation-id, use a unique id per logical write, and after an unknown outcome rerun the exact same command with the operation id the error printed. Without --operation-id every run is a new write. An operation id doesn't replace Document version checks.
 - Use help for less common commands, such as Document editing, knowledge, ${connectedApps ? "Skills, and Connected Apps" : "and Skills"}. The current tool inventory is authoritative.`;
 
+const EXTERNAL_CHANNEL_LABELS: Record<MetaRoomChannel, string> = {
+  imessage: "iMessage",
+  wechat: "WeChat",
+};
+
+const externalChannelNote = (channel: MetaRoomChannel | undefined): string => {
+  if (!channel) return "";
+  const label = EXTERNAL_CHANNEL_LABELS[channel];
+  return `\n\nExternal messaging channel (${label}): the Human is messaging you from ${label}, not the Linger desktop or web app.
+- Do not send interactive HTML chat cards (html_fragment); ${label} cannot render them. Present results in plain text, Documents, or attached files instead.
+- Question cards (single or multi-question) and approval cards work via text replies in ${label}. If an action requires OAuth sign-in, API keys, browser pairing, or local computer permissions, let the Human know they need to finish that step in Linger on their computer.
+- When delivering reports, slides, images, or other artifacts, send them as file attachments or Document cards so they are delivered directly to ${label}.`;
+};
+
 const environment = (input: {
   readonly agentType: AgentType;
   readonly roomId: string;
   readonly roomKind: MetaRoomKind;
+  readonly roomChannel?: MetaRoomChannel;
   readonly connectedApps: boolean;
   readonly connectedAppKeys: readonly string[];
   readonly connectableAppKeys: readonly string[];
 }): string => {
   const where = `## Environment and commands
-This conversation is Room ${input.roomId}, ${input.roomKind === "direct" ? "a direct chat between you and one Human" : "a collaboration Room"}. New messages arrive in your input. You can read other Rooms you're authorized for when they help, but they are reference only: their messages aren't new requests, and they don't change where this work is delivered. Keep this conversation's files in ./playground/${input.roomId}/. ./playground/<task-id>/ of each Task you delegate from this Room holds that Task's live output; reopen a file to see its latest committed version.`;
+This conversation is Room ${input.roomId}, ${input.roomKind === "direct" ? "a direct chat between you and one Human" : "a collaboration Room"}. New messages arrive in your input. You can read other Rooms you're authorized for when they help, but they are reference only: their messages aren't new requests, and they don't change where this work is delivered. Keep this conversation's files in ./playground/${input.roomId}/. ./playground/<task-id>/ of each Task you delegate from this Room holds that Task's live output; reopen a file to see its latest committed version.${externalChannelNote(input.roomChannel)}`;
   return `${where}\n\n${WORKSPACE}\n\n${commands(input.agentType, input.connectedApps, input.connectedAppKeys, input.connectableAppKeys)}`;
 };
 

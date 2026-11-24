@@ -295,4 +295,45 @@ describe("context-instructions feature", () => {
       }),
     ).toContain('"display_name":"Research Partner"');
   });
+
+  it("appends external channel guidance only for channel Rooms", () => {
+    const facts = {
+      connectedApps: true,
+      connectedAppKeys: [],
+      connectableAppKeys: [],
+      compactInstructions: false,
+    };
+
+    const normal = composeContextFeatures({
+      context: makeTestFeatureContext({
+        roomKind: "direct",
+        agent: { name: "Research Partner", instructions: "be helpful" },
+      }).context,
+      features: [createContextInstructionsFeature()],
+    }).contextInstructions(facts)!;
+    expect(normal).not.toContain("External messaging channel");
+    expect(normal).not.toContain("html_fragment");
+
+    const wechat = composeContextFeatures({
+      context: makeTestFeatureContext({
+        roomKind: "direct",
+        roomChannel: "wechat",
+        agent: { name: "Research Partner", instructions: "be helpful" },
+      }).context,
+      features: [createContextInstructionsFeature()],
+    }).contextInstructions(facts)!;
+    expect(wechat).toContain("External messaging channel (WeChat)");
+    expect(wechat).toContain("html_fragment");
+
+    const compactIMessage = composeContextFeatures({
+      context: makeTestFeatureContext({
+        roomKind: "direct",
+        roomChannel: "imessage",
+        agent: { name: "Research Partner", instructions: "be helpful" },
+      }).context,
+      features: [createContextInstructionsFeature()],
+    }).contextInstructions({ ...facts, compactInstructions: true })!;
+    expect(compactIMessage).toContain("External channel (iMessage)");
+    expect(compactIMessage).toContain("html_fragment");
+  });
 });

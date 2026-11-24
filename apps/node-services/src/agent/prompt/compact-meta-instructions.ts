@@ -183,9 +183,17 @@ const commands = (
 - Agents: teamhub room invite --agent-id <actor-id> brings an Agent from teamhub agent list into this Room (not a direct chat); teamhub agent create --name "<name>" --prompt "<working instructions>" adds a new teammate; ${agentType === "anotherme" ? 'teamhub agent update --agent-id <actor-id> --prompt "..." changes an Agent you manage' : 'teamhub agent update --prompt "..." changes you, or add --agent-id <actor-id> for an Agent you manage'}. A change to an established Agent waits for approval.${connectedApps ? connectedAppsCommands(connectedAppKeys, connectableAppKeys) : connectableAppsOnly(connectableAppKeys)}
 - With --operation-id, use a unique id per write; after an unknown outcome, rerun the same command with the id the error printed.`;
 
+const compactExternalChannelNote = (
+  channel: MetaInstructionsInput["roomChannel"],
+): string => {
+  if (!channel) return "";
+  const label = channel === "imessage" ? "iMessage" : "WeChat";
+  return `\nExternal channel (${label}): do not send HTML chat cards (html_fragment); use plain text, Documents, or attached files instead. Question and approval cards work via text reply; OAuth, API keys, and computer permissions must be finished in Linger on the computer.`;
+};
+
 const environment = (input: MetaInstructionsInput): string =>
   `## Environment and commands
-This is Room ${input.roomId}, ${input.roomKind === "direct" ? "a direct chat with one Human" : "a collaboration Room"}. New messages arrive in your input; other Rooms you can read are reference only. Keep files in ./playground/${input.roomId}/; ./playground/<task-id>/ holds a Task's live output (read only).
+This is Room ${input.roomId}, ${input.roomKind === "direct" ? "a direct chat with one Human" : "a collaboration Room"}. New messages arrive in your input; other Rooms you can read are reference only. Keep files in ./playground/${input.roomId}/; ./playground/<task-id>/ holds a Task's live output (read only).${compactExternalChannelNote(input.roomChannel)}
 ${COMPACT_PACKAGE_ENVIRONMENT}
 
 ${commands(input.agentType, input.connectedApps, input.connectedAppKeys, input.connectableAppKeys)}`;

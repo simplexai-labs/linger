@@ -27,6 +27,9 @@ export const createContextInstructionsFeature = (): FeatureDeclaration =>
                     contextKind: ref.kind,
                     roomId: ref.roomId,
                     roomKind: view.roomKind as MetaRoomKind,
+                    ...(view.roomChannel !== undefined
+                      ? { roomChannel: view.roomChannel }
+                      : {}),
                   } as const);
           return assembleExecutionContextDeveloperInstructions({
             agentName: view.agent.name,

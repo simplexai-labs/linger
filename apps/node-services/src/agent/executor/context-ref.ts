@@ -182,6 +182,7 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
 
 export type ContextTargetResidency = "active" | "suspended";
 export type MetaRoomKind = "direct" | "collaboration";
+export type MetaRoomChannel = "imessage" | "wechat";
 
 /**
  * TeamHub-trusted identity of the shared Task directory a Context reads
@@ -207,6 +208,7 @@ export type SharedTaskScope =
 export interface ExecutionContextRecord {
   readonly ref: ExecutionContextRef;
   readonly roomKind?: MetaRoomKind;
+  readonly roomChannel?: MetaRoomChannel;
   readonly sharedTaskScope?: SharedTaskScope;
   readonly targetResidency: ContextTargetResidency;
   readonly terminalReason?: "room_deleted" | "context_deleted";

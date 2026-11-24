@@ -43,6 +43,7 @@ type Context struct {
 	TenantID          string     `json:"tenant_id"`
 	AgentActorID      string     `json:"agent_actor_id"`
 	RoomKind          string     `json:"room_kind,omitempty"`
+	RoomChannel       string     `json:"room_channel,omitempty"`
 	MembershipEpochID string     `json:"membership_epoch_id,omitempty"`
 	TargetResidency   string     `json:"target_residency"`
 	StateRevision     int64      `json:"state_revision"`

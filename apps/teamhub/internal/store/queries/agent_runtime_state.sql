@@ -209,6 +209,12 @@ SELECT context_key, tenant_id, agent_actor_id, agent_management_id, context_kind
 FROM agent_execution_contexts
 WHERE context_key=sqlc.arg(context_key)::text;
 
+-- name: ListRoomChannelsByIDs :many
+SELECT id, channel_kind::text AS channel_kind
+FROM rooms
+WHERE id = ANY(sqlc.arg(room_ids)::text[])
+  AND channel_kind IS NOT NULL;
+
 -- name: LockMetaContextsForRoomMemberships :exec
 -- Meta Contexts are locked in context_key order before any membership write
 -- or Room lock.

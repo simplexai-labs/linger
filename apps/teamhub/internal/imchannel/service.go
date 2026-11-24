@@ -171,10 +171,11 @@ type StatusUpdate struct {
 
 // InboundInput is one normalized inbound IM message from Node Services.
 type InboundInput struct {
-	ExternalID        string
-	SenderExternalID  string
-	Text              string
-	AdapterStatePatch map[string]any
+	ExternalID          string
+	SenderExternalID    string
+	Text                string
+	AttachmentUploadIDs []string
+	AdapterStatePatch   map[string]any
 }
 
 // InboundResult reports how TeamHub handled an inbound IM message.
@@ -183,18 +184,28 @@ type InboundResult struct {
 	Kind          string
 	RoomID        string
 	ReplyHintCode string
+	NextPrompt    string
+}
+
+// OutboundDocument describes a downloadable attachment or Document card on a Message.
+type OutboundDocument struct {
+	DocumentID string
+	Filename   string
+	MediaType  string
 }
 
 // OutboundEvent is one projected Room event ready for outbound IM formatting.
 type OutboundEvent struct {
-	RoomSeq       int64
-	EventType     string
-	MessageID     string
-	AuthorActorID string
-	AuthorKind    string
-	MessageKind   string
-	RawMessage    string
-	Card          map[string]any
+	RoomSeq         int64
+	EventType       string
+	MessageID       string
+	AuthorActorID   string
+	AuthorKind      string
+	MessageKind     string
+	RawMessage      string
+	Card            map[string]any
+	Documents       []OutboundDocument
+	HasHTMLFragment bool
 }
 
 // OutboundPage is a bounded slice of Room events after a sequence watermark.
@@ -215,12 +226,31 @@ type pairingOwner struct {
 	createdAt    time.Time
 }
 
+type pendingQuestionOption struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+type pendingQuestionStep struct {
+	ID      string                  `json:"id"`
+	Prompt  string                  `json:"prompt"`
+	Input   string                  `json:"input"`
+	Options []pendingQuestionOption `json:"options"`
+}
+
 type pendingCardRecord struct {
-	DecisionID string   `json:"decisionId"`
-	Version    int64    `json:"version"`
-	QuestionID string   `json:"questionId"`
-	Input      string   `json:"input"`
-	OptionIDs  []string `json:"optionIds"`
+	Kind         string                `json:"kind,omitempty"`
+	DecisionID   string                `json:"decisionId"`
+	Version      int64                 `json:"version"`
+	Title        string                `json:"title,omitempty"`
+	DecisionKind string                `json:"decisionKind,omitempty"`
+	Questions    []pendingQuestionStep `json:"questions,omitempty"`
+	CurrentIndex int                   `json:"currentIndex,omitempty"`
+	Answers      map[string]any        `json:"answers,omitempty"`
+	// Legacy single-question fields retained for stored bindings from older builds.
+	QuestionID string   `json:"questionId,omitempty"`
+	Input      string   `json:"input,omitempty"`
+	OptionIDs  []string `json:"optionIds,omitempty"`
 }
 
 // Service coordinates IM channel bindings, pairing, inbound ingestion, and outbound reads.
@@ -569,11 +599,34 @@ func (s *Service) ReportStatus(ctx context.Context, bindingID string, update Sta
 	return err
 }
 
-// IngestInbound writes an inbound IM message into the Human's Another Me direct Chat
-// or submits a numbered reply to the pending question card.
+// ResolveBindingAccess validates an enabled binding and returns its owner
+// account ID and isolated Channel Room ID for media downloads and uploads.
+func (s *Service) ResolveBindingAccess(ctx context.Context, bindingID string) (string, string, error) {
+	binding, err := s.store.GetIMChannelBindingByID(ctx, bindingID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrNotFound
+	}
+	if err != nil {
+		return "", "", err
+	}
+	if !binding.Enabled {
+		return "", "", ErrNotFound
+	}
+	opened, err := s.collab.OpenAnotherMeChannel(ctx, binding.AccountID, binding.TenantID, httpapi.RoomChannel(binding.Provider))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrNotFound
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return binding.AccountID, opened.Room.Id, nil
+}
+
+// IngestInbound writes an inbound IM message into the Human's isolated Channel
+// Room or advances/submits the pending question or approval card.
 func (s *Service) IngestInbound(ctx context.Context, bindingID string, input InboundInput) (InboundResult, error) {
 	text := strings.TrimSpace(input.Text)
-	if text == "" || strings.TrimSpace(input.ExternalID) == "" {
+	if (text == "" && len(input.AttachmentUploadIDs) == 0) || strings.TrimSpace(input.ExternalID) == "" {
 		return InboundResult{}, ErrInvalid
 	}
 	binding, err := s.store.GetIMChannelBindingByID(ctx, bindingID)
@@ -603,20 +656,30 @@ func (s *Service) IngestInbound(ctx context.Context, bindingID string, input Inb
 	}
 	roomID := opened.Room.Id
 
-	// Check whether the inbound text answers the latest pending question card.
-	if handled, result, err := s.tryAnswerPendingCard(ctx, binding, roomID, text); err != nil {
-		return InboundResult{}, err
-	} else if handled {
-		return result, nil
+	// Only pure text replies (no attachments) interact with the active pending card.
+	if text != "" && len(input.AttachmentUploadIDs) == 0 {
+		if handled, result, err := s.tryAnswerPendingCard(ctx, binding, roomID, text); err != nil {
+			return InboundResult{}, err
+		} else if handled {
+			return result, nil
+		}
 	}
 
-	var textSeg httpapi.MessageSegment
-	if err := textSeg.FromTextSegment(httpapi.TextSegment{Type: "text", Content: text}); err != nil {
-		return InboundResult{}, ErrInvalid
+	segments := []httpapi.MessageSegment{}
+	if text != "" {
+		var textSeg httpapi.MessageSegment
+		if err := textSeg.FromTextSegment(httpapi.TextSegment{Type: "text", Content: text}); err != nil {
+			return InboundResult{}, ErrInvalid
+		}
+		segments = append(segments, textSeg)
 	}
 	req := httpapi.MessageCreateRequest{
 		RawMessage: text,
-		Segments:   []httpapi.MessageSegment{textSeg},
+		Segments:   segments,
+	}
+	if len(input.AttachmentUploadIDs) > 0 {
+		ids := append([]string(nil), input.AttachmentUploadIDs...)
+		req.AttachmentUploadIds = &ids
 	}
 	content, err := collaboration.NormalizeMessageCreateRequest(req)
 	if err != nil {
@@ -637,13 +700,68 @@ func decodePendingCard(raw []byte) (pendingCardRecord, bool) {
 		return pendingCardRecord{}, false
 	}
 	var card pendingCardRecord
-	if err := json.Unmarshal(raw, &card); err != nil {
+	if err := json.Unmarshal(raw, &card); err != nil || card.DecisionID == "" {
 		return pendingCardRecord{}, false
 	}
-	if card.DecisionID == "" || card.QuestionID == "" || len(card.OptionIDs) == 0 {
-		return pendingCardRecord{}, false
+	if card.Kind == "approval" {
+		return card, true
 	}
-	return card, true
+	if len(card.Questions) > 0 {
+		card.Kind = "question"
+		if card.CurrentIndex < 0 || card.CurrentIndex >= len(card.Questions) {
+			return pendingCardRecord{}, false
+		}
+		return card, true
+	}
+	// Legacy single-question format compatibility.
+	if card.QuestionID != "" && len(card.OptionIDs) > 0 && (card.Input == "radio" || card.Input == "checkbox") {
+		opts := make([]pendingQuestionOption, 0, len(card.OptionIDs))
+		for _, id := range card.OptionIDs {
+			opts = append(opts, pendingQuestionOption{ID: id, Label: id})
+		}
+		card.Kind = "question"
+		card.Questions = []pendingQuestionStep{{
+			ID:      card.QuestionID,
+			Input:   card.Input,
+			Options: opts,
+		}}
+		card.CurrentIndex = 0
+		return card, true
+	}
+	return pendingCardRecord{}, false
+}
+
+func formatQuestionStepPrompt(card pendingCardRecord) string {
+	if card.CurrentIndex < 0 || card.CurrentIndex >= len(card.Questions) {
+		return ""
+	}
+	q := card.Questions[card.CurrentIndex]
+	title := strings.TrimSpace(card.Title)
+	header := title
+	if len(card.Questions) > 1 {
+		if header != "" {
+			header = fmt.Sprintf("%s (%d/%d)", header, card.CurrentIndex+1, len(card.Questions))
+		} else {
+			header = fmt.Sprintf("(%d/%d)", card.CurrentIndex+1, len(card.Questions))
+		}
+	}
+	lines := make([]string, 0, len(q.Options)+3)
+	if header != "" {
+		lines = append(lines, header)
+	}
+	prompt := strings.TrimSpace(q.Prompt)
+	if prompt != "" && prompt != title {
+		lines = append(lines, prompt)
+	}
+	for i, opt := range q.Options {
+		lines = append(lines, fmt.Sprintf("%d. %s", i+1, opt.Label))
+	}
+	if q.Input == "checkbox" {
+		lines = append(lines, "Reply with numbers (e.g. 1,3), or type your own answer.")
+	} else {
+		lines = append(lines, "Reply with a number, or type your own answer.")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (s *Service) tryAnswerPendingCard(ctx context.Context, binding store.ImChannelBinding, roomID, text string) (bool, InboundResult, error) {
@@ -654,38 +772,100 @@ func (s *Service) tryAnswerPendingCard(ctx context.Context, binding store.ImChan
 	if !ok {
 		return false, InboundResult{}, nil
 	}
-	picks := parseNumberedAnswer(text, card.Input, len(card.OptionIDs))
-	if len(picks) == 0 {
-		return false, InboundResult{}, nil
-	}
-	var answerValue any
-	if card.Input == "radio" {
-		answerValue = card.OptionIDs[picks[0]-1]
-	} else {
-		selected := make([]string, 0, len(picks))
-		for _, n := range picks {
-			selected = append(selected, card.OptionIDs[n-1])
+	trimmed := strings.TrimSpace(text)
+	if card.Kind == "approval" {
+		var decision string
+		switch trimmed {
+		case "1":
+			decision = "approve"
+		case "2":
+			decision = "deny"
+		default:
+			return false, InboundResult{}, nil
 		}
-		answerValue = selected
+		_, err := s.decisions.DecideDecision(ctx, binding.AccountID, card.DecisionID, typedcard.DecisionAnswerCommand{
+			ExpectedVersion: card.Version,
+			Decision:        decision,
+		})
+		return s.finishDecisionAttempt(ctx, binding.ID, roomID, err)
 	}
+
+	step := card.Questions[card.CurrentIndex]
+	var answerValue any
+	picks := parseNumberedAnswer(trimmed, step.Input, len(step.Options))
+	if len(picks) > 0 {
+		if step.Input == "radio" {
+			answerValue = step.Options[picks[0]-1].ID
+		} else {
+			selected := make([]string, 0, len(picks))
+			for _, n := range picks {
+				selected = append(selected, step.Options[n-1].ID)
+			}
+			answerValue = selected
+		}
+	} else {
+		// Accept free-text "Other..." reply for any question card.
+		if step.Input == "radio" {
+			answerValue = truncateRunes(trimmed, 10000)
+		} else {
+			answerValue = []string{truncateRunes(trimmed, 200)}
+		}
+	}
+	if card.Answers == nil {
+		card.Answers = map[string]any{}
+	}
+	card.Answers[step.ID] = answerValue
+
+	if card.CurrentIndex+1 < len(card.Questions) {
+		card.CurrentIndex++
+		encoded, err := json.Marshal(card)
+		if err != nil {
+			return false, InboundResult{}, err
+		}
+		if _, err := s.store.UpdateIMChannelRuntimeState(ctx, store.UpdateIMChannelRuntimeStateParams{
+			ID:              binding.ID,
+			PendingCardJson: encoded,
+		}); err != nil {
+			return false, InboundResult{}, err
+		}
+		return true, InboundResult{
+			Accepted:   true,
+			Kind:       "question_step",
+			RoomID:     roomID,
+			NextPrompt: formatQuestionStepPrompt(card),
+		}, nil
+	}
+
 	_, err := s.decisions.DecideDecision(ctx, binding.AccountID, card.DecisionID, typedcard.DecisionAnswerCommand{
 		ExpectedVersion: card.Version,
 		Decision:        "submit",
-		Answers:         map[string]any{card.QuestionID: answerValue},
+		Answers:         card.Answers,
 	})
+	return s.finishDecisionAttempt(ctx, binding.ID, roomID, err)
+}
+
+func (s *Service) finishDecisionAttempt(ctx context.Context, bindingID, roomID string, err error) (bool, InboundResult, error) {
 	if err == nil {
-		_ = s.store.ClearIMChannelPendingCard(ctx, binding.ID)
+		_ = s.store.ClearIMChannelPendingCard(ctx, bindingID)
 		return true, InboundResult{Accepted: true, Kind: "decision", RoomID: roomID}, nil
 	}
 	if errors.Is(err, typedcard.ErrConflict) {
-		_ = s.store.ClearIMChannelPendingCard(ctx, binding.ID)
+		_ = s.store.ClearIMChannelPendingCard(ctx, bindingID)
 		return true, InboundResult{Accepted: true, Kind: "decision_conflict", RoomID: roomID, ReplyHintCode: "CARD_CONFLICT"}, nil
 	}
 	if errors.Is(err, typedcard.ErrInvalid) || errors.Is(err, typedcard.ErrForbidden) || errors.Is(err, typedcard.ErrNotFound) {
-		_ = s.store.ClearIMChannelPendingCard(ctx, binding.ID)
+		_ = s.store.ClearIMChannelPendingCard(ctx, bindingID)
 		return true, InboundResult{Accepted: true, Kind: "decision_rejected", RoomID: roomID, ReplyHintCode: "CARD_OPEN_LINGER"}, nil
 	}
 	return false, InboundResult{}, err
+}
+
+func truncateRunes(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit])
 }
 
 // ListOutbound reads Room events in the bound Human's isolated Channel Room after afterSeq.
@@ -849,7 +1029,19 @@ func projectRoomEvent(roomSeq int64, eventType string, rawPayload json.RawMessag
 				MessageKind string         `json:"message_kind"`
 				RawMessage  string         `json:"raw_message"`
 				Card        map[string]any `json:"card"`
-				Author      struct {
+				Attachments []struct {
+					DocumentID string `json:"document_id"`
+					Filename   string `json:"filename"`
+					MediaType  string `json:"media_type"`
+					Available  bool   `json:"available"`
+				} `json:"attachments"`
+				Segments []struct {
+					Type         string `json:"type"`
+					Content      string `json:"content"`
+					DocumentID   string `json:"document_id"`
+					Presentation string `json:"presentation"`
+				} `json:"segments"`
+				Author struct {
 					ID   string `json:"id"`
 					Kind string `json:"kind"`
 				} `json:"author"`
@@ -858,15 +1050,59 @@ func projectRoomEvent(roomSeq int64, eventType string, rawPayload json.RawMessag
 		if json.Unmarshal(rawPayload, &payload) != nil || payload.Message.ID == "" {
 			return OutboundEvent{}, false
 		}
+		seenDocs := map[string]struct{}{}
+		docs := make([]OutboundDocument, 0)
+		for _, att := range payload.Message.Attachments {
+			if !att.Available || att.DocumentID == "" {
+				continue
+			}
+			if _, dup := seenDocs[att.DocumentID]; dup {
+				continue
+			}
+			seenDocs[att.DocumentID] = struct{}{}
+			docs = append(docs, OutboundDocument{
+				DocumentID: att.DocumentID,
+				Filename:   att.Filename,
+				MediaType:  att.MediaType,
+			})
+		}
+		hasHTML := false
+		omittedCard := false
+		bodyParts := make([]string, 0, len(payload.Message.Segments))
+		for _, seg := range payload.Message.Segments {
+			if seg.Type == "html_fragment" {
+				hasHTML = true
+			}
+			if seg.Type == "document" && seg.DocumentID != "" {
+				if _, dup := seenDocs[seg.DocumentID]; !dup {
+					seenDocs[seg.DocumentID] = struct{}{}
+					docs = append(docs, OutboundDocument{
+						DocumentID: seg.DocumentID,
+						Filename:   seg.Content,
+					})
+				}
+				if seg.Presentation == "card" || seg.Presentation == "canvas" {
+					omittedCard = true
+					continue
+				}
+			}
+			bodyParts = append(bodyParts, seg.Content)
+		}
+		rawMsg := payload.Message.RawMessage
+		if omittedCard {
+			rawMsg = strings.TrimSpace(strings.Join(bodyParts, ""))
+		}
 		return OutboundEvent{
-			RoomSeq:       roomSeq,
-			EventType:     "message_created",
-			MessageID:     payload.Message.ID,
-			AuthorActorID: payload.Message.Author.ID,
-			AuthorKind:    payload.Message.Author.Kind,
-			MessageKind:   payload.Message.MessageKind,
-			RawMessage:    payload.Message.RawMessage,
-			Card:          payload.Message.Card,
+			RoomSeq:         roomSeq,
+			EventType:       "message_created",
+			MessageID:       payload.Message.ID,
+			AuthorActorID:   payload.Message.Author.ID,
+			AuthorKind:      payload.Message.Author.Kind,
+			MessageKind:     payload.Message.MessageKind,
+			RawMessage:      rawMsg,
+			Card:            payload.Message.Card,
+			Documents:       docs,
+			HasHTMLFragment: hasHTML,
 		}, true
 	case "card.changed":
 		var payload struct {

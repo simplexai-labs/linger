@@ -636,10 +636,16 @@ function contextRecord(context: RuntimeContext): ExecutionContextRecord {
       throw new Error("Meta Context is missing trusted Room kind");
   } else if (roomKind !== undefined)
     throw new Error("Room kind is allowed only for a Meta Context");
+  const roomChannel =
+    ref.kind === "meta" &&
+    (context.room_channel === "imessage" || context.room_channel === "wechat")
+      ? context.room_channel
+      : undefined;
   const sharedTaskScope = contextSharedTaskScope(ref, context);
   return Object.freeze({
     ref: Object.freeze({ ...ref }),
     ...(roomKind === undefined ? {} : { roomKind }),
+    ...(roomChannel === undefined ? {} : { roomChannel }),
     ...(sharedTaskScope === undefined ? {} : { sharedTaskScope }),
     targetResidency: context.target_residency,
     ...(context.terminal_reason !== undefined

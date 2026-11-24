@@ -1,4 +1,10 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  randomUUID,
+} from "node:crypto";
 
 import { sleep } from "@linger/service-kit";
 import type { JsonLogger } from "@linger/service-kit/node";
@@ -8,6 +14,8 @@ import type {
   ChannelAdapter,
   ChannelCapabilities,
   ChannelPairingProvider,
+  InboundChannelAttachment,
+  OutboundChannelMedia,
   OutboundChannelMessage,
   PairingPollResult,
   SendOutcome,
@@ -15,6 +23,7 @@ import type {
 
 // Protocol constants aligned with @tencent-weixin/openclaw-weixin v2.4.10.
 export const WECHAT_ILINK_DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
+export const WECHAT_CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c";
 const ILINK_APP_ID = "bot";
 const ILINK_CHANNEL_VERSION = "2.4.10";
 const ILINK_CLIENT_VERSION = String((2 << 16) | (4 << 8) | 10);
@@ -24,6 +33,7 @@ const ILINK_BOT_TYPE = "3";
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const DEFAULT_API_TIMEOUT_MS = 15_000;
 const DEFAULT_CONFIG_TIMEOUT_MS = 10_000;
+const DEFAULT_CDN_TIMEOUT_MS = 60_000;
 const QR_POLL_TIMEOUT_MS = 35_000;
 const PAIRING_TTL_MS = 10 * 60_000;
 const STALE_TOKEN_ERRCODE = -14;
@@ -33,12 +43,20 @@ const MAX_CONSECUTIVE_FAILURES = 3;
 const RETRY_DELAY_MS = 2_000;
 const BACKOFF_DELAY_MS = 30_000;
 const CONFLICT_BACKOFF_MS = 60_000;
+const MAX_INBOUND_MEDIA_ITEMS = 5;
+const MAX_INBOUND_MEDIA_BYTES = 25 * 1024 * 1024;
 
 const MESSAGE_TYPE_USER = 1;
 const MESSAGE_TYPE_BOT = 2;
 const MESSAGE_STATE_FINISH = 2;
 const ITEM_TYPE_TEXT = 1;
+const ITEM_TYPE_IMAGE = 2;
 const ITEM_TYPE_VOICE = 3;
+const ITEM_TYPE_FILE = 4;
+const ITEM_TYPE_VIDEO = 5;
+const UPLOAD_MEDIA_IMAGE = 1;
+const UPLOAD_MEDIA_VIDEO = 2;
+const UPLOAD_MEDIA_FILE = 3;
 const TYPING_START = 1;
 const TYPING_CANCEL = 2;
 
@@ -51,10 +69,39 @@ export const WECHAT_CAPABILITIES: ChannelCapabilities = Object.freeze({
   supportsMarkdown: false,
 });
 
+interface WeixinCdnMedia {
+  readonly encrypt_query_param?: string;
+  readonly aes_key?: string;
+  readonly encrypt_type?: number;
+  readonly full_url?: string;
+}
+
 interface WeixinMessageItem {
   readonly type?: number;
   readonly text_item?: { readonly text?: string };
   readonly voice_item?: { readonly text?: string };
+  readonly image_item?: {
+    readonly media?: WeixinCdnMedia;
+    readonly aeskey?: string;
+    readonly url?: string;
+  };
+  readonly file_item?: {
+    readonly media?: WeixinCdnMedia;
+    readonly file_name?: string;
+    readonly len?: string;
+  };
+  readonly video_item?: {
+    readonly media?: WeixinCdnMedia;
+    readonly video_size?: number;
+  };
+}
+
+interface GetUploadUrlResp {
+  readonly upload_param?: string;
+  readonly upload_full_url?: string;
+  readonly ret?: number;
+  readonly errcode?: number;
+  readonly errmsg?: string;
 }
 
 interface WeixinMessage {
@@ -264,6 +311,73 @@ async function ilinkPost(params: {
   const raw = await res.text();
   if (!res.ok) throw new HttpStatusError(params.label, res.status, raw);
   return raw;
+}
+
+function encryptAesEcb(plaintext: Uint8Array, key: Buffer): Buffer {
+  const cipher = createCipheriv("aes-128-ecb", key, null);
+  return Buffer.concat([cipher.update(plaintext), cipher.final()]);
+}
+
+function decryptAesEcb(ciphertext: Uint8Array, key: Buffer): Buffer {
+  const decipher = createDecipheriv("aes-128-ecb", key, null);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
+
+function aesEcbPaddedSize(plaintextSize: number): number {
+  return Math.ceil((plaintextSize + 1) / 16) * 16;
+}
+
+/**
+ * Parses WeChat CDNMedia.aes_key (either base64(16 raw bytes) or
+ * base64(32 ASCII hex chars)) or hex image_item.aeskey into a 16-byte Buffer.
+ */
+function parseWeChatAesKey(
+  base64Key?: string,
+  hexKey?: string,
+): Buffer | undefined {
+  if (hexKey && /^[0-9a-fA-F]{32}$/.test(hexKey.trim())) {
+    return Buffer.from(hexKey.trim(), "hex");
+  }
+  if (!base64Key?.trim()) return undefined;
+  const decoded = Buffer.from(base64Key.trim(), "base64");
+  if (decoded.length === 16) return decoded;
+  if (
+    decoded.length === 32 &&
+    /^[0-9a-fA-F]{32}$/.test(decoded.toString("ascii"))
+  ) {
+    return Buffer.from(decoded.toString("ascii"), "hex");
+  }
+  return undefined;
+}
+
+function sniffImageFormat(bytes: Uint8Array): { ext: string; mime: string } {
+  if (
+    bytes.byteLength >= 4 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    return { ext: ".png", mime: "image/png" };
+  }
+  if (
+    bytes.byteLength >= 3 &&
+    bytes[0] === 0x47 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46
+  ) {
+    return { ext: ".gif", mime: "image/gif" };
+  }
+  if (
+    bytes.byteLength >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45
+  ) {
+    return { ext: ".webp", mime: "image/webp" };
+  }
+  return { ext: ".jpg", mime: "image/jpeg" };
 }
 
 /** Extracts plain text from an inbound WeChat message, including server ASR for voice notes. */
@@ -775,6 +889,188 @@ export class WeChatClawBotAdapter implements ChannelAdapter {
     }
   }
 
+  async sendMedia(media: OutboundChannelMedia): Promise<SendOutcome> {
+    const remainingMs = this.#cooldownUntilMs - Date.now();
+    if (remainingMs > 0) {
+      return {
+        ok: false,
+        retryable: false,
+        errorCode: "WECHAT_SESSION_COOLDOWN",
+        runtimeStatus: "cooldown",
+        cooldownSec: Math.ceil(remainingMs / 1000),
+      };
+    }
+    if (!this.#remoteUserId) {
+      return {
+        ok: false,
+        retryable: false,
+        errorCode: "WECHAT_RECIPIENT_UNKNOWN",
+      };
+    }
+    const mime = (media.mediaType ?? "").toLowerCase();
+    const isImage = mime.startsWith("image/");
+    const isVideo = mime.startsWith("video/");
+    const uploadMediaType = isImage
+      ? UPLOAD_MEDIA_IMAGE
+      : isVideo
+        ? UPLOAD_MEDIA_VIDEO
+        : UPLOAD_MEDIA_FILE;
+    const rawsize = media.bytes.byteLength;
+    const rawfilemd5 = createHash("md5").update(media.bytes).digest("hex");
+    const filesize = aesEcbPaddedSize(rawsize);
+    const filekey = randomBytes(16).toString("hex");
+    const aeskey = randomBytes(16);
+    const aeskeyHex = aeskey.toString("hex");
+
+    try {
+      const uploadUrlRaw = await ilinkPost({
+        baseUrl: this.#baseUrl,
+        endpoint: "ilink/bot/getuploadurl",
+        body: {
+          filekey,
+          media_type: uploadMediaType,
+          to_user_id: this.#remoteUserId,
+          rawsize,
+          rawfilemd5,
+          filesize,
+          no_need_thumb: true,
+          aeskey: aeskeyHex,
+          base_info: buildBaseInfo(),
+        },
+        token: this.#botToken,
+        timeoutMs: DEFAULT_API_TIMEOUT_MS,
+        label: "getUploadUrl",
+        fetchImpl: this.#fetchImpl,
+      });
+      const uploadResp = JSON.parse(uploadUrlRaw) as GetUploadUrlResp;
+      if (
+        uploadResp.errcode === STALE_TOKEN_ERRCODE ||
+        uploadResp.ret === STALE_TOKEN_ERRCODE
+      ) {
+        this.#cooldownUntilMs = Date.now() + COOLDOWN_DURATION_MS;
+        return {
+          ok: false,
+          retryable: false,
+          errorCode: "WECHAT_SESSION_COOLDOWN",
+          runtimeStatus: "cooldown",
+          cooldownSec: Math.ceil(COOLDOWN_DURATION_MS / 1000),
+        };
+      }
+      const cdnUrl =
+        uploadResp.upload_full_url?.trim() ||
+        (uploadResp.upload_param
+          ? `${WECHAT_CDN_BASE_URL}/upload?encrypted_query_param=${encodeURIComponent(uploadResp.upload_param)}&filekey=${encodeURIComponent(filekey)}`
+          : undefined);
+      if (!cdnUrl) {
+        return {
+          ok: false,
+          retryable: false,
+          errorCode: "WECHAT_CDN_UPLOAD_URL_MISSING",
+        };
+      }
+      const ciphertext = encryptAesEcb(media.bytes, aeskey);
+      const cdnRes = await this.#fetchImpl(cdnUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: new Uint8Array(ciphertext),
+        signal: AbortSignal.timeout(DEFAULT_CDN_TIMEOUT_MS),
+      });
+      if (!cdnRes.ok) {
+        return {
+          ok: false,
+          retryable: cdnRes.status >= 500,
+          errorCode: "WECHAT_CDN_UPLOAD_FAILED",
+        };
+      }
+      const downloadParam = cdnRes.headers.get("x-encrypted-param")?.trim();
+      if (!downloadParam) {
+        return {
+          ok: false,
+          retryable: false,
+          errorCode: "WECHAT_CDN_PARAM_MISSING",
+        };
+      }
+
+      const mediaRef = {
+        encrypt_query_param: downloadParam,
+        aes_key: Buffer.from(aeskeyHex).toString("base64"),
+        encrypt_type: 1,
+      };
+      const item = isImage
+        ? {
+            type: ITEM_TYPE_IMAGE,
+            image_item: { media: mediaRef, mid_size: filesize },
+          }
+        : isVideo
+          ? {
+              type: ITEM_TYPE_VIDEO,
+              video_item: { media: mediaRef, video_size: filesize },
+            }
+          : {
+              type: ITEM_TYPE_FILE,
+              file_item: {
+                media: mediaRef,
+                file_name: media.filename,
+                len: String(rawsize),
+              },
+            };
+
+      const raw = await ilinkPost({
+        baseUrl: this.#baseUrl,
+        endpoint: "ilink/bot/sendmessage",
+        body: {
+          msg: {
+            from_user_id: "",
+            to_user_id: this.#remoteUserId,
+            client_id: `linger-${randomUUID()}`,
+            message_type: MESSAGE_TYPE_BOT,
+            message_state: MESSAGE_STATE_FINISH,
+            item_list: [item],
+            ...(this.#lastContextToken
+              ? { context_token: this.#lastContextToken }
+              : {}),
+          },
+          base_info: buildBaseInfo(),
+        },
+        token: this.#botToken,
+        timeoutMs: DEFAULT_API_TIMEOUT_MS,
+        label: "sendMediaMessage",
+        fetchImpl: this.#fetchImpl,
+      });
+      const resp = raw.trim() ? parseWeixinApiJson<SendMessageResp>(raw) : {};
+      if (
+        (resp.ret && resp.ret !== 0) ||
+        (resp.errcode && resp.errcode !== 0)
+      ) {
+        return {
+          ok: false,
+          retryable: false,
+          errorCode: "WECHAT_SEND_REJECTED",
+        };
+      }
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof HttpStatusError && err.status === 403) {
+        return {
+          ok: false,
+          retryable: false,
+          errorCode: "WECHAT_CONFLICT",
+          runtimeStatus: "conflict",
+        };
+      }
+      this.#logger.log("warn", "channels.wechat_media_send_failed", {
+        binding_id: this.#bindingId,
+        room_seq: media.roomSeq,
+        error: String(err),
+      });
+      return {
+        ok: false,
+        retryable: true,
+        errorCode: "WECHAT_NETWORK_ERROR",
+      };
+    }
+  }
+
   async setTyping(active: boolean): Promise<void> {
     if (!this.#remoteUserId || this.#cooldownUntilMs > Date.now()) return;
     const ticket = await this.#ensureTypingTicket();
@@ -821,8 +1117,9 @@ export class WeChatClawBotAdapter implements ChannelAdapter {
       patch.last_context_token = msg.context_token;
     }
 
-    const text = extractWeChatInboundText(msg);
-    if (!text) return;
+    const text = extractWeChatInboundText(msg) ?? "";
+    const attachments = await this.#downloadInboundAttachments(msg);
+    if (!text && attachments.length === 0) return;
 
     const externalId =
       msg.message_id?.trim() ||
@@ -831,9 +1128,96 @@ export class WeChatClawBotAdapter implements ChannelAdapter {
       externalId,
       senderExternalId: sender,
       text,
+      ...(attachments.length > 0 ? { attachments } : {}),
       receivedAtMs: msg.create_time_ms ?? Date.now(),
       adapterStatePatch: patch,
     });
+  }
+
+  async #downloadInboundAttachments(
+    msg: WeixinMessage,
+  ): Promise<InboundChannelAttachment[]> {
+    if (msg.message_type !== MESSAGE_TYPE_USER || msg.group_id?.trim()) {
+      return [];
+    }
+    const out: InboundChannelAttachment[] = [];
+    for (const item of msg.item_list ?? []) {
+      if (out.length >= MAX_INBOUND_MEDIA_ITEMS) break;
+      let media: WeixinCdnMedia | undefined;
+      let hexKey: string | undefined;
+      let directUrl: string | undefined;
+      let defaultName: string;
+      let mediaType: string | undefined;
+
+      if (item.type === ITEM_TYPE_IMAGE && item.image_item) {
+        media = item.image_item.media;
+        hexKey = item.image_item.aeskey;
+        directUrl = item.image_item.url;
+        defaultName = "image.jpg";
+        mediaType = "image/jpeg";
+      } else if (item.type === ITEM_TYPE_FILE && item.file_item) {
+        media = item.file_item.media;
+        defaultName = item.file_item.file_name?.trim() || "file.bin";
+      } else if (item.type === ITEM_TYPE_VIDEO && item.video_item) {
+        media = item.video_item.media;
+        defaultName = "video.mp4";
+        mediaType = "video/mp4";
+      } else {
+        continue;
+      }
+
+      const downloadUrl =
+        media?.full_url?.trim() ||
+        (media?.encrypt_query_param
+          ? `${WECHAT_CDN_BASE_URL}/download?encrypted_query_param=${encodeURIComponent(media.encrypt_query_param)}`
+          : directUrl?.trim());
+      if (!downloadUrl) continue;
+
+      try {
+        const res = await this.#fetchImpl(downloadUrl, {
+          method: "GET",
+          signal: AbortSignal.timeout(DEFAULT_CDN_TIMEOUT_MS),
+        });
+        if (!res.ok) continue;
+        const lengthHeader = Number(res.headers.get("content-length"));
+        if (
+          Number.isFinite(lengthHeader) &&
+          lengthHeader > MAX_INBOUND_MEDIA_BYTES
+        ) {
+          await res.body?.cancel();
+          continue;
+        }
+        const rawBytes = new Uint8Array(await res.arrayBuffer());
+        if (
+          rawBytes.byteLength === 0 ||
+          rawBytes.byteLength > MAX_INBOUND_MEDIA_BYTES
+        ) {
+          continue;
+        }
+        const aesKey = parseWeChatAesKey(media?.aes_key, hexKey);
+        const plain = aesKey
+          ? new Uint8Array(decryptAesEcb(rawBytes, aesKey))
+          : rawBytes;
+        let filename = defaultName;
+        if (item.type === ITEM_TYPE_IMAGE) {
+          const sniffed = sniffImageFormat(plain);
+          filename = `image-${String(out.length + 1)}${sniffed.ext}`;
+          mediaType = sniffed.mime;
+        }
+        out.push({
+          filename,
+          ...(mediaType ? { mediaType } : {}),
+          bytes: plain,
+        });
+      } catch (err) {
+        this.#logger.log("warn", "channels.wechat_inbound_media_failed", {
+          binding_id: this.#bindingId,
+          item_type: item.type,
+          error: String(err),
+        });
+      }
+    }
+    return out;
   }
 
   async #getUpdates(

@@ -1475,6 +1475,45 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/internal/v1/channels/bindings/{bindingId}/documents/{documentId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        bindingId: components["schemas"]["Id"];
+        documentId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    /** Download the latest content of a Document visible to the bound Human for outbound IM delivery. */
+    get: operations["downloadInternalIMChannelDocument"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/internal/v1/channels/bindings/{bindingId}/attachments": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        bindingId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Upload an inbound IM media attachment into the bound Human's isolated Channel Room. */
+    post: operations["uploadInternalIMChannelAttachment"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2025,6 +2064,17 @@ export interface components {
           document_id: components["schemas"]["Id"];
         };
     AgentRuntimeContextKey: string;
+    /**
+     * @description External messaging channel bridged to this Room.
+     * @enum {string}
+     */
+    RoomChannel:
+      | "imessage"
+      | "wechat"
+      | "whatsapp"
+      | "telegram"
+      | "discord"
+      | "slack";
     AgentRuntimeInt64: string;
     /** @description Trusted identity of the shared Task directory this Context reads or writes. Present for a Room-bound Meta Context (role meta, no task_id) and for an alter_ego Context whose current Task generation is coordinated by a Room-bound Meta Context of the same Agent (role alter_ego, task_id required). The origin Room is that frozen coordinator's Room, never the Task Room. */
     AgentRuntimeSharedTaskScope: {
@@ -2047,6 +2097,7 @@ export interface components {
        * @enum {string}
        */
       room_kind?: "direct" | "collaboration";
+      room_channel?: components["schemas"]["RoomChannel"];
       /** @enum {string} */
       target_residency: "active" | "suspended";
       state_revision: components["schemas"]["AgentRuntimePositiveInt64"];
@@ -3592,7 +3643,8 @@ export interface components {
     InternalIMChannelInboundRequest: {
       external_id: string;
       sender_external_id: string;
-      text: string;
+      text?: string;
+      attachment_upload_ids?: string[];
       adapter_state_patch?: {
         [key: string]: unknown;
       };
@@ -3603,11 +3655,18 @@ export interface components {
       kind:
         | "message"
         | "decision"
+        | "question_step"
         | "decision_conflict"
         | "decision_rejected"
         | "no_another_me";
       room_id?: string;
       reply_hint_code?: string;
+      next_prompt?: string;
+    };
+    InternalIMChannelOutboundDocument: {
+      document_id: components["schemas"]["Id"];
+      filename: string;
+      media_type?: string;
     };
     InternalIMChannelOutboundEvent: {
       /** Format: int64 */
@@ -3622,6 +3681,8 @@ export interface components {
       card?: {
         [key: string]: unknown;
       };
+      documents?: components["schemas"]["InternalIMChannelOutboundDocument"][];
+      has_html_fragment?: boolean;
     };
     InternalIMChannelOutboundPage: {
       room_id: string;
@@ -3631,6 +3692,9 @@ export interface components {
       latest_room_seq: number;
       has_more: boolean;
       items: components["schemas"]["InternalIMChannelOutboundEvent"][];
+    };
+    InternalIMChannelAttachmentUploadResponse: {
+      id: string;
     };
   };
   responses: {
@@ -6222,6 +6286,81 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthenticated"];
       404: components["responses"]["NotFound"];
+    };
+  };
+  downloadInternalIMChannelDocument: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        bindingId: components["schemas"]["Id"];
+        documentId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Document content stream. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/octet-stream": string;
+        };
+      };
+      /** @description Native Document export is still rendering; retry shortly. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  uploadInternalIMChannelAttachment: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        bindingId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": {
+          filename: string;
+          media_type?: string;
+          /** Format: binary */
+          content: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Uploaded attachment token ready to attach to an inbound message. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InternalIMChannelAttachmentUploadResponse"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      /** @description Attachment exceeds the configured size limit. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
 }

@@ -591,9 +591,13 @@ func contextsFromRows(ctx context.Context, queries *store.Queries, rows []contex
 	if err != nil {
 		return nil, err
 	}
+	roomChannels, err := readRoomChannels(ctx, queries, rows)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]Context, 0, len(rows))
 	for _, row := range rows {
-		converted, err := contextFromRowWithCoordinators(row, coordinators)
+		converted, err := contextFromRowWithCoordinators(row, coordinators, roomChannels)
 		if err != nil {
 			return nil, err
 		}
@@ -607,7 +611,34 @@ func contextFromRow(ctx context.Context, queries *store.Queries, row contextReco
 	if err != nil {
 		return Context{}, err
 	}
-	return contextFromRowWithCoordinators(row, coordinators)
+	roomChannels, err := readRoomChannels(ctx, queries, []contextRecord{row})
+	if err != nil {
+		return Context{}, err
+	}
+	return contextFromRowWithCoordinators(row, coordinators, roomChannels)
+}
+
+func readRoomChannels(ctx context.Context, queries *store.Queries, rows []contextRecord) (map[string]string, error) {
+	roomIDs := make([]string, 0)
+	for _, row := range rows {
+		if row.ContextKind == "meta" && row.RoomID.Valid && row.RoomID.String != "" {
+			roomIDs = append(roomIDs, row.RoomID.String)
+		}
+	}
+	channels := make(map[string]string)
+	if len(roomIDs) == 0 {
+		return channels, nil
+	}
+	found, err := queries.ListRoomChannelsByIDs(ctx, slices.Compact(slices.Sorted(slices.Values(roomIDs))))
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range found {
+		if item.ChannelKind != "" {
+			channels[item.ID] = item.ChannelKind
+		}
+	}
+	return channels, nil
 }
 
 type taskCoordinatorKey struct{ tenantID, taskID string }
@@ -659,7 +690,7 @@ func sharedTaskScope(tenantID string, ref ContextRef, coordinators map[taskCoord
 	return nil
 }
 
-func contextFromRowWithCoordinators(row contextRecord, coordinators map[taskCoordinatorKey]string) (Context, error) {
+func contextFromRowWithCoordinators(row contextRecord, coordinators map[taskCoordinatorKey]string, roomChannels map[string]string) (Context, error) {
 	ref, err := DecodeContextKey(row.ContextKey)
 	if err != nil || ref.AgentID != row.AgentManagementID || ref.Kind != row.ContextKind ||
 		ref.TaskID != row.TaskID.String || ref.RoomID != row.RoomID.String ||
@@ -677,6 +708,9 @@ func contextFromRowWithCoordinators(row contextRecord, coordinators map[taskCoor
 			return Context{}, errors.New("stored Agent Execution Context Room kind is invalid")
 		}
 		result.RoomKind = row.RoomKind.String
+		if ch := roomChannels[ref.RoomID]; ch != "" {
+			result.RoomChannel = ch
+		}
 	} else if row.RoomKind.Valid {
 		return Context{}, errors.New("stored Agent Execution Context Room kind is invalid")
 	}

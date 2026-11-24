@@ -28,10 +28,15 @@
   always start in the order `memory`, `llm-wiki`, `agent`, `voice`, `channels`, `document`. Shutdown starts media draining immediately while other roles stop in reverse.
 - The `channels` role mounts `/v1/channels` on the shared HTTP listener and
   supervises network IM protocol adapters (starting with WeChat ClawBot over
-  iLink v2.4.10 long-polling). It holds no local state on disk: credentials,
-  adapter cursors, outbound Room watermarks, and pending question cards live in
+  iLink v2.4.10 long-polling and AES-128-ECB CDN media). It holds no local state on disk: credentials,
+  adapter cursors, outbound Room watermarks, and pending question/approval cards live in
   TeamHub (`im_channel_bindings`) and are read over `teamhub-internal` on
-  startup, `POST /v1/channels:reconcile`, and periodic fallback polls.
+  startup, `POST /v1/channels:reconcile`, and periodic fallback polls. It bridges
+  multi-question (with free-text Other) and approval cards, uploads inbound IM
+  attachments, and delivers outbound attachments and Documents (exporting
+  Markdown Documents to plain `.txt`). Meta contexts for channel Rooms also carry
+  `room_channel` from TeamHub so the Agent avoids interactive HTML chat cards in
+  external messaging channels without altering normal Rooms.
   Background work that uses a later role's seam starts from the role's
   `started()`, which the host calls once every selected role has started, and
   stops from `stopping()`, called before the first role stops: Memory's

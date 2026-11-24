@@ -784,25 +784,25 @@ func (e FinishAgentLocalRunRequestTerminalType) Valid() bool {
 
 // Defines values for IMChannelProvider.
 const (
-	Discord  IMChannelProvider = "discord"
-	Slack    IMChannelProvider = "slack"
-	Telegram IMChannelProvider = "telegram"
-	Wechat   IMChannelProvider = "wechat"
-	Whatsapp IMChannelProvider = "whatsapp"
+	IMChannelProviderDiscord  IMChannelProvider = "discord"
+	IMChannelProviderSlack    IMChannelProvider = "slack"
+	IMChannelProviderTelegram IMChannelProvider = "telegram"
+	IMChannelProviderWechat   IMChannelProvider = "wechat"
+	IMChannelProviderWhatsapp IMChannelProvider = "whatsapp"
 )
 
 // Valid indicates whether the value is a known member of the IMChannelProvider enum.
 func (e IMChannelProvider) Valid() bool {
 	switch e {
-	case Discord:
+	case IMChannelProviderDiscord:
 		return true
-	case Slack:
+	case IMChannelProviderSlack:
 		return true
-	case Telegram:
+	case IMChannelProviderTelegram:
 		return true
-	case Wechat:
+	case IMChannelProviderWechat:
 		return true
-	case Whatsapp:
+	case IMChannelProviderWhatsapp:
 		return true
 	default:
 		return false
@@ -849,6 +849,7 @@ const (
 	DecisionRejected InternalIMChannelInboundResponseKind = "decision_rejected"
 	Message          InternalIMChannelInboundResponseKind = "message"
 	NoAnotherMe      InternalIMChannelInboundResponseKind = "no_another_me"
+	QuestionStep     InternalIMChannelInboundResponseKind = "question_step"
 )
 
 // Valid indicates whether the value is a known member of the InternalIMChannelInboundResponseKind enum.
@@ -863,6 +864,8 @@ func (e InternalIMChannelInboundResponseKind) Valid() bool {
 	case Message:
 		return true
 	case NoAnotherMe:
+		return true
+	case QuestionStep:
 		return true
 	default:
 		return false
@@ -1571,6 +1574,36 @@ func (e RecordAnotherMeBackgroundCallRequestOutcome) Valid() bool {
 	case RecordAnotherMeBackgroundCallRequestOutcomeCompleted:
 		return true
 	case RecordAnotherMeBackgroundCallRequestOutcomeFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RoomChannel.
+const (
+	RoomChannelDiscord  RoomChannel = "discord"
+	RoomChannelImessage RoomChannel = "imessage"
+	RoomChannelSlack    RoomChannel = "slack"
+	RoomChannelTelegram RoomChannel = "telegram"
+	RoomChannelWechat   RoomChannel = "wechat"
+	RoomChannelWhatsapp RoomChannel = "whatsapp"
+)
+
+// Valid indicates whether the value is a known member of the RoomChannel enum.
+func (e RoomChannel) Valid() bool {
+	switch e {
+	case RoomChannelDiscord:
+		return true
+	case RoomChannelImessage:
+		return true
+	case RoomChannelSlack:
+		return true
+	case RoomChannelTelegram:
+		return true
+	case RoomChannelWechat:
+		return true
+	case RoomChannelWhatsapp:
 		return true
 	default:
 		return false
@@ -2431,6 +2464,9 @@ type AgentExecutionContext struct {
 	MembershipEpochId *string                `json:"membership_epoch_id,omitempty"`
 	NextInputSequence AgentRuntimeInt64      `json:"next_input_sequence"`
 	Ref               AgentRuntimeContextRef `json:"ref"`
+
+	// RoomChannel External messaging channel bridged to this Room.
+	RoomChannel *RoomChannel `json:"room_channel,omitempty"`
 
 	// RoomKind Trusted TeamHub Room shape. Present only for a Room-bound Meta Context and derived from TeamHub Room authority.
 	RoomKind *AgentExecutionContextRoomKind `json:"room_kind,omitempty"`
@@ -3477,6 +3513,11 @@ type Id = string
 // IdempotencyKey Client-generated key scoped to the authenticated principal and operation.
 type IdempotencyKey = string
 
+// InternalIMChannelAttachmentUploadResponse defines model for InternalIMChannelAttachmentUploadResponse.
+type InternalIMChannelAttachmentUploadResponse struct {
+	Id string `json:"id"`
+}
+
 // InternalIMChannelBinding defines model for InternalIMChannelBinding.
 type InternalIMChannelBinding struct {
 	// AccountId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
@@ -3518,16 +3559,18 @@ type InternalIMChannelBindingList struct {
 
 // InternalIMChannelInboundRequest defines model for InternalIMChannelInboundRequest.
 type InternalIMChannelInboundRequest struct {
-	AdapterStatePatch *map[string]interface{} `json:"adapter_state_patch,omitempty"`
-	ExternalId        string                  `json:"external_id"`
-	SenderExternalId  string                  `json:"sender_external_id"`
-	Text              string                  `json:"text"`
+	AdapterStatePatch   *map[string]interface{} `json:"adapter_state_patch,omitempty"`
+	AttachmentUploadIds *[]string               `json:"attachment_upload_ids,omitempty"`
+	ExternalId          string                  `json:"external_id"`
+	SenderExternalId    string                  `json:"sender_external_id"`
+	Text                *string                 `json:"text,omitempty"`
 }
 
 // InternalIMChannelInboundResponse defines model for InternalIMChannelInboundResponse.
 type InternalIMChannelInboundResponse struct {
 	Accepted      bool                                 `json:"accepted"`
 	Kind          InternalIMChannelInboundResponseKind `json:"kind"`
+	NextPrompt    *string                              `json:"next_prompt,omitempty"`
 	ReplyHintCode *string                              `json:"reply_hint_code,omitempty"`
 	RoomId        *string                              `json:"room_id,omitempty"`
 }
@@ -3535,16 +3578,26 @@ type InternalIMChannelInboundResponse struct {
 // InternalIMChannelInboundResponseKind defines model for InternalIMChannelInboundResponse.Kind.
 type InternalIMChannelInboundResponseKind string
 
+// InternalIMChannelOutboundDocument defines model for InternalIMChannelOutboundDocument.
+type InternalIMChannelOutboundDocument struct {
+	// DocumentId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	DocumentId Id      `json:"document_id"`
+	Filename   string  `json:"filename"`
+	MediaType  *string `json:"media_type,omitempty"`
+}
+
 // InternalIMChannelOutboundEvent defines model for InternalIMChannelOutboundEvent.
 type InternalIMChannelOutboundEvent struct {
-	AuthorActorId *string                                 `json:"author_actor_id,omitempty"`
-	AuthorKind    *string                                 `json:"author_kind,omitempty"`
-	Card          *map[string]interface{}                 `json:"card,omitempty"`
-	EventType     InternalIMChannelOutboundEventEventType `json:"event_type"`
-	MessageId     *string                                 `json:"message_id,omitempty"`
-	MessageKind   *string                                 `json:"message_kind,omitempty"`
-	RawMessage    *string                                 `json:"raw_message,omitempty"`
-	RoomSeq       int64                                   `json:"room_seq"`
+	AuthorActorId   *string                                 `json:"author_actor_id,omitempty"`
+	AuthorKind      *string                                 `json:"author_kind,omitempty"`
+	Card            *map[string]interface{}                 `json:"card,omitempty"`
+	Documents       *[]InternalIMChannelOutboundDocument    `json:"documents,omitempty"`
+	EventType       InternalIMChannelOutboundEventEventType `json:"event_type"`
+	HasHtmlFragment *bool                                   `json:"has_html_fragment,omitempty"`
+	MessageId       *string                                 `json:"message_id,omitempty"`
+	MessageKind     *string                                 `json:"message_kind,omitempty"`
+	RawMessage      *string                                 `json:"raw_message,omitempty"`
+	RoomSeq         int64                                   `json:"room_seq"`
 }
 
 // InternalIMChannelOutboundEventEventType defines model for InternalIMChannelOutboundEvent.EventType.
@@ -4216,6 +4269,9 @@ type RequeueAgentLocalRunRequest struct {
 	Epoch AgentServiceEpoch `json:"epoch"`
 	RunId string            `json:"run_id"`
 }
+
+// RoomChannel External messaging channel bridged to this Room.
+type RoomChannel string
 
 // RuntimeHumanInteractionCreated defines model for RuntimeHumanInteractionCreated.
 type RuntimeHumanInteractionCreated struct {
@@ -5090,6 +5146,18 @@ type serviceBearerContextKey string
 // voiceRuntimeBearerContextKey is the context key for voiceRuntimeBearer security scheme
 type voiceRuntimeBearerContextKey string
 
+// UploadInternalIMChannelAttachmentMultipartBody defines parameters for UploadInternalIMChannelAttachment.
+type UploadInternalIMChannelAttachmentMultipartBody struct {
+	Content   openapi_types.File `json:"content"`
+	Filename  string             `json:"filename"`
+	MediaType *string            `json:"media_type,omitempty"`
+}
+
+// UploadInternalIMChannelAttachmentParams defines parameters for UploadInternalIMChannelAttachment.
+type UploadInternalIMChannelAttachmentParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListInternalIMChannelOutboundParams defines parameters for ListInternalIMChannelOutbound.
 type ListInternalIMChannelOutboundParams struct {
 	AfterSeq *int64 `form:"after_seq,omitempty" json:"after_seq,omitempty"`
@@ -5238,6 +5306,9 @@ type IssueManagedAgentAccessCredentialJSONRequestBody = ManagedAgentAccessCreden
 
 // ResolveMcpContextJSONRequestBody defines body for ResolveMcpContext for application/json ContentType.
 type ResolveMcpContextJSONRequestBody = McpContextResolveRequest
+
+// UploadInternalIMChannelAttachmentMultipartRequestBody defines body for UploadInternalIMChannelAttachment for multipart/form-data ContentType.
+type UploadInternalIMChannelAttachmentMultipartRequestBody UploadInternalIMChannelAttachmentMultipartBody
 
 // IngestInternalIMChannelInboundJSONRequestBody defines body for IngestInternalIMChannelInbound for application/json ContentType.
 type IngestInternalIMChannelInboundJSONRequestBody = InternalIMChannelInboundRequest

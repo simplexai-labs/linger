@@ -3,6 +3,17 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
+import {
+  advancePendingCard,
+  formatPendingCard,
+  formatUnsupportedCardNotice,
+  isReachableExternalUrl,
+  parseNumberedAnswer,
+  type CardFormattingHints,
+  type DecisionCardLike,
+  type PendingCardState,
+} from "@linger/service-kit/channel-bridge";
+
 import type { Translate } from "../i18n/language.js";
 import { normalizeIMessageHandle } from "./config.js";
 import type { ChannelStore, PendingCard } from "./imessage-state.js";
@@ -10,7 +21,7 @@ import {
   TeamHubStreamError,
   type IMessageTeamHub,
   type TeamHubCardChanged,
-  type TeamHubDecisionCard,
+  type TeamHubDecisionRequest,
   type TeamHubMessage,
   type TeamHubMessageCreated,
   type TeamHubResult,
@@ -31,6 +42,8 @@ import type {
   IMsgSendTarget,
 } from "./imsg-rpc.js";
 import type { Logger } from "./log.js";
+
+export { parseNumberedAnswer };
 
 // Every text the channel sends starts with this. Messages to one's own Apple
 // ID come back as a new inbound row with a new GUID, so the prefix is the
@@ -199,62 +212,100 @@ export function outboundMessageBody(
   return omittedCard ? parts.join("") : message.raw_message;
 }
 
-// The numbers of a numbered reply: one for radio, a comma list for
-// checkbox, each in 1..count and none twice.
-export function parseNumberedAnswer(
-  text: string,
-  input: "radio" | "checkbox",
-  count: number,
-): number[] | undefined {
-  const trimmed = text.trim();
-  const grammar = input === "radio" ? /^\d+$/ : /^\d+(\s*,\s*\d+)*$/;
-  if (!grammar.test(trimmed)) return undefined;
-  const numbers = trimmed.split(",").map((part) => Number(part.trim()));
-  if (numbers.some((n) => n < 1 || n > count)) return undefined;
-  if (new Set(numbers).size !== numbers.length) return undefined;
-  return numbers;
-}
-
-export interface QuestionCardText {
-  readonly text: string;
-  readonly decisionId: string;
-  readonly version: number;
-  readonly questionId: string;
-  readonly input: "radio" | "checkbox";
-  readonly optionIds: string[];
-}
-
-// Only question cards are answered from Messages. The other kinds approve
-// actions that cannot be taken back or need inputs (connections, keys,
-// files) Messages cannot carry, so they stay in Linger.
-export function questionCardText(
-  card: TeamHubDecisionCard,
-  humanActorId: string | undefined,
-  t: Translate,
-): QuestionCardText | undefined {
-  if (card.kind !== "question" || card.status !== "pending") return undefined;
-  if (!humanActorId || card.decision_owner.id !== humanActorId)
-    return undefined;
-  const questions = card.question?.questions;
-  if (questions?.length !== 1) return undefined;
-  const question = questions[0]!;
-  if (question.input !== "radio" && question.input !== "checkbox")
-    return undefined;
-  const lines = [card.title];
-  if (question.prompt.trim() !== card.title.trim()) lines.push(question.prompt);
-  question.options.forEach((option, index) =>
-    lines.push(`${String(index + 1)}. ${option.label}`),
-  );
-  lines.push(
-    t(question.input === "radio" ? m.replyWithNumber : m.replyWithNumbers),
-  );
+function cardHints(t: Translate): CardFormattingHints {
   return {
-    text: lines.join("\n"),
-    decisionId: card.decision_id,
+    replyRadioOrOther: t(m.replyRadioOrOther),
+    replyCheckboxOrOther: t(m.replyCheckboxOrOther),
+    approveOption: t(m.approveOption),
+    denyOption: t(m.denyOption),
+    replyApproveOrDeny: t(m.replyApproveOrDeny),
+    openLingerToReview: (title, url) =>
+      url
+        ? `${title}\n${t(m.openToAnswer, { link: url })}`
+        : t(m.openToAnswerInApp, { title }),
+  };
+}
+
+function cloneAnswers(
+  answers: Readonly<Record<string, string | readonly string[]>>,
+): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(answers)) {
+    out[key] = typeof value === "string" ? value : [...value];
+  }
+  return out;
+}
+
+function toStoredPendingCard(
+  state: PendingCardState,
+  chatTarget: IMsgSendTarget,
+  messageId: string,
+): PendingCard {
+  if (state.kind === "question") {
+    return {
+      kind: "question",
+      chatTarget,
+      messageId,
+      decisionId: state.decisionId,
+      version: state.version,
+      title: state.title,
+      questions: state.questions.map((q) => ({
+        id: q.id,
+        prompt: q.prompt,
+        input: q.input,
+        options: q.options.map((o) => ({ id: o.id, label: o.label })),
+      })),
+      currentIndex: state.currentIndex,
+      answers: cloneAnswers(state.answers),
+    };
+  }
+  return {
+    kind: "approval",
+    chatTarget,
+    messageId,
+    decisionId: state.decisionId,
+    version: state.version,
+    title: state.title,
+    decisionKind: state.decisionKind,
+  };
+}
+
+function toPendingCardState(card: PendingCard): PendingCardState {
+  if ("kind" in card && card.kind === "question") {
+    return {
+      kind: "question",
+      decisionId: card.decisionId,
+      version: card.version,
+      title: card.title,
+      questions: card.questions,
+      currentIndex: card.currentIndex,
+      answers: card.answers,
+    };
+  }
+  if ("kind" in card && card.kind === "approval") {
+    return {
+      kind: "approval",
+      decisionId: card.decisionId,
+      version: card.version,
+      title: card.title,
+      decisionKind: card.decisionKind,
+    };
+  }
+  return {
+    kind: "question",
+    decisionId: card.decisionId,
     version: card.version,
-    questionId: question.id,
-    input: question.input,
-    optionIds: question.options.map((option) => option.id),
+    title: "",
+    questions: [
+      {
+        id: card.questionId,
+        prompt: "",
+        input: card.input,
+        options: card.optionIds.map((id) => ({ id, label: id })),
+      },
+    ],
+    currentIndex: 0,
+    answers: {},
   };
 }
 
@@ -669,19 +720,23 @@ export class IMessageChannel {
     let chunks: string[];
     let pending: PendingCard | undefined;
     if (message.card) {
-      const question = questionCardText(
-        message.card,
+      const hints = cardHints(this.#options.t);
+      const formatted = formatPendingCard(
+        message.card as DecisionCardLike,
         this.#humanActorId,
-        this.#options.t,
+        hints,
       );
-      if (question) {
-        chunks = imessageChunks(question.text);
-        const { text: _text, ...card } = question;
-        pending = { ...card, chatTarget: target, messageId: message.id };
-      } else
-        chunks = imessageChunks(
-          `${message.card.title}\n${this.#options.t(m.openToAnswer, { link: this.#chatLink() })}`,
+      if (formatted) {
+        chunks = imessageChunks(formatted.text);
+        pending = toStoredPendingCard(formatted.state, target, message.id);
+      } else {
+        const notice = formatUnsupportedCardNotice(
+          message.card as DecisionCardLike,
+          this.#chatLink(),
+          hints,
         );
+        chunks = notice ? imessageChunks(notice) : [];
+      }
     } else chunks = imessageText(outboundMessageBody(message, documents));
     if (chunks.length === 0 && documents.length === 0) return;
     // Only the latest Message can be answered by number.
@@ -706,7 +761,13 @@ export class IMessageChannel {
       documents: documents.length || undefined,
       files_sent: filesSent || undefined,
       sent,
-      card: pending ? "question" : message.card ? "link" : undefined,
+      card: pending
+        ? "kind" in pending
+          ? pending.kind
+          : "question"
+        : message.card
+          ? "link"
+          : undefined,
     });
     if (sent && pending) store.update({ pendingCard: pending });
   }
@@ -721,13 +782,11 @@ export class IMessageChannel {
         document_id: doc.documentId,
         reason,
       });
-      return this.#sendOne(
-        target,
-        `${OUTBOUND_PREFIX}${t(m.openDocument, {
-          name: doc.label,
-          link: this.#documentLink(doc.documentId),
-        })}`,
-      );
+      const link = this.#documentLink(doc.documentId);
+      const fallbackText = isReachableExternalUrl(link)
+        ? t(m.openDocument, { name: doc.label, link })
+        : t(m.openDocumentInApp, { name: doc.label });
+      return this.#sendOne(target, `${OUTBOUND_PREFIX}${fallbackText}`);
     };
     if (!teamhub.downloadDocument) return fallback("unsupported");
     const downloaded = await teamhub.downloadDocument(
@@ -898,13 +957,37 @@ export class IMessageChannel {
       (!("chatId" in pending.chatTarget) ||
         pending.chatTarget.chatId === admission.chatId)
     ) {
-      const numbers = parseNumberedAnswer(
+      const outcome = advancePendingCard(
+        toPendingCardState(pending),
         admission.text,
-        pending.input,
-        pending.optionIds.length,
+        cardHints(this.#options.t),
       );
-      if (numbers) {
-        const step = await this.#answer(pending, numbers);
+      if (outcome.action === "next_question") {
+        store.update({
+          pendingCard: toStoredPendingCard(
+            outcome.nextState,
+            pending.chatTarget,
+            pending.messageId,
+          ),
+        });
+        for (const chunk of imessageChunks(outcome.nextPrompt)) {
+          await this.#sendOne(pending.chatTarget, `${OUTBOUND_PREFIX}${chunk}`);
+        }
+        return done();
+      }
+      if (outcome.action === "submit_question") {
+        const step = await this.#submitDecision(pending, {
+          expected_version: outcome.version,
+          decision: "submit",
+          answers: cloneAnswers(outcome.answers),
+        });
+        return step === "done" ? done() : step;
+      }
+      if (outcome.action === "decide_approval") {
+        const step = await this.#submitDecision(pending, {
+          expected_version: outcome.version,
+          decision: outcome.decision,
+        });
         return step === "done" ? done() : step;
       }
     }
@@ -1003,16 +1086,12 @@ export class IMessageChannel {
     return retryable(result.status) ? "retry" : "done";
   }
 
-  async #answer(pending: PendingCard, numbers: number[]): Promise<Step> {
+  async #submitDecision(
+    pending: PendingCard,
+    body: TeamHubDecisionRequest,
+  ): Promise<Step> {
     const { store, teamhub, log } = this.#options;
-    const chosen = numbers.map((n) => pending.optionIds[n - 1]!);
-    const result = await teamhub.decide(pending.decisionId, {
-      expected_version: pending.version,
-      decision: "submit",
-      answers: {
-        [pending.questionId]: pending.input === "radio" ? chosen[0]! : chosen,
-      },
-    });
+    const result = await teamhub.decide(pending.decisionId, body);
     if (result.ok) {
       log.info("imessage.card_answered", { decision_id: pending.decisionId });
       store.update({ pendingCard: null });
@@ -1027,13 +1106,14 @@ export class IMessageChannel {
       code: result.code,
     });
     const { t } = this.#options;
-    await this.#sendOne(
-      pending.chatTarget,
-      OUTBOUND_PREFIX +
-        (result.status === 409
-          ? t(m.answerChanged)
-          : t(m.answerFailed, { link: this.#chatLink() })),
-    );
+    const link = this.#chatLink();
+    const failText =
+      result.status === 409
+        ? t(m.answerChanged)
+        : isReachableExternalUrl(link)
+          ? t(m.answerFailed, { link })
+          : t(m.answerFailedInApp);
+    await this.#sendOne(pending.chatTarget, `${OUTBOUND_PREFIX}${failText}`);
     return "done";
   }
 

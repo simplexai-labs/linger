@@ -610,14 +610,14 @@ describe("IMessageChannel question cards", () => {
   it("sends numbered options and remembers the card", async () => {
     const f = await cardSetup();
     expect(f.sent.map((s) => s.text)).toEqual([
-      `${OUTBOUND_PREFIX}Which day?\nPick one\n1. Monday\n2. Tuesday\n3. Friday\nReply with a number.`,
+      `${OUTBOUND_PREFIX}Which day?\nPick one\n1. Monday\n2. Tuesday\n3. Friday\nReply with a number, or type your own answer.`,
     ]);
     expect(f.state().pendingCard).toMatchObject({
+      kind: "question",
       messageId: "m-11",
       decisionId: "d-1",
       version: 3,
-      questionId: "q1",
-      optionIds: ["o1", "o2", "o3"],
+      currentIndex: 0,
     });
     await f.channel.stop();
   });
@@ -637,9 +637,11 @@ describe("IMessageChannel question cards", () => {
 
   it("answers a checkbox card with several options", async () => {
     const f = await cardSetup("checkbox");
-    expect(f.sent[0]!.text.endsWith("Reply with numbers, e.g. 1,3.")).toBe(
-      true,
-    );
+    expect(
+      f.sent[0]!.text.endsWith(
+        "Reply with numbers (e.g. 1,3), or type your own answer.",
+      ),
+    ).toBe(true);
     f.inbound(row(1, { text: "3, 1" }));
     await vi.waitFor(() => expect(f.teamhub.decide).toHaveBeenCalled());
     expect(f.teamhub.decide.mock.calls[0]![1]).toMatchObject({
@@ -648,15 +650,92 @@ describe("IMessageChannel question cards", () => {
     await f.channel.stop();
   });
 
-  it("posts other replies as Messages and keeps the card", async () => {
-    const f = await cardSetup();
-    f.inbound(row(1, { text: "4" }));
-    f.inbound(row(2, { text: "let me think" }));
+  it("steps through multi-question cards and accepts free-text Other answers", async () => {
+    const f = setup();
+    f.channel.start();
+    await f.running();
+    f.stream().push(
+      message(11, {
+        card: questionCard("radio", {
+          title: "Deck setup",
+          question: {
+            questions: [
+              {
+                id: "q1",
+                prompt: "Audience?",
+                input: "radio",
+                options: [
+                  { id: "o1", label: "Friends" },
+                  { id: "o2", label: "Team" },
+                ],
+              },
+              {
+                id: "q2",
+                prompt: "How many slides?",
+                input: "radio",
+                options: [
+                  { id: "s1", label: "5-8" },
+                  { id: "s2", label: "10-12" },
+                ],
+              },
+            ],
+          },
+        }),
+      }),
+    );
+    await vi.waitFor(() => expect(f.sent).toHaveLength(1));
+    expect(f.sent[0]!.text).toContain("Deck setup (1/2)");
+
+    // Answer step 1 with custom "Other..." text -> sends step 2 without calling decide yet.
+    f.inbound(row(1, { text: "Executive leadership" }));
+    await vi.waitFor(() => expect(f.sent).toHaveLength(2));
+    expect(f.sent[1]!.text).toContain("Deck setup (2/2)");
+    expect(f.teamhub.decide).not.toHaveBeenCalled();
+
+    // Answer step 2 with option number -> submits both answers together.
+    f.inbound(row(2, { text: "2" }));
+    await vi.waitFor(() => expect(f.teamhub.decide).toHaveBeenCalledOnce());
+    expect(f.teamhub.decide).toHaveBeenCalledWith("d-1", {
+      expected_version: 3,
+      decision: "submit",
+      answers: { q1: "Executive leadership", q2: "s2" },
+    });
+    expect(f.state().pendingCard).toBeNull();
+    await f.channel.stop();
+  });
+
+  it("handles approval cards with 1/2 and passes through other text as Messages", async () => {
+    const f = setup();
+    f.channel.start();
+    await f.running();
+    f.stream().push(
+      message(11, {
+        card: questionCard("radio", {
+          kind: "connector_write",
+          title: "Send the email?",
+          connector_write: { summary: "Email team@example.com" },
+        }),
+      }),
+    );
+    await vi.waitFor(() => expect(f.state().pendingCard).toBeTruthy());
+    expect(f.sent[0]!.text).toContain("1. Approve\n2. Deny");
+
+    // Non-1/2 reply passes through as chat and keeps the approval card pending.
+    f.inbound(row(1, { text: "let me think" }));
     await vi.waitFor(() =>
-      expect(f.teamhub.postMessage).toHaveBeenCalledTimes(2),
+      expect(f.teamhub.postMessage).toHaveBeenCalledOnce(),
     );
     expect(f.teamhub.decide).not.toHaveBeenCalled();
     expect(f.state().pendingCard).toBeTruthy();
+
+    // Replying "1" approves the card.
+    f.inbound(row(2, { text: "1" }));
+    await vi.waitFor(() => expect(f.teamhub.decide).toHaveBeenCalledOnce());
+    expect(f.teamhub.decide).toHaveBeenCalledWith("d-1", {
+      expected_version: 3,
+      decision: "approve",
+    });
+    expect(f.state().pendingCard).toBeNull();
     await f.channel.stop();
   });
 
@@ -686,15 +765,15 @@ describe("IMessageChannel question cards", () => {
     await f.channel.stop();
   });
 
-  it("links other cards to Linger", async () => {
+  it("links unsupported cards to Linger", async () => {
     const f = setup();
     f.channel.start();
     await f.running();
     f.stream().push(
       message(11, {
         card: questionCard("radio", {
-          kind: "connector_write",
-          title: "Send the email?",
+          kind: "connector_oauth",
+          title: "Connect Gmail",
         }),
       }),
     );
@@ -705,7 +784,7 @@ describe("IMessageChannel question cards", () => {
     );
     await vi.waitFor(() => expect(f.state().roomSeq).toBe(12));
     expect(f.sent.map((s) => s.text)).toEqual([
-      `${OUTBOUND_PREFIX}Send the email?\nOpen Linger to answer: https://linger.test/t/t1/rooms/${ROOM}/chat`,
+      `${OUTBOUND_PREFIX}Connect Gmail\nOpen Linger to answer: https://linger.test/t/t1/rooms/${ROOM}/chat`,
       `${OUTBOUND_PREFIX}Which day?\nOpen Linger to answer: https://linger.test/t/t1/rooms/${ROOM}/chat`,
     ]);
     expect(f.state().pendingCard).toBeFalsy();

@@ -1,12 +1,20 @@
 package app
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
+	artifactstore "github.com/simplexai-labs/linger/apps/teamhub/internal/artifact"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/collaboration"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/document"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/idempotency"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/imchannel"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/secretbox"
 	"github.com/simplexai-labs/linger/contracts-go/teamhubinternal"
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
@@ -229,7 +237,12 @@ func (a *App) ingestInternalIMChannelInbound(c *gin.Context) {
 	input := imchannel.InboundInput{
 		ExternalID:       request.ExternalId,
 		SenderExternalID: request.SenderExternalId,
-		Text:             request.Text,
+	}
+	if request.Text != nil {
+		input.Text = *request.Text
+	}
+	if request.AttachmentUploadIds != nil {
+		input.AttachmentUploadIDs = append([]string(nil), (*request.AttachmentUploadIds)...)
 	}
 	if request.AdapterStatePatch != nil {
 		input.AdapterStatePatch = *request.AdapterStatePatch
@@ -250,7 +263,94 @@ func (a *App) ingestInternalIMChannelInbound(c *gin.Context) {
 		v := result.ReplyHintCode
 		resp.ReplyHintCode = &v
 	}
+	if result.NextPrompt != "" {
+		v := result.NextPrompt
+		resp.NextPrompt = &v
+	}
 	c.JSON(http.StatusOK, resp)
+}
+
+func (a *App) downloadInternalIMChannelDocument(c *gin.Context) {
+	accountID, _, err := a.imChannels.ResolveBindingAccess(c.Request.Context(), c.Param("bindingId"))
+	if a.writeIMChannelError(c, "resolve IM channel binding for document download", err) {
+		return
+	}
+	writeLatestContentCacheHeaders(c)
+	content, err := a.documents.GetLatestDownloadContent(c.Request.Context(), document.LatestDownloadInput{
+		AccountID:  accountID,
+		DocumentID: c.Param("documentId"),
+	})
+	if a.writeUnifiedDocumentError(c, "download IM channel Document", err) {
+		return
+	}
+	if content.InlineBytes != nil {
+		a.writeLatestObjectContentHeaders(c, immutableObjectContent{
+			filename: content.Filename, mediaType: content.MediaType,
+			sha256: content.SHA256, sizeBytes: content.SizeBytes,
+		})
+		http.ServeContent(c.Writer, c.Request, content.Filename, time.Time{}, bytes.NewReader(content.InlineBytes))
+		return
+	}
+	a.writeLatestObjectContent(c, immutableObjectContent{
+		filename: content.Filename, mediaType: content.MediaType,
+		objectKey: content.ObjectKey, sha256: content.SHA256,
+		sizeBytes: content.SizeBytes,
+	})
+}
+
+func (a *App) uploadInternalIMChannelAttachment(c *gin.Context) {
+	key, ok := a.requireIdempotencyKey(c)
+	if !ok {
+		return
+	}
+	accountID, roomID, err := a.imChannels.ResolveBindingAccess(c.Request.Context(), c.Param("bindingId"))
+	if a.writeIMChannelError(c, "resolve IM channel binding for attachment upload", err) {
+		return
+	}
+	upload, err := a.parseMessageAttachmentUpload(c)
+	if err != nil {
+		if errors.Is(err, artifactstore.ErrTooLarge) || isMaxBytesError(err) {
+			code, limit := "too_large", a.cfg.ArtifactMaxBytes
+			a.writeErrorWithDetails(c, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "message attachment exceeds the configured limit",
+				[]httpapi.ErrorDetail{{Field: "content", Code: &code, Reason: "exceeds the attachment size limit", LimitBytes: &limit}})
+		} else {
+			a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "message attachment upload is invalid")
+		}
+		return
+	}
+	defer upload.Content.Close()
+	object, err := a.artifacts.Put(c.Request.Context(), upload.Content)
+	if err != nil {
+		a.writeArtifactStorageError(c, err)
+		return
+	}
+	keepObject := false
+	defer func() {
+		if !keepObject {
+			if deleteErr := artifactstore.DeleteDetached(c.Request.Context(), a.artifacts, object.Key); deleteErr != nil {
+				a.logger.Error("remove uncommitted IM channel attachment", "object_key", object.Key, "error", deleteErr)
+			}
+		}
+	}()
+	result, replay, err := a.collaboration.UploadMessageAttachment(c.Request.Context(), accountID, roomID, upload, object, key)
+	keepObject = collaboration.KeepMessageAttachmentObject(replay, err)
+	if errors.Is(err, pgx.ErrNoRows) {
+		a.writeError(c, http.StatusNotFound, "ROOM_NOT_FOUND", "room was not found")
+		return
+	}
+	if errors.Is(err, idempotency.ErrConflict) {
+		a.writeError(c, http.StatusConflict, "IDEMPOTENCY_KEY_REUSED", "idempotency key was used with different input")
+		return
+	}
+	if errors.Is(err, secretbox.ErrTooLong) {
+		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "message attachment filename and media type are too long")
+		return
+	}
+	if err != nil {
+		a.internalError(c, "upload IM channel attachment", err)
+		return
+	}
+	writeResultResponse(c, result)
 }
 
 func (a *App) listInternalIMChannelOutbound(c *gin.Context) {
@@ -296,6 +396,25 @@ func (a *App) listInternalIMChannelOutbound(c *gin.Context) {
 		if len(ev.Card) > 0 {
 			card := ev.Card
 			item.Card = &card
+		}
+		if len(ev.Documents) > 0 {
+			docs := make([]teamhubinternal.InternalIMChannelOutboundDocument, 0, len(ev.Documents))
+			for _, d := range ev.Documents {
+				doc := teamhubinternal.InternalIMChannelOutboundDocument{
+					DocumentId: d.DocumentID,
+					Filename:   d.Filename,
+				}
+				if d.MediaType != "" {
+					mt := d.MediaType
+					doc.MediaType = &mt
+				}
+				docs = append(docs, doc)
+			}
+			item.Documents = &docs
+		}
+		if ev.HasHTMLFragment {
+			v := true
+			item.HasHtmlFragment = &v
 		}
 		items = append(items, item)
 	}

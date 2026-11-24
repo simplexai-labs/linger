@@ -13,6 +13,8 @@ func (a *App) agentServiceRoutes() []contractRoute {
 	return []contractRoute{
 		route(http.MethodPost, "/internal/agents/:agentId/access-credentials", nil, agentService, a.issueManagedAgentAccessCredential),
 		route(http.MethodGet, "/internal/v1/channels/bindings", nil, agentService, a.listInternalIMChannelBindings),
+		route(http.MethodPost, "/internal/v1/channels/bindings/:bindingId/attachments", teamhubinternal.UploadInternalIMChannelAttachmentParams{}, agentService, a.uploadInternalIMChannelAttachment),
+		route(http.MethodGet, "/internal/v1/channels/bindings/:bindingId/documents/:documentId", nil, agentService, a.downloadInternalIMChannelDocument),
 		route(http.MethodPost, "/internal/v1/channels/bindings/:bindingId/inbound", nil, agentService, a.ingestInternalIMChannelInbound),
 		route(http.MethodGet, "/internal/v1/channels/bindings/:bindingId/outbound", teamhubinternal.ListInternalIMChannelOutboundParams{}, agentService, a.listInternalIMChannelOutbound),
 		route(http.MethodPost, "/internal/v1/channels/bindings/:bindingId/status", nil, agentService, a.reportInternalIMChannelStatus),

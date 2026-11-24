@@ -9,6 +9,7 @@ import type {
 import type { RuntimeViewMapping } from "../executor/workspace.js";
 import type {
   ExecutionContextRef,
+  MetaRoomChannel,
   MetaRoomKind,
 } from "../executor/context-ref.js";
 import type { CanonicalInboxMessage } from "./inbox-source/types.js";
@@ -72,6 +73,7 @@ export interface FeatureContextView {
   readonly agentName: string;
   readonly agent: Readonly<AgentDefinition>;
   readonly roomKind?: MetaRoomKind;
+  readonly roomChannel?: MetaRoomChannel;
   /** Deployment capabilities from the Agent Runtime configuration. */
   readonly capabilities: readonly AgentCapability[];
 }

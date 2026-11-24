@@ -601,14 +601,18 @@ Gateway and runs Agents. The daemon exits with the app.
   event's `room_seq` is stored as in flight first, only a send imsg proves
   never started is retried (five tries; while imsg restarts, sends wait up
   to two minutes without using a try), and an event still in flight after
-  a restart is skipped. A pending question card with one radio or checkbox
-  question owned by the person is sent as numbered options; a reply of
-  numbers within range submits `POST /v0/decisions/{id}`, a 409 says the
-  question changed, another refusal links to the Chat, other text is an ordinary Message, and `card.changed`
-  with a newer version, or any later Another Me Message, forgets the card. Other cards are sent as their
-  title and a link to the Chat. The bridge's own words (reply hints, these
-  links, the 409 notice) come from `imessage.messages.ts` in the shell's
-  language. Cursors and the pending card live in
+  a restart is skipped. A pending question card (one or more radio/checkbox
+  questions) owned by the person is stepped through one question at a time via
+  numbered or free-text ("Other") replies, and pending approval cards
+  (`runtime_permission`, `connector_write`, `agent_change`, `room_creation`)
+  accept `1` (approve) or `2` (deny) before submitting `POST /v0/decisions/{id}`;
+  a 409 says the prompt changed, another refusal falls back to Linger (omitting
+  unreachable `localhost` URLs), non-1/2 replies on approval cards pass through
+  as ordinary Messages, and `card.changed` with a newer version, or any later
+  Another Me Message, forgets the card. Cards requiring OAuth, API keys, or
+  macOS permissions prompt the person to review them in Linger. The bridge's own
+  words (reply hints, these links, the 409 notice) come from `imessage.messages.ts`
+  in the shell's language. Cursors and the pending card live in
   `<userData>/imessage/state.json` (0600; a damaged file starts empty).
   Signed out (401 or `session.expired`) it probes `/v0/me` every 30 s;
   without an Another Me it checks every 60 s; an unexpected failure is

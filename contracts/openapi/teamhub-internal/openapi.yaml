@@ -1159,6 +1159,87 @@ paths:
           $ref: "#/components/responses/NotFound"
       security:
         - agentServiceToTeamHubBearer: []
+  /internal/v1/channels/bindings/{bindingId}/documents/{documentId}:
+    parameters:
+      - name: bindingId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/common.yaml#/components/schemas/Id
+      - name: documentId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/common.yaml#/components/schemas/Id
+    get:
+      operationId: downloadInternalIMChannelDocument
+      summary: Download the latest content of a Document visible to the bound Human for outbound IM delivery.
+      responses:
+        "200":
+          description: Document content stream.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "202":
+          description: Native Document export is still rendering; retry shortly.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - agentServiceToTeamHubBearer: []
+  /internal/v1/channels/bindings/{bindingId}/attachments:
+    parameters:
+      - name: bindingId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/common.yaml#/components/schemas/Id
+    post:
+      operationId: uploadInternalIMChannelAttachment
+      summary: Upload an inbound IM media attachment into the bound Human's isolated Channel Room.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [filename, content]
+              properties:
+                filename:
+                  type: string
+                media_type:
+                  type: string
+                content:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Uploaded attachment token ready to attach to an inbound message.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/im-channels.yaml#/components/schemas/InternalIMChannelAttachmentUploadResponse
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          description: Attachment exceeds the configured size limit.
+      security:
+        - agentServiceToTeamHubBearer: []
 components:
   securitySchemes:
     agentBearer:

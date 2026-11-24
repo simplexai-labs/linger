@@ -758,6 +758,10 @@ func agentExecutionContextToContract(value agentruntimestate.Context) (teamhubin
 		roomKind := teamhubinternal.AgentExecutionContextRoomKind(value.RoomKind)
 		result.RoomKind = &roomKind
 	}
+	if value.RoomChannel != "" {
+		roomChannel := teamhubinternal.RoomChannel(value.RoomChannel)
+		result.RoomChannel = &roomChannel
+	}
 	if scope := value.SharedTaskScope; scope != nil {
 		result.SharedTaskScope = &teamhubinternal.AgentRuntimeSharedTaskScope{
 			Version: teamhubinternal.AgentRuntimeSharedTaskScopeVersion(scope.Version), TenantId: scope.TenantID,

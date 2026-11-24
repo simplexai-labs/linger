@@ -391,3 +391,66 @@ func TestIngestInboundAnswersPendingCardOrCreatesMessage(t *testing.T) {
 		t.Fatalf("expected message in isolated channel room, got %s", fc.roomIDs[0])
 	}
 }
+
+func TestIngestInboundMultiQuestionOtherAndApproval(t *testing.T) {
+	fs := newFakeStore()
+	fc := &fakeCollab{}
+	fd := &fakeDecisions{}
+	svc := New(fs, fc, fd, testSecretBox(t), &fakeNode{}, nil)
+
+	multiJSON, _ := json.Marshal(pendingCardRecord{
+		Kind:       "question",
+		DecisionID: "dec_multi",
+		Version:    1,
+		Title:      "Trip Deck",
+		Questions: []pendingQuestionStep{
+			{
+				ID: "q1", Prompt: "Audience?", Input: "radio",
+				Options: []pendingQuestionOption{{ID: "o1", Label: "Friends"}, {ID: "o2", Label: "Team"}},
+			},
+			{
+				ID: "q2", Prompt: "Pages?", Input: "radio",
+				Options: []pendingQuestionOption{{ID: "p1", Label: "5"}, {ID: "p2", Label: "10"}},
+			},
+		},
+	})
+	fs.bindings["imc_multi"] = store.ImChannelBinding{
+		ID: "imc_multi", TenantID: "ten_1", AccountID: "acc_1",
+		HumanActorID: "act_1", Provider: "wechat", Enabled: true,
+		PendingCardJson: multiJSON,
+	}
+
+	// First answer advances to question 2.
+	step1, err := svc.IngestInbound(context.Background(), "imc_multi", InboundInput{
+		ExternalID: "m1", SenderExternalID: "u@im.wechat", Text: "1",
+	})
+	if err != nil || step1.Kind != "question_step" || step1.NextPrompt == "" {
+		t.Fatalf("step1 = %+v, %v", step1, err)
+	}
+	// Second answer uses custom "Other" text and submits both answers.
+	step2, err := svc.IngestInbound(context.Background(), "imc_multi", InboundInput{
+		ExternalID: "m2", SenderExternalID: "u@im.wechat", Text: "8 pages",
+	})
+	if err != nil || step2.Kind != "decision" {
+		t.Fatalf("step2 = %+v, %v", step2, err)
+	}
+	if fd.lastID != "dec_multi" || fd.lastCmd.Answers["q1"] != "o1" || fd.lastCmd.Answers["q2"] != "8 pages" {
+		t.Fatalf("unexpected multi answers: %+v", fd.lastCmd)
+	}
+
+	// Approval card accepts "1" as approve.
+	approvalJSON, _ := json.Marshal(pendingCardRecord{
+		Kind: "approval", DecisionID: "dec_perm", Version: 2, Title: "Run script", DecisionKind: "runtime_permission",
+	})
+	fs.bindings["imc_multi"] = store.ImChannelBinding{
+		ID: "imc_multi", TenantID: "ten_1", AccountID: "acc_1",
+		HumanActorID: "act_1", Provider: "wechat", Enabled: true,
+		PendingCardJson: approvalJSON,
+	}
+	approved, err := svc.IngestInbound(context.Background(), "imc_multi", InboundInput{
+		ExternalID: "m3", SenderExternalID: "u@im.wechat", Text: "1",
+	})
+	if err != nil || approved.Kind != "decision" || fd.lastID != "dec_perm" || fd.lastCmd.Decision != "approve" {
+		t.Fatalf("approval = %+v, cmd=%+v, err=%v", approved, fd.lastCmd, err)
+	}
+}

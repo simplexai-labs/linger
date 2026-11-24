@@ -1,3 +1,5 @@
+import { createCipheriv, createDecipheriv } from "node:crypto";
+
 import { createJsonLogger } from "@linger/service-kit/node";
 import { describe, expect, it, vi } from "vitest";
 
@@ -204,6 +206,171 @@ describe("WeChatClawBotAdapter", () => {
     expect(outcome).toEqual({ ok: true });
     expect((sentBody?.msg as Record<string, unknown>)?.context_token).toBe(
       "ctx_abc",
+    );
+  });
+
+  it("encrypts and uploads outbound files via AES-128-ECB CDN and decrypts inbound media", async () => {
+    const controller = new AbortController();
+    const inboundAttachments: {
+      filename: string;
+      mediaType?: string;
+      bytes: number[];
+    }[] = [];
+
+    const inboundKey = Buffer.from("00112233445566778899aabbccddeeff", "hex");
+    const inboundPlain = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    const enc = createCipheriv("aes-128-ecb", inboundKey, null);
+    const inboundCipher = Buffer.concat([
+      enc.update(inboundPlain),
+      enc.final(),
+    ]);
+
+    let uploadReqAesKeyHex = "";
+    let uploadedCiphertext: Buffer | undefined;
+    let sendMessagePayload: Record<string, unknown> | undefined;
+    let pollCount = 0;
+
+    const fetchMock: typeof fetch = vi.fn(async (input, init) => {
+      const url = String(input);
+      if (url.includes("notifystart") || url.includes("notifystop")) {
+        return new Response(JSON.stringify({ ret: 0 }), { status: 200 });
+      }
+      if (url.includes("getupdates")) {
+        pollCount += 1;
+        if (pollCount === 1) {
+          return new Response(
+            JSON.stringify({
+              ret: 0,
+              get_updates_buf: "buf_img",
+              msgs: [
+                {
+                  message_id: "9001",
+                  from_user_id: "user_1@im.wechat",
+                  message_type: 1,
+                  context_token: "ctx_media",
+                  item_list: [
+                    {
+                      type: 2,
+                      image_item: {
+                        media: {
+                          encrypt_query_param: "enc_q_1",
+                          aes_key: inboundKey.toString("base64"),
+                        },
+                      },
+                    },
+                  ],
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        controller.abort();
+        return new Response(JSON.stringify({ ret: 0, msgs: [] }), {
+          status: 200,
+        });
+      }
+      if (url.includes("/download?")) {
+        return new Response(inboundCipher, { status: 200 });
+      }
+      if (url.includes("getuploadurl")) {
+        const body = JSON.parse(String(init?.body)) as { aeskey: string };
+        uploadReqAesKeyHex = body.aeskey;
+        return new Response(
+          JSON.stringify({
+            ret: 0,
+            upload_full_url: "https://cdn.example/upload/slot1",
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === "https://cdn.example/upload/slot1") {
+        uploadedCiphertext = Buffer.from(init?.body as Uint8Array);
+        return new Response(null, {
+          status: 200,
+          headers: { "x-encrypted-param": "cdn_download_param_1" },
+        });
+      }
+      if (url.includes("sendmessage")) {
+        sendMessagePayload = JSON.parse(String(init?.body)) as Record<
+          string,
+          unknown
+        >;
+        return new Response(JSON.stringify({ ret: 0, message_id: "200" }), {
+          status: 200,
+        });
+      }
+      return new Response("{}", { status: 200 });
+    });
+
+    const adapter = new WeChatClawBotAdapter({
+      bindingId: "imc_1",
+      botToken: "tok_1",
+      remoteUserId: "user_1@im.wechat",
+      logger: silentLogger(),
+      fetchImpl: fetchMock,
+    });
+
+    await adapter.start({
+      signal: controller.signal,
+      onInbound: async (msg) => {
+        for (const att of msg.attachments ?? []) {
+          inboundAttachments.push({
+            filename: att.filename,
+            ...(att.mediaType ? { mediaType: att.mediaType } : {}),
+            bytes: Array.from(att.bytes),
+          });
+        }
+      },
+      onStatus: async () => {},
+    });
+
+    expect(inboundAttachments).toEqual([
+      {
+        filename: "image-1.png",
+        mediaType: "image/png",
+        bytes: Array.from(inboundPlain),
+      },
+    ]);
+
+    const fileBytes = new TextEncoder().encode("Trip Plan plain text");
+    const outcome = await adapter.sendMedia({
+      filename: "Trip Plan.txt",
+      mediaType: "text/plain",
+      bytes: fileBytes,
+      roomSeq: 15,
+    });
+    expect(outcome).toEqual({ ok: true });
+    expect(uploadReqAesKeyHex).toHaveLength(32);
+    expect(uploadedCiphertext).toBeDefined();
+
+    // Decrypt the uploaded ciphertext with the hex AES key to verify round-trip.
+    const dec = createDecipheriv(
+      "aes-128-ecb",
+      Buffer.from(uploadReqAesKeyHex, "hex"),
+      null,
+    );
+    const decrypted = Buffer.concat([
+      dec.update(uploadedCiphertext!),
+      dec.final(),
+    ]);
+    expect(decrypted.toString("utf8")).toBe("Trip Plan plain text");
+
+    const item = (
+      (sendMessagePayload?.msg as Record<string, unknown>)?.item_list as Record<
+        string,
+        unknown
+      >[]
+    )?.[0];
+    expect(item?.type).toBe(4);
+    const fileItem = item?.file_item as Record<string, unknown>;
+    expect(fileItem?.file_name).toBe("Trip Plan.txt");
+    const media = fileItem?.media as Record<string, unknown>;
+    expect(media?.encrypt_query_param).toBe("cdn_download_param_1");
+    expect(media?.aes_key).toBe(
+      Buffer.from(uploadReqAesKeyHex, "utf8").toString("base64"),
     );
   });
 });

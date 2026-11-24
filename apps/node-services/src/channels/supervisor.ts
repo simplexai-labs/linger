@@ -1,6 +1,10 @@
 import {
+  channelIdempotencyKey,
+  channelPlainText,
   channelText,
-  formatQuestionCard,
+  formatPendingCard,
+  formatUnsupportedCardNotice,
+  isCardPlaceholderMessage,
   type DecisionCardLike,
 } from "@linger/service-kit/channel-bridge";
 import { sha256Hex, type JsonLogger } from "@linger/service-kit/node";
@@ -9,6 +13,7 @@ import type {
   ChannelAdapter,
   ChannelProvider,
   InboundChannelMessage,
+  OutboundChannelMedia,
 } from "./adapter.js";
 import { WeChatClawBotAdapter } from "./providers/wechat-ilink.js";
 import type {
@@ -20,6 +25,34 @@ import type {
 const RECONCILE_POLL_MS = 60_000;
 const OUTBOUND_POLL_MS = 20_000;
 const MAX_SEND_ATTEMPTS = 2;
+const MAX_INBOUND_ATTACHMENTS = 5;
+const MAX_OUTBOUND_DOCUMENT_BYTES = 50 * 1024 * 1024;
+
+function isMarkdownFile(filename: string, mediaType?: string): boolean {
+  const lowerName = filename.toLowerCase();
+  const lowerType = mediaType?.toLowerCase();
+  return (
+    lowerType === "text/markdown" ||
+    lowerType === "text/x-markdown" ||
+    lowerName.endsWith(".md") ||
+    lowerName.endsWith(".markdown")
+  );
+}
+
+function readableDocumentFilename(
+  downloadedFilename: string | undefined,
+  fallbackLabel: string,
+  asPlainText: boolean,
+): string {
+  const preferred =
+    downloadedFilename && downloadedFilename.toLowerCase() !== "latest.md"
+      ? downloadedFilename
+      : fallbackLabel;
+  const safe = (preferred.trim() || "document").replace(/[\\/:*?"<>|]/g, "_");
+  if (!asPlainText) return safe;
+  const stem = safe.replace(/\.(md|markdown)$/i, "");
+  return stem.toLowerCase().endsWith(".txt") ? stem : `${stem}.txt`;
+}
 
 export type AdapterFactory = (
   binding: InternalIMChannelBinding,
@@ -290,10 +323,41 @@ export class ChannelSupervisor {
     runner: ActiveRunner,
     msg: InboundChannelMessage,
   ): Promise<void> {
+    const attachmentUploadIds: string[] = [];
+    if (
+      msg.attachments &&
+      msg.attachments.length > 0 &&
+      this.#teamHub.uploadAttachment
+    ) {
+      const limit = Math.min(msg.attachments.length, MAX_INBOUND_ATTACHMENTS);
+      for (let index = 0; index < limit; index += 1) {
+        const attachment = msg.attachments[index]!;
+        const uploadId = await this.#teamHub.uploadAttachment(
+          runner.bindingId,
+          {
+            idempotencyKey: channelIdempotencyKey(
+              `${runner.adapter.provider}-att`,
+              `${msg.externalId}:${String(index)}`,
+            ),
+            filename: attachment.filename,
+            ...(attachment.mediaType
+              ? { mediaType: attachment.mediaType }
+              : {}),
+            bytes: attachment.bytes,
+          },
+        );
+        if (uploadId) attachmentUploadIds.push(uploadId);
+      }
+    }
+    if (!msg.text.trim() && attachmentUploadIds.length === 0) return;
+
     const response = await this.#teamHub.ingestInbound(runner.bindingId, {
       external_id: msg.externalId,
       sender_external_id: msg.senderExternalId,
-      text: msg.text,
+      ...(msg.text ? { text: msg.text } : {}),
+      ...(attachmentUploadIds.length > 0
+        ? { attachment_upload_ids: attachmentUploadIds }
+        : {}),
       ...(msg.adapterStatePatch
         ? { adapter_state_patch: msg.adapterStatePatch }
         : {}),
@@ -308,16 +372,27 @@ export class ChannelSupervisor {
       });
       return;
     }
+    if (response.kind === "question_step") {
+      if (response.next_prompt) {
+        for (const chunk of channelText(
+          response.next_prompt,
+          runner.adapter.capabilities.maxTextChars,
+        )) {
+          await this.#sendWithRetry(runner, chunk, runner.outboundSeq);
+        }
+      }
+      return;
+    }
     if (response.kind === "decision_conflict") {
       await runner.adapter.sendText({
-        text: "That question was already answered or changed in Linger.",
+        text: "That prompt was already answered or changed in Linger.",
         roomSeq: runner.outboundSeq,
       });
       return;
     }
     if (response.kind === "decision_rejected") {
       await runner.adapter.sendText({
-        text: "Please open Linger to answer this prompt.",
+        text: "Please open Linger to complete this prompt.",
         roomSeq: runner.outboundSeq,
       });
       return;
@@ -411,8 +486,12 @@ export class ChannelSupervisor {
     const chunks: string[] = [];
     let nextPendingCard: Record<string, unknown> | undefined;
     let clearPendingCard = true;
+    const card = event.card as DecisionCardLike | undefined;
 
-    if (event.raw_message?.trim()) {
+    if (
+      event.raw_message?.trim() &&
+      !(card && isCardPlaceholderMessage(event.raw_message, card))
+    ) {
       chunks.push(
         ...channelText(event.raw_message, caps.maxTextChars, {
           includeLinkUrls: caps.supportsClickableLinks,
@@ -420,25 +499,30 @@ export class ChannelSupervisor {
       );
     }
 
-    if (event.card) {
-      const card = event.card as DecisionCardLike;
-      const question = formatQuestionCard(card, runner.humanActorId);
-      if (question) {
-        chunks.push(...channelText(question.text, caps.maxTextChars));
-        nextPendingCard = {
-          decisionId: question.decisionId,
-          version: question.version,
-          questionId: question.questionId,
-          input: question.input,
-          optionIds: [...question.optionIds],
-        };
+    if (card) {
+      const formatted = formatPendingCard(card, runner.humanActorId);
+      if (formatted) {
+        chunks.push(...channelText(formatted.text, caps.maxTextChars));
+        nextPendingCard = formatted.state as unknown as Record<string, unknown>;
         clearPendingCard = false;
-      } else if (card.status === "pending" && card.title) {
-        chunks.push(`Open Linger to review: ${card.title}`);
+      } else {
+        const notice = formatUnsupportedCardNotice(card, undefined);
+        if (notice) {
+          chunks.push(...channelText(notice, caps.maxTextChars));
+        }
       }
     }
 
-    if (chunks.length === 0) {
+    const documents = event.documents ?? [];
+    if (
+      chunks.length === 0 &&
+      documents.length === 0 &&
+      event.has_html_fragment
+    ) {
+      chunks.push("Interactive content is available in Linger.");
+    }
+
+    if (chunks.length === 0 && documents.length === 0) {
       runner.outboundSeq = event.room_seq;
       await this.#teamHub.reportStatus(runner.bindingId, {
         outbound_room_id: runner.roomId,
@@ -483,9 +567,93 @@ export class ChannelSupervisor {
       }
     }
 
+    for (const doc of documents) {
+      const delivered = await this.#deliverDocument(
+        runner,
+        doc.document_id,
+        doc.filename,
+        doc.media_type,
+        event.room_seq,
+      );
+      if (!delivered) {
+        await this.#sendWithRetry(
+          runner,
+          `Open Linger to view document: ${doc.filename}`,
+          event.room_seq,
+        );
+      }
+    }
+
     await this.#teamHub.reportStatus(runner.bindingId, {
       touch_outbound: true,
     });
+    return true;
+  }
+
+  async #deliverDocument(
+    runner: ActiveRunner,
+    documentId: string,
+    fallbackName: string,
+    fallbackMediaType: string | undefined,
+    roomSeq: number,
+  ): Promise<boolean> {
+    if (!this.#teamHub.downloadDocument || !runner.adapter.sendMedia) {
+      return false;
+    }
+    const downloaded = await this.#teamHub.downloadDocument(
+      runner.bindingId,
+      documentId,
+      MAX_OUTBOUND_DOCUMENT_BYTES,
+    );
+    if (!downloaded) {
+      this.#logger.log("warn", "channels.outbound_document_download_failed", {
+        binding_id: runner.bindingId,
+        document_id: documentId,
+      });
+      return false;
+    }
+
+    const rawName = downloaded.filename || fallbackName;
+    const rawMediaType = downloaded.mediaType || fallbackMediaType;
+    let payloadBytes = downloaded.bytes;
+    let filename: string;
+    let mediaType: string | undefined;
+
+    if (isMarkdownFile(rawName, rawMediaType)) {
+      const plain = channelPlainText(
+        new TextDecoder("utf-8").decode(downloaded.bytes),
+        { includeLinkUrls: runner.adapter.capabilities.supportsClickableLinks },
+      );
+      payloadBytes = new TextEncoder().encode(plain);
+      filename = readableDocumentFilename(
+        downloaded.filename,
+        fallbackName,
+        true,
+      );
+      mediaType = "text/plain";
+    } else {
+      filename = readableDocumentFilename(
+        downloaded.filename,
+        fallbackName,
+        false,
+      );
+      mediaType = rawMediaType;
+    }
+
+    const outcome = await this.#sendMediaWithRetry(runner, {
+      filename,
+      ...(mediaType ? { mediaType } : {}),
+      bytes: payloadBytes,
+      roomSeq,
+    });
+    if (!outcome.ok) {
+      this.#logger.log("warn", "channels.outbound_document_send_failed", {
+        binding_id: runner.bindingId,
+        document_id: documentId,
+        error_code: outcome.errorCode,
+      });
+      return false;
+    }
     return true;
   }
 
@@ -497,6 +665,25 @@ export class ChannelSupervisor {
       attempt += 1
     ) {
       last = await runner.adapter.sendText({ text, roomSeq });
+    }
+    return last;
+  }
+
+  async #sendMediaWithRetry(runner: ActiveRunner, media: OutboundChannelMedia) {
+    if (!runner.adapter.sendMedia) {
+      return {
+        ok: false as const,
+        retryable: false,
+        errorCode: "MEDIA_UNSUPPORTED",
+      };
+    }
+    let last = await runner.adapter.sendMedia(media);
+    for (
+      let attempt = 1;
+      attempt < MAX_SEND_ATTEMPTS && !last.ok && last.retryable;
+      attempt += 1
+    ) {
+      last = await runner.adapter.sendMedia(media);
     }
     return last;
   }

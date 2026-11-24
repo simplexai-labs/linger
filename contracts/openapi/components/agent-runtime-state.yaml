@@ -349,6 +349,8 @@ components:
           description: >-
             Trusted TeamHub Room shape. Present only for a Room-bound Meta
             Context and derived from TeamHub Room authority.
+        room_channel:
+          $ref: "./domain.yaml#/components/schemas/RoomChannel"
         target_residency:
           type: string
           enum: [active, suspended]
