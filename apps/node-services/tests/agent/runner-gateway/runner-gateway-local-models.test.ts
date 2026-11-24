@@ -3,6 +3,7 @@ import type {
   CapabilityLocalModelsExecute,
   LocalModelsSnapshot,
 } from "@linger/wire-contracts/runner-gateway/types";
+import { parseDaemonToAgentEnvelope } from "@linger/wire-contracts/runner-gateway/validator";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -561,5 +562,30 @@ describe("Runner Gateway local models", () => {
     ).rejects.toThrow(/identity mismatch/u);
     expect(close).toHaveBeenCalledWith(1002, "Runner protocol violation");
     await expect(cancelling).rejects.toBeInstanceOf(LocalComputerOfflineError);
+  });
+});
+
+describe("runner.local_models external_holders", () => {
+  it.each([
+    ["an empty list", []],
+    ["a listed app", [{ name: "msedge", bytes: 188_743_680 }]],
+  ])("parses and keeps %s as sent", (_label, externalHolders) => {
+    const base = snapshot("v1");
+    const envelope = parseDaemonToAgentEnvelope({
+      type: "runner.local_models",
+      protocol_version: "2",
+      runner_id: target.computerId,
+      sent_at: new Date().toISOString(),
+      revision: 1,
+      local_models: {
+        ...base,
+        pools: [{ ...base.pools[0], external_holders: externalHolders }],
+      },
+    });
+    if (envelope.type !== "runner.local_models")
+      throw new Error("Unexpected envelope");
+    expect(envelope.local_models.pools[0]?.external_holders).toEqual(
+      externalHolders,
+    );
   });
 });

@@ -80,11 +80,11 @@ type libraryStatus struct {
 	ObservedAt  string               `json:"observed_at"`
 	Host        *wire.LocalModelHost `json:"host"`
 	Pools       []struct {
-		ID              string                              `json:"id"`
-		TotalBytes      uint64                              `json:"total_bytes"`
-		UsedBytes       uint64                              `json:"used_bytes"`
-		Holders         []wire.LocalModelPoolHolder         `json:"holders"`
-		ExternalHolders []wire.LocalModelPoolExternalHolder `json:"external_holders"`
+		ID              string                      `json:"id"`
+		TotalBytes      uint64                      `json:"total_bytes"`
+		UsedBytes       uint64                      `json:"used_bytes"`
+		Holders         []wire.LocalModelPoolHolder `json:"holders"`
+		ExternalHolders []json.RawMessage           `json:"external_holders"`
 	} `json:"pools"`
 	Models []wire.LocalModel          `json:"models"`
 	Debug  *wire.LocalModelsDebugInfo `json:"debug,omitempty"`
@@ -151,9 +151,12 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 		if pool.ExternalHolders != nil {
 			externalHolders = make([]wire.LocalModelPoolExternalHolder, 0)
 		}
-		for _, holder := range pool.ExternalHolders {
-			if name := clip(strings.TrimSpace(holder.Name), 200); name != "" && len(externalHolders) < 256 {
-				externalHolders = append(externalHolders, wire.LocalModelPoolExternalHolder{Name: name, Bytes: holder.Bytes})
+		for _, raw := range pool.ExternalHolders {
+			if len(externalHolders) >= 256 {
+				break
+			}
+			if holder, ok := externalHolder(raw); ok {
+				externalHolders = append(externalHolders, holder)
 			}
 		}
 		snapshot.Pools = append(snapshot.Pools, wire.LocalModelPool{
@@ -409,12 +412,34 @@ func counter(value *float64) *uint64 {
 	return &result
 }
 
+// maxWireInteger is the contract's NonNegativeInteger maximum.
+const maxWireInteger = 1<<53 - 1
+
+// externalHolder decodes one external_holders entry leniently: the list comes
+// from per-process OS GPU counters and is display-only, so a malformed entry is
+// dropped instead of failing the library or reaching the strict wire contract.
+func externalHolder(raw json.RawMessage) (wire.LocalModelPoolExternalHolder, bool) {
+	var holder struct {
+		Name  string      `json:"name"`
+		Bytes json.Number `json:"bytes"`
+	}
+	if err := json.Unmarshal(raw, &holder); err != nil {
+		return wire.LocalModelPoolExternalHolder{}, false
+	}
+	name := clip(strings.TrimSpace(holder.Name), 200)
+	bytes, err := strconv.ParseUint(holder.Bytes.String(), 10, 64)
+	if name == "" || err != nil {
+		return wire.LocalModelPoolExternalHolder{}, false
+	}
+	return wire.LocalModelPoolExternalHolder{Name: name, Bytes: min(bytes, maxWireInteger)}, true
+}
+
 func bytesValue(value float64) uint64 {
 	if math.IsNaN(value) || value <= 0 {
 		return 0
 	}
-	if value >= 1<<53 {
-		return 1 << 53
+	if value >= maxWireInteger {
+		return maxWireInteger
 	}
 	return uint64(value)
 }

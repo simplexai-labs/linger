@@ -3,10 +3,13 @@ package localmodels
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	wire "github.com/simplexai-labs/linger/contracts-go/runnergateway"
 )
 
 // testdata/library-status-dev38.json is what localmodels 0.1.0.dev38 printed
@@ -220,5 +223,46 @@ func TestMapStatusKeepsReportedEmptyExternalHolders(t *testing.T) {
 				t.Fatalf("reported empty list was not encoded as []: %s", out)
 			}
 		})
+	}
+}
+
+func TestMapStatusDropsMalformedExternalHolders(t *testing.T) {
+	encoded, err := os.ReadFile("testdata/library-status-dev38.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := mapStatus(encoded, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
+	}
+	document["pools"].([]any)[0].(map[string]any)["external_holders"] = []any{
+		map[string]any{"name": "negative", "bytes": -1},
+		map[string]any{"name": "fraction", "bytes": 1.5},
+		map[string]any{"name": 123, "bytes": 10},
+		json.RawMessage(`{"name":"sentinel","bytes":18446744073709551615}`),
+		map[string]any{"name": "msedge", "bytes": 42},
+	}
+	encoded, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := mapStatus(encoded, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []wire.LocalModelPoolExternalHolder{
+		{Name: "sentinel", Bytes: 9007199254740991},
+		{Name: "msedge", Bytes: 42},
+	}
+	if !reflect.DeepEqual(snapshot.Pools[0].ExternalHolders, want) {
+		t.Fatalf("external holders = %+v, want %+v", snapshot.Pools[0].ExternalHolders, want)
+	}
+	if len(snapshot.Models) != len(baseline.Models) || len(snapshot.Pools) != len(baseline.Pools) ||
+		!reflect.DeepEqual(snapshot.Pools[1:], baseline.Pools[1:]) {
+		t.Fatalf("malformed holders changed the rest of the snapshot")
 	}
 }

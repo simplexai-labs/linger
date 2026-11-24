@@ -85,9 +85,12 @@ build:assets` to check the initial JS budget.
   Removing), and spins that action's button, with the row's actions off; a
   download the Computer accepted can be cancelled before its first progress.
   Make room filters stale unloaded IDs out of `unload_first`, lists what else
-  holds the pool (components, and other apps from `used_bytes` no holder
-  accounts for) when unloading models cannot free enough, and says a model
-  cannot fit only when it needs more than the pool's total. Opening the page or
+  holds the pool (components and other apps) when unloading models cannot free
+  enough, and says a model cannot fit only when it needs more than the pool's
+  total. When the pool reports `external_holders`, only those apps count as
+  Other apps and the rest of the `used_bytes` no holder accounts for shows as
+  System & engine; without the field, all of that rest counts as Other apps.
+  Opening the page or
   reconnecting an offline Computer auto-refreshes `model-source` and triggers a
   fresh `POST .../local-models` memory snapshot for the owner, while
   `LOCAL_COMPUTER_OFFLINE` disables BYOK edits immediately. A Computer's detail
