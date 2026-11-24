@@ -97,14 +97,10 @@ describe("RunLoop", () => {
       if (input.type === "text") {
         expect(input.text.includes("new native session")).toBe(expected);
         if (expected) {
-          expect(input.text).toContain("teamhub message read without a target");
-          expect(input.text).toContain("teamhub message read --thread <id>");
-          expect(input.text).toContain("task:, meta: and taskmeta:");
-          expect(input.text).toContain("--inbox <exact-inbox-id>");
+          expect(input.text).toContain("teamhub message read");
           expect(input.text).not.toContain("--room");
-          expect(input.text).toContain("latest relevant human decision");
           expect(input.text).toContain("room:room-1");
-          expect(input.text).toContain("Do not replay");
+          expect(input.text).toContain("do not replay");
         }
       }
       run.complete("done");

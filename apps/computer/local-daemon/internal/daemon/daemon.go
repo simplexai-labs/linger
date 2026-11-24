@@ -227,10 +227,6 @@ type activeOperation struct {
 	inputMu           sync.Mutex
 	finishing         bool
 	pendingInputs     map[string]*pendingOperationInput
-	// sessionMoved is set when the Run continued in a new native session
-	// after announcing its retained one; it then declines a scheduler
-	// yield, whose follow-up would resume the session that is gone.
-	sessionMoved atomic.Bool
 }
 
 func New(options Options) (*Daemon, error) {

@@ -2111,16 +2111,31 @@ func (CliRunContext) FixedFields() map[string]string { return nil }
 // RequiredFields lists the keys a CliRunContext must carry.
 func (CliRunContext) RequiredFields() []string { return nil }
 
+// PreviousRuntimeSession mirrors the PreviousRuntimeSession schema shape.
+type PreviousRuntimeSession struct {
+	ProviderType string `json:"provider_type"`
+	SessionID    string `json:"session_id"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a PreviousRuntimeSession.
+func (PreviousRuntimeSession) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a PreviousRuntimeSession must carry.
+func (PreviousRuntimeSession) RequiredFields() []string {
+	return []string{"provider_type", "session_id"}
+}
+
 // ContextRunStartRequest mirrors the ContextRunStartRequest schema shape.
 type ContextRunStartRequest struct {
-	Kind           string            `json:"kind"`
-	Runtime        RuntimeConfig     `json:"runtime"`
-	SessionOptions SessionOptions    `json:"session_options"`
-	Session        json.RawMessage   `json:"session"`
-	Input          AgentInput        `json:"input"`
-	RunContext     ContextRunContext `json:"run_context"`
-	CLIRunContext  *CliRunContext    `json:"cli_run_context,omitempty"`
-	RunResources   LocalRunResources `json:"run_resources"`
+	Kind            string                  `json:"kind"`
+	Runtime         RuntimeConfig           `json:"runtime"`
+	SessionOptions  SessionOptions          `json:"session_options"`
+	Session         json.RawMessage         `json:"session"`
+	PreviousSession *PreviousRuntimeSession `json:"previous_session,omitempty"`
+	Input           AgentInput              `json:"input"`
+	RunContext      ContextRunContext       `json:"run_context"`
+	CLIRunContext   *CliRunContext          `json:"cli_run_context,omitempty"`
+	RunResources    LocalRunResources       `json:"run_resources"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a ContextRunStartRequest.

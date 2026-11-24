@@ -2142,6 +2142,21 @@ export interface components {
       name: string;
       instructions: string;
     };
+    AgentLocalRunRecentMessage: {
+      message_id: string;
+      author: string;
+      author_kind: string;
+      body: string;
+      truncated?: boolean;
+      /** Format: date-time */
+      created_at: string;
+    };
+    /** @description Bounded slice of recent product messages preceding a Run's first input, returned only when the Context currently has no persisted Runtime Session and continues earlier work. */
+    AgentLocalRunRecentMessages: {
+      inbox_id: string;
+      messages: components["schemas"]["AgentLocalRunRecentMessage"][];
+      next_cursor?: string;
+    };
     ClaimedAgentLocalRun: {
       /** @description Current cancellation flag returned atomically with the Run claim. The production authority always returns this field. */
       cancellation_requested?: boolean;
@@ -2151,6 +2166,7 @@ export interface components {
       profile_update?: components["schemas"]["AgentProfileUpdate"];
       /** @description The Context received input before this Run's first input. */
       continues_context: boolean;
+      recent_messages?: components["schemas"]["AgentLocalRunRecentMessages"];
     };
     ClaimAgentLocalRunResult: {
       claimed: boolean;
@@ -2298,6 +2314,11 @@ export interface components {
       configuration_revision: components["schemas"]["AgentRuntimePositiveInt64"];
       /** @description Loaded registration revision for automatic stale-session clearing. Requires the same active registration and rejects a Session compatible through proven profile initialization. Omit only for an explicit Session reset. */
       expected_current_configuration_revision?: components["schemas"]["AgentRuntimePositiveInt64"];
+      /**
+       * @description Runtime failure code that triggers a same-revision Session reset on an idle active Context. Mutually exclusive with expected_current_configuration_revision.
+       * @enum {string}
+       */
+      recovery_reason?: "session_not_found" | "context_too_long";
     };
     ClearAgentRuntimeSessionResult: {
       cleared: boolean;

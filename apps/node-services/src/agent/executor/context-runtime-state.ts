@@ -2,12 +2,14 @@ import { queuedMetaRunKind } from "./run-kind.js";
 import type { RunKind } from "../../model-tasks.js";
 import { logAgentEvent } from "../observability/agent-log.js";
 import { acceptedNotificationInput } from "../prompt/accepted-notification.js";
+import type { RecentContextMessages } from "../prompt/inbox-notification.js";
 import {
   encodeExecutionContextRef,
   type ExecutionContextRef,
 } from "./context-ref.js";
 import { materializeGhostResources, type SkillDescriptor } from "./ghost.js";
 import type {
+  PreviousRuntimeSession,
   RuntimeExecutionFailure,
   RuntimeSession as ProviderRuntimeSession,
 } from "./provider.js";
@@ -32,9 +34,13 @@ import { isRecord } from "@linger/service-kit";
 
 export type RuntimeStateAwaitable<T> = T | PromiseLike<T>;
 
+export type SessionRecoveryReason = "session_not_found" | "context_too_long";
+
 export interface ClaimedLocalRun {
   /** The Context received input before this Run's first input. */
   readonly continuesContext?: boolean;
+  /** Bounded recent product messages preceding this Run when starting a fresh session. */
+  readonly recentMessages?: RecentContextMessages;
   /** Process-local only; absent for Runs queued before this process. */
   readonly acceptedAtMonotonicMs?: number;
   /** Earliest TeamHub input `created_at` as epoch ms; absent on old TeamHub. */
@@ -170,7 +176,14 @@ export interface ContextRuntimeStatePort {
   setExecutionResources(
     resources: ExecutionResources,
   ): RuntimeStateAwaitable<void>;
-  clearRuntimeSession(): RuntimeStateAwaitable<boolean>;
+  clearRuntimeSession(options?: {
+    readonly recoveryReason?: SessionRecoveryReason;
+  }): RuntimeStateAwaitable<boolean>;
+  /**
+   * Returns and clears the native session identity last discarded on this state
+   * port so the next fresh start can export its local transcript.
+   */
+  consumeClearedSession?(): PreviousRuntimeSession | null;
   /**
    * Drop a RuntimeSession checkpointed under an older configuration revision.
    * Runtime activation calls this; read-only inspection must not, so Debug
@@ -347,6 +360,7 @@ class TeamHubContextRuntimeState implements ContextRuntimeStatePort {
     | undefined;
   readonly #trackOwnRevisionAdvance: (() => () => void) | undefined;
   #session: TeamHubRuntimeSession | null = null;
+  #lastClearedSession: PreviousRuntimeSession | null = null;
   // Resources the Runtime loaded for its next turn; they reach TeamHub with
   // the next Session checkpoint instead of a write of their own.
   #pendingResources: ExecutionResources | undefined;
@@ -507,6 +521,24 @@ class TeamHubContextRuntimeState implements ContextRuntimeStatePort {
     return {
       runId: result.run.run_id,
       continuesContext: result.run.continues_context,
+      ...(result.run.recent_messages
+        ? {
+            recentMessages: {
+              inboxId: result.run.recent_messages.inbox_id,
+              messages: result.run.recent_messages.messages.map((item) => ({
+                messageId: item.message_id,
+                author: item.author,
+                authorKind: item.author_kind,
+                body: item.body,
+                ...(item.truncated ? { truncated: true } : {}),
+                createdAt: item.created_at,
+              })),
+              ...(result.run.recent_messages.next_cursor
+                ? { nextCursor: result.run.recent_messages.next_cursor }
+                : {}),
+            },
+          }
+        : {}),
       acceptedAtMonotonicMs: this.#acceptedAt.get(result.run.run_id),
       inputReceivedAtMs: earliestInputReceivedAtMs(result.run.inputs),
       attemptCount: result.run.attempt_count,
@@ -821,16 +853,30 @@ class TeamHubContextRuntimeState implements ContextRuntimeStatePort {
     revisionAdvanced?.();
   }
 
-  async clearRuntimeSession(): Promise<boolean> {
-    return this.#clearRuntimeSession();
+  async clearRuntimeSession(options?: {
+    readonly recoveryReason?: SessionRecoveryReason;
+  }): Promise<boolean> {
+    if (options?.recoveryReason && !this.#session) {
+      const current = await this.#client.getSession(this.#contextKey);
+      this.#session = current.available ? (current.session ?? null) : null;
+    }
+    return this.#clearRuntimeSession(undefined, options?.recoveryReason);
+  }
+
+  consumeClearedSession(): PreviousRuntimeSession | null {
+    const previous = this.#lastClearedSession;
+    this.#lastClearedSession = null;
+    return previous;
   }
 
   async #clearRuntimeSession(
     expectedCurrentConfigurationRevision?: string,
+    recoveryReason?: SessionRecoveryReason,
   ): Promise<boolean> {
     this.#assertOpen();
     this.#pendingResources = undefined;
     if (!this.#session) return false;
+    const identity = extractPersistedSessionIdentity(this.#session);
     const result = await this.#client.clearSession({
       context_key: this.#contextKey,
       epoch: this.#epoch,
@@ -841,8 +887,12 @@ class TeamHubContextRuntimeState implements ContextRuntimeStatePort {
               expectedCurrentConfigurationRevision,
           }
         : {}),
+      ...(recoveryReason ? { recovery_reason: recoveryReason } : {}),
     });
-    if (result.cleared) this.#session = null;
+    if (result.cleared) {
+      if (identity) this.#lastClearedSession = identity;
+      this.#session = null;
+    }
     return result.cleared;
   }
 
@@ -1003,6 +1053,31 @@ const parsePositiveInt64 = (value: string, field: string): string => {
 
 const stringValue = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() !== "" ? value : undefined;
+
+const extractPersistedSessionIdentity = (
+  session: TeamHubRuntimeSession,
+): PreviousRuntimeSession | null => {
+  const providerType = session.provider_kind;
+  if (
+    providerType !== "codex" &&
+    providerType !== "claude" &&
+    providerType !== "pi" &&
+    providerType !== "antigravity"
+  ) {
+    return null;
+  }
+  const directThreadId = stringValue(session.thread_id);
+  if (directThreadId) {
+    return { providerType, sessionId: directThreadId };
+  }
+  const parsed = readRuntimeSessionCheckpoint(session);
+  const native = parsed.nativeSession;
+  if (!native) return null;
+  const sessionId =
+    stringValue(native.threadId) ?? stringValue(native.sessionId);
+  if (!sessionId) return null;
+  return { providerType, sessionId };
+};
 
 const isTransientTerminalFailure = (error: unknown): boolean =>
   error instanceof TeamHubRuntimeStateError &&

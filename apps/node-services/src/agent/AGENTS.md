@@ -208,6 +208,13 @@ take precedence.
   connection. Background calls resolve the placed Agent's configured model on
   its Runtime and fall back to the target Runtime's catalog default on
   cross-Runtime fallback or when unconfigured.
+- `previous_session` on `operation.start` goes only to Computer 0.63.0 or later
+  (`FIRST_PREVIOUS_SESSION_COMPUTER_VERSION`), because older Computers reject
+  unknown envelope fields and close the connection. On `session_not_found` or
+  `context_too_long`, `RunLoop` requeues the Run once, clears the persisted
+  Runtime Session with `recovery_reason`, and reactivates in a fresh native
+  session so the Run resumes with inlined recent messages and (on Computer
+  0.63.0+) an exported `./playground/.previous-context.md` transcript.
 - Default unit, integration, and fixture smoke tests use deterministic adapters
   and do not call a live model provider. Explicitly named live suites such as
   `smoke:local-runner:live` may use an authenticated provider and must remain

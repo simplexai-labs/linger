@@ -508,19 +508,18 @@ for a browser sign-in when signed out.
   stored is not a usable session: `session/load` accepts it, but the prompt
   then fails, so Linger never assigns one. A stored session replays at least
   the prompt that made it, so a load that replays no prompt, or that
-  Antigravity refuses, finds no session. A resumed Run reports its
+  Antigravity refuses, finds no session and returns `session_not_found` so Agent
+  Service can clear the persisted session and restart the Run cleanly in a fresh
+  native session with recent messages. A resumed Run still reports its
   turn-started event before `session/load`, because loading takes seconds
-  and the Room shows the Agent working from that event. The executor can then
-  no longer start a fresh session, so the adapter opens `session/new` in the
-  same process and the terminal result carries the new session. Such a Run
-  announced the old session, so the Daemon declines every scheduler yield for
-  it, including the one Agent Service resends after a reconnect, and lets it
-  finish. Agent Service sends a later Stop as its own cancel with its own
-  reason. An Agent Service released before this sends no such cancel, so its
-  Stop cannot end such a Run. A Run that resumes after a yield ends as
-  `session_not_found` instead. A Run yields to
+  and the Room shows the Agent working from that event. A Run yields to
   the scheduler only after native work, because its session holds no prompt
   before that.
+- On a fresh `run.start` that names `previous_session` (Computer 0.63.0 or
+  later), the provider executor reads the superseded native session through
+  `runtimehistory`, writes a bounded, redacted Markdown tail to
+  `./playground/.previous-context.md`, and appends that path to the turn's
+  `<system-reminder>` only when the file was written.
 - A tool call is named by Antigravity's own tool name, such as
   `run_command`; its title is the whole command line, which the call's
   redacted input already shows.

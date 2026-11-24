@@ -314,85 +314,33 @@ func finishedRun(outcome native.Outcome, events ...native.Event) *native.Run {
 	return &native.Run{Events: messages, Outcome: results}
 }
 
-func TestExecutorStartsFreshSessionWhenRetainedSessionIsMissing(t *testing.T) {
-	for _, provider := range []string{"codex", "claude"} {
+func TestExecutorReturnsSessionNotFoundWithoutSilentFallback(t *testing.T) {
+	for _, provider := range []string{"codex", "claude", "pi", "antigravity"} {
 		t.Run(provider, func(t *testing.T) {
 			var specs []native.RunSpec
-			executor := Executor{NewBackend: func(string, native.Profile) (native.Runtime, error) {
-				return sequenceBackend{specs: &specs, runs: []*native.Run{
-					finishedRun(native.Outcome{Status: "failed", FailureCode: "session_not_found", Error: "session history could not be restored"}),
-					finishedRun(native.Outcome{Status: "completed", Output: "hello", SessionID: "fresh-session"}, native.Event{Kind: native.EventText, Body: "hello"}),
-				}}, nil
-			}}
+			executor := Executor{
+				RuntimeHomeRoot: t.TempDir(),
+				NewBackend: func(string, native.Profile) (native.Runtime, error) {
+					return sequenceBackend{specs: &specs, runs: []*native.Run{
+						finishedRun(native.Outcome{Status: "failed", FailureCode: "session_not_found", Error: "session history could not be restored"}),
+					}}, nil
+				},
+			}
 			execution, err := executor.Start(t.Context(), OperationSpec{
 				OperationKind: "run.start", Provider: provider, ExecutablePath: "/bin/" + provider,
-				WorkingDirectory: t.TempDir(), TaskID: "fresh-" + provider, ResumeSessionID: "legacy-session",
+				WorkingDirectory: t.TempDir(), TaskID: "missing-" + provider, ResumeSessionID: "legacy-session",
+				Environment: map[string]string{"HOME": t.TempDir()},
+				TenantID:    "tenant-1", OwnerActorID: "owner-1", AgentID: "agent-1", ScopeID: "scope-1",
 			}, func(context.Context, protocol.Event) error { return nil })
 			if err != nil {
 				t.Fatal(err)
 			}
 			result := <-execution.Result
-			if result.Status != "completed" || result.SessionID != "fresh-session" {
-				t.Fatalf("result=%+v, want completed fresh session", result)
+			if result.Status != "failed" || result.FailureCode != "session_not_found" {
+				t.Fatalf("result=%+v, want failed session_not_found", result)
 			}
-			if len(specs) != 2 || specs[0].ResumeID != "legacy-session" || !specs[0].ResumeRequired || specs[1].ResumeID != "" || specs[1].ResumeRequired {
-				t.Fatalf("native starts=%+v, want one resume then one fresh start", specs)
-			}
-			if (provider == "claude") != (specs[1].AssignSessionID != "") {
-				t.Fatalf("fresh start assigned session %q for %s", specs[1].AssignSessionID, provider)
-			}
-		})
-	}
-}
-
-func TestExecutorDoesNotRepeatFreshSessionFallback(t *testing.T) {
-	missing := native.Outcome{Status: "failed", FailureCode: "session_not_found", Error: "missing"}
-	cases := map[string]struct {
-		spec   OperationSpec
-		runs   []*native.Run
-		starts int
-	}{
-		"second refusal fails": {
-			spec:   OperationSpec{OperationKind: "run.start", ResumeSessionID: "legacy"},
-			runs:   []*native.Run{finishedRun(missing), finishedRun(missing)},
-			starts: 2,
-		},
-		"events already emitted": {
-			spec:   OperationSpec{OperationKind: "run.start", ResumeSessionID: "legacy"},
-			runs:   []*native.Run{finishedRun(missing, native.Event{Kind: native.EventText, Body: "partial"})},
-			starts: 1,
-		},
-		"yielded session must still exist": {
-			spec:   OperationSpec{OperationKind: "run.start", ResumeSessionID: "retained", ResumeAfterYield: true},
-			runs:   []*native.Run{finishedRun(missing)},
-			starts: 1,
-		},
-		"new session": {
-			spec:   OperationSpec{OperationKind: "run.start"},
-			runs:   []*native.Run{finishedRun(missing)},
-			starts: 1,
-		},
-		"model invoke": {
-			spec:   OperationSpec{OperationKind: "model.invoke", ResumeSessionID: "legacy"},
-			runs:   []*native.Run{finishedRun(missing)},
-			starts: 1,
-		},
-	}
-	for name, test := range cases {
-		t.Run(name, func(t *testing.T) {
-			var specs []native.RunSpec
-			executor := Executor{NewBackend: func(string, native.Profile) (native.Runtime, error) {
-				return sequenceBackend{specs: &specs, runs: test.runs}, nil
-			}}
-			spec := test.spec
-			spec.Provider, spec.ExecutablePath, spec.WorkingDirectory, spec.TaskID = "codex", "/bin/codex", t.TempDir(), "no-repeat"
-			execution, err := executor.Start(t.Context(), spec, func(context.Context, protocol.Event) error { return nil })
-			if err != nil {
-				t.Fatal(err)
-			}
-			result := <-execution.Result
-			if result.Status != "failed" || result.FailureCode != "session_not_found" || len(specs) != test.starts {
-				t.Fatalf("result=%+v starts=%d, want session_not_found after %d starts", result, len(specs), test.starts)
+			if len(specs) != 1 || specs[0].ResumeID != "legacy-session" || !specs[0].ResumeRequired {
+				t.Fatalf("native starts=%+v, want single strict resume", specs)
 			}
 		})
 	}

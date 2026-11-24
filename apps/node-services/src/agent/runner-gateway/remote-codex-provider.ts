@@ -493,6 +493,14 @@ export class RemoteRuntimeProvider implements AgentProvider {
           runtime: this.#runtime,
           session_options: this.#requireSessionOptions(),
           session: mutableSession,
+          ...(spec.previousSession
+            ? {
+                previous_session: {
+                  provider_type: spec.previousSession.providerType,
+                  session_id: spec.previousSession.sessionId,
+                },
+              }
+            : {}),
           input,
           ...runStartContext,
           ...(cliRunContext ? { cli_run_context: cliRunContext } : {}),

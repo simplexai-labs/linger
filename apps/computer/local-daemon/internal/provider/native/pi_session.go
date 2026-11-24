@@ -25,7 +25,7 @@ const (
 var (
 	errPiSessionRoot     = errors.New("Pi requires a Context session directory")
 	errPiSessionInUse    = errors.New("Pi session is already in use")
-	errPiSessionMismatch = errors.New("the retained Pi session is missing or belongs to another Context")
+	errPiSessionMismatch = fmt.Errorf("%w: the retained Pi session is missing or belongs to another Context", ErrSessionNotFound)
 )
 
 // piSessionRoot reads the absolute session root from the profile

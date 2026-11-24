@@ -226,25 +226,7 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 		}
 	}
 	if refusal != "" {
-		// The Run already started on the retained session, so the executor
-		// can no longer continue it in a new one; this process does, and the
-		// terminal result carries the new session.
-		if !startedEarly || spec.FreshSession == nil {
-			return t.resumeRefused(failed("session_not_found", refusal))
-		}
-		spec.FreshSession()
-		if t.profile.Logger != nil {
-			t.profile.Logger.Warn("runtime.session.fresh_start", "provider", "antigravity", "reason", "session_not_found")
-		}
-		resumed, method = false, "session/new"
-		delete(params, "sessionId")
-		raw, err = open()
-		if acpNeedsAuth(err) {
-			return failed("authentication_required", "Antigravity sign-in is required")
-		}
-		if err != nil {
-			return failed("", "Antigravity "+method+" failed: "+err.Error())
-		}
+		return t.resumeRefused(failed("session_not_found", refusal))
 	}
 	var session acpSession
 	if json.Unmarshal(raw, &session) != nil || session.SessionID == "" {

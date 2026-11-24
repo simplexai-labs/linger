@@ -1087,10 +1087,18 @@ export interface ContextRunStartRequest {
   runtime: RuntimeConfig;
   session_options: SessionOptions;
   session: OpaqueObject;
+  previous_session?: PreviousRuntimeSession;
   input: AgentInput;
   run_context: ContextRunContext;
   cli_run_context?: CliRunContext;
   run_resources: LocalRunResources;
+}
+/**
+ * Identifies the superseded native session of this Context so a fresh run.start can export its local transcript into ./playground/.previous-context.md.
+ */
+export interface PreviousRuntimeSession {
+  provider_type: "codex" | "claude" | "pi" | "antigravity";
+  session_id: string;
 }
 export interface AgentInput {
   type: "text";

@@ -416,42 +416,6 @@ func TestDaemonDoesNotReportCancelledWhenProviderCleanupIsUnconfirmed(t *testing
 	testDaemonDrainCleanup(t, true)
 }
 
-func TestSchedulerYieldIsDeclinedAfterTheSessionMoved(t *testing.T) {
-	d, err := newTestDaemon(t, Options{ComputerID: "computer-1", ControlPlane: fakeControlPlane{stream: &fakeStream{}}, IdentityStore: fakeStore{}, OperationResolver: fakeOperationResolver{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	start := daemonOperationStart("moved", "agent-1")
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	active := &activeOperation{identity: operationIdentity(start), cancel: cancel}
-	active.sessionMoved.Store(true)
-	d.activeOperations[start.OperationID] = active
-	yield := operationCancelCommand(start)
-	yield.Payload = mustJSON(map[string]string{"reason": schedulerYield})
-	if err := d.handleOperationCancel(yield); err != nil {
-		t.Fatal(err)
-	}
-	if ctx.Err() != nil || active.reason != "" {
-		t.Fatalf("the yield cancelled the Run: reason %q", active.reason)
-	}
-	// Agent Service resends the retained yield after a reconnect.
-	if err := d.handleOperationCancel(yield); err != nil {
-		t.Fatal(err)
-	}
-	if ctx.Err() != nil || active.reason != "" {
-		t.Fatalf("a resent yield cancelled the Run: reason %q", active.reason)
-	}
-	stop := operationCancelCommand(start)
-	stop.Payload = mustJSON(map[string]string{"reason": "Stopped by user"})
-	if err := d.handleOperationCancel(stop); err != nil {
-		t.Fatal(err)
-	}
-	if ctx.Err() == nil || active.reason != "Stopped by user" {
-		t.Fatalf("Stop did not cancel the Run: reason %q", active.reason)
-	}
-}
-
 func TestSchedulerYieldRequiresConfirmedCleanup(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

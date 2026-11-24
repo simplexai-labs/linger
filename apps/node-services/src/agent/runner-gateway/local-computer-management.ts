@@ -71,6 +71,12 @@ export const FIRST_LOCAL_MODELS_ENGINE_COMPUTER_VERSION = "0.61.0";
 // connection, so the field is omitted for it.
 export const FIRST_MODEL_INVOKE_MODEL_COMPUTER_VERSION = "0.62.0";
 
+// The first release that decodes `previous_session` on `operation.start` and
+// exports the superseded native session transcript to `./playground/.previous-context.md`.
+// Older Computers reject unknown envelope fields and close the connection, so
+// the field is omitted for them.
+export const FIRST_PREVIOUS_SESSION_COMPUTER_VERSION = "0.63.0";
+
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 /** Source builds report `dev` and follow the current wire contract. */

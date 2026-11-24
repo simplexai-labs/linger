@@ -1,5 +1,6 @@
 import type { AgentLogger } from "../observability/agent-log.js";
 import {
+  type PreviousRuntimeSession,
   type RunEvent,
   RuntimeExecutionError,
   type AgentInput,
@@ -26,6 +27,7 @@ import type {
   ProfileUpdate,
   ContextRuntimeStatePort,
   LocalRunTerminal,
+  SessionRecoveryReason,
 } from "./context-runtime-state.js";
 import type {
   Message,
@@ -41,6 +43,7 @@ import type {
   RuntimeStatusUpdate,
 } from "./runtime-status.js";
 import {
+  type RecentContextMessages,
   renderInterruptedRunReminder,
   renderRuntimeContinuationReminder,
 } from "../prompt/inbox-notification.js";
@@ -293,7 +296,11 @@ interface LocalRunExecution {
   readonly claimMs: number | undefined;
   readonly cancellationLookupMs: number | undefined;
   readonly continuesContext: boolean | undefined;
+  readonly recentMessages: RecentContextMessages | undefined;
   readonly profileUpdate: ProfileUpdate | undefined;
+  readonly startedFreshSession: boolean;
+  readonly priorAttemptInterrupted: boolean;
+  hadPriorProgress: boolean;
   run: AgentRun | null;
   runtimeStatus: RuntimeStatusSession | null;
   runtimeStatusEvents: Promise<void> | null;
@@ -335,7 +342,21 @@ export class RunLoop {
     | ((runId: string, messages: NonEmptyReadonlyArray<Message>) => void)
     | undefined;
   readonly #onWorkStateRefreshed: (() => void) | undefined;
+  readonly #canRecoverSession: ((runId: string) => boolean) | undefined;
+  readonly #consumePartialWorkRecovery:
+    | ((runId: string) => boolean)
+    | undefined;
+  readonly #onSessionRecoveryFailed: ((runId: string) => void) | undefined;
+  readonly #onSessionRecoveryRequested:
+    | ((
+        runId: string,
+        reason: SessionRecoveryReason,
+        hadPriorProgress: boolean,
+      ) => void)
+    | undefined;
+  readonly #recoveryAbortErrors = new Map<string, unknown>();
   #firstSessionRun: boolean;
+  #previousSession: PreviousRuntimeSession | undefined;
   #activeExecution: ActiveExecution | null = null;
   #activeRunIntent: ActiveRunIntent | null = null;
   #activeOperations = 0;
@@ -369,6 +390,7 @@ export class RunLoop {
     readonly runtimeName?: string;
     readonly runtimeSession: RuntimeSession;
     readonly newSession?: boolean;
+    readonly previousSession?: PreviousRuntimeSession;
     readonly prepareNextRun?: (signal: AbortSignal) => Promise<boolean>;
     readonly beforeStartRun?: (runId: string) => Promise<void>;
     readonly runtimeStatusPublisher?: RuntimeStatusPublisher;
@@ -399,6 +421,18 @@ export class RunLoop {
     ) => void;
     /** Runs after each work-state read, for example to take up steers. */
     readonly onWorkStateRefreshed?: () => void;
+    /** Reports whether this Run may trigger an automatic session restart. */
+    readonly canRecoverSession?: (runId: string) => boolean;
+    /** Reports and clears whether an earlier recovered attempt of this Run already ran steps. */
+    readonly consumePartialWorkRecovery?: (runId: string) => boolean;
+    /** Marks a Run whose session clear failed so the next claim terminates cleanly. */
+    readonly onSessionRecoveryFailed?: (runId: string) => void;
+    /** Requests runtime reactivation in a fresh native session after requeue and session clear. */
+    readonly onSessionRecoveryRequested?: (
+      runId: string,
+      reason: SessionRecoveryReason,
+      hadPriorProgress: boolean,
+    ) => void;
   }) {
     this.#logger = options.logger;
     this.#executionContextRef = options.executionContextRef;
@@ -418,6 +452,7 @@ export class RunLoop {
     this.#firstSessionRun = Boolean(
       options.newSession || runtimeSessionStartsFresh(options.runtimeSession),
     );
+    this.#previousSession = options.previousSession;
     this.#prepareNextRun = options.prepareNextRun;
     this.#beforeStartRun = options.beforeStartRun;
     this.#runtimeStatusPublisher = options.runtimeStatusPublisher;
@@ -427,6 +462,10 @@ export class RunLoop {
     this.#onRunBeforeStop = options.onRunBeforeStop;
     this.#onRunClaimed = options.onRunClaimed;
     this.#onWorkStateRefreshed = options.onWorkStateRefreshed;
+    this.#canRecoverSession = options.canRecoverSession;
+    this.#consumePartialWorkRecovery = options.consumePartialWorkRecovery;
+    this.#onSessionRecoveryFailed = options.onSessionRecoveryFailed;
+    this.#onSessionRecoveryRequested = options.onSessionRecoveryRequested;
   }
 
   get activeOperations(): number {
@@ -906,6 +945,11 @@ export class RunLoop {
         }
         this.#activeOperations += 1;
         this.#notifyActivityChanged();
+        const recoveryAbortError = this.#recoveryAbortErrors.get(claimed.runId);
+        if (recoveryAbortError !== undefined) {
+          this.#recoveryAbortErrors.delete(claimed.runId);
+          preparationFailure = { error: recoveryAbortError };
+        }
         try {
           await this.#execute(
             claimed.runId,
@@ -918,6 +962,7 @@ export class RunLoop {
             claimed.inputReceivedAtMs,
             claimMs,
             claimed.continuesContext,
+            claimed.recentMessages,
             claimed.profileUpdate,
           );
         } catch (error) {
@@ -945,6 +990,7 @@ export class RunLoop {
     inputReceivedAtMs?: number,
     claimMs?: number,
     continuesContext?: boolean,
+    recentMessages?: RecentContextMessages,
     profileUpdate?: ProfileUpdate,
   ): Promise<void> {
     const { controller } = intent;
@@ -999,7 +1045,13 @@ export class RunLoop {
       claimMs,
       cancellationLookupMs,
       continuesContext,
+      recentMessages,
       profileUpdate,
+      startedFreshSession: this.#firstSessionRun,
+      priorAttemptInterrupted:
+        this.#firstSessionRun &&
+        Boolean(this.#consumePartialWorkRecovery?.(runId)),
+      hadPriorProgress: false,
       run: null,
       runtimeStatus: null,
       runtimeStatusEvents: null,
@@ -1140,6 +1192,8 @@ export class RunLoop {
       input,
       replyDelivery,
     );
+    this.#firstSessionRun = false;
+    this.#previousSession = undefined;
 
     execution.runtimeStatus ??= await this.#openRuntimeStatus(
       runId,
@@ -1155,6 +1209,9 @@ export class RunLoop {
       (error) => this.#reconcileRevocation(execution, error),
       new RunTimeline(this.#logger, runId, attemptCount),
       replyDelivery,
+      () => {
+        execution.hadPriorProgress = true;
+      },
     );
     const result = await run.wait();
     const providerCompletedAt = performance.now();
@@ -1194,7 +1251,13 @@ export class RunLoop {
         [
           this.#firstSessionRun
             ? execution.continuesContext || resumesAttempt
-              ? renderRuntimeContinuationReminder(provenance.sourceInboxIds)
+              ? renderRuntimeContinuationReminder(
+                  provenance.sourceInboxIds,
+                  execution.recentMessages,
+                  execution.priorAttemptInterrupted
+                    ? { priorAttemptInterrupted: true }
+                    : undefined,
+                )
               : ""
             : resumesAttempt
               ? renderInterruptedRunReminder()
@@ -1254,6 +1317,9 @@ export class RunLoop {
           signal: controller.signal,
           runContext: execution.runContext,
           acceptedAtMonotonicMs: execution.acceptedAtMonotonicMs,
+          ...(this.#firstSessionRun && this.#previousSession
+            ? { previousSession: this.#previousSession }
+            : {}),
           runKind: execution.kind,
           priority: execution.intent.priority,
           preemptSignal: execution.intent.preemption.signal,
@@ -1302,7 +1368,6 @@ export class RunLoop {
               }
             : {}),
         });
-        this.#firstSessionRun = false;
         return run;
       } catch (error) {
         const remaining =
@@ -1561,6 +1626,52 @@ export class RunLoop {
       });
     }
     if (
+      isRecoverableSessionFailure(error) &&
+      !providerCleanupFailed &&
+      !controller.signal.aborted &&
+      !execution.hasYielded &&
+      !execution.startedFreshSession &&
+      this.#onSessionRecoveryRequested &&
+      (this.#canRecoverSession ? this.#canRecoverSession(runId) : true)
+    ) {
+      const reason = error.failure.code;
+      await this.#settleRuntimeStatusEvents(execution);
+      await this.#commitDurably(() => this.#state.requeueLocalRun(runId));
+      try {
+        await this.#commitDurably(() =>
+          this.#state.clearRuntimeSession({ recoveryReason: reason }),
+        );
+      } catch (clearError) {
+        // Older TeamHub releases reject recovery_reason (400) and concurrent
+        // state changes may return 409. Keep the RunLoop alive so the next
+        // claim fails visibly with the original error instead of leaving the
+        // Run stuck queued.
+        this.#logger.log("warn", "local_run.session_recovery_clear_failed", {
+          runId,
+          reason,
+          error: clearError,
+        });
+        this.#recoveryAbortErrors.set(runId, error);
+        this.#onSessionRecoveryFailed?.(runId);
+        intent.resolveFinished();
+        return;
+      }
+      this.requestDrain({ cancelActive: false });
+      intent.resolveFinished();
+      this.#logger.log("warn", "local_run.session_recovery_requested", {
+        runId,
+        attemptCount,
+        reason,
+        hadPriorProgress: execution.hadPriorProgress,
+      });
+      this.#onSessionRecoveryRequested(
+        runId,
+        reason,
+        execution.hadPriorProgress,
+      );
+      return;
+    }
+    if (
       error instanceof ProviderRunStartError &&
       !(error instanceof ProviderRunAdmissionUnavailableError) &&
       error.effect === "definitely_not_started" &&
@@ -1747,6 +1858,7 @@ export class RunLoop {
     reconcileRevocation: (error: unknown) => Promise<boolean>,
     timeline: RunTimeline,
     replyDelivery: ReplyDelivery,
+    onFirstOutput?: () => void,
   ): Promise<void> {
     const statusSession = session;
     const pending: RuntimeStatusUpdate[] = [];
@@ -1815,6 +1927,7 @@ export class RunLoop {
             event.type === "tool.called")
         ) {
           firstOutputObserved = true;
+          onFirstOutput?.();
           const receivedAtUnixMs = Date.now();
           this.#logger.log("info", "local_run.first_output", {
             runId,
@@ -2304,6 +2417,15 @@ class LocalRunLoopRetryableError extends Error {
     this.name = "LocalRunLoopRetryableError";
   }
 }
+
+const isRecoverableSessionFailure = (
+  error: unknown,
+): error is RuntimeExecutionError & {
+  readonly failure: { readonly code: SessionRecoveryReason };
+} =>
+  error instanceof RuntimeExecutionError &&
+  (error.failure.code === "session_not_found" ||
+    error.failure.code === "context_too_long");
 
 const isRetryableLoopFailure = (error: unknown): boolean =>
   typeof error === "object" &&

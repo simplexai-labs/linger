@@ -16,6 +16,7 @@ import {
 } from "../../model-tasks.js";
 import { logAgentEvent } from "../observability/agent-log.js";
 import {
+  FIRST_PREVIOUS_SESSION_COMPUTER_VERSION,
   FIRST_STOP_HOOK_COMPUTER_VERSION,
   isComputerVersionAtLeast,
   LocalComputerOfflineError,
@@ -943,19 +944,30 @@ function filterOperationTargetForDaemon(
   target: RunnerOperationTarget,
   daemonVersion: string,
 ): RunnerOperationTarget {
-  if (
-    isComputerVersionAtLeast(daemonVersion, FIRST_STOP_HOOK_COMPUTER_VERSION) ||
-    target.request.run_context.stop_hook === undefined
-  ) {
+  const stripStopHook =
+    !isComputerVersionAtLeast(
+      daemonVersion,
+      FIRST_STOP_HOOK_COMPUTER_VERSION,
+    ) && target.request.run_context.stop_hook !== undefined;
+  const stripPreviousSession =
+    !isComputerVersionAtLeast(
+      daemonVersion,
+      FIRST_PREVIOUS_SESSION_COMPUTER_VERSION,
+    ) && target.request.previous_session !== undefined;
+  if (!stripStopHook && !stripPreviousSession) {
     return target;
   }
-  const filteredRunContext = { ...target.request.run_context };
-  delete filteredRunContext.stop_hook;
+  const filteredRequest = { ...target.request };
+  if (stripStopHook) {
+    const filteredRunContext = { ...filteredRequest.run_context };
+    delete filteredRunContext.stop_hook;
+    filteredRequest.run_context = filteredRunContext;
+  }
+  if (stripPreviousSession) {
+    delete filteredRequest.previous_session;
+  }
   return {
     ...target,
-    request: {
-      ...target.request,
-      run_context: filteredRunContext,
-    },
+    request: filteredRequest,
   };
 }

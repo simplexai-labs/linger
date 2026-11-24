@@ -4094,6 +4094,23 @@ export const runnerGatewayEnvelopeSchema = {
         },
       },
     },
+    PreviousRuntimeSession: {
+      type: "object",
+      additionalProperties: false,
+      description:
+        "Identifies the superseded native session of this Context so a fresh run.start can export its local transcript into ./playground/.previous-context.md.",
+      required: ["provider_type", "session_id"],
+      properties: {
+        provider_type: {
+          enum: ["codex", "claude", "pi", "antigravity"],
+        },
+        session_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+        },
+      },
+    },
     ContextRunStartRequest: {
       type: "object",
       additionalProperties: false,
@@ -4118,6 +4135,9 @@ export const runnerGatewayEnvelopeSchema = {
         },
         session: {
           $ref: "#/$defs/OpaqueObject",
+        },
+        previous_session: {
+          $ref: "#/$defs/PreviousRuntimeSession",
         },
         input: {
           $ref: "#/$defs/AgentInput",

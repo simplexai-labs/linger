@@ -94,7 +94,6 @@ func (d *Daemon) handleOperationStart(ctx context.Context, stream transport.Stre
 		}
 	}
 	active := &activeOperation{identity: identity, ctx: operationCtx, cancel: cancel}
-	spec.SessionMoved = func() { active.sessionMoved.Store(true) }
 	emitEvent := d.operationEventEmitter(command, identity, active)
 	if spec.OperationKind == "run.start" {
 		// Only run.start rewrites the per-run CLI files, after the Context

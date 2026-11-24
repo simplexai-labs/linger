@@ -612,6 +612,10 @@ components:
           allOf:
             - $ref: "#/components/schemas/AgentRuntimePositiveInt64"
           description: Loaded registration revision for automatic stale-session clearing. Requires the same active registration and rejects a Session compatible through proven profile initialization. Omit only for an explicit Session reset.
+        recovery_reason:
+          type: string
+          enum: [session_not_found, context_too_long]
+          description: Runtime failure code that triggers a same-revision Session reset on an idle active Context. Mutually exclusive with expected_current_configuration_revision.
     ClearAgentRuntimeSessionResult:
       type: object
       additionalProperties: false
@@ -743,6 +747,43 @@ components:
         continues_context:
           type: boolean
           description: The Context received input before this Run's first input.
+        recent_messages:
+          $ref: "#/components/schemas/AgentLocalRunRecentMessages"
+    AgentLocalRunRecentMessage:
+      type: object
+      additionalProperties: false
+      required: [message_id, author, author_kind, body, created_at]
+      properties:
+        message_id:
+          type: string
+        author:
+          type: string
+        author_kind:
+          type: string
+        body:
+          type: string
+        truncated:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    AgentLocalRunRecentMessages:
+      type: object
+      additionalProperties: false
+      description: >-
+        Bounded slice of recent product messages preceding a Run's first input,
+        returned only when the Context currently has no persisted Runtime Session
+        and continues earlier work.
+      required: [inbox_id, messages]
+      properties:
+        inbox_id:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentLocalRunRecentMessage"
+        next_cursor:
+          type: string
     AgentProfileUpdate:
       type: object
       additionalProperties: false

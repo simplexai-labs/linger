@@ -287,6 +287,13 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 		spec.CreateProviderSessionID = resumeSessionID
 		spec.ResumeSessionID = ""
 	}
+	if spec.ResumeSessionID == "" && request.PreviousSession != nil &&
+		request.PreviousSession.ProviderType != "" && request.PreviousSession.SessionID != "" {
+		spec.PreviousSession = &provider.PreviousSession{
+			ProviderType: request.PreviousSession.ProviderType,
+			SessionID:    request.PreviousSession.SessionID,
+		}
+	}
 	return spec, nil
 }
 
@@ -411,8 +418,12 @@ type semanticRequest struct {
 		BaseInstructions      *string `json:"base_instructions,omitempty"`
 		DeveloperInstructions *string `json:"developer_instructions,omitempty"`
 	} `json:"session_options"`
-	Session semanticSession `json:"session,omitempty"`
-	Input   struct {
+	Session         semanticSession `json:"session,omitempty"`
+	PreviousSession *struct {
+		ProviderType string `json:"provider_type"`
+		SessionID    string `json:"session_id"`
+	} `json:"previous_session,omitempty"`
+	Input struct {
 		Text string `json:"text,omitempty"`
 	} `json:"input,omitempty"`
 	RunResources struct {

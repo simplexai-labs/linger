@@ -325,70 +325,70 @@ func (e AgentRuntimeActivityOutcome) Valid() bool {
 
 // Defines values for AgentRuntimeExecutionFailureCode.
 const (
-	AuthenticationRequired  AgentRuntimeExecutionFailureCode = "authentication_required"
-	CleanupUnconfirmed      AgentRuntimeExecutionFailureCode = "cleanup_unconfirmed"
-	ComputerUnavailable     AgentRuntimeExecutionFailureCode = "computer_unavailable"
-	ContextTooLong          AgentRuntimeExecutionFailureCode = "context_too_long"
-	ExecutionFailed         AgentRuntimeExecutionFailureCode = "execution_failed"
-	ExecutionOutcomeUnknown AgentRuntimeExecutionFailureCode = "execution_outcome_unknown"
-	Interrupted             AgentRuntimeExecutionFailureCode = "interrupted"
-	LocalModelUnavailable   AgentRuntimeExecutionFailureCode = "local_model_unavailable"
-	ModelNotOffered         AgentRuntimeExecutionFailureCode = "model_not_offered"
-	ModelServiceError       AgentRuntimeExecutionFailureCode = "model_service_error"
-	ModelUnavailable        AgentRuntimeExecutionFailureCode = "model_unavailable"
-	NetworkError            AgentRuntimeExecutionFailureCode = "network_error"
-	ProtocolIncompatible    AgentRuntimeExecutionFailureCode = "protocol_incompatible"
-	RateLimited             AgentRuntimeExecutionFailureCode = "rate_limited"
-	ReplyNotSent            AgentRuntimeExecutionFailureCode = "reply_not_sent"
-	ReplyUndelivered        AgentRuntimeExecutionFailureCode = "reply_undelivered"
-	ResponseTooLarge        AgentRuntimeExecutionFailureCode = "response_too_large"
-	SessionNotFound         AgentRuntimeExecutionFailureCode = "session_not_found"
-	Timeout                 AgentRuntimeExecutionFailureCode = "timeout"
-	Unclassified            AgentRuntimeExecutionFailureCode = "unclassified"
+	AgentRuntimeExecutionFailureCodeAuthenticationRequired  AgentRuntimeExecutionFailureCode = "authentication_required"
+	AgentRuntimeExecutionFailureCodeCleanupUnconfirmed      AgentRuntimeExecutionFailureCode = "cleanup_unconfirmed"
+	AgentRuntimeExecutionFailureCodeComputerUnavailable     AgentRuntimeExecutionFailureCode = "computer_unavailable"
+	AgentRuntimeExecutionFailureCodeContextTooLong          AgentRuntimeExecutionFailureCode = "context_too_long"
+	AgentRuntimeExecutionFailureCodeExecutionFailed         AgentRuntimeExecutionFailureCode = "execution_failed"
+	AgentRuntimeExecutionFailureCodeExecutionOutcomeUnknown AgentRuntimeExecutionFailureCode = "execution_outcome_unknown"
+	AgentRuntimeExecutionFailureCodeInterrupted             AgentRuntimeExecutionFailureCode = "interrupted"
+	AgentRuntimeExecutionFailureCodeLocalModelUnavailable   AgentRuntimeExecutionFailureCode = "local_model_unavailable"
+	AgentRuntimeExecutionFailureCodeModelNotOffered         AgentRuntimeExecutionFailureCode = "model_not_offered"
+	AgentRuntimeExecutionFailureCodeModelServiceError       AgentRuntimeExecutionFailureCode = "model_service_error"
+	AgentRuntimeExecutionFailureCodeModelUnavailable        AgentRuntimeExecutionFailureCode = "model_unavailable"
+	AgentRuntimeExecutionFailureCodeNetworkError            AgentRuntimeExecutionFailureCode = "network_error"
+	AgentRuntimeExecutionFailureCodeProtocolIncompatible    AgentRuntimeExecutionFailureCode = "protocol_incompatible"
+	AgentRuntimeExecutionFailureCodeRateLimited             AgentRuntimeExecutionFailureCode = "rate_limited"
+	AgentRuntimeExecutionFailureCodeReplyNotSent            AgentRuntimeExecutionFailureCode = "reply_not_sent"
+	AgentRuntimeExecutionFailureCodeReplyUndelivered        AgentRuntimeExecutionFailureCode = "reply_undelivered"
+	AgentRuntimeExecutionFailureCodeResponseTooLarge        AgentRuntimeExecutionFailureCode = "response_too_large"
+	AgentRuntimeExecutionFailureCodeSessionNotFound         AgentRuntimeExecutionFailureCode = "session_not_found"
+	AgentRuntimeExecutionFailureCodeTimeout                 AgentRuntimeExecutionFailureCode = "timeout"
+	AgentRuntimeExecutionFailureCodeUnclassified            AgentRuntimeExecutionFailureCode = "unclassified"
 )
 
 // Valid indicates whether the value is a known member of the AgentRuntimeExecutionFailureCode enum.
 func (e AgentRuntimeExecutionFailureCode) Valid() bool {
 	switch e {
-	case AuthenticationRequired:
+	case AgentRuntimeExecutionFailureCodeAuthenticationRequired:
 		return true
-	case CleanupUnconfirmed:
+	case AgentRuntimeExecutionFailureCodeCleanupUnconfirmed:
 		return true
-	case ComputerUnavailable:
+	case AgentRuntimeExecutionFailureCodeComputerUnavailable:
 		return true
-	case ContextTooLong:
+	case AgentRuntimeExecutionFailureCodeContextTooLong:
 		return true
-	case ExecutionFailed:
+	case AgentRuntimeExecutionFailureCodeExecutionFailed:
 		return true
-	case ExecutionOutcomeUnknown:
+	case AgentRuntimeExecutionFailureCodeExecutionOutcomeUnknown:
 		return true
-	case Interrupted:
+	case AgentRuntimeExecutionFailureCodeInterrupted:
 		return true
-	case LocalModelUnavailable:
+	case AgentRuntimeExecutionFailureCodeLocalModelUnavailable:
 		return true
-	case ModelNotOffered:
+	case AgentRuntimeExecutionFailureCodeModelNotOffered:
 		return true
-	case ModelServiceError:
+	case AgentRuntimeExecutionFailureCodeModelServiceError:
 		return true
-	case ModelUnavailable:
+	case AgentRuntimeExecutionFailureCodeModelUnavailable:
 		return true
-	case NetworkError:
+	case AgentRuntimeExecutionFailureCodeNetworkError:
 		return true
-	case ProtocolIncompatible:
+	case AgentRuntimeExecutionFailureCodeProtocolIncompatible:
 		return true
-	case RateLimited:
+	case AgentRuntimeExecutionFailureCodeRateLimited:
 		return true
-	case ReplyNotSent:
+	case AgentRuntimeExecutionFailureCodeReplyNotSent:
 		return true
-	case ReplyUndelivered:
+	case AgentRuntimeExecutionFailureCodeReplyUndelivered:
 		return true
-	case ResponseTooLarge:
+	case AgentRuntimeExecutionFailureCodeResponseTooLarge:
 		return true
-	case SessionNotFound:
+	case AgentRuntimeExecutionFailureCodeSessionNotFound:
 		return true
-	case Timeout:
+	case AgentRuntimeExecutionFailureCodeTimeout:
 		return true
-	case Unclassified:
+	case AgentRuntimeExecutionFailureCodeUnclassified:
 		return true
 	default:
 		return false
@@ -638,6 +638,24 @@ func (e CancelAgentLocalRunResultStatus) Valid() bool {
 	case CancelAgentLocalRunResultStatusCanceled:
 		return true
 	case CancelAgentLocalRunResultStatusNotFound:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ClearAgentRuntimeSessionRequestRecoveryReason.
+const (
+	ClearAgentRuntimeSessionRequestRecoveryReasonContextTooLong  ClearAgentRuntimeSessionRequestRecoveryReason = "context_too_long"
+	ClearAgentRuntimeSessionRequestRecoveryReasonSessionNotFound ClearAgentRuntimeSessionRequestRecoveryReason = "session_not_found"
+)
+
+// Valid indicates whether the value is a known member of the ClearAgentRuntimeSessionRequestRecoveryReason enum.
+func (e ClearAgentRuntimeSessionRequestRecoveryReason) Valid() bool {
+	switch e {
+	case ClearAgentRuntimeSessionRequestRecoveryReasonContextTooLong:
+		return true
+	case ClearAgentRuntimeSessionRequestRecoveryReasonSessionNotFound:
 		return true
 	default:
 		return false
@@ -2370,6 +2388,23 @@ type AgentLocalRun struct {
 // AgentLocalRunStatus defines model for AgentLocalRun.Status.
 type AgentLocalRunStatus string
 
+// AgentLocalRunRecentMessage defines model for AgentLocalRunRecentMessage.
+type AgentLocalRunRecentMessage struct {
+	Author     string    `json:"author"`
+	AuthorKind string    `json:"author_kind"`
+	Body       string    `json:"body"`
+	CreatedAt  time.Time `json:"created_at"`
+	MessageId  string    `json:"message_id"`
+	Truncated  *bool     `json:"truncated,omitempty"`
+}
+
+// AgentLocalRunRecentMessages Bounded slice of recent product messages preceding a Run's first input, returned only when the Context currently has no persisted Runtime Session and continues earlier work.
+type AgentLocalRunRecentMessages struct {
+	InboxId    string                       `json:"inbox_id"`
+	Messages   []AgentLocalRunRecentMessage `json:"messages"`
+	NextCursor *string                      `json:"next_cursor,omitempty"`
+}
+
 // AgentLocalRunReplyStatus defines model for AgentLocalRunReplyStatus.
 type AgentLocalRunReplyStatus struct {
 	// Replied Whether TeamHub persisted a visible reply from this Local Run: a conversation Message or decision card attributed to the Run, a queued presentation sequence attributed to the Run, or an unattributed conversation Message, presentation sequence, or emoji Reaction written by the Context's Agent in the Room or its Threads since the Run started.
@@ -3109,7 +3144,10 @@ type ClaimedAgentLocalRun struct {
 
 	// ProfileUpdate The Agent's current profile, present when this Context's Runtime Session was started under an older profile. Agent Service puts it before the Run's inputs as one hidden update; TeamHub returns each profile revision to a Session once.
 	ProfileUpdate *AgentProfileUpdate `json:"profile_update,omitempty"`
-	RunId         string              `json:"run_id"`
+
+	// RecentMessages Bounded slice of recent product messages preceding a Run's first input, returned only when the Context currently has no persisted Runtime Session and continues earlier work.
+	RecentMessages *AgentLocalRunRecentMessages `json:"recent_messages,omitempty"`
+	RunId          string                       `json:"run_id"`
 }
 
 // ClearAgentRuntimeSessionRequest defines model for ClearAgentRuntimeSessionRequest.
@@ -3122,7 +3160,13 @@ type ClearAgentRuntimeSessionRequest struct {
 
 	// ExpectedCurrentConfigurationRevision Loaded registration revision for automatic stale-session clearing. Requires the same active registration and rejects a Session compatible through proven profile initialization. Omit only for an explicit Session reset.
 	ExpectedCurrentConfigurationRevision *AgentRuntimePositiveInt64 `json:"expected_current_configuration_revision,omitempty"`
+
+	// RecoveryReason Runtime failure code that triggers a same-revision Session reset on an idle active Context. Mutually exclusive with expected_current_configuration_revision.
+	RecoveryReason *ClearAgentRuntimeSessionRequestRecoveryReason `json:"recovery_reason,omitempty"`
 }
+
+// ClearAgentRuntimeSessionRequestRecoveryReason Runtime failure code that triggers a same-revision Session reset on an idle active Context. Mutually exclusive with expected_current_configuration_revision.
+type ClearAgentRuntimeSessionRequestRecoveryReason string
 
 // ClearAgentRuntimeSessionResult defines model for ClearAgentRuntimeSessionResult.
 type ClearAgentRuntimeSessionResult struct {
