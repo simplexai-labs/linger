@@ -485,7 +485,9 @@ Gateway and runs Agents. The daemon exits with the app.
   English. Errors from transfers and servers stay in English.
 - `src/preload/index.ts`: the only SPA API, `window.lingerDesktop`. Its
   `update` reads the Updater's state (without the release page URL) and runs
-  the tray's install and check, for the SPA's account menu.
+  the tray's install and check, for the SPA's account menu; `settings` exposes
+  `preventSleep` (`get`, `set`, `onChange`) so Settings › Computers mirrors and
+  stays in sync with the tray's Prevent Sleep toggle.
 - `src/shared/api.ts`, `src/shared/shell.ts`: preload contract types and IPC
   channel names.
 - `src/main/computer-daemon.ts`: ComputerDaemon. While the computer is

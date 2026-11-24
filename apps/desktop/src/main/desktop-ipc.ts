@@ -33,7 +33,10 @@ const languageInput = z.enum(LANGUAGES);
 // The server address is not settable from the SPA: a page served by one
 // server must not be able to repoint the app. It changes on app://offline.
 const settingsPatchInput = z
-  .object({ displayName: z.string().min(1).max(120).optional() })
+  .object({
+    displayName: z.string().min(1).max(120).optional(),
+    preventSleep: z.boolean().optional(),
+  })
   .strict();
 
 const permissionId = z.enum(["screen_recording", "accessibility"]);
@@ -150,6 +153,7 @@ export class DesktopIpcModule implements Module {
       return {
         serverUrl: config.serverUrl ?? "",
         displayName: config.displayName ?? this.#defaultDisplayName,
+        preventSleep: power.alwaysOn(),
       };
     };
     const handle = (
@@ -181,10 +185,15 @@ export class DesktopIpcModule implements Module {
     });
     handle(IPC.settingsGet, () => settings());
     handle(IPC.settingsSet, (patch) => {
+      const parsed = settingsPatchInput.parse(patch);
       const before = settings().displayName;
-      ctx.config.update(settingsPatchInput.parse(patch));
-      // The daemon announces the name; a new name restarts it when idle.
-      if (settings().displayName !== before) ctx.bus.emit("computer.renamed");
+      if (parsed.displayName !== undefined) {
+        ctx.config.update({ displayName: parsed.displayName });
+        // The daemon announces the name; a new name restarts it when idle.
+        if (settings().displayName !== before) ctx.bus.emit("computer.renamed");
+      }
+      if (parsed.preventSleep !== undefined)
+        power.setAlwaysOn(parsed.preventSleep);
       return settings();
     });
 
@@ -237,11 +246,18 @@ export class DesktopIpcModule implements Module {
     const push = (): void => {
       windows.webContents()?.send(IPC.computerStatusEvent, status());
     };
+    const pushSettings = (): void => {
+      windows.webContents()?.send(IPC.settingsEvent, settings());
+    };
     this.#unsubscribe.push(
       ctx.bus.on("computer.connection", push),
       ctx.bus.on("runtime.state", push),
       ctx.bus.on("runtime.activity", push),
-      ctx.bus.on("power.changed", push),
+      ctx.bus.on("power.changed", () => {
+        push();
+        pushSettings();
+      }),
+      ctx.bus.on("computer.renamed", pushSettings),
       ctx.bus.on("computer.changed", push),
       ctx.bus.on("update.changed", () =>
         windows

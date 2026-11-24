@@ -48,6 +48,22 @@ const fixture = async (
     ...stubModule("Diagnostics"),
     save: vi.fn(async () => "/Users/me/Downloads/linger-diagnostics.zip"),
   };
+  let alwaysOn = false;
+  const power = {
+    ...stubModule("PowerGuard"),
+    alwaysOn: () => alwaysOn,
+    active: () => alwaysOn,
+    setAlwaysOn: vi.fn((on: boolean) => {
+      alwaysOn = on;
+      bus.emit("power.changed");
+    }),
+  };
+  const daemon = {
+    ...stubModule("ComputerDaemon"),
+    connection: () => "online",
+    state: () => "ready",
+    running: () => 0,
+  };
   const send = vi.fn();
   const windows = {
     ...stubModule("WindowManager"),
@@ -61,8 +77,8 @@ const fixture = async (
       stubModule("Config"),
       language,
       stubModule("Enrollment"),
-      stubModule("PowerGuard"),
-      stubModule("ComputerDaemon"),
+      power as never,
+      daemon as never,
       diagnostics as never,
       windows as never,
       stubModule("WorkspaceGrants"),
@@ -86,6 +102,7 @@ const fixture = async (
     diagnostics,
     language,
     local,
+    power,
     updater,
     send,
     setUpdate,
@@ -261,6 +278,54 @@ describe("DesktopIpcModule language", () => {
       f.invoke(IPC.languageSet, "https://evil.example.com", "zh-CN"),
     ).toThrow("Not allowed");
     expect(f.language.current()).toBe("en");
+    await f.host.stop("quit");
+  });
+});
+
+describe("DesktopIpcModule settings", () => {
+  it("reads, updates, and pushes preventSleep in sync with PowerGuard", async () => {
+    const f = await fixture();
+    expect(await f.invoke(IPC.settingsGet)).toEqual({
+      serverUrl: SERVER,
+      displayName: "Desk",
+      preventSleep: false,
+    });
+
+    expect(
+      await f.invoke(IPC.settingsSet, SERVER, { preventSleep: true }),
+    ).toEqual({
+      serverUrl: SERVER,
+      displayName: "Desk",
+      preventSleep: true,
+    });
+    expect(f.power.setAlwaysOn).toHaveBeenCalledWith(true);
+    expect(f.send).toHaveBeenCalledWith(IPC.settingsEvent, {
+      serverUrl: SERVER,
+      displayName: "Desk",
+      preventSleep: true,
+    });
+
+    // Changes triggered from the tray push updated settings back to the page.
+    f.power.setAlwaysOn(false);
+    expect(f.send).toHaveBeenLastCalledWith(IPC.settingsEvent, {
+      serverUrl: SERVER,
+      displayName: "Desk",
+      preventSleep: false,
+    });
+    await f.host.stop("quit");
+  });
+
+  it("rejects cross-origin or invalid settings updates", async () => {
+    const f = await fixture();
+    expect(() =>
+      f.invoke(IPC.settingsSet, "https://evil.example.com", {
+        preventSleep: true,
+      }),
+    ).toThrow("Not allowed");
+    expect(() =>
+      f.invoke(IPC.settingsSet, SERVER, { serverUrl: "https://evil.example" }),
+    ).toThrow();
+    expect(f.power.setAlwaysOn).not.toHaveBeenCalled();
     await f.host.stop("quit");
   });
 });

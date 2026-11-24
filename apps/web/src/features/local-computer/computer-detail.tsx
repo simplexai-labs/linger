@@ -64,6 +64,8 @@ import { relativeTime } from "./computer-relative-time";
 import { ComputerRow, ProgressChip, RowMark, StatusDot } from "./computer-row";
 import { computersMessages } from "./computers.messages";
 import { isUpgradeRecommended } from "./computer-version";
+import { useDesktopComputer } from "./desktop-computer";
+import { DesktopPreventSleep } from "./desktop-prevent-sleep";
 import { localRuntimeMessage } from "./local-runtime-message";
 
 type LocalComputer = TeamHubLocalComputerPage["items"][number];
@@ -130,6 +132,9 @@ export function ComputerDetail({
   );
   const [setup, setSetup] = useState<AppSetup | null>(null);
   const [updateOpen, setUpdateOpen] = useState(false);
+  const desktopComputer = useDesktopComputer();
+  const isThisComputer =
+    desktopComputer?.status?.computerId === computer.computer_id;
   const online = displayStatus === "online";
   const openSetup = (app: TeamHubLocalRuntimeType, choosable = false) =>
     setSetup({ app, choosable });
@@ -200,6 +205,13 @@ export function ComputerDetail({
             />
           </Link>
         </Group>
+      ) : null}
+      {isThisComputer ? (
+        <DesktopPreventSleep
+          renderGroup={(content) => (
+            <Group title={t(computersMessages.power)}>{content}</Group>
+          )}
+        />
       ) : null}
       {displayStatus === "offline" ? null : (
         <Group defaultOpen={false} title={t(computersMessages.access)}>
