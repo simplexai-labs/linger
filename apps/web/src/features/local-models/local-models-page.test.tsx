@@ -5670,13 +5670,14 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     await findModels();
 
     const spotlight = spotlightRegion();
-    expect(spotlight).toHaveTextContent("Inkling 2 Mini (UD-Q3_K_XL)");
+    expect(spotlight).toHaveTextContent("Inkling 2 Mini");
+    expect(spotlight).toHaveTextContent("UD-Q3_K_XL");
     expect(spotlight).not.toHaveTextContent("UD-Q4_K_XL");
 
     // Expand the spotlight row to check engine-scoped guidance and ready-alternatives hint.
     fireEvent.click(
       within(spotlight).getByRole("button", {
-        name: "Inkling 2 Mini (UD-Q3_K_XL)",
+        name: "Inkling 2 Mini",
       }),
     );
     expect(spotlight).toHaveTextContent(
