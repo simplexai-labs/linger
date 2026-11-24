@@ -408,3 +408,45 @@ func TestPublishLocalModelsDowngradesDiagnosticsForOlderServices(t *testing.T) {
 		t.Fatalf("full frame lost engine fields: %+v", m0)
 	}
 }
+
+func TestPublishLocalModelsGatesExternalHolders(t *testing.T) {
+	snapshot := wire.LocalModelsSnapshot{
+		Pools: []wire.LocalModelPool{
+			{ID: "gpu:0", Kind: "gpu", ExternalHolders: []wire.LocalModelPoolExternalHolder{{Name: "msedge", Bytes: 10}}},
+			{ID: "ram", Kind: "ram", ExternalHolders: []wire.LocalModelPoolExternalHolder{}},
+		},
+	}
+	publish := func(feature bool) []map[string]any {
+		t.Helper()
+		stream := &browserEventStream{}
+		d := &Daemon{computerID: "computer", protocolVersion: protocol.Version, localModelsStream: stream}
+		d.localModelsExternalHolders.Store(feature)
+		d.PublishLocalModels(snapshot)
+		var frame struct {
+			LocalModels struct {
+				Pools []map[string]any `json:"pools"`
+			} `json:"local_models"`
+		}
+		if err := json.Unmarshal(stream.events[0].Payload, &frame); err != nil {
+			t.Fatal(err)
+		}
+		return frame.LocalModels.Pools
+	}
+
+	for _, pool := range publish(false) {
+		if _, ok := pool["external_holders"]; ok {
+			t.Fatalf("legacy service received external_holders: %+v", pool)
+		}
+	}
+	if len(snapshot.Pools[0].ExternalHolders) != 1 || snapshot.Pools[1].ExternalHolders == nil {
+		t.Fatalf("stripping mutated the caller's snapshot: %+v", snapshot.Pools)
+	}
+
+	pools := publish(true)
+	if holders, ok := pools[0]["external_holders"].([]any); !ok || len(holders) != 1 {
+		t.Fatalf("holders did not pass through: %+v", pools[0])
+	}
+	if holders, ok := pools[1]["external_holders"].([]any); !ok || len(holders) != 0 {
+		t.Fatalf("empty holders did not pass through as []: %+v", pools[1])
+	}
+}

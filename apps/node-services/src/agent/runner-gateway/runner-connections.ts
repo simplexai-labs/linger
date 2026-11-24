@@ -487,9 +487,10 @@ export class RunnerConnections {
               )
                 ? (["local_models_engine"] as const)
                 : []),
-              // A Computer ignores a feature it does not know, so this one
-              // needs no release gate.
+              // A Computer ignores a feature it does not know, so these
+              // need no release gate.
               "local_model_unavailable",
+              "local_models_external_holders",
             ],
           }
         : {}),

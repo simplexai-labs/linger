@@ -211,6 +211,7 @@ export const runnerGatewayEnvelopeSchema = {
         "model_invoke_outcomes",
         "local_models_engine",
         "local_model_unavailable",
+        "local_models_external_holders",
       ],
     },
     Timestamp: {
@@ -2383,7 +2384,10 @@ export const runnerGatewayEnvelopeSchema = {
           },
         },
         external_holders: {
+          description:
+            "Closeable desktop applications holding this pool's memory, as localmodels reports them. [] means localmodels looked and found none; an absent field means not reported. Sent only when service_features declares local_models_external_holders.",
           type: "array",
+          minItems: 0,
           maxItems: 256,
           items: {
             $ref: "#/$defs/LocalModelPoolExternalHolder",

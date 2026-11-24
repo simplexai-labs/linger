@@ -145,7 +145,12 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 		}
 		// Only these closeable apps count as other apps in the Web; the rest
 		// of used_bytes may be the engine's own memory beyond its holder.
+		// A reported list, even [], stays non-nil so it encodes as [] ("none
+		// found"); an omitted field stays nil and is not encoded.
 		var externalHolders []wire.LocalModelPoolExternalHolder
+		if pool.ExternalHolders != nil {
+			externalHolders = make([]wire.LocalModelPoolExternalHolder, 0)
+		}
 		for _, holder := range pool.ExternalHolders {
 			if name := clip(strings.TrimSpace(holder.Name), 200); name != "" && len(externalHolders) < 256 {
 				externalHolders = append(externalHolders, wire.LocalModelPoolExternalHolder{Name: name, Bytes: holder.Bytes})

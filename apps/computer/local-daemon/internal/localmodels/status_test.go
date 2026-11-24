@@ -184,3 +184,41 @@ func TestMapStatusPreservesExternalHolders(t *testing.T) {
 		t.Fatalf("pool without external holders encoded the field: %s", out)
 	}
 }
+
+func TestMapStatusKeepsReportedEmptyExternalHolders(t *testing.T) {
+	for name, reported := range map[string][]any{
+		"empty":       {},
+		"blank names": {map[string]any{"name": "  ", "bytes": float64(100)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			encoded, err := os.ReadFile("testdata/library-status-dev38.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document map[string]any
+			if err := json.Unmarshal(encoded, &document); err != nil {
+				t.Fatal(err)
+			}
+			document["pools"].([]any)[0].(map[string]any)["external_holders"] = reported
+			encoded, err = json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := mapStatus(encoded, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			pool0 := snapshot.Pools[0]
+			if pool0.ExternalHolders == nil || len(pool0.ExternalHolders) != 0 {
+				t.Fatalf("expected a non-nil empty list, got %#v", pool0.ExternalHolders)
+			}
+			out, err := json.Marshal(pool0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(out), `"external_holders":[]`) {
+				t.Fatalf("reported empty list was not encoded as []: %s", out)
+			}
+		})
+	}
+}

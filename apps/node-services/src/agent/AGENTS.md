@@ -193,6 +193,9 @@ take precedence.
   or later (`FIRST_LOCAL_MODELS_ENGINE_COMPUTER_VERSION`); a Daemon talking to
   an older Agent Service strips `engine`, `engine_label`, `concurrency`, and
   `host_ram_bytes` from `LocalModel` rows.
+- `local_models_external_holders` is advertised to every Computer (a Daemon
+  ignores an unknown feature); a Daemon talking to an older Agent Service
+  strips `external_holders` from `LocalModelPool` rows.
 - Default unit, integration, and fixture smoke tests use deterministic adapters
   and do not call a live model provider. Explicitly named live suites such as
   `smoke:local-runner:live` may use an authenticated provider and must remain

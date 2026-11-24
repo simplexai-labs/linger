@@ -199,6 +199,7 @@ describe("Runner Gateway local models", () => {
         "model_invoke_outcomes",
         "local_models_engine",
         "local_model_unavailable",
+        "local_models_external_holders",
       ],
     ],
     [
@@ -210,6 +211,7 @@ describe("Runner Gateway local models", () => {
         "model_invoke_outcomes",
         "local_models_engine",
         "local_model_unavailable",
+        "local_models_external_holders",
       ],
     ],
     [
@@ -220,6 +222,7 @@ describe("Runner Gateway local models", () => {
         "local_models_diagnostics",
         "model_invoke_outcomes",
         "local_model_unavailable",
+        "local_models_external_holders",
       ],
     ],
     [
@@ -229,6 +232,7 @@ describe("Runner Gateway local models", () => {
         "byok_endpoint",
         "local_models_diagnostics",
         "local_model_unavailable",
+        "local_models_external_holders",
       ],
     ],
     [
@@ -238,12 +242,43 @@ describe("Runner Gateway local models", () => {
         "byok_endpoint",
         "local_models_diagnostics",
         "local_model_unavailable",
+        "local_models_external_holders",
       ],
     ],
-    ["0.57.0", ["local_models", "byok_endpoint", "local_model_unavailable"]],
-    ["0.56.0", ["local_models", "byok_endpoint", "local_model_unavailable"]],
-    ["0.55.0", ["local_models", "local_model_unavailable"]],
-    ["0.52.0", ["local_models", "local_model_unavailable"]],
+    [
+      "0.57.0",
+      [
+        "local_models",
+        "byok_endpoint",
+        "local_model_unavailable",
+        "local_models_external_holders",
+      ],
+    ],
+    [
+      "0.56.0",
+      [
+        "local_models",
+        "byok_endpoint",
+        "local_model_unavailable",
+        "local_models_external_holders",
+      ],
+    ],
+    [
+      "0.55.0",
+      [
+        "local_models",
+        "local_model_unavailable",
+        "local_models_external_holders",
+      ],
+    ],
+    [
+      "0.52.0",
+      [
+        "local_models",
+        "local_model_unavailable",
+        "local_models_external_holders",
+      ],
+    ],
     ["0.51.0", undefined],
   ])(
     "welcomes a %s Computer with service_features %j",

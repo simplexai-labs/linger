@@ -110,6 +110,10 @@ Progress and outcomes travel back only as snapshots:
    `host_ram_bytes`) is sent only when `runner.welcome`'s `service_features`
    declares `local_models_engine` (`FIRST_LOCAL_MODELS_ENGINE_COMPUTER_VERSION`,
    `0.61.0`); otherwise the Daemon strips those fields for older Agent Services.
+   Pool `external_holders` is sent only when `service_features` declares
+   `local_models_external_holders` (to every Computer, which ignores unknown
+   features); otherwise the Daemon strips it. `[]` means localmodels found no
+   closeable app, while an absent field means not reported.
    `service_features` also declares `local_model_unavailable` to every Computer
    that receives the field: a Daemon ignores a feature it does not know, and one
    that knows it reports a Pi Run whose local model it could not load with that

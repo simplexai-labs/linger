@@ -270,7 +270,10 @@ downloaded model that Run's Agent names.
 - Snapshots. `runner.local_models` carries `library-status/v1` mapped to
   `LocalModelsSnapshot` (pools gain `kind` and `gpu_index`, and keep the
   tool's `external_holders`, the closeable desktop apps it found holding that
-  pool's memory, without their PIDs; the Models page calls only those "Other
+  pool's memory, without their PIDs; `[]` stays `[]` for "none found" and an
+  omitted field stays omitted for "not reported"; sent only when
+  `runner.welcome`'s `service_features` names
+  `local_models_external_holders` and stripped otherwise; the Models page calls only those "Other
   apps" and shows the rest of `used_bytes` beyond `holders` neutrally, since
   an engine can hold more than its catalog estimate). Structural and
   security invariants (`id`, unique model IDs, `fit`, `state`, `pool`,

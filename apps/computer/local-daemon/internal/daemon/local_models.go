@@ -33,6 +33,11 @@ const serviceFeatureLocalModelsDiagnostics = "local_models_diagnostics"
 // on unknown LocalModel properties.
 const serviceFeatureLocalModelsEngine = "local_models_engine"
 
+// serviceFeatureLocalModelsExternalHolders in runner.welcome's service_features
+// says the Agent Service accepts external_holders on LocalModelPool rows. Older
+// services close the connection on unknown LocalModelPool properties.
+const serviceFeatureLocalModelsExternalHolders = "local_models_external_holders"
+
 // serviceFeatureLocalModelUnavailable in runner.welcome's service_features
 // says the Agent Service accepts the local_model_unavailable Run failure
 // code. An older service rejects the frame, so the Daemon reports
@@ -103,6 +108,9 @@ func (d *Daemon) PublishLocalModels(snapshot wire.LocalModelsSnapshot) {
 	}
 	if !d.localModelsEngine.Load() {
 		snapshot = stripLocalModelsEngine(snapshot)
+	}
+	if !d.localModelsExternalHolders.Load() {
+		snapshot = stripLocalModelsExternalHolders(snapshot)
 	}
 	d.localModelsRevision++
 	sentAt := time.Now().UTC()
@@ -274,6 +282,21 @@ func stripLocalModelsEngine(snapshot wire.LocalModelsSnapshot) wire.LocalModelsS
 		models[i] = model
 	}
 	snapshot.Models = models
+	return snapshot
+}
+
+// stripLocalModelsExternalHolders omits pool external_holders when talking to
+// an Agent Service that did not announce serviceFeatureLocalModelsExternalHolders.
+func stripLocalModelsExternalHolders(snapshot wire.LocalModelsSnapshot) wire.LocalModelsSnapshot {
+	if len(snapshot.Pools) == 0 {
+		return snapshot
+	}
+	pools := make([]wire.LocalModelPool, len(snapshot.Pools))
+	for i, pool := range snapshot.Pools {
+		pool.ExternalHolders = nil
+		pools[i] = pool
+	}
+	snapshot.Pools = pools
 	return snapshot
 }
 

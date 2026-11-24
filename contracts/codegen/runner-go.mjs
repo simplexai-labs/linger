@@ -117,6 +117,12 @@ export function renderRunnerGo(schema) {
     return scalar(node) ?? "json.RawMessage";
   };
 
+  // An optional array that declares minItems 0 treats [] as a value distinct
+  // from "not reported", so it uses omitzero: nil is omitted, [] is encoded.
+  const omit = (value, type) =>
+    type.startsWith("[]") && resolve(value).minItems === 0
+      ? ",omitzero"
+      : ",omitempty";
   const declare = (name, node) => {
     if (types.has(name)) return;
     types.set(name, undefined);
@@ -142,7 +148,7 @@ export function renderRunnerGo(schema) {
         key,
         field,
         type,
-        tag: `json:"${key}${optional ? ",omitempty" : ""}"`,
+        tag: `json:"${key}${optional ? omit(value, type) : ""}"`,
         required: !optional,
         fixed: typeof fixed === "string" ? fixed : undefined,
       });

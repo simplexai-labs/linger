@@ -1268,7 +1268,7 @@ type LocalModelPool struct {
 	TotalBytes      uint64                         `json:"total_bytes"`
 	UsedBytes       uint64                         `json:"used_bytes"`
 	Holders         []LocalModelPoolHolder         `json:"holders"`
-	ExternalHolders []LocalModelPoolExternalHolder `json:"external_holders,omitempty"`
+	ExternalHolders []LocalModelPoolExternalHolder `json:"external_holders,omitzero"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModelPool.

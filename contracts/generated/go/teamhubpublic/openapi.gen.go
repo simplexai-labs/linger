@@ -7401,7 +7401,7 @@ type LocalModelNoteCode string
 
 // LocalModelPool One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them.
 type LocalModelPool struct {
-	// ExternalHolders Closeable desktop applications holding this pool's memory, as localmodels reports them. Absent when localmodels does not report them; the rest of used_bytes is then not known to be other apps.
+	// ExternalHolders Closeable desktop applications holding this pool's memory, as localmodels reports them. An empty list means localmodels looked and found no closeable app; absent means not reported, and the rest of used_bytes is then not known to be other apps.
 	ExternalHolders *[]LocalModelPoolExternalHolder `json:"external_holders,omitempty"`
 
 	// GpuIndex Present only for kind gpu; matches LocalModelGpu.index.

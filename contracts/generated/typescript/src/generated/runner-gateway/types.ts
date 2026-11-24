@@ -38,7 +38,8 @@ export type ServiceFeature =
   | "local_models_diagnostics"
   | "model_invoke_outcomes"
   | "local_models_engine"
-  | "local_model_unavailable";
+  | "local_model_unavailable"
+  | "local_models_external_holders";
 export type JsonValue =
   | null
   | boolean
@@ -1384,6 +1385,9 @@ export interface LocalModelPool {
    */
   holders: LocalModelPoolHolder[];
   /**
+   * Closeable desktop applications holding this pool's memory, as localmodels reports them. [] means localmodels looked and found none; an absent field means not reported. Sent only when service_features declares local_models_external_holders.
+   *
+   * @minItems 0
    * @maxItems 256
    */
   external_holders?: LocalModelPoolExternalHolder[];

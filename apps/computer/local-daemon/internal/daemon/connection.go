@@ -338,6 +338,7 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 	d.byokEndpoint.Store(slices.Contains(command.ServiceFeatures, serviceFeatureByokEndpoint))
 	d.localModelsDiagnostics.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsDiagnostics))
 	d.localModelsEngine.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsEngine))
+	d.localModelsExternalHolders.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsExternalHolders))
 	d.modelInvokeOutcomes.Store(slices.Contains(command.ServiceFeatures, serviceFeatureModelInvokeOutcomes))
 	d.localModelUnavailable.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelUnavailable))
 	localModels := slices.Contains(command.ServiceFeatures, serviceFeatureLocalModels)
@@ -427,6 +428,7 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 		d.localModelsStream = nil
 		d.localModelsDiagnostics.Store(false)
 		d.localModelsEngine.Store(false)
+		d.localModelsExternalHolders.Store(false)
 		d.localModelUnavailable.Store(false)
 	}
 	d.connectionMu.Unlock()
