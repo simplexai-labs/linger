@@ -22,7 +22,7 @@ import {
   reclaimNativeOrphans,
   type NativeService,
 } from "./native-process.js";
-import { freePort, portFree } from "./ports.js";
+import { freePort, isPortAllocationError, portFree } from "./ports.js";
 import type { SetupChoice } from "./setup-plan.js";
 import type { ByokConfiguration } from "./byok-source.js";
 import type { RuntimeDescriptor } from "./managed-runtimes.js";
@@ -310,6 +310,21 @@ export async function prepareSourceConfiguration(
       (await readPrivate(path.join(instance.root, "services.env")))!,
     );
     const ports = instance.source.ports;
+    let liveKitEnv: Record<string, string> = {};
+    try {
+      liveKitEnv = liveKitEnvironment(
+        await prepareLiveKitSettings(
+          instance.root,
+          await reservedPorts(),
+          (message) => warnings.push(message),
+        ),
+      );
+    } catch (error) {
+      if (!isPortAllocationError(error)) throw error;
+      warnings.push(
+        `Voice stays off: LiveKit could not reserve a local port (${error.message}).\n`,
+      );
+    }
     const generated = {
       ...supplied,
       ...user,
@@ -339,14 +354,8 @@ export async function prepareSourceConfiguration(
       // Both loopback addresses, so no other program answers for the origin.
       HOST: "127.0.0.1,::1",
       // Native runs its own LiveKit on loopback with this instance's ports
-      // and keys.
-      ...liveKitEnvironment(
-        await prepareLiveKitSettings(
-          instance.root,
-          await reservedPorts(),
-          (message) => warnings.push(message),
-        ),
-      ),
+      // and keys when port reservation succeeds.
+      ...liveKitEnv,
     };
     const quote = (value: string) => {
       if (!/[\r\n\0]/.test(value)) {

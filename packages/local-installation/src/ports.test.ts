@@ -2,7 +2,13 @@ import { createSocket } from "node:dgram";
 import net from "node:net";
 import os from "node:os";
 import { afterEach, expect, it } from "vitest";
-import { freePort, portFree } from "./ports.js";
+import {
+  NO_FREE_PORT,
+  PortAllocationError,
+  freePort,
+  isPortAllocationError,
+  portFree,
+} from "./ports.js";
 
 const open: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -66,14 +72,43 @@ it("reports the loopback bind error if it cannot find an alternative", async () 
   const taken = (await listen("127.0.0.1"))!;
   const reserved = new Set(Array.from({ length: 65536 }, (_, port) => port));
   reserved.delete(taken);
-  await expect(freePort(reserved, { preferred: taken })).rejects.toThrow(
-    "TCP: 127.0.0.1 bind: EADDRINUSE",
+  const error = await freePort(reserved, { preferred: taken }).catch(
+    (caught: unknown) => caught,
+  );
+  expect(isPortAllocationError(error)).toBe(true);
+  expect(error).toBeInstanceOf(PortAllocationError);
+  expect((error as PortAllocationError).code).toBe(NO_FREE_PORT);
+  expect((error as PortAllocationError).port).toBe(taken);
+  expect((error as Error).message).toContain(
+    `TCP: 127.0.0.1 bind: EADDRINUSE (port ${taken})`,
   );
 });
 
 it("checks UDP ports separately", async () => {
   const socket = createSocket("udp4");
   await new Promise<void>((resolve) => socket.bind(0, "127.0.0.1", resolve));
+  open.push(() => new Promise((resolve) => socket.close(() => resolve())));
+  const { port } = socket.address();
+  expect(await portFree(port, "udp")).toBe(false);
+  const moved = await freePort(new Set(), { preferred: port, protocol: "udp" });
+  expect(moved).not.toBe(port);
+  expect(await portFree(moved, "udp")).toBe(true);
+});
+
+it("treats a UDP port taken on IPv6 loopback only as used", async (context) => {
+  const socket = createSocket({ type: "udp6", ipv6Only: true });
+  const bound = await new Promise<boolean>((resolve) => {
+    socket.once("error", () => {
+      try {
+        socket.close();
+      } catch {
+        // Already closed.
+      }
+      resolve(false);
+    });
+    socket.bind(0, "::1", () => resolve(true));
+  });
+  if (!bound) return context.skip("This computer has no ::1 UDP.");
   open.push(() => new Promise((resolve) => socket.close(() => resolve())));
   const { port } = socket.address();
   expect(await portFree(port, "udp")).toBe(false);

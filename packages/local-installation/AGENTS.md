@@ -57,8 +57,9 @@ package's `.env` is not read. Voice keys are normally saved in the app
 (TeamHub); a key in `user.env` overrides it. Whenever the distribution has
 voice tools for this computer, Native prepares them and runs LiveKit with
 the key pair and ports in the instance's `livekit.env`, with or without a
-voice key; without them, or when they fail to prepare, TeamHub gets
-`TEAMHUB_VOICE_MEDIA=off` and the install continues. The services' `voice`
+voice key; without them, or when they fail to prepare or LiveKit cannot
+reserve a local port, TeamHub gets `TEAMHUB_VOICE_MEDIA=off` and the install
+continues. The services' `voice`
 setting tracks only the tools, so a key change never restarts them through
 it. A native process restarts when its generated environment changes.
 The desktop passes the system proxy it resolved for Soniox as
@@ -86,7 +87,10 @@ the environment file.
 Every port the installer chooses (`ports.ts`) must be free on both
 127.0.0.1 and ::1 with nothing answering there: `localhost` resolves to ::1
 first on macOS, and a program on ::1 alone would answer for a service that
-bound 127.0.0.1 without an error. The web static host listens on both.
+bound 127.0.0.1 without an error. UDP allocation holds the bound IPv4 socket
+while checking ::1 instead of closing and rebinding 127.0.0.1, and falls back
+to unprivileged non-ephemeral ports when OS ephemeral UDP ports fail or
+collide. The web static host listens on both.
 Creating an instance also reserves other instances' saved LiveKit HTTP and RTC
 ports, even while their voice services are stopped. Each
 start re-checks a stopped service's ports and moves one another program took
