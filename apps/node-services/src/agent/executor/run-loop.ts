@@ -356,7 +356,6 @@ export class RunLoop {
   readonly #unstartedRequeues = new Set<string>();
   #terminalRecoveryStop = new AbortController();
   #priorityWait?: AbortController;
-  /** A read of the queued input's kind for the active Run's priority. */
   #capacityWait = new AbortController();
   #retiredPreparationFailure: { readonly error: unknown } | undefined;
   // Native session compaction; no Run is claimed until it settles.

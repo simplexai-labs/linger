@@ -697,9 +697,10 @@ components:
           items:
             type: string
           description: >-
-            The Inboxes of the Context's Room and its Threads (`room:<id>`,
-            `thread:<id>`) that hold such a reply. A Run that took up
-            mentions from several Inboxes has answered only those listed.
+            The Inboxes that hold such a reply: the Inbox of the Room or
+            Thread it is in (`room:<id>`, `thread:<id>`) and of each Task whose
+            work Room that is (`task:<id>`). A Run that took up mentions from
+            several Inboxes has answered only those listed.
     ClaimAgentLocalRunRequest:
       type: object
       additionalProperties: false

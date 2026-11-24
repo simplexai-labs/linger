@@ -368,12 +368,13 @@ type LocalRunReplyStatus struct {
 	// Replied reports a reply attributed to the Run, or written by its Agent in
 	// the Context's Room or its Threads while the Run ran.
 	Replied bool
-	// RepliedInboxIDs are the Room and Thread Inboxes that hold such a reply.
+	// RepliedInboxIDs are the Inboxes that hold such a reply: the Room or
+	// Thread it is in and each Task whose work Room that is.
 	RepliedInboxIDs []string
 }
 
-// GetLocalRunReplyStatus reports whether, and in which Inboxes of its
-// collaboration Room, TeamHub persisted a visible reply for the Local Run.
+// GetLocalRunReplyStatus reports whether, and in which Inboxes, TeamHub
+// persisted a visible reply for the Local Run.
 func (s *Service) GetLocalRunReplyStatus(ctx context.Context, contextKey, runID string) (LocalRunReplyStatus, error) {
 	if s == nil || s.pool == nil || contextKey == "" || runID == "" {
 		return LocalRunReplyStatus{}, ErrInvalid

@@ -462,6 +462,32 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 	insertRuntimeRunMessageFixture(t, pool, roomID, "msg-run5-room-reply", run5, "Room reply")
 	assertReplied(run5, true, "room:"+roomID, "thread:"+threadID)
 	finishRun(run5)
+
+	// Run 6: a Task's work Room delivers its Messages on the Task's Inbox, so
+	// a reply in that Room answers the Task's Inbox too; a reply in one of its
+	// Threads does not.
+	const taskID = "http-reply-status-task"
+	// The Task, its first generation and that generation's participant
+	// reference each other, so they are written in one transaction.
+	if _, err := pool.Exec(t.Context(), `
+		INSERT INTO work_items(id,tenant_id,number,kind,title,created_by_actor_id,updated_by_actor_id,state,task_execution_generation,task_execution_status,task_execution_revision,task_desired_control,task_control_revision,task_control_settled_revision,task_execution_updated_at,task_next_reconcile_at,task_lease_generation)
+		VALUES('http-reply-status-task','tenant_acme',98766,'task','reply status task','actor_acme_alice','actor_acme_alice','in_progress',1,'idle',1,'run',0,0,now(),now(),0);
+		INSERT INTO task_execution_generations(task_id,tenant_id,generation,result_agent_actor_id,spec,spec_hash)
+		VALUES('http-reply-status-task','tenant_acme',1,'actor_acme_official','{}',decode(repeat('00',32),'hex'));
+		INSERT INTO task_execution_participants(task_id,tenant_id,generation,actor_id,agent_management_id,execution_context_ref)
+		VALUES('http-reply-status-task','tenant_acme',1,'actor_acme_official','`+testRuntimeAgentID+`',
+		       jsonb_build_object('kind','alter_ego','agentId','`+testRuntimeAgentID+`','taskId','http-reply-status-task'));
+		INSERT INTO work_item_room_links(work_item_id,tenant_id,link_type,room_id,linked_by_actor_id)
+		VALUES('http-reply-status-task','tenant_acme','work','http-reply-status-room','actor_acme_alice')`); err != nil {
+		t.Fatalf("seed Task work Room: %v", err)
+	}
+	run6 := startRun("reply-run-6")
+	assertReplied(run6, false)
+	insertRuntimeRunMessageFixture(t, pool, threadID, "msg-run6-thread-reply", run6, "Thread reply")
+	assertReplied(run6, true, "thread:"+threadID)
+	insertRuntimeRunMessageFixture(t, pool, roomID, "msg-run6-room-reply", run6, "Room reply")
+	assertReplied(run6, true, "room:"+roomID, "task:"+taskID, "thread:"+threadID)
+	finishRun(run6)
 }
 
 func agentRuntimeStateRequest(

@@ -2099,7 +2099,7 @@ export interface components {
     AgentLocalRunReplyStatus: {
       /** @description Whether TeamHub persisted a visible reply from this Local Run: a conversation Message or decision card attributed to the Run, a queued presentation sequence attributed to the Run, or an unattributed conversation Message, presentation sequence, or emoji Reaction written by the Context's Agent in the Room or its Threads since the Run started. */
       replied: boolean;
-      /** @description The Inboxes of the Context's Room and its Threads (`room:<id>`, `thread:<id>`) that hold such a reply. A Run that took up mentions from several Inboxes has answered only those listed. */
+      /** @description The Inboxes that hold such a reply: the Inbox of the Room or Thread it is in (`room:<id>`, `thread:<id>`) and of each Task whose work Room that is (`task:<id>`). A Run that took up mentions from several Inboxes has answered only those listed. */
       replied_inbox_ids?: string[];
     };
     AgentRuntimeWaitingContexts: {

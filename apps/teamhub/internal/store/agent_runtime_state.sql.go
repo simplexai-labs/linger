@@ -2202,10 +2202,10 @@ WITH target_run AS (
       AND context.room_id IS NOT NULL
 ),
 room_scope AS (
-    SELECT target_run.room_id AS id, 'room:'||target_run.room_id AS inbox_id
+    SELECT target_run.room_id AS id
     FROM target_run
     UNION ALL
-    SELECT thread.id, 'thread:'||thread.id
+    SELECT thread.id
     FROM target_run
     JOIN rooms thread
       ON thread.parent_room_id=target_run.room_id
@@ -2254,10 +2254,18 @@ reply_room AS (
       AND (target_run.finished_at IS NULL OR reaction.created_at<=target_run.finished_at)
       AND reaction.room_id IN (SELECT id FROM room_scope)
 )
-SELECT room_scope.inbox_id::text AS inbox_id
-FROM room_scope
-WHERE room_scope.id IN (SELECT room_id FROM reply_room)
-ORDER BY room_scope.inbox_id
+SELECT (CASE WHEN room.parent_room_id IS NULL THEN 'room:' ELSE 'thread:' END||room.id)::text AS inbox_id
+FROM target_run
+JOIN rooms room ON room.tenant_id=target_run.tenant_id
+WHERE room.id IN (SELECT room_id FROM reply_room)
+UNION
+SELECT ('task:'||link.work_item_id)::text
+FROM target_run
+JOIN work_item_room_links link
+  ON link.tenant_id=target_run.tenant_id
+ AND link.link_type='work'
+WHERE link.room_id IN (SELECT room_id FROM reply_room)
+ORDER BY inbox_id
 `
 
 type ListAgentLocalRunReplyInboxesParams struct {
@@ -2265,9 +2273,11 @@ type ListAgentLocalRunReplyInboxesParams struct {
 	RunID      string `json:"run_id"`
 }
 
-// The Inboxes of the Run's Room and its Threads that hold a visible reply
-// from the Run, counted as in GetAgentLocalRunReplyDelivered. A Run that took
-// up mentions from several Inboxes must answer in each of them.
+// The Inboxes that hold a visible reply from the Run, counted as in
+// GetAgentLocalRunReplyDelivered. A reply answers the Inbox of the Room or
+// Thread it is in and the Inbox of each Task whose work Room that is, the
+// inverse of agent_inbox_resource_room. A Run that took up mentions from
+// several Inboxes must answer in each of them.
 func (q *Queries) ListAgentLocalRunReplyInboxes(ctx context.Context, arg ListAgentLocalRunReplyInboxesParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, listAgentLocalRunReplyInboxes, arg.ContextKey, arg.RunID)
 	if err != nil {
