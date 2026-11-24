@@ -7,6 +7,7 @@ import { ModalDialog } from "@/components/ui/modal-dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { StatusPill } from "@/components/ui/status-pill";
 import { DesktopIMessageCard } from "@/features/local-computer/desktop-imessage-card";
+import { ChannelBrandIcon } from "@/features/rooms/channel-icon";
 import { teamHubData, teamHubDone } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import { useT } from "@/i18n/use-translation";
@@ -435,6 +436,7 @@ export function ChannelsSettingsPage() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
+              <ChannelBrandIcon channel="wechat" size={22} />
               <h2 className="text-base font-medium text-foreground">
                 {t(channelsMessages.wechatName)}
               </h2>

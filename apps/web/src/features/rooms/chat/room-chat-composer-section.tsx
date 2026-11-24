@@ -1,12 +1,12 @@
-import { Message01Icon } from "@hugeicons/core-free-icons";
 import { lazy, Suspense, type ComponentProps } from "react";
 
-import { Icon } from "@/components/ui/icon";
 import { isRunWorking } from "@/features/teamhub/run-status";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { commonMessages } from "@/i18n/common.messages";
 import { translate } from "@/i18n/language";
 import { useT } from "@/i18n/use-translation";
+
+import { ChannelBrandIcon } from "../channel-icon";
 
 import { RoomRejoinBanner } from "../room-participation";
 import { readRoomComposerDraft, writeRoomComposerDraft } from "../room-drafts";
@@ -335,12 +335,7 @@ export function ChannelViewOnlyBanner({
         className="mx-auto flex max-w-3xl items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 text-sm shadow-xs"
         data-testid="channel-view-only-banner"
       >
-        <span
-          aria-hidden="true"
-          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
-        >
-          <Icon icon={Message01Icon} size={16} />
-        </span>
+        <ChannelBrandIcon channel={channel} size={28} />
         <div className="min-w-0">
           <p className="font-medium text-foreground">
             {t(composerMessages.channelViewOnlyTitle)}

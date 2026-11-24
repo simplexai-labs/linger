@@ -4,7 +4,6 @@ import {
   AlertCircleIcon,
   ArrowDown01Icon,
   Cancel01Icon,
-  Message01Icon,
   PinIcon,
   Search01Icon,
   SidebarLeftIcon,
@@ -34,6 +33,7 @@ import type {
   TeamHubTenant,
 } from "@/features/teamhub/teamhub-types";
 
+import { ChannelAvatar } from "./channel-icon";
 import { ActorAvatar } from "./members/actor-avatar";
 import { useAgentAvatarRecord } from "./members/actor-avatar-image";
 import {
@@ -343,41 +343,26 @@ export function RoomSecondaryNavigation({
                       : room.channel === "wechat"
                         ? t(roomListMessages.channelWeChat)
                         : room.name;
+                  const channelAgent =
+                    anotherMeRoom?.direct_peer ??
+                    room.member_preview?.find(
+                      (member) => member.kind === "agent",
+                    );
                   return (
                     <NavRow active={room.id === activeRoomId} key={room.id}>
-                      <Link
-                        aria-current={
-                          room.id === activeRoomId ? "page" : undefined
+                      <ChannelRoomLink
+                        active={room.id === activeRoomId}
+                        agentId={channelAgent?.id}
+                        agentName={channelAgent?.display_name ?? displayName}
+                        displayName={displayName}
+                        failed={failedRooms.has(room.id)}
+                        onNavigate={(event) =>
+                          completeNavigation(event, room.id)
                         }
-                        aria-label={displayName}
-                        className={roomNavClass()}
-                        onClick={(event) => completeNavigation(event, room.id)}
-                        to={`/t/${tenant.id}/rooms/${room.id}/chat`}
-                      >
-                        <span
-                          aria-hidden="true"
-                          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-foreground"
-                        >
-                          <Icon icon={Message01Icon} size={16} />
-                        </span>
-                        <span className="min-w-0 flex-1 px-1">
-                          <RoomRowTitle pinned={false}>
-                            {displayName}
-                          </RoomRowTitle>
-                          <span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">
-                            {room.latest_message
-                              ? markdownPlainText(
-                                  room.latest_message.raw_message,
-                                )
-                              : t(roomListMessages.noMessages)}
-                          </span>
-                        </span>
-                        <RoomRowStatus
-                          failed={failedRooms.has(room.id)}
-                          room={room}
-                          working={runningRooms.has(room.id)}
-                        />
-                      </Link>
+                        room={room}
+                        tenantId={tenant.id}
+                        working={runningRooms.has(room.id)}
+                      />
                     </NavRow>
                   );
                 })}
@@ -583,6 +568,60 @@ function RoomRowTitle({
         </span>
       ) : null}
     </span>
+  );
+}
+
+function ChannelRoomLink({
+  active,
+  agentId,
+  agentName,
+  displayName,
+  failed,
+  onNavigate,
+  room,
+  tenantId,
+  working,
+}: {
+  active: boolean;
+  agentId?: string;
+  agentName: string;
+  displayName: string;
+  failed?: boolean;
+  onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void;
+  room: TeamHubRoomListItem;
+  tenantId: string;
+  working: boolean;
+}) {
+  const t = useT();
+  const [hovered, setHovered] = useState(false);
+  return (
+    <Link
+      aria-current={active ? "page" : undefined}
+      aria-label={displayName}
+      className={roomNavClass()}
+      onClick={onNavigate}
+      onPointerEnter={(event) => {
+        if (event.pointerType === "mouse") setHovered(true);
+      }}
+      onPointerLeave={() => setHovered(false)}
+      to={`/t/${tenantId}/rooms/${room.id}/chat`}
+    >
+      <ChannelAvatar
+        actorId={agentId}
+        animate={hovered || working}
+        channel={room.channel ?? ""}
+        name={agentName}
+      />
+      <span className="min-w-0 flex-1 px-1">
+        <RoomRowTitle pinned={false}>{displayName}</RoomRowTitle>
+        <span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">
+          {room.latest_message
+            ? markdownPlainText(room.latest_message.raw_message)
+            : t(roomListMessages.noMessages)}
+        </span>
+      </span>
+      <RoomRowStatus failed={failed} room={room} working={working} />
+    </Link>
   );
 }
 

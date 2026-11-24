@@ -10,6 +10,7 @@ import {
   SettingsRowText,
 } from "@/components/ui/settings-group";
 import { Spinner } from "@/components/ui/spinner";
+import { ChannelBrandIcon } from "@/features/rooms/channel-icon";
 
 import { useT } from "@/i18n/use-translation";
 
@@ -66,6 +67,7 @@ function IMessageCard({
     <div className="flex flex-col gap-4">
       <SettingsGroup footer={t(m.footer)} label={t(m.label)}>
         <SettingsRow>
+          <ChannelBrandIcon channel="imessage" size={22} />
           {/* The bridge line wraps; SettingsRowText would truncate it. */}
           <span className="min-w-0 flex-1">
             <SettingsRowText title={t(m.useIMessage)} />
