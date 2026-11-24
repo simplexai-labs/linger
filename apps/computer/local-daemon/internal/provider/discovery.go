@@ -198,7 +198,7 @@ func diagnose(ctx context.Context, kind, executable, protocol string, options Di
 		defer release()
 		environment = prepared
 	}
-	outcome := probeRuntime(probe, kind, canonical, environment, budget, version, options.RuntimeHomeRoot)
+	outcome := probeRuntime(probe, kind, canonical, environment, budget, options.RuntimeHomeRoot)
 	observation.Status = outcome.Status
 	observation.authProbeFailed = outcome.protocolVerified && outcome.Status == "error" && outcome.Code == "RUNTIME_DIAGNOSTIC_FAILED"
 	if outcome.Status != "ready" {

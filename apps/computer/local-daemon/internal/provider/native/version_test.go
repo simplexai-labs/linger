@@ -18,10 +18,12 @@ func TestRequireVersion(t *testing.T) {
 		accepted      bool
 		tooOld        bool
 	}{
-		{"codex", "wrapper\n codex-cli 0.100.0", true, false},
+		{"codex", "wrapper\n codex-cli 0.166.0", true, false},
+		{"codex", "codex-cli 0.165.9", false, true},
+		{"codex", "codex-cli 0.150.1", false, true},
 		{"claude", "v1.99.999 (fixture)", false, true},
 		{"pi", "fixture 1.2.0+build", true, false},
-		{"codex", "0.100.999999999999999999999999", false, false},
+		{"codex", "0.166.999999999999999999999999", false, false},
 		{"codex", "loading plugins", false, false},
 		{"codex", "", false, false},
 		{"claude", "2.1.281", false, true},
@@ -68,17 +70,6 @@ func TestVersionTokens(t *testing.T) {
 	}
 	if _, _, err := versionToken("9.99999999999999999999.1"); err == nil || err.Error() != "Runtime version component exceeds numeric range" {
 		t.Fatalf("overflow error = %v", err)
-	}
-}
-
-func TestCodexVersionGates(t *testing.T) {
-	for version, want := range map[string]bool{
-		"0.163.0": true, " codex-cli 0.163.0\n": true, "v0.170.2": true, "codex-cli v1.0.0": true,
-		"0.162.9": false, "0.163.0-alpha.1": false, "codex-cli 0.163.0 (build)": false, "": false, "garbage": false,
-	} {
-		if CodexSupportsDirectTools(version) != want || CodexSupportsPermissionHook(version) != want {
-			t.Fatalf("gate(%q) != %v", version, want)
-		}
 	}
 }
 

@@ -17,24 +17,16 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-func TestCodexAppServerArgsGates(t *testing.T) {
-	tail := []string{"--config", "features.memories=false", "--config", "features.memory_tool=false", "--config", "features.apps=false", "--config", "features.image_generation=false", "--config", "project_root_markers=[]", "--config", "skills.bundled.enabled=false",
-		"--config", "features.multi_agent=false", "--config", "features.multi_agent_v2=false"}
-	agentsOff := []string{"--config", "agents.enabled=false"}
-	cases := map[string][]string{
-		"0.100.0":           append([]string{"app-server", "--disable", "plugins", "--listen", "stdio://", "x"}, tail...),
-		"codex-cli 0.128.0": append([]string{"app-server", "--disable", "plugins", "--disable", "goals", "--listen", "stdio://", "x"}, tail...),
-		// Codex before 0.145.0 refuses to start on agents.enabled.
-		"0.144.6":         append([]string{"app-server", "--disable", "plugins", "--disable", "goals", "--listen", "stdio://", "x"}, tail...),
-		"0.145.0-alpha.1": append([]string{"app-server", "--disable", "plugins", "--listen", "stdio://", "x"}, tail...),
-		"0.145.0":         append(append([]string{"app-server", "--disable", "plugins", "--disable", "goals", "--listen", "stdio://", "x"}, tail...), agentsOff...),
-		"0.150.1":         append(append([]string{"app-server", "--disable", "plugins", "--disable", "goals", "--listen", "stdio://", "--config", "tool_output_token_limit=12000", "x"}, tail...), agentsOff...),
-		"garbage":         append([]string{"app-server", "--disable", "plugins", "--listen", "stdio://", "x"}, tail...),
+func TestCodexAppServerArgs(t *testing.T) {
+	want := []string{
+		"app-server", "--disable", "plugins", "--disable", "goals", "--listen", "stdio://",
+		"--config", "tool_output_token_limit=12000", "x",
+		"--config", "features.memories=false", "--config", "features.memory_tool=false", "--config", "features.apps=false",
+		"--config", "features.image_generation=false", "--config", "project_root_markers=[]", "--config", "skills.bundled.enabled=false",
+		"--config", "features.multi_agent=false", "--config", "features.multi_agent_v2=false", "--config", "agents.enabled=false",
 	}
-	for version, want := range cases {
-		if got := CodexAppServerArgs(version, "x"); !slices.Equal(got, want) {
-			t.Fatalf("%s: %q", version, got)
-		}
+	if got := CodexAppServerArgs("x"); !slices.Equal(got, want) {
+		t.Fatalf("args = %q", got)
 	}
 }
 
@@ -46,7 +38,7 @@ func TestCodexExecutionArgsKeepSubAgentsOff(t *testing.T) {
 		ComputerArgs: []string{"--enable", "multi_agent_v2,other", "-c", "agents.enabled=true"},
 		AgentArgs:    []string{"--enable=multi_agent", "-c", "features.multi_agent_v2=true", "-c", "agents.max_threads=8"},
 	}
-	args := codexExecutionArgs(Profile{CodexToolVersion: "0.169.1"}, spec, "", slog.New(slog.DiscardHandler))
+	args := codexExecutionArgs(Profile{}, spec, "", slog.New(slog.DiscardHandler))
 	for _, banned := range []string{"multi_agent_v2,other", "--enable=multi_agent", "agents.enabled=true", "features.multi_agent_v2=true"} {
 		if slices.Contains(args, banned) {
 			t.Fatalf("user override %q survived: %q", banned, args)
@@ -62,36 +54,18 @@ func TestCodexExecutionArgsKeepSubAgentsOff(t *testing.T) {
 	}
 }
 
-func TestCodexImmediateUnloadCapability(t *testing.T) {
-	for _, version := range []string{"0.155.1", "codex-cli 0.155.1", "0.156.0"} {
-		if !codexSupportsImmediateUnload(version, "/home") {
-			t.Fatalf("%s should support unload", version)
-		}
-	}
-	for _, version := range []string{"0.150.1", "0.155.0", "0.155.1-alpha", "unknown 0.155.1", ""} {
-		if codexSupportsImmediateUnload(version, "/home") {
-			t.Fatalf("%s should not support unload", version)
-		}
-	}
-	if codexSupportsImmediateUnload("0.156.0", "") {
-		t.Fatal("no home must disable unload")
+func TestCodexImmediateUnloadNeedsAnOwnedHome(t *testing.T) {
+	if !codexUnloadsImmediately("/home") || codexUnloadsImmediately(" ") {
+		t.Fatal("unload must follow the Daemon-owned home")
 	}
 	spec := RunSpec{AgentArgs: []string{"-c", "thread_unload_delay_secs=60"}}
-	args := codexExecutionArgs(Profile{CodexToolVersion: "0.155.1"}, spec, "/home", slog.New(slog.DiscardHandler))
+	args := codexExecutionArgs(Profile{}, spec, "/home", slog.New(slog.DiscardHandler))
 	if !slices.Equal(args[len(args)-2:], []string{"-c", "thread_unload_delay_secs=0"}) || !slices.Contains(args, "thread_unload_delay_secs=60") {
 		t.Fatalf("args = %q", args)
 	}
-	args = codexExecutionArgs(Profile{CodexToolVersion: "0.150.1"}, spec, "/home", slog.New(slog.DiscardHandler))
+	args = codexExecutionArgs(Profile{}, spec, "", slog.New(slog.DiscardHandler))
 	if slices.Contains(args, "thread_unload_delay_secs=0") {
-		t.Fatalf("unsupported version got unload: %q", args)
-	}
-}
-
-func TestCodexPermissionHookVersions(t *testing.T) {
-	for version, want := range map[string]bool{"codex-cli 0.163.0": true, "0.170.2": true, "0.162.9": false, "0.150.1": false, "0.163.0-alpha.1": false, "": false, "unknown": false} {
-		if CodexSupportsPermissionHook(version) != want {
-			t.Fatalf("%q", version)
-		}
+		t.Fatalf("no home got unload: %q", args)
 	}
 }
 
@@ -645,12 +619,12 @@ func TestCodexCleanupExcusedWhenTheProcessHadGone(t *testing.T) {
 
 func TestCodexExecutionArgsDisableWebSearchLast(t *testing.T) {
 	spec := RunSpec{AgentArgs: []string{"-c", `web_search="live"`}}
-	args := codexExecutionArgs(Profile{CodexToolVersion: "0.150.1"}, spec, "/home", slog.New(slog.DiscardHandler))
+	args := codexExecutionArgs(Profile{}, spec, "", slog.New(slog.DiscardHandler))
 	if slices.Contains(args, `web_search="disabled"`) {
 		t.Fatalf("subscription Codex lost web search: %q", args)
 	}
 	spec.WithoutNativeWebTools = true
-	args = codexExecutionArgs(Profile{CodexToolVersion: "0.150.1"}, spec, "/home", slog.New(slog.DiscardHandler))
+	args = codexExecutionArgs(Profile{}, spec, "", slog.New(slog.DiscardHandler))
 	if !slices.Equal(args[len(args)-2:], []string{"--config", `web_search="disabled"`}) {
 		t.Fatalf("gateway Codex keeps web search: %q", args)
 	}

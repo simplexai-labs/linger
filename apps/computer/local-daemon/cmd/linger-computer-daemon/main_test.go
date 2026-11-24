@@ -37,7 +37,7 @@ func TestRuntimeMonitorPreservesCodexRegistrationUntilFailureThreshold(t *testin
 			entry, original, replacement := filepath.Join(root, "codex"), filepath.Join(root, "codex-old"), filepath.Join(root, "codex-new")
 			stateFile := filepath.Join(root, "probe-state")
 			script := `#!/bin/sh
-if [ "$1" = "--version" ]; then echo 'codex-cli 0.144.1'; exit 0; fi
+if [ "$1" = "--version" ]; then echo 'codex-cli 0.171.0'; exit 0; fi
 read probe_state < "$PROBE_STATE"
 if [ "$probe_state" = "protocol" ]; then exit 2; fi
 read initialize
@@ -75,7 +75,7 @@ fi
 				}
 				output, err := command.CombinedOutput()
 				cancel()
-				if err != nil || strings.TrimSpace(string(output)) != "codex-cli 0.144.1" {
+				if err != nil || strings.TrimSpace(string(output)) != "codex-cli 0.171.0" {
 					t.Fatalf("prepare Codex fixture %s: %v, output=%q", executable, err, output)
 				}
 			}

@@ -36,7 +36,7 @@ done
 // parkedCodexScript answers each request and completes each turn, so the process
 // parks after its turn and records its pid under CODEX_HOME.
 const parkedCodexScript = `#!/bin/sh
-if [ "$1" = --version ]; then printf 'codex-cli 0.100.0\n'; exit 0; fi
+if [ "$1" = --version ]; then printf 'codex-cli 0.171.0\n'; exit 0; fi
 printf '%s\n' "$$" > "$CODEX_HOME/pid"
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
@@ -106,7 +106,7 @@ func parkCodexFor(t *testing.T, executable, contextKey, agentID string) int {
 	}
 	backend, err := native.Open("codex", native.Profile{
 		Program: executable, Logger: slog.Default(), ContextKey: contextKey, AgentID: agentID,
-		CodexToolVersion: "cached-test-version", Env: map[string]string{"CODEX_HOME": home},
+		Env: map[string]string{"CODEX_HOME": home},
 	})
 	if err != nil {
 		t.Fatal(err)

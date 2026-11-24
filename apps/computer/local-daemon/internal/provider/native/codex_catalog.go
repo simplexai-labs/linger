@@ -16,7 +16,7 @@ const (
 
 // discoverCodexProtocolCatalog lists models through app-server model/list.
 // It never starts a thread or a turn.
-func discoverCodexProtocolCatalog(ctx context.Context, inv Invocation, version string) (ModelList, error) {
+func discoverCodexProtocolCatalog(ctx context.Context, inv Invocation) (ModelList, error) {
 	initialize := map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": "initialize",
 		"params": map[string]any{"clientInfo": map[string]any{"name": "linger-catalog", "version": "1"}, "capabilities": nil},
@@ -64,7 +64,7 @@ func discoverCodexProtocolCatalog(ctx context.Context, inv Invocation, version s
 		expected++
 		return false, send(page(expected, next))
 	}
-	if err := exchangeCatalog(ctx, inv, CodexAppServerArgs(version), []any{initialize}, receive); err != nil {
+	if err := exchangeCatalog(ctx, inv, CodexAppServerArgs(), []any{initialize}, receive); err != nil {
 		return ModelList{}, err
 	}
 	return models.list(), nil

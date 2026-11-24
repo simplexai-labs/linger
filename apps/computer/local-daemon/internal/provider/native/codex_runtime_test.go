@@ -627,7 +627,7 @@ func TestCodexUsagePerTurnOnReusedProcess(t *testing.T) {
 }
 
 func TestCodexSteering(t *testing.T) {
-	fake := newCodexFake(t, []codexFakeTurn{{Stall: true}}, nil)
+	fake := newCodexFake(t, []codexFakeTurn{{Stall: true}}, map[string]string{"FAKE_MODES": "steer_consumed"})
 	spec := fake.spec()
 	spec.SilenceBudget = 400 * time.Millisecond
 	spec.FirstProgressBudget = 400 * time.Millisecond
@@ -647,7 +647,6 @@ func TestCodexSteering(t *testing.T) {
 			if _, err := run.Steer(context.Background(), SteerRequest{ExpectedTurnID: "turn-0", Input: "x"}); !errors.As(err, &steerErr) || steerErr.Reason != "target_mismatch" || steerErr.ActualTurnID != "turn-1" {
 				t.Fatalf("mismatch = %v", err)
 			}
-			// A Codex older than the client id echo is acknowledged on acceptance.
 			if ack, err := run.Steer(context.Background(), SteerRequest{ExpectedTurnID: "turn-1", Input: "x"}); err != nil || ack.TurnID != "turn-1" {
 				t.Fatalf("ack = %+v %v", ack, err)
 			}
@@ -952,7 +951,6 @@ func TestCodexSteerNeedsConsumptionEvidence(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.mode, func(t *testing.T) {
 			fake := newCodexFake(t, []codexFakeTurn{{Stall: true}}, map[string]string{"FAKE_MODES": tc.mode})
-			fake.version = "0.166.0"
 			spec := fake.spec()
 			spec.SilenceBudget = 400 * time.Millisecond
 			spec.ExposeTurnStarted = true
@@ -991,48 +989,34 @@ func TestCodexSteerNeedsConsumptionEvidence(t *testing.T) {
 }
 
 func TestCodexThreadRunsTheShellTextHookBeforeShellCommands(t *testing.T) {
-	cases := []struct {
-		name, version string
-		want          bool
-	}{
-		{"Codex with hooks", "0.165.0", true},
-		{"Codex without hooks", "0.100.0", false},
+	fake := newCodexFake(t, []codexFakeTurn{{Status: "completed"}}, nil)
+	codexResidentCapForTest(t, 0)
+	spec := fake.spec()
+	spec.ShellTextHook = "/opt/linger/linger-computer-daemon"
+	if out, _ := codexDrain(t, fake.runtime(nil), "hello", spec); out.Status != statusCompleted {
+		t.Fatalf("outcome = %+v", out)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			fake := newCodexFake(t, []codexFakeTurn{{Status: "completed"}}, nil)
-			fake.version = tc.version
-			codexResidentCapForTest(t, 0)
-			spec := fake.spec()
-			spec.ShellTextHook = "/opt/linger/linger-computer-daemon"
-			if out, _ := codexDrain(t, fake.runtime(nil), "hello", spec); out.Status != statusCompleted {
-				t.Fatalf("outcome = %+v", out)
-			}
-			config, _ := fake.requests("thread/start")[0]["params"].(map[string]any)["config"].(map[string]any)
-			hooks, _ := json.Marshal(config["hooks"])
-			found := strings.Contains(string(hooks), `"PreToolUse":[{"hooks":[{"command":"'/opt/linger/linger-computer-daemon' shell-text-hook"`) && strings.Contains(string(hooks), `"matcher":"^Bash$"`)
-			if found != tc.want || (config["bypass_hook_trust"] == true) != tc.want {
-				t.Fatalf("config = %v", config)
-			}
-		})
+	config, _ := fake.requests("thread/start")[0]["params"].(map[string]any)["config"].(map[string]any)
+	hooks, _ := json.Marshal(config["hooks"])
+	found := strings.Contains(string(hooks), `"PreToolUse":[{"hooks":[{"command":"'/opt/linger/linger-computer-daemon' shell-text-hook"`) && strings.Contains(string(hooks), `"matcher":"^Bash$"`)
+	if !found || config["bypass_hook_trust"] != true {
+		t.Fatalf("config = %v", config)
 	}
 }
 
 func TestCodexThreadToolOutputLimitFollowsContextWindow(t *testing.T) {
 	cases := []struct {
-		name, version string
-		window        int
-		want          any
+		name   string
+		window int
+		want   any
 	}{
-		{"small window", "0.165.0", 64896, float64(9734)},
-		{"large window", "0.165.0", 272000, float64(25000)},
-		{"unknown window", "0.165.0", 0, nil},
-		{"Codex without the setting", "0.100.0", 64896, nil},
+		{"small window", 64896, float64(9734)},
+		{"large window", 272000, float64(25000)},
+		{"unknown window", 0, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := newCodexFake(t, []codexFakeTurn{{Status: "completed"}}, nil)
-			fake.version = tc.version
 			codexResidentCapForTest(t, 0)
 			spec := fake.spec()
 			spec.ContextWindow = tc.window

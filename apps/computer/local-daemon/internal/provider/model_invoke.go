@@ -505,7 +505,7 @@ func codexModelInvocation(request ModelInvokeRequest, environment map[string]str
 	lastPath := filepath.Join(root, "last.txt")
 	events := &codexInvokeEvents{}
 	return modelInvocation{
-		args:        codexModelInvokeArgs(installed.Version, request.Mode, request.ReasoningEffort, named, work, schemaPath, lastPath),
+		args:        codexModelInvokeArgs(request.Mode, request.ReasoningEffort, named, work, schemaPath, lastPath),
 		environment: environment,
 		stdout:      events,
 		model:       cmp.Or(named, prepared.Model),
@@ -536,7 +536,7 @@ func codexDefaultModel(configured, catalogDefault string) string {
 // codexModelInvokeArgs builds the codex exec argv; an empty model leaves the
 // choice to config.toml. The prompt is read from stdin, so no positional
 // argument follows the options.
-func codexModelInvokeArgs(version, mode, effort, model, work, schemaPath, lastPath string) []string {
+func codexModelInvokeArgs(mode, effort, model, work, schemaPath, lastPath string) []string {
 	sandbox := "read-only"
 	if mode == ModelInvokeWorkspace {
 		sandbox = "workspace-write"
@@ -564,7 +564,7 @@ func codexModelInvokeArgs(version, mode, effort, model, work, schemaPath, lastPa
 		}
 		args = append(args, "-c", "features."+feature+"=false")
 	}
-	args = append(args, native.CodexSubAgentConfig(version)...)
+	args = append(args, native.CodexSubAgentConfig()...)
 	if schemaPath != "" {
 		args = append(args, "--output-schema", schemaPath)
 	}

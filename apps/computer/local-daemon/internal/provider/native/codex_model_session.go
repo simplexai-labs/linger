@@ -283,7 +283,7 @@ type codexModelServer struct {
 
 func startCodexModelServer(ctx context.Context, runtime CodexModelRuntime) (*codexModelServer, error) {
 	procCtx, cancel := context.WithCancel(context.Background())
-	cmd := ownedCommand(procCtx, profileInvocation(runtime.Executable, nil, runtime.Environment), CodexAppServerArgs(runtime.Version, runtime.Args...)...)
+	cmd := ownedCommand(procCtx, profileInvocation(runtime.Executable, nil, runtime.Environment), CodexAppServerArgs(runtime.Args...)...)
 	cmd.Dir = runtime.Dir
 	cmd.WaitDelay = codexPipeDrainGrace
 	stdin, err := cmd.StdinPipe()

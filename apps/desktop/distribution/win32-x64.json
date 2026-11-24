@@ -10,7 +10,12 @@
     "sha256": "4f52d89ecc59cf726440b966361dec392fa713c51fd77a294e5f583295b33d71",
     "bytes": 23271756,
     "sourceCommit": "50e1c17f122c6b5bfaa9848c991b4b81e43f858f",
-    "manifestSha256": "6f344f1ffb950df358de0efbd51e81de0111208811581cca5bc75d0e2ff815a6"
+    "manifestSha256": "6f344f1ffb950df358de0efbd51e81de0111208811581cca5bc75d0e2ff815a6",
+    "runtimeVersions": {
+      "codex": "0.171.0",
+      "claude": "2.1.311",
+      "pi": "1.5.2"
+    }
   },
   "nativeSources": [
     {

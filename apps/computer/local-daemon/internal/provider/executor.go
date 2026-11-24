@@ -432,13 +432,11 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 			codexConfigDigest = runtimeHome.ConfigDigest
 			skills := sha256.Sum256([]byte(runtimeHome.SkillDigest + "\x00" + spec.ContextSkillDigest))
 			residentSkillDigest = hex.EncodeToString(skills[:])
-			if native.CodexSupportsDirectTools(spec.CodexVersion) {
-				mcpConfig, capabilityErr = codexDirectLocalTools(mcpConfig, spec.TrustedLocalMCPTools)
-			}
+			mcpConfig, capabilityErr = codexDirectLocalTools(mcpConfig, spec.TrustedLocalMCPTools)
 			// A prepare binds the thread its Run reuses, so it carries the same
 			// managed hooks as that Run; the binding fingerprint covers them. The
 			// Run's MCP servers are attached when it adopts the process.
-			if capabilityErr == nil && (authorization.ReviewsPermissions() || authorization.UsesStopHook()) && native.CodexSupportsPermissionHook(spec.CodexVersion) {
+			if capabilityErr == nil && (authorization.ReviewsPermissions() || authorization.UsesStopHook()) {
 				codexHook, mcpConfig, capabilityErr = prepareCodexHooks(runtimeHome.Path, teamhubCommands, mcpConfig, authorization.ReviewsPermissions(), authorization.UsesStopHook())
 			}
 
@@ -482,7 +480,6 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 		TaskID:              spec.TaskID,
 		RuntimeID:           spec.RegistrationID,
 		ComputerVersion:     spec.DaemonVersion,
-		CodexToolVersion:    spec.CodexVersion,
 		CodexConfigArgs:     codexConfigArgs,
 		CodexConfigDigest:   codexConfigDigest,
 		PiConfigDigest:      piConfigDigest,

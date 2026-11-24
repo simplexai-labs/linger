@@ -10,25 +10,24 @@ import (
 	"time"
 )
 
-// MinimumVersions is the product compatibility policy per Runtime kind. The
-// Claude minimum is the first release with the permission-review control
-// protocol.
+// MinimumVersions is the product compatibility policy per Runtime kind. Each
+// minimum is the first release with every capability the Daemon uses, so no
+// adapter branches on a Runtime's version. The localmodels kit that installs
+// the managed Runtimes reuses one only at or above its own baseline, which
+// must not sit below these.
 var MinimumVersions = map[string]string{
-	"codex":  "0.100.0",
+	// The first release that echoes a steer's clientUserMessageId; it also
+	// has direct tool calls, the PermissionRequest and PreToolUse hooks,
+	// agents.enabled, --disable goals, tool_output_token_limit and
+	// thread_unload_delay_secs.
+	"codex": "0.166.0",
+	// The first release with the permission-review control protocol.
 	"claude": "2.1.282",
 	"pi":     "1.2.0",
 	// The first release whose ACP server was verified to offer model and
 	// thinking-level options and the system prompt append.
 	"antigravity": "1.5.12",
 }
-
-const (
-	codexDirectToolsVersion = "0.163.0"
-	// codexHooksVersion is the first release whose thread hooks the Daemon
-	// configures: the PermissionRequest review and the PreToolUse
-	// shell-text-hook.
-	codexHooksVersion = "0.163.0"
-)
 
 var (
 	errNoVersion       = errors.New("Runtime did not report a recognizable version")
@@ -130,34 +129,6 @@ func RequireVersion(kind, observed string) error {
 		return &VersionTooOldError{Runtime: kind, Found: observed, Required: minimum}
 	}
 	return nil
-}
-
-// stableCodexVersion accepts only a bare stable X.Y.Z (optionally
-// v-prefixed), after an optional "codex-cli " prefix.
-func stableCodexVersion(version string) (versionNumber, bool) {
-	version = strings.TrimPrefix(strings.TrimSpace(version), "codex-cli ")
-	token, number, err := versionToken(version)
-	if err != nil || token != version {
-		return versionNumber{}, false
-	}
-	return number, true
-}
-
-func stableCodexAtLeast(version, minimum string) bool {
-	have, ok := stableCodexVersion(version)
-	if !ok {
-		return false
-	}
-	_, want, _ := versionToken(minimum)
-	return !have.less(want)
-}
-
-func CodexSupportsDirectTools(version string) bool {
-	return stableCodexAtLeast(version, codexDirectToolsVersion)
-}
-
-func CodexSupportsPermissionHook(version string) bool {
-	return stableCodexAtLeast(version, codexHooksVersion)
 }
 
 var versionProbePipeBudget = 2 * time.Second

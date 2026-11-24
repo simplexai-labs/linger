@@ -101,7 +101,7 @@ func TestRuntimeMonitorRecoversCodexAuthenticationWithoutRestart(t *testing.T) {
 	loginMarker := filepath.Join(root, "logged-in")
 	protocolCount := filepath.Join(root, "protocol-count")
 	script := `#!/bin/sh
-if [ "$1" = "--version" ]; then echo "codex-cli 0.100.0"; exit 0; fi
+if [ "$1" = "--version" ]; then echo "codex-cli 0.171.0"; exit 0; fi
 echo called >> "$PROTOCOL_COUNT"
 read line
 echo '{"jsonrpc":"2.0","id":1,"result":{"userAgent":"codex-test"}}'

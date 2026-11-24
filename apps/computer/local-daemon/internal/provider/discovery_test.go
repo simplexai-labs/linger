@@ -22,9 +22,9 @@ func TestDiscoverUsesConfiguredExecutableAndReportsAllRuntimes(t *testing.T) {
 	codex := filepath.Join(root, "codex")
 	script := `#!/bin/sh
 case "$1 $2" in
-  "--version ") echo "codex-cli 0.100.0" ;;
+  "--version ") echo "codex-cli 0.171.0" ;;
   "app-server --disable")
-    [ "$3 $4 $5" = "plugins --listen stdio://" ] || exit 2
+    [ "$3 $4 $5 $6 $7" = "plugins --disable goals --listen stdio://" ] || exit 2
     read line
     echo '{"jsonrpc":"2.0","id":1,"result":{"userAgent":"codex-test"}}'
     if read initialized && read account; then
@@ -89,7 +89,7 @@ func TestDiscoverPublishesRuntimeModelCatalog(t *testing.T) {
 	codex := filepath.Join(root, "codex")
 	script := `#!/bin/sh
 case "$1 $2" in
-  "--version ") echo "codex-cli 0.144.1" ;;
+  "--version ") echo "codex-cli 0.171.0" ;;
   "app-server --disable")
     [ "$3 $4 $5 $6 $7" = "plugins --disable goals --listen stdio://" ] || exit 2
     read line
@@ -170,7 +170,7 @@ func TestDiscoverRejectsInvalidConfiguredCatalogAndRecovers(t *testing.T) {
 	t.Setenv("CODEX_HOME", root)
 	codex := filepath.Join(root, "codex")
 	script := `#!/bin/sh
-if [ "$1" = "--version" ]; then echo 'codex-cli 0.144.1'; exit 0; fi
+if [ "$1" = "--version" ]; then echo 'codex-cli 0.171.0'; exit 0; fi
 ` + fakeCodexModelCatalog
 	if err := os.WriteFile(codex, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -226,7 +226,7 @@ func TestDiscoverUsesCodexRuntimeEnvironmentForModelCatalog(t *testing.T) {
 	codex := filepath.Join(t.TempDir(), "codex")
 	script := `#!/bin/sh
 [ "$HOME" = "$EXPECTED_HOME" ] && [ "$CODEX_HOME" != "$AMBIENT_CODEX_HOME" ] || exit 2
-if [ "$1" = "--version" ]; then echo 'codex-cli 0.144.1'; exit 0; fi
+if [ "$1" = "--version" ]; then echo 'codex-cli 0.171.0'; exit 0; fi
 [ "$CODEX_HOME" != "$EXPECTED_CODEX_HOME" ] || exit 2
 ` + fakeCodexModelCatalog
 	if err := os.WriteFile(codex, []byte(script), 0o700); err != nil {
@@ -331,9 +331,9 @@ func TestDiscoverReportsCodexAuthenticationRequiredAfterProtocolHandshake(t *tes
 	codex := filepath.Join(root, "codex")
 	script := `#!/bin/sh
 case "$1 $2" in
-  "--version ") echo "codex-cli 0.100.0" ;;
+  "--version ") echo "codex-cli 0.171.0" ;;
   "app-server --disable")
-    [ "$3 $4 $5" = "plugins --listen stdio://" ] || exit 2
+    [ "$3 $4 $5 $6 $7" = "plugins --disable goals --listen stdio://" ] || exit 2
     read line
     echo '{"jsonrpc":"2.0","id":1,"result":{"userAgent":"codex-test"}}'
     if read initialized && read account; then

@@ -3,8 +3,6 @@ package provider
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
 )
 
 func TestCodexDirectLocalToolsKeepsDaemonToolsOutOfCodeMode(t *testing.T) {
@@ -26,13 +24,5 @@ func TestCodexDirectLocalToolsKeepsDaemonToolsOutOfCodeMode(t *testing.T) {
 	}
 	if _, found := parsed.Servers["wiki"]["omit_tools_from"]; found {
 		t.Fatalf("a remote server left code mode: %v", parsed.Servers["wiki"])
-	}
-}
-
-func TestCodexDirectToolsNeedAVerifiedCodex(t *testing.T) {
-	for version, want := range map[string]bool{"codex-cli 0.163.0": true, "0.164.0": true, "0.162.9": false, "": false} {
-		if native.CodexSupportsDirectTools(version) != want {
-			t.Fatalf("%q: want %v", version, want)
-		}
 	}
 }

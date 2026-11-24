@@ -45,6 +45,13 @@ stops and names the open file.
 `linger-computer-daemon --config <path>` reads the owner-only config emitted by
 the `linger-computer login` flow. It discovers and version-gates the
 configured Codex, Claude, Pi, and Antigravity installations.
+Each Runtime kind has one minimum version (`native.MinimumVersions`, Codex
+0.166.0); an older installation is reported as `RUNTIME_INCOMPATIBLE` and never
+runs, so the adapters do not branch on a Runtime's version. The localmodels kit
+that installs the managed Runtimes reuses an existing one only at or above its
+own baseline, which must not sit below these minimums. Raise a minimum only
+after a kit that installs a release at or above it ships in the desktop
+distribution pins (`apps/desktop/distribution/*.json`).
 It performs bounded protocol and authentication probes.
 A protocol probe passes once the Runtime answers the handshake, however the
 process exits after its input closes. When the handshake fails, the daemon log
@@ -123,8 +130,8 @@ code-mode host's `apply_patch`, with the working directory as the only writable
 root. It therefore reads no files, and the Daemon appends the workspace files'
 contents to the end of the prompt, because the `workspace-write` sandbox limits
 writes but not reads. Codex feature disables use `-c`/`--config
-features.<name>=false` rather than `--disable <name>` so older Codex versions
-ignore features they do not define instead of aborting on startup.
+features.<name>=false` rather than `--disable <name>` so a Codex release
+ignores features it does not define instead of aborting on startup.
 
 `go test -tags live_model_invoke ./internal/provider -run TestLiveCodex` runs one
 structured call and one workspace call with the locally signed-in Codex (checking
@@ -439,7 +446,7 @@ heredoc (`internal/permission/shell_text.go`). Named variables such as `"$id"`,
 
 - Claude checks it in its tool policy, on both the PreToolUse hook and
   `can_use_tool`.
-- Codex 0.163.0 and later run `linger-computer-daemon shell-text-hook` as a
+- Codex runs `linger-computer-daemon shell-text-hook` as a
   PreToolUse hook for every shell command. Codex on Windows runs PowerShell,
   so it gets no hook.
 - Pi loads the managed extension (`extensions/pi-mcp.mjs`) for every Run. It
@@ -750,8 +757,7 @@ The Daemon admits only background, output-file-free scripts, fits the time limit
 On macOS, `click` takes `delivery_mode: "foreground"` and `action`: the first for web controls that react only to a real pointer, the second for accessibility actions such as `show_alternate_ui`.
 
 The macOS and Linux developer instructions identify the public entry. Codex
-0.163.0 and later calls the public tools directly, outside code mode and
-deferred tool search. Earlier versions use their standard tool discovery.
+calls the public tools directly, outside code mode and deferred tool search.
 Web tools depend on the link the Runtime reaches its model through
 (`RuntimeModel.Link`). On a vendor subscription, Claude Code keeps `WebSearch`
 and `WebFetch`, deferred behind `ToolSearch`, so its developer instructions name

@@ -18,7 +18,7 @@ func TestDiscoverLiveChecksOnlySelectedReadyRuntime(t *testing.T) {
 	codex := filepath.Join(t.TempDir(), "codex")
 	script := `#!/bin/sh
 case "$1 $2" in
-  "--version ") echo "codex-cli 0.100.0" ;;
+  "--version ") echo "codex-cli 0.171.0" ;;
   "exec --skip-git-repo-check")
     [ "$8" = "Reply with exactly: OK" ] || exit 2
     eval "$LIVE_EXEC" ;;

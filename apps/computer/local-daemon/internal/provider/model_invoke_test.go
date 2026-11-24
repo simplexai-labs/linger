@@ -50,7 +50,7 @@ func disabledFeatures(args []string) []string {
 }
 
 func TestCodexModelInvokeArgsPinEffortIsolationAndNoPrompt(t *testing.T) {
-	args := codexModelInvokeArgs("0.150.1", ModelInvokeStructured, "low", "", "/tmp/call/work", "/tmp/call/schema.json", "/tmp/call/last.txt")
+	args := codexModelInvokeArgs(ModelInvokeStructured, "low", "", "/tmp/call/work", "/tmp/call/schema.json", "/tmp/call/last.txt")
 	if args[0] != "exec" || !slices.Contains(args, "--skip-git-repo-check") || !slices.Contains(args, "--ephemeral") ||
 		!slices.Contains(args, "--ignore-rules") || argValue(args, "--sandbox") != "read-only" ||
 		argValue(args, "--color") != "never" || argValue(args, "-C") != "/tmp/call/work" ||
@@ -82,13 +82,13 @@ func TestCodexModelInvokeArgsPinEffortIsolationAndNoPrompt(t *testing.T) {
 		t.Fatalf("argv ends with %q", last)
 	}
 
-	text := codexModelInvokeArgs("0.150.1", ModelInvokeText, "high", "gpt-account-default", "/w", "", "/l")
+	text := codexModelInvokeArgs(ModelInvokeText, "high", "gpt-account-default", "/w", "", "/l")
 	if slices.Contains(text, "--output-schema") || !slices.Contains(text, `model_reasoning_effort="high"`) ||
 		argValue(text, "-m") != "gpt-account-default" || slices.Contains(args, "-m") {
 		t.Fatalf("text args = %q", text)
 	}
 
-	workspace := codexModelInvokeArgs("0.150.1", ModelInvokeWorkspace, "medium", "", "/w", "", "/l")
+	workspace := codexModelInvokeArgs(ModelInvokeWorkspace, "medium", "", "/w", "", "/l")
 	if argValue(workspace, "--sandbox") != "workspace-write" {
 		t.Fatalf("workspace args = %q", workspace)
 	}
@@ -177,7 +177,7 @@ func TestClaudeModelInvokeArgsDisableToolsAndCustomizations(t *testing.T) {
 		t.Fatalf("empty effort args = %q; want neither --effort nor --thinking", emptyArgs)
 	}
 
-	codexEmpty := codexModelInvokeArgs("", ModelInvokeText, "", "", "/w", "", "/l")
+	codexEmpty := codexModelInvokeArgs(ModelInvokeText, "", "", "/w", "", "/l")
 	for _, arg := range codexEmpty {
 		if strings.HasPrefix(arg, "model_reasoning_effort=") {
 			t.Fatalf("codex empty effort included reasoning override: %q", codexEmpty)

@@ -28,6 +28,9 @@ export const EVERYTHING_PATHS = [
 ];
 
 const COMPUTER_GO_PATHS = [
+  // The Daemon's Runtime minimums are checked against the Runtime versions
+  // the pinned localmodels kit installs.
+  "apps/desktop/distribution/",
   "apps/computer/package.json",
   "apps/computer/local-daemon/",
   "apps/computer/run-test.sh",

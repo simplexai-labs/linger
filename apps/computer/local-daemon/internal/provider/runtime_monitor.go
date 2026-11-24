@@ -308,7 +308,7 @@ func carryOrResolveModelLinks(ctx context.Context, kind string, environment map[
 func refreshAuthenticationProbe(ctx context.Context, diagnostic RuntimeDiagnostic, environment map[string]string, options DiscoveryOptions) runtimeProbeOutcome {
 	budget := boundedAuthTimeout(options.Timeout)
 	if diagnostic.Type != "codex" {
-		return probeRuntimeAuthentication(ctx, diagnostic.Type, diagnostic.ExecutablePath, environment, budget, diagnostic.Version, options.RuntimeHomeRoot)
+		return probeRuntimeAuthentication(ctx, diagnostic.Type, diagnostic.ExecutablePath, environment, budget, options.RuntimeHomeRoot)
 	}
 	probe, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
@@ -318,7 +318,7 @@ func refreshAuthenticationProbe(ctx context.Context, diagnostic RuntimeDiagnosti
 		return runtimeProbeOutcome{Status: "error", Code: "RUNTIME_DIAGNOSTIC_FAILED", Message: "Codex diagnostic home could not be prepared"}
 	}
 	defer release()
-	return probeRuntimeAuthentication(probe, diagnostic.Type, diagnostic.ExecutablePath, prepared, budget, diagnostic.Version, options.RuntimeHomeRoot)
+	return probeRuntimeAuthentication(probe, diagnostic.Type, diagnostic.ExecutablePath, prepared, budget, options.RuntimeHomeRoot)
 }
 
 func runtimeExecutableChanged(diagnostic RuntimeDiagnostic) bool {

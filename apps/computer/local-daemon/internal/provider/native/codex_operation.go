@@ -452,15 +452,12 @@ func (op *codexOperation) steer(ctx context.Context, request SteerRequest) (Stee
 		"threadId": op.proc.boundThread(), "expectedTurnId": request.ExpectedTurnID,
 		"input": []any{map[string]any{"type": "text", "text": request.Input, "text_elements": []any{}}},
 	}
-	evidence := codexSupportsSteerClientID(op.proc.version)
 	clientID := uuid.NewString()
 	consumed := make(chan struct{})
-	if evidence {
-		params["clientUserMessageId"] = clientID
-		op.mu.Lock()
-		op.steers[clientID] = consumed
-		op.mu.Unlock()
-	}
+	params["clientUserMessageId"] = clientID
+	op.mu.Lock()
+	op.steers[clientID] = consumed
+	op.mu.Unlock()
 	uncertain := func(reason, message string) error {
 		return &SteerError{Effect: "uncertain", Reason: reason, ExpectedTurnID: request.ExpectedTurnID, Message: message}
 	}
@@ -481,9 +478,6 @@ func (op *codexOperation) steer(ctx context.Context, request SteerRequest) (Stee
 	}
 	if json.Unmarshal(result, &ack) != nil || ack.TurnID != request.ExpectedTurnID {
 		return SteerAck{}, uncertain("ack_mismatch", "Codex acknowledged steer for an unexpected turn")
-	}
-	if !evidence {
-		return SteerAck{TurnID: ack.TurnID}, nil
 	}
 	select {
 	case <-consumed:

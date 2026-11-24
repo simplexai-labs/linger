@@ -41,7 +41,7 @@ echo 'shutting down after input closed' >&2
 exit 1
 `)
 	environment := map[string]string{"PATH": "/usr/bin:/bin", "HOME": t.TempDir()}
-	if err := probeRuntimeProtocol(context.Background(), "codex", script, environment, 5*time.Second, "codex-cli 0.171.0"); err != nil {
+	if err := probeRuntimeProtocol(context.Background(), "codex", script, environment, 5*time.Second); err != nil {
 		t.Fatalf("an answered handshake failed: %v", err)
 	}
 	if !strings.Contains(logged.String(), "runner.runtime_probe.exit_after_handshake") || !strings.Contains(logged.String(), "exit_code=1") {
@@ -55,7 +55,7 @@ func TestProtocolProbeLogsWhyAnUnansweredHandshakeFailed(t *testing.T) {
 exit 2
 `)
 	environment := map[string]string{"PATH": "/usr/bin:/bin", "HOME": t.TempDir()}
-	if err := probeRuntimeProtocol(context.Background(), "pi", script, environment, 5*time.Second, "1.6.0"); err == nil {
+	if err := probeRuntimeProtocol(context.Background(), "pi", script, environment, 5*time.Second); err == nil {
 		t.Fatal("an unanswered handshake passed")
 	}
 	output := logged.String()

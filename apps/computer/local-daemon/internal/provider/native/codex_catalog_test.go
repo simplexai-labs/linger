@@ -15,7 +15,7 @@ func codexCatalogFake(t *testing.T, pages string, modes string) Invocation {
 func TestCodexProtocolCatalog(t *testing.T) {
 	pages := `[{"data":[{"id":"a","model":"gpt-a","displayName":"A","isDefault":true,"defaultReasoningEffort":"high","supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high","description":"deep"}]},{"id":"h","hidden":true}],"nextCursor":"c1"},` +
 		`{"data":[{"id":"gpt-b"},{"model":"gpt-a"}],"nextCursor":null}]`
-	models, err := discoverCodexProtocolCatalog(context.Background(), codexCatalogFake(t, pages, ""), "0.100.0")
+	models, err := discoverCodexProtocolCatalog(context.Background(), codexCatalogFake(t, pages, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestCodexProtocolCatalog(t *testing.T) {
 		"rejected":        {`[]`, "Codex catalog RPC was rejected"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := discoverCodexProtocolCatalog(context.Background(), codexCatalogFake(t, tc.pages, ""), "0.100.0")
+			_, err := discoverCodexProtocolCatalog(context.Background(), codexCatalogFake(t, tc.pages, ""))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v", err)
 			}

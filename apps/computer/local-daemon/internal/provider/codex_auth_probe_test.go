@@ -11,8 +11,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
 )
 
 // Scaled probe budgets keep the Linux budget regressions fast: a cold start
@@ -103,7 +101,7 @@ func TestDiscoverCodexColdInitializeWithinLinuxBudget(t *testing.T) {
 			executable := filepath.Join(root, "codex")
 			trace := filepath.Join(root, "launches")
 			script := `#!/bin/sh
-if [ "$1" = "--version" ]; then echo 'codex-cli 0.144.1'; exit 0; fi
+if [ "$1" = "--version" ]; then echo 'codex-cli 0.171.0'; exit 0; fi
 read initialize
 echo initialize >> "$LAUNCH_TRACE"
 /bin/sleep 0.8
@@ -241,12 +239,10 @@ read account
 	return executable, map[string]string{"HOME": root, "CODEX_HOME": root, "LAUNCH_TRACE": trace}
 }
 
-func TestCodexManagedProbeDisablesGoalsOnSupportedVersions(t *testing.T) {
+func TestCodexManagedProbeLaunchArgs(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fixture uses a POSIX script")
 	}
-	// Every version runs one shared executable: macOS scans each new
-	// executable on its first launch.
 	executable := filepath.Join(t.TempDir(), "codex")
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$LAUNCH_TRACE"
@@ -260,36 +256,23 @@ fi
 	if err := os.WriteFile(executable, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for _, version := range []string{"0.100.0", "0.125.0", "0.128.0", "0.150.1"} {
-		t.Run(version, func(t *testing.T) {
-			root := t.TempDir()
-			trace := filepath.Join(root, "launches")
-			expected := "app-server --disable plugins --listen stdio:// --config features.memories=false --config features.memory_tool=false --config features.apps=false --config features.image_generation=false"
-			if version == "0.128.0" {
-				expected = "app-server --disable plugins --disable goals --listen stdio:// --config features.memories=false --config features.memory_tool=false --config features.apps=false --config features.image_generation=false"
-			}
-			if version == "0.150.1" {
-				expected = "app-server --disable plugins --disable goals --listen stdio:// --config tool_output_token_limit=12000 --config features.memories=false --config features.memory_tool=false --config features.apps=false --config features.image_generation=false"
-			}
-			expected += " --config project_root_markers=[] --config skills.bundled.enabled=false --config features.multi_agent=false --config features.multi_agent_v2=false"
-			if version == "0.150.1" {
-				expected += " --config agents.enabled=false"
-			}
-			environment := map[string]string{"HOME": root, "CODEX_HOME": root, "EXPECTED_ARGS": expected, "LAUNCH_TRACE": trace}
-			outcome := probeRuntime(t.Context(), "codex", executable, environment, 5*time.Second, version)
-			if outcome.Status != "ready" {
-				t.Fatalf("protocol/authentication probe = %+v", outcome)
-			}
-			current := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{Type: "codex", Status: "ready", ExecutablePath: executable, Version: version}}}
-			refreshed, err := RefreshRuntimeAuthentication(t.Context(), current, DiscoveryOptions{Environment: environment, Timeout: 5 * time.Second})
-			if err != nil || refreshed.Diagnostics[0].Status != "ready" {
-				t.Fatalf("authentication refresh = %+v, %v", refreshed, err)
-			}
-			launches, err := os.ReadFile(trace)
-			if err != nil || strings.TrimSpace(string(launches)) != strings.Join([]string{expected, expected, expected}, "\n") {
-				t.Fatalf("probe launches = %q, %v", launches, err)
-			}
-		})
+	root := t.TempDir()
+	trace := filepath.Join(root, "launches")
+	expected := "app-server --disable plugins --disable goals --listen stdio:// --config tool_output_token_limit=12000 --config features.memories=false --config features.memory_tool=false --config features.apps=false --config features.image_generation=false" +
+		" --config project_root_markers=[] --config skills.bundled.enabled=false --config features.multi_agent=false --config features.multi_agent_v2=false --config agents.enabled=false"
+	environment := map[string]string{"HOME": root, "CODEX_HOME": root, "EXPECTED_ARGS": expected, "LAUNCH_TRACE": trace}
+	outcome := probeRuntime(t.Context(), "codex", executable, environment, 5*time.Second)
+	if outcome.Status != "ready" {
+		t.Fatalf("protocol/authentication probe = %+v", outcome)
+	}
+	current := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{Type: "codex", Status: "ready", ExecutablePath: executable, Version: "0.171.0"}}}
+	refreshed, err := RefreshRuntimeAuthentication(t.Context(), current, DiscoveryOptions{Environment: environment, Timeout: 5 * time.Second})
+	if err != nil || refreshed.Diagnostics[0].Status != "ready" {
+		t.Fatalf("authentication refresh = %+v, %v", refreshed, err)
+	}
+	launches, err := os.ReadFile(trace)
+	if err != nil || strings.TrimSpace(string(launches)) != strings.Join([]string{expected, expected, expected}, "\n") {
+		t.Fatalf("probe launches = %q, %v", launches, err)
 	}
 }
 
@@ -302,7 +285,7 @@ func TestCodexAuthenticationUsesActiveProviderAccountState(t *testing.T) {
 	executable := filepath.Join(t.TempDir(), "codex")
 	script := `#!/bin/sh
 if [ "$1 $2" = "login status" ]; then echo "Not logged in"; exit 1; fi
-[ "$1 $2 $3 $4 $5" = "app-server --disable plugins --listen stdio://" ] || exit 2
+[ "$1 $2 $3 $4 $5 $6 $7" = "app-server --disable plugins --disable goals --listen stdio://" ] || exit 2
 read initialize
 echo '{"id":1,"result":{"userAgent":"test"}}'
 read initialized
@@ -346,10 +329,6 @@ func TestNativeCodexAuthenticationWithoutAuthFile(t *testing.T) {
 	if executable == "" {
 		t.Skip("requires an explicitly selected native Codex executable")
 	}
-	version, err := native.ProbeVersion(t.Context(), native.Invocation{Program: executable})
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, custom := range []bool{false, true} {
 		root := t.TempDir()
 		if custom {
@@ -358,9 +337,9 @@ func TestNativeCodexAuthenticationWithoutAuthFile(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		result := probeCodexAuthenticationVersion(context.Background(), executable, map[string]string{
+		result := probeCodexAuthentication(context.Background(), executable, map[string]string{
 			"HOME": root, "CODEX_HOME": root, "PATH": os.Getenv("PATH"),
-		}, 5*time.Second, version)
+		}, 5*time.Second)
 		want := "authentication_required"
 		if custom {
 			want = "ready"
@@ -392,7 +371,7 @@ func TestNativeClaudeAuthenticationDoesNotCallModel(t *testing.T) {
 		"HOME": root, "CLAUDE_CONFIG_DIR": root, "PATH": os.Getenv("PATH"),
 		"ANTHROPIC_API_KEY": "fixture-not-a-real-key", "ANTHROPIC_BASE_URL": server.URL,
 		"DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1", "DISABLE_AUTOUPDATER": "1",
-	}, 5*time.Second, "")
+	}, 5*time.Second)
 	if outcome.Status != "ready" {
 		t.Fatalf("Claude local authentication = %+v", outcome)
 	}

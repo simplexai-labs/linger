@@ -64,7 +64,6 @@ type Profile struct {
 	Env                 map[string]string
 	Logger              *slog.Logger
 	ToolVersion         string
-	CodexToolVersion    string
 	ComputerVersion     string
 	TaskID              string
 	RuntimeID           string

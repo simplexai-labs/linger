@@ -32,7 +32,7 @@ func TestRefreshCodexAuthenticationUsesWritableProbeHomeFromReadOnlySource(t *te
 		t.Fatal(err)
 	}
 	current := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{
-		Type: "codex", Status: "ready", Protocol: "app-server", Version: "0.150.1",
+		Type: "codex", Status: "ready", Protocol: "app-server", Version: "0.171.0",
 		EntryPath: options.ConfiguredPaths["codex"], ExecutablePath: executable,
 	}}}
 	result, err := RefreshRuntimeAuthentication(context.Background(), current, options)
@@ -72,7 +72,7 @@ func codexReadOnlyProbeFixture(t *testing.T) (DiscoveryOptions, string, string) 
 	trace := filepath.Join(root, "trace")
 	executable := filepath.Join(root, "codex")
 	script := `#!/bin/sh
-if [ "$1" = "--version" ]; then echo 'codex-cli 0.150.1'; exit 0; fi
+if [ "$1" = "--version" ]; then echo 'codex-cli 0.171.0'; exit 0; fi
 printf '%s\n' "$CODEX_HOME" >> "$PROBE_TRACE"
 [ -r "$CODEX_HOME/auth.json" ] || exit 17
 : > "$CODEX_HOME/probe-state" || exit 18

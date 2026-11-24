@@ -87,7 +87,7 @@ func TestAntigravityProtocolProbeIsolatesGeminiDirAndLogFile(t *testing.T) {
 		"HOME":                   home,
 		testAgyProtocolHelperEnv: metaFile,
 	}
-	if err := probeRuntimeProtocol(context.Background(), "antigravity", executable, env, 5*time.Second, "1.5.13"); err != nil {
+	if err := probeRuntimeProtocol(context.Background(), "antigravity", executable, env, 5*time.Second); err != nil {
 		t.Fatalf("antigravity protocol probe failed: %v", err)
 	}
 	rawMeta, err := os.ReadFile(metaFile)
@@ -226,7 +226,7 @@ exit 0
 	if _, mutated := callerEnv["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]; mutated {
 		t.Fatal("probeClaudeAuthStatus mutated caller environment map")
 	}
-	if err := probeRuntimeProtocol(context.Background(), "claude", claude, callerEnv, 5*time.Second, ""); err != nil {
+	if err := probeRuntimeProtocol(context.Background(), "claude", claude, callerEnv, 5*time.Second); err != nil {
 		t.Fatalf("probeRuntimeProtocol(claude) = %v, want nil", err)
 	}
 	if _, mutated := callerEnv["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]; mutated {
@@ -241,7 +241,7 @@ exit 0
 	if outcome := probeClaudeAuthStatus(context.Background(), claude, overrideEnv, 5*time.Second); outcome.Status != "ready" {
 		t.Fatalf("probeClaudeAuthStatus(override) = %+v, want ready", outcome)
 	}
-	if err := probeRuntimeProtocol(context.Background(), "claude", claude, overrideEnv, 5*time.Second, ""); err != nil {
+	if err := probeRuntimeProtocol(context.Background(), "claude", claude, overrideEnv, 5*time.Second); err != nil {
 		t.Fatalf("probeRuntimeProtocol(claude, override) = %v, want nil", err)
 	}
 }

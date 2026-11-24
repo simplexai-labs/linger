@@ -35,7 +35,7 @@ func runWindowsDiscoveryFixture() {
 		if os.Getenv("FIXTURE_VERSION_SLOW") == "1" {
 			time.Sleep(6 * time.Second)
 		}
-		fmt.Println(map[string]string{"codex": "codex-cli 0.144.1", "claude": "claude 2.1.282"}[kind])
+		fmt.Println(map[string]string{"codex": "codex-cli 0.171.0", "claude": "claude 2.1.282"}[kind])
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "--help" {

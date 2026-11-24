@@ -22,7 +22,7 @@ func TestDiscoverUsesInteractiveTerminalPath(t *testing.T) {
 		"codex":  filepath.Join(root, ".local/bin"),
 		"claude": filepath.Join(root, ".local/share/mise/installs/node/22.22.3/bin"),
 	}
-	versions := map[string]string{"codex": "codex-cli 0.144.1", "claude": "2.1.282", "pi": "1.2.0"}
+	versions := map[string]string{"codex": "codex-cli 0.171.0", "claude": "2.1.282", "pi": "1.2.0"}
 	for name, directory := range locations {
 		if err := os.MkdirAll(directory, 0700); err != nil {
 			t.Fatal(err)

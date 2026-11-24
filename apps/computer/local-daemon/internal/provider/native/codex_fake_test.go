@@ -75,7 +75,7 @@ func codexFakeMain(args []string) int {
 	if len(args) == 1 && args[0] == "--version" {
 		version := os.Getenv("FAKE_VERSION")
 		if version == "" {
-			version = "0.100.0"
+			version = "0.171.0"
 		}
 		fmt.Println("codex-cli " + version)
 		return 0
@@ -428,7 +428,6 @@ type codexFake struct {
 	log      string
 	launches string
 	env      map[string]string
-	version  string
 	program  string
 	// skillDigest and configDigest are the delivered inputs the next
 	// runtime() reports.
@@ -469,7 +468,7 @@ func (f *codexFake) runtime(logger *slog.Logger) Runtime {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	rt, err := Open("codex", Profile{Program: f.program, Env: f.env, Logger: logger, CodexToolVersion: f.version, ComputerVersion: "test", TaskID: "task-" + f.t.Name(),
+	rt, err := Open("codex", Profile{Program: f.program, Env: f.env, Logger: logger, ComputerVersion: "test", TaskID: "task-" + f.t.Name(),
 		ResidentSkillDigest: f.skillDigest, CodexConfigDigest: f.configDigest})
 	if err != nil {
 		f.t.Fatal(err)
