@@ -159,6 +159,11 @@ export function VoiceFocusSurface({
     voice.listenerStatus === "enabling";
   const transcriptIncomplete =
     captureActive && capture?.last_failure_code === "transcript_incomplete";
+  // A Capture stays "starting" until the recorder confirms its first audio. A
+  // failure code on it means Start failed and TeamHub is retrying, so the
+  // transcript is all that is being kept.
+  const audioNotSaved =
+    captureStatus === "starting" && Boolean(capture?.last_failure_code);
   // Starting connects on demand, so an unbound or blocked microphone still
   // needs the affordance; a bound-but-idle listener and an imminent
   // auto-start do not offer it twice.
@@ -210,15 +215,17 @@ export function VoiceFocusSurface({
         ? t(m.statusReconnectingTranscript)
         : livekit?.captureSyncStatus === "recovering"
           ? t(m.statusReconnectingRecording)
-          : paused && captureActive
-            ? t(m.statusMicrophoneMuted)
-            : transcriptIncomplete
-              ? inputInterrupted
-                ? t(m.statusUnconfirmedAfterStop)
-                : t(m.statusUnconfirmed)
-              : finalizing
-                ? t(m.statusGeneratingFiles)
-                : undefined);
+          : audioNotSaved
+            ? t(m.statusAudioNotSaved)
+            : paused && captureActive
+              ? t(m.statusMicrophoneMuted)
+              : transcriptIncomplete
+                ? inputInterrupted
+                  ? t(m.statusUnconfirmedAfterStop)
+                  : t(m.statusUnconfirmed)
+                : finalizing
+                  ? t(m.statusGeneratingFiles)
+                  : undefined);
   const surfaceError =
     (stopFailed ? t(m.stopFailed) : undefined) ??
     actionError ??

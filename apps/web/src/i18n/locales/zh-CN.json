@@ -3506,6 +3506,7 @@
     "statusReconnectingMicrophone": "正在重新连接麦克风，音频尚未确认送达",
     "statusReconnectingTranscript": "正在重新连接转写更新，已保存的文字会在重连后同步",
     "statusReconnectingRecording": "正在重新连接录音状态，等待服务器确认",
+    "statusAudioNotSaved": "音频暂未保存，目前只保留转写。正在重试录音。",
     "statusMicrophoneMuted": "麦克风已静音。继续录音前，你的声音不会被录下。",
     "statusUnconfirmedAfterStop": "部分转写片段尚未确认。停止后会尝试恢复。",
     "statusUnconfirmed": "部分转写片段尚未确认。录音仍在继续，停止后会尝试恢复。",
