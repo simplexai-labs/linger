@@ -64,11 +64,14 @@ class FakeChild implements DaemonChild {
   kill(): void {
     this.killed = true;
   }
-  status(gateway: string, active = 0): void {
+  status(gateway: string, active = 0, modelInvokes?: number): void {
     const line = JSON.stringify({
       type: "status",
       gateway_state: gateway,
       active_operations: active,
+      ...(modelInvokes !== undefined
+        ? { active_model_invokes: modelInvokes }
+        : {}),
     });
     for (const listener of this.lines) listener(line);
   }
@@ -308,17 +311,48 @@ describe("ComputerDaemonModule", () => {
   it("follows the status the daemon reports", async () => {
     const { daemon, ctx, bus, children } = setup();
     const activity: number[] = [];
+    const modelActivity: number[] = [];
     bus.on("runtime.activity", (running) => activity.push(running));
+    bus.on("runtime.model_activity", (running) => modelActivity.push(running));
     await daemon.start(ctx);
     children[0]!.status("connected", 2);
     expect(daemon.state()).toBe("ready");
     expect(daemon.connection()).toBe("online");
     expect(daemon.running()).toBe(2);
-    children[0]!.status("upgrade-required");
+    // An older daemon that omits active_model_invokes defaults to 0.
+    expect(daemon.modelInvokes()).toBe(0);
+    children[0]!.status("connected", 2, 3);
+    expect(daemon.running()).toBe(2);
+    expect(daemon.modelInvokes()).toBe(3);
+    children[0]!.status("upgrade-required", 0, 0);
     expect(daemon.connection()).toBe("upgrade_required");
     children[0]!.status("identity-conflict");
     expect(daemon.connection()).toBe("identity_conflict");
     expect(activity).toEqual([2, 0]);
+    expect(modelActivity).toEqual([3, 0]);
+  });
+
+  it("resets background model activity when the daemon exits or stops", async () => {
+    const { daemon, ctx, bus, children } = setup();
+    const modelActivity: number[] = [];
+    bus.on("runtime.model_activity", (running) => modelActivity.push(running));
+    await daemon.start(ctx);
+    children[0]!.status("connected", 0, 2);
+    expect(daemon.modelInvokes()).toBe(2);
+    children[0]!.exit(1);
+    expect(daemon.modelInvokes()).toBe(0);
+    expect(modelActivity).toEqual([2, 0]);
+    await daemon.stop();
+  });
+
+  it("restarts on grant changes without waiting on background model invokes", async () => {
+    const { daemon, ctx, bus, children } = setup();
+    await daemon.start(ctx);
+    children[0]!.status("connected", 0, 2);
+    bus.emit("grants.changed");
+    await vi.waitFor(() => expect(children).toHaveLength(2));
+    expect(children[0]!.stopped).toBe(true);
+    expect(daemon.modelInvokes()).toBe(0);
   });
 
   it("stays stopped until this computer is connected", async () => {

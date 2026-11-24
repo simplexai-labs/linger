@@ -159,6 +159,47 @@ func TestModelInvokeRunsEveryCallItReceives(t *testing.T) {
 	}
 }
 
+func TestActiveModelInvokeCountTracksInFlightCalls(t *testing.T) {
+	invoker := newFakeModelInvoker()
+	d, stream := modelInvokeFixture(t, invoker)
+	if got := d.ActiveModelInvokeCount(); got != 0 {
+		t.Fatalf("initial active model invokes = %d", got)
+	}
+	for _, id := range []string{"invoke-a", "invoke-b"} {
+		if err := d.handleModelInvoke(context.Background(), stream, modelInvokeCommand(id, nil)); err != nil {
+			t.Fatal(err)
+		}
+		<-invoker.started
+	}
+	if got := d.ActiveModelInvokeCount(); got != 2 {
+		t.Fatalf("in-flight active model invokes = %d", got)
+	}
+	if got := d.ActiveOperationCount(); got != 0 {
+		t.Fatalf("model invokes must not count as active operations, got %d", got)
+	}
+	cancel := protocol.Command{
+		Type: protocol.CommandModelInvokeCancel, CommandID: "cancel-invoke-a", RunnerID: "computer-1", ConnectionEpoch: 1,
+		Payload: mustJSON(map[string]any{"invoke_id": "invoke-a", "reason": "scheduler_yield"}),
+	}
+	if err := d.cancelModelInvoke(cancel); err != nil {
+		t.Fatal(err)
+	}
+	if payload := waitForModelInvoked(t, stream, "invoke-a"); payload["outcome"] != "canceled" {
+		t.Fatalf("payload = %v", payload)
+	}
+	if got := d.ActiveModelInvokeCount(); got != 1 {
+		t.Fatalf("remaining active model invokes = %d", got)
+	}
+	close(invoker.release)
+	if payload := waitForModelInvoked(t, stream, "invoke-b"); payload["outcome"] != "completed" {
+		t.Fatalf("payload = %v", payload)
+	}
+	d.WaitForOperations()
+	if got := d.ActiveModelInvokeCount(); got != 0 {
+		t.Fatalf("final active model invokes = %d", got)
+	}
+}
+
 func TestModelInvokeIsCanceledByDisconnectAndDrain(t *testing.T) {
 	for name, stop := range map[string]func(*Daemon, context.CancelFunc){
 		"connection lost": func(_ *Daemon, cancelConnection context.CancelFunc) { cancelConnection() },

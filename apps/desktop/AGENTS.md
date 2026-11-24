@@ -495,7 +495,14 @@ Gateway and runs Agents. The daemon exits with the app.
   credential in `LINGER_COMPUTER_TOKEN` (`gateway.token_env`). The config's
   `desktop` section puts the daemon in Desktop mode: no self-update, it exits
   when its stdin closes, and it reports `{"type":"status",...}` lines on
-  stdout, which drive the tray and the SPA status. Its log goes to
+  stdout (`gateway_state`, `active_operations`, `active_model_invokes`).
+  `active_operations` drives the tray busy state, quit confirmation, idle
+  restarts, updater waiting and the SPA status (`runtime.activity`);
+  `active_model_invokes` (omitted by older daemons, treated as `0`) emits
+  `runtime.model_activity` for `PowerGuard` only, so background model calls
+  (Memory, Wiki) hold `prevent-app-suspension` while running and through a
+  short release tail (`MODEL_ACTIVITY_TAIL_MS`) without marking the Computer
+  busy. Its log goes to
   `<userData>/logs/computer-daemon.log`. Crashes and launch failures retry
   with backoff. The Desktop reports the reason after three consecutive
   attempts fail before the daemon reports a status. The exit log

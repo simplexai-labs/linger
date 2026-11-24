@@ -1,3 +1,4 @@
+import type { ComputerDaemonModule } from "./computer-daemon.js";
 import type { Module, ModuleContext } from "./modules.js";
 
 // Electron's powerSaveBlocker and powerMonitor, injected for tests.
@@ -7,16 +8,27 @@ export interface PowerApi {
   onPowerEvent(listener: (kind: "suspend" | "resume") => void): () => void;
 }
 
-// Keeps the system awake while operations or installations run, or in always-on
-// mode. The daemon reconnects by itself after a resume.
+// Keeps the system awake briefly after a background model call finishes so
+// chained steps (such as multi-batch Wiki refreshes or Wiki -> Daily ->
+// dreaming) do not sleep between calls.
+export const MODEL_ACTIVITY_TAIL_MS = 3 * 60_000;
+
+// Keeps the system awake while operations, background model invocations, or
+// installations run, or in always-on mode. The daemon reconnects by itself
+// after a resume.
 export class PowerGuardModule implements Module {
   readonly name = "PowerGuard";
   readonly dependsOn = ["ComputerDaemon"];
   readonly #power: PowerApi;
   #ctx: ModuleContext | undefined;
   #running = 0;
+  #modelInvokes = 0;
+  #modelTail: NodeJS.Timeout | undefined;
   #installing = false;
   #blocker: number | undefined;
+  #lastEmitted:
+    | { readonly active: boolean; readonly alwaysOn: boolean }
+    | undefined;
   readonly #unsubscribe: (() => void)[] = [];
 
   constructor(power: PowerApi) {
@@ -25,9 +37,21 @@ export class PowerGuardModule implements Module {
 
   async start(ctx: ModuleContext): Promise<void> {
     this.#ctx = ctx;
+    const daemon = ctx.get<Module & Partial<ComputerDaemonModule>>(
+      "ComputerDaemon",
+    );
+    this.#running = daemon.running?.() ?? 0;
+    this.#modelInvokes = daemon.modelInvokes?.() ?? 0;
     this.#unsubscribe.push(
       ctx.bus.on("runtime.activity", (running) => {
         this.#running = running;
+        this.#apply();
+      }),
+      ctx.bus.on("runtime.model_activity", (modelInvokes) => {
+        const previous = this.#modelInvokes;
+        this.#modelInvokes = modelInvokes;
+        if (modelInvokes > 0) this.#clearModelTail();
+        else if (previous > 0) this.#armModelTail();
         this.#apply();
       }),
       ctx.bus.on("local-server.busy", (busy) => {
@@ -43,6 +67,7 @@ export class PowerGuardModule implements Module {
 
   async stop(): Promise<void> {
     for (const off of this.#unsubscribe.splice(0)) off();
+    this.#clearModelTail();
     this.#release();
   }
 
@@ -59,17 +84,46 @@ export class PowerGuardModule implements Module {
     return this.#blocker !== undefined;
   }
 
+  #armModelTail(): void {
+    this.#clearModelTail();
+    this.#modelTail = setTimeout(() => {
+      this.#modelTail = undefined;
+      this.#apply();
+    }, MODEL_ACTIVITY_TAIL_MS);
+    this.#modelTail.unref?.();
+  }
+
+  #clearModelTail(): void {
+    if (!this.#modelTail) return;
+    clearTimeout(this.#modelTail);
+    this.#modelTail = undefined;
+  }
+
   #apply(): void {
-    const want = this.alwaysOn() || this.#running > 0 || this.#installing;
+    const alwaysOn = this.alwaysOn();
+    const want =
+      alwaysOn ||
+      this.#running > 0 ||
+      this.#modelInvokes > 0 ||
+      this.#modelTail !== undefined ||
+      this.#installing;
     if (want && this.#blocker === undefined) {
       this.#blocker = this.#power.block();
       this.#ctx!.log.info("power.blocking", {
         running: this.#running,
+        model_invokes: this.#modelInvokes,
         installing: this.#installing,
       });
     } else if (!want) {
       this.#release();
     }
+    const active = this.active();
+    if (
+      this.#lastEmitted?.active === active &&
+      this.#lastEmitted.alwaysOn === alwaysOn
+    )
+      return;
+    this.#lastEmitted = { active, alwaysOn };
     this.#ctx!.bus.emit("power.changed");
   }
 

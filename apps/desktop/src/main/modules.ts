@@ -35,6 +35,7 @@ export interface BusEvents {
   "local-server.unreachable": [];
   "power.changed": [];
   "runtime.activity": [running: number];
+  "runtime.model_activity": [running: number];
   "runtime.state": [state: string];
   "server.changed": [serverUrl: string];
   // The same server answers at another origin; enrollments follow it.

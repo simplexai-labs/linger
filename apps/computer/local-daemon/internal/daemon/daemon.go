@@ -418,6 +418,14 @@ func (d *Daemon) ActiveOperationCount() int {
 	return len(d.activeOperations)
 }
 
+// ActiveModelInvokeCount returns the number of in-flight one-shot model
+// invocations.
+func (d *Daemon) ActiveModelInvokeCount() int {
+	d.modelInvokeMu.Lock()
+	defer d.modelInvokeMu.Unlock()
+	return len(d.modelInvokes)
+}
+
 func (d *Daemon) DrainIfIdle() int {
 	d.admissionMu.Lock()
 	defer d.admissionMu.Unlock()
