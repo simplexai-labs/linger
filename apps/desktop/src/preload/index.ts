@@ -5,6 +5,7 @@ import {
   type ComputerStatus,
   type DesktopUpdateState,
   type LingerDesktopApi,
+  type PreviewViewState,
 } from "../shared/api.js";
 
 // Sandboxed preload: exposes only window.lingerDesktop, never ipcRenderer.
@@ -67,6 +68,23 @@ const api: LingerDesktopApi = {
         callback(name, url);
       ipcRenderer.on(IPC.previewFrameRefused, listener);
       return () => ipcRenderer.off(IPC.previewFrameRefused, listener);
+    },
+    view: {
+      open: (id, url) => ipcRenderer.invoke(IPC.previewOpen, id, url),
+      place: (id, bounds) => ipcRenderer.invoke(IPC.previewPlace, id, bounds),
+      hide: (id) => ipcRenderer.invoke(IPC.previewHide, id),
+      command: (id, command) =>
+        ipcRenderer.invoke(IPC.previewCommand, id, command),
+      close: (id) => ipcRenderer.invoke(IPC.previewClose, id),
+      onState: (callback) => {
+        const listener = (
+          _event: unknown,
+          id: string,
+          state: PreviewViewState,
+        ): void => callback(id, state);
+        ipcRenderer.on(IPC.previewState, listener);
+        return () => ipcRenderer.off(IPC.previewState, listener);
+      },
     },
   },
   voiceWindow: {

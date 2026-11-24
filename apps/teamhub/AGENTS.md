@@ -69,6 +69,18 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   Graph's empty 202 acknowledges sending without supplying a sent message ID;
   an uncertain send is never replayed automatically. All three share draft
   bindings and delivery receipts.
+- `internal/urlpreview`: `GET /v0/url-preview/framing` reads a page's
+  framing rules (`X-Frame-Options`, CSP `frame-ancestors`) for the Web link
+  preview panel, which cannot read a cross-origin frame's headers. It sends
+  a cookieless HEAD (GET only when the server refuses HEAD, which may spend
+  a one-time link), follows up to five redirects itself and answers
+  `allowed`, `refused` or `unknown` within five seconds. It requests only
+  public addresses, checked at connection time, on ports 80 and 443, reads
+  at most 64 KiB of headers and runs at most eight probes at once; others
+  answer `unknown` at once. Through the environment's HTTP(S) proxy it checks
+  every address the name resolves to before asking; the proxy resolves the
+  name again, so only certificates guard https against a name that changes
+  its answer in between.
 - `internal/<feature>`: business behavior, transactions and data access with
   package tests: `collaboration` (Human Rooms and Messages),
   `agentregistry` (Agents, templates, Skill bindings, Another Me),

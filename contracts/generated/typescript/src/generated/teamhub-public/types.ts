@@ -2509,6 +2509,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/url-preview/framing": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Report whether a site lets the link preview panel frame it.
+     * @description A browser cannot read a cross-origin frame's response headers, so the Web link preview panel asks TeamHub before it frames a page. TeamHub sends HEAD without cookies (GET only when the server refuses HEAD, which may spend a one-time link), follows up to five redirects and reads the framing rules of the final response. It requests only public addresses, checked at connection time, on ports 80 and 443, runs a few probes at once and gives up after five seconds. The desktop app shows pages natively and does not use this. 400 INVALID_REQUEST for a URL that is not http or https, or that carries credentials.
+     */
+    get: operations["getUrlPreviewFraming"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/web-search/backends": {
     parameters: {
       query?: never;
@@ -7534,6 +7554,13 @@ export interface components {
       media_type?: string;
       /** Format: binary */
       content: string;
+    };
+    UrlPreviewFraming: {
+      /**
+       * @description refused: the final response forbids framing by another site (X-Frame-Options DENY or SAMEORIGIN, or a CSP frame-ancestors that allows no page of the Linger page's scheme), so the panel offers a new tab instead of a frame. allowed: it does not. unknown: TeamHub did not read the page, because it was unreachable, slow or redirected too often, TeamHub was busy with other probes, or it is on a non-public address or a port other than 80 and 443, which TeamHub never requests; the panel frames it and lets the browser decide.
+       * @enum {string}
+       */
+      framing: "allowed" | "refused" | "unknown";
     };
     /**
      * @description A backend that runs searches.
@@ -12846,6 +12873,33 @@ export interface operations {
       409: components["responses"]["Conflict"];
       413: components["responses"]["PayloadTooLarge"];
       503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  getUrlPreviewFraming: {
+    parameters: {
+      query: {
+        /** @description The http or https page to preview. */
+        url: string;
+        /** @description The scheme of the Linger page that frames the site; frame-ancestors scheme sources are matched against it. Without it, http and https sources both allow the frame. */
+        page_scheme?: "http" | "https";
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Whether the page may be framed. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UrlPreviewFraming"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
     };
   };
   listWebSearchBackends: {

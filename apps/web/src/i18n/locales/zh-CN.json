@@ -2141,6 +2141,7 @@
     "openInBrowserTab": "请在浏览器标签页中打开这个地址查看。",
     "openSiteInNewTab": "在新标签页中打开这个网站",
     "siteRefusesFrame": "{host} 不允许在应用内显示。",
+    "checkingSite": "正在确认这个网站能否在应用内显示。",
     "previewTitle": "预览 {url}"
   },
   "wiki": {

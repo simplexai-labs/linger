@@ -3264,6 +3264,8 @@ paths:
           $ref: '../components/common.yaml#/components/responses/PayloadTooLarge'
         '503':
           $ref: '../components/common.yaml#/components/responses/ServiceUnavailable'
+  /v0/url-preview/framing:
+    $ref: '../paths/teamhub-public-url-preview.yaml#/framing'
   /v0/web-search/backends:
     $ref: '../paths/teamhub-public-web-search.yaml#/backends'
   /v0/web-search/backends/{backend}/key:

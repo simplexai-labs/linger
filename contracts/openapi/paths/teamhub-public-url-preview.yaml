@@ -1,0 +1,46 @@
+framing:
+  get:
+    tags: [Rooms]
+    operationId: getUrlPreviewFraming
+    summary: Report whether a site lets the link preview panel frame it.
+    description: >-
+      A browser cannot read a cross-origin frame's response headers, so the
+      Web link preview panel asks TeamHub before it frames a page. TeamHub
+      sends HEAD without cookies (GET only when the server refuses HEAD,
+      which may spend a one-time link), follows up to five redirects and
+      reads the framing rules of the final response. It requests only
+      public addresses, checked at connection time, on ports 80 and 443,
+      runs a few probes at once and gives up after five seconds. The
+      desktop app shows pages natively and does not use this.
+      400 INVALID_REQUEST for a URL that is not http or https, or that
+      carries credentials.
+    parameters:
+      - name: url
+        in: query
+        required: true
+        description: The http or https page to preview.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 4096
+      - name: page_scheme
+        in: query
+        required: false
+        description: >-
+          The scheme of the Linger page that frames the site; frame-ancestors
+          scheme sources are matched against it. Without it, http and https
+          sources both allow the frame.
+        schema:
+          type: string
+          enum: [http, https]
+    responses:
+      "200":
+        description: Whether the page may be framed.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/url-preview.yaml#/components/schemas/UrlPreviewFraming"
+      "400":
+        $ref: "../components/common.yaml#/components/responses/BadRequest"
+      "401":
+        $ref: "../components/common.yaml#/components/responses/Unauthenticated"

@@ -12,6 +12,7 @@ export const urlPreviewMessages = defineMessages("urlPreview", {
   openInBrowserTab: "Open this address in a browser tab to view it.",
   openSiteInNewTab: "Open this site in a new tab",
   siteRefusesFrame: "{host} does not allow being shown in the app.",
+  checkingSite: "Checking whether this site can be shown here.",
   // The name of the frame that shows the page.
   previewTitle: "Preview {url}",
 });

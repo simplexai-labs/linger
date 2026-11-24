@@ -66,6 +66,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/taskdelegation"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/taskexecution"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/urlpreview"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicecaptureqa"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicekey"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicemedia"
@@ -123,6 +124,8 @@ type App struct {
 	voiceKeys *voicekey.Service
 	// webSearch runs the Agents' web searches with the saved keys.
 	webSearch *websearch.Service
+	// urlPreview reads sites' framing rules for the Web link preview panel.
+	urlPreview *urlpreview.Prober
 	// reconcileVoiceWorkers wakes the Node Services voice workers after a key
 	// is saved and reports whether they are ready; nil without a Node Services
 	// link.
@@ -534,6 +537,7 @@ func (a *App) registerFeatures(ctx context.Context, cfg config.Config, deps Deps
 	if err := a.registerWebSearch(cfg, deps); err != nil {
 		return err
 	}
+	a.urlPreview = urlpreview.New()
 	a.reminders = reminder.New(a.pool)
 	agentAuthorization := a.registerAgentAuthorization()
 	if err := a.registerExternalApps(ctx, cfg.ExternalApps, deps.Composio, agentAuthorization); err != nil {

@@ -4043,6 +4043,27 @@ func (e UnifiedDocumentStatus) Valid() bool {
 	}
 }
 
+// Defines values for UrlPreviewFramingFraming.
+const (
+	UrlPreviewFramingFramingAllowed UrlPreviewFramingFraming = "allowed"
+	UrlPreviewFramingFramingRefused UrlPreviewFramingFraming = "refused"
+	UrlPreviewFramingFramingUnknown UrlPreviewFramingFraming = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the UrlPreviewFramingFraming enum.
+func (e UrlPreviewFramingFraming) Valid() bool {
+	switch e {
+	case UrlPreviewFramingFramingAllowed:
+		return true
+	case UrlPreviewFramingFramingRefused:
+		return true
+	case UrlPreviewFramingFramingUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for VoiceCaptureTranscriptRecoveryStatus.
 const (
 	VoiceCaptureTranscriptRecoveryStatusFailed    VoiceCaptureTranscriptRecoveryStatus = "failed"
@@ -4814,6 +4835,24 @@ func (e ListWorkItemsParamsScope) Valid() bool {
 	case ListWorkItemsParamsScopePersonal:
 		return true
 	case ListWorkItemsParamsScopeTenant:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetUrlPreviewFramingParamsPageScheme.
+const (
+	Http  GetUrlPreviewFramingParamsPageScheme = "http"
+	Https GetUrlPreviewFramingParamsPageScheme = "https"
+)
+
+// Valid indicates whether the value is a known member of the GetUrlPreviewFramingParamsPageScheme enum.
+func (e GetUrlPreviewFramingParamsPageScheme) Valid() bool {
+	switch e {
+	case Http:
+		return true
+	case Https:
 		return true
 	default:
 		return false
@@ -9653,6 +9692,15 @@ type UnifiedDocumentVersionRef struct {
 	VersionNumber int    `json:"version_number"`
 }
 
+// UrlPreviewFraming defines model for UrlPreviewFraming.
+type UrlPreviewFraming struct {
+	// Framing refused: the final response forbids framing by another site (X-Frame-Options DENY or SAMEORIGIN, or a CSP frame-ancestors that allows no page of the Linger page's scheme), so the panel offers a new tab instead of a frame. allowed: it does not. unknown: TeamHub did not read the page, because it was unreachable, slow or redirected too often, TeamHub was busy with other probes, or it is on a non-public address or a port other than 80 and 443, which TeamHub never requests; the panel frames it and lets the browser decide.
+	Framing UrlPreviewFramingFraming `json:"framing"`
+}
+
+// UrlPreviewFramingFraming refused: the final response forbids framing by another site (X-Frame-Options DENY or SAMEORIGIN, or a CSP frame-ancestors that allows no page of the Linger page's scheme), so the panel offers a new tab instead of a frame. allowed: it does not. unknown: TeamHub did not read the page, because it was unreachable, slow or redirected too often, TeamHub was busy with other probes, or it is on a non-public address or a port other than 80 and 443, which TeamHub never requests; the panel frames it and lets the browser decide.
+type UrlPreviewFramingFraming string
+
 // VoiceCapture defines model for VoiceCapture.
 type VoiceCapture struct {
 	ArchivedThroughMs *int64 `json:"archived_through_ms,omitempty"`
@@ -10805,6 +10853,18 @@ type CreateWorkItemParams struct {
 	// IdempotencyKey Reusing the same key with the same canonical request returns the original result. Reusing it with different input returns 409 IDEMPOTENCY_KEY_REUSED.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 }
+
+// GetUrlPreviewFramingParams defines parameters for GetUrlPreviewFraming.
+type GetUrlPreviewFramingParams struct {
+	// Url The http or https page to preview.
+	Url string `form:"url" json:"url"`
+
+	// PageScheme The scheme of the Linger page that frames the site; frame-ancestors scheme sources are matched against it. Without it, http and https sources both allow the frame.
+	PageScheme *GetUrlPreviewFramingParamsPageScheme `form:"page_scheme,omitempty" json:"page_scheme,omitempty"`
+}
+
+// GetUrlPreviewFramingParamsPageScheme defines parameters for GetUrlPreviewFraming.
+type GetUrlPreviewFramingParamsPageScheme string
 
 // ListVoiceEventsParams defines parameters for ListVoiceEvents.
 type ListVoiceEventsParams struct {

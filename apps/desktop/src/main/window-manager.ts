@@ -32,6 +32,7 @@ import { diagnosticsDialogs } from "./diagnostics-dialogs.js";
 import { sendWithPrompts } from "./diagnostics-upload.js";
 import type { LanguageModule } from "./language.js";
 import type { Module, ModuleContext } from "./modules.js";
+import { PreviewViews } from "./preview-views.js";
 import {
   OFFLINE_ORIGIN,
   PREVIEW_FRAME_PREFIX,
@@ -164,6 +165,12 @@ export class WindowManagerModule implements Module {
   #revealTimer: NodeJS.Timeout | undefined;
   // Closes the floating voice window, when there is one.
   #closeVoiceWindow: (() => void) | undefined;
+  readonly #previews = new PreviewViews({
+    window: () => this.#window,
+    content: () => this.#content,
+    serverUrl: () => this.#serverUrl(),
+    warn: (event, fields) => this.#ctx?.log.warn(event, fields),
+  });
   readonly #unsubscribe: (() => void)[] = [];
 
   constructor(options: WindowManagerOptions) {
@@ -185,6 +192,7 @@ export class WindowManagerModule implements Module {
       this.#command(name as ShellCommand);
     });
     this.#unsubscribe.push(
+      this.#previews.register(),
       () => ipcMain.removeHandler(SHELL_IPC.state),
       () => ipcMain.removeAllListeners(SHELL_IPC.command),
       // The title bar's button labels are filled in when it loads.
@@ -370,6 +378,7 @@ export class WindowManagerModule implements Module {
     });
     window.on("closed", () => {
       this.#closeVoiceWindow?.();
+      this.#previews.closeAll();
       titlebar?.webContents.close();
       content.webContents.close();
       if (this.#window === window) {
@@ -755,6 +764,9 @@ export class WindowManagerModule implements Module {
       "did-stop-loading",
     ] as const)
       contents.on(event as "did-start-loading", () => this.#pushState());
+    // A new page in the window no longer knows the previews of the last one.
+    contents.on("did-navigate", () => this.#previews.closeAll());
+    contents.on("render-process-gone", () => this.#previews.closeAll());
   }
 
   #guard(

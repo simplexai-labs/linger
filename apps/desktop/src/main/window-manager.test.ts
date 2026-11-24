@@ -143,6 +143,7 @@ import { ConfigStore } from "./config.js";
 import zhCN from "../i18n/locales/zh-CN.json" with { type: "json" };
 import { LanguageModule } from "./language.js";
 import { EventBus, ModuleHost, type Module } from "./modules.js";
+import { PreviewViews } from "./preview-views.js";
 import { tempDirectory } from "./test-support.js";
 import { WindowManagerModule } from "./window-manager.js";
 
@@ -611,6 +612,21 @@ describe("WindowManagerModule", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("closes the previews of a page that navigates away or crashes", async () => {
+    const closeAll = vi.spyOn(PreviewViews.prototype, "closeAll");
+    const { host } = setup({ serverUrl: "http://localhost:3000" });
+    await host.start();
+    const content = contentView().webContents;
+    closeAll.mockClear();
+    content.emit("did-navigate-in-page");
+    expect(closeAll).not.toHaveBeenCalled();
+    content.emit("did-navigate");
+    content.emit("render-process-gone");
+    expect(closeAll).toHaveBeenCalledTimes(2);
+    await host.stop("quit");
+    closeAll.mockRestore();
   });
 
   it("keeps framing rules for the preview frame and reports a refusal", async () => {

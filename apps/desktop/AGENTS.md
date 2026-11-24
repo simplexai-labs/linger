@@ -48,12 +48,30 @@ Gateway and runs Agents. The daemon exits with the app.
   The callback restores the originating window and forwards the return to its
   signed-in SPA, which requests TeamHub verification.
 
-- The Web link preview panel frames other sites. The window drops their
-  framing refusals (`X-Frame-Options`, CSP `frame-ancestors`) for frames of
-  the app, except the panel's frame, named `linger-url-preview:<id>`. When
-  that frame's final response refuses framing, the window sends
-  `preview.frame-refused`, and the panel offers the system browser instead,
-  where the user's sign-ins work.
+- The Web link preview panel shows other sites in native views
+  (`src/main/preview-views.ts`, `preview.view` in the preload API). Each is a
+  `WebContentsView` the page asks for by id (at most eight) and lays over its
+  panel; a top-level page ignores framing rules (`X-Frame-Options`, CSP
+  `frame-ancestors`), so every site shows. Previews share the persistent
+  `persist:linger-preview` session, apart from the app's session with the
+  Linger server: sign-ins made there last across restarts, and sites get no
+  permissions beyond clipboard writes. They keep Electron's user agent, so
+  sites that refuse embedded browsers, such as Google sign-in, need the
+  system browser. Only the Linger page's main frame may drive the views. It
+  learns each view's address and history after every navigation, never its
+  content. A view loads only http and https; links asking for a new tab load
+  in place, and only script popups (sign-in windows) open a window: at most
+  two per view, titled with their site and closed with the view. A crashed
+  view reloads once. While a layer of the page (a portal beside the app
+  root, an open dialog or popover, or an element hit-tested over the panel)
+  covers the panel, or the panel is inert or being resized, the page hides
+  the view and the panel shows empty. The window closes every view when its
+  page navigates, crashes or its window closes.
+- Web builds without native previews still frame sites. The window drops
+  framing refusals for frames of the app, except the panel's frame, named
+  `linger-url-preview:<id>`. When that frame's final response refuses
+  framing, the window sends `preview.frame-refused`, and the panel offers
+  the system browser instead.
 
 - `src/main/modules.ts`: `Module` interface, typed bus and the host that starts
   modules in dependency layers and stops them in reverse.

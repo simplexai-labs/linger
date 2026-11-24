@@ -234,6 +234,7 @@ func (a *App) publicRoutes() []contractRoute {
 		route(http.MethodGet, "/v0/voice-sessions/:voiceSessionId/events", httpapi.ListVoiceEventsParams{}, session, a.listVoiceEvents),
 		route(http.MethodGet, "/v0/voice-sessions/:voiceSessionId/events/stream", httpapi.StreamVoiceEventsParams{}, session, a.streamVoiceEvents),
 		route(http.MethodGet, "/v0/voice-sessions/:voiceSessionId/transcript-events", httpapi.ListVoiceTranscriptEventsParams{}, session, a.listVoiceTranscriptEvents),
+		route(http.MethodGet, "/v0/url-preview/framing", httpapi.GetUrlPreviewFramingParams{}, session, a.getURLPreviewFraming),
 		route(http.MethodGet, "/v0/web-search/backends", httpapi.ListWebSearchBackendsParams{}, session, a.listWebSearchBackends),
 		route(http.MethodDelete, "/v0/web-search/backends/:backend/key", nil, session, a.deleteWebSearchKey),
 		route(http.MethodPut, "/v0/web-search/backends/:backend/key", nil, session, a.saveWebSearchKey),

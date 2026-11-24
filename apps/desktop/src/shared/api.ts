@@ -68,6 +68,36 @@ export type DesktopUpdateState =
     }
   | { readonly kind: "failed"; readonly error: string };
 
+// A rectangle in the page's CSS pixels, relative to its viewport.
+export interface PreviewBounds {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+// Reported after each navigation of a view. The page learns the address,
+// which may carry a site's tokens, but never the view's content.
+export interface PreviewViewState {
+  readonly url: string;
+  readonly canGoBack: boolean;
+  readonly canGoForward: boolean;
+}
+
+export type PreviewCommand = "back" | "forward" | "reload";
+
+export interface PreviewViewApi {
+  // Creates the view, hidden, or loads url in an existing one.
+  open(id: string, url: string): Promise<void>;
+  // Shows the view over bounds.
+  place(id: string, bounds: PreviewBounds): Promise<void>;
+  // Hides the view, such as while a menu or dialog covers the panel.
+  hide(id: string): Promise<void>;
+  command(id: string, command: PreviewCommand): Promise<void>;
+  close(id: string): Promise<void>;
+  onState(callback: (id: string, state: PreviewViewState) => void): () => void;
+}
+
 export interface LingerDesktopApi {
   readonly version: string;
   readonly platform: "darwin" | "win32" | "linux";
@@ -106,12 +136,18 @@ export interface LingerDesktopApi {
     prepare(): Promise<string>;
     onReturn(callback: (connectedAccountId?: string) => void): () => void;
   };
-  // The link preview panel's frame, named PREVIEW_FRAME_PREFIX + an id,
-  // refused to be framed; url is the page that refused.
   readonly preview: {
+    // The link preview panel's frame, named PREVIEW_FRAME_PREFIX + an id,
+    // refused to be framed; url is the page that refused. Web builds without
+    // `view` support use it.
     onFrameRefused(
       callback: (frameName: string, url: string) => void,
     ): () => void;
+    // Native previews: each is a browser view the app lays over the panel,
+    // keyed by an id the page picks. A top-level page ignores framing rules
+    // and keeps its sign-ins in the app's own preview session. Older apps
+    // lack it, so the page frames sites instead.
+    readonly view: PreviewViewApi;
   };
   // The page floats its Voice Mode and Recording windows in a window of their
   // own opened with `window.open("")`; present only when this app allows that,
@@ -157,6 +193,12 @@ export const IPC = {
   connectorOAuthPrepare: "connector-oauth.prepare",
   connectorOAuthReturn: "connector-oauth.return",
   previewFrameRefused: "preview.frame-refused",
+  previewOpen: "preview.open",
+  previewPlace: "preview.place",
+  previewHide: "preview.hide",
+  previewCommand: "preview.command",
+  previewClose: "preview.close",
+  previewState: "preview.state",
   voiceWindowShowMain: "voice-window.show-main",
   languageSet: "language.set",
   diagnosticsSave: "diagnostics.save",
