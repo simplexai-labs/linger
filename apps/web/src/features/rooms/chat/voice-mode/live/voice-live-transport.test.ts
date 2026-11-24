@@ -307,6 +307,27 @@ describe("live Voice Mode transport", () => {
     expect(f.options.fail).toHaveBeenCalledOnce();
   });
 
+  it("keeps waiting while TeamHub has not yet seen a slow publisher join", async () => {
+    const f = fixture();
+    f.routes.getVoiceSession
+      .mockReturnValueOnce({
+        id: "live-session",
+        purpose: "chat_live",
+        input_ready_generation: 0,
+        last_failure_code: "publisher_absent",
+      })
+      .mockReturnValue({
+        id: "live-session",
+        purpose: "chat_live",
+        input_ready_generation: 1,
+      });
+    await openVoiceLive(f.options);
+    expect(
+      f.server.requestsTo("GET", "/v0/voice-sessions/{voiceSessionId}"),
+    ).toHaveLength(2);
+    expect(f.routes.closeVoiceSession).not.toHaveBeenCalled();
+  });
+
   it("fails, cleaning up, when the server is not live-ready in time", async () => {
     vi.useFakeTimers();
     const f = fixture();

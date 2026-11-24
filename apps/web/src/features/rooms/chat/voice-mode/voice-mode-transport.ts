@@ -29,6 +29,7 @@ import {
   closeAbandonedVoiceSession,
   closeVoiceSessionQuietly,
   observeAudioLevel,
+  sessionReadinessFailure,
 } from "./voice-media-room";
 import { asError } from "@linger/service-kit";
 import { VoiceModeDisconnectedError } from "./voice-mode-errors";
@@ -295,10 +296,9 @@ export async function openVoiceMode(input: {
       if (current.purpose !== "chat_dictation")
         throw new Error(translate(m.authorizationChanged));
       inputStartedOffsetMs = current.input_started_offset_ms;
-      if (current.last_failure_code)
-        throw new Error(
-          translate(m.runtimeUnavailable, { code: current.last_failure_code }),
-        );
+      const failure = sessionReadinessFailure(current);
+      if (failure)
+        throw new Error(translate(m.runtimeUnavailable, { code: failure }));
       if (current.input_ready_generation === credential.generation) {
         for (const participant of media.room.remoteParticipants.values())
           if (

@@ -20,6 +20,12 @@ const (
 	voiceMediaStopRecoveryDelay           = 35 * time.Second
 	voiceRuntimeDispatchReconcileInterval = 5 * time.Second
 	voiceRuntimeDispatchReconcileTimeout  = 5 * time.Second
+	// voicePublisherJoinGrace covers a new session's first join: on a slow
+	// network the browser needs about ten round trips (credential, signaling,
+	// ICE, DTLS, publish) before LiveKit lists it, and the client gives up
+	// on its own after its 15 s readiness wait. Marking it absent sooner
+	// makes the client end a session that was about to work.
+	voicePublisherJoinGrace = 30 * time.Second
 )
 
 // stopCaptureStep stops the last recorder of a Capture whose stop committed,
@@ -96,6 +102,9 @@ func (s *Service) reconcileSession(ctx context.Context, record store.VoiceSessio
 	session.RequirePublisher = true
 	if err = s.provider.EnsureSession(reconcileCtx, session); err != nil {
 		if errors.Is(err, errPublisherAbsent) {
+			if time.Since(record.CreatedAt.Time) < voicePublisherJoinGrace {
+				return nil
+			}
 			if record.LastFailureCode.String == "publisher_absent" {
 				return s.retireUnpublishedSession(reconcileCtx, record)
 			}

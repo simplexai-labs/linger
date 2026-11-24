@@ -86,7 +86,7 @@ func TestLiveKitPublisherDepartureReleasesSessionAfterGrace(t *testing.T) {
 			service := voicemedia.New(env.pool, provider, nil)
 			ageSession := func() {
 				t.Helper()
-				if _, err := env.pool.Exec(t.Context(), "UPDATE voice_sessions SET updated_at=clock_timestamp()-interval '61 seconds' WHERE id=$1", session.ID); err != nil {
+				if _, err := env.pool.Exec(t.Context(), "UPDATE voice_sessions SET created_at=LEAST(created_at,clock_timestamp()-interval '61 seconds'),updated_at=clock_timestamp()-interval '61 seconds' WHERE id=$1", session.ID); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -100,6 +100,15 @@ func TestLiveKitPublisherDepartureReleasesSessionAfterGrace(t *testing.T) {
 			}
 			reconcile := func() (time.Duration, error) {
 				return service.RunJobStepForTest(t.Context(), voicemedia.VoiceSessionReconcileArgs{VoiceSessionID: session.ID})
+			}
+			if _, err := env.pool.Exec(t.Context(), "UPDATE voice_sessions SET updated_at=clock_timestamp()-interval '61 seconds' WHERE id=$1", session.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := reconcile(); err != nil {
+				t.Fatalf("joining publisher: %v", err)
+			}
+			if current := readSession(); current.LastFailureCode.Valid || current.Status == "closing" || current.Status == "closed" {
+				t.Fatalf("a publisher still joining a new session must not be marked absent: %s %s", current.Status, current.LastFailureCode.String)
 			}
 			ageSession()
 			if _, err := reconcile(); err != nil {

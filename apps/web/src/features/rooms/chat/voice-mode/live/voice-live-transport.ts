@@ -28,6 +28,7 @@ import {
   closeAbandonedVoiceSession,
   closeVoiceSessionQuietly,
   observeAudioLevel,
+  sessionReadinessFailure,
   voiceMicrophoneOptions,
 } from "../voice-media-room";
 import { VoiceModeDisconnectedError } from "../voice-mode-errors";
@@ -380,10 +381,9 @@ export async function openVoiceLive(input: {
       if (!current) break;
       if (current.purpose !== "chat_live")
         throw new Error(translate(m.authorizationChanged));
-      if (current.last_failure_code)
-        throw new Error(
-          translate(m.liveUnavailable, { code: current.last_failure_code }),
-        );
+      const failure = sessionReadinessFailure(current);
+      if (failure)
+        throw new Error(translate(m.liveUnavailable, { code: failure }));
       // An event from the runtime proves it is listening, like readiness.
       if (current.input_ready_generation === credential.generation || activity)
         break;

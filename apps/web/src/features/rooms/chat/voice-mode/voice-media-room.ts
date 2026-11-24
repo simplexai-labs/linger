@@ -29,6 +29,16 @@ export async function acquireVoiceMicrophone(
   }
 }
 
+/**
+ * The failure that ends a session still waiting to listen. A publisher
+ * marked absent is not one: on a slow network TeamHub can look before the
+ * browser has joined, and its next check clears the mark once the browser is there.
+ */
+export function sessionReadinessFailure(session: TeamHubVoiceSession) {
+  const code = session.last_failure_code;
+  return code && code !== "publisher_absent" ? code : undefined;
+}
+
 /** Closes a VoiceSession whose creation finishes after the caller gave up. */
 export function closeAbandonedVoiceSession(
   client: TeamHubClient,
