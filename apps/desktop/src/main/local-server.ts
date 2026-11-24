@@ -3637,6 +3637,10 @@ export class InstallerApi {
     if (
       !fresh &&
       latest &&
+      // A job for another choice is the person's earlier answer: after a quit
+      // part way through the local model download, choosing a subscription
+      // must not follow that download. The installer replaces it.
+      runsPlan(latest, plan) &&
       (["queued", "running"].includes(latest.state) ||
         // A finished one only while its instance is still there; its data
         // may have been removed since. Its services must still run too: after
@@ -3960,6 +3964,16 @@ const recommended = (report: { recommendation?: string }) =>
   report.recommendation === "local-models"
     ? "pi"
     : (report.recommendation ?? "codex");
+
+// Whether the job installs what the plan asks for. The installer picks for
+// "recommended", which never deploys the local model (see `recommended`).
+// A job that names no choice used the saved one and is followed as before.
+const runsPlan = (job: Job, plan: LocalServerPlan): boolean =>
+  !job.setupChoice ||
+  (plan.runtime === "recommended"
+    ? job.setupChoice !== "local-models"
+    : job.setupChoice ===
+      (plan.runtime === "local" ? "local-models" : plan.runtime));
 
 export interface SetCookie {
   readonly name: string;

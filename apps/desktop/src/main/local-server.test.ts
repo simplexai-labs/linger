@@ -2651,6 +2651,98 @@ describe("LocalServerModule", () => {
     await f.host.stop("quit");
   });
 
+  it.each([
+    ["a subscription runtime", { runtime: "codex" } as const, "codex"],
+    // The subscription on a computer whose pick is the local model.
+    ["the installer's pick", { runtime: "recommended" } as const, "pi"],
+  ])(
+    "does not follow the local model download after %s is chosen instead",
+    async (_name, plan, setupChoice) => {
+      // The person chose the local model, quit part way through its
+      // download, and chose again; the installer kept that job running.
+      const f = fixture(
+        withCheckout,
+        {},
+        checkout,
+        installerApi([
+          {
+            id: "download",
+            instance: LOCAL_INSTANCE,
+            setupChoice: "local-models",
+            state: "running",
+            stage: "runtime",
+            message: "Downloading the local model…",
+            createdAt: "2026-11-03T00:00:00Z",
+            stages: [{ id: "runtime", state: "running" }],
+          },
+        ]),
+      );
+      await f.host.start();
+      const messages: string[] = [];
+      f.host.ctx.bus.on("local-server.changed", () =>
+        messages.push(f.module.status().message),
+      );
+      await f.module.begin(plan);
+      expect(f.api.created).toEqual([
+        { instance: LOCAL_INSTANCE, setupChoice },
+      ]);
+      expect(messages).not.toContain("Downloading the local model…");
+      expect(f.module.status().phase).toBe("ready");
+      await f.host.stop("quit");
+    },
+  );
+
+  it("installs the local model chosen after a subscription setup", async () => {
+    const subscription = {
+      id: "old",
+      instance: LOCAL_INSTANCE,
+      setupChoice: "codex",
+      state: "succeeded",
+      origin: "http://localhost:3000",
+      createdAt: "2026-11-03T00:00:00Z",
+      stages: [],
+    };
+    // Its services still answer, so the same choice would follow it.
+    const answering = (home: string) => ({
+      ...withCheckout(home),
+      fetch: (async () => new Response(null)) as typeof fetch,
+    });
+    const same = fixture(answering, {}, checkout, installerApi([subscription]));
+    await same.host.start();
+    await same.module.begin({ runtime: "codex" });
+    expect(same.api.created).toEqual([]);
+    await same.host.stop("quit");
+    for (const state of ["succeeded", "running"]) {
+      const f = fixture(
+        answering,
+        {},
+        checkout,
+        installerApi(
+          [{ ...subscription, state }],
+          DONE,
+          undefined,
+          // The new job stays queued until the running one has stopped,
+          // which takes until the end of a step such as starting services.
+          state === "running"
+            ? [
+                { state: "queued" },
+                { state: "queued" },
+                { state: "queued" },
+                { state: "running", stage: "images" },
+              ]
+            : undefined,
+        ),
+      );
+      await f.host.start();
+      await f.module.begin({ runtime: "local" });
+      expect(f.api.created).toEqual([
+        { instance: LOCAL_INSTANCE, setupChoice: "local-models" },
+      ]);
+      expect(f.module.status().phase).toBe("ready");
+      await f.host.stop("quit");
+    }
+  });
+
   it("installs again when a finished installation's data is gone", async () => {
     const f = fixture(
       withCheckout,

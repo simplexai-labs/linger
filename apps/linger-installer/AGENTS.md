@@ -22,7 +22,15 @@ A closed native sign-in input reports failure without stopping the installer;
 retry starts a new owned login process.
 A start returns the instance's running or queued job; a job that finished its
 run and waits for the person (`waiting_user`, e.g. `LOCAL_MODELS_UNAVAILABLE`)
-is canceled and replaced, so Try Again checks the computer again.
+is canceled and replaced, so Try Again checks the computer again. A start that
+names another choice (`setupChoice`, or BYOK for another runtime) than the
+active job's is the person's latest choice: it cancels that job (stopping a
+local model download chosen before, which the manager keeps running after the
+desktop quits) and runs once it has ended. The start answers at once with the
+new `queued` job: the earlier job may be in a step that only stops at its end
+(services, account, computer), which can take minutes, so the new job waits for
+it in the background and shutdown or a cancel stops it before it runs. A start
+without a choice follows the active job.
 An idle desktop-owned manager steps aside when the desktop relaunches the same
 instance with another checkout. Every installation runs natively from the
 source checkout `--source-repo` names. Start failures print their real cause
