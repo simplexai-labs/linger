@@ -37,6 +37,8 @@ import type { RunnerDebugInspection } from "./runner-debug-inspection.js";
 import type { RunnerLocalCapabilities } from "./runner-local-capabilities.js";
 import type { RunnerOperationPreparation } from "./runner-operation-preparation.js";
 import {
+  DEFAULT_OPERATION_YIELD_DEADLINE_MS,
+  DEFAULT_STOPPED_TASK_GRACE_MS,
   RunnerOperationState,
   type OperationEnvelope,
 } from "./runner-operation.js";
@@ -167,6 +169,12 @@ export interface RunnerGatewayOptions {
   readonly heartbeatIntervalMs?: number;
   readonly heartbeatTimeoutMs?: number;
   readonly operationCancelTimeoutMs?: number;
+  /** How long a yield may stay unconfirmed before the Run stops counting as
+   * yielding and another Run may be asked. */
+  readonly operationYieldDeadlineMs?: number;
+  /** How long a stopped Task keeps its place after the cancel timeout while
+   * its Computer has not confirmed the stop. */
+  readonly stoppedTaskGraceMs?: number;
   readonly createId?: () => string;
   readonly runtimeModels?: LocalRuntimeModelCatalog;
   /**
@@ -315,6 +323,8 @@ export interface RunnerGatewayContext {
   readonly createId: () => string;
   readonly heartbeatTimeoutMs: number;
   readonly operationCancelTimeoutMs: number;
+  readonly operationYieldDeadlineMs: number;
+  readonly stoppedTaskGraceMs: number;
   readonly agentRunnerReadyTimeoutMs: number;
   readonly debugInspectionTimeoutMs: number;
   readonly localComputerReconnectWaitMs: number;
@@ -353,6 +363,10 @@ export function createRunnerGatewayContext(
     options.heartbeatTimeoutMs ?? heartbeatIntervalMs * 3;
   const operationCancelTimeoutMs =
     options.operationCancelTimeoutMs ?? DEFAULT_OPERATION_CANCEL_TIMEOUT_MS;
+  const operationYieldDeadlineMs =
+    options.operationYieldDeadlineMs ?? DEFAULT_OPERATION_YIELD_DEADLINE_MS;
+  const stoppedTaskGraceMs =
+    options.stoppedTaskGraceMs ?? DEFAULT_STOPPED_TASK_GRACE_MS;
   const agentRunnerReadyTimeoutMs =
     options.agentRunnerReadyTimeoutMs ?? DEFAULT_AGENT_RUNNER_READY_TIMEOUT_MS;
   const debugInspectionTimeoutMs =
@@ -371,6 +385,8 @@ export function createRunnerGatewayContext(
     createId,
     heartbeatTimeoutMs,
     operationCancelTimeoutMs,
+    operationYieldDeadlineMs,
+    stoppedTaskGraceMs,
     agentRunnerReadyTimeoutMs,
     debugInspectionTimeoutMs,
     localComputerReconnectWaitMs,

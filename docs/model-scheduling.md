@@ -55,13 +55,20 @@ proactive Runs rank above Tasks on purpose: a routine that comes due or a
 reminder the user asked for runs on time instead of waiting for a long Task,
 and the Task gives up its current turn for it. Work of one
 priority never swaps out its own kind. A Run can yield once the Runtime has a
-resumable native session. On Codex, the Run must also have produced model
-output, its thinking included, or a tool event so that its original input is
-in its history. A pending tool approval or human interaction is answered
-before yielding. The waiting work starts after the Computer confirms cleanup.
-A Run that finishes on its own while it is asked to yield completes normally.
-The yielded Run keeps its ID, running status and claim while it waits, and
-continues in the same session when admitted again. A user stop still ends it.
+resumable native session and the Run has produced model output, its thinking
+included, or a tool event since it last started or resumed. Its original input
+is then in its history, and every resume makes some progress before the Run
+can be swapped out again. A pending tool approval or human interaction is
+answered before yielding. The waiting work starts after the Computer confirms
+cleanup. A Run that finishes on its own while it is asked to yield completes
+normally. The yielded Run keeps its ID, running status and claim while it
+waits, and continues in the same session when admitted again. A user stop
+still ends it. A yield the Computer has not finished after 90 seconds no
+longer blocks other swaps: the Agent Service logs it, does not ask that Run
+again, and lets the waiting work ask the next Run below it. A Task the user
+stopped keeps its place until its Computer confirms the stop, so a chat
+cannot start beside it, but for at most the cancel timeout plus 45 seconds;
+then the Agent Service ends it, logs the unconfirmed stop and frees the place.
 If a yielded Run's cleanup cannot be confirmed, the Computer refuses further
 work on that Runtime until it restarts. Other stops only report the unknown
 cleanup. A recording question, its notes, an approval and a compaction are

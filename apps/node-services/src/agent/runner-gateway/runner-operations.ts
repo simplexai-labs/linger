@@ -422,13 +422,16 @@ export class RunnerOperations {
       resolvedTarget,
       connection.hello.daemon_version,
     );
-    const operation = new RunnerOperationState({
+    const operation: RunnerOperationState = new RunnerOperationState({
       target: targetForDaemon,
       connectionEpoch: connection.connectionEpoch,
       runnerRevision: desiredRunner.runnerRevision,
       createId: this.context.createId,
       send: (command) => this.owners.connections().sendToCurrentRunner(command),
       cancelTimeoutMs: this.context.operationCancelTimeoutMs,
+      yieldDeadlineMs: this.context.operationYieldDeadlineMs,
+      stoppedTaskGraceMs: this.context.stoppedTaskGraceMs,
+      onSchedulingChange: () => this.#schedulingChanged(operation),
       runtimeAssignment: {
         registrationId: desiredRunner.registrationId,
         assignmentRevision: desiredRunner.assignmentRevision,
@@ -649,6 +652,18 @@ export class RunnerOperations {
         operation.expireInputReceipts();
   }
 
+  /** A Run that has just become able to yield, or whose yield is overdue,
+   * lets the work waiting on its endpoint ask again. */
+  #recheckYields(operation: RunnerOperationState): void {
+    this.owners.queue().recheckInteractiveWait(operationEndpoint(operation));
+    this.wakeCapacityWaiters();
+  }
+
+  #schedulingChanged(operation: RunnerOperationState): void {
+    if (operation.terminal) this.#retireOperation(operation);
+    else this.#recheckYields(operation);
+  }
+
   #retireOperation(operation: RunnerOperationState): void {
     const operationId = operation.start.operation_id;
     if (this.#operations.get(operationId) !== operation) {
@@ -751,7 +766,7 @@ export class RunnerOperations {
         );
       return;
     }
-    const wasResumable = operation.resumable;
+    const wasYieldable = operation.yieldBlocker === undefined;
     const acknowledgement = await operation.receive(envelope);
     if (
       envelope.type === "operation.event" &&
@@ -769,12 +784,10 @@ export class RunnerOperations {
       this.#recordRunOperation(operation);
     if (
       !operation.terminal &&
-      operation.resumable &&
-      (!wasResumable || envelope.type === "operation.input_result")
-    ) {
-      this.owners.queue().recheckInteractiveWait(operationEndpoint(operation));
-      this.wakeCapacityWaiters();
-    }
+      !wasYieldable &&
+      operation.yieldBlocker === undefined
+    )
+      this.#recheckYields(operation);
     if (operation.terminal) this.#retireOperation(operation);
     if (acknowledgement)
       await this.owners.connections().send(connection, acknowledgement);

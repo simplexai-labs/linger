@@ -236,6 +236,14 @@ interface PendingInput {
   settled: boolean;
 }
 
+/** How long a yield may stay unconfirmed before the Run stops counting as
+ * yielding. */
+export const DEFAULT_OPERATION_YIELD_DEADLINE_MS = 90_000;
+/** How long a stopped Task keeps its place after the cancel timeout. Longer
+ * than the Computer's own stop waits: a stop hook gets 15 s and a Runtime
+ * process 5 s more to exit. */
+export const DEFAULT_STOPPED_TASK_GRACE_MS = 45_000;
+
 /**
  * One Runner Operation as this Agent Service process sees it. It lives only
  * in memory: a Computer that reconnects resumes it by operation_id, and a new
@@ -250,6 +258,9 @@ export class RunnerOperationState {
   readonly #createId: () => string;
   readonly #send: CommandSender;
   readonly #cancelTimeoutMs: number;
+  readonly #yieldDeadlineMs: number;
+  readonly #stoppedTaskGraceMs: number;
+  readonly #onSchedulingChange: (() => void) | undefined;
   readonly #epoch: string | undefined;
   #lastSequence = 0;
   #outcomeEnvelope:
@@ -271,6 +282,9 @@ export class RunnerOperationState {
   readonly #priority: RunPriority;
   #yieldSessionId?: string;
   #yieldRequested = false;
+  #yieldOverdue = false;
+  #yieldTimer: ReturnType<typeof setTimeout> | undefined;
+  #stopTimer: ReturnType<typeof setTimeout> | undefined;
   #observedNativeWork = false;
   readonly #interactions = new Set<string>();
   #prepareCommand?: OperationPrepare;
@@ -315,6 +329,11 @@ export class RunnerOperationState {
     readonly createId: () => string;
     readonly send: CommandSender;
     readonly cancelTimeoutMs: number;
+    readonly yieldDeadlineMs?: number;
+    readonly stoppedTaskGraceMs?: number;
+    /** Called when the Run stops counting as yielding, or ends here after a
+     * stop its Computer never confirmed. */
+    readonly onSchedulingChange?: () => void;
     readonly runtimeAssignment: {
       readonly registrationId: string;
       readonly assignmentRevision: number;
@@ -328,6 +347,11 @@ export class RunnerOperationState {
     this.#createId = options.createId;
     this.#send = options.send;
     this.#cancelTimeoutMs = options.cancelTimeoutMs;
+    this.#yieldDeadlineMs =
+      options.yieldDeadlineMs ?? DEFAULT_OPERATION_YIELD_DEADLINE_MS;
+    this.#stoppedTaskGraceMs =
+      options.stoppedTaskGraceMs ?? DEFAULT_STOPPED_TASK_GRACE_MS;
+    this.#onSchedulingChange = options.onSchedulingChange;
     const start = parseAgentToDaemonEnvelope({
       type: "operation.start",
       protocol_version: RUNNER_GATEWAY_PROTOCOL_VERSION,
@@ -628,35 +652,35 @@ export class RunnerOperationState {
     return this.#priority.value;
   }
 
-  get resumable(): boolean {
-    // Codex and Antigravity announce their session before the first input
-    // is durably in its history; an Antigravity session with no prompt yet
-    // cannot be loaded at all. Any model output, thinking included, comes
-    // after the runtime recorded that input.
-    return (
-      Boolean(this.#yieldSessionId) &&
-      (!namesOwnSession(this.start.runtime_type) || this.#observedNativeWork)
-    );
-  }
-
-  /** A yield was asked and the Computer has not reported its terminal. */
+  /** A yield was asked, is not yet overdue, and the Computer has not
+   * reported its terminal. */
   get yielding(): boolean {
-    return this.#yieldRequested && !this.#terminal;
+    return this.#yieldRequested && !this.#yieldOverdue && !this.#terminal;
   }
 
   /** Why the Run cannot be asked to yield now; undefined when it can. */
   get yieldBlocker():
     | "terminal"
     | "yielding"
+    | "yield_overdue"
     | "cancel"
     | "not_resumable"
+    | "no_native_work"
     | "interaction"
     | "pending_input"
     | undefined {
     if (this.#terminal) return "terminal";
-    if (this.#yieldRequested) return "yielding";
+    if (this.#yieldRequested)
+      return this.#yieldOverdue ? "yield_overdue" : "yielding";
     if (this.#cancelCommand) return "cancel";
-    if (!this.resumable) return "not_resumable";
+    if (!this.#yieldSessionId) return "not_resumable";
+    // Model output, thinking included, comes after the Runtime recorded the
+    // Run's input, so only then can its session resume the Run: Codex and
+    // Antigravity announce their session before that, and an Antigravity
+    // session with no prompt yet cannot be loaded at all. It also means each
+    // start or resume does some model work before it can be swapped out
+    // again, so repeated swaps cannot keep a Run from progressing.
+    if (!this.#observedNativeWork) return "no_native_work";
     if (this.#interactions.size) return "interaction";
     if ([...this.#pendingInputs.values()].some((input) => !input.settled))
       return "pending_input";
@@ -675,7 +699,28 @@ export class RunnerOperationState {
     );
     // Reconciliation resends this exact command if the Computer disconnected.
     void this.#send(this.#cancelCommand).catch(() => undefined);
+    this.#yieldTimer = setTimeout(
+      () => this.#markYieldOverdue(),
+      this.#yieldDeadlineMs,
+    );
     return true;
+  }
+
+  // A yield the Computer never finishes must not stop every later swap on
+  // its endpoint: the Run stops counting as yielding and is not asked again.
+  #markYieldOverdue(): void {
+    this.#yieldTimer = undefined;
+    if (this.#terminal || !this.#yieldRequested) return;
+    this.#yieldOverdue = true;
+    logAgentEvent("warn", "runner.operation.yield_overdue", {
+      operationId: this.start.operation_id,
+      computerId: this.start.runner_id,
+      agentId: this.start.agent_id,
+      executionContextKey: this.start.execution_context_key,
+      runtimeType: this.start.runtime_type,
+      deadlineMs: this.#yieldDeadlineMs,
+    });
+    this.#onSchedulingChange?.();
   }
 
   retainCancellation(reason: string): void {
@@ -687,6 +732,9 @@ export class RunnerOperationState {
     // the Run, and a yield terminal would resume it.
     if (this.#yieldRequested && reason !== "scheduler_yield") {
       this.#yieldRequested = false;
+      this.#yieldOverdue = false;
+      clearTimeout(this.#yieldTimer);
+      this.#yieldTimer = undefined;
       this.#cancelCommand = createCancel(this.start, this.#createId(), reason);
       return;
     }
@@ -1076,15 +1124,43 @@ export class RunnerOperationState {
         message,
       );
     } catch {
-      // A user stop may precede a chat waiter. Retain the Task's occupation
-      // until the Computer reports a terminal, including across reconnects.
-      if (this.#terminal || this.#delegatedTask) return;
+      if (this.#terminal) return;
+      // A user stop may precede a chat waiter. The Task keeps its place,
+      // including across reconnects, while its Computer may still be
+      // cleaning it up, so the chat cannot start beside it.
+      if (this.#delegatedTask) {
+        this.#boundStoppedTask(message);
+        return;
+      }
       this.#complete(() =>
         this.#outcome.reject(
           new RunnerOperationError("cancelled", message, false),
         ),
       );
     }
+  }
+
+  // A Computer that never confirms the stop must not hold the place for good.
+  #boundStoppedTask(message: string): void {
+    if (this.#stopTimer) return;
+    this.#stopTimer = setTimeout(() => {
+      this.#stopTimer = undefined;
+      if (this.#terminal) return;
+      logAgentEvent("warn", "runner.operation.stop_unconfirmed_released", {
+        operationId: this.start.operation_id,
+        computerId: this.start.runner_id,
+        agentId: this.start.agent_id,
+        executionContextKey: this.start.execution_context_key,
+        runtimeType: this.start.runtime_type,
+        waitedMs: this.#cancelTimeoutMs + this.#stoppedTaskGraceMs,
+      });
+      this.#complete(() =>
+        this.#outcome.reject(
+          new RunnerOperationError("cancelled", message, false),
+        ),
+      );
+      this.#onSchedulingChange?.();
+    }, this.#stoppedTaskGraceMs);
   }
 
   #settleInput(
@@ -1165,6 +1241,9 @@ export class RunnerOperationState {
   #complete(settle: () => void, awaitInputReceipts = false): void {
     if (this.#terminal) return;
     this.#terminal = true;
+    clearTimeout(this.#yieldTimer);
+    clearTimeout(this.#stopTimer);
+    this.#yieldTimer = this.#stopTimer = undefined;
     this.#acceptance.emit("settled");
     this.#events.close();
     if (
