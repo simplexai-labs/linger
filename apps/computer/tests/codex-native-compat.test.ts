@@ -150,7 +150,9 @@ it.skipIf(!executable)(
             ),
         ),
       ).toBe(true);
-      expect(requests).toHaveLength(4);
+      // The first Run's tool call and answer, then the resumed Run; the Run
+      // naming a missing Session fails before it reaches the model.
+      expect(requests).toHaveLength(3);
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
