@@ -426,6 +426,8 @@ async function stopInstallation(
   options: ReturnType<typeof parseInstallerArguments>,
 ) {
   const { stopDesktopInstallation } = await import("./server/stop.js");
+  const { DEFAULT_STOP_BUDGET_MS } =
+    await import("@linger/local-installation/localmodels-tool");
   const { recordStopOutcome, stopFailure } =
     await import("./server/stop-diagnostics.js");
   const failures: ReturnType<typeof stopFailure>[] = [];
@@ -445,7 +447,8 @@ async function stopInstallation(
   const outcome = await stopDesktopInstallation({
     home: options.home,
     instanceName: options.instanceName!,
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(DEFAULT_STOP_BUDGET_MS),
+    budgetMs: DEFAULT_STOP_BUDGET_MS,
     log: (message) => process.stderr.write(message.replace(/\n?$/, "\n")),
     onFailure: (stage, error) => failures.push(stopFailure(stage, error)),
   }).catch((error: unknown) => {
@@ -472,10 +475,13 @@ async function stopLocalModels(
   options: ReturnType<typeof parseInstallerArguments>,
 ) {
   const { stopDesktopLocalModels } = await import("./server/stop.js");
+  const { QUIT_STOP_BUDGET_MS } =
+    await import("@linger/local-installation/localmodels-tool");
   setTimeout(() => process.exit(1), 150_000).unref();
   const outcome = await stopDesktopLocalModels({
     home: options.home,
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(QUIT_STOP_BUDGET_MS),
+    budgetMs: QUIT_STOP_BUDGET_MS,
     log: (message) => process.stderr.write(message.replace(/\n?$/, "\n")),
   }).catch((error: unknown) => ({
     failed: [

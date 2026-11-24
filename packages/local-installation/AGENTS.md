@@ -332,6 +332,19 @@ Deployments, that check and the quit-time stop share one lock per home
 (`withLocalModelsLock`); the check waits up to 180 s for it, past the stop's
 150 s hard exit, then reports `LOCAL_MODELS_RECOVERY_REQUIRED` (or
 `LOCAL_MODELS_BUSY` when restoring a library model without a stack plan).
+`stopLocalmodels` (`localmodels-tool.ts`) shares one overall budget across its
+steps (135 s for quit, 120 s for full stop) instead of a fixed 30 s per-step
+cap, reserving a protected slice for `stack down` (and `foundations stop` on
+full stops, scaling reserves proportionally when a caller forwards less than
+120 s remaining) and capping or skipping earlier library steps once the
+pre-reserve budget is spent so slow or hung steps never encroach on the final
+shutdown.
+When a quit-time stop starts under the lock it writes
+`<home>/runtime/localmodels/stop-pending.json` and removes it only on success;
+on the next launch `retryPendingLocalModelsStop` performs at most one bounded
+retry per unbroken failure streak (retiring the marker on failure until a later
+stop succeeds) so transient quit failures recover without stalling every
+subsequent launch when a stop stays broken.
 `restoreByokSource` (`local-models.ts`) brings back a saved BYOK source's
 Bifrost gateway on every resume (warm, or a restart from the saved choice,
 which then prepares the saved runtime and no other source). Under the same

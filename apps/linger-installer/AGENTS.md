@@ -145,9 +145,15 @@ and logs durations for the `manager`, `services`, and `localmodels` stop stages.
 `--stop-local-models` is the desktop's quit: in the default home and the
 location `desktop/local-server.json` names, it cancels the model library's
 running loads, unloads its loaded models and stops the stack with the gateway the localmodels tool
-started, and keeps the services and the model controller running. It
+started, and keeps the services and the model controller running. All steps
+share one stop budget (135 s inside the 150 s hard exit) with a reserved slice
+for `stack down` instead of a fixed 30 s per-command timeout. It
 holds each home's local model lock (`withLocalModelsLock`) while it stops,
-so the next launch's restore waits for it; a home whose lock a deployment
+records `<home>/runtime/localmodels/stop-pending.json` before stopping and
+clears it only on success, so the next launch's resume waits for an in-flight
+stop and retries a failed or interrupted stop once before restoring models or
+starting services (retiring the marker after a failed retry until a later stop
+succeeds so persistently broken stops never stall every launch); a home whose lock a deployment
 holds is skipped with a log line. Taking the lock retries a busy lock for up
 to 2 s, because the Computer Daemon probes it for a moment after it starts. A kit that is present but fails verification
 is a stop failure, so the helper logs the repair guidance, prints a JSON

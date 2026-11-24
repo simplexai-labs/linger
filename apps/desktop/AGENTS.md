@@ -708,7 +708,10 @@ Gateway and runs Agents. The daemon exits with the app.
   that keep running: `LocalServer` starts `installer.js --home <default
 home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
   its output in `<home>/installer/local-models-stop.log`, and does not wait
-  for it. If the installed kit fails verification, the helper exits with a
+  for it. Its steps share one stop budget with reserved time for `stack down`
+  so slow commands on a busy machine can finish; if a quit-time stop still
+  fails or is cut short, `<home>/runtime/localmodels/stop-pending.json` remains
+  and the next launch's `--resume` retries the stop once before resuming. If the installed kit fails verification, the helper exits with a
   failure and logs the repair guidance; the app still quits, and no unverified
   tool runs. It runs only when `desktop/local-server.json` names an
   installation. The Computer exits with the app, so nothing uses the models

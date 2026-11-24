@@ -29,9 +29,11 @@ import {
   redactLocalmodelsOutput,
 } from "./localmodels-failure.js";
 import {
+  DEFAULT_STOP_BUDGET_MS,
   isStoppedDownloadErrorCode,
   localmodelsBaseDirectory,
   runLocalmodels,
+  stopLocalmodels,
 } from "./localmodels-tool.js";
 import {
   readSetupChoice,
@@ -842,6 +844,159 @@ async function waitForLocalModelsLock<T>(
       await sleep(dependencies.lockRetryMs ?? 1000, signal);
     }
   }
+}
+
+interface LocalModelsStopPendingRecord {
+  recordedAt: string;
+  retired: boolean;
+}
+
+/**
+ * Marker recording that a quit-time local model stop is in flight or failed to
+ * complete cleanly, so the next launch retries the stop before resuming.
+ */
+export function localModelsStopPendingFile(home: string): string {
+  return path.join(localModelsLockRoot(home), "stop-pending.json");
+}
+
+async function readPendingLocalModelsStop(
+  home: string,
+): Promise<LocalModelsStopPendingRecord | undefined> {
+  let raw: string | undefined;
+  try {
+    raw = await readPrivate(localModelsStopPendingFile(home));
+  } catch {
+    // Ignore symlinks, foreign-owned files, or non-private markers.
+    return undefined;
+  }
+  if (raw === undefined) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as {
+      recordedAt?: unknown;
+      retired?: unknown;
+    };
+    const recordedAt =
+      typeof parsed?.recordedAt === "string" ? parsed.recordedAt : "";
+    return { recordedAt, retired: parsed?.retired === true };
+  } catch {
+    // Treat a corrupted or partially written private marker as unretired so it
+    // gets one bounded retry and is then retired.
+    return { recordedAt: "", retired: false };
+  }
+}
+
+async function writePendingLocalModelsStop(
+  home: string,
+  record: LocalModelsStopPendingRecord,
+): Promise<void> {
+  await privateDirectory(localModelsLockRoot(home));
+  await atomicPrivate(
+    localModelsStopPendingFile(home),
+    `${JSON.stringify(record)}\n`,
+  );
+}
+
+/**
+ * Records that a quit-time local model stop has not yet completed cleanly.
+ * Preserves a retired state from an unbroken failure streak so repeated failed
+ * quits do not re-arm blocking launch-time retries until a stop succeeds.
+ */
+export async function markLocalModelsStopPending(home: string): Promise<void> {
+  const existing = await readPendingLocalModelsStop(home);
+  await writePendingLocalModelsStop(home, {
+    recordedAt: new Date().toISOString(),
+    retired: existing?.retired ?? false,
+  });
+}
+
+/** Clears the pending local model stop marker once a stop finishes cleanly. */
+export async function clearLocalModelsStopPending(home: string): Promise<void> {
+  await rm(localModelsStopPendingFile(home), { force: true });
+}
+
+/**
+ * Reports whether a regular, owner-owned stop-pending marker is present and
+ * still eligible for a launch-time retry.
+ */
+export async function hasPendingLocalModelsStop(
+  home: string,
+): Promise<boolean> {
+  const record = await readPendingLocalModelsStop(home);
+  return record !== undefined && !record.retired;
+}
+
+export interface PendingStopRetryResult {
+  retried: boolean;
+  failed?: string;
+}
+
+/**
+ * Retries a quit-time local model stop that did not finish cleanly before
+ * resume restores models or mounts a gateway. Normal launches see no marker
+ * and return immediately; launches racing an in-flight quit stop wait for its
+ * lock and observe the cleared marker without stopping twice. Each unbroken
+ * failure streak gets at most one launch-time retry so a persistently broken
+ * stop cannot stall every subsequent launch; failures are logged and returned
+ * rather than thrown.
+ */
+export async function retryPendingLocalModelsStop(
+  home: string,
+  options: {
+    signal: AbortSignal;
+    log?: (message: string) => void;
+  },
+  dependencies: RestoreDependencies & {
+    stopModels?: typeof stopLocalmodels;
+  } = {},
+): Promise<PendingStopRetryResult> {
+  if (!(await hasPendingLocalModelsStop(home))) return { retried: false };
+  const held = await waitForLocalModelsLock(
+    home,
+    async (): Promise<PendingStopRetryResult> => {
+      const current = await readPendingLocalModelsStop(home);
+      if (!current || current.retired) return { retried: false };
+      options.log?.(
+        "The last local model stop did not finish; retrying before resume.",
+      );
+      const retrySignal = AbortSignal.any([
+        options.signal,
+        AbortSignal.timeout(DEFAULT_STOP_BUDGET_MS),
+      ]);
+      try {
+        await (dependencies.stopModels ?? stopLocalmodels)(home, {
+          signal: retrySignal,
+          log: options.log,
+          keepController: true,
+          budgetMs: DEFAULT_STOP_BUDGET_MS,
+        });
+      } catch (error) {
+        if (options.signal.aborted) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        options.log?.(
+          `Could not finish the last local model stop in ${home}: ${message}`,
+        );
+        await writePendingLocalModelsStop(home, {
+          recordedAt: current.recordedAt || new Date().toISOString(),
+          retired: true,
+        }).catch(() =>
+          clearLocalModelsStopPending(home).catch(() => undefined),
+        );
+        return { retried: true, failed: message };
+      }
+      await clearLocalModelsStopPending(home).catch(() => undefined);
+      return { retried: true };
+    },
+    options.signal,
+    dependencies,
+  );
+  if (!held) {
+    const message = "Another local model operation is still running.";
+    options.log?.(
+      `Could not retry the last local model stop in ${home}: ${message}`,
+    );
+    return { retried: false, failed: message };
+  }
+  return held.value;
 }
 
 /**

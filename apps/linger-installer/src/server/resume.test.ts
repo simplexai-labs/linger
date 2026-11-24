@@ -532,3 +532,42 @@ test("reports warm and cold resume timings via onTimings and log summary", async
   expect(failedTimings?.coldStartMs).toBeGreaterThanOrEqual(0);
   expect(failedLogs.join("")).toMatch(/Resume timings \(cold, ms\):/);
 });
+
+test("retries a pending local model stop before warm restore and before cold start", async () => {
+  const warmOrder: string[] = [];
+  await resumeSourceInstance(options, {
+    load: async () => instance,
+    engines: native(vi.fn(), true),
+    pending: async () => false,
+    retryPendingStop: async (stopHome) => {
+      warmOrder.push(`stop:${stopHome}`);
+      return { retried: true };
+    },
+    restore: async () => {
+      warmOrder.push("restore");
+      return undefined;
+    },
+    restoreByok: async () => {
+      warmOrder.push("byok");
+      return undefined;
+    },
+  });
+  expect(warmOrder).toEqual([`stop:${home}`, "restore", "byok"]);
+
+  const coldOrder: string[] = [];
+  await resumeSourceInstance(options, {
+    load: async () => instance,
+    engines: native(
+      vi.fn<ResumeEngine["run"]>(async () => {
+        coldOrder.push("run");
+        return { code: 0, state: "ready", message: "ok" };
+      }),
+      false,
+    ),
+    retryPendingStop: async (stopHome) => {
+      coldOrder.push(`stop:${stopHome}`);
+      return { retried: true };
+    },
+  });
+  expect(coldOrder).toEqual([`stop:${home}`, "run"]);
+});

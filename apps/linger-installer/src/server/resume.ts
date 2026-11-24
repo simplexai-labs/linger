@@ -8,6 +8,7 @@ import {
   localModelsDegradedFromOutcome,
   restoreByokSource,
   restoreLocalModels,
+  retryPendingLocalModelsStop,
   type LocalModelsDegraded,
 } from "@linger/local-installation/local-models";
 import { userEnvironmentPending } from "@linger/local-installation/user-environment";
@@ -71,6 +72,7 @@ export async function resumeSourceInstance(
     pending = userEnvironmentPending,
     restore = restoreLocalModels,
     restoreByok = restoreByokSource,
+    retryPendingStop = retryPendingLocalModelsStop,
   } = {},
 ): Promise<InstallOutcome> {
   const startedAt = performance.now();
@@ -91,6 +93,12 @@ export async function resumeSourceInstance(
     totalMs: 0,
   };
   try {
+    // If the last quit-time local model stop timed out or failed, finish
+    // tearing down any lingering engine or gateway before resuming.
+    await retryPendingStop(path.resolve(instance.root, "../.."), {
+      signal: options.signal,
+      log: options.log,
+    });
     // A desktop update ships a new source tree, and a changed user.env new
     // keys; running services keep the old ones until they restart.
     const repo = await realpath(options.sourceRepo).catch(() =>
