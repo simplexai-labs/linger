@@ -149,10 +149,18 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   still rendering these routes answer 503 with `Retry-After`.
 - The live voice's About the User holds the Human's whole memory.md and the
   email addresses they use: their own (login, active Gmail connection,
-  addresses in the current Profile) and up to ten recipients of Gmail
-  canvases they sent, read from `document_texts`. A heard recipient whose name
-  or domain sounds like one of theirs takes that part and is said back; all
-  of it goes to the voice provider with the instructions.
+  addresses in the current Profile) and up to ten recipients of Gmail canvases
+  they sent, read from `document_texts`; all of it goes to the voice provider
+  with the instructions. Live writes a recipient as heard and leaves matching
+  it to TeamHub: before a canvas write, TeamHub compares each `to`/`cc`
+  address not on that list with it, name before `@` and domain apart (edit
+  distance, or a shared start with Jaro-Winkler): a close one holds the write
+  as `needs_confirmation` with reason `check_recipient` and the suggested
+  address (the known one, or the heard name at the known domain). The write
+  goes ahead when the model writes the suggestion, or keeps its own with
+  `confirmed` once the user stood by it (no recorded question is needed: the
+  model may have suggested the known address itself, and sending asks again).
+  It never replaces an address itself.
 - Live whole-document rewrites preserve top-level image, file, audio and video
   blocks. The model keeps their exported `document-asset:` lines in order;
   missing, repeated or reordered markers are rejected before any write.

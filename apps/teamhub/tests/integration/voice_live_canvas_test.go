@@ -469,3 +469,53 @@ func TestVoiceLiveWritesAndChangesAnEmailCanvasAsTheAgent(t *testing.T) {
 		}
 	}
 }
+
+// A recipient that resembles a known address holds the canvas write until the
+// model writes the suggested one, or keeps its own with confirmed; an address
+// like none of them is written as heard.
+func TestVoiceLiveChecksEmailRecipientsBeforeWriting(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	var computes atomic.Int32
+	replaced := make(chan string, 8)
+	var bodies *pgxpool.Pool
+	runtime := canvasRuntime(t, &computes, replaced, func() *pgxpool.Pool { return bodies })
+	env, _, roomID, sessionID := newVoiceLiveRoom(t, func(cfg *config.Config) { cfg.RoomDocument.RuntimeURL = runtime.URL })
+	bodies = env.pool
+	if _, err := env.pool.Exec(t.Context(), "UPDATE accounts SET email='amy.chen@work.example' WHERE id=(SELECT account_id FROM actors WHERE id='actor_acme_alice')"); err != nil {
+		t.Fatal(err)
+	}
+	call := liveToolCaller(t, env, sessionID)
+	messages := func() int {
+		return countRows(t, env, "SELECT count(*) FROM messages WHERE room_id=$1 AND segments::text LIKE '%canvas%'", roomID)
+	}
+	before := messages()
+	email := map[string]any{"subject": "Tournament", "body": "Join me next week.", "to": "amy.chan@wark.example"}
+	held := call("lt_ask", "recipient-ask", "open_email_canvas", email)
+	suggestions, _ := held["suggestions"].([]any)
+	if held["reason"] != "check_recipient" || len(suggestions) != 1 || messages() != before {
+		t.Fatalf("held=%v", held)
+	}
+	if suggestion, _ := suggestions[0].(map[string]any); suggestion["suggested"] != "amy.chen@work.example" {
+		t.Fatalf("suggestion=%v", suggestion)
+	}
+	email["to"] = "amy.chen@work.example"
+	result := call("lt_yes", "recipient-yes", "open_email_canvas", email)
+	if result["status"] != "opened" {
+		t.Fatalf("suggested=%v", result)
+	}
+	edit := map[string]any{"document_id": result["document_id"], "revision_id": result["revision_id"], "to": "lee@wark.example"}
+	if asked := call("lt_edit", "recipient-domain", "edit_email_canvas", edit); asked["reason"] != "check_recipient" || computes.Load() != 0 {
+		t.Fatalf("domain=%v", asked)
+	}
+	edit["confirmed"] = true
+	if kept := call("lt_edit_yes", "recipient-kept", "edit_email_canvas", edit); kept["status"] != "changed" {
+		t.Fatalf("kept=%v", kept)
+	}
+	if header := <-replaced; !strings.Contains(header, "to: lee@wark.example") {
+		t.Fatalf("kept recipient changed: %s", header)
+	}
+	fresh := map[string]any{"subject": "Hello", "body": "Hi Kevin.", "to": "kevin@acme.example"}
+	if opened := call("lt_new", "recipient-new", "open_email_canvas", fresh); opened["status"] != "opened" {
+		t.Fatalf("new=%v", opened)
+	}
+}

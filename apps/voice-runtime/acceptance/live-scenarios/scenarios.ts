@@ -1763,54 +1763,142 @@ export function scenarioJobs(
     s.close();
   }
 
-  // ---------- B17 misheard recipient ----------
-  // About the User lists the addresses the user uses (the dump sends to
-  // lisa.chen@northwind.io): a misheard one resolves to it and is said back,
-  // a listed name at another domain keeps the listed name, and an address
-  // like none of them is kept as heard.
-  async function b17(rep: number) {
-    const t: string[] = [];
-    const to = (r: Reply[]) => {
-      const value = calls(r).find((c) => c.name === "open_email_canvas")?.args
-        .to;
-      return typeof value === "string" ? value : "";
+  // ---------- B19 recipient check ----------
+  // TeamHub holds a canvas write whose recipient resembles a known address
+  // (check_recipient). The user's yes ends with the suggested address, their
+  // no with the heard one, and they are asked about it at most once.
+  async function b19(rep: number) {
+    const suggest: Record<string, string> = {
+      "lisa.zhu@nortex.io": "lisa.chen@northwind.io",
+      "lisazhu@nortex.io": "lisa.chen@northwind.io",
+      "kevin@northwin.io": "kevin@northwind.io",
     };
-    let s = await open();
-    const misheard = await s.turn(
-      "\u5e2e\u6211\u5199\u5c01\u90ae\u4ef6\u7ed9 lisa chan at northwin.io\uff0c\u8ddf\u5979\u8bf4\u5468\u4e94\u7684\u8bc4\u5ba1\u6539\u5230\u4e0b\u5348\u4e09\u70b9\u3002",
-      makeMock(),
+    const held = (a: Record<string, unknown>) => {
+      const to = typeof a.to === "string" ? a.to.toLowerCase() : "";
+      // As TeamHub answers a recipient that is not an email address.
+      if (to && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to))
+        return {
+          error: "invalid_recipients",
+          next: "An address is not an email address: ask the user for it.",
+        };
+      const suggested = suggest[to];
+      if (!suggested || a.confirmed === true) return undefined;
+      return {
+        status: "needs_confirmation",
+        reason: "check_recipient",
+        suggestions: [{ heard: to, suggested }],
+        next:
+          "Nothing was written yet: each heard address resembles a suggested one the user has used before, so it may be misheard. " +
+          "Ask the user once, in your own words, whether they meant the suggested address, saying it, and end your turn. " +
+          "If they say yes, call again with the suggested address in place of the heard one. If they say the heard address is right, call again unchanged with confirmed=true. If they give another address, call again with that one.",
+      };
+    };
+    const mock = () =>
+      makeMock({
+        open_email_canvas: (a) =>
+          held(a) ?? {
+            status: "opened",
+            document_id: "document_mail",
+            revision_id: "revision_mail_1",
+            next: "Hand it over like a friend would, in your own words with I as the subject: the gist of what you wrote in a few words, then that it is open beside the chat for them to look over.",
+          },
+        edit_email_canvas: (a) =>
+          held(a) ?? {
+            status: "changed",
+            document_id: "document_mail",
+            revision_id: "revision_mail_2",
+            next: "Tell the user in one short, warm sentence of your own what you changed in the email.",
+          },
+      });
+    const writes = (rs: Reply[][]) =>
+      rs
+        .flatMap((r) => calls(r))
+        .filter(
+          (c) =>
+            (c.name === "open_email_canvas" ||
+              c.name === "edit_email_canvas") &&
+            typeof c.args.to === "string",
+        );
+    // The recipient the canvas ends with: the last write that was not held.
+    const finalTo = (rs: Reply[][]) => {
+      const to = writes(rs)
+        .filter((c) => !held(c.args))
+        .at(-1)?.args.to;
+      return typeof to === "string" ? to : "";
+    };
+    const heldCount = (rs: Reply[][]) =>
+      writes(rs).filter((c) => held(c.args)).length;
+    const ask =
+      "\u5e2e\u6211\u5199\u5c01\u90ae\u4ef6\u7ed9 lisa zhu at nortex.io\uff0c\u8ddf\u5979\u8bf4\u5468\u4e94\u7684\u8bc4\u5ba1\u6539\u5230\u4e0b\u5348\u4e09\u70b9\u3002";
+    for (const answer of ["yes", "keep"] as const) {
+      const t: string[] = [];
+      const s = await open();
+      const m = mock();
+      const r1 = await s.turn(ask, m);
+      t.push(
+        `U: to lisa zhu at nortex.io → A: ${say(r1)} [to=${writes([r1])
+          .map((c) => c.args.to)
+          .join(" | ")}]`,
+      );
+      const r2 = await s.turn(
+        answer === "yes"
+          ? "\u5bf9\uff0c\u5c31\u662f\u5979\u3002"
+          : "\u4e0d\u662f\uff0c\u5c31\u662f lisa.zhu@nortex.io \u8fd9\u4e2a\u65b0\u90ae\u7bb1\u3002",
+        m,
+      );
+      const final = finalTo([r1, r2]);
+      t.push(`U: ${answer} → A: ${say(r2)} [final to=${final}]`);
+      s.close();
+      push({
+        scenario: "B19 recipient check",
+        caseId: answer,
+        rep,
+        transcript: t,
+        metrics: {
+          askedSuggestion: /lisa\.?chen|northwind/i.test(text(r1)),
+          heldAtMostOnce: heldCount([r1, r2]) <= 1,
+          resolved:
+            answer === "yes"
+              ? /^lisa\.chen@northwind\.io$/i.test(final)
+              : /^lisa\.zhu@nortex\.io$/i.test(final),
+        },
+      });
+    }
+    const t: string[] = [];
+    const s = await open();
+    const m = mock();
+    const r1 = await s.turn(
+      "\u5e2e\u6211\u5199\u5c01\u90ae\u4ef6\u7ed9 kevin at northwin.io\uff0c\u8ddf\u4ed6\u8bf4\u5468\u4e94\u7684\u8bc4\u5ba1\u6539\u5230\u4e0b\u5348\u4e09\u70b9\u3002",
+      m,
     );
-    t.push(
-      `U: to lisa chan at northwin.io → A: ${say(misheard)} [to=${to(misheard)}]`,
-    );
-    s.close();
-    s = await open();
-    const newDomain = await s.turn(
-      "\u5e2e\u6211\u5199\u5c01\u90ae\u4ef6\u7ed9 markce018 at 163.com\uff0c\u8ddf\u4ed6\u8bf4\u5468\u4e94\u7684\u8bc4\u5ba1\u6539\u5230\u4e0b\u5348\u4e09\u70b9\u3002",
-      makeMock(),
-    );
-    t.push(
-      `U: to markce018 at 163.com → A: ${say(newDomain)} [to=${to(newDomain)}]`,
-    );
-    s.close();
-    s = await open();
-    const fresh = await s.turn(
-      "\u5e2e\u6211\u5199\u5c01\u90ae\u4ef6\u7ed9 kevin at acme.com\uff0c\u8ddf\u4ed6\u8bf4\u5468\u4e94\u7684\u8bc4\u5ba1\u6539\u5230\u4e0b\u5348\u4e09\u70b9\u3002",
-      makeMock(),
-    );
-    t.push(`U: to kevin at acme.com → A: ${say(fresh)} [to=${to(fresh)}]`);
+    t.push(`U: to kevin at northwin.io → A: ${say(r1)}`);
+    const r2 = await s.turn("\u5bf9\u3002", m);
+    const final = finalTo([r1, r2]);
+    t.push(`U: yes → A: ${say(r2)} [final to=${final}]`);
     s.close();
     push({
-      scenario: "B17 misheard recipient",
-      caseId: "known-and-new",
+      scenario: "B19 recipient check",
+      caseId: "domain-only",
       rep,
       transcript: t,
+      metrics: { resolved: /^kevin@northwind\.io$/i.test(final) },
+    });
+    const f = await open();
+    const fresh = await f.turn(
+      "\u5e2e\u6211\u5199\u5c01\u90ae\u4ef6\u7ed9 kevin at acme.com\uff0c\u8ddf\u4ed6\u8bf4\u5468\u4e94\u7684\u8bc4\u5ba1\u6539\u5230\u4e0b\u5348\u4e09\u70b9\u3002",
+      mock(),
+    );
+    f.close();
+    push({
+      scenario: "B19 recipient check",
+      caseId: "new",
+      rep,
+      transcript: [
+        `U: to kevin at acme.com \u2192 A: ${say(fresh)} [final to=${finalTo([fresh])}]`,
+      ],
       metrics: {
-        matchedKnown: /^lisa\.chen@northwind\.io$/i.test(to(misheard)),
-        saidBack: /lisa\.?chen|northwind/i.test(text(misheard)),
-        // markc1018 is listed at gmail.com; the user names 163.com.
-        namePartMatched: /^markc1018@163\.com$/i.test(to(newDomain)),
-        keptNew: /^kevin@acme\.com$/i.test(to(fresh)),
+        keptNew: /^kevin@acme\.com$/i.test(finalTo([fresh])),
+        notHeld: heldCount([fresh]) === 0,
       },
     });
   }
@@ -1891,7 +1979,7 @@ export function scenarioJobs(
     ["b13-open-file", b13],
     ["b14-email-content", b14],
     ["b15-tone-language", b15],
-    ["b17-misheard-recipient", b17],
     ["b18-media-rewrite", b18],
+    ["b19-recipient-check", b19],
   ];
 }

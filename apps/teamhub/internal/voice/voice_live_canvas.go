@@ -79,6 +79,9 @@ func (s *Service) openVoiceLiveEmailCanvas(ctx context.Context, session voiceliv
 	if output != "" || err != nil {
 		return output, err
 	}
+	if output, err := s.checkVoiceLiveRecipients(ctx, session, args.To, args.Cc, bool(args.Confirmed)); output != "" || err != nil {
+		return output, err
+	}
 	canvas, problem := voicelive.EmailCanvas(args, target)
 	if problem != "" {
 		return voicelive.ErrorOutput(problem), nil
@@ -193,6 +196,16 @@ func (s *Service) editVoiceLiveEmailCanvas(ctx context.Context, session voiceliv
 	var args voicelive.EditEmailCanvasArguments
 	if voicelive.DecodeArguments(request.Arguments, &args) != nil || args.DocumentID == "" {
 		return "", voicelive.ErrInvalid
+	}
+	var to, cc string
+	if args.To != nil {
+		to = *args.To
+	}
+	if args.Cc != nil {
+		cc = *args.Cc
+	}
+	if output, err := s.checkVoiceLiveRecipients(ctx, session, to, cc, bool(args.Confirmed)); output != "" || err != nil {
+		return output, err
 	}
 	principal, err := s.voiceLiveAgentPrincipal(ctx, session)
 	if errors.Is(err, errVoiceLiveAgentUnavailable) {
