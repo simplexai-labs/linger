@@ -9,6 +9,7 @@ import {
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { teamHubErrorResponse } from "@/test/teamhub-test-server";
 import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import type {
@@ -81,10 +82,32 @@ describe("Feishu Mail", () => {
     ).toBeNull();
     unmount();
 
+    let computerOnline = false;
+    runtime.server.on("GET", "/v0/external-apps/feishu-mail/setup", () =>
+      computerOnline
+        ? new Response(null, { status: 204 })
+        : teamHubErrorResponse(409, "FEISHU_COMPUTER_OFFLINE"),
+    );
     renderPage(runtime, "/apps?app=feishu_mail");
+    const dialog = await screen.findByRole("dialog", { name: /Feishu Mail/ });
     expect(
-      await screen.findByRole("dialog", { name: /Feishu Mail/ }),
+      await within(dialog).findByText(
+        "The Computer that runs your Another Me is offline",
+      ),
     ).toBeVisible();
+    expect(within(dialog).getByText("owner@example.test")).toBeVisible();
+    computerOnline = true;
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Check again" }),
+    );
+    expect(
+      await within(dialog).findByRole("button", {
+        name: "Add another Feishu Mail account",
+      }),
+    ).toBeEnabled();
+    expect(
+      runtime.server.requestsTo("POST", "/v0/external-connections"),
+    ).toHaveLength(0);
   });
 });
 
