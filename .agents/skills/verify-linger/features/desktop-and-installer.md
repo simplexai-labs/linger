@@ -114,7 +114,7 @@ Never run live verification against a developer's real `~/.simplexai`, `<appData
 1. Confirm OS-specific window chrome: macOS native traffic lights (`data-desktop-chrome="inset"`), Windows `titleBarOverlay`, Linux custom `titlebar.html` controls.
 2. Close the main window: verify the app remains alive in the tray (or Dock on macOS) and relaunching the executable focuses the single existing instance instead of starting a second one.
 3. Click **Quit** from tray/menu: verify the app exits and detached `installer.js --stop-local-models` runs while core collaboration services stay running (see [Local Models and BYOK](local-models-and-byok.md#quit-reopen-resume-and-uninstall-teardown)).
-4. Relaunch Desktop: verify `--resume` reconnects to the existing instance without re-entering setup.
+4. Relaunch Desktop: verify `--resume` reconnects to the existing instance without re-entering setup. For sleep and wake, force quit and quitting mid-Run or mid-download, run [Sleep, wake and quit](local-models-and-byok.md#sleep-wake-and-quit).
 5. Simulate an unavailable local server so `offline.html?failed=...` appears; test **Try Again**, **Show Logs**, **Save Diagnostics**, and **Set Up Again**. Confirm **Set Up Again** returns to Welcome while preserving instance data and `savedEnrollments` (and renews the holding Computer without leaving an orphan — see [Login and account switching](local-computer.md#login-and-account-switching)).
 
 ### Auto-updater and in-place upgrade
