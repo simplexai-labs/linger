@@ -185,3 +185,8 @@ export function isModelCallKind(value: unknown): value is ModelCallKind {
     (modelCallKinds as readonly string[]).includes(value)
   );
 }
+
+/** Whether kind is a yieldable background model call. */
+export function isBackgroundModelCall(kind: string): boolean {
+  return isModelCallKind(kind) && !modelCallPolicies[kind].interactive;
+}

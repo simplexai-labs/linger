@@ -55,13 +55,18 @@ const flush = () => vi.advanceTimersByTimeAsync(0);
 const fixed = (limit: number) => ({ initial: limit, max: limit });
 /** One finished Run request: so many ms per thousand prompt tokens. Time
  * stands still, so it is judged by the units running when it reports. */
-const latency = (msPerThousand: number) => ({
+const latency = (
+  msPerThousand: number,
+  source: "run" | "call" = "run",
+  endedMsAgo = 0,
+) => ({
   type: "latency" as const,
-  source: "run" as const,
+  source,
   latencyMs: msPerThousand * 4,
-  endedMsAgo: 0,
+  endedMsAgo,
   workTokens: 4_000,
 });
+const callLatency = (msPerThousand: number) => latency(msPerThousand, "call");
 const signal = new AbortController().signal;
 
 describe("ModelQueue", () => {
@@ -238,6 +243,7 @@ describe("ModelQueue limit", () => {
     expect(asked).toHaveBeenLastCalledWith(
       codex,
       modelCallPolicies.meeting_notes.priority,
+      1,
     );
     task.release(done);
     await flush();
@@ -286,7 +292,7 @@ describe("ModelQueue limit", () => {
     await flush();
     expect(routine.value).toBeUndefined();
     // Waiting Meta work asks for a yield; only a lower Run gives one.
-    expect(asked).toHaveBeenLastCalledWith(codex, runPriorities.routine);
+    expect(asked).toHaveBeenLastCalledWith(codex, runPriorities.routine, 1);
   });
 
   it("moves a waiting Run up when its priority rises, in arrival order within it", async () => {
@@ -310,11 +316,11 @@ describe("ModelQueue limit", () => {
     );
     const chat = track(queue.acquire(codex, run("c"), signal));
     await flush();
-    expect(asked).toHaveBeenLastCalledWith(codex, runPriorities.chat);
+    expect(asked).toHaveBeenLastCalledWith(codex, runPriorities.chat, 1);
     asked.mockClear();
 
     priority.raise(runPriorities.chat);
-    expect(asked).toHaveBeenLastCalledWith(codex, runPriorities.chat);
+    expect(asked).toHaveBeenLastCalledWith(codex, runPriorities.chat, 1);
     holder.release(done);
     await flush();
     expect(followUp.value).toBeDefined();
@@ -379,103 +385,431 @@ describe("ModelQueue limit", () => {
     }
   });
 
-  it("tries one more unit while work waits and requests stay as fast", async () => {
-    const queue = new ModelQueue(() => ({ initial: 1, max: 3 }));
-    await queue.acquire(codex, run("a"), signal);
-    for (let i = 0; i < 4; i++) queue.observe(codex, latency(500));
-    // Nothing waited, so nothing showed a second place was needed.
-    const waiting = track(queue.acquire(codex, run("b"), signal));
-    await flush();
-    expect(waiting.value).toBeUndefined();
-
-    queue.observe(codex, latency(520));
-    await flush();
-    expect(waiting.value).toBeDefined();
-  });
-
-  it("does not raise a limit on background work running alone under it", async () => {
+  it("promotes confirmed concurrency only through silent background probes, never on interactive work alone", async () => {
     let now = 0;
     const queue = new ModelQueue(
       () => ({ initial: 1, max: 3 }),
       () => now,
     );
-    const alone = {
-      type: "latency" as const,
-      source: "call" as const,
-      latencyMs: 10_000,
-      endedMsAgo: 0,
-      workTokens: 4_000,
-    };
-    let running = await queue.acquire(codex, call("wiki", "w0"), signal);
-    for (let i = 1; i <= 12; i++) {
-      const next = track(queue.acquire(codex, call("wiki", `w${i}`), signal));
+    // Interactive work alone stays at the confirmed limit of one.
+    const chatA = await queue.acquire(codex, run("a"), signal);
+    const chatB = track(queue.acquire(codex, run("b"), signal));
+    for (let i = 0; i < 4; i++) {
       now += 10_000;
-      queue.observe(codex, alone);
-      await flush();
-      // Two places leave background work one; three would start the next.
-      expect(next.value).toBeUndefined();
-      running.release(done);
-      await flush();
-      running = next.value!;
+      queue.observe(codex, latency(500));
     }
-    // Calls alone did try two, whose last place chat can take.
-    const chat = track(queue.acquire(codex, run(), signal));
     await flush();
+    expect(chatB.value).toBeUndefined();
+    chatA.release(done);
+    await flush();
+    chatB.value!.release(done);
+    await flush();
+
+    // Three lone background calls establish the baseline.
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(codex, call("wiki", `b${i}`), signal);
+      now += 10_000;
+      queue.observe(codex, callLatency(500));
+      bg.release(done);
+    }
+
+    // Two waiting background calls trigger a silent probe for two and promote
+    // once both stay within 1.3x of the baseline.
+    const p1 = await queue.acquire(codex, call("wiki", "p1"), signal);
+    const p2 = track(queue.acquire(codex, call("wiki", "p2"), signal));
+    await flush();
+    expect(p2.value).toBeDefined();
+    now += 10_000;
+    queue.observe(codex, callLatency(550));
+    p1.release(done);
+    queue.observe(codex, callLatency(580));
+    p2.value!.release(done);
+    await flush();
+
+    // Confirmed limit is now two: background alone still leaves the last place
+    // free for chat, and chat starts right alongside one running background call.
+    const bg1 = await queue.acquire(codex, call("wiki", "s1"), signal);
+    const bg2 = track(queue.acquire(codex, call("wiki", "s2"), signal));
+    const chat = track(queue.acquire(codex, run("c"), signal));
+    await flush();
+    expect(bg2.value).toBeUndefined();
     expect(chat.value).toBeDefined();
+    bg1.release(done);
+    await flush();
+    // While chat holds the single slot at confirmed limit 2, background waits.
+    expect(bg2.value).toBeUndefined();
+    chat.value!.release(done);
+    await flush();
+    expect(bg2.value).toBeDefined();
+    bg2.value!.release(done);
   });
 
-  it("raises a limit once requests that ran at it stay as fast, each placed by when it was timed", async () => {
+  it("fast-fails a slow probe and keeps confirmed concurrency at one for a single-concurrency endpoint", async () => {
+    let now = 0;
+    const asked = vi.fn();
+    const queue = new ModelQueue(
+      () => ({ initial: 1, max: 4 }),
+      () => now,
+      asked,
+    );
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(codex, call("memory", `b${i}`), signal);
+      now += 10_000;
+      queue.observe(codex, callLatency(500));
+      bg.release(done);
+    }
+
+    // Probe for two starts with two background calls.
+    const p1 = await queue.acquire(codex, call("memory", "p1"), signal);
+    const p2 = track(queue.acquire(codex, call("memory", "p2"), signal));
+    const p3 = track(queue.acquire(codex, call("memory", "p3"), signal));
+    await flush();
+    expect(p2.value).toBeDefined();
+    expect(p3.value).toBeUndefined();
+
+    // First sample > 1.8x fails the probe immediately without waiting for more.
+    now += 20_000;
+    queue.observe(codex, callLatency(1_000));
+    p1.release(done);
+    await flush();
+    // p3 does not start while p2 drains because the probe failed back to one.
+    expect(p3.value).toBeUndefined();
+    p2.value!.release(done);
+    await flush();
+    expect(p3.value).toBeDefined();
+
+    // Chat arriving while p3 runs sees confirmed limit 1 and asks p3 to yield.
+    const chat = track(queue.acquire(codex, run("chat"), signal));
+    await flush();
+    expect(chat.value).toBeUndefined();
+    expect(asked).toHaveBeenLastCalledWith(codex, runPriorities.chat, 1);
+  });
+
+  it("records a ceiling on a two-call FIFO burst where the second call drains alone at mean 1.5", async () => {
     let now = 0;
     const queue = new ModelQueue(
-      () => ({ initial: 2, max: 3 }),
+      () => ({ initial: 1, max: 3 }),
       () => now,
     );
-    const request = (endedMsAgo = 0) => ({
-      type: "latency" as const,
-      source: "run" as const,
-      latencyMs: 10_000,
-      endedMsAgo,
-      workTokens: 4_000,
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(codex, call("memory", `b${i}`), signal);
+      now += 3_000;
+      queue.observe(codex, {
+        type: "latency",
+        source: "call",
+        latencyMs: 3_000,
+        endedMsAgo: 0,
+        workTokens: 3_000,
+      });
+      bg.release(done);
+    }
+
+    // Two calls start together on a single-slot FIFO server: the first finishes
+    // fast at t=3s (mean 2.0), the second waits 3s then runs alone 3s (mean 1.5, 2.0x).
+    const p1 = await queue.acquire(codex, call("memory", "p1"), signal);
+    const p2 = track(queue.acquire(codex, call("memory", "p2"), signal));
+    await flush();
+    expect(p2.value).toBeDefined();
+    now += 3_000;
+    queue.observe(codex, {
+      type: "latency",
+      source: "call",
+      latencyMs: 3_000,
+      endedMsAgo: 0,
+      workTokens: 3_000,
     });
-    await queue.acquire(codex, run("a"), signal);
-    for (let i = 0; i < 3; i++) {
-      now += 10_000;
-      queue.observe(codex, request());
-    }
-    await queue.acquire(codex, run("b"), signal);
-    const c = track(queue.acquire(codex, run("c"), signal));
-    // Its first item came before b started, though it reports after.
-    now += 10_000;
-    queue.observe(codex, request(10_000));
-    for (let i = 0; i < 3; i++) {
-      now += 10_000;
-      queue.observe(codex, request());
-    }
+    p1.release(done);
+    now += 3_000;
+    queue.observe(codex, {
+      type: "latency",
+      source: "call",
+      latencyMs: 6_000,
+      endedMsAgo: 0,
+      workTokens: 3_000,
+    });
+    p2.value!.release(done);
     await flush();
-    expect(c.value).toBeUndefined();
-    now += 10_000;
-    queue.observe(codex, request());
+
+    // Ceiling 2 must be recorded so the very next burst does not immediately re-probe.
+    const next1 = await queue.acquire(codex, call("memory", "n1"), signal);
+    const next2 = track(queue.acquire(codex, call("memory", "n2"), signal));
     await flush();
-    expect(c.value).toBeDefined();
+    expect(next2.value).toBeUndefined();
+    next1.release(done);
   });
 
-  it("gives a place back when requests slow down and halves it when refused", async () => {
-    const queue = new ModelQueue(() => ({ initial: 1, max: 8 }));
-    const first = await queue.acquire(codex, run("a"), signal);
-    for (let i = 0; i < 3; i++) queue.observe(codex, latency(500));
-    const second = track(queue.acquire(codex, run("b"), signal));
-    queue.observe(codex, latency(500));
-    await flush();
-    expect(second.value).toBeDefined();
+  it("rejects a gray-zone probe (1.3x to 1.8x) so confirmed concurrency stays at one", async () => {
+    let now = 0;
+    const queue = new ModelQueue(
+      () => ({ initial: 1, max: 3 }),
+      () => now,
+    );
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(codex, call("memory", `b${i}`), signal);
+      now += 10_000;
+      queue.observe(codex, callLatency(500));
+      bg.release(done);
+    }
 
+    const p1 = await queue.acquire(codex, call("memory", "p1"), signal);
+    const p2 = track(queue.acquire(codex, call("memory", "p2"), signal));
+    await flush();
+    expect(p2.value).toBeDefined();
+    // Both samples are 1.5x slower (between 1.3 and 1.8): probe fails.
+    now += 15_000;
+    queue.observe(codex, callLatency(750));
+    p1.release(done);
+    queue.observe(codex, callLatency(750));
+    p2.value!.release(done);
+    await flush();
+
+    // Confirmed limit stays one: two chats serialize.
+    const c1 = await queue.acquire(codex, run("c1"), signal);
+    const c2 = track(queue.acquire(codex, run("c2"), signal));
+    await flush();
+    expect(c2.value).toBeUndefined();
+    c1.release(done);
+  });
+
+  it("aborts a probe at once when interactive work arrives and asks all extra probing calls to yield", async () => {
+    let now = 0;
+    const asked = vi.fn();
+    const queue = new ModelQueue(
+      () => ({ initial: 1, max: 3 }),
+      () => now,
+      asked,
+    );
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(codex, call("memory", `b${i}`), signal);
+      now += 10_000;
+      queue.observe(codex, callLatency(500));
+      bg.release(done);
+    }
+
+    const p1 = await queue.acquire(codex, call("memory", "p1"), signal);
+    const p2 = track(queue.acquire(codex, call("memory", "p2"), signal));
+    await flush();
+    expect(p2.value).toBeDefined();
+
+    // Interactive chat arrives mid-probe: both probing calls are asked to yield.
+    const chat = track(queue.acquire(codex, run("chat"), signal));
+    await flush();
+    expect(chat.value).toBeUndefined();
+    expect(asked).toHaveBeenLastCalledWith(codex, runPriorities.chat, 2);
+
+    p1.release(done);
+    await flush();
+    expect(chat.value).toBeUndefined();
+    p2.value!.release(done);
+    await flush();
+    expect(chat.value).toBeDefined();
+    chat.value!.release(done);
+    await flush();
+
+    // Aborting for interactive work sets no ceiling, so background can probe right after.
+    const q1 = await queue.acquire(codex, call("memory", "q1"), signal);
+    const q2 = track(queue.acquire(codex, call("memory", "q2"), signal));
+    await flush();
+    expect(q2.value).toBeDefined();
+    q1.release(done);
+    q2.value!.release(done);
+  });
+
+  it("aborts a probe and trims calls above the confirmed limit when a Task or compaction arrives", async () => {
+    let now = 0;
+    const asked = vi.fn();
+    const queue = new ModelQueue(
+      () => ({ initial: 1, max: 3 }),
+      () => now,
+      asked,
+    );
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(codex, call("memory", `b${i}`), signal);
+      now += 10_000;
+      queue.observe(codex, callLatency(500));
+      bg.release(done);
+    }
+
+    const p1 = await queue.acquire(codex, call("memory", "p1"), signal);
+    const p2 = track(queue.acquire(codex, call("memory", "p2"), signal));
+    await flush();
+    expect(p2.value).toBeDefined();
+
+    // Task (priority 12) aborts the probe and trims the one excess probing call,
+    // leaving one call at the confirmed limit of one.
+    const task = track(
+      queue.acquire(
+        codex,
+        { kind: "task", priority: runPriorities.task, key: "t1" },
+        signal,
+      ),
+    );
+    await flush();
+    expect(task.value).toBeUndefined();
+    expect(asked).toHaveBeenLastCalledWith(codex, runPriorities.task, 1);
+
+    asked.mockClear();
+    p2.value!.release(done);
+    await flush();
+    // At the confirmed limit of one, Task waits for the remaining call without yielding it.
+    expect(task.value).toBeUndefined();
+    expect(asked).not.toHaveBeenCalled();
+
+    p1.release(done);
+    await flush();
+    expect(task.value).toBeDefined();
+    task.value!.release(done);
+    await flush();
+
+    // Promote confirmed limit to 2, then abort a probe for 3 with a Task:
+    // steady-state cap at confirmed 2 is softLimit(2) = 1, so two excess
+    // probing calls are trimmed and Task enters once the single remaining call finishes.
+    const a1 = await queue.acquire(codex, call("memory", "a1"), signal);
+    const a2 = track(queue.acquire(codex, call("memory", "a2"), signal));
+    await flush();
+    now += 10_000;
+    queue.observe(codex, callLatency(500));
+    a1.release(done);
+    queue.observe(codex, callLatency(500));
+    a2.value!.release(done);
+    await flush();
+
+    const r1 = await queue.acquire(codex, call("wiki", "r1"), signal);
+    const r2 = track(queue.acquire(codex, call("wiki", "r2"), signal));
+    const r3 = track(queue.acquire(codex, call("wiki", "r3"), signal));
+    await flush();
+    expect(r2.value).toBeDefined();
+    expect(r3.value).toBeDefined();
+
+    asked.mockClear();
+    const task2 = track(
+      queue.acquire(
+        codex,
+        { kind: "task", priority: runPriorities.task, key: "t2" },
+        signal,
+      ),
+    );
+    await flush();
+    expect(task2.value).toBeUndefined();
+    expect(asked).toHaveBeenLastCalledWith(codex, runPriorities.task, 2);
+
+    asked.mockClear();
+    r3.value!.release(done);
+    await flush();
+    expect(asked).toHaveBeenLastCalledWith(codex, runPriorities.task, 1);
+
+    asked.mockClear();
+    r2.value!.release(done);
+    await flush();
+    expect(task2.value).toBeUndefined();
+    expect(asked).not.toHaveBeenCalled();
+
+    r1.release(done);
+    await flush();
+    expect(task2.value).toBeDefined();
+    task2.value!.release(done);
+  });
+
+  it("scales past two on pure background work via sequential probes and skips probing when calls cannot yield", async () => {
+    let now = 0;
+    const cannotYield = new ModelQueue(
+      () => ({ initial: 1, max: 4 }),
+      () => now,
+      undefined,
+      undefined,
+      () => false,
+    );
+    for (let i = 0; i < 3; i++) {
+      const bg = await cannotYield.acquire(
+        codex,
+        call("wiki", `n${i}`),
+        signal,
+      );
+      now += 10_000;
+      cannotYield.observe(codex, callLatency(500));
+      bg.release(done);
+    }
+    const n1 = await cannotYield.acquire(codex, call("wiki", "x1"), signal);
+    const n2 = track(cannotYield.acquire(codex, call("wiki", "x2"), signal));
+    await flush();
+    expect(n2.value).toBeUndefined();
+    n1.release(done);
+
+    // When background calls can yield, pure background probes 1 -> 2 -> 3.
+    const queue = new ModelQueue(
+      () => ({ initial: 1, max: 4 }),
+      () => now,
+    );
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(codex, call("wiki", `b${i}`), signal);
+      now += 10_000;
+      queue.observe(codex, callLatency(500));
+      bg.release(done);
+    }
+    // Probe 2 passes.
+    const w1 = await queue.acquire(codex, call("wiki", "w1"), signal);
+    const w2 = track(queue.acquire(codex, call("wiki", "w2"), signal));
+    await flush();
+    expect(w2.value).toBeDefined();
+    now += 10_000;
+    queue.observe(codex, callLatency(520));
+    w1.release(done);
+    queue.observe(codex, callLatency(520));
+    w2.value!.release(done);
+    await flush();
+
+    // Probe 3 starts with three background calls and passes.
+    const t1 = await queue.acquire(codex, call("wiki", "t1"), signal);
+    const t2 = track(queue.acquire(codex, call("wiki", "t2"), signal));
+    const t3 = track(queue.acquire(codex, call("wiki", "t3"), signal));
+    await flush();
+    expect(t2.value).toBeDefined();
+    expect(t3.value).toBeDefined();
+    now += 10_000;
+    queue.observe(codex, callLatency(540));
+    t1.release(done);
+    queue.observe(codex, callLatency(540));
+    t2.value!.release(done);
+    queue.observe(codex, callLatency(540));
+    t3.value!.release(done);
+    await flush();
+
+    // Confirmed limit is now 3: three interactive Runs start at once.
+    const r1 = await queue.acquire(codex, run("r1"), signal);
+    const r2 = track(queue.acquire(codex, run("r2"), signal));
+    const r3 = track(queue.acquire(codex, run("r3"), signal));
+    await flush();
+    expect(r2.value).toBeDefined();
+    expect(r3.value).toBeDefined();
+    r1.release(done);
+    r2.value!.release(done);
+    r3.value!.release(done);
+  });
+
+  it("gives a place back when confirmed concurrency slows down and halves it when refused", async () => {
+    let now = 0;
+    const queue = new ModelQueue(
+      () => ({ initial: 2, max: 8 }),
+      () => now,
+    );
+    // Establish run baseline at concurrency 1.
+    const first = await queue.acquire(codex, run("a"), signal);
+    for (let i = 0; i < 3; i++) {
+      now += 10_000;
+      queue.observe(codex, latency(500));
+    }
+    const second = await queue.acquire(codex, run("b"), signal);
     // Two at once take three times as long: back to one.
-    for (let i = 0; i < 4; i++) queue.observe(codex, latency(1_500));
+    for (let i = 0; i < 4; i++) {
+      now += 10_000;
+      queue.observe(codex, latency(1_500));
+    }
     first.release(done);
     const third = track(queue.acquire(codex, run("c"), signal));
     await flush();
     expect(third.value).toBeUndefined();
 
-    second.value!.release(done);
+    second.release(done);
     await flush();
     expect(third.value).toBeDefined();
 
@@ -495,28 +829,38 @@ describe("ModelQueue limit", () => {
     expect(refused.value).toBeDefined();
   });
 
-  it("judges a lower limit only once the units above it have finished", async () => {
-    const queue = new ModelQueue(() => ({ initial: 1, max: 4 }));
+  it("judges a lower limit only once the units above it have finished, placing each Run sample by when it was timed", async () => {
+    let now = 0;
+    const queue = new ModelQueue(
+      () => ({ initial: 3, max: 4 }),
+      () => now,
+    );
     const a = await queue.acquire(codex, run("a"), signal);
-    for (let i = 0; i < 3; i++) queue.observe(codex, latency(500));
-    const b = track(queue.acquire(codex, run("b"), signal));
-    queue.observe(codex, latency(500));
-    const c = track(queue.acquire(codex, run("c"), signal));
-    for (let i = 0; i < 4; i++) queue.observe(codex, latency(500));
-    await flush();
-    expect(c.value).toBeDefined();
-
-    // Three at once are slow: two. Three still run, so their slow requests
-    // say nothing about two.
-    for (let i = 0; i < 8; i++) queue.observe(codex, latency(1_500));
+    for (let i = 0; i < 3; i++) {
+      now += 10_000;
+      queue.observe(codex, latency(500));
+    }
+    const b = await queue.acquire(codex, run("b"), signal);
+    const c = await queue.acquire(codex, run("c"), signal);
+    // A late-reporting Run timed before b and c started does not count at 3.
+    now += 10_000;
+    queue.observe(codex, latency(1_500, "run", 10_000));
+    // Three at once are slow: drops to two. Three still run, so later slow
+    // samples at concurrency 3 say nothing about two.
+    for (let i = 0; i < 8; i++) {
+      now += 10_000;
+      queue.observe(codex, latency(1_500));
+    }
     a.release(done);
-    b.value!.release(done);
+    b.release(done);
     const d = track(queue.acquire(codex, run("d"), signal));
     await flush();
     expect(d.value).toBeDefined();
+    c.release(done);
+    d.value!.release(done);
   });
 
-  it("keeps a limit it came down from as the ceiling and retries it later, waiting longer after each failed retry", async () => {
+  it("keeps a failed probe as the ceiling and retries it later, waiting longer after each failed retry", async () => {
     let now = 0;
     const minutes = (count: number) => (now += count * 60_000);
     const seconds = (count: number) => (now += count * 1_000);
@@ -524,59 +868,96 @@ describe("ModelQueue limit", () => {
       () => ({ initial: 1, max: 4 }),
       () => now,
     );
-    const a = await queue.acquire(codex, run("a"), signal);
-    for (let i = 0; i < 3; i++) queue.observe(codex, latency(500));
-    const b = track(queue.acquire(codex, run("b"), signal));
-    queue.observe(codex, latency(500));
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(codex, call("wiki", `b${i}`), signal);
+      seconds(10);
+      queue.observe(codex, callLatency(500));
+      bg.release(done);
+    }
+
+    // First probe of two is slow -> ceiling = 2, wait 5 minutes.
+    const a = await queue.acquire(codex, call("wiki", "a"), signal);
+    const b = track(queue.acquire(codex, call("wiki", "b"), signal));
     await flush();
     expect(b.value).toBeDefined();
-    for (let i = 0; i < 4; i++) queue.observe(codex, latency(1_500));
+    seconds(10);
+    queue.observe(codex, callLatency(1_500));
     a.release(done);
-
-    // One unit running looks fast, but two were just too slow.
-    const c = track(queue.acquire(codex, run("c"), signal));
-    for (let i = 0; i < 4; i++) queue.observe(codex, latency(500));
-    await flush();
-    expect(c.value).toBeUndefined();
-    minutes(5);
-    queue.observe(codex, latency(500));
-    await flush();
-    expect(c.value).toBeDefined();
-
-    // Both run a while and the retry is slow too: the next one waits ten
-    // minutes.
-    seconds(10);
-    for (let i = 0; i < 4; i++) queue.observe(codex, latency(1_500));
     b.value!.release(done);
-    const d = track(queue.acquire(codex, run("d"), signal));
-    minutes(5);
-    for (let i = 0; i < 4; i++) queue.observe(codex, latency(500));
     await flush();
-    expect(d.value).toBeUndefined();
-    minutes(5);
-    queue.observe(codex, latency(500));
-    await flush();
-    expect(d.value).toBeDefined();
 
-    // Both run a while and this retry holds: the ceiling is gone and the
-    // limit grows past it.
-    seconds(10);
-    const e = track(queue.acquire(codex, run("e"), signal));
-    for (let i = 0; i < 4; i++) queue.observe(codex, latency(500));
+    // Before five minutes, waiting background calls stay at one.
+    const c1 = await queue.acquire(codex, call("wiki", "c1"), signal);
+    const c2 = track(queue.acquire(codex, call("wiki", "c2"), signal));
     await flush();
-    expect(e.value).toBeDefined();
+    expect(c2.value).toBeUndefined();
+    minutes(5);
+    seconds(10);
+    queue.observe(codex, callLatency(500));
+    await flush();
+    expect(c2.value).toBeDefined();
+
+    // Retry fails too: the next retry waits ten minutes.
+    seconds(10);
+    queue.observe(codex, callLatency(1_500));
+    c1.release(done);
+    c2.value!.release(done);
+    await flush();
+
+    const d1 = await queue.acquire(codex, call("wiki", "d1"), signal);
+    const d2 = track(queue.acquire(codex, call("wiki", "d2"), signal));
+    minutes(5);
+    seconds(10);
+    queue.observe(codex, callLatency(500));
+    await flush();
+    expect(d2.value).toBeUndefined();
+    minutes(5);
+    seconds(10);
+    queue.observe(codex, callLatency(500));
+    await flush();
+    expect(d2.value).toBeDefined();
+
+    // This retry holds: ceiling clears, confirmed becomes 2, and 3 can be probed.
+    seconds(10);
+    queue.observe(codex, callLatency(500));
+    d1.release(done);
+    queue.observe(codex, callLatency(500));
+    d2.value!.release(done);
+    await flush();
+
+    const e1 = await queue.acquire(codex, call("wiki", "e1"), signal);
+    const e2 = track(queue.acquire(codex, call("wiki", "e2"), signal));
+    const e3 = track(queue.acquire(codex, call("wiki", "e3"), signal));
+    await flush();
+    expect(e2.value).toBeDefined();
+    expect(e3.value).toBeDefined();
+    e1.release(done);
+    e2.value!.release(done);
+    e3.value!.release(done);
   });
 
   it("keeps a learned limit while the endpoint is idle and starts over when its link changes", async () => {
+    let now = 0;
     let range = { initial: 1, max: 4 };
-    const queue = new ModelQueue(() => range);
-    const first = await queue.acquire(codex, run("a"), signal);
-    for (let i = 0; i < 3; i++) queue.observe(codex, latency(500));
-    const second = track(queue.acquire(codex, run("b"), signal));
-    queue.observe(codex, latency(500));
+    const queue = new ModelQueue(
+      () => range,
+      () => now,
+    );
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(codex, call("wiki", `b${i}`), signal);
+      now += 10_000;
+      queue.observe(codex, callLatency(500));
+      bg.release(done);
+    }
+    const first = await queue.acquire(codex, call("wiki", "p1"), signal);
+    const second = track(queue.acquire(codex, call("wiki", "p2"), signal));
     await flush();
+    now += 10_000;
+    queue.observe(codex, callLatency(500));
     first.release(done);
+    queue.observe(codex, callLatency(500));
     second.value!.release(done);
+    await flush();
 
     const again = await queue.acquire(codex, run("c"), signal);
     const alongside = track(queue.acquire(codex, run("d"), signal));

@@ -8,6 +8,7 @@ import type {
 import { LocalComputerOfflineError } from "../../../src/agent/runner-gateway/local-computer-management.js";
 import {
   RunnerGatewayProtocolError,
+  type RunnerGateway,
   type RunnerGatewayConnection,
 } from "../../../src/agent/runner-gateway/runner-gateway.js";
 import { OPERATION_OUTCOME_UNKNOWN } from "../../../src/agent/runner-gateway/runner-operation.js";
@@ -1505,8 +1506,9 @@ describe("RunnerGateway", () => {
     const codex = { computerId: "runner-local", runtimeType: "codex" as const };
     /** Foreground work, so the place it waits for is not held back. */
     const approval = { priority: 0, kind: "approval", key: "approval:test" };
+    const memory = { priority: 40, kind: "memory", key: "memory:test" };
 
-    const startRun = async () => {
+    const connectApi = async () => {
       const gateway = createTestRunnerGateway({
         heartbeatIntervalMs: 60_000,
         createId: sequenceIds(),
@@ -1516,6 +1518,85 @@ describe("RunnerGateway", () => {
         ...hello(),
         runtime_diagnostics: runtimeDiagnostics({ link: "api" }),
       });
+      return { gateway, peer, connection };
+    };
+
+    /** Promotes an API endpoint to confirmed limit two via a fast background probe. */
+    const promoteToTwo = async (
+      gateway: RunnerGateway,
+      peer: RecordingPeer,
+      connection: RunnerGatewayConnection,
+    ) => {
+      const usage = {
+        input_tokens: 4_000,
+        cached_input_tokens: 0,
+        output_tokens: 100,
+      };
+      const answer = async (index: number) => {
+        await vi.waitFor(() =>
+          expect(
+            peer.sent.filter(
+              (envelope) =>
+                envelope.type === "execute" && envelope.kind === "model_invoke",
+            ).length,
+          ).toBeGreaterThanOrEqual(index + 1),
+        );
+        const invoke = peer.sent.filter(
+          (envelope) =>
+            envelope.type === "execute" && envelope.kind === "model_invoke",
+        )[index]!;
+        if (invoke.type !== "execute" || invoke.kind !== "model_invoke")
+          throw new Error("Expected model_invoke");
+        await connection.receive({
+          type: "executed",
+          kind: "model_invoke",
+          command_id: invoke.command_id,
+          runner_id: "runner-local",
+          invoke_id: invoke.invoke_id,
+          outcome: "completed",
+          text: '{"summary":"ok"}',
+          duration_ms: 900,
+          usage,
+        });
+      };
+      const invokeMemory = (input: string) =>
+        gateway.invokeModel("runner-local", {
+          tenantId: "tenant-acme",
+          ownerActorId: "human-alice",
+          agentId: "agent-another-me",
+          runtimeType: "codex",
+          mode: "structured",
+          reasoningEffort: "low",
+          input,
+          timeoutMs: 60_000,
+          queue: memory,
+          signal: new AbortController().signal,
+        });
+      for (let i = 0; i < 3; i++) {
+        const call = invokeMemory(`base ${i}`);
+        await answer(i);
+        await call;
+      }
+      const p1 = invokeMemory("probe 1");
+      const p2 = invokeMemory("probe 2");
+      await vi.waitFor(() =>
+        expect(
+          peer.sent.filter(
+            (envelope) =>
+              envelope.type === "execute" && envelope.kind === "model_invoke",
+          ),
+        ).toHaveLength(5),
+      );
+      await answer(3);
+      await answer(4);
+      await Promise.all([p1, p2]);
+    };
+
+    const startRun = async (
+      gateway: RunnerGateway,
+      peer: RecordingPeer,
+      connection: RunnerGatewayConnection,
+    ) => {
       const operation = await gateway.startOperation(sessionTarget());
       operation.result.catch(() => undefined);
       const start = peer.sent.find(
@@ -1530,44 +1611,48 @@ describe("RunnerGateway", () => {
           runner_pid: 100,
         }),
       );
-      return { gateway, connection, operation, start };
+      return { operation, start };
     };
 
-    /** Four requests of the Run alone, each as fast, while work waits. */
-    const answerFast = async (
+    const respond = async (
       connection: RunnerGatewayConnection,
       start: OperationStart,
+      seq: number,
+      firstItemMs: number,
     ) => {
-      for (let seq = 2; seq <= 5; seq++)
-        await connection.receive(
-          event(start, seq, {
-            type: "operation.event",
-            event: {
-              type: "model.responded",
-              started_at_unix_ms: 1_000,
-              first_item_at_unix_ms: 3_000,
-              responded_at_unix_ms: 4_000,
-              granularity: "item",
-              usage: {
-                input: 4_000,
-                cache_read: 0,
-                cache_write: 0,
-                output: 50,
-              },
+      await connection.receive(
+        event(start, seq, {
+          type: "operation.event",
+          event: {
+            type: "model.responded",
+            started_at_unix_ms: 1_000,
+            first_item_at_unix_ms: 1_000 + firstItemMs,
+            responded_at_unix_ms: 1_000 + firstItemMs,
+            granularity: "item",
+            usage: {
+              input: 4_000,
+              cache_read: 0,
+              cache_write: 0,
+              output: 50,
             },
-          }),
-        );
+          },
+        }),
+      );
     };
 
     const admittedLater = (lease: Promise<unknown>) => {
       const state = { admitted: false };
-      void lease.then(() => (state.admitted = true));
+      void lease.then(
+        () => (state.admitted = true),
+        () => undefined,
+      );
       return state;
     };
 
-    it("raises the limit while the Run answers fast and work waits", async () => {
-      const { gateway, connection, start } = await startRun();
+    it("does not raise an unconfirmed limit on a Run alone, and lowers a confirmed limit when concurrent Run requests slow down", async () => {
+      const { gateway, peer, connection } = await connectApi();
       try {
+        const { operation, start } = await startRun(gateway, peer, connection);
         const waiting = admittedLater(
           gateway.acquireModelCall(
             codex,
@@ -1575,27 +1660,79 @@ describe("RunnerGateway", () => {
             new AbortController().signal,
           ),
         );
+        for (let seq = 2; seq <= 5; seq++)
+          await respond(connection, start, seq, 2_000);
         await new Promise((resolve) => setImmediate(resolve));
         expect(waiting.admitted).toBe(false);
-        await answerFast(connection, start);
+        await connection.receive(
+          event(start, 6, {
+            type: "operation.completed",
+            result: {
+              type: "run",
+              final_response: "done",
+              session: { thread_id: "thread-1" },
+            },
+          }),
+        );
+        await operation.result;
         await vi.waitFor(() => expect(waiting.admitted).toBe(true));
       } finally {
         connection.disconnect();
       }
-    });
 
-    it("halves the limit when the Run fails rate limited", async () => {
-      const { gateway, connection, start } = await startRun();
+      // On a confirmed limit of two, slow Run responses at concurrency 2 lower it back to one.
+      const promoted = await connectApi();
       try {
-        const alongside = gateway.acquireModelCall(
+        await promoteToTwo(
+          promoted.gateway,
+          promoted.peer,
+          promoted.connection,
+        );
+        const { start } = await startRun(
+          promoted.gateway,
+          promoted.peer,
+          promoted.connection,
+        );
+        // Three lone Run responses set the Run baseline at 2 ms.
+        for (let seq = 2; seq <= 4; seq++)
+          await respond(promoted.connection, start, seq, 2);
+        const alongside = await promoted.gateway.acquireModelCall(
           codex,
           approval,
           new AbortController().signal,
         );
-        await answerFast(connection, start);
-        const lease = await alongside;
+        // Hold concurrency 2 longer than each 8 ms response so every sample runs at 2.
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        for (let seq = 5; seq <= 8; seq++)
+          await respond(promoted.connection, start, seq, 8);
+        alongside.release({ outcome: "completed" });
+        // Limit is back to one: a new foreground call waits while the Run holds it.
+        const blocked = admittedLater(
+          promoted.gateway.acquireModelCall(
+            codex,
+            approval,
+            new AbortController().signal,
+          ),
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(blocked.admitted).toBe(false);
+      } finally {
+        promoted.connection.disconnect();
+      }
+    });
+
+    it("halves a confirmed limit when the Run fails rate limited", async () => {
+      const { gateway, peer, connection } = await connectApi();
+      try {
+        await promoteToTwo(gateway, peer, connection);
+        const { start } = await startRun(gateway, peer, connection);
+        const lease = await gateway.acquireModelCall(
+          codex,
+          approval,
+          new AbortController().signal,
+        );
         await connection.receive(
-          event(start, 6, {
+          event(start, 2, {
             type: "operation.failed",
             stage: "runtime_execution",
             error: {

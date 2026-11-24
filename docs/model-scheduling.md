@@ -14,17 +14,25 @@ their requests would reach the model beside the Run's own without waiting.
 
 The number of units at once adapts to how the endpoint answers. Each request
 counts at the number of units that actually ran while it was timed, not at
-the limit. While work waits and requests that ran at the current number come
-back about as fast as requests that ran alone, the queue tries one more. When
-they get clearly slower it gives one back, and when the endpoint refuses work
-(rate limited, overloaded, or a call runs out of time) it halves and holds off
-raising for a minute. Background work leaves the last place free, so on its
-own it never takes the number past two. Speed is compared per
+the limit. The confirmed limit grows only through silent background probes:
+once single-unit background calls establish a baseline and no foreground,
+Task, Document or compaction work is active or waiting, the queue temporarily
+runs one more yieldable background call at once (on Computers that can stop a
+model call). If those concurrent background calls stay within 1.3x of the
+lone-unit speed, the confirmed limit promotes by one; if a probe sample slows
+past 1.8x, the probe median exceeds 1.3x, or the endpoint refuses work, the
+probe stops immediately and the confirmed limit stays unchanged. If higher
+work arrives during a probe, the probe aborts at once and swaps out the extra
+background calls so interactive work never pays for an unconfirmed limit. In
+steady state, when requests at the confirmed limit get clearly slower (past
+1.8x) it gives one back, and when the endpoint refuses work (rate limited,
+overloaded, or a call runs out of time) it halves and holds off probing for a
+minute. Speed is compared per
 thousand new prompt tokens, so a long prompt does not look like a busy
-endpoint. A number it had to come down from is not tried again for five
-minutes; if that retry is too slow as well, the wait doubles, up to half an
-hour. What it learns lasts until the service restarts or the runtime's models
-change.
+endpoint. A number that failed a probe or had to be given back is not probed
+again for five minutes; if that retry fails as well, the wait doubles, up to
+half an hour. What it learns lasts until the service restarts or the runtime's
+models change.
 
 The current adaptive limit is the hard limit. Ordinary work can start while
 the total running count is below the soft limit, `max(1, hard - 1)`.

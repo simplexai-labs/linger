@@ -1,4 +1,4 @@
-import type { ModelLease } from "../../model-tasks.js";
+import { INTERACTIVE_PRIORITY, type ModelLease } from "../../model-tasks.js";
 import {
   RunnerComputerTools,
   type ComputerToolRequest,
@@ -183,8 +183,11 @@ export class RunnerGateway
         ),
       Date.now,
       // A background model call is below every Run, so it is swapped out first.
-      (endpoint, priority) => {
-        if (!this.#modelInvocation.yieldCall(endpoint, priority))
+      (endpoint, priority, count) => {
+        if (
+          this.#modelInvocation.yieldCall(endpoint, priority, count) < count &&
+          priority <= INTERACTIVE_PRIORITY
+        )
           this.#operations.yieldFor(endpoint, priority);
       },
       (endpoint) =>
@@ -192,6 +195,16 @@ export class RunnerGateway
           endpoint.computerId,
           endpoint.runtimeType,
         ),
+      (endpoint) => {
+        const connection = this.#connections.getConnection(endpoint.computerId);
+        return (
+          connection !== undefined &&
+          this.#connections.supportsModelInvokeCancel(
+            endpoint.computerId,
+            connection.connectionEpoch,
+          )
+        );
+      },
     );
     this.#computerTools = new RunnerComputerTools(context, owners);
     this.#localModels = new RunnerLocalModels(context, owners);
