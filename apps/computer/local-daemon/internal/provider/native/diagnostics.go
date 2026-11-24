@@ -6,6 +6,8 @@ import (
 	"math"
 	"os"
 	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/process"
 )
@@ -120,4 +122,149 @@ func integralNumber(raw json.RawMessage) (int64, bool) {
 		return 0, false
 	}
 	return int64(number), true
+}
+
+// StructuredAPIError holds the structured HTTP status and API error fields
+// extracted from a provider or gateway error string without matching prose.
+type StructuredAPIError struct {
+	Code       string
+	Type       string
+	Message    string
+	StatusCode *int
+}
+
+var (
+	leadingHTTPStatusPattern  = regexp.MustCompile(`^([45][0-9]{2})(?::|\s|$)`)
+	providerHTTPStatusPattern = regexp.MustCompile(`API error \(([45][0-9]{2})\):`)
+	posixNetworkErrnoPattern  = regexp.MustCompile(`\b(?:ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ENOTFOUND)\b`)
+)
+
+// ParseStructuredAPIError extracts structured provider API error metadata from
+// a JSON error body (`{"error":{"code":...,"type":...}}` or top-level
+// `{"code":...,"type":...}`), accepting both string error codes and numeric
+// HTTP status codes (as llama.cpp / Bifrost return), plus leading HTTP status
+// prefixes formatted by provider SDKs.
+func ParseStructuredAPIError(text string) (StructuredAPIError, bool) {
+	trimmed := strings.TrimSpace(text)
+	var statusCode *int
+	if match := leadingHTTPStatusPattern.FindStringSubmatch(trimmed); len(match) == 2 {
+		if code, err := strconv.Atoi(match[1]); err == nil && validHTTPStatus(int64(code)) {
+			statusCode = intPointer(code)
+		}
+	} else if match := providerHTTPStatusPattern.FindStringSubmatch(trimmed); len(match) == 2 {
+		if code, err := strconv.Atoi(match[1]); err == nil && validHTTPStatus(int64(code)) {
+			statusCode = intPointer(code)
+		}
+	}
+
+	rest := trimmed
+	for len(rest) > 0 {
+		idx := strings.IndexByte(rest, '{')
+		if idx < 0 {
+			break
+		}
+		rest = rest[idx:]
+		var body struct {
+			Code    json.RawMessage `json:"code"`
+			Type    string          `json:"type"`
+			Message string          `json:"message"`
+			Error   *struct {
+				Code    json.RawMessage `json:"code"`
+				Type    string          `json:"type"`
+				Message string          `json:"message"`
+			} `json:"error"`
+		}
+		dec := json.NewDecoder(strings.NewReader(rest))
+		if err := dec.Decode(&body); err == nil {
+			if body.Error != nil {
+				codeStr, codeStatus := parseAPIErrorCodeField(body.Error.Code)
+				errType := strings.TrimSpace(body.Error.Type)
+				if codeStr != "" || errType != "" || codeStatus != nil {
+					if statusCode == nil {
+						statusCode = codeStatus
+					}
+					return StructuredAPIError{
+						Code:       codeStr,
+						Type:       errType,
+						Message:    strings.TrimSpace(body.Error.Message),
+						StatusCode: statusCode,
+					}, true
+				}
+			}
+			codeStr, codeStatus := parseAPIErrorCodeField(body.Code)
+			errType := strings.TrimSpace(body.Type)
+			if codeStr != "" || errType != "" || codeStatus != nil {
+				if statusCode == nil {
+					statusCode = codeStatus
+				}
+				return StructuredAPIError{
+					Code:       codeStr,
+					Type:       errType,
+					Message:    strings.TrimSpace(body.Message),
+					StatusCode: statusCode,
+				}, true
+			}
+		}
+		rest = rest[1:]
+	}
+	if statusCode != nil {
+		return StructuredAPIError{StatusCode: statusCode}, true
+	}
+	return StructuredAPIError{}, false
+}
+
+// parseAPIErrorCodeField decodes a JSON error "code" field that may be either
+// a string identifier or an HTTP status integer (400-599).
+func parseAPIErrorCodeField(raw json.RawMessage) (string, *int) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return "", nil
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		text = strings.TrimSpace(text)
+		if code, err := strconv.Atoi(text); err == nil && code >= 400 && code <= 599 {
+			return "", intPointer(code)
+		}
+		return text, nil
+	}
+	if number, ok := integralNumber(raw); ok && number >= 400 && number <= 599 {
+		return "", intPointer(int(number))
+	}
+	return "", nil
+}
+
+// APIErrorDiagnostics builds sanitized RuntimeFailureDiagnostics from
+// structured HTTP status codes, JSON error code/type fields, or POSIX network
+// error codes embedded in a runtime error string.
+func APIErrorDiagnostics(text string) RuntimeFailureDiagnostics {
+	var out RuntimeFailureDiagnostics
+	if apiErr, ok := ParseStructuredAPIError(text); ok {
+		out.StatusCode = apiErr.StatusCode
+		out.Code = selectDiagnosticAPIErrorCode(apiErr)
+	}
+	if out.Code == "" && out.StatusCode == nil {
+		if errno := posixNetworkErrnoPattern.FindString(text); errno != "" {
+			out.Code = errno
+		}
+	}
+	if sanitized := out.Sanitized(); sanitized != nil {
+		return *sanitized
+	}
+	return RuntimeFailureDiagnostics{}
+}
+
+func selectDiagnosticAPIErrorCode(apiErr StructuredAPIError) string {
+	code := apiErr.Code
+	errType := apiErr.Type
+	if code != "" && code != "error" && code != "invalid_request_error" && diagnosticCodePattern.MatchString(code) {
+		return code
+	}
+	if errType != "" && errType != "error" && diagnosticCodePattern.MatchString(errType) {
+		return errType
+	}
+	if code != "" && diagnosticCodePattern.MatchString(code) {
+		return code
+	}
+	return ""
 }

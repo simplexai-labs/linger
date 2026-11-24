@@ -934,6 +934,19 @@ func TestCodexFailedTurnCarriesErrorInfoDiagnostics(t *testing.T) {
 	}
 }
 
+func TestCodexFailedTurnExtractsStructuredAPIErrorOnHTTP400(t *testing.T) {
+	fake := newCodexFake(t, []codexFakeTurn{{
+		Status:    "failed",
+		Error:     `unexpected status 400 Bad Request: {"error":{"code":400,"type":"exceed_context_size_error","message":"request exceeds context"}}`,
+		ErrorInfo: json.RawMessage(`{"httpConnectionFailed":{"httpStatusCode":400}}`),
+	}}, nil)
+	out, _ := codexDrain(t, fake.runtime(nil), "go", fake.spec())
+	if out.Status != statusFailed || out.Diagnostics.Code != "exceed_context_size_error" ||
+		out.Diagnostics.StatusCode == nil || *out.Diagnostics.StatusCode != 400 {
+		t.Fatalf("outcome = %+v", out)
+	}
+}
+
 // A steer counts as applied only once Codex shows the user message with the
 // steer's client id in the live turn. A turn that ends first did not apply
 // it, so the caller may run it again; an RPC refusal never depends on the

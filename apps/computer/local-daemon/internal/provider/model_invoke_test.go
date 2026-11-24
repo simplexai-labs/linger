@@ -331,7 +331,11 @@ func TestModelInvokerClassifiesFailures(t *testing.T) {
 		{stderr: "Error: stream disconnected before completion\n", outcome: ModelInvokeFailed},
 		{event: `{"type":"turn.failed","error":{"message":"context window exceeded","codexErrorInfo":"contextWindowExceeded"}}`, outcome: ModelInvokeContextTooLong},
 		{event: `{"type":"turn.failed","error":{"message":"{\"error\":{\"type\":\"exceed_context_size_error\",\"message\":\"request exceeds context\"}}"}}`, outcome: ModelInvokeContextTooLong},
+		{event: `{"type":"turn.failed","error":{"message":"{\"error\":{\"type\":\"exceed_context_size_error\",\"message\":\"request exceeds context\"}}","codexErrorInfo":{"httpConnectionFailed":{"httpStatusCode":400}}}}`, outcome: ModelInvokeContextTooLong},
 		{event: `{"type":"turn.failed","error":{"message":"upstream unavailable","codexErrorInfo":{"internalServerError":{"httpStatusCode":503}}}}`, outcome: ModelInvokeRuntimeUnavailable},
+		{event: `{"type":"turn.failed","error":{"message":"rate limited","codexErrorInfo":{"httpConnectionFailed":{"httpStatusCode":429}}}}`, outcome: ModelInvokeRuntimeUnavailable},
+		{event: `{"type":"turn.failed","error":{"message":"{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"too many requests\"}}"}}`, outcome: ModelInvokeRuntimeUnavailable},
+		{stderr: "fetch failed: connect ECONNREFUSED 127.0.0.1:18100\n", outcome: ModelInvokeRuntimeUnavailable},
 	} {
 		fixture := newCodexInvokeFixture(t, func(_ context.Context, command *exec.Cmd) error {
 			_, _ = io.WriteString(command.Stderr, test.stderr)

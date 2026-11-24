@@ -279,6 +279,23 @@ func (f *piFakeProcess) act() int {
 		f.send(map[string]any{"type": "agent_start"})
 		f.send(map[string]any{"type": "auto_retry_end", "success": true})
 		f.finish()
+	case "retry-exhausted":
+		errText := `503: {"code":503,"message":"shared KV pool full","type":"unavailable_error"}`
+		f.assistantEnd("", "error", errText)
+		f.send(map[string]any{"type": "agent_end"})
+		f.send(map[string]any{"type": "auto_retry_start", "attempt": 1, "maxAttempts": 2, "errorMessage": errText})
+		f.send(map[string]any{"type": "auto_retry_end", "success": false, "attempt": 2, "finalError": errText})
+		f.send(map[string]any{"type": "agent_settled", "aborted": false})
+	case "overflow-compaction-failed":
+		errText := `400: {"code":400,"message":"request (70000 tokens) exceeds the available context size (65536 tokens)","type":"exceed_context_size_error"}`
+		f.assistantEnd("", "error", errText)
+		f.send(map[string]any{"type": "agent_end"})
+		f.send(map[string]any{"type": "compaction_start", "reason": "overflow"})
+		f.send(map[string]any{"type": "compaction_end", "reason": "overflow", "result": nil, "aborted": false, "willRetry": false, "errorMessage": "Context overflow recovery failed after one compact-and-retry attempt."})
+		f.send(map[string]any{"type": "agent_settled", "aborted": false})
+	case "compaction-succeeded":
+		f.send(map[string]any{"type": "compaction_end", "reason": "threshold", "result": map[string]any{"summary": "compacted"}, "aborted": false, "willRetry": false})
+		f.finish()
 	case "cancel":
 		program, _ := os.Executable()
 		child := exec.Command(program)

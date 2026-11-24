@@ -127,15 +127,79 @@ func TestClassifyPiModelInvokeFailureSanitizesAndDistinguishesCauses(t *testing.
 	tests := []struct {
 		name        string
 		err         error
+		failureCode string
+		diagnostics native.RuntimeFailureDiagnostics
 		answerError string
 		wantOutcome string
 		wantReason  string
 	}{
 		{
+			name:        "adapter context_too_long failure code",
+			failureCode: "context_too_long",
+			answerError: "Compaction failed: prompt exceeds context",
+			wantOutcome: ModelInvokeContextTooLong,
+			wantReason:  "Model invocation prompt exceeds the model context window",
+		},
+		{
+			name:        "pre-populated outcome diagnostics take precedence",
+			diagnostics: native.RuntimeFailureDiagnostics{Code: "unavailable_error"},
+			answerError: "400 Bad Request",
+			wantOutcome: ModelInvokeRuntimeUnavailable,
+			wantReason:  "Pi background model service is unavailable",
+		},
+		{
 			name:        "llama-server 65K context overflow",
 			answerError: `POST http://127.0.0.1:18100/v1/chat/completions Bearer sk-secret: {"error":{"type":"exceed_context_size_error","message":"request (70000 tokens) exceeds the available context size (65536 tokens)"}}`,
 			wantOutcome: ModelInvokeContextTooLong,
 			wantReason:  "Model invocation prompt exceeds the model context window",
+		},
+		{
+			name:        "llama-server numeric code 400 unwrapped by OpenAI SDK",
+			answerError: `400: {"code":400,"message":"request (70000 tokens) exceeds the available context size (65536 tokens)","type":"exceed_context_size_error","n_prompt_tokens":70000,"n_ctx":65536}`,
+			wantOutcome: ModelInvokeContextTooLong,
+			wantReason:  "Model invocation prompt exceeds the model context window",
+		},
+		{
+			name:        "llama-server 503 shared KV pool full",
+			answerError: `503: {"code":503,"message":"shared KV pool full","type":"unavailable_error"}`,
+			wantOutcome: ModelInvokeRuntimeUnavailable,
+			wantReason:  "Pi background model service is unavailable",
+		},
+		{
+			name:        "gateway 413 payload too large",
+			answerError: `413: {"type":"request_too_large","message":"Request exceeds the maximum size"}`,
+			wantOutcome: ModelInvokeContextTooLong,
+			wantReason:  "Model invocation prompt exceeds the model context window",
+		},
+		{
+			name:        "plain HTTP 413 without JSON body",
+			answerError: "413 Payload Too Large",
+			wantOutcome: ModelInvokeContextTooLong,
+			wantReason:  "Model invocation prompt exceeds the model context window",
+		},
+		{
+			name:        "gateway 429 rate limit exceeded",
+			answerError: `429: {"code":"rate_limit_exceeded","type":"rate_limit_error","message":"Too many concurrent requests"}`,
+			wantOutcome: ModelInvokeRuntimeUnavailable,
+			wantReason:  "Pi background model service is unavailable",
+		},
+		{
+			name:        "plain HTTP 503 without JSON body",
+			answerError: "503 Service Unavailable",
+			wantOutcome: ModelInvokeRuntimeUnavailable,
+			wantReason:  "Pi background model service is unavailable",
+		},
+		{
+			name:        "plain HTTP 403 without JSON body",
+			answerError: "403 Forbidden",
+			wantOutcome: ModelInvokeAuthRequired,
+			wantReason:  "Pi background authentication is required",
+		},
+		{
+			name:        "structured JSON model_not_found",
+			answerError: `400: {"error":{"code":"model_not_found","message":"unknown model"}}`,
+			wantOutcome: ModelInvokeRuntimeIncompatible,
+			wantReason:  "Pi background model is not available",
 		},
 		{
 			name:        "local server POSIX ECONNREFUSED",
@@ -177,7 +241,12 @@ func TestClassifyPiModelInvokeFailureSanitizesAndDistinguishesCauses(t *testing.
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classifyPiModelInvokeFailure(tc.err, native.Outcome{Status: "failed", Error: tc.answerError})
+			got := classifyPiModelInvokeFailure(tc.err, native.Outcome{
+				Status:      "failed",
+				FailureCode: tc.failureCode,
+				Diagnostics: tc.diagnostics,
+				Error:       tc.answerError,
+			})
 			if got.Outcome != tc.wantOutcome || got.Reason != tc.wantReason {
 				t.Fatalf("got = %+v; want outcome=%q reason=%q", got, tc.wantOutcome, tc.wantReason)
 			}

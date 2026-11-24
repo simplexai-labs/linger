@@ -86,18 +86,35 @@ func (d *Daemon) finishOperation(ctx context.Context, command protocol.Command, 
 		reason = "runtime_aborted"
 	}
 	terminalType := protocol.EventOperationCompleted
+	var classifiedFailure provider.RuntimeExecutionFailure
 	if reason != "" && !result.CleanupUnconfirmed {
 		terminalType = protocol.EventOperationCancelled
 	} else if result.Status != "completed" {
 		terminalType = protocol.EventOperationFailed
-		if d.onModelUnavailable != nil && spec.Model != "" && !result.ModelLoadFailed && provider.ClassifyExecutionFailure(spec.Provider, spec.CodexVersion, result.Status, result.FailureCode, result.Diagnostics).Code == "model_unavailable" {
+		classifiedFailure = provider.ClassifyExecutionFailure(spec.Provider, spec.CodexVersion, result.Status, result.FailureCode, result.Diagnostics)
+		if d.onModelUnavailable != nil && spec.Model != "" && !result.ModelLoadFailed && classifiedFailure.Code == "model_unavailable" {
 			d.onModelUnavailable(spec.Provider, spec.Model)
 		}
 	}
-	slog.Info("runner.operation.finished", "operation_id", command.OperationID, "kind", spec.OperationKind,
+	failureCode := result.FailureCode
+	if classifiedFailure.Code != "" {
+		failureCode = classifiedFailure.Code
+	}
+	logAttrs := []any{
+		"operation_id", command.OperationID, "kind", spec.OperationKind,
 		"provider", spec.Provider, "status", terminalType, "provider_status", result.Status,
-		"scheduler_yield_requested", yieldRequested, "failure_code", result.FailureCode,
-		"error", receiptReason(redact.Text(result.Error)))
+		"scheduler_yield_requested", yieldRequested, "failure_code", failureCode,
+		"error", receiptReason(redact.Text(result.Error)),
+	}
+	if diagnostics := result.Diagnostics.Sanitized(); diagnostics != nil {
+		if diagnostics.Code != "" {
+			logAttrs = append(logAttrs, "diagnostic_code", diagnostics.Code)
+		}
+		if diagnostics.StatusCode != nil {
+			logAttrs = append(logAttrs, "http_status", *diagnostics.StatusCode)
+		}
+	}
+	slog.Info("runner.operation.finished", logAttrs...)
 	includeDetail := d.runtimeFailureDetail.Load()
 	payload := terminalPayloadFor(spec, result, includeDetail)
 	if terminalType == protocol.EventOperationCancelled {

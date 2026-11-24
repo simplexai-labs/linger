@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -922,79 +921,24 @@ var modelInvokeAuthMarkers = []string{
 	"invalid api key", "invalid_api_key", "please sign in",
 }
 
-var posixNetworkErrnoPattern = regexp.MustCompile(`\b(?:ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ENOTFOUND)\b`)
-
-type structuredAPIError struct {
-	Code    string
-	Type    string
-	Message string
+type modelInvokeFailureReasons struct {
+	authRequired     string
+	modelUnavailable string
+	unavailable      string
 }
 
-// parseStructuredAPIError extracts a structured provider API error object
-// (`{"error":{"code":...,"type":...}}` or top-level `{"code":...,"type":...}`)
-// from a whole JSON body or a client error line carrying an embedded JSON body.
-func parseStructuredAPIError(text string) (structuredAPIError, bool) {
-	rest := strings.TrimSpace(text)
-	for len(rest) > 0 {
-		idx := strings.IndexByte(rest, '{')
-		if idx < 0 {
-			return structuredAPIError{}, false
-		}
-		rest = rest[idx:]
-		var body struct {
-			Code    string `json:"code"`
-			Type    string `json:"type"`
-			Message string `json:"message"`
-			Error   *struct {
-				Code    string `json:"code"`
-				Type    string `json:"type"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		dec := json.NewDecoder(strings.NewReader(rest))
-		if err := dec.Decode(&body); err == nil {
-			if body.Error != nil && (body.Error.Code != "" || body.Error.Type != "") {
-				return structuredAPIError{
-					Code:    strings.TrimSpace(body.Error.Code),
-					Type:    strings.TrimSpace(body.Error.Type),
-					Message: strings.TrimSpace(body.Error.Message),
-				}, true
-			}
-			if body.Code != "" {
-				return structuredAPIError{
-					Code:    strings.TrimSpace(body.Code),
-					Type:    strings.TrimSpace(body.Type),
-					Message: strings.TrimSpace(body.Message),
-				}, true
-			}
-		}
-		rest = rest[1:]
-	}
-	return structuredAPIError{}, false
-}
-
-func isContextTooLongErrorCode(code string) bool {
+func modelInvokeResultForFailureCode(code string, reasons modelInvokeFailureReasons) (ModelInvokeResult, bool) {
 	switch code {
-	case "exceed_context_size_error", "context_length_exceeded", "context_window_exceeded", "contextWindowExceeded", "prompt_too_long":
-		return true
+	case "context_too_long":
+		return ModelInvokeResult{Outcome: ModelInvokeContextTooLong, Reason: "Model invocation prompt exceeds the model context window"}, true
+	case "authentication_required":
+		return ModelInvokeResult{Outcome: ModelInvokeAuthRequired, Reason: reasons.authRequired}, true
+	case "model_unavailable":
+		return ModelInvokeResult{Outcome: ModelInvokeRuntimeIncompatible, Reason: reasons.modelUnavailable}, true
+	case "rate_limited", "model_service_error", "network_error":
+		return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: reasons.unavailable}, true
 	}
-	return false
-}
-
-func isAuthErrorCode(code string) bool {
-	switch code {
-	case "invalid_api_key", "authentication_error", "authentication_failed", "unauthorized":
-		return true
-	}
-	return false
-}
-
-func isUnavailableErrorCode(code string) bool {
-	switch code {
-	case "server_error", "overloaded_error", "service_unavailable", "unavailable_error", "model_not_loaded":
-		return true
-	}
-	return false
+	return ModelInvokeResult{}, false
 }
 
 func invocationDiagnostics(invocation modelInvocation) (string, native.RuntimeFailureDiagnostics) {
@@ -1033,41 +977,42 @@ func classifyModelInvokeFailureWithDiagnostics(
 	}
 	reason = truncateRunes(redact.Text(strings.TrimSpace(reason)), 300)
 
-	if failureCode != "" || diagnostics.Code != "" || diagnostics.StatusCode != nil {
-		classified := ClassifyExecutionFailure(runtimeType, "", "failed", failureCode, diagnostics)
-		switch classified.Code {
-		case "context_too_long":
-			return ModelInvokeResult{Outcome: ModelInvokeContextTooLong, Reason: "Model invocation prompt exceeds the model context window"}
-		case "authentication_required":
-			return ModelInvokeResult{Outcome: ModelInvokeAuthRequired, Reason: reason}
-		case "model_unavailable":
-			return ModelInvokeResult{Outcome: ModelInvokeRuntimeIncompatible, Reason: reason}
-		case "model_service_error", "network_error":
-			return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: reason}
+	classify := func(code string, diag native.RuntimeFailureDiagnostics, modelUnavailableReason string) (ModelInvokeResult, bool) {
+		if code == "" && diag.Code == "" && diag.StatusCode == nil {
+			return ModelInvokeResult{}, false
 		}
+		classified := ClassifyExecutionFailure(runtimeType, "", "failed", code, diag)
+		return modelInvokeResultForFailureCode(classified.Code, modelInvokeFailureReasons{
+			authRequired:     reason,
+			modelUnavailable: modelUnavailableReason,
+			unavailable:      reason,
+		})
+	}
+
+	if result, ok := classify(failureCode, diagnostics, reason); ok {
+		return result
 	}
 
 	apiSource := reported
 	if apiSource == "" {
 		apiSource = stderr
 	}
-	if apiErr, ok := parseStructuredAPIError(apiSource); ok {
-		if apiErr.Code == "model_not_found" {
+	parsed := native.APIErrorDiagnostics(apiSource)
+	if parsed.Code == "" && parsed.StatusCode == nil && reported != "" && stderr != "" {
+		parsed = native.APIErrorDiagnostics(stderr)
+	}
+	modelUnavailableReason := reason
+	if parsed.Code == "model_not_found" {
+		if apiErr, ok := native.ParseStructuredAPIError(apiSource); ok {
 			unavailable := "The model is not available to this account"
 			if apiErr.Message != "" {
 				unavailable += ": " + apiErr.Message
 			}
-			return ModelInvokeResult{Outcome: ModelInvokeRuntimeIncompatible, Reason: truncateRunes(redact.Text(unavailable), 300)}
+			modelUnavailableReason = truncateRunes(redact.Text(unavailable), 300)
 		}
-		if isContextTooLongErrorCode(apiErr.Code) || isContextTooLongErrorCode(apiErr.Type) {
-			return ModelInvokeResult{Outcome: ModelInvokeContextTooLong, Reason: "Model invocation prompt exceeds the model context window"}
-		}
-		if isAuthErrorCode(apiErr.Code) || isAuthErrorCode(apiErr.Type) {
-			return ModelInvokeResult{Outcome: ModelInvokeAuthRequired, Reason: reason}
-		}
-		if isUnavailableErrorCode(apiErr.Code) || isUnavailableErrorCode(apiErr.Type) {
-			return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: reason}
-		}
+	}
+	if result, ok := classify("", parsed, modelUnavailableReason); ok {
+		return result
 	}
 
 	evidence := strings.ToLower(stderr + "\n" + reported)
@@ -1080,9 +1025,6 @@ func classifyModelInvokeFailureWithDiagnostics(
 		if strings.Contains(evidence, marker) {
 			return ModelInvokeResult{Outcome: ModelInvokeAuthRequired, Reason: reason}
 		}
-	}
-	if posixNetworkErrnoPattern.MatchString(stderr + "\n" + reported) {
-		return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: reason}
 	}
 	return ModelInvokeResult{Outcome: ModelInvokeFailed, Reason: reason}
 }

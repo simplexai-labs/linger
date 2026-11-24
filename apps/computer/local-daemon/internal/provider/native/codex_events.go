@@ -263,7 +263,7 @@ func (op *codexOperation) turnFinished(n *codexNotification) {
 			if n.Turn.Error.Message != "" {
 				message = n.Turn.Error.Message
 			}
-			diagnostics = codexErrorDiagnostics(n.Turn.Error.CodexErrorInfo)
+			diagnostics = codexFailureDiagnostics(n.Turn.Error.CodexErrorInfo, message)
 		}
 		op.setTurnErrorLocked(message, "", diagnostics)
 	}
@@ -297,8 +297,28 @@ func (op *codexOperation) errorNotification(n *codexNotification) {
 	if message == "" {
 		message = "Codex reported a terminal protocol error"
 	}
-	op.recordTurnFailure(message, "", codexErrorDiagnostics(info))
+	op.recordTurnFailure(message, "", codexFailureDiagnostics(info, message))
 	op.activityNote("error:terminal")
+}
+
+// codexFailureDiagnostics prefers Codex's own codexErrorInfo and falls back to
+// structured API error metadata embedded in message when codexErrorInfo is
+// absent, generic ("other"), or an HTTP 400 connection wrapper around a
+// structured provider error such as llama.cpp's exceed_context_size_error.
+func codexFailureDiagnostics(info json.RawMessage, message string) RuntimeFailureDiagnostics {
+	diag := codexErrorDiagnostics(info)
+	genericHTTP400 := diag.Code == "httpConnectionFailed" && diag.StatusCode != nil && *diag.StatusCode == 400
+	if diag.Code != "" && diag.Code != "other" && !genericHTTP400 {
+		return diag
+	}
+	parsed := APIErrorDiagnostics(message)
+	if parsed.Code != "" {
+		diag.Code = parsed.Code
+	}
+	if diag.StatusCode == nil && parsed.StatusCode != nil {
+		diag.StatusCode = parsed.StatusCode
+	}
+	return diag
 }
 
 func (op *codexOperation) item(method string, item *codexItem) {

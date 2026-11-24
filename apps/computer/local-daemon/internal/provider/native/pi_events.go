@@ -21,14 +21,19 @@ type piEventFrame struct {
 		ID       string `json:"id"`
 		ToolName string `json:"toolName"`
 	} `json:"assistantMessageEvent"`
-	ToolName   string          `json:"toolName"`
-	ToolCallID string          `json:"toolCallId"`
-	Args       json.RawMessage `json:"args"`
-	Result     json.RawMessage `json:"result"`
-	IsError    bool            `json:"isError"`
-	Success    bool            `json:"success"`
-	FinalError json.RawMessage `json:"finalError"`
-	Aborted    bool            `json:"aborted"`
+	ToolName     string          `json:"toolName"`
+	ToolCallID   string          `json:"toolCallId"`
+	Args         json.RawMessage `json:"args"`
+	Result       json.RawMessage `json:"result"`
+	IsError      bool            `json:"isError"`
+	Success      bool            `json:"success"`
+	FinalError   json.RawMessage `json:"finalError"`
+	Aborted      bool            `json:"aborted"`
+	Reason       string          `json:"reason"`
+	ErrorMessage string          `json:"errorMessage"`
+	WillRetry    bool            `json:"willRetry"`
+	Attempt      int             `json:"attempt"`
+	MaxAttempts  int             `json:"maxAttempts"`
 }
 
 type piWireMessage struct {
@@ -99,16 +104,34 @@ func (t *piTurn) apply(event piEventFrame, observed time.Time) {
 			status = "failed"
 		}
 		t.emit(Event{Kind: EventToolOutput, ObservedAt: observed, Status: status, ToolName: event.ToolName, InvocationID: piInvocationID(event.ToolCallID), Output: piText(event.Result)})
+	case "auto_retry_start":
+		if t.logger != nil {
+			t.logger.Warn("pi.auto_retry_start", "attempts", event.Attempt, "error", event.ErrorMessage)
+		}
 	case "auto_retry_end":
 		if !event.Success {
-			t.noteFailure(piText(event.FinalError))
+			finalErr := piText(event.FinalError)
+			t.noteFailure(finalErr)
+			if t.logger != nil {
+				t.logger.Warn("pi.auto_retry_end", "outcome", "failed", "attempts", event.Attempt, "error", finalErr)
+			}
 		}
-	case "auto_compaction_end":
+	case "compaction_end", "auto_compaction_end":
 		result := strings.TrimSpace(string(event.Result))
 		if !event.Aborted && result != "" && result != "null" {
 			t.mu.Lock()
 			t.compactions++
 			t.mu.Unlock()
+		} else if !event.Aborted && event.Reason == "overflow" && !event.WillRetry {
+			t.mu.Lock()
+			t.overflowFailed = true
+			if t.failure == "" && event.ErrorMessage != "" {
+				t.failure = event.ErrorMessage
+			}
+			t.mu.Unlock()
+			if t.logger != nil {
+				t.logger.Warn("pi.compaction_end", "outcome", "failed", "reason", event.Reason, "error", event.ErrorMessage)
+			}
 		}
 	case "error":
 		t.noteFailure(piText(event.Message))
@@ -208,6 +231,7 @@ func (t *piTurn) applyMessageEnd(message piWireMessage, observed time.Time) {
 	}
 	t.failure = ""
 	t.aborted = message.StopReason == "aborted"
+	t.overflowFailed = false
 	if message.StopReason == "error" || t.aborted {
 		t.failure = message.ErrorMessage
 		if t.failure == "" {

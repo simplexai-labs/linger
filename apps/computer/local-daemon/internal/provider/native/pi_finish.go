@@ -204,8 +204,18 @@ func (t *piTurn) finish(began time.Time, status, failure string, interrupted boo
 	}
 	outcome := t.outcomeFor(began, status, failure)
 	outcome.ExitConfirmed, outcome.ExitUnconfirmed = confirmed, !confirmed
-	if status == statusFailed && !interrupted && !p.terminated.Load() {
-		outcome.Diagnostics = processExitDiagnostics(p.cmd.ProcessState)
+	if status == statusFailed {
+		t.mu.Lock()
+		overflowFailed := t.overflowFailed
+		t.mu.Unlock()
+		outcome.Diagnostics = APIErrorDiagnostics(failure)
+		if overflowFailed {
+			outcome.FailureCode = "context_too_long"
+		}
+		if !interrupted && !p.terminated.Load() {
+			exit := processExitDiagnostics(p.cmd.ProcessState)
+			outcome.Diagnostics.ExitCode, outcome.Diagnostics.Signal = exit.ExitCode, exit.Signal
+		}
 	}
 	p.unbind(t)
 	if confirmed {

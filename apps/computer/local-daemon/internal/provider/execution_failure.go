@@ -51,10 +51,28 @@ func ClassifyExecutionFailure(runtimeType, version, status, failureCode string, 
 }
 
 func diagnosticFailureCode(diagnostics native.RuntimeFailureDiagnostics) string {
+	switch diagnostics.Code {
+	case "contextWindowExceeded", "exceed_context_size_error", "context_length_exceeded",
+		"context_window_exceeded", "prompt_too_long", "request_too_large":
+		return "context_too_long"
+	case "model_not_found":
+		return "model_unavailable"
+	case "unauthorized", "invalid_api_key", "authentication_error", "authentication_failed":
+		return "authentication_required"
+	case "usageLimitExceeded", "rate_limit_exceeded", "rate_limit_error", "rate_limit":
+		return "rate_limited"
+	case "internalServerError", "serverOverloaded", "server_error", "overloaded_error",
+		"service_unavailable", "unavailable_error", "server_busy", "model_not_loaded":
+		return "model_service_error"
+	case "ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH", "ENOTFOUND":
+		return "network_error"
+	}
 	if status := diagnostics.StatusCode; status != nil {
 		switch *status {
 		case 401, 403:
 			return "authentication_required"
+		case 413:
+			return "context_too_long"
 		case 429:
 			return "rate_limited"
 		}
@@ -63,14 +81,6 @@ func diagnosticFailureCode(diagnostics native.RuntimeFailureDiagnostics) string 
 		}
 	}
 	switch diagnostics.Code {
-	case "unauthorized":
-		return "authentication_required"
-	case "usageLimitExceeded":
-		return "rate_limited"
-	case "contextWindowExceeded":
-		return "context_too_long"
-	case "internalServerError", "serverOverloaded":
-		return "model_service_error"
 	case "httpConnectionFailed", "responseStreamConnectionFailed", "responseStreamDisconnected":
 		// A connection failure that carries an HTTP status reached the
 		// service; only one without a status is a network failure.
