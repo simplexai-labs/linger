@@ -225,6 +225,7 @@ export class ComputerDaemonModule implements Module {
   #connection = "disconnected";
   #running = 0;
   #modelInvokes = 0;
+  #localModelsJobs = 0;
   #failures = 0;
   #startedAt = 0;
   #retry: NodeJS.Timeout | undefined;
@@ -256,6 +257,11 @@ export class ComputerDaemonModule implements Module {
   // One-shot background model invocations the daemon is executing right now.
   modelInvokes(): number {
     return this.#modelInvokes;
+  }
+
+  // Local model download or load jobs the daemon is supervising right now.
+  localModelsBusy(): number {
+    return this.#localModelsJobs;
   }
 
   // online, connecting, auth_failed, upgrade_required, or disconnected
@@ -513,6 +519,7 @@ export class ComputerDaemonModule implements Module {
         gateway_state?: unknown;
         active_operations?: unknown;
         active_model_invokes?: unknown;
+        local_models_jobs?: unknown;
       };
       try {
         status = JSON.parse(line) as typeof status;
@@ -538,6 +545,11 @@ export class ComputerDaemonModule implements Module {
         this.#setRunning(status.active_operations);
       if (typeof status.active_model_invokes === "number")
         this.#setModelInvokes(status.active_model_invokes);
+      this.#setLocalModelsJobs(
+        typeof status.local_models_jobs === "number"
+          ? status.local_models_jobs
+          : 0,
+      );
     });
     child.onExit((code, reason) => {
       if (this.#child !== child) return;
@@ -545,6 +557,7 @@ export class ComputerDaemonModule implements Module {
       void this.#closeDriver();
       this.#setRunning(0);
       this.#setModelInvokes(0);
+      this.#setLocalModelsJobs(0);
       this.#setConnection("disconnected");
       if (this.#stopping) return;
       if (Date.now() - this.#startedAt >= HEALTHY_AFTER_MS) this.#failures = 0;
@@ -626,6 +639,7 @@ export class ComputerDaemonModule implements Module {
     this.#child = undefined;
     this.#setRunning(0);
     this.#setModelInvokes(0);
+    this.#setLocalModelsJobs(0);
     this.#setConnection("disconnected");
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
@@ -689,6 +703,12 @@ export class ComputerDaemonModule implements Module {
     if (this.#modelInvokes === modelInvokes) return;
     this.#modelInvokes = modelInvokes;
     this.#ctx?.bus.emit("runtime.model_activity", modelInvokes);
+  }
+
+  #setLocalModelsJobs(jobs: number): void {
+    if (this.#localModelsJobs === jobs) return;
+    this.#localModelsJobs = jobs;
+    this.#ctx?.bus.emit("local-models.activity", jobs);
   }
 
   #setConnection(connection: string): void {

@@ -110,6 +110,15 @@ func (d *Daemon) ensureLocalModel(ctx context.Context, runtimeType, model string
 	return "model_unavailable", err
 }
 
+// ActiveLocalModelsJobCount reports in-flight local model download or load
+// jobs supervised by the library so the Desktop can wait before switching kits.
+func (d *Daemon) ActiveLocalModelsJobCount() int {
+	if counter, ok := d.localModels.(interface{ ActiveJobCount() int }); ok {
+		return counter.ActiveJobCount()
+	}
+	return 0
+}
+
 // refreshLocalModels reports the library on a newly welcomed connection.
 func (d *Daemon) refreshLocalModels(ctx context.Context) {
 	if d.localModels == nil {

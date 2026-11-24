@@ -68,6 +68,11 @@ const desktopConfig = z.object({
   // releases (update-manifest.ts); GitHub's simplexai-labs/linger when unset.
   // A value that is not a URL is dropped rather than resetting the file.
   updateFeedUrl: z.string().url().optional().catch(undefined),
+  // Whether to check in the background for signed localmodels engine updates.
+  localModelsAutoCheck: z.boolean().default(true),
+  // Optional HTTPS feed URL serving manifest.json and manifest.json.sig for
+  // localmodels component updates (defaults to npm / npmmirror discovery).
+  localModelsFeedUrl: z.string().url().optional().catch(undefined),
   // Where Send Diagnostics uploads to (docs/diagnostics-upload.md); set by
   // hand for a self-hosted receiver. An invalid value is dropped, not the
   // whole file.

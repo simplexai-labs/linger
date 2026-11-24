@@ -35,6 +35,8 @@ export interface BusEvents {
   "local-server.retry": [];
   // The window could not load the server it shows.
   "local-server.unreachable": [];
+  "local-models.activity": [jobs: number];
+  "local-models.update.changed": [state: string];
   "power.changed": [];
   "runtime.activity": [running: number];
   "runtime.model_activity": [running: number];

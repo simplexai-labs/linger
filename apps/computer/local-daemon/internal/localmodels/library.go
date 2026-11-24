@@ -1464,3 +1464,22 @@ func loadCodeOf(err error) string {
 	}
 	return ""
 }
+
+// ActiveJobCount reports the number of in-flight model downloads or loads,
+// including jobs adopted from disk after a Daemon restart.
+func (l *Library) ActiveJobCount() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	count := len(l.jobs)
+	if l.current != nil {
+		for _, model := range l.current.Models {
+			if model.State != "downloading" && model.State != "loading" {
+				continue
+			}
+			if _, supervised := l.jobs[model.ID]; !supervised {
+				count++
+			}
+		}
+	}
+	return count
+}

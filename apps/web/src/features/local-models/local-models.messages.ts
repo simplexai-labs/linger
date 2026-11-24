@@ -623,4 +623,33 @@ export const localModelsMessages = defineMessages("localModels", {
     "Other apps hold {other} of memory ({free} of {total} free). Close some, then recheck.",
   guidanceConstrainedBodyGpu:
     "Other apps hold {other} of GPU memory ({free} of {total} free). Close some, then recheck.",
+
+  // Independent signed localmodels engine updates.
+  engineSectionTitle: "Model engine",
+  engineFactVersion: "Version",
+  engineFactUpdates: "Updates",
+  engineSourceBundled: "Bundled",
+  engineSourceUpdated: "Updated",
+  engineCheckUpdates: "Check for updates",
+  engineCheckingUpdates: "Checking…",
+  engineAutoCheck: "Check automatically",
+  engineUpdateTitle: "Model engine {version} is available",
+  engineUpdateSafeBody:
+    "Updates the model catalog and detector without changing downloaded models.",
+  engineUpdateAction: "Update",
+  engineUpdateToVersion: "Update to {version}",
+  engineReleaseNotes: "Release notes",
+  engineRequiresAppTitle: "Model engine {version} requires a newer Linger",
+  engineRequiresAppBody:
+    "Model engine {version} requires Linger {minVersion} or newer.",
+  engineCheckLingerUpdates: "Check for Linger updates",
+  engineDownloading: "Downloading model engine {version}…",
+  engineDownloadingProgress:
+    "Downloading model engine {version} ({done} / {total})…",
+  engineVerifying: "Verifying model engine {version}…",
+  engineWaiting:
+    "Model engine {version} is ready and waiting for active tasks to finish…",
+  engineApplying: "Applying model engine {version}…",
+  engineUpdatedNotice: "Model engine updated to {version}.",
+  engineUpdateFailed: "Model engine update failed: {error}",
 });
