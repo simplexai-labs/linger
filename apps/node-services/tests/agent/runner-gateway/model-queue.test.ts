@@ -53,11 +53,13 @@ function track<T>(promise: Promise<T>) {
 
 const flush = () => vi.advanceTimersByTimeAsync(0);
 const fixed = (limit: number) => ({ initial: limit, max: limit });
-/** One finished Run request: so many ms per thousand prompt tokens. */
+/** One finished Run request: so many ms per thousand prompt tokens. Time
+ * stands still, so it is judged by the units running when it reports. */
 const latency = (msPerThousand: number) => ({
   type: "latency" as const,
   source: "run" as const,
   latencyMs: msPerThousand * 4,
+  endedMsAgo: 0,
   workTokens: 4_000,
 });
 const signal = new AbortController().signal;
@@ -391,6 +393,72 @@ describe("ModelQueue limit", () => {
     expect(waiting.value).toBeDefined();
   });
 
+  it("does not raise a limit on background work running alone under it", async () => {
+    let now = 0;
+    const queue = new ModelQueue(
+      () => ({ initial: 1, max: 3 }),
+      () => now,
+    );
+    const alone = {
+      type: "latency" as const,
+      source: "call" as const,
+      latencyMs: 10_000,
+      endedMsAgo: 0,
+      workTokens: 4_000,
+    };
+    let running = await queue.acquire(codex, call("wiki", "w0"), signal);
+    for (let i = 1; i <= 12; i++) {
+      const next = track(queue.acquire(codex, call("wiki", `w${i}`), signal));
+      now += 10_000;
+      queue.observe(codex, alone);
+      await flush();
+      // Two places leave background work one; three would start the next.
+      expect(next.value).toBeUndefined();
+      running.release(done);
+      await flush();
+      running = next.value!;
+    }
+    // Calls alone did try two, whose last place chat can take.
+    const chat = track(queue.acquire(codex, run(), signal));
+    await flush();
+    expect(chat.value).toBeDefined();
+  });
+
+  it("raises a limit once requests that ran at it stay as fast, each placed by when it was timed", async () => {
+    let now = 0;
+    const queue = new ModelQueue(
+      () => ({ initial: 2, max: 3 }),
+      () => now,
+    );
+    const request = (endedMsAgo = 0) => ({
+      type: "latency" as const,
+      source: "run" as const,
+      latencyMs: 10_000,
+      endedMsAgo,
+      workTokens: 4_000,
+    });
+    await queue.acquire(codex, run("a"), signal);
+    for (let i = 0; i < 3; i++) {
+      now += 10_000;
+      queue.observe(codex, request());
+    }
+    await queue.acquire(codex, run("b"), signal);
+    const c = track(queue.acquire(codex, run("c"), signal));
+    // Its first item came before b started, though it reports after.
+    now += 10_000;
+    queue.observe(codex, request(10_000));
+    for (let i = 0; i < 3; i++) {
+      now += 10_000;
+      queue.observe(codex, request());
+    }
+    await flush();
+    expect(c.value).toBeUndefined();
+    now += 10_000;
+    queue.observe(codex, request());
+    await flush();
+    expect(c.value).toBeDefined();
+  });
+
   it("gives a place back when requests slow down and halves it when refused", async () => {
     const queue = new ModelQueue(() => ({ initial: 1, max: 8 }));
     const first = await queue.acquire(codex, run("a"), signal);
@@ -451,6 +519,7 @@ describe("ModelQueue limit", () => {
   it("keeps a limit it came down from as the ceiling and retries it later, waiting longer after each failed retry", async () => {
     let now = 0;
     const minutes = (count: number) => (now += count * 60_000);
+    const seconds = (count: number) => (now += count * 1_000);
     const queue = new ModelQueue(
       () => ({ initial: 1, max: 4 }),
       () => now,
@@ -474,7 +543,9 @@ describe("ModelQueue limit", () => {
     await flush();
     expect(c.value).toBeDefined();
 
-    // The retry is slow too: the next one waits ten minutes.
+    // Both run a while and the retry is slow too: the next one waits ten
+    // minutes.
+    seconds(10);
     for (let i = 0; i < 4; i++) queue.observe(codex, latency(1_500));
     b.value!.release(done);
     const d = track(queue.acquire(codex, run("d"), signal));
@@ -487,7 +558,9 @@ describe("ModelQueue limit", () => {
     await flush();
     expect(d.value).toBeDefined();
 
-    // This retry holds: the ceiling is gone and the limit grows past it.
+    // Both run a while and this retry holds: the ceiling is gone and the
+    // limit grows past it.
+    seconds(10);
     const e = track(queue.acquire(codex, run("e"), signal));
     for (let i = 0; i < 4; i++) queue.observe(codex, latency(500));
     await flush();

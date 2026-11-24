@@ -810,6 +810,11 @@ export class RunnerOperations {
       type: "latency",
       source: "run",
       latencyMs: response.first_item_at_unix_ms - response.started_at_unix_ms,
+      // The report arrives once the whole response is written.
+      endedMsAgo: Math.max(
+        0,
+        response.responded_at_unix_ms - response.first_item_at_unix_ms,
+      ),
       workTokens: response.usage.input,
     });
   }

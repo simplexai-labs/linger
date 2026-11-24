@@ -412,6 +412,7 @@ function modelSignal(
     type: "latency",
     source: "call",
     latencyMs: outcome.duration_ms,
+    endedMsAgo: 0,
     workTokens:
       Math.max(input_tokens - cached_input_tokens, 0) +
       OUTPUT_TOKEN_WEIGHT * output_tokens,

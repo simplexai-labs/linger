@@ -16,9 +16,19 @@ export type ModelSignal =
        * compared only with its own kind. */
       readonly source: "run" | "call";
       readonly latencyMs: number;
+      /** How long before the report the timed span ended. */
+      readonly endedMsAgo: number;
       readonly workTokens: number;
     }
   | { readonly type: "overload" };
+
+/** Units running on the endpoint while one request was timed, the request
+ * itself included. */
+export interface Concurrency {
+  /** Weighted by how long each count lasted. */
+  readonly mean: number;
+  readonly peak: number;
+}
 
 /** One latency sample beside what it is compared with, in ms per thousand
  * tokens; a median is missing until enough samples arrived. */
@@ -41,9 +51,9 @@ export interface LimitChange {
   readonly ratio?: number;
 }
 
-/** Samples taken at one limit before it moves again. */
+/** Samples that ran at one limit before it moves again. */
 const WINDOW = 4;
-/** Samples taken with one unit running, which set the baseline. */
+/** Samples that ran alone, which set the baseline. */
 const BASELINE_SAMPLES = 10;
 const BASELINE_MIN_SAMPLES = 3;
 /** Window median over baseline at or below which another unit is tried. */
@@ -66,10 +76,11 @@ interface Latencies {
 
 /**
  * An endpoint's concurrency, probed additively and backed off fast. The
- * limit grows by one only while work waits for it and requests are about as
- * fast as with one unit running; it shrinks by one when they are clearly
- * slower and halves when the endpoint refuses work. Running units are never
- * interrupted, so a lower limit only holds back new ones.
+ * limit grows by one only while work waits for it and requests that ran at
+ * the limit are about as fast as requests that ran alone; it shrinks by one
+ * when they are clearly slower and halves when the endpoint refuses work.
+ * Running units are never interrupted, so a lower limit only holds back new
+ * ones.
  *
  * A limit it had to come down from is the ceiling: it is not tried again
  * until the retry time, since one unit running always looks fast and would
@@ -100,7 +111,8 @@ export class AdaptiveLimit {
   observe(
     signal: ModelSignal,
     endpoint: {
-      readonly active: number;
+      /** Over a latency signal's timed span; an overload ignores it. */
+      readonly concurrency: Concurrency;
       readonly saturated: boolean;
       readonly now: number;
     },
@@ -122,11 +134,13 @@ export class AdaptiveLimit {
       latencies = { baseline: [], window: [] };
       this.#latencies.set(signal.source, latencies);
     }
-    if (endpoint.active <= 1)
-      keepLast(latencies.baseline, perThousand, BASELINE_SAMPLES);
+    const { mean, peak } = endpoint.concurrency;
+    if (peak <= 1) keepLast(latencies.baseline, perThousand, BASELINE_SAMPLES);
+    // Background work leaves the last place free, so a limit's requests
+    // often run with fewer units and would show the speed of a lower one.
     // After a lower limit the units already running drain first; until
     // then requests still show the old limit's load.
-    if (endpoint.active <= this.#limit)
+    if (Math.round(mean) === this.#limit)
       keepLast(latencies.window, perThousand, WINDOW);
     const baseline =
       latencies.baseline.length >= BASELINE_MIN_SAMPLES
@@ -199,6 +213,49 @@ export class AdaptiveLimit {
     // Requests timed at the old limit say nothing about the new one.
     for (const latencies of this.#latencies.values()) latencies.window = [];
     return { from, to, reason, ...(ratio === undefined ? {} : { ratio }) };
+  }
+}
+
+/** Longer than any timed request; a longer one counts from here. */
+const OCCUPANCY_HISTORY_MS = 30 * 60_000;
+
+/** How many units an endpoint ran, and since when. */
+export class Occupancy {
+  /** Each count holds from its time until the next one. */
+  readonly #counts: { readonly at: number; readonly active: number }[];
+
+  constructor(now: number) {
+    this.#counts = [{ at: now, active: 0 }];
+  }
+
+  record(now: number, active: number): void {
+    this.#counts.push({ at: now, active });
+    // The newest count before the horizon still holds at it.
+    let stale = 0;
+    while (this.#counts[stale + 1]!.at <= now - OCCUPANCY_HISTORY_MS) stale++;
+    this.#counts.splice(0, stale);
+  }
+
+  /** Units running from one time to another, which start no earlier than
+   * the history does. */
+  over(from: number, to: number): Concurrency {
+    const counts = this.#counts;
+    const start = Math.max(from, counts[0]!.at);
+    const end = Math.max(to, start);
+    let i = 0;
+    while (i + 1 < counts.length && counts[i + 1]!.at <= start) i++;
+    if (end === start)
+      return { mean: counts[i]!.active, peak: counts[i]!.active };
+    let area = 0;
+    let peak = 0;
+    for (let at = start; i < counts.length && at < end; i++) {
+      const until = Math.min(counts[i + 1]?.at ?? end, end);
+      if (until <= at) continue;
+      area += counts[i]!.active * (until - at);
+      peak = Math.max(peak, counts[i]!.active);
+      at = until;
+    }
+    return { mean: area / (end - start), peak };
   }
 }
 

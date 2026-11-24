@@ -12,11 +12,14 @@ their requests would reach the model beside the Run's own without waiting.
 | A runtime whose every model is on your account     | 10        | 10       |
 | A computer that does not say how it reaches them   | 1         | 8        |
 
-The number of units at once adapts to how the endpoint answers. While work
-waits and requests come back about as fast as with one unit running, the
-queue tries one more. When requests get clearly slower it gives one back, and
-when the endpoint refuses work (rate limited, overloaded, or a call runs out
-of time) it halves and holds off raising for a minute. Speed is compared per
+The number of units at once adapts to how the endpoint answers. Each request
+counts at the number of units that actually ran while it was timed, not at
+the limit. While work waits and requests that ran at the current number come
+back about as fast as requests that ran alone, the queue tries one more. When
+they get clearly slower it gives one back, and when the endpoint refuses work
+(rate limited, overloaded, or a call runs out of time) it halves and holds off
+raising for a minute. Background work leaves the last place free, so on its
+own it never takes the number past two. Speed is compared per
 thousand new prompt tokens, so a long prompt does not look like a busy
 endpoint. A number it had to come down from is not tried again for five
 minutes; if that retry is too slow as well, the wait doubles, up to half an

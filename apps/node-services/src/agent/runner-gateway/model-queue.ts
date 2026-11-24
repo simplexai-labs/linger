@@ -8,6 +8,7 @@ import {
 import { logAgentEvent } from "../observability/agent-log.js";
 import {
   AdaptiveLimit,
+  Occupancy,
   type ConcurrencyRange,
   type ModelSignal,
 } from "./adaptive-limit.js";
@@ -69,6 +70,9 @@ interface EndpointState {
   readonly key: string;
   readonly endpoint: ModelEndpoint;
   active: number;
+  /** A timed request lies within its unit's place, so the history never
+   * needs to outlive an idle endpoint. */
+  readonly occupancy: Occupancy;
   readonly waiting: Waiter[];
 }
 
@@ -107,10 +111,17 @@ export class ModelQueue {
     const state = this.#endpoints.get(key);
     const active = state?.active ?? 0;
     const saturated = (state?.waiting.length ?? 0) > 0;
+    const now = this.now();
+    const ended = now - (signal.type === "latency" ? signal.endedMsAgo : 0);
+    const started = ended - (signal.type === "latency" ? signal.latencyMs : 0);
+    const concurrency = state?.occupancy.over(started, ended) ?? {
+      mean: 0,
+      peak: 0,
+    };
     const { change, latency } = limit.observe(signal, {
-      active,
+      concurrency,
       saturated,
-      now: this.now(),
+      now,
     });
     if (latency)
       logAgentEvent("debug", "model_queue.latency_sampled", {
@@ -124,6 +135,8 @@ export class ModelQueue {
         ...(latency.window === undefined
           ? {}
           : { window_ms_per_thousand: Math.round(latency.window) }),
+        concurrency: Math.round(concurrency.mean * 10) / 10,
+        peak_concurrency: concurrency.peak,
         active,
         waiting: state?.waiting.length ?? 0,
         limit: limit.value,
@@ -244,7 +257,13 @@ export class ModelQueue {
     const key = endpointKey(endpoint);
     let state = this.#endpoints.get(key);
     if (!state) {
-      state = { key, endpoint, active: 0, waiting: [] };
+      state = {
+        key,
+        endpoint,
+        active: 0,
+        occupancy: new Occupancy(this.now()),
+        waiting: [],
+      };
       this.#endpoints.set(key, state);
     }
     return state;
@@ -273,6 +292,7 @@ export class ModelQueue {
     const finish = () => {
       if (!result || borrowers > 0) return;
       state.active -= 1;
+      state.occupancy.record(this.now(), state.active);
       logAgentEvent("info", "model_queue.finished", {
         kind: work.kind,
         key: work.key.slice(0, 200),
@@ -315,6 +335,7 @@ export class ModelQueue {
       const next = state.waiting[0]!;
       if (state.active >= admissionLimit(limit, next.priority())) break;
       state.active += 1;
+      state.occupancy.record(this.now(), state.active);
       state.waiting.shift();
       next.admit();
     }
