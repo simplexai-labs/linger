@@ -328,7 +328,8 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		path := "/v0/agent-runtime/runs/reply-status?context_key=" + url.QueryEscape(contextKey) + "&local_run_id=" + url.QueryEscape(runID)
 		return agentRuntimeStateRequest(t, handler, http.MethodGet, path, teamHubInternalToken, nil)
 	}
-	assertReplied := func(runID string, want bool) {
+	// inboxes are the Inboxes where the reply landed, in order.
+	assertReplied := func(runID string, want bool, inboxes ...string) {
 		t.Helper()
 		code, raw := queryReplyStatus(runID)
 		if code != http.StatusOK {
@@ -338,6 +339,9 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		decode(t, raw, &result)
 		if result.Replied != want {
 			t.Fatalf("reply status for %s replied=%v, want %v", runID, result.Replied, want)
+		}
+		if result.RepliedInboxIds == nil || !slices.Equal(*result.RepliedInboxIds, append([]string{}, inboxes...)) {
+			t.Fatalf("reply status for %s inboxes=%s, want %v", runID, raw, inboxes)
 		}
 	}
 	startRun := func(inputID string) string {
@@ -408,7 +412,7 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 	}
 	assertReplied(run1, false)
 	insertRuntimeRunMessageFixture(t, pool, roomID, "msg-run1-reply", run1, "Direct reply")
-	assertReplied(run1, true)
+	assertReplied(run1, true, "room:"+roomID)
 	finishRun(run1)
 
 	// Run 2: attributed presentation sequence counts even before items deliver into messages.
@@ -419,7 +423,7 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		VALUES('seq-run2','tenant_acme',$1,'actor_acme_official',$2,'pending')`, roomID, run2); err != nil {
 		t.Fatalf("insert attributed sequence: %v", err)
 	}
-	assertReplied(run2, true)
+	assertReplied(run2, true, "room:"+roomID)
 	finishRun(run2)
 
 	// Run 3: unattributed presentation sequence created during the Run counts.
@@ -430,7 +434,7 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		VALUES('seq-run3-unattributed','tenant_acme',$1,'actor_acme_official',NULL,'pending',clock_timestamp())`, roomID); err != nil {
 		t.Fatalf("insert unattributed sequence: %v", err)
 	}
-	assertReplied(run3, true)
+	assertReplied(run3, true, "room:"+roomID)
 	finishRun(run3)
 
 	// Run 4: unattributed conversation message written during the Run counts.
@@ -442,7 +446,7 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		       '[{"type":"text","content":"Early reply"}]'::jsonb,'conversation',NULL,clock_timestamp())`, roomID); err != nil {
 		t.Fatalf("insert unattributed message: %v", err)
 	}
-	assertReplied(run4, true)
+	assertReplied(run4, true, "room:"+roomID)
 	finishRun(run4)
 
 	// Run 5: emoji reaction in a Thread of the Room written during the Run counts.
@@ -453,7 +457,10 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		VALUES('reply-status-thread-msg','tenant_acme',$1,'actor_acme_official','thumbs_up',clock_timestamp())`, threadID); err != nil {
 		t.Fatalf("insert thread reaction: %v", err)
 	}
-	assertReplied(run5, true)
+	// A reply in a Thread answers that Thread's Inbox, not the Room's.
+	assertReplied(run5, true, "thread:"+threadID)
+	insertRuntimeRunMessageFixture(t, pool, roomID, "msg-run5-room-reply", run5, "Room reply")
+	assertReplied(run5, true, "room:"+roomID, "thread:"+threadID)
 	finishRun(run5)
 }
 

@@ -499,14 +499,19 @@ export const createAgentManagerApplication = (
       ...(stateBackend.kind === "teamhub"
         ? {
             roomReplyGuard: {
-              hasRunReplied: async (contextKey, runId, signal) =>
-                (
-                  await stateBackend.client.getRunReplyStatus(
-                    contextKey,
-                    runId,
-                    signal,
-                  )
-                ).replied,
+              readReplyStatus: async (contextKey, runId, signal) => {
+                const status = await stateBackend.client.getRunReplyStatus(
+                  contextKey,
+                  runId,
+                  signal,
+                );
+                return {
+                  replied: status.replied,
+                  ...(status.replied_inbox_ids
+                    ? { repliedInboxIds: status.replied_inbox_ids }
+                    : {}),
+                };
+              },
             },
           }
         : {}),

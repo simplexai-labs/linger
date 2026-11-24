@@ -36,7 +36,8 @@ func TestAgentServiceEpochInterruptsRunningRunsAndKeepsQueuedRuns(t *testing.T) 
 	if err != nil {
 		t.Fatalf("submit queued Run: %v", err)
 	}
-	messageSteer := queueRuntimeInboxMessage(t, env, "epoch-message-steer", "1", "steer", true)
+	// Not a chat, so the Run it becomes keeps its place behind older queued Runs.
+	messageSteer := queueRuntimeWakeMessage(t, env, "epoch-message-steer", "1", false)
 	if messageSteer.Status != "steering" {
 		t.Fatalf("queue Message steer: %+v", messageSteer)
 	}

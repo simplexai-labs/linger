@@ -203,11 +203,13 @@ func (a *App) getAgentLocalRun(c *gin.Context) {
 
 func (a *App) getAgentLocalRunReplyStatus(c *gin.Context) {
 	params := contractParams[teamhubinternal.GetAgentLocalRunReplyStatusParams](c)
-	replied, err := a.agentRuntimeState.GetLocalRunReplyStatus(c.Request.Context(), params.ContextKey, params.LocalRunId)
+	status, err := a.agentRuntimeState.GetLocalRunReplyStatus(c.Request.Context(), params.ContextKey, params.LocalRunId)
 	if a.writeAgentRuntimeStateError(c, "get Local Run reply status", err) {
 		return
 	}
-	c.JSON(http.StatusOK, teamhubinternal.AgentLocalRunReplyStatus{Replied: replied})
+	c.JSON(http.StatusOK, teamhubinternal.AgentLocalRunReplyStatus{
+		Replied: status.Replied, RepliedInboxIds: &status.RepliedInboxIDs,
+	})
 }
 
 func (a *App) claimAgentLocalRun(c *gin.Context) {

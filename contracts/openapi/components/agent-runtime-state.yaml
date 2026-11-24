@@ -692,6 +692,14 @@ components:
             unattributed conversation Message, presentation sequence, or emoji
             Reaction written by the Context's Agent in the Room or its Threads
             since the Run started.
+        replied_inbox_ids:
+          type: array
+          items:
+            type: string
+          description: >-
+            The Inboxes of the Context's Room and its Threads (`room:<id>`,
+            `thread:<id>`) that hold such a reply. A Run that took up
+            mentions from several Inboxes has answered only those listed.
     ClaimAgentLocalRunRequest:
       type: object
       additionalProperties: false

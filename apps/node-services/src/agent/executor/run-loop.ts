@@ -259,8 +259,17 @@ interface ActiveRunIntent {
   readonly resolveProviderReady: (execution: ActiveExecution | null) => void;
   readonly runId: string;
   readonly sourceInboxIds: ReadonlySet<string>;
-  /** Rises to the most urgent input the Context has for this Run to serve. */
+  /** Rises to the most urgent input steered into this Run. */
   readonly priority: RunPriority;
+  /** Aborted when a chat takes the place of this Run before it reaches its
+   * Runtime; the Provider then gives the place back. Replaced once a segment
+   * activates so a later yield does not inherit a lost preemption race. */
+  preemption: AbortController;
+  /** The chat steers that preempted this Run, settled before it requeues. */
+  readonly preemptingSteers: Set<Promise<void>>;
+  /** The next activation of this Run, null once it can no longer start. */
+  readonly nextActivation: () => Promise<ActiveExecution | null>;
+  readonly resolveActivation: (execution: ActiveExecution | null) => void;
 }
 
 /** One claimed Local Run while the Run loop executes it. */
@@ -348,8 +357,6 @@ export class RunLoop {
   #terminalRecoveryStop = new AbortController();
   #priorityWait?: AbortController;
   /** A read of the queued input's kind for the active Run's priority. */
-  #queuedPriorityRead?: Promise<void>;
-  #queuedPriorityReadAgain = false;
   #capacityWait = new AbortController();
   #retiredPreparationFailure: { readonly error: unknown } | undefined;
   // Native session compaction; no Run is claimed until it settles.
@@ -554,59 +561,11 @@ export class RunLoop {
     options: { readonly workStateAlreadyFresh?: boolean } = {},
   ): void {
     this.#priorityWait?.abort();
-    this.#raiseForQueuedInput();
     if (!options.workStateAlreadyFresh) this.#workStateRefreshRequested = true;
     this.#maintenance?.abort();
     this.#cancelLoopRetry();
     this.#ensureRunning();
     this.#notifyActivityChanged();
-  }
-
-  /**
-   * A Meta Run serves the Context's queued input after it, so it waits and
-   * runs as the most urgent of that input. One read at a time; a wake during
-   * a read reads once more.
-   */
-  #raiseForQueuedInput(): void {
-    const intent = this.#activeRunIntent;
-    const context = this.#executionContextRef?.kind;
-    if (
-      !intent ||
-      context === "alter_ego" ||
-      context === "document" ||
-      !this.#state.queuedMetaKind ||
-      intent.priority.value <= runPriorities.chat
-    )
-      return;
-    if (this.#queuedPriorityRead) {
-      this.#queuedPriorityReadAgain = true;
-      return;
-    }
-    const read = (async () => {
-      do {
-        this.#queuedPriorityReadAgain = false;
-        const kind = await this.#state.queuedMetaKind!(
-          intent.controller.signal,
-        );
-        intent.priority.raise(runPriorities[kind]);
-      } while (
-        this.#queuedPriorityReadAgain &&
-        this.#activeRunIntent === intent &&
-        intent.priority.value > runPriorities.chat
-      );
-    })()
-      .catch((error: unknown) => {
-        if (!intent.controller.signal.aborted)
-          this.#logger.log("warn", "local_run.queued_priority_read_failed", {
-            runId: intent.runId,
-            error,
-          });
-      })
-      .finally(() => {
-        if (this.#queuedPriorityRead === read)
-          this.#queuedPriorityRead = undefined;
-      });
-    this.#queuedPriorityRead = read;
   }
 
   async requestCancellation(
@@ -639,13 +598,37 @@ export class RunLoop {
     stopSignal: AbortSignal,
     expectedSourceInboxId?: string,
   ): Promise<void> {
-    // Raised before the steer waits for the Provider, so a Run still waiting
-    // for its place waits as what the steer needs.
-    this.#activeRunIntent?.priority.raise(
-      runPriorities[runKind(this.#executionContextRef, messages)],
-    );
+    const intent = this.#activeRunIntent;
+    // A chat does not wait for a Meta Run that has not reached its Runtime,
+    // first or after a yield: the Run goes back to the queue and the chat is
+    // claimed first. A Run the Provider already started is steered instead.
+    // Capture nextActivation synchronously before queuing on #trustedSteerTail
+    // so an activation completing before apply() still resolves to it.
+    const preempt =
+      intent !== null &&
+      this.#isMetaChat(messages) &&
+      expectedSourceInboxId !== undefined &&
+      intent.priority.value > runPriorities.chat &&
+      !this.#activeExecution?.acceptingSteers
+        ? { intent, nextActivation: intent.nextActivation() }
+        : undefined;
+    if (preempt) {
+      preempt.intent.preemption.abort(new LocalRunPreemptedError());
+    } else {
+      // Raised before the steer waits for the Provider, so a Run still
+      // waiting for its place waits as what the steer needs.
+      intent?.priority.raise(
+        runPriorities[runKind(this.#executionContextRef, messages)],
+      );
+    }
     const apply = () =>
-      this.#applySteer(groupId, messages, stopSignal, expectedSourceInboxId);
+      this.#applySteer(
+        groupId,
+        messages,
+        stopSignal,
+        expectedSourceInboxId,
+        preempt,
+      );
     const operation =
       expectedSourceInboxId === undefined
         ? apply()
@@ -653,6 +636,7 @@ export class RunLoop {
     if (expectedSourceInboxId !== undefined) {
       this.#trustedSteerTail = operation;
     }
+    if (preempt) preempt.intent.preemptingSteers.add(operation);
     this.#steerOperations.add(operation);
     this.#activeOperations += 1;
     this.#notifyActivityChanged();
@@ -663,6 +647,14 @@ export class RunLoop {
       this.#steerOperations.delete(operation);
       this.#notifyActivityChanged();
     }
+  }
+
+  /** Messages a Human waits on in a Meta Context. */
+  #isMetaChat(messages: readonly Message[]): boolean {
+    return (
+      this.#executionContextRef?.kind === "meta" &&
+      runKind(this.#executionContextRef, messages) === "chat"
+    );
   }
 
   /** resumable: an active Run goes back to the queue and resumes in the
@@ -905,8 +897,6 @@ export class RunLoop {
           throw new Error("Claimed Local Run has no execution intent");
         if (this.#retiredPreparationFailure) this.#drainRequested = true;
         const executionIntent = intent as ActiveRunIntent;
-        // Input queued before the claim waits behind this Run too.
-        this.#raiseForQueuedInput();
         try {
           this.#onRunClaimed?.(claimed.runId, claimed.messages);
         } catch (error) {
@@ -1028,6 +1018,7 @@ export class RunLoop {
       await this.#failExecution(execution, error);
     } finally {
       intent.resolveProviderReady(null);
+      intent.resolveActivation(null);
       execution.removeAbortListener?.();
       this.#pendingCancellationRunIds.delete(runId);
       if (this.#activeExecution?.runId === runId) {
@@ -1259,6 +1250,7 @@ export class RunLoop {
     const { controller } = execution;
     const admissionWaitStartedAt = Date.now();
     for (;;) {
+      execution.intent.preemption.signal.throwIfAborted();
       try {
         const run = await this.#provider.startRun(this.#runtimeSession, input, {
           signal: controller.signal,
@@ -1266,6 +1258,7 @@ export class RunLoop {
           acceptedAtMonotonicMs: execution.acceptedAtMonotonicMs,
           runKind: execution.kind,
           priority: execution.intent.priority,
+          preemptSignal: execution.intent.preemption.signal,
           ...(this.#onRunBeforeStop
             ? {
                 onStopHook: async (event, signal) => {
@@ -1325,11 +1318,15 @@ export class RunLoop {
         this.#logger.log("warn", "local_run.admission_wait", {
           runId: execution.runId,
         });
+        execution.intent.preemption.signal.throwIfAborted();
         await delay(
           Math.min(RUNTIME_ADMISSION_RETRY_MS, remaining),
           undefined,
           {
-            signal: controller.signal,
+            signal: AbortSignal.any([
+              controller.signal,
+              execution.intent.preemption.signal,
+            ]),
           },
         );
       }
@@ -1456,7 +1453,9 @@ export class RunLoop {
       observedMessages: execution.observedMessages,
     };
     this.#activeExecution = active;
+    execution.intent.preemption = new AbortController();
     execution.intent.resolveProviderReady(active);
+    execution.intent.resolveActivation(active);
     const cancel = () => {
       try {
         execution.run?.cancel();
@@ -1549,6 +1548,7 @@ export class RunLoop {
     } else {
       intent.resolveProviderReady(null);
     }
+    intent.resolveActivation(null);
     // A durable cancellation cannot confirm native resource cleanup.
     const providerCleanupFailed = error instanceof ProviderRunCleanupError;
     if (
@@ -1581,6 +1581,26 @@ export class RunLoop {
         attemptCount,
         maxAttempts: MAX_LOCAL_RUN_START_ATTEMPTS,
         error,
+      });
+      return;
+    }
+    // A chat took this Run's place before its Runtime started it. The Run
+    // waits again; the chat, queued by its steer, is claimed first, so the
+    // claim must not run before that steer settles.
+    if (
+      error instanceof LocalRunPreemptedError &&
+      !providerCleanupFailed &&
+      !controller.signal.aborted
+    ) {
+      await this.#settleRuntimeStatusEvents(execution);
+      await this.#commitDurably(() => this.#state.requeueLocalRun(runId));
+      if (!execution.hasYielded) this.#unstartedRequeues.add(runId);
+      await Promise.allSettled(intent.preemptingSteers);
+      intent.resolveFinished();
+      this.#logger.log("info", "local_run.preempted", {
+        runId,
+        attemptCount,
+        yielded: execution.hasYielded,
       });
       return;
     }
@@ -1940,25 +1960,34 @@ export class RunLoop {
     messages: NonEmptyReadonlyArray<Message>,
     stopSignal: AbortSignal,
     expectedSourceInboxId?: string,
+    preempt?: {
+      readonly intent: ActiveRunIntent;
+      readonly nextActivation: Promise<ActiveExecution | null>;
+    },
   ): Promise<void> {
-    const intent = this.#activeRunIntent;
+    const intent = preempt?.intent ?? this.#activeRunIntent;
     if (!intent) {
       await this.#enqueueSteer(groupId, messages);
       return;
     }
 
-    const target = this.#activeExecution ?? (await intent.providerReady);
+    const target = preempt
+      ? await preempt.nextActivation
+      : (this.#activeExecution ?? (await intent.providerReady));
     if (
       !target ||
       !target.acceptingSteers ||
       stopSignal.aborted ||
+      // A Meta chat steers the Run whichever Inbox it reads.
       (expectedSourceInboxId !== undefined &&
-        !target.sourceInboxIds.has(expectedSourceInboxId))
+        !target.sourceInboxIds.has(expectedSourceInboxId) &&
+        !this.#isMetaChat(messages))
     ) {
       if (expectedSourceInboxId === undefined) await intent.finished;
       await this.#enqueueSteer(groupId, messages);
       return;
     }
+    if (preempt) intent.priority.raise(runPriorities.chat);
 
     const operation = this.#applyProviderSteer(
       target,
@@ -2112,6 +2141,8 @@ export class RunLoop {
     const controller = new AbortController();
     const providerReady = deferred<ActiveExecution | null>();
     const finished = deferred<void>();
+    let activation = deferred<ActiveExecution | null>();
+    let ended = false;
     // A failed durable terminal transition is observed only by a concurrent steer.
     void finished.promise.catch(() => undefined);
     const intent: ActiveRunIntent = {
@@ -2124,6 +2155,16 @@ export class RunLoop {
       runId,
       sourceInboxIds: new Set(sourceInboxIds),
       priority,
+      preemption: new AbortController(),
+      preemptingSteers: new Set(),
+      nextActivation: () =>
+        ended ? Promise.resolve(null) : activation.promise,
+      resolveActivation: (execution) => {
+        if (ended) return;
+        activation.resolve(execution);
+        if (execution) activation = deferred();
+        else ended = true;
+      },
     };
     if (this.#stopRequested || this.#pendingCancellationRunIds.has(runId)) {
       controller.abort(
@@ -2241,6 +2282,14 @@ class LocalRunStoppedError extends Error {
   constructor(readonly resumable: boolean) {
     super("Local Run stopped");
     this.name = "LocalRunStoppedError";
+  }
+}
+
+/** A chat took the place of a Run that had not reached its Runtime. */
+class LocalRunPreemptedError extends Error {
+  constructor() {
+    super("Local Run gave its place to a chat");
+    this.name = "LocalRunPreemptedError";
   }
 }
 

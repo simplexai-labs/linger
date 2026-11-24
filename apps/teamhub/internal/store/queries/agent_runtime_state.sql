@@ -725,6 +725,77 @@ SELECT (
 )::boolean AS replied
 FROM target_run;
 
+-- name: ListAgentLocalRunReplyInboxes :many
+-- The Inboxes of the Run's Room and its Threads that hold a visible reply
+-- from the Run, counted as in GetAgentLocalRunReplyDelivered. A Run that took
+-- up mentions from several Inboxes must answer in each of them.
+WITH target_run AS (
+    SELECT run.run_id, run.started_at, run.finished_at,
+           context.tenant_id, context.agent_actor_id, context.room_id
+    FROM agent_local_runs run
+    JOIN agent_execution_contexts context ON context.context_key=run.context_key
+    WHERE run.context_key=sqlc.arg(context_key)::text
+      AND run.run_id=sqlc.arg(run_id)::text
+      AND context.room_id IS NOT NULL
+),
+room_scope AS (
+    SELECT target_run.room_id AS id, 'room:'||target_run.room_id AS inbox_id
+    FROM target_run
+    UNION ALL
+    SELECT thread.id, 'thread:'||thread.id
+    FROM target_run
+    JOIN rooms thread
+      ON thread.parent_room_id=target_run.room_id
+     AND thread.deleted_at IS NULL
+),
+reply_room AS (
+    SELECT message.room_id
+    FROM target_run
+    JOIN messages message ON message.local_run_id=target_run.run_id
+    WHERE message.message_kind='conversation'
+    UNION
+    SELECT sequence.room_id
+    FROM target_run
+    JOIN agent_presentation_sequences sequence ON sequence.local_run_id=target_run.run_id
+    UNION
+    SELECT message.room_id
+    FROM target_run
+    JOIN messages message
+      ON message.tenant_id=target_run.tenant_id
+     AND message.author_actor_id=target_run.agent_actor_id
+    WHERE target_run.started_at IS NOT NULL
+      AND message.message_kind='conversation'
+      AND message.local_run_id IS NULL
+      AND message.created_at>=target_run.started_at
+      AND (target_run.finished_at IS NULL OR message.created_at<=target_run.finished_at)
+      AND message.room_id IN (SELECT id FROM room_scope)
+    UNION
+    SELECT sequence.room_id
+    FROM target_run
+    JOIN agent_presentation_sequences sequence
+      ON sequence.tenant_id=target_run.tenant_id
+     AND sequence.agent_actor_id=target_run.agent_actor_id
+    WHERE target_run.started_at IS NOT NULL
+      AND sequence.local_run_id IS NULL
+      AND sequence.created_at>=target_run.started_at
+      AND (target_run.finished_at IS NULL OR sequence.created_at<=target_run.finished_at)
+      AND sequence.room_id IN (SELECT id FROM room_scope)
+    UNION
+    SELECT reaction.room_id
+    FROM target_run
+    JOIN message_reactions reaction
+      ON reaction.tenant_id=target_run.tenant_id
+     AND reaction.actor_id=target_run.agent_actor_id
+    WHERE target_run.started_at IS NOT NULL
+      AND reaction.created_at>=target_run.started_at
+      AND (target_run.finished_at IS NULL OR reaction.created_at<=target_run.finished_at)
+      AND reaction.room_id IN (SELECT id FROM room_scope)
+)
+SELECT room_scope.inbox_id::text AS inbox_id
+FROM room_scope
+WHERE room_scope.id IN (SELECT room_id FROM reply_room)
+ORDER BY room_scope.inbox_id;
+
 -- name: ListAgentLocalRunInputs :many
 SELECT input.*,
        relation.relation AS run_relation,relation.ordinal AS run_ordinal
@@ -735,11 +806,12 @@ WHERE relation.run_id=sqlc.arg(run_id)::text
 ORDER BY relation.relation,relation.ordinal;
 
 -- name: LockNextQueuedAgentLocalRun :one
+-- A queued Run that serves a Meta chat goes first; the rest keep arrival order.
 SELECT run.*
 FROM agent_local_runs run
 WHERE run.context_key=sqlc.arg(context_key)::text AND run.status='queued'
   AND agent_document_run_claimable(run.run_id,run.context_key)
-ORDER BY created_at,run_id
+ORDER BY agent_local_run_serves_chat(run.run_id) DESC,created_at,run_id
 LIMIT 1
 FOR UPDATE;
 

@@ -285,9 +285,13 @@ export class RunnerOperations {
       permit.release();
       permit = undefined;
     }
+    const signal = target.signal ?? new AbortController().signal;
+    const waitSignal = target.preemptSignal
+      ? AbortSignal.any([signal, target.preemptSignal])
+      : signal;
     permit ??= await this.acquireOperationCapacity(
       { ...target, priority },
-      target.signal ?? new AbortController().signal,
+      waitSignal,
     );
     try {
       // The whole Run is one unit of its endpoint's model queue. It waits
@@ -302,11 +306,11 @@ export class RunnerOperations {
           kind: target.runKind ?? "chat",
           key: target.request.run_context.execution_run_ref,
         },
-        target.signal ?? new AbortController().signal,
+        waitSignal,
       );
       try {
         if (target.beforeYieldResume) await target.beforeYieldResume();
-        target.signal?.throwIfAborted();
+        waitSignal.throwIfAborted();
         const reservation = this.#capacityReservations.get(permit.id);
         if (
           !reservation ||

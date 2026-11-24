@@ -144,10 +144,10 @@ function createSilentLogger(): {
 
 describe("RunLoop + room-reply-guard stop hook", () => {
   it("succeeds without shell heuristics when stop hook confirms a reply landed", async () => {
-    const hasRunReplied = vi.fn(async () => true);
+    const readReplyStatus = vi.fn(async () => ({ replied: true }));
     const composed = composeContextFeatures({
       context: makeMetaContext(),
-      features: [createRoomReplyGuardFeature({ hasRunReplied })],
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
     });
     const state = new TestContextRuntimeState({
       databasePath: ":memory:",
@@ -191,7 +191,7 @@ describe("RunLoop + room-reply-guard stop hook", () => {
     state.close();
 
     expect(decisions).toEqual([{ action: "allow" }]);
-    expect(hasRunReplied).toHaveBeenCalledTimes(1);
+    expect(readReplyStatus).toHaveBeenCalledTimes(1);
     // Stop hook already confirmed with TeamHub, so #completedTerminal skips
     // redundant fallback checks even though zero `message` activities occurred.
     expect(stateReplySpy).not.toHaveBeenCalled();
@@ -200,10 +200,10 @@ describe("RunLoop + room-reply-guard stop hook", () => {
 
   it("blocks once, lets the model recover, and finishes succeeded when TeamHub confirms the retry", async () => {
     let repliedInDb = false;
-    const hasRunReplied = vi.fn(async () => repliedInDb);
+    const readReplyStatus = vi.fn(async () => ({ replied: repliedInDb }));
     const composed = composeContextFeatures({
       context: makeMetaContext(),
-      features: [createRoomReplyGuardFeature({ hasRunReplied })],
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
     });
     const state = new TestContextRuntimeState({
       databasePath: ":memory:",
@@ -263,10 +263,10 @@ describe("RunLoop + room-reply-guard stop hook", () => {
   });
 
   it("fails with reply_not_sent if the model still sends nothing after a stop-hook block", async () => {
-    const hasRunReplied = vi.fn(async () => false);
+    const readReplyStatus = vi.fn(async () => ({ replied: false }));
     const composed = composeContextFeatures({
       context: makeMetaContext(),
-      features: [createRoomReplyGuardFeature({ hasRunReplied })],
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
     });
     const state = new TestContextRuntimeState({
       databasePath: ":memory:",
@@ -319,12 +319,12 @@ describe("RunLoop + room-reply-guard stop hook", () => {
   });
 
   it("falls back to reply_not_sent when the stop-hook TeamHub check fails and no message activity occurred", async () => {
-    const hasRunReplied = vi.fn(async () => {
+    const readReplyStatus = vi.fn(async () => {
       throw new Error("teamhub timeout");
     });
     const composed = composeContextFeatures({
       context: makeMetaContext(),
-      features: [createRoomReplyGuardFeature({ hasRunReplied })],
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
     });
     const state = new TestContextRuntimeState({
       databasePath: ":memory:",
@@ -367,7 +367,7 @@ describe("RunLoop + room-reply-guard stop hook", () => {
     state.close();
 
     expect(decisions).toEqual([{ action: "allow" }]);
-    expect(hasRunReplied).toHaveBeenCalledTimes(1);
+    expect(readReplyStatus).toHaveBeenCalledTimes(1);
     expect(stateReplySpy).toHaveBeenCalledTimes(1);
     const finished = state.getLocalRun(runId);
     expect(finished?.status).toBe("failed");
@@ -378,13 +378,13 @@ describe("RunLoop + room-reply-guard stop hook", () => {
   });
 
   it("succeeds after a stop-hook block when a delivered message activity occurs even if the final TeamHub reply check rejects", async () => {
-    const hasRunReplied = vi
-      .fn<() => Promise<boolean>>()
-      .mockResolvedValueOnce(false)
+    const readReplyStatus = vi
+      .fn<() => Promise<{ readonly replied: boolean }>>()
+      .mockResolvedValueOnce({ replied: false })
       .mockRejectedValueOnce(new Error("teamhub 503"));
     const composed = composeContextFeatures({
       context: makeMetaContext(),
-      features: [createRoomReplyGuardFeature({ hasRunReplied })],
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
     });
     const state = new TestContextRuntimeState({
       databasePath: ":memory:",

@@ -133,9 +133,9 @@ export const renderDirectInboxChange = (
 export const renderInterruptedRunReminder = (): string =>
   [
     "<system-reminder>",
-    "An earlier attempt of this request may already have started in this native session and was interrupted when the Agent Service restarted.",
+    "An earlier attempt of this request may already have started in this native session and was interrupted, because the Agent Service restarted or a more urgent request went first.",
     "The native history keeps the tool results that finished and the messages you already sent. Do not repeat an operation that already took effect; check its result when unsure. Messages that arrived during the interrupted attempt are only in the native history.",
-    "A tool call the restart cut off has no result and did not finish, even if its process is gone; run it again when the request still needs it.",
+    "A tool call the interruption cut off has no result and did not finish, even if its process is gone; run it again when the request still needs it.",
     "Continue from where the attempt stopped and finish the request.",
     "</system-reminder>",
   ].join("\n");

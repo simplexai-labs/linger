@@ -14,6 +14,7 @@ import type {
   Message,
   NonEmptyReadonlyArray,
 } from "../../../src/agent/executor/types.js";
+import { runKind } from "../../../src/agent/executor/run-kind.js";
 
 interface Input {
   message: Message;
@@ -37,9 +38,11 @@ const states = new Map<string, State>();
  */
 export class TestContextRuntimeState implements ContextRuntimeStatePort {
   readonly #acceptedAt = new Map<string, number>();
+  readonly #ref: ExecutionContextRef;
   readonly databasePath: string;
   readonly state: State;
   constructor(options: { databasePath: string; ref: ExecutionContextRef }) {
+    this.#ref = options.ref;
     this.databasePath = options.databasePath;
     const key = `${options.databasePath}:${JSON.stringify(options.ref)}`;
     const existing =
@@ -123,9 +126,21 @@ export class TestContextRuntimeState implements ContextRuntimeStatePort {
   claimLocalRun() {
     if ([...this.state.runs.values()].some((r) => r.status === "running"))
       return null;
-    const run = [...this.state.runs.values()].find(
+    const queued = [...this.state.runs.values()].filter(
       (r) => r.status === "queued",
     );
+    const run =
+      (this.#ref.kind === "meta"
+        ? queued.find(
+            (r) =>
+              runKind(
+                this.#ref,
+                r.initialMessageIds.map(
+                  (id) => this.state.inputs.get(id)!.message,
+                ),
+              ) === "chat",
+          )
+        : undefined) ?? queued[0];
     if (!run) return null;
     run.status = "running";
     run.attemptCount++;
