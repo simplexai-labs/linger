@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectItem } from "@/components/ui/select";
 import { ComputerSetupInstructions } from "@/features/local-computer/computer-setup-instructions";
 import { computersMessages } from "@/features/local-computer/computers.messages";
+import { useCliInstallAvailable } from "@/features/local-computer/desktop-computer";
 import { LocalRuntimeAuthenticationGuidance } from "@/features/local-computer/local-runtime-authentication-guidance";
 import { commonMessages } from "@/i18n/common.messages";
 import { type Translate, translate } from "@/i18n/language";
@@ -198,6 +199,7 @@ function LocalComputerSetupPrompt({
   titleTone?: "danger";
 }) {
   const t = useT();
+  const cliInstallAvailable = useCliInstallAvailable();
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -217,7 +219,9 @@ function LocalComputerSetupPrompt({
           {t(commonMessages.retry)}
         </Button>
       </div>
-      <ComputerSetupInstructions connected={connected} />
+      {cliInstallAvailable ? (
+        <ComputerSetupInstructions connected={connected} />
+      ) : null}
     </div>
   );
 }

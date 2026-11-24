@@ -505,7 +505,11 @@ Gateway and runs Agents. The daemon exits with the app.
   RTX DCH WHQL downloads (allowlisted CDN, Windows Authenticode check, elevated
   `-s -noreboot -noeula` install, `PowerGuard` sleep block, and `config.json`
   `pendingDriverUpdate` post-reboot resume) with `getInstallState` /
-  `onInstallState` / `startInstall` / `clearInstallState`.
+  `onInstallState` / `startInstall` / `clearInstallState`; and
+  `localServer.owned()` reports whether the window points at this app's own
+  local installation regardless of startup/resume readiness, so the SPA can hide
+  CLI daemon download entry points even during hot start or install-time
+  preload.
 - `src/shared/api.ts`, `src/shared/shell.ts`: preload contract types and IPC
   channel names.
 - `src/main/computer-daemon.ts`: ComputerDaemon. While the computer is

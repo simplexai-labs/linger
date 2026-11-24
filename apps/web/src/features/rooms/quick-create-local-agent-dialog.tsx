@@ -8,7 +8,10 @@ import { Icon } from "@/components/ui/icon";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { Select, SelectItem } from "@/components/ui/select";
 import { ComputerSetupInstructions } from "@/features/local-computer/computer-setup-instructions";
-import { useDesktopComputer } from "@/features/local-computer/desktop-computer";
+import {
+  useCliInstallAvailable,
+  useDesktopComputer,
+} from "@/features/local-computer/desktop-computer";
 import { DesktopComputerSetup } from "@/features/local-computer/desktop-computer-setup";
 import { subscribeLocalComputerEnrollment } from "@/features/local-computer/local-computer-enrollment-events";
 import { localComputersQueryKey } from "@/features/local-computer/local-computer-queries";
@@ -64,6 +67,7 @@ export function QuickCreateLocalAgentDialog({
   const [effort, setEffort] = useState<TeamHubAgentReasoningEffort>();
   const [target, setTarget] = useState<LocalAgentTarget>();
   const desktop = useDesktopComputer();
+  const cliInstallAvailable = useCliInstallAvailable();
   const desktopComputerId = desktop?.status?.computerId;
   const [connection, setConnection] = useState<{
     knownIds: ReadonlySet<string>;
@@ -321,24 +325,26 @@ export function QuickCreateLocalAgentDialog({
                 >
                   {t(createAgentMessages.computer)}
                 </label>
-                <Button
-                  size="compact"
-                  tone="ghost"
-                  onClick={() =>
-                    setConnection({
-                      knownIds: new Set(
-                        computers.data?.items.map(
-                          (computer) => computer.computer_id,
+                {cliInstallAvailable ? (
+                  <Button
+                    size="compact"
+                    tone="ghost"
+                    onClick={() =>
+                      setConnection({
+                        knownIds: new Set(
+                          computers.data?.items.map(
+                            (computer) => computer.computer_id,
+                          ),
                         ),
-                      ),
-                    })
-                  }
-                >
-                  <span className="inline-flex items-center gap-1.5 text-app-info">
-                    <Icon icon={Add01Icon} size={14} />{" "}
-                    {t(createAgentMessages.connectNewComputer)}
-                  </span>
-                </Button>
+                      })
+                    }
+                  >
+                    <span className="inline-flex items-center gap-1.5 text-app-info">
+                      <Icon icon={Add01Icon} size={14} />{" "}
+                      {t(createAgentMessages.connectNewComputer)}
+                    </span>
+                  </Button>
+                ) : null}
               </div>
               <Select
                 id="local-agent-computer"

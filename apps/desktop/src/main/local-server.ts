@@ -1554,6 +1554,18 @@ export class LocalServerModule implements Module {
     this.#signInMethod = undefined;
   }
 
+  // Whether the window is pointed at this app's own local installation
+  // regardless of startup phase (installing, preparing/resuming, or ready),
+  // unlike servesWindow(), which also requires readiness and TeamHub proof
+  // before posting the owner password.
+  async ownsWindow(): Promise<boolean> {
+    const serverUrl = this.#ctx?.config.get().serverUrl;
+    if (!serverUrl) return false;
+    if (this.#origin && sameOrigin(this.#origin, serverUrl)) return true;
+    const record = await this.#readRecord();
+    return Boolean(record && sameOrigin(record.origin, serverUrl));
+  }
+
   // Whether the window shows the Linger this app installed here and its
   // server still answers as itself; only then can its owner account sign the
   // window in. The services can stop while the app runs, and another program

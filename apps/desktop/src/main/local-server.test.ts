@@ -3535,6 +3535,24 @@ describe("LocalServerModule after a restart", () => {
     await f.host.stop("quit");
   });
 
+  it("reports ownsWindow true before resume finishes and false for a remote server", async () => {
+    const f = fixture({}, enrolled, (home) => {
+      record(home);
+      writeFileSync(path.join(home, "resume-fails"), "");
+    });
+    await f.host.start();
+    // Even while resume fails/prepares and servesWindow() is false, ownsWindow()
+    // identifies this window as pointing at the installed local server.
+    await waitForInstaller(() =>
+      expect(f.module.status().phase).toBe("failed"),
+    );
+    expect(await f.module.servesWindow()).toBe(false);
+    expect(await f.module.ownsWindow()).toBe(true);
+    f.host.ctx.config.update({ serverUrl: "https://remote.example.com" });
+    expect(await f.module.ownsWindow()).toBe(false);
+    await f.host.stop("quit");
+  });
+
   it("stops the local models when the person quits, without waiting for them", async () => {
     const stopped = (home: string) => path.join(home, "stop-local-models.json");
     const f = fixture({}, enrolled, record);

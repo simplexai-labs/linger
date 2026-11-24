@@ -220,6 +220,7 @@ export class DesktopIpcModule implements Module {
     // The handler already checked that the caller is the window's server, so
     // only the window's server needs to be the installed one.
     handle(IPC.localAccountAvailable, () => localServer.servesWindow());
+    handle(IPC.localServerOwned, () => localServer.ownsWindow());
     handle(IPC.localAccountSignIn, async (): Promise<LocalAccountSignIn> => {
       try {
         await localServer.signInWithAccount();

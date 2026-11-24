@@ -50,6 +50,9 @@ const api: LingerDesktopApi = {
     available: () => ipcRenderer.invoke(IPC.localAccountAvailable),
     signIn: () => ipcRenderer.invoke(IPC.localAccountSignIn),
   },
+  localServer: {
+    owned: () => ipcRenderer.invoke(IPC.localServerOwned),
+  },
   update: {
     getState: () => ipcRenderer.invoke(IPC.updateState),
     onState: (callback) => {

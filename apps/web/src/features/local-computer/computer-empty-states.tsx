@@ -20,7 +20,7 @@ export function UnavailableComputer({
   onConnect,
 }: {
   onBack: () => void;
-  onConnect: () => void;
+  onConnect?: () => void;
 }) {
   const t = useT();
   return (
@@ -39,10 +39,12 @@ export function UnavailableComputer({
           <Button onClick={onBack} tone="primary">
             {t(computersMessages.backToComputers)}
           </Button>
-          <Button onClick={onConnect}>
-            <Icon icon={ComputerTerminal01Icon} size={16} />
-            {t(computersMessages.setupCommands)}
-          </Button>
+          {onConnect ? (
+            <Button onClick={onConnect}>
+              <Icon icon={ComputerTerminal01Icon} size={16} />
+              {t(computersMessages.setupCommands)}
+            </Button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -85,7 +87,7 @@ export function ConnectComputerDialog({
 }
 
 /** Every Computer was removed; the built-in local Computer normally prevents this. */
-export function NoComputers({ onConnect }: { onConnect: () => void }) {
+export function NoComputers({ onConnect }: { onConnect?: () => void }) {
   const t = useT();
   return (
     <div className="flex flex-col items-center pt-16 text-center">
@@ -96,10 +98,12 @@ export function NoComputers({ onConnect }: { onConnect: () => void }) {
       <p className="mt-1.5 text-sm text-muted-foreground">
         {t(computersMessages.noComputersBody)}
       </p>
-      <Button className="mt-6" onClick={onConnect} tone="primary">
-        <Icon icon={Add01Icon} size={14} />
-        {t(computerSetupMessages.title)}
-      </Button>
+      {onConnect ? (
+        <Button className="mt-6" onClick={onConnect} tone="primary">
+          <Icon icon={Add01Icon} size={14} />
+          {t(computerSetupMessages.title)}
+        </Button>
+      ) : null}
     </div>
   );
 }

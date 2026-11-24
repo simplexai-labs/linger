@@ -258,7 +258,14 @@ build:assets` to check the initial JS budget.
   development forwards `/install/` to the local Agent Service listener. Both
   hosts forward the Computer `teamhub` CLI's `/api/agent/` to
   `TEAMHUB_BASE_URL`, so a Computer needs only the Web origin.
-  Never bundle installers or CLI releases into Web.
+  Never bundle installers or CLI releases into Web. The desktop app's own local
+  server runs with its built-in Computer and ships no `/install/` release, so
+  when `window.lingerDesktop.localServer.owned()` (falling back to
+  `localAccount.available()` on older desktop builds) reports true
+  (`useCliInstallAvailable`), Web hides standalone CLI daemon download, update,
+  and terminal troubleshooting entry points across Computers, LocalComputerGate,
+  and Agent creation; browsers and desktop windows connected to a remote server
+  keep them.
 - Effects owning SSE, WebSocket, polling, timers, or subscriptions may depend only on resource identity; UI callbacks and presentation state must not recreate them. Lifecycle changes require a test proving unrelated rerenders do not resubscribe and identity changes clean up exactly once.
 - Browser configuration for local Vite reads `import.meta.env.VITE_*`
   through the app config boundary. Production builds follow the page origin

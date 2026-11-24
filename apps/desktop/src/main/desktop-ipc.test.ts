@@ -28,12 +28,14 @@ const PASSWORD = "a-private-password";
 
 const fixture = async (
   localServer: {
+    ownsWindow?: () => Promise<boolean>;
     servesWindow?: () => Promise<boolean>;
     signInWithAccount?: () => Promise<void>;
   } = {},
 ) => {
   const local = {
     ...stubModule("LocalServer"),
+    ownsWindow: vi.fn(localServer.ownsWindow ?? (async () => true)),
     servesWindow: vi.fn(localServer.servesWindow ?? (async () => true)),
     signInWithAccount: vi.fn(localServer.signInWithAccount ?? (async () => {})),
   };
@@ -136,6 +138,17 @@ describe("DesktopIpcModule local account", () => {
     expect(await f.invoke(IPC.localAccountAvailable)).toBe(false);
     f.local.servesWindow.mockResolvedValue(true);
     expect(await f.invoke(IPC.localAccountAvailable)).toBe(true);
+    await f.host.stop("quit");
+  });
+
+  it("reports whether the window points at the installed local server", async () => {
+    const f = await fixture({ ownsWindow: async () => false });
+    expect(await f.invoke(IPC.localServerOwned)).toBe(false);
+    f.local.ownsWindow.mockResolvedValue(true);
+    expect(await f.invoke(IPC.localServerOwned)).toBe(true);
+    expect(() =>
+      f.invoke(IPC.localServerOwned, "https://evil.example.com"),
+    ).toThrow("Not allowed");
     await f.host.stop("quit");
   });
 

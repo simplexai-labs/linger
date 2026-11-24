@@ -13,7 +13,7 @@ import {
 } from "@testing-library/react";
 import { Suspense } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   anotherMeQueryKey,
@@ -197,6 +197,60 @@ describe("Local Computer gate", () => {
     expect(
       within(gate).getByRole("button", { name: "Sign out" }),
     ).toBeEnabled();
+  });
+
+  describe("in the desktop app's local server", () => {
+    afterEach(() => {
+      delete (window as { lingerDesktop?: unknown }).lingerDesktop;
+    });
+
+    const stubDesktopLocalServer = (
+      computerId?: string,
+      bridge = "connecting",
+    ) => {
+      (window as { lingerDesktop?: unknown }).lingerDesktop = {
+        computer: {
+          getStatus: async () => ({
+            bridge,
+            runtime: "ready",
+            activeOperations: 0,
+            ...(computerId ? { computerId } : {}),
+          }),
+          onStatus: () => () => {},
+          enroll: vi.fn(async () => ({ computerId: computerId ?? "c-mac" })),
+        },
+        localAccount: { available: async () => true },
+      };
+    };
+
+    it("hides CLI install commands when the enrolled desktop Computer is offline", async () => {
+      stubDesktopLocalServer(newMac.computer_id, "connecting");
+      await renderShell({ ...newMac, status: "offline" });
+
+      const gate = await screen.findByRole("dialog", {
+        name: "Connect your computer",
+      });
+      expect(
+        await within(gate).findByText(/Looking for Codex and Claude Code/),
+      ).toBeVisible();
+      expect(
+        within(gate).queryByText(/install\/linger-computer\.sh/),
+      ).toBeNull();
+      expect(within(gate).queryByText(/linger-computer-local/)).toBeNull();
+    });
+
+    it("shows the Computer online without CLI install commands while waiting for an AI app", async () => {
+      stubDesktopLocalServer(newMac.computer_id, "online");
+      await renderShell(newMac);
+
+      const gate = await screen.findByRole("dialog", {
+        name: "Connect your computer",
+      });
+      expect(await within(gate).findByText("New Mac is online.")).toBeVisible();
+      expect(
+        within(gate).queryByText(/install\/linger-computer\.sh/),
+      ).toBeNull();
+    });
   });
 });
 

@@ -32,6 +32,7 @@ import {
 } from "./computer-empty-states";
 import { computerSetupMessages } from "./computer-setup.messages";
 import { computersMessages } from "./computers.messages";
+import { useCliInstallAvailable } from "./desktop-computer";
 import {
   localComputersQueryKey,
   localComputersQueryOptions,
@@ -66,6 +67,7 @@ export function ComputersPage() {
   });
 
   const [searchParams, setSearchParams] = useSearchParams();
+  const cliInstallAvailable = useCliInstallAvailable();
   const [setupOpen, setSetupOpen] = useState(false);
   const [expectedComputerId, setExpectedComputerId] = useState<string | null>(
     null,
@@ -216,7 +218,7 @@ export function ComputersPage() {
             ) : null}
             {t(computersMessages.pageTitle)}
           </h1>
-          {inventory.items.length ? (
+          {cliInstallAvailable && inventory.items.length ? (
             <Button
               aria-label={t(computerSetupMessages.label)}
               onClick={openSetup}
@@ -234,7 +236,9 @@ export function ComputersPage() {
             </p>
           ) : null}
           {inventory.items.length === 0 ? (
-            <NoComputers onConnect={openSetup} />
+            <NoComputers
+              onConnect={cliInstallAvailable ? openSetup : undefined}
+            />
           ) : selectedComputer ? (
             <ComputerDetail
               activeRuntime={modelSource.data?.status?.runtime}
@@ -248,10 +252,11 @@ export function ComputersPage() {
                   variant={variant}
                 />
               )}
+              cliInstallAvailable={cliInstallAvailable}
               computer={selectedComputer}
               key={selectedComputer.computer_id}
               localModelsHref={`/t/${tenantId}/settings/models?computer=${encodeURIComponent(selectedComputer.computer_id)}`}
-              onConnect={openSetup}
+              onConnect={cliInstallAvailable ? openSetup : undefined}
               onOpenAgent={(actorId) => {
                 if (!openAgent.isPending) openAgent.mutate(actorId);
               }}
@@ -261,7 +266,10 @@ export function ComputersPage() {
               }}
             />
           ) : requestedComputerId ? (
-            <UnavailableComputer onBack={showDirectory} onConnect={openSetup} />
+            <UnavailableComputer
+              onBack={showDirectory}
+              onConnect={cliInstallAvailable ? openSetup : undefined}
+            />
           ) : (
             <ComputerDirectory
               agents={agents.items}
@@ -272,7 +280,7 @@ export function ComputersPage() {
         </div>
       </main>
 
-      {setupOpen ? (
+      {cliInstallAvailable && setupOpen ? (
         <ConnectComputerDialog
           tenantId={tenantId}
           connected={setupConnected}
@@ -288,10 +296,14 @@ export function ComputersPage() {
           error={removeMutation.error}
           onClose={() => setRemoveComputerId(null)}
           onConfirm={() => removeMutation.mutate(removeComputer.computer_id)}
-          onConnect={() => {
-            setRemoveComputerId(null);
-            openSetup();
-          }}
+          onConnect={
+            cliInstallAvailable
+              ? () => {
+                  setRemoveComputerId(null);
+                  openSetup();
+                }
+              : undefined
+          }
           pending={removeMutation.isPending}
           tenantId={tenantId}
         />
