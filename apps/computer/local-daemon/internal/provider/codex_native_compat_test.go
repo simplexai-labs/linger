@@ -58,8 +58,11 @@ func TestNativeCodexFirstRunResume(t *testing.T) {
 	if second.Status != "completed" || second.SessionID != first.SessionID {
 		t.Fatalf("native Session did not resume: %+v", second)
 	}
+	// A Session the runtime home does not hold fails as session_not_found;
+	// Agent Service then restarts the Run in a fresh Session with recent
+	// messages, so the Daemon must not start one on its own.
 	missing, _ := run("00000000-0000-4000-8000-000000000000")
-	if missing.Status != "completed" || missing.SessionID == "" || missing.SessionID == first.SessionID {
-		t.Fatalf("missing Session did not continue in a fresh Session: %+v", missing)
+	if missing.Status != "failed" || missing.FailureCode != "session_not_found" {
+		t.Fatalf("missing Session did not fail as session_not_found: %+v", missing)
 	}
 }
