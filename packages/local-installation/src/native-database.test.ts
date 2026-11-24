@@ -108,6 +108,17 @@ describe("windowsElevated", () => {
   });
 });
 
+describe("prepareNativeDatabase start", () => {
+  it("restarts a server an earlier release left running from another archive", async () => {
+    run.mockImplementation(async () => ok("1"));
+    await prepareNativeDatabase(options);
+    expect(vi.mocked(startNativeProcess).mock.calls[0]![0]).toMatchObject({
+      name: "postgres",
+      restartOnConfigurationChange: true,
+    });
+  });
+});
+
 describe("prepareNativeDatabase on Windows", () => {
   it("runs the .exe programs from the private PostgreSQL", async () => {
     asWindows();

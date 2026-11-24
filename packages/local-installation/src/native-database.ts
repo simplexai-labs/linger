@@ -172,6 +172,11 @@ export async function prepareNativeDatabase(options: {
       signal,
       redactions: [password],
       withoutAdministrators,
+      // A release that repins the PostgreSQL archive unpacks it into a new
+      // component folder, so the server an earlier release left running
+      // differs only in its executable path. A stop is a fast shutdown, and
+      // the new server opens the same data directory.
+      restartOnConfigurationChange: true,
     });
     const connection = [
       "--host",

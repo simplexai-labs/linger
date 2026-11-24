@@ -217,6 +217,31 @@ test("restarts a service whose settings changed, keeps one whose did not", async
   ).toBe(second.pid);
   expect((await startNativeProcess(options)).pid).not.toBe(second.pid);
 });
+test("restarts a server whose executable moved to a new component folder", async (context) => {
+  const { expect } = context;
+  const root = await fixture(context);
+  // The executable path is what a repinned archive changes; the
+  // configuration identity stands in for it so the fixture runs one binary.
+  const options = {
+    root,
+    name: "postgres" as const,
+    executable: process.execPath,
+    configurationExecutable: path.join(root, "components/old/bin/postgres"),
+    args: ["-e", "setInterval(()=>{},1000)"],
+    cwd: root,
+    env: process.env,
+    restartOnConfigurationChange: true,
+  };
+  const first = await startNativeProcess(options);
+  const second = await startNativeProcess({
+    ...options,
+    configurationExecutable: path.join(root, "components/new/bin/postgres"),
+  });
+  expect(second.running).toBe(true);
+  expect(second.pid).not.toBe(first.pid);
+  await expect.poll(() => exited(first.pid!)).toBe(true);
+  expect((await inspectNativeProcess(root, "postgres")).pid).toBe(second.pid);
+});
 test("redacts complete lines before persisting split writes and known secrets", async (context) => {
   const { expect } = context;
   const root = await fixture(context);

@@ -136,6 +136,10 @@ it to `native/postgres-data` only once it succeeds, so a killed `initdb`
 never leaves a directory that later attempts treat as initialized. A `postgres-data` with
 `PG_VERSION` but no `postmaster.opts` (which only a started server writes)
 never served a connection, holds no data, and is initialized again.
+A running PostgreSQL whose configuration changed restarts like LiveKit and
+TeamHub: a release that repins the PostgreSQL archive unpacks it into a new
+component folder, so the server an earlier release left running differs in
+its executable path and must not stop the install.
 
 On Windows `postgres.exe` refuses a token with Administrators enabled. When
 the installer runs elevated (Run as administrator, the built-in
