@@ -63,6 +63,9 @@ type Options struct {
 	// OnModelUnavailable learns that the Runtime login refused a model, so
 	// the Computer can stop offering it.
 	OnModelUnavailable func(runtimeType, modelID string)
+	// ModelInvokeUnready reports whether runtimeType lists models but has
+	// none loaded to answer a model call that names none.
+	ModelInvokeUnready func(runtimeType string) bool
 	// ModelInvoker runs model invocations; nil answers each with runtime_unavailable.
 	ModelInvoker ModelInvoker
 	// LocalModels runs owner-chosen localmodels library actions; nil
@@ -114,6 +117,7 @@ type Daemon struct {
 	cliCredentials      *clicredential.Store
 	teamhubCLIBin       string
 	onModelUnavailable  func(runtimeType, modelID string)
+	modelInvokeUnready  func(runtimeType string) bool
 	openMCPProxies      func(context.Context, json.RawMessage, mcpproxy.OperationIdentity) (*mcpproxy.Set, error)
 	connectionEpoch     uint64
 	// contentURL is the current connection's context_content_url, read by
@@ -295,6 +299,7 @@ func New(options Options) (*Daemon, error) {
 		teamhubCLIBin:        options.TeamHubCLIBin,
 		openMCPProxies:       mcpproxy.Open,
 		onModelUnavailable:   options.OnModelUnavailable,
+		modelInvokeUnready:   options.ModelInvokeUnready,
 	}, nil
 }
 

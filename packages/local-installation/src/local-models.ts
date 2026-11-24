@@ -136,9 +136,10 @@ function localModelsLockRoot(home: string): string {
   return path.join(path.resolve(home), "runtime/localmodels");
 }
 /**
- * The lock database `withLocalModelsLock` takes. The Computer config names
- * it, so the Daemon waits for a quit-time stop or a resume restore holding
- * it.
+ * The lock database `withLocalModelsLock` takes. The Computer Daemon derives
+ * the same path from the config's `state_directory` (`installerLockPath`),
+ * the file beside that directory, to wait for a quit-time stop or a resume
+ * restore holding it.
  */
 export function localModelsLockFile(home: string): string {
   return instanceLockFile(localModelsLockRoot(home));

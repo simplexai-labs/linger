@@ -627,3 +627,31 @@ func TestModelInvokeOutcomesFollowWelcomeServiceFeature(t *testing.T) {
 		})
 	}
 }
+
+// Pi may list the Computer's downloaded local models with none loaded; a
+// model call, which names no model, is refused instead of starting Pi.
+func TestModelInvokeRefusesAPiWithNoLoadedModel(t *testing.T) {
+	invoker := newFakeModelInvoker()
+	d, stream := modelInvokeFixture(t, invoker)
+	d.modelInvokeUnready = func(runtimeType string) bool { return runtimeType == "pi" }
+	command := modelInvokeCommand("invoke-pi", nil)
+	command.RuntimeType = "pi"
+	if err := d.handleModelInvoke(context.Background(), stream, command); err != nil {
+		t.Fatal(err)
+	}
+	if payload := waitForModelInvoked(t, stream, "invoke-pi"); payload["outcome"] != "runtime_unavailable" {
+		t.Fatalf("payload = %v", payload)
+	}
+	if invoker.calls() != 0 {
+		t.Fatalf("invoker calls = %d", invoker.calls())
+	}
+	// Another Runtime is unaffected.
+	if err := d.handleModelInvoke(context.Background(), stream, modelInvokeCommand("invoke-codex", nil)); err != nil {
+		t.Fatal(err)
+	}
+	<-invoker.started
+	close(invoker.release)
+	if payload := waitForModelInvoked(t, stream, "invoke-codex"); payload["outcome"] != "completed" {
+		t.Fatalf("payload = %v", payload)
+	}
+}

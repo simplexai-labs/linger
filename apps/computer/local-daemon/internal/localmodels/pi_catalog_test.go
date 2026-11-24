@@ -3,9 +3,13 @@ package localmodels
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 )
@@ -32,11 +36,32 @@ func piDiagnostic(status string, models ...provider.RuntimeModel) []provider.Run
 	return []provider.RuntimeDiagnostic{{Type: "codex", Status: "ready", Models: []provider.RuntimeModel{{ID: "gpt", AllowedReasoningEffort: []string{}}}}, diagnostic}
 }
 
-func catalogLibrary(t *testing.T, fake *fakeTool) *Library {
+// catalogFixture reads the library once and merges against that read, as
+// the Daemon's discovery shaping does.
+type catalogFixture struct {
+	library *Library
+	catalog *PiCatalog
+}
+
+func catalogLibrary(t *testing.T, fake *fakeTool) *catalogFixture {
 	t.Helper()
 	library := newEnsureLibrary(t, fake, 0)
 	library.Refresh(context.Background())
-	return library
+	return &catalogFixture{library: library, catalog: NewPiCatalog(t.TempDir())}
+}
+
+func (f *catalogFixture) MergePiCatalog(diagnostics []provider.RuntimeDiagnostic, source *OverlayState) []provider.RuntimeDiagnostic {
+	return f.catalog.Merge(diagnostics, source, f.library.Snapshot())
+}
+
+func (f *catalogFixture) Refresh(ctx context.Context) { f.library.Refresh(ctx) }
+
+func (f *catalogFixture) piCatalogPath() string { return f.catalog.path }
+
+func (f *catalogFixture) readPiCatalog() map[string]provider.RuntimeModel {
+	f.catalog.mu.Lock()
+	defer f.catalog.mu.Unlock()
+	return f.catalog.read()
 }
 
 func modelIDs(diagnostic provider.RuntimeDiagnostic) []string {
@@ -178,5 +203,117 @@ func TestTheCatalogChangesWhenTheDownloadedModelsDo(t *testing.T) {
 	library.Refresh(context.Background())
 	if changes != 2 {
 		t.Fatalf("a new download: %d changes", changes)
+	}
+}
+
+func rememberedCatalog(t *testing.T, models ...provider.RuntimeModel) *PiCatalog {
+	t.Helper()
+	directory := t.TempDir()
+	document := piCatalogFile{Schema: piCatalogSchema, Models: map[string]provider.RuntimeModel{}}
+	for _, model := range models {
+		document.Models[model.ID] = model
+	}
+	encoded, _ := json.Marshal(document)
+	if err := os.WriteFile(directory+"/"+piCatalogFileName, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A crash left a temporary write behind.
+	if err := os.WriteFile(directory+"/"+piCatalogTempPrefix+"stale", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return NewPiCatalog(directory)
+}
+
+// Before the Library has read anything, the first discovery and the hello
+// already list what Pi listed while the models were loaded.
+func TestRememberedEntriesStandInBeforeTheFirstRead(t *testing.T) {
+	entry := provider.RuntimeModel{ID: testPiModel, Label: "Qwen3 4B", AllowedReasoningEffort: []string{"high"}, DefaultReasoningEffort: "high"}
+	catalog := rememberedCatalog(t, entry)
+	if _, err := os.Stat(filepath.Dir(catalog.path) + "/" + piCatalogTempPrefix + "stale"); err == nil {
+		t.Fatal("a stale temporary write was left")
+	}
+	merged := catalog.Merge(piDiagnostic("authentication_required"), nil, nil)
+	if merged[1].Status != "ready" || !slices.Equal(modelIDs(merged[1]), []string{testPiModel}) || merged[1].Models[0].DefaultReasoningEffort != "high" {
+		t.Fatalf("pi = %+v", merged[1])
+	}
+	if !catalog.LibraryOnly() {
+		t.Fatal("Pi is ready only through library models")
+	}
+	// A failed read keeps them.
+	unreadable := unavailable(CodeToolFailed, "", time.Now())
+	if got := catalog.Merge(piDiagnostic("authentication_required"), nil, &unreadable)[1]; got.Status != "ready" {
+		t.Fatalf("pi after a failed read = %+v", got)
+	}
+}
+
+func TestOnlyTheManagedLocalSourceGetsLibraryModels(t *testing.T) {
+	entry := provider.RuntimeModel{ID: testPiModel, Label: "Qwen3 4B", AllowedReasoningEffort: []string{}}
+	for _, tc := range []struct {
+		source *OverlayState
+		merges bool
+	}{
+		{nil, true},
+		{&OverlayState{Mode: "local"}, true},
+		{&OverlayState{Mode: "subscription"}, false},
+		{&OverlayState{Mode: "byok", Runtime: "pi"}, false},
+		{&OverlayState{Mode: "byok", Runtime: "claude"}, false},
+	} {
+		catalog := rememberedCatalog(t, entry)
+		got := catalog.Merge(piDiagnostic("authentication_required"), tc.source, nil)[1]
+		if (len(got.Models) == 1) != tc.merges || (got.Status == "ready") != tc.merges {
+			t.Fatalf("source %+v: pi = %+v", tc.source, got)
+		}
+	}
+}
+
+func TestOnlyAReadyOrSignedOutPiGetsLibraryModels(t *testing.T) {
+	entry := provider.RuntimeModel{ID: testPiModel, Label: "Qwen3 4B", AllowedReasoningEffort: []string{}}
+	for _, status := range []string{"not_installed", "error"} {
+		got := rememberedCatalog(t, entry).Merge(piDiagnostic(status), nil, nil)[1]
+		if got.Status != status || len(got.Models) != 0 {
+			t.Fatalf("%s: pi = %+v", status, got)
+		}
+	}
+}
+
+func TestLibraryModelsStayWithinTheCatalogBound(t *testing.T) {
+	var own []provider.RuntimeModel
+	for i := range provider.MaxRuntimeModels - 1 {
+		own = append(own, provider.RuntimeModel{ID: fmt.Sprintf("own/%03d", i), AllowedReasoningEffort: []string{}})
+	}
+	long := strings.Repeat("x", provider.MaxRuntimeModelTextRunes+1)
+	catalog := rememberedCatalog(t,
+		provider.RuntimeModel{ID: "lib/a", Label: strings.Repeat("y", provider.MaxRuntimeModelTextRunes+5), AllowedReasoningEffort: []string{}},
+		provider.RuntimeModel{ID: "lib/b", AllowedReasoningEffort: []string{}},
+		provider.RuntimeModel{ID: long, AllowedReasoningEffort: []string{}},
+	)
+	got := catalog.Merge(piDiagnostic("ready", own...), nil, nil)[1]
+	if len(got.Models) != provider.MaxRuntimeModels || got.Models[len(got.Models)-1].ID != "lib/a" {
+		t.Fatalf("%d models, last %+v", len(got.Models), got.Models[len(got.Models)-1])
+	}
+	if label := got.Models[len(got.Models)-1].Label; len([]rune(label)) != provider.MaxRuntimeModelTextRunes {
+		t.Fatalf("label has %d runes", len([]rune(label)))
+	}
+}
+
+func TestTheCatalogChangesWhenTheLibraryCanBeReadAgain(t *testing.T) {
+	fake := newFakeTool(t)
+	fake.write("status.json", status(model(testModel, "idle")))
+	changes := 0
+	library := New(Options{
+		Tool: &fake.tool, Environment: map[string]string{"LOCALMODELS_FAKE_TOOL": "1", "PATH": os.Getenv("PATH")},
+		JobDirectory: t.TempDir() + "/jobs", CatalogChanged: func() { changes++ }, ProgressInterval: time.Hour,
+	})
+	t.Cleanup(library.Close)
+	library.Refresh(context.Background())
+	failing := filepath.Join(fake.state, "status-exit")
+	if err := os.WriteFile(failing, []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	library.Refresh(context.Background())
+	_ = os.Remove(failing)
+	library.Refresh(context.Background())
+	if changes != 2 {
+		t.Fatalf("%d changes, want the first read and the recovery", changes)
 	}
 }

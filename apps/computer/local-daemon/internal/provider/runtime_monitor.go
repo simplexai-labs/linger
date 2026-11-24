@@ -50,7 +50,22 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 		}
 		return options.Discovery
 	}
+	// current is what discovery and the authentication probes found, the
+	// input of the next probe and of the retain rules, which compare a
+	// Runtime's own status and probe provenance. published is current after
+	// Shape, which adds catalog entries and statuses no probe produced (a
+	// BYOK catalog, the local models Pi lists only while loaded): it is what
+	// OnChanged reports and what the next result is compared against.
+	// Feeding a shaped result back into a probe would keep those entries
+	// after the condition that added them is gone.
+	shape := func(result DiscoveryResult) DiscoveryResult {
+		if options.Shape == nil {
+			return result
+		}
+		return options.Shape(result)
+	}
 	current := options.Initial
+	published := shape(current)
 	activeDiscovery := resolveDiscovery()
 	prevEnv := maps.Clone(activeDiscovery.Environment)
 	prevPaths := maps.Clone(activeDiscovery.ConfiguredPaths)
@@ -83,9 +98,6 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 			(options.FullRefreshAllowed == nil || options.FullRefreshAllowed()) {
 			next, err = discover(ctx, activeDiscovery)
 			if err == nil {
-				if options.Shape != nil {
-					next = options.Shape(next)
-				}
 				requested = false
 				prevEnv = maps.Clone(activeDiscovery.Environment)
 				prevPaths = maps.Clone(activeDiscovery.ConfiguredPaths)
@@ -99,9 +111,6 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 		} else {
 			next, err = refreshRuntimeAuthentication(ctx, current, activeDiscovery, tick%options.FullRefreshEveryTicks == 0)
 			if err == nil {
-				if options.Shape != nil {
-					next = options.Shape(next)
-				}
 				if options.RuntimeBusy != nil && options.RuntimeBusy() {
 					next = retainReadyRuntimesDuringInconclusiveProbes(current, next)
 				}
@@ -115,20 +124,21 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 			}
 			return err
 		}
-		if !envChanged && sameRuntimeDiagnostics(current.Diagnostics, next.Diagnostics) {
+		shaped := shape(next)
+		if !envChanged && sameRuntimeDiagnostics(published.Diagnostics, shaped.Diagnostics) {
 			// Retain internal probe provenance even when the public status did not
 			// change; only this provenance permits a safe auth-only recovery.
 			current = next
 			continue
 		}
-		if err := options.OnChanged(next); err != nil {
+		if err := options.OnChanged(shaped); err != nil {
 			if options.OnError != nil {
 				options.OnError(err)
 				continue
 			}
 			return err
 		}
-		current = next
+		current, published = next, shaped
 	}
 }
 

@@ -1445,9 +1445,6 @@ it("adds the localmodels tool to an existing Computer config once", async () => 
   expect(config).toEqual({
     runner_id: "same-identity",
     runtime_paths: { codex: "/existing/codex" },
-    local_models: {
-      ...localModelsTool(home),
-      lock_file: path.join(home, "runtime", "localmodels", "operation.sqlite"),
-    },
+    local_models: localModelsTool(home),
   });
 });

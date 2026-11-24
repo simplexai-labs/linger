@@ -61,7 +61,8 @@ func busyProbes(library *Library) <-chan struct{} {
 }
 
 // drainAndAwait waits for a probe that started after this call.
-func drainAndAwait(probes <-chan struct{}) {
+func drainAndAwait(t *testing.T, probes <-chan struct{}) {
+	t.Helper()
 	for {
 		select {
 		case <-probes:
@@ -70,8 +71,14 @@ func drainAndAwait(probes <-chan struct{}) {
 		}
 		break
 	}
-	<-probes
-	<-probes
+	timeout := time.After(20 * time.Second)
+	for range 2 {
+		select {
+		case <-probes:
+		case <-timeout:
+			t.Fatal("timed out waiting for a lock probe")
+		}
+	}
 }
 
 func TestARunWaitsForTheInstallersStop(t *testing.T) {
@@ -87,7 +94,7 @@ func TestARunWaitsForTheInstallersStop(t *testing.T) {
 	library.Refresh(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- library.EnsureLoaded(context.Background(), testPiModel) }()
-	drainAndAwait(probes)
+	drainAndAwait(t, probes)
 	select {
 	case err := <-done:
 		t.Fatalf("returned %v while the installer held its lock", err)
@@ -151,7 +158,7 @@ func TestACancelledRunLeavesTheSharedLockWait(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- library.EnsureLoaded(context.Background(), testPiModel) }()
-	drainAndAwait(probes)
+	drainAndAwait(t, probes)
 	select {
 	case err := <-done:
 		t.Fatalf("a later Run returned %v while the lock was held", err)
@@ -221,15 +228,11 @@ func TestARunOutsideTheLibraryDoesNotWaitForTheInstaller(t *testing.T) {
 	}
 }
 
-// The config names the lock; one an older installer wrote does not, and the
-// installer's layout stands in for it.
-func TestTheInstallerLockPathComesFromTheConfig(t *testing.T) {
-	named := &Tool{StateDirectory: "/home/u/runtime/localmodels/state", LockFile: "/elsewhere/operation.sqlite"}
-	if got := installerLockPath(named); got != "/elsewhere/operation.sqlite" {
-		t.Fatalf("named lock = %q", got)
-	}
-	older := &Tool{StateDirectory: filepath.Join("/home", "u", "runtime", "localmodels", "state")}
-	if got := installerLockPath(older); got != filepath.Join("/home", "u", "runtime", "localmodels", "operation.sqlite") {
-		t.Fatalf("derived lock = %q", got)
+// The installer's layout puts the lock beside the state directory; the
+// installer's localModelsLockFile pins the same path.
+func TestTheInstallerLockSitsBesideTheStateDirectory(t *testing.T) {
+	tool := &Tool{StateDirectory: filepath.Join("/home", "u", "runtime", "localmodels", "state")}
+	if got := installerLockPath(tool); got != filepath.Join("/home", "u", "runtime", "localmodels", "operation.sqlite") {
+		t.Fatalf("lock = %q", got)
 	}
 }

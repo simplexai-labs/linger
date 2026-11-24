@@ -515,3 +515,91 @@ echo '{"loggedIn":true}'
 		t.Fatalf("auth probe ran while refresh was disallowed: err=%v data=%q", readErr, data)
 	}
 }
+
+// A Shape that fills a signed-out Pi's empty catalog with models no probe
+// reports, as the Daemon does with local models, must not feed back into the
+// authentication refreshes: Pi stays ready while the Shape adds a model, and
+// returns to signed out on the next refresh once it stops.
+func TestRuntimeMonitorProbesFromTheUnshapedResult(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX shell")
+	}
+	root := t.TempDir()
+	piAgentDir := filepath.Join(root, ".pi", "agent")
+	if err := os.MkdirAll(piAgentDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	piExecutable := filepath.Join(root, "pi")
+	script := `#!/bin/sh
+if [ "$1" = "--version" ]; then echo '1.2.0'; exit 0; fi
+while IFS= read -r line; do
+  case "$line" in
+  *linger-probe*) echo '{"type":"response","id":"linger-probe","command":"get_state","success":true,"data":{"isStreaming":false}}' ;;
+  *linger-state*) echo '{"type":"response","id":"linger-state","command":"get_state","success":true,"data":{"thinkingLevel":"off"}}' ;;
+  *linger-models*) echo '{"type":"response","id":"linger-models","command":"get_available_models","success":true,"data":{"models":[]}}' ;;
+  esac
+done
+`
+	if err := os.WriteFile(piExecutable, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	primeTestExecutable(t, piExecutable)
+	options := DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": piExecutable},
+		Runtimes:        []string{"pi"},
+		Environment:     map[string]string{"HOME": root, "PATH": root, "PI_CODING_AGENT_DIR": piAgentDir},
+		Timeout:         10 * time.Second,
+	}
+	initial, err := Discover(t.Context(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initial.Diagnostics[0].Status != "authentication_required" || len(initial.Diagnostics[0].Models) != 0 {
+		t.Fatalf("initial = %+v", initial.Diagnostics[0])
+	}
+	var library atomic.Bool
+	library.Store(true)
+	shapeCalls := 0
+	shape := func(result DiscoveryResult) DiscoveryResult {
+		shapeCalls++
+		diagnostics := append([]RuntimeDiagnostic(nil), result.Diagnostics...)
+		pi := &diagnostics[0]
+		if library.Load() && pi.Status == "authentication_required" && len(pi.Models) == 0 {
+			pi.Models = []RuntimeModel{{ID: "localmodels-library/m", AllowedReasoningEffort: []string{}}}
+			pi.Status, pi.Error = "ready", nil
+		}
+		if shapeCalls == 6 {
+			// The model left the library.
+			library.Store(false)
+		}
+		return DiscoveryResult{Diagnostics: diagnostics, Installations: InstallationsFromDiagnostics(diagnostics)}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	var published []RuntimeDiagnostic
+	err = MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+		Initial:               initial,
+		Discovery:             options,
+		RefreshInterval:       5 * time.Millisecond,
+		FullRefreshEveryTicks: 1_000_000,
+		Discover: func(context.Context, DiscoveryOptions) (DiscoveryResult, error) {
+			t.Fatal("only authentication refreshes run")
+			return DiscoveryResult{}, nil
+		},
+		Shape: shape,
+		OnChanged: func(next DiscoveryResult) error {
+			published = append(published, next.Diagnostics[0])
+			cancel()
+			return nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("monitor exited with %v", err)
+	}
+	if shapeCalls <= 6 {
+		t.Fatalf("published before the model left the library: %+v", published)
+	}
+	if len(published) != 1 || published[0].Status != "authentication_required" || len(published[0].Models) != 0 {
+		t.Fatalf("published = %+v", published)
+	}
+}

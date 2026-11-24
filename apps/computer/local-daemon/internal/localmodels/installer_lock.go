@@ -28,15 +28,12 @@ const (
 	sqliteLocked = 6
 )
 
-// installerLockPath names the installer's local-models lock: the path the
-// Computer config names, else, for a config an older installer wrote
-// without it, the installer's layout, which keeps the localmodels state in
-// <home>/runtime/localmodels/state and the lock database beside it as
-// <home>/runtime/localmodels/operation.sqlite.
+// installerLockPath names the installer's local-models lock. The installer
+// keeps the localmodels state in <home>/runtime/localmodels/state and its
+// lock database beside it as <home>/runtime/localmodels/operation.sqlite
+// (localModelsLockFile in packages/local-installation), so the lock sits in
+// the state directory's parent.
 func installerLockPath(tool *Tool) string {
-	if tool != nil && tool.LockFile != "" {
-		return tool.LockFile
-	}
 	if tool == nil || tool.StateDirectory == "" {
 		return ""
 	}

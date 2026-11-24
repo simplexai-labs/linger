@@ -115,6 +115,11 @@ func (d *Daemon) modelInvokeBlocked(command protocol.Command, request modelInvok
 	if d.modelInvoker == nil {
 		return provider.ModelInvokeResult{Outcome: provider.ModelInvokeRuntimeUnavailable, Reason: "Model invocation is unavailable"}
 	}
+	if d.modelInvokeUnready != nil && d.modelInvokeUnready(command.RuntimeType) {
+		// Pi lists the Computer's downloaded local models so a Run can load
+		// one, but a model call names no model and none is loaded.
+		return provider.ModelInvokeResult{Outcome: provider.ModelInvokeRuntimeUnavailable, Reason: "The Runtime has no loaded model"}
+	}
 	if reason := invalidModelInvokeRequest(request); reason != "" {
 		return provider.ModelInvokeResult{Outcome: provider.ModelInvokeFailed, Reason: reason}
 	}

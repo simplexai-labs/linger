@@ -1,6 +1,5 @@
 import path from "node:path";
 import { privateDirectory } from "./instance.js";
-import { localModelsLockFile } from "./local-models.js";
 import {
   ensureLocalmodelsTool,
   localmodelsBaseDirectory,
@@ -21,11 +20,6 @@ export interface LocalmodelsComputerTool {
   moduleDirectory: string;
   stateDirectory: string;
   baseDirectory: string;
-  /**
-   * The installer's local-models lock; absent from an environment an older
-   * installer wrote, whose Daemon then derives it from stateDirectory.
-   */
-  lockFile?: string;
 }
 
 /**
@@ -49,7 +43,6 @@ export async function localmodelsComputerTool(
     moduleDirectory: tool.moduleDir,
     stateDirectory,
     baseDirectory,
-    lockFile: localModelsLockFile(home),
   };
 }
 
@@ -60,31 +53,21 @@ const ENVIRONMENT = {
   moduleDirectory: "LINGER_LOCALMODELS_MODULE_DIR",
   stateDirectory: "LINGER_LOCALMODELS_STATE",
   baseDirectory: "LINGER_LOCALMODELS_BASE_DIR",
-} as const satisfies Record<
-  Exclude<keyof LocalmodelsComputerTool, "lockFile">,
-  string
->;
-// Optional: an older installer's environment does not name it.
-const LOCK_FILE_ENVIRONMENT = "LINGER_LOCALMODELS_LOCK_FILE";
+} as const satisfies Record<keyof LocalmodelsComputerTool, string>;
 
-export const LOCALMODELS_TOOL_ENVIRONMENT: readonly string[] = [
-  ...Object.values(ENVIRONMENT),
-  LOCK_FILE_ENVIRONMENT,
-];
+export const LOCALMODELS_TOOL_ENVIRONMENT: readonly string[] =
+  Object.values(ENVIRONMENT);
 
 export function localmodelsToolEnvironment(
   tool: LocalmodelsComputerTool | undefined,
 ): Record<string, string> {
   if (!tool) return {};
-  return {
-    ...Object.fromEntries(
-      Object.entries(ENVIRONMENT).map(([key, name]) => [
-        name,
-        tool[key as keyof typeof ENVIRONMENT],
-      ]),
-    ),
-    ...(tool.lockFile ? { [LOCK_FILE_ENVIRONMENT]: tool.lockFile } : {}),
-  };
+  return Object.fromEntries(
+    Object.entries(ENVIRONMENT).map(([key, name]) => [
+      name,
+      tool[key as keyof LocalmodelsComputerTool],
+    ]),
+  );
 }
 
 /** The tool an environment names, when it names all four absolute paths. */
@@ -102,13 +85,7 @@ export function localmodelsToolFromEnvironment(
     )
   )
     return undefined;
-  const tool = Object.fromEntries(
-    entries,
-  ) as unknown as LocalmodelsComputerTool;
-  const lockFile = environment?.[LOCK_FILE_ENVIRONMENT];
-  if (typeof lockFile === "string" && platformPath.isAbsolute(lockFile))
-    tool.lockFile = lockFile;
-  return tool;
+  return Object.fromEntries(entries) as unknown as LocalmodelsComputerTool;
 }
 
 /** The Computer config's `local_models` section. */
@@ -118,7 +95,6 @@ export function localModelsConfig(tool: LocalmodelsComputerTool) {
     module_directory: tool.moduleDirectory,
     state_directory: tool.stateDirectory,
     base_directory: tool.baseDirectory,
-    ...(tool.lockFile ? { lock_file: tool.lockFile } : {}),
   };
 }
 

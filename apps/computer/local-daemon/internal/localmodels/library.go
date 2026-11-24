@@ -133,11 +133,11 @@ type Library struct {
 	// installer busy. Nil outside tests.
 	testWaiting       func(id string)
 	testInstallerBusy func()
-	// piCatalogMu serializes reads and writes of pi-catalog.json.
-	piCatalogMu sync.Mutex
 	// catalog identifies the models the Pi catalog lists from the last
 	// status read (catalogKey); nil before the first one.
-	catalog      *string
+	catalog *string
+	// unreadable is whether the last status read failed.
+	unreadable   bool
 	piExecutable string
 	piEnsuring   bool
 	piFailures   int
@@ -340,9 +340,12 @@ func (l *Library) Refresh(ctx context.Context) wire.LocalModelsSnapshot {
 		// library model, so a finished download or a removal changes it too,
 		// as does the first read that finds any.
 		catalog := catalogKey(snapshot)
-		catalogChanged = (l.catalog == nil && catalog != "") || (l.catalog != nil && *l.catalog != catalog)
+		// A read after a failed one also counts: the Pi catalog fell back to
+		// the remembered entries meanwhile.
+		catalogChanged = (l.catalog == nil && catalog != "") || (l.catalog != nil && *l.catalog != catalog) || l.unreadable
 		l.catalog = &catalog
 	}
+	l.unreadable = !snapshot.Available
 	l.mu.Unlock()
 	committed := l.commit(snapshot)
 	// localmodels registers a loaded model with Pi and unregisters it on
@@ -1009,11 +1012,6 @@ func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
 	known := read && l.current.Available
 	cached := l.rowLocked(func(model wire.LocalModel) bool { return model.PiModel == piModel })
 	l.mu.Unlock()
-	if read && !known {
-		// The library cannot be read now; reconcile rereads it in the
-		// background, and the Run starts as it would without this check.
-		return nil
-	}
 	if known && cached == nil {
 		// pi_model is present while the model is on the Computer, and the
 		// installer's stop changes nothing on disk.
@@ -1028,6 +1026,15 @@ func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
 		// about to be unloaded; read the status after it.
 		return err
 	}
+	l.mu.Lock()
+	read = l.current != nil
+	known = read && l.current.Available
+	l.mu.Unlock()
+	if read && !known {
+		// The library cannot be read now; reconcile rereads it in the
+		// background, and the Run starts as it would without this check.
+		return nil
+	}
 	readCtx := ctx
 	if !read {
 		// The first read of a Library this Run waits for: a tool that hangs
@@ -1039,6 +1046,15 @@ func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
 	snapshot := l.Refresh(readCtx)
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if readCtx.Err() != nil {
+		// The read ran out of its budget; a read that finished meanwhile
+		// still answers.
+		latest := l.Snapshot()
+		if latest == nil {
+			return nil
+		}
+		snapshot = *latest
 	}
 	if !snapshot.Available {
 		return nil

@@ -42,27 +42,3 @@ func TestLocalModelsConfigRejectsRelativeOrMissingPaths(t *testing.T) {
 		}
 	}
 }
-
-func TestLocalModelsConfigReadsTheInstallerLockFile(t *testing.T) {
-	root := t.TempDir()
-	fields := func(lockFile string) string {
-		return fmt.Sprintf(`,"local_models":{"python":%q,"module_directory":%q,"state_directory":%q,"base_directory":%q,"lock_file":%q}`,
-			filepath.Join(root, "python3"), root, filepath.Join(root, "state"), filepath.Join(root, "models"), lockFile)
-	}
-	lock := filepath.Join(root, "operation.sqlite")
-	config, err := loadConfigFields(t, fields(lock))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if config.LocalModels.LockFile != lock {
-		t.Fatalf("LockFile = %q", config.LocalModels.LockFile)
-	}
-	// A relative path is ignored, not fatal: the lock only orders Runs.
-	config, err = loadConfigFields(t, fields("operation.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if config.LocalModels.LockFile != "" {
-		t.Fatalf("LockFile = %q", config.LocalModels.LockFile)
-	}
-}

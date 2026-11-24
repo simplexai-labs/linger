@@ -294,11 +294,11 @@ func normalizeRuntimeModels(catalog []native.ModelOption) []RuntimeModel {
 			ordered = append(ordered, entry)
 		}
 	}
-	result := make([]RuntimeModel, 0, min(100, len(ordered)))
+	result := make([]RuntimeModel, 0, min(MaxRuntimeModels, len(ordered)))
 	seen := make(map[string]bool)
 	for _, entry := range ordered {
 		id := strings.TrimSpace(entry.ID)
-		if id == "" || len([]rune(id)) > 160 || seen[id] {
+		if id == "" || len([]rune(id)) > MaxRuntimeModelTextRunes || seen[id] {
 			continue
 		}
 		seen[id] = true
@@ -306,7 +306,7 @@ func normalizeRuntimeModels(catalog []native.ModelOption) []RuntimeModel {
 		if label == "" {
 			label = id
 		}
-		model := RuntimeModel{ID: id, Label: truncateRunes(label, 160), AllowedReasoningEffort: []string{}, IsDefault: entry.Default, resolved: strings.TrimSpace(entry.Resolved)}
+		model := RuntimeModel{ID: id, Label: ClipRuntimeModelLabel(label), AllowedReasoningEffort: []string{}, IsDefault: entry.Default, resolved: strings.TrimSpace(entry.Resolved)}
 		if entry.ContextWindow > 0 && entry.ContextWindow <= maxModelContextWindow {
 			model.ContextWindow = entry.ContextWindow
 		}
@@ -321,12 +321,25 @@ func normalizeRuntimeModels(catalog []native.ModelOption) []RuntimeModel {
 			}
 		}
 		result = append(result, model)
-		if len(result) == 100 {
+		if len(result) == MaxRuntimeModels {
 			break
 		}
 	}
 	return result
 }
+
+// Bounds of a Runtime's model catalog: how many models it lists, and how
+// many runes a model ID or label may have.
+const (
+	MaxRuntimeModels         = 100
+	MaxRuntimeModelTextRunes = 160
+)
+
+// ClipRuntimeModelLabel cuts a model label to the catalog bound.
+func ClipRuntimeModelLabel(label string) string {
+	return truncateRunes(label, MaxRuntimeModelTextRunes)
+}
+
 func validRuntimeReasoningEffort(value string) bool {
 	return slices.Contains([]string{"none", "low", "medium", "high", "xhigh", "max", "ultra"}, value)
 }

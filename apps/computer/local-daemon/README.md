@@ -131,9 +131,8 @@ spends model quota and is not part of the default tests.
 The Daemon runs the model library of the installer's `localmodels` tool for
 the Local models page. The Computer config's `local_models` section names the
 tool: `python`, `module_directory` (the sealed kit, used as `PYTHONPATH` and
-working directory), `state_directory` (`LOCALMODELS_STATE`),
-`base_directory` (`--base-dir`) and, optionally, `lock_file` (the
-installer's local-models lock; see Installer lock). From `state_directory`, the Daemon derives
+working directory), `state_directory` (`LOCALMODELS_STATE`) and
+`base_directory` (`--base-dir`). From `state_directory`, the Daemon derives
 sibling `tools` (`LOCALMODELS_TOOLS_DIR`), `bifrost`
 (`LOCALMODELS_BIFROST_DIR`), and `bifrost-addr` (`LOCALMODELS_BIFROST_ADDR`).
 The Daemon prefers the address in `<tools>/owned.json`. On start and apply
@@ -201,9 +200,8 @@ downloaded model that Run's Agent names.
   Run start as before.
 - Installer lock. A quit starts the installer's stop after the app is gone;
   it cancels and unloads the library's models while holding the installer's
-  local-models lock, the config's `lock_file` (for a config an older
-  installer wrote without it, `operation.sqlite` beside the tool's state
-  directory),
+  local-models lock, `operation.sqlite` beside the tool's state directory
+  (the installer's `localModelsLockFile` names the same file),
   and the installer's resume reloads the saved `runtime_model` under the
   same lock. A relaunch inside either window would read the models as still
   loaded, or start a second load. So once per Daemon, before the first Run
@@ -218,19 +216,29 @@ downloaded model that Run's Agent names.
   `loading` once it starts.
 - Pi catalog. localmodels registers a model with Pi only while it is
   loaded, so after a quit Pi lists none of them, and with no model at all
-  Pi asks for a sign-in. The Daemon adds to the Pi diagnostic it reports
-  every library row with a `pi_model` that is loaded, loading, or
+  Pi asks for a sign-in. When Pi runs on the managed local models source
+  (no saved source, or `local`; never `subscription` or BYOK) and is `ready`
+  or `authentication_required`, the Daemon adds to the Pi diagnostic it
+  reports every library row with a `pi_model` that is loaded, loading, or
   downloaded and loadable (not an interrupted download). A model Pi listed
   while it was loaded keeps that entry (label, reasoning effort, context
   window), remembered in `state/local-models/pi-catalog.json`; one Pi never
-  listed gets its name, its context size and no reasoning effort. Pi's own
-  entries and its default model stay as Pi reports them. A Pi diagnostic
-  that is `authentication_required` only because its own catalog was empty
-  is reported `ready` once library models fill it. Nothing is added while
-  the library cannot be read, or when Pi runs on a BYOK source. A
-  remembered entry goes when its row leaves the library. A status read whose
-  set of such models differs from the last one, including the first read
-  that finds any, asks for discovery again.
+  listed gets its name, its context size and no reasoning effort. Until the
+  library has been read, and while a read fails, the remembered entries
+  stand in, so the first discovery and the hello already list them. Pi's
+  own entries and its default model stay as Pi reports them and come first
+  within the catalog bound (models are dropped past it, IDs over the bound
+  are skipped, labels are clipped). A Pi diagnostic that is
+  `authentication_required` only because its own catalog was empty is
+  reported `ready` once library models fill it; a model call (`model_invoke`)
+  on such a Pi, which names no model and finds none loaded, ends
+  `runtime_unavailable`. Remembered entries are learned only from Pi's own
+  catalog, and one goes when its row leaves the library. The runtime
+  monitor probes from Pi's own result and adds library models only to what
+  it publishes, so an authentication refresh neither keeps a merged model
+  nor undoes the `ready`. A status read whose set of such models differs
+  from the last one, including the first read that finds any and the first
+  after a failed read, asks for discovery again.
 - Jobs. A download or load runs in its own process group and writes its event
   lines to a file under `state/local-models/jobs`, which the Daemon tails, so
   a Daemon restart neither signals the job nor breaks its output. `cancel` is

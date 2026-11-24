@@ -18,12 +18,16 @@ import {
   reasonCodeList,
   restoreLocalModels,
   stackProgress,
+  localModelsLockFile,
   withLocalModelsLock,
 } from "./local-models.js";
 import { lastJsonObject } from "./byok-source.js";
 import { writeSetupChoice } from "./setup-selection.js";
 import { runProcess } from "./process.js";
-import { runLocalmodels } from "./localmodels-tool.js";
+import {
+  localmodelsStateDirectory,
+  runLocalmodels,
+} from "./localmodels-tool.js";
 import { expectPrivate } from "./test-support/private.js";
 import { INSTANCE_BUSY, type Instance } from "./instance.js";
 const roots: string[] = [];
@@ -1640,6 +1644,15 @@ async function holdLocalModelsLock(home: string) {
     await held;
   };
 }
+test("the lock file sits beside the localmodels state directory, where the Computer Daemon looks for it", () => {
+  const home = path.join(os.tmpdir(), "home");
+  expect(localModelsLockFile(home)).toBe(
+    path.join(
+      path.dirname(localmodelsStateDirectory(home)),
+      "operation.sqlite",
+    ),
+  );
+});
 test("the lock waits out a holder that lets go within its retry window", async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), "local-models-lock-"));
   roots.push(home);
