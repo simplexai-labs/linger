@@ -207,15 +207,11 @@ describe("URL preview in a browser", () => {
 });
 
 describe("URL preview in a native desktop view", () => {
-  let frames: FrameRequestCallback[] = [];
-  let time = 0;
   const elementFromPoint = document.elementFromPoint;
-  // Each frame comes after the cover check interval, so it checks again.
-  function nextFrame() {
-    const pending = frames;
-    frames = [];
-    time += 200;
-    act(() => pending.forEach((callback) => callback(time)));
+  function advance(ms: number) {
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
   }
 
   function setup() {
@@ -234,10 +230,6 @@ describe("URL preview in a native desktop view", () => {
     vi.stubGlobal("lingerDesktop", {
       preview: { onFrameRefused: () => () => undefined, view },
     });
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
-      frames.push(callback),
-    );
-    vi.stubGlobal("cancelAnimationFrame", () => undefined);
     return {
       view,
       report: (id: string, state: unknown) => report?.(id, state),
@@ -245,6 +237,15 @@ describe("URL preview in a native desktop view", () => {
   }
 
   function renderPlaced() {
+    vi.useFakeTimers({
+      toFake: [
+        "setInterval",
+        "clearInterval",
+        "requestAnimationFrame",
+        "cancelAnimationFrame",
+        "performance",
+      ],
+    });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
       DOMRect.fromRect({ x: 600, y: 44, width: 400, height: 600 }),
     );
@@ -259,7 +260,7 @@ describe("URL preview in a native desktop view", () => {
   }
 
   afterEach(() => {
-    frames = [];
+    vi.useRealTimers();
     document.elementFromPoint = elementFromPoint;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -311,35 +312,49 @@ describe("URL preview in a native desktop view", () => {
     const { cover } = renderPlaced();
     const id = view.open.mock.calls[0]![0];
 
-    nextFrame();
+    advance(16);
     expect(view.place).toHaveBeenCalledExactlyOnceWith(id, {
       x: 600,
       y: 44,
       width: 400,
       height: 600,
     });
-    nextFrame();
+    advance(1000);
     expect(view.place).toHaveBeenCalledTimes(1);
 
     cover(document.body);
-    nextFrame();
+    advance(100);
     expect(view.hide).toHaveBeenCalledWith(id);
 
     cover(null);
-    nextFrame();
+    advance(100);
     expect(view.place).toHaveBeenCalledTimes(2);
+  });
+
+  it("checks every frame only for a moment after input", () => {
+    setup();
+    renderPlaced();
+    const frames = vi.spyOn(window, "requestAnimationFrame");
+    advance(1000);
+    const settled = frames.mock.calls.length;
+    advance(1000);
+    expect(frames.mock.calls.length).toBe(settled);
+
+    fireEvent.pointerDown(document.body);
+    advance(100);
+    expect(frames.mock.calls.length).toBeGreaterThan(settled + 3);
   });
 
   it("hides the view under a layer drawn beside the app, even one that takes no pointer", () => {
     const { view } = setup();
     renderPlaced();
-    nextFrame();
+    advance(16);
     expect(view.place).toHaveBeenCalledTimes(1);
 
     const tooltip = document.createElement("div");
     tooltip.style.pointerEvents = "none";
     document.body.append(tooltip);
-    nextFrame();
+    advance(100);
     expect(view.hide).toHaveBeenCalledTimes(1);
     tooltip.remove();
   });

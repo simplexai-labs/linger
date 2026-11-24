@@ -373,10 +373,11 @@ function NativeUrlPreview({
 // Points inset from the edges, where handles such as the panel's resize
 // grip overlap the surface by a few pixels without covering the page.
 const SAMPLES = [0.08, 0.3, 0.5, 0.7, 0.92];
-// How often the surface is checked for covering layers; for a moment after
-// input, which opens menus and dialogs, it is checked every frame.
-const COVER_CHECK_MS = 100;
-const INPUT_WATCH_MS = 400;
+// How often an idle panel is checked for moves and covering layers. For a
+// moment after input, a transition or a resize, which open menus and move
+// the panel, it is checked every frame.
+const IDLE_CHECK_MS = 100;
+const ACTIVE_WATCH_MS = 400;
 
 function intersects(rect: DOMRect, bounds: PreviewBounds) {
   return (
@@ -450,7 +451,8 @@ function visibleBounds(element: HTMLElement): PreviewBounds | null {
 }
 
 /**
- * Keeps the native view over this element. While something of the page
+ * Keeps the native view over this element: every frame while the page is
+ * active, ten times a second while it is idle. While something of the page
  * covers it, the view hides and the panel shows empty; the page never sees
  * the view's content.
  */
@@ -470,25 +472,11 @@ function NativeViewSurface({
     let frame = 0;
     // The bounds the view was last placed at; null while it is hidden.
     let placed: string | null = null;
-    let isCovered = false;
-    let checkedAt = Number.NEGATIVE_INFINITY;
-    let watchUntil = 0;
-    const watch = () => {
-      watchUntil = performance.now() + INPUT_WATCH_MS;
-    };
-    const tick = (now: number) => {
-      frame = requestAnimationFrame(tick);
+    let activeUntil = 0;
+    const check = () => {
       const element = ref.current;
       const bounds = element ? visibleBounds(element) : null;
-      if (
-        element &&
-        bounds &&
-        (now < watchUntil || now - checkedAt >= COVER_CHECK_MS)
-      ) {
-        checkedAt = now;
-        isCovered = covered(element, bounds);
-      }
-      if (bounds && !isCovered) {
+      if (element && bounds && !covered(element, bounds)) {
         const key = `${bounds.x},${bounds.y},${bounds.width},${bounds.height}`;
         if (key === placed) return;
         placed = key;
@@ -498,15 +486,38 @@ function NativeViewSurface({
         void view.hide(id).catch(() => undefined);
       }
     };
+    const everyFrame = () => {
+      check();
+      frame =
+        performance.now() < activeUntil ? requestAnimationFrame(everyFrame) : 0;
+    };
+    const watch = () => {
+      activeUntil = performance.now() + ACTIVE_WATCH_MS;
+      if (!frame) frame = requestAnimationFrame(everyFrame);
+    };
+    const timer = window.setInterval(check, IDLE_CHECK_MS);
+    const resized =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(watch);
+    if (ref.current) resized?.observe(ref.current);
     window.addEventListener("pointerdown", watch, true);
     window.addEventListener("keydown", watch, true);
     window.addEventListener("focusin", watch, true);
-    frame = requestAnimationFrame(tick);
+    window.addEventListener("transitionrun", watch, true);
+    window.addEventListener("animationstart", watch, true);
+    window.addEventListener("resize", watch);
+    window.addEventListener("scroll", watch, true);
+    watch();
     return () => {
+      window.clearInterval(timer);
       cancelAnimationFrame(frame);
+      resized?.disconnect();
       window.removeEventListener("pointerdown", watch, true);
       window.removeEventListener("keydown", watch, true);
       window.removeEventListener("focusin", watch, true);
+      window.removeEventListener("transitionrun", watch, true);
+      window.removeEventListener("animationstart", watch, true);
+      window.removeEventListener("resize", watch);
+      window.removeEventListener("scroll", watch, true);
       if (placed !== null) void view.hide(id).catch(() => undefined);
     };
   }, [hidden, id, view]);
