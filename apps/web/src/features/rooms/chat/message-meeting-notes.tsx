@@ -155,7 +155,7 @@ function FullNotesStatus({
     <div className="flex items-center gap-2.5 px-4 py-2.5 text-[13px] leading-[18px] text-app-muted">
       {ready && meeting ? (
         <>
-          <span className="grid size-4 shrink-0 place-items-center rounded-full bg-app-success text-white">
+          <span className="grid size-4 shrink-0 place-items-center rounded-full bg-app-success text-primary-foreground">
             <Icon icon={Tick02Icon} size={10} />
           </span>
           <span className="min-w-0 flex-1">

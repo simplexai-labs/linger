@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 
 import type { Language } from "../i18n/language.js";
+import type { Theme } from "../shared/theme.js";
 import type { ConfigStore } from "./config.js";
 import type { Logger } from "./log.js";
 
@@ -44,6 +45,8 @@ export interface BusEvents {
   "server.moved": [from: string, to: string];
   "setup.open": [];
   "status.changed": [status: { tone: string; label: string }];
+  // The shell went light or dark; the window recolors.
+  "theme.changed": [theme: Theme];
   "update.changed": [state: string];
 }
 

@@ -70,6 +70,8 @@ const state = vi.hoisted(() => {
     readonly destroy = vi.fn(() => {
       this.destroyed = true;
     });
+    readonly setBackgroundColor = vi.fn();
+    readonly setTitleBarOverlay = vi.fn();
     readonly getContentBounds = () => ({ width: 1280, height: 820 });
     readonly getNormalBounds = () => ({ x: 0, y: 0, width: 1280, height: 820 });
     readonly isMinimized = () => false;
@@ -139,12 +141,14 @@ vi.mock("../shell/messages.html", () => ({
 import { protocol, session } from "electron";
 
 import { IPC } from "../shared/api.js";
+import { WINDOW_COLORS } from "../shared/theme.js";
 import { ConfigStore } from "./config.js";
 import zhCN from "../i18n/locales/zh-CN.json" with { type: "json" };
 import { LanguageModule } from "./language.js";
 import { EventBus, ModuleHost, type Module } from "./modules.js";
 import { PreviewViews } from "./preview-views.js";
-import { tempDirectory } from "./test-support.js";
+import { fakeNativeTheme, tempDirectory } from "./test-support.js";
+import { ThemeModule } from "./theme.js";
 import { WindowManagerModule } from "./window-manager.js";
 
 const flush = (): Promise<void> =>
@@ -175,6 +179,8 @@ function setup(
   };
   Object.assign(diagnosticsStub, { uploadUrl: () => undefined });
   const language = new LanguageModule({ systemLanguages: () => ["en-US"] });
+  const nativeTheme = fakeNativeTheme();
+  const theme = new ThemeModule({ native: nativeTheme });
   const manager = new WindowManagerModule({
     preload: "/preload.cjs",
     shellPreload: "/shell.cjs",
@@ -193,6 +199,7 @@ function setup(
       },
       diagnosticsStub,
       language,
+      theme,
       manager,
     ],
     {
@@ -205,7 +212,7 @@ function setup(
       },
     },
   );
-  return { manager, host, config, bus, logs, language };
+  return { manager, host, config, bus, logs, language, theme, nativeTheme };
 }
 
 function contentView() {
@@ -710,6 +717,85 @@ describe("WindowManagerModule", () => {
       expect(await page("app://offline/")).toContain(
         zhCN.offline.unreachableTitle,
       );
+      await host.stop("quit");
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
+  });
+
+  it("opens in the kept theme and repaints the window when the theme changes", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    // Windows has every part: the drawn title bar and the caption overlay.
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      const { host, theme, nativeTheme } = setup({
+        serverUrl: "http://localhost:3000",
+        theme: "dark",
+      });
+      await host.start();
+      const window = state.windows[0]!;
+      const dark = WINDOW_COLORS.dark;
+      expect(window.options.backgroundColor).toBe(dark.canvas);
+      expect(window.options.titleBarOverlay).toMatchObject({
+        color: dark.canvas,
+        symbolColor: dark.symbol,
+      });
+      expect(titlebarView()!.setBackgroundColor).toHaveBeenLastCalledWith(
+        dark.canvas,
+      );
+      expect(contentView().setBackgroundColor).toHaveBeenLastCalledWith(
+        dark.page,
+      );
+
+      const light = WINDOW_COLORS.light;
+      theme.choose("light");
+      expect(window.setBackgroundColor).toHaveBeenLastCalledWith(light.canvas);
+      expect(window.setTitleBarOverlay).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          color: light.canvas,
+          symbolColor: light.symbol,
+        }),
+      );
+      expect(titlebarView()!.setBackgroundColor).toHaveBeenLastCalledWith(
+        light.canvas,
+      );
+      expect(contentView().setBackgroundColor).toHaveBeenLastCalledWith(
+        light.page,
+      );
+
+      // While the system is followed, its switch repaints the window too.
+      theme.choose("system");
+      window.setBackgroundColor.mockClear();
+      nativeTheme.setSystemDark(true);
+      expect(window.setBackgroundColor).toHaveBeenCalledExactlyOnceWith(
+        dark.canvas,
+      );
+      await host.stop("quit");
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
+  });
+
+  it("keeps the native traffic lights and sets no caption overlay on macOS", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    try {
+      const { host, theme } = setup({
+        serverUrl: "http://localhost:3000",
+        theme: "light",
+      });
+      await host.start();
+      const window = state.windows[0]!;
+      expect(titlebarView()).toBeUndefined();
+
+      theme.choose("dark");
+      expect(window.setBackgroundColor).toHaveBeenLastCalledWith(
+        WINDOW_COLORS.dark.canvas,
+      );
+      expect(contentView().setBackgroundColor).toHaveBeenLastCalledWith(
+        WINDOW_COLORS.dark.page,
+      );
+      expect(window.setTitleBarOverlay).not.toHaveBeenCalled();
       await host.stop("quit");
     } finally {
       Object.defineProperty(process, "platform", platform);

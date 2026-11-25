@@ -126,6 +126,16 @@ build:assets` to check the initial JS budget.
   menus and pages follow, `use-translation.tsx` is the React side, and
   `locales/` holds one catalog per translated language plus its glossary,
   which the desktop catalog follows too.
+- `src/app/theme.ts`: the interface theme, chosen in Settings › Appearance
+  (System, Light, Dark). The choice is stored on the device
+  (`localStorage["linger.theme"]`; an absent value means System, which
+  follows `prefers-color-scheme`) and shown as `data-theme="dark"` on the
+  document element, with no attribute for light. The inline script in
+  `index.html` applies the same rule before the first paint, so a dark
+  interface never flashes by in light; `theme.test.ts` runs that script
+  against the module, so change the two together. `desktop-theme.ts` reports
+  the choice to the desktop app, whose window, native menus and own pages
+  follow it.
 - `src/test`: unit-test support, including the in-process TeamHub test server.
 - `e2e`: Playwright product workflows; every spec runs on the real TeamHub and
   Document Runtime stack (`make check-e2e-room-document`).
@@ -283,6 +293,17 @@ build:assets` to check the initial JS budget.
   `--color-app-*` roles such as `text-app-ink`) instead of hex arbitrary values;
   when no token fits, add one to `src/app/visual-theme.css` and the
   `@theme inline` block in `src/app/globals.css`.
+- The dark theme changes tokens only: its values live in the
+  `:root[data-theme="dark"]` block of `src/app/visual-theme.css`. A color
+  that must differ between the themes gets a token with a value there; do
+  not add `dark:` variants, and do not write black or white into a component
+  or a stylesheet. A wash over whatever surface lies below is
+  `rgb(var(--app-wash) / N%)`, and text on a strong fill (`bg-app-success`,
+  `bg-app-info`, the send button) is `text-primary-foreground`. Literal
+  white or black is right only where the content is light or dark in itself:
+  a PDF page, a framed site, a diagram, video. Check a new surface in both
+  themes, and in the desktop app too when `:root[data-desktop-shell]` styles
+  it.
 - Input hints use `--app-placeholder` / `text-app-placeholder` across native
   fields, chat composers, select prompts, and editable empty states. Keep
   entered text and adjacent labels on their own text tokens.

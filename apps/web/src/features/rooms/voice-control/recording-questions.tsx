@@ -361,7 +361,7 @@ function TaskNode({ state }: { state: AskTaskState }) {
     case "sent":
       return (
         <span
-          className={`${base} ${styles.taskSent} inline-flex size-[14px] items-center justify-center bg-app-success text-white`}
+          className={`${base} ${styles.taskSent} inline-flex size-[14px] items-center justify-center bg-app-success text-primary-foreground`}
           data-node="sent"
         >
           <span className={`inline-flex ${styles.taskSentCheck}`}>

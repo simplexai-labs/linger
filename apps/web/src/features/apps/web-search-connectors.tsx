@@ -361,7 +361,7 @@ function BackendLogoTile({ backend }: { backend: TeamHubWebSearchBackend }) {
     <span
       aria-hidden="true"
       className={cn(
-        "flex size-10 shrink-0 items-center justify-center rounded-lg bg-card shadow-outline",
+        "flex size-10 shrink-0 items-center justify-center rounded-lg bg-card has-[img]:bg-(--app-logo-tile) shadow-outline",
         logo ? "text-foreground" : "text-muted-foreground",
       )}
     >

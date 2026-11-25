@@ -11,6 +11,25 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Linger</title>
+    <!-- Runs before the first paint so a dark interface never flashes by in
+         light: the rule of src/app/theme.ts in miniature, inline so it costs
+         no request. theme.test.ts checks the two agree. -->
+    <script>
+      (() => {
+        let stored = null;
+        try {
+          stored = localStorage.getItem("linger.theme");
+        } catch {
+          // Storage that cannot be read means no pinned theme.
+        }
+        if (
+          stored === "dark" ||
+          (stored !== "light" &&
+            matchMedia("(prefers-color-scheme: dark)").matches)
+        )
+          document.documentElement.setAttribute("data-theme", "dark");
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -28,10 +28,10 @@ import { HideMeetingDialog } from "./hide-meeting-dialog";
 import { meetingsMessages as m } from "./meetings.messages";
 
 const levelClass = [
-  "bg-[#f1f0ec]",
-  "bg-[#dedcd1]",
-  "bg-[#b5b3a5]",
-  "bg-[#7d7b6e]",
+  "bg-(--app-heat-1)",
+  "bg-(--app-heat-2)",
+  "bg-(--app-heat-3)",
+  "bg-(--app-heat-4)",
   "bg-app-ink",
 ] as const;
 const recentDayCount = 7;

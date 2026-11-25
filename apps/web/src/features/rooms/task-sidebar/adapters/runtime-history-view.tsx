@@ -57,7 +57,7 @@ export function RuntimeHistoryView({
   return (
     <ol
       aria-label={t(runtimeStatusMessages.activityLog)}
-      className="space-y-1 bg-white px-4 py-3 text-xs font-normal leading-5 text-app-body"
+      className="space-y-1 bg-card px-4 py-3 text-xs font-normal leading-5 text-app-body"
     >
       {items.map((item) =>
         item.kind === "tool_calls" ? (

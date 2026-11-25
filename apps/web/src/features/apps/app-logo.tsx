@@ -113,7 +113,7 @@ export function AppLogoTile({
   return (
     <span
       aria-hidden="true"
-      className={`flex shrink-0 items-center justify-center rounded-lg bg-card text-foreground shadow-outline ${small ? "size-7" : "size-10"}`}
+      className={`flex shrink-0 items-center justify-center rounded-lg bg-card has-[img]:bg-(--app-logo-tile) text-foreground shadow-outline ${small ? "size-7" : "size-10"}`}
     >
       <AppLogo name={name} size={small ? "profile" : "md"} url={url} />
     </span>

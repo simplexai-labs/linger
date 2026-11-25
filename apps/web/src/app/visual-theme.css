@@ -42,6 +42,18 @@
     0 0 0 1px #1a191a0d, 0 8px 32px #00000014, 0 2px 8px -4px #0000000a;
   --town-shadow-button:
     0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  /* Nature palette inks: the shade that reads on a tint of its own 500. */
+  --town-sun-700: #912b00;
+  --town-lichen-700: #515a16;
+  --town-rain-700: #2c5b60;
+  --town-butter-700: #5f5302;
+  --town-lake-700: #305d4a;
+  --town-bubblegum-700: #95154b;
+  --town-grass-700: #39603c;
+  --town-lavender-700: #65417b;
+  --town-acorn-700: #6e4b0f;
+  --town-bluebell-700: #2e518d;
+  --town-fawn-700: #6b4944;
 }
 
 :root {
@@ -174,4 +186,97 @@
   --composer-shadow-color: rgba(0, 0, 0, 0.06);
   --composer-shadow-focus-color: rgba(0, 0, 0, 0.07);
   --app-scrollbar: hsl(var(--town-muted-foreground) / 0.4);
+  /* A neutral wash over whatever surface lies below, as
+     rgb(var(--app-wash) / 5%): black on light surfaces, white on dark. */
+  --app-wash: 0 0 0;
+  /* Behind another product's logo, which is drawn for a light page. */
+  --app-logo-tile: hsl(var(--town-card));
+  /* For an image drawn in the ink (the wordmark): dark turns the ink light
+     and keeps the hue of what is colored. */
+  --app-ink-image-filter: none;
+  /* Meeting calendar heat, quiet to busy; the busiest day is --app-ink. */
+  --app-heat-1: #f1f0ec;
+  --app-heat-2: #dedcd1;
+  --app-heat-3: #b5b3a5;
+  --app-heat-4: #7d7b6e;
+}
+
+/*
+  The dark theme: a night version of the Town palette, on while the document
+  element carries data-theme="dark" (src/app/theme.ts). Hues stay; neutrals
+  become low-luminance warm greys and status colors lighten enough to read on
+  them. Only tokens change here, never a component. The selector outweighs
+  the :root blocks above, so its place in the file does not decide who wins.
+*/
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --town-background: 60 9% 7%;
+  --town-foreground: 60 14% 92%;
+  --town-card: 60 8% 10%;
+  --town-popover: 60 8% 12%;
+  --town-primary: 60 14% 92%;
+  --town-primary-foreground: 60 9% 9%;
+  --town-secondary: 60 6% 16%;
+  --town-secondary-foreground: 60 10% 80%;
+  --town-muted: 60 6% 14%;
+  --town-muted-foreground: 58 7% 62%;
+  --town-accent: 60 6% 16%;
+  --town-accent-foreground: 60 14% 92%;
+  --town-destructive: 8 86% 60%;
+  --town-destructive-foreground: 0 0% 100%;
+  --town-info: 207 88% 65%;
+  --town-success: 98 45% 55%;
+  --town-warning: 37 95% 58%;
+  --town-border: 60 6% 19%;
+  --town-border-hover: 60 6% 26%;
+  --town-border-heavy: 60 14% 92%;
+  --town-input: 60 6% 19%;
+  --town-input-hover: 60 6% 26%;
+  --town-sidebar: 60 10% 8.5%;
+  --town-sidebar-foreground: 60 14% 92%;
+  --town-sidebar-muted: 60 7% 13%;
+  --town-sidebar-border: 60 6% 16%;
+  --town-highlight: 207 90% 62%;
+  --town-button-accent: 208 60% 60%;
+  --town-comment-amber: 45 90% 60%;
+  --town-send: 221 90% 62%;
+  --town-send-hover: 224 88% 68%;
+  --town-shadow-outline: 0 0 0 1px #00000059;
+  --town-shadow-sm: 0 0 0 1px #00000059, 0 1px 3px #00000073, 0 0 1px #00000073;
+  --town-shadow-md: 0 0 0 1px #00000059, 0 2px 8px #00000080, 0 0 2px #00000073;
+  --town-shadow-lg:
+    0 0 0 1px #00000059, 0 4px 16px #0000008c, 0 2px 6px -2px #00000073;
+  --town-shadow-xl:
+    0 0 0 1px #00000059, 0 8px 32px #00000099, 0 2px 8px -4px #00000080;
+  --town-shadow-button:
+    0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4);
+  --town-sun-700: #eaa68f;
+  --town-lichen-700: #d9e397;
+  --town-rain-700: #a5d0d4;
+  --town-butter-700: #ebe18e;
+  --town-lake-700: #a9d1c0;
+  --town-bubblegum-700: #ea8fae;
+  --town-grass-700: #adccb0;
+  --town-lavender-700: #c1a9d1;
+  --town-acorn-700: #eac88f;
+  --town-bluebell-700: #9eb5db;
+  --town-fawn-700: #ceb0ab;
+  /* Shadows that are plain black at a low alpha vanish on dark surfaces. */
+  --app-floating-shadow-color: rgba(0, 0, 0, 0.4);
+  --app-modal-shadow-color: rgba(0, 0, 0, 0.45);
+  --message-hover-shadow-color: rgba(0, 0, 0, 0.3);
+  --composer-shadow-color: rgba(0, 0, 0, 0.4);
+  --composer-shadow-focus-color: rgba(0, 0, 0, 0.45);
+  --chat-card-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 14px rgb(0 0 0 / 35%);
+  --app-wash: 255 255 255;
+  --app-logo-tile: hsl(60 9% 90%);
+  --app-ink-image-filter: invert(1) hue-rotate(180deg);
+  --app-heat-1: #24241f;
+  --app-heat-2: #34342e;
+  --app-heat-3: #55554c;
+  --app-heat-4: #8f8d80;
+  /* The person's own Messages are the ink in light. Ink is near white here,
+     and a white bubble glares on a dark page, so they sit on a raised grey. */
+  --chat-own-bubble-bg: hsl(60 5% 22%);
+  --chat-own-bubble-text: hsl(var(--town-foreground));
 }

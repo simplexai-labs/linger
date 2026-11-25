@@ -54,27 +54,27 @@
   --color-sidebar: hsl(var(--town-sidebar));
   --color-sidebar-muted: hsl(var(--town-sidebar-muted));
   --color-sun-500: #d95b31;
-  --color-sun-700: #912b00;
+  --color-sun-700: var(--town-sun-700);
   --color-lichen-500: #839127;
-  --color-lichen-700: #515a16;
+  --color-lichen-700: var(--town-lichen-700);
   --color-rain-500: #4e9ba2;
-  --color-rain-700: #2c5b60;
+  --color-rain-700: var(--town-rain-700);
   --color-butter-500: #a08e00;
-  --color-butter-700: #5f5302;
+  --color-butter-700: var(--town-butter-700);
   --color-lake-500: #509578;
-  --color-lake-700: #305d4a;
+  --color-lake-700: var(--town-lake-700);
   --color-bubblegum-500: #df5583;
-  --color-bubblegum-700: #95154b;
+  --color-bubblegum-700: var(--town-bubblegum-700);
   --color-grass-500: #5e9662;
-  --color-grass-700: #39603c;
+  --color-grass-700: var(--town-grass-700);
   --color-lavender-500: #a17cb9;
-  --color-lavender-700: #65417b;
+  --color-lavender-700: var(--town-lavender-700);
   --color-acorn-500: #b88022;
-  --color-acorn-700: #6e4b0f;
+  --color-acorn-700: var(--town-acorn-700);
   --color-bluebell-500: #698cc7;
-  --color-bluebell-700: #2e518d;
+  --color-bluebell-700: var(--town-bluebell-700);
   --color-fawn-500: #b07f77;
-  --color-fawn-700: #6b4944;
+  --color-fawn-700: var(--town-fawn-700);
   --font-sans: var(--app-font-sans);
   --font-slab: var(--app-font-slab);
   --font-weight-normal: 400;
@@ -472,6 +472,7 @@ a[href][aria-disabled="true"],
   display: block;
   width: 8rem;
   height: auto;
+  filter: var(--app-ink-image-filter);
 }
 
 .linger-brand-mark {
@@ -1549,7 +1550,7 @@ a[href][aria-disabled="true"],
     overflow: hidden;
     border-radius: var(--app-panel-radius);
     background: var(--app-work-surface);
-    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 10%);
+    box-shadow: inset 0 0 0 1px rgb(var(--app-wash) / 10%);
   }
 }
 
@@ -1618,9 +1619,9 @@ a[href][aria-disabled="true"],
    it meets a neighbour, so the pieces read as one card. */
 :root[data-desktop-shell] {
   --app-card-gap: 6px;
-  --desktop-seam: rgb(0 0 0 / 8%);
+  --desktop-seam: rgb(var(--app-wash) / 8%);
   --app-card-shadow:
-    0 0 0 1px rgb(0 0 0 / 5%), 0 1px 2px rgb(0 0 0 / 4%),
+    0 0 0 1px rgb(var(--app-wash) / 5%), 0 1px 2px rgb(0 0 0 / 4%),
     0 6px 20px rgb(0 0 0 / 6%);
   --desktop-card-reach: -32px;
   /* The frame keeps its own sizes: every bar is as tall as the drag strip. */
@@ -1679,13 +1680,13 @@ a[href][aria-disabled="true"],
     height: 30px;
     gap: 7px;
     border-radius: 9999px;
-    background: rgb(0 0 0 / 5%);
+    background: rgb(var(--app-wash) / 5%);
     padding-inline: 12px;
     box-shadow: none;
     font-size: 14px;
   }
   :root[data-desktop-shell] .room-secondary-navigation-search:hover {
-    background: rgb(0 0 0 / 8%);
+    background: rgb(var(--app-wash) / 8%);
   }
   /* The list sits on the frame, as the bar along the top does. The rail
      and the navigation around it stack above the page for the rail's
@@ -1711,7 +1712,7 @@ a[href][aria-disabled="true"],
     font-size: 14px;
     font-weight: 500;
     text-transform: uppercase;
-    color: rgb(0 0 0 / 40%);
+    color: rgb(var(--app-wash) / 40%);
   }
   :root[data-desktop-shell]
     .room-secondary-navigation-list
@@ -1719,7 +1720,7 @@ a[href][aria-disabled="true"],
     > div
     > h2
     > button:hover {
-    color: rgb(0 0 0 / 60%);
+    color: rgb(var(--app-wash) / 60%);
   }
   :root[data-desktop-shell]
     .room-secondary-navigation-list
@@ -2716,7 +2717,7 @@ a[href][aria-disabled="true"],
 
 .message-composer-send {
   background: var(--composer-send);
-  color: #fff;
+  color: var(--app-action-foreground);
 }
 
 .message-composer-send:hover {
@@ -2983,7 +2984,7 @@ a[href][aria-disabled="true"],
   display: grid;
   place-items: center;
   border-radius: calc(10 * var(--room-avatar-unit));
-  background: rgb(0 0 0 / 6%);
+  background: rgb(var(--app-wash) / 6%);
   color: var(--app-muted);
 }
 
@@ -4300,7 +4301,7 @@ button.question-choice:focus-visible {
     bottom: 11px;
     left: 0;
     border-radius: 999px;
-    background: rgb(0 0 0 / 5%);
+    background: rgb(var(--app-wash) / 5%);
     content: "";
   }
 
@@ -4309,7 +4310,7 @@ button.question-choice:focus-visible {
   }
 
   .room-members-trigger:hover::before {
-    background: rgb(0 0 0 / 10%);
+    background: rgb(var(--app-wash) / 10%);
   }
 
   .message-row > div > div:first-child {
@@ -4360,7 +4361,7 @@ button.question-choice:focus-visible {
   .message-row-actions
     .message-inline-action-button[aria-expanded="true"]::before,
   .message-row-actions .message-inline-action-button:hover::before {
-    background: rgb(0 0 0 / 5%);
+    background: rgb(var(--app-wash) / 5%);
   }
 
   .message-row-actions .message-inline-action-button > svg {
@@ -5519,7 +5520,7 @@ button.question-choice:focus-visible {
   padding: 5px 9px;
   border-radius: 7px;
   background: var(--app-ink);
-  color: #fdfdfc;
+  color: var(--app-canvas);
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;

@@ -283,7 +283,7 @@ function VisualStep({
           className={cn(
             "flex size-5 shrink-0 items-center justify-center rounded-full text-2xs font-semibold",
             state === "done"
-              ? "bg-app-success text-white"
+              ? "bg-app-success text-primary-foreground"
               : state === "current"
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground",
@@ -339,7 +339,7 @@ function WindowDots() {
 
 function StepTick() {
   return (
-    <span className="flex size-3.5 items-center justify-center rounded-full bg-app-success text-white">
+    <span className="flex size-3.5 items-center justify-center rounded-full bg-app-success text-primary-foreground">
       <Icon icon={Tick02Icon} size={10} />
     </span>
   );

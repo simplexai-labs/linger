@@ -186,6 +186,14 @@ export interface LingerDesktopApi {
   readonly language: {
     set(language: string): Promise<void>;
   };
+  // The page reports the theme chosen in Settings › Appearance ("system",
+  // "light" or "dark") on every load and on every change, so the window,
+  // native menus and the app's own pages match it. No report means a page
+  // without a dark theme, and the app stays light. Older apps lack it, and
+  // their window stays light around a dark page.
+  readonly theme: {
+    set(choice: string): Promise<void>;
+  };
   // The tray's Save Diagnostics…: writes the bundle and shows it in its
   // folder. Older apps lack it, so the page shows no entry for it there.
   readonly diagnostics: {
@@ -251,5 +259,6 @@ export const IPC = {
   previewState: "preview.state",
   voiceWindowShowMain: "voice-window.show-main",
   languageSet: "language.set",
+  themeSet: "theme.set",
   diagnosticsSave: "diagnostics.save",
 } as const;

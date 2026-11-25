@@ -18,8 +18,34 @@
         --border-strong: #d4d4d4;
         --action: #202020;
         --action-hover: #303030;
+        --action-text: #ffffff;
         --danger: #d92d20;
+        --badge: #a3a3a3;
+        --code: #f3f3f3;
+        --focus-ring: rgba(32, 32, 32, 0.08);
         color-scheme: light;
+      }
+      /* The main process sets the theme the Web client reported as the
+         app's color scheme (src/main/theme.ts). --canvas matches the dark
+         canvas in src/shared/theme.ts. */
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --canvas: #1a1a17;
+          --surface: #222220;
+          --ink: #ecece8;
+          --body: #c9c9c3;
+          --muted: #9a9a92;
+          --border: #2f2f2b;
+          --border-strong: #45453f;
+          --action: #ecece8;
+          --action-hover: #ffffff;
+          --action-text: #1a1a17;
+          --danger: #f0705f;
+          --badge: #6b6b64;
+          --code: #2b2b28;
+          --focus-ring: rgba(236, 236, 232, 0.16);
+          color-scheme: dark;
+        }
       }
       * {
         box-sizing: border-box;
@@ -68,7 +94,7 @@
         height: 16px;
         border-radius: 50%;
         border: 3px solid var(--surface);
-        background: #a3a3a3;
+        background: var(--badge);
       }
       [data-mode="setup"] .badge,
       [data-mode="updating"] .badge,
@@ -112,7 +138,7 @@
         margin-top: 14px;
         padding: 2px 8px;
         border-radius: 6px;
-        background: #f3f3f3;
+        background: var(--code);
         color: var(--muted);
         font:
           12px/1.6 ui-monospace,
@@ -143,7 +169,7 @@
       button.primary {
         border: 0;
         background: var(--action);
-        color: #fff;
+        color: var(--action-text);
       }
       button.primary:hover {
         background: var(--action-hover);
@@ -195,7 +221,7 @@
       }
       input:focus {
         border-color: var(--ink);
-        box-shadow: 0 0 0 3px rgba(32, 32, 32, 0.08);
+        box-shadow: 0 0 0 3px var(--focus-ring);
       }
       form .row {
         display: flex;

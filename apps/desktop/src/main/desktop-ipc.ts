@@ -10,6 +10,7 @@ import {
   type WorkspaceGrantView,
 } from "../shared/api.js";
 import { LANGUAGES } from "../i18n/language.js";
+import { THEME_CHOICES } from "../shared/theme.js";
 import type { ComputerDaemonModule } from "./computer-daemon.js";
 import type { WorkspaceGrant } from "./config.js";
 import { ConnectorOAuth } from "./connector-oauth.js";
@@ -21,6 +22,7 @@ import type { LocalServerModule } from "./local-server.js";
 import type { Module, ModuleContext } from "./modules.js";
 import { sameOrigin } from "./navigation.js";
 import type { PowerGuardModule } from "./power-guard.js";
+import type { ThemeModule } from "./theme.js";
 import {
   runDesktopPermissionStep,
   type DesktopPermissionHost,
@@ -31,6 +33,7 @@ import type { WorkspaceGrantsModule } from "./workspace-grants.js";
 
 const grantIdInput = z.string().min(1).max(128);
 const languageInput = z.enum(LANGUAGES);
+const themeInput = z.enum(THEME_CHOICES);
 // The server address is not settable from the SPA: a page served by one
 // server must not be able to repoint the app. It changes on app://offline.
 const settingsPatchInput = z
@@ -100,6 +103,7 @@ export class DesktopIpcModule implements Module {
     "WorkspaceGrants",
     "Updater",
     "Language",
+    "Theme",
   ];
   readonly #defaultDisplayName: string;
   // Set on macOS only.
@@ -126,6 +130,7 @@ export class DesktopIpcModule implements Module {
     const localServer = ctx.get<LocalServerModule>("LocalServer");
     const updater = ctx.get<UpdaterModule>("Updater");
     const language = ctx.get<LanguageModule>("Language");
+    const theme = ctx.get<ThemeModule>("Theme");
     const diagnostics = ctx.get<DiagnosticsModule>("Diagnostics");
 
     const oauth = new ConnectorOAuth();
@@ -244,6 +249,10 @@ export class DesktopIpcModule implements Module {
     // The language picked in the page's Settings, for the shell's own text.
     handle(IPC.languageSet, (tag) => {
       language.choose(languageInput.parse(tag));
+    });
+    // The theme picked in the page's Settings, for the window around it.
+    handle(IPC.themeSet, (choice) => {
+      theme.choose(themeInput.parse(choice));
     });
     // The same save as the tray's; the page learns only whether it worked.
     handle(IPC.diagnosticsSave, async () => {

@@ -5,6 +5,7 @@ import path from "node:path";
 import { z } from "zod";
 
 import { LANGUAGES } from "../i18n/language.js";
+import { THEME_CHOICES } from "../shared/theme.js";
 import { isUploadUrl } from "./diagnostics-upload.js";
 
 const workspaceGrant = z.object({
@@ -43,6 +44,10 @@ const desktopConfig = z.object({
   // follows; unset until the person chooses one (language.ts). A value
   // this version does not offer is dropped, not the whole file.
   language: z.enum(LANGUAGES).optional().catch(undefined),
+  // The theme the Web client last reported, which the window and the shell
+  // pages follow; unset until a page reports one (theme.ts). A value this
+  // version does not know is dropped, not the whole file.
+  theme: z.enum(THEME_CHOICES).optional().catch(undefined),
   // Always-on mode: keep the system awake even when idle.
   preventSleep: z.boolean().default(false),
   // macOS permissions whose system prompt was shown once.

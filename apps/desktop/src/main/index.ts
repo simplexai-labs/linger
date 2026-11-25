@@ -8,6 +8,7 @@ import {
   app,
   desktopCapturer,
   dialog,
+  nativeTheme,
   powerMonitor,
   powerSaveBlocker,
   session,
@@ -58,6 +59,7 @@ import { loginShellEnvironment, withLoginShell } from "./shell-env.js";
 import { markStartMenuShortcut } from "./start-menu-shortcut.js";
 import { StatusModule } from "./status.js";
 import { SystemPermissions } from "./system-permissions.js";
+import { ThemeModule } from "./theme.js";
 import { TrayModule } from "./tray.js";
 import { updateNotice } from "./tray-menu.js";
 import { UpdaterModule, updateInstallFor } from "./updater.js";
@@ -330,6 +332,7 @@ async function main(): Promise<void> {
       stop: async () => {},
     },
     language,
+    new ThemeModule({ native: nativeTheme }),
     new EnrollmentModule({
       defaultDisplayName,
       credentials,

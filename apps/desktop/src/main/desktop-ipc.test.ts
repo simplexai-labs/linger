@@ -21,7 +21,9 @@ vi.mock("electron", () => ({
 const { DesktopIpcModule } = await import("./desktop-ipc.js");
 const { LanguageModule } = await import("./language.js");
 const { EventBus } = await import("./modules.js");
-const { stubModule, testHost } = await import("./test-support.js");
+const { fakeNativeTheme, stubModule, testHost } =
+  await import("./test-support.js");
+const { ThemeModule } = await import("./theme.js");
 
 const SERVER = "http://localhost:3000";
 const PASSWORD = "a-private-password";
@@ -90,10 +92,12 @@ const fixture = async (
   };
   const bus = new EventBus();
   const language = new LanguageModule({ systemLanguages: () => ["en-US"] });
+  const theme = new ThemeModule({ native: fakeNativeTheme() });
   const host = testHost(
     [
       stubModule("Config"),
       language,
+      theme,
       stubModule("Enrollment"),
       power as never,
       daemon as never,
@@ -126,6 +130,7 @@ const fixture = async (
     send,
     setUpdate,
     invoke,
+    theme,
     windows,
   };
 };
@@ -308,6 +313,32 @@ describe("DesktopIpcModule language", () => {
       f.invoke(IPC.languageSet, "https://evil.example.com", "zh-CN"),
     ).toThrow("Not allowed");
     expect(f.language.current()).toBe("en");
+    await f.host.stop("quit");
+  });
+});
+
+describe("DesktopIpcModule theme", () => {
+  it("keeps the page's choice and tells the shell once it changes", async () => {
+    const f = await fixture();
+    const changed = vi.fn();
+    f.bus.on("theme.changed", changed);
+    expect(f.theme.current()).toBe("light");
+    await f.invoke(IPC.themeSet, SERVER, "dark");
+    expect(f.theme.current()).toBe("dark");
+    expect(changed).toHaveBeenCalledExactlyOnceWith("dark");
+    // The page reports its theme on every load; the same one is no news.
+    await f.invoke(IPC.themeSet, SERVER, "dark");
+    expect(changed).toHaveBeenCalledOnce();
+    await f.host.stop("quit");
+  });
+
+  it("accepts only the themes the shell has, from the server's page", async () => {
+    const f = await fixture();
+    expect(() => f.invoke(IPC.themeSet, SERVER, "sepia")).toThrow();
+    expect(() =>
+      f.invoke(IPC.themeSet, "https://evil.example.com", "dark"),
+    ).toThrow("Not allowed");
+    expect(f.theme.current()).toBe("light");
     await f.host.stop("quit");
   });
 });

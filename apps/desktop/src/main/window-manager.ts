@@ -27,12 +27,14 @@ import {
   type TitlebarState,
 } from "../shared/shell.js";
 import { IPC } from "../shared/api.js";
+import type { WindowColors } from "../shared/theme.js";
 import type { DiagnosticsModule } from "./diagnostics.js";
 import { diagnosticsDialogs } from "./diagnostics-dialogs.js";
 import { sendWithPrompts } from "./diagnostics-upload.js";
 import type { LanguageModule } from "./language.js";
 import type { Module, ModuleContext } from "./modules.js";
 import { PreviewViews } from "./preview-views.js";
+import type { ThemeModule } from "./theme.js";
 import {
   OFFLINE_ORIGIN,
   PREVIEW_FRAME_PREFIX,
@@ -71,7 +73,6 @@ export interface WindowManagerOptions {
 
 const TITLEBAR_HEIGHT = 40;
 const REVEAL_FALLBACK_MS = 1_500;
-const CANVAS = "#f6f6f6";
 const COMMANDS = new Set<ShellCommand>([
   "back",
   "forward",
@@ -81,21 +82,24 @@ const COMMANDS = new Set<ShellCommand>([
   "close",
 ]);
 
-const chrome = (platform: NodeJS.Platform): BaseWindowConstructorOptions => {
+// The caption buttons Windows draws over the title bar page.
+const captionOverlay = (colors: WindowColors) => ({
+  color: colors.canvas,
+  symbolColor: colors.symbol,
+  height: TITLEBAR_HEIGHT - 1,
+});
+
+const chrome = (
+  platform: NodeJS.Platform,
+  colors: WindowColors,
+): BaseWindowConstructorOptions => {
   if (platform === "darwin")
     return {
       titleBarStyle: "hiddenInset",
       trafficLightPosition: { x: 14, y: 13 },
     };
   if (platform === "win32")
-    return {
-      titleBarStyle: "hidden",
-      titleBarOverlay: {
-        color: CANVAS,
-        symbolColor: "#404040",
-        height: TITLEBAR_HEIGHT - 1,
-      },
-    };
+    return { titleBarStyle: "hidden", titleBarOverlay: captionOverlay(colors) };
   return { frame: false };
 };
 
@@ -147,7 +151,7 @@ const extractAssetPaths = (documentHtml: string): string[] => {
 // Closing hides the window; the tray keeps the app running.
 export class WindowManagerModule implements Module {
   readonly name = "WindowManager";
-  readonly dependsOn = ["Config", "Language"];
+  readonly dependsOn = ["Config", "Language", "Theme"];
   readonly #options: WindowManagerOptions;
   #ctx: ModuleContext | undefined;
   #window: BaseWindow | undefined;
@@ -199,6 +203,9 @@ export class WindowManagerModule implements Module {
       ctx.bus.on("language.changed", () =>
         this.#titlebar?.webContents.reload(),
       ),
+      // The shell pages follow prefers-color-scheme on their own; what the
+      // window paints itself does not.
+      ctx.bus.on("theme.changed", () => this.#recolor()),
     );
     if (!this.#options.background) this.show();
   }
@@ -308,15 +315,16 @@ export class WindowManagerModule implements Module {
   #ensureWindow(): void {
     if (this.#window) return;
     const bounds = this.#ctx!.config.get().window;
+    const colors = this.#theme().colors();
     const window = new BaseWindow({
       ...(bounds ?? { width: 1280, height: 820 }),
       minWidth: 800,
       minHeight: 560,
       show: false,
       title: "Linger",
-      backgroundColor: CANVAS,
+      backgroundColor: colors.canvas,
       icon: nativeImage.createFromBuffer(Buffer.from(iconPng)),
-      ...chrome(process.platform),
+      ...chrome(process.platform, colors),
     });
     const titlebar = drawsTitlebar(process.platform)
       ? new WebContentsView({
@@ -329,7 +337,7 @@ export class WindowManagerModule implements Module {
           },
         })
       : undefined;
-    titlebar?.setBackgroundColor(CANVAS);
+    titlebar?.setBackgroundColor(colors.canvas);
     const content = new WebContentsView({
       webPreferences: {
         preload: this.#options.preload,
@@ -340,7 +348,7 @@ export class WindowManagerModule implements Module {
         spellcheck: false,
       },
     });
-    content.setBackgroundColor("#ffffff");
+    content.setBackgroundColor(colors.page);
     if (titlebar) window.contentView.addChildView(titlebar);
     window.contentView.addChildView(content);
     this.#window = window;
@@ -396,6 +404,19 @@ export class WindowManagerModule implements Module {
     void titlebar?.webContents
       .loadURL(`${SHELL_ORIGIN}/titlebar`)
       .catch(() => undefined);
+  }
+
+  // Repaints what the window draws itself in the theme of the moment, so
+  // a resize or a page still loading never shows the other theme.
+  #recolor(): void {
+    const window = this.#window;
+    if (!window || window.isDestroyed()) return;
+    const colors = this.#theme().colors();
+    window.setBackgroundColor(colors.canvas);
+    this.#titlebar?.setBackgroundColor(colors.canvas);
+    this.#content?.setBackgroundColor(colors.page);
+    if (process.platform === "win32")
+      window.setTitleBarOverlay(captionOverlay(colors));
   }
 
   #scheduleRevealFallback(): void {
@@ -664,7 +685,7 @@ export class WindowManagerModule implements Module {
             maximizable: false,
             fullscreenable: false,
             autoHideMenuBar: true,
-            backgroundColor: CANVAS,
+            backgroundColor: this.#theme().colors().canvas,
           },
         };
       if (navigationDecision(details.url, this.#serverUrl()) !== "deny")
@@ -903,6 +924,10 @@ export class WindowManagerModule implements Module {
 
   #language(): LanguageModule {
     return this.#ctx!.get<LanguageModule>("Language");
+  }
+
+  #theme(): ThemeModule {
+    return this.#ctx!.get<ThemeModule>("Theme");
   }
 
   #localize(page: string, messages: Parameters<typeof localizePage>[2]) {

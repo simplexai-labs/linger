@@ -40,6 +40,9 @@ elsewhere.
 | Profile                       | 个人资料                   |                                                   |
 | Security                      | 安全                       |                                                   |
 | Language                      | 语言                       |                                                   |
+| Appearance                    | 外观                       |                                                   |
+| Theme (of the interface)      | 界面主题                   | Wiki Topics are 主题.                             |
+| Light / Dark / System         | 浅色 / 深色 / 跟随系统     | As macOS and Windows name them.                   |
 | Space                         | 空间                       |                                                   |
 | Meetings                      | 会议                       |                                                   |
 | Pocket Notes                  | 随手记                     | Proposed; the product owner has not confirmed it. |

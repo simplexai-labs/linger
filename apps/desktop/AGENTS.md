@@ -506,6 +506,23 @@ Gateway and runs Agents. The daemon exits with the app.
   dialogs, notifications) uses `Language.t` with the messages in
   `src/main/*.messages.ts`; a message missing from the catalog shows in
   English. Errors from transfers and servers stay in English.
+- `src/main/theme.ts`: Theme. The shell follows the theme picked in the Web
+  client's Settings › Appearance, which the SPA reports (`theme.set` with
+  `system`, `light` or `dark`) on every load and on every change; the main
+  process keeps it in its config and sets it as Electron's
+  `nativeTheme.themeSource`. Native menus and dialogs then match, and the
+  shell pages (`titlebar.html`, `offline.html`), which read
+  `prefers-color-scheme`, follow without a reload. Before any report the
+  shell is light, which is what a server whose Web client has no dark theme
+  shows; `server.changed` goes back to that until the new server's page
+  reports. When the theme on screen changes (a new choice, or the system
+  switching while it is followed) the module emits `theme.changed`, and
+  `WindowManager` repaints what the window draws itself: its background, the
+  title bar view, the background behind the page and, on Windows, the
+  caption overlay, from `WINDOW_COLORS` in `src/shared/theme.ts`. The shell
+  pages' `--canvas` must equal its `canvas` in both themes (`theme.test.ts`),
+  or the window flashes on start and resize. The setup window keeps its own
+  light look.
 - `src/preload/index.ts`: the only SPA API, `window.lingerDesktop`. Its
   `update` reads the Updater's state (without the release page URL) and runs
   the tray's install and check, for the SPA's account menu; `settings` exposes

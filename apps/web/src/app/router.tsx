@@ -769,6 +769,14 @@ function createSettingsRoute(): RouteObject {
         }),
         path: "language",
       },
+      {
+        lazy: async () => ({
+          Component: (
+            await import("@/features/settings/appearance-settings-page")
+          ).AppearanceSettingsPage,
+        }),
+        path: "appearance",
+      },
       { loader: openModels, path: "local-models" },
       { loader: openProfile, path: "administration" },
     ],

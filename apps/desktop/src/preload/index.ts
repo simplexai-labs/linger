@@ -106,6 +106,9 @@ const api: LingerDesktopApi = {
   language: {
     set: (language) => ipcRenderer.invoke(IPC.languageSet, language),
   },
+  theme: {
+    set: (choice) => ipcRenderer.invoke(IPC.themeSet, choice),
+  },
   diagnostics: {
     save: () => ipcRenderer.invoke(IPC.diagnosticsSave),
   },

@@ -819,7 +819,7 @@ function AnothermePanel({
         <button
           data-voice-risk="never"
           aria-label={t(m.sendAnothermeMessage)}
-          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-(--composer-send) text-white opacity-50"
+          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-(--composer-send) text-primary-foreground opacity-50"
           disabled
           title={t(m.send)}
           type="button"

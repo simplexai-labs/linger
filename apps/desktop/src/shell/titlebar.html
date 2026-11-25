@@ -14,10 +14,27 @@
         --body: #404040;
         --muted: #737373;
         --border: #e5e5e5;
+        --disabled: #c4c4c4;
         --hover: rgba(0, 0, 0, 0.06);
         --active: rgba(0, 0, 0, 0.1);
         --danger-hover: #e81123;
         color-scheme: light;
+      }
+      /* The main process sets the theme the Web client reported as the
+         app's color scheme (src/main/theme.ts). --canvas matches the dark
+         canvas in src/shared/theme.ts. */
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --canvas: #1a1a17;
+          --ink: #ecece8;
+          --body: #c9c9c3;
+          --muted: #9a9a92;
+          --border: #2c2c28;
+          --disabled: #55554f;
+          --hover: rgba(255, 255, 255, 0.08);
+          --active: rgba(255, 255, 255, 0.14);
+          color-scheme: dark;
+        }
       }
       * {
         box-sizing: border-box;
@@ -77,7 +94,7 @@
         background: var(--active);
       }
       button:disabled {
-        color: #c4c4c4;
+        color: var(--disabled);
       }
       button:focus-visible {
         outline: 2px solid var(--ink);

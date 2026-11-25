@@ -311,7 +311,7 @@ function CatalogAppCard({
         onClick={onOpen}
         type="button"
       >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-card text-foreground shadow-outline">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-card has-[img]:bg-(--app-logo-tile) text-foreground shadow-outline">
           <AppLogo name={app.display_name} url={app.logo_url} />
         </span>
         <span className="min-w-0 flex-1">

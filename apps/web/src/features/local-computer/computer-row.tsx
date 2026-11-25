@@ -88,7 +88,7 @@ function StateBadge({
   return (
     <span
       className={cn(
-        "flex size-3.5 items-center justify-center rounded-full text-white",
+        "flex size-3.5 items-center justify-center rounded-full text-primary-foreground",
         tone === "success" ? "bg-app-success" : "bg-app-warning",
       )}
     >

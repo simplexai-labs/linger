@@ -369,7 +369,7 @@ function GateStep({
         className={cn(
           "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-2xs font-semibold",
           state === "done"
-            ? "bg-app-success text-white"
+            ? "bg-app-success text-primary-foreground"
             : state === "current"
               ? "bg-primary text-primary-foreground"
               : "bg-muted text-muted-foreground",

@@ -32,7 +32,7 @@ const toneClassName: Record<ButtonTone, string> = {
     "border border-destructive/40 bg-transparent text-destructive hover:border-foreground/15",
   ghost:
     "border border-transparent bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
-  info: "bg-app-info text-white hover:bg-app-info-hover",
+  info: "bg-app-info text-primary-foreground hover:bg-app-info-hover",
   primary:
     "bg-primary text-primary-foreground shadow-button hover:bg-primary/90",
   secondary:
