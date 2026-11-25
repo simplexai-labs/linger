@@ -5,16 +5,19 @@ import "time"
 type EventKind string
 
 const (
-	EventText         EventKind = "text"
-	EventReasoning    EventKind = "thinking"
-	EventToolCall     EventKind = "tool-use"
-	EventToolOutput   EventKind = "tool-result"
-	EventToolProgress EventKind = "tool-progress"
-	EventStatus       EventKind = "status"
-	EventError        EventKind = "error"
-	EventLog          EventKind = "log"
-	EventPlan         EventKind = "plan"
-	EventHumanPrompt  EventKind = "human-interaction"
+	EventText      EventKind = "text"
+	EventReasoning EventKind = "thinking"
+	EventToolCall  EventKind = "tool-use"
+	// EventToolCallStart marks that the model started composing a tool call
+	// before execution arguments are complete.
+	EventToolCallStart EventKind = "tool-use-start"
+	EventToolOutput    EventKind = "tool-result"
+	EventToolProgress  EventKind = "tool-progress"
+	EventStatus        EventKind = "status"
+	EventError         EventKind = "error"
+	EventLog           EventKind = "log"
+	EventPlan          EventKind = "plan"
+	EventHumanPrompt   EventKind = "human-interaction"
 	// EventModelResponse is one completed model request; Response holds it.
 	EventModelResponse EventKind = "model-response"
 )
@@ -32,13 +35,16 @@ type Event struct {
 	ID             string
 	Body           string
 	Title          string
-	ToolName       string
-	InvocationID   string
-	Input          map[string]any
-	Output         string
-	Status         string
-	Level          string
-	SessionID      string
+	// Complete marks that a reasoning block has ended, so buffered text
+	// without a newline or closing bold heading becomes its title.
+	Complete     bool
+	ToolName     string
+	InvocationID string
+	Input        map[string]any
+	Output       string
+	Status       string
+	Level        string
+	SessionID    string
 	// TurnID on a status event means the turn started.
 	TurnID        string
 	ProcessReused *bool
