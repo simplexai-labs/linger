@@ -29,6 +29,7 @@ import {
   sequenceIds,
   settlesWithin,
 } from "./runner-gateway-fixtures.js";
+import { runtimeDiagnostics } from "./runtime-diagnostics-fixture.js";
 
 describe("RunnerGateway", () => {
   it("holds an MCP initialize request until the dispatched Operation is accepted", async () => {
@@ -1155,4 +1156,58 @@ describe("RunnerGateway", () => {
       await operation.result;
     },
   );
+
+  it("validates and sends provider.prepare for Antigravity with a blank session", async () => {
+    const gateway = createTestRunnerGateway({
+      heartbeatIntervalMs: 1_000,
+      createId: sequenceIds(),
+    });
+    const peer = new RecordingPeer();
+    await acceptReadyConnection(
+      gateway,
+      peer,
+      {
+        ...contextHello(),
+        runtimes: ["antigravity"],
+        runtime_diagnostics: runtimeDiagnostics({ ready: ["antigravity"] }),
+      },
+      defaultAgentPlacement({
+        workspaceGrantId: "grant-owner",
+        runtime: { type: "antigravity" },
+      }),
+    );
+    const context = localContextViewIdentity();
+    const prepareTarget = {
+      tenantId: context.tenantId,
+      agentId: context.agentId,
+      runnerId: context.computerId,
+      ownerActorId: "actor-alice",
+      workspaceGrantId: context.workspaceGrantId,
+      executionContextKey: context.executionContextKey,
+      runtimeInstanceId: context.runtimeInstanceId,
+    };
+
+    const prepared = gateway.prepareProvider(prepareTarget, {
+      runtime: { type: "antigravity" },
+      sessionOptions: { thread_name: "Reviewer" },
+      session: { threadId: "" },
+      contextViewRef: { view_digest: context.viewDigest },
+      runContext: { permission_review: true },
+    });
+    expect(prepared).toBeDefined();
+
+    const providerPrepare = peer.sent.find(
+      (envelope) =>
+        envelope.type === "prepare" && envelope.target === "provider",
+    );
+    expect(providerPrepare).toMatchObject({
+      type: "prepare",
+      target: "provider",
+      prepare_id: prepared!.prepareId,
+      runtime_type: "antigravity",
+      runtime: { type: "antigravity" },
+      session: { threadId: "" },
+      run_context: { permission_review: true },
+    });
+  });
 });

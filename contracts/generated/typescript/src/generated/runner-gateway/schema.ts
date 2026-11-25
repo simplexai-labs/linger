@@ -4671,7 +4671,7 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/Id",
         },
         runtime_type: {
-          enum: ["codex", "claude", "pi"],
+          enum: ["codex", "claude", "pi", "antigravity"],
         },
         execution_context_key: {
           $ref: "#/$defs/ExecutionContextKey",

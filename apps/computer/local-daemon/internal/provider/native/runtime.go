@@ -17,6 +17,10 @@ import (
 // on this Computer.
 var ErrSessionNotFound = errors.New("native session not found")
 
+// ErrProviderPrepareNotEligible reports that a Runtime installation or
+// configuration cannot park a pre-started process for provider prepare.
+var ErrProviderPrepareNotEligible = errors.New("provider prepare is not eligible")
+
 // Kinds lists the Runtime kinds this package can open.
 var Kinds = []string{"claude", "codex", "pi", "antigravity"}
 

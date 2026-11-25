@@ -1010,7 +1010,7 @@ export interface ProviderPrepare {
   connection_epoch: PositiveInteger;
   agent_id: Id;
   workspace_grant_id: Id;
-  runtime_type: "codex" | "claude" | "pi";
+  runtime_type: "codex" | "claude" | "pi" | "antigravity";
   execution_context_key: ExecutionContextKey;
   runtime_instance_id: ExecutionContextKey;
   context_view_ref: ContextViewRef;

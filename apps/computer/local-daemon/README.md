@@ -524,20 +524,32 @@ for a browser sign-in when signed out.
   family. A family's reasoning efforts are the levels its
   `<family>-<level>` entries in `availableModels` name. A Run selects them
   with `session/set_config_option` (`model`, then `thought_level`).
-- Each Operation runs in its own `agy acp` process; nothing is parked. A
-  first Run opens `session/new`, and its turn-started event reports the
-  session id as the checkpoint, like a Codex thread. Later Runs reopen it with
-  `session/load` and drop the history it replays. An id Antigravity has not
-  stored is not a usable session: `session/load` accepts it, but the prompt
-  then fails, so Linger never assigns one. A stored session replays at least
-  the prompt that made it, so a load that replays no prompt, or that
-  Antigravity refuses, finds no session and returns `session_not_found` so Agent
-  Service can clear the persisted session and restart the Run cleanly in a fresh
-  native session with recent messages. A resumed Run still reports its
-  turn-started event before `session/load`, because loading takes seconds
-  and the Room shows the Agent working from that event. A Run yields to
-  the scheduler only after native work, because its session holds no prompt
-  before that.
+- Residency-capable `agy acp` servers (those advertising both `session/list`
+  and `session/resume` during `initialize`) park in `antigravityResidents`,
+  keyed by Context. Room-presence `provider.prepare` runs `initialize` followed
+  by `session/list` with zero MCP servers so both blank and historical rooms
+  warm up without creating empty conversations; the first Run adopts the
+  parked process and opens `session/new` or `session/resume` directly.
+- Between turns, a cleanly completed resident keeps its `agy acp` process
+  parked and routes HTTP MCP servers through a loopback `mcpFront` that
+  answers 503 while parked and rebinds to each Run's upstream URLs on reuse.
+  Changing `systemPrompt.append` hot-updates via `session/resume` with an empty
+  `mcpServers` list so existing MCP connections are not duplicated; changing
+  `model` or `thought_level` hot-updates via `session/set_config_option`.
+- A parked Antigravity process is recycled on MCP server set changes, stdio
+  MCP configurations, executable/working-directory/environment/skill/auth file
+  changes, logout or re-login diagnostics transitions, Agent stop or removal,
+  and Daemon shutdown. Cancelled, timed-out, failed, or background-continuation
+  turns never park and confirm process-tree exit.
+- Legacy `agy` installations that lack `session/list` or `session/resume`
+  report `not_eligible` on `provider.prepare` and fall back to a one-shot
+  process per Operation using `session/load` (dropping replayed history). An id
+  Antigravity has not stored is not a usable session: `session/load` accepts it
+  with zero replayed prompts and `session/resume` rejects it with a JSON-RPC
+  error, so both return `session_not_found` and let Agent Service clear the
+  persisted session and restart cleanly in a fresh native session with recent
+  messages. A resumed Run still reports its turn-started event before session
+  restore, and a Run yields to the scheduler only after native work.
 - On a fresh `run.start` that names `previous_session` (Computer 0.63.0 or
   later), the provider executor reads the superseded native session through
   `runtimehistory`, writes a bounded, redacted Markdown tail to
@@ -568,8 +580,8 @@ for a browser sign-in when signed out.
 - Antigravity reports a model error, such as a rejected API key, as reply text
   and ends the turn with `end_turn`. With no structured signal, such a Run
   completes and the Room shows the text.
-- History reads, provider prepare, Local Skill scans and local models do not
-  support Antigravity, so Agent Memory skips Antigravity Agents.
+- History reads, Local Skill scans and local models do not support
+  Antigravity, so Agent Memory skips Antigravity Agents.
 - The Gateway hello leaves out the Antigravity diagnostic while `agy` is not
   installed, so such a Computer still connects to an Agent Service released
   before Antigravity support. When `agy` is installed later, the next

@@ -17,6 +17,7 @@ func init() {
 	codexResidents.setCap(0)
 	claudeResidents.setCap(0)
 	piResidents.setCap(0)
+	antigravityResidents.setCap(0)
 }
 
 func withResidentCap[P residentProcess](t *testing.T, table *residentTable[P], limit int) {
@@ -38,7 +39,7 @@ func shortenForTest(t *testing.T, v *time.Duration, d time.Duration) {
 // holdsPrestart reports whether a live, non-retiring prestart of any
 // provider is parked.
 func holdsPrestart() bool {
-	return tableHoldsPrestart(codexResidents) || tableHoldsPrestart(claudeResidents) || tableHoldsPrestart(piResidents)
+	return tableHoldsPrestart(codexResidents) || tableHoldsPrestart(claudeResidents) || tableHoldsPrestart(piResidents) || tableHoldsPrestart(antigravityResidents)
 }
 
 func tableHoldsPrestart[P residentProcess](table *residentTable[P]) bool {
@@ -440,6 +441,46 @@ func TestResidentUnconfirmedStopHoldsKey(t *testing.T) {
 	}
 	if _, _, ok := residentEntryOf(table, "a"); ok {
 		t.Fatal("confirmed entry stayed")
+	}
+}
+
+func TestResidentInvalidateAllAdvancesEpochAndRejectsStalePark(t *testing.T) {
+	table := newFakeTable(1)
+	fence := captureReleaseFence(Profile{ContextKey: "ctx", AgentID: "agent"})
+	epoch0 := table.currentEpoch()
+
+	parked := newFakeResident("k1", nil)
+	parked.res.bindEpoch(epoch0)
+	if !table.park(parked, fence, false, quietLogger(), nil) {
+		t.Fatal("initial park failed")
+	}
+	inFlight := newFakeResident("k1", nil)
+	inFlight.res.bindEpoch(epoch0)
+
+	count, err := table.invalidateAll("credentials_changed", quietLogger())
+	if count != 1 || err != nil {
+		t.Fatalf("invalidateAll = %d %v", count, err)
+	}
+	if !parked.dead.Load() {
+		t.Fatal("parked entry was not stopped")
+	}
+
+	// A newer-epoch resident parks under the same key; the stale in-flight
+	// resident must be rejected without evicting the newer resident.
+	fresh := newFakeResident("k1", nil)
+	fresh.res.bindEpoch(table.currentEpoch())
+	if !table.park(fresh, fence, false, quietLogger(), nil) {
+		t.Fatal("fresh epoch park failed")
+	}
+	counters := &ReadinessCounters{}
+	if table.park(inFlight, fence, false, quietLogger(), counters) {
+		t.Fatal("stale-epoch resident parked after invalidateAll")
+	}
+	if counters.recycles["credentials_changed"] != 1 {
+		t.Fatalf("counters=%+v, want credentials_changed=1", counters)
+	}
+	if got, retiring, ok := residentEntryOf(table, "k1"); !ok || retiring || got != fresh || fresh.dead.Load() {
+		t.Fatalf("stale park disturbed fresh resident: got=%v retiring=%v ok=%v dead=%v", got, retiring, ok, fresh.dead.Load())
 	}
 }
 

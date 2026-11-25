@@ -379,10 +379,14 @@ func run(args []string) (resultErr error) {
 		},
 	})
 	defer localModels.Close()
+	antigravityExecutable := &antigravityExecutableTracker{path: discovered.Installations["antigravity"].ExecutablePath}
 	applyDiscovered := func(publishCtx context.Context, next provider.DiscoveryResult) error {
 		logRuntimeDiagnostics(next.Diagnostics)
 		nextProviders, nextRuntimes := providerInstallations(next, currentProviderEnvironment(), localModelsStateDir)
 		providerCatalog.Replace(nextProviders)
+		if antigravityExecutable.changed(next) && localDaemon != nil {
+			localDaemon.InvalidateAntigravityResidents("executable_changed")
+		}
 		if controller != nil {
 			controller.UpdateDiagnostics(next.Diagnostics)
 		}
@@ -666,6 +670,25 @@ func runtimeRefreshAllowed(gatewayState string) bool {
 	}
 }
 
+// antigravityExecutableTracker detects changes to Antigravity's discovered
+// executable path across refreshes so parked residents are invalidated even
+// when status and version stay identical.
+type antigravityExecutableTracker struct {
+	mu   sync.Mutex
+	path string
+}
+
+func (t *antigravityExecutableTracker) changed(next provider.DiscoveryResult) bool {
+	nextPath := next.Installations["antigravity"].ExecutablePath
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.path == nextPath {
+		return false
+	}
+	t.path = nextPath
+	return true
+}
+
 // runtimeInventory publishes the discovered Runtimes to the Gateway without
 // the models their current login refused.
 type runtimeInventory struct {
@@ -743,6 +766,10 @@ func (i *runtimeInventory) republish() {
 // account. A Claude login kept in the macOS keychain has no file; its
 // refusals expire by time only.
 func runtimeCredentialFiles(environment map[string]string) map[string]string {
+	home := environment["HOME"]
+	if home == "" {
+		home = environment["USERPROFILE"]
+	}
 	codexHome := environment["CODEX_HOME"]
 	if codexHome == "" {
 		codexHome = filepath.Join(environment["HOME"], ".codex")
@@ -751,10 +778,14 @@ func runtimeCredentialFiles(environment map[string]string) map[string]string {
 	if claudeHome == "" {
 		claudeHome = filepath.Join(environment["HOME"], ".claude")
 	}
-	return map[string]string{
+	files := map[string]string{
 		"codex":  filepath.Join(codexHome, "auth.json"),
 		"claude": filepath.Join(claudeHome, ".credentials.json"),
 	}
+	if home != "" {
+		files["antigravity"] = filepath.Join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	}
+	return files
 }
 
 func runtimeObservations(computer computerconfig.Config, diagnostics []provider.RuntimeDiagnostic, revision uint64) []transport.RegistrationObservation {

@@ -57,12 +57,15 @@ func (b *providerPrepareBackend) executions() []native.RunSpec {
 	return append([]native.RunSpec(nil), b.options...)
 }
 
-// noResumeResolver resolves the spec of a Codex Context that has no thread yet.
-type noResumeResolver struct{}
+// blankRoomResolver resolves the spec of a Context that has no retained session yet.
+type blankRoomResolver struct {
+	provider   string
+	executable string
+}
 
-func (noResumeResolver) Resolve(context.Context, protocol.Command, json.RawMessage) (provider.OperationSpec, error) {
+func (r blankRoomResolver) Resolve(context.Context, protocol.Command, json.RawMessage) (provider.OperationSpec, error) {
 	return provider.OperationSpec{
-		OperationKind: "run.start", Provider: "codex", ExecutablePath: "/bin/codex",
+		OperationKind: "run.start", Provider: r.provider, ExecutablePath: r.executable,
 		WorkingDirectory: "/tmp", CodexVersion: "0.155.1",
 	}, nil
 }
@@ -132,12 +135,12 @@ func waitForProviderPrepared(t *testing.T, stream *fakeStream, prepareID string)
 func TestProviderPrepareUnsupportedRuntimeIsNotEligibleWithoutSpawn(t *testing.T) {
 	backend := &providerPrepareBackend{}
 	d, stream := providerPrepareFixture(t, backend)
-	command := providerPrepareCommand("prepare-antigravity")
-	command.RuntimeType = "antigravity"
+	command := providerPrepareCommand("prepare-unknown")
+	command.RuntimeType = "unknown"
 	if err := d.handleProviderPrepare(context.Background(), stream, command); err != nil {
 		t.Fatal(err)
 	}
-	payload := waitForProviderPrepared(t, stream, "prepare-antigravity")
+	payload := waitForProviderPrepared(t, stream, "prepare-unknown")
 	if payload["outcome"] != "not_eligible" || payload["reason"] == nil {
 		t.Fatalf("payload=%v, want not_eligible with a reason", payload)
 	}
@@ -146,11 +149,55 @@ func TestProviderPrepareUnsupportedRuntimeIsNotEligibleWithoutSpawn(t *testing.T
 	}
 }
 
+func TestProviderPrepareAntigravityBlankRoomAndNotEligible(t *testing.T) {
+	t.Run("blank_room_succeeds", func(t *testing.T) {
+		backend := &providerPrepareBackend{}
+		d, stream := providerPrepareFixture(t, backend)
+		d.operationResolver = blankRoomResolver{provider: "antigravity", executable: "/bin/agy"}
+		command := providerPrepareCommand("prepare-agy-blank")
+		command.RuntimeType = "antigravity"
+		command.Payload = mustJSON(map[string]any{
+			"prepare_id": "prepare-agy-blank",
+			"runtime":    map[string]any{"type": "antigravity"},
+			"session":    map[string]any{"threadId": ""},
+		})
+		if err := d.handleProviderPrepare(context.Background(), stream, command); err != nil {
+			t.Fatal(err)
+		}
+		if payload := waitForProviderPrepared(t, stream, "prepare-agy-blank"); payload["outcome"] == "not_eligible" || payload["outcome"] == "failed" {
+			t.Fatalf("payload=%v, want ready or already_ready", payload)
+		}
+		executions := backend.executions()
+		if len(executions) != 1 || !executions[0].PrepareOnly || executions[0].ResumeID != "" {
+			t.Fatalf("provider executions=%+v, want one blank-room Antigravity prepare", executions)
+		}
+	})
+
+	t.Run("legacy_not_eligible", func(t *testing.T) {
+		backend := &providerPrepareBackend{failWith: native.ErrProviderPrepareNotEligible}
+		d, stream := providerPrepareFixture(t, backend)
+		d.operationResolver = blankRoomResolver{provider: "antigravity", executable: "/bin/agy"}
+		command := providerPrepareCommand("prepare-agy-legacy")
+		command.RuntimeType = "antigravity"
+		command.Payload = mustJSON(map[string]any{
+			"prepare_id": "prepare-agy-legacy",
+			"runtime":    map[string]any{"type": "antigravity"},
+			"session":    map[string]any{"threadId": ""},
+		})
+		if err := d.handleProviderPrepare(context.Background(), stream, command); err != nil {
+			t.Fatal(err)
+		}
+		if payload := waitForProviderPrepared(t, stream, "prepare-agy-legacy"); payload["outcome"] != "not_eligible" {
+			t.Fatalf("payload=%v, want not_eligible", payload)
+		}
+	})
+}
+
 func TestProviderPrepareTimeoutGivesPiStartupRoom(t *testing.T) {
 	if got := providerPrepareTimeoutFor("pi"); got != piProviderPrepareTimeout || got <= providerPrepareTimeout {
 		t.Fatalf("pi timeout = %s, want %s > %s", got, piProviderPrepareTimeout, providerPrepareTimeout)
 	}
-	for _, runtimeType := range []string{"codex", "claude"} {
+	for _, runtimeType := range []string{"codex", "claude", "antigravity"} {
 		if got := providerPrepareTimeoutFor(runtimeType); got != providerPrepareTimeout {
 			t.Fatalf("%s timeout = %s, want %s", runtimeType, got, providerPrepareTimeout)
 		}
@@ -160,7 +207,7 @@ func TestProviderPrepareTimeoutGivesPiStartupRoom(t *testing.T) {
 func TestProviderPrepareWithoutThreadStartsTheCodexContextsFirstThread(t *testing.T) {
 	backend := &providerPrepareBackend{}
 	d, stream := providerPrepareFixture(t, backend)
-	d.operationResolver = noResumeResolver{}
+	d.operationResolver = blankRoomResolver{provider: "codex", executable: "/bin/codex"}
 	if err := d.handleProviderPrepare(context.Background(), stream, providerPrepareCommand("prepare-first-run")); err != nil {
 		t.Fatal(err)
 	}
