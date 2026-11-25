@@ -76,7 +76,7 @@ describe("Room Message card renderer", () => {
     );
 
     const card = await screen.findByRole("region", { name: "Room creation" });
-    expect(screen.queryByText(/Waiting for Alice/)).toBeNull();
+    expect(within(card).getByText("Waiting for Alice to decide")).toBeVisible();
     expect(
       within(card).queryByRole("button", { name: "Create Room" }),
     ).toBeNull();
