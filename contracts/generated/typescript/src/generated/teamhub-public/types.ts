@@ -4130,12 +4130,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
-    /** @description Reliable LiveKit data packet on topic linger.voice.live sent by the VoiceSession publisher to Voice Runtime. tool_result answers one tool_request; context silently tells the live model where the Human is, such as the page they opened. These packets only steer the conversation and never authorize writes. */
+    /** @description Reliable LiveKit data packet on topic linger.voice.live sent by the VoiceSession publisher to Voice Runtime. tool_result answers one tool_request; context silently tells the live model where the Human is, such as the page they opened; audio_stats reports how the browser received the reply audio and sent the microphone since its previous report, only for Voice Runtime to log. These packets only steer the conversation and never authorize writes. */
     VoiceLiveClientEvent: {
       /** @enum {string} */
-      type: "tool_result" | "context";
+      type: "tool_result" | "context" | "audio_stats";
       call_id?: string;
       text?: string;
+      audio?: components["schemas"]["VoiceLiveAudioStats"];
     };
     /** @description Reliable LiveKit data packet on topic linger.voice.live sent by Voice Runtime to the VoiceSession publisher. user_partial and user_turn carry the Human's transcript; reply_delta and reply_done carry the live reply text for subtitles; reply_done also means the turn's whole reply, including its tool rounds, has finished, so the browser saves the turn after it; reply_interrupted stops playback of that turn; tool_request asks the browser to read or operate the page it shows, or to end Voice Mode; speech_started opens the bubble of a background update the runtime started saying, identified by speech_id, whose reply_delta/reply_done carry its actual spoken words without touching the turn's own reply. playout_done says the turn's reply audio has finished playing on the reply track. session_failure asks the browser to fall back to dictation. */
     VoiceLiveRuntimeEvent: {
@@ -8629,6 +8630,20 @@ export interface components {
     GoogleCalendarPage: {
       calendars: components["schemas"]["GoogleCalendar"][];
       next_page_token?: string;
+    };
+    /** @description WebRTC audio statistics the browser observed since its previous audio_stats report, as deltas rather than cumulative totals. Reply fields come from the reply track's inbound-rtp stats and packets_sent from the microphone's outbound-rtp stats; a field is absent when the browser does not report it, and a counter that went down (a new stream) reports its new total. No audio or text. */
+    VoiceLiveAudioStats: {
+      interval_ms: number;
+      samples_received?: number;
+      concealed_samples?: number;
+      silent_concealed_samples?: number;
+      concealment_events?: number;
+      inserted_samples_for_deceleration?: number;
+      removed_samples_for_acceleration?: number;
+      /** @description Average jitter buffer delay of the samples emitted in the interval. */
+      jitter_buffer_delay_ms?: number;
+      packets_lost?: number;
+      packets_sent?: number;
     };
   };
   responses: {

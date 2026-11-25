@@ -32,6 +32,11 @@ import {
   voiceMicrophoneOptions,
 } from "../voice-media-room";
 import { VoiceModeDisconnectedError } from "../voice-mode-errors";
+import {
+  voiceLiveAudioStatsDelta,
+  voiceLiveAudioStatsIntervalMs,
+  voiceLiveAudioTotals,
+} from "./voice-live-audio-stats";
 import { translate } from "@/i18n/language";
 import { voiceSessionMessages as m } from "../voice-session.messages";
 
@@ -89,6 +94,8 @@ export async function openVoiceLive(input: {
   let track: LocalAudioTrack | undefined;
   let meter: (() => void) | undefined;
   let replyMeter: (() => void) | undefined;
+  let replyTrack: RemoteTrack | undefined;
+  let audioStats: ReturnType<typeof setInterval> | undefined;
   let audio: HTMLAudioElement | undefined;
   let soundOff = input.soundOff;
   let closed = false;
@@ -110,6 +117,9 @@ export async function openVoiceLive(input: {
     input.microphone?.(undefined);
     replyMeter?.();
     replyMeter = undefined;
+    clearInterval(audioStats);
+    audioStats = undefined;
+    replyTrack = undefined;
     if (audio) {
       audio.srcObject = null;
       audio.remove();
@@ -170,6 +180,7 @@ export async function openVoiceLive(input: {
     }
     audio.muted = soundOff;
     remote.attach(audio);
+    replyTrack = remote;
     replyMeter?.();
     let audible = false;
     replyMeter = observeAudioLevel(remote.mediaStreamTrack, (level) => {
@@ -343,6 +354,31 @@ export async function openVoiceLive(input: {
         return closing;
       },
     };
+    // The browser's view of the reply audio goes to the Live worker's log;
+    // a reading that fails is skipped and never touches the call.
+    let audioTotals = voiceLiveAudioTotals(Date.now(), undefined, undefined);
+    let readingStats = false;
+    audioStats = setInterval(() => {
+      if (readingStats || !live()) return;
+      readingStats = true;
+      void (async () => {
+        try {
+          const [reply, microphone] = await Promise.all([
+            replyTrack?.getRTCStatsReport(),
+            track?.getRTCStatsReport(),
+          ]);
+          if (!live()) return;
+          const current = voiceLiveAudioTotals(Date.now(), reply, microphone);
+          const stats = voiceLiveAudioStatsDelta(audioTotals, current);
+          audioTotals = current;
+          if (stats) connection.send({ type: "audio_stats", audio: stats });
+        } catch {
+          // Statistics are diagnostics only.
+        } finally {
+          readingStats = false;
+        }
+      })();
+    }, voiceLiveAudioStatsIntervalMs);
     input.channel?.(connection);
     const readyDeadline = Date.now() + 15_000;
     // The live Runtime is a visible Agent participant, so its readiness

@@ -15,6 +15,7 @@ import {
 import {
   TeamHubVoiceRuntimeError,
   type TeamHubVoiceRuntimeClient,
+  type VoiceLiveAudioStats,
   type VoiceLiveClientEvent,
   type VoiceLiveRuntimeEvent,
 } from "./live-client.js";
@@ -144,6 +145,8 @@ const userFirstMs = 15_000;
 /** A turn server VAD ended with no reply after this long gets one asked for. */
 const swallowedTurnMs = 2_500;
 const maximumClientPacketBytes = 64 * 1024;
+/** The browser reports every 10 s; this leaves room for timer jitter. */
+const minimumAudioStatsGapMs = 5_000;
 const noteChunkChars = 3_000;
 /**
  * TeamHub hints the moment a task or an app event changes; the tasks are
@@ -446,6 +449,45 @@ export function parseLiveClientEvent(
     return { type, call_id, text };
   if (type === "context" && typeof text === "string" && text.trim())
     return { type, text: text.slice(0, 4_000) };
+  if (type === "audio_stats") {
+    const audio = parseAudioStats((event as VoiceLiveClientEvent).audio);
+    if (audio) return { type, audio };
+  }
+}
+
+/** Upper bounds of the audio_stats fields the contract declares. */
+const audioStatsBounds = {
+  interval_ms: 3_600_000,
+  samples_received: 1e9,
+  concealed_samples: 1e9,
+  silent_concealed_samples: 1e9,
+  concealment_events: 1e9,
+  inserted_samples_for_deceleration: 1e9,
+  removed_samples_for_acceleration: 1e9,
+  jitter_buffer_delay_ms: 60_000,
+  packets_lost: 1e9,
+  packets_sent: 1e9,
+} satisfies Record<keyof VoiceLiveAudioStats, number>;
+
+/**
+ * Keeps only the declared, in-range audio_stats fields so a browser can
+ * never put free text or unbounded values into the logs.
+ */
+function parseAudioStats(value: unknown): VoiceLiveAudioStats | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const stats: Record<string, number> = {};
+  for (const [key, maximum] of Object.entries(audioStatsBounds)) {
+    const field = (value as Record<string, unknown>)[key];
+    if (
+      typeof field === "number" &&
+      field >= 0 &&
+      field <= maximum &&
+      (key === "jitter_buffer_delay_ms" || Number.isInteger(field))
+    )
+      stats[key] = field;
+  }
+  if (stats.interval_ms === undefined) return;
+  return stats as unknown as VoiceLiveAudioStats;
 }
 
 /** Splits text into bounded notes without cutting a surrogate pair. */
@@ -470,6 +512,7 @@ export function sentenceEnded(text: string) {
 
 export class LiveVoiceWorker {
   private voiceSessionId = "";
+  private audioStatsLoggedAt = -Infinity;
   private publisherIdentity = "";
   private sessionCreatedAtMs = 0;
   private ctx!: JobContext;
@@ -1751,6 +1794,33 @@ export class LiveVoiceWorker {
       return;
     }
     if (event.type === "context") this.note(event.text!);
+    if (event.type === "audio_stats") this.logAudioStats(event.audio!);
+  }
+
+  /**
+   * Logs the browser's view of the reply audio. Reports closer together than
+   * the browser's own cadence are dropped so a client cannot flood the log.
+   */
+  private logAudioStats(audio: VoiceLiveAudioStats) {
+    const now = Date.now();
+    if (now - this.audioStatsLoggedAt < minimumAudioStatsGapMs) return;
+    this.audioStatsLoggedAt = now;
+    log().info(
+      {
+        voiceSessionId: this.voiceSessionId,
+        intervalMs: audio.interval_ms,
+        samplesReceived: audio.samples_received,
+        concealedSamples: audio.concealed_samples,
+        silentConcealedSamples: audio.silent_concealed_samples,
+        concealmentEvents: audio.concealment_events,
+        insertedSamplesForDeceleration: audio.inserted_samples_for_deceleration,
+        removedSamplesForAcceleration: audio.removed_samples_for_acceleration,
+        jitterBufferDelayMs: audio.jitter_buffer_delay_ms,
+        packetsLost: audio.packets_lost,
+        micPacketsSent: audio.packets_sent,
+      },
+      "Voice live client audio stats",
+    );
   }
 
   /**

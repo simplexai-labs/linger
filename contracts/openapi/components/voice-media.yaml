@@ -652,13 +652,16 @@ components:
       description:
         Reliable LiveKit data packet on topic linger.voice.live sent by the VoiceSession publisher to Voice
         Runtime. tool_result answers one tool_request; context silently tells the live model where the Human is, such as
-        the page they opened. These packets only steer the conversation and never authorize writes.
+        the page they opened; audio_stats reports how the browser received the reply audio and sent the microphone
+        since its previous report, only for Voice Runtime to log. These packets only steer the conversation and never
+        authorize writes.
       properties:
         type:
           type: string
           enum:
             - tool_result
             - context
+            - audio_stats
         call_id:
           type: string
           minLength: 1
@@ -666,3 +669,57 @@ components:
         text:
           type: string
           maxLength: 20000
+        audio:
+          $ref: "#/components/schemas/VoiceLiveAudioStats"
+    VoiceLiveAudioStats:
+      type: object
+      additionalProperties: false
+      required:
+        - interval_ms
+      description:
+        WebRTC audio statistics the browser observed since its previous audio_stats report, as deltas rather than
+        cumulative totals. Reply fields come from the reply track's inbound-rtp stats and packets_sent from the
+        microphone's outbound-rtp stats; a field is absent when the browser does not report it, and a counter that went
+        down (a new stream) reports its new total. No audio or text.
+      properties:
+        interval_ms:
+          type: integer
+          minimum: 0
+          maximum: 3600000
+        samples_received:
+          type: integer
+          minimum: 0
+          maximum: 1000000000
+        concealed_samples:
+          type: integer
+          minimum: 0
+          maximum: 1000000000
+        silent_concealed_samples:
+          type: integer
+          minimum: 0
+          maximum: 1000000000
+        concealment_events:
+          type: integer
+          minimum: 0
+          maximum: 1000000000
+        inserted_samples_for_deceleration:
+          type: integer
+          minimum: 0
+          maximum: 1000000000
+        removed_samples_for_acceleration:
+          type: integer
+          minimum: 0
+          maximum: 1000000000
+        jitter_buffer_delay_ms:
+          type: number
+          minimum: 0
+          maximum: 60000
+          description: Average jitter buffer delay of the samples emitted in the interval.
+        packets_lost:
+          type: integer
+          minimum: 0
+          maximum: 1000000000
+        packets_sent:
+          type: integer
+          minimum: 0
+          maximum: 1000000000

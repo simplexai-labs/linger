@@ -25,6 +25,7 @@ const media = vi.hoisted(() => ({
   unmute: vi.fn(async () => undefined),
   stop: vi.fn(),
   publishData: vi.fn(async () => undefined),
+  micStats: vi.fn(async (): Promise<unknown> => undefined),
   disconnect: vi.fn(async () => undefined),
   present: [] as Array<{
     identity: string;
@@ -49,6 +50,7 @@ vi.mock("livekit-client", () => ({
     unmute: media.unmute,
     stop: media.stop,
     mediaStreamTrack: new EventTarget(),
+    getRTCStatsReport: media.micStats,
   }),
   Room: class {
     listeners = new Map<string, Listener>();
@@ -345,6 +347,84 @@ describe("live Voice Mode transport", () => {
     );
     expect(f.routes.closeVoiceSession).toHaveBeenCalledOnce();
     expect(f.release).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
+  it("reports reply audio stats as deltas and skips a failed reading", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const connection = await openVoiceLive(f.options);
+    const replyStats = vi.fn();
+    emit(
+      "subscribed",
+      {
+        attach: vi.fn(),
+        mediaStreamTrack: new EventTarget(),
+        getRTCStatsReport: replyStats,
+      },
+      publication(voiceLiveReplyTrack),
+      participant("agent-runtime"),
+    );
+    const inbound = (stats: Record<string, number>) =>
+      new Map([["in", { type: "inbound-rtp", kind: "audio", ...stats }]]);
+    const outbound = (packetsSent: number) =>
+      new Map([["out", { type: "outbound-rtp", kind: "audio", packetsSent }]]);
+    const reports = () =>
+      media.publishData.mock.calls.map(
+        (call) =>
+          JSON.parse(
+            new TextDecoder().decode((call as unknown[])[0] as Uint8Array),
+          ) as unknown,
+      );
+
+    replyStats.mockResolvedValueOnce(
+      inbound({
+        concealedSamples: 100,
+        jitterBufferDelay: 2,
+        jitterBufferEmittedCount: 100,
+        packetsLost: 1,
+      }),
+    );
+    media.micStats.mockResolvedValueOnce(outbound(500));
+    await vi.advanceTimersByTimeAsync(10_000);
+    replyStats.mockRejectedValueOnce(new Error("stats unavailable"));
+    await vi.advanceTimersByTimeAsync(10_000);
+    replyStats.mockResolvedValueOnce(
+      inbound({
+        concealedSamples: 160,
+        jitterBufferDelay: 3,
+        jitterBufferEmittedCount: 200,
+        packetsLost: 1,
+      }),
+    );
+    media.micStats.mockResolvedValueOnce(outbound(1_000));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(reports()).toEqual([
+      {
+        type: "audio_stats",
+        audio: {
+          interval_ms: 10_000,
+          concealed_samples: 100,
+          jitter_buffer_delay_ms: 20,
+          packets_lost: 1,
+          packets_sent: 500,
+        },
+      },
+      {
+        type: "audio_stats",
+        audio: {
+          interval_ms: 20_000,
+          concealed_samples: 60,
+          jitter_buffer_delay_ms: 10,
+          packets_lost: 0,
+          packets_sent: 500,
+        },
+      },
+    ]);
+
+    await connection.close();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(media.publishData).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
 });
