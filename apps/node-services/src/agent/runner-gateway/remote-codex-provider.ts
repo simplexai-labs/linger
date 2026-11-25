@@ -29,6 +29,7 @@ import type {
   RuntimeSession,
 } from "../executor/provider.js";
 import {
+  formatRuntimeFailureDetail,
   RuntimeExecutionError,
   StreamingAgentRun,
   ProviderRunCleanupError,
@@ -563,6 +564,7 @@ export class RemoteRuntimeProvider implements AgentProvider {
         throw new RuntimeExecutionError({
           code: "protocol_incompatible",
           runtime_type: this.#runtime.type,
+          detail: "Runtime did not return an initial session checkpoint",
         });
       }
       replaceOpaqueObject(mutableSession, checkpoint);
@@ -1171,10 +1173,12 @@ const localRunFailure = (
     !executionStarted &&
     (error.code === "RUNNER_STOPPED" || error.code === "RUNTIME_NOT_ENABLED")
   ) {
+    const detail = formatRuntimeFailureDetail(error.message);
     return new RuntimeExecutionError(
       {
         code: "computer_unavailable",
         ...(runtimeType ? { runtime_type: runtimeType } : {}),
+        ...(detail ? { detail } : {}),
       },
       { cause: error },
     );

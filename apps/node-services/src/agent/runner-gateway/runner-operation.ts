@@ -9,9 +9,11 @@ import { isDeepStrictEqual } from "node:util";
 
 import { logAgentEvent } from "../observability/agent-log.js";
 import {
+  formatRuntimeFailureDiagnostics,
   RuntimeExecutionError,
   ProviderRunYieldedError,
   runtimeSessionAwaitsFirstRun,
+  sanitizeRuntimeFailureDetail,
 } from "../executor/provider.js";
 import type { ProviderSteerAck } from "../executor/provider.js";
 import type {
@@ -1034,21 +1036,30 @@ export class RunnerOperationState {
           runtimeType: this.start.runtime_type,
           runtimeVersion: envelope.error.failure?.runtime_version,
         });
-        this.#complete(
-          () =>
+        this.#complete(() => {
+          if (envelope.error.failure) {
+            const { detail: rawDetail, ...baseFailure } =
+              envelope.error.failure;
+            const detail =
+              rawDetail !== undefined
+                ? sanitizeRuntimeFailureDetail(rawDetail)
+                : formatRuntimeFailureDiagnostics(envelope.error.diagnostics);
+            const failure = detail ? { ...baseFailure, detail } : baseFailure;
             this.#outcome.reject(
-              envelope.error.failure
-                ? new RuntimeExecutionError(envelope.error.failure, {
-                    diagnostics: envelope.error.diagnostics,
-                  })
-                : new RunnerOperationError(
-                    envelope.error.code,
-                    envelope.error.message,
-                    envelope.error.retryable,
-                  ),
+              new RuntimeExecutionError(failure, {
+                diagnostics: envelope.error.diagnostics,
+              }),
+            );
+            return;
+          }
+          this.#outcome.reject(
+            new RunnerOperationError(
+              envelope.error.code,
+              envelope.error.message,
+              envelope.error.retryable,
             ),
-          true,
-        );
+          );
+        }, true);
         break;
       case "operation.cancelled": {
         const id = this.#yieldSessionId;

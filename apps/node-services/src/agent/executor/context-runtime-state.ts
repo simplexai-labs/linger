@@ -642,6 +642,31 @@ class TeamHubContextRuntimeState implements ContextRuntimeStatePort {
           body = withoutSession;
           continue;
         }
+        // An older TeamHub rejects unknown properties on terminal.failure.
+        // Drop the optional detail once and retry so rolling upgrades keep
+        // settling failed Runs.
+        if (
+          body?.terminal.type === "failed" &&
+          body.terminal.failure?.detail !== undefined &&
+          error instanceof TeamHubRuntimeStateError &&
+          error.status === 400
+        ) {
+          logAgentEvent("warn", "local_run.failure_detail_rejected", {
+            runId,
+            writeAttempt,
+            error,
+          });
+          const { detail: _rejectedDetail, ...failureWithoutDetail } =
+            body.terminal.failure;
+          body = {
+            ...body,
+            terminal: {
+              ...body.terminal,
+              failure: failureWithoutDetail,
+            },
+          };
+          continue;
+        }
         if (!isTransientTerminalFailure(error) || signal.aborted) throw error;
         try {
           await waitForTerminalRetry(delayMs, signal);
