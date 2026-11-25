@@ -29,6 +29,10 @@ const operationMCPPrepareKind = "internal.mcp.prepare"
 // Provider process the Context's next Run adopts.
 const operationProviderPrepareKind = "internal.provider.prepare"
 
+// reasoningFlushDelay bounds how long Executor waits for a newline or closing
+// heading before publishing buffered single-line thinking as its title.
+var reasoningFlushDelay = 1500 * time.Millisecond
+
 type OperationSpec struct {
 	// A continuation prompt requires the exact native history of the interrupted Task.
 	ResumeAfterYield  bool
@@ -639,17 +643,8 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 		}
 		emittedResponseText := false
 		projection := eventProjection{operationID: spec.TaskID, canYield: spec.OperationKind == "run.start"}
-		for message := range session.Events {
-			if executionFailure != "" {
-				continue
-			}
-			if spec.OperationKind == "run.start" && message.Kind == native.EventStatus && message.Status == "running" && message.TurnID == "" {
-				continue
-			}
-			if message.Kind == native.EventText && (message.Body != "" || message.Output != "") {
-				emittedResponseText = true
-			}
-			for _, projected := range projection.project(message) {
+		emitProjected := func(events []any) {
+			for _, projected := range events {
 				payload, marshalErr := json.Marshal(projected)
 				if marshalErr != nil {
 					executionFailure = fmt.Sprintf("marshal provider event: %v", marshalErr)
@@ -663,6 +658,71 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 				}); emitErr != nil {
 					executionFailure = fmt.Sprintf("emit provider event: %v", emitErr)
 					cancelExecution()
+				}
+			}
+		}
+		var flushTimer *time.Timer
+		var flushC <-chan time.Time
+		stopFlushTimer := func() {
+			if flushTimer == nil {
+				return
+			}
+			if !flushTimer.Stop() {
+				select {
+				case <-flushTimer.C:
+				default:
+				}
+			}
+			flushC = nil
+		}
+		armFlushTimer := func() {
+			delay := reasoningFlushDelay
+			if delay <= 0 {
+				return
+			}
+			if flushTimer == nil {
+				flushTimer = time.NewTimer(delay)
+			} else {
+				if !flushTimer.Stop() {
+					select {
+					case <-flushTimer.C:
+					default:
+					}
+				}
+				flushTimer.Reset(delay)
+			}
+			flushC = flushTimer.C
+		}
+		defer stopFlushTimer()
+
+	drainEvents:
+		for {
+			select {
+			case message, ok := <-session.Events:
+				if !ok {
+					stopFlushTimer()
+					break drainEvents
+				}
+				if executionFailure != "" {
+					stopFlushTimer()
+					continue
+				}
+				if spec.OperationKind == "run.start" && message.Kind == native.EventStatus && message.Status == "running" && message.TurnID == "" {
+					continue
+				}
+				if message.Kind == native.EventText && (message.Body != "" || message.Output != "") {
+					emittedResponseText = true
+				}
+				emitProjected(projection.project(message))
+				if executionFailure == "" && projection.hasPendingReasoning() {
+					armFlushTimer()
+				} else {
+					stopFlushTimer()
+				}
+			case <-flushC:
+				flushC = nil
+				if executionFailure == "" {
+					emitProjected(projection.flushReasoning())
 				}
 			}
 		}

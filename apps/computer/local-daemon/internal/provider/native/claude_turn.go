@@ -365,7 +365,7 @@ func (t *claudeTurn) onAssistantFrame(frame claudeFrame, observed time.Time) {
 			}
 		case "thinking":
 			if block.Text != "" {
-				t.emit(Event{Kind: EventReasoning, ModelMessageID: message.ID, Body: block.Text, ObservedAt: observed})
+				t.emit(Event{Kind: EventReasoning, ModelMessageID: message.ID, Body: block.Text, Complete: true, ObservedAt: observed})
 			}
 		case "tool_use":
 			hasTool = true
