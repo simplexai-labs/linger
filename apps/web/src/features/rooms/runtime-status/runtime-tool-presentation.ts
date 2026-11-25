@@ -13,21 +13,6 @@ import {
   UserIcon,
   Wrench01Icon,
 } from "@hugeicons/core-free-icons";
-import {
-  FilePenLine,
-  BookOpen,
-  Globe,
-  Image,
-  ListChecks,
-  MessageCircle,
-  RefreshCw,
-  ScanSearch,
-  Search,
-  SquareTerminal,
-  UserRound,
-  Users,
-  Wrench,
-} from "lucide-react";
 
 import type { Translate } from "@/i18n/language";
 import type { Message } from "@/i18n/messages";
@@ -35,33 +20,20 @@ import type { Message } from "@/i18n/messages";
 import type { RuntimeActivityEntry } from "./runtime-presentation-events";
 import { runtimeStatusMessages as m } from "./runtime-status.messages";
 
-// `icon` stays Lucide for the Runtime history view; other surfaces render `glyph`.
 const presentations = {
-  command: {
-    icon: SquareTerminal,
-    glyph: CommandLineIcon,
-    label: m.toolCommand,
-  },
-  read: { icon: BookOpen, glyph: BookOpen01Icon, label: m.toolRead },
-  edit: { icon: FilePenLine, glyph: FileEditIcon, label: m.toolEdit },
-  search: { icon: Search, glyph: Search01Icon, label: m.toolSearch },
-  browser: { icon: Globe, glyph: Globe02Icon, label: m.toolBrowser },
-  message: { icon: MessageCircle, glyph: BubbleChatIcon, label: m.toolMessage },
-  message_read: {
-    icon: MessageCircle,
-    glyph: BubbleChatIcon,
-    label: m.toolMessageRead,
-  },
-  delegation: {
-    icon: Users,
-    glyph: UserGroupIcon,
-    label: m.toolDelegation,
-  },
-  image: { icon: Image, glyph: Image01Icon, label: m.toolImage },
-  interaction: { icon: UserRound, glyph: UserIcon, label: m.toolInteraction },
-  recovery: { icon: RefreshCw, glyph: RefreshIcon, label: m.toolRecovery },
-  review: { icon: ScanSearch, glyph: SearchVisualIcon, label: m.toolReview },
-  tool: { icon: Wrench, glyph: Wrench01Icon, label: m.tool },
+  command: { glyph: CommandLineIcon, label: m.toolCommand },
+  read: { glyph: BookOpen01Icon, label: m.toolRead },
+  edit: { glyph: FileEditIcon, label: m.toolEdit },
+  search: { glyph: Search01Icon, label: m.toolSearch },
+  browser: { glyph: Globe02Icon, label: m.toolBrowser },
+  message: { glyph: BubbleChatIcon, label: m.toolMessage },
+  message_read: { glyph: BubbleChatIcon, label: m.toolMessageRead },
+  delegation: { glyph: UserGroupIcon, label: m.toolDelegation },
+  image: { glyph: Image01Icon, label: m.toolImage },
+  interaction: { glyph: UserIcon, label: m.toolInteraction },
+  recovery: { glyph: RefreshIcon, label: m.toolRecovery },
+  review: { glyph: SearchVisualIcon, label: m.toolReview },
+  tool: { glyph: Wrench01Icon, label: m.tool },
 };
 type ToolCategory = keyof typeof presentations;
 
@@ -89,23 +61,22 @@ const kinds: Record<string, ToolCategory> = {
  */
 export function toolPresentation(t: Translate, kind: string, name?: string) {
   const category = kinds[kind] ?? "tool";
-  const { glyph, icon } = presentations[category];
+  const { glyph } = presentations[category];
   const label: Message<string> = presentations[category].label;
   const named = category === "tool" && name ? toolNameLabel(name) : "";
   return {
     category,
-    icon,
     glyph,
     label: t(label),
     summary: named || t(summaries[category]),
   };
 }
 
-/** A tool call's kind and icons, which read the same in every language. */
+/** A tool call's kind and icon, which read the same in every language. */
 export function toolAppearance(kind: string) {
   const category = kinds[kind] ?? "tool";
-  const { glyph, icon } = presentations[category];
-  return { category, glyph, icon };
+  const { glyph } = presentations[category];
+  return { category, glyph };
 }
 
 /**
@@ -142,12 +113,11 @@ export function toolGroupPresentation(
 ) {
   const single = calls.length === 1 ? calls[0] : undefined;
   if (single) {
-    return { icon: single.icon, glyph: single.glyph, label: single.summary };
+    return { glyph: single.glyph, label: single.summary };
   }
   const categories = [...new Set(calls.map((call) => call.category))];
   const category = categories.length === 1 ? categories[0] : undefined;
   return {
-    icon: calls[0]?.icon ?? ListChecks,
     glyph: calls[0]?.glyph ?? CheckListIcon,
     label:
       calls.length > 1 && (!category || category === "tool")

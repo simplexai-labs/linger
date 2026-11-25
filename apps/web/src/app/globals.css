@@ -3102,9 +3102,9 @@ a[href][aria-disabled="true"],
 }
 
 .another-me-card[data-active="true"] {
-  border-color: transparent;
-  background-color: var(--am-brand);
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--am-brand) 36%, var(--app-border));
+  background-color: color-mix(in srgb, var(--am-brand) 10%, var(--app-surface));
+  box-shadow: var(--town-shadow-sm);
 }
 
 .another-me-card[data-active="true"]::before {
@@ -3155,12 +3155,12 @@ a[href][aria-disabled="true"],
 }
 
 .another-me-card[data-active="true"] .another-me-card-title {
-  color: var(--am-text);
+  color: var(--app-ink);
 }
 
 .another-me-card[data-active="true"] .another-me-card-sub {
-  color: var(--am-text);
-  opacity: var(--am-sub-opacity);
+  color: var(--app-muted);
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4424,6 +4424,30 @@ button.question-choice:focus-visible {
     width: 44px !important;
     height: 44px !important;
   }
+
+  /* Expand compact touch hit areas to at least 44x44px without inflating desktop density. */
+  .app-dialog-close,
+  .ui-button-compact,
+  .ui-button-icon-compact {
+    position: relative;
+  }
+
+  .app-dialog-close::after,
+  .ui-button-icon-compact::after {
+    position: absolute;
+    inset: -8px;
+    content: "";
+  }
+
+  .ui-button-compact {
+    min-width: 2.75rem;
+  }
+
+  .ui-button-compact::after {
+    position: absolute;
+    inset: -8px 0;
+    content: "";
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -5557,8 +5581,12 @@ button.question-choice:focus-visible {
   }
   .meeting-heatmap-cell:hover {
     transform: none;
+    box-shadow: 0 0 0 1.5px var(--app-ink);
   }
-  .meeting-today,
+  .meeting-today {
+    animation: none;
+    box-shadow: 0 0 0 1.5px var(--app-ink);
+  }
   .meeting-tip {
     animation: none;
   }

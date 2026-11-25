@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ReadOnlyBlockNoteDocumentLoader } from "@/components/read-only-blocknote-document-loader";
 import { Button } from "@/components/ui/button";
+import { useTablistKeyboard } from "@/components/ui/tablist-keyboard";
 import { ArtifactContentRendererLoader } from "@/features/rooms/files/artifact-content-renderer-loader";
 import {
   downloadArtifactPreview,
@@ -34,6 +35,11 @@ const meetingSummaryHiddenSectionTitles = [
 ] as const;
 
 export type MeetingTab = "summary" | "transcript";
+
+const MEETING_TAB_ITEMS: readonly { id: MeetingTab }[] = [
+  { id: "summary" },
+  { id: "transcript" },
+];
 
 /**
  * One page per meeting: Summary and Transcript share the reading area as two
@@ -91,6 +97,11 @@ export function MeetingReader({
     { id: "summary", label: m.summary },
     { id: "transcript", label: m.transcript },
   ];
+  const { getTabProps, registerTab } = useTablistKeyboard({
+    items: MEETING_TAB_ITEMS,
+    onChange: onSelectTab,
+    value: tab,
+  });
   return (
     <article
       className="meeting-document mx-auto w-full max-w-4xl px-5 py-7 md:px-10"
@@ -136,24 +147,30 @@ export function MeetingReader({
         className="flex items-center gap-1 border-b border-app-border"
         role="tablist"
       >
-        {tabs.map((item) => (
-          <button
-            aria-controls={`meeting-${item.id}`}
-            aria-selected={tab === item.id}
-            className={`-mb-px border-b-2 px-3 pb-2 pt-1 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-focus ${
-              tab === item.id
-                ? "border-app-ink text-app-ink"
-                : "border-transparent text-app-muted hover:text-app-ink"
-            }`}
-            id={`meeting-tab-${item.id}`}
-            key={item.id}
-            onClick={() => onSelectTab(item.id)}
-            role="tab"
-            type="button"
-          >
-            {t(item.label)}
-          </button>
-        ))}
+        {tabs.map((item) => {
+          const keyboardProps = getTabProps(item.id);
+          return (
+            <button
+              aria-controls={`meeting-${item.id}`}
+              aria-selected={tab === item.id}
+              className={`-mb-px border-b-2 px-3 pb-2 pt-1 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-focus ${
+                tab === item.id
+                  ? "border-app-ink text-app-ink"
+                  : "border-transparent text-app-muted hover:text-app-ink"
+              }`}
+              id={`meeting-tab-${item.id}`}
+              key={item.id}
+              onClick={() => onSelectTab(item.id)}
+              onKeyDown={keyboardProps.onKeyDown}
+              ref={registerTab(item.id)}
+              role="tab"
+              tabIndex={keyboardProps.tabIndex}
+              type="button"
+            >
+              {t(item.label)}
+            </button>
+          );
+        })}
       </div>
       <div
         aria-labelledby={`meeting-tab-${tab}`}

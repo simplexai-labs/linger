@@ -1,5 +1,7 @@
-import { ChevronRight, Sparkles } from "lucide-react";
+import { ArrowRight01Icon, SparklesIcon } from "@hugeicons/core-free-icons";
 import { useMemo } from "react";
+
+import { Icon } from "@/components/ui/icon";
 
 import {
   toolGroupPresentation,
@@ -57,7 +59,7 @@ export function RuntimeHistoryView({
   return (
     <ol
       aria-label={t(runtimeStatusMessages.activityLog)}
-      className="space-y-1 bg-white px-4 py-3 text-xs font-normal leading-5 text-app-body"
+      className="space-y-1 bg-card px-4 py-3 text-xs font-normal leading-5 text-app-body"
     >
       {items.map((item) =>
         item.kind === "tool_calls" ? (
@@ -189,7 +191,7 @@ function RuntimeToolCallsActivity({ calls }: { calls: ActivityToolCall[] }) {
       ...toolPresentation(t, "tool", shownName),
     };
   });
-  const { icon: GroupIcon, label: groupLabel } = toolGroupPresentation(
+  const { glyph: groupGlyph, label: groupLabel } = toolGroupPresentation(
     t,
     presentedCalls,
   );
@@ -198,14 +200,14 @@ function RuntimeToolCallsActivity({ calls }: { calls: ActivityToolCall[] }) {
       <details className="group">
         <summary className="flex min-h-8 cursor-pointer list-none items-center gap-2 py-1.5 text-app-muted hover:text-app-body focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-app-focus [&::-webkit-details-marker]:hidden">
           <span className="relative inline-flex size-[15px] shrink-0 items-center justify-center">
-            <GroupIcon
-              aria-hidden="true"
+            <Icon
               className="absolute inset-0 m-auto group-hover:hidden group-focus-within:hidden group-open:hidden"
+              icon={groupGlyph}
               size={15}
             />
-            <ChevronRight
-              aria-hidden="true"
+            <Icon
               className="absolute inset-0 m-auto hidden group-hover:block group-focus-within:block group-open:block group-open:rotate-90 motion-reduce:transition-none"
+              icon={ArrowRight01Icon}
               size={15}
             />
           </span>
@@ -214,13 +216,19 @@ function RuntimeToolCallsActivity({ calls }: { calls: ActivityToolCall[] }) {
           </span>
         </summary>
         <ul className="space-y-1 pb-3 pl-[1.45rem]">
-          {presentedCalls.map(({ record, name, icon: Icon, label }) => {
+          {presentedCalls.map(({ record, name, glyph, label }) => {
             return (
               <li
                 className="flex min-h-7 items-center gap-2"
                 key={`${record.ordinal}:${record.tool_call_id}`}
               >
-                <Icon aria-label={label} className="shrink-0" size={13} />
+                <span
+                  aria-label={label}
+                  className="inline-flex shrink-0"
+                  role="img"
+                >
+                  <Icon icon={glyph} size={13} />
+                </span>
                 <span className="truncate" title={name}>
                   {name}
                 </span>
@@ -246,7 +254,7 @@ function RuntimeActivityRecord({
     );
     return (
       <li className="flex min-h-8 items-start gap-2 py-1.5 text-app-muted">
-        <Sparkles aria-hidden="true" className="mt-0.5 shrink-0" size={15} />
+        <Icon className="mt-0.5 shrink-0" icon={SparklesIcon} size={15} />
         <p className="min-w-0 flex-1 line-clamp-2" title={title}>
           {title}
         </p>

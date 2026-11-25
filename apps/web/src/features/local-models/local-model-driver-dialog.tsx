@@ -19,6 +19,7 @@ import { Button, buttonClassName } from "@/components/ui/button";
 import { FormFeedback } from "@/components/ui/form-feedback";
 import { Icon } from "@/components/ui/icon";
 import { ModalDialog } from "@/components/ui/modal-dialog";
+import { useTablistKeyboard } from "@/components/ui/tablist-keyboard";
 import { commonMessages } from "@/i18n/common.messages";
 import { useT } from "@/i18n/use-translation";
 import { cn } from "@/lib/cn";
@@ -36,6 +37,10 @@ export interface DriverUpdateReason {
 
 const AUTO_RECHECK_COOLDOWN_MS = 3000;
 const IDLE_DRIVER_INSTALL_STATE: DesktopDriverInstallState = { phase: "idle" };
+const LINUX_DISTRO_ITEMS: readonly { id: LinuxNvidiaDistro }[] = [
+  { id: "ubuntu" },
+  { id: "fedora" },
+];
 
 function installFailureMessage(code: string) {
   switch (code) {
@@ -106,6 +111,12 @@ export function UpdateDriverDialog({
     classifyWindowsNvidiaGpu(gpuName) !== "unsupported";
 
   const [distro, setDistro] = useState<LinuxNvidiaDistro>("ubuntu");
+  const { getTabProps: getDistroTabProps, registerTab: registerDistroTab } =
+    useTablistKeyboard({
+      items: LINUX_DISTRO_ITEMS,
+      onChange: setDistro,
+      value: distro,
+    });
   const [copiedTarget, setCopiedTarget] = useState<"command" | "gpu" | null>(
     null,
   );
@@ -407,23 +418,29 @@ export function UpdateDriverDialog({
                   ["ubuntu", m.driverDialogLinuxUbuntuTab],
                   ["fedora", m.driverDialogLinuxFedoraTab],
                 ] as const
-              ).map(([id, label]) => (
-                <button
-                  aria-selected={distro === id}
-                  className={cn(
-                    "inline-flex h-7 items-center rounded-full border px-2.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    distro === id
-                      ? "border-foreground bg-foreground text-background"
-                      : "border-border bg-card text-secondary-foreground hover:bg-accent",
-                  )}
-                  key={id}
-                  onClick={() => setDistro(id)}
-                  role="tab"
-                  type="button"
-                >
-                  {t(label)}
-                </button>
-              ))}
+              ).map(([id, label]) => {
+                const keyboardProps = getDistroTabProps(id);
+                return (
+                  <button
+                    aria-selected={distro === id}
+                    className={cn(
+                      "inline-flex h-7 items-center rounded-full border px-2.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      distro === id
+                        ? "border-foreground bg-foreground text-background"
+                        : "border-border bg-card text-secondary-foreground hover:bg-accent",
+                    )}
+                    key={id}
+                    onClick={() => setDistro(id)}
+                    onKeyDown={keyboardProps.onKeyDown}
+                    ref={registerDistroTab(id)}
+                    role="tab"
+                    tabIndex={keyboardProps.tabIndex}
+                    type="button"
+                  >
+                    {t(label)}
+                  </button>
+                );
+              })}
             </div>
             <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2">
               <code className="min-w-0 flex-1 overflow-x-auto font-mono text-xs text-foreground">

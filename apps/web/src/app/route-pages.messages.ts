@@ -4,7 +4,7 @@ import { defineMessages } from "@/i18n/messages";
 export const routePagesMessages = defineMessages("routePages", {
   notFoundTitle: "Page not found",
   openMessages: "Open Messages",
-  loadingError: "TeamHub loading error",
+  loadingError: "Linger loading error",
   rooms: "Rooms",
   roomNavigation: "Room navigation",
   backToRooms: "Back to my Rooms",

@@ -212,6 +212,12 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .message-code-copy {
+    transition: none;
+  }
+}
+
 .message-markdown pre code {
   padding: 0;
   border-radius: 0;

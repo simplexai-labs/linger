@@ -2857,7 +2857,7 @@
   "routePages": {
     "notFoundTitle": "找不到页面",
     "openMessages": "打开消息",
-    "loadingError": "TeamHub 加载出错",
+    "loadingError": "Linger 加载出错",
     "rooms": "Room",
     "roomNavigation": "Room 导航",
     "backToRooms": "返回我的 Room",

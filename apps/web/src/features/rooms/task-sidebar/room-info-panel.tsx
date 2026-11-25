@@ -6,6 +6,7 @@ import {
 import { useState } from "react";
 
 import { Icon } from "@/components/ui/icon";
+import { useTablistKeyboard } from "@/components/ui/tablist-keyboard";
 import { useT } from "@/i18n/use-translation";
 
 import type {
@@ -20,6 +21,11 @@ import { cn } from "@/lib/cn";
 import { sidePanelMessages as m } from "./side-panel.messages";
 
 type InfoView = "agents" | "files";
+
+const INFO_VIEW_ITEMS: readonly { id: InfoView }[] = [
+  { id: "agents" },
+  { id: "files" },
+];
 
 const viewLabels = { agents: m.sectionAgents, files: m.sectionFiles };
 const kindLabels = { agent: m.kindAgent, human: m.kindHuman };
@@ -41,6 +47,11 @@ export function RoomInfoPanel({
 }) {
   const t = useT();
   const [view, setView] = useState<InfoView>("agents");
+  const { getTabProps, registerTab } = useTablistKeyboard({
+    items: INFO_VIEW_ITEMS,
+    onChange: setView,
+    value: view,
+  });
 
   return (
     <div
@@ -105,18 +116,22 @@ export function RoomInfoPanel({
         >
           {(["agents", "files"] as const).map((item) => {
             const selected = item === view;
+            const keyboardProps = getTabProps(item);
             return (
               <button
                 aria-selected={selected}
                 className={cn(
-                  "h-8 shrink-0 whitespace-nowrap rounded-full px-3 text-sm font-medium capitalize transition-colors duration-150",
+                  "h-8 shrink-0 whitespace-nowrap rounded-full px-3 text-sm font-medium capitalize transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   selected
                     ? "bg-muted text-foreground"
                     : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                 )}
                 key={item}
                 onClick={() => setView(item)}
+                onKeyDown={keyboardProps.onKeyDown}
+                ref={registerTab(item)}
                 role="tab"
+                tabIndex={keyboardProps.tabIndex}
                 type="button"
               >
                 {t(viewLabels[item])}
