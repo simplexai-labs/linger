@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  voiceLiveAudioBaseline,
   voiceLiveAudioStatsDelta,
   voiceLiveAudioTotals,
 } from "./voice-live-audio-stats";
@@ -81,13 +82,50 @@ describe("voiceLiveAudioStatsDelta", () => {
     });
   });
 
-  it("treats a counter that went down as a new stream's total", () => {
+  it("reports no change for a counter that went down, such as packetsLost after late packets", () => {
     expect(
       voiceLiveAudioStatsDelta(
-        { at: 0, concealedSamples: 900, packetsSent: 10 },
-        { at: 10_000, concealedSamples: 50, packetsSent: 20 },
+        { at: 0, packetsLost: 200, concealedSamples: 50 },
+        { at: 10_000, packetsLost: 199, concealedSamples: 50 },
       ),
-    ).toEqual({ interval_ms: 10_000, concealed_samples: 50, packets_sent: 10 });
+    ).toEqual({ interval_ms: 10_000, packets_lost: 0, concealed_samples: 0 });
+  });
+
+  it("counts a replaced track from zero and keeps the other stream's baseline", () => {
+    const previous = {
+      at: 0,
+      concealedSamples: 50,
+      packetsLost: 7,
+      packetsSent: 100,
+    };
+    const current = {
+      at: 10_000,
+      concealedSamples: 80,
+      packetsLost: 1,
+      packetsSent: 600,
+    };
+    expect(
+      voiceLiveAudioStatsDelta(
+        voiceLiveAudioBaseline(previous, { reply: true, microphone: false }),
+        current,
+      ),
+    ).toEqual({
+      interval_ms: 10_000,
+      concealed_samples: 80,
+      packets_lost: 1,
+      packets_sent: 500,
+    });
+    expect(
+      voiceLiveAudioStatsDelta(
+        voiceLiveAudioBaseline(previous, { reply: false, microphone: true }),
+        current,
+      ),
+    ).toEqual({
+      interval_ms: 10_000,
+      concealed_samples: 30,
+      packets_lost: 0,
+      packets_sent: 600,
+    });
   });
 
   it("omits what no stream reported and leaves out the jitter average without emitted samples", () => {

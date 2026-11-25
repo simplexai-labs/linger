@@ -422,9 +422,29 @@ describe("live Voice Mode transport", () => {
       },
     ]);
 
+    // A resubscribed reply track counts from zero; the microphone keeps going.
+    const resubscribedStats = vi.fn();
+    emit(
+      "subscribed",
+      {
+        attach: vi.fn(),
+        mediaStreamTrack: new EventTarget(),
+        getRTCStatsReport: resubscribedStats,
+      },
+      publication(voiceLiveReplyTrack),
+      participant("agent-runtime"),
+    );
+    resubscribedStats.mockResolvedValueOnce(inbound({ concealedSamples: 200 }));
+    media.micStats.mockResolvedValueOnce(outbound(1_400));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(reports().at(-1)).toEqual({
+      type: "audio_stats",
+      audio: { interval_ms: 10_000, concealed_samples: 200, packets_sent: 400 },
+    });
+
     await connection.close();
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(media.publishData).toHaveBeenCalledTimes(2);
+    expect(media.publishData).toHaveBeenCalledTimes(3);
     vi.useRealTimers();
   });
 });

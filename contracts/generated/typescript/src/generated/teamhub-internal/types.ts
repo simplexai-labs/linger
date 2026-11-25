@@ -3451,7 +3451,7 @@ export interface components {
       context: components["schemas"]["McpContextReference"];
       document_comment_runtime?: components["schemas"]["McpDocumentCommentRuntimeProjection"];
     };
-    /** @description WebRTC audio statistics the browser observed since its previous audio_stats report, as deltas rather than cumulative totals. Reply fields come from the reply track's inbound-rtp stats and packets_sent from the microphone's outbound-rtp stats; a field is absent when the browser does not report it, and a counter that went down (a new stream) reports its new total. No audio or text. */
+    /** @description WebRTC audio statistics the browser observed since its previous audio_stats report, as deltas rather than cumulative totals. Reply fields come from the reply track's inbound-rtp stats and packets_sent from the microphone's outbound-rtp stats; a field is absent when the browser does not report it, a replaced reply or microphone track counts from zero, and a counter that went down (packets_lost after late packets) reports 0. No audio or text. */
     VoiceLiveAudioStats: {
       interval_ms: number;
       samples_received?: number;

@@ -62,9 +62,23 @@ export function voiceLiveAudioTotals(
 }
 
 /**
- * What changed between two readings. A counter that went down belongs to a
- * new stream, such as a resubscribed reply track, so its new total is the
- * change. Returns nothing when no counter is known.
+ * The previous reading as the baseline for the next one. A replaced reply or
+ * microphone track counts from zero, so its counters leave the baseline.
+ */
+export function voiceLiveAudioBaseline(
+  previous: VoiceLiveAudioTotals,
+  changed: { reply: boolean; microphone: boolean },
+): VoiceLiveAudioTotals {
+  const baseline = { ...previous };
+  if (changed.reply) for (const key of inboundCounters) delete baseline[key];
+  if (changed.microphone) delete baseline.packetsSent;
+  return baseline;
+}
+
+/**
+ * What changed between two readings of the same streams. A counter that went
+ * down, as `packetsLost` does when late packets arrive, changed by nothing.
+ * Returns nothing when no counter is known.
  */
 export function voiceLiveAudioStatsDelta(
   previous: VoiceLiveAudioTotals,
@@ -74,7 +88,7 @@ export function voiceLiveAudioStatsDelta(
     const now = current[key];
     if (now === undefined) return;
     const before = previous[key] ?? 0;
-    return Math.max(0, now >= before ? now - before : now);
+    return Math.max(0, now - before);
   };
   const count = (key: Exclude<keyof VoiceLiveAudioTotals, "at">) => {
     const value = delta(key);

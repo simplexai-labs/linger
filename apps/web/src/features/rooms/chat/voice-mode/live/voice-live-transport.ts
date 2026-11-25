@@ -33,6 +33,7 @@ import {
 } from "../voice-media-room";
 import { VoiceModeDisconnectedError } from "../voice-mode-errors";
 import {
+  voiceLiveAudioBaseline,
   voiceLiveAudioStatsDelta,
   voiceLiveAudioStatsIntervalMs,
   voiceLiveAudioTotals,
@@ -357,20 +358,37 @@ export async function openVoiceLive(input: {
     // The browser's view of the reply audio goes to the Live worker's log;
     // a reading that fails is skipped and never touches the call.
     let audioTotals = voiceLiveAudioTotals(Date.now(), undefined, undefined);
+    // The tracks the previous reading came from: a replaced one starts at zero.
+    let readReply: RemoteTrack | undefined;
+    let readMicrophone: LocalAudioTrack | undefined;
     let readingStats = false;
     audioStats = setInterval(() => {
       if (readingStats || !live()) return;
       readingStats = true;
+      const reply = replyTrack;
+      const microphone = track;
       void (async () => {
         try {
-          const [reply, microphone] = await Promise.all([
-            replyTrack?.getRTCStatsReport(),
-            track?.getRTCStatsReport(),
+          const [replyReport, microphoneReport] = await Promise.all([
+            reply?.getRTCStatsReport(),
+            microphone?.getRTCStatsReport(),
           ]);
           if (!live()) return;
-          const current = voiceLiveAudioTotals(Date.now(), reply, microphone);
-          const stats = voiceLiveAudioStatsDelta(audioTotals, current);
+          const current = voiceLiveAudioTotals(
+            Date.now(),
+            replyReport,
+            microphoneReport,
+          );
+          const stats = voiceLiveAudioStatsDelta(
+            voiceLiveAudioBaseline(audioTotals, {
+              reply: reply !== readReply,
+              microphone: microphone !== readMicrophone,
+            }),
+            current,
+          );
           audioTotals = current;
+          readReply = reply;
+          readMicrophone = microphone;
           if (stats) connection.send({ type: "audio_stats", audio: stats });
         } catch {
           // Statistics are diagnostics only.
