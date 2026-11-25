@@ -363,7 +363,8 @@ does not need it: every phone uses the official Push Service.
    generic alert through Expo with enhanced push security on. The alert's
    `collapseId` and Android `tag` are its kind and Room, so a Room's next
    alert replaces the last instead of stacking, and `threadId` groups a
-   Room's alerts. A decision is `time-sensitive`, a reply `active`. It is
+   Room's alerts. A decision asks for `time-sensitive`, a reply `active`; iOS
+   treats `time-sensitive` as `active` while the app lacks that entitlement. It is
    enabled by
    `RELAY_PUSH_SEAL_KEY` and `RELAY_PUSH_EXPO_ACCESS_TOKEN`
    (`apps/relay/README.md`).

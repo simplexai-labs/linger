@@ -36,10 +36,6 @@ const config: ExpoConfig = {
   ios: {
     bundleIdentifier: "com.heylinger.linger",
     supportsTablet: false,
-    // A decision the Human must make may break through a Focus mode.
-    entitlements: {
-      "com.apple.developer.usernotifications.time-sensitive": true,
-    },
     infoPlist: {
       NSLocalNetworkUsageDescription:
         "Linger connects directly to your computer on this Wi-Fi network.",

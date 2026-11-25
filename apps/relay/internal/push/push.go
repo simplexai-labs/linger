@@ -46,7 +46,8 @@ var (
 )
 
 // Alert texts per kind. They name the kind of event, never its content.
-// A decision interrupts more than a reply.
+// A decision interrupts more than a reply where the app holds the
+// time-sensitive entitlement; elsewhere iOS shows it as active.
 var alerts = map[string]struct{ title, body, level string }{
 	"message":  {"Linger", "You have a new reply", "active"},
 	"decision": {"Linger", "Linger needs your decision", "time-sensitive"},
