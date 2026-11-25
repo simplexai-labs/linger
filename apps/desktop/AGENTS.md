@@ -90,7 +90,7 @@ Gateway and runs Agents. The daemon exits with the app.
   after enrollment. It fetches the pinned Node runtime (sources in the download region's
   order, `scripts/installs/README.md`) and unpacks the linger source package
   into the install location (the default home, or a folder picked under
-  Customize; tar runs inside the target with relative paths, falling back to
+  More options; tar runs inside the target with relative paths, falling back to
   the pure-Node extractor when `tar.exe` is missing with `ENOENT` on stripped
   Windows images, and the
   finished folder is moved into place with `renameRetrying`, which waits out
@@ -122,7 +122,7 @@ Gateway and runs Agents. The daemon exits with the app.
   (`DELETE /api/runtime-login`); the
   dialog also offers installing another runtime instead (a new job with
   that `setupChoice`). No sign-in secret passes through the page. The
-  dialog also offers BYOK, with the same form as Customize's BYOK
+  dialog also offers BYOK, with the same form as the welcome screen's BYOK
   (`byokFields` in `setup.html`): a base URL used verbatim, an optional path
   (default `/v1`) and endpoint (default the runtime's own), key and model.
   Its refresh button and Test run the installer headless
@@ -207,12 +207,21 @@ Gateway and runs Agents. The daemon exits with the app.
   In the report, `local-models` is the planned model served by Pi, shown with the model,
   GPU, memory and download (the card's memory is the whole stack's, so
   "with its services"); otherwise the named runtime, with why there is no
-  local model. The page words each reason by its code and the structured
+  local model. The welcome screen shows the three model sources directly
+  (Local model, BYOK, and Subscription), so a first-time user can skip local
+  model download and enter a BYOK endpoint, key, model ID and runtime without
+  opening More options or waiting for the local-model hardware check to finish.
+  Closing More options keeps the selected install location and optional app
+  integration values. Reset restores the default install location.
+  `setupLocalServerState` projects `LocalServerStatus` for the setup page,
+  forwarding `byokCheck` and `byokModels` alongside the rest of the setup
+  state so BYOK endpoint tests and model listings render their live result.
+  The page words each reason by its code and the structured
   counts or numeric versions it carries (`gpuIndex`, `freeBytes`,
   `requiredBytes`, `detectedCudaVersion`, `requiredCudaVersion`,
   `driverVersion`); the tool's message goes only to the main process log
-  (`local_server.inspected`), never to the page. Under Customize the Local
-  model card stays visible once the check ends: disabled, "Not available on
+  (`local_server.inspected`), never to the page. When no local model fits, the
+  Local model card stays visible once the check ends: disabled, "Not available on
   this computer", with that reason. For `cuda-driver-update-required` and
   `cuda-driver-version-unknown`, the page explains the NVIDIA graphics driver
   requirement (with required driver branch via `@linger/service-kit/nvidia-driver`),
@@ -225,16 +234,12 @@ Gateway and runs Agents. The daemon exits with the app.
   when installation completes or the setup window regains focus after a driver
   action.
   Off macOS the page names the system tray, not the menu bar.
-  Under Customize the local model runs only behind Pi: with another runtime
-  it is greyed (`aria-disabled`, still focusable), does not toggle, and says
-  "Local models are only available with the Pi runtime."; choosing another
-  runtime clears it, and choosing Pi offers it again.
-  When the tool reports local models blocked now (`stack.state:
-"blocked-now"`: the model fits the hardware, but other programs hold the
-  memory it needs now; a tool before that field marks it by `basis:
-"capacity"` or reason `free-memory-required`, either one), the install
-  would plan again against the memory free then and stop, so the local model
-  shows on hold and is not offered. `gpu-memory-required` names the GPU and
+  When the tool reports `stack.state: "blocked-now"`, setup shows the local
+  model on hold, even if the report has no model plan. Blockers include a
+  gateway port in use, an unavailable Pi runtime, an outdated NVIDIA driver,
+  and memory held by other programs. An older tool signals a memory hold with
+  `basis: "capacity"` or the reason `free-memory-required`.
+  `gpu-memory-required` names the GPU and
   its free against needed memory and says to close programs that use the
   GPU; `free-memory-required` gives the RAM counts (from the reason, or the
   tool's `stack.memory` when the reason has none). The page still words
@@ -245,10 +250,11 @@ Gateway and runs Agents. The daemon exits with the app.
   (`packages/local-installation/src/setup-plan.ts`) replaces that pick with
   an installed runtime (signed-in first), else Codex; that override and the
   fallbacks go once the pinned tool reports `state`. The page adds no host rule of its own; while
-  the check runs the button waits with a spinner and says what it waits for
-  (the first run downloads the localmodels tool, counted by `download`
-  event lines before the report), and Customize marks the
-  recommended runtime and model. While installing, a step that downloads
+  the check runs, plans that depend on it (Local model or Auto subscription)
+  wait with a spinner and say what they wait for (the first run downloads the
+  localmodels tool, counted by `download` event lines before the report),
+  while BYOK and an explicit Subscription runtime start right away, and the
+  source and runtime selectors mark the recommendation. While installing, a step that downloads
   shows its bytes, what remains and the rate from the installer's byte
   counter (`localmodels.stack-progress/v1` for the local model and
   engine); a counter of one file (`partial`) shows only that file. When
@@ -369,7 +375,7 @@ Gateway and runs Agents. The daemon exits with the app.
   `local-computers` and says what is missing (offline computer, no writable
   folder, or no signed-in runtime with each runtime's reported state) and logs
   `local_server.another_me_missing` or
-  `local_server.computer_offline_after_agents`. Customize → API keys takes the
+  `local_server.computer_offline_after_agents`. More options → API keys takes the
   Composio key only (`provider-keys.ts`); voice keys are saved in the app,
   and a `SONIOX_API_KEY` or `XAI_API_KEY` written into `user.env` by hand
   still reaches the services and overrides the app's. Install saves the edits

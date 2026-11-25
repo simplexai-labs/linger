@@ -51,6 +51,7 @@ import {
   proveLocalServer,
   RUNTIME_LOOKUP_HINT_MS,
   RUNTIME_LOOKUP_LIMIT_MS,
+  setupLocalServerState,
   SignInRejectedError,
   signInFailure,
   signInWithPassword,
@@ -5976,5 +5977,77 @@ describe("InstallerApi polling", () => {
       (await open(fake.fetcher)).run(plan, controller.signal, () => {}),
     ).rejects.toThrow();
     expect(fake.reads()).toBe(1);
+  });
+});
+
+describe("setupLocalServerState", () => {
+  it("forwards BYOK check, models, preparing, waiting, failure, and refusal state and shortens home paths", () => {
+    const home = path.resolve("home", "alice");
+    const location = path.join(home, ".simplexai");
+    const legacyBackup = path.join(
+      location,
+      "instances",
+      "desktop",
+      "simplex-backup-1",
+    );
+    const view = setupLocalServerState(
+      {
+        available: true,
+        phase: "idle",
+        message: "",
+        preparing: "starting",
+        steps: ["prepare", "services", "workspace", "connect", "agents"],
+        step: "prepare",
+        progress: 0,
+        waiting: "runtime",
+        attempt: 0,
+        localModels: { state: "unavailable" },
+        location: { path: location, custom: false },
+        keys: { composio: false },
+        byokCheck: {
+          state: "ready",
+          protocol: "openai-responses",
+          url: "https://api.example.com/v1/responses",
+          modelId: "gpt-5.4",
+          contextWindow: 200_000,
+        },
+        byokModels: {
+          state: "ready",
+          url: "https://api.example.com/v1/models",
+          models: [{ id: "gpt-5.4", contextWindow: 200_000 }],
+        },
+        legacyBackup,
+        refusal: {
+          code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+          reason: "UNSAFE_PARENT_ACCESS",
+        },
+        failure: "runtime_lookup_timed_out",
+      },
+      undefined,
+      home,
+    );
+    expect(view.preparing).toBe("starting");
+    expect(view.waiting).toBe("runtime");
+    expect(view.location.path).toBe(path.join("~", ".simplexai"));
+    expect(view.legacyBackup).toBe(
+      path.join("~", ".simplexai", "instances", "desktop", "simplex-backup-1"),
+    );
+    expect(view.byokCheck).toEqual({
+      state: "ready",
+      protocol: "openai-responses",
+      url: "https://api.example.com/v1/responses",
+      modelId: "gpt-5.4",
+      contextWindow: 200_000,
+    });
+    expect(view.byokModels).toEqual({
+      state: "ready",
+      url: "https://api.example.com/v1/models",
+      models: [{ id: "gpt-5.4", contextWindow: 200_000 }],
+    });
+    expect(view.refusal).toEqual({
+      code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+      reason: "UNSAFE_PARENT_ACCESS",
+    });
+    expect(view.failure).toBe("runtime_lookup_timed_out");
   });
 });

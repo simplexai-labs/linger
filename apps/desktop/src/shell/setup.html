@@ -64,7 +64,12 @@
         flex: none;
         height: 190px;
         background: #f4f4f0 url("/welcome-scene.png") center / cover no-repeat;
+        transition: height 260ms var(--ease);
         -webkit-app-region: drag;
+      }
+      body[data-step="welcome"][data-local-available="true"] .scene {
+        height: 120px;
+        background-position: center 42%;
       }
       .topbar {
         position: absolute;
@@ -468,9 +473,12 @@
         background: #f4f4f5;
       }
 
-      /* Quick Install: one button, the options folded away behind it. */
+      /* Welcome setup: direct model source choice with optional details below. */
       main {
         position: relative;
+      }
+      body[data-step="welcome"][data-local-available="true"] main {
+        padding: 14px 24px 12px;
       }
       section[data-step="welcome"],
       section[data-step="installing"],
@@ -483,8 +491,16 @@
       section[data-step="welcome"] {
         padding-bottom: 0;
       }
+      body[data-local-available="true"] section[data-step="welcome"] {
+        justify-content: flex-start;
+        padding-bottom: 4px;
+      }
       section[data-step="welcome"] .eyebrow {
         margin-top: auto;
+      }
+      body[data-local-available="true"] section[data-step="welcome"] .eyebrow {
+        margin-top: 0;
+        margin-bottom: 8px;
       }
       h1 {
         margin-bottom: 8px;
@@ -493,6 +509,11 @@
         line-height: 34px;
         letter-spacing: -0.022em;
       }
+      body[data-local-available="true"] section[data-step="welcome"] h1 {
+        margin-bottom: 4px;
+        font-size: 23px;
+        line-height: 28px;
+      }
       .lead {
         font-size: 13.5px;
         letter-spacing: -0.003em;
@@ -500,7 +521,7 @@
       .lead.tight {
         margin-bottom: 0;
       }
-      /* Customizing makes room for the options. */
+      /* Expanding More options compacts the header and hides the spotlight card. */
       section[data-customizing="true"] {
         padding-bottom: 0;
       }
@@ -513,8 +534,6 @@
         font-size: 12.5px;
       }
       section[data-customizing="true"] .eyebrow,
-      section[data-customizing="true"] .plan-line .sep,
-      section[data-customizing="true"] #plan-summary,
       section[data-customizing="true"] #plan-featured-badge,
       section[data-customizing="true"] .spotlight-card {
         display: none;
@@ -548,16 +567,131 @@
         height: 12px;
         stroke-width: 2;
       }
+      .setup-card {
+        width: min(100%, 512px);
+        margin: 12px auto 0;
+        text-align: left;
+      }
+      .source-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .source-card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 3px;
+        min-width: 0;
+        padding: 9px 11px;
+        border: 1px solid #e6e6e1;
+        border-radius: 12px;
+        background: #fafaf8;
+        text-align: left;
+        transition:
+          border-color 150ms ease,
+          background-color 150ms ease,
+          box-shadow 150ms ease;
+      }
+      .source-card:hover:not(:disabled) {
+        border-color: #c8c8c0;
+        background: #fff;
+      }
+      .source-card[aria-checked="true"] {
+        border-color: var(--ink);
+        background: #fff;
+        box-shadow:
+          0 0 0 0.5px var(--ink),
+          0 6px 16px -12px rgba(20, 20, 16, 0.32);
+      }
+      .source-top {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        min-width: 0;
+      }
+      .source-top strong {
+        color: var(--ink);
+        font-size: 12.5px;
+        font-weight: 580;
+        letter-spacing: -0.008em;
+        white-space: nowrap;
+      }
+      .source-card[data-recommended="true"] .source-top strong::after {
+        content: "";
+        display: inline-block;
+        width: 5px;
+        height: 5px;
+        margin-left: 5px;
+        vertical-align: 2px;
+        border-radius: 50%;
+        background: #d9822b;
+      }
+      .source-pill {
+        margin-left: auto;
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: #f1f1ec;
+        color: #5f5e55;
+        font-size: 10px;
+        font-weight: 550;
+        line-height: 15px;
+        white-space: nowrap;
+      }
+      .source-pill.accent {
+        background: #f2efe9;
+        color: #4a483f;
+      }
+      .source-pill.warn {
+        background: #fdf3ec;
+        color: #9a4715;
+      }
+      .source-meta {
+        width: 100%;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.35;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+      .source-panel {
+        margin-top: 8px;
+        padding: 4px 16px;
+        border: 1px solid rgba(20, 20, 16, 0.08);
+        border-radius: 14px;
+        background: #fff;
+        box-shadow:
+          0 1px 2px rgba(20, 20, 16, 0.03),
+          0 10px 26px -18px rgba(20, 20, 16, 0.2);
+      }
+      .source-hint {
+        width: 100%;
+        margin: 0;
+        color: var(--muted);
+        font-size: 11.5px;
+        line-height: 1.4;
+      }
+      .source-hint .link {
+        padding: 0 2px;
+        font-size: 11.5px;
+      }
       .start {
         display: flex;
         flex-direction: column;
         align-items: center;
-        padding-top: 16px;
+        padding-top: 14px;
+      }
+      body:not([data-local-available="true"]) .start {
+        padding-top: 24px;
       }
       .primary.large {
         position: relative;
         min-width: 232px;
-        min-height: 44px;
+        min-height: 42px;
         padding: 0 22px;
         overflow: hidden;
         border: 0;
@@ -604,14 +738,14 @@
       .primary.large[data-busy="true"] svg {
         display: none;
       }
-      /* What Quick Install does, and the way to change it. */
+      /* What Install does, and secondary setup options. */
       .plan-line {
         display: flex;
         align-items: center;
         justify-content: center;
         flex-wrap: wrap;
-        gap: 4px 6px;
-        margin-top: 11px;
+        gap: 4px 8px;
+        margin: 9px 0 0;
         color: var(--faint);
         font-size: 11.5px;
       }
@@ -638,8 +772,8 @@
         background: #d9822b;
       }
       .spotlight-card {
-        width: min(100%, 468px);
-        margin: 12px auto 0;
+        width: min(100%, 512px);
+        margin: 10px auto 0;
         padding: 8px 12px;
         border: 1px solid #e8e5dc;
         border-radius: 12px;
@@ -705,11 +839,11 @@
         text-decoration-color: var(--ink);
       }
       .plan-why {
-        max-width: 440px;
-        margin-top: 4px;
+        max-width: 480px;
+        margin: 4px 0 0;
         color: var(--faint);
         font-size: 11.5px;
-        line-height: 1.45;
+        line-height: 1.4;
         font-variant-numeric: tabular-nums;
       }
       .plan-actions {
@@ -762,13 +896,13 @@
         display: grid;
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: 0fr;
-        width: min(100%, 448px);
+        width: min(100%, 512px);
         margin: 0 auto;
         opacity: 0;
         transition:
-          grid-template-rows 420ms var(--ease),
-          opacity 280ms ease,
-          margin 420ms var(--ease);
+          grid-template-rows 320ms var(--ease),
+          opacity 220ms ease,
+          margin 320ms var(--ease);
       }
       .fold[data-open="true"] {
         grid-template-rows: 1fr;
@@ -779,7 +913,7 @@
         min-width: 0;
         min-height: 0;
         overflow: hidden;
-        padding: 0 4px 4px;
+        padding: 0;
       }
       .fold[data-open="true"] > div {
         overflow: visible;
@@ -795,7 +929,7 @@
       .byok-tooltip {
         position: absolute;
         bottom: calc(100% + 8px);
-        right: 0;
+        left: 50%;
         z-index: 30;
         width: 248px;
         padding: 8px 10px;
@@ -810,7 +944,7 @@
         box-shadow: 0 10px 24px -8px rgba(20, 20, 16, 0.45);
         opacity: 0;
         pointer-events: none;
-        transform: translateY(3px);
+        transform: translate(-50%, 3px);
         transition:
           opacity 150ms ease,
           transform 150ms ease;
@@ -818,12 +952,13 @@
       .byok-tip-btn:hover .byok-tooltip,
       .byok-tip-btn:focus-visible .byok-tooltip {
         opacity: 1;
-        transform: translateY(0);
+        transform: translate(-50%, 0);
       }
       .choice.byok-box {
         flex-direction: column;
         align-items: stretch;
-        gap: 10px;
+        gap: 8px;
+        padding: 10px 0;
       }
       .byok-row {
         display: flex;
@@ -832,9 +967,9 @@
         gap: 10px;
       }
       .byok-row label {
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 500;
+        color: var(--ink);
+        font-size: 12.5px;
+        font-weight: 550;
       }
       /* BYOK fields, built once by byokFields() for the setup form and the
          sign-in dialog: the base URL and two optional comboboxes (path and
@@ -1167,6 +1302,12 @@
         font-size: 0.95em;
         overflow-wrap: anywhere;
       }
+      .location-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: none;
+      }
       .choice.optional-keys {
         display: block;
       }
@@ -1186,22 +1327,22 @@
       }
       .choices,
       .panel {
-        border: 1px solid rgba(20, 20, 16, 0.07);
-        border-radius: 16px;
+        border: 1px solid rgba(20, 20, 16, 0.08);
+        border-radius: 14px;
         background: #fff;
         box-shadow:
-          0 1px 2px rgba(20, 20, 16, 0.04),
-          0 12px 32px -18px rgba(20, 20, 16, 0.22);
+          0 1px 2px rgba(20, 20, 16, 0.03),
+          0 10px 26px -18px rgba(20, 20, 16, 0.2);
         text-align: left;
       }
       .choices {
-        padding: 2px 16px;
+        padding: 4px 16px;
       }
       .choice {
         display: flex;
         align-items: center;
         gap: 14px;
-        padding: 5px 0;
+        padding: 7px 0;
       }
       .choice + .choice {
         border-top: 1px solid #f1f1ee;
@@ -1238,7 +1379,7 @@
       .seg button {
         position: relative;
         z-index: 1;
-        min-width: 56px;
+        min-width: 54px;
         height: 26px;
         padding: 0 10px;
         border: 0;
@@ -1292,9 +1433,9 @@
         display: flex;
         flex-direction: column;
         align-items: flex-start;
-        gap: 1px;
+        gap: 2px;
         min-width: 0;
-        padding: 6px 10px;
+        padding: 7px 10px;
         border: 1px solid #e6e6e1;
         border-radius: 9px;
         background: #fff;
@@ -1307,9 +1448,8 @@
         border-color: #c4c4bc;
       }
       .pick[aria-checked="true"] {
-        border-color: var(--ink);
-        background: #fafaf8;
-        box-shadow: inset 0 0 0 0.5px var(--ink);
+        border-color: #d8d8d0;
+        background: #f8f8f5;
       }
       .pick-head {
         display: flex;
@@ -1326,7 +1466,8 @@
       .pick small {
         color: var(--muted);
         font-size: 11px;
-        white-space: nowrap;
+        line-height: 1.4;
+        white-space: normal;
       }
       .local-spotlight {
         width: 100%;
@@ -2022,139 +2163,175 @@
         ></span>
         <h1 id="welcome-title" data-t="welcomeTitle"></h1>
         <p class="lead tight" id="welcome-lead"></p>
-        <div class="fold" id="local-options" data-open="false">
+        <div class="setup-card" id="local-setup">
+          <div
+            class="source-grid"
+            role="radiogroup"
+            data-t-aria-label="modelSource"
+            data-plan="source"
+          >
+            <button
+              type="button"
+              class="source-card"
+              role="radio"
+              data-value="local"
+            >
+              <span class="source-top">
+                <strong data-t="localModel"></strong>
+                <span class="source-pill" id="source-local-pill" hidden></span>
+              </span>
+              <span class="source-meta" id="source-local-meta"></span>
+            </button>
+            <button
+              type="button"
+              class="source-card byok-tip-btn"
+              role="radio"
+              data-value="byok"
+              aria-describedby="byok-tip-text"
+            >
+              <span class="source-top">
+                <strong>BYOK</strong>
+                <span class="source-pill accent" data-t="noDownload"></span>
+              </span>
+              <span class="source-meta" data-t="byokCardMeta"></span>
+              <span
+                class="byok-tooltip"
+                id="byok-tip-text"
+                role="tooltip"
+                data-t="byokTooltip"
+              ></span>
+            </button>
+            <button
+              type="button"
+              class="source-card"
+              role="radio"
+              data-value="subscription"
+            >
+              <span class="source-top">
+                <strong data-t="subscription"></strong>
+              </span>
+              <span
+                class="source-meta"
+                id="source-sub-meta"
+                data-t="subscriptionCardMeta"
+              ></span>
+            </button>
+          </div>
+          <div class="source-panel">
+            <div class="choice local" id="local-row" hidden>
+              <div class="text">
+                <strong data-t="localModel"></strong
+                ><span class="sub" id="local-sub"></span>
+              </div>
+              <button
+                type="button"
+                class="pick"
+                id="local-model"
+                role="checkbox"
+                data-t-aria-label="localModelToggle"
+                hidden
+              >
+                <span class="pick-head"
+                  ><span class="pick-name" id="local-model-name"></span
+                  ><span
+                    class="featured-pill"
+                    id="local-model-featured"
+                    hidden
+                    data-t="featuredPartnerBadge"
+                  ></span></span
+                ><small id="local-model-needs"></small>
+              </button>
+              <div class="local-spotlight" id="local-spotlight">
+                <span id="local-spotlight-text"></span>
+                <button
+                  type="button"
+                  class="spotlight-link"
+                  id="local-spotlight-link"
+                  data-t-title="openAnnouncement"
+                ></button>
+              </div>
+              <p class="source-hint" id="local-skip-hint" hidden>
+                <span data-t="skipLocalHint"></span>
+                <button
+                  type="button"
+                  class="link quiet"
+                  id="local-skip-to-byok"
+                  data-t="byokInstead"
+                ></button>
+              </p>
+            </div>
+            <div class="choice" id="subscription-row" hidden>
+              <div class="text">
+                <strong data-t="aiRuntime"></strong
+                ><span class="sub" id="runtime-sub" data-t="runtimeHint"></span>
+              </div>
+              <div
+                class="seg"
+                role="radiogroup"
+                data-t-aria-label="aiRuntime"
+                data-plan="runtime"
+              >
+                <span class="knob"></span>
+                <button
+                  type="button"
+                  role="radio"
+                  data-value="recommended"
+                  data-t="auto"
+                ></button>
+                <button type="button" role="radio" data-value="codex">
+                  Codex
+                </button>
+                <button type="button" role="radio" data-value="claude">
+                  Claude Code
+                </button>
+              </div>
+            </div>
+            <div class="choice byok-box" id="byok-row" hidden>
+              <div class="byok-row">
+                <label id="byok-runtime-label" data-t="aiRuntime"></label>
+                <div
+                  class="seg"
+                  role="radiogroup"
+                  aria-labelledby="byok-runtime-label"
+                  data-byok="runtime"
+                >
+                  <span class="knob"></span>
+                  <button type="button" role="radio" data-value="claude">
+                    Claude Code
+                  </button>
+                  <button type="button" role="radio" data-value="codex">
+                    Codex
+                  </button>
+                  <button type="button" role="radio" data-value="pi">Pi</button>
+                </div>
+              </div>
+              <div class="byok-fields" id="byok-fields"></div>
+            </div>
+          </div>
+        </div>
+        <div class="fold" id="local-options" data-open="false" inert>
           <div>
             <div class="choices">
               <div class="choice">
                 <div class="text">
-                  <strong data-t="modelSource"></strong
-                  ><span
-                    class="sub"
-                    id="source-sub"
-                    data-t="modelSourceHint"
-                  ></span>
+                  <strong data-t="installLocation"></strong
+                  ><span class="sub" id="location-sub"></span>
                 </div>
-                <div
-                  class="seg"
-                  role="radiogroup"
-                  data-t-aria-label="modelSource"
-                  data-plan="source"
-                >
-                  <span class="knob"></span>
+                <div class="location-actions">
                   <button
                     type="button"
-                    role="radio"
-                    data-value="local"
-                    data-t="localModel"
+                    class="link quiet"
+                    id="location-reset"
+                    hidden
+                    data-t="resetLocation"
                   ></button>
                   <button
                     type="button"
-                    role="radio"
-                    data-value="subscription"
-                    data-t="subscription"
-                  ></button>
-                  <button
-                    type="button"
-                    role="radio"
-                    data-value="byok"
-                    class="byok-tip-btn"
-                    aria-describedby="byok-tip-text"
-                  >
-                    BYOK
-                    <span
-                      class="byok-tooltip"
-                      id="byok-tip-text"
-                      role="tooltip"
-                      data-t="byokTooltip"
-                    ></span>
-                  </button>
-                </div>
-              </div>
-              <div class="choice local" id="local-row" hidden>
-                <div class="text">
-                  <strong data-t="localModel"></strong
-                  ><span class="sub" id="local-sub"></span>
-                </div>
-                <button
-                  type="button"
-                  class="pick"
-                  id="local-model"
-                  role="checkbox"
-                  data-t-aria-label="localModelToggle"
-                  hidden
-                >
-                  <span class="pick-head"
-                    ><span class="pick-name" id="local-model-name"></span
-                    ><span
-                      class="featured-pill"
-                      id="local-model-featured"
-                      hidden
-                      data-t="featuredPartnerBadge"
-                    ></span></span
-                  ><small id="local-model-needs"></small>
-                </button>
-                <div class="local-spotlight" id="local-spotlight">
-                  <span id="local-spotlight-text"></span>
-                  <button
-                    type="button"
-                    class="spotlight-link"
-                    id="local-spotlight-link"
-                    data-t-title="openAnnouncement"
+                    class="change"
+                    id="location-change"
+                    data-t="changeLocation"
                   ></button>
                 </div>
-              </div>
-              <div class="choice" id="subscription-row" hidden>
-                <div class="text">
-                  <strong data-t="aiRuntime"></strong
-                  ><span
-                    class="sub"
-                    id="runtime-sub"
-                    data-t="runtimeHint"
-                  ></span>
-                </div>
-                <div
-                  class="seg"
-                  role="radiogroup"
-                  data-t-aria-label="aiRuntime"
-                  data-plan="runtime"
-                >
-                  <span class="knob"></span>
-                  <button
-                    type="button"
-                    role="radio"
-                    data-value="recommended"
-                    data-t="auto"
-                  ></button>
-                  <button type="button" role="radio" data-value="codex">
-                    Codex
-                  </button>
-                  <button type="button" role="radio" data-value="claude">
-                    Claude Code
-                  </button>
-                </div>
-              </div>
-              <div class="choice byok-box" id="byok-row" hidden>
-                <div class="byok-row">
-                  <label id="byok-runtime-label" data-t="aiRuntime"></label>
-                  <div
-                    class="seg"
-                    role="radiogroup"
-                    aria-labelledby="byok-runtime-label"
-                    data-byok="runtime"
-                  >
-                    <span class="knob"></span>
-                    <button type="button" role="radio" data-value="claude">
-                      Claude Code
-                    </button>
-                    <button type="button" role="radio" data-value="codex">
-                      Codex
-                    </button>
-                    <button type="button" role="radio" data-value="pi">
-                      Pi
-                    </button>
-                  </div>
-                </div>
-                <div class="byok-fields" id="byok-fields"></div>
               </div>
               <details class="choice optional-keys" id="optional-keys">
                 <summary data-t="appIntegrations"></summary>
@@ -2186,18 +2363,6 @@
                 </div>
                 <p class="keys-note" id="keys-note"></p>
               </details>
-              <div class="choice">
-                <div class="text">
-                  <strong data-t="installLocation"></strong
-                  ><span class="sub" id="location-sub"></span>
-                </div>
-                <button
-                  type="button"
-                  class="change"
-                  id="location-change"
-                  data-t="changeLocation"
-                ></button>
-              </div>
             </div>
           </div>
         </div>
@@ -2228,7 +2393,7 @@
               type="button"
               aria-expanded="false"
               aria-controls="local-options"
-              data-t="customize"
+              data-t="moreOptions"
             ></button>
           </p>
           <p class="plan-why" id="plan-why" hidden></p>
@@ -2933,11 +3098,13 @@
             ? t("runtimeLookupUnreachable")
             : local.message;
       // Quick Install installs what the localmodels tool recommends for this
-      // computer once it has checked; until then (or when it cannot check)
-      // the installer picks. The tool's local-models pick runs through Pi,
-      // so it implies Pi.
+      // computer once it has checked; while checking it highlights the local
+      // model check while letting the user switch to BYOK or Subscription
+      // immediately.
       const defaults = () => {
         const models = state.localServer.localModels;
+        if (models.state === "checking")
+          return { source: "local", runtime: "pi", localModel: false };
         const pick = models.state === "checked" && models.recommendation;
         if (pick === "local-models" && models.eligible && models.model)
           return { source: "local", runtime: "pi", localModel: true };
@@ -3643,6 +3810,7 @@
         if (pending === "signin.open") pending = null;
         if (next === "ready" && step !== "ready") setTimeout(celebrate, 320);
         step = next;
+        document.body.dataset.step = step;
         for (const el of document.querySelectorAll("section"))
           el.classList.toggle("active", el.dataset.step === step);
         if (step === "server") {
@@ -3942,7 +4110,7 @@
           models.reasons?.some((reason) => MEMORY_HELD_CODES.has(reason.code)),
         );
       // The held card's short line: what blocks local models right now.
-      const heldLine = (models) => {
+      const heldLine = (models, compact = false) => {
         if (
           models.reasons?.some(
             (reason) => reason.code === "gateway-port-in-use",
@@ -3956,6 +4124,7 @@
         )
           return t("heldHarnessUnavailable");
         if (cudaDriverHeld(models)) return t("heldCudaDriver");
+        if (compact && memoryHeld(models)) return t("localMetaMemoryBusy");
         const gpu = models.reasons?.find(
           (reason) =>
             reason.code === "gpu-memory-required" &&
@@ -3988,17 +4157,33 @@
 
       const renderLocal = (busy) => {
         const local = state.localServer;
+        const models = local.localModels;
+        const checking = models.state === "checking";
         const recommended = defaults();
         // Auto, picked before the check named a pick, means that pick; once
         // it is known Auto no longer shows.
-        if (pickedAutoBeforeCheck && recommended.runtime !== "recommended") {
+        if (
+          pickedAutoBeforeCheck &&
+          !checking &&
+          (recommended.source === "local" ||
+            recommended.runtime !== "recommended")
+        ) {
           picked = false;
           pickedAutoBeforeCheck = false;
         }
         if (!picked) plan = recommended;
-        // The local model is offered only once this computer is known to
-        // serve it; until then its row does not show.
-        const models = local.localModels;
+        const subKnown =
+          !checking &&
+          recommended.source === "subscription" &&
+          recommended.runtime !== "recommended";
+        // Once the check names a subscription runtime, Auto is hidden; resolve
+        // an earlier Auto pick to that runtime so a visible radio stays checked.
+        if (
+          plan.source === "subscription" &&
+          plan.runtime === "recommended" &&
+          subKnown
+        )
+          plan = { ...plan, runtime: recommended.runtime };
         const model =
           models.state === "checked" && models.eligible && models.model;
         // The computer is temporarily blocked from running a local model now
@@ -4009,11 +4194,16 @@
         const heldModel = held && models.model;
         plan.localModel = plan.source === "local" && !!model;
         const custom = !isDefaultPlan(local);
-        // Quick Install waits for the check, so it installs what it shows.
-        const checking = models.state === "checking";
+        // Only local-model or Auto subscription waits for the hardware probe;
+        // BYOK and an explicit Subscription runtime can start immediately.
+        const waitingForCheck =
+          checking &&
+          (plan.source === "local" ||
+            (plan.source === "subscription" && plan.runtime === "recommended"));
         const known =
-          recommended.source === "local" ||
-          recommended.runtime !== "recommended";
+          !checking &&
+          (recommended.source === "local" ||
+            recommended.runtime !== "recommended");
         const following = JSON.stringify(plan) === JSON.stringify(recommended);
         const named = (choice) =>
           choice.source === "local"
@@ -4023,87 +4213,98 @@
                   .filter(Boolean)
                   .join(" · ")
               : RUNTIMES[choice.runtime];
+        document.body.dataset.localAvailable = String(local.available);
+        $("local-setup").hidden = !local.available;
         $("welcome-lead").textContent = t(
           local.available ? "welcomeLeadLocal" : "welcomeLeadTeam",
         );
         $("local-install").hidden = !local.available;
-        $("team").hidden = !local.available || customizing;
+        $("team").hidden = !local.available;
         $("get-started").hidden = local.available;
-        $("local-options").dataset.open = String(
-          customizing && local.available,
-        );
+        const optionsOpen = customizing && local.available;
+        $("local-options").dataset.open = String(optionsOpen);
+        $("local-options").inert = !optionsOpen;
         $("local-customize").setAttribute("aria-expanded", String(customizing));
         $("local-customize").textContent = t(
-          customizing ? "useDefaults" : "customize",
+          customizing ? "hideOptions" : "moreOptions",
         );
-        // Until the check ends the button says what it waits for: the first
-        // run downloads the localmodels tool, then the check runs. The label
-        // changes only when it differs, so the spinner keeps turning.
+        // Until the check ends, a plan that depends on it shows what it waits
+        // for: first downloading the localmodels tool, then checking hardware.
         const fetching = checking ? models.download : undefined;
-        const label = checking
+        const label = waitingForCheck
           ? '<span class="spinner"></span>' +
             esc(t(fetching ? "downloadingTools" : "checkingComputer"))
-          : esc(t(custom ? "install" : "quickInstall"));
+          : esc(
+              t(
+                plan.source === "byok"
+                  ? "installWithByok"
+                  : custom
+                    ? "install"
+                    : "quickInstall",
+              ),
+            );
         if ($("local-install-label").innerHTML !== label)
           $("local-install-label").innerHTML = label;
         document.querySelector('[data-step="welcome"]').dataset.customizing =
-          String(customizing && local.available);
+          String(optionsOpen);
         const byokIncomplete = plan.source === "byok" && !mainByok.complete();
         const localUnavailable = plan.source === "local" && !model;
         $("local-install").disabled ||=
-          checking || byokIncomplete || localUnavailable;
-        $("local-install").dataset.busy = String(checking);
-        $("local-install").setAttribute("aria-busy", String(checking));
-        $("plan-summary").textContent = checking
+          waitingForCheck || byokIncomplete || localUnavailable;
+        $("local-install").dataset.busy = String(waitingForCheck);
+        $("local-install").setAttribute("aria-busy", String(waitingForCheck));
+        $("plan-summary").textContent = waitingForCheck
           ? t("findingSetup")
-          : following && known
-            ? t("recommendedPlan", { plan: named(plan) })
-            : named(plan) || t("bestRuntime");
+          : plan.source === "byok"
+            ? named(plan)
+            : following && known
+              ? t("recommendedPlan", { plan: named(plan) })
+              : named(plan) || t("bestRuntime");
         // Why: the localmodels tool's facts, and its reason codes in the
         // page's words.
         const unavailableText =
           models.state === "checked"
             ? reasonsText(models, false)
             : t("cannotCheck");
-        $("plan-why").textContent = fetching
-          ? transferParts(fetching).join(" · ")
-          : !following || checking
-            ? ""
-            : plan.localModel
-              ? [
-                  model.name,
-                  models.gpu
-                    ? t("fitsGpu", { gpu: models.gpu })
-                    : t("fitsComputer"),
-                  t("memoryAmount", { size: gigabytes(models.memoryBytes) }),
-                  model.downloadBytes != null &&
-                    t("downloadAmount", {
-                      size: gigabytes(model.downloadBytes),
-                    }),
-                ]
-                  .filter(Boolean)
-                  .join(" · ")
-              : held
-                ? cudaDriverHeld(models)
-                  ? t("heldWhyCudaDriver", {
-                      reasons: reasonsText(models, true),
-                      plan: named(plan),
-                    })
-                  : memoryHeld(models)
-                    ? t("heldWhy", {
+        $("plan-why").textContent =
+          waitingForCheck && fetching
+            ? transferParts(fetching).join(" · ")
+            : plan.source === "byok" || !following || checking
+              ? ""
+              : plan.localModel
+                ? [
+                    model.name,
+                    models.gpu
+                      ? t("fitsGpu", { gpu: models.gpu })
+                      : t("fitsComputer"),
+                    t("memoryAmount", { size: gigabytes(models.memoryBytes) }),
+                    model.downloadBytes != null &&
+                      t("downloadAmount", {
+                        size: gigabytes(model.downloadBytes),
+                      }),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                : held
+                  ? cudaDriverHeld(models)
+                    ? t("heldWhyCudaDriver", {
                         reasons: reasonsText(models, true),
                         plan: named(plan),
                       })
-                    : t("heldWhyGeneric", {
-                        reasons: reasonsText(models, true),
-                        plan: named(plan),
-                      })
-                : (models.state === "checked" && !models.eligible) ||
-                    models.state === "unavailable"
-                  ? unavailableText
-                  : "";
-        $("plan-why").hidden =
-          !local.available || customizing || !$("plan-why").textContent;
+                    : memoryHeld(models)
+                      ? t("heldWhy", {
+                          reasons: reasonsText(models, true),
+                          plan: named(plan),
+                        })
+                      : t("heldWhyGeneric", {
+                          reasons: reasonsText(models, true),
+                          plan: named(plan),
+                        })
+                  : (models.state === "checked" && !models.eligible) ||
+                      models.state === "unavailable"
+                    ? unavailableText
+                    : "";
+        $("plan-why").hidden = !local.available || !$("plan-why").textContent;
         $("plan-line").hidden = !local.available;
         $("welcome-eyebrow").hidden = !local.available;
         const location = local.location;
@@ -4111,6 +4312,7 @@
           location.error || shortPath(location.path);
         $("location-sub").title = location.error ? "" : location.path;
         $("location-sub").dataset.warn = String(!!location.error);
+        $("location-reset").hidden = !location.custom && !location.error;
         for (const input of document.querySelectorAll("[data-key]")) {
           const provider = input.dataset.key;
           const saved = local.keys[provider];
@@ -4126,6 +4328,8 @@
         }
         $("keys-note").textContent = t("keysNote");
         const shown = model || heldModel;
+        const settled =
+          models.state === "checked" || models.state === "unavailable";
         const inklingRecommended = Boolean(
           recommended.localModel && model?.featuredInkling,
         );
@@ -4136,7 +4340,9 @@
           checking ||
           !following ||
           !inklingRecommended;
-        $("featured-spotlight").hidden = !local.available || customizing;
+        const hideFeaturedSpotlight =
+          !local.available || customizing || plan.source === "byok";
+        $("featured-spotlight").hidden = hideFeaturedSpotlight;
         $("featured-spotlight").dataset.recommended =
           String(inklingRecommended);
         $("featured-spotlight-note").textContent = t(
@@ -4148,6 +4354,7 @@
           inklingRecommended ? "learnMoreLink" : "thinkingMachinesLink",
         );
         $("local-model-featured").hidden = !shownIsInkling;
+        $("local-spotlight").hidden = !hideFeaturedSpotlight;
         $("local-spotlight").dataset.recommended = String(shownIsInkling);
         $("local-spotlight-text").textContent = t(
           shownIsInkling ? "featuredModelSpecs" : "featuredModelCustomizeNote",
@@ -4155,21 +4362,48 @@
         $("local-spotlight-link").textContent = t(
           shownIsInkling ? "learnMoreLink" : "thinkingMachinesLink",
         );
-        $("source-sub").textContent =
-          recommended.source === "local"
-            ? t("recommendedLocal")
-            : known
-              ? t("recommendedSubscription", {
-                  runtime: RUNTIMES[recommended.runtime],
+        // Summary cards: show download size or status right on first launch.
+        const localPill = $("source-local-pill");
+        if (held) {
+          localPill.textContent = t("localPillOnHold");
+          localPill.className = "source-pill warn";
+          localPill.hidden = false;
+        } else if (settled && !model) {
+          localPill.textContent = t("localPillUnavailable");
+          localPill.className = "source-pill";
+          localPill.hidden = false;
+        } else {
+          localPill.hidden = true;
+        }
+        $("source-local-meta").textContent = checking
+          ? fetching
+            ? fetching.total
+              ? t("localMetaToolsProgress", {
+                  done: size(fetching.completed),
+                  total: size(fetching.total),
                 })
-              : t("chooseSource");
+              : t("localMetaToolsDone", { done: size(fetching.completed) })
+            : t("localMetaChecking")
+          : model
+            ? [
+                model.name,
+                model.downloadBytes != null && gigabytes(model.downloadBytes),
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : held
+              ? heldLine(models, true)
+              : t("localMetaNotAvailable");
+        $("source-sub-meta").textContent = subKnown
+          ? t("subscriptionRecommendedMeta", {
+              runtime: RUNTIMES[recommended.runtime],
+            })
+          : t("subscriptionCardMeta");
         $("local-row").hidden = plan.source !== "local";
         $("subscription-row").hidden = plan.source !== "subscription";
         $("byok-row").hidden = plan.source !== "byok";
         // Once checked, the card always shows: the model, or why there is
         // none, disabled.
-        const settled =
-          models.state === "checked" || models.state === "unavailable";
         const canRecheck =
           held ||
           (models.state === "checked" &&
@@ -4251,6 +4485,8 @@
         );
         $("local-driver-guide").hidden = !showDriverActions;
         $("local-driver-guide").disabled = busy;
+        $("local-skip-hint").hidden =
+          plan.source !== "local" || (!checking && !!model);
         $("local-recheck").hidden = !canRecheck || !local.available;
         $("local-recheck").disabled = busy || driverInstalling;
         $("local-plan-actions").hidden =
@@ -4292,11 +4528,10 @@
           $("local-model").setAttribute("aria-checked", "false");
           $("local-model").disabled = true;
         } else {
-          $("local-sub").textContent = t("checkingComputer");
+          $("local-sub").textContent = t(
+            fetching ? "downloadingTools" : "checkingLocalModel",
+          );
         }
-        const subKnown =
-          recommended.source === "subscription" &&
-          recommended.runtime !== "recommended";
         $("runtime-sub").textContent = subKnown
           ? t("recommendedRuntime", { runtime: RUNTIMES[recommended.runtime] })
           : t("subscriptionHint");
@@ -4690,7 +4925,7 @@
             // The installer sets up Pi with the local model for "local".
             runtime,
             ...(byokPayload ? { byok: byokPayload } : {}),
-            ...(customizing && Object.keys(keys).length ? { keys } : {}),
+            ...(Object.keys(keys).length ? { keys } : {}),
           },
           "local-error",
         );
@@ -4860,17 +5095,18 @@
         });
       $("local-customize").addEventListener("click", () => {
         customizing = !customizing;
-        if (!customizing) {
-          picked = false;
-          pickedAutoBeforeCheck = false;
-          byokRuntime = "claude";
-          mainByok.reset();
-          clearKeys();
-          const location = state.localServer.location;
-          if (location.custom || location.error)
-            run({ op: "local.location.reset" });
-        }
         render();
+      });
+      $("local-skip-to-byok").addEventListener("click", () => {
+        picked = true;
+        pickedAutoBeforeCheck = false;
+        plan = {
+          ...plan,
+          source: "byok",
+          localModel: false,
+        };
+        render();
+        if (!$("byok-url").value.trim()) $("byok-url").focus();
       });
       for (const seg of document.querySelectorAll("[data-plan]"))
         for (const option of seg.querySelectorAll("button"))
@@ -4890,7 +5126,7 @@
                 runtime:
                   value === "local"
                     ? "pi"
-                    : plan.runtime === "pi"
+                    : value === "subscription" && plan.runtime === "pi"
                       ? rec.source === "subscription"
                         ? rec.runtime
                         : "recommended"
@@ -4906,6 +5142,12 @@
               };
             }
             render();
+            if (
+              field === "source" &&
+              value === "byok" &&
+              !$("byok-url").value.trim()
+            )
+              $("byok-url").focus();
           });
       for (const option of document.querySelectorAll(
         '[data-byok="runtime"] button',
@@ -4918,6 +5160,9 @@
         });
       $("location-change").addEventListener("click", () =>
         run({ op: "local.location.pick" }),
+      );
+      $("location-reset").addEventListener("click", () =>
+        run({ op: "local.location.reset" }),
       );
       $("local-recheck").addEventListener("click", () =>
         run({ op: "local.recheck" }, "local-error"),

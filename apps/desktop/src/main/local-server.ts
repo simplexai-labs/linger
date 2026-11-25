@@ -19,6 +19,7 @@ import {
   statfs,
   writeFile,
 } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { createInterface } from "node:readline";
@@ -101,6 +102,8 @@ import type {
   SetupByokEndpoint,
   SetupByokModels,
   SetupByokProtocol,
+  SetupLocalAccount,
+  SetupLocalServer,
   SetupReason,
 } from "../shared/setup.js";
 
@@ -355,6 +358,47 @@ export interface LocalModelsDegradedStatus {
   readonly code: string;
   readonly message: string;
   readonly reasons?: readonly string[];
+}
+
+// Projects LocalServerStatus for the setup page, replacing the user's home
+// prefix with ~ and forwarding runtime sign-in, waiting, failure, refusal,
+// and BYOK state.
+export function setupLocalServerState(
+  status: LocalServerStatus,
+  account: SetupLocalAccount | undefined,
+  homeDir = os.homedir(),
+): SetupLocalServer {
+  const shown = (folder: string) =>
+    folder === homeDir || folder.startsWith(homeDir + path.sep)
+      ? "~" + folder.slice(homeDir.length)
+      : folder;
+  return {
+    available: status.available,
+    phase: status.phase,
+    message: status.message,
+    ...(status.preparing ? { preparing: status.preparing } : {}),
+    steps: status.steps,
+    step: status.step,
+    progress: status.progress,
+    ...(status.transfer ? { transfer: status.transfer } : {}),
+    ...(status.waiting ? { waiting: status.waiting } : {}),
+    attempt: status.attempt,
+    localModels: status.localModels,
+    location: {
+      ...status.location,
+      path: shown(status.location.path),
+    },
+    keys: status.keys,
+    ...(status.signIn ? { signIn: status.signIn } : {}),
+    ...(status.byokCheck ? { byokCheck: status.byokCheck } : {}),
+    ...(status.byokModels ? { byokModels: status.byokModels } : {}),
+    ...(status.legacyBackup
+      ? { legacyBackup: shown(status.legacyBackup) }
+      : {}),
+    ...(status.refusal ? { refusal: status.refusal } : {}),
+    ...(status.failure ? { failure: status.failure } : {}),
+    ...(account ? { account } : {}),
+  };
 }
 
 export interface LocalServerOptions {
