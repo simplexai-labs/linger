@@ -1,9 +1,61 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { PassThrough, type Readable } from "node:stream";
+import { afterEach, expect, test, vi } from "vitest";
+
+const fsHooks = vi.hoisted(() => ({
+  wrapReadStream: undefined as
+    | ((file: string, stream: Readable) => Readable)
+    | undefined,
+  onCreateWriteStream: undefined as
+    | ((
+        file: string,
+        stream: ReturnType<typeof import("node:fs").createWriteStream>,
+      ) => void)
+    | undefined,
+  onRm: undefined as ((target: string) => void) | undefined,
+}));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    createReadStream: (...args: Parameters<typeof actual.createReadStream>) => {
+      const stream = actual.createReadStream(...args);
+      return fsHooks.wrapReadStream
+        ? fsHooks.wrapReadStream(String(args[0]), stream)
+        : stream;
+    },
+    createWriteStream: (
+      ...args: Parameters<typeof actual.createWriteStream>
+    ) => {
+      const stream = actual.createWriteStream(...args);
+      fsHooks.onCreateWriteStream?.(String(args[0]), stream);
+      return stream;
+    },
+  };
+});
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    rm: (...args: Parameters<typeof actual.rm>) => {
+      fsHooks.onRm?.(String(args[0]));
+      return actual.rm(...args);
+    },
+  };
+});
 
 import {
   checkTeamhubBinaries,
@@ -11,10 +63,15 @@ import {
   parseTeamhubBinaries,
   TEAMHUB_BINARY_DIRECTORY,
   TEAMHUB_COMMANDS,
+  teamhubBinaryStampsFile,
 } from "./teamhub-binaries.js";
 
 const roots: string[] = [];
 afterEach(async () => {
+  fsHooks.wrapReadStream = undefined;
+  fsHooks.onCreateWriteStream = undefined;
+  fsHooks.onRm = undefined;
+  vi.restoreAllMocks();
   for (const root of roots.splice(0))
     await rm(root, { recursive: true, force: true });
 });
@@ -154,4 +211,133 @@ test("a manifest names only plain files", () => {
     expect(() => parseTeamhubBinaries(manifest(file))).toThrow(
       "Invalid TeamHub binary manifest.",
     );
+});
+
+test("skips re-hashing settled binaries while detecting same-size backdated tampering via ctime", async () => {
+  const f = await bundle();
+  const expected = { target, sourceArchiveSha256 };
+  const dir = path.join(f.repo, TEAMHUB_BINARY_DIRECTORY);
+  expect(await installTeamhubBinaries(f.from, f.repo, expected)).toBe(
+    "installed",
+  );
+  const stampFile = `${dir}.verified.json`;
+  expect(existsSync(stampFile)).toBe(true);
+  const past = new Date(Date.now() - 10_000);
+  const recorded = JSON.parse(await readFile(stampFile, "utf8")) as {
+    digest: string;
+    stamps: Record<string, [number, number, number]>;
+  };
+  const baseNow = Date.now();
+  vi.spyOn(Date, "now").mockReturnValue(baseNow + 10_000);
+  // Warm repeat check stays verified and leaves existing stamps intact without re-hashing.
+  expect(await checkTeamhubBinaries(f.repo, target)).toBe("verified");
+  expect(JSON.parse(await readFile(stampFile, "utf8"))).toEqual(recorded);
+
+  // Overwrite with identical length and backdate mtime; ctime still invalidates the stamp.
+  const file = path.join(dir, "teamhub.exe");
+  await writeFile(file, "teamhub for windowz");
+  await utimes(file, past, past);
+  expect(await checkTeamhubBinaries(f.repo, target)).toBe("removed");
+  expect(existsSync(stampFile)).toBe(false);
+});
+
+test("installTeamhubBinaries drains sibling streams before removing destination on partial failure and supports AbortSignal", async () => {
+  const f = await bundle();
+  const dir = path.join(f.repo, TEAMHUB_BINARY_DIRECTORY);
+  const stampFile = teamhubBinaryStampsFile(dir);
+
+  const holdMigrateStream = () => {
+    const hold = new PassThrough();
+    let writeClosed = false;
+    let resolveWriteOpened!: () => void;
+    const writeOpened = new Promise<void>((resolve) => {
+      resolveWriteOpened = resolve;
+    });
+    fsHooks.wrapReadStream = (file, stream) => {
+      if (!file.endsWith("migrate.exe")) return stream;
+      stream.destroy();
+      return hold;
+    };
+    fsHooks.onCreateWriteStream = (file, stream) => {
+      if (!file.endsWith("migrate.exe")) return;
+      resolveWriteOpened();
+      stream.once("close", () => {
+        writeClosed = true;
+      });
+    };
+    return {
+      hold,
+      writeOpened,
+      isWriteClosed: () => writeClosed,
+    };
+  };
+
+  // Tamper teamhub bytes keeping identical size so teamhub fails checksum while
+  // migrate's write stream is still open.
+  await writeFile(path.join(f.from, "teamhub.exe"), "TEAMHUB for windows");
+  const migrateBody = await readFile(path.join(f.from, "migrate.exe"));
+  const phase1 = holdMigrateStream();
+  let teamhubClosed!: () => void;
+  const waitTeamhubClosed = new Promise<void>((resolve) => {
+    teamhubClosed = resolve;
+  });
+  const rmOrder: string[] = [];
+  let copyStarted = false;
+  const baseWriteHook = fsHooks.onCreateWriteStream!;
+  fsHooks.onCreateWriteStream = (file, stream) => {
+    baseWriteHook(file, stream);
+    if (file.endsWith("teamhub.exe")) {
+      stream.once("close", () => teamhubClosed());
+    } else if (file.endsWith("migrate.exe")) {
+      copyStarted = true;
+      stream.once("close", () => rmOrder.push("migrate-closed"));
+    }
+  };
+  fsHooks.onRm = (targetPath) => {
+    if (copyStarted && targetPath === dir) rmOrder.push("rm-destination");
+  };
+
+  const pendingError = installTeamhubBinaries(f.from, f.repo, {
+    target,
+    sourceArchiveSha256,
+  }).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  await Promise.all([phase1.writeOpened, waitTeamhubClosed]);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(phase1.isWriteClosed()).toBe(false);
+  expect(rmOrder).toEqual([]);
+  phase1.hold.end(migrateBody);
+  const error = await pendingError;
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toContain("does not match");
+  expect(phase1.isWriteClosed()).toBe(true);
+  expect(rmOrder.indexOf("migrate-closed")).toBeGreaterThanOrEqual(0);
+  expect(rmOrder.indexOf("migrate-closed")).toBeLessThan(
+    rmOrder.indexOf("rm-destination"),
+  );
+  expect(existsSync(dir)).toBe(false);
+  expect(existsSync(stampFile)).toBe(false);
+
+  // Restore valid teamhub bytes and verify AbortSignal cancels open streams and removes destination + stamps.
+  await writeFile(path.join(f.from, "teamhub.exe"), "teamhub for windows");
+  await writeFile(stampFile, "stale");
+  const controller = new AbortController();
+  const phase2 = holdMigrateStream();
+  fsHooks.onRm = undefined;
+  const abortedError = installTeamhubBinaries(f.from, f.repo, {
+    target,
+    sourceArchiveSha256,
+    signal: controller.signal,
+  }).then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  await phase2.writeOpened;
+  controller.abort();
+  expect(await abortedError).toBeDefined();
+  expect(phase2.isWriteClosed()).toBe(true);
+  expect(existsSync(dir)).toBe(false);
+  expect(existsSync(stampFile)).toBe(false);
 });

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import {
-  copyFile,
+  chmod,
   mkdir,
   readFile,
   rename,
@@ -10,6 +10,16 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import {
+  readSettledStamps,
+  settledStampMatches,
+  sha256File,
+  writeSettledStamps,
+  type SettledStamp,
+  type SettledStamps,
+} from "./verified-stamps.js";
 
 // The TeamHub commands Native runs. A desktop build compiles them from the
 // source package it ships (apps/desktop/scripts/build-teamhub.mjs), so Native
@@ -87,10 +97,17 @@ export async function readTeamhubBinaries(
   return parseTeamhubBinaries(JSON.parse(text));
 }
 
-async function digest(file: string) {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(file)) hash.update(chunk);
-  return hash.digest("hex");
+export function teamhubBinaryStampsFile(directory: string): string {
+  return `${directory}.verified.json`;
+}
+
+async function removeBinaries(destination: string): Promise<void> {
+  await rm(destination, { recursive: true, force: true });
+  await rm(teamhubBinaryStampsFile(destination), { force: true });
+}
+
+function manifestDigest(manifest: TeamhubBinaries): string {
+  return createHash("sha256").update(JSON.stringify(manifest)).digest("hex");
 }
 
 // Throws unless every binary in `directory` has its manifest's size and sha256.
@@ -98,18 +115,75 @@ export async function verifyTeamhubBinaries(
   directory: string,
   manifest: TeamhubBinaries,
 ): Promise<void> {
-  for (const command of TEAMHUB_COMMANDS) {
-    const binary = manifest.binaries[command];
-    const file = path.join(directory, binary.file);
-    const size = await stat(file).then(
-      (info) => info.size,
-      () => -1,
+  const digest = manifestDigest(manifest);
+  const stampPath = teamhubBinaryStampsFile(directory);
+  const known = await readSettledStamps(stampPath, digest);
+  const nowMs = Date.now();
+  const nextStamps: SettledStamps = {};
+  let hashed = 0;
+  await Promise.all(
+    TEAMHUB_COMMANDS.map(async (command) => {
+      const binary = manifest.binaries[command];
+      const file = path.join(directory, binary.file);
+      const info = await stat(file).catch(() => undefined);
+      if (!info?.isFile() || info.size !== binary.bytes)
+        throw new Error(
+          `${binary.file} does not match its TeamHub binary manifest.`,
+        );
+      const seen = known?.[binary.file];
+      if (settledStampMatches(seen, info, nowMs)) {
+        nextStamps[binary.file] = seen!;
+        return;
+      }
+      hashed += 1;
+      if ((await sha256File(file)) !== binary.sha256)
+        throw new Error(
+          `${binary.file} does not match its TeamHub binary manifest.`,
+        );
+      nextStamps[binary.file] = [info.size, info.mtimeMs, info.ctimeMs];
+    }),
+  );
+  if (hashed > 0 || !known)
+    await writeSettledStamps(stampPath, digest, nextStamps);
+}
+
+async function copyVerifiedBinary(
+  source: string,
+  destination: string,
+  binary: TeamhubBinary,
+  signal?: AbortSignal,
+): Promise<SettledStamp> {
+  signal?.throwIfAborted();
+  const info = await stat(source).catch(() => undefined);
+  if (!info?.isFile() || info.size !== binary.bytes)
+    throw new Error(
+      `${binary.file} does not match its TeamHub binary manifest.`,
     );
-    if (size !== binary.bytes || (await digest(file)) !== binary.sha256)
-      throw new Error(
-        `${binary.file} does not match its TeamHub binary manifest.`,
-      );
-  }
+  const hash = createHash("sha256");
+  let written = 0;
+  const mode = info.mode & 0o777;
+  const sourceStream = createReadStream(source);
+  const hashStream = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      written += chunk.length;
+      hash.update(chunk);
+      callback(null, chunk);
+    },
+  });
+  const destinationStream = createWriteStream(destination, {
+    mode: mode || 0o755,
+  });
+  if (signal)
+    await pipeline(sourceStream, hashStream, destinationStream, { signal });
+  else await pipeline(sourceStream, hashStream, destinationStream);
+  signal?.throwIfAborted();
+  await chmod(destination, mode || 0o755);
+  if (written !== binary.bytes || hash.digest("hex") !== binary.sha256)
+    throw new Error(
+      `${binary.file} does not match its TeamHub binary manifest.`,
+    );
+  const copied = await stat(destination);
+  return [copied.size, copied.mtimeMs, copied.ctimeMs];
 }
 
 // Copies the binaries a desktop build ships in `from` into the checkout it
@@ -118,8 +192,13 @@ export async function verifyTeamhubBinaries(
 export async function installTeamhubBinaries(
   from: string,
   repo: string,
-  expected: { target: string; sourceArchiveSha256: string },
+  expected: {
+    target: string;
+    sourceArchiveSha256: string;
+    signal?: AbortSignal;
+  },
 ): Promise<"absent" | "current" | "installed"> {
+  expected.signal?.throwIfAborted();
   const manifest = await readTeamhubBinaries(from);
   if (!manifest) return "absent";
   if (manifest.target !== expected.target)
@@ -141,22 +220,46 @@ export async function installTeamhubBinaries(
       // the bundled copy before Native has to fall back to compiling it.
     }
   }
-  await rm(destination, { recursive: true, force: true });
+  expected.signal?.throwIfAborted();
+  await removeBinaries(destination);
   await mkdir(destination, { recursive: true });
   try {
-    for (const command of TEAMHUB_COMMANDS) {
-      const { file } = manifest.binaries[command];
-      await copyFile(path.join(from, file), path.join(destination, file));
+    const stamps: SettledStamps = {};
+    // Settle every stream before cleanup so sibling write handles close before rm runs.
+    const results = await Promise.allSettled(
+      TEAMHUB_COMMANDS.map(async (command) => {
+        const binary = manifest.binaries[command];
+        const stamp = await copyVerifiedBinary(
+          path.join(from, binary.file),
+          path.join(destination, binary.file),
+          binary,
+          expected.signal,
+        );
+        return [binary.file, stamp] as const;
+      }),
+    );
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed) throw failed.reason;
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        const [file, stamp] = result.value;
+        stamps[file] = stamp;
+      }
     }
-    await verifyTeamhubBinaries(destination, manifest);
+    expected.signal?.throwIfAborted();
     const temporary = path.join(
       destination,
       `${TEAMHUB_BINARY_MANIFEST}.${randomUUID()}.tmp`,
     );
     await writeFile(temporary, JSON.stringify(manifest, null, 2));
     await rename(temporary, path.join(destination, TEAMHUB_BINARY_MANIFEST));
+    await writeSettledStamps(
+      teamhubBinaryStampsFile(destination),
+      manifestDigest(manifest),
+      stamps,
+    );
   } catch (error) {
-    await rm(destination, { recursive: true, force: true });
+    await removeBinaries(destination);
     throw error;
   }
   return "installed";
@@ -176,7 +279,7 @@ export async function checkTeamhubBinaries(
     await verifyTeamhubBinaries(directory, manifest);
     return "verified";
   } catch {
-    await rm(directory, { recursive: true, force: true });
+    await removeBinaries(directory);
     return "removed";
   }
 }

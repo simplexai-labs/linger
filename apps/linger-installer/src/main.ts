@@ -150,43 +150,50 @@ const serveFailed = (error: unknown) => {
 async function resume(options: ReturnType<typeof parseInstallerArguments>) {
   // Headless restart for the desktop client: progress on stderr, the outcome
   // as one JSON line on stdout.
-  const { resumeSourceInstance } = await import("./server/resume.js");
+  const [{ resumeSourceInstance }, { withLocalmodelsToolCache }] =
+    await Promise.all([
+      import("./server/resume.js"),
+      import("@linger/local-installation/localmodels-tool"),
+    ]);
   const controller = new AbortController();
   process.once("SIGTERM", () => controller.abort());
   let runtimeDescriptors: RuntimeDescriptor[] | undefined;
-  const outcome = await resumeSourceInstance({
-    home: options.home,
-    sourceRepo: options.sourceRepo!,
-    instanceName: options.instanceName!,
-    externalComputer: options.externalComputer,
-    onRuntimeDescriptors: (descriptors) => {
-      runtimeDescriptors = descriptors;
-    },
-    signal: controller.signal,
-    log: (message) => process.stderr.write(message.replace(/\n?$/, "\n")),
-  }).catch((error: unknown) => ({
-    code: 1,
-    state: "failed",
-    message: error instanceof Error ? error.message : String(error),
-    details: undefined,
-  }));
-  // The desktop's own Computer takes the runtime and localmodels tool paths
-  // from every resume, so an install from before it knew one gains it.
-  // The desktop does not read resume stderr, so timings ride in the outcome.
   let runtimeLookupTimings: RuntimeLookupTimings | undefined;
-  const runtime =
-    outcome.code === 0 && options.externalComputer
-      ? await import("./server/instance-runtime.js")
-          .then(({ instanceRuntime }) =>
-            instanceRuntime(options.home, options.instanceName!, {
-              runtimeDescriptors,
-              onTimings: (timings) => {
-                runtimeLookupTimings = timings;
-              },
-            }),
-          )
-          .catch(() => undefined)
-      : undefined;
+  const { outcome, runtime } = await withLocalmodelsToolCache(async () => {
+    const resumeOutcome = await resumeSourceInstance({
+      home: options.home,
+      sourceRepo: options.sourceRepo!,
+      instanceName: options.instanceName!,
+      externalComputer: options.externalComputer,
+      onRuntimeDescriptors: (descriptors) => {
+        runtimeDescriptors = descriptors;
+      },
+      signal: controller.signal,
+      log: (message) => process.stderr.write(message.replace(/\n?$/, "\n")),
+    }).catch((error: unknown) => ({
+      code: 1,
+      state: "failed",
+      message: error instanceof Error ? error.message : String(error),
+      details: undefined,
+    }));
+    // The desktop's own Computer takes the runtime and localmodels tool paths
+    // from every resume, so an install from before it knew one gains it.
+    // The desktop does not read resume stderr, so timings ride in the outcome.
+    const instanceRuntimeResult =
+      resumeOutcome.code === 0 && options.externalComputer
+        ? await import("./server/instance-runtime.js")
+            .then(({ instanceRuntime }) =>
+              instanceRuntime(options.home, options.instanceName!, {
+                runtimeDescriptors,
+                onTimings: (timings) => {
+                  runtimeLookupTimings = timings;
+                },
+              }),
+            )
+            .catch(() => undefined)
+        : undefined;
+    return { outcome: resumeOutcome, runtime: instanceRuntimeResult };
+  });
   // Detached service processes may keep handles open; exit once flushed.
   process.stdout.write(
     `${JSON.stringify({

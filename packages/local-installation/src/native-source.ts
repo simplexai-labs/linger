@@ -58,6 +58,7 @@ import {
   readByokEnvironment,
   type ByokGatewayFailure,
 } from "./byok-source.js";
+import { withLocalmodelsToolCache } from "./localmodels-tool.js";
 import {
   readSetupChoice,
   writeGpuSharing,
@@ -294,6 +295,8 @@ async function startupFailure(instance: Instance, ends: Map<string, number>) {
   }
   return undefined;
 }
+const WAIT_HEALTHY_POLL_MS = [100, 200, 300, 500] as const;
+
 async function waitHealthy(
   instance: Instance,
   signal: AbortSignal,
@@ -302,6 +305,7 @@ async function waitHealthy(
 ) {
   const deadline = Date.now() + 20 * 60_000;
   let last = 0;
+  let pollAttempt = 0;
   const occupied = new Map<string, number>();
   for (;;) {
     signal.throwIfAborted();
@@ -326,8 +330,11 @@ async function waitHealthy(
     // A failed build exits the service, so its log explains the stop.
     const failure = await startupFailure(instance, ends);
     if (failure) throw new Error(failure);
-    for (const name of watchedServices)
-      if (!(await inspectNativeProcess(instance.root, name)).running) {
+    const processStates = await Promise.all(
+      watchedServices.map((name) => inspectNativeProcess(instance.root, name)),
+    );
+    for (const [index, name] of watchedServices.entries())
+      if (!processStates[index]!.running) {
         // With the service gone, whatever holds its port is another program.
         for (const [, owner, port] of probeEndpoints(instance.source!))
           if (owner === name && !(await portFree(port)))
@@ -354,7 +361,12 @@ async function waitHealthy(
         message: `Waiting for native compilation and readiness (${checks.filter((row) => row.ready).length}/4 ready).\n`,
       });
     }
-    await delay(500, undefined, { signal });
+    const interval =
+      WAIT_HEALTHY_POLL_MS[
+        Math.min(pollAttempt, WAIT_HEALTHY_POLL_MS.length - 1)
+      ]!;
+    pollAttempt += 1;
+    await delay(interval, undefined, { signal });
   }
 }
 // What each stage is doing, for a failure that brings no message of its own.
@@ -401,7 +413,9 @@ export async function installNativeSource(
   now?: () => number,
 ): Promise<InstallOutcome> {
   const timer = stageTimer(now);
-  const outcome = await runNativeSource(options, timer);
+  const outcome = await withLocalmodelsToolCache(() =>
+    runNativeSource(options, timer),
+  );
   const timings = timer.finish();
   options.onEvent({
     kind: "log",
@@ -1135,48 +1149,55 @@ async function runNativeSource(
             // window does not wait on a dead port until the next launch.
             restartOnExit: SERVICE_RESTART_POLICY,
           });
-          // Stop the Agent Service only when TeamHub is about to restart for a
-          // changed configuration, so its graceful shutdown can requeue
-          // in-flight Runs while TeamHub is still up. When TeamHub is not
-          // running or not changing, node-services is left alone so it can
-          // reconnect. It was running before this run, so it is never recorded
-          // as started: if a later step fails, its replacement stays up beside
-          // the new TeamHub; if TeamHub's own restart fails, node-services
-          // stays stopped until the next resume.
+          // Stop the Agent Service (and Web, if running) concurrently before
+          // TeamHub restarts for a changed configuration, so node-services can
+          // requeue in-flight Runs while TeamHub is still up. All three
+          // services then start concurrently via Promise.allSettled; pre-stopped
+          // node-services and web, like pre-existing teamhub, stay untracked in
+          // `started` so rollback does not stop previously running services.
+          // When TeamHub is not running or not changing, node-services is left
+          // alone so it can reconnect.
           const preStopped =
             (await nativeConfigurationChanged(serviceOptions("teamhub"))) &&
             (await inspectNativeProcess(current.root, "node-services")).running;
-          if (preStopped)
-            await stopNativeProcess(current.root, "node-services");
-          const serviceNames = ["teamhub", "node-services", "web"] as const;
+          let webWasRunning = false;
           if (preStopped) {
-            for (const name of serviceNames) {
-              const running = (await inspectNativeProcess(current.root, name))
-                .running;
-              if (!running && name !== "node-services") started.push(name);
-              await startNativeProcess(serviceOptions(name));
-            }
-          } else {
-            const states = await Promise.all(
-              serviceNames.map((name) =>
-                inspectNativeProcess(current.root, name),
-              ),
-            );
-            for (const [index, name] of serviceNames.entries()) {
-              if (!states[index]!.running) started.push(name);
-            }
-            // Settle every start before rollback so a supervisor still being
-            // spawned is recorded and can be stopped.
-            const results = await Promise.allSettled(
-              serviceNames.map((name) =>
-                startNativeProcess(serviceOptions(name)),
-              ),
-            );
-            const failed = results.find(
+            webWasRunning = (await inspectNativeProcess(current.root, "web"))
+              .running;
+            const stopResults = await Promise.allSettled([
+              stopNativeProcess(current.root, "node-services"),
+              ...(webWasRunning
+                ? [stopNativeProcess(current.root, "web")]
+                : []),
+            ]);
+            const stopFailed = stopResults.find(
               (result) => result.status === "rejected",
             );
-            if (failed) throw failed.reason;
+            if (stopFailed) throw stopFailed.reason;
           }
+          const serviceNames = ["teamhub", "node-services", "web"] as const;
+          const states = await Promise.all(
+            serviceNames.map((name) =>
+              inspectNativeProcess(current.root, name),
+            ),
+          );
+          for (const [index, name] of serviceNames.entries()) {
+            if (
+              !states[index]!.running &&
+              !(preStopped && name === "node-services") &&
+              !(webWasRunning && name === "web")
+            )
+              started.push(name);
+          }
+          // Settle every start before rollback so a supervisor still being
+          // spawned is recorded and can be stopped.
+          const results = await Promise.allSettled(
+            serviceNames.map((name) =>
+              startNativeProcess(serviceOptions(name)),
+            ),
+          );
+          const failed = results.find((result) => result.status === "rejected");
+          if (failed) throw failed.reason;
           return timed(
             "Waiting for native collaboration services",
             () => waitHealthy(current, signal, emit, ends),

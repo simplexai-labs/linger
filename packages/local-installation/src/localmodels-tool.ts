@@ -1,5 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { existsSync } from "node:fs";
 import { lstat, readdir, readFile, rm, chmod } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +22,7 @@ import {
 } from "./published-source.js";
 import type { InstallerEvent } from "./events.js";
 import { renameRetrying } from "./fs-retry.js";
+import { runBounded, sha256File } from "./verified-stamps.js";
 export type LocalmodelsToolSource = PublishedServiceSource & {
   sourceCommit: string;
   manifestSha256: string;
@@ -69,11 +71,6 @@ function safeRelative(name: string): boolean {
           /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(p),
       )
   );
-}
-async function digest(file: string) {
-  const h = createHash("sha256");
-  for await (const chunk of createReadStream(file)) h.update(chunk);
-  return h.digest("hex");
 }
 async function verifyDirectory(
   directory: string,
@@ -200,7 +197,7 @@ async function verify(
       const seen = known[name];
       if (!seen || seen[0] !== stamp[0] || seen[1] !== stamp[1]) {
         hashed += 1;
-        if ((await digest(file)) !== expected)
+        if ((await sha256File(file)) !== expected)
           throw new Error("Upstream tool payload checksum mismatch.");
       }
       stamps[name] = stamp;
@@ -282,12 +279,18 @@ async function unpack(archive: string, directory: string) {
  */
 async function setKitMode(directory: string, sealed: boolean) {
   if (process.platform === "win32") return;
+  if (!sealed) await chmod(directory, 0o700);
+  const subdirs: string[] = [];
+  const files: string[] = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const file = path.join(directory, entry.name);
-    if (entry.isDirectory()) await setKitMode(file, sealed);
-    else if (sealed && entry.isFile())
-      await chmod(file, (await lstat(file)).mode & 0o500);
+    if (entry.isDirectory()) subdirs.push(file);
+    else if (sealed && entry.isFile()) files.push(file);
   }
+  await runBounded(files, CONCURRENCY, async (file) => {
+    await chmod(file, (await lstat(file)).mode & 0o500);
+  });
+  for (const subdir of subdirs) await setKitMode(subdir, sealed);
   await chmod(directory, sealed ? 0o500 : 0o700);
 }
 /** The Windows read-only attribute prevents CPython from replacing a verified cache file. */
@@ -444,6 +447,19 @@ async function prepareLocalmodelsTool(
 }
 type ToolLocation = Awaited<ReturnType<typeof prepareLocalmodelsTool>>;
 const preparing = new Map<string, Promise<ToolLocation>>();
+const verifiedToolSession = new AsyncLocalStorage<Map<string, ToolLocation>>();
+
+/**
+ * Reuses already-verified localmodels tool locations across sequential calls in
+ * one installation or resume run so the kit's assets are not re-statted for
+ * each CLI invocation.
+ */
+export function withLocalmodelsToolCache<T>(run: () => Promise<T>): Promise<T> {
+  const existing = verifiedToolSession.getStore();
+  if (existing) return run();
+  return verifiedToolSession.run(new Map(), run);
+}
+
 function configuredDevTool(): ToolLocation | undefined {
   const python = process.env.LINGER_LOCALMODELS_DEV_PYTHON?.trim();
   const moduleDir = process.env.LINGER_LOCALMODELS_DEV_MODULE_DIR?.trim();
@@ -468,16 +484,22 @@ export async function ensureLocalmodelsTool(
   )
     return devTool;
   const key = `${path.resolve(home)}:${JSON.stringify(dependencies.source ?? pinnedToolSource())}`;
+  const sessionCache = verifiedToolSession.getStore();
+  const cached = sessionCache?.get(key);
+  if (cached && existsSync(cached.python)) return cached;
   const running = preparing.get(key);
   if (running) {
     const result = await running;
     options.signal?.throwIfAborted();
+    sessionCache?.set(key, result);
     return result;
   }
   const task = prepareLocalmodelsTool(home, options, dependencies);
   preparing.set(key, task);
   try {
-    return await task;
+    const result = await task;
+    sessionCache?.set(key, result);
+    return result;
   } finally {
     preparing.delete(key);
   }
@@ -1290,7 +1312,8 @@ export async function readPublishedTool(
   try {
     value = JSON.parse(await readFile(file, "utf8"));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return;
     throw error;
   }
   if (value.localmodelsTool === undefined) return;

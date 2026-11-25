@@ -293,9 +293,20 @@ Gateway and runs Agents. The daemon exits with the app.
   resumes on it, with the "Updating Linger" page instead of the older
   interface. Only when the installer reports the services serving from the
   new folder (`details.source`) and the origin answers does it record that
-  folder and prune the older one; otherwise the older services keep running
+  folder and schedule pruning the older one asynchronously after signaling
+  `resume_ready` so removing the previous checkout never delays opening the
+  window; otherwise the older services keep running
   from their folder, the record keeps naming it, and the start failure page's
-  Retry moves them again. A prune never removes a folder a running process
+  Retry moves them again. On macOS, bundled runtime copies clone via APFS when
+  available and probe for `com.apple.quarantine` before running recursive
+  `xattr -dr`. Before `UpdaterModule` announces an unpacked macOS bundle
+  `ready`, `prepareUpdateTool` best-effort pre-fetches that bundle's pinned
+  `localmodels` tool into the enrolled local installation's tool cache and
+  pre-stages the staged bundle's packed source checkout, TeamHub binaries, and
+  offline runtime directory (when present) into the enrolled home's versioned
+  source directory without mutating setup/resume progress or getting deleted by
+  background pruning (failures warn as `update.prepare_failed` without blocking
+  the app update). A prune never removes a folder a running process
   still starts from (`foldersInUse`; when processes cannot be listed, it
   removes nothing) and logs `local_server.source_in_use` instead. An app older than the recorded version
   (a downgrade) leaves the services on their newer source and logs

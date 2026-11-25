@@ -1323,16 +1323,54 @@ test("a stopped TeamHub never stops node-services up front", async () => {
   );
 });
 
-test("a running node-services stops before TeamHub restarts", async () => {
+test("a running node-services and web stop concurrently before TeamHub restarts and services start concurrently", async () => {
   const f = await fixture();
   for (const name of ["teamhub", "node-services", "web"]) f.running.add(name);
   vi.mocked(nativeConfigurationChanged).mockImplementation(
     async (options) => options.name === "teamhub",
   );
+  const preStopEntered = new Set<string>();
+  const preStopCompleted = new Set<string>();
+  let releasePreStops!: () => void;
+  const allPreStopping = new Promise<void>((resolve) => {
+    releasePreStops = resolve;
+  });
+  const baseStop = vi.mocked(stopNativeProcess).getMockImplementation()!;
+  vi.mocked(stopNativeProcess).mockImplementation(async (root, name) => {
+    if (name === "node-services" || name === "web") {
+      preStopEntered.add(name);
+      if (preStopEntered.size === 2) releasePreStops();
+      await allPreStopping;
+    }
+    const result = await baseStop(root, name);
+    preStopCompleted.add(name);
+    return result;
+  });
+  const baseStart = vi.mocked(startNativeProcess).getMockImplementation()!;
+  const entered = new Set<string>();
+  let releaseAll!: () => void;
+  const allEntered = new Promise<void>((resolve) => {
+    releaseAll = resolve;
+  });
+  vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    if (
+      options.name === "teamhub" ||
+      options.name === "node-services" ||
+      options.name === "web"
+    ) {
+      expect(preStopCompleted).toEqual(new Set(["node-services", "web"]));
+      entered.add(options.name);
+      if (entered.size === 3) releaseAll();
+      await allEntered;
+    }
+    return baseStart(options);
+  });
   await runFlow(f);
   expect(
-    vi.mocked(stopNativeProcess).mock.calls.map((call) => call[1]),
-  ).toEqual(["node-services"]);
+    new Set(vi.mocked(stopNativeProcess).mock.calls.map((call) => call[1])),
+  ).toEqual(new Set(["node-services", "web"]));
+  expect(preStopEntered).toEqual(new Set(["node-services", "web"]));
+  expect(entered).toEqual(new Set(["teamhub", "node-services", "web"]));
   const teamHubStart = vi
     .mocked(startNativeProcess)
     .mock.calls.findIndex(([options]) => options.name === "teamhub");
@@ -1340,22 +1378,64 @@ test("a running node-services stops before TeamHub restarts", async () => {
     vi.mocked(startNativeProcess).mock.invocationCallOrder[teamHubStart]!,
   );
   expect(f.running.has("node-services")).toBe(true);
+  expect(f.running.has("web")).toBe(true);
 });
 
-test("a failure after the restart keeps the node-services that ran before", async () => {
+test("a failure after pre-stopping running web keeps pre-existing web, node-services, and teamhub running without rollback stopping them", async () => {
+  const f = await fixture();
+  for (const name of ["postgres", "teamhub", "node-services", "web"])
+    f.running.add(name);
+  vi.mocked(nativeConfigurationChanged).mockImplementation(
+    async (options) => options.name === "teamhub",
+  );
+  vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    if (options.name === "teamhub") throw new Error("teamhub failed");
+    f.running.add(options.name);
+    return { running: true, pid: 100 };
+  });
+  const result = await runFlow(f);
+  expect(result.code).toBe(1);
+  // Only the pre-stop calls ran; rollback must not stop pre-existing web or node-services.
+  expect(
+    new Set(vi.mocked(stopNativeProcess).mock.calls.map((call) => call[1])),
+  ).toEqual(new Set(["node-services", "web"]));
+  expect(vi.mocked(stopNativeProcess)).toHaveBeenCalledTimes(2);
+  expect(f.running.has("node-services")).toBe(true);
+  expect(f.running.has("web")).toBe(true);
+});
+
+test("a failure after the restart settles concurrent starts and keeps the node-services and TeamHub that ran before", async () => {
   const f = await fixture();
   for (const name of ["postgres", "teamhub", "node-services"])
     f.running.add(name);
   vi.mocked(nativeConfigurationChanged).mockImplementation(
     async (options) => options.name === "teamhub",
   );
+  const entered = new Set<string>();
+  const settled = new Set<string>();
+  let releaseAll!: () => void;
+  const allEntered = new Promise<void>((resolve) => {
+    releaseAll = resolve;
+  });
   vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    if (
+      options.name === "teamhub" ||
+      options.name === "node-services" ||
+      options.name === "web"
+    ) {
+      entered.add(options.name);
+      if (entered.size === 3) releaseAll();
+      await allEntered;
+    }
     if (options.name === "web") throw new Error("web failed");
     f.running.add(options.name);
+    settled.add(options.name);
     return { running: true, pid: 100 };
   });
   const result = await runFlow(f);
   expect(result.code).toBe(1);
+  expect(entered).toEqual(new Set(["teamhub", "node-services", "web"]));
+  expect(settled).toEqual(new Set(["teamhub", "node-services"]));
   // The pre-stop hands in-flight Runs back; the rollback stops only what this
   // run started, never the node-services or TeamHub that were already running.
   expect(
@@ -1363,6 +1443,61 @@ test("a failure after the restart keeps the node-services that ran before", asyn
   ).toEqual(["node-services", "web"]);
   expect(f.running.has("teamhub")).toBe(true);
   expect(f.running.has("node-services")).toBe(true);
+});
+
+test("waitHealthy inspects watched services concurrently and reports stopped services in watchedServices priority order", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    f.running.add(options.name);
+    return { running: true, pid: 100 };
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("{}", { status: 503 })),
+  );
+  const baseInspect = vi.mocked(inspectNativeProcess).getMockImplementation()!;
+  let inHealthLoop = false;
+  const inspectedInLoop = new Set<string>();
+  let releaseInspect!: () => void;
+  const allInspected = new Promise<void>((resolve) => {
+    releaseInspect = resolve;
+  });
+  vi.mocked(inspectNativeListeners).mockImplementation(
+    async (_root, listeners) => {
+      inHealthLoop = true;
+      return listeners.map(() => ({ running: false }));
+    },
+  );
+  vi.mocked(inspectNativeProcess).mockImplementation(async (root, name) => {
+    if (
+      inHealthLoop &&
+      (name === "teamhub" || name === "node-services" || name === "web")
+    ) {
+      inspectedInLoop.add(name);
+      if (inspectedInLoop.size === 3) releaseInspect();
+      await allInspected;
+      return name === "node-services"
+        ? { running: true, pid: 100 }
+        : { running: false };
+    }
+    return baseInspect(root, name);
+  });
+  const result = await installNativeSource({
+    ...f,
+    name: "native-flow-wait-order",
+    setupChoice: "pi",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(result.code).toBe(1);
+  expect(inspectedInLoop).toEqual(new Set(["teamhub", "node-services", "web"]));
+  // Both teamhub and web reported stopped; teamhub comes first in watchedServices.
+  expect(result.message).toContain("Native teamhub stopped during startup.");
 });
 
 test("stops native business services even if owned gateway shutdown reports a failure", async () => {
