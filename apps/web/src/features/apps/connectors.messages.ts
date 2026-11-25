@@ -125,13 +125,7 @@ export const connectorMessages = defineMessages("connectors", {
   // API key guide and form. Read All and Write All are labels in Composio.
   getYourApiKey: "Get your API key",
   getAKey: "Get a key",
-  composioKeyNote: "Read-only keys can't connect apps.",
-  composioStepOpen: "Open Composio and sign in or create an account.",
-  composioStepCreate:
-    "Create a project API key and select <strong>Read All</strong> and <strong>Write All</strong> before creating it.",
-  composioStepPaste: "Copy the key, paste it below, and select Save key.",
-  composioStepReturn:
-    "Return to your app, select Connect, and complete authorization.",
+  composioKeyReminder: "Don't forget to select Read All and Write All.",
   composioApiKey: "Composio API key",
   checkingKey: "Checking key...",
   saveKey: "Save key",

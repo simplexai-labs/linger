@@ -66,15 +66,17 @@ describe("Connected apps", () => {
       await screen.findByRole("button", { name: "Connect Slack" }),
     );
     const dialog = await screen.findByRole("dialog", { name: "Connect Slack" });
-    expect(dialog).toHaveTextContent("Read All");
-    expect(dialog).toHaveTextContent("Write All");
-    expect(dialog).toHaveTextContent("Read-only keys can't connect apps.");
+    expect(dialog.querySelector(".app-dialog-description")).toBeNull();
+    expect(dialog.querySelector("ol")).toBeNull();
+    expect(dialog).toHaveTextContent("Get your API key");
     expect(dialog).toHaveTextContent(
-      "Copy the key, paste it below, and select Save key",
+      "Don't forget to select Read All and Write All.",
     );
-    expect(dialog).toHaveTextContent(
-      "select Connect, and complete authorization",
+    expect(dialog).not.toHaveTextContent("securely through Composio");
+    expect(dialog).not.toHaveTextContent(
+      "Permissions cannot be changed after a key is created",
     );
+    expect(dialog).not.toHaveTextContent("stored encrypted");
     expect(
       within(dialog).getByRole("link", { name: "Get a key" }),
     ).toHaveAttribute(
@@ -84,13 +86,25 @@ describe("Connected apps", () => {
     expect(createConnection).not.toHaveBeenCalled();
 
     listApps.mockRestore();
-    fireEvent.change(within(dialog).getByLabelText("Composio API key"), {
+    const keyInput = within(dialog).getByLabelText("Composio API key");
+    expect(keyInput).not.toHaveAttribute("aria-describedby");
+    fireEvent.change(keyInput, {
       target: { value: " ck_live " },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save key" }));
-    fireEvent.click(
-      await within(dialog).findByRole("button", { name: "Connect Slack" }),
-    );
+    const connectButton = await within(dialog).findByRole("button", {
+      name: "Connect Slack",
+    });
+    expect(dialog).not.toHaveClass("app-dialog-standard");
+    expect(dialog).toHaveAttribute("aria-label", "Connect Slack");
+    expect(
+      within(dialog).getByRole("heading", { level: 2, name: "Connect Slack" }),
+    ).toBeVisible();
+    expect(
+      within(dialog).getByRole("button", { name: "Close" }),
+    ).toHaveAttribute("data-voice-close");
+    expect(connectButton).toHaveFocus();
+    fireEvent.click(connectButton);
 
     expect(save).toHaveBeenCalledWith("ck_live");
     await waitFor(() => expect(createConnection).toHaveBeenCalledWith("slack"));
