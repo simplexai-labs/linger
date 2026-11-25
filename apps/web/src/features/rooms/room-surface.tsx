@@ -784,7 +784,6 @@ function RoomHeader({
   const isDirectRoom = room.kind === "direct";
   const headerPeer =
     room.direct_peer?.kind === "agent" ? room.direct_peer : undefined;
-  const headerName = room.name;
 
   return (
     <header
@@ -801,7 +800,7 @@ function RoomHeader({
             type="button"
             aria-expanded={panelOpen}
             aria-label={t(roomSurfaceMessages.openSettingsFromAvatar, {
-              name: headerName,
+              name: room.name,
             })}
             className="flex shrink-0 items-center justify-center rounded-full after:absolute after:inset-0 after:rounded-full after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-app-focus"
             onClick={() => {
@@ -815,7 +814,7 @@ function RoomHeader({
                 <ActorAvatar
                   actorId={headerPeer.id}
                   kind="agent"
-                  name={headerName}
+                  name={room.name}
                   size="xs"
                 />
                 {directAgent && directAgentAvailability ? (
@@ -836,7 +835,7 @@ function RoomHeader({
             aria-label={room.name}
             className="pointer-events-none min-w-0 truncate text-sm leading-[18px] font-medium text-foreground"
           >
-            {headerName}
+            {room.name}
           </h1>
         </div>
         {isDirectRoom && room.direct_peer_active === false ? (
