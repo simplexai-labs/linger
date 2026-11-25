@@ -62,6 +62,11 @@ const serviceFeatureModelGatewayUnavailable = "model_gateway_unavailable"
 // object, so the Daemon omits detail when absent.
 const serviceFeatureRuntimeFailureDetail = "runtime_failure_detail"
 
+// serviceFeatureOperationBackgroundWait in runner.welcome's service_features
+// says the Agent Service accepts run.background_waiting and
+// run.background_resumed Operation events.
+const serviceFeatureOperationBackgroundWait = "operation_background_wait"
+
 // LocalModelLibrary runs the actions a Computer owner chooses on this
 // Computer's localmodels library. The Daemon never picks a model: on its
 // own it loads only the downloaded model a Run's Agent already names, and it

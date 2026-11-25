@@ -11,6 +11,8 @@ import {
   type RunnerGateway,
   type RunnerGatewayConnection,
 } from "../../../src/agent/runner-gateway/runner-gateway.js";
+import { INTERACTIVE_STALL_MS } from "../../../src/agent/runner-gateway/model-queue.js";
+import { setAgentLogOptions } from "../../../src/agent/observability/agent-log.js";
 import { OPERATION_OUTCOME_UNKNOWN } from "../../../src/agent/runner-gateway/runner-operation.js";
 import { createTestRunnerGateway } from "../test-support/runner-gateway.js";
 import { readyContextScope } from "../test-support/ready-context-view.js";
@@ -3259,4 +3261,268 @@ describe("an input still in flight at the terminal", () => {
       connection.disconnect();
     },
   );
+
+  it("suspends and resumes the ModelQueue lease on run.background_waiting and run.background_resumed", async () => {
+    const gateway = createTestRunnerGateway({ createId: sequenceIds() });
+    const peer = new RecordingPeer();
+    const connection = await acceptReadyConnection(gateway, peer, {
+      ...hello([], null),
+      runtime_diagnostics: runtimeDiagnostics({ link: "api" }),
+    });
+    try {
+      const run1 = await gateway.startOperation({
+        ...runTarget(),
+        ...readyContextScope("first"),
+      });
+      const start1 = peer.sent.find(
+        (command) => command.type === "operation.start",
+      )!;
+      await connection.receive(
+        event(start1, 1, {
+          type: "operation.accepted",
+          command_id: start1.command_id,
+          runner_pid: 100,
+        }),
+      );
+      await connection.receive(
+        event(start1, 2, {
+          type: "operation.event",
+          event: {
+            type: "run.started",
+            turn_id: "turn-1",
+            session: { threadId: "thread-1" },
+          },
+        }),
+      );
+
+      const run2Promise = gateway.startOperation({
+        ...runTarget(),
+        ...readyContextScope("second"),
+      });
+      expect(await settlesWithin(run2Promise, 10)).toBe(false);
+
+      // Entering background wait frees the API endpoint slot so run2 starts immediately.
+      await connection.receive(
+        event(start1, 3, {
+          type: "operation.event",
+          event: {
+            type: "run.background_waiting",
+            observed_at_unix_ms: 1000,
+            tools: [
+              {
+                call_id: "call-1",
+                tool_name: "schedule",
+                started_at_unix_ms: 1000,
+              },
+            ],
+          },
+        }),
+      );
+      const run2 = await run2Promise;
+      const startsAfterRun2 = peer.sent.filter(
+        (command): command is OperationStart =>
+          command.type === "operation.start",
+      );
+      expect(startsAfterRun2).toHaveLength(2);
+      const start2 = startsAfterRun2[1]!;
+      await connection.receive(
+        event(start2, 1, {
+          type: "operation.accepted",
+          command_id: start2.command_id,
+          runner_pid: 101,
+        }),
+      );
+
+      const run3Promise = gateway.startOperation({
+        ...runTarget(),
+        ...readyContextScope("third"),
+      });
+      expect(await settlesWithin(run3Promise, 10)).toBe(false);
+
+      // Resuming run1 restores its active slot, so completing run2 alone still blocks run3.
+      await connection.receive(
+        event(start1, 4, {
+          type: "operation.event",
+          event: {
+            type: "run.background_resumed",
+            observed_at_unix_ms: 1100,
+            trigger: "user_input",
+          },
+        }),
+      );
+      await connection.receive(
+        event(start2, 2, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "done-2",
+            session: { thread_id: "thread-2" },
+          },
+        }),
+      );
+      await expect(run2.result).resolves.toMatchObject({ type: "run" });
+      expect(await settlesWithin(run3Promise, 10)).toBe(false);
+
+      await connection.receive(
+        event(start1, 5, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "done-1",
+            session: { thread_id: "thread-1" },
+          },
+        }),
+      );
+      await expect(run1.result).resolves.toMatchObject({ type: "run" });
+      const run3 = await run3Promise;
+      const start3 = peer.sent
+        .filter(
+          (command): command is OperationStart =>
+            command.type === "operation.start",
+        )
+        .at(-1)!;
+      await connection.receive(
+        event(start3, 1, {
+          type: "operation.accepted",
+          command_id: start3.command_id,
+          runner_pid: 102,
+        }),
+      );
+      await connection.receive(
+        event(start3, 2, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "done-3",
+            session: { thread_id: "thread-3" },
+          },
+        }),
+      );
+      await expect(run3.result).resolves.toMatchObject({ type: "run" });
+    } finally {
+      connection.disconnect();
+    }
+  });
+
+  it("includes phase waiting_background and background_tools in stalled holder diagnostics", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("AGENT_LOG_LEVEL", "info");
+    setAgentLogOptions({ format: "json" });
+    const output = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const gateway = createTestRunnerGateway({
+      heartbeatIntervalMs: 120_000,
+      createId: sequenceIds(),
+    });
+    const peer = new RecordingPeer();
+    const connection = await acceptReadyConnection(gateway, peer, {
+      ...hello([], 1),
+      runtime_diagnostics: runtimeDiagnostics({ link: "api" }),
+    });
+    try {
+      const run1 = await gateway.startOperation({
+        ...runTarget(),
+        ...readyContextScope("first"),
+        runKind: "chat",
+      });
+      const start1 = peer.sent.find(
+        (command) => command.type === "operation.start",
+      )!;
+      await connection.receive(
+        event(start1, 1, {
+          type: "operation.accepted",
+          command_id: start1.command_id,
+          runner_pid: 100,
+        }),
+      );
+      await connection.receive(
+        event(start1, 2, {
+          type: "operation.event",
+          event: {
+            type: "run.background_waiting",
+            observed_at_unix_ms: 1000,
+            tools: [
+              {
+                call_id: "call-bg-1",
+                tool_name: "schedule",
+                started_at_unix_ms: 1000,
+              },
+            ],
+          },
+        }),
+      );
+
+      const run2Promise = gateway.startOperation({
+        ...runTarget(),
+        ...readyContextScope("second"),
+        runKind: "chat",
+      });
+      void run2Promise.catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(INTERACTIVE_STALL_MS + 1);
+
+      const stalls = output.mock.calls
+        .map(([line]) => JSON.parse(String(line)))
+        .filter(
+          (entry) => entry.event === "runner.capacity.interactive_waiting",
+        );
+      expect(stalls).toHaveLength(1);
+      expect(stalls[0]).toMatchObject({
+        holders: [
+          expect.objectContaining({
+            operation_id: start1.operation_id,
+            phase: "waiting_background",
+            background_tools: [
+              {
+                call_id: "call-bg-1",
+                tool_name: "schedule",
+                started_at_unix_ms: 1000,
+              },
+            ],
+          }),
+        ],
+      });
+
+      await connection.receive(
+        event(start1, 3, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "done-1",
+            session: { thread_id: "thread-1" },
+          },
+        }),
+      );
+      await expect(run1.result).resolves.toMatchObject({ type: "run" });
+      const run2 = await run2Promise;
+      const start2 = peer.sent
+        .filter(
+          (command): command is OperationStart =>
+            command.type === "operation.start",
+        )
+        .at(-1)!;
+      await connection.receive(
+        event(start2, 1, {
+          type: "operation.accepted",
+          command_id: start2.command_id,
+          runner_pid: 101,
+        }),
+      );
+      await connection.receive(
+        event(start2, 2, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "done-2",
+            session: { thread_id: "thread-2" },
+          },
+        }),
+      );
+      await expect(run2.result).resolves.toMatchObject({ type: "run" });
+    } finally {
+      setAgentLogOptions();
+      vi.unstubAllEnvs();
+      output.mockRestore();
+      vi.useRealTimers();
+      connection.disconnect();
+    }
+  });
 });

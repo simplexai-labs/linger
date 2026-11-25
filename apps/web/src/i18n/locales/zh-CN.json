@@ -1647,6 +1647,7 @@
     "stateStopped": "已停止",
     "stateThinking": "思考中",
     "stateTyping": "正在输入",
+    "stateWaitingBackground": "等待后台任务",
     "stateWaitingForInput": "等待你的输入",
     "stateWorking": "工作中",
     "starting": "正在启动",

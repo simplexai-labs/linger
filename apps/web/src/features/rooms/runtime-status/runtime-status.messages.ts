@@ -14,6 +14,7 @@ export const runtimeStatusMessages = defineMessages("runtimeStatus", {
   stateStopped: "Stopped",
   stateThinking: "Thinking",
   stateTyping: "Typing",
+  stateWaitingBackground: "Waiting for background task",
   stateWaitingForInput: "Waiting for your input",
   stateWorking: "Working",
   starting: "Starting",

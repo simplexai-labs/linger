@@ -1788,6 +1788,106 @@ describe("RemoteCodexProvider session compaction", () => {
       undefined,
     );
   });
+
+  it("maps run.background_waiting and run.background_resumed to working status transitions", async () => {
+    const base = new ScriptedDispatcher();
+    const dispatcher: RunnerOperationDispatcher = {
+      startOperation: async (target) => {
+        const operation = await base.startOperation(target);
+        if (target.request.kind !== "run.start") return operation;
+        return {
+          ...operation,
+          events: iterate<WireRunEvent>([
+            {
+              type: "run.started",
+              turn_id: "turn-bg",
+              session: { threadId: "thread-bg" },
+            },
+            {
+              type: "run.background_waiting",
+              observed_at_unix_ms: 10,
+              tools: [
+                {
+                  call_id: "c1",
+                  tool_name: "schedule",
+                  started_at_unix_ms: 10,
+                },
+              ],
+            },
+            {
+              type: "run.background_waiting",
+              observed_at_unix_ms: 20,
+              tools: [
+                {
+                  call_id: "c2",
+                  tool_name: "run_command",
+                  started_at_unix_ms: 20,
+                },
+              ],
+            },
+            {
+              type: "run.background_waiting",
+              observed_at_unix_ms: 30,
+              tools: [
+                {
+                  call_id: "c3",
+                  tool_name: "mcp_custom",
+                  started_at_unix_ms: 30,
+                },
+              ],
+            },
+            {
+              type: "run.background_resumed",
+              observed_at_unix_ms: 40,
+              trigger: "user_input",
+            },
+            {
+              type: "message.delta",
+              message_id: "message-1",
+              delta: "Done",
+            },
+            { type: "run.completed" },
+          ]),
+        };
+      },
+    };
+    const provider = createProvider(dispatcher);
+    const session = await provider.createSession(sessionOptions());
+    const run = await provider.startRun(
+      session,
+      { type: "text", text: "wait on tools" },
+      runSpec,
+    );
+    const events: RunEvent[] = await collect(run.events);
+    await run.wait();
+    expect(events).toEqual([
+      {
+        type: "run.started",
+      },
+      {
+        type: "status.changed",
+        status: "waiting_background",
+      },
+      {
+        type: "status.changed",
+        status: "waiting_background",
+      },
+      {
+        type: "status.changed",
+        status: "waiting_background",
+      },
+      {
+        type: "status.changed",
+        status: "working",
+      },
+      {
+        type: "message.delta",
+        messageId: "message-1",
+        delta: "Done",
+      },
+      { type: "run.completed" },
+    ]);
+  });
 });
 
 const createProvider = (

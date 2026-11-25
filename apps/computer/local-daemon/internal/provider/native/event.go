@@ -18,9 +18,22 @@ const (
 	EventLog           EventKind = "log"
 	EventPlan          EventKind = "plan"
 	EventHumanPrompt   EventKind = "human-interaction"
+	// EventBackgroundWaiting reports that a Turn went idle on model output while
+	// one or more native background tools remain open.
+	EventBackgroundWaiting EventKind = "background-waiting"
+	// EventBackgroundResumed reports that a Turn resumed active model execution
+	// after waiting on background tools.
+	EventBackgroundResumed EventKind = "background-resumed"
 	// EventModelResponse is one completed model request; Response holds it.
 	EventModelResponse EventKind = "model-response"
 )
+
+// BackgroundTool describes one open background tool call held while a Turn waits.
+type BackgroundTool struct {
+	CallID    string
+	ToolName  string
+	StartedAt time.Time
+}
 
 // Event is one progress observation of a Run.
 type Event struct {
@@ -56,4 +69,8 @@ type Event struct {
 	ActivityTitle string
 	// Response is the completed model request of an EventModelResponse.
 	Response *ModelResponse
+	// BackgroundTools lists open background tools on EventBackgroundWaiting.
+	BackgroundTools []BackgroundTool
+	// BackgroundTrigger names what resumed execution on EventBackgroundResumed.
+	BackgroundTrigger string
 }

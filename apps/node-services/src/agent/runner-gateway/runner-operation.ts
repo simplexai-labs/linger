@@ -80,6 +80,14 @@ export interface RunnerOperationInput {
   readonly contextViewRef?: ContextViewRef;
 }
 
+export interface BackgroundWaitTool {
+  readonly callId: string;
+  readonly toolName: string;
+  readonly startedAtUnixMs: number;
+}
+
+export type RunnerOperationPhase = "running" | "waiting_background";
+
 export interface RunnerOperation {
   readonly operationId: string;
   readonly events: AsyncIterable<RunEvent>;
@@ -306,6 +314,8 @@ export class RunnerOperationState {
   #inputReceiptTimer: ReturnType<typeof setTimeout> | undefined;
   #inputReceipts: Deferred<void> | undefined;
   #turnId: string | undefined;
+  #phase: RunnerOperationPhase = "running";
+  #backgroundTools: readonly BackgroundWaitTool[] = [];
 
   // Called after the operation.start frame is written to the Computer peer.
   // Replays on reconnect are later writes of the same frame.
@@ -422,6 +432,16 @@ export class RunnerOperationState {
   /** The Runtime turn the Operation started, once the Daemon reports it. */
   get turnId(): string | undefined {
     return this.#turnId;
+  }
+
+  /** Whether the Run is actively executing or waiting on background tools. */
+  get phase(): RunnerOperationPhase {
+    return this.#phase;
+  }
+
+  /** Native background tools currently keeping the Run open while idle. */
+  get backgroundTools(): readonly BackgroundWaitTool[] {
+    return this.#backgroundTools;
   }
 
   /** The usage the Daemon reported with the terminal, when it reported one. */
@@ -978,6 +998,18 @@ export class RunnerOperationState {
             threadId.trim()
           )
             this.#yieldSessionId = threadId;
+        }
+        if (envelope.event.type === "run.background_waiting") {
+          this.#phase = "waiting_background";
+          this.#backgroundTools = envelope.event.tools.map((tool) => ({
+            callId: tool.call_id,
+            toolName: tool.tool_name,
+            startedAtUnixMs: tool.started_at_unix_ms,
+          }));
+        }
+        if (envelope.event.type === "run.background_resumed") {
+          this.#phase = "running";
+          this.#backgroundTools = [];
         }
         if (
           envelope.event.type === "tool.called" ||

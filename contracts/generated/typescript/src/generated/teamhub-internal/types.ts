@@ -2381,8 +2381,8 @@ export interface components {
        */
       type: "status.changed";
       /** @enum {string} */
-      status: "queued" | "working" | "thinking";
-      /** @description Optional public queue label for queued, or the full provider-visible reasoning summary title for thinking. Omit for working; raw reasoning is never allowed. */
+      status: "queued" | "working" | "thinking" | "waiting_background";
+      /** @description Optional public queue label for queued, or the full provider-visible reasoning summary title for thinking. Omit for working and waiting_background; raw reasoning is never allowed. */
       title?: string;
     };
     AgentRuntimePlanStep: {

@@ -1376,6 +1376,16 @@ const toRunEvent = (event: WireRunEvent): RunEvent | null => {
     case "file.updated":
     case "file.deleted":
       return { type: event.type, path: event.path };
+    case "run.background_waiting":
+      return {
+        type: "status.changed",
+        status: "waiting_background",
+      };
+    case "run.background_resumed":
+      return {
+        type: "status.changed",
+        status: "working",
+      };
     case "run.completed":
       return event;
     case "run.failed":

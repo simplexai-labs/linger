@@ -50,6 +50,7 @@ type acpProcess struct {
 	caps        acpCapabilities
 	shape       *antigravityShape
 	front       *mcpFront
+	hookEP      *AntigravityHookEndpoint
 	releaseTemp func() error
 	releaseOnce sync.Once
 	fixedHandle func(acpFrame)

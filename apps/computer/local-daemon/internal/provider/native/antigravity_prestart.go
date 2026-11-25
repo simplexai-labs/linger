@@ -27,7 +27,12 @@ func (r *antigravityRuntime) prestart(ctx context.Context, spec RunSpec, program
 	}
 	fence := captureReleaseFence(r.profile)
 	epoch := antigravityResidents.currentEpoch()
-	wantShape := antigravityShapeFor(program, r.profile, spec, "", false)
+	hookEP, hookArgs := antigravityHookConfig(r.profile.Logger)
+	hookDir := ""
+	if hookEP != nil {
+		hookDir = hookEP.Dir()
+	}
+	wantShape := antigravityShapeFor(program, r.profile, spec, hookDir, "", false)
 
 	live, fields := antigravityResidents.peek(key, antigravityMismatch(wantShape, spec))
 	if live && len(fields) == 0 {
@@ -51,7 +56,7 @@ func (r *antigravityRuntime) prestart(ctx context.Context, spec RunSpec, program
 			return nil, fmt.Errorf("Antigravity process temp directory could not be retained: %w", err)
 		}
 	}
-	proc, err := startACP(profileInvocation(program, nil, r.profile.Env), spec.Dir, r.profile.Logger, nil)
+	proc, err := startACP(profileInvocation(program, nil, r.profile.Env), spec.Dir, r.profile.Logger, nil, hookArgs...)
 	if err != nil {
 		if releaseTemp != nil {
 			_ = releaseTemp()
@@ -60,6 +65,7 @@ func (r *antigravityRuntime) prestart(ctx context.Context, spec RunSpec, program
 	}
 	proc.res.bind(key, r.profile)
 	proc.res.bindEpoch(epoch)
+	proc.hookEP = hookEP
 	proc.releaseTemp = releaseTemp
 	spec.Readiness.spawned()
 

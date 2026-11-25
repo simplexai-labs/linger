@@ -80,6 +80,8 @@ function setup(
       options.lease ?? {
         release: () => {},
         borrow: () => ({ release: () => {} }),
+        suspend: () => {},
+        resume: () => {},
       },
   );
   const placements = vi.fn(async () => options.placements ?? [alice, bob]);
@@ -663,6 +665,8 @@ describe("Model chains", () => {
   const lease = () => ({
     release: vi.fn(),
     borrow: () => ({ release: vi.fn() }),
+    suspend: () => {},
+    resume: () => {},
   });
 
   it("takes a new place for each call on the same Runtime", async () => {
