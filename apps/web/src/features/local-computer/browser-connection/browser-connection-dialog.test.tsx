@@ -33,14 +33,21 @@ type BrowserRoute = (
   body: unknown,
 ) => Promise<TeamHubBrowserConnectionStatus>;
 
-function setup(browser: BrowserRoute) {
+const mac = {
+  computer_id: "computer-mac",
+  display_name: "Alice's Mac",
+  status: "online",
+};
+
+function setup(browser: BrowserRoute, computers = [mac]) {
   const route = vi.fn(browser);
   const request = vi.fn(async (path: string, init: SentRequestInit) => {
     const match =
       /^\/v0\/tenants\/[^/]+\/local-computers\/([^/]+)\/browser-connection$/.exec(
         path,
       );
-    if (!match || match[1] !== "computer-mac") throw new Error(path);
+    if (!computers.some(({ computer_id }) => computer_id === match?.[1]))
+      throw new Error(path);
     return route(
       init.method ?? "GET",
       init.body ? JSON.parse(init.body as string) : undefined,
@@ -62,15 +69,7 @@ function setup(browser: BrowserRoute) {
     onAuthenticationRequired: vi.fn(),
   });
   const client = {
-    listTenantLocalComputers: vi.fn().mockResolvedValue({
-      items: [
-        {
-          computer_id: "computer-mac",
-          display_name: "Alice's Mac",
-          status: "online",
-        },
-      ],
-    }),
+    listTenantLocalComputers: vi.fn().mockResolvedValue({ items: computers }),
     api,
   };
   const queryClient = new QueryClient({
@@ -134,6 +133,32 @@ describe("BrowserConnectionDialog", () => {
     expect(cached).not.toContain(token);
     expect(JSON.stringify({ ...localStorage })).not.toContain(token);
     expect(JSON.stringify({ ...sessionStorage })).not.toContain(token);
+  });
+
+  it("offers a picker when there are several Computers and reads the chosen one", async () => {
+    const { request } = setup(
+      async () => isolated,
+      [
+        mac,
+        {
+          computer_id: "computer-pc",
+          display_name: "Alice's PC",
+          status: "online",
+        },
+      ],
+    );
+
+    const picker = await screen.findByRole("combobox", { name: "Computer" });
+    fireEvent.click(picker);
+    fireEvent.click(await screen.findByRole("option", { name: "Alice's PC" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("/local-computers/computer-pc/"),
+        expect.anything(),
+      ),
+    );
+    expect(picker).toHaveAttribute("value", "computer-pc");
   });
 
   it("disconnects a connected Chrome", async () => {
