@@ -214,10 +214,13 @@ skills:
         version: 1.0.0
         package_path: builtin/xlsx/1.0.0
   - skill_id: simplexai_personal_profile
-    bootstrap_manifest_id: skill_manifest_simplexai_personal_profile_1_0_6
+    bootstrap_manifest_id: skill_manifest_simplexai_personal_profile_1_0_7
     default_agent_types:
       - anotherme
     manifests:
+      - manifest_id: skill_manifest_simplexai_personal_profile_1_0_7
+        version: 1.0.7
+        package_path: builtin/personal-profile/1.0.7
       - manifest_id: skill_manifest_simplexai_personal_profile_1_0_6
         version: 1.0.6
         package_path: builtin/personal-profile/1.0.6

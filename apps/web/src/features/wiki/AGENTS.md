@@ -23,6 +23,7 @@
   with `features/memory`). Filter displayed graph nodes and edges only; never issue
   backend mutations for these decisions.
 
-- Profile timeline upper bounds such as `≤2020` display as `–2020`. Keep the
-  stored period and editor Markdown intact so the source's date certainty is
-  retained. Sorting uses the stored period.
+- Profile generation writes an upper bound with a leading dash (`–2020`),
+  like an end year. Profiles written earlier may still store `≤2020`; the
+  timeline displays it as `–2020` and keeps the stored period and editor
+  Markdown intact. Sorting uses the stored period.

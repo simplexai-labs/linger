@@ -39,7 +39,7 @@ const timelineEntry = z
       .min(1)
       .max(100)
       .describe(
-        "Years only, never months: 2009–2013 when both years are known, 2019 when only the start year is known, –2013 when only the end year is known, ≤2013 when a later year only proves the entry was over by then (never copy one year onto several entries), or Present for every ongoing role.",
+        "Years only, never months: 2009–2013 when both years are known, 2019 when only the start year is known, –2013 when only the end year is known or a later year only proves the entry was over by then (never copy one year onto several entries), or Present for every ongoing role.",
       ),
     organization: z
       .string()
