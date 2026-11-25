@@ -255,7 +255,8 @@ session closes; that close starts no new round and no backoff. A failed LAN
 dial changes nothing, and only one runs at a time. While a voice call holds a
 socket stream the session keeps its route. Requests cut off by the switch
 fail as a closed session: queries retry, the event stream resumes from its
-cursor, and the outbox resends with the same `Idempotency-Key`.
+cursor, the outbox resends with the same `Idempotency-Key`, and an
+attachment upload is sent once more with its own key.
 
 ## Voice
 

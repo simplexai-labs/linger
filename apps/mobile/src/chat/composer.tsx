@@ -25,7 +25,9 @@ import {
 } from "../api/teamhub";
 import type { MessageAttachmentUpload } from "../api/types";
 import { HttpError } from "../session/http";
+import { SessionClosed } from "../session/session";
 import {
+  NotConnected,
   useDirectAgent,
   useIdentity,
   useRoomMembers,
@@ -168,14 +170,23 @@ export function Composer(props: {
     setFiles((current) => [...current, { localId, name: asset.name }]);
     try {
       const bytes = await new File(asset.uri).bytes();
-      const upload = await teamHub.run((session) =>
-        uploadAttachment(
-          session,
-          props.roomId,
-          { name: asset.name, mediaType: asset.mimeType, bytes },
-          localId,
-        ),
-      );
+      const send = () =>
+        teamHub.run((session) =>
+          uploadAttachment(
+            session,
+            props.roomId,
+            { name: asset.name, mediaType: asset.mimeType, bytes },
+            localId,
+          ),
+        );
+      // A session can close under an upload, as when the phone moves from a
+      // Relay to the LAN; the same key lets the computer keep one copy.
+      const upload = await send().catch(async (error: unknown) => {
+        if (!(error instanceof SessionClosed || error instanceof NotConnected))
+          throw error;
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        return send();
+      });
       setFiles((current) =>
         current.map((file) =>
           file.localId === localId ? { ...file, upload } : file,

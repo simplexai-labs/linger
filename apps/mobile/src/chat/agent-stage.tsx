@@ -118,6 +118,32 @@ function TopBar(props: { readonly record?: boolean }) {
   );
 }
 
+/** A quiet round Stop for one Run, as a media control. */
+function StopButton(props: {
+  readonly roomId: string;
+  readonly runId: string;
+  readonly agentName: string;
+}) {
+  const { stopping, stop } = useStopRun(props.roomId);
+  const isStopping = stopping.has(props.runId);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Stop ${props.agentName}`}
+      disabled={isStopping}
+      hitSlop={10}
+      onPress={() => stop(props.runId)}
+      style={({ pressed }) => [
+        styles.stop,
+        pressed && styles.stopPressed,
+        isStopping && styles.stopDisabled,
+      ]}
+    >
+      <View style={styles.stopSquare} />
+    </Pressable>
+  );
+}
+
 /**
  * The Agent's current work and its Stop, the one place a direct chat shows
  * them. It fades in and out inside a slot of fixed height, so the stage and
@@ -129,7 +155,7 @@ function WorkLine(props: {
   readonly line: string;
   readonly agentName: string;
 }) {
-  const { stopping, stop } = useStopRun(props.roomId);
+  const { stopping } = useStopRun(props.roomId);
   const isStopping = stopping.has(props.runId);
   return (
     <Reanimated.View
@@ -149,20 +175,11 @@ function WorkLine(props: {
       >
         {isStopping ? "Stopping…" : props.line}
       </Text>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Stop ${props.agentName}`}
-        disabled={isStopping}
-        hitSlop={10}
-        onPress={() => stop(props.runId)}
-        style={({ pressed }) => [
-          styles.stop,
-          pressed && styles.stopPressed,
-          isStopping && styles.stopDisabled,
-        ]}
-      >
-        <View style={styles.stopSquare} />
-      </Pressable>
+      <StopButton
+        roomId={props.roomId}
+        runId={props.runId}
+        agentName={props.agentName}
+      />
     </Reanimated.View>
   );
 }
@@ -178,7 +195,7 @@ function FoldedStage(props: {
   readonly record?: boolean;
   readonly working?: { readonly runId: string; readonly line: string };
 }) {
-  const { stopping, stop } = useStopRun(props.roomId);
+  const { stopping } = useStopRun(props.roomId);
   const working = props.working;
   const isStopping = !!working && stopping.has(working.runId);
   return (
@@ -219,20 +236,11 @@ function FoldedStage(props: {
       </Pressable>
       <View style={[styles.foldedSide, styles.foldedTrailing]}>
         {working ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Stop ${props.agent.display_name}`}
-            disabled={isStopping}
-            hitSlop={10}
-            onPress={() => stop(working.runId)}
-            style={({ pressed }) => [
-              styles.stop,
-              pressed && styles.stopPressed,
-              isStopping && styles.stopDisabled,
-            ]}
-          >
-            <View style={styles.stopSquare} />
-          </Pressable>
+          <StopButton
+            roomId={props.roomId}
+            runId={working.runId}
+            agentName={props.agent.display_name}
+          />
         ) : props.record ? (
           <Pressable
             accessibilityRole="button"
