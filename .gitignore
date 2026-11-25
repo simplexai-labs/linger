@@ -18,7 +18,10 @@ test-results/
 .llm-wiki/
 .llm-wiki-external-sync/
 .worktrees/
-.claude/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/verify/
 .vscode/
 .pnpm-store/
 .cache/

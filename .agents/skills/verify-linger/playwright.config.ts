@@ -13,6 +13,16 @@ const evidence = process.env.VERIFY_LINGER_EVIDENCE;
 if (!evidence)
   throw new Error("Launch with scripts/verify.sh to allocate evidence");
 
+const specOverride = process.env.VERIFY_SPEC?.trim() || undefined;
+if (
+  specOverride &&
+  (specOverride.startsWith("/") || specOverride.includes(".."))
+) {
+  throw new Error(
+    `VERIFY_SPEC must name a spec under apps/web/e2e, got ${specOverride}`,
+  );
+}
+const specMatch = specOverride?.replace(/^apps\/web\/e2e\//, "");
 const roomStartupProof = process.env.VERIFY_ROOM_STARTUP === "1";
 const productionStartupProof =
   process.env.VERIFY_ROOM_STARTUP_PRODUCTION === "1";
@@ -57,21 +67,23 @@ export default defineConfig({
     : base.webServer,
   testDir: fileURLToPath(
     new URL(
-      roomStartupProof || productionStartupProof
+      specMatch || roomStartupProof || productionStartupProof
         ? "../../../apps/web/e2e"
         : ".",
       import.meta.url,
     ),
   ),
-  testMatch: roomStartupProof
-    ? "room-startup.spec.ts"
-    : productionStartupProof
-      ? "room-startup-production.spec.ts"
-      : connectorProof
-        ? "connector-cli.spec.ts"
-        : appsProof
-          ? "apps.spec.ts"
-          : "document.spec.ts",
+  testMatch:
+    specMatch ??
+    (roomStartupProof
+      ? "room-startup.spec.ts"
+      : productionStartupProof
+        ? "room-startup-production.spec.ts"
+        : connectorProof
+          ? "connector-cli.spec.ts"
+          : appsProof
+            ? "apps.spec.ts"
+            : "document.spec.ts"),
   timeout: 120_000,
   workers: 1,
   retries: 0,
