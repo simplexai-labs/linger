@@ -803,6 +803,7 @@ describe("EditAgentRuntimeDialog", () => {
       models: [
         {
           model: {
+            availability: { downloadable: true },
             id: "qwen3-coder-30b:Q4_K_M",
             name: "Qwen3 Coder 30B",
             pi_model: "localmodels-library/qwen3-coder-30b",
@@ -830,7 +831,7 @@ describe("EditAgentRuntimeDialog", () => {
     expect(await screen.findByText("Pi needs a model")).toBeVisible();
     expect(
       screen.getByText(
-        "No local model is downloaded on Studio Mac yet, and no cloud API provider is configured for Pi.",
+        "No local model is downloaded on Studio Mac yet, and Pi has no ready model source.",
       ),
     ).toBeVisible();
     const links = screen.getAllByRole("link", { name: "Settings › Models" });
@@ -902,7 +903,7 @@ describe("EditAgentRuntimeDialog", () => {
     expect(await screen.findByText("Downloading local model")).toBeVisible();
     expect(
       screen.getByText(
-        "Qwen3 Coder 30B is downloading on Studio Mac (42%). Pi turns ready here on its own once the download finishes.",
+        "Qwen3 Coder 30B is downloading on Studio Mac (42%). Once it finishes, Pi can use it when Local model is selected as the model source.",
       ),
     ).toBeVisible();
     expect(screen.queryByText("Pi sign-in required")).not.toBeInTheDocument();

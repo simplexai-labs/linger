@@ -2,7 +2,11 @@ import type { ReactNode } from "react";
 
 import { Spinner } from "@/components/ui/spinner";
 import type { LocalModelsView } from "@/features/local-models/local-models-queries";
-import { downloadStopped } from "@/features/local-models/local-models-rules";
+import {
+  downloadStopped,
+  isModelOnComputer,
+  modelStatus,
+} from "@/features/local-models/local-models-rules";
 import { agentRuntimeMessages } from "@/features/rooms/members/agent-runtime.messages";
 import type { Message } from "@/i18n/messages";
 import { RichMessage, useT } from "@/i18n/use-translation";
@@ -63,11 +67,8 @@ export function classifyPiLocalModelsState(
     return { kind: "loading", modelName: loading.model.name };
   }
 
-  const hasInstalled = view.models.some(
-    (entry) =>
-      entry.model.state === "loaded" ||
-      entry.model.state === "idle" ||
-      (entry.model.state === "failed" && !downloadStopped(entry.model)),
+  const hasInstalled = view.models.some((entry) =>
+    isModelOnComputer(entry.model, modelStatus(entry.model)),
   );
   if (hasInstalled) {
     return { kind: "models_installed" };

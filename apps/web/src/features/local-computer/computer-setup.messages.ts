@@ -79,18 +79,18 @@ export const computerSetupMessages = defineMessages("computerSetup", {
   piCheckingSetup: "Checking Pi model setup on {computer}…",
   piNeedsModelTitle: "Pi needs a model",
   piNeedsModelBody:
-    "No local model is downloaded on {computer} yet, and no cloud API provider is configured for Pi.",
+    "No local model is downloaded on {computer} yet, and Pi has no ready model source.",
   piNeedsModelAction:
-    "Download a local model or add a BYOK API key in <link>Settings › Models</link>. Pi turns ready here on its own once a model is available.",
+    "Download a local model or configure a Pi model source in <link>Settings › Models</link>.",
   piDownloadingTitle: "Downloading local model",
   piDownloadingBody:
-    "{model} is downloading on {computer}. Pi turns ready here on its own once the download finishes.",
+    "{model} is downloading on {computer}. Once it finishes, Pi can use it when Local model is selected as the model source.",
   piDownloadingBodyWithPercent:
-    "{model} is downloading on {computer} ({percent}%). Pi turns ready here on its own once the download finishes.",
+    "{model} is downloading on {computer} ({percent}%). Once it finishes, Pi can use it when Local model is selected as the model source.",
   piDownloadingAction: "View progress in <link>Settings › Models</link>.",
   piLoadingTitle: "Loading local model",
   piLoadingBody:
-    "{model} is loading on {computer}. Pi turns ready here on its own once it finishes loading.",
+    "{model} is loading on {computer}. Once it finishes, Pi can use it when Local model is selected as the model source.",
   piLoadingAction: "View status in <link>Settings › Models</link>.",
   piDownloadStoppedTitle: "Local model download stopped",
   piDownloadStoppedBody:

@@ -107,8 +107,6 @@ export function EditAgentRuntimeDialog({
       selection.computerId &&
       (selection.runtimeType === "pi" || piAuthRequiredOnComputer),
     ),
-    refetchInterval:
-      selection.runtimeType === "pi" && !localReady ? 5_000 : false,
   });
   const piModelsState = classifyPiLocalModelsState(localModels.data);
   const unavailableModelLabel =

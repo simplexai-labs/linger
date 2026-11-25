@@ -189,12 +189,6 @@ export function QuickCreateLocalAgentDialog({
       selectedRuntime?.type === "pi" &&
       selectedRuntime.status === "authentication_required",
     ),
-    refetchInterval:
-      !setupOpen &&
-      selectedRuntime?.type === "pi" &&
-      selectedRuntime.status === "authentication_required"
-        ? 5_000
-        : false,
   });
   const piModelsState = classifyPiLocalModelsState(localModels.data);
 
