@@ -115,3 +115,42 @@ describe("TaskTracker", () => {
     expect(tracker.apply([], [alert]).updates).toEqual([]);
   });
 });
+
+describe("Room reports", () => {
+  it("keeps two Rooms separate and emits each report once", () => {
+    const tracker = new TaskTracker();
+    const first = {
+      message_id: "message_one",
+      state: "waiting_for_user" as const,
+      handoff_id: "handoff_one",
+      room_id: "room_one",
+      room_name: "Travel",
+      text: "What is the budget?",
+    };
+    const second = {
+      ...first,
+      message_id: "message_two",
+      handoff_id: "handoff_two",
+      room_id: "room_two",
+      room_name: "Finance",
+    };
+    const received = tracker.apply([], [], [first, second]);
+    expect(received.updates).toMatchObject([
+      { kind: "room", roomReport: first },
+      { kind: "room", roomReport: second },
+    ]);
+    expect(received.notes).toEqual(received.updates);
+    expect(tracker.apply([], [], [first, second])).toEqual({
+      notes: [],
+      updates: [],
+    });
+    const followup = {
+      ...first,
+      message_id: "message_three",
+      text: "Booked within budget.",
+    };
+    expect(tracker.apply([], [], [followup]).updates).toMatchObject([
+      { roomReport: followup },
+    ]);
+  });
+});

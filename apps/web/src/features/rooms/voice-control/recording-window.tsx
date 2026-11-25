@@ -62,12 +62,11 @@ const pageTop = 36;
 
 /**
  * The one place a recording is watched and controlled from, whatever page is
- * behind it. Where the browser or the desktop app supports it the window
- * floats over other tabs and apps; otherwise it floats over the page, where
+ * behind it. In the desktop app the window floats over other apps;
+ * in a browser it stays in the page, where
  * its edges and corners resize it. Minimizing it leaves only its top row and
  * keeps recording; Stop, or closing the open floating window, ends the
- * recording. The floating window's return button, like the browser's back to
- * tab button, keeps recording in the page window.
+ * recording. The desktop window's return button keeps recording in the page.
  */
 export default function RecordingWindow() {
   const t = useT();
@@ -80,9 +79,8 @@ export default function RecordingWindow() {
   const [lastView, setLastView] = useState<RecordingView>("transcript");
   const view = windowState.minimized ? undefined : lastView;
 
-  // Hide the surface while distinguishing native close from back to tab,
-  // matching Voice Mode. Only back to tab, or the desktop app's return
-  // button, keeps recording in the page.
+  // Hide the surface while the desktop window closes. Only its explicit
+  // return button keeps recording in the page.
   const [floated, setFloated] = useState(false);
   const [backInPage, setBackInPage] = useState(false);
   if (pip && !floated) setFloated(true);
@@ -199,7 +197,7 @@ export default function RecordingWindow() {
         ? (expanded?.height ?? pip.outerHeight)
         : collapsedHeight;
       try {
-        // Restore both outer dimensions: a browser-clamped width must not
+        // Restore both outer dimensions: a desktop-clamped width must not
         // become the starting point for another relative shrink/expand cycle.
         pip.resizeTo(
           Math.min(width, pip.screen.availWidth || width),
@@ -252,9 +250,6 @@ export default function RecordingWindow() {
     window.addEventListener("pointerup", end);
   };
   if (!voice) return null;
-  // An open window the Human gave a height fills it; a minimized one is its
-  // top row.
-  const fill = Boolean(!pip && view && sized?.height);
   return createPortal(
     <div
       aria-label={t(m.window)}
@@ -270,7 +265,6 @@ export default function RecordingWindow() {
           ? undefined
           : moved
             ? {
-                height: fill ? sized?.height : undefined,
                 left: moved.left,
                 right: "auto",
                 top: moved.top,
@@ -283,10 +277,10 @@ export default function RecordingWindow() {
     >
       <RecordingPanel
         autoStart={windowState.autoStart}
-        fill={fill}
+        height={sized?.height}
         floating={pip ? "pip" : "page"}
         onFloat={
-          !pip && voicePipSupported("recording")
+          !pip && voicePipSupported()
             ? () => {
                 void openVoicePip("recording");
               }
@@ -402,7 +396,7 @@ export function pinchedPlacement(view: PinchZoom) {
 
 function RecordingPanel({
   autoStart,
-  fill,
+  height,
   floating,
   onFloat,
   onMoveStart,
@@ -411,7 +405,7 @@ function RecordingPanel({
   view,
 }: {
   autoStart: boolean;
-  fill: boolean;
+  height?: number;
   floating: "page" | "pip";
   onFloat?: () => void;
   onMoveStart: (event: PointerEvent<HTMLDivElement>) => void;
@@ -432,7 +426,7 @@ function RecordingPanel({
   return (
     <VoiceFocusSurface
       autoStart={autoStart}
-      fill={fill}
+      height={height}
       floating={floating}
       onFloat={onFloat}
       onMoveStart={onMoveStart}

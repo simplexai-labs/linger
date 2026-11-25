@@ -429,6 +429,12 @@ components:
       properties:
         invocation_id:
           $ref: "#/components/schemas/AgentInvocationId"
+        handoff_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        handoff_state:
+          type: string
+          enum: [working, waiting_for_user, completed]
+          description: State of the identified Room handoff after this report; requires handoff_id.
         messages:
           type: array
           description: Ordered private messages persisted atomically in the Direct Room.
@@ -453,6 +459,8 @@ components:
       properties:
         invocation_id:
           $ref: "#/components/schemas/AgentInvocationId"
+        handoff_id:
+          $ref: "./common.yaml#/components/schemas/Id"
         room_id:
           $ref: "./common.yaml#/components/schemas/Id"
         instruction:

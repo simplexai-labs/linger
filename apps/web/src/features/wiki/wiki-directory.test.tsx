@@ -287,7 +287,7 @@ describe("Wiki directory", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
-  it("sorts an upper-bound year as an end year in the timeline", async () => {
+  it("displays upper-bound periods with a dash and preserves their years", async () => {
     const entry = (period: string, organization: string) => ({
       period,
       organization,
@@ -306,6 +306,7 @@ describe("Wiki directory", () => {
             entry("2020", "Example Co"),
             entry("\u22642020", "Example Lab"),
             entry("\u20132018", "Example University"),
+            entry("Present", "Current Co"),
           ],
         },
       }),
@@ -321,8 +322,9 @@ describe("Wiki directory", () => {
     ].map((item) => item.textContent);
     expect(entries).toEqual([
       "\u20132018Example University",
-      "\u22642020Example Lab",
+      "\u20132020Example Lab",
       "2020Example Co",
+      "PresentCurrent Co",
     ]);
   });
   it("says the Profile is being written while an Agent builds it", async () => {

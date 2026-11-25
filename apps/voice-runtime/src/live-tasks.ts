@@ -1,4 +1,8 @@
-import type { VoiceLiveAlert, VoiceLiveTask } from "./live-client.js";
+import type {
+  VoiceLiveAlert,
+  VoiceLiveTask,
+  VoiceLiveRoomReport,
+} from "./live-client.js";
 
 export interface TaskUpdate {
   taskId: string;
@@ -8,7 +12,8 @@ export interface TaskUpdate {
    * result, or what it needs from the user); failed ends the work; approval
    * waits for a card in the chat.
    */
-  kind: "report" | "failed" | "approval" | "alert" | "browser";
+  kind: "report" | "failed" | "approval" | "alert" | "browser" | "room";
+  roomReport?: VoiceLiveRoomReport;
   /** What to tell, full text: the reports or the failure. */
   replies: string[];
 }
@@ -27,6 +32,7 @@ interface Tracked {
  */
 export class TaskTracker {
   private readonly tasks = new Map<string, Tracked>();
+  readonly #roomReports = new Set<string>();
   private readonly alerts = new Set<string>();
 
   /** Whether any task may still produce something to say. */
@@ -55,6 +61,7 @@ export class TaskTracker {
   apply(
     list: VoiceLiveTask[],
     alerts: VoiceLiveAlert[] = [],
+    roomReports: VoiceLiveRoomReport[] = [],
   ): { notes: TaskUpdate[]; updates: TaskUpdate[] } {
     const notes: TaskUpdate[] = [];
     const updates: TaskUpdate[] = [];
@@ -66,6 +73,19 @@ export class TaskTracker {
         goal: "",
         kind: "alert",
         replies: [alert.text],
+      };
+      notes.push(update);
+      updates.push(update);
+    }
+    for (const report of roomReports) {
+      if (this.#roomReports.has(report.message_id)) continue;
+      this.#roomReports.add(report.message_id);
+      const update: TaskUpdate = {
+        taskId: report.message_id,
+        goal: report.room_name,
+        kind: "room",
+        replies: [report.text],
+        roomReport: report,
       };
       notes.push(update);
       updates.push(update);

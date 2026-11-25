@@ -37,6 +37,8 @@ var (
 type Input struct {
 	InvocationID string
 	Messages     []string
+	HandoffID    string
+	HandoffState string
 }
 
 type Result struct {
@@ -144,6 +146,17 @@ func (s *Service) send(
 	}
 
 	requestHash := hashNormalizedMessages(normalizedMessages)
+	if input.HandoffID != "" {
+		encoded, err := json.Marshal(struct {
+			HandoffID string   `json:"handoff_id"`
+			State     string   `json:"state"`
+			Messages  []string `json:"messages"`
+		}{input.HandoffID, input.HandoffState, normalizedMessages})
+		if err != nil {
+			return Result{}, err
+		}
+		requestHash = sha256.Sum256(encoded)
+	}
 	idempotencyKey := agentauth.IdempotencyKey(idempotencyOperation, input.InvocationID)
 	if err := idempotency.Lock(ctx, tx, idempotency.AgentKey(authority.Agent.ID, idempotencyOperation, idempotencyKey)); err != nil {
 		return Result{}, err
@@ -187,6 +200,29 @@ func (s *Service) send(
 		roomID, roomCreated = direct.Room.ID, direct.Created
 	}
 
+	if input.HandoffID != "" {
+		if authorization.RoomID == "" || authorization.ParticipantTaskID != "" {
+			return Result{}, ErrForbidden
+		}
+		// A leave must not commit between the authorization read and the report.
+		if err := roomcreation.LockMemberships(ctx, queries, roomID, authorization.RoomID); err != nil {
+			return Result{}, err
+		}
+		handoff, err := queries.GetRoomHandoff(ctx, input.HandoffID)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && (handoff.TenantID != tenantID || handoff.AgentActorID != authority.Agent.ID || handoff.HumanActorID != authority.Sponsor.ID || handoff.RoomID != authorization.RoomID || handoff.OriginRoomID != roomID || authorization.ParticipantTaskID != "") {
+			return Result{}, ErrForbidden
+		}
+		if err != nil {
+			return Result{}, err
+		}
+		for _, actorID := range []string{authority.Agent.ID, authority.Sponsor.ID} {
+			if _, err := queries.GetRoomHandoffMember(ctx, store.GetRoomHandoffMemberParams{RoomID: handoff.RoomID, ActorID: actorID}); errors.Is(err, pgx.ErrNoRows) {
+				return Result{}, ErrForbidden
+			} else if err != nil {
+				return Result{}, err
+			}
+		}
+	}
 	messageIDs := make([]string, 0, len(contents))
 	for _, content := range contents {
 		created, err := s.createMessage(ctx, queries, messagecreation.Draft{
@@ -195,7 +231,24 @@ func (s *Service) send(
 		if err != nil {
 			return Result{}, err
 		}
+		if input.HandoffID != "" {
+			if err := queries.CreateRoomHandoffReport(ctx, store.CreateRoomHandoffReportParams{MessageID: created.Message.ID, HandoffID: input.HandoffID}); err != nil {
+				return Result{}, err
+			}
+		}
 		messageIDs = append(messageIDs, created.Message.ID)
+	}
+	if input.HandoffID != "" {
+		state := input.HandoffState
+		if state == "" {
+			state = "working"
+		}
+		if err := queries.SetRoomHandoffState(ctx, store.SetRoomHandoffStateParams{ID: input.HandoffID, State: state}); err != nil {
+			return Result{}, err
+		}
+		if err := queries.NotifyVoiceLiveRoomAlert(ctx, store.NotifyVoiceLiveRoomAlertParams{RoomID: roomID, WakeID: input.HandoffID}); err != nil {
+			return Result{}, err
+		}
 	}
 	stored := persistedResult{
 		Accepted: true, InboxID: "room:" + roomID, MessageIDs: messageIDs,
@@ -272,6 +325,10 @@ func resolveAuthorityForShare(ctx context.Context, tx pgx.Tx, identity agentauth
 }
 
 func normalizeInput(input Input) ([]messagecreation.Content, []string, error) {
+	if input.HandoffID == "" && input.HandoffState != "" || input.HandoffState != "" && input.HandoffState != "working" && input.HandoffState != "waiting_for_user" && input.HandoffState != "completed" {
+		return nil, nil, ErrInvalid
+	}
+
 	if !invocationPattern.MatchString(input.InvocationID) || len(input.Messages) < 1 || len(input.Messages) > maxMessages {
 		return nil, nil, ErrInvalid
 	}

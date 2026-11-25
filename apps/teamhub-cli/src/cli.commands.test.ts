@@ -825,3 +825,76 @@ describe("caller Context comes only from config.json", () => {
     expect(f.fetcher).not.toHaveBeenCalled();
   });
 });
+
+it("sends the Room handoff identity with a private report", async () => {
+  const f = fixture({ kind: "room", id: "room_group" });
+  f.fetcher.mockResolvedValue(
+    Response.json({
+      accepted: true,
+      duplicate_request: false,
+      inbox_id: "room:room_direct",
+      message_ids: ["message_report"],
+      room_created: false,
+    }),
+  );
+  expect(
+    await runCli(
+      [
+        "message",
+        "direct",
+        "--content",
+        "What is the budget?",
+        "--handoff",
+        "message_handoff",
+        "--handoff-state",
+        "waiting_for_user",
+        "--json",
+      ],
+      f.dependencies,
+    ),
+    f.stderr.join(""),
+  ).toBe(0);
+  expect(JSON.parse(f.fetcher.mock.calls[0]![1]!.body as string)).toMatchObject(
+    {
+      messages: ["What is the budget?"],
+      handoff_id: "message_handoff",
+      handoff_state: "waiting_for_user",
+    },
+  );
+});
+
+it("continues the same Room handoff with the Human's answer", async () => {
+  const f = fixture({ kind: "room", id: "room_direct" });
+  f.fetcher.mockResolvedValue(
+    Response.json({
+      accepted: true,
+      duplicate_request: false,
+      inbox_id: "room:room_group",
+      handoff_id: "message_handoff",
+    }),
+  );
+  expect(
+    await runCli(
+      [
+        "room",
+        "handoff",
+        "--inbox",
+        "room:room_group",
+        "--content",
+        "Budget is 1000.",
+        "--handoff",
+        "message_handoff",
+        "--json",
+      ],
+      f.dependencies,
+    ),
+    f.stderr.join(""),
+  ).toBe(0);
+  expect(JSON.parse(f.fetcher.mock.calls[0]![1]!.body as string)).toMatchObject(
+    {
+      room_id: "room_group",
+      instruction: "Budget is 1000.",
+      handoff_id: "message_handoff",
+    },
+  );
+});

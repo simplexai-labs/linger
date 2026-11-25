@@ -9,6 +9,108 @@ import (
 	"context"
 )
 
+const createRoomHandoff = `-- name: CreateRoomHandoff :exec
+INSERT INTO room_handoffs(id,tenant_id,origin_room_id,room_id,human_actor_id,agent_actor_id)
+VALUES($1::text,$2::text,$3::text,
+  $4::text,$5::text,$6::text)
+`
+
+type CreateRoomHandoffParams struct {
+	ID           string `json:"id"`
+	TenantID     string `json:"tenant_id"`
+	OriginRoomID string `json:"origin_room_id"`
+	RoomID       string `json:"room_id"`
+	HumanActorID string `json:"human_actor_id"`
+	AgentActorID string `json:"agent_actor_id"`
+}
+
+func (q *Queries) CreateRoomHandoff(ctx context.Context, arg CreateRoomHandoffParams) error {
+	_, err := q.db.Exec(ctx, createRoomHandoff,
+		arg.ID,
+		arg.TenantID,
+		arg.OriginRoomID,
+		arg.RoomID,
+		arg.HumanActorID,
+		arg.AgentActorID,
+	)
+	return err
+}
+
+const createRoomHandoffReport = `-- name: CreateRoomHandoffReport :exec
+INSERT INTO room_handoff_reports(message_id,handoff_id,voice_session_id)
+SELECT $1::text,handoff.id,(
+ SELECT voice.id FROM voice_sessions voice
+ WHERE voice.room_id=handoff.origin_room_id AND voice.created_by_actor_id=handoff.human_actor_id
+   AND voice.live_agent_actor_id=handoff.agent_actor_id AND voice.tenant_id=handoff.tenant_id
+   AND voice.purpose='chat_live' AND voice.status IN ('provisioning','connected','reconnecting')
+   AND voice.live_lease_until>clock_timestamp()
+ ORDER BY voice.created_at DESC,voice.id LIMIT 1
+)
+FROM room_handoffs handoff WHERE handoff.id=$2::text
+`
+
+type CreateRoomHandoffReportParams struct {
+	MessageID string `json:"message_id"`
+	HandoffID string `json:"handoff_id"`
+}
+
+func (q *Queries) CreateRoomHandoffReport(ctx context.Context, arg CreateRoomHandoffReportParams) error {
+	_, err := q.db.Exec(ctx, createRoomHandoffReport, arg.MessageID, arg.HandoffID)
+	return err
+}
+
+const getRoomHandoff = `-- name: GetRoomHandoff :one
+SELECT id, tenant_id, origin_room_id, room_id, human_actor_id, agent_actor_id, state, created_at FROM room_handoffs WHERE id=$1::text FOR UPDATE
+`
+
+func (q *Queries) GetRoomHandoff(ctx context.Context, id string) (RoomHandoff, error) {
+	row := q.db.QueryRow(ctx, getRoomHandoff, id)
+	var i RoomHandoff
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.OriginRoomID,
+		&i.RoomID,
+		&i.HumanActorID,
+		&i.AgentActorID,
+		&i.State,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getRoomHandoffMember = `-- name: GetRoomHandoffMember :one
+SELECT actor.id,actor.tenant_id,actor.kind,actor.display_name,actor.account_id,actor.handle,actor.created_at
+FROM active_room_members member
+JOIN actors actor ON actor.id=member.actor_id AND actor.tenant_id=member.tenant_id
+JOIN rooms room ON room.id=member.room_id AND room.deleted_at IS NULL AND room.deletion_started_at IS NULL
+LEFT JOIN room_member_states state ON state.room_id=member.room_id AND state.actor_id=member.actor_id
+  AND state.participation_epoch_id=member.membership_epoch_id
+WHERE member.room_id=$1::text AND member.actor_id=$2::text AND state.left_at IS NULL
+FOR KEY SHARE OF member
+`
+
+type GetRoomHandoffMemberParams struct {
+	RoomID  string `json:"room_id"`
+	ActorID string `json:"actor_id"`
+}
+
+// A departed member must rejoin before continuing a cross-Room request.
+func (q *Queries) GetRoomHandoffMember(ctx context.Context, arg GetRoomHandoffMemberParams) (Actor, error) {
+	row := q.db.QueryRow(ctx, getRoomHandoffMember, arg.RoomID, arg.ActorID)
+	var i Actor
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Kind,
+		&i.DisplayName,
+		&i.AccountID,
+		&i.Handle,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const isRunStartedByDirectChatHuman = `-- name: IsRunStartedByDirectChatHuman :one
 SELECT EXISTS (
   SELECT 1
@@ -64,4 +166,147 @@ func (q *Queries) IsRunStartedByDirectChatHuman(ctx context.Context, arg IsRunSt
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const listAgentMessageRoomHandoffs = `-- name: ListAgentMessageRoomHandoffs :many
+SELECT report.message_id,handoff.id AS handoff_id,handoff.room_id,room.name AS room_name,handoff.state
+FROM room_handoff_reports report
+JOIN room_handoffs handoff ON handoff.id=report.handoff_id
+JOIN rooms room ON room.id=handoff.room_id
+WHERE report.message_id=ANY($1::text[])
+  AND handoff.agent_actor_id=$2::text AND handoff.tenant_id=$3::text
+`
+
+type ListAgentMessageRoomHandoffsParams struct {
+	MessageIds []string `json:"message_ids"`
+	ActorID    string   `json:"actor_id"`
+	TenantID   string   `json:"tenant_id"`
+}
+
+type ListAgentMessageRoomHandoffsRow struct {
+	MessageID string `json:"message_id"`
+	HandoffID string `json:"handoff_id"`
+	RoomID    string `json:"room_id"`
+	RoomName  string `json:"room_name"`
+	State     string `json:"state"`
+}
+
+// Attach routing only to reports the history read already authorized.
+func (q *Queries) ListAgentMessageRoomHandoffs(ctx context.Context, arg ListAgentMessageRoomHandoffsParams) ([]ListAgentMessageRoomHandoffsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentMessageRoomHandoffs, arg.MessageIds, arg.ActorID, arg.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentMessageRoomHandoffsRow{}
+	for rows.Next() {
+		var i ListAgentMessageRoomHandoffsRow
+		if err := rows.Scan(
+			&i.MessageID,
+			&i.HandoffID,
+			&i.RoomID,
+			&i.RoomName,
+			&i.State,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVoiceLiveRoomReports = `-- name: ListVoiceLiveRoomReports :many
+SELECT report.message_id,handoff.id AS handoff_id,handoff.room_id,room.name AS room_name,
+  handoff.state,message.body
+FROM room_handoff_reports report
+JOIN room_handoffs handoff ON handoff.id=report.handoff_id
+JOIN messages message ON message.id=report.message_id
+JOIN rooms room ON room.id=handoff.room_id AND room.deletion_started_at IS NULL AND room.deleted_at IS NULL
+JOIN voice_sessions voice ON voice.id=$1::text AND report.voice_session_id=voice.id
+  AND voice.room_id=handoff.origin_room_id AND voice.created_by_actor_id=handoff.human_actor_id
+  AND voice.live_agent_actor_id=handoff.agent_actor_id AND voice.tenant_id=handoff.tenant_id
+JOIN active_room_members human ON human.room_id=room.id AND human.actor_id=handoff.human_actor_id
+JOIN active_room_members agent ON agent.room_id=room.id AND agent.actor_id=handoff.agent_actor_id
+WHERE report.told_at IS NULL
+AND NOT EXISTS (
+ SELECT 1 FROM room_member_states state WHERE state.room_id=room.id AND state.left_at IS NOT NULL
+ AND (state.actor_id=human.actor_id AND state.participation_epoch_id=human.membership_epoch_id
+   OR state.actor_id=agent.actor_id AND state.participation_epoch_id=agent.membership_epoch_id)
+)
+ORDER BY message.created_at,message.id LIMIT 50
+`
+
+type ListVoiceLiveRoomReportsRow struct {
+	MessageID string `json:"message_id"`
+	HandoffID string `json:"handoff_id"`
+	RoomID    string `json:"room_id"`
+	RoomName  string `json:"room_name"`
+	State     string `json:"state"`
+	Body      string `json:"body"`
+}
+
+// Private reports remain in the direct chat after the call ends. Only new,
+// untold reports for this Human's AnotherMe are spoken during this call.
+func (q *Queries) ListVoiceLiveRoomReports(ctx context.Context, voiceSessionID string) ([]ListVoiceLiveRoomReportsRow, error) {
+	rows, err := q.db.Query(ctx, listVoiceLiveRoomReports, voiceSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVoiceLiveRoomReportsRow{}
+	for rows.Next() {
+		var i ListVoiceLiveRoomReportsRow
+		if err := rows.Scan(
+			&i.MessageID,
+			&i.HandoffID,
+			&i.RoomID,
+			&i.RoomName,
+			&i.State,
+			&i.Body,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markVoiceLiveRoomReportsTold = `-- name: MarkVoiceLiveRoomReportsTold :exec
+UPDATE room_handoff_reports report SET told_at=clock_timestamp()
+FROM room_handoffs handoff,voice_sessions voice
+WHERE report.handoff_id=handoff.id
+  AND report.message_id=ANY($1::text[]) AND report.told_at IS NULL
+  AND voice.id=$2::text AND voice.room_id=handoff.origin_room_id
+  AND voice.created_by_actor_id=handoff.human_actor_id AND voice.live_agent_actor_id=handoff.agent_actor_id
+  AND voice.tenant_id=handoff.tenant_id AND report.voice_session_id=voice.id
+`
+
+type MarkVoiceLiveRoomReportsToldParams struct {
+	MessageIds     []string `json:"message_ids"`
+	VoiceSessionID string   `json:"voice_session_id"`
+}
+
+func (q *Queries) MarkVoiceLiveRoomReportsTold(ctx context.Context, arg MarkVoiceLiveRoomReportsToldParams) error {
+	_, err := q.db.Exec(ctx, markVoiceLiveRoomReportsTold, arg.MessageIds, arg.VoiceSessionID)
+	return err
+}
+
+const setRoomHandoffState = `-- name: SetRoomHandoffState :exec
+UPDATE room_handoffs SET state=$1::text WHERE id=$2::text
+`
+
+type SetRoomHandoffStateParams struct {
+	State string `json:"state"`
+	ID    string `json:"id"`
+}
+
+func (q *Queries) SetRoomHandoffState(ctx context.Context, arg SetRoomHandoffStateParams) error {
+	_, err := q.db.Exec(ctx, setRoomHandoffState, arg.State, arg.ID)
+	return err
 }

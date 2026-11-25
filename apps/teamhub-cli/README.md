@@ -116,3 +116,13 @@ teamhub web connect tavily
 Email canvases support Gmail, Outlook and Feishu Mail. New emails open in a
 canvas and the Human sends from its card; replies keep the mail reply command.
 `teamhub outlook canvas-draft` saves a canvas to Outlook without sending.
+
+Room collaboration can continue across text and Live voice. In an AnotherMe
+private chat, `teamhub room handoff --inbox room:<room-id> --content <request>`
+asks the same AnotherMe in a group Room to act there. Both the Human and
+AnotherMe must be current members. Continue a request with `--handoff <handoff-id>`.
+In the target Room, report a question or result with
+`teamhub message direct --handoff <handoff-id> --handoff-state waiting_for_user --content <question>`
+(or `working` for useful progress and `completed` for a result). The report is
+saved in the Human's private chat and is also available to an active Live call
+there. The server binds the report to that Human, Agent, and target Room.

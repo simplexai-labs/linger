@@ -3,6 +3,9 @@ import { teamHubIdSchema } from "../message-segments.js";
 
 export const roomHandoffInputSchema = z
   .object({
+    handoff_id: teamHubIdSchema
+      .optional()
+      .describe("Existing handoff to continue with the Human's answer."),
     room_id: teamHubIdSchema.describe(
       "Another Room where you and your Human are both members.",
     ),

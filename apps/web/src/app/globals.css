@@ -5590,16 +5590,10 @@ button.question-choice:focus-visible {
 }
 
 .voice-window-title {
-  background-color: #242527;
-  color: #f8f8f8;
-  font-size: 12px;
-  font-weight: 500;
-}
-/* A voice window inside the desktop app's page takes the window's own surface
-   for its bar instead of a browser-style dark frame. */
-:root[data-desktop-shell] .voice-window-title {
   background-color: var(--app-canvas);
   color: var(--app-ink);
+  font-size: 12px;
+  font-weight: 500;
   box-shadow: var(--town-shadow-outline);
   clip-path: inset(-1px -1px 0 -1px);
 }

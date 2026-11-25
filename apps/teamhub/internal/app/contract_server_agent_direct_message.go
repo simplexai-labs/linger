@@ -34,12 +34,19 @@ func (a *App) sendAgentDirectMessage(c *gin.Context) {
 		)
 		return
 	}
+	handoffID, handoffState := "", ""
+	if request.HandoffId != nil {
+		handoffID = *request.HandoffId
+	}
+	if request.HandoffState != nil {
+		handoffState = string(*request.HandoffState)
+	}
 	result, err := a.agentDirectMessages.Send(
 		c.Request.Context(),
 		token,
 		agentdirectmessage.Input{
-			InvocationID: request.InvocationId,
-			Messages:     append([]string(nil), request.Messages...),
+			InvocationID: request.InvocationId, HandoffID: handoffID, HandoffState: handoffState,
+			Messages: append([]string(nil), request.Messages...),
 		},
 	)
 	if a.writeAgentDirectMessageError(c, err) {

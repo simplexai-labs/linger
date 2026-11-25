@@ -391,8 +391,8 @@ func TestVoiceLiveCreateRoomRunsAsTheHumanAfterConfirmation(t *testing.T) {
 	if again := call("room-4", "lt_room", `{"name":"Room made by voice","members":["bob"],"confirmed":true}`); !strings.Contains(again, result.RoomID) || rooms() != 1 {
 		t.Fatalf("retried create=%s rooms=%d", again, rooms())
 	}
-	if countRows(t, env, `SELECT count(*) FROM active_room_members WHERE room_id=$1 AND actor_id IN ('actor_acme_alice','actor_acme_bob')`, result.RoomID) != 2 {
-		t.Fatal("creator and spoken member were not both admitted")
+	if countRows(t, env, `SELECT count(*) FROM active_room_members WHERE room_id=$1 AND actor_id IN ('actor_acme_alice','actor_acme_bob','actor_acme_official')`, result.RoomID) != 3 {
+		t.Fatal("creator, AnotherMe and spoken member were not all admitted")
 	}
 	call("room-5a", "lt_room_ask_again", `{"name":"Room made by voice"}`)
 	if output := call("room-5", "lt_room_again", `{"name":"Room made by voice","confirmed":true}`); !strings.Contains(output, "room_name_taken") || rooms() != 1 {

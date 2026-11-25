@@ -67,6 +67,7 @@ function removeFakeVoicePip() {
 
 afterEach(() => {
   removeFakeVoicePip();
+  Reflect.deleteProperty(window, "lingerDesktop");
   document.head.querySelectorAll("[data-test-style]").forEach((node) => {
     node.remove();
   });
@@ -88,8 +89,8 @@ describe("Voice Mode picture-in-picture window", () => {
     for (const bridge of [{}, { voiceWindow: {} }]) {
       desktop.lingerDesktop = bridge;
       try {
-        expect(voicePipSupported("voice-mode")).toBe(false);
-        expect(voicePipSupported("recording")).toBe(false);
+        expect(voicePipSupported()).toBe(false);
+        expect(voicePipSupported()).toBe(false);
         await expect(openVoicePip("voice-mode")).resolves.toBeUndefined();
         expect(fake.requestWindow).not.toHaveBeenCalled();
         expect(open).not.toHaveBeenCalled();
@@ -99,14 +100,15 @@ describe("Voice Mode picture-in-picture window", () => {
     }
   });
 
-  it("keeps Voice Mode in the page in a browser, floating only a recording", async () => {
+  it("keeps both Voice Mode and Meeting in the page even when browser picture-in-picture is available", async () => {
     // The browser's own title bar on that window cannot be hidden or styled.
     const fake = installFakeVoicePip();
-    expect(voicePipSupported("voice-mode")).toBe(false);
+    expect(voicePipSupported()).toBe(false);
     await expect(openVoicePip("voice-mode")).resolves.toBeUndefined();
     expect(fake.requestWindow).not.toHaveBeenCalled();
-    expect(voicePipSupported("recording")).toBe(true);
-    await expect(openVoicePip("recording")).resolves.toBe(fake.pipWindow);
+    expect(voicePipSupported()).toBe(false);
+    await expect(openVoicePip("recording")).resolves.toBeUndefined();
+    expect(fake.requestWindow).not.toHaveBeenCalled();
   });
 
   it("floats in the desktop app's own window where the app offers one", async () => {
@@ -114,7 +116,7 @@ describe("Voice Mode picture-in-picture window", () => {
     const fake = installFakeDesktopVoiceWindow();
     document.documentElement.setAttribute("data-desktop-shell", "");
     document.documentElement.setAttribute("data-desktop-chrome", "inset");
-    expect(voicePipSupported("voice-mode")).toBe(true);
+    expect(voicePipSupported()).toBe(true);
 
     await expect(openVoicePip("voice-mode")).resolves.toBe(fake.voiceWindow);
     expect(fake.open).toHaveBeenCalledOnce();
@@ -179,37 +181,6 @@ describe("Voice Mode picture-in-picture window", () => {
     }
   });
 
-  it("returns from the browser's window by the return button, bringing its tab to the front", async () => {
-    const fake = installFakeVoicePip();
-    const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
-    const closedByHuman = vi.fn();
-    const stop = onVoicePipClosedByHuman("recording", closedByHuman);
-    try {
-      await openVoicePip("recording");
-      returnVoicePipToPage("voice-mode");
-      expect(focus).not.toHaveBeenCalled();
-      returnVoicePipToPage("recording");
-      expect(focus).toHaveBeenCalledOnce();
-      expect(fake.pipWindow.close).toHaveBeenCalledOnce();
-      expect(closedByHuman).toHaveBeenCalledOnce();
-      // The button says it returned; nothing waits on the page's visibility.
-      vi.useFakeTimers();
-      await expect(returnedToOpener()).resolves.toBe(true);
-      vi.useRealTimers();
-
-      // The browser's own close button is still judged by whether the page
-      // came to the front.
-      await openVoicePip("recording");
-      fake.pipWindow.close();
-      await expect(returnedToOpener(20)).resolves.toBe(false);
-      expect(focus).toHaveBeenCalledOnce();
-    } finally {
-      vi.useRealTimers();
-      focus.mockRestore();
-      stop();
-    }
-  });
-
   it("returns the call to the page even if the main window cannot be shown", async () => {
     const fake = installFakeDesktopVoiceWindow();
     fake.showMain.mockRejectedValueOnce(new Error("no window"));
@@ -225,7 +196,7 @@ describe("Voice Mode picture-in-picture window", () => {
     early.textContent = ".early {}";
     document.head.append(early);
     document.documentElement.setAttribute("data-theme", "dark");
-    const fake = installFakeVoicePip();
+    const fake = installFakeDesktopVoiceWindow();
 
     await openVoicePip("recording");
     expect(fake.document.documentElement.dataset.theme).toBe("dark");
@@ -241,39 +212,20 @@ describe("Voice Mode picture-in-picture window", () => {
   });
 
   it("opens one window and tells a desktop close apart from the page closing it", async () => {
-    const fake = installFakeVoicePip();
+    const fake = installFakeDesktopVoiceWindow();
     const first = await openVoicePip("recording");
     await expect(openVoicePip("recording")).resolves.toBe(first);
-    expect(fake.requestWindow).toHaveBeenCalledOnce();
+    expect(fake.open).toHaveBeenCalledOnce();
     const closedByHuman = vi.fn();
     const stop = onVoicePipClosedByHuman("recording", closedByHuman);
     closeVoicePip("recording");
-    expect(fake.pipWindow.close).toHaveBeenCalledOnce();
+    expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
     expect(closedByHuman).not.toHaveBeenCalled();
 
     await openVoicePip("recording");
-    fake.pipWindow.close();
+    fake.voiceWindow.close();
     expect(closedByHuman).toHaveBeenCalledOnce();
     stop();
-  });
-
-  it("reads back to tab only from the page coming to the front", async () => {
-    installFakeVoicePip();
-    await openVoicePip("recording");
-    const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    try {
-      // Back to tab from a background tab brings the page to the front.
-      const returned = returnedToOpener(20);
-      document.dispatchEvent(new Event("visibilitychange"));
-      await expect(returned).resolves.toBe(true);
-      resetVoicePipForTest();
-      // The documented trade-off: a page that stayed visible, focused
-      // afterwards or not, reads as a close, so the close button always ends
-      // the call even where back to tab on an unfocused visible window does too.
-      await expect(returnedToOpener(20)).resolves.toBe(false);
-    } finally {
-      focused.mockRestore();
-    }
   });
 
   it("gives the window to one owner at a time", async () => {
