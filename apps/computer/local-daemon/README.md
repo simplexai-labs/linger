@@ -1035,7 +1035,13 @@ mouse events. Cua's background refusals, which recommend a foreground retry or
 background route instead. Cua 0.35.4 refuses a background scroll in a
 Chromium window, so the Agent reads such a page with a `get_window_state`
 query instead; elsewhere a list or pane scrolls by its own `element_token`
-through UI Automation. Windows Operations get `WindowsToolGuide`.
+through UI Automation. Before a `get_window_state` or an input names a
+minimized window by `window_id`, the Daemon restores that window without
+activating it and orders it right below the window in front, so the user's
+foreground window and keyboard focus stay unchanged and background input then
+reaches it. An input to a window the Daemon just restored is not sent: the
+element positions of the earlier read belonged to the minimized window, so the
+Agent reads the window again first. Windows Operations get `WindowsToolGuide`.
 
 Linux controls the signed-in user's X11 desktop. The driver `local_linux.py` is
 embedded in the Go binary; it reads windows through AT-SPI and sends input with

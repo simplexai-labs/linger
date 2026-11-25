@@ -109,3 +109,33 @@ func TestWindowsTargetWindowFromElementToken(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowsRestore(t *testing.T) {
+	restored := func(int64, int64) (bool, error) { return true, nil }
+	open := func(int64, int64) (bool, error) { return false, nil }
+	stuck := func(int64, int64) (bool, error) { return false, errors.New("window 9 stayed minimized") }
+	called := false
+	never := func(int64, int64) (bool, error) { called = true; return true, nil }
+
+	if err := windowsRestore("get_window_state", 42, 9, restored); err != nil {
+		t.Fatalf("restored read refused: %v", err)
+	}
+	if err := windowsRestore("click", 42, 9, open); err != nil {
+		t.Fatalf("input to an open window refused: %v", err)
+	}
+	if err := windowsRestore("click", 42, 9, restored); !errors.Is(err, errNotSent) || !strings.Contains(err.Error(), "get_window_state") {
+		t.Fatalf("input to a restored window = %v", err)
+	}
+	if err := windowsRestore("type_text", 42, 9, stuck); !errors.Is(err, errNotSent) {
+		t.Fatalf("input to a stuck window = %v", err)
+	}
+	if err := windowsRestore("get_window_state", 42, 9, stuck); err == nil || errors.Is(err, errNotSent) {
+		t.Fatalf("read of a stuck window = %v", err)
+	}
+	if err := windowsRestore("click", 42, 0, never); err != nil || called {
+		t.Fatalf("input without a window: err %v, restore called %v", err, called)
+	}
+	if err := windowsRestore("list_windows", 42, 9, never); err != nil || called {
+		t.Fatalf("list_windows: err %v, restore called %v", err, called)
+	}
+}

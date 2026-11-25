@@ -369,6 +369,10 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 		if err := windowsInputRefusal(name, arguments, func() bool { return c.chromiumTarget(arguments) }); err != nil {
 			return nil, err
 		}
+		pid, window := c.targetWindow(arguments)
+		if err := windowsRestore(name, pid, window, restoreMinimizedWindow); err != nil {
+			return nil, err
+		}
 	}
 	namedWindow := arguments["window_id"] != nil
 	if inputTools[name] && ctx.Value(cuaInternalInput{}) == nil {
