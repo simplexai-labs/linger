@@ -1969,7 +1969,7 @@ type LocalModelActionAck struct {
 // LocalModelActionAckOutcome defines model for LocalModelActionAck.Outcome.
 type LocalModelActionAckOutcome string
 
-// LocalModelActionCommand TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh; unload_first only with load.
+// LocalModelActionCommand TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh; unload_first only with load; no_autoload only with download.
 type LocalModelActionCommand struct {
 	// Action refresh asks the Computer to reread its library and send a snapshot; it names no model.
 	Action LocalModelActionKind `json:"action"`
@@ -1979,6 +1979,9 @@ type LocalModelActionCommand struct {
 
 	// ModelId Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
 	ModelId *LocalModelId `json:"model_id,omitempty"`
+
+	// NoAutoload Valid only when action is download; leaves the downloaded model idle without loading it.
+	NoAutoload *bool `json:"no_autoload,omitempty"`
 
 	// RequestId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	RequestId   Id              `json:"request_id"`

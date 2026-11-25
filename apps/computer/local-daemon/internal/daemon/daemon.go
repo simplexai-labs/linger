@@ -138,6 +138,9 @@ type Daemon struct {
 	// localModelsExternalHolders holds whether the current Agent Service
 	// declared serviceFeatureLocalModelsExternalHolders in its welcome.
 	localModelsExternalHolders atomic.Bool
+	// localModelsMemoryBreakdown holds whether the current Agent Service declared
+	// serviceFeatureLocalModelsMemoryBreakdown in its welcome.
+	localModelsMemoryBreakdown atomic.Bool
 	// modelInvokeOutcomes holds whether the current Agent Service declared
 	// serviceFeatureModelInvokeOutcomes in its welcome.
 	modelInvokeOutcomes atomic.Bool

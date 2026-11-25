@@ -1,6 +1,15 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import { createPortal } from "react-dom";
 import {
   Copy01Icon,
+  InformationCircleIcon,
   LinkSquare02Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -11,10 +20,12 @@ import { FormFeedback } from "@/components/ui/form-feedback";
 import { Icon } from "@/components/ui/icon";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { Select, SelectItem } from "@/components/ui/select";
+import { useAnchoredSelectPopup } from "@/components/ui/select-popup";
+import { relativeTime } from "@/features/local-computer/computer-relative-time";
 import type { TeamHubLocalComputerPage } from "@/features/teamhub/teamhub-types";
 import { commonMessages } from "@/i18n/common.messages";
 import type { Translate } from "@/i18n/language";
-import { useT } from "@/i18n/use-translation";
+import { useT, useTranslation } from "@/i18n/use-translation";
 import { cn } from "@/lib/cn";
 
 import {
@@ -36,6 +47,7 @@ import { localModelsMessages as m } from "./local-models.messages";
 import type { LocalModelPool, LocalModelsView } from "./local-models-queries";
 import {
   contextLabel,
+  downloadMemoryShortfall,
   downloadStopped,
   formatGigabytes,
   isModelOnComputer,
@@ -47,11 +59,13 @@ import {
   placeName,
   poolFreeBytes,
   poolLabel,
+  poolMemoryBreakdown,
   poolOf,
   poolOtherBytes,
   poolUnaccountedBytes,
   safeModelSourceUrl,
   speedLabel,
+  type MemoryBreakdown,
   type ModelEntry,
 } from "./local-models-rules";
 
@@ -139,6 +153,136 @@ function CopyEndpoint({ endpoint, name }: { endpoint: string; name: string }) {
         <Icon icon={copied ? Tick02Icon : Copy01Icon} size={14} />
       </Button>
     </span>
+  );
+}
+
+/** Hover/focus/click popover explaining how pool memory and macOS reclaimable space add up. */
+export function MemoryBreakdownPopover({
+  align = "left",
+  breakdown,
+  children,
+}: {
+  align?: "left" | "right";
+  breakdown?: MemoryBreakdown;
+  children: ReactNode;
+}) {
+  const [hoverOpen, setHoverOpen] = useState(false);
+  const [focusOpen, setFocusOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  const open = Boolean(breakdown) && (pinned || hoverOpen || focusOpen);
+
+  function close() {
+    setPinned(false);
+    setHoverOpen(false);
+    setFocusOpen(false);
+  }
+
+  if (!breakdown) return <>{children}</>;
+
+  return (
+    <span
+      className="inline-flex max-w-full items-center"
+      onMouseEnter={() => setHoverOpen(true)}
+      onMouseLeave={() => setHoverOpen(false)}
+    >
+      <button
+        aria-controls={open ? panelId : undefined}
+        aria-expanded={open}
+        className="inline-flex max-w-full items-center gap-1 rounded-sm text-left underline decoration-border-hover decoration-dotted underline-offset-4 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onBlur={() => setFocusOpen(false)}
+        onClick={() => {
+          if (pinned) close();
+          else setPinned(true);
+        }}
+        onFocus={() => setFocusOpen(true)}
+        ref={triggerRef}
+        type="button"
+      >
+        {children}
+        <Icon
+          aria-hidden
+          className="shrink-0 text-muted-foreground"
+          icon={InformationCircleIcon}
+          size={14}
+        />
+      </button>
+      {open ? (
+        <MemoryBreakdownPanel
+          align={align}
+          breakdown={breakdown}
+          id={panelId}
+          onClose={close}
+          triggerRef={triggerRef}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+function MemoryBreakdownPanel({
+  align,
+  breakdown,
+  id,
+  onClose,
+  triggerRef,
+}: {
+  align: "left" | "right";
+  breakdown: MemoryBreakdown;
+  id: string;
+  onClose: () => void;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+}) {
+  const { popupRef, portalRoot, style, supportsPopover } =
+    useAnchoredSelectPopup({
+      align,
+      fixedWidth: true,
+      layoutKey: breakdown.rows.length,
+      onClose,
+      resolveWidth: ({ viewportWidth }) => Math.min(288, viewportWidth - 16),
+      triggerRef,
+    });
+  return createPortal(
+    <div
+      aria-label={breakdown.title}
+      className="z-30 m-0 max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-xl border border-border bg-card p-3.5 text-left text-xs text-foreground shadow-lg"
+      id={id}
+      popover={supportsPopover ? "manual" : undefined}
+      ref={popupRef}
+      role="region"
+      style={style}
+    >
+      <p className="font-medium text-foreground">{breakdown.title}</p>
+      <dl className="mt-2 grid gap-1.5">
+        {breakdown.rows.map((item) => (
+          <div
+            className="flex items-center justify-between gap-3"
+            key={item.label}
+          >
+            <dt className="text-muted-foreground">{item.label}</dt>
+            <dd
+              className={cn(
+                "font-medium tabular-nums",
+                item.tone === "danger"
+                  ? "text-app-danger"
+                  : item.tone === "warning"
+                    ? "text-app-warning"
+                    : "text-foreground",
+              )}
+            >
+              {item.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {breakdown.note ? (
+        <p className="mt-2.5 border-t border-border/70 pt-2 leading-relaxed text-muted-foreground">
+          {breakdown.note}
+        </p>
+      ) : null}
+    </div>,
+    portalRoot,
   );
 }
 
@@ -249,11 +393,8 @@ export function ModelFacts({
   const speed = speedLabel(model, t);
   const sourceUrl = safeModelSourceUrl(model.source_url);
   const reclaimable = memoryReclaimable(view, model);
-  const availableNeedsRoom =
-    status === "available" &&
-    pool !== undefined &&
-    poolOtherBytes(pool) > 0 &&
-    poolFreeBytes(pool) < model.memory_bytes;
+  const lowMemory =
+    status === "available" ? downloadMemoryShortfall(view, model) : null;
   const computerId = view.computer.computer_id;
   const usedNames = usedByAgentNames(entry, assignableAgents, computerId);
   const idleUsedWarning =
@@ -387,12 +528,13 @@ export function ModelFacts({
           </FormFeedback>
         </div>
       ) : null}
-      {availableNeedsRoom ? (
+      {lowMemory ? (
         <div className="my-1.5">
           <FormFeedback tone="warning">
             {t(m.downloadNeedsRoom, {
-              free: formatGigabytes(poolFreeBytes(pool), t),
-              pool: poolLabel(view, pool, t),
+              free: formatGigabytes(lowMemory.freeBytes, t),
+              need: formatGigabytes(lowMemory.needBytes, t),
+              pool: poolLabel(view, lowMemory.pool, t),
             })}
           </FormFeedback>
         </div>
@@ -597,8 +739,15 @@ function PoolBar({
           />
         ) : null}
       </span>
-      <span className="w-24 shrink-0 text-right text-xs whitespace-nowrap tabular-nums text-muted-foreground">
-        {t(m.memoryFree, { free: formatGigabytes(poolFreeBytes(pool), t) })}
+      <span className="w-28 shrink-0 text-right text-xs whitespace-nowrap tabular-nums text-muted-foreground">
+        <MemoryBreakdownPopover
+          align="right"
+          breakdown={poolMemoryBreakdown(view, pool, t)}
+        >
+          <span>
+            {t(m.memoryFree, { free: formatGigabytes(poolFreeBytes(pool), t) })}
+          </span>
+        </MemoryBreakdownPopover>
       </span>
     </div>
   );
@@ -606,13 +755,20 @@ function PoolBar({
 
 /** Memory and hardware of one Computer, for people who want the numbers. */
 export function AdvancedDialog({
+  canRecheck = false,
   onClose,
+  onRecheck,
+  rechecking = false,
   view,
 }: {
+  canRecheck?: boolean;
   onClose: () => void;
+  onRecheck?: () => void;
+  rechecking?: boolean;
   view: LocalModelsView;
 }) {
-  const t = useT();
+  const translation = useTranslation();
+  const { t } = translation;
   const host = view.computer.host;
   type PoolHolder = LocalModelPool["holders"][number];
   const seenHolderIds = new Set<string>();
@@ -652,9 +808,28 @@ export function AdvancedDialog({
       <div className="space-y-5 px-5 py-4">
         {view.pools.length ? (
           <section>
-            <h3 className="mb-2 text-xs font-medium text-muted-foreground">
-              {t(m.factMemory)}
-            </h3>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                <h3 className="font-medium">{t(m.factMemory)}</h3>
+                {view.observed_at ? (
+                  <span>
+                    {t(m.checkedAt, {
+                      time: relativeTime(view.observed_at, translation),
+                    })}
+                  </span>
+                ) : null}
+              </div>
+              {canRecheck && onRecheck ? (
+                <Button
+                  loading={rechecking}
+                  onClick={onRecheck}
+                  size="compact"
+                  tone="ghost"
+                >
+                  {t(m.recheckMemory)}
+                </Button>
+              ) : null}
+            </div>
             <div className="divide-y divide-border rounded-xl border border-border bg-app-canvas/40 px-3.5">
               {view.pools.map((pool) => (
                 <PoolBar

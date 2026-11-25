@@ -213,6 +213,7 @@ export const runnerGatewayEnvelopeSchema = {
         "local_models_concurrency_probe",
         "local_model_unavailable",
         "local_models_external_holders",
+        "local_models_memory_breakdown",
       ],
     },
     Timestamp: {
@@ -2299,6 +2300,20 @@ export const runnerGatewayEnvelopeSchema = {
         ram_total_bytes: {
           $ref: "#/$defs/NonNegativeInteger",
         },
+        ram_available_bytes: {
+          description:
+            "Free plus reclaimable unified/system memory reported by the host probe.",
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        metal_working_set_bytes: {
+          description:
+            "Metal recommendedMaxWorkingSetSize on Apple Silicon Macs.",
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        memory_pressure: {
+          description: "macOS memory pressure level at snapshot time.",
+          $ref: "#/$defs/LocalModelMemoryPressure",
+        },
         disk_free_bytes: {
           $ref: "#/$defs/NonNegativeInteger",
         },
@@ -2310,6 +2325,10 @@ export const runnerGatewayEnvelopeSchema = {
           },
         },
       },
+    },
+    LocalModelMemoryPressure: {
+      type: "string",
+      enum: ["normal", "warn", "critical"],
     },
     LocalModelPoolHolder: {
       description:
@@ -2355,7 +2374,7 @@ export const runnerGatewayEnvelopeSchema = {
     },
     LocalModelPool: {
       description:
-        "One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them.",
+        "One place models load into. unified is RAM less OS/Metal reserves; system is 80% of RAM, as localmodels computes them.",
       type: "object",
       additionalProperties: false,
       required: ["id", "kind", "total_bytes", "used_bytes", "holders"],
@@ -2375,6 +2394,11 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/NonNegativeInteger",
         },
         used_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        reserve_bytes: {
+          description:
+            "Memory kept back for the OS, display, or Metal safety margin.",
           $ref: "#/$defs/NonNegativeInteger",
         },
         holders: {
@@ -2807,6 +2831,21 @@ export const runnerGatewayEnvelopeSchema = {
             "Additional host system RAM used alongside GPU VRAM for hybrid offload engines. Sent only when runner.welcome service_features names local_models_engine.",
           $ref: "#/$defs/NonNegativeInteger",
         },
+        fits_now: {
+          description:
+            "Whether the model currently fits its pool in live free memory.",
+          type: "boolean",
+        },
+        load_need_bytes: {
+          description:
+            "Pool-aligned free memory needed to load when fits_now is false.",
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        load_free_bytes: {
+          description:
+            "Pool-aligned free memory on the planned pool when fits_now is false.",
+          $ref: "#/$defs/NonNegativeInteger",
+        },
       },
     },
     LocalModelsUnavailableReason: {
@@ -2873,7 +2912,7 @@ export const runnerGatewayEnvelopeSchema = {
     },
     CapabilityLocalModelsExecute: {
       description:
-        "Ask the Computer to act on its model library. The Computer answers at once with accepted or refused and supervises the localmodels job itself; progress and the outcome arrive as runner.local_models snapshots. refresh rereads the library and needs no model_id; every other action names one. unload_first is only for load.",
+        "Ask the Computer to act on its model library. The Computer answers at once with accepted or refused and supervises the localmodels job itself; progress and the outcome arrive as runner.local_models snapshots. refresh rereads the library and needs no model_id; every other action names one. unload_first is only for load; no_autoload is only for download.",
       type: "object",
       unevaluatedProperties: false,
       allOf: [
@@ -2911,6 +2950,11 @@ export const runnerGatewayEnvelopeSchema = {
                 $ref: "#/$defs/LocalModelId",
               },
             },
+            no_autoload: {
+              description:
+                "Only valid for download; keeps the downloaded model idle instead of loading it.",
+              type: "boolean",
+            },
           },
           if: {
             properties: {
@@ -2923,6 +2967,7 @@ export const runnerGatewayEnvelopeSchema = {
             properties: {
               model_id: false,
               unload_first: false,
+              no_autoload: false,
             },
           },
           else: {
@@ -2945,6 +2990,20 @@ export const runnerGatewayEnvelopeSchema = {
           else: {
             properties: {
               unload_first: false,
+            },
+          },
+        },
+        {
+          if: {
+            properties: {
+              action: {
+                const: "download",
+              },
+            },
+          },
+          else: {
+            properties: {
+              no_autoload: false,
             },
           },
         },

@@ -1142,6 +1142,27 @@ func (e LocalModelHostPlatform) Valid() bool {
 	}
 }
 
+// Defines values for LocalModelMemoryPressure.
+const (
+	LocalModelMemoryPressureCritical LocalModelMemoryPressure = "critical"
+	LocalModelMemoryPressureNormal   LocalModelMemoryPressure = "normal"
+	LocalModelMemoryPressureWarn     LocalModelMemoryPressure = "warn"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelMemoryPressure enum.
+func (e LocalModelMemoryPressure) Valid() bool {
+	switch e {
+	case LocalModelMemoryPressureCritical:
+		return true
+	case LocalModelMemoryPressureNormal:
+		return true
+	case LocalModelMemoryPressureWarn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalModelNoteCode.
 const (
 	LocalModelNoteNoRoomToLoad LocalModelNoteCode = "NO_ROOM_TO_LOAD"
@@ -3407,6 +3428,9 @@ type LocalModel struct {
 	// Fit Where the model can live, judged on total capacity so it stays stable across loads. system means localmodels can run it from RAM, slower.
 	Fit LocalModelFit `json:"fit"`
 
+	// FitsNow Whether the model currently fits its pool in live free memory.
+	FitsNow *bool `json:"fits_now,omitempty"`
+
 	// HostRamBytes Additional host system RAM used alongside GPU VRAM for hybrid offload engines (such as PolyStrata); absent when all weights stay in the model's primary pool.
 	HostRamBytes *int64 `json:"host_ram_bytes,omitempty"`
 
@@ -3415,6 +3439,12 @@ type LocalModel struct {
 
 	// License SPDX identifier or license name, such as Apache-2.0 or Gemma Terms of Use.
 	License *string `json:"license,omitempty"`
+
+	// LoadFreeBytes Pool-aligned free memory on the planned pool when fits_now is false.
+	LoadFreeBytes *int64 `json:"load_free_bytes,omitempty"`
+
+	// LoadNeedBytes Pool-aligned free memory needed to load when fits_now is false.
+	LoadNeedBytes *int64 `json:"load_need_bytes,omitempty"`
 
 	// MemoryBytes Footprint when loaded at its context policy, from the localmodels estimator.
 	MemoryBytes int64           `json:"memory_bytes"`
@@ -3567,10 +3597,19 @@ type LocalModelHost struct {
 	EngineLabel string          `json:"engine_label"`
 	Gpus        []LocalModelGpu `json:"gpus"`
 
+	// MemoryPressure macOS memory pressure level at snapshot time.
+	MemoryPressure *LocalModelMemoryPressure `json:"memory_pressure,omitempty"`
+
+	// MetalWorkingSetBytes Metal recommendedMaxWorkingSetSize on Apple Silicon Macs.
+	MetalWorkingSetBytes *int64 `json:"metal_working_set_bytes,omitempty"`
+
 	// OsLabel Display only, such as Ubuntu 24.04.
-	OsLabel       string                 `json:"os_label"`
-	Platform      LocalModelHostPlatform `json:"platform"`
-	RamTotalBytes int64                  `json:"ram_total_bytes"`
+	OsLabel  string                 `json:"os_label"`
+	Platform LocalModelHostPlatform `json:"platform"`
+
+	// RamAvailableBytes Free plus reclaimable unified/system memory reported by the host probe.
+	RamAvailableBytes *int64 `json:"ram_available_bytes,omitempty"`
+	RamTotalBytes     int64  `json:"ram_total_bytes"`
 }
 
 // LocalModelHostArch defines model for LocalModelHost.Arch.
@@ -3582,6 +3621,9 @@ type LocalModelHostPlatform string
 // LocalModelId Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
 type LocalModelId = string
 
+// LocalModelMemoryPressure macOS memory pressure level at snapshot time.
+type LocalModelMemoryPressure string
+
 // LocalModelNote defines model for LocalModelNote.
 type LocalModelNote struct {
 	Code LocalModelNoteCode `json:"code"`
@@ -3590,7 +3632,7 @@ type LocalModelNote struct {
 // LocalModelNoteCode defines model for LocalModelNote.Code.
 type LocalModelNoteCode string
 
-// LocalModelPool One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them.
+// LocalModelPool One place models load into. unified is RAM less OS/Metal reserves; system is 80% of RAM, as localmodels computes them.
 type LocalModelPool struct {
 	// ExternalHolders Closeable desktop applications holding this pool's memory, as localmodels reports them. An empty list means localmodels looked and found no closeable app; absent means not reported, and the rest of used_bytes is then not known to be other apps.
 	ExternalHolders *[]LocalModelPoolExternalHolder `json:"external_holders,omitempty"`
@@ -3600,10 +3642,13 @@ type LocalModelPool struct {
 	Holders  []LocalModelPoolHolder `json:"holders"`
 
 	// Id A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs).
-	Id         LocalModelPoolId   `json:"id"`
-	Kind       LocalModelPoolKind `json:"kind"`
-	TotalBytes int64              `json:"total_bytes"`
-	UsedBytes  int64              `json:"used_bytes"`
+	Id   LocalModelPoolId   `json:"id"`
+	Kind LocalModelPoolKind `json:"kind"`
+
+	// ReserveBytes Memory kept back for the OS, display, or Metal safety margin.
+	ReserveBytes *int64 `json:"reserve_bytes,omitempty"`
+	TotalBytes   int64  `json:"total_bytes"`
+	UsedBytes    int64  `json:"used_bytes"`
 }
 
 // LocalModelPoolKind defines model for LocalModelPool.Kind.

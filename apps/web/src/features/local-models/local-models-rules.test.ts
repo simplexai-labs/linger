@@ -19,11 +19,14 @@ import {
   collapsedRowBadges,
   compactContextLabel,
   contextLabel,
+  downloadMemoryCheck,
+  downloadMemoryShortfall,
   downloadPercent,
   downloadStatusDetail,
   downloadStopped,
   featuredInklingEntry,
   formatGigabytes,
+  headerMemoryBreakdown,
   hostBlocker,
   isModelOnComputer,
   loadCheck,
@@ -41,6 +44,7 @@ import {
   parametersLabel,
   placeName,
   poolLabel,
+  poolMemoryBreakdown,
   poolOtherBytes,
   poolUnaccountedBytes,
   safeModelSourceUrl,
@@ -1658,5 +1662,159 @@ describe("hostBlocker, RAM reclaimability, and diagnostics copy", () => {
     expect(
       dualActiveSections.onComputer.map((g) => g.defaultEntry.model.id),
     ).toEqual(["qwen3.8-27b:UD-Q4_K_M", "qwen3.8-27b-iq3s:UD-IQ3_S"]);
+  });
+});
+
+describe("live memory checks and memory breakdowns", () => {
+  it("respects fits_now and pool-aligned load_need_bytes/load_free_bytes", () => {
+    const view = macView();
+    const scaledToFit = localModel({
+      fit: "unified",
+      fits_now: true,
+      id: "qwen3.8-27b-iq3s:UD-IQ3_S",
+      memory_bytes: gb(20.8),
+      name: "Qwen3.8 27B",
+      pool: "unified",
+    });
+    // fits_now: true trusts the planner even when full capacity exceeds live free.
+    expect(downloadMemoryCheck(view, scaledToFit)).toBeNull();
+    expect(downloadMemoryShortfall(view, scaledToFit)).toBeNull();
+    expect(loadCheck(view, scaledToFit)).toBeNull();
+
+    const blocked = localModel({
+      fit: "unified",
+      fits_now: false,
+      id: "qwen3.8-27b:UD-Q4_K_M",
+      load_free_bytes: gb(6.6),
+      load_need_bytes: gb(18.4),
+      memory_bytes: gb(22.4),
+      name: "Qwen3.8 27B (Q4_K_M)",
+      pool: "unified",
+    });
+    expect(downloadMemoryCheck(view, blocked)).toMatchObject({
+      freeBytes: gb(6.6),
+      needBytes: gb(18.4),
+    });
+    expect(downloadMemoryShortfall(view, blocked)).toMatchObject({
+      freeBytes: gb(6.6),
+      needBytes: gb(18.4),
+    });
+    expect(loadCheck(view, blocked)).toMatchObject({
+      freeBytes: gb(6.6),
+      needBytes: gb(18.4),
+    });
+
+    // Older Computers omit fits_now; downloadMemoryCheck degrades to direct download
+    // instead of attempting unsupported no_autoload, while downloadMemoryShortfall
+    // and loadCheck keep the pool-free fallback for passive warnings and load checks.
+    const legacyLowRoom = localModel({
+      fit: "unified",
+      id: "llama3.3-70b:Q4_K_M",
+      memory_bytes: gb(46),
+      name: "Llama 3.3 70B",
+      pool: "unified",
+      state: "absent",
+    });
+    expect(downloadMemoryCheck(view, legacyLowRoom)).toBeNull();
+    expect(downloadMemoryShortfall(view, legacyLowRoom)).toMatchObject({
+      freeBytes: gb(51.2) - gb(14.3),
+      needBytes: gb(46),
+    });
+    expect(loadCheck(view, legacyLowRoom)).toMatchObject({
+      freeBytes: gb(51.2) - gb(14.3),
+      needBytes: gb(46),
+    });
+
+    const legacyFits = localModel({
+      fit: "unified",
+      id: "gemma3-4b:Q4_K_M",
+      memory_bytes: gb(4),
+      name: "Gemma 3 4B",
+      pool: "unified",
+      state: "absent",
+    });
+    expect(downloadMemoryCheck(view, legacyFits)).toBeNull();
+    expect(downloadMemoryShortfall(view, legacyFits)).toBeNull();
+  });
+
+  it("builds unified, GPU, and multi-GPU header memory breakdowns", () => {
+    const unified = {
+      ...memoryPool("unified", 21.5),
+      reserve_bytes: gb(2.5),
+      used_bytes: gb(14.9),
+    };
+    const mac = macView({
+      computer: {
+        ...macView().computer,
+        host: {
+          ...macView().computer.host!,
+          memory_pressure: "warn",
+          metal_working_set_bytes: gb(17.8),
+          ram_available_bytes: gb(9.1),
+          ram_total_bytes: gb(24),
+        },
+      },
+      pools: [unified],
+    });
+
+    const unifiedBreakdown = poolMemoryBreakdown(mac, unified, translate);
+    expect(unifiedBreakdown.title).toBe("Unified memory breakdown");
+    expect(unifiedBreakdown.rows).toEqual([
+      { label: "Physical memory", value: "24 GB" },
+      { label: "Used by macOS & apps", value: "14.9 GB" },
+      { label: "Reclaimable & free", value: "9.1 GB" },
+      { label: "Reserved for macOS & Linger", value: "2.5 GB" },
+      { label: "Available for models", value: "6.6 GB" },
+      { label: "Per-model Metal GPU cap", value: "17.8 GB" },
+      { label: "Memory pressure", tone: "warning", value: "Warning" },
+    ]);
+    expect(headerMemoryBreakdown(mac, translate)).toEqual(unifiedBreakdown);
+
+    const lab = labView();
+    expect(headerMemoryBreakdown(lab, translate)).toEqual({
+      rows: [
+        { label: "GPU 0 · RTX 4090", value: "2.6 GB free of 24 GB" },
+        { label: "GPU 1 · RTX 4090", value: "22.9 GB free of 24 GB" },
+      ],
+      title: "GPU memory breakdown",
+    });
+
+    const gpuWithExternalHolders = {
+      ...gpuPool(0, 16, [
+        { gb: 7.5, id: "inkling-2-mini", name: "Inkling 2 Mini" },
+      ]),
+      external_holders: [{ bytes: gb(0.2), name: "browser" }],
+      used_bytes: gb(15),
+    };
+    expect(
+      poolMemoryBreakdown(
+        labView({ pools: [gpuWithExternalHolders] }),
+        gpuWithExternalHolders,
+        translate,
+      ).rows,
+    ).toEqual([
+      { label: "Total VRAM", value: "16 GB" },
+      { label: "Loaded models", value: "7.5 GB" },
+      { label: "Other apps", value: "0.2 GB" },
+      { label: "System & engine", value: "7.3 GB" },
+      { label: "Free for models", value: "1 GB" },
+    ]);
+
+    const gpuNoExternalApps = {
+      ...gpuWithExternalHolders,
+      external_holders: [],
+    };
+    expect(
+      poolMemoryBreakdown(
+        labView({ pools: [gpuNoExternalApps] }),
+        gpuNoExternalApps,
+        translate,
+      ).rows,
+    ).toEqual([
+      { label: "Total VRAM", value: "16 GB" },
+      { label: "Loaded models", value: "7.5 GB" },
+      { label: "System & engine", value: "7.5 GB" },
+      { label: "Free for models", value: "1 GB" },
+    ]);
   });
 });

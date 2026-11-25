@@ -343,6 +343,7 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 	d.localModelsEngine.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsEngine))
 	d.localModelsConcurrencyProbe.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsConcurrencyProbe))
 	d.localModelsExternalHolders.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsExternalHolders))
+	d.localModelsMemoryBreakdown.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsMemoryBreakdown))
 	d.modelInvokeOutcomes.Store(slices.Contains(command.ServiceFeatures, serviceFeatureModelInvokeOutcomes))
 	d.localModelUnavailable.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelUnavailable))
 	localModels := slices.Contains(command.ServiceFeatures, serviceFeatureLocalModels)
@@ -460,6 +461,7 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 		d.localModelsEngine.Store(false)
 		d.localModelsConcurrencyProbe.Store(false)
 		d.localModelsExternalHolders.Store(false)
+		d.localModelsMemoryBreakdown.Store(false)
 		d.localModelUnavailable.Store(false)
 	}
 	d.connectionMu.Unlock()

@@ -83,6 +83,7 @@ type libraryStatus struct {
 		ID              string                      `json:"id"`
 		TotalBytes      uint64                      `json:"total_bytes"`
 		UsedBytes       uint64                      `json:"used_bytes"`
+		ReserveBytes    *uint64                     `json:"reserve_bytes,omitempty"`
 		Holders         []wire.LocalModelPoolHolder `json:"holders"`
 		ExternalHolders []json.RawMessage           `json:"external_holders"`
 	} `json:"pools"`
@@ -115,6 +116,9 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 	}
 	if !slices.Contains([]string{"linux", "darwin", "windows"}, host.Platform) || (host.Arch != "x86_64" && host.Arch != "arm64") {
 		return wire.LocalModelsSnapshot{}, fmt.Errorf("library status host %s/%s is outside the contract", status.Host.Platform, status.Host.Arch)
+	}
+	if host.MemoryPressure != "" && !slices.Contains([]string{"normal", "warn", "critical"}, host.MemoryPressure) {
+		return wire.LocalModelsSnapshot{}, fmt.Errorf("library status host memory_pressure %q is outside the contract", host.MemoryPressure)
 	}
 	host.OsLabel, host.EngineLabel = clip(host.OsLabel, 200), clip(host.EngineLabel, 200)
 	if host.Gpus == nil {
@@ -161,7 +165,7 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 		}
 		snapshot.Pools = append(snapshot.Pools, wire.LocalModelPool{
 			ID: pool.ID, Kind: kind, GpuIndex: index, TotalBytes: pool.TotalBytes, UsedBytes: pool.UsedBytes,
-			Holders: holders, ExternalHolders: externalHolders,
+			ReserveBytes: pool.ReserveBytes, Holders: holders, ExternalHolders: externalHolders,
 		})
 	}
 	for _, model := range status.Models {

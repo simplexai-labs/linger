@@ -86,9 +86,16 @@ build:assets` to check the initial JS budget.
   Sponsor-owned Agent eligibility and `Pi` runtime switch payloads in
   `local-model-agents.ts` (`Use with <Another Me>`, `Open chat`,
   `Switch Agent…` in `Used by`, and `Make room` automatic Agent handoff once
-  the replacement model loads when `Pi` is ready), and maps every code and enum
-  label to English in `local-models-copy.ts`. Without `?computer=` the page
-  reopens the last owned Computer chosen in this browser
+  the replacement model loads when `Pi` is ready), maps every code and enum
+  label through `local-models-copy.ts` and `local-models.messages.ts`, checks
+  live download memory (row and driver-resume banner downloads alike) via
+  `downloadMemoryCheck` when the Computer reports
+  `fits_now === false` (`DownloadLowMemoryDialog`: `Recheck memory` or
+  `Download only` with `no_autoload`, keeping direct download when `fits_now`
+  is absent while still showing the passive memory-shortfall warning via
+  `downloadMemoryShortfall`), and exposes `MemoryBreakdownPopover` on the header summary and
+  Details `PoolBar` plus `Recheck memory` in Details. Without `?computer=` the
+  page reopens the last owned Computer chosen in this browser
   (`last-models-computer.ts`, cleared on logout), else the desktop app opens its
   own Computer and a browser prefers an online Computer. The header
   `ComputerPicker` (`computer-picker.tsx`) shows connection dots and orders

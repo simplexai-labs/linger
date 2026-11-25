@@ -160,7 +160,9 @@ take precedence.
   accept or refusal, `LOCAL_MODELS_ACTION_TIMEOUT` past the command's
   `expires_at` (at most 30 seconds; the Daemon never answers after that
   deadline, so the outcome is unknown, not refused), or
-  `LOCAL_COMPUTER_OFFLINE`.
+  `LOCAL_COMPUTER_OFFLINE`. `no_autoload: true` is sent only to Computer 0.65.0
+  or later (`FIRST_LOCAL_MODEL_DOWNLOAD_ONLY_COMPUTER_VERSION`) and omitted when
+  not set, because an older Daemon closes the connection on unknown fields.
 - A Computer's model source is the Daemon's too
   (`runner-gateway/runner-local-capabilities.ts`, `modelSource`). Agent Service
   sends `execute` `model_source` only to Computer 0.54.0 or later
@@ -226,6 +228,10 @@ take precedence.
   Runtime Session with `recovery_reason`, and reactivates in a fresh native
   session so the Run resumes with inlined recent messages and (on Computer
   0.63.0+) an exported `./playground/.previous-context.md` transcript.
+- Agent Service advertises `local_models_memory_breakdown` only to Computer
+  0.65.0 or later (`FIRST_LOCAL_MODELS_MEMORY_BREAKDOWN_COMPUTER_VERSION`).
+  The Daemon only publishes live fit, host memory, and pool reserve fields
+  after a welcome names the feature.
 - Default unit, integration, and fixture smoke tests use deterministic adapters
   and do not call a live model provider. Explicitly named live suites such as
   `smoke:local-runner:live` may use an authenticated provider and must remain

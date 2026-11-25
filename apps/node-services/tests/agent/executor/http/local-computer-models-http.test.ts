@@ -98,6 +98,27 @@ describe("Agent Management local-models action route", () => {
       outcome: "refused",
       refusal: { code: "LOAD_NO_ROOM", pool: "gpu:0", need_bytes: 9 },
     });
+
+    const downloadOnly = vi.fn(
+      async (
+        _command: LocalModelActionCommand,
+      ): Promise<LocalModelActionAck> => ({ outcome: "accepted" }),
+    );
+    const dlOnlyResponse = await post(createApp(downloadOnly), {
+      request_id: "request-3",
+      action: "download",
+      model_id: "qwen3-4b:Q4_K_M",
+      no_autoload: true,
+      expires_at: expiresAt,
+    });
+    expect(dlOnlyResponse.status).toBe(200);
+    expect(downloadOnly).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "download",
+        modelId: "qwen3-4b:Q4_K_M",
+        noAutoload: true,
+      }),
+    );
   });
 
   it("rejects malformed actions before reaching the Computer", async () => {
@@ -105,6 +126,20 @@ describe("Agent Management local-models action route", () => {
     const app = createApp(act);
     for (const body of [
       { request_id: "r", action: "download", expires_at: expiresAt },
+      {
+        request_id: "r",
+        action: "load",
+        model_id: "m:1",
+        no_autoload: true,
+        expires_at: expiresAt,
+      },
+      {
+        request_id: "r",
+        action: "download",
+        model_id: "m:1",
+        no_autoload: "yes",
+        expires_at: expiresAt,
+      },
       {
         request_id: "r",
         action: "refresh",

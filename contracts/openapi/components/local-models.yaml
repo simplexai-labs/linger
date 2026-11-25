@@ -107,6 +107,16 @@ components:
           type: integer
           format: int64
           minimum: 0
+    LocalModelMemoryPressure:
+      description: macOS memory pressure level at snapshot time.
+      type: string
+      enum: [normal, warn, critical]
+      x-enum-varnames:
+        [
+          LocalModelMemoryPressureNormal,
+          LocalModelMemoryPressureWarn,
+          LocalModelMemoryPressureCritical,
+        ]
     LocalModelHost:
       description: Hardware and software of the Computer as localmodels reports it.
       type: object
@@ -147,6 +157,18 @@ components:
           type: integer
           format: int64
           minimum: 0
+        ram_available_bytes:
+          description: Free plus reclaimable unified/system memory reported by the host probe.
+          type: integer
+          format: int64
+          minimum: 0
+        metal_working_set_bytes:
+          description: Metal recommendedMaxWorkingSetSize on Apple Silicon Macs.
+          type: integer
+          format: int64
+          minimum: 0
+        memory_pressure:
+          $ref: "#/components/schemas/LocalModelMemoryPressure"
         disk_free_bytes:
           type: integer
           format: int64
@@ -199,8 +221,8 @@ components:
           minimum: 0
     LocalModelPool:
       description: >-
-        One place models load into. The system and unified budgets are 80% of
-        RAM, as localmodels computes them.
+        One place models load into. unified is RAM less OS/Metal reserves;
+        system is 80% of RAM, as localmodels computes them.
       type: object
       additionalProperties: false
       required: [id, kind, total_bytes, used_bytes, holders]
@@ -225,6 +247,11 @@ components:
           format: int64
           minimum: 0
         used_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        reserve_bytes:
+          description: Memory kept back for the OS, display, or Metal safety margin.
           type: integer
           format: int64
           minimum: 0
@@ -673,6 +700,19 @@ components:
           type: integer
           format: int64
           minimum: 0
+        fits_now:
+          description: Whether the model currently fits its pool in live free memory.
+          type: boolean
+        load_need_bytes:
+          description: Pool-aligned free memory needed to load when fits_now is false.
+          type: integer
+          format: int64
+          minimum: 0
+        load_free_bytes:
+          description: Pool-aligned free memory on the planned pool when fits_now is false.
+          type: integer
+          format: int64
+          minimum: 0
     LocalModelsUnavailableReason:
       type: object
       additionalProperties: false
@@ -753,7 +793,7 @@ components:
       description: >-
         TeamHub asks Agent Service to send one execute local_models frame to an
         owned Computer. model_id is required except for refresh; unload_first
-        only with load.
+        only with load; no_autoload only with download.
       type: object
       additionalProperties: false
       required: [request_id, action, expires_at]
@@ -770,6 +810,9 @@ components:
           uniqueItems: true
           items:
             $ref: "#/components/schemas/LocalModelId"
+        no_autoload:
+          description: Valid only when action is download; leaves the downloaded model idle without loading it.
+          type: boolean
         expires_at:
           $ref: "./common.yaml#/components/schemas/Timestamp"
     LocalModelActionRefusal:
@@ -815,7 +858,8 @@ components:
     LocalModelActionRequest:
       description: >-
         A Human's action on one model. The click is the approval; there is no
-        separate confirm step on the Computer. unload_first only with load.
+        separate confirm step on the Computer. unload_first only with load;
+        no_autoload only with download.
       type: object
       additionalProperties: false
       required: [action]
@@ -838,6 +882,9 @@ components:
           uniqueItems: true
           items:
             $ref: "#/components/schemas/LocalModelId"
+        no_autoload:
+          description: Valid only when action is download; leaves the downloaded model idle without loading it.
+          type: boolean
     LocalModelActionAccepted:
       type: object
       additionalProperties: false

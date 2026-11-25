@@ -3,7 +3,11 @@ import { isInkling2MiniModelId } from "@linger/service-kit/featured-models";
 import type { Translate } from "@/i18n/language";
 import { formatBytes } from "@/lib/format-bytes";
 
-import { architectureCopy, capabilityCopy } from "./local-models-copy";
+import {
+  architectureCopy,
+  capabilityCopy,
+  memoryPressureCopy,
+} from "./local-models-copy";
 import { localModelsMessages as m } from "./local-models.messages";
 import type {
   LocalModel,
@@ -741,11 +745,10 @@ export function memoryGuidance(view: LocalModelsView): MemoryGuidance | null {
       const modelPool = entry.model.pool;
       if (modelPool === undefined || !poolIds.has(modelPool)) return false;
       const pool = poolOf(view, modelPool);
-      return (
-        pool !== undefined &&
-        poolOtherBytes(pool) > 0 &&
-        entry.model.memory_bytes > poolFreeBytes(pool)
-      );
+      if (!pool || poolOtherBytes(pool) <= 0) return false;
+      return entry.model.fits_now !== undefined
+        ? !entry.model.fits_now
+        : entry.model.memory_bytes > poolFreeBytes(pool);
     });
     if (constrainedAvailable) {
       return {
@@ -758,6 +761,49 @@ export function memoryGuidance(view: LocalModelsView): MemoryGuidance | null {
     }
   }
   return null;
+}
+
+export interface DownloadMemoryCheck {
+  freeBytes: number;
+  needBytes: number;
+  pool: LocalModelPool;
+}
+
+/**
+ * Passive live-memory shortfall shown on an available model row and its
+ * expanded details. Unlike `downloadMemoryCheck`, this falls back to
+ * comparing `memory_bytes` against `poolFreeBytes(pool)` when an older
+ * Computer omits `fits_now`, matching `memoryGuidance` and `loadCheck`.
+ */
+export function downloadMemoryShortfall(
+  view: LocalModelsView,
+  model: LocalModel,
+): DownloadMemoryCheck | null {
+  if (model.state !== "absent" || !model.availability.downloadable) return null;
+  if (model.fits_now === true) return null;
+  const pool = poolOf(view, model.pool);
+  if (!pool) return null;
+  if (model.fits_now === undefined && poolFreeBytes(pool) >= model.memory_bytes)
+    return null;
+  return {
+    freeBytes: model.load_free_bytes ?? poolFreeBytes(pool),
+    needBytes: model.load_need_bytes ?? model.memory_bytes,
+    pool,
+  };
+}
+
+/**
+ * Why a downloadable model cannot be auto-loaded immediately after download,
+ * or `null` when its pool has live room now, no pool applies, or the Computer
+ * does not report `fits_now` (older Computers without `--no-autoload` support
+ * keep direct download).
+ */
+export function downloadMemoryCheck(
+  view: LocalModelsView,
+  model: LocalModel,
+): DownloadMemoryCheck | null {
+  if (model.fits_now !== false) return null;
+  return downloadMemoryShortfall(view, model);
 }
 
 export interface LoadCheck {
@@ -779,7 +825,9 @@ export function loadCheck(
   model: LocalModel,
 ): LoadCheck | null {
   const pool = poolOf(view, model.pool);
-  if (!pool || poolFreeBytes(pool) >= model.memory_bytes) return null;
+  if (!pool || model.fits_now === true) return null;
+  if (model.fits_now === undefined && poolFreeBytes(pool) >= model.memory_bytes)
+    return null;
   const loaded = modelEntries(view).filter(
     (entry) =>
       entry.status === "loaded" &&
@@ -787,13 +835,171 @@ export function loadCheck(
       entry.model.id !== model.id,
   );
   return {
-    freeBytes: poolFreeBytes(pool),
+    freeBytes: model.load_free_bytes ?? poolFreeBytes(pool),
     kept: pool.holders.filter(
       (holder) => !loaded.some((entry) => entry.model.id === holder.id),
     ),
     loaded,
-    needBytes: model.memory_bytes,
+    needBytes: model.load_need_bytes ?? model.memory_bytes,
     pool,
+  };
+}
+
+export interface MemoryBreakdownRow {
+  label: string;
+  tone?: "default" | "warning" | "danger";
+  value: string;
+}
+
+export interface MemoryBreakdown {
+  note?: string;
+  rows: MemoryBreakdownRow[];
+  title: string;
+}
+
+/** Structured breakdown for a single memory pool hover card and Details view. */
+export function poolMemoryBreakdown(
+  view: LocalModelsView,
+  pool: LocalModelPool,
+  t: Translate,
+): MemoryBreakdown {
+  const host = view.computer.host;
+  const holdersBytes = pool.holders.reduce(
+    (sum, holder) => sum + holder.bytes,
+    0,
+  );
+  const freeBytes = poolFreeBytes(pool);
+  const rows: MemoryBreakdownRow[] = [];
+
+  if (pool.kind === "unified") {
+    if (host) {
+      rows.push({
+        label: t(m.breakdownPhysicalMemory),
+        value: formatGigabytes(host.ram_total_bytes, t),
+      });
+    }
+    if (holdersBytes > 0) {
+      rows.push({
+        label: t(m.breakdownLoadedModels),
+        value: formatGigabytes(holdersBytes, t),
+      });
+    }
+    const appsBytes =
+      host?.ram_available_bytes !== undefined
+        ? Math.max(
+            0,
+            host.ram_total_bytes - host.ram_available_bytes - holdersBytes,
+          )
+        : Math.max(0, pool.used_bytes - holdersBytes);
+    rows.push({
+      label: t(m.breakdownUsedByMacosApps),
+      value: formatGigabytes(appsBytes, t),
+    });
+    if (host?.ram_available_bytes !== undefined) {
+      rows.push({
+        label: t(m.breakdownReclaimableFree),
+        value: formatGigabytes(host.ram_available_bytes, t),
+      });
+    }
+    if (pool.reserve_bytes !== undefined && pool.reserve_bytes > 0) {
+      rows.push({
+        label: t(m.breakdownReservedMacosLinger),
+        value: formatGigabytes(pool.reserve_bytes, t),
+      });
+    }
+    rows.push({
+      label: t(m.breakdownAvailableForModels),
+      value: formatGigabytes(freeBytes, t),
+    });
+    if (host?.metal_working_set_bytes !== undefined) {
+      rows.push({
+        label: t(m.breakdownMetalGpuCap),
+        value: formatGigabytes(host.metal_working_set_bytes, t),
+      });
+    }
+    if (host?.memory_pressure && host.memory_pressure !== "normal") {
+      rows.push({
+        label: t(m.breakdownMemoryPressure),
+        tone: host.memory_pressure === "critical" ? "danger" : "warning",
+        value: memoryPressureCopy(host.memory_pressure, t),
+      });
+    }
+    const note =
+      host?.memory_pressure === "critical"
+        ? t(m.breakdownNoteCritical)
+        : host?.memory_pressure === "warn"
+          ? t(m.breakdownNoteWarn)
+          : t(m.breakdownNoteNormal);
+    return { note, rows, title: t(m.breakdownUnifiedTitle) };
+  }
+
+  const otherAppsBytes = poolOtherBytes(pool);
+  const unaccountedBytes = poolUnaccountedBytes(pool);
+  if (pool.kind === "system" && host) {
+    rows.push({
+      label: t(m.breakdownPhysicalMemory),
+      value: formatGigabytes(host.ram_total_bytes, t),
+    });
+  }
+  rows.push({
+    label:
+      pool.kind === "gpu" ? t(m.breakdownTotalVram) : t(m.breakdownModelBudget),
+    value: formatGigabytes(pool.total_bytes, t),
+  });
+  if (holdersBytes > 0) {
+    rows.push({
+      label: t(m.breakdownLoadedModels),
+      value: formatGigabytes(holdersBytes, t),
+    });
+  }
+  if (otherAppsBytes > 0) {
+    rows.push({
+      label:
+        pool.external_holders !== undefined
+          ? t(m.otherApps)
+          : t(m.breakdownOtherProcesses),
+      value: formatGigabytes(otherAppsBytes, t),
+    });
+  }
+  if (unaccountedBytes > 0) {
+    rows.push({
+      label: t(m.systemAndEngine),
+      value: formatGigabytes(unaccountedBytes, t),
+    });
+  }
+  if (pool.reserve_bytes !== undefined && pool.reserve_bytes > 0) {
+    rows.push({
+      label:
+        pool.kind === "gpu"
+          ? t(m.breakdownDriverReserve)
+          : t(m.breakdownOsReserve),
+      value: formatGigabytes(pool.reserve_bytes, t),
+    });
+  }
+  rows.push({
+    label: t(m.breakdownFreeForModels),
+    value: formatGigabytes(freeBytes, t),
+  });
+  return { rows, title: poolLabel(view, pool, t) };
+}
+
+/** Breakdown shown when hovering or clicking the header memory summary. */
+export function headerMemoryBreakdown(
+  view: LocalModelsView,
+  t: Translate,
+): MemoryBreakdown | undefined {
+  const { pools } = summaryPools(view);
+  if (!pools.length) return undefined;
+  if (pools.length === 1) return poolMemoryBreakdown(view, pools[0]!, t);
+  return {
+    rows: pools.map((pool) => ({
+      label: poolLabel(view, pool, t),
+      value: t(m.breakdownPoolFreeOf, {
+        free: formatGigabytes(poolFreeBytes(pool), t),
+        total: formatGigabytes(pool.total_bytes, t),
+      }),
+    })),
+    title: t(m.breakdownGpuTitle),
   };
 }
 

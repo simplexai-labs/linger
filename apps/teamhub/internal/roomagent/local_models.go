@@ -25,13 +25,14 @@ var (
 
 // LocalModelActionCommand asks the owner's connected Computer to act on its
 // model library. ModelID is empty only for refresh; UnloadFirst is only for
-// load.
+// load; NoAutoload is only for download.
 type LocalModelActionCommand struct {
 	TenantID, OwnerActorID, ComputerID string
 	RequestID                          string
 	Action                             string
 	ModelID                            string
 	UnloadFirst                        []string
+	NoAutoload                         bool
 	ExpiresAt                          time.Time
 }
 
@@ -59,6 +60,10 @@ func (g *HTTPGateway) ActOnLocalModels(ctx context.Context, command LocalModelAc
 	if len(command.UnloadFirst) > 0 {
 		unloadFirst := append([]string(nil), command.UnloadFirst...)
 		request.UnloadFirst = &unloadFirst
+	}
+	if command.NoAutoload {
+		noAutoload := true
+		request.NoAutoload = &noAutoload
 	}
 	response, err := g.localModelsClient.ActOnLocalComputerModelsWithResponse(ctx, command.TenantID, command.OwnerActorID, command.ComputerID, request)
 	if err != nil {

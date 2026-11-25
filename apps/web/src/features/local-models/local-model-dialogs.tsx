@@ -25,6 +25,7 @@ import {
   poolOf,
   poolOtherBytes,
   poolUnaccountedBytes,
+  type DownloadMemoryCheck,
   type LoadCheck,
   type ModelEntry,
 } from "./local-models-rules";
@@ -49,6 +50,95 @@ function AffectedAgents({
     </FormFeedback>
   ) : (
     <p className="text-sm text-muted-foreground">{t(m.noAgentUses)}</p>
+  );
+}
+
+/** Soft live-memory warning before starting a download that cannot load yet. */
+export function DownloadLowMemoryDialog({
+  check,
+  disabled,
+  entry,
+  onClose,
+  onDownloadAndLoad,
+  onDownloadOnly,
+  onRecheck,
+  rechecking = false,
+  view,
+}: {
+  check: DownloadMemoryCheck | null;
+  disabled: boolean;
+  entry: ModelEntry;
+  onClose: () => void;
+  onDownloadAndLoad: () => void;
+  onDownloadOnly: () => void;
+  onRecheck?: () => void;
+  rechecking?: boolean;
+  view: LocalModelsView;
+}) {
+  const t = useT();
+  const poolName = check ? poolLabel(view, check.pool, t) : t(m.placeMemory);
+  return (
+    <ModalDialog
+      className="[&_.app-dialog-footer]:flex-wrap"
+      description={
+        check
+          ? t(m.downloadLowMemoryDescription, {
+              free: formatGigabytes(check.freeBytes, t),
+              name: entry.model.name,
+              need: formatGigabytes(check.needBytes, t),
+              pool: poolName,
+            })
+          : t(m.downloadReadyDescription, {
+              computer: view.computer.display_name,
+              name: entry.model.name,
+            })
+      }
+      footer={
+        <>
+          <Button onClick={onClose}>{t(commonMessages.cancel)}</Button>
+          {onRecheck ? (
+            <Button
+              disabled={disabled}
+              loading={rechecking}
+              onClick={onRecheck}
+            >
+              {t(m.recheckMemory)}
+            </Button>
+          ) : null}
+          {check ? (
+            <Button disabled={disabled} onClick={onDownloadOnly} tone="primary">
+              {t(m.downloadOnly)}
+            </Button>
+          ) : (
+            <Button
+              disabled={disabled}
+              onClick={onDownloadAndLoad}
+              tone="primary"
+            >
+              {t(m.downloadAndLoad)}
+            </Button>
+          )}
+        </>
+      }
+      onClose={onClose}
+      size="md"
+      title={t(check ? m.downloadLowMemoryTitle : m.downloadReadyTitle)}
+    >
+      <div className="grid gap-3 px-5 py-4">
+        {check ? (
+          <FormFeedback tone="warning">
+            {t(m.downloadLowMemoryBody, {
+              computer: view.computer.display_name,
+              size: formatGigabytes(entry.model.download_bytes, t),
+            })}
+          </FormFeedback>
+        ) : (
+          <FormFeedback tone="info">
+            {t(m.downloadReadyBody, { name: entry.model.name })}
+          </FormFeedback>
+        )}
+      </div>
+    </ModalDialog>
   );
 }
 

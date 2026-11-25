@@ -60,7 +60,6 @@ export const FIRST_LOCAL_MODELS_DIAGNOSTICS_COMPUTER_VERSION = "0.58.0";
 // feature and emits `context_too_long` and `unsupported` on executed
 // `model_invoke`.
 export const FIRST_MODEL_INVOKE_OUTCOMES_COMPUTER_VERSION = "0.60.0";
-
 // The first release that understands the `local_models_engine` welcome feature
 // and gates per-model engine, engine_label, concurrency, and host_ram_bytes
 // fields behind it.
@@ -80,6 +79,14 @@ export const FIRST_PREVIOUS_SESSION_COMPUTER_VERSION = "0.63.0";
 // The first release that understands the `local_models_concurrency_probe`
 // welcome feature and gates per-model `concurrency_probing` behind it.
 export const FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION = "0.64.0";
+
+// The first release that decodes `no_autoload` on `execute` `local_models`.
+// An older Computer rejects the unknown key and closes the connection.
+export const FIRST_LOCAL_MODEL_DOWNLOAD_ONLY_COMPUTER_VERSION = "0.65.0";
+
+// The first release that understands the `local_models_memory_breakdown`
+// welcome feature and sends the optional live memory fields.
+export const FIRST_LOCAL_MODELS_MEMORY_BREAKDOWN_COMPUTER_VERSION = "0.65.0";
 
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 

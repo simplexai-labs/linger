@@ -196,6 +196,13 @@ INSERT INTO agent_registrations(actor_id,tenant_id,agent_management_id,status,in
 		t.Fatalf("unconfirmed action status=%d body=%s", status, body)
 	}
 	computers.err = nil
+	if status, body := act(alice, map[string]any{"action": "download", "no_autoload": true}); status != http.StatusAccepted ||
+		!containsJSONText(body, `"action":"download"`) {
+		t.Fatalf("owner no_autoload download status=%d body=%s", status, body)
+	}
+	if len(computers.commands) != 5 || !computers.commands[4].NoAutoload {
+		t.Fatalf("forwarded no_autoload command=%+v", computers.commands)
+	}
 	if status, _, body := env.request(bob, http.MethodPost, base, nil, ""); status != http.StatusForbidden || !containsJSONText(body, "LOCAL_MODEL_ACTION_FORBIDDEN") {
 		t.Fatalf("member refresh status=%d body=%s", status, body)
 	}
@@ -203,8 +210,8 @@ INSERT INTO agent_registrations(actor_id,tenant_id,agent_management_id,status,in
 		!containsJSONText(body, `"action":"refresh"`) {
 		t.Fatalf("owner refresh status=%d body=%s", status, body)
 	}
-	if len(computers.commands) != 5 || computers.commands[4].Action != "refresh" || computers.commands[4].ModelID != "" ||
-		computers.commands[4].OwnerActorID != "actor_acme_alice" || computers.commands[4].RequestID == "" {
+	if len(computers.commands) != 6 || computers.commands[5].Action != "refresh" || computers.commands[5].ModelID != "" ||
+		computers.commands[5].OwnerActorID != "actor_acme_alice" || computers.commands[5].RequestID == "" {
 		t.Fatalf("forwarded refresh commands=%+v", computers.commands)
 	}
 	if _, err := pool.Exec(t.Context(), `UPDATE local_computers SET last_seen_at=now()-interval '2 minutes' WHERE computer_id=$1`, computerID); err != nil {
@@ -216,7 +223,7 @@ INSERT INTO agent_registrations(actor_id,tenant_id,agent_management_id,status,in
 	if status, _, body := env.request(alice, http.MethodPost, base, nil, ""); status != http.StatusServiceUnavailable || !containsJSONText(body, "LOCAL_COMPUTER_OFFLINE") {
 		t.Fatalf("offline refresh status=%d body=%s", status, body)
 	}
-	if len(computers.commands) != 5 {
+	if len(computers.commands) != 6 {
 		t.Fatalf("an offline Computer was sent an action: %d commands", len(computers.commands))
 	}
 

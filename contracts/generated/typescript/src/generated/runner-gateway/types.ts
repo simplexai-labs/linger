@@ -40,7 +40,8 @@ export type ServiceFeature =
   | "local_models_engine"
   | "local_models_concurrency_probe"
   | "local_model_unavailable"
-  | "local_models_external_holders";
+  | "local_models_external_holders"
+  | "local_models_memory_breakdown";
 export type JsonValue =
   | null
   | boolean
@@ -105,7 +106,7 @@ export type CapabilityComputerPermission = LocalSkillCommandIdentity & {
   kind: "computer_permission";
 };
 /**
- * Ask the Computer to act on its model library. The Computer answers at once with accepted or refused and supervises the localmodels job itself; progress and the outcome arrive as runner.local_models snapshots. refresh rereads the library and needs no model_id; every other action names one. unload_first is only for load.
+ * Ask the Computer to act on its model library. The Computer answers at once with accepted or refused and supervises the localmodels job itself; progress and the outcome arrive as runner.local_models snapshots. refresh rereads the library and needs no model_id; every other action names one. unload_first is only for load; no_autoload is only for download.
  */
 export type CapabilityLocalModelsExecute = LocalSkillCommandIdentity & {
   type: "execute";
@@ -116,6 +117,10 @@ export type CapabilityLocalModelsExecute = LocalSkillCommandIdentity & {
    * @maxItems 64
    */
   unload_first?: LocalModelId[];
+  /**
+   * Only valid for download; keeps the downloaded model idle instead of loading it.
+   */
+  no_autoload?: boolean;
 } & {
   [k: string]: unknown;
 };
@@ -1368,6 +1373,18 @@ export interface LocalModelHost {
    */
   engine_label: string;
   ram_total_bytes: NonNegativeInteger;
+  /**
+   * Free plus reclaimable unified/system memory reported by the host probe.
+   */
+  ram_available_bytes?: number;
+  /**
+   * Metal recommendedMaxWorkingSetSize on Apple Silicon Macs.
+   */
+  metal_working_set_bytes?: number;
+  /**
+   * macOS memory pressure level at snapshot time.
+   */
+  memory_pressure?: "normal" | "warn" | "critical";
   disk_free_bytes: NonNegativeInteger;
   /**
    * @maxItems 64
@@ -1382,7 +1399,7 @@ export interface LocalModelGpu {
   free_bytes: NonNegativeInteger;
 }
 /**
- * One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them.
+ * One place models load into. unified is RAM less OS/Metal reserves; system is 80% of RAM, as localmodels computes them.
  */
 export interface LocalModelPool {
   id: LocalModelPoolId;
@@ -1393,6 +1410,10 @@ export interface LocalModelPool {
   gpu_index?: number;
   total_bytes: NonNegativeInteger;
   used_bytes: NonNegativeInteger;
+  /**
+   * Memory kept back for the OS, display, or Metal safety margin.
+   */
+  reserve_bytes?: number;
   /**
    * @maxItems 256
    */
@@ -1512,6 +1533,18 @@ export interface LocalModel {
    * Additional host system RAM used alongside GPU VRAM for hybrid offload engines. Sent only when runner.welcome service_features names local_models_engine.
    */
   host_ram_bytes?: number;
+  /**
+   * Whether the model currently fits its pool in live free memory.
+   */
+  fits_now?: boolean;
+  /**
+   * Pool-aligned free memory needed to load when fits_now is false.
+   */
+  load_need_bytes?: number;
+  /**
+   * Pool-aligned free memory on the planned pool when fits_now is false.
+   */
+  load_free_bytes?: number;
 }
 export interface LocalModelAvailability {
   downloadable: boolean;

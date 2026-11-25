@@ -81,12 +81,16 @@ and the `LocalModel*` definitions of `runner-gateway/envelope.schema.json`.
 Actions go Web → TeamHub → Agent Service → Computer → `localmodels`:
 
 1. Web posts `actOnLocalComputerModel`
-   (`POST /v0/tenants/{tenantId}/local-computers/{computerId}/local-models/{modelId}/actions`).
+   (`POST /v0/tenants/{tenantId}/local-computers/{computerId}/local-models/{modelId}/actions`)
+   or `refreshLocalComputerModels`
+   (`POST /v0/tenants/{tenantId}/local-computers/{computerId}/local-models`).
    Only the Computer owner may act.
 2. TeamHub calls Node Services `actOnLocalComputerModels`
    (`POST /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-model-actions`).
-3. Agent Service sends `execute` with kind `local_models` (download, cancel,
-   load with `unload_first`, unload, remove, or refresh). The Daemon answers
+3. Agent Service sends `execute` with kind `local_models` (download with optional
+   `no_autoload`, cancel, load with `unload_first`, unload, remove, or refresh).
+   Agent Service sends `no_autoload: true` only to Computer 0.65.0 or later
+   (`FIRST_LOCAL_MODEL_DOWNLOAD_ONLY_COMPUTER_VERSION`). The Daemon answers
    `executed` with outcome `accepted` or `refused` at once and runs the
    `localmodels library` job itself. The ack returns to TeamHub as
    `LocalModelActionAck`; a refusal becomes a `LocalModelsErrorCode`.
@@ -118,6 +122,11 @@ Progress and outcomes travel back only as snapshots:
    `local_models_external_holders` (to every Computer, which ignores unknown
    features); otherwise the Daemon strips it. `[]` means localmodels found no
    closeable app, while an absent field means not reported.
+   Agent Service advertises `local_models_memory_breakdown` only to Computer
+   0.65.0 or later (`FIRST_LOCAL_MODELS_MEMORY_BREAKDOWN_COMPUTER_VERSION`).
+   The Daemon includes `fits_now`, `load_need_bytes`, `load_free_bytes`,
+   `ram_available_bytes`, `metal_working_set_bytes`, `memory_pressure`, and
+   `reserve_bytes` only when the welcome names that feature.
    `service_features` also declares `local_model_unavailable` to every Computer
    that receives the field: a Daemon ignores a feature it does not know, and one
    that knows it reports a Pi Run whose local model it could not load with that

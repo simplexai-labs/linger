@@ -2581,6 +2581,11 @@ export interface components {
      * @example 2026-07-21T10:15:30Z
      */
     Timestamp: string;
+    /**
+     * @description macOS memory pressure level at snapshot time.
+     * @enum {string}
+     */
+    LocalModelMemoryPressure: "normal" | "warn" | "critical";
     LocalModelGpu: {
       index: number;
       uuid?: string;
@@ -2602,6 +2607,17 @@ export interface components {
       engine_label: string;
       /** Format: int64 */
       ram_total_bytes: number;
+      /**
+       * Format: int64
+       * @description Free plus reclaimable unified/system memory reported by the host probe.
+       */
+      ram_available_bytes?: number;
+      /**
+       * Format: int64
+       * @description Metal recommendedMaxWorkingSetSize on Apple Silicon Macs.
+       */
+      metal_working_set_bytes?: number;
+      memory_pressure?: components["schemas"]["LocalModelMemoryPressure"];
       /** Format: int64 */
       disk_free_bytes: number;
       gpus: components["schemas"]["LocalModelGpu"][];
@@ -2623,7 +2639,7 @@ export interface components {
       /** Format: int64 */
       bytes: number;
     };
-    /** @description One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them. */
+    /** @description One place models load into. unified is RAM less OS/Metal reserves; system is 80% of RAM, as localmodels computes them. */
     LocalModelPool: {
       id: components["schemas"]["LocalModelPoolId"];
       /** @enum {string} */
@@ -2634,6 +2650,11 @@ export interface components {
       total_bytes: number;
       /** Format: int64 */
       used_bytes: number;
+      /**
+       * Format: int64
+       * @description Memory kept back for the OS, display, or Metal safety margin.
+       */
+      reserve_bytes?: number;
       holders: components["schemas"]["LocalModelPoolHolder"][];
       /** @description Closeable desktop applications holding this pool's memory, as localmodels reports them. An empty list means localmodels looked and found no closeable app; absent means not reported, and the rest of used_bytes is then not known to be other apps. */
       external_holders?: components["schemas"]["LocalModelPoolExternalHolder"][];
@@ -2852,6 +2873,18 @@ export interface components {
        * @description Additional host system RAM used alongside GPU VRAM for hybrid offload engines (such as PolyStrata); absent when all weights stay in the model's primary pool.
        */
       host_ram_bytes?: number;
+      /** @description Whether the model currently fits its pool in live free memory. */
+      fits_now?: boolean;
+      /**
+       * Format: int64
+       * @description Pool-aligned free memory needed to load when fits_now is false.
+       */
+      load_need_bytes?: number;
+      /**
+       * Format: int64
+       * @description Pool-aligned free memory on the planned pool when fits_now is false.
+       */
+      load_free_bytes?: number;
     };
     /** @description Present only when localmodels debug mode (tiny or simulate) is active on the Computer. config_path is shown only to the Computer owner. */
     LocalModelsDebugInfo: {

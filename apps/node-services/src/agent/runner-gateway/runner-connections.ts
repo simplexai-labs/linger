@@ -29,6 +29,7 @@ import {
   FIRST_PI_MODEL_INVOKE_COMPUTER_VERSION,
   FIRST_BYOK_ENDPOINT_COMPUTER_VERSION,
   FIRST_LOCAL_MODELS_DIAGNOSTICS_COMPUTER_VERSION,
+  FIRST_LOCAL_MODELS_MEMORY_BREAKDOWN_COMPUTER_VERSION,
   FIRST_MODEL_INVOKE_OUTCOMES_COMPUTER_VERSION,
   FIRST_LOCAL_MODELS_ENGINE_COMPUTER_VERSION,
   FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
@@ -495,6 +496,12 @@ export class RunnerConnections {
                 FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
               )
                 ? (["local_models_concurrency_probe"] as const)
+                : []),
+              ...(isComputerVersionAtLeast(
+                connection.hello.daemon_version,
+                FIRST_LOCAL_MODELS_MEMORY_BREAKDOWN_COMPUTER_VERSION,
+              )
+                ? (["local_models_memory_breakdown"] as const)
                 : []),
               // A Computer ignores a feature it does not know, so these
               // need no release gate.

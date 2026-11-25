@@ -48,6 +48,7 @@ import type {
 } from "./local-models-queries";
 import {
   collapsedRowBadges,
+  downloadMemoryShortfall,
   downloadPercent,
   downloadStatusDetail,
   downloadStopped,
@@ -218,17 +219,30 @@ function OpenChatLink({
 function RowStatusLine({
   availableSummary,
   detail,
+  lowMemoryNeedBytes,
   slower,
   status,
   tag,
 }: {
   availableSummary: string;
   detail: string | null;
+  lowMemoryNeedBytes?: number;
   slower: boolean;
   status: ModelStatus;
   tag: { dot?: string; label: Message<string>; working?: boolean };
 }) {
   const t = useT();
+  const lowMemoryNotice =
+    lowMemoryNeedBytes !== undefined ? (
+      <>
+        {" · "}
+        <span className="text-app-warning">
+          {t(m.needsFreeToLoad, {
+            need: formatGigabytes(lowMemoryNeedBytes, t),
+          })}
+        </span>
+      </>
+    ) : null;
   return (
     <span
       className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
@@ -265,10 +279,16 @@ function RowStatusLine({
             {availableSummary}
             {" · "}
             <span className="text-app-warning">{t(m.runsSlower)}</span>
+            {lowMemoryNotice}
           </>
         ) : detail ? (
-          ` · ${detail}`
-        ) : null}
+          <>
+            {` · ${detail}`}
+            {lowMemoryNotice}
+          </>
+        ) : (
+          lowMemoryNotice
+        )}
       </span>
     </span>
   );
@@ -545,6 +565,8 @@ export function ModelRow({
         variants!.map((variant) => variant.model.quant || variant.model.name),
       ).size < variants!.length
     : false;
+  const lowMemory =
+    status === "available" ? downloadMemoryShortfall(view, model) : null;
   const brand = modelBrand(model);
   const computerId = view.computer.computer_id;
   const usedNames = usedByAgentNames(entry, assignableAgents, computerId);
@@ -700,6 +722,7 @@ export function ModelRow({
             <RowStatusLine
               availableSummary={availableSummary}
               detail={ending ? null : detail}
+              lowMemoryNeedBytes={lowMemory?.needBytes}
               slower={slower}
               status={status}
               tag={tag}

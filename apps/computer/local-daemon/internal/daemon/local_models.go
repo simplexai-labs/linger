@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport"
@@ -43,6 +44,11 @@ const serviceFeatureLocalModelsConcurrencyProbe = "local_models_concurrency_prob
 // says the Agent Service accepts external_holders on LocalModelPool rows. Older
 // services close the connection on unknown LocalModelPool properties.
 const serviceFeatureLocalModelsExternalHolders = "local_models_external_holders"
+
+// serviceFeatureLocalModelsMemoryBreakdown in runner.welcome's service_features
+// says the Agent Service accepts live fit, host memory, and pool reserve fields.
+// Older services close the connection on unknown properties.
+const serviceFeatureLocalModelsMemoryBreakdown = "local_models_memory_breakdown"
 
 // serviceFeatureLocalModelUnavailable in runner.welcome's service_features
 // says the Agent Service accepts the local_model_unavailable Run failure
@@ -105,20 +111,25 @@ func (d *Daemon) PublishLocalModels(snapshot wire.LocalModelsSnapshot) {
 	defer d.localModelsMu.Unlock()
 	d.connectionMu.Lock()
 	stream := d.localModelsStream
+	diagnostics := d.localModelsDiagnostics.Load()
+	engine := d.localModelsEngine.Load()
+	concurrencyProbe := d.localModelsConcurrencyProbe.Load()
+	externalHolders := d.localModelsExternalHolders.Load()
+	memoryBreakdown := d.localModelsMemoryBreakdown.Load()
 	d.connectionMu.Unlock()
 	if stream == nil {
 		return
 	}
-	if !d.localModelsDiagnostics.Load() {
-		snapshot = downgradeLocalModelsSnapshot(snapshot)
+	if !diagnostics || !memoryBreakdown {
+		snapshot = downgradeLocalModelsSnapshot(snapshot, diagnostics, memoryBreakdown)
 	}
-	if !d.localModelsEngine.Load() {
+	if !engine {
 		snapshot = stripLocalModelsEngine(snapshot)
 	}
-	if !d.localModelsConcurrencyProbe.Load() {
+	if !concurrencyProbe {
 		snapshot = stripLocalModelsConcurrencyProbe(snapshot)
 	}
-	if !d.localModelsExternalHolders.Load() {
+	if !externalHolders {
 		snapshot = stripLocalModelsExternalHolders(snapshot)
 	}
 	d.localModelsRevision++
@@ -154,14 +165,19 @@ func (d *Daemon) handleLocalModelsCommand(ctx context.Context, stream transport.
 		slog.Info("local_models.command_expired", "action", request.Action, "model", request.ModelID)
 		return nil
 	}
-	action := localmodels.Action{Name: request.Action, Model: request.ModelID, UnloadFirst: request.UnloadFirst}
+	action := localmodels.Action{
+		Name:        request.Action,
+		Model:       request.ModelID,
+		UnloadFirst: request.UnloadFirst,
+		NoAutoload:  request.NoAutoload != nil && *request.NoAutoload,
+	}
 	var refusal *wire.LocalModelActionRefusal
 	switch {
 	case request.RunnerID != d.computerID || !d.ownedBy(request.TenantID, request.OwnerActorID):
 		// The Agent Service routes only the Computer's own owners here.
 		slog.Warn("local_models.command_rejected", "reason", "owner", "action", request.Action)
 		refusal = &wire.LocalModelActionRefusal{Code: localmodels.CodeToolFailed, Detail: "the command does not name this Computer's owner"}
-	case !validLocalModelAction(action):
+	case !validLocalModelAction(request):
 		slog.Warn("local_models.command_rejected", "reason", "shape", "action", request.Action)
 		refusal = &wire.LocalModelActionRefusal{Code: "MODEL_UNKNOWN", Detail: "the command names no valid model action"}
 	case !d.acceptsLocalModels(stream):
@@ -217,18 +233,21 @@ func (d *Daemon) handleLocalModelsCommand(ctx context.Context, stream transport.
 
 // validLocalModelAction checks what the wire schema requires, so no value
 // the tool would read as an option reaches its command line.
-func validLocalModelAction(action localmodels.Action) bool {
-	switch action.Name {
+func validLocalModelAction(request wire.CapabilityLocalModelsExecute) bool {
+	if request.NoAutoload != nil && request.Action != localmodels.ActionDownload {
+		return false
+	}
+	switch request.Action {
 	case localmodels.ActionRefresh:
-		return action.Model == "" && len(action.UnloadFirst) == 0
+		return request.ModelID == "" && len(request.UnloadFirst) == 0
 	case localmodels.ActionDownload, localmodels.ActionCancel, localmodels.ActionUnload, localmodels.ActionRemove:
-		return localmodels.ValidModelID(action.Model) && len(action.UnloadFirst) == 0
+		return localmodels.ValidModelID(request.ModelID) && len(request.UnloadFirst) == 0
 	case localmodels.ActionLoad:
-		if !localmodels.ValidModelID(action.Model) {
+		if !localmodels.ValidModelID(request.ModelID) {
 			return false
 		}
-		for _, other := range action.UnloadFirst {
-			if !localmodels.ValidModelID(other) || other == action.Model {
+		for _, other := range request.UnloadFirst {
+			if !localmodels.ValidModelID(other) || other == request.ModelID {
 				return false
 			}
 		}
@@ -245,16 +264,35 @@ func (d *Daemon) acceptsLocalModels(stream transport.Stream) bool {
 	return d.localModelsStream != nil && d.localModelsStream == stream
 }
 
-// downgradeLocalModelsSnapshot strips diagnostic fields and maps newer codes to
-// legacy equivalents when talking to an Agent Service that did not announce
-// serviceFeatureLocalModelsDiagnostics.
-func downgradeLocalModelsSnapshot(snapshot wire.LocalModelsSnapshot) wire.LocalModelsSnapshot {
-	snapshot.Debug = nil
-	if len(snapshot.Models) == 0 {
-		return snapshot
+// downgradeLocalModelsSnapshot omits fields the Agent Service does not accept.
+func downgradeLocalModelsSnapshot(snapshot wire.LocalModelsSnapshot, diagnostics, memoryBreakdown bool) wire.LocalModelsSnapshot {
+	if !diagnostics {
+		snapshot.Debug = nil
 	}
-	models := make([]wire.LocalModel, len(snapshot.Models))
-	for i, model := range snapshot.Models {
+	if !memoryBreakdown {
+		if snapshot.Host != nil {
+			host := *snapshot.Host
+			host.RamAvailableBytes = nil
+			host.MetalWorkingSetBytes = nil
+			host.MemoryPressure = ""
+			snapshot.Host = &host
+		}
+		snapshot.Pools = slices.Clone(snapshot.Pools)
+		for i := range snapshot.Pools {
+			snapshot.Pools[i].ReserveBytes = nil
+		}
+	}
+	snapshot.Models = slices.Clone(snapshot.Models)
+	for i := range snapshot.Models {
+		model := &snapshot.Models[i]
+		if !memoryBreakdown {
+			model.FitsNow = nil
+			model.LoadNeedBytes = nil
+			model.LoadFreeBytes = nil
+		}
+		if diagnostics {
+			continue
+		}
 		if reason := model.Availability.Reason; reason != nil {
 			legacy := &wire.LocalModelAvailabilityReason{Code: reason.Code, NeedBytes: reason.NeedBytes, HaveBytes: reason.HaveBytes}
 			switch legacy.Code {
@@ -270,9 +308,7 @@ func downgradeLocalModelsSnapshot(snapshot wire.LocalModelsSnapshot) wire.LocalM
 			copied.Code = downgradeLocalModelErrorCode(copied.Code)
 			model.Error = &copied
 		}
-		models[i] = model
 	}
-	snapshot.Models = models
 	return snapshot
 }
 

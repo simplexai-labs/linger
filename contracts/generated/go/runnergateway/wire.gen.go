@@ -1217,13 +1217,16 @@ func (LocalModelGpu) RequiredFields() []string {
 
 // LocalModelHost mirrors the LocalModelHost schema shape.
 type LocalModelHost struct {
-	Platform      string          `json:"platform"`
-	Arch          string          `json:"arch"`
-	OsLabel       string          `json:"os_label"`
-	EngineLabel   string          `json:"engine_label"`
-	RamTotalBytes uint64          `json:"ram_total_bytes"`
-	DiskFreeBytes uint64          `json:"disk_free_bytes"`
-	Gpus          []LocalModelGpu `json:"gpus"`
+	Platform             string          `json:"platform"`
+	Arch                 string          `json:"arch"`
+	OsLabel              string          `json:"os_label"`
+	EngineLabel          string          `json:"engine_label"`
+	RamTotalBytes        uint64          `json:"ram_total_bytes"`
+	RamAvailableBytes    *uint64         `json:"ram_available_bytes,omitempty"`
+	MetalWorkingSetBytes *uint64         `json:"metal_working_set_bytes,omitempty"`
+	MemoryPressure       string          `json:"memory_pressure,omitempty"`
+	DiskFreeBytes        uint64          `json:"disk_free_bytes"`
+	Gpus                 []LocalModelGpu `json:"gpus"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModelHost.
@@ -1267,6 +1270,7 @@ type LocalModelPool struct {
 	GpuIndex        *uint64                        `json:"gpu_index,omitempty"`
 	TotalBytes      uint64                         `json:"total_bytes"`
 	UsedBytes       uint64                         `json:"used_bytes"`
+	ReserveBytes    *uint64                        `json:"reserve_bytes,omitempty"`
 	Holders         []LocalModelPoolHolder         `json:"holders"`
 	ExternalHolders []LocalModelPoolExternalHolder `json:"external_holders,omitzero"`
 }
@@ -1412,6 +1416,9 @@ type LocalModel struct {
 	Concurrency           *uint64                     `json:"concurrency,omitempty"`
 	ConcurrencyProbing    *bool                       `json:"concurrency_probing,omitempty"`
 	HostRamBytes          *uint64                     `json:"host_ram_bytes,omitempty"`
+	FitsNow               *bool                       `json:"fits_now,omitempty"`
+	LoadNeedBytes         *uint64                     `json:"load_need_bytes,omitempty"`
+	LoadFreeBytes         *uint64                     `json:"load_free_bytes,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModel.
@@ -1468,6 +1475,7 @@ type CapabilityLocalModelsExecute struct {
 	Action          string   `json:"action"`
 	ModelID         string   `json:"model_id,omitempty"`
 	UnloadFirst     []string `json:"unload_first,omitempty"`
+	NoAutoload      *bool    `json:"no_autoload,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a CapabilityLocalModelsExecute.

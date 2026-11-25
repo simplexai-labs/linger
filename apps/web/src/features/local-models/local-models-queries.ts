@@ -106,6 +106,7 @@ export function localModelActionMutationKey(
 export interface LocalModelActionInput {
   action: LocalModelAction;
   modelId: string;
+  noAutoload?: boolean;
   unloadFirst?: string[];
 }
 
@@ -114,13 +115,15 @@ export function actOnLocalComputerModel(
   client: TeamHubClient,
   tenantId: string,
   computerId: string,
-  { action, modelId, unloadFirst }: LocalModelActionInput,
+  { action, modelId, noAutoload, unloadFirst }: LocalModelActionInput,
 ) {
   return teamHubData(
     client.api.POST(localModelActionPath, {
-      body: unloadFirst?.length
-        ? { action, unload_first: unloadFirst }
-        : { action },
+      body: {
+        action,
+        ...(noAutoload ? { no_autoload: true } : {}),
+        ...(unloadFirst?.length ? { unload_first: unloadFirst } : {}),
+      },
       params: { path: { computerId, modelId, tenantId } },
     }),
   );
