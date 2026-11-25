@@ -323,12 +323,12 @@ describe("XaiLiveSession", () => {
         delta: odd.subarray(3).toString("base64"),
       },
       { type: "response.output_audio_transcript.delta", delta: "OK" },
-      // The settled transcript arrives after the reply already started.
+      // The settled transcript, which carries no status, arrives after the
+      // reply already started.
       {
         type: "conversation.item.input_audio_transcription.completed",
         item_id: "u1",
         transcript: "Check the schedule",
-        status: "completed",
       },
       { type: "response.output_audio.done" },
       { type: "response.done", response: { status: "completed" } },
@@ -342,6 +342,55 @@ describe("XaiLiveSession", () => {
       { type: "audio_delta", pcm: Int16Array.from([1]) },
       { type: "audio_delta", pcm: Int16Array.from([2]) },
       { type: "text_delta", text: "OK", update: false },
+    ]);
+    await session.close();
+  });
+
+  it("settles the input on its final transcript when the reply only calls a tool", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    const events = collect(session, 5);
+    provider.emit(
+      { type: "input_audio_buffer.speech_started", item_id: "u1" },
+      {
+        type: "conversation.item.input_audio_transcription.updated",
+        item_id: "u1",
+        transcript: "Open the...",
+      },
+      {
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "u1",
+        transcript: "Open the...",
+        status: "in_progress",
+      },
+      // xAI's final transcript carries no status.
+      {
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "u1",
+        transcript: "Open the mail from Lisa",
+      },
+      { type: "response.created", response: { id: "r1" } },
+      {
+        type: "response.function_call_arguments.done",
+        call_id: "c1",
+        name: "lookup",
+        arguments: "{}",
+      },
+    );
+    expect(await events).toEqual([
+      { type: "speech_started", itemId: "u1" },
+      { type: "transcript_delta", itemId: "u1", text: "Open the..." },
+      {
+        type: "transcript_completed",
+        itemId: "u1",
+        text: "Open the mail from Lisa",
+      },
+      { type: "response_started" },
+      {
+        type: "function_calls",
+        update: false,
+        calls: [{ callId: "c1", name: "lookup", arguments: "{}" }],
+      },
     ]);
     await session.close();
   });
@@ -430,7 +479,6 @@ describe("XaiLiveSession", () => {
         type: "conversation.item.input_audio_transcription.completed",
         item_id: "i1",
         transcript: spanishRequest,
-        status: "completed",
       },
       { type: "response.created", response: { id: "r1" } },
       {
