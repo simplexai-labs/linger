@@ -289,3 +289,91 @@ it("synchronizes managed MCP servers dynamically and reports structured verdicts
     await rm(root, { recursive: true, force: true });
   }
 }, 30_000);
+
+it("sorts managed MCP servers and active tool names deterministically", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "linger-pi-tool-order-"));
+  try {
+    const file = path.join(root, "mcp.json");
+    const entry = new URL("../tools/pi-mcp.mjs", import.meta.url).href;
+    const mod = (await import(entry)) as {
+      default: (pi: Record<string, unknown>) => Promise<void>;
+      loadManagedMcpConfig: (configPath: string) => {
+        servers: Array<{ name: string }>;
+      };
+      sortActiveToolNames: (names: string[]) => string[];
+    };
+
+    await writeFile(
+      file,
+      JSON.stringify({
+        mcpServers: {
+          zeta: { type: "http", url: "http://127.0.0.1:1001/zeta" },
+          alpha: { type: "http", url: "http://127.0.0.1:1002/alpha" },
+          mid: { type: "http", url: "http://127.0.0.1:1003/mid" },
+        },
+      }),
+      { mode: 0o600 },
+    );
+    expect(mod.loadManagedMcpConfig(file).servers.map((s) => s.name)).toEqual([
+      "alpha",
+      "mid",
+      "zeta",
+    ]);
+
+    expect(
+      mod.sortActiveToolNames([
+        "read",
+        "mcp__zeta__b",
+        "bash",
+        "mcp__alpha__z",
+        "edit",
+        "read_mcp_resource",
+        "mcp__alpha__a",
+        "list_mcp_resources",
+      ]),
+    ).toEqual([
+      "read",
+      "bash",
+      "edit",
+      "list_mcp_resources",
+      "mcp__alpha__a",
+      "mcp__alpha__z",
+      "mcp__zeta__b",
+      "read_mcp_resource",
+    ]);
+
+    const handlers = new Map<string, () => Promise<void> | void>();
+    let currentTools = ["read", "bash", "mcp__zeta__b", "mcp__alpha__a"];
+    const setCalls: string[][] = [];
+    const fakePi = {
+      on: (event: string, handler: () => Promise<void> | void) => {
+        handlers.set(event, handler);
+      },
+      getActiveTools: () => currentTools,
+      setActiveTools: (next: string[]) => {
+        setCalls.push(next);
+        currentTools = next;
+      },
+    };
+    const prevConfig = process.env.LINGER_PI_MANAGED_MCP_CONFIG;
+    delete process.env.LINGER_PI_MANAGED_MCP_CONFIG;
+    try {
+      await mod.default(fakePi);
+    } finally {
+      if (prevConfig !== undefined) {
+        process.env.LINGER_PI_MANAGED_MCP_CONFIG = prevConfig;
+      }
+    }
+    const beforeStart = handlers.get("before_agent_start");
+    expect(beforeStart).toBeTypeOf("function");
+    await beforeStart!();
+    expect(setCalls).toEqual([
+      ["read", "bash", "mcp__alpha__a", "mcp__zeta__b"],
+    ]);
+    // Running again when already sorted does not trigger an extra rebuild.
+    await beforeStart!();
+    expect(setCalls).toHaveLength(1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

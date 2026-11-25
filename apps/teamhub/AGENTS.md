@@ -214,7 +214,24 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   because they often carry outside content. A refusal names its reason in an
   error issue, which the CLI shows the Agent. The handoff body is hidden from the Web timeline but other
   Agents in that Room can read it. Results come back through
-  `send_direct_message`.
+  `send_direct_message`. Live in the AnotherMe private chat uses the same
+  handoff transaction after spoken confirmation, with its active session's
+  identity and lease instead of a direct-chat Meta Run. Live-created Rooms
+  include the call's Agent through ordinary member admission. Existing groups
+  require both members before handoff; a missing Agent is invited explicitly.
+  `room_handoffs` binds each request to its Human, AnotherMe, origin and target;
+  `handoff_id` continues that request. Agent message history exposes the
+  report's `room_handoff` routing metadata to its owning AnotherMe, so text
+  follow-ups preserve the same target. Target-room `send_direct_message` reports
+  carry `handoff_id` and `handoff_state` (`working`, `waiting_for_user`, or
+  `completed`), remain visible in private chat after the call, and wake the
+  existing Live task-update stream. Live reads only reports created during
+  its private call, scoped to both identities and current target membership.
+  `ack_room_reports` records completed speech for restart deduplication;
+  interrupted or unspoken updates stay unacknowledged. The private Message is
+  the durable fallback, not an audio-heard receipt. Task delegation still
+  creates AlterEgo Tasks; it does not perform Room coordination. No additional
+  network round trip or file walk is added before `provider_ready`.
 
 - Go generates only types for the contracts TeamHub serves. Mount each
   operation in the caller's route table in `internal/app/routes_*.go`;

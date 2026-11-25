@@ -219,9 +219,7 @@ export const computersMessages = defineMessages("computers", {
   moving: "Moving…",
 
   // Connecting the user's Chrome to a Computer.
-  connectMyBrowser: "Connect my browser",
-  connectMyBrowserIntro:
-    "Let Agent browser tasks on this Computer use your everyday Chrome and its sign-ins. The token goes only to your Computer and never appears in chat.",
+  connectChromeIntro: "Let Agents on <name>{computer}</name> use your Chrome.",
   loadingComputers: "Loading your Computers…",
   cannotLoadComputers: "Can't load your Computers right now.",
   computerNoLongerConnected:
@@ -229,17 +227,13 @@ export const computersMessages = defineMessages("computers", {
   noLocalComputerYet:
     "You don't have a Local Computer yet. Connect one in Settings > Computers first. Cloud Computers can't use your browser.",
   computer: "Computer",
-  computerNamed: "Computer: <name>{computer}</name>",
   computerOfflineOption: "{computer} (offline)",
-  reconfigure: "Reconfigure",
+  replaceToken: "Replace token",
   disconnect: "Disconnect",
   disconnecting: "Disconnecting…",
-  installExtensionStep: "Install <link>Playwright Extension</link> in Chrome",
-  copyTokenStep:
-    "Click the extension icon and copy the token it shows (the full <code>PLAYWRIGHT_MCP_EXTENSION_TOKEN=…</code> line also works)",
-  pasteTokenStep: "Paste it below and connect",
   extensionToken: "Extension token",
-  pasteToken: "Paste token",
+  pasteTokenFromExtension: "Paste the token from Playwright Extension",
+  noExtensionYet: "No extension yet? <link>Install Playwright Extension</link>",
   connectingUpToMinute: "Connecting, up to 1 minute…",
   checkingBrowserStatus: "Checking browser status…",
   browserComputerOffline:

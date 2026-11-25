@@ -191,7 +191,7 @@ export function EditAgentRuntimeDialog({
           className="space-y-4 px-5 py-4"
           disabled={isPending || loading}
         >
-          <label className="block">
+          <div>
             <span className="mb-1.5 block text-sm font-medium">
               {t(agentRuntimeMessages.computer)}
             </span>
@@ -213,8 +213,8 @@ export function EditAgentRuntimeDialog({
                 </SelectItem>
               ))}
             </Select>
-          </label>
-          <label className="block">
+          </div>
+          <div>
             <span className="mb-1.5 block text-sm font-medium">
               {t(agentRuntimeMessages.runtime)}
             </span>
@@ -244,9 +244,9 @@ export function EditAgentRuntimeDialog({
                 </SelectItem>
               ))}
             </Select>
-          </label>
+          </div>
           <div className="space-y-1.5">
-            <label className="block">
+            <div>
               <span className="mb-1.5 block text-sm font-medium">
                 {t(agentRuntimeMessages.model)}
               </span>
@@ -271,7 +271,7 @@ export function EditAgentRuntimeDialog({
                   </SelectItem>
                 ))}
               </Select>
-            </label>
+            </div>
             {selection.runtimeType === "pi" &&
             selection.computerId &&
             !loading &&
@@ -649,7 +649,7 @@ function ReasoningField({
     );
   }
   return (
-    <label className="block">
+    <div>
       <span className="mb-1.5 block text-sm font-medium">
         {t(agentRuntimeMessages.reasoning)}
       </span>
@@ -665,7 +665,7 @@ function ReasoningField({
           </SelectItem>
         ))}
       </Select>
-    </label>
+    </div>
   );
 }
 

@@ -529,6 +529,18 @@ func (s *Service) LiveTasks(ctx context.Context, voiceSessionID string) (teamhub
 		text, _ := voicelive.Truncate(strings.TrimSpace(strings.TrimPrefix(wake.Body, notify)), 20000)
 		alerts = append(alerts, teamhubinternal.VoiceLiveAlert{AlertId: wake.ID, Text: text})
 	}
+	reports, err := s.queries.ListVoiceLiveRoomReports(ctx, session.ID)
+	if err != nil {
+		return teamhubinternal.VoiceLiveTaskList{}, fmt.Errorf("read live Room reports: %w", err)
+	}
+	if len(reports) > 0 {
+		result := make([]teamhubinternal.VoiceLiveRoomReport, 0, len(reports))
+		for _, report := range reports {
+			text, _ := voicelive.Truncate(report.Body, 20000)
+			result = append(result, teamhubinternal.VoiceLiveRoomReport{MessageId: report.MessageID, HandoffId: report.HandoffID, RoomId: report.RoomID, RoomName: report.RoomName, State: teamhubinternal.VoiceLiveRoomReportState(report.State), Text: text})
+		}
+		response.RoomReports = &result
+	}
 	if len(alerts) > 0 {
 		response.Alerts = &alerts
 	}

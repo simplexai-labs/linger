@@ -730,6 +730,51 @@ describe("XaiLiveSession", () => {
     await session.close();
   });
 
+  it("never says or shows Grok's marker for words it already said, nor the repeat inside it", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    const shown: string[] = [];
+    const heard: number[] = [];
+    const done = (async () => {
+      for await (const event of session.events()) {
+        if (event.type === "text_delta") shown.push(event.text);
+        if (event.type === "audio_delta") heard.push(...event.pcm);
+        if (event.type === "response_finished") break;
+      }
+    })();
+    provider.emit(
+      { type: "response.created", response: { id: "r1" } },
+      { type: "response.output_audio_transcript.delta", delta: "Is this OK? " },
+      { type: "response.output_audio.delta", delta: pcmBase64(1) },
+      // The marker arrives split across deltas, as streamed words do.
+      {
+        type: "response.output_audio_transcript.delta",
+        delta: "<response_seg",
+      },
+      {
+        type: "response.output_audio_transcript.delta",
+        delta:
+          "ment_0_already_spoken> Is this OK? </response_segment_0_already",
+      },
+      { type: "response.output_audio.delta", delta: pcmBase64(2) },
+      {
+        type: "response.output_audio_transcript.delta",
+        delta: "_spoken\n> Faster now.",
+      },
+      { type: "response.output_audio.delta", delta: pcmBase64(3) },
+      // A stray closing marker is dropped too; other angle brackets stay.
+      {
+        type: "response.output_audio_transcript.delta",
+        delta: "</response_segment_1_already_spoken> a <b> c",
+      },
+      { type: "response.done", response: { status: "completed" } },
+    );
+    await done;
+    expect(shown.join("")).toBe("Is this OK?  Faster now. a <b> c");
+    expect(heard).toEqual([1, 3]);
+    await session.close();
+  });
+
   it("never runs a call an update without tools wrote as words", async () => {
     const provider = await fakeProvider();
     const session = await open(provider.url);

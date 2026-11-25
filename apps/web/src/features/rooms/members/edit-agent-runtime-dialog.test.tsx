@@ -97,6 +97,49 @@ describe("EditAgentRuntimeDialog", () => {
     });
   });
 
+  it("dismisses an open dropdown when clicking field headings without reopening or opening another field", async () => {
+    renderDialog({ onSave: vi.fn() });
+    const model = await screen.findByRole("combobox", { name: "Agent model" });
+    await waitFor(() => expect(model).toHaveTextContent("Codex default"));
+    const runtime = screen.getByRole("combobox", { name: "Agent runtime" });
+    const modelHeading = screen.getByText("Model");
+    const runtimeHeading = screen.getByText("Runtime");
+
+    // Clicking headings while closed does not spuriously open dropdowns.
+    fireEvent.pointerDown(modelHeading, { button: 0, pointerId: 1 });
+    fireEvent.pointerUp(modelHeading, { button: 0, pointerId: 1 });
+    fireEvent.click(modelHeading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(model).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.pointerDown(runtimeHeading, { button: 0, pointerId: 2 });
+    fireEvent.pointerUp(runtimeHeading, { button: 0, pointerId: 2 });
+    fireEvent.click(runtimeHeading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(runtime).toHaveAttribute("aria-expanded", "false");
+
+    // Clicking the Model heading/row while Model is open dismisses it without reopening.
+    fireEvent.click(model);
+    await screen.findByRole("option", { name: "Codex fast" });
+    fireEvent.pointerDown(modelHeading, { button: 0, pointerId: 3 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.pointerUp(modelHeading, { button: 0, pointerId: 3 });
+    fireEvent.click(modelHeading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(model).toHaveAttribute("aria-expanded", "false");
+
+    // Clicking the Runtime heading/row while Model is open closes Model without opening Runtime.
+    fireEvent.click(model);
+    await screen.findByRole("option", { name: "Codex fast" });
+    fireEvent.pointerDown(runtimeHeading, { button: 0, pointerId: 4 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.pointerUp(runtimeHeading, { button: 0, pointerId: 4 });
+    fireEvent.click(runtimeHeading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(model).toHaveAttribute("aria-expanded", "false");
+    expect(runtime).toHaveAttribute("aria-expanded", "false");
+  });
+
   it.each(["computer", "workspace"])(
     "never falls back to a different %s if the configured binding is missing",
     async (missing) => {

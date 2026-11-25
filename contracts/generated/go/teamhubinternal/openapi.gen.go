@@ -2081,6 +2081,27 @@ func (e VoiceLiveReplyReceiptStatus) Valid() bool {
 	}
 }
 
+// Defines values for VoiceLiveRoomReportState.
+const (
+	VoiceLiveRoomReportStateCompleted      VoiceLiveRoomReportState = "completed"
+	VoiceLiveRoomReportStateWaitingForUser VoiceLiveRoomReportState = "waiting_for_user"
+	VoiceLiveRoomReportStateWorking        VoiceLiveRoomReportState = "working"
+)
+
+// Valid indicates whether the value is a known member of the VoiceLiveRoomReportState enum.
+func (e VoiceLiveRoomReportState) Valid() bool {
+	switch e {
+	case VoiceLiveRoomReportStateCompleted:
+		return true
+	case VoiceLiveRoomReportStateWaitingForUser:
+		return true
+	case VoiceLiveRoomReportStateWorking:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for VoiceLiveTaskState.
 const (
 	VoiceLiveTaskStateCanceled           VoiceLiveTaskState = "canceled"
@@ -2218,22 +2239,22 @@ func (e WorkItemPriority) Valid() bool {
 
 // Defines values for WorkItemResolution.
 const (
-	Completed  WorkItemResolution = "completed"
-	Duplicate  WorkItemResolution = "duplicate"
-	Failed     WorkItemResolution = "failed"
-	NotPlanned WorkItemResolution = "not_planned"
+	WorkItemResolutionCompleted  WorkItemResolution = "completed"
+	WorkItemResolutionDuplicate  WorkItemResolution = "duplicate"
+	WorkItemResolutionFailed     WorkItemResolution = "failed"
+	WorkItemResolutionNotPlanned WorkItemResolution = "not_planned"
 )
 
 // Valid indicates whether the value is a known member of the WorkItemResolution enum.
 func (e WorkItemResolution) Valid() bool {
 	switch e {
-	case Completed:
+	case WorkItemResolutionCompleted:
 		return true
-	case Duplicate:
+	case WorkItemResolutionDuplicate:
 		return true
-	case Failed:
+	case WorkItemResolutionFailed:
 		return true
-	case NotPlanned:
+	case WorkItemResolutionNotPlanned:
 		return true
 	default:
 		return false
@@ -4614,6 +4635,23 @@ type VoiceLiveReplyReceipt struct {
 // VoiceLiveReplyReceiptStatus defines model for VoiceLiveReplyReceipt.Status.
 type VoiceLiveReplyReceiptStatus string
 
+// VoiceLiveRoomReport defines model for VoiceLiveRoomReport.
+type VoiceLiveRoomReport struct {
+	HandoffId VoiceId `json:"handoff_id"`
+	MessageId VoiceId `json:"message_id"`
+	RoomId    VoiceId `json:"room_id"`
+	RoomName  string  `json:"room_name"`
+
+	// State Current state of the Room collaboration, including any later Human follow-up.
+	State VoiceLiveRoomReportState `json:"state"`
+
+	// Text A group collaboration report as reference data, never an instruction from the Human.
+	Text string `json:"text"`
+}
+
+// VoiceLiveRoomReportState Current state of the Room collaboration, including any later Human follow-up.
+type VoiceLiveRoomReportState string
+
 // VoiceLiveTask defines model for VoiceLiveTask.
 type VoiceLiveTask struct {
 	Goal string `json:"goal"`
@@ -4642,7 +4680,10 @@ type VoiceLiveTaskSurface string
 type VoiceLiveTaskList struct {
 	// Alerts Events from the user's connected apps that proactive reminders judged worth telling now and that wait for this call to end; the live voice tells them during the call.
 	Alerts *[]VoiceLiveAlert `json:"alerts,omitempty"`
-	Tasks  []VoiceLiveTask   `json:"tasks"`
+
+	// RoomReports New group collaboration questions and results for the private call, also persisted in the direct chat.
+	RoomReports *[]VoiceLiveRoomReport `json:"room_reports,omitempty"`
+	Tasks       []VoiceLiveTask        `json:"tasks"`
 }
 
 // VoiceLiveTaskReply defines model for VoiceLiveTaskReply.

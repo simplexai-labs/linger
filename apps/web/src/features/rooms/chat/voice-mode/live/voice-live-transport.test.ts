@@ -169,6 +169,69 @@ describe("live Voice Mode transport", () => {
     ).toEqual([]);
   });
 
+  it("reports the live model as waking up until the runtime's provider opens", async () => {
+    const runtime = {
+      ...participant("agent-runtime"),
+      isAgent: true,
+      attributes: {
+        "linger.voice_ready_generation": "1",
+        "linger.voice_provider_ready": "0",
+      } as Record<string, string>,
+    };
+    media.present = [runtime];
+    const f = fixture();
+    const providerReady = vi.fn();
+    await openVoiceLive({ ...f.options, providerReady });
+    expect(providerReady.mock.calls).toEqual([[false]]);
+
+    runtime.attributes = {
+      ...runtime.attributes,
+      "linger.voice_provider_ready": "1",
+    };
+    emit("attributes");
+    emit("attributes");
+    // A provider reconnect wakes it up again.
+    runtime.attributes = {
+      ...runtime.attributes,
+      "linger.voice_provider_ready": "0",
+    };
+    emit("attributes");
+    expect(providerReady.mock.calls).toEqual([[false], [true], [false]]);
+  });
+
+  it("reports nothing about the provider until it sees the runtime", async () => {
+    // TeamHub says the call listens before the runtime's attributes arrive.
+    const f = fixture();
+    const providerReady = vi.fn();
+    await openVoiceLive({ ...f.options, providerReady });
+    expect(providerReady).not.toHaveBeenCalled();
+    media.room!.remoteParticipants.set("agent-runtime", {
+      ...participant("agent-runtime"),
+      isAgent: true,
+      attributes: {
+        "linger.voice_ready_generation": "1",
+        "linger.voice_provider_ready": "0",
+      },
+    });
+    emit("attributes");
+    // Waking up from the start, never a Listening that flips back.
+    expect(providerReady.mock.calls).toEqual([[false]]);
+  });
+
+  it("takes a runtime that never reports its provider as connected", async () => {
+    media.present = [
+      {
+        ...participant("agent-runtime"),
+        isAgent: true,
+        attributes: { "linger.voice_ready_generation": "1" },
+      },
+    ];
+    const f = fixture();
+    const providerReady = vi.fn();
+    await openVoiceLive({ ...f.options, providerReady });
+    expect(providerReady.mock.calls).toEqual([[true]]);
+  });
+
   it("opens a chat_live session and subscribes only to the runtime's live reply", async () => {
     const early = publication(voiceLiveReplyTrack);
     const otherTrack = publication("linger-other");

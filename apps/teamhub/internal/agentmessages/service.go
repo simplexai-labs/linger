@@ -37,7 +37,18 @@ type Inbox struct {
 type Resource struct {
 	DocumentID string `json:"document_id"`
 }
+
+// RoomHandoff identifies the collaboration a private report came from.
+type RoomHandoff struct {
+	HandoffID string `json:"handoff_id"`
+	RoomID    string `json:"room_id"`
+	RoomName  string `json:"room_name"`
+	State     string `json:"state"`
+}
+
+// Message is an authorized history entry with optional Room report routing.
 type Message struct {
+	RoomHandoff        *RoomHandoff    `json:"room_handoff,omitempty"`
 	MessageID          string          `json:"message_id"`
 	InboxID            string          `json:"inbox_id"`
 	AuthorActorID      string          `json:"author_actor_id"`
@@ -160,8 +171,22 @@ func readPage(ctx context.Context, queries *store.Queries, params store.ReadAgen
 		result.HasMore = true
 		rows = rows[:limit]
 	}
+	messageIDs := make([]string, 0, len(rows))
 	for _, row := range rows {
-		message := Message{MessageID: row.MessageID, InboxID: row.InboxID, AuthorActorID: row.AuthorActorID,
+		messageIDs = append(messageIDs, row.MessageID)
+	}
+	handoffs := map[string]*RoomHandoff{}
+	if len(messageIDs) > 0 {
+		reports, err := queries.ListAgentMessageRoomHandoffs(ctx, store.ListAgentMessageRoomHandoffsParams{MessageIds: messageIDs, ActorID: params.ActorID, TenantID: params.TenantID})
+		if err != nil {
+			return result, err
+		}
+		for _, report := range reports {
+			handoffs[report.MessageID] = &RoomHandoff{HandoffID: report.HandoffID, RoomID: report.RoomID, RoomName: report.RoomName, State: report.State}
+		}
+	}
+	for _, row := range rows {
+		message := Message{RoomHandoff: handoffs[row.MessageID], MessageID: row.MessageID, InboxID: row.InboxID, AuthorActorID: row.AuthorActorID,
 			Author: row.Author, AuthorKind: row.AuthorKind, Body: row.Body, Segments: row.Segments,
 			MessageKind: row.MessageKind, CreatedAt: row.CreatedAt.Time,
 			ContextMessageIDs: []string{}, ResourceReferences: []Resource{}}

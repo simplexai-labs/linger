@@ -854,6 +854,11 @@ export const messageCommandDefinitions: readonly CommandDefinition[] = [
       "(--messages <JSON> | --messages-file <path|->)",
     ],
     options: {
+      "--handoff": { description: "Room handoff ID this report answers." },
+      "--handoff-state": {
+        description:
+          "working, waiting_for_user, or completed; requires --handoff.",
+      },
       ...Object.fromEntries(
         Object.entries(bodyOptions).map(([key, value]) => [
           key,
@@ -874,6 +879,8 @@ export const messageCommandDefinitions: readonly CommandDefinition[] = [
     ],
     normalize: async (args, reader) => {
       assertPositionals(args, 0, 0);
+      if (option(args, "--handoff-state") && !option(args, "--handoff"))
+        fail("--handoff-state requires --handoff.");
       const complete =
         option(args, "--messages") !== undefined ||
         option(args, "--messages-file") !== undefined;
@@ -891,6 +898,12 @@ export const messageCommandDefinitions: readonly CommandDefinition[] = [
         fail("--messages must be an array of strings.");
       return {
         input: {
+          ...(option(args, "--handoff")
+            ? { handoff_id: option(args, "--handoff") }
+            : {}),
+          ...(option(args, "--handoff-state")
+            ? { handoff_state: option(args, "--handoff-state") }
+            : {}),
           messages: count(messages as unknown[], 1, 100, "Messages").map(
             (value) => string(value, "Message body"),
           ),

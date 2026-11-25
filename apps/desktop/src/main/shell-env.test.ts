@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -70,6 +73,120 @@ describe.skipIf(process.platform === "win32")("loginShellEnvironment", () => {
     expect(
       await loginShellEnvironment({ SHELL: "zsh" }, fallback),
     ).toBeUndefined();
+  });
+
+  it("stabilizes fnm_multishells entries, keeps stable symlinks, and cleans probe symlinks", async () => {
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), "linger-shell-env-"));
+    try {
+      const nodeBin = path.join(
+        root,
+        "fnm",
+        "node-versions",
+        "v22.0.0",
+        "installation",
+        "bin",
+      );
+      await fsp.mkdir(nodeBin, { recursive: true });
+      const installationDir = path.dirname(nodeBin);
+
+      const stableRealBin = path.join(
+        root,
+        "homebrew",
+        "Cellar",
+        "tool",
+        "bin",
+      );
+      await fsp.mkdir(stableRealBin, { recursive: true });
+      const stableOptDir = path.join(root, "opt", "homebrew", "opt");
+      await fsp.mkdir(stableOptDir, { recursive: true });
+      const stableOptBin = path.join(stableOptDir, "tool-bin");
+      await fsp.symlink(stableRealBin, stableOptBin);
+
+      const multishellsDir = path.join(root, "state", "fnm_multishells");
+      await fsp.mkdir(multishellsDir, { recursive: true });
+      const interactiveLink = path.join(multishellsDir, "101_1");
+      const loginLink = path.join(multishellsDir, "102_2");
+      const parentLink = path.join(multishellsDir, "99_0");
+      await fsp.symlink(
+        path.relative(multishellsDir, installationDir),
+        interactiveLink,
+      );
+      await fsp.symlink(installationDir, loginLink);
+      await fsp.symlink(installationDir, parentLink);
+      const danglingEntry = path.join(multishellsDir, "missing", "bin");
+
+      const run: RunShell = async (_shell, args) => {
+        if (args[0] === "-ilc") {
+          return {
+            code: 0,
+            stdout: framed({
+              FNM_MULTISHELL_PATH: interactiveLink,
+              PATH: [
+                path.join(interactiveLink, "bin"),
+                stableOptBin,
+                danglingEntry,
+                "/usr/bin",
+                stableOptBin,
+              ].join(path.delimiter),
+              HTTPS_PROXY: "http://proxy:8080",
+            }),
+          };
+        }
+        return {
+          code: 0,
+          stdout: framed({
+            FNM_MULTISHELL_PATH: loginLink,
+            PATH: [path.join(loginLink, "bin"), "/usr/bin"].join(
+              path.delimiter,
+            ),
+          }),
+        };
+      };
+
+      const env = await loginShellEnvironment(
+        {
+          SHELL: "/bin/zsh",
+          HOME: root,
+          FNM_MULTISHELL_PATH: parentLink,
+        },
+        run,
+      );
+      expect(env).toEqual({
+        PATH: [nodeBin, stableOptBin, danglingEntry, "/usr/bin"].join(
+          path.delimiter,
+        ),
+        HTTPS_PROXY: "http://proxy:8080",
+      });
+      expect(env?.FNM_MULTISHELL_PATH).toBeUndefined();
+      await expect(fsp.lstat(interactiveLink)).rejects.toThrow();
+      await expect(fsp.lstat(loginLink)).rejects.toThrow();
+      expect((await fsp.lstat(parentLink)).isSymbolicLink()).toBe(true);
+    } finally {
+      await fsp.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes trailing slashes and preserves relative-only PATH when stabilization yields none", async () => {
+    const trailingSlashEnv = await loginShellEnvironment(
+      { SHELL: "/bin/zsh" },
+      async (_shell, args) =>
+        args[0] === "-ilc"
+          ? {
+              code: 0,
+              stdout: framed({ PATH: "/usr/bin/:/usr/bin:/bin/" }),
+            }
+          : { code: -1, stdout: "" },
+    );
+    expect(trailingSlashEnv).toEqual({ PATH: "/usr/bin:/bin" });
+
+    const relativeOnlyEnv = await loginShellEnvironment(
+      { SHELL: "/bin/zsh" },
+      async (_shell, args) =>
+        args[0] === "-ilc"
+          ? { code: 0, stdout: framed({ PATH: "relative/bin" }) }
+          : { code: -1, stdout: "" },
+    );
+    expect(relativeOnlyEnv).toEqual({ PATH: "relative/bin" });
   });
 });
 
@@ -176,5 +293,36 @@ describe.skipIf(process.platform === "win32")("withLoginShell", () => {
       HTTPS_PROXY: "http://proxy:1",
       PATH: runtimeSearchPath(app.PATH, login.PATH, "/Users/me"),
     });
+  });
+
+  it("drops FNM_MULTISHELL_PATH and stabilizes inherited fnm_multishells PATH", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "linger-with-login-"));
+    try {
+      const nodeBin = path.join(root, "fnm", "v24", "installation", "bin");
+      fs.mkdirSync(nodeBin, { recursive: true });
+      const multishellsDir = path.join(root, "fnm_multishells");
+      fs.mkdirSync(multishellsDir, { recursive: true });
+      const parentLink = path.join(multishellsDir, "555_1");
+      fs.symlinkSync(path.dirname(nodeBin), parentLink);
+
+      const env = withLoginShell(
+        {
+          HOME: root,
+          PATH: [path.join(parentLink, "bin"), "/usr/bin"].join(path.delimiter),
+        },
+        {
+          PATH: [nodeBin, "/usr/bin"].join(path.delimiter),
+          FNM_MULTISHELL_PATH: parentLink,
+        },
+        root,
+      );
+      expect(env.FNM_MULTISHELL_PATH).toBeUndefined();
+      expect(env.PATH!.split(path.delimiter).slice(0, 2)).toEqual([
+        nodeBin,
+        "/usr/bin",
+      ]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

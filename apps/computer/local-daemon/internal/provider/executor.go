@@ -718,6 +718,10 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 	return execution, nil
 }
 
+func thinkingTitle(title string) string {
+	return clip(redact.Text(title), native.MaxReasoningTitleRunes)
+}
+
 func normalizeMessage(message native.Event, operationID string) any {
 	messageID := message.ID
 	if messageID == "" {
@@ -737,9 +741,9 @@ func normalizeMessage(message native.Event, operationID string) any {
 	case native.EventReasoning:
 		event := map[string]any{"type": "status.changed", "status": "thinking"}
 		// Titles taken from a Runtime's own thinking text may quote what it
-		// read, so they are redacted like tool inputs.
-		if message.Title != "" {
-			event["title"] = redact.Text(message.Title)
+		// read, so they are redacted and capped to the Runner Gateway limit.
+		if title := thinkingTitle(message.Title); title != "" {
+			event["title"] = title
 		}
 		return event
 	case native.EventToolCall:

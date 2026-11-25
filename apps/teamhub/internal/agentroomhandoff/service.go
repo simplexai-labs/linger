@@ -23,7 +23,9 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentauth"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/idempotency"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/messagecreation"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomcreation"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicelive"
 )
 
 const (
@@ -59,6 +61,7 @@ type Input struct {
 	InvocationID string
 	RoomID       string
 	Instruction  string
+	HandoffID    string
 }
 
 // Result is the handoff in the target Room.
@@ -77,21 +80,18 @@ type receipt struct {
 type Service struct {
 	pool       *pgxpool.Pool
 	authorizer *agentauth.Service
-	now        func() time.Time
 }
 
 // New builds the Service.
 func New(pool *pgxpool.Pool, authorizer *agentauth.Service) *Service {
-	return &Service{pool: pool, authorizer: authorizer, now: time.Now}
+	return &Service{pool: pool, authorizer: authorizer}
 }
 
 // HandOff posts the handoff in input.RoomID, or returns the receipt of the
 // same invocation.
 func (s *Service) HandOff(ctx context.Context, token string, input Input) (Result, error) {
-	instruction := strings.TrimSpace(input.Instruction)
-	if !invocationPattern.MatchString(input.InvocationID) || !roomIDPattern.MatchString(input.RoomID) ||
-		instruction == "" || utf8.RuneCountInString(instruction) > MaxInstructionRunes {
-		return Result{}, ErrInvalid
+	if err := validateInput(input); err != nil {
+		return Result{}, err
 	}
 	if s == nil || s.pool == nil || s.authorizer == nil {
 		return Result{}, ErrUnavailable
@@ -106,14 +106,76 @@ func (s *Service) HandOff(ctx context.Context, token string, input Input) (Resul
 		return Result{}, err
 	}
 	queries := store.New(tx)
-	human := authorization.UserArtifactOwnerActorID
 	directRoomID, err := directChat(ctx, queries, authorization)
 	if err != nil {
 		return Result{}, err
 	}
 
-	requestHash := sha256.Sum256([]byte(input.RoomID + "\x00" + instruction))
-	key := idempotency.AgentKey(authorization.AgentActorID, idempotencyOperation,
+	result, err := handOffInTx(ctx, tx, handoffCaller{authorization.TenantID, authorization.UserArtifactOwnerActorID, authorization.AgentActorID}, directRoomID, input, func() error {
+		return requireHumanRequest(ctx, queries, authorization, directRoomID, authorization.UserArtifactOwnerActorID)
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	return result, tx.Commit(ctx)
+}
+
+// HandOffLive uses the active call's own Human and AnotherMe without starting
+// a direct-chat Meta. It rechecks the lease in the publishing transaction.
+func HandOffLive(ctx context.Context, pool *pgxpool.Pool, sessionID string, input Input) (Result, error) {
+	if err := validateInput(input); err != nil {
+		return Result{}, err
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	queries := store.New(tx)
+	current, err := queries.LockVoiceLiveSessionCurrent(ctx, sessionID)
+	if err != nil {
+		return Result{}, err
+	}
+	if !current {
+		return Result{}, voicelive.ErrNotFound
+	}
+	session, err := voicelive.ActiveSession(ctx, queries, sessionID)
+	if err != nil {
+		return Result{}, err
+	}
+	direct, err := queries.GetAnotherMeDirectRoomAgent(ctx, store.GetAnotherMeDirectRoomAgentParams{RoomID: session.RoomID, TenantID: session.TenantID})
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && (direct.AgentActorID != session.Agent.ID || direct.HumanActorID != session.HumanActorID) {
+		return Result{}, ErrNotFromDirectChat
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	result, err := handOffInTx(ctx, tx, handoffCaller{session.TenantID, session.HumanActorID, session.Agent.ID}, session.RoomID, input, nil)
+	if err != nil {
+		return Result{}, err
+	}
+	return result, tx.Commit(ctx)
+}
+
+type handoffCaller struct{ tenant, human, agent string }
+
+func validateInput(input Input) error {
+	if !invocationPattern.MatchString(input.InvocationID) || !roomIDPattern.MatchString(input.RoomID) ||
+		(input.HandoffID != "" && !roomIDPattern.MatchString(input.HandoffID)) || strings.TrimSpace(input.Instruction) == "" || utf8.RuneCountInString(input.Instruction) > MaxInstructionRunes {
+		return ErrInvalid
+	}
+	return nil
+}
+
+func handOffInTx(ctx context.Context, tx pgx.Tx, caller handoffCaller, directRoomID string, input Input, verifyHuman func() error) (Result, error) {
+	queries := store.New(tx)
+	instruction := strings.TrimSpace(input.Instruction)
+	payload := input.RoomID + "\x00" + instruction
+	if input.HandoffID != "" {
+		payload += "\x00" + input.HandoffID
+	}
+	requestHash := sha256.Sum256([]byte(payload))
+	key := idempotency.AgentKey(caller.agent, idempotencyOperation,
 		agentauth.IdempotencyKey(idempotencyOperation, input.InvocationID))
 	if err := idempotency.Lock(ctx, tx, key); err != nil {
 		return Result{}, err
@@ -131,34 +193,56 @@ func (s *Service) HandOff(ctx context.Context, token string, input Input) (Resul
 			stored.HandoffID != record.ResourceID || stored.InboxID != "room:"+input.RoomID {
 			return Result{}, ErrUnavailable
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return Result{}, err
-		}
 		return Result{InboxID: stored.InboxID, HandoffID: stored.HandoffID, Replay: true}, nil
 	}
 
-	if err := requireHumanRequest(ctx, queries, authorization, directRoomID, human); err != nil {
+	if verifyHuman != nil {
+		if err := verifyHuman(); err != nil {
+			return Result{}, err
+		}
+	}
+	// Departure and admission serialize with the instruction's publication.
+	if err := roomcreation.LockMemberships(ctx, queries, directRoomID, input.RoomID); err != nil {
 		return Result{}, err
 	}
-	humanActor, agentActor, err := targetMembers(ctx, queries, authorization, directRoomID, input.RoomID)
+	humanActor, agentActor, err := targetMembers(ctx, queries, caller, directRoomID, input.RoomID)
 	if err != nil {
 		return Result{}, err
 	}
-	handoffID := handoffMessageID(authorization.AgentActorID, input.InvocationID)
-	text, err := handoffText(handoffID, directRoomID, input.RoomID, instruction, human, s.now())
+	messageID := handoffMessageID(caller.agent, input.InvocationID)
+	handoffID := messageID
+	if input.HandoffID != "" {
+		existing, err := queries.GetRoomHandoff(ctx, input.HandoffID)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && (existing.TenantID != caller.tenant || existing.AgentActorID != caller.agent || existing.HumanActorID != caller.human || existing.OriginRoomID != directRoomID || existing.RoomID != input.RoomID) {
+			return Result{}, ErrRoomUnavailable
+		}
+		if err != nil {
+			return Result{}, err
+		}
+		handoffID = existing.ID
+	}
+	text, err := handoffText(handoffID, directRoomID, input.RoomID, instruction, caller.human, time.Now())
 	if err != nil {
 		return Result{}, err
 	}
 	// The Human speaks the hidden message so the AnotherMe does not ignore it
 	// as its own; the mention wakes only that AnotherMe's Context.
 	persisted, err := messagecreation.CardHandoff(ctx, queries, messagecreation.Draft{
-		ID: handoffID, TenantID: authorization.TenantID, RoomID: input.RoomID, Author: humanActor,
+		ID: messageID, TenantID: caller.tenant, RoomID: input.RoomID, Author: humanActor,
 		HumanWaiting: true,
 	}, agentActor, text)
 	if err != nil {
 		return Result{}, err
 	}
 	if _, err := messagecreation.Publish(ctx, queries, persisted); err != nil {
+		return Result{}, err
+	}
+	if input.HandoffID == "" {
+		err = queries.CreateRoomHandoff(ctx, store.CreateRoomHandoffParams{ID: handoffID, TenantID: caller.tenant, OriginRoomID: directRoomID, RoomID: input.RoomID, HumanActorID: caller.human, AgentActorID: caller.agent})
+	} else {
+		err = queries.SetRoomHandoffState(ctx, store.SetRoomHandoffStateParams{ID: handoffID, State: "working"})
+	}
+	if err != nil {
 		return Result{}, err
 	}
 	stored := receipt{InboxID: "room:" + input.RoomID, HandoffID: handoffID}
@@ -169,9 +253,6 @@ func (s *Service) HandOff(ctx context.Context, token string, input Input) (Resul
 	if err := idempotency.Save(ctx, tx, key, requestHash[:], idempotency.Record{
 		ResourceID: handoffID, Status: http.StatusOK, Body: body, InvocationID: input.InvocationID,
 	}); err != nil {
-		return Result{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return Result{}, err
 	}
 	return Result{InboxID: stored.InboxID, HandoffID: handoffID}, nil
@@ -232,7 +313,7 @@ func requireHumanRequest(
 func targetMembers(
 	ctx context.Context,
 	queries *store.Queries,
-	authorization agentauth.Authorization,
+	caller handoffCaller,
 	directRoomID, roomID string,
 ) (store.Actor, store.Actor, error) {
 	if roomID == directRoomID {
@@ -251,23 +332,23 @@ func targetMembers(
 		return store.Actor{}, store.Actor{}, err
 	}
 	member := func(actorID, kind string) (store.Actor, error) {
-		actor, err := queries.GetRoomActorMember(ctx, store.GetRoomActorMemberParams{RoomID: roomID, ActorID: actorID})
+		actor, err := queries.GetRoomHandoffMember(ctx, store.GetRoomHandoffMemberParams{RoomID: roomID, ActorID: actorID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return store.Actor{}, ErrRoomUnavailable
 		}
 		if err != nil {
 			return store.Actor{}, err
 		}
-		if actor.TenantID != authorization.TenantID || actor.Kind != kind {
+		if actor.TenantID != caller.tenant || actor.Kind != kind {
 			return store.Actor{}, ErrRoomUnavailable
 		}
 		return actor, nil
 	}
-	humanActor, err := member(authorization.UserArtifactOwnerActorID, "human")
+	humanActor, err := member(caller.human, "human")
 	if err != nil {
 		return store.Actor{}, store.Actor{}, err
 	}
-	agentActor, err := member(authorization.AgentActorID, "agent")
+	agentActor, err := member(caller.agent, "agent")
 	if err != nil {
 		return store.Actor{}, store.Actor{}, err
 	}
@@ -303,7 +384,12 @@ Your Human asked for this in your direct chat, and you there handed it to you he
 instruction in this Room: read this Room's history with teamhub message read, then post here and
 mention each Agent who should act. Reply only to the Inbox room:%s. Messages of the direct chat are
 not copied into this Room. When the work is done or needs your Human's decision, tell them with
-teamhub message direct. Never hand this work back.
-</room-handoff-pattern>`, roomID)
+teamhub message direct --handoff %s --handoff-state waiting_for_user (a question) or
+--handoff-state completed (a result). Use working for a useful progress update. Keep following this
+request as new Room messages arrive until it is completed or the Human asks you to stop. Do not
+relay every message. Pass the handoff ID only in --handoff; in the private message, name this Room
+and include enough context for the Human to answer.
+Never hand this work back.
+</room-handoff-pattern>`, roomID, handoffID)
 	return " Room handoff=" + string(payload) + "\n" + prompt, nil
 }

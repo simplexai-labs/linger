@@ -25,7 +25,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
 )
 
-// Queue runs push jobs; the trigger in migration 00894 names it.
+// Queue runs push jobs; the trigger in migration 00895 names it.
 const Queue = "mobile"
 
 // Args names one published Message's room event.

@@ -133,6 +133,43 @@ describe("Voice Mode turn delivery", () => {
     expect(committed).toEqual(["one:first document", "two:second document"]);
     expect(send).not.toHaveBeenCalled();
   });
+  it("shows a live turn's words until the outbox shows it, not until the server accepts it", async () => {
+    let receive!: (event: VoiceModeEvent) => void;
+    let queue!: () => void;
+    let accept!: () => void;
+    const controller = new VoiceModeController({
+      open: async (next) => {
+        receive = next;
+        return { close: async () => undefined, commit: async () => undefined };
+      },
+      send: vi.fn(),
+      prepareSend: () =>
+        Object.assign(
+          (onQueued?: () => void) =>
+            new Promise<void>((resolve) => {
+              queue = () => onQueued?.();
+              accept = resolve;
+            }),
+          { keepsText: true },
+        ),
+    });
+    await controller.start();
+    receive({ kind: "turn", id: "one", text: "Hello", endOffsetMs: 100 });
+    await tick();
+    // Waiting for the live verdict, the words stay where the Human sees them,
+    // and nothing is being sent yet.
+    expect(controller.getState().text).toBe("Hello");
+    expect(controller.getState().sending).toBe(false);
+    queue();
+    expect(controller.getState().sending).toBe(true);
+    // The outbox shows the turn now, so the words leave in the same moment
+    // rather than showing twice until the server answers.
+    expect(controller.getState().text).toBe("");
+    accept();
+    await controller.whenDeliverySettles();
+    expect(controller.getState().text).toBe("");
+    expect(controller.getState().sending).toBe(false);
+  });
   it.each(["success", "failure"] as const)(
     "keeps an in-flight send out of the exit draft until its %s settles",
     async (outcome) => {

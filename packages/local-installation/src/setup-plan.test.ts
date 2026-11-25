@@ -1,7 +1,11 @@
 import path from "node:path";
 import { expect, it, vi } from "vitest";
-import { inspectSetup } from "./setup-plan.js";
+import { inspectSetup, type SetupOptions } from "./setup-plan.js";
 import { WINDOWS_PRIVATE_PATH_UNSAFE } from "./windows-private.js";
+
+const noDaemon = async () => null;
+const inspectWithoutDaemon = (options: SetupOptions) =>
+  inspectSetup({ probeRuntimes: noDaemon, ...options });
 
 const upstream = (available = true) => ({
   schema: "localmodels.setup-report/v1",
@@ -46,7 +50,7 @@ const runner = (value: object = upstream()) =>
 it("delegates all hardware policy, runtime detection, estimates and recommendation upstream", async () => {
   const localmodels = runner();
   const home = path.resolve("/owned");
-  const report = await inspectSetup({
+  const report = await inspectWithoutDaemon({
     home,
     localmodels,
   });
@@ -98,7 +102,7 @@ it("delegates all hardware policy, runtime detection, estimates and recommendati
 });
 it("preserves upstream rejection and never substitutes downstream eligibility", async () => {
   const localmodels = runner(upstream(false));
-  const report = await inspectSetup({ localmodels });
+  const report = await inspectWithoutDaemon({ localmodels });
   expect(report.localModels.state).toBe("unavailable");
   expect(report.localModels.reasons).toEqual([
     { code: "upstream_policy", message: "Upstream rejected this host" },
@@ -130,7 +134,9 @@ it("recommends the next runtime while the local plan waits for free memory (tool
       },
     };
   };
-  const report = await inspectSetup({ localmodels: runner(freeMemory(true)) });
+  const report = await inspectWithoutDaemon({
+    localmodels: runner(freeMemory(true)),
+  });
   expect(report.localModels).toMatchObject({
     eligible: false,
     state: "blocked-now",
@@ -145,11 +151,13 @@ it("recommends the next runtime while the local plan waits for free memory (tool
   });
   expect(report.localModels).not.toHaveProperty("memory");
   expect(report.recommendation).toBe("pi");
-  const bare = await inspectSetup({ localmodels: runner(freeMemory(false)) });
+  const bare = await inspectWithoutDaemon({
+    localmodels: runner(freeMemory(false)),
+  });
   expect(bare.recommendation).toBe("codex");
   // The reason code alone holds the plan too.
   const { basis: _, ...stack } = freeMemory(true).stack;
-  const coded = await inspectSetup({
+  const coded = await inspectWithoutDaemon({
     localmodels: runner({ ...freeMemory(true), stack }),
   });
   expect(coded.localModels).toMatchObject({
@@ -157,7 +165,7 @@ it("recommends the next runtime while the local plan waits for free memory (tool
     basis: "capacity",
   });
   expect(coded.recommendation).toBe("pi");
-  const ready = await inspectSetup({ localmodels: runner() });
+  const ready = await inspectWithoutDaemon({ localmodels: runner() });
   expect(ready.localModels).not.toHaveProperty("basis");
 });
 it("reads the tool's blocked-now state, memory and recommendation", async () => {
@@ -185,7 +193,7 @@ it("reads the tool's blocked-now state, memory and recommendation", async () => 
     },
     recommendation: "codex",
   };
-  const report = await inspectSetup({ localmodels: runner(blocked) });
+  const report = await inspectWithoutDaemon({ localmodels: runner(blocked) });
   expect(report.localModels).toMatchObject({
     eligible: false,
     state: "blocked-now",
@@ -202,7 +210,7 @@ it("reads the tool's blocked-now state, memory and recommendation", async () => 
   // The tool's non-local pick stands, even with Pi installed.
   expect(report.recommendation).toBe("codex");
   // The tool's state wins over the older marks; null fields stay out.
-  const ready = await inspectSetup({
+  const ready = await inspectWithoutDaemon({
     localmodels: runner({
       ...value,
       stack: {
@@ -221,7 +229,7 @@ it("reads the tool's blocked-now state, memory and recommendation", async () => 
   });
   expect(ready.localModels).not.toHaveProperty("basis");
   expect(ready.localModels).not.toHaveProperty("memory");
-  const small = await inspectSetup({
+  const small = await inspectWithoutDaemon({
     localmodels: runner({
       ...upstream(false),
       stack: {
@@ -239,7 +247,7 @@ it("reads the tool's blocked-now state, memory and recommendation", async () => 
 });
 it("passes on the memory counts each reason carries", async () => {
   const value = upstream();
-  const report = await inspectSetup({
+  const report = await inspectWithoutDaemon({
     localmodels: runner({
       ...value,
       stack: {
@@ -287,7 +295,7 @@ it("passes on the memory counts each reason carries", async () => {
 });
 it("passes on validated CUDA driver versions and drops malformed values", async () => {
   const value = upstream(false);
-  const report = await inspectSetup({
+  const report = await inspectWithoutDaemon({
     localmodels: runner({
       ...value,
       stack: {
@@ -341,14 +349,14 @@ it("fails explicitly and redacts tool output when upstream is unavailable or mal
     { code: 0, stdout: "{}", stderr: "" },
   ]) {
     await expect(
-      inspectSetup({ localmodels: vi.fn(async () => response) }),
+      inspectWithoutDaemon({ localmodels: vi.fn(async () => response) }),
     ).rejects.toMatchObject({ code: "LOCALMODELS_SETUP_UNAVAILABLE" });
   }
 });
 it("names the upstream cause and logs its redacted output when the check fails", async () => {
   const onEvent = vi.fn();
   await expect(
-    inspectSetup({
+    inspectWithoutDaemon({
       onEvent,
       localmodels: vi.fn(async () => ({
         code: 1,
@@ -380,7 +388,7 @@ it("names the upstream cause and logs its redacted output when the check fails",
 it("honors cancellation before invoking upstream", async () => {
   const localmodels = runner();
   await expect(
-    inspectSetup({ signal: AbortSignal.abort(), localmodels }),
+    inspectWithoutDaemon({ signal: AbortSignal.abort(), localmodels }),
   ).rejects.toThrow();
   expect(localmodels).not.toHaveBeenCalled();
 });
@@ -396,11 +404,11 @@ it("inspects with GPU sharing unless sharing was explicitly declined", async () 
     stdout: JSON.stringify(upstream()),
     stderr: "",
   }));
-  await inspectSetup({ localmodels, shareGpu: false });
+  await inspectWithoutDaemon({ localmodels, shareGpu: false });
   expect(localmodels.mock.calls[0]?.[1]).not.toContain("--share-gpu");
-  await inspectSetup({ localmodels, shareGpu: true });
+  await inspectWithoutDaemon({ localmodels, shareGpu: true });
   expect(localmodels.mock.calls[1]?.[1]).toContain("--share-gpu");
-  await inspectSetup({ localmodels });
+  await inspectWithoutDaemon({ localmodels });
   expect(localmodels.mock.calls[2]?.[1]).toContain("--share-gpu");
 });
 
@@ -408,7 +416,7 @@ it("checks the installation target while keeping tool state in the existing home
   const home = path.resolve("cached-home");
   const targetHome = path.resolve("candidate");
   const localmodels = runner();
-  await inspectSetup({ home, targetHome, localmodels });
+  await inspectWithoutDaemon({ home, targetHome, localmodels });
   expect(localmodels).toHaveBeenCalledWith(
     home,
     expect.arrayContaining([
@@ -433,7 +441,7 @@ it("preserves WINDOWS_PRIVATE_PATH_UNSAFE refusals instead of wrapping them as L
     },
   );
   await expect(
-    inspectSetup({
+    inspectWithoutDaemon({
       localmodels: vi.fn(async () => {
         throw refusalError;
       }),
@@ -443,7 +451,7 @@ it("preserves WINDOWS_PRIVATE_PATH_UNSAFE refusals instead of wrapping them as L
 
 it("preserves upstream stack.upgrade guidance when freeing memory unlocks a stronger model", async () => {
   const base = upstream();
-  const report = await inspectSetup({
+  const report = await inspectWithoutDaemon({
     localmodels: runner({
       ...base,
       facts: {
@@ -554,7 +562,7 @@ it("drops malformed or incomplete stack.upgrade hints without failing inspection
       reasons: [{ code: "free-memory-required", message: "Close apps." }],
     },
   ]) {
-    const report = await inspectSetup({
+    const report = await inspectWithoutDaemon({
       localmodels: runner({
         ...base,
         stack: {
@@ -565,4 +573,148 @@ it("drops malformed or incomplete stack.upgrade hints without failing inspection
     });
     expect(report.localModels).not.toHaveProperty("upgrade");
   }
+});
+
+it("uses local-daemon as single source of truth even when localmodels omits harness runtime data", async () => {
+  const base = upstream(false);
+  const localmodels = runner({
+    schema: base.schema,
+    facts: base.facts,
+    stack: base.stack,
+  });
+  const probeRuntimes = vi.fn(async () => [
+    {
+      type: "codex" as const,
+      status: "authentication_required" as const,
+      installed: true,
+      authenticated: false,
+      version: "codex-cli 0.171.0",
+      requiredVersion: "0.166.0",
+      executable: "/Applications/Codex.app/Contents/Resources/codex",
+    },
+    {
+      type: "claude" as const,
+      status: "ready" as const,
+      installed: true,
+      authenticated: true,
+      version: "2.1.310 (Claude Code)",
+      requiredVersion: "2.1.282",
+      executable: "/Users/me/.local/bin/claude",
+    },
+    {
+      type: "pi" as const,
+      status: "not_installed" as const,
+      installed: false,
+      authenticated: false,
+      requiredVersion: "1.2.0",
+    },
+  ]);
+
+  const report = await inspectSetup({ localmodels, probeRuntimes });
+  expect(report.recommendation).toBe("claude");
+  expect(report.runtimes.find((r) => r.choice === "claude")).toMatchObject({
+    installed: true,
+    auth: "authenticated",
+    status: "ready",
+    version: "2.1.310 (Claude Code)",
+    requiredVersion: "2.1.282",
+  });
+  expect(report.runtimes.find((r) => r.choice === "codex")).toMatchObject({
+    installed: true,
+    auth: "unauthenticated",
+    status: "authentication_required",
+  });
+});
+
+it("prefers daemon-verified CC Switch Codex as ready and surfaces incompatible local Claude", async () => {
+  const base = upstream(false);
+  const localmodels = runner({
+    ...base,
+    harness: {
+      schema: "localmodels.harness-status/v1",
+      runtimes: [
+        { runtime: "codex", installed: true, authenticated: false },
+        { runtime: "claude", installed: true, authenticated: true },
+        { runtime: "pi", installed: false, authenticated: false },
+      ],
+    },
+    recommendation: "claude",
+  });
+  const probeRuntimes = vi.fn(async () => [
+    {
+      type: "codex" as const,
+      status: "ready" as const,
+      installed: true,
+      authenticated: true,
+      version: "codex-cli 0.171.0",
+      requiredVersion: "0.166.0",
+      executable: "/opt/homebrew/bin/codex",
+    },
+    {
+      type: "claude" as const,
+      status: "incompatible" as const,
+      installed: true,
+      authenticated: false,
+      version: "2.1.100 (Claude Code)",
+      requiredVersion: "2.1.282",
+      executable: "/usr/local/bin/claude",
+    },
+    {
+      type: "pi" as const,
+      status: "not_installed" as const,
+      installed: false,
+      authenticated: false,
+      requiredVersion: "1.2.0",
+    },
+  ]);
+
+  const report = await inspectSetup({ localmodels, probeRuntimes });
+  expect(report.recommendation).toBe("codex");
+  expect(report.runtimes.find((r) => r.choice === "codex")).toMatchObject({
+    installed: true,
+    auth: "authenticated",
+    status: "ready",
+  });
+  expect(report.runtimes.find((r) => r.choice === "claude")).toMatchObject({
+    installed: true,
+    auth: "unauthenticated",
+    status: "incompatible",
+    version: "2.1.100 (Claude Code)",
+    requiredVersion: "2.1.282",
+  });
+});
+
+it("keeps local-models as the recommendation when local models are ready even with ready daemon runtimes", async () => {
+  const localmodels = runner(upstream(true));
+  const probeRuntimes = vi.fn(async () => [
+    {
+      type: "claude" as const,
+      status: "ready" as const,
+      installed: true,
+      authenticated: true,
+      version: "2.1.310 (Claude Code)",
+      requiredVersion: "2.1.282",
+      executable: "/Users/me/.local/bin/claude",
+    },
+    {
+      type: "codex" as const,
+      status: "ready" as const,
+      installed: true,
+      authenticated: true,
+      version: "codex-cli 0.171.0",
+      requiredVersion: "0.166.0",
+      executable: "/opt/homebrew/bin/codex",
+    },
+    {
+      type: "pi" as const,
+      status: "not_installed" as const,
+      installed: false,
+      authenticated: false,
+      requiredVersion: "1.2.0",
+    },
+  ]);
+
+  const report = await inspectSetup({ localmodels, probeRuntimes });
+  expect(report.localModels).toMatchObject({ eligible: true, state: "ready" });
+  expect(report.recommendation).toBe("local-models");
 });

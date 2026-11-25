@@ -38,9 +38,12 @@ export interface VoiceModeSessionTarget {
 /**
  * Sends one prepared turn once. A live turn the live model answers carries
  * its marker; anything else is an ordinary Message that wakes the Agent.
+ * `onQueued` runs as soon as the turn shows in the Room's outbox, before the
+ * server accepts it, so the words it replaces can go in the same moment.
  */
 export type VoiceModeTurnSend = (
   voiceLiveTurn?: TeamHubVoiceLiveTurnMarker,
+  onQueued?: () => void,
 ) => Promise<void>;
 
 /** What a mounted Room composer offers the session for its own turns. */
@@ -61,6 +64,11 @@ export interface VoiceModeLivePresentation {
   soundOff: boolean;
   /** This call's exchanges in the order they were said. */
   transcript: readonly VoiceLiveLine[];
+  /**
+   * The live model is still connecting or reconnecting. The call may already
+   * be listening: speech waits for the model and is answered once it opens.
+   */
+  waking: boolean;
 }
 
 export interface VoiceModeSession {

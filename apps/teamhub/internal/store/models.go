@@ -1533,6 +1533,24 @@ type RoomEvent struct {
 	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type RoomHandoff struct {
+	ID           string             `json:"id"`
+	TenantID     string             `json:"tenant_id"`
+	OriginRoomID string             `json:"origin_room_id"`
+	RoomID       string             `json:"room_id"`
+	HumanActorID string             `json:"human_actor_id"`
+	AgentActorID string             `json:"agent_actor_id"`
+	State        string             `json:"state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type RoomHandoffReport struct {
+	MessageID      string             `json:"message_id"`
+	HandoffID      string             `json:"handoff_id"`
+	VoiceSessionID pgtype.Text        `json:"voice_session_id"`
+	ToldAt         pgtype.Timestamptz `json:"told_at"`
+}
+
 type RoomHistoryShare struct {
 	ID                       string             `json:"id"`
 	RoomID                   string             `json:"room_id"`

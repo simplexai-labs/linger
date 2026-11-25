@@ -47,6 +47,8 @@ export const voiceLiveReplyTrack = "linger-live-reply";
 const publisherPrefix = "publisher-";
 /** Reply playback louder than this counts as audible. */
 const audibleLevel = 0.05;
+/** The runtime's "0" while its provider session opens or reconnects. */
+const providerReadyAttribute = "linger.voice_provider_ready";
 
 export type VoiceLiveConnection = VoiceModeConnection & {
   voiceSessionId: string;
@@ -79,6 +81,11 @@ export async function openVoiceLive(input: {
   channel?: (connection: VoiceLiveConnection) => void;
   /** The reply playback became audible after silence. */
   audible?: () => void;
+  /**
+   * Whether the live model itself is connected, once the call listens: false
+   * while the runtime still opens or reconnects its provider session.
+   */
+  providerReady?: (ready: boolean) => void;
   /** Runs after capture and playback stop, before the session closes. */
   beforeClose?: () => Promise<void>;
   soundOff: boolean;
@@ -411,8 +418,27 @@ export async function openVoiceLive(input: {
             generation,
       );
     let wakeReady: (() => void) | undefined;
+    let listening = false;
+    let providerReady: boolean | undefined;
+    // A runtime that never reports its provider is taken as connected.
+    const reportProvider = () => {
+      const runtime = [...media.remoteParticipants.values()].find(
+        (participant) =>
+          participant.isAgent &&
+          participant.attributes["linger.voice_ready_generation"] ===
+            generation,
+      );
+      // Until the runtime shows here, nothing is known: listening may have
+      // started on TeamHub's word before its attributes arrive.
+      if (!runtime) return;
+      const next = runtime.attributes[providerReadyAttribute] !== "0";
+      if (next === providerReady || !live()) return;
+      providerReady = next;
+      input.providerReady?.(next);
+    };
     media.on(RoomEvent.ParticipantAttributesChanged, () => {
       if (runtimeReady()) wakeReady?.();
+      if (listening) reportProvider();
     });
     for (;;) {
       if (activity || runtimeReady()) break;
@@ -446,6 +472,8 @@ export async function openVoiceLive(input: {
       await waitForVoiceDelay(200, signal);
       signal.throwIfAborted();
     }
+    listening = true;
+    reportProvider();
     return connection;
   } catch (error) {
     closed = true;

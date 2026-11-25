@@ -26,14 +26,14 @@ afterEach(() => {
   pageActions = [];
 });
 
-function fixture(page?: VoicePageSource) {
+function fixture(page?: VoicePageSource, isActive: () => boolean = () => true) {
   const sent: TeamHubVoiceLiveClientEvent[] = [];
   const posts: Array<{ text: string; eventId: string; marker?: unknown }> = [];
   const exits: number[] = [];
   let transcript: readonly VoiceLiveLine[] = [];
   const arbiter = createVoiceLiveArbiter({
     voiceSessionId: () => "live-session",
-    active: () => true,
+    active: isActive,
     send: (event) => sent.push(event),
     context: {
       roomId: "agent-room",
@@ -116,14 +116,59 @@ describe("voice live arbiter", () => {
     expect(f.posts.map((post) => post.text)).toEqual(["Look at this"]);
   });
 
-  it("saves a turn whose reply never ends after a bounded wait", async () => {
+  it("keeps the live marker when the bounded wait expires during an active call", async () => {
     vi.useFakeTimers();
     const f = fixture();
     void f.arbiter.prepareTurn("lt_1", "You there?")();
     await vi.advanceTimersByTimeAsync(voiceLiveTurnSettleMs - 1);
     expect(f.posts).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
-    expect(f.posts).toHaveLength(1);
+    expect(f.posts).toEqual([
+      {
+        text: "You there?",
+        eventId: "lt_1",
+        marker: { voice_session_id: "live-session", turn_id: "lt_1" },
+      },
+    ]);
+  });
+
+  it("drops the live marker when an unanswered turn settles on fallback or exit", async () => {
+    let active = true;
+    const f = fixture(undefined, () => active);
+    void f.arbiter.prepareTurn("lt_1", "Check my calendar")();
+    active = false;
+    await f.arbiter.settle();
+    expect(f.posts).toEqual([{ text: "Check my calendar", eventId: "lt_1" }]);
+
+    active = true;
+    const f2 = fixture(undefined, () => active);
+    void f2.arbiter.prepareTurn("lt_2", "Check my email")();
+    f2.arbiter.dispose();
+    await vi.waitFor(() =>
+      expect(f2.posts).toEqual([{ text: "Check my email", eventId: "lt_2" }]),
+    );
+  });
+
+  it("keeps the live marker when exiting after a turn already triggered a live tool request", async () => {
+    let active = true;
+    const f = fixture(undefined, () => active);
+    void f.arbiter.prepareTurn("lt_1", "Open Pocket Note")();
+    f.arbiter.receive({
+      type: "tool_request",
+      turn_id: "lt_1",
+      call_id: "c1",
+      tool: "page_action",
+      text: '{"action":"click","target":"e1"}',
+    });
+    active = false;
+    await f.arbiter.settle();
+    expect(f.posts).toEqual([
+      {
+        text: "Open Pocket Note",
+        eventId: "lt_1",
+        marker: { voice_session_id: "live-session", turn_id: "lt_1" },
+      },
+    ]);
   });
 
   it("saves an interrupted turn at once", async () => {

@@ -1597,6 +1597,13 @@ export interface components {
       | components["schemas"]["SkillSegment"]
       | components["schemas"]["ArtifactTreeSegment"]
       | components["schemas"]["MeetingNotesSegment"];
+    AgentHistoryRoomHandoff: {
+      handoff_id: string;
+      room_id: string;
+      room_name: string;
+      /** @enum {string} */
+      state: "working" | "waiting_for_user" | "completed";
+    };
     AgentHistoryMessage: {
       message_id: string;
       inbox_id: string;
@@ -1610,6 +1617,7 @@ export interface components {
       message_kind: "conversation" | "agent_runtime" | "task_terminal_notice";
       /** Format: date-time */
       created_at: string;
+      room_handoff?: components["schemas"]["AgentHistoryRoomHandoff"];
       context_message_ids: string[];
       resource_references: {
         document_id: string;
@@ -1628,6 +1636,7 @@ export interface components {
       message_kind: "conversation" | "agent_runtime" | "task_terminal_notice";
       /** Format: date-time */
       created_at: string;
+      room_handoff?: components["schemas"]["AgentHistoryRoomHandoff"];
       context_message_ids: string[];
       resource_references: {
         document_id: string;
@@ -2439,6 +2448,12 @@ export interface components {
     /** @description Infrastructure-owned invocation identity and Runtime Manifest attestation plus the ordered private messages to send to the current Agent's Human sponsor. */
     AgentSendDirectMessageRequest: {
       invocation_id: components["schemas"]["AgentInvocationId"];
+      handoff_id?: components["schemas"]["Id"];
+      /**
+       * @description State of the identified Room handoff after this report; requires handoff_id.
+       * @enum {string}
+       */
+      handoff_state?: "working" | "waiting_for_user" | "completed";
       /** @description Ordered private messages persisted atomically in the Direct Room. */
       messages: string[];
     };
@@ -2463,6 +2478,7 @@ export interface components {
     /** @description The Room to hand the Human's request to and the instruction the AnotherMe's Context there carries out. The caller, its direct chat and its Human are derived by TeamHub, never accepted from the caller. */
     AgentRoomHandoffRequest: {
       invocation_id: components["schemas"]["AgentInvocationId"];
+      handoff_id?: components["schemas"]["Id"];
       room_id: components["schemas"]["Id"];
       /** @description Self-contained instruction for the AnotherMe in the target Room. Hidden from the Room's timeline; the receiving Context decides what to post there. */
       instruction: string;

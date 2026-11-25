@@ -101,6 +101,20 @@ managed service start/list/stop. Managed services retain PID, process-group,
 and start-token identity across daemon restarts, and stop succeeds only after
 the recorded process group disappears.
 
+`linger-computer-daemon probe-runtimes --json` (`cmd/linger-computer-daemon/probe_runtimes.go`)
+provides a stateless, single-shot Runtime discovery, minimum-version check, and
+authentication probe for Desktop setup and the local installer. It shares
+`computerconfig.RuntimeDiscoveryOptions` (resolving explicit absolute
+`--<runtime>-path` flags or `LINGER_<TYPE>_PATH` overrides and scrubbing
+`LINGER_*`, `TEAMHUB_*`, `RUNNER_GATEWAY_*`, `MIRROR_*`, and `SERVICE_TOKEN`
+via `computerconfig.RuntimeEnvironment`) and `provider.Discover` (with
+`SkipModelCatalog: true`) with `linger-computer` and the resident Daemon.
+It accepts repeatable `--runtime <codex|claude|pi|antigravity>` (defaulting to
+`codex`, `claude`, and `pi`) and optional `--timeout-ms`, and emits a single
+`linger.daemon.runtime-probe/v1` JSON object on stdout carrying per-runtime
+`type`, `status`, `installed`, `authenticated`, redacted `version`,
+`required_version`, `executable`, and optional `error`.
+
 ## One-shot model calls
 
 The Daemon accepts `execute` (kind `model_invoke`). `internal/daemon/model_invoke.go`

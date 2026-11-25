@@ -25,7 +25,7 @@ export default defineAgent({
           proxy: config.providerProxy,
           audioTransport: config.xaiLiveAudioTransport,
           model: "grok-voice-3.0",
-          voice: "carina",
+          voice: "ursa",
           reasoningEffort: "high",
           setup,
         }),

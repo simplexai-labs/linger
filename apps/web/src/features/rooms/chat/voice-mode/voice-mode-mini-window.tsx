@@ -1,24 +1,21 @@
 import {
-  Cancel01Icon,
-  Maximize01Icon,
+  ArrowDown01Icon,
   Mic01Icon,
   MicOff01Icon,
-  Minimize01Icon,
-  PictureInPictureExitIcon,
-  PictureInPictureOnIcon,
   RotateLeft01Icon,
   VolumeHighIcon,
   VolumeOffIcon,
 } from "@hugeicons/core-free-icons";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Icon } from "@/components/ui/icon";
+import { AutoHeight } from "@/components/ui/auto-height";
+import { Icon, type IconSvgElement } from "@/components/ui/icon";
 import {
-  Fragment,
   memo,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
+  type ComponentProps,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
@@ -28,7 +25,7 @@ import {
 import { createPortal } from "react-dom";
 import { useMatch, useNavigate } from "react-router";
 
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/cn";
 import { commonMessages } from "@/i18n/common.messages";
 import { translate } from "@/i18n/language";
 import { useT } from "@/i18n/use-translation";
@@ -42,23 +39,20 @@ import {
 import { roomMessagesInfiniteQueryOptions } from "../../room-queries";
 import { useRoomRunStatusCollection } from "../../runtime-status/use-room-run-statuses";
 import { ActorAvatar } from "../../members/actor-avatar";
-import { voiceModeStatusLabel } from "./voice-mode-presentation";
+import {
+  voiceModeStatusLabel,
+  voiceWindowStatus,
+} from "./voice-mode-presentation";
 import styles from "./voice-mode.module.css";
 import { registerVoiceWindow, type VoiceWindowAction } from "./voice-ui-bridge";
-import {
-  onVoicePipClosedByHuman,
-  openVoicePip,
-  returnedToOpener,
-  returnVoicePipToPage,
-  useVoicePip,
-  voicePipSupported,
-} from "./voice-pip";
+import { onVoicePipClosedByHuman, useVoicePip } from "./voice-pip";
 import {
   containedVoiceWindowPosition,
   useKeptInViewport,
   VoiceWindowResizeHandles,
   type VoiceWindowBounds,
 } from "./voice-window-resize";
+import { FadingText } from "./fading-text";
 import { showVoiceNotice, useVoiceNotice } from "./voice-notice";
 import { voiceWindowMessages as m } from "./voice-window.messages";
 import {
@@ -67,14 +61,36 @@ import {
   type VoiceModeSession,
 } from "./voice-mode-session";
 
-// The height of the conversation below the 36px title bar: never more than
-// leaves the whole window 16px inside the page.
-const windowSizes = {
-  compact: { height: "min(480px,70dvh,100dvh - 68px)", width: 320 },
-  expanded: { height: "min(760px,86dvh,100dvh - 68px)", width: 560 },
-} as const;
-/** Still shows the header's controls and a few lines of the conversation. */
-const minWindowSize = { height: 200, width: 260 };
+/** About the island's width with all its controls out. */
+const islandWidth = 360;
+/** The island bar's height; the conversation opens below it. */
+const islandHeight = 48;
+/** A floated window's height with its conversation open. */
+const floatedConversationHeight = 480;
+/**
+ * The handset laid down, as phones draw hanging up: level and symmetric.
+ * The icon set's handsets only lie askew when turned, so this one is drawn
+ * here in its format.
+ */
+const hangUpIcon: IconSvgElement = [
+  [
+    "path",
+    {
+      d: "M2.9 15.8V11.6C2.9 9.6 7 8 12 8C17 8 21.1 9.6 21.1 11.6V15.8Q21.1 16.6 20.3 16.6H16.2Q15.4 16.6 15.4 15.8V12.9C14.3 12.5 13.2 12.3 12 12.3C10.8 12.3 9.7 12.5 8.6 12.9V15.8Q8.6 16.6 7.8 16.6H3.7Q2.9 16.6 2.9 15.8Z",
+      stroke: "currentColor",
+      strokeLinejoin: "round",
+      strokeWidth: "1.5",
+      key: "0",
+    },
+  ],
+];
+/** A status line under the conversation (a notice, pending selections). */
+const statusRowHeight = 29;
+// The height of the conversation below the island: never more than leaves
+// the whole window 16px inside the page.
+const conversationHeight = "min(480px,70dvh,100dvh - 80px)";
+/** Still shows the island's controls and a few lines of the conversation. */
+const minWindowSize = { height: 200, width: islandWidth };
 const windowGap = 16;
 const positionKey = "linger:voice-mode-window";
 /** Above this level the Human is speaking, not just breathing near the mic. */
@@ -84,19 +100,16 @@ interface Position {
   left: number;
   top: number;
 }
-type WindowSize = keyof typeof windowSizes;
 
 /**
- * Floating window for the running Voice Mode session. It follows the Human
- * across Rooms, shows this session's turns and the Room's replies, and can be
- * dragged anywhere on screen and resized by its edges and corners. Where the
- * browser or the desktop app supports it, the window lives in an
- * always-on-top window of its own instead, so it stays over other tabs and
- * apps. Closing it, from its own button or the desktop's, ends Voice Mode:
- * the window leaves at once while the session drains its last words in the
- * background, and the Room composer shows that finishing state. The floating
- * window's return button, like the browser's back to tab button, only returns
- * to the conversation.
+ * The running Voice Mode session as an island: it follows the Human across
+ * Rooms, folds this session's turns and the Room's replies under it, and in
+ * the page can be dragged anywhere on screen and resized by its edges and
+ * corners. In the desktop app it lives in that app's always-on-top window
+ * instead, so it stays over other apps; browsers keep it in the page.
+ * Hanging up, or closing the desktop's window, ends Voice Mode: the window
+ * leaves at once while the session drains its last words in the background,
+ * and the Room composer shows that finishing state.
  */
 export default function VoiceModeMiniWindow({
   anotherMeActorId,
@@ -141,7 +154,7 @@ function MiniWindow({
   const t = useT();
   const { client } = useTeamHubRuntime();
   const navigate = useNavigate();
-  const { recipient, roomId, roomName, tenantId } = session.target;
+  const { recipient, roomId, tenantId } = session.target;
   // A direct Agent chat talks with that Agent; any other Room with Another Me.
   const voiceActorId =
     recipient?.kind === "agent" ? recipient.id : anotherMeActorId;
@@ -192,53 +205,64 @@ function MiniWindow({
   );
   const notice = useVoiceNotice();
   const pip = useVoicePip("voice-mode");
-  // One window: the desktop's close button on the floating one ends Voice Mode
-  // too. Its back to tab or return button instead returns to this conversation
-  // and keeps the call, which goes on in the window inside the page.
+  // Only the desktop app floats Voice Mode, in a window with no back to tab
+  // button: closing that window ends the call. Once it has floated, losing
+  // the window shows nothing in the page, so no window flashes up before
+  // Voice Mode ends.
   const exitRef = useRef(onExit);
-  const openRoomRef = useRef(() => {});
   useLayoutEffect(() => {
     exitRef.current = onExit;
-    openRoomRef.current = () =>
-      void navigate(`/t/${tenantId}/rooms/${roomId}/chat`);
   });
-  // Once the call has floated, losing that window shows nothing in the page
-  // while TeamHub tells a close from back to tab, so no window flashes up
-  // before Voice Mode ends. Back to tab brings the window into the page.
   const [floated, setFloated] = useState(false);
-  const [backInPage, setBackInPage] = useState(false);
   if (pip && !floated) setFloated(true);
-  if (pip && backInPage) setBackInPage(false);
-  const leavingPip = floated && !pip && !backInPage;
+  const leavingPip = floated && !pip;
   useEffect(
-    () =>
-      onVoicePipClosedByHuman("voice-mode", () => {
-        void returnedToOpener().then((returned) => {
-          if (!returned) return exitRef.current();
-          setBackInPage(true);
-          openRoomRef.current();
-        });
-      }),
+    () => onVoicePipClosedByHuman("voice-mode", () => exitRef.current()),
     [],
   );
 
-  // Every session opens compact. The expand button switches between the two
-  // preset sizes; dragging an edge or corner gives the window any other size,
-  // which lasts until a preset is chosen again or the session ends.
-  const [size, setSize] = useState<WindowSize>("compact");
+  // Every session opens as the island alone. Its arrow opens the
+  // conversation below; dragging an edge or corner of the open window gives
+  // it any other size, which it keeps as the conversation closes (the width)
+  // and opens again (the height). A floated window grows and shrinks with it,
+  // inside the click that asked, keeping the size the Human gave it too.
+  const [open, setOpen] = useState(false);
   const [resized, setResized] = useState<{ height: number; width: number }>();
-  const { width, height } = windowSizes[size];
-  const large = resized
-    ? resized.width >= windowSizes.expanded.width
-    : size === "expanded";
-  const choosePreset = (next: WindowSize) => {
-    setResized(undefined);
-    setSize(next);
+  const showConversation = open;
+  const floatedOpenSize = useRef<{ height: number; width: number }>(undefined);
+  // A floated window's conversation is as tall as the window leaves it.
+  const [floatedBody, setFloatedBody] = useState<number>();
+  const openConversation = (next: boolean) => {
+    if (!pip) return setOpen(next);
+    const target = floatedTarget(pip, next, floatedOpenSize.current);
+    floatedOpenSize.current = target.openSize;
+    if (next) {
+      setFloatedBody(target.body);
+      setOpen(true);
+      animateFloated(pip, target.height);
+    }
+    // The window shuts over the conversation, which goes once it is hidden.
+    else animateFloated(pip, target.height, () => setOpen(false));
   };
+  // A floated window the Human resizes gives its conversation the new height;
+  // the window's own open and close animation already sets it.
+  const openRef = useRef(open);
+  useLayoutEffect(() => {
+    openRef.current = open;
+  });
+  useEffect(() => {
+    if (!pip) return;
+    const fit = () => {
+      if (!floatedFrame && openRef.current)
+        setFloatedBody(pip.innerHeight - islandHeight);
+    };
+    pip.addEventListener("resize", fit);
+    return () => pip.removeEventListener("resize", fit);
+  }, [pip]);
   const frameRef = useRef<HTMLElement>(null);
   const { consumeDrag, dragHandlers, moveTo, place, position, remember } =
     useDraggablePosition(
-      resized?.width ?? width,
+      resized?.width ?? islandWidth,
       frameRef,
       !pip && !leavingPip,
     );
@@ -247,10 +271,11 @@ function MiniWindow({
     windowControl.current = (action) => {
       if (action === "mute" || action === "unmute")
         void onMute(action === "mute");
-      // The desktop places a picture-in-picture window; only a drag moves it.
-      else if (pip) showVoiceNotice(translate(m.dragHint));
+      // Spoken expand and shrink fold the conversation as the arrow does,
+      // floated or not; the desktop places its window, so only a drag moves it.
       else if (action === "expand" || action === "shrink")
-        choosePreset(action === "expand" ? "expanded" : "compact");
+        openConversation(action === "expand");
+      else if (pip) showVoiceNotice(translate(m.dragHint));
       else place(action === "move_left" ? "left" : "right");
     };
   });
@@ -289,27 +314,144 @@ function MiniWindow({
     observer.observe(content);
     observer.observe(scroller);
     return () => observer.disconnect();
-  }, [pip]);
+  }, [pip, showConversation]);
 
   const state = session.state;
   const muted = session.muted;
-  const listening = Boolean(state.microphoneActive) && !muted;
+  // A live call wakes up until the live model itself is connected, even once
+  // the microphone is heard; dictation wakes up until it listens.
+  const waking =
+    state.status === "connecting" ||
+    state.status === "idle" ||
+    Boolean(session.live?.waking);
+  const listening = Boolean(state.microphoneActive) && !muted && !waking;
+  // Another Me leans in once each time the call wakes up.
+  const [cheer, setCheer] = useState(0);
+  const [wasWaking, setWasWaking] = useState(waking);
+  if (waking !== wasWaking) {
+    setWasWaking(waking);
+    if (!waking) setCheer(cheer + 1);
+  }
+  const status = t(
+    voiceWindowStatus(
+      { ...state, entered: session.entered },
+      { muted, waking: session.live?.waking },
+    ),
+  );
+  // The conversation is as tall as its words up to a preset; a dragged or
+  // floated window gives it whatever its own height leaves below the island.
+  const footerHeight =
+    (notice ? statusRowHeight : 0) + (pendingMaterials ? statusRowHeight : 0);
+  const conversationSize: CSSProperties = pip
+    ? {
+        height:
+          (floatedBody ?? floatedConversationHeight - islandHeight) -
+          footerHeight,
+      }
+    : resized
+      ? { height: resized.height - islandHeight - footerHeight }
+      : { maxHeight: `calc(${conversationHeight})` };
   if (leavingPip) return null;
+  const conversationLog = (
+    <div
+      aria-label={t(m.conversation)}
+      aria-live="polite"
+      className="workspace-scrollbar min-h-24 overflow-y-auto border-t border-app-border px-3 py-3"
+      onScroll={(event) => {
+        const element = event.currentTarget;
+        const top = element.scrollTop;
+        const atBottom = element.scrollHeight - top - element.clientHeight < 24;
+        // A follow glide passes through positions short of the bottom
+        // on its way down; only moving up leaves the newest words.
+        if (atBottom) {
+          followRef.current = true;
+          glidingRef.current = false;
+        } else if (!glidingRef.current || top < lastTopRef.current) {
+          followRef.current = false;
+          glidingRef.current = false;
+        }
+        lastTopRef.current = top;
+      }}
+      ref={scrollRef}
+      role="log"
+      style={conversationSize}
+    >
+      <div className="space-y-2" ref={contentRef}>
+        {(transcript ? transcript.length : turns.length || replying.length) ||
+        live ? null : (
+          <p className="py-4 text-center text-xs text-app-muted">
+            {t(m.empty)}
+          </p>
+        )}
+        {transcript ? (
+          transcript.map((line) => (
+            <Bubble
+              agent={line.speaker !== "you"}
+              author={
+                line.speaker === "you"
+                  ? t(commonMessages.you)
+                  : session.target.recipient?.display_name || t(m.reply)
+              }
+              key={line.id}
+              own={line.speaker === "you"}
+              pending={line.pending}
+              text={line.text}
+            />
+          ))
+        ) : (
+          <>
+            {turns.map((message) => (
+              <Bubble
+                agent={message.author.kind === "agent"}
+                author={message.author.display_name}
+                key={message.id}
+                own={
+                  currentActorId
+                    ? message.author.id === currentActorId
+                    : message.author.kind === "human"
+                }
+                text={message.raw_message}
+              />
+            ))}
+            {replying.map((run) => (
+              <Bubble
+                agent
+                author={run.agent.display_name}
+                key={run.id}
+                own={false}
+                pending
+                text={t(m.working)}
+              />
+            ))}
+            {heard ? (
+              <Bubble author={t(commonMessages.you)} own pending text={heard} />
+            ) : null}
+          </>
+        )}
+        {saying ? (
+          <Bubble author={t(commonMessages.you)} own pending text={saying} />
+        ) : null}
+      </div>
+    </div>
+  );
   return createPortal(
     <section
       aria-label={t(m.window)}
       className={
         pip
-          ? "flex h-dvh w-full flex-col bg-app-canvas"
-          : `voice-mode-window app-floating-enter fixed z-[90] flex max-w-[calc(100vw-32px)] flex-col rounded-xl bg-app-canvas shadow-xl ${
-              // A dragged edge is followed at once; only a preset eases in.
-              resized
-                ? "max-h-[calc(100dvh-32px)]"
-                : "transition-[width,max-height] duration-200 ease-out motion-reduce:transition-none"
-            }`
+          ? cn(
+              // The island stays at the top, so the window can grow and
+              // shrink under it without the island moving.
+              "flex h-dvh w-full flex-col bg-app-voice-island",
+            )
+          : // One width open or not, so nothing on the island moves; the
+            // island alone is 48px tall, so 24px corners make it a pill.
+            "voice-mode-window app-floating-enter fixed z-[90] flex max-h-[calc(100dvh-32px)] max-w-[calc(100vw-32px)] flex-col rounded-3xl bg-app-voice-island shadow-xl"
       }
       data-pip={pip ? true : undefined}
-      data-size={resized ? "custom" : size}
+      data-size={
+        resized ? "custom" : showConversation ? "conversation" : "island"
+      }
       // Voice Mode finds its own window by this, whatever the language.
       data-voice-window=""
       ref={frameRef}
@@ -317,39 +459,36 @@ function MiniWindow({
         pip
           ? undefined
           : resized
-            ? { ...position, ...resized }
-            : { ...position, maxHeight: `calc(${height} + 36px)`, width }
+            ? showConversation
+              ? { ...position, ...resized }
+              : { ...position, width: resized.width }
+            : { ...position, width: islandWidth }
       }
     >
       {/* Clips the content to the window's corners; the resize handles sit
           outside it, on the border. */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[inherit]">
-        {pip ? null : (
-          <div
-            className="voice-window-title flex h-9 shrink-0 cursor-grab touch-none select-none items-center px-3 active:cursor-grabbing"
-            {...dragHandlers}
-          >
-            {t(m.title)}
-          </div>
-        )}
+        {/* The island is the window's draggable bar: Another Me, what the
+            call is doing, the voice, and the call's controls. */}
         <header
-          className={`flex shrink-0 select-none items-center gap-2 border-b border-app-border px-3 py-2 ${
-            pip ? "" : "cursor-grab touch-none active:cursor-grabbing"
-          }`}
+          className={cn(
+            "flex shrink-0 select-none items-center gap-2 bg-app-voice-island py-1.5 pl-2 pr-1.5 text-app-voice-island-ink",
+            pip ? "" : "cursor-grab touch-none active:cursor-grabbing",
+          )}
+          style={{ height: islandHeight }}
           {...(pip ? {} : dragHandlers)}
         >
-          <VoiceAvatarBeat listening={listening}>
-            <span className={styles.avatarSpin}>
-              <ActorAvatar
-                actorId={voiceActorId}
-                kind="agent"
-                name={voiceName}
-                size="xs"
-              />
-            </span>
+          <VoiceAvatarBeat listening={listening} waking={waking}>
+            <ActorAvatar
+              actorId={voiceActorId}
+              cheer={cheer}
+              kind="agent"
+              name={voiceName}
+              size="xs"
+            />
           </VoiceAvatarBeat>
           <button
-            className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
+            className="min-w-[72px] truncate rounded text-left text-[14px] font-semibold leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
             onClick={() => {
               if (!consumeDrag())
                 void navigate(`/t/${tenantId}/rooms/${roomId}/chat`);
@@ -357,220 +496,105 @@ function MiniWindow({
             title={t(m.openConversation)}
             type="button"
           >
-            <span className="block truncate text-[14px] font-medium leading-5 text-app-ink">
-              {roomName || t(m.title)}
-            </span>
-            <span className="block truncate text-[12px] leading-4 text-app-muted">
-              {voiceModeStatusLabel({ ...state, entered: session.entered }, t)}
-            </span>
+            {status}
           </button>
+          <span className="sr-only" role="status">
+            {voiceModeStatusLabel({ ...state, entered: session.entered }, t)}
+          </span>
+          <IslandWave active={listening} />
           <span
-            className="flex shrink-0 items-center"
+            className="ml-auto flex shrink-0 items-center gap-1.5"
             onPointerDown={(event) => event.stopPropagation()}
           >
-            {state.canRetry ? (
-              <Button
-                // Names differ from the Room composer's controls so both can
-                // be on screen without two identically named buttons.
-                aria-label={t(m.retry)}
-                disabled={state.sending}
-                onClick={onRetry}
-                size="compactIcon"
-                tone="ghost"
+            <span className="flex items-center gap-1.5">
+              {state.canRetry ? (
+                <IslandButton
+                  // Names differ from the Room composer's controls so both
+                  // can be on screen without two identically named buttons.
+                  aria-label={t(m.retry)}
+                  disabled={state.sending}
+                  onClick={onRetry}
+                >
+                  <Icon icon={RotateLeft01Icon} size={16} />
+                </IslandButton>
+              ) : null}
+              <IslandButton
+                aria-label={t(muted ? m.unmute : m.mute)}
+                aria-pressed={muted}
+                disabled={!state.microphoneActive}
+                onClick={() => void onMute(!muted)}
               >
-                <Icon icon={RotateLeft01Icon} size={16} />
-              </Button>
-            ) : null}
-            <Button
-              aria-label={t(muted ? m.unmute : m.mute)}
-              aria-pressed={muted}
-              disabled={!state.microphoneActive}
-              onClick={() => void onMute(!muted)}
-              size="compactIcon"
-              tone="ghost"
-            >
-              {muted ? (
-                <Icon icon={MicOff01Icon} size={16} />
-              ) : (
-                <Icon icon={Mic01Icon} size={16} />
+                <Icon icon={muted ? MicOff01Icon : Mic01Icon} size={16} />
+              </IslandButton>
+              {soundOff === undefined ? null : (
+                <IslandButton
+                  aria-label={t(soundOff ? m.replySoundOn : m.replySoundOff)}
+                  aria-pressed={soundOff}
+                  onClick={() => onSoundOff(!soundOff)}
+                >
+                  <Icon
+                    icon={soundOff ? VolumeOffIcon : VolumeHighIcon}
+                    size={16}
+                  />
+                </IslandButton>
               )}
-            </Button>
-            {soundOff === undefined ? null : (
-              <Button
-                aria-label={t(soundOff ? m.replySoundOn : m.replySoundOff)}
-                aria-pressed={soundOff}
-                onClick={() => onSoundOff(!soundOff)}
-                size="compactIcon"
-                tone="ghost"
+              <IslandButton
+                aria-expanded={open}
+                // Closing the conversation is how Voice Mode closes it.
+                data-voice-close={open ? "" : undefined}
+                aria-label={t(open ? m.hideConversation : m.showConversation)}
+                onClick={() => openConversation(!open)}
               >
-                {soundOff ? (
-                  <Icon icon={VolumeOffIcon} size={16} />
-                ) : (
-                  <Icon icon={VolumeHighIcon} size={16} />
-                )}
-              </Button>
-            )}
-            {/* Brings the call back into the conversation it started in, in
-              the desktop app's main window or this browser tab. */}
-            {pip ? (
-              <Button
-                aria-label={t(m.returnToLinger)}
-                onClick={() => returnVoicePipToPage("voice-mode")}
-                size="compactIcon"
-                title={t(m.returnHint)}
-                tone="ghost"
-              >
-                <Icon icon={PictureInPictureExitIcon} size={16} />
-              </Button>
-            ) : null}
-            {/* Back in the page, one click floats the call again; the browser
-              opens that window only from a click in the page. */}
-            {pip || !voicePipSupported() ? null : (
-              <Button
-                aria-label={t(m.float)}
-                onClick={() => void openVoicePip("voice-mode")}
-                size="compactIcon"
-                title={t(m.floatHint)}
-                tone="ghost"
-              >
-                <Icon icon={PictureInPictureOnIcon} size={16} />
-              </Button>
-            )}
-            {pip ? null : (
-              <Button
-                aria-label={t(large ? m.shrink : m.expand)}
-                onClick={() => choosePreset(large ? "compact" : "expanded")}
-                size="compactIcon"
-                tone="ghost"
-              >
-                {large ? (
-                  <Icon icon={Minimize01Icon} size={14} />
-                ) : (
-                  <Icon icon={Maximize01Icon} size={14} />
-                )}
-              </Button>
-            )}
-            {/* The floating window's own close button ends Voice Mode there. */}
-            {pip ? null : (
-              // Not marked risky: ending Voice Mode from its window is never
-              // confirmed, as its English name never was.
-              <Button
-                aria-label={t(m.end)}
-                onClick={onExit}
-                size="compactIcon"
-                tone="ghost"
-              >
-                <Icon icon={Cancel01Icon} size={16} />
-              </Button>
-            )}
+                <Icon
+                  className={cn(
+                    "transition-transform duration-300 motion-reduce:transition-none",
+                    open && "rotate-180",
+                  )}
+                  icon={ArrowDown01Icon}
+                  size={16}
+                />
+              </IslandButton>
+            </span>
+            {/* Not marked risky: ending Voice Mode from its window is never
+                confirmed, as its English name never was. */}
+            <button
+              aria-label={t(m.end)}
+              className="grid size-9 place-items-center rounded-full bg-app-voice-end text-white transition-[background-color,transform] hover:bg-app-voice-end-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-focus active:scale-90"
+              onClick={onExit}
+              type="button"
+            >
+              <Icon icon={hangUpIcon} size={20} />
+            </button>
           </span>
         </header>
-        <div
-          aria-label={t(m.conversation)}
-          aria-live="polite"
-          className="workspace-scrollbar min-h-24 flex-1 overflow-y-auto px-3 py-3"
-          onScroll={(event) => {
-            const element = event.currentTarget;
-            const top = element.scrollTop;
-            const atBottom =
-              element.scrollHeight - top - element.clientHeight < 24;
-            // A follow glide passes through positions short of the bottom
-            // on its way down; only moving up leaves the newest words.
-            if (atBottom) {
-              followRef.current = true;
-              glidingRef.current = false;
-            } else if (!glidingRef.current || top < lastTopRef.current) {
-              followRef.current = false;
-              glidingRef.current = false;
-            }
-            lastTopRef.current = top;
-          }}
-          ref={scrollRef}
-          role="log"
-        >
-          <div className="space-y-2" ref={contentRef}>
-            {(transcript
-              ? transcript.length
-              : turns.length || replying.length) || live ? null : (
-              <p className="py-4 text-center text-xs text-app-muted">
-                {t(m.empty)}
-              </p>
-            )}
-            {transcript ? (
-              transcript.map((line) => (
-                <Bubble
-                  agent={line.speaker !== "you"}
-                  author={
-                    line.speaker === "you"
-                      ? t(commonMessages.you)
-                      : session.target.recipient?.display_name || t(m.reply)
-                  }
-                  key={line.id}
-                  own={line.speaker === "you"}
-                  pending={line.pending}
-                  text={line.text}
-                />
-              ))
-            ) : (
-              <>
-                {turns.map((message) => (
-                  <Bubble
-                    agent={message.author.kind === "agent"}
-                    author={message.author.display_name}
-                    key={message.id}
-                    own={
-                      currentActorId
-                        ? message.author.id === currentActorId
-                        : message.author.kind === "human"
-                    }
-                    text={message.raw_message}
-                  />
-                ))}
-                {replying.map((run) => (
-                  <Bubble
-                    agent
-                    author={run.agent.display_name}
-                    key={run.id}
-                    own={false}
-                    pending
-                    text={t(m.working)}
-                  />
-                ))}
-                {heard ? (
-                  <Bubble
-                    author={t(commonMessages.you)}
-                    own
-                    pending
-                    text={heard}
-                  />
-                ) : null}
-              </>
-            )}
-            {saying ? (
-              <Bubble
-                author={t(commonMessages.you)}
-                own
-                pending
-                text={saying}
-              />
-            ) : null}
-          </div>
-        </div>
+        {/* In the page the conversation slides open and shut under the
+            island with the chat's own resize timing; a floated window moves
+            itself, with the same timing, over a conversation that holds
+            still. */}
+        {pip ? (
+          showConversation ? (
+            <div className="bg-app-canvas">{conversationLog}</div>
+          ) : null
+        ) : (
+          <AutoHeight className="bg-app-canvas" open={showConversation}>
+            {conversationLog}
+          </AutoHeight>
+        )}
         {notice ? (
           <p
-            className="shrink-0 truncate border-t border-app-border px-3 py-1.5 text-[12px] text-app-muted"
+            className="h-[29px] shrink-0 truncate border-t border-app-border bg-app-canvas px-3 py-1.5 text-[12px] leading-4 text-app-muted"
             role="status"
           >
             {notice}
           </p>
         ) : null}
         {pendingMaterials ? (
-          <p className="shrink-0 truncate border-t border-app-border px-3 py-1.5 text-[12px] text-app-muted">
+          <p className="h-[29px] shrink-0 truncate border-t border-app-border bg-app-canvas px-3 py-1.5 text-[12px] leading-4 text-app-muted">
             {t(m.pendingSelections, { count: pendingMaterials })}
           </p>
         ) : null}
       </div>
-      {pip ? null : (
+      {pip || !showConversation ? null : (
         <VoiceWindowResizeHandles
           bounds={viewportBounds}
           label={t(m.resize)}
@@ -629,70 +653,6 @@ const Bubble = memo(function Bubble({
     </div>
   );
 });
-
-interface TextPiece {
-  id: number;
-  text: string;
-  fade: boolean;
-}
-
-/**
- * A line's words as they arrive: each newly arrived phrase shows whole and
- * fades in, while the words before it stay as they were.
- */
-function FadingText({ text }: { text: string }) {
-  const [pieces, setPieces] = useState<TextPiece[]>(() => [
-    { id: 0, text, fade: false },
-  ]);
-  const [seen, setSeen] = useState(text);
-  if (text !== seen) {
-    setSeen(text);
-    setPieces(nextTextPieces(pieces, seen, text));
-  }
-  return pieces.map((piece) =>
-    piece.fade ? (
-      <span className="voice-live-fade-in" key={piece.id}>
-        {piece.text}
-      </span>
-    ) : (
-      <Fragment key={piece.id}>{piece.text}</Fragment>
-    ),
-  );
-}
-
-/**
- * Keeps the pieces the new text still starts with and adds what changed as
- * one fading piece. A transcription that revised earlier words fades in from
- * the first word it changed.
- */
-function nextTextPieces(
-  pieces: readonly TextPiece[],
-  before: string,
-  after: string,
-): TextPiece[] {
-  let common = 0;
-  const limit = Math.min(before.length, after.length);
-  while (common < limit && before[common] === after[common]) common++;
-  // Never split a character made of two UTF-16 units.
-  const previous = after.charCodeAt(common - 1);
-  if (common > 0 && previous >= 0xd800 && previous <= 0xdbff) common--;
-  const kept: TextPiece[] = [];
-  let offset = 0;
-  for (const piece of pieces) {
-    if (offset >= common) break;
-    const take = Math.min(piece.text.length, common - offset);
-    kept.push(
-      take === piece.text.length
-        ? piece
-        : { ...piece, text: piece.text.slice(0, take) },
-    );
-    offset += piece.text.length;
-  }
-  const added = after.slice(common);
-  if (!added) return kept;
-  const id = pieces.reduce((largest, piece) => Math.max(largest, piece.id), 0);
-  return [...kept, { id: id + 1, text: added, fade: true }];
-}
 
 /** Conversation Messages sent since this session started, oldest first. */
 export function sessionMessages(
@@ -810,10 +770,7 @@ function defaultPosition(width: number): Position {
  *  viewport. Its height is known once it is in the page. */
 export function clampPosition(
   position: Position,
-  {
-    height = 0,
-    width = windowSizes.compact.width,
-  }: { height?: number; width?: number } = {},
+  { height = 0, width = islandWidth }: { height?: number; width?: number } = {},
 ): Position {
   return containedVoiceWindowPosition(
     position,
@@ -858,13 +815,95 @@ function writePosition(position: Position) {
   }
 }
 
-/** Only this beat follows the microphone level, so the window stays still. */
+/**
+ * The height a floated window takes for the island alone or the open
+ * conversation, the open size to come back to, and the conversation's own
+ * height in it. The width stays the Human's.
+ */
+function floatedTarget(
+  view: Window,
+  open: boolean,
+  openSize: { height: number; width: number } | undefined,
+) {
+  const chromeHeight = view.outerHeight - view.innerHeight;
+  const opened = openSize?.height ?? floatedConversationHeight + chromeHeight;
+  return {
+    body: opened - chromeHeight - islandHeight,
+    height: open ? opened : islandHeight + chromeHeight,
+    openSize: open
+      ? openSize
+      : { height: view.outerHeight, width: view.outerWidth },
+  };
+}
+
+let floatedFrame: { view: Window; id: number } | undefined;
+
+/**
+ * Moves a floated window's height with the in-page conversation's timing
+ * (`--chat-resize-duration`, `--app-out-quint`), one frame at a time, so
+ * opening and closing read the same in the page and floated.
+ */
+function animateFloated(view: Window, height: number, done?: () => void) {
+  if (floatedFrame) floatedFrame.view.cancelAnimationFrame(floatedFrame.id);
+  floatedFrame = undefined;
+  const to = Math.min(height, view.screen.availHeight || height);
+  const width = view.outerWidth;
+  const resize = (next: number) => {
+    try {
+      view.resizeTo(width, Math.round(next));
+    } catch {
+      // The Human can still drag the window to size.
+    }
+  };
+  const duration =
+    Number.parseFloat(
+      view
+        .getComputedStyle?.(view.document.documentElement)
+        .getPropertyValue("--chat-resize-duration") ?? "",
+    ) * 1000 || 280;
+  const still =
+    !view.requestAnimationFrame ||
+    view.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  if (still) {
+    resize(to);
+    return done?.();
+  }
+  const from = view.outerHeight;
+  const start = view.performance.now();
+  const step = (now: number) => {
+    const progress = Math.min(1, (now - start) / duration);
+    resize(from + (to - from) * outQuint(progress));
+    if (progress < 1)
+      floatedFrame = { view, id: view.requestAnimationFrame(step) };
+    else {
+      floatedFrame = undefined;
+      done?.();
+    }
+  };
+  floatedFrame = { view, id: view.requestAnimationFrame(step) };
+}
+
+/** `--app-out-quint`, cubic-bezier(0, 0, 0.2, 1), at `progress` in [0, 1]. */
+function outQuint(progress: number) {
+  let s = progress;
+  for (let i = 0; i < 8; i++) {
+    const x = 0.6 * (1 - s) * s * s + s * s * s;
+    const slope = 0.6 * (2 * s - 3 * s * s) + 3 * s * s;
+    if (Math.abs(slope) < 1e-6) break;
+    s = Math.min(1, Math.max(0, s - (x - progress) / slope));
+  }
+  return 3 * (1 - s) * s * s + s * s * s;
+}
+
+/** Only the avatar follows the microphone level, so the window stays still. */
 function VoiceAvatarBeat({
   children,
   listening,
+  waking,
 }: {
   children: ReactNode;
   listening: boolean;
+  waking: boolean;
 }) {
   const level = useVoiceModeLevel();
   return (
@@ -874,9 +913,83 @@ function VoiceAvatarBeat({
       data-listening={listening || undefined}
       data-speaking={(listening && level > speakingLevel) || undefined}
       data-voice-avatar
+      data-waking={waking || undefined}
       style={{ "--voice-level": listening ? level : 0 } as CSSProperties}
     >
       {children}
+    </span>
+  );
+}
+
+function IslandButton({ className, ...props }: ComponentProps<"button">) {
+  return (
+    <button
+      className={cn(
+        "grid size-9 shrink-0 place-items-center rounded-full bg-app-voice-island-control text-app-voice-island-ink transition-colors hover:bg-app-voice-island-control-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-focus disabled:opacity-40 aria-pressed:bg-app-voice-island-ink aria-pressed:text-app-voice-island",
+        className,
+      )}
+      type="button"
+      {...props}
+    />
+  );
+}
+
+const islandBars = [0, 1, 2, 3];
+
+/**
+ * Four pill bars that rise from their middle with the voice. The level is
+ * eased (a fast rise, a slow fall) so the bars never jitter, each bar sways
+ * a little out of step so they read as speech, and in silence they rest as
+ * dots that bob gently. Frames come from the window the bars are drawn in,
+ * so a floated call keeps moving while its tab is hidden.
+ */
+function IslandWave({ active }: { active: boolean }) {
+  const level = useVoiceModeLevel();
+  const target = useRef(0);
+  useLayoutEffect(() => {
+    target.current = active ? Math.sqrt(Math.min(1, Math.max(0, level))) : 0;
+  });
+  const waveRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const wave = waveRef.current;
+    const view = wave?.ownerDocument.defaultView;
+    if (!wave || !view?.requestAnimationFrame) return;
+    const bars = [...wave.children] as HTMLElement[];
+    const still = view.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    let eased = 0;
+    let frame = 0;
+    const draw = (now: number) => {
+      const goal = target.current;
+      eased = still
+        ? goal
+        : eased + (goal - eased) * (goal > eased ? 0.35 : 0.08);
+      const time = now / 1000;
+      bars.forEach((bar, index) => {
+        const inner = index === 1 || index === 2 ? 1 : 0.7;
+        const lift =
+          eased < 0.04
+            ? still
+              ? 0
+              : 0.04 + 0.04 * Math.sin(time * 3 + index * 0.9)
+            : Math.min(
+                1,
+                eased *
+                  inner *
+                  (still ? 1 : 0.6 + 0.4 * Math.sin(time * 9 + index * 1.7)) *
+                  1.15,
+              );
+        bar.style.height = `${4 + lift * 20}px`;
+      });
+      frame = view.requestAnimationFrame(draw);
+    };
+    frame = view.requestAnimationFrame(draw);
+    return () => view.cancelAnimationFrame(frame);
+  }, []);
+  return (
+    <span aria-hidden="true" className={styles.islandWave} ref={waveRef}>
+      {islandBars.map((bar) => (
+        <i key={bar} />
+      ))}
     </span>
   );
 }

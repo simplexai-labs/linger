@@ -23,6 +23,7 @@ const (
 	ToolReadPocketNotes  = "read_pocket_notes"
 	ToolDeletePocketNote = "delete_pocket_note"
 	ToolCreateRoom       = "create_room"
+	ToolHandOffToRoom    = "hand_off_to_room"
 	ToolAddRoomMembers   = "add_room_members"
 	ToolReadDocument     = "read_document"
 	ToolCheckReminders   = "check_reminders"
@@ -60,9 +61,10 @@ func stringProperty(description string) map[string]any {
 var Tools = append([]Tool{
 	{
 		Name:        ToolSearchMessages,
-		Description: "Find a substring in chat message bodies. Attached notes and transcript text live on the recording. Searches only the current Room by default; all_rooms=true searches every Room the user is in.",
+		Description: "Find a substring in chat message bodies. Attached notes and transcript text live on the recording. Searches only the current Room by default; room_id selects another accessible Room, and all_rooms=true searches every Room the user is in. To read recent discussion in one Room, supply its room_id and an empty query.",
 		Parameters: objectSchema([]string{"query"}, map[string]any{
-			"query":     stringProperty("Keywords to search for"),
+			"query":     stringProperty("Keywords to search for, or empty to list recent messages in room_id"),
+			"room_id":   stringProperty("Optional accessible Room ID from find_rooms"),
 			"all_rooms": map[string]any{"type": "boolean", "description": "Whether to search all Rooms"},
 		}),
 	},
@@ -120,7 +122,7 @@ var Tools = append([]Tool{
 	},
 	{
 		Name: ToolSendMessage,
-		Description: "Send a message as the user in a room of this app. Without room_id it goes to the room this call belongs to (not the room open on the page); to message another Room or person here, get its room_id with find_rooms first. It cannot post outside this app: Slack is send_slack; Feishu, WeChat or email is start_task. " +
+		Description: "Send a message as the user in a room of this app. To speak as yourself, coordinate Agents or follow the discussion, use hand_off_to_room. Without room_id it goes to the room this call belongs to (not the room open on the page); to message another Room or person here, get its room_id with find_rooms first. It cannot post outside this app: Slack is send_slack; Feishu, WeChat or email is start_task. " +
 			"It posts the user's own words as the user; never use it to share a task's result, report or files: the Agent posts those in the chat with their files by itself. " +
 			"This is a write: first call without confirmed, read back the room name and content from the returned summary and ask the user to confirm, and after they agree call again with the same room_id and text and confirmed=true. " +
 			"Setting confirmed=true without first getting a summary returns needs_confirmation again and sends nothing. If the room is wrong, go through it again with another room_id.",
@@ -154,9 +156,19 @@ var Tools = append([]Tool{
 			"members": map[string]any{
 				"type": "array", "maxItems": MaxRoomMembers,
 				"items":       map[string]any{"type": "string"},
-				"description": "Optional names of people or Agents to add, not including the user",
+				"description": "Optional names of people or Agents to add; the user and the call's Agent join automatically",
 			},
 			"confirmed": map[string]any{"type": "boolean", "description": "Whether the user has confirmed out loud"},
+		}),
+	},
+	{
+		Name:        ToolHandOffToRoom,
+		Description: "From the private chat with the user's AnotherMe, ask yourself in another group Room to speak, mention the relevant Agents, and follow the discussion. Use this for Room coordination; create_room and add_room_members stay direct tools. Both the user and you must be members of the target Room; if you are missing, add yourself with add_room_members after confirmation. Only include the user's instruction and background they want shared. First call with confirmed=false and ask using the preview; after agreement in a later turn repeat with confirmed=true. Accepted means handed off, not finished. Questions and results arrive as Room reports; pass the user's answer with the same room_id and handoff_id. Use search_messages to read recent discussion when asked. Never use start_task to create a Room or speak in one.",
+		Parameters: objectSchema([]string{"room_id", "instruction", "confirmed"}, map[string]any{
+			"room_id":     stringProperty("Target group Room ID from find_rooms or create_room"),
+			"instruction": stringProperty("Self-contained request, at most 8000 characters; share only relevant authorized context"),
+			"handoff_id":  stringProperty("Existing handoff ID when answering a Room report or continuing that request"),
+			"confirmed":   map[string]any{"type": "boolean", "description": "Whether the user agreed to the preview in a later turn"},
 		}),
 	},
 	{
@@ -217,6 +229,7 @@ var Tools = append([]Tool{
 type SearchArguments struct {
 	Query    string `json:"query"`
 	AllRooms bool   `json:"all_rooms"`
+	RoomID   string `json:"room_id"`
 }
 
 // ListWorkItemsArguments filters the user’s visible Work Items by state.

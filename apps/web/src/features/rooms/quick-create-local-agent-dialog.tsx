@@ -338,12 +338,9 @@ export function QuickCreateLocalAgentDialog({
           <>
             <div>
               <div className="mb-1.5 flex items-center justify-between gap-3">
-                <label
-                  className="text-sm font-medium"
-                  htmlFor="local-agent-computer"
-                >
+                <span className="text-sm font-medium">
                   {t(createAgentMessages.computer)}
-                </label>
+                </span>
                 {cliInstallAvailable ? (
                   <Button
                     size="compact"
@@ -394,7 +391,7 @@ export function QuickCreateLocalAgentDialog({
             </div>
             {selectedComputer ? (
               <>
-                <label className="block">
+                <div>
                   <span className="mb-1.5 block text-sm font-medium">
                     {t(createAgentMessages.runtime)}
                   </span>
@@ -416,9 +413,9 @@ export function QuickCreateLocalAgentDialog({
                       </SelectItem>
                     ))}
                   </Select>
-                </label>
+                </div>
                 <div className="space-y-1.5">
-                  <label className="block">
+                  <div>
                     <span className="mb-1.5 block text-sm font-medium">
                       {t(createAgentMessages.model)}
                     </span>
@@ -439,7 +436,7 @@ export function QuickCreateLocalAgentDialog({
                         </SelectItem>
                       ))}
                     </Select>
-                  </label>
+                  </div>
                   {selectedRuntime?.type === "pi" && modelOptions.length > 0 ? (
                     <p className="text-xs text-muted-foreground">
                       <RichMessage
@@ -449,7 +446,7 @@ export function QuickCreateLocalAgentDialog({
                     </p>
                   ) : null}
                 </div>
-                <label className="block">
+                <div>
                   <span className="mb-1.5 block text-sm font-medium">
                     {t(createAgentMessages.thinkingEffort)}
                   </span>
@@ -469,7 +466,7 @@ export function QuickCreateLocalAgentDialog({
                       </SelectItem>
                     ))}
                   </Select>
-                </label>
+                </div>
                 {!selectedModel && !loginRuntime ? (
                   selectedComputer &&
                   selectedRuntime?.status === "incompatible" ? (

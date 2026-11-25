@@ -29,8 +29,12 @@ func (a *App) handOffAgentRoomWork(c *gin.Context) {
 		a.writeAgentAPIError(c, http.StatusBadRequest, teamhubagentapi.AgentApiErrorCodeInvalidRequest, "Room handoff request is invalid")
 		return
 	}
+	handoffID := ""
+	if request.HandoffId != nil {
+		handoffID = *request.HandoffId
+	}
 	result, err := a.agentRoomHandoffs.HandOff(c.Request.Context(), token, agentroomhandoff.Input{
-		InvocationID: request.InvocationId, RoomID: request.RoomId, Instruction: request.Instruction,
+		InvocationID: request.InvocationId, HandoffID: handoffID, RoomID: request.RoomId, Instruction: request.Instruction,
 	})
 	if a.writeAgentRoomHandoffError(c, err) {
 		return

@@ -147,6 +147,38 @@ const muteSilence = Buffer.alloc(inputRate * 0.7 * 2);
 const markupStart = "<tool_call>";
 const markupEnd = "</tool_call>";
 
+// After a tool call Grok sometimes writes its own marker for words it already
+// said, `<response_segment_0_already_spoken>…</response_segment_0_already_spoken>`,
+// around a repeat of them. The marker and the repeat are never said or shown.
+const spokenSegmentHead = "<response_segment_";
+const spokenSegmentOpen = /^<response_segment_\d+_already_spoken\s*>/;
+const spokenSegmentClose = /<\/response_segment_\d+_already_spoken\s*>/;
+const spokenSegmentStrayClose = /^<\/response_segment_\d+_already_spoken\s*>/;
+
+/**
+ * The length of an already-spoken marker `text` starts with, 0 while `text`
+ * may still become one (or a stray closing one), or undefined when it cannot.
+ */
+function spokenSegmentMarker(text: string): number | undefined {
+  const whole =
+    spokenSegmentOpen.exec(text) ?? spokenSegmentStrayClose.exec(text);
+  if (whole) return whole[0].length;
+  const head = text.startsWith("</")
+    ? "</" + spokenSegmentHead.slice(1)
+    : spokenSegmentHead;
+  if (text.length <= head.length) return head.startsWith(text) ? 0 : undefined;
+  if (!text.startsWith(head)) return undefined;
+  const after = text.slice(head.length);
+  const digits = /^\d*/.exec(after)![0];
+  const tail = after.slice(digits.length);
+  if (!digits) return tail === "" ? 0 : undefined;
+  const word = "_already_spoken";
+  return word.startsWith(tail) ||
+    (tail.startsWith(word) && /^\s*$/.test(tail.slice(word.length)))
+    ? 0
+    : undefined;
+}
+
 /**
  * The call in a tool call written as words, mapped to a known tool; values
  * of non-string parameters are read as JSON, as the markup writes them.
@@ -229,6 +261,11 @@ interface Response {
   markup?: string;
   /** It wrote a tool call out: nothing more of it is said or shown. */
   silenced: boolean;
+  /**
+   * Inside an already-spoken marker: the words so far, kept only to find its
+   * end; neither they nor their audio are said or shown.
+   */
+  repeat?: string;
   /** Asked for after a call written as words could not run. */
   retry: boolean;
   /** It called a tool before it ended. */
@@ -802,7 +839,8 @@ export class XaiLiveSession implements LiveSession {
       }
       case "response.output_audio.delta": {
         const response = this.outputResponse();
-        if (!response || response.silenced) return;
+        if (!response || response.silenced || response.repeat !== undefined)
+          return;
         // A delta may end inside a sample; carry that byte to the next one.
         const bytes = Buffer.concat([
           this.audioCarry,
@@ -917,6 +955,18 @@ export class XaiLiveSession implements LiveSession {
     response.held = "";
     let said = "";
     while (rest) {
+      if (response.repeat !== undefined) {
+        const repeat = response.repeat + rest;
+        const end = spokenSegmentClose.exec(repeat);
+        if (!end) {
+          // Only the tail can still hold the start of its closing marker.
+          response.repeat = repeat.slice(-64);
+          break;
+        }
+        response.repeat = undefined;
+        rest = repeat.slice(end.index + end[0].length);
+        continue;
+      }
       if (response.markup !== undefined) {
         const written = response.markup + rest;
         const end = written.indexOf(markupEnd);
@@ -933,6 +983,7 @@ export class XaiLiveSession implements LiveSession {
       const plain = at < 0 ? rest : rest.slice(0, at);
       if (!response.silenced) said += plain;
       rest = rest.slice(plain.length);
+      const marker = rest ? spokenSegmentMarker(rest) : undefined;
       if (rest.startsWith(markupStart)) {
         if (said) this.pushText(response, said);
         said = "";
@@ -940,7 +991,15 @@ export class XaiLiveSession implements LiveSession {
         response.heldAudio = [];
         response.markup = "";
         rest = rest.slice(markupStart.length);
-      } else if (rest && markupStart.startsWith(rest)) {
+      } else if (marker) {
+        if (said) this.pushText(response, said);
+        said = "";
+        // The audio held with the marker's start is the repeat beginning.
+        response.heldAudio = [];
+        // An opening marker starts a repeat; a stray closing one is dropped.
+        if (!rest.startsWith("</")) response.repeat = "";
+        rest = rest.slice(marker);
+      } else if (rest && (markupStart.startsWith(rest) || marker === 0)) {
         response.held = rest;
         rest = "";
       } else if (rest) {

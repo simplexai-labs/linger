@@ -586,7 +586,7 @@ function TemplateSetup({
             onSelectionChange={beginNewCommand}
             selection={placement.selection}
           />
-          <label className="block">
+          <div>
             <span className="mb-1.5 block text-sm font-medium">
               {t(m.model)}
             </span>
@@ -606,9 +606,9 @@ function TemplateSetup({
                 </SelectItem>
               ))}
             </Select>
-          </label>
+          </div>
           {modelSelection.reasoningEfforts.length > 0 ? (
-            <label className="block">
+            <div>
               <span className="mb-1.5 block text-sm font-medium">
                 {t(m.reasoning)}
               </span>
@@ -630,7 +630,7 @@ function TemplateSetup({
                   </SelectItem>
                 ))}
               </Select>
-            </label>
+            </div>
           ) : null}
           <TemplateBindingsNote
             error={bindings.isError}

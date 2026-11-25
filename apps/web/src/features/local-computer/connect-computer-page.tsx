@@ -179,7 +179,7 @@ export function ConnectComputerPage({
               {t(computersMessages.noSpace)}
             </p>
           ) : (
-            <label className="block">
+            <div>
               <span className="mb-1.5 block text-sm font-medium">
                 {t(computersMessages.space)}
               </span>
@@ -195,7 +195,7 @@ export function ConnectComputerPage({
                   </SelectItem>
                 ))}
               </Select>
-            </label>
+            </div>
           )}
 
           {session.data ? (

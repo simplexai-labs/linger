@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { JobContext } from "@livekit/agents";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TeamHubVoiceRuntimeError } from "./live-client.js";
+import type { SpeechActivityDetector } from "./voice-activity.js";
 
 const rtc = vi.hoisted(() => {
   class Track {
@@ -204,6 +205,7 @@ interface Task {
 async function harness(
   options: {
     toolTimeoutMs?: number;
+    openDetector?: () => Promise<SpeechActivityDetector>;
     providerOpening?: Promise<void>;
     beforeReady?: (state: {
       track: InstanceType<typeof rtc.Track>;
@@ -221,6 +223,14 @@ async function harness(
   const setups: unknown[] = [];
   let tasks: Task[] = [];
   let alerts: Array<{ alert_id: string; text: string }> = [];
+  let roomReports: Array<{
+    message_id: string;
+    handoff_id: string;
+    state: "working" | "waiting_for_user" | "completed";
+    room_id: string;
+    room_name: string;
+    text: string;
+  }> = [];
   let hint: (() => void) | undefined;
   const client = {
     reportObservation: vi.fn(async (event: { event_id: string }) => ({
@@ -252,7 +262,11 @@ async function harness(
             : '{"result":"business"}'),
       }),
     ),
-    listLiveTasks: vi.fn(async () => ({ tasks, alerts })),
+    listLiveTasks: vi.fn(async () => ({
+      tasks,
+      alerts,
+      room_reports: roomReports,
+    })),
     // The hint stream stays open; hint() is TeamHub's push of a change.
     watchLiveTasks: vi.fn(
       (_id: string, changed: () => void, signal: AbortSignal) => {
@@ -313,26 +327,35 @@ async function harness(
       updateStartTimeoutMs: 200,
       updateGapMs: options.updateGapMs ?? 0,
       userFirstMs: options.userFirstMs ?? 0,
-      openDetector: async () => {
-        let through = 0;
-        return {
-          async pushPCM(frame: Int16Array) {
-            through += 512;
-            // Speech markers cover the user, a distant voice and a borderline onset.
-            return [
-              {
-                throughSample: through,
-                speech: [1, 3, 4, 5].includes(frame[0]!),
-                levelDb:
-                  ({ 3: -35, 4: -29, 5: -34 } as Record<number, number>)[
-                    frame[0]!
-                  ] ?? -20,
-              },
-            ];
-          },
-          close: () => undefined,
-        };
-      },
+      openDetector:
+        options.openDetector ??
+        (async () => {
+          let through = 0;
+          return {
+            async pushPCM(frame: Int16Array) {
+              through += 512;
+              // Speech markers cover the user, a distant voice and a borderline onset.
+              return [
+                {
+                  throughSample: through,
+                  speech: [1, 3, 4, 5, 6, 7, 8].includes(frame[0]!),
+                  levelDb:
+                    (
+                      {
+                        3: -35,
+                        4: -29,
+                        5: -34,
+                        6: -60,
+                        7: -45,
+                        8: -52,
+                      } as Record<number, number>
+                    )[frame[0]!] ?? -20,
+                },
+              ];
+            },
+            close: () => undefined,
+          };
+        }),
     },
   );
   const running = worker.run(ctx);
@@ -375,6 +398,9 @@ async function harness(
     send,
     setTasks: (next: Task[]) => {
       tasks = next;
+    },
+    setRoomReports: (next: typeof roomReports) => {
+      roomReports = next;
     },
     setAlerts: (next: typeof alerts) => {
       alerts = next;
@@ -616,6 +642,13 @@ describe("LiveVoiceWorker", () => {
             expect.objectContaining({ "linger.voice_ready_generation": "1" }),
           ),
         );
+        // ...while the browser still hears that the provider is waking up.
+        expect(readyAttributes()).not.toContainEqual(
+          expect.objectContaining({ "linger.voice_provider_ready": "1" }),
+        );
+        expect(readyAttributes()).toContainEqual(
+          expect.objectContaining({ "linger.voice_provider_ready": "0" }),
+        );
         track.frame(1);
         ready();
       },
@@ -625,6 +658,11 @@ describe("LiveVoiceWorker", () => {
       expect(test.session().audio.length).toBeGreaterThanOrEqual(2),
     );
     expect(test.session().audio[0]![0]).toBe(0);
+    await vi.waitFor(() =>
+      expect(test.localParticipant.setAttributes).toHaveBeenLastCalledWith(
+        expect.objectContaining({ "linger.voice_provider_ready": "1" }),
+      ),
+    );
     await test.shutdown();
   });
 
@@ -798,6 +836,126 @@ describe("LiveVoiceWorker", () => {
     expect(test.client.executeLiveToolCall).toHaveBeenCalledWith(
       expect.objectContaining({ call_id: "call-ask", turn_id: turnA }),
       expect.anything(),
+    );
+    await test.shutdown();
+  });
+
+  it("switches a new response to the newer user turn after an earlier turn's tool round", async () => {
+    const test = await harness({
+      toolOutput: () => '{"status":"ok","page":"search results"}',
+    });
+    test.session().emit(
+      { type: "speech_started", itemId: "item-a" },
+      { type: "transcript_completed", itemId: "item-a", text: "Search for it" },
+      { type: "response_started" },
+      {
+        type: "function_calls",
+        update: false,
+        calls: [
+          {
+            callId: "call-1",
+            name: "computer_browser",
+            arguments: '{"action":"open"}',
+          },
+        ],
+      },
+      { type: "response_finished", canceled: false },
+    );
+    await vi.waitFor(() =>
+      expect(test.session().sendToolResults).toHaveBeenCalledOnce(),
+    );
+    // The user speaks a follow-up while the earlier turn's reply stayed open
+    // across tool rounds with no active audio playback.
+    test.session().emit(
+      { type: "speech_started", itemId: "item-b" },
+      {
+        type: "transcript_completed",
+        itemId: "item-b",
+        text: "Open Wikipedia history",
+      },
+      { type: "response_started" },
+      { type: "text_delta", text: "Found the history section.", update: false },
+      { type: "audio_delta", pcm: pcm(480) },
+      { type: "response_finished", canceled: false },
+    );
+    await vi.waitFor(() =>
+      expect(test.client.reportLiveReply).toHaveBeenCalledOnce(),
+    );
+    expect(test.ofType("reply_delta")).toEqual([
+      {
+        type: "reply_delta",
+        turn_id: turnB,
+        text: "Found the history section.",
+      },
+    ]);
+    expect(test.ofType("reply_done")).toEqual([
+      { type: "reply_done", turn_id: turnA, text: "" },
+      {
+        type: "reply_done",
+        turn_id: turnB,
+        text: "Found the history section.",
+      },
+    ]);
+    expect(test.client.reportLiveReply.mock.calls[0]![0]).toEqual({
+      event_id: liveReplyEventId(sessionId, turnB),
+      voice_session_id: sessionId,
+      turn_id: turnB,
+      text: "Found the history section.",
+    });
+    await test.shutdown();
+  });
+
+  it("finishes an in-flight tool call quietly once a newer turn's response has started", async () => {
+    const test = await harness();
+    let resolveSlowTool: (output: string) => void = () => undefined;
+    test.client.executeLiveToolCall.mockImplementationOnce(
+      (call: { call_id: string }) =>
+        new Promise((resolve) => {
+          resolveSlowTool = (output) =>
+            resolve({ call_id: call.call_id, output });
+        }),
+    );
+    test.session().emit(
+      { type: "speech_started", itemId: "item-a" },
+      { type: "transcript_completed", itemId: "item-a", text: "Check tab" },
+      { type: "response_started" },
+      {
+        type: "function_calls",
+        update: false,
+        calls: [
+          {
+            callId: "call-slow",
+            name: "computer_browser",
+            arguments: '{"action":"open"}',
+          },
+        ],
+      },
+      { type: "response_finished", canceled: false },
+    );
+    await vi.waitFor(() =>
+      expect(test.client.executeLiveToolCall).toHaveBeenCalledOnce(),
+    );
+    test
+      .session()
+      .emit(
+        { type: "speech_started", itemId: "item-b" },
+        { type: "transcript_completed", itemId: "item-b", text: "Never mind" },
+        { type: "response_started" },
+        { type: "text_delta", text: "Okay.", update: false },
+        { type: "response_finished", canceled: false },
+      );
+    await vi.waitFor(() =>
+      expect(test.ofType("reply_done")).toEqual([
+        { type: "reply_done", turn_id: turnA, text: "" },
+        { type: "reply_done", turn_id: turnB, text: "Okay." },
+      ]),
+    );
+    resolveSlowTool('{"status":"ok"}');
+    await vi.waitFor(() =>
+      expect(test.session().sendToolResults).toHaveBeenCalledWith(
+        [{ callId: "call-slow", output: '{"status":"ok"}' }],
+        { reply: false },
+      ),
     );
     await test.shutdown();
   });
@@ -1045,6 +1203,133 @@ describe("LiveVoiceWorker", () => {
     await test.shutdown();
   });
 
+  it("does not let provider VAD bypass a rejected local interruption", async () => {
+    const test = await harness();
+    test.track.frame(1);
+    test.track.frame(0);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(2));
+    await answeredTurn(test);
+    await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
+    test.source().queued = 400;
+    for (let index = 0; index < 12; index++) test.track.frame(3);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(14));
+    test.session().emit({ type: "speech_started", itemId: "noise" });
+    await vi.waitFor(() =>
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          last_input_level_db: -35,
+          speech_duration_ms: 0,
+        }),
+        "voice.live.barge_in_unconfirmed",
+      ),
+    );
+    expect(test.source().clears).toBe(0);
+    expect(test.session().cancel).not.toHaveBeenCalled();
+    for (let index = 0; index < 6; index++) test.track.frame(1);
+    await vi.waitFor(() =>
+      expect(
+        test.session().audio.filter((frame) => frame[0] === 1),
+      ).toHaveLength(7),
+    );
+    test.session().emit({ type: "speech_started", itemId: "item-b" });
+    await vi.waitFor(() =>
+      expect(test.session().cancel).toHaveBeenCalledOnce(),
+    );
+    await test.shutdown();
+  });
+
+  it("does not borrow the preceding user turn's speech duration to interrupt a new reply", async () => {
+    const test = await harness();
+    for (let index = 0; index < 10; index++) test.track.frame(1);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(10));
+    await answeredTurn(test);
+    await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
+    test.track.frame(1);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(11));
+    expect(test.session().audio.at(-1)?.[0]).toBe(0);
+    test.session().emit({ type: "speech_started", itemId: "early" });
+    await vi.waitFor(() =>
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({ speech_duration_ms: 32 }),
+        "voice.live.barge_in_unconfirmed",
+      ),
+    );
+    expect(test.session().cancel).not.toHaveBeenCalled();
+    for (let index = 0; index < 5; index++) test.track.frame(1);
+    await vi.waitFor(() =>
+      expect(
+        test.session().audio.filter((frame) => frame[0] === 1),
+      ).toHaveLength(16),
+    );
+    test.session().emit({ type: "speech_started", itemId: "item-b" });
+    await vi.waitFor(() =>
+      expect(test.session().cancel).toHaveBeenCalledOnce(),
+    );
+    await test.shutdown();
+  });
+
+  it("keeps an admitted short interruption valid for delayed provider confirmation", async () => {
+    const test = await harness();
+    await answeredTurn(test);
+    await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
+    for (let index = 0; index < 6; index++) test.track.frame(1);
+    await vi.waitFor(() =>
+      expect(
+        test.session().audio.filter((frame) => frame[0] === 1),
+      ).toHaveLength(6),
+    );
+    const beforeQuiet = test.session().audio.length;
+    for (let index = 0; index < 16; index++) test.track.frame(0);
+    await vi.waitFor(() =>
+      expect(test.session().audio).toHaveLength(beforeQuiet + 16),
+    );
+    expect(test.source().clears).toBe(0);
+    test.session().emit({ type: "speech_started", itemId: "item-b" });
+    await vi.waitFor(() =>
+      expect(test.session().cancel).toHaveBeenCalledOnce(),
+    );
+    await test.shutdown();
+  });
+
+  it("holds a 160 ms aside without pausing or accepting a provider-only interruption", async () => {
+    const test = await harness();
+    await answeredTurn(test);
+    await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
+    for (let index = 0; index < 5; index++) test.track.frame(1);
+    for (let index = 0; index < 16; index++) test.track.frame(0);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(21));
+    expect(
+      test
+        .session()
+        .audio.every((frame) => frame.every((sample) => sample === 0)),
+    ).toBe(true);
+    test.session().emit({ type: "speech_started", itemId: "aside" });
+    await vi.waitFor(() =>
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.anything(),
+        "voice.live.barge_in_unconfirmed",
+      ),
+    );
+    expect(test.source().clears).toBe(0);
+    expect(test.session().cancel).not.toHaveBeenCalled();
+    await test.shutdown();
+  });
+
+  it("allows provider interruption when local speech detection is unavailable", async () => {
+    const test = await harness({
+      openDetector: async () => {
+        throw new Error("Unavailable");
+      },
+    });
+    await answeredTurn(test);
+    await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
+    test.session().emit({ type: "speech_started", itemId: "item-b" });
+    await vi.waitFor(() =>
+      expect(test.session().cancel).toHaveBeenCalledOnce(),
+    );
+    await test.shutdown();
+  });
+
   it("pauses the reply for local speech and stops it when server VAD confirms", async () => {
     const test = await harness();
     await answeredTurn(test);
@@ -1239,7 +1524,11 @@ describe("LiveVoiceWorker", () => {
     test.session().emit({ type: "audio_done" });
     await new Promise((resolve) => setImmediate(resolve));
     test.track.frame(3);
-    await vi.waitFor(() => expect(test.session().audio.at(-1)?.[0]).toBe(3));
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(24));
+    expect(test.session().audio.at(-1)).toEqual(new Int16Array(320));
+    test.track.frame(4);
+    await vi.waitFor(() => expect(test.session().audio.at(-1)?.[0]).toBe(4));
+    expect(test.session().audio.some((frame) => frame[0] === 3)).toBe(false);
     await test.shutdown();
   });
 
@@ -1261,14 +1550,23 @@ describe("LiveVoiceWorker", () => {
         .audio.slice(2)
         .every((frame) => frame[0] === 0),
     ).toBe(true);
+    for (let index = 0; index < 3; index++) test.track.frame(5);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(7));
+    expect(
+      test
+        .session()
+        .audio.slice(2)
+        .every((frame) => frame[0] === 0),
+    ).toBe(true);
     test.track.frame(5);
     await vi.waitFor(() =>
       expect(
         test
           .session()
-          .audio.slice(4)
+          .audio.slice(2)
+          .filter((frame) => frame[0] !== 0)
           .map((frame) => frame[0]),
-      ).toEqual([4, 1, 5]),
+      ).toEqual([4, 1, 5, 5, 5, 5]),
     );
     expect(test.source().clears).toBe(0);
     await test.shutdown();
@@ -1337,7 +1635,7 @@ describe("LiveVoiceWorker", () => {
   });
 
   it.each([false, true])(
-    "passes quieter user speech on the first window outside playback (after reply: %s)",
+    "filters distant speech while listening without losing a soft foreground onset or tail (after reply: %s)",
     async (afterReply) => {
       const test = await harness();
       for (let index = 0; index < 5; index++) test.track.frame(1);
@@ -1353,10 +1651,98 @@ describe("LiveVoiceWorker", () => {
         test.session().emit({ type: "response_finished", canceled: false });
         test.source().queued = 0;
       }
-      // A stale loud level must not mute a normal turn, even after it gated speech.
-      test.track.frame(3);
-      await vi.waitFor(() => expect(test.session().audio.at(-1)?.[0]).toBe(3));
+      const beforeDistant = test.session().audio.length;
+      // A long background conversation cannot lower the foreground calibration.
+      for (let index = 0; index < 80; index++) test.track.frame(3);
+      await vi.waitFor(() =>
+        expect(test.session().audio).toHaveLength(beforeDistant + 80),
+      );
+      expect(
+        test
+          .session()
+          .audio.slice(beforeDistant)
+          .every((frame) => frame.every((sample) => sample === 0)),
+      ).toBe(true);
+      test.track.frame(4);
+      test.track.frame(5);
+      await vi.waitFor(() => expect(test.session().audio.at(-1)?.[0]).toBe(5));
+      // A soft opening and its softer tail pass immediately, without replaying the rejected voice.
+      expect(
+        test
+          .session()
+          .audio.slice(beforeDistant + 80)
+          .map((frame) => frame[0]),
+      ).toEqual([4, 5]);
       expect(test.source().clears).toBe(0);
+      await test.shutdown();
+    },
+  );
+
+  it("filters faint speech from the start and learns a softly spoken foreground voice", async () => {
+    const test = await harness();
+    for (let index = 0; index < 12; index++) test.track.frame(6);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(12));
+    expect(
+      test
+        .session()
+        .audio.every((frame) => frame.every((sample) => sample === 0)),
+    ).toBe(true);
+    test.track.frame(7);
+    test.track.frame(8);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(14));
+    expect(
+      test
+        .session()
+        .audio.slice(12)
+        .map((frame) => frame[0]),
+    ).toEqual([7, 8]);
+    await test.shutdown();
+  });
+
+  it("rejects low-level speech during the silence grace period without replaying it", async () => {
+    const test = await harness();
+    test.track.frame(1);
+    test.track.frame(0);
+    test.track.frame(3);
+    test.track.frame(1);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(4));
+    expect(test.session().audio.map((frame) => frame[0])).toEqual([1, 0, 0, 1]);
+    await test.shutdown();
+  });
+
+  it("relearns the foreground level when the microphone track changes", async () => {
+    const test = await harness();
+    test.track.frame(1);
+    test.track.frame(0);
+    test.track.frame(3);
+    await vi.waitFor(() => expect(test.session().audio).toHaveLength(3));
+    expect(test.session().audio.at(-1)?.[0]).toBe(0);
+    const replacement = new rtc.Track();
+    test.room.emit("subscribed", replacement, { source: 1 }, publisher);
+    replacement.frame(3);
+    await vi.waitFor(() => expect(test.session().audio.at(-1)?.[0]).toBe(3));
+    expect(test.session().audio).toHaveLength(4);
+    await test.shutdown();
+  });
+
+  it.each(["opening", "inference"] as const)(
+    "keeps microphone audio flowing if local VAD fails during %s",
+    async (stage) => {
+      const close = vi.fn();
+      const test = await harness({
+        openDetector: async () => {
+          if (stage === "opening") throw new Error("Detector unavailable");
+          return {
+            pushPCM: async () => {
+              throw new Error("Inference unavailable");
+            },
+            close,
+          };
+        },
+      });
+      test.track.frame(7);
+      await vi.waitFor(() => expect(test.session().audio.at(-1)?.[0]).toBe(7));
+      if (stage === "inference") expect(close).toHaveBeenCalledOnce();
       await test.shutdown();
     },
   );
@@ -1836,6 +2222,79 @@ describe("LiveVoiceWorker background work", () => {
     expect(test.session().abandon).not.toHaveBeenCalled();
     await test.shutdown();
   });
+
+  it.each(["completed", "canceled", "interrupted"])(
+    "routes a Room report and acknowledges only completed speech (%s)",
+    async (outcome) => {
+      const test = await harness();
+      test.setRoomReports([
+        {
+          message_id: "message_report",
+          state: "waiting_for_user",
+          handoff_id: "message_handoff",
+          room_id: "room_travel",
+          room_name: "Travel",
+          text: "What is the budget?",
+        },
+      ]);
+      await vi.waitFor(() =>
+        expect(test.session().tell).toHaveBeenCalledOnce(),
+      );
+      expect(
+        test
+          .session()
+          .note.mock.calls.map((call) => call[0])
+          .join("\n"),
+      ).toContain('"handoff_id":"message_handoff"');
+      expect(test.session().tell.mock.calls[0]![0]).toContain(
+        "hand_off_to_room",
+      );
+      expect(test.session().tell.mock.calls[0]![0]).toContain("message_report");
+      expect(test.client.executeLiveToolCall).not.toHaveBeenCalled();
+      test.session().emit(
+        {
+          type: "text_delta",
+          text: "What budget should I give the travel group?",
+          update: true,
+        },
+        { type: "audio_started", update: true },
+        { type: "audio_delta", pcm: pcm(960) },
+      );
+      await vi.waitFor(() =>
+        expect(test.ofType("speech_started")).toHaveLength(1),
+      );
+      expect(test.client.executeLiveToolCall).not.toHaveBeenCalled();
+      if (outcome === "interrupted") {
+        for (let index = 0; index < 6; index++) test.track.frame(1);
+        await vi.waitFor(() =>
+          expect(
+            test.session().audio.filter((frame) => frame[0] === 1),
+          ).toHaveLength(6),
+        );
+        test.session().emit({ type: "speech_started", itemId: "item-b" });
+        await vi.waitFor(() =>
+          expect(test.session().cancel).toHaveBeenCalled(),
+        );
+      }
+      test.session().emit({
+        type: "response_finished",
+        canceled: outcome === "canceled",
+      });
+      await vi.waitFor(() => expect(test.ofType("reply_done")).toHaveLength(1));
+      if (outcome === "completed") {
+        await vi.waitFor(() =>
+          expect(test.client.executeLiveToolCall).toHaveBeenCalledWith(
+            expect.objectContaining({
+              name: "ack_room_reports",
+              arguments: JSON.stringify({ message_ids: ["message_report"] }),
+            }),
+          ),
+        );
+      } else expect(test.client.executeLiveToolCall).not.toHaveBeenCalled();
+      expect(test.client.reportLiveReply).not.toHaveBeenCalled();
+      await test.shutdown();
+    },
+  );
 
   it("says an event that comes before the user said anything", async () => {
     const test = await harness();

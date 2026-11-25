@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   voiceModeStatusLabel,
+  voiceWindowStatus,
   type VoiceModePresentation,
 } from "./voice-mode-presentation";
 
@@ -30,5 +31,33 @@ describe("Voice Mode visible status", () => {
     expect(voiceModeStatusLabel({ entered: true, text: "", ...state })).toBe(
       label,
     );
+  });
+});
+
+describe("Voice Mode window status", () => {
+  it.each<
+    [
+      Partial<VoiceModePresentation>,
+      { muted?: boolean; waking?: boolean },
+      string,
+    ]
+  >([
+    [{ status: "connecting" }, {}, "Waking up"],
+    // The microphone is heard, but the live model has not connected yet.
+    [{ status: "listening" }, { waking: true }, "Waking up"],
+    [{ status: "listening" }, { waking: false }, "Listening"],
+    [{ status: "listening" }, {}, "Listening"],
+    [{ status: "listening" }, { muted: true }, "Mic off"],
+    [{ status: "listening", sending: true }, {}, "Sending…"],
+    [{ status: "closing" }, {}, "Finishing…"],
+    [{ status: "error" }, {}, "Stopped"],
+    [{ entered: false, status: "paused" }, {}, "Paused"],
+  ])("says %j %j in one line", (state, call, label) => {
+    expect(
+      voiceWindowStatus(
+        { entered: true, text: "", ...state },
+        { muted: false, ...call },
+      ).source,
+    ).toBe(label);
   });
 });

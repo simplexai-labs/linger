@@ -33,6 +33,8 @@ function message(value: unknown): string {
     `Target: ${target(item.inbox_id)}`,
     `Created: ${text(item.created_at)}`,
   ];
+  if (item.room_handoff)
+    lines.push(`room_handoff=${JSON.stringify(item.room_handoff)}`);
   if (item.thread_id) lines.push(`Thread: ${text(item.thread_id)}`);
   lines.push(
     `message_id=${JSON.stringify(item.message_id)} ${text(item.author)} (${text(item.author_kind)}; ${text(item.author_actor_id)}): ${JSON.stringify(item.body)}`,

@@ -22,3 +22,7 @@
   decisions scoped to the current Account and Tenant (`wiki-display-state.ts`, shared
   with `features/memory`). Filter displayed graph nodes and edges only; never issue
   backend mutations for these decisions.
+
+- Profile timeline upper bounds such as `≤2020` display as `–2020`. Keep the
+  stored period and editor Markdown intact so the source's date certainty is
+  retained. Sorting uses the stored period.
