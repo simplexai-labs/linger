@@ -787,8 +787,9 @@ export class XaiLiveSession implements LiveSession {
         const itemId = text("item_id");
         this.inputTexts.set(itemId, text("transcript"));
         this.latestWords = text("transcript") || this.latestWords;
-        // Interim segments also arrive as "completed" while still in progress.
-        if (event.status === "completed") this.completeInput(itemId);
+        // Interim segments also arrive as "completed", marked in_progress; the
+        // final one carries no status at all, so only in_progress is interim.
+        if (event.status !== "in_progress") this.completeInput(itemId);
         return;
       }
       case "response.created": {

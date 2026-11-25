@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import os from "node:os";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface BindEvent {
   type: "udp4" | "udp6";
@@ -89,6 +90,10 @@ beforeEach(() => {
   mockDgram.events = [];
   mockDgram.openUdp4.clear();
   mockDgram.onBind = () => ({ assignedPort: 55_000 });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("freePort UDP dual-stack probing", () => {
@@ -203,6 +208,90 @@ describe("freePort UDP dual-stack probing", () => {
     expect((error as Error).message).toMatch(
       /No free local port is available on this computer\. UDP: 127\.0\.0\.1 bind: EADDRINUSE \(port \d+\)\./,
     );
+    expect(mockDgram.openUdp4.size).toBe(0);
+  });
+
+  it("holds the ephemeral udp4 socket while probing non-loopback interfaces when allInterfaces is enabled", async () => {
+    vi.spyOn(os, "networkInterfaces").mockReturnValue({
+      en0: [
+        {
+          address: "192.168.20.10",
+          netmask: "255.255.255.0",
+          family: "IPv4",
+          mac: "00:00:00:00:00:00",
+          internal: false,
+          cidr: "192.168.20.10/24",
+        },
+      ],
+    });
+    let nextPort = 57_000;
+    mockDgram.onBind = (socket, port, host) => {
+      mockDgram.events.push({
+        type: socket.type,
+        port,
+        host,
+        ipv6Only: socket.ipv6Only,
+        openUdp4Ports: [...mockDgram.openUdp4].map((entry) => entry.boundPort),
+      });
+      if (socket.type === "udp4" && port === 0)
+        return { assignedPort: nextPort++ };
+      if (host === "192.168.20.10" && port === 57_000)
+        return { errorCode: "EADDRINUSE" };
+      return {};
+    };
+
+    const reserved = new Set<number>();
+    const port = await freePort(reserved, {
+      protocol: "udp",
+      allInterfaces: true,
+    });
+
+    expect(port).toBe(57_001);
+    expect(reserved.has(57_001)).toBe(true);
+    expect(mockDgram.events).toEqual([
+      {
+        type: "udp4",
+        port: 0,
+        host: "127.0.0.1",
+        ipv6Only: undefined,
+        openUdp4Ports: [],
+      },
+      {
+        type: "udp6",
+        port: 57_000,
+        host: "::1",
+        ipv6Only: true,
+        openUdp4Ports: [57_000],
+      },
+      {
+        type: "udp4",
+        port: 57_000,
+        host: "192.168.20.10",
+        ipv6Only: undefined,
+        openUdp4Ports: [57_000],
+      },
+      {
+        type: "udp4",
+        port: 0,
+        host: "127.0.0.1",
+        ipv6Only: undefined,
+        openUdp4Ports: [],
+      },
+      {
+        type: "udp6",
+        port: 57_001,
+        host: "::1",
+        ipv6Only: true,
+        openUdp4Ports: [57_001],
+      },
+      {
+        type: "udp4",
+        port: 57_001,
+        host: "192.168.20.10",
+        ipv6Only: undefined,
+        openUdp4Ports: [57_001],
+      },
+    ]);
     expect(mockDgram.openUdp4.size).toBe(0);
   });
 });

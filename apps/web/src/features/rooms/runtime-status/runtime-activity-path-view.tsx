@@ -274,6 +274,7 @@ function RuntimeActivityPathRow({ item }: { item: RuntimeActivityPathItem }) {
   if (item.kind === "reply") {
     return <ReplyRow text={item.text} />;
   }
+  const detail = item.failure?.detail?.trim();
   return (
     <li className="runtime-activity-step py-1.5">
       <p className={item.tone === "failed" ? "text-app-danger" : undefined}>
@@ -282,6 +283,14 @@ function RuntimeActivityPathRow({ item }: { item: RuntimeActivityPathItem }) {
           ? runtimeFailureMessage(t, item.failure)
           : t(m.runCanceled)}
       </p>
+      {detail ? (
+        <p
+          className="mt-1.5 break-words rounded-sm border border-app-border bg-app-surface-soft px-2 py-1.5 font-mono text-[12px] leading-4 text-app-muted"
+          data-runtime-failure-detail=""
+        >
+          {detail}
+        </p>
+      ) : null}
     </li>
   );
 }

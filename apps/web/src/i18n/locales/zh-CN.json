@@ -337,6 +337,7 @@
     "backgroundFailedUnknown": {
       "other": "后台任务已连续失败 {count} 次。在有任务成功之前，Wiki、记忆和日报可能不是最新的。"
     },
+    "dismissBackgroundFailureNotice": "关闭后台失败提示",
     "openThread": "打开话题，{replies}",
     "messageThread": "消息话题",
     "thread": "话题",

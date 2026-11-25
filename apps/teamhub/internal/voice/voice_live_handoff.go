@@ -15,6 +15,13 @@ import (
 	"github.com/simplexai-labs/linger/contracts-go/teamhubinternal"
 )
 
+// voiceLiveHandoffGistRunes bounds the instruction a handoff preview shows.
+const voiceLiveHandoffGistRunes = 120
+
+// voiceLiveHandedOffNext tells the voice an accepted handoff is under way,
+// not finished, in its own tone.
+const voiceLiveHandedOffNext = "You passed the request to the Room and they are on it now; it is not finished. Tell the user in one warm first-person sentence where you passed it and that you will bring back what comes of it, without repeating an acknowledgement you already said. Questions and results arrive later as Room reports."
+
 func (s *Service) handOffVoiceLiveRoom(ctx context.Context, session voicelive.Session, request teamhubinternal.VoiceLiveToolCall) (string, error) {
 	var args struct {
 		RoomID      string              `json:"room_id"`
@@ -44,8 +51,16 @@ func (s *Service) handOffVoiceLiveRoom(ctx context.Context, session voicelive.Se
 	} else if err != nil {
 		return "", err
 	}
-	prompt := voicelive.NeedsConfirmation("Will ask " + session.Agent.DisplayName + " in the room “" + room.Name + "” to handle: " + strings.TrimSpace(args.Instruction))
-	key := prompt + "\x00" + room.ID + "\x00" + args.HandoffID
+	// The preview names the Room and the gist only, so the voice asks in its
+	// own words instead of reading the whole instruction out; the full
+	// instruction still binds the confirmation.
+	instruction := strings.TrimSpace(args.Instruction)
+	gist, cut := voicelive.Truncate(strings.Join(strings.Fields(instruction), " "), voiceLiveHandoffGistRunes)
+	if cut {
+		gist += "…"
+	}
+	prompt := voicelive.NeedsConfirmation("Pass to the room “" + room.Name + "”: " + gist)
+	key := prompt + "\x00" + instruction + "\x00" + room.ID + "\x00" + args.HandoffID
 	if confirmed, err := s.voiceLiveConfirmed(ctx, session, request, bool(args.Confirmed), key); err != nil || !confirmed {
 		return prompt, err
 	}
@@ -63,7 +78,7 @@ func (s *Service) handOffVoiceLiveRoom(ctx context.Context, session voicelive.Se
 	case err != nil:
 		return "", err
 	}
-	return voicelive.Output(map[string]any{"status": "accepted", "room_id": room.ID, "room": room.Name, "handoff_id": result.HandoffID, "next": "Say you have passed the request to the Room. It is not finished yet; questions and results will arrive as Room reports."}), nil
+	return voicelive.Output(map[string]any{"status": "accepted", "room_id": room.ID, "room": room.Name, "handoff_id": result.HandoffID, "next": voiceLiveHandedOffNext}), nil
 }
 
 func (s *Service) ackVoiceLiveRoomReports(ctx context.Context, session voicelive.Session, request teamhubinternal.VoiceLiveToolCall) (string, error) {

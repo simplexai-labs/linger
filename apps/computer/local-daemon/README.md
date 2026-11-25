@@ -611,9 +611,12 @@ for a browser sign-in when signed out.
   is not zero finishes as failed. Otherwise
   the adapter selects the allow option, as the Runtime runs with the Agent's
   full local authority.
-- Antigravity reports a model error, such as a rejected API key, as reply text
-  and ends the turn with `end_turn`. With no structured signal, such a Run
-  completes and the Room shows the text.
+- Antigravity can report a model or preflight error (such as a rejected API key
+  or unsupported region) as plain text and end the turn with `end_turn` without
+  emitting model usage or any tool, thought, or plan activity. Because a normal
+  model turn reports usage or activity, the adapter fails such a Run, retires
+  the process instead of parking it, and surfaces the trimmed redacted notice in
+  `failure.detail` when the Agent Service announces `runtime_failure_detail`.
 - History reads, Local Skill scans and local models do not support
   Antigravity, so Agent Memory skips Antigravity Agents.
 - The Gateway hello leaves out the Antigravity diagnostic while `agy` is not
@@ -1035,7 +1038,13 @@ mouse events. Cua's background refusals, which recommend a foreground retry or
 background route instead. Cua 0.35.4 refuses a background scroll in a
 Chromium window, so the Agent reads such a page with a `get_window_state`
 query instead; elsewhere a list or pane scrolls by its own `element_token`
-through UI Automation. Windows Operations get `WindowsToolGuide`.
+through UI Automation. Before a `get_window_state` or an input names a
+minimized window by `window_id`, the Daemon restores that window without
+activating it and orders it right below the window in front, so the user's
+foreground window and keyboard focus stay unchanged and background input then
+reaches it. An input to a window the Daemon just restored is not sent: the
+element positions of the earlier read belonged to the minimized window, so the
+Agent reads the window again first. Windows Operations get `WindowsToolGuide`.
 
 Linux controls the signed-in user's X11 desktop. The driver `local_linux.py` is
 embedded in the Go binary; it reads windows through AT-SPI and sends input with

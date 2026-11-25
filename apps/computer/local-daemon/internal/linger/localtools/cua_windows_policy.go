@@ -50,6 +50,27 @@ func windowsInputRefusal(name string, arguments map[string]any, chromium func() 
 	return nil
 }
 
+// windowsRestore restores the minimized window that a Windows read or input
+// names, behind the window in front, so the Agent never needs the user to
+// restore it. An input to a window it restored is not sent: the element
+// positions of an earlier read were those of the minimized window.
+func windowsRestore(name string, pid, window int64, restore func(pid, window int64) (bool, error)) error {
+	if window <= 0 || !inputTools[name] && name != "get_window_state" {
+		return nil
+	}
+	restored, err := restore(pid, window)
+	if err != nil && inputTools[name] {
+		return fmt.Errorf("COMPUTER_INPUT_NOT_SENT: %w; tell the user what you could not do: %w", err, errNotSent)
+	}
+	if err != nil {
+		return err
+	}
+	if restored && inputTools[name] {
+		return fmt.Errorf("COMPUTER_INPUT_NOT_SENT: window %d was minimized; the Computer restored it behind the window in front without taking the user's focus. Read it with get_window_state, then send the input again: %w", window, errNotSent)
+	}
+	return nil
+}
+
 // windowsRefusedResult replaces the text of a Cua background refusal, which
 // recommends foreground delivery or bring_to_front, with the Windows route.
 func windowsRefusedResult(name string, result json.RawMessage) json.RawMessage {
@@ -60,7 +81,7 @@ func windowsRefusedResult(name string, result json.RawMessage) json.RawMessage {
 	text := "COMPUTER_INPUT_NOT_SENT: this window does not take " + name + " in the background, and the Computer sends no foreground input on Windows. Try another element or control, or tell the user what you could not do."
 	switch {
 	case reply.Structured.Code == "window_minimized":
-		text = "COMPUTER_INPUT_NOT_SENT: the window is minimized, and the Computer does not bring windows forward on Windows. Ask the user to restore the window, then read it again."
+		text = "COMPUTER_INPUT_NOT_SENT: the window is minimized. Read it with get_window_state and its window_id from list_windows: the Computer restores it behind the window in front, without taking the user's focus. Then send the input with that window_id."
 	case name == "scroll":
 		text = "COMPUTER_INPUT_NOT_SENT: this window does not scroll in the background. Chrome, Edge and Electron apps never do: read the content you need with get_window_state query instead of scrolling. In another app, pass the element_token of the scrolled list or pane itself from the latest get_window_state read."
 	}
@@ -111,4 +132,4 @@ func (c *cuaSession) targetWindow(arguments map[string]any) (pid, window int64) 
 // WindowsToolGuide describes Windows targeting and the background-only rule
 // to the Runtime.
 const WindowsToolGuide = `Use computer.ui_exec for desktop and browser interaction. Within the script use ui.window(pid, window_id) for a Windows window, ui.page for the managed browser, and ui.computer for native methods; ui.computer.list_windows finds an app's windows. Window actions use the latest observation and return the updated window.
-The user keeps working on this PC. Every input goes to the window you name in the background: no input moves the user's mouse, changes the window in front or reaches the app the user is using. Scroll a list or pane with ui.computer.scroll and its own element_token. Chrome, Edge and Electron apps do not scroll in the background, so read their content with ui.computer.get_window_state and a query; in them double_click and right_click are refused, so click the element or use the page's own buttons and menus. An input refused with COMPUTER_INPUT_NOT_SENT was not sent: try another route or tell the user. A minimized window takes no input: ask the user to restore it.`
+The user keeps working on this PC. Every input goes to the window you name in the background: no input moves the user's mouse, changes the window in front or reaches the app the user is using. Scroll a list or pane with ui.computer.scroll and its own element_token. Chrome, Edge and Electron apps do not scroll in the background, so read their content with ui.computer.get_window_state and a query; in them double_click and right_click are refused, so click the element or use the page's own buttons and menus. An input refused with COMPUTER_INPUT_NOT_SENT was not sent: try another route or tell the user. A minimized window named by window_id is restored behind the window in front, without taking the user's focus, when you read it or send it input; after an input reports that it restored the window, read the window before the next input.`

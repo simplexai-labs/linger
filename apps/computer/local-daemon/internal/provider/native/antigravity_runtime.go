@@ -287,10 +287,14 @@ type antigravityTurn struct {
 	// background is set when the turn enters awaitBackground so the process is
 	// never parked with a background continuation in flight.
 	background bool
-	sessionID  string
-	textID     string
-	output     strings.Builder
-	tools      map[string]bool
+	// sawActivity records whether the prompted turn observed any reasoning,
+	// tool call, or plan. Antigravity surfaces some upstream refusals as a
+	// plain agent_message_chunk followed by end_turn with no usage or activity.
+	sawActivity bool
+	sessionID   string
+	textID      string
+	output      strings.Builder
+	tools       map[string]bool
 	// lastUpdate is when the prompted session last reported anything.
 	lastUpdate time.Time
 }
@@ -349,6 +353,9 @@ func (t *antigravityTurn) drive(prompt string, servers []any) {
 		if outcome.Error == "" {
 			outcome.Error = "Antigravity turn was " + status
 		}
+		if outcome.PublicDetail == "" {
+			outcome.PublicDetail = outcome.Error
+		}
 	}
 	t.mu.Lock()
 	outcome.SessionID = t.sessionID
@@ -357,6 +364,7 @@ func (t *antigravityTurn) drive(prompt string, servers []any) {
 		return
 	}
 	t.proc.unbind(t)
+	exitedBeforeStop := !t.proc.alive()
 	confirmed := t.proc.stop()
 	outcome.ExitConfirmed = confirmed
 	outcome.ExitUnconfirmed = !confirmed
@@ -365,7 +373,7 @@ func (t *antigravityTurn) drive(prompt string, servers []any) {
 	} else {
 		antigravityResidents.hold(t.proc)
 	}
-	if outcome.Status == statusFailed && outcome.Diagnostics.empty() && t.proc.cmd.ProcessState != nil {
+	if outcome.Status == statusFailed && outcome.Diagnostics.empty() && exitedBeforeStop && t.proc.cmd.ProcessState != nil {
 		outcome.Diagnostics = processExitDiagnostics(t.proc.cmd.ProcessState)
 	}
 	t.finish(outcome)
@@ -377,7 +385,7 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 	started := time.Now()
 	conn, spec := t.proc.conn, t.spec
 	failed := func(code, message string) Outcome {
-		return Outcome{Status: statusFailed, FailureCode: code, Error: message, ElapsedMs: time.Since(started).Milliseconds()}
+		return Outcome{Status: statusFailed, FailureCode: code, Error: message, PublicDetail: message, ElapsedMs: time.Since(started).Milliseconds()}
 	}
 	// A resumed session is known before agy loads it, which takes seconds,
 	// so the Run starts now; a new session reports its id once agy names it.
@@ -638,7 +646,9 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 	t.mu.Lock()
 	// Untrimmed, as the reply Agent Service reads from the stream.
 	outcome.Output = t.output.String()
+	sawActivity := t.sawActivity
 	t.mu.Unlock()
+	hasUsage := result.Usage != nil && result.Usage.nonzero()
 	if result.Usage != nil {
 		model := spec.Model
 		if model == "" {
@@ -652,11 +662,22 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 	}
 	switch result.StopReason {
 	case "end_turn":
-		outcome.Status = statusCompleted
+		if !hasUsage && !sawActivity {
+			outcome.Status = statusFailed
+			outcome.Error = strings.TrimSpace(outcome.Output)
+			if outcome.Error == "" {
+				outcome.Error = "Antigravity ended the turn without a model response"
+			}
+			outcome.PublicDetail = outcome.Error
+			outcome.Output = ""
+		} else {
+			outcome.Status = statusCompleted
+		}
 	case "cancelled":
 		outcome.Status, outcome.Error = statusAborted, "Antigravity turn was cancelled"
 	default:
 		outcome.Status, outcome.Error = statusFailed, "Antigravity stopped the turn: "+result.StopReason
+		outcome.PublicDetail = outcome.Error
 	}
 	return outcome
 }
@@ -745,6 +766,10 @@ type antigravityTokens struct {
 	ThoughtTokens     int64 `json:"thoughtTokens"`
 	CachedReadTokens  int64 `json:"cachedReadTokens"`
 	CachedWriteTokens int64 `json:"cachedWriteTokens"`
+}
+
+func (u antigravityTokens) nonzero() bool {
+	return u.InputTokens > 0 || u.OutputTokens > 0 || u.ThoughtTokens > 0 || u.CachedReadTokens > 0 || u.CachedWriteTokens > 0
 }
 
 // count maps ACP usage onto TokenCount, where Input excludes cache reads and
@@ -847,12 +872,16 @@ func (t *antigravityTurn) update(params json.RawMessage, observed time.Time) {
 		t.emit(Event{Kind: EventText, ObservedAt: observed, ID: id, ModelMessageID: update.MessageID, Body: text})
 	case "agent_thought_chunk":
 		if text := acpContentText(update.Content); text != "" {
+			t.mu.Lock()
+			t.sawActivity = true
+			t.mu.Unlock()
 			t.requests.item("", observed)
 			t.emit(Event{Kind: EventReasoning, ObservedAt: observed, ModelMessageID: update.MessageID, Body: text})
 		}
 	case "tool_call":
 		// Text after a tool call is a new message.
 		t.mu.Lock()
+		t.sawActivity = true
 		t.textID = ""
 		t.tools[update.ToolCallID] = true
 		t.mu.Unlock()
@@ -864,6 +893,9 @@ func (t *antigravityTurn) update(params json.RawMessage, observed time.Time) {
 	case "tool_call_update":
 		t.toolResult(update, observed)
 	case "plan":
+		t.mu.Lock()
+		t.sawActivity = true
+		t.mu.Unlock()
 		steps := make([]any, 0, len(update.Entries))
 		for _, entry := range update.Entries {
 			if entry.Content == "" {

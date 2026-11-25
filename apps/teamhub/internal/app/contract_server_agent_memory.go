@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/simplexai-labs/linger/contracts-go/teamhubinternal"
@@ -57,6 +58,9 @@ func validAgentMemory(input teamhubinternal.AgentMemoryDocument) bool {
 	}
 	if p := input.Pending; p != nil {
 		if (p.Stage != "extract" && p.Stage != "consolidate") || len(p.Prompt) > 400000 || (p.Attempt != nil && (*p.Attempt < 0 || *p.Attempt > 3)) {
+			return false
+		}
+		if p.Target != nil && (strings.TrimSpace(*p.Target) == "" || len(*p.Target) > 512) {
 			return false
 		}
 		// Only an extraction reads one source session; a consolidation has none.

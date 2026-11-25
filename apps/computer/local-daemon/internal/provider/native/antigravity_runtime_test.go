@@ -267,6 +267,28 @@ func TestAntigravityReportsStructuredFailures(t *testing.T) {
 	if _, outcome := drainAgy(t, run); outcome.Status != statusFailed || outcome.FailureCode != "model_not_offered" {
 		t.Fatalf("unknown model outcome=%+v", outcome)
 	}
+
+	inline := newAgyHarness(t, "inline-error", nil)
+	run, err = inline.runtime.Start(t.Context(), "hi", RunSpec{Dir: inline.dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, outcome := drainAgy(t, run); outcome.Status != statusFailed || outcome.Output != "" ||
+		outcome.Error != "\u26a0 FAILED_PRECONDITION (code 400): User location is not supported for the API use." ||
+		!outcome.ExitConfirmed || !outcome.Diagnostics.empty() {
+		t.Fatalf("inline error outcome=%+v", outcome)
+	}
+
+	empty := newAgyHarness(t, "empty-end-turn", nil)
+	run, err = empty.runtime.Start(t.Context(), "hi", RunSpec{Dir: empty.dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, outcome := drainAgy(t, run); outcome.Status != statusFailed || outcome.Output != "" ||
+		outcome.Error != "Antigravity ended the turn without a model response" ||
+		!outcome.ExitConfirmed || !outcome.Diagnostics.empty() {
+		t.Fatalf("empty end_turn outcome=%+v", outcome)
+	}
 }
 
 func TestAntigravityUsesAGeminiAPIKeyOnlyWhenSignedOut(t *testing.T) {

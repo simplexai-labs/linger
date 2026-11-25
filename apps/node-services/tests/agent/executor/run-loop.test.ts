@@ -2268,7 +2268,10 @@ describe("RunLoop", () => {
           : {
               type: "failed",
               error: "provider failed",
-              failure: { code: "unclassified", runtime_type: "pi" },
+              failure: {
+                code: "unclassified",
+                runtime_type: "pi",
+              },
             },
         expect.anything(),
         expect.any(AbortSignal),

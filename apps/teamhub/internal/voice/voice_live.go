@@ -531,6 +531,7 @@ func (s *Service) createVoiceLiveRoom(ctx context.Context, session voicelive.Ses
 	output := map[string]any{
 		"status": "created", "room_id": room.Id, "room": room.Name,
 		"path": "/t/" + session.TenantID + "/rooms/" + room.Id,
+		"next": voicelive.DoneNext,
 	}
 	if len(members.Names) > 0 {
 		output["members"] = members.Names

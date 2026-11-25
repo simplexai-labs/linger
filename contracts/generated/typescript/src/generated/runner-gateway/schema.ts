@@ -214,6 +214,7 @@ export const runnerGatewayEnvelopeSchema = {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
       ],
     },
     Timestamp: {
@@ -5800,6 +5801,11 @@ export const runnerGatewayEnvelopeSchema = {
           type: "string",
           pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$",
           maxLength: 80,
+        },
+        detail: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500,
         },
       },
     },

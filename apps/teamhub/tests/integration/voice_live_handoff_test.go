@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentcredential"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentmessages"
@@ -53,7 +54,7 @@ func TestVoiceLiveRoomHandoffReportsAndFollowups(t *testing.T) {
 	handoff := func(room, key string) string {
 		t.Helper()
 		args := map[string]any{"room_id": room, "instruction": "Ask the travel Agents to plan the offsite and report decisions."}
-		if preview := call(key+"_ask", key+"_preview", "hand_off_to_room", args); preview["status"] != "needs_confirmation" {
+		if preview := call(key+"_ask", key+"_preview", "hand_off_to_room", args); preview["status"] != "needs_confirmation" || !strings.HasPrefix(preview["summary"].(string), "Pass to the room") {
 			t.Fatalf("preview=%v", preview)
 		}
 		args["confirmed"] = true
@@ -61,7 +62,7 @@ func TestVoiceLiveRoomHandoffReportsAndFollowups(t *testing.T) {
 			t.Fatalf("same-turn confirmation=%v", early)
 		}
 		first := call(key+"_yes", key+"_commit", "hand_off_to_room", args)
-		if first["status"] != "accepted" {
+		if first["status"] != "accepted" || first["next"] == nil {
 			t.Fatalf("handoff=%v", first)
 		}
 		again := call(key+"_yes", key+"_retry", "hand_off_to_room", args)
@@ -88,7 +89,7 @@ func TestVoiceLiveRoomHandoffReportsAndFollowups(t *testing.T) {
 	create["confirmed"] = true
 	created := call("create_yes", "create_commit", "create_room", create)
 	secondRoom, ok := created["room_id"].(string)
-	if !ok {
+	if !ok || created["next"] == nil {
 		t.Fatalf("create=%v", created)
 	}
 	if n := countRows(t, env, `SELECT count(*) FROM active_room_members WHERE room_id=$1 AND actor_id IN ('actor_acme_alice','actor_acme_official')`, secondRoom); n != 2 {
@@ -175,6 +176,17 @@ func TestVoiceLiveRoomHandoffReportsAndFollowups(t *testing.T) {
 	}
 	if n := countRows(t, env, `SELECT count(*) FROM messages WHERE room_id=$1 AND message_kind='agent_runtime' AND body LIKE '%The accommodation budget is 1000%'`, targetRoom); n != 1 {
 		t.Fatalf("followup messages=%d", n)
+	}
+	// A long request previews only its gist; the confirmation still binds the
+	// whole instruction.
+	long := map[string]any{"room_id": targetRoom, "handoff_id": handoffID, "instruction": "Compare every hotel near the venue. " + strings.Repeat("Check the reviews, the price and the walk. ", 40)}
+	if preview := call("long_ask", "long_preview", "hand_off_to_room", long); utf8.RuneCountInString(preview["summary"].(string)) > 200 || !strings.HasSuffix(preview["summary"].(string), "…") {
+		t.Fatalf("long preview=%v", preview)
+	}
+	// The user telling the voice to hand it off in their own turn is the yes.
+	ordered := map[string]any{"room_id": targetRoom, "handoff_id": handoffID, "instruction": "Book the hotel closest to the station.", "confirmed": true}
+	if accepted := call("direct_yes", "direct_commit", "hand_off_to_room", ordered); accepted["status"] != "accepted" || accepted["handoff_id"] != handoffID {
+		t.Fatalf("direct handoff=%v", accepted)
 	}
 	// A handoff cannot be retargeted, even to another authorized Room.
 	args["room_id"] = secondRoom

@@ -1,4 +1,7 @@
-import type { RuntimeExecutionFailure } from "../executor/provider.js";
+import {
+  formatRuntimeFailureDetail,
+  type RuntimeExecutionFailure,
+} from "../executor/provider.js";
 import type {
   LocalModelActionAck,
   LocalModelActionCommand,
@@ -345,7 +348,12 @@ export class LocalComputerModelError extends LocalComputerPlacementError {
   ) {
     super(message);
     this.name = "LocalComputerModelError";
-    this.failure = { code: "model_not_offered", runtime_type: runtimeType };
+    const detail = formatRuntimeFailureDetail(message);
+    this.failure = {
+      code: "model_not_offered",
+      runtime_type: runtimeType,
+      ...(detail ? { detail } : {}),
+    };
   }
 }
 

@@ -41,7 +41,8 @@ export type ServiceFeature =
   | "local_models_concurrency_probe"
   | "local_model_unavailable"
   | "model_gateway_unavailable"
-  | "local_models_external_holders";
+  | "local_models_external_holders"
+  | "runtime_failure_detail";
 export type JsonValue =
   | null
   | boolean
@@ -2298,6 +2299,7 @@ export interface RuntimeExecutionFailure {
     | "execution_failed";
   runtime_type: "codex" | "claude" | "pi" | "antigravity";
   runtime_version?: string;
+  detail?: string;
 }
 export interface RuntimeFailureDiagnostics {
   exitCode?: number;

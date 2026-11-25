@@ -418,6 +418,15 @@ func (f *agyFakeProcess) prompt(id json.RawMessage, sessionID, promptText string
 		f.fail(id, -32603, "prompt execution failed")
 		return
 	}
+	if f.mode == "inline-error" {
+		f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "\n\u26a0 FAILED_PRECONDITION (code 400): User location is not supported for the API use.\n"}})
+		f.result(id, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+	if f.mode == "empty-end-turn" {
+		f.result(id, map[string]any{"stopReason": "end_turn"})
+		return
+	}
 	if os.Getenv(agyFakeMCPCallEnv) == "1" {
 		if err := f.callMCPServers(sessionID, promptText); err != nil {
 			f.fail(id, -32603, err.Error())

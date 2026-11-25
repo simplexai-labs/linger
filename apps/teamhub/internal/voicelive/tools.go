@@ -163,12 +163,12 @@ var Tools = append([]Tool{
 	},
 	{
 		Name:        ToolHandOffToRoom,
-		Description: "From the private chat with the user's AnotherMe, ask yourself in another group Room to speak, mention the relevant Agents, and follow the discussion. Use this for Room coordination; create_room and add_room_members stay direct tools. Both the user and you must be members of the target Room; if you are missing, add yourself with add_room_members after confirmation. Only include the user's instruction and background they want shared. First call with confirmed=false and ask using the preview; after agreement in a later turn repeat with confirmed=true. Accepted means handed off, not finished. Questions and results arrive as Room reports; pass the user's answer with the same room_id and handoff_id. Use search_messages to read recent discussion when asked. Never use start_task to create a Room or speak in one.",
+		Description: "From the private chat with the user's AnotherMe, ask yourself in another group Room to speak, mention the relevant Agents, and follow the discussion. Use this for Room coordination; create_room and add_room_members stay direct tools. Both the user and you must be members of the target Room; if you are missing, add yourself with add_room_members after confirmation. Only include the user's instruction and background they want shared. When the user's own turn tells you to pass it to that Room, call with confirmed=true and it is handed off without asking again. When you are not sure they want it handed off now, call without confirmed: it returns needs_confirmation with the Room and the gist of the request; ask, and after they say yes in their next turn call again with the same arguments and confirmed=true. Accepted means handed off, not finished. Questions and results arrive as Room reports; pass the user's answer with the same room_id and handoff_id. Use search_messages to read recent discussion when asked. Never use start_task to create a Room or speak in one.",
 		Parameters: objectSchema([]string{"room_id", "instruction", "confirmed"}, map[string]any{
 			"room_id":     stringProperty("Target group Room ID from find_rooms or create_room"),
 			"instruction": stringProperty("Self-contained request, at most 8000 characters; share only relevant authorized context"),
 			"handoff_id":  stringProperty("Existing handoff ID when answering a Room report or continuing that request"),
-			"confirmed":   map[string]any{"type": "boolean", "description": "Whether the user agreed to the preview in a later turn"},
+			"confirmed":   map[string]any{"type": "boolean", "description": "true when the user, in their own latest turn, told you to hand it off or said yes to the preview"},
 		}),
 	},
 	{
@@ -379,15 +379,21 @@ func Output(value any) string {
 	return string(encoded)
 }
 
-// DirectYesTools are writes whose content the user already sees, so the
-// user telling the model to do it in their own turn is their yes, unless that
-// turn asked about it or wrote the content; the others read their details
-// back for a yes first.
-var DirectYesTools = map[string]bool{ToolSendEmailCanvas: true}
+// DirectYesTools are writes the user can order outright: the user telling the
+// model to do it in their own turn is their yes, unless that turn asked about
+// it or wrote the content. Sending an email canvas shows exactly what goes out
+// beside the chat; a Room handoff passes the user's own request to a Room they
+// belong to and reports back. The others read their details back for a yes first.
+var DirectYesTools = map[string]bool{ToolSendEmailCanvas: true, ToolHandOffToRoom: true}
 
 // SentNext tells the live model to report a completed send: without it the
 // model can take the result as context and stay silent.
 const SentNext = "Tell the user in one warm, conversational sentence, in their language, that you sent it and to whom. Keep your friendly personality while leading with the confirmed result; a light touch is welcome when it fits, without forcing praise or a joke."
+
+// DoneNext tells the live model to report a finished write in the voice's
+// tone: without it the model improvises a bare status word, or repeats the
+// acknowledgement it spoke before the call.
+const DoneNext = "It is done. Tell the user in one warm, conversational first-person sentence, in their language, what you did and the part of the result that matters to them, such as the name and who is in it. If you already said you were doing it, go straight to the result without repeating that or adding another acknowledgement. A light touch is welcome when it fits; never a bare status word such as done or created."
 
 // StartedNext acknowledges accepted work in the voice's own words without
 // exposing implementation details or claiming that work has finished.
@@ -404,7 +410,7 @@ func ErrorOutput(code string) string {
 func NeedsConfirmation(summary string) string {
 	return Output(map[string]string{
 		"status": "needs_confirmation", "summary": summary,
-		"next": "Ask the user this now, once, in your own words with these details, and end your turn; never answer it for them, and do not say you are doing it yet. If the user already said yes to it while this call ran, do not ask again: call again with confirmed=true now. Otherwise call again with confirmed=true only after they say yes in their own next turn, and as you make that call say in one short complete sentence that you are doing it now, since it can take a few seconds.",
+		"next": "Ask the user this now, once, and end your turn. Ask the way a friend at their side would: a few words reacting to what they asked, then the details that matter (what, where, who) in your own words and their language, and a short question. Never read the summary out or translate it word for word, and never use a formal phrase such as please confirm. Never answer it for them, and do not say you are doing it yet. If the user already said yes to it while this call ran, do not ask again: call again with confirmed=true now. Otherwise call again with confirmed=true only after they say yes in their own next turn, and when its result comes, tell them in one warm sentence what came of it; never a bare progress word such as creating or sending.",
 	})
 }
 

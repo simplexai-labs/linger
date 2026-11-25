@@ -3,13 +3,19 @@ package agentruntimestate
 import (
 	"encoding/json"
 	"regexp"
+	"strings"
+	"unicode/utf8"
 )
 
-// PublicRuntimeFailure contains metadata only; native provider text stays private.
+const maxRuntimeFailureDetailRunes = 500
+
+// PublicRuntimeFailure carries the structured public failure classification and
+// an optional redacted, single-line diagnostic detail for Activity display.
 type PublicRuntimeFailure struct {
 	Code           string `json:"code"`
 	RuntimeType    string `json:"runtime_type,omitempty"`
 	RuntimeVersion string `json:"runtime_version,omitempty"`
+	Detail         string `json:"detail,omitempty"`
 }
 
 var runtimeVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$`)
@@ -46,5 +52,19 @@ func terminalRuntimeFailure(raw json.RawMessage) (*PublicRuntimeFailure, error) 
 	if failure.RuntimeVersion != "" && (len(failure.RuntimeVersion) > 80 || !runtimeVersionPattern.MatchString(failure.RuntimeVersion)) {
 		return nil, ErrInvalid
 	}
+	if failure.Detail != "" {
+		if strings.TrimSpace(failure.Detail) == "" || utf8.RuneCountInString(failure.Detail) > maxRuntimeFailureDetailRunes || hasControlChar(failure.Detail) {
+			return nil, ErrInvalid
+		}
+	}
 	return &failure, nil
+}
+
+func hasControlChar(value string) bool {
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
 }

@@ -501,6 +501,7 @@ export class RunnerConnections {
               "local_model_unavailable",
               "model_gateway_unavailable",
               "local_models_external_holders",
+              "runtime_failure_detail",
             ],
           }
         : {}),

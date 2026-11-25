@@ -56,6 +56,12 @@ const serviceFeatureLocalModelUnavailable = "local_model_unavailable"
 // execution_failed to it instead.
 const serviceFeatureModelGatewayUnavailable = "model_gateway_unavailable"
 
+// serviceFeatureRuntimeFailureDetail in runner.welcome's service_features says
+// the Agent Service accepts the optional detail property on
+// RuntimeExecutionFailure. Older services reject unknown properties on that
+// object, so the Daemon omits detail when absent.
+const serviceFeatureRuntimeFailureDetail = "runtime_failure_detail"
+
 // LocalModelLibrary runs the actions a Computer owner chooses on this
 // Computer's localmodels library. The Daemon never picks a model: on its
 // own it loads only the downloaded model a Run's Agent already names, and it

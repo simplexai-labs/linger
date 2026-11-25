@@ -81,30 +81,34 @@ Environment variables:
 - `LOCALMODELS_KIT_HOME`: kit cache directory, default `~/.cache/simplex-localmodels/kits` (on Windows `%LOCALAPPDATA%\simplex-localmodels\kits`).
 - `SIMPLEX_NPM_REGISTRY`: replace both registry bases with a test registry or private mirror. Archive SHA256 and size pins still apply.
 - `SIMPLEX_REGION`: `global` uses `registry.npmjs.org`; `cn` uses `registry.npmmirror.com`; `auto` probes both.
+- `SIMPLEX_IMAGE_MIRROR`: used by the Simplex container installer for its cn image registry. It does not change localmodels kit or Bifrost downloads.
 - `LOCALMODELS_KIT_BASE_URL`: legacy mirror layout serving the same pinned npm archives as `<target>.tgz`.
 
-The Linger installer does not go through `stack.sh`; it calls the same kind of localmodels kit
+The Simplex installer does not go through `stack.sh`; it calls the same kind of localmodels kit
 directly and by convention pins the same version as here.
 
 Run the pinned script without cloning the repository:
 
 ```sh
 # global
-curl -fsSL https://cdn.jsdelivr.net/npm/@simplexai/localmodels@0.1.0-dev.57/stack.sh | sh -s -- --region global --help
+curl -fsSL https://cdn.jsdelivr.net/npm/@simplexai/localmodels@0.1.0-dev.59/stack.sh | sh -s -- --region global --help
 # cn
-curl -fsSL https://registry.npmmirror.com/@simplexai/localmodels/0.1.0-dev.57/files/stack.sh | sh -s -- --region cn --help
+curl -fsSL https://registry.npmmirror.com/@simplexai/localmodels/0.1.0-dev.59/files/stack.sh | sh -s -- --region cn --help
 ```
 
 ```powershell
-irm https://cdn.jsdelivr.net/npm/@simplexai/localmodels@0.1.0-dev.57/stack.ps1 -OutFile stack.ps1
+irm https://cdn.jsdelivr.net/npm/@simplexai/localmodels@0.1.0-dev.59/stack.ps1 -OutFile stack.ps1
 powershell -ExecutionPolicy Bypass -File .\stack.ps1 -Region global --help
-# cn script URL: https://registry.npmmirror.com/@simplexai/localmodels/0.1.0-dev.57/files/stack.ps1
+# cn script URL: https://registry.npmmirror.com/@simplexai/localmodels/0.1.0-dev.59/files/stack.ps1
 ```
 
-The localmodels release process publishes each version's platform kits, its patched Bifrost packages and the
-platform-independent `@simplexai/localmodels` package holding both scripts and `release.json`. `stack.sh`, `stack.ps1`
-and this section carry that release's pin; do not edit them by hand. The version pin only says which published CLI
-runs; it does not state which platforms or GPUs are supported.
+Source, templates and tests live in `localmodels/` and `scripts/installs/` of llm-inference-lab.
+Each localmodels release publishes the platform kits, patched Bifrost packages and the platform-independent
+`@simplexai/localmodels` package containing both scripts and `release.json`.
+To adopt a release, manually copy its generated `stack.sh`, `stack.ps1` and this section into the
+consumer repository, preserving the other install scripts and README sections. Keep the generated files unchanged.
+The version pin only says which published CLI runs; platform and GPU support and real-device acceptance status are set by
+llm-inference-lab's product documents and dated reports.
 
 <!-- <<< llm-inference-lab: stack -->
 

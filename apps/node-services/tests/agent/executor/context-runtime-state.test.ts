@@ -1552,6 +1552,61 @@ describe("TeamHub Context Runtime state", () => {
     await state.close();
   });
 
+  it("drops failure.detail and retries once when an older TeamHub rejects it with HTTP 400", async () => {
+    const seenTerminals: unknown[] = [];
+    const finishRun = vi.fn<TeamHubRuntimeStateClient["finishRun"]>(
+      async (body) => {
+        seenTerminals.push(body.terminal);
+        if (seenTerminals.length === 1) {
+          throw new TeamHubRuntimeStateError(
+            400,
+            "unknown field detail",
+            "INVALID_REQUEST",
+          );
+        }
+        return { run: terminalRun("failed") };
+      },
+    );
+    const { state } = await terminalFixture({ finishRun });
+    try {
+      await state.finishLocalRun("run-1", {
+        type: "failed",
+        error: "execution failed",
+        failure: {
+          code: "execution_failed",
+          runtime_type: "antigravity",
+          runtime_version: "1.5.16",
+          detail:
+            "FAILED_PRECONDITION (code 400): User location is not supported for the API use.",
+        },
+      });
+      expect(seenTerminals).toEqual([
+        {
+          type: "failed",
+          error: "execution failed",
+          failure: {
+            code: "execution_failed",
+            runtime_type: "antigravity",
+            runtime_version: "1.5.16",
+            detail:
+              "FAILED_PRECONDITION (code 400): User location is not supported for the API use.",
+          },
+        },
+        {
+          type: "failed",
+          error: "execution failed",
+          failure: {
+            code: "execution_failed",
+            runtime_type: "antigravity",
+            runtime_version: "1.5.16",
+          },
+        },
+      ]);
+    } finally {
+      await state.close();
+    }
+  });
+
   it("reads Local Run reply delivery status from TeamHub", async () => {
     const getRunReplyStatus = vi.fn<
       TeamHubRuntimeStateClient["getRunReplyStatus"]

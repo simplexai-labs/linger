@@ -1,5 +1,6 @@
 import type { AgentLogger } from "../observability/agent-log.js";
 import {
+  formatRuntimeFailureDetail,
   type PreviousRuntimeSession,
   type RunEvent,
   RuntimeExecutionError,
@@ -2302,7 +2303,13 @@ const failedRunTerminal = (
     ? ({
         type: "failed",
         error: "Provider cancellation cleanup is unconfirmed",
-        failure: runFailure("cleanup_unconfirmed", runtimeType),
+        failure: runFailure(
+          "cleanup_unconfirmed",
+          runtimeType,
+          error.cause instanceof Error
+            ? formatRuntimeFailureDetail(error.cause.message)
+            : undefined,
+        ),
       } as const)
     : signal.reason instanceof LocalRunCancellationRequestedError ||
         signal.reason instanceof LocalRunStoppedError
@@ -2324,30 +2331,44 @@ const failedRunTerminal = (
 const classifiedRunFailure = (
   error: unknown,
   runtimeType: RuntimeExecutionFailure["runtime_type"],
-): RuntimeExecutionFailure =>
-  error instanceof RuntimeExecutionError
-    ? error.failure
-    : runFailure(
-        error instanceof ProviderRunInterruptedError
-          ? "interrupted"
-          : error instanceof ProviderRunAdmissionUnavailableError
-            ? "computer_unavailable"
-            : error instanceof StreamingAgentRunLimitError
-              ? "response_too_large"
-              : "unclassified",
-        // A Run that definitely never started did not reach the Runtime, so
-        // naming it would point the user at the wrong component.
-        error instanceof ProviderRunStartError &&
-          !(error instanceof ProviderRunAdmissionUnavailableError)
-          ? undefined
-          : runtimeType,
-      );
+): RuntimeExecutionFailure => {
+  if (error instanceof RuntimeExecutionError) {
+    return error.failure;
+  }
+  if (error instanceof ProviderRunInterruptedError) {
+    return runFailure("interrupted", runtimeType);
+  }
+  if (error instanceof ProviderRunAdmissionUnavailableError) {
+    return runFailure(
+      "computer_unavailable",
+      runtimeType,
+      formatRuntimeFailureDetail(error.message),
+    );
+  }
+  if (error instanceof StreamingAgentRunLimitError) {
+    return runFailure(
+      "response_too_large",
+      runtimeType,
+      formatRuntimeFailureDetail(error.message),
+    );
+  }
+  return runFailure(
+    "unclassified",
+    // A Run that definitely never started did not reach the Runtime, so
+    // naming it would point the user at the wrong component.
+    error instanceof ProviderRunStartError ? undefined : runtimeType,
+  );
+};
 
 const runFailure = (
   code: RuntimeExecutionFailure["code"],
   runtimeType: RuntimeExecutionFailure["runtime_type"],
-): RuntimeExecutionFailure =>
-  runtimeType ? { code, runtime_type: runtimeType } : { code };
+  detail?: string,
+): RuntimeExecutionFailure => ({
+  code,
+  ...(runtimeType ? { runtime_type: runtimeType } : {}),
+  ...(detail ? { detail } : {}),
+});
 
 const provenanceOf = (
   messages: NonEmptyReadonlyArray<Message>,
