@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 
 import type { JobContext } from "@livekit/agents";
 import { AutoSubscribe, log } from "@livekit/agents";
@@ -138,6 +139,8 @@ const shortSpeechSamples = 16_000 * 0.096;
 const pauseIdleTimeoutMs = 2_500;
 /** Reply audio kept after it reaches the track: more than AudioSource's 1 s queue. */
 const heardBackSamples = 24_000 * 1.2;
+/** The track running dry this long while the next frame waited here is a stall. */
+const playbackStallMs = 10;
 /** The local VAD's window, in its 16 kHz samples. */
 const detectorWindowSamples = 512;
 /** Queued reports wait this long for the user to speak first. */
@@ -185,6 +188,8 @@ interface InputMetrics {
   speechStartedAt?: number;
   firstPartialAt?: number;
   maxInputQueueWaitMs: number;
+  /** Microphone audio the bounded input buffer discarded unsent. */
+  droppedInputMs: number;
   maxVadMs: number;
   maxPublishQueueWaitMs: number;
   maxPublishMs: number;
@@ -192,6 +197,7 @@ interface InputMetrics {
 
 const newInputMetrics = (): InputMetrics => ({
   maxInputQueueWaitMs: 0,
+  droppedInputMs: 0,
   maxVadMs: 0,
   maxPublishQueueWaitMs: 0,
   maxPublishMs: 0,
@@ -257,6 +263,7 @@ interface Reply {
 interface Queued {
   reply: Reply;
   pcm: Int16Array;
+  queuedAt: number;
 }
 
 interface Pause {
@@ -575,6 +582,11 @@ export class LiveVoiceWorker {
   /** Audio that reached the track, newest last; a pause puts back the unheard part. */
   private handedOver: Queued[] = [];
   private handedOverSamples = 0;
+  /** When the track plays out what it was handed; unset while it holds nothing. */
+  private playoutEndsAt?: number;
+  private stalls = { count: 0, totalMs: 0, maxMs: 0 };
+  /** A starved CPU shows here before it shows as late audio. */
+  private readonly loopDelay = monitorEventLoopDelay({ resolution: 10 });
   /** Playback held for local speech that server VAD has not confirmed. */
   private paused?: Pause;
   private pauses = 0;
@@ -639,6 +651,7 @@ export class LiveVoiceWorker {
 
   async run(ctx: JobContext): Promise<void> {
     this.ctx = ctx;
+    this.loopDelay.enable();
     this.startedAt = this.options.startedAt ?? Date.now();
     const roomName = ctx.job.room?.name;
     if (!roomName) throw new Error("Voice Runtime job is missing a Room name");
@@ -1200,9 +1213,11 @@ export class LiveVoiceWorker {
   }
 
   private enqueuePlayback(reply: Reply, pcm: Int16Array) {
+    const queuedAt = Date.now();
     for (let offset = 0; offset < pcm.length; offset += replyChunkSamples)
       this.playQueue.push({
         reply,
+        queuedAt,
         // AudioFrame hands rtc-node its whole backing buffer and ignores the
         // view offset, so each frame needs its own buffer.
         pcm: pcm.slice(offset, offset + replyChunkSamples),
@@ -1233,12 +1248,13 @@ export class LiveVoiceWorker {
         }
         const turn = next.reply.turn;
         const pauses = this.pauses;
+        this.notePlayout(next);
         await this.source.captureFrame(
           new AudioFrame(next.pcm, replySampleRate, 1, next.pcm.length),
         );
         // captureFrame may finish enqueueing after an interruption cleared the track.
         if (next.reply.interrupted) {
-          this.source.clearQueue();
+          this.clearTrack();
           continue;
         }
         // The await may have let a pause in.
@@ -1246,7 +1262,7 @@ export class LiveVoiceWorker {
         if (paused && this.pauses !== pauses) {
           // The pause cleared the track while this frame was on its way:
           // clear it again and keep the frame right after the ones put back.
-          this.source.clearQueue();
+          this.clearTrack();
           this.playQueue.splice(paused.requeued, 0, next);
           continue;
         }
@@ -1274,6 +1290,8 @@ export class LiveVoiceWorker {
       );
     } finally {
       this.playing = false;
+      this.playoutEndsAt = undefined;
+      this.logStalls();
       const reply = this.playingReply;
       if (!this.playQueue.length) this.lastSpokeAt = Date.now();
       if (!this.stopped) {
@@ -1285,6 +1303,46 @@ export class LiveVoiceWorker {
         this.flushUpdates();
       }
     }
+  }
+
+  /** Counts the times the track ran dry while its next frame already waited here. */
+  private notePlayout(frame: Queued) {
+    const now = Date.now();
+    const endsAt = this.playoutEndsAt;
+    if (
+      endsAt !== undefined &&
+      frame.queuedAt < endsAt &&
+      now - endsAt >= playbackStallMs
+    ) {
+      const gapMs = now - endsAt;
+      this.stalls.count++;
+      this.stalls.totalMs += gapMs;
+      this.stalls.maxMs = Math.max(this.stalls.maxMs, gapMs);
+    }
+    this.playoutEndsAt =
+      Math.max(now, endsAt ?? now) +
+      (frame.pcm.length / replySampleRate) * 1_000;
+  }
+
+  private logStalls() {
+    const { count, totalMs, maxMs } = this.stalls;
+    if (!count) return;
+    this.stalls = { count: 0, totalMs: 0, maxMs: 0 };
+    log().warn(
+      {
+        voiceSessionId: this.voiceSessionId,
+        stalls: count,
+        stalledMs: totalMs,
+        maxStallMs: maxMs,
+      },
+      "Voice live reply playback stalled",
+    );
+  }
+
+  /** Drops the audio the track has not played yet. */
+  private clearTrack() {
+    this.source?.clearQueue();
+    this.playoutEndsAt = undefined;
   }
 
   private handOver(frame: Queued) {
@@ -1324,7 +1382,7 @@ export class LiveVoiceWorker {
         this.playedSamples = Math.max(0, this.playedSamples - frame.pcm.length);
       back.unshift(frame);
     }
-    this.source.clearQueue();
+    this.clearTrack();
     this.playQueue.unshift(...back);
     this.pauses++;
     let resume!: () => void;
@@ -1425,7 +1483,9 @@ export class LiveVoiceWorker {
     this.playQueue = [];
     this.handedOver = [];
     this.handedOverSamples = 0;
-    this.source?.clearQueue();
+    // Audio still in the track was never heard, so history keeps none of it.
+    const unheardMs = this.source?.queuedDuration ?? 0;
+    this.clearTrack();
     const turns = new Set<Turn>();
     const playingReply = playing ? this.playingReply : undefined;
     if (playingReply && !playingReply.speech) turns.add(playingReply.turn);
@@ -1436,7 +1496,9 @@ export class LiveVoiceWorker {
       playingReply
     )
       this.session?.cancel({
-        playedMs: playingReply ? this.playedMs() : undefined,
+        playedMs: playingReply
+          ? Math.max(0, this.playedMs() - unheardMs)
+          : undefined,
         localSpeech: source === "local",
       });
     if (this.pendingSpeech) this.pendingSpeechInterrupted = true;
@@ -2239,6 +2301,9 @@ export class LiveVoiceWorker {
       for (;;) {
         const queuedAt = input.oldestRetainedAtMs();
         const frame = await input.next(signal);
+        const dropped = input.takeDroppedSamples();
+        if (dropped)
+          this.inputMetrics.droppedInputMs += (dropped / liveInputRate) * 1_000;
         if (!frame || this.stopped || this.failed) break;
         if (queuedAt !== undefined)
           this.inputMetrics.maxInputQueueWaitMs = Math.max(
@@ -2511,12 +2576,17 @@ export class LiveVoiceWorker {
             : turn.completedAt - turn.speechEndedAt,
         completedToFirstFrameMs: since(turn.firstFrameAt),
         maxInputQueueWaitMs: turn.inputMetrics.maxInputQueueWaitMs,
+        droppedInputMs: Math.round(turn.inputMetrics.droppedInputMs),
         maxVadMs: turn.inputMetrics.maxVadMs,
         maxPublishQueueWaitMs: turn.inputMetrics.maxPublishQueueWaitMs,
         maxPublishMs: turn.inputMetrics.maxPublishMs,
+        // Since the previous turn's metrics, in milliseconds.
+        maxEventLoopDelayMs: Math.round(this.loopDelay.max / 1e6),
+        p99EventLoopDelayMs: Math.round(this.loopDelay.percentile(99) / 1e6),
       },
       "Voice live turn metrics",
     );
+    this.loopDelay.reset();
   }
 
   private async fail(error: unknown) {
@@ -2560,7 +2630,8 @@ export class LiveVoiceWorker {
       finish(JSON.stringify({ error: "session_closed" }));
     this.endPause();
     this.playQueue = [];
-    this.source?.clearQueue();
+    this.clearTrack();
+    this.loopDelay.disable();
     this.playingReply = undefined;
     for (const turn of this.turns.values()) this.maybeReport(turn);
     // Closing the provider ends its event loop; session.close has a deadline.

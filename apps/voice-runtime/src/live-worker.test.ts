@@ -1131,6 +1131,39 @@ describe("LiveVoiceWorker", () => {
     },
   );
 
+  it("keeps audio still in the track out of what an interrupted reply played", async () => {
+    const test = await harness();
+    test.source().queueFrames = true;
+    await answeredTurn(test);
+    await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
+    test.session().emit({ type: "speech_started", itemId: "item-b" });
+    await vi.waitFor(() =>
+      expect(test.session().cancel).toHaveBeenCalledOnce(),
+    );
+    // Both 20 ms frames were still queued, so the listener heard none of them.
+    expect(test.session().cancel).toHaveBeenCalledWith({
+      playedMs: 0,
+      localSpeech: false,
+    });
+    await test.shutdown();
+  });
+
+  it("reports the track running dry while reply audio waited in the worker", async () => {
+    const test = await harness();
+    test.source().holdFrames();
+    await answeredTurn(test);
+    // The first frame's 20 ms play out while the worker cannot hand over the next.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    test.source().releaseFrames();
+    await vi.waitFor(() =>
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ stalls: 1, voiceSessionId: sessionId }),
+        "Voice live reply playback stalled",
+      ),
+    );
+    await test.shutdown();
+  });
+
   it("resumes unheard audio, ignores immediate echo, and pauses the same reply for a fresh interruption", async () => {
     const test = await harness();
     await answeredTurn(test);
