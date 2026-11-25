@@ -205,7 +205,7 @@ while IFS= read -r line; do
    printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"agy-session-1","configOptions":[{"id":"model","category":"model","currentValue":"gemini-pro"},{"id":"thought_level","category":"thought_level","currentValue":"low"}]}}\n' "$id" ;;
  session/prompt)
    printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}\n'
-   printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;;
+   printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1}}}\n' "$id" ;;
  *)
    printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
  esac

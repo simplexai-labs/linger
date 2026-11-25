@@ -611,9 +611,12 @@ for a browser sign-in when signed out.
   is not zero finishes as failed. Otherwise
   the adapter selects the allow option, as the Runtime runs with the Agent's
   full local authority.
-- Antigravity reports a model error, such as a rejected API key, as reply text
-  and ends the turn with `end_turn`. With no structured signal, such a Run
-  completes and the Room shows the text.
+- Antigravity can report a model or preflight error (such as a rejected API key
+  or unsupported region) as plain text and end the turn with `end_turn` without
+  emitting model usage or any tool, thought, or plan activity. Because a normal
+  model turn reports usage or activity, the adapter fails such a Run, retires
+  the process instead of parking it, and surfaces the trimmed redacted notice in
+  `failure.detail` when the Agent Service announces `runtime_failure_detail`.
 - History reads, Local Skill scans and local models do not support
   Antigravity, so Agent Memory skips Antigravity Agents.
 - The Gateway hello leaves out the Antigravity diagnostic while `agy` is not
