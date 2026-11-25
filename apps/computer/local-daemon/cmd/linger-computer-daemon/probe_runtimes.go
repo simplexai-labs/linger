@@ -7,11 +7,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"maps"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/computerconfig"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/redact"
@@ -49,9 +48,9 @@ func (f *repeatedStringFlag) Set(value string) error {
 }
 
 // runProbeRuntimes runs a stateless, single-shot Runtime discovery and
-// authentication check using the exact same provider.Discover pipeline as the
-// resident daemon, so desktop setup and the installer never drift from runtime
-// behavior.
+// authentication check using the exact same shared discovery options and
+// provider.Discover pipeline as the resident daemon and linger-computer CLI,
+// so desktop setup and the installer never drift from runtime behavior.
 func runProbeRuntimes(ctx context.Context, args []string, environment map[string]string, output io.Writer) error {
 	flags := flag.NewFlagSet("probe-runtimes", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -82,47 +81,22 @@ func runProbeRuntimes(ctx context.Context, args []string, environment map[string
 	if len(selected) == 0 {
 		selected = []string{"codex", "claude", "pi"}
 	}
-	if err := provider.ValidateRuntimeSelection(selected); err != nil {
+
+	options, err := computerconfig.RuntimeDiscoveryOptions(computerconfig.RuntimeDiscoveryRequest{
+		ConfiguredPaths: map[string]string{
+			"codex":       codexPath,
+			"claude":      claudePath,
+			"pi":          piPath,
+			"antigravity": antigravityPath,
+		},
+		Environment:          environment,
+		Runtimes:             selected,
+		SkipModelCatalog:     true,
+		Timeout:              time.Duration(timeoutMs) * time.Millisecond,
+		RequireAbsolutePaths: true,
+	})
+	if err != nil {
 		return fmt.Errorf("probe-runtimes: %w", err)
-	}
-
-	env := maps.Clone(environment)
-	if env == nil {
-		env = map[string]string{}
-	}
-	configuredPaths := map[string]string{}
-	for kind, envKey := range map[string]string{
-		"codex":  "LINGER_CODEX_PATH",
-		"claude": "LINGER_CLAUDE_PATH",
-		"pi":     "LINGER_PI_PATH",
-	} {
-		if value := strings.TrimSpace(env[envKey]); value != "" && filepath.IsAbs(value) {
-			configuredPaths[kind] = value
-		}
-	}
-	for kind, explicit := range map[string]string{
-		"codex":       strings.TrimSpace(codexPath),
-		"claude":      strings.TrimSpace(claudePath),
-		"pi":          strings.TrimSpace(piPath),
-		"antigravity": strings.TrimSpace(antigravityPath),
-	} {
-		if explicit == "" {
-			continue
-		}
-		if !filepath.IsAbs(explicit) {
-			return fmt.Errorf("probe-runtimes: --%s-path must be absolute", kind)
-		}
-		configuredPaths[kind] = explicit
-	}
-
-	options := provider.DiscoveryOptions{
-		ConfiguredPaths:  configuredPaths,
-		Environment:      env,
-		Runtimes:         selected,
-		SkipModelCatalog: true,
-	}
-	if timeoutMs > 0 {
-		options.Timeout = time.Duration(timeoutMs) * time.Millisecond
 	}
 
 	discovered, err := provider.Discover(ctx, options)

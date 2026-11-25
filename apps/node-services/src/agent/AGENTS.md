@@ -176,12 +176,16 @@ take precedence.
   later (`FIRST_STOP_HOOK_COMPUTER_VERSION`), because an older Computer rejects
   unknown envelope fields and closes the connection; Runs on older Computers
   rely on `RunLoop`'s post-hoc reply check (`reply_not_sent` / `reply_undelivered`).
-- `local_model_unavailable` in `runner.welcome`'s `service_features` goes to
-  every Computer that receives the field: the Go Daemon decodes the list as
-  strings and ignores a value it does not know. A Daemon that sees it reports a
-  Pi Run whose local model it could not load with the `local_model_unavailable`
-  failure code; otherwise it falls back to `model_unavailable`. TeamHub must
-  accept the code before an Agent Service announcing the feature reaches it.
+- `local_model_unavailable` and `model_gateway_unavailable` in
+  `runner.welcome`'s `service_features` go to every Computer that receives the
+  field: the Go Daemon decodes the list as strings and ignores a value it does
+  not know. A Daemon that sees `local_model_unavailable` reports a Pi Run whose
+  local model it could not load with that failure code (otherwise falling back
+  to `model_unavailable`); one that sees `model_gateway_unavailable` reports a
+  Run whose local model gateway it could not start or reach with
+  `model_gateway_unavailable` (otherwise falling back to `execution_failed`).
+  TeamHub must accept each code before an Agent Service announcing the feature
+  reaches it.
 - Extended local-model diagnostics and debug metadata (`local_models_diagnostics`
   in `runner.welcome`'s `service_features`) are advertised only to Computer
   0.58.0 or later (`FIRST_LOCAL_MODELS_DIAGNOSTICS_COMPUTER_VERSION`), the

@@ -24,7 +24,7 @@ import { RoomDeleteDialog } from "./room-delete-dialog";
 import { roomQueryKey, tenantRoomsQueryKey } from "./room-queries";
 
 describe("Room deletion", () => {
-  it("requires the exact Room name, clears Room caches, and leaves the route", async () => {
+  it("confirms deletion directly with the Room name in view, clears caches, and leaves the route", async () => {
     const runtime = createTestTeamHubRuntime();
     acceptRoomUpdates(runtime);
 
@@ -43,8 +43,7 @@ describe("Room deletion", () => {
     const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
       if (event.type === "removed") {
         removedWhileMounted.push(
-          screen.queryByRole("dialog", { name: `Delete Room ${room.name}` }) !==
-            null,
+          screen.queryByRole("dialog", { name: "Delete Room" }) !== null,
         );
       }
     });
@@ -57,16 +56,14 @@ describe("Room deletion", () => {
         return null;
       },
     });
-    const confirm = screen.getByRole("button", { name: "Delete Room" });
+    const dialog = screen.getByRole("dialog", { name: "Delete Room" });
+    expect(dialog).toHaveTextContent(
+      `${room.name} will be deleted. Every member will lose access to this Room.`,
+    );
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 
-    expect(confirm).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Room name confirmation"), {
-      target: { value: "All" },
-    });
-    expect(confirm).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Room name confirmation"), {
-      target: { value: room.name },
-    });
+    const confirm = screen.getByRole("button", { name: "Delete Room" });
+    expect(confirm).toBeEnabled();
     fireEvent.click(confirm);
 
     await waitFor(() => expect(router.state.navigation.state).toBe("loading"));
@@ -96,6 +93,34 @@ describe("Room deletion", () => {
     });
   });
 
+  it("uses direct-chat deletion wording without a confirmation input for deleted-Agent Direct Rooms", async () => {
+    const runtime = createTestTeamHubRuntime();
+    acceptRoomUpdates(runtime);
+
+    const directRoom = await getRoom(runtime, "room-dm-codex");
+    const room: TeamHubRoom = {
+      ...directRoom,
+      direct_peer_active: false,
+      name: "Renamed Codex",
+    };
+
+    const { router } = renderDeleteDialog({
+      queryClient: new QueryClient(),
+      room,
+      runtime,
+    });
+    const dialog = screen.getByRole("dialog", { name: "Delete Room" });
+    expect(dialog).toHaveTextContent(
+      "Renamed Codex will be deleted. Its messages, files, and history will no longer be available.",
+    );
+    expect(dialog).not.toHaveTextContent(/Every member will lose access/i);
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Room" }));
+    await screen.findByText("Rooms index");
+    expect(router.state.location.pathname).toBe("/t/tenant-northstar/rooms");
+  });
+
   it.each([true, false])(
     "clears caches after a late deletion confirmation, but keeps them on failure (confirmed=%s)",
     async (confirmed) => {
@@ -116,9 +141,6 @@ describe("Room deletion", () => {
       const roomKey = roomQueryKey("tenant-northstar", room.id);
       queryClient.setQueryData(roomKey, room);
       const { unmount } = renderDeleteDialog({ queryClient, room, runtime });
-      fireEvent.change(screen.getByLabelText("Room name confirmation"), {
-        target: { value: room.name },
-      });
       fireEvent.click(screen.getByRole("button", { name: "Delete Room" }));
       await waitFor(() => expect(deletion).toHaveBeenCalledOnce());
       unmount();
@@ -142,9 +164,6 @@ describe("Room deletion", () => {
     runtime.server.on("DELETE", "/v0/rooms/{roomId}", deleteRoom);
     renderDeleteDialog({ queryClient: new QueryClient(), room, runtime });
 
-    fireEvent.change(screen.getByLabelText("Room name confirmation"), {
-      target: { value: room.name },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Delete Room" }));
     await screen.findByText(/did not confirm whether this Room was deleted/);
     fireEvent.click(screen.getByRole("button", { name: "Delete Room" }));
@@ -166,9 +185,6 @@ describe("Room deletion", () => {
     queryClient.setQueryData(tenantRoomsQueryKey("tenant-northstar"), rooms);
     const { router } = renderDeleteDialog({ queryClient, room, runtime });
 
-    fireEvent.change(screen.getByLabelText("Room name confirmation"), {
-      target: { value: room.name },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Delete Room" }));
 
     // Router state changes before React commits the route and unmounts this

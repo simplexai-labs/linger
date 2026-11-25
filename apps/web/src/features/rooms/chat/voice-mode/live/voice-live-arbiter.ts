@@ -303,10 +303,16 @@ export function createVoiceLiveArbiter(options: {
             // A turn the Human goes on with is saved once, as the longer turn.
             if (turn.continued) return;
             turn.posted = true;
-            // A turn the live session never answered, such as one heard as
-            // it failed, goes to the Room Agent as an ordinary Message.
+            // A turn belongs to the live call while the session is still live
+            // or once the live model answered or superseded it; only an
+            // unanswered turn left behind by exit or fallback goes to the Room
+            // Agent as an ordinary Message.
+            const liveOwned =
+              turn.answered ||
+              turn.superseded ||
+              (!disposed && options.active());
             await sendTurn(
-              heardBy && (turn.answered || turn.superseded)
+              heardBy && liveOwned
                 ? { voice_session_id: heardBy, turn_id: turnId }
                 : undefined,
             );
@@ -338,6 +344,7 @@ export function createVoiceLiveArbiter(options: {
         return;
       }
       if (event.type === "tool_request") {
+        if (event.turn_id) ensureTurn(event.turn_id).answered = true;
         void toolRequest(event);
         return;
       }

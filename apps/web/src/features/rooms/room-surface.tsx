@@ -81,7 +81,6 @@ import {
 import { readPanelSidebarWidth } from "./task-sidebar/panel-width";
 import { AuthenticatedRouteLoading } from "./route-loading-surface";
 import { RoomPresentationBoundary } from "./room-presentation-boundary";
-import { GENERAL_AGENT_DEFAULT_NAME } from "./general-agent-defaults";
 import { MobileNavigationButton } from "./mobile-navigation";
 import { roomSurfaceMessages } from "./room-surface.messages";
 
@@ -344,7 +343,10 @@ function RoomSurfaceContent({
   const livePeerName = actorItems.find(
     (actor) => actor.id === room.direct_peer?.id,
   )?.display_name;
-  const roomTitle = isDirectRoom && livePeerName ? livePeerName : room.name;
+  // Deleted Agents leave the active actors catalog; fall back to direct_peer so
+  // the header, delete dialog, and sidebar always agree on the Direct Room name.
+  const peerName = livePeerName || room.direct_peer?.display_name;
+  const roomTitle = isDirectRoom && peerName ? peerName : room.name;
   const presentationRoom =
     roomTitle === room.name ? room : { ...room, name: roomTitle };
   const currentActorIsOwner = members.items.some(
@@ -568,7 +570,7 @@ function RoomSurfaceContent({
             {deleteOpen ? (
               <RoomDeleteDialog
                 onClose={() => setDeleteOpen(false)}
-                room={room}
+                room={presentationRoom}
                 tenantId={tenantId}
               />
             ) : null}
@@ -782,12 +784,6 @@ function RoomHeader({
   const isDirectRoom = room.kind === "direct";
   const headerPeer =
     room.direct_peer?.kind === "agent" ? room.direct_peer : undefined;
-  const headerName =
-    headerPeer?.display_name &&
-    (room.name === headerPeer.display_name ||
-      room.name === GENERAL_AGENT_DEFAULT_NAME)
-      ? headerPeer.display_name
-      : room.name;
 
   return (
     <header
@@ -804,7 +800,7 @@ function RoomHeader({
             type="button"
             aria-expanded={panelOpen}
             aria-label={t(roomSurfaceMessages.openSettingsFromAvatar, {
-              name: headerName,
+              name: room.name,
             })}
             className="flex shrink-0 items-center justify-center rounded-full after:absolute after:inset-0 after:rounded-full after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-app-focus"
             onClick={() => {
@@ -818,7 +814,7 @@ function RoomHeader({
                 <ActorAvatar
                   actorId={headerPeer.id}
                   kind="agent"
-                  name={headerName}
+                  name={room.name}
                   size="xs"
                 />
                 {directAgent && directAgentAvailability ? (
@@ -839,7 +835,7 @@ function RoomHeader({
             aria-label={room.name}
             className="pointer-events-none min-w-0 truncate text-sm leading-[18px] font-medium text-foreground"
           >
-            {headerName}
+            {room.name}
           </h1>
         </div>
         {isDirectRoom && room.direct_peer_active === false ? (

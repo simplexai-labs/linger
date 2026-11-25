@@ -367,3 +367,109 @@ test("shares a frozen Room conversation with an anonymous reader and revokes acc
     await guest.close();
   }
 });
+
+test("deletes a Room through Room settings after a single confirmation dialog", async ({
+  browser,
+  request,
+}, testInfo) => {
+  const fixture = await new RoomDocumentE2EHarnessClient(request).reset();
+  const alice = await openRoomChat(browser, fixture);
+  try {
+    const navigation = alice.page.getByRole("navigation", {
+      name: "Room navigation",
+      exact: true,
+    });
+    await navigation
+      .getByRole("button", { name: "Create chat", exact: true })
+      .click();
+    await alice.page
+      .getByRole("menuitem", { name: "Create Room", exact: true })
+      .click();
+    const create = alice.page.getByRole("dialog", {
+      name: "Create Room",
+      exact: true,
+    });
+    await create.getByLabel("Room name").fill("Delete confirmation proof");
+    await create
+      .getByRole("button", { name: "Create Room", exact: true })
+      .click();
+
+    const members = alice.page.getByRole("dialog", {
+      name: "Add Room members",
+    });
+    await expect(members).toBeVisible();
+    await members.getByRole("button", { name: "Close", exact: true }).click();
+    await members
+      .getByRole("button", { name: "Skip for now", exact: true })
+      .click();
+    await expect(members).toHaveCount(0);
+    await expect(alice.page).toHaveURL(/\/rooms\/[^/]+\/chat$/);
+
+    const deletedRoomUrl = alice.page.url();
+    const deletedRoomId = new URL(deletedRoomUrl).pathname.split("/").at(-2)!;
+    expect(deletedRoomId).not.toBe(fixture.room_id);
+
+    await alice.page
+      .getByRole("button", {
+        name: "Open Delete confirmation proof settings from avatar",
+      })
+      .click();
+    const panel = alice.page.getByTestId("panel-room-settings");
+    await expect(panel).toBeVisible();
+    await panel
+      .getByRole("button", { name: "Delete Room", exact: true })
+      .click();
+
+    const confirmation = alice.page.getByRole("dialog", {
+      name: "Delete Room",
+      exact: true,
+    });
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation).toContainText(
+      "Delete confirmation proof will be deleted. Every member will lose access to this Room. Its messages, files, and history will no longer be available.",
+    );
+    await expect(confirmation.getByRole("textbox")).toHaveCount(0);
+    const confirmDelete = confirmation.getByRole("button", {
+      name: "Delete Room",
+      exact: true,
+    });
+    await expect(confirmDelete).toBeEnabled();
+    await alice.page.screenshot({
+      path: testInfo.outputPath("delete-room-dialog.png"),
+    });
+
+    await confirmDelete.click();
+    await expect(confirmation).toHaveCount(0);
+    await expect(alice.page).not.toHaveURL(new RegExp(deletedRoomId));
+    await expect(
+      navigation.getByRole("link", { name: /Delete confirmation proof/ }),
+    ).toHaveCount(0);
+
+    // A fresh session visiting the deleted Room URL confirms server persistence.
+    const verifyContext = await browser.newContext();
+    try {
+      const page = await verifyContext.newPage();
+      await blockExternalFonts(page);
+      await page.goto(new URL("/login", deletedRoomUrl).href);
+      await page.getByLabel("Email").fill("alice@example.com");
+      await page
+        .getByLabel("Password", { exact: true })
+        .fill("teamhub-dev-alice");
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await page.waitForURL(/\/t\//);
+      await page.goto(deletedRoomUrl);
+      await expect(
+        page.getByRole("heading", {
+          name: "This Room is not available to you",
+        }),
+      ).toBeVisible();
+      await page.screenshot({
+        path: testInfo.outputPath("deleted-room-unavailable.png"),
+      });
+    } finally {
+      await verifyContext.close();
+    }
+  } finally {
+    await alice.context.close();
+  }
+});

@@ -1585,12 +1585,13 @@ export interface components {
       interrupted?: boolean;
       code?: string;
     };
-    /** @description Reliable LiveKit data packet on topic linger.voice.live sent by the VoiceSession publisher to Voice Runtime. tool_result answers one tool_request; context silently tells the live model where the Human is, such as the page they opened. These packets only steer the conversation and never authorize writes. */
+    /** @description Reliable LiveKit data packet on topic linger.voice.live sent by the VoiceSession publisher to Voice Runtime. tool_result answers one tool_request; context silently tells the live model where the Human is, such as the page they opened; audio_stats reports how the browser received the reply audio and sent the microphone since its previous report, only for Voice Runtime to log. These packets only steer the conversation and never authorize writes. */
     VoiceLiveClientEvent: {
       /** @enum {string} */
-      type: "tool_result" | "context";
+      type: "tool_result" | "context" | "audio_stats";
       call_id?: string;
       text?: string;
+      audio?: components["schemas"]["VoiceLiveAudioStats"];
     };
     /**
      * @description Opaque, case-sensitive identifier. Clients must not infer type or time from it.
@@ -2180,7 +2181,7 @@ export interface components {
     AgentRuntimeSuccessResult: {
       success: boolean;
     };
-    /** @description Public classified failure; contains no native error text, paths, credentials, or task input. Each code is set where the failure is observed, from structured signals only. model_unavailable means the model service refused the selected model for the Runtime's account, so the Agent needs another model or another sign-in. model_not_offered means the Agent's Computer does not offer the selected model for its Runtime, or the model does not support the selected reasoning effort, so the Runtime could not start; the Agent needs a model and reasoning effort that Computer offers. local_model_unavailable means the Agent's Computer could not load the Agent's local model (not enough free memory, not fully downloaded, or loading took too long), so the Runtime did not start; the person can manage it on the Computer's Models page or choose another model. context_too_long means the conversation no longer fits the model's context window. model_service_error means the model service reported a server-side error. timeout means the Runtime hit its local execution deadline. execution_outcome_unknown means a command was dispatched but no validated exit was observed before unexpected transport or Runtime failure. Intentional cancellation, authorization loss or unavailability, and normal retirement do not create this classification. Authorization loss or unavailability includes explicit revocation, authorization checks that fail or time out, and authorization expiry. This code does not currently cover unknown effects caused by control-plane disconnection. It remains a failed Run and must not be automatically replayed; verify its effects before starting another Run. reply_undelivered means a Room Run finished while a Human who mentioned the Agent waited for its reply, every message write the Agent tried to post failed, and no reply reached the Room. reply_not_sent means a Room Run finished while a Human who mentioned the Agent waited for its reply and no reply reached the Room without any failed message write attempt (for instance, the Runtime ended the turn in text nobody sees, which is not posted for it). interrupted means the Run stopped before it finished for a reason other than a user cancellation, such as a restart or a Runner stopped on its Computer; part of its work may have taken effect and it is not replayed. computer_unavailable means the Agent's Computer could not run it: the Computer is unreachable, the Agent's Runner is stopped there, or the Runtime is not enabled. cleanup_unconfirmed means the Runtime process could not be confirmed stopped. response_too_large means the reply exceeded the Room's size limit. unclassified means no structured signal identified the cause. runtime_type is present when the failure belongs to a selected Runtime; it is absent for failures the Agent Service or TeamHub observes without one. */
+    /** @description Public classified failure; contains no native error text, paths, credentials, or task input. Each code is set where the failure is observed, from structured signals only. model_unavailable means the model service refused the selected model for the Runtime's account, so the Agent needs another model or another sign-in. model_not_offered means the Agent's Computer does not offer the selected model for its Runtime, or the model does not support the selected reasoning effort, so the Runtime could not start; the Agent needs a model and reasoning effort that Computer offers. local_model_unavailable means the Agent's Computer could not load the Agent's local model (not enough free memory, not fully downloaded, or loading took too long), so the Runtime did not start; the person can manage it on the Computer's Models page or choose another model. model_gateway_unavailable means the Agent's Computer could not start or reach its local model gateway (such as Bifrost for BYOK), so the Runtime did not start; the person can check the Computer's Models page or Local Computer diagnostics before retrying. context_too_long means the conversation no longer fits the model's context window. model_service_error means the model service reported a server-side error. timeout means the Runtime hit its local execution deadline. execution_outcome_unknown means a command was dispatched but no validated exit was observed before unexpected transport or Runtime failure. Intentional cancellation, authorization loss or unavailability, and normal retirement do not create this classification. Authorization loss or unavailability includes explicit revocation, authorization checks that fail or time out, and authorization expiry. This code does not currently cover unknown effects caused by control-plane disconnection. It remains a failed Run and must not be automatically replayed; verify its effects before starting another Run. reply_undelivered means a Room Run finished while a Human who mentioned the Agent waited for its reply, every message write the Agent tried to post failed, and no reply reached the Room. reply_not_sent means a Room Run finished while a Human who mentioned the Agent waited for its reply and no reply reached the Room without any failed message write attempt (for instance, the Runtime ended the turn in text nobody sees, which is not posted for it). interrupted means the Run stopped before it finished for a reason other than a user cancellation, such as a restart or a Runner stopped on its Computer; part of its work may have taken effect and it is not replayed. computer_unavailable means the Agent's Computer could not run it: the Computer is unreachable, the Agent's Runner is stopped there, or the Runtime is not enabled. cleanup_unconfirmed means the Runtime process could not be confirmed stopped. response_too_large means the reply exceeded the Room's size limit. unclassified means no structured signal identified the cause. runtime_type is present when the failure belongs to a selected Runtime; it is absent for failures the Agent Service or TeamHub observes without one. */
     AgentRuntimeExecutionFailure: {
       /** @enum {string} */
       code:
@@ -2192,6 +2193,7 @@ export interface components {
         | "model_unavailable"
         | "model_not_offered"
         | "local_model_unavailable"
+        | "model_gateway_unavailable"
         | "context_too_long"
         | "model_service_error"
         | "timeout"
@@ -3449,6 +3451,20 @@ export interface components {
       agent_id: string;
       context: components["schemas"]["McpContextReference"];
       document_comment_runtime?: components["schemas"]["McpDocumentCommentRuntimeProjection"];
+    };
+    /** @description WebRTC audio statistics the browser observed since its previous audio_stats report, as deltas rather than cumulative totals. Reply fields come from the reply track's inbound-rtp stats and packets_sent from the microphone's outbound-rtp stats; a field is absent when the browser does not report it, a replaced reply or microphone track counts from zero, and a counter that went down (packets_lost after late packets) reports 0. No audio or text. */
+    VoiceLiveAudioStats: {
+      interval_ms: number;
+      samples_received?: number;
+      concealed_samples?: number;
+      silent_concealed_samples?: number;
+      concealment_events?: number;
+      inserted_samples_for_deceleration?: number;
+      removed_samples_for_acceleration?: number;
+      /** @description Average jitter buffer delay of the samples emitted in the interval. */
+      jitter_buffer_delay_ms?: number;
+      packets_lost?: number;
+      packets_sent?: number;
     };
   };
   responses: {

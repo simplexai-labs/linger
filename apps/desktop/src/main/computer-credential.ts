@@ -22,8 +22,9 @@ const computerCredential = z.object({
 });
 export type ComputerCredential = z.infer<typeof computerCredential>;
 
-// An owner-only file next to the app config. Not the OS keychain: preview
-// builds are signed ad hoc, so every update would ask for keychain access.
+// An owner-only file next to the app config. Not the OS keychain: local
+// and ad-hoc builds are signed ad hoc, so every update would prompt for
+// keychain access.
 export class CredentialStore {
   readonly #file: string;
 

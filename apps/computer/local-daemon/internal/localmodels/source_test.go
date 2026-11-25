@@ -1105,3 +1105,31 @@ func TestModelSourceApplyPreservesPreviousAndHarnessRuntimePaths(t *testing.T) {
 		t.Fatalf("OverlayRuntimePaths = %+v, want codex=%q pi=%q", resolved, customCodex, newHarnessPi)
 	}
 }
+
+func TestSanitizeModelSourceMessageRedactsURLQueryStrings(t *testing.T) {
+	raw := "Could not reach https://api.example.com/v1/chat?key=opaque-secret-123&mode=test (HTTP 502)."
+	got := sanitizeModelSourceMessage(raw, "fallback", "")
+	want := "Could not reach https://api.example.com/v1/chat?[REDACTED] (HTTP 502)."
+	if got != want {
+		t.Fatalf("sanitizeModelSourceMessage = %q, want %q", got, want)
+	}
+
+	stdout := []byte(`{"code":"BYOK_GATEWAY_FAILED","message":"Probe failed for https://api.example.com/v1/chat?key=opaque-secret-123 (connection refused)."}`)
+	err := parseToolFailure(stdout, "BYOK_GATEWAY_FAILED", "fallback", "")
+	var sourceErr *ModelSourceError
+	if !errors.As(err, &sourceErr) {
+		t.Fatalf("parseToolFailure error = %v, want *ModelSourceError", err)
+	}
+	wantParsed := "Probe failed for https://api.example.com/v1/chat?[REDACTED] (connection refused)."
+	if sourceErr.Message != wantParsed {
+		t.Fatalf("parseToolFailure message = %q, want %q", sourceErr.Message, wantParsed)
+	}
+	if strings.Contains(sourceErr.Message, "opaque-secret-123") {
+		t.Fatalf("query secret leaked into message: %q", sourceErr.Message)
+	}
+
+	plain := "Bifrost exited with code 1 while binding 127.0.0.1:18480."
+	if got := sanitizeModelSourceMessage(plain, "fallback", ""); got != plain {
+		t.Fatalf("non-query message altered: got %q, want %q", got, plain)
+	}
+}

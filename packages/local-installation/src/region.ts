@@ -50,6 +50,16 @@ async function readRecord(file: string): Promise<RegionRecord | undefined> {
     : undefined;
 }
 
+/**
+ * Returns the cached download region saved in `<home>/runtime/region.json`
+ * without performing any network probe.
+ */
+export async function readCachedRegion(
+  home: string,
+): Promise<Region | undefined> {
+  return (await readRecord(regionFile(home)))?.region;
+}
+
 function fresh(record: RegionRecord, now: number): boolean {
   const age = now - Date.parse(record.resolved_at);
   return age >= 0 && age < STALE_MS;

@@ -63,8 +63,8 @@ export class RuntimeLoginManager {
       home: input.home,
       env,
       signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(30000)])
-        : AbortSignal.timeout(30000),
+        ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
+        : AbortSignal.timeout(15000),
     });
     return { env, state };
   }

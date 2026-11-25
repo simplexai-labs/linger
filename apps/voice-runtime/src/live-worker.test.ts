@@ -456,6 +456,40 @@ describe("parseLiveClientEvent", () => {
       ).toBeUndefined();
     expect(parseLiveClientEvent(new TextEncoder().encode("{"))).toBeUndefined();
   });
+
+  it("keeps only declared, bounded audio stats", () => {
+    expect(
+      parseLiveClientEvent(
+        encode({
+          type: "audio_stats",
+          audio: {
+            interval_ms: 10_000,
+            concealed_samples: 480,
+            jitter_buffer_delay_ms: 42.5,
+            packets_lost: 1.5,
+            packets_sent: -1,
+            removed_samples_for_acceleration: 2e9,
+            note: "free text",
+          },
+        }),
+      ),
+    ).toEqual({
+      type: "audio_stats",
+      audio: {
+        interval_ms: 10_000,
+        concealed_samples: 480,
+        jitter_buffer_delay_ms: 42.5,
+      },
+    });
+    expect(
+      parseLiveClientEvent(
+        encode({ type: "audio_stats", audio: { concealed_samples: 1 } }),
+      ),
+    ).toBeUndefined();
+    expect(
+      parseLiveClientEvent(encode({ type: "audio_stats", audio: [] })),
+    ).toBeUndefined();
+  });
 });
 
 describe("runToolRound", () => {
@@ -752,6 +786,126 @@ describe("LiveVoiceWorker", () => {
     expect(test.client.executeLiveToolCall).toHaveBeenCalledWith(
       expect.objectContaining({ call_id: "call-ask", turn_id: turnA }),
       expect.anything(),
+    );
+    await test.shutdown();
+  });
+
+  it("switches a new response to the newer user turn after an earlier turn's tool round", async () => {
+    const test = await harness({
+      toolOutput: () => '{"status":"ok","page":"search results"}',
+    });
+    test.session().emit(
+      { type: "speech_started", itemId: "item-a" },
+      { type: "transcript_completed", itemId: "item-a", text: "Search for it" },
+      { type: "response_started" },
+      {
+        type: "function_calls",
+        update: false,
+        calls: [
+          {
+            callId: "call-1",
+            name: "computer_browser",
+            arguments: '{"action":"open"}',
+          },
+        ],
+      },
+      { type: "response_finished", canceled: false },
+    );
+    await vi.waitFor(() =>
+      expect(test.session().sendToolResults).toHaveBeenCalledOnce(),
+    );
+    // The user speaks a follow-up while the earlier turn's reply stayed open
+    // across tool rounds with no active audio playback.
+    test.session().emit(
+      { type: "speech_started", itemId: "item-b" },
+      {
+        type: "transcript_completed",
+        itemId: "item-b",
+        text: "Open Wikipedia history",
+      },
+      { type: "response_started" },
+      { type: "text_delta", text: "Found the history section.", update: false },
+      { type: "audio_delta", pcm: pcm(480) },
+      { type: "response_finished", canceled: false },
+    );
+    await vi.waitFor(() =>
+      expect(test.client.reportLiveReply).toHaveBeenCalledOnce(),
+    );
+    expect(test.ofType("reply_delta")).toEqual([
+      {
+        type: "reply_delta",
+        turn_id: turnB,
+        text: "Found the history section.",
+      },
+    ]);
+    expect(test.ofType("reply_done")).toEqual([
+      { type: "reply_done", turn_id: turnA, text: "" },
+      {
+        type: "reply_done",
+        turn_id: turnB,
+        text: "Found the history section.",
+      },
+    ]);
+    expect(test.client.reportLiveReply.mock.calls[0]![0]).toEqual({
+      event_id: liveReplyEventId(sessionId, turnB),
+      voice_session_id: sessionId,
+      turn_id: turnB,
+      text: "Found the history section.",
+    });
+    await test.shutdown();
+  });
+
+  it("finishes an in-flight tool call quietly once a newer turn's response has started", async () => {
+    const test = await harness();
+    let resolveSlowTool: (output: string) => void = () => undefined;
+    test.client.executeLiveToolCall.mockImplementationOnce(
+      (call: { call_id: string }) =>
+        new Promise((resolve) => {
+          resolveSlowTool = (output) =>
+            resolve({ call_id: call.call_id, output });
+        }),
+    );
+    test.session().emit(
+      { type: "speech_started", itemId: "item-a" },
+      { type: "transcript_completed", itemId: "item-a", text: "Check tab" },
+      { type: "response_started" },
+      {
+        type: "function_calls",
+        update: false,
+        calls: [
+          {
+            callId: "call-slow",
+            name: "computer_browser",
+            arguments: '{"action":"open"}',
+          },
+        ],
+      },
+      { type: "response_finished", canceled: false },
+    );
+    await vi.waitFor(() =>
+      expect(test.client.executeLiveToolCall).toHaveBeenCalledOnce(),
+    );
+    test
+      .session()
+      .emit(
+        { type: "speech_started", itemId: "item-b" },
+        { type: "transcript_completed", itemId: "item-b", text: "Never mind" },
+        { type: "response_started" },
+        { type: "text_delta", text: "Okay.", update: false },
+        { type: "response_finished", canceled: false },
+      );
+    await vi.waitFor(() =>
+      expect(test.ofType("reply_done")).toEqual([
+        { type: "reply_done", turn_id: turnA, text: "" },
+        { type: "reply_done", turn_id: turnB, text: "Okay." },
+      ]),
+    );
+    resolveSlowTool('{"status":"ok"}');
+    await vi.waitFor(() =>
+      expect(test.session().sendToolResults).toHaveBeenCalledWith(
+        [{ callId: "call-slow", output: '{"status":"ok"}' }],
+        { reply: false },
+      ),
     );
     await test.shutdown();
   });
@@ -1097,6 +1251,39 @@ describe("LiveVoiceWorker", () => {
     },
   );
 
+  it("keeps audio still in the track out of what an interrupted reply played", async () => {
+    const test = await harness();
+    test.source().queueFrames = true;
+    await answeredTurn(test);
+    await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
+    test.session().emit({ type: "speech_started", itemId: "item-b" });
+    await vi.waitFor(() =>
+      expect(test.session().cancel).toHaveBeenCalledOnce(),
+    );
+    // Both 20 ms frames were still queued, so the listener heard none of them.
+    expect(test.session().cancel).toHaveBeenCalledWith({
+      playedMs: 0,
+      localSpeech: false,
+    });
+    await test.shutdown();
+  });
+
+  it("reports the track running dry while reply audio waited in the worker", async () => {
+    const test = await harness();
+    test.source().holdFrames();
+    await answeredTurn(test);
+    // The first frame's 20 ms play out while the worker cannot hand over the next.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    test.source().releaseFrames();
+    await vi.waitFor(() =>
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ stalls: 1, voiceSessionId: sessionId }),
+        "Voice live reply playback stalled",
+      ),
+    );
+    await test.shutdown();
+  });
+
   it("resumes unheard audio, ignores immediate echo, and pauses the same reply for a fresh interruption", async () => {
     const test = await harness();
     await answeredTurn(test);
@@ -1361,6 +1548,31 @@ describe("LiveVoiceWorker", () => {
     );
     await vi.waitFor(() => expect(test.session().note).toHaveBeenCalledOnce());
     expect(test.session().note).toHaveBeenCalledWith("On the Pocket Note page");
+    await test.shutdown();
+  });
+
+  it("logs the publisher's audio stats, at most one report per gap", async () => {
+    const test = await harness();
+    test.send({
+      type: "audio_stats",
+      audio: { interval_ms: 10_000, concealed_samples: 960, packets_sent: 500 },
+    });
+    test.send(
+      { type: "audio_stats", audio: { interval_ms: 10_000 } },
+      { identity: "someone-else" },
+    );
+    test.send({ type: "audio_stats", audio: { interval_ms: 5 } });
+    const logged = logger.info.mock.calls.filter(
+      (call) => call[1] === "Voice live client audio stats",
+    );
+    expect(logged).toHaveLength(1);
+    expect(logged[0]![0]).toMatchObject({
+      voiceSessionId: sessionId,
+      intervalMs: 10_000,
+      concealedSamples: 960,
+      micPacketsSent: 500,
+    });
+    expect(test.session().note).not.toHaveBeenCalled();
     await test.shutdown();
   });
 

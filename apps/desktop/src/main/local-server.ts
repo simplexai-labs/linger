@@ -364,9 +364,12 @@ export interface LocalServerOptions {
   readonly home: string;
   // This app's version, recorded with the source package it unpacks.
   readonly version: string;
-  // The resolved user terminal environment passed to installer subprocesses
-  // (--inspect, setup server, --resume, BYOK checks), matching ComputerDaemonModule.
-  readonly env?:
+  // The resolved user terminal environment passed ONLY to read-only setup
+  // inspection (--inspect) so daemon runtime probing can read profile
+  // variables (e.g. ANTHROPIC_BASE_URL, OPENAI_API_KEY, CODEX_HOME). Never
+  // forwarded to --resume, BYOK checks, --switch-release, or the serving
+  // installer that starts local services.
+  readonly inspectEnv?:
     | Readonly<Record<string, string>>
     | Promise<Readonly<Record<string, string>>>;
   // Bundled or active V2 backend linger-computer-daemon executable used as the
@@ -979,14 +982,29 @@ export class LocalServerModule implements Module {
           };
   }
 
-  async #baseEnv(): Promise<NodeJS.ProcessEnv> {
-    const resolved = await this.#options.env;
+  async #resolveDaemonExecutable(): Promise<string | undefined> {
+    const configured = this.#options.daemonExecutable;
+    return typeof configured === "function" ? await configured() : configured;
+  }
+
+  async #daemonEnv(): Promise<NodeJS.ProcessEnv> {
+    const daemon = await this.#resolveDaemonExecutable();
+    return daemon
+      ? {
+          ...process.env,
+          LINGER_COMPUTER_DAEMON: daemon,
+        }
+      : { ...process.env };
+  }
+
+  async #inspectEnv(): Promise<NodeJS.ProcessEnv> {
+    const [resolved, daemon] = await Promise.all([
+      this.#options.inspectEnv,
+      this.#resolveDaemonExecutable(),
+    ]);
     const base: NodeJS.ProcessEnv = resolved
       ? { ...resolved }
       : { ...process.env };
-    const configured = this.#options.daemonExecutable;
-    const daemon =
-      typeof configured === "function" ? await configured() : configured;
     if (daemon) {
       base.LINGER_COMPUTER_DAEMON = daemon;
     }
@@ -1003,7 +1021,7 @@ export class LocalServerModule implements Module {
   ): Promise<Record<string, unknown>> {
     const home = this.#location ?? this.#home;
     try {
-      const baseEnv = await this.#baseEnv();
+      const daemonEnv = await this.#daemonEnv();
       const output = await new Promise<string>((resolve, reject) => {
         const child = spawn(
           process.execPath,
@@ -1018,7 +1036,7 @@ export class LocalServerModule implements Module {
             stdio: ["pipe", "pipe", "pipe"],
             windowsHide: true,
             env: {
-              ...baseEnv,
+              ...daemonEnv,
               ELECTRON_RUN_AS_NODE: "1",
               LINGER_HOME: home,
             },
@@ -1054,7 +1072,7 @@ export class LocalServerModule implements Module {
     // The tool's codes with its words, for the log only.
     reasonLog: string[];
   }> {
-    const baseEnv = await this.#baseEnv();
+    const inspectEnv = await this.#inspectEnv();
     // The app's own Node runs the check, so it needs no download of its own;
     // installing still uses the pinned Node runtime.
     const output = await new Promise<string>((resolve, reject) => {
@@ -1073,7 +1091,7 @@ export class LocalServerModule implements Module {
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
           env: {
-            ...baseEnv,
+            ...inspectEnv,
             ELECTRON_RUN_AS_NODE: "1",
             LINGER_HOME: this.#options.home,
           },
@@ -1707,13 +1725,13 @@ export class LocalServerModule implements Module {
     if (!existsSync(this.#installerScript())) {
       throw new Error("Cannot switch release: bundled installer.js is missing.");
     }
-    const [baseEnv, proxyEnv, node] = await Promise.all([
-      this.#baseEnv(),
+    const [daemonEnv, proxyEnv, node] = await Promise.all([
+      this.#daemonEnv(),
       this.#systemProxyEnv(),
       this.#ensureNode(signal),
     ]);
     const env = {
-      ...baseEnv,
+      ...daemonEnv,
       ...proxyEnv,
       LINGER_HOME: record.home,
     };
@@ -2747,8 +2765,8 @@ export class LocalServerModule implements Module {
     repo: string,
     signal: AbortSignal,
   ): Promise<InstallerApi> {
-    const [baseEnv, proxyEnv] = await Promise.all([
-      this.#baseEnv(),
+    const [daemonEnv, proxyEnv] = await Promise.all([
+      this.#daemonEnv(),
       this.#systemProxyEnv(),
     ]);
     const child = spawn(
@@ -2770,7 +2788,7 @@ export class LocalServerModule implements Module {
         // A detached Windows process otherwise opens its own console window.
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...baseEnv, ...proxyEnv, LINGER_HOME: home },
+        env: { ...daemonEnv, ...proxyEnv, LINGER_HOME: home },
       },
     );
     const log = this.#ctx?.log;
@@ -3230,7 +3248,7 @@ export class LocalServerModule implements Module {
       ms: Date.now() - nodeStartedAt,
     });
     const env = {
-      ...(await this.#baseEnv()),
+      ...(await this.#daemonEnv()),
       ...(await proxyEnv),
       LINGER_HOME: record.home,
     };

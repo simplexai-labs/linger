@@ -45,6 +45,7 @@ export function useVoiceSessionEvents(
     );
     setTranscriptStatus("live");
     refs.eventStreamLiveRef.current = false;
+    refs.captureResyncRef.current = undefined;
     refs.voiceAccessLostRef.current = false;
     const unsubscribe = runtime.voiceEvents?.subscribe({
       voiceSessionId,
@@ -62,6 +63,13 @@ export function useVoiceSessionEvents(
                   Date.parse(capture.created_at) >
                     Date.parse(current.created_at)))
             ) {
+              const stale =
+                current !== undefined &&
+                current.id === capture.id &&
+                Date.parse(capture.updated_at) < Date.parse(current.updated_at);
+              // Live SSE already delivered fresh Capture state, so an aborted
+              // active-capture resync must not carry over into finalizing polling.
+              if (!stale) refs.captureResyncRef.current = undefined;
               setCapture(capture);
             }
           }
@@ -88,13 +96,15 @@ export function useVoiceSessionEvents(
       onMode: (mode) => {
         if (!active) return;
         if (mode === "sse" && !refs.eventStreamLiveRef.current)
-          refs.captureResyncRef.current = true;
+          refs.captureResyncRef.current = {};
+        else if (mode !== "sse") refs.captureResyncRef.current = undefined;
         refs.eventStreamLiveRef.current = mode === "sse";
         setTranscriptStatus(mode === "recovering" ? "recovering" : "live");
       },
       onAccessLost: () => {
         if (!active) return;
         refs.eventStreamLiveRef.current = false;
+        refs.captureResyncRef.current = undefined;
         refs.voiceAccessLostRef.current = true;
         setTranscriptStatus("idle");
         setListenerError(translate(m.accessExpired));
@@ -107,6 +117,7 @@ export function useVoiceSessionEvents(
     return () => {
       unsubscribe?.();
       refs.eventStreamLiveRef.current = false;
+      refs.captureResyncRef.current = undefined;
       active = false;
       projector.dispose();
     };

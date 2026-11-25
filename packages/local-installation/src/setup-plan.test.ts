@@ -1,6 +1,11 @@
 import path from "node:path";
 import { expect, it, vi } from "vitest";
-import { inspectSetup } from "./setup-plan.js";
+import { inspectSetup, type SetupOptions } from "./setup-plan.js";
+import { WINDOWS_PRIVATE_PATH_UNSAFE } from "./windows-private.js";
+
+const noDaemon = async () => null;
+const inspectWithoutDaemon = (options: SetupOptions) =>
+  inspectSetup({ probeRuntimes: noDaemon, ...options });
 
 const upstream = (available = true) => ({
   schema: "localmodels.setup-report/v1",
@@ -45,7 +50,7 @@ const runner = (value: object = upstream()) =>
 it("delegates all hardware policy, runtime detection, estimates and recommendation upstream", async () => {
   const localmodels = runner();
   const home = path.resolve("/owned");
-  const report = await inspectSetup({
+  const report = await inspectWithoutDaemon({
     home,
     localmodels,
   });
@@ -97,7 +102,7 @@ it("delegates all hardware policy, runtime detection, estimates and recommendati
 });
 it("preserves upstream rejection and never substitutes downstream eligibility", async () => {
   const localmodels = runner(upstream(false));
-  const report = await inspectSetup({ localmodels });
+  const report = await inspectWithoutDaemon({ localmodels });
   expect(report.localModels.state).toBe("unavailable");
   expect(report.localModels.reasons).toEqual([
     { code: "upstream_policy", message: "Upstream rejected this host" },
@@ -129,7 +134,9 @@ it("recommends the next runtime while the local plan waits for free memory (tool
       },
     };
   };
-  const report = await inspectSetup({ localmodels: runner(freeMemory(true)) });
+  const report = await inspectWithoutDaemon({
+    localmodels: runner(freeMemory(true)),
+  });
   expect(report.localModels).toMatchObject({
     eligible: false,
     state: "blocked-now",
@@ -144,11 +151,13 @@ it("recommends the next runtime while the local plan waits for free memory (tool
   });
   expect(report.localModels).not.toHaveProperty("memory");
   expect(report.recommendation).toBe("pi");
-  const bare = await inspectSetup({ localmodels: runner(freeMemory(false)) });
+  const bare = await inspectWithoutDaemon({
+    localmodels: runner(freeMemory(false)),
+  });
   expect(bare.recommendation).toBe("codex");
   // The reason code alone holds the plan too.
   const { basis: _, ...stack } = freeMemory(true).stack;
-  const coded = await inspectSetup({
+  const coded = await inspectWithoutDaemon({
     localmodels: runner({ ...freeMemory(true), stack }),
   });
   expect(coded.localModels).toMatchObject({
@@ -156,7 +165,7 @@ it("recommends the next runtime while the local plan waits for free memory (tool
     basis: "capacity",
   });
   expect(coded.recommendation).toBe("pi");
-  const ready = await inspectSetup({ localmodels: runner() });
+  const ready = await inspectWithoutDaemon({ localmodels: runner() });
   expect(ready.localModels).not.toHaveProperty("basis");
 });
 it("reads the tool's blocked-now state, memory and recommendation", async () => {
@@ -184,7 +193,7 @@ it("reads the tool's blocked-now state, memory and recommendation", async () => 
     },
     recommendation: "codex",
   };
-  const report = await inspectSetup({ localmodels: runner(blocked) });
+  const report = await inspectWithoutDaemon({ localmodels: runner(blocked) });
   expect(report.localModels).toMatchObject({
     eligible: false,
     state: "blocked-now",
@@ -201,7 +210,7 @@ it("reads the tool's blocked-now state, memory and recommendation", async () => 
   // The tool's non-local pick stands, even with Pi installed.
   expect(report.recommendation).toBe("codex");
   // The tool's state wins over the older marks; null fields stay out.
-  const ready = await inspectSetup({
+  const ready = await inspectWithoutDaemon({
     localmodels: runner({
       ...value,
       stack: {
@@ -220,7 +229,7 @@ it("reads the tool's blocked-now state, memory and recommendation", async () => 
   });
   expect(ready.localModels).not.toHaveProperty("basis");
   expect(ready.localModels).not.toHaveProperty("memory");
-  const small = await inspectSetup({
+  const small = await inspectWithoutDaemon({
     localmodels: runner({
       ...upstream(false),
       stack: {
@@ -238,7 +247,7 @@ it("reads the tool's blocked-now state, memory and recommendation", async () => 
 });
 it("passes on the memory counts each reason carries", async () => {
   const value = upstream();
-  const report = await inspectSetup({
+  const report = await inspectWithoutDaemon({
     localmodels: runner({
       ...value,
       stack: {
@@ -286,7 +295,7 @@ it("passes on the memory counts each reason carries", async () => {
 });
 it("passes on validated CUDA driver versions and drops malformed values", async () => {
   const value = upstream(false);
-  const report = await inspectSetup({
+  const report = await inspectWithoutDaemon({
     localmodels: runner({
       ...value,
       stack: {
@@ -340,14 +349,14 @@ it("fails explicitly and redacts tool output when upstream is unavailable or mal
     { code: 0, stdout: "{}", stderr: "" },
   ]) {
     await expect(
-      inspectSetup({ localmodels: vi.fn(async () => response) }),
+      inspectWithoutDaemon({ localmodels: vi.fn(async () => response) }),
     ).rejects.toMatchObject({ code: "LOCALMODELS_SETUP_UNAVAILABLE" });
   }
 });
 it("names the upstream cause and logs its redacted output when the check fails", async () => {
   const onEvent = vi.fn();
   await expect(
-    inspectSetup({
+    inspectWithoutDaemon({
       onEvent,
       localmodels: vi.fn(async () => ({
         code: 1,
@@ -379,7 +388,7 @@ it("names the upstream cause and logs its redacted output when the check fails",
 it("honors cancellation before invoking upstream", async () => {
   const localmodels = runner();
   await expect(
-    inspectSetup({ signal: AbortSignal.abort(), localmodels }),
+    inspectWithoutDaemon({ signal: AbortSignal.abort(), localmodels }),
   ).rejects.toThrow();
   expect(localmodels).not.toHaveBeenCalled();
 });
@@ -395,11 +404,11 @@ it("inspects with GPU sharing unless sharing was explicitly declined", async () 
     stdout: JSON.stringify(upstream()),
     stderr: "",
   }));
-  await inspectSetup({ localmodels, shareGpu: false });
+  await inspectWithoutDaemon({ localmodels, shareGpu: false });
   expect(localmodels.mock.calls[0]?.[1]).not.toContain("--share-gpu");
-  await inspectSetup({ localmodels, shareGpu: true });
+  await inspectWithoutDaemon({ localmodels, shareGpu: true });
   expect(localmodels.mock.calls[1]?.[1]).toContain("--share-gpu");
-  await inspectSetup({ localmodels });
+  await inspectWithoutDaemon({ localmodels });
   expect(localmodels.mock.calls[2]?.[1]).toContain("--share-gpu");
 });
 
@@ -407,7 +416,7 @@ it("checks the installation target while keeping tool state in the existing home
   const home = path.resolve("cached-home");
   const targetHome = path.resolve("candidate");
   const localmodels = runner();
-  await inspectSetup({ home, targetHome, localmodels });
+  await inspectWithoutDaemon({ home, targetHome, localmodels });
   expect(localmodels).toHaveBeenCalledWith(
     home,
     expect.arrayContaining([
@@ -418,6 +427,152 @@ it("checks the installation target while keeping tool state in the existing home
     ]),
     expect.anything(),
   );
+});
+
+it("preserves WINDOWS_PRIVATE_PATH_UNSAFE refusals instead of wrapping them as LOCALMODELS_SETUP_UNAVAILABLE", async () => {
+  const refusalError = Object.assign(
+    new Error(
+      "Windows private path validation failed: C:\\Shared\\Linger is inside a folder other accounts on this computer can rename or replace. Use a current-user owned local directory without links or shared access.",
+    ),
+    {
+      code: WINDOWS_PRIVATE_PATH_UNSAFE,
+      reason: "UNSAFE_PARENT_ACCESS",
+      path: "C:\\Shared\\Linger",
+    },
+  );
+  await expect(
+    inspectWithoutDaemon({
+      localmodels: vi.fn(async () => {
+        throw refusalError;
+      }),
+    }),
+  ).rejects.toBe(refusalError);
+});
+
+it("preserves upstream stack.upgrade guidance when freeing memory unlocks a stronger model", async () => {
+  const base = upstream();
+  const report = await inspectWithoutDaemon({
+    localmodels: runner({
+      ...base,
+      facts: {
+        ...base.facts,
+        platform: "darwin",
+        arch: "arm64",
+        ram: { total_bytes: 24 * 1024 ** 3 },
+        gpus: [],
+      },
+      stack: {
+        ...base.stack,
+        available: true,
+        state: "ready",
+        hardwareCapable: true,
+        plan: {
+          llm: {
+            model: { id: "spark-x2.6-4b-q4km" },
+            placement: { gpus: [] },
+          },
+          budget: {
+            download_bytes: 2_800_000_000,
+            disk_needed_bytes: 3_100_000_000,
+            ram_needed_bytes: 5_000_000_000,
+          },
+        },
+        upgrade: {
+          plan: {
+            llm: {
+              model: { id: "inkling-2-mini-iq3xxs" },
+              placement: { gpus: [] },
+            },
+            budget: {
+              download_bytes: 11_800_000_000,
+              disk_needed_bytes: 12_500_000_000,
+              ram_needed_bytes: 14_900_000_000,
+            },
+          },
+          summary: {
+            llm: "inkling-2-mini-iq3xxs",
+            llmName: "Inkling 2 Mini (IQ3_XXS)",
+            downloadBytes: 11_800_000_000,
+            diskBytes: 12_500_000_000,
+            memoryBytes: 14_900_000_000,
+          },
+          reasons: [
+            {
+              code: "free-memory-required",
+              message:
+                "Close other apps to free RAM for Inkling 2 Mini (IQ3_XXS).",
+              freeBytes: 12_000_000_000,
+              requiredBytes: 14_900_000_000,
+            },
+            {
+              code: "gpu-memory-required",
+              message: "Invalid count should be stripped.",
+              gpuIndex: 0,
+              freeBytes: -5,
+              requiredBytes: 10,
+            },
+          ],
+          gpuApps: [
+            { name: "chrome.exe", pids: [101, -1, 202], bytes: 1_500_000_000 },
+            { name: "", pids: [303], bytes: 100 },
+            { name: "bad.exe", pids: [404], bytes: -1 },
+          ],
+        },
+      },
+    }),
+  });
+  expect(report.localModels.estimate.model).toBe("spark-x2.6-4b-q4km");
+  expect(report.localModels.upgrade).toEqual({
+    modelName: "Inkling 2 Mini (IQ3_XXS)",
+    selectedGpuIndex: null,
+    estimate: {
+      model: "inkling-2-mini-iq3xxs",
+      downloadBytes: 11_800_000_000,
+      diskBytes: 12_500_000_000,
+      memoryBytes: 14_900_000_000,
+      durationSeconds: null,
+      assumption: "Resource plan supplied by localmodels; duration is unknown.",
+    },
+    reasons: [
+      {
+        code: "free-memory-required",
+        message: "Close other apps to free RAM for Inkling 2 Mini (IQ3_XXS).",
+        freeBytes: 12_000_000_000,
+        requiredBytes: 14_900_000_000,
+      },
+      {
+        code: "gpu-memory-required",
+        message: "Invalid count should be stripped.",
+        gpuIndex: 0,
+        requiredBytes: 10,
+      },
+    ],
+    gpuApps: [{ name: "chrome.exe", pids: [101, 202], bytes: 1_500_000_000 }],
+  });
+});
+
+it("drops malformed or incomplete stack.upgrade hints without failing inspection", async () => {
+  const base = upstream();
+  for (const badUpgrade of [
+    null,
+    {},
+    { summary: { llm: "inkling-2-mini-iq3xxs" }, reasons: [] },
+    {
+      summary: { llm: "" },
+      reasons: [{ code: "free-memory-required", message: "Close apps." }],
+    },
+  ]) {
+    const report = await inspectWithoutDaemon({
+      localmodels: runner({
+        ...base,
+        stack: {
+          ...base.stack,
+          upgrade: badUpgrade,
+        },
+      }),
+    });
+    expect(report.localModels).not.toHaveProperty("upgrade");
+  }
 });
 
 it("uses local-daemon as single source of truth even when localmodels omits harness runtime data", async () => {
@@ -527,4 +682,39 @@ it("prefers daemon-verified CC Switch Codex as ready and surfaces incompatible l
     version: "2.1.100 (Claude Code)",
     requiredVersion: "2.1.282",
   });
+});
+
+it("keeps local-models as the recommendation when local models are ready even with ready daemon runtimes", async () => {
+  const localmodels = runner(upstream(true));
+  const probeRuntimes = vi.fn(async () => [
+    {
+      type: "claude" as const,
+      status: "ready" as const,
+      installed: true,
+      authenticated: true,
+      version: "2.1.310 (Claude Code)",
+      requiredVersion: "2.1.282",
+      executable: "/Users/me/.local/bin/claude",
+    },
+    {
+      type: "codex" as const,
+      status: "ready" as const,
+      installed: true,
+      authenticated: true,
+      version: "codex-cli 0.171.0",
+      requiredVersion: "0.166.0",
+      executable: "/opt/homebrew/bin/codex",
+    },
+    {
+      type: "pi" as const,
+      status: "not_installed" as const,
+      installed: false,
+      authenticated: false,
+      requiredVersion: "1.2.0",
+    },
+  ]);
+
+  const report = await inspectSetup({ localmodels, probeRuntimes });
+  expect(report.localModels).toMatchObject({ eligible: true, state: "ready" });
+  expect(report.recommendation).toBe("local-models");
 });

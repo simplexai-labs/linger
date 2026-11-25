@@ -1,18 +1,25 @@
+import path from "node:path";
 import { expect, test, vi } from "vitest";
 import type { Instance } from "@linger/local-installation/instance";
 import type { installNativeSource } from "@linger/local-installation/native-source";
 import { resumeSourceInstance, type ResumeEngine } from "./resume.js";
 
+// Resume compares the resolved checkout, so the fixtures use resolved paths
+// (a drive-letter path on Windows).
+const home = path.resolve("/home");
+const source = path.resolve("/source");
+const oldSource = path.resolve("/old-source");
+
 const instance = {
   name: "desktop",
   mode: "source-native",
   origin: "http://localhost:3000",
-  root: "/home/instances/desktop",
-  source: { repo: "/source" },
+  root: path.join(home, "instances", "desktop"),
+  source: { repo: source },
 } as Instance;
 const options = {
-  home: "/home",
-  sourceRepo: "/source",
+  home,
+  sourceRepo: source,
   instanceName: "desktop",
   externalComputer: true,
   signal: new AbortController().signal,
@@ -40,8 +47,8 @@ test("starts the saved instance again without new input", async () => {
   expect(run).toHaveBeenCalledWith(
     expect.objectContaining({
       name: "desktop",
-      home: "/home",
-      repo: "/source",
+      home,
+      repo: source,
       externalComputer: true,
       resume: true,
       degradeLocalModels: true,
@@ -151,7 +158,7 @@ test("mounts a saved BYOK source again after the local models", async () => {
   ).toMatchObject({ code: 0, message: "Services are already running." });
   expect(order).toEqual(["restore", "byok"]);
   expect(restoreByok).toHaveBeenCalledWith(
-    "/home",
+    home,
     expect.objectContaining({ signal: options.signal }),
   );
 });
@@ -197,7 +204,7 @@ test("reports a local model library reload failure as localModelsDegraded withou
     state: "ready",
     details: {
       origin: "http://localhost:3000",
-      source: "/source",
+      source,
       localModelsDegraded: {
         code: "LOAD_NO_ROOM",
         message:
@@ -237,7 +244,7 @@ test("reports a local model restore that failed without blocking resume", async 
     state: "ready",
     details: {
       origin: "http://localhost:3000",
-      source: "/source",
+      source,
       localModelsDegraded: {
         code: "LOCAL_MODELS_RECOVERY_REQUIRED",
         message: "The local model stack is not ready.",
@@ -270,7 +277,7 @@ test("reports a local model restore that throws without blocking resume", async 
     state: "ready",
     details: {
       origin: "http://localhost:3000",
-      source: "/source",
+      source,
       localModelsDegraded: {
         code: "LOCAL_MODELS_RECOVERY_REQUIRED",
         message: "Invalid upstream local model binding.",
@@ -312,9 +319,7 @@ test("restarts running services for a changed user.env", async () => {
     engines: native(run, true),
     pending: async () => true,
   });
-  expect(run).toHaveBeenCalledWith(
-    expect.objectContaining({ repo: "/source" }),
-  );
+  expect(run).toHaveBeenCalledWith(expect.objectContaining({ repo: source }));
 });
 
 test("moves running services to a new source tree", async () => {
@@ -325,12 +330,10 @@ test("moves running services to a new source tree", async () => {
   }));
   await resumeSourceInstance(options, {
     load: async () =>
-      ({ ...instance, source: { repo: "/old-source" } }) as Instance,
+      ({ ...instance, source: { repo: oldSource } }) as Instance,
     engines: native(run, true),
   });
-  expect(run).toHaveBeenCalledWith(
-    expect.objectContaining({ repo: "/source" }),
-  );
+  expect(run).toHaveBeenCalledWith(expect.objectContaining({ repo: source }));
 });
 
 test("prepares the runtime in full when resuming onto another checkout", async () => {
@@ -344,13 +347,13 @@ test("prepares the runtime in full when resuming onto another checkout", async (
     { ...options, onRuntimeDescriptors },
     {
       load: async () =>
-        ({ ...instance, source: { repo: "/old-source" } }) as Instance,
+        ({ ...instance, source: { repo: oldSource } }) as Instance,
       engines: native(run, false),
     },
   );
   expect(run.mock.calls[0]![0]).not.toHaveProperty("resume");
   expect(run.mock.calls[0]![0]).toMatchObject({
-    repo: "/source",
+    repo: source,
     onRuntimeDescriptors,
   });
 });
@@ -371,7 +374,7 @@ test("preserves structured local-model upgrade failure details when moving to a 
   expect(
     await resumeSourceInstance(options, {
       load: async () =>
-        ({ ...instance, source: { repo: "/old-source" } }) as Instance,
+        ({ ...instance, source: { repo: oldSource } }) as Instance,
       engines: native(run, true),
     }),
   ).toEqual(failed);
@@ -386,7 +389,7 @@ test("reports the source the services serve from", async () => {
       restore: async () => undefined,
       restoreByok: async () => undefined,
     }),
-  ).toMatchObject({ code: 0, details: { source: "/source" } });
+  ).toMatchObject({ code: 0, details: { source } });
   // The instance names a new checkout only once its services became ready
   // on it, so a run that never restarted them reports the old one.
   const run = vi.fn<ResumeEngine["run"]>(async () => ({
@@ -394,13 +397,13 @@ test("reports the source the services serve from", async () => {
     state: "ready",
     message: "ok",
   }));
-  const old = { ...instance, source: { repo: "/old-source" } } as Instance;
+  const old = { ...instance, source: { repo: oldSource } } as Instance;
   expect(
     await resumeSourceInstance(options, {
       load: async () => old,
       engines: native(run, true),
     }),
-  ).toMatchObject({ code: 0, details: { source: "/old-source" } });
+  ).toMatchObject({ code: 0, details: { source: oldSource } });
 });
 
 test("reports the origin the services moved to", async () => {

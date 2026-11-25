@@ -226,7 +226,6 @@ export const cardsMessages = defineMessages("cards", {
   // A browser connection.
   labelBrowserConnection: "Browser connection requested",
   everydayChrome: "Everyday Chrome",
-  continuesOnceConnected: "{agent} continues once you connect.",
   browserConnectionFailed: "Failed: the connection did not complete",
 
   // A system permission of a Computer.

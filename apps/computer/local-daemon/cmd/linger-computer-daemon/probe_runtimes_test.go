@@ -164,6 +164,86 @@ echo '2.1.100 (Claude Code)'
 	}
 }
 
+func TestRunProbeRuntimesScrubsSensitiveEnvironmentAndPreservesUserEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX script fixture")
+	}
+	home := t.TempDir()
+	customBin := filepath.Join(home, "custom-bin")
+	if err := os.MkdirAll(customBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	codexHome := filepath.Join(home, "user-codex-home")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte(
+		"model_provider = \"ccswitch\"\n\n[model_providers.ccswitch]\nbase_url = \"https://proxy.example/v1\"\nrequires_openai_auth = false\n",
+	), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	claudeConfigDir := filepath.Join(home, "user-claude-config")
+	if err := os.MkdirAll(claudeConfigDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	codexExe := filepath.Join(customBin, "codex")
+	// Fail immediately if any Linger/TeamHub/Gateway/Service secret leaks into
+	// the probed subprocess or if standard user environment variables are lost.
+	codexScript := `#!/bin/sh
+for forbidden in LINGER_CODEX_PATH LINGER_SECRET TEAMHUB_TOKEN RUNNER_GATEWAY_TOKEN SERVICE_TOKEN MIRROR_TOKEN; do
+  eval "val=\${$forbidden:-}"
+  if [ -n "$val" ]; then
+    echo "leaked $forbidden" >&2
+    exit 9
+  fi
+done
+if [ "$CLAUDE_CONFIG_DIR" != "` + claudeConfigDir + `" ] || [ "$USER_CUSTOM_VAR" != "preserved" ]; then
+  echo "missing user env" >&2
+  exit 10
+fi
+if [ "$1" = "--version" ]; then echo 'codex-cli 0.171.0'; exit 0; fi
+read initialize
+echo '{"id":1,"result":{"userAgent":"fake-codex"}}'
+if read initialized && read account; then
+  echo '{"id":2,"result":{"account":null,"requiresOpenaiAuth":false}}'
+fi
+`
+	if err := os.WriteFile(codexExe, []byte(codexScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	env := map[string]string{
+		"HOME":                 home,
+		"PATH":                 "/usr/bin:/bin",
+		"CODEX_HOME":           codexHome,
+		"CLAUDE_CONFIG_DIR":    claudeConfigDir,
+		"USER_CUSTOM_VAR":      "preserved",
+		"LINGER_CODEX_PATH":    codexExe,
+		"LINGER_SECRET":        "top-secret",
+		"TEAMHUB_TOKEN":        "th-secret",
+		"RUNNER_GATEWAY_TOKEN": "gw-secret",
+		"SERVICE_TOKEN":        "svc-secret",
+		"MIRROR_TOKEN":         "mirror-secret",
+	}
+	if err := runProbeRuntimes(t.Context(), []string{"--json", "--runtime", "codex"}, env, &out); err != nil {
+		t.Fatalf("runProbeRuntimes failed: %v", err)
+	}
+
+	var report runtimeProbeReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("decode report: %v (raw=%q)", err, out.String())
+	}
+	if len(report.Runtimes) != 1 {
+		t.Fatalf("runtimes count = %d, want 1", len(report.Runtimes))
+	}
+	got := report.Runtimes[0]
+	if got.Status != "ready" || !got.Installed || !got.Authenticated || got.Executable != codexExe {
+		t.Fatalf("unexpected codex probe entry: %+v", got)
+	}
+}
+
 func TestRunProbeRuntimesRejectsInvalidFlags(t *testing.T) {
 	var out bytes.Buffer
 	if err := runProbeRuntimes(t.Context(), []string{"--runtime", "unknown"}, map[string]string{}, &out); err == nil {
@@ -171,5 +251,8 @@ func TestRunProbeRuntimesRejectsInvalidFlags(t *testing.T) {
 	}
 	if err := runProbeRuntimes(t.Context(), []string{"--codex-path", "relative/codex"}, map[string]string{}, &out); err == nil {
 		t.Fatal("expected error for non-absolute --codex-path")
+	}
+	if err := runProbeRuntimes(t.Context(), []string{"--claude-path", "relative/claude"}, map[string]string{}, &out); err == nil {
+		t.Fatal("expected error for non-absolute --claude-path")
 	}
 }

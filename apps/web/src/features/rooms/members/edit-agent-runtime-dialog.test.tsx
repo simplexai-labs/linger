@@ -97,6 +97,49 @@ describe("EditAgentRuntimeDialog", () => {
     });
   });
 
+  it("dismisses an open dropdown when clicking field headings without reopening or opening another field", async () => {
+    renderDialog({ onSave: vi.fn() });
+    const model = await screen.findByRole("combobox", { name: "Agent model" });
+    await waitFor(() => expect(model).toHaveTextContent("Codex default"));
+    const runtime = screen.getByRole("combobox", { name: "Agent runtime" });
+    const modelHeading = screen.getByText("Model");
+    const runtimeHeading = screen.getByText("Runtime");
+
+    // Clicking headings while closed does not spuriously open dropdowns.
+    fireEvent.pointerDown(modelHeading, { button: 0, pointerId: 1 });
+    fireEvent.pointerUp(modelHeading, { button: 0, pointerId: 1 });
+    fireEvent.click(modelHeading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(model).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.pointerDown(runtimeHeading, { button: 0, pointerId: 2 });
+    fireEvent.pointerUp(runtimeHeading, { button: 0, pointerId: 2 });
+    fireEvent.click(runtimeHeading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(runtime).toHaveAttribute("aria-expanded", "false");
+
+    // Clicking the Model heading/row while Model is open dismisses it without reopening.
+    fireEvent.click(model);
+    await screen.findByRole("option", { name: "Codex fast" });
+    fireEvent.pointerDown(modelHeading, { button: 0, pointerId: 3 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.pointerUp(modelHeading, { button: 0, pointerId: 3 });
+    fireEvent.click(modelHeading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(model).toHaveAttribute("aria-expanded", "false");
+
+    // Clicking the Runtime heading/row while Model is open closes Model without opening Runtime.
+    fireEvent.click(model);
+    await screen.findByRole("option", { name: "Codex fast" });
+    fireEvent.pointerDown(runtimeHeading, { button: 0, pointerId: 4 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.pointerUp(runtimeHeading, { button: 0, pointerId: 4 });
+    fireEvent.click(runtimeHeading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(model).toHaveAttribute("aria-expanded", "false");
+    expect(runtime).toHaveAttribute("aria-expanded", "false");
+  });
+
   it.each(["computer", "workspace"])(
     "never falls back to a different %s if the configured binding is missing",
     async (missing) => {
@@ -215,12 +258,15 @@ describe("EditAgentRuntimeDialog", () => {
         name: "Antigravity · Update needed",
       }),
     );
-    const notice = screen.getByText("Antigravity on Old Mac needs an update.");
-    expect(notice).toBeVisible();
-    expect(notice).toHaveAttribute(
-      "title",
-      "antigravity version 1.5.9 is below minimum 1.5.12",
-    );
+    expect(screen.getByText("Antigravity update required")).toBeVisible();
+    expect(
+      screen.getByText(
+        "Antigravity (1.5.9) on Old Mac needs an update before Agents can run with it.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText("antigravity version 1.5.9 is below minimum 1.5.12"),
+    ).toBeVisible();
     expect(screen.getByText("agy update")).toBeVisible();
     expect(
       screen.queryByText("The npm commands need Node.js."),
@@ -715,7 +761,350 @@ describe("EditAgentRuntimeDialog", () => {
       ).toHaveTextContent("Qwen3 Coder 30B · Unavailable"),
     );
   });
+
+  it("explains an incompatible Codex runtime with version, diagnostic detail, and update command", async () => {
+    const computer = localComputer("computer-old", "Studio Mac", "online", {
+      platform: "darwin",
+      runtimes: [
+        {
+          error_code: "RUNTIME_INCOMPATIBLE",
+          message: "codex version 0.150.1 is below minimum 0.166.0",
+          models: [],
+          status: "incompatible",
+          type: "codex",
+          version: "codex-cli 0.150.1",
+        },
+      ],
+    });
+    renderDialog({
+      computersOverride: { items: [computer] },
+      onSave: vi.fn(),
+    });
+
+    expect(await screen.findByText("Codex update required")).toBeVisible();
+    expect(
+      screen.getByText(
+        "Codex (codex-cli 0.150.1) on Studio Mac needs an update before Agents can run with it.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText("codex version 0.150.1 is below minimum 0.166.0"),
+    ).toBeVisible();
+    expect(screen.getByText("npm install -g @openai/codex")).toBeVisible();
+    expect(
+      screen.getByText(
+        "If you installed Codex from Homebrew or its macOS app, update it there instead.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("Studio Mac needs an update to run Codex."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
+  });
+
+  it("distinguishes a Computer daemon upgrade requirement from a Runtime update", async () => {
+    const computer = localComputer("computer-old", "Studio Mac", "online", {
+      upgrade_required: true,
+    });
+    renderDialog({
+      computersOverride: { items: [computer] },
+      onSave: vi.fn(),
+    });
+
+    expect(
+      await screen.findByText("Linger Computer update required"),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Settings › Computers" }),
+    ).toHaveAttribute("href", "/t/tenant-northstar/settings/computers");
+    expect(
+      screen.queryByText(
+        "Install and sign in to this runtime on the computer, then wait for it to become ready.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("guides Pi to Settings › Models when local models are available and none is downloaded", async () => {
+    const onClose = vi.fn();
+    const computer = localComputer("computer-old", "Studio Mac", "online", {
+      platform: "darwin",
+    });
+    computer.runtimes = [
+      ...computer.runtimes,
+      {
+        error_code: "RUNTIME_AUTHENTICATION_REQUIRED",
+        message:
+          "Configure a Pi API key or open pi and enter /login as the Computer user",
+        models: [],
+        status: "authentication_required",
+        type: "pi",
+        version: "1.5.2",
+      },
+    ];
+    const api = mockLocalModelsApi({
+      available: true,
+      models: [
+        {
+          model: {
+            availability: { downloadable: true },
+            id: "qwen3-coder-30b:Q4_K_M",
+            name: "Qwen3 Coder 30B",
+            pi_model: "localmodels-library/qwen3-coder-30b",
+            state: "absent",
+          },
+          used_by: [],
+        },
+      ],
+    });
+    renderDialog({
+      api,
+      computersOverride: { items: [computer] },
+      onClose,
+      onSave: vi.fn(),
+    });
+
+    const runtime = await screen.findByRole("combobox", {
+      name: "Agent runtime",
+    });
+    fireEvent.click(runtime);
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Pi · Model needed" }),
+    );
+
+    expect(await screen.findByText("Pi needs a model")).toBeVisible();
+    expect(
+      screen.getByText(
+        "No local model is downloaded on Studio Mac yet, and Pi has no ready model source.",
+      ),
+    ).toBeVisible();
+    const links = screen.getAllByRole("link", { name: "Settings › Models" });
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute(
+      "href",
+      "/t/tenant-northstar/settings/models?computer=computer-old",
+    );
+    expect(
+      screen.getByText("Using the standalone Pi CLI instead?"),
+    ).toBeVisible();
+    expect(
+      screen.queryByText(
+        "Download and load a local model in Settings › Models to run Agents with Pi on this computer.",
+      ),
+    ).not.toBeInTheDocument();
+    fireEvent.click(links[0]!);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows download progress instead of Pi sign-in while a local model is downloading", async () => {
+    const computer = localComputer("computer-old", "Studio Mac", "online", {
+      platform: "darwin",
+    });
+    computer.runtimes = [
+      ...computer.runtimes,
+      {
+        error_code: "RUNTIME_AUTHENTICATION_REQUIRED",
+        message: "sign in",
+        models: [],
+        status: "authentication_required",
+        type: "pi",
+      },
+    ];
+    const api = mockLocalModelsApi({
+      available: true,
+      models: [
+        {
+          model: {
+            download: {
+              bytes_per_second: 50_000_000,
+              done_bytes: 420,
+              step: "download",
+              total_bytes: 1_000,
+            },
+            id: "qwen3-coder-30b:Q4_K_M",
+            name: "Qwen3 Coder 30B",
+            pi_model: "localmodels-library/qwen3-coder-30b",
+            state: "downloading",
+          },
+          used_by: [],
+        },
+      ],
+    });
+    renderDialog({
+      api,
+      computersOverride: { items: [computer] },
+      onSave: vi.fn(),
+    });
+
+    const runtime = await screen.findByRole("combobox", {
+      name: "Agent runtime",
+    });
+    fireEvent.click(runtime);
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Pi · Downloading model" }),
+    );
+
+    expect(await screen.findByText("Downloading local model")).toBeVisible();
+    expect(
+      screen.getByText(
+        "Qwen3 Coder 30B is downloading on Studio Mac (42%). Once it finishes, Pi can use it when Local model is selected as the model source.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("Pi sign-in required")).not.toBeInTheDocument();
+  });
+
+  it("shows stopped download guidance when a local model download failed", async () => {
+    const computer = localComputer("computer-old", "Studio Mac", "online");
+    computer.runtimes = [
+      ...computer.runtimes,
+      {
+        error_code: "RUNTIME_AUTHENTICATION_REQUIRED",
+        message: "sign in",
+        models: [],
+        status: "authentication_required",
+        type: "pi",
+      },
+    ];
+    const api = mockLocalModelsApi({
+      available: true,
+      models: [
+        {
+          model: {
+            error: { code: "NETWORK_UNAVAILABLE" },
+            id: "qwen3-coder-30b:Q4_K_M",
+            name: "Qwen3 Coder 30B",
+            pi_model: "localmodels-library/qwen3-coder-30b",
+            state: "failed",
+          },
+          used_by: [],
+        },
+      ],
+    });
+    renderDialog({
+      api,
+      computersOverride: { items: [computer] },
+      onSave: vi.fn(),
+    });
+
+    const runtime = await screen.findByRole("combobox", {
+      name: "Agent runtime",
+    });
+    fireEvent.click(runtime);
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Pi · Model needed" }),
+    );
+
+    expect(
+      await screen.findByText("Local model download stopped"),
+    ).toBeVisible();
+  });
+
+  it("shows Pi CLI sign-in without a local models footnote when local models are unavailable", async () => {
+    const computer = localComputer("computer-old", "Linux Server", "online", {
+      platform: "linux",
+    });
+    computer.runtimes = [
+      ...computer.runtimes,
+      {
+        error_code: "RUNTIME_AUTHENTICATION_REQUIRED",
+        message: "sign in",
+        models: [],
+        status: "authentication_required",
+        type: "pi",
+      },
+    ];
+    const api = mockLocalModelsApi({
+      available: false,
+      models: [],
+      reason: { code: "TOOL_NOT_INSTALLED" },
+    });
+    renderDialog({
+      api,
+      computersOverride: { items: [computer] },
+      onSave: vi.fn(),
+    });
+
+    const runtime = await screen.findByRole("combobox", {
+      name: "Agent runtime",
+    });
+    fireEvent.click(runtime);
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Pi · Sign-in required" }),
+    );
+
+    expect(await screen.findByText("Pi sign-in required")).toBeVisible();
+    expect(
+      screen.getByText(
+        "In Pi, enter /login to sign in, or configure an API key in Pi auth.json.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("link", { name: "Settings › Models" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows checking and check-failed states clearly instead of install fallback", async () => {
+    const computer = localComputer("computer-old", "Studio Mac", "online", {
+      runtimes: [
+        {
+          models: [],
+          status: "unknown",
+          type: "codex",
+        },
+        {
+          error_code: "RUNTIME_DIAGNOSTIC_FAILED",
+          message: "Claude authentication status probe failed",
+          models: [],
+          status: "error",
+          type: "claude",
+        },
+      ],
+    });
+    renderDialog({
+      computersOverride: { items: [computer] },
+      onSave: vi.fn(),
+    });
+
+    expect(await screen.findByText("Checking Codex")).toBeVisible();
+    expect(
+      screen.queryByText(
+        "Install and sign in to this runtime on the computer, then wait for it to become ready.",
+      ),
+    ).not.toBeInTheDocument();
+
+    const runtime = screen.getByRole("combobox", { name: "Agent runtime" });
+    fireEvent.click(runtime);
+    fireEvent.click(
+      await screen.findByRole("option", {
+        name: "Claude Code · Could not check",
+      }),
+    );
+
+    expect(await screen.findByText("Couldn't check Claude Code")).toBeVisible();
+    expect(
+      screen.getByText("Claude authentication status probe failed"),
+    ).toBeVisible();
+  });
 });
+
+function mockLocalModelsApi(overrides: Record<string, unknown>) {
+  return {
+    GET: vi.fn().mockResolvedValue({
+      data: {
+        available: true,
+        computer: {
+          computer_id: "computer-old",
+          display_name: "Studio Mac",
+          status: "online",
+        },
+        models: [],
+        pools: [],
+        viewer_is_owner: true,
+        ...overrides,
+      },
+      response: new Response(null, { status: 200 }),
+    }),
+  };
+}
 
 function renderDialog({
   api,

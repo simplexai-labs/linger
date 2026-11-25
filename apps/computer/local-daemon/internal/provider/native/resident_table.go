@@ -44,6 +44,8 @@ type residency struct {
 	key        string
 	contextKey string
 	agentID    string
+	hasEpoch   bool
+	epoch      uint64
 
 	mu sync.Mutex
 	// prestart marks a process a provider prepare parked that no Run has
@@ -65,6 +67,12 @@ type residentStopCall struct {
 // bind fixes the process's key and its Context and Agent scope.
 func (r *residency) bind(key string, profile Profile) {
 	r.key, r.contextKey, r.agentID = key, profile.ContextKey, profile.AgentID
+}
+
+// bindEpoch fixes the table invalidation epoch observed before spawn.
+func (r *residency) bindEpoch(epoch uint64) {
+	r.hasEpoch = true
+	r.epoch = epoch
 }
 
 // stop runs tree at most once at a time. A confirmed stop is final; a stop
@@ -139,6 +147,7 @@ type residentTable[P residentProcess] struct {
 	limit   int
 	idle    time.Duration
 	seq     uint64
+	epoch   uint64
 	entries map[string]*residentEntry[P]
 }
 
@@ -170,6 +179,12 @@ func (t *residentTable[P]) enabled() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.limit > 0
+}
+
+func (t *residentTable[P]) currentEpoch() uint64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.epoch
 }
 
 func (t *residentTable[P]) live(p P) bool {
@@ -309,6 +324,12 @@ func (t *residentTable[P]) park(p P, fence releaseFence, prestart bool, logger *
 		return false
 	}
 	t.mu.Lock()
+	if res.hasEpoch && res.epoch != t.epoch {
+		t.mu.Unlock()
+		t.note(res.loggerOr(logger), p, "recycled", "credentials_changed", nil, false)
+		counters.recycled("credentials_changed", nil)
+		return false
+	}
 	if other := t.entries[res.key]; other != nil && other.proc != p {
 		// The other owner's exit path takes the table lock, so retire it
 		// without holding the lock.
@@ -329,6 +350,12 @@ func (t *residentTable[P]) park(p P, fence releaseFence, prestart bool, logger *
 		t.mu.Unlock()
 		t.note(res.loggerOr(logger), p, "recycled", "released", nil, false)
 		counters.recycled("released", nil)
+		return false
+	}
+	if res.hasEpoch && res.epoch != t.epoch {
+		t.mu.Unlock()
+		t.note(res.loggerOr(logger), p, "recycled", "credentials_changed", nil, false)
+		counters.recycled("credentials_changed", nil)
 		return false
 	}
 	res.mu.Lock()
@@ -495,6 +522,23 @@ func (t *residentTable[P]) retireAll(procs []P) error {
 // stopWhere marks and retires every matching entry and returns the count.
 func (t *residentTable[P]) stopWhere(reason string, match func(P) bool, fallback *slog.Logger) (int, error) {
 	marked := t.markWhere(reason, match, fallback)
+	return len(marked), t.retireAll(marked)
+}
+
+// invalidateAll atomically advances the table invalidation epoch and marks
+// every entry retiring under the table lock, then retires them all.
+func (t *residentTable[P]) invalidateAll(reason string, fallback *slog.Logger) (int, error) {
+	t.mu.Lock()
+	t.epoch++
+	var marked []P
+	for _, entry := range t.entries {
+		entry.retiring = true
+		marked = append(marked, entry.proc)
+	}
+	t.mu.Unlock()
+	for _, p := range marked {
+		t.note(p.residency().loggerOr(fallback), p, "recycled", reason, nil, false)
+	}
 	return len(marked), t.retireAll(marked)
 }
 

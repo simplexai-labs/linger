@@ -18,6 +18,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/registration"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/protocol"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
 	wire "github.com/simplexai-labs/linger/contracts-go/runnergateway"
 )
 
@@ -345,6 +346,7 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 	d.localModelsExternalHolders.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsExternalHolders))
 	d.modelInvokeOutcomes.Store(slices.Contains(command.ServiceFeatures, serviceFeatureModelInvokeOutcomes))
 	d.localModelUnavailable.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelUnavailable))
+	d.modelGatewayUnavailable.Store(slices.Contains(command.ServiceFeatures, serviceFeatureModelGatewayUnavailable))
 	localModels := slices.Contains(command.ServiceFeatures, serviceFeatureLocalModels)
 	if err := d.activateStreamAndReplay(ctx, stream, command.ReconcileOperationIDs, localModels); err != nil {
 		return err
@@ -394,6 +396,7 @@ func (d *Daemon) UpdateRuntimeInventory(ctx context.Context, runtimes []string, 
 		return err
 	}
 	d.inventoryMu.Lock()
+	previousDiagnostics := append(json.RawMessage(nil), d.runtimeDiagnostics...)
 	d.runtimes = append([]string(nil), runtimes...)
 	d.runtimeDiagnostics = append(json.RawMessage(nil), diagnostics...)
 	if observations != nil {
@@ -402,6 +405,10 @@ func (d *Daemon) UpdateRuntimeInventory(ctx context.Context, runtimes []string, 
 	d.diagnosticsRevision = nextRevisionAbove(saturatingIncrement(d.diagnosticsRevision), d.runtimeObservations)
 	revision := d.diagnosticsRevision
 	d.inventoryMu.Unlock()
+
+	if antigravityInventoryChanged(previousDiagnostics, diagnostics) {
+		d.InvalidateAntigravityResidents("credentials_changed")
+	}
 
 	d.connectionMu.Lock()
 	stream := d.diagnosticsStream
@@ -414,6 +421,49 @@ func (d *Daemon) UpdateRuntimeInventory(ctx context.Context, runtimes []string, 
 		RunnerID: d.computerID, Revision: revision, SentAt: time.Now().UTC(),
 		Payload: append(json.RawMessage(nil), diagnostics...),
 	})
+}
+
+// InvalidateAntigravityResidents cancels in-flight Antigravity provider
+// prepares and stops parked Antigravity residents for reason.
+func (d *Daemon) InvalidateAntigravityResidents(reason string) {
+	d.cancelProviderPrepares(providerPrepareForRuntime("antigravity"), reason)
+	if err := native.StopParkedAntigravityResidentsForCredentials(); err != nil {
+		slog.Warn("runner.resident.stop_failed", "provider", "antigravity", "reason", reason, "error", err)
+	}
+}
+
+type runtimeDiagnosticSummary struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Version string `json:"version"`
+}
+
+func runtimeDiagnosticFor(raw json.RawMessage, runtimeType string) (runtimeDiagnosticSummary, bool) {
+	if len(raw) == 0 {
+		return runtimeDiagnosticSummary{}, false
+	}
+	var diagnostics []runtimeDiagnosticSummary
+	if json.Unmarshal(raw, &diagnostics) != nil {
+		return runtimeDiagnosticSummary{}, false
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Type == runtimeType {
+			return diagnostic, true
+		}
+	}
+	return runtimeDiagnosticSummary{}, false
+}
+
+func antigravityInventoryChanged(previous, next json.RawMessage) bool {
+	prev, prevOK := runtimeDiagnosticFor(previous, "antigravity")
+	curr, currOK := runtimeDiagnosticFor(next, "antigravity")
+	if !prevOK && !currOK {
+		return false
+	}
+	if prev.Status != curr.Status {
+		return true
+	}
+	return prev.Status == "ready" && prev.Version != curr.Version
 }
 
 func (d *Daemon) runtimeInventory() ([]string, json.RawMessage, []transport.RegistrationObservation) {
@@ -453,6 +503,7 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 	if d.diagnosticsStream == stream {
 		d.diagnosticsStream = nil
 		d.modelInvokeOutcomes.Store(false)
+		d.modelGatewayUnavailable.Store(false)
 	}
 	if d.localModelsStream == stream {
 		d.localModelsStream = nil

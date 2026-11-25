@@ -1,20 +1,45 @@
+import { STATIC_PREFIX_END_MARKER } from "./prompt/prefix-boundary.js";
+
 /** Product Agent identity and platform policy replace Codex's native base prompt. */
 export const codexAgentInstructions = (options: {
   readonly baseInstructions?: string;
   readonly developerInstructions?: string;
   readonly compactInstructions?: boolean;
-}): { baseInstructions: string; developerInstructions: undefined } => ({
-  baseInstructions: [
-    options.baseInstructions?.trim(),
-    options.compactInstructions
-      ? CODEX_EXECUTION_RESPONSIBILITY_COMPACT
-      : CODEX_EXECUTION_RESPONSIBILITY,
-    options.developerInstructions?.trim(),
-  ]
-    .filter(Boolean)
-    .join("\n\n"),
-  developerInstructions: undefined,
-});
+}): { baseInstructions: string; developerInstructions: undefined } => {
+  const responsibility = options.compactInstructions
+    ? CODEX_EXECUTION_RESPONSIBILITY_COMPACT
+    : CODEX_EXECUTION_RESPONSIBILITY;
+  const developer = options.developerInstructions?.trim() ?? "";
+  const markerIndex = developer.indexOf(STATIC_PREFIX_END_MARKER);
+  if (markerIndex !== -1) {
+    const staticPart = developer.slice(0, markerIndex).trim();
+    const dynamicPart = developer
+      .slice(markerIndex + STATIC_PREFIX_END_MARKER.length)
+      .trim();
+    return {
+      baseInstructions: [
+        responsibility,
+        staticPart,
+        STATIC_PREFIX_END_MARKER,
+        options.baseInstructions?.trim(),
+        dynamicPart,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      developerInstructions: undefined,
+    };
+  }
+  return {
+    baseInstructions: [
+      options.baseInstructions?.trim(),
+      responsibility,
+      developer,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    developerInstructions: undefined,
+  };
+};
 
 const CODEX_EXECUTION_RESPONSIBILITY = `<execution-responsibility>
 Within your assigned scope and existing authorization, carry an accepted request through implementation, verification, and delivery of the requested result. Recoverable command failures, missing configuration, and installable dependencies are work to resolve; a progress report or a promise to continue is not completion. Continue after reporting progress. Stop only when the requested result is verified, the user stops the work, or progress requires unavailable authority, external input, or a decision you cannot infer. Report a real blocker precisely with completed work and the minimum input needed. Preserve the platform's assignment, delegation, approval, and publication rules; do not bypass them or duplicate a submitted operation whose outcome is uncertain.

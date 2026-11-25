@@ -73,6 +73,11 @@ const teamHubWebToolGuide = "Web tools: search the web with `teamhub web search 
 // link that still has its own web tools.
 const teamHubWebOverOwnTools = "Use them instead of your built-in web search and fetch tools, which may not work through the API this model is served by."
 
+// staticPrefixEndMarker is the internal insertion slot emitted between the
+// static prefix and volatile context sections by node-services. It is consumed
+// and removed by assembleResolvedInstructions so the model never sees it.
+const staticPrefixEndMarker = "<!-- LINGER_STATIC_PREFIX_END -->"
+
 // webToolGuide describes the web tools an Operation has. A Runtime on a
 // vendor subscription uses its own web tools first and the TeamHub CLI when
 // they fail; one on an API link uses the TeamHub CLI, and on the localmodels
@@ -184,13 +189,12 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 		return provider.OperationSpec{}, errors.New("Codex run.start requires a retained session or an explicit first-run marker")
 	}
 	developerInstructions := instructionValue(request.SessionOptions.DeveloperInstructions)
+	var daemonStaticGuides []string
 	if command.HostAccess == "trusted" {
-		developerInstructions = strings.TrimSpace(strings.Join([]string{
-			developerInstructions, trustedHostServiceInstructions, boundServiceInstructions(r.ServiceCommand),
-		}, "\n\n"))
+		daemonStaticGuides = append(daemonStaticGuides, trustedHostServiceInstructions, boundServiceInstructions(r.ServiceCommand))
 	}
 	if r.ToolGuide != "" {
-		developerInstructions = strings.TrimSpace(developerInstructions + "\n\n" + r.ToolGuide)
+		daemonStaticGuides = append(daemonStaticGuides, r.ToolGuide)
 	}
 	cliInstalled, err := r.cliCredentialInstalled(command.TenantID, command.AgentID)
 	if err != nil {
@@ -199,12 +203,13 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 	webGuide := webToolGuide(command.RuntimeType, installation.APILink, installation.ModelGateway,
 		cliInstalled && r.TeamHubCLIBin != "")
 	if webGuide != "" {
-		developerInstructions = strings.TrimSpace(developerInstructions + "\n\n" + webGuide)
+		daemonStaticGuides = append(daemonStaticGuides, webGuide)
 	}
-	systemPrompt := strings.TrimSpace(strings.Join([]string{
+	resolvedBase, resolvedDeveloper, systemPrompt, baseHadMarker, devHadMarker := assembleResolvedInstructions(
 		instructionValue(request.SessionOptions.BaseInstructions),
 		developerInstructions,
-	}, "\n\n"))
+		daemonStaticGuides,
+	)
 	spec := provider.OperationSpec{
 		OperationKind: request.Kind, Provider: command.RuntimeType,
 		ExecutablePath: installation.ExecutablePath, WorkingDirectory: workingDirectory,
@@ -226,8 +231,11 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 		WithoutNativeWebTools: installation.ModelGateway,
 		TenantID:              command.TenantID, OwnerActorID: binding.OwnerActorID, AgentID: command.AgentID,
 	}
-	if command.HostAccess == "trusted" || r.ToolGuide != "" || webGuide != "" {
-		spec.DeveloperInstructions = &developerInstructions
+	if baseHadMarker {
+		spec.BaseInstructions = &resolvedBase
+	}
+	if devHadMarker || (!baseHadMarker && len(daemonStaticGuides) > 0) {
+		spec.DeveloperInstructions = &resolvedDeveloper
 	}
 	// The profile path is stable and depends only on the Agent-level credential,
 	// so a Run's first and later provider starts see the same environment.
@@ -481,6 +489,39 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func joinNonEmptySections(parts ...string) string {
+	nonEmpty := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			nonEmpty = append(nonEmpty, trimmed)
+		}
+	}
+	return strings.Join(nonEmpty, "\n\n")
+}
+
+// assembleResolvedInstructions replaces staticPrefixEndMarker (in either
+// developer or base instructions) with static Daemon guides and places
+// per-Agent BaseInstructions before the dynamic tail when the slot is in
+// developer instructions. Legacy inputs without the marker keep
+// BaseInstructions first and append guides at the end.
+func assembleResolvedInstructions(base, developer string, daemonStaticGuides []string) (string, string, string, bool, bool) {
+	if staticPart, dynamicPart, hasMarker := strings.Cut(developer, staticPrefixEndMarker); hasMarker {
+		staticSection := joinNonEmptySections(append([]string{staticPart}, daemonStaticGuides...)...)
+		resolvedDeveloper := joinNonEmptySections(staticSection, dynamicPart)
+		systemPrompt := joinNonEmptySections(staticSection, base, dynamicPart)
+		return base, resolvedDeveloper, systemPrompt, false, true
+	}
+	if staticPart, dynamicPart, hasMarker := strings.Cut(base, staticPrefixEndMarker); hasMarker {
+		staticSection := joinNonEmptySections(append([]string{staticPart}, daemonStaticGuides...)...)
+		resolvedBase := joinNonEmptySections(staticSection, dynamicPart)
+		systemPrompt := joinNonEmptySections(resolvedBase, developer)
+		return resolvedBase, developer, systemPrompt, true, false
+	}
+	resolvedDeveloper := joinNonEmptySections(append([]string{developer}, daemonStaticGuides...)...)
+	systemPrompt := joinNonEmptySections(base, resolvedDeveloper)
+	return base, resolvedDeveloper, systemPrompt, false, false
 }
 
 const trustedHostServiceInstructions = "When the user asks for a local server or other process that must remain available after this turn, start it through the Computer daemon with `linger-computer daemon service start <name> -- <command> [args...]`. Do not use shell backgrounding or nohup for a persistent service because command-process containment will stop it. Use `linger-computer daemon service stop <name>` before replacing it, and verify the final localhost URL after the managed start returns."

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -1227,15 +1228,19 @@ func unsupportedSourceCommand(exitCode int, stdout []byte) error {
 	return nil
 }
 
-// sanitizeModelSourceMessage removes the submitted BYOK secret and recognizable
-// credentials before an error message leaves the Computer; TeamHub owns full
-// public-response scrubbing of user-home paths and URL query strings.
+var modelSourceURLQueryPattern = regexp.MustCompile(`(?i)(\b[a-z][a-z0-9+.-]*://[^\s?#"'\)\]}]+)\?[^\s"'<>)\]}]*`)
+
+// sanitizeModelSourceMessage removes the submitted BYOK secret, URL query
+// strings, and recognizable credentials before an error message is logged or
+// leaves the Computer.
 func sanitizeModelSourceMessage(raw, fallback, secret string) string {
 	scrubbed := strings.TrimSpace(raw)
 	if scrubbed == "" {
 		return fallback
 	}
-	scrubbed = redact.Text(redactSecret(scrubbed, secret))
+	scrubbed = redactSecret(scrubbed, secret)
+	scrubbed = modelSourceURLQueryPattern.ReplaceAllString(scrubbed, "${1}?[REDACTED]")
+	scrubbed = redact.Text(scrubbed)
 	cleaned := strings.Join(strings.Fields(scrubbed), " ")
 	if cleaned == "" {
 		return fallback

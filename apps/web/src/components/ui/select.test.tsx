@@ -209,11 +209,167 @@ describe("Select", () => {
     expect(addListener).not.toHaveBeenCalledWith(
       "pointerdown",
       expect.any(Function),
+      true,
     );
     expect(removeListener).not.toHaveBeenCalledWith(
       "pointerdown",
       expect.any(Function),
+      true,
     );
+  });
+
+  it("dismisses on outside pointerdown and suppresses the paired click without blocking the next click", async () => {
+    const onOutsideClick = vi.fn();
+    render(
+      <div>
+        <Select aria-label="Model" onValueChange={vi.fn()} value="first">
+          <SelectItem value="first">First</SelectItem>
+          <SelectItem value="second">Second</SelectItem>
+        </Select>
+        <button onClick={onOutsideClick} type="button">
+          Cancel
+        </button>
+      </div>,
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "Model" });
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+
+    fireEvent.click(trigger);
+    await screen.findByRole("listbox");
+
+    // Full pointer press-and-release outside dismisses the popup and swallows
+    // the paired click so Cancel is not activated by the dismissal gesture.
+    fireEvent.pointerDown(cancel, { button: 0, pointerId: 1 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.pointerUp(cancel, { button: 0, pointerId: 1 });
+    fireEvent.click(cancel, { button: 0 });
+    expect(onOutsideClick).not.toHaveBeenCalled();
+
+    // A subsequent click on the same button proceeds normally.
+    fireEvent.pointerDown(cancel, { button: 0, pointerId: 2 });
+    fireEvent.pointerUp(cancel, { button: 0, pointerId: 2 });
+    fireEvent.click(cancel, { button: 0 });
+    expect(onOutsideClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses wrapping label activation so clicking a parent label dismisses without reopening", async () => {
+    render(
+      <label className="block" htmlFor="labeled-model">
+        <span>Model</span>
+        <Select
+          aria-label="Model"
+          id="labeled-model"
+          onValueChange={vi.fn()}
+          value="first"
+        >
+          <SelectItem value="first">First</SelectItem>
+          <SelectItem value="second">Second</SelectItem>
+        </Select>
+      </label>,
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "Model" });
+    const heading = screen.getByText("Model");
+
+    // Verify native <label> click forwarding activates the trigger when closed.
+    fireEvent.click(heading);
+    await screen.findByRole("listbox");
+
+    // Clicking the parent <label> while open closes the popup and suppresses
+    // label activation so the dropdown does not immediately reopen.
+    fireEvent.pointerDown(heading, { button: 0, pointerId: 1 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.pointerUp(heading, { button: 0, pointerId: 1 });
+    fireEvent.click(heading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("toggles closed cleanly when clicking the trigger itself while open", async () => {
+    render(
+      <Select aria-label="Model" onValueChange={vi.fn()} value="first">
+        <SelectItem value="first">First</SelectItem>
+        <SelectItem value="second">Second</SelectItem>
+      </Select>,
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "Model" });
+    fireEvent.click(trigger);
+    await screen.findByRole("listbox");
+
+    fireEvent.pointerDown(trigger, { button: 0, pointerId: 1 });
+    fireEvent.pointerUp(trigger, { button: 0, pointerId: 1 });
+    fireEvent.click(trigger, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("closes on outside right-click without suppressing a subsequent left click", async () => {
+    const onOutsideClick = vi.fn();
+    render(
+      <div>
+        <Select aria-label="Model" onValueChange={vi.fn()} value="first">
+          <SelectItem value="first">First</SelectItem>
+          <SelectItem value="second">Second</SelectItem>
+        </Select>
+        <button onClick={onOutsideClick} type="button">
+          Save
+        </button>
+      </div>,
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "Model" });
+    const save = screen.getByRole("button", { name: "Save" });
+
+    fireEvent.click(trigger);
+    await screen.findByRole("listbox");
+
+    fireEvent.pointerDown(save, { button: 2, pointerId: 1 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+
+    // Even a bare click without a preceding pointerdown must not be swallowed.
+    fireEvent.click(save, { button: 0 });
+    expect(onOutsideClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not suppress a later click after pointercancel or synthetic pointerdown on document.body", async () => {
+    const onOutsideClick = vi.fn();
+    render(
+      <div>
+        <Select aria-label="Model" onValueChange={vi.fn()} value="first">
+          <SelectItem value="first">First</SelectItem>
+          <SelectItem value="second">Second</SelectItem>
+        </Select>
+        <button onClick={onOutsideClick} type="button">
+          Action
+        </button>
+      </div>,
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "Model" });
+    const action = screen.getByRole("button", { name: "Action" });
+
+    // Cancelled pointer gesture releases suppression immediately.
+    fireEvent.click(trigger);
+    await screen.findByRole("listbox");
+    fireEvent.pointerDown(action, { button: 0, pointerId: 1 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.pointerCancel(action, { pointerId: 1 });
+    fireEvent.click(action, { button: 0 });
+    expect(onOutsideClick).toHaveBeenCalledTimes(1);
+
+    // A synthetic pointerdown on document.body without pointerup does not eat
+    // a later click on an unrelated descendant button.
+    fireEvent.click(trigger);
+    await screen.findByRole("listbox");
+    fireEvent.pointerDown(document.body, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.click(action, { button: 0 });
+    expect(onOutsideClick).toHaveBeenCalledTimes(2);
   });
 
   it("anchors wide option popups to the trigger right edge without overflowing the viewport", () => {

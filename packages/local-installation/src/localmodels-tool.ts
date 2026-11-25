@@ -777,9 +777,6 @@ function formatDownloadedBytes(bytes: number): string {
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${bytes} B`;
 }
-export const REAL_LOCALMODELS_RUNNER = Symbol.for(
-  "linger.localmodels.realRunner",
-);
 export async function runLocalmodels(
   home: string,
   args: string[],
@@ -799,9 +796,6 @@ export async function runLocalmodels(
     },
   );
 }
-Object.defineProperty(runLocalmodels, REAL_LOCALMODELS_RUNNER, {
-  value: true,
-});
 // Hosts come from the kit's mirror list; anything else is not shown.
 function displayHost(value: unknown): string | undefined {
   return typeof value === "string" &&

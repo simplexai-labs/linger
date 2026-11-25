@@ -840,7 +840,7 @@ describe("quick Local Agent creation", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Pi" }));
     expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
     expect(
-      screen.getByText(
+      await screen.findByText(
         "In Pi, enter /login to sign in, or configure an API key in Pi auth.json.",
       ),
     ).toBeVisible();
@@ -898,6 +898,191 @@ describe("quick Local Agent creation", () => {
     expect(link.closest("p")).toHaveTextContent(
       "Download and load a local model in Settings › Models to run Agents with Pi on this computer.",
     );
+  });
+
+  it("shows update command and diagnostic when an incompatible runtime is chosen", async () => {
+    const runtime = await testRuntime();
+    const inventory =
+      await runtime.client.listTenantLocalComputers("tenant-northstar");
+    const computer = inventory.items[0]!;
+    vi.spyOn(runtime.client, "listTenantLocalComputers").mockResolvedValue({
+      items: [
+        {
+          ...computer,
+          platform: "darwin",
+          runtimes: [
+            {
+              error_code: "RUNTIME_INCOMPATIBLE",
+              message: "codex version 0.150.1 is below minimum 0.166.0",
+              models: [],
+              status: "incompatible",
+              type: "codex",
+              version: "codex-cli 0.150.1",
+            },
+          ],
+        },
+      ],
+    });
+    renderCreation(runtime, "local");
+    fireEvent.click(
+      await screen.findByRole("combobox", { name: "Local Computer" }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "Jenny's Mac" }));
+
+    expect(await screen.findByText("Codex update required")).toBeVisible();
+    expect(
+      screen.getByText("codex version 0.150.1 is below minimum 0.166.0"),
+    ).toBeVisible();
+    expect(screen.getByText("npm install -g @openai/codex")).toBeVisible();
+  });
+
+  it("shows local model download progress instead of Pi CLI sign-in while downloading", async () => {
+    const runtime = await testRuntime();
+    const computer = runtime.seed.localComputers[0]!;
+    runtime.seed.localComputers = [
+      {
+        ...computer,
+        platform: "darwin",
+        runtimes: [
+          {
+            error_code: "RUNTIME_AUTHENTICATION_REQUIRED",
+            message: "sign in",
+            models: [],
+            status: "authentication_required",
+            type: "pi",
+          },
+        ],
+      },
+    ];
+    runtime.server.on(
+      "GET",
+      "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models",
+      () => ({
+        available: true,
+        computer: {
+          computer_id: computer.computer_id,
+          display_name: computer.display_name,
+          status: "online",
+        },
+        models: [
+          {
+            model: {
+              availability: { downloadable: true },
+              context_tokens: 131_072,
+              description: "",
+              download: {
+                bytes_per_second: 50_000_000,
+                done_bytes: 630,
+                step: "download",
+                total_bytes: 1_000,
+              },
+              download_bytes: 18_000_000_000,
+              fit: "unified",
+              id: "qwen3-coder-30b:Q4_K_M",
+              memory_bytes: 18_000_000_000,
+              name: "Qwen3 Coder 30B",
+              pi_model: "localmodels-library/qwen3-coder-30b",
+              pool: "unified",
+              quant: "Q4_K_M",
+              recommended: true,
+              state: "downloading",
+              vision: false,
+            },
+            used_by: [],
+          },
+        ],
+        pools: [],
+        viewer_is_owner: true,
+      }),
+    );
+
+    renderCreation(runtime, "local");
+    fireEvent.click(
+      await screen.findByRole("combobox", { name: "Local Computer" }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "Jenny's Mac" }));
+
+    expect(await screen.findByText("Downloading local model")).toBeVisible();
+    expect(
+      screen.getByText(
+        "Qwen3 Coder 30B is downloading on Jenny's Mac (63%). Once it finishes, Pi can use it when Local model is selected as the model source.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("Pi sign-in required")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+  });
+
+  it("guides Pi to Settings › Models in Quick Create when no local model is downloaded", async () => {
+    const runtime = await testRuntime();
+    const computer = runtime.seed.localComputers[0]!;
+    runtime.seed.localComputers = [
+      {
+        ...computer,
+        platform: "darwin",
+        runtimes: [
+          {
+            error_code: "RUNTIME_AUTHENTICATION_REQUIRED",
+            message: "sign in",
+            models: [],
+            status: "authentication_required",
+            type: "pi",
+          },
+        ],
+      },
+    ];
+    runtime.server.on(
+      "GET",
+      "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models",
+      () => ({
+        available: true,
+        computer: {
+          computer_id: computer.computer_id,
+          display_name: computer.display_name,
+          status: "online",
+        },
+        models: [
+          {
+            model: {
+              availability: { downloadable: true },
+              context_tokens: 131_072,
+              description: "",
+              download_bytes: 18_000_000_000,
+              fit: "unified",
+              id: "qwen3-coder-30b:Q4_K_M",
+              memory_bytes: 18_000_000_000,
+              name: "Qwen3 Coder 30B",
+              pi_model: "localmodels-library/qwen3-coder-30b",
+              pool: "unified",
+              quant: "Q4_K_M",
+              recommended: true,
+              state: "absent",
+              vision: false,
+            },
+            used_by: [],
+          },
+        ],
+        pools: [],
+        viewer_is_owner: true,
+      }),
+    );
+
+    renderCreation(runtime, "local");
+    fireEvent.click(
+      await screen.findByRole("combobox", { name: "Local Computer" }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "Jenny's Mac" }));
+
+    expect(await screen.findByText("Pi needs a model")).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Settings › Models" }),
+    ).toHaveAttribute(
+      "href",
+      `/t/tenant-northstar/settings/models?computer=${computer.computer_id}`,
+    );
+    expect(
+      screen.getByText("Using the standalone Pi CLI instead?"),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
   });
 
   describe("in the desktop app", () => {

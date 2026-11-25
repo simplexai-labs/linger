@@ -58,6 +58,47 @@ export const computerSetupMessages = defineMessages("computerSetup", {
     "Update a Runtime on {computer} as the OS user that runs Local Computer, in PowerShell. It appears here within a minute.",
   runtimeCommand: "{app}: <code>{command}</code>",
   npmNeedsNode: "The npm commands need Node.js.",
+  updateRequiredTitle: "{app} update required",
+  updateRequiredBody:
+    "{app} on {computer} needs an update before Agents can run with it.",
+  updateRequiredBodyWithVersion:
+    "{app} ({version}) on {computer} needs an update before Agents can run with it.",
+  updateRunInTerminal: "Run in Terminal on {computer}:",
+  updateRunInPowerShell: "Run in PowerShell on {computer}:",
+  updateAlternativeMac:
+    "If you installed {app} from Homebrew or its macOS app, update it there instead.",
+  readyAfterUpdate: "It turns ready here on its own shortly after you update.",
+  computerUpgradeRequiredTitle: "Linger Computer update required",
+  openComputerSettings: "Open <link>Settings › Computers</link> to update it.",
+  checkingRuntimeTitle: "Checking {app}",
+  checkingRuntimeBody:
+    "Waiting for {computer} to report {app} status. It updates here on its own.",
+  runtimeCheckFailedTitle: "Couldn't check {app}",
+  runtimeCheckFailedBody:
+    "Check {app} on {computer} or inspect its status in <link>Settings › Computers</link>.",
+  piCheckingSetup: "Checking Pi model setup on {computer}…",
+  piNeedsModelTitle: "Pi needs a model",
+  piNeedsModelBody:
+    "No local model is downloaded on {computer} yet, and Pi has no ready model source.",
+  piNeedsModelAction:
+    "Download a local model or configure a Pi model source in <link>Settings › Models</link>.",
+  piDownloadingTitle: "Downloading local model",
+  piDownloadingBody:
+    "{model} is downloading on {computer}. Once it finishes, Pi can use it when Local model is selected as the model source.",
+  piDownloadingBodyWithPercent:
+    "{model} is downloading on {computer} ({percent}%). Once it finishes, Pi can use it when Local model is selected as the model source.",
+  piDownloadingAction: "View progress in <link>Settings › Models</link>.",
+  piLoadingTitle: "Loading local model",
+  piLoadingBody:
+    "{model} is loading on {computer}. Once it finishes, Pi can use it when Local model is selected as the model source.",
+  piLoadingAction: "View status in <link>Settings › Models</link>.",
+  piDownloadStoppedTitle: "Local model download stopped",
+  piDownloadStoppedBody:
+    "{model} didn't finish downloading on {computer}. Resume the download or choose another model in <link>Settings › Models</link> to run Agents with Pi.",
+  piCredentialsOrSourceTitle: "Pi credentials or model source needed",
+  piCredentialsOrSourceBody:
+    "Pi on {computer} couldn't authenticate with its configured model source. Check your BYOK API key or switch to a local model in <link>Settings › Models</link>.",
+  piStandaloneCliToggle: "Using the standalone Pi CLI instead?",
   desktopConnectIntro:
     "Connect this computer to run Agents with the Codex or Claude Code installed on it.",
   connecting: "Connecting…",

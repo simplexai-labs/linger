@@ -290,7 +290,7 @@ On Windows, an SSH-started Daemon can remain alive after logout while still runn
 
 **Setup:** Chrome with the official Playwright Extension on the Computer. A disposable Chrome profile is preferred. Never put the extension token in chat, evidence or logs.
 
-1. Open "Connect my browser" from the Computer detail in Settings → Computers, or from the browser connection card an Agent sends. A card locks its Computer.
+1. Open the "Connect Chrome" dialog from the Computer detail in Settings → Computers, or from the browser connection card an Agent sends. A card locks its Computer. The dialog shows only the token field until a connection exists; the extension install link sits in its footer.
 2. Paste a wrong token. Expect `BROWSER_TOKEN_REJECTED` and no saved connection.
 3. Paste the extension's token. Expect `Connected`. The token file is under the Daemon state `computer-tools/browser-connections/`, `0600` on macOS and current-user ACL on Windows.
 4. Ask the Agent for a task that needs a signed-in page in that Chrome. Check the result.

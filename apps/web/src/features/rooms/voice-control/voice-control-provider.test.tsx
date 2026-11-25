@@ -838,6 +838,289 @@ describe("LiveKit voice input lifecycle", () => {
     expect(closed).toHaveBeenCalledOnce();
   });
 
+  it("aborts an in-flight active-capture resync when SSE delivers finalizing without duplicating the GET", async () => {
+    vi.useFakeTimers();
+    const runtime = createTestTeamHubRuntime();
+    const accepted = acceptVoice(runtime);
+    const subscriptions: VoiceEventSubscription[] = [];
+    runtime.voiceEvents = {
+      subscribe: vi.fn((input: VoiceEventSubscription) => {
+        subscriptions.push(input);
+        return Object.assign(vi.fn(), { catchUp: async () => undefined });
+      }),
+    };
+    const start = spyVoiceRoute(
+      runtime,
+      accepted,
+      "POST",
+      "/v0/voice-sessions/{voiceSessionId}/captures",
+    );
+    const readCapture = accepted(
+      "GET",
+      "/v0/voice-captures/{captureSessionId}",
+    );
+    let holdResync = false;
+    let resyncAborted = false;
+    const getCapture = vi.fn(async (request: TestRouteRequest) => {
+      if (!holdResync) return readCapture(request);
+      return new Promise((_resolve, reject) => {
+        const abort = () => {
+          resyncAborted = true;
+          reject(request.request.signal.reason);
+        };
+        if (request.request.signal.aborted) {
+          abort();
+          return;
+        }
+        request.request.signal.addEventListener("abort", abort, { once: true });
+      });
+    });
+    runtime.server.on(
+      "GET",
+      "/v0/voice-captures/{captureSessionId}",
+      getCapture,
+    );
+    const view = render(
+      <TeamHubRuntimeProvider runtime={runtime}>
+        <MemoryRouter>
+          <LiveKitVoiceControlProvider tenantId="tenant-northstar">
+            <ListenerState />
+          </LiveKitVoiceControlProvider>
+        </MemoryRouter>
+      </TeamHubRuntimeProvider>,
+    );
+    try {
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(subscriptions).toHaveLength(1);
+      act(() => subscriptions[0]!.onMode("sse"));
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      const capture = (await start.mock.results[0]!
+        .value) as TeamHubVoiceCapture;
+      expect(screen.getByLabelText("capture")).toHaveTextContent(
+        `recording:${capture.id}`,
+      );
+      const beforeReconnect = getCapture.mock.calls.length;
+      expect(beforeReconnect).toBe(1);
+
+      // Reconnect SSE while the Capture is already recording and hold its
+      // resync read in flight until live SSE delivers finalizing.
+      holdResync = true;
+      act(() => {
+        subscriptions[0]!.onMode("recovering");
+        subscriptions[0]!.onMode("sse");
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(getCapture).toHaveBeenCalledTimes(beforeReconnect + 1);
+      expect(resyncAborted).toBe(false);
+
+      act(() =>
+        subscriptions[0]!.onEvents({
+          next_cursor: `${capture.voice_session_id}:2`,
+          has_more: false,
+          items: [
+            {
+              kind: "capture",
+              capture: {
+                ...capture,
+                status: "finalizing",
+                updated_at: new Date(
+                  Date.parse(capture.updated_at) + 1_000,
+                ).toISOString(),
+              },
+            },
+          ],
+        }),
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByLabelText("capture")).toHaveTextContent(
+        `finalizing:${capture.id}`,
+      );
+      expect(resyncAborted).toBe(true);
+      expect(getCapture).toHaveBeenCalledTimes(beforeReconnect + 1);
+
+      await act(async () => vi.advanceTimersByTimeAsync(1_500));
+      expect(getCapture).toHaveBeenCalledTimes(beforeReconnect + 1);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("runs a single resync read after SSE goes live on an existing Capture and stays idle afterwards", async () => {
+    vi.useFakeTimers();
+    const runtime = createTestTeamHubRuntime();
+    const accepted = acceptVoice(runtime);
+    const subscriptions: VoiceEventSubscription[] = [];
+    runtime.voiceEvents = {
+      subscribe: vi.fn((input: VoiceEventSubscription) => {
+        subscriptions.push(input);
+        return Object.assign(vi.fn(), { catchUp: async () => undefined });
+      }),
+    };
+    const start = spyVoiceRoute(
+      runtime,
+      accepted,
+      "POST",
+      "/v0/voice-sessions/{voiceSessionId}/captures",
+    );
+    const readCapture = accepted(
+      "GET",
+      "/v0/voice-captures/{captureSessionId}",
+    );
+    let serverFinalizing = false;
+    const getCapture = vi.fn(async (request: TestRouteRequest) => {
+      const answer = await readCapture(request);
+      const current = (
+        answer instanceof Response ? await answer.json() : answer
+      ) as TeamHubVoiceCapture;
+      if (!serverFinalizing) return current;
+      return {
+        ...current,
+        status: "finalizing" as const,
+        updated_at: new Date(
+          Date.parse(current.updated_at) + 1_000,
+        ).toISOString(),
+      };
+    });
+    runtime.server.on(
+      "GET",
+      "/v0/voice-captures/{captureSessionId}",
+      getCapture,
+    );
+    const view = render(
+      <TeamHubRuntimeProvider runtime={runtime}>
+        <MemoryRouter>
+          <LiveKitVoiceControlProvider tenantId="tenant-northstar">
+            <ListenerState />
+          </LiveKitVoiceControlProvider>
+        </MemoryRouter>
+      </TeamHubRuntimeProvider>,
+    );
+    try {
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(subscriptions).toHaveLength(1);
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      const capture = (await start.mock.results[0]!
+        .value) as TeamHubVoiceCapture;
+      expect(screen.getByLabelText("capture")).toHaveTextContent(
+        `recording:${capture.id}`,
+      );
+      const beforeSse = getCapture.mock.calls.length;
+      expect(beforeSse).toBe(1);
+
+      serverFinalizing = true;
+      act(() => subscriptions[0]!.onMode("sse"));
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(getCapture).toHaveBeenCalledTimes(beforeSse + 1);
+      expect(screen.getByLabelText("capture")).toHaveTextContent(
+        `finalizing:${capture.id}`,
+      );
+
+      // While SSE remains live, finalizing polling must not issue further GETs.
+      await act(async () => vi.advanceTimersByTimeAsync(2_000));
+      expect(getCapture).toHaveBeenCalledTimes(beforeSse + 1);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("resyncs a restored finalizing Capture when SSE went live before restore settled", async () => {
+    vi.useFakeTimers();
+    const runtime = createTestTeamHubRuntime();
+    acceptVoice(runtime);
+    const subscriptions: VoiceEventSubscription[] = [];
+    runtime.voiceEvents = {
+      subscribe: vi.fn((input: VoiceEventSubscription) => {
+        subscriptions.push(input);
+        return Object.assign(vi.fn(), { catchUp: async () => undefined });
+      }),
+    };
+    let releaseRestore!: (capture: TeamHubVoiceCapture) => void;
+    let restoredRoomId = "";
+    const activeCaptureRead = vi.fn(
+      (request: TestRouteRequest) =>
+        new Promise<TeamHubVoiceCapture>((resolve) => {
+          restoredRoomId = request.params.roomId!;
+          releaseRestore = resolve;
+        }),
+    );
+    runtime.server.on(
+      "GET",
+      "/v0/rooms/{roomId}/active-voice-capture",
+      activeCaptureRead,
+    );
+    let finalizedSnapshot!: TeamHubVoiceCapture;
+    const getCapture = vi.fn(() => finalizedSnapshot);
+    runtime.server.on(
+      "GET",
+      "/v0/voice-captures/{captureSessionId}",
+      getCapture,
+    );
+    const view = render(
+      <TeamHubRuntimeProvider runtime={runtime}>
+        <MemoryRouter>
+          <LiveKitVoiceControlProvider tenantId="tenant-northstar">
+            <ListenerState />
+          </LiveKitVoiceControlProvider>
+        </MemoryRouter>
+      </TeamHubRuntimeProvider>,
+    );
+    try {
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(subscriptions).toHaveLength(1);
+      expect(activeCaptureRead).toHaveBeenCalledOnce();
+      expect(screen.getByLabelText("capture")).toHaveTextContent("idle:");
+
+      const voiceSessionId = subscriptions[0]!.voiceSessionId;
+      const staleFinalizing: TeamHubVoiceCapture = {
+        id: "capture_restored",
+        room_id: restoredRoomId,
+        voice_session_id: voiceSessionId,
+        status: "finalizing",
+        audio_document_version_id: "audio_restored",
+        requested_start_offset_ms: 0,
+        gap_count: 0,
+        gap_duration_ms: 0,
+        created_at: "2026-09-19T00:00:00Z",
+        updated_at: "2026-09-19T00:00:01Z",
+      };
+      finalizedSnapshot = {
+        ...staleFinalizing,
+        status: "finalized",
+        updated_at: "2026-09-19T00:00:02Z",
+      };
+
+      // SSE goes live and drops a bootstrap terminal event while captureRef
+      // is still undefined because restoreActiveCapture has not settled yet.
+      act(() => {
+        subscriptions[0]!.onMode("sse");
+        subscriptions[0]!.onEvents({
+          next_cursor: `${voiceSessionId}:1`,
+          has_more: false,
+          items: [{ kind: "capture", capture: finalizedSnapshot }],
+        });
+      });
+      expect(getCapture).not.toHaveBeenCalled();
+
+      act(() => releaseRestore(staleFinalizing));
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+
+      expect(getCapture).toHaveBeenCalledTimes(1);
+      expect(screen.getByLabelText("capture")).toHaveTextContent(
+        `completed:${staleFinalizing.id}`,
+      );
+
+      await act(async () => vi.advanceTimersByTimeAsync(2_000));
+      expect(getCapture).toHaveBeenCalledTimes(1);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it("records into a selected general Agent room and refuses to retarget an active Capture", async () => {
     const runtime = createTestTeamHubRuntime();
     const accepted = acceptVoice(runtime);

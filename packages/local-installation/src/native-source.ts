@@ -3,7 +3,7 @@ import { portFree } from "./ports.js";
 import { prepareModelGateway, stopModelGateway } from "./model-gateway.js";
 import { createHash } from "node:crypto";
 import { constants, existsSync, readFileSync } from "node:fs";
-import { lstat, open, realpath, statfs } from "node:fs/promises";
+import { lstat, open, readdir, realpath, statfs } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseEnv } from "node:util";
@@ -43,7 +43,11 @@ import { readUserEnvironment } from "./user-environment.js";
 import { checkTeamhubBinaries } from "./teamhub-binaries.js";
 import { sourceRegion } from "@linger/service-kit";
 import { npmRegistryEnvironment } from "./npm-registry.js";
-import { recordRegionFallback, resolveRegion } from "./region.js";
+import {
+  readCachedRegion,
+  recordRegionFallback,
+  resolveRegion,
+} from "./region.js";
 import { prepareNativeDatabase } from "./native-database.js";
 import {
   inspectNativeListeners,
@@ -1561,6 +1565,10 @@ async function runNativeSource(
           signal.throwIfAborted();
           await beforeFoundation?.();
           const prepareLocalStackServices = async () => {
+            const foundationMainPlan =
+              !restoredByok &&
+              !options.byok &&
+              !(!explicitLocal && saved && saved.mode !== "local");
             await timed(
               "Preparing foundation services",
               () =>
@@ -1569,6 +1577,7 @@ async function runNativeSource(
                   signal,
                   onEvent: emit,
                   shareGpu: options.shareGpu,
+                  mainPlan: foundationMainPlan,
                 }),
               { stage: stageForLogs },
             );
@@ -1576,13 +1585,22 @@ async function runNativeSource(
             // sign-in, retires one an earlier release started.
             await prepareModelGateway(
               current,
-              // A restored BYOK source keeps its gateway whatever the saved
-              // choice: a local-models choice would require the local stack.
+              // A restored BYOK or subscription source keeps its own gateway
+              // choice whatever setup-choice.json recorded: a local-models
+              // choice would require the local stack.
               restoredByok
                 ? { runtime: restoredByok.runtime, modelSource: "byok" }
-                : options.byok && choice !== "local-models"
-                  ? { runtime: choice, modelSource: "byok" }
-                  : choice,
+                : options.byok
+                  ? {
+                      runtime:
+                        choice === "local-models"
+                          ? (options.byok.runtime ?? "claude")
+                          : choice,
+                      modelSource: "byok",
+                    }
+                  : !explicitLocal && saved?.mode === "subscription"
+                    ? saved.runtime
+                    : choice,
               {
                 home,
                 signal,
@@ -1998,6 +2016,88 @@ export interface SwitchNativeReleaseResult {
 }
 
 /**
+ * Resolves the cached private voice-tools `bin/` directory (containing `ffmpeg`
+ * and `ffprobe`) without performing network downloads, so V2 service switches
+ * and baseline rollbacks keep voice media tooling on `PATH`.
+ */
+async function resolveCachedVoiceToolsBin(
+  home: string,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (process.env.LINGER_NATIVE_VOICE_TOOLS_JSON) {
+    const prepared = await prepareNativeVoiceTools({
+      home,
+      signal: signal ?? AbortSignal.timeout(30_000),
+    }).catch(() => undefined);
+    if (prepared?.bin) return prepared.bin;
+  }
+  const componentsDir = path.join(path.resolve(home), "tools", "native", "components");
+  const entries = await readdir(componentsDir, { withFileTypes: true }).catch(
+    () => [],
+  );
+  const exe = process.platform === "win32" ? ".exe" : "";
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith("pending-")) continue;
+    const binDir = path.join(componentsDir, entry.name, "bin");
+    if (
+      existsSync(path.join(binDir, `ffmpeg${exe}`)) &&
+      existsSync(path.join(binDir, `ffprobe${exe}`))
+    ) {
+      return binDir;
+    }
+  }
+  return undefined;
+}
+
+async function loadSwitchServiceEnvironment(
+  instance: Instance,
+  home: string,
+  signal?: AbortSignal,
+): Promise<{
+  readonly baseEnv: NodeJS.ProcessEnv;
+  readonly proxyEnv: Record<string, string>;
+  readonly identityKey: string | undefined;
+}> {
+  const [rawNativeEnv, userEnv, identityKey, liveKit, voiceBin] =
+    await Promise.all([
+      readPrivate(path.join(instance.root, "native.env")).catch(
+        () => undefined,
+      ),
+      readUserEnvironment(instance.root).catch(() => ({})),
+      readLocalIdentityKey(instance.root).catch(() => undefined),
+      readLiveKitSettings(instance.root).catch(() => undefined),
+      resolveCachedVoiceToolsBin(home, signal),
+    ]);
+  const parsedNativeEnv: Record<string, string> = rawNativeEnv
+    ? Object.fromEntries(
+        Object.entries(parseEnv(rawNativeEnv)).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      )
+    : {};
+  const region =
+    parsedNativeEnv.SIMPLEX_REGION ||
+    process.env.SIMPLEX_REGION ||
+    (await readCachedRegion(home).catch(() => undefined));
+  const baseEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...parsedNativeEnv,
+    ...userEnv,
+    ...(region ? { SIMPLEX_REGION: region } : {}),
+    ...(liveKit && voiceBin
+      ? {
+          PATH: [voiceBin, process.env.PATH]
+            .filter(Boolean)
+            .join(path.delimiter),
+        }
+      : {}),
+  };
+  delete baseEnv.TEAMHUB_LOCAL_IDENTITY_KEY;
+  const proxyEnv = systemProxyEnvironment(baseEnv);
+  return { baseEnv, proxyEnv, identityKey };
+}
+
+/**
  * Atomically switches the instance's selected application services (`teamhub`,
  * `node-services`, and/or `web`) to a staged V2 LocalReleaseDescriptor while
  * keeping `postgres` and `livekit` running. Reuses `withInstanceLock` and
@@ -2023,27 +2123,8 @@ export async function switchNativeRelease(
       );
     }
 
-    const rawNativeEnv = await readPrivate(
-      path.join(instance.root, "native.env"),
-    ).catch(() => undefined);
-    const parsedNativeEnv: Record<string, string> = rawNativeEnv
-      ? Object.fromEntries(
-          Object.entries(parseEnv(rawNativeEnv)).filter(
-            (entry): entry is [string, string] => typeof entry[1] === "string",
-          ),
-        )
-      : {};
-    const userEnv = await readUserEnvironment(instance.root).catch(() => ({}));
-    const identityKey = await readLocalIdentityKey(instance.root).catch(
-      () => undefined,
-    );
-    const baseEnv: NodeJS.ProcessEnv = {
-      ...process.env,
-      ...parsedNativeEnv,
-      ...userEnv,
-    };
-    delete baseEnv.TEAMHUB_LOCAL_IDENTITY_KEY;
-    const proxyEnv = systemProxyEnvironment(baseEnv);
+    const { baseEnv, proxyEnv, identityKey } =
+      await loadSwitchServiceEnvironment(instance, home, signal);
 
     const switchTeamhub = targetServices.has("teamhub");
     const switchNodeServices = targetServices.has("node-services");
@@ -2182,6 +2263,7 @@ export async function switchNativeRelease(
           args: [webHost.script],
           cwd: webHost.cwd,
           env: {
+            HOST: "127.0.0.1,::1",
             ...baseEnv,
             ...webCmd.env,
           },
@@ -2230,32 +2312,19 @@ export async function restoreBaselineNativeRelease(
   options: RestoreBaselineNativeReleaseOptions,
 ): Promise<RestoreBaselineNativeReleaseResult> {
   const source = requireNative(instance);
-  const { signal, log } = options;
+  const { home, signal, log } = options;
   const targetServices = new Set<SwitchableReleaseService>(
     options.services && options.services.length > 0
       ? options.services
       : ["teamhub", "node-services", "web"],
   );
   return withInstanceLock(instance, async () => {
-    const rawNativeEnv = await readPrivate(
-      path.join(instance.root, "native.env"),
-    ).catch(() => undefined);
-    const parsedNativeEnv: Record<string, string> = rawNativeEnv
-      ? Object.fromEntries(
-          Object.entries(parseEnv(rawNativeEnv)).filter(
-            (entry): entry is [string, string] => typeof entry[1] === "string",
-          ),
-        )
-      : {};
-    const userEnv = await readUserEnvironment(instance.root).catch(() => ({}));
-    const identityKey = await readLocalIdentityKey(instance.root).catch(
-      () => undefined,
-    );
-    const baselineEnv: NodeJS.ProcessEnv = {
-      ...process.env,
-      ...parsedNativeEnv,
-      ...userEnv,
-    };
+    const {
+      baseEnv: loadedEnv,
+      proxyEnv,
+      identityKey,
+    } = await loadSwitchServiceEnvironment(instance, home, signal);
+    const baselineEnv: NodeJS.ProcessEnv = { ...loadedEnv };
     // Strip any V2-specific overrides so restored baseline services run cleanly
     // against the Shell's built-in `.simplexai-runtime` layout.
     delete baselineEnv.TEAMHUB_LOCAL_IDENTITY_KEY;
@@ -2266,7 +2335,6 @@ export async function restoreBaselineNativeRelease(
     delete baselineEnv.LINGER_PROMPTS_DIR;
     delete baselineEnv.LINGER_WEB_ROOT;
     delete baselineEnv.LINGER_WEB_ARTIFACT_ID;
-    const proxyEnv = systemProxyEnvironment(baselineEnv);
 
     const repo = source.repo;
     const sourceNativeScript = path.join(repo, "scripts", "source-native.mjs");
@@ -2397,6 +2465,10 @@ export async function restoreBaselineNativeRelease(
     }
 
     if (restoreWeb) {
+      const webBaselineEnv: NodeJS.ProcessEnv = {
+        HOST: "127.0.0.1,::1",
+        ...baselineEnv,
+      };
       const offlineWebHost = path.join(offlineDir, "web", "static-host.mjs");
       if (existsSync(offlineWebHost)) {
         log?.("Stopping V2 web to restore Shell baseline.");
@@ -2408,7 +2480,7 @@ export async function restoreBaselineNativeRelease(
           executable: process.execPath,
           args: [offlineWebHost],
           cwd: path.join(offlineDir, "web"),
-          env: baselineEnv,
+          env: webBaselineEnv,
           signal,
           settings: JSON.stringify({ release: "baseline" }),
           restartOnConfigurationChange: true,
@@ -2424,7 +2496,7 @@ export async function restoreBaselineNativeRelease(
           executable: process.execPath,
           args: [sourceNativeScript, "web"],
           cwd: repo,
-          env: baselineEnv,
+          env: webBaselineEnv,
           signal,
           settings: JSON.stringify({ release: "baseline" }),
           restartOnConfigurationChange: true,

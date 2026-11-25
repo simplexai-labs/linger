@@ -2,10 +2,13 @@ package native
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -19,21 +22,53 @@ const (
 	antigravityPipeDrain = time.Second
 )
 
+var errAntigravityProcessBusy = errors.New("Antigravity process is not idle")
+
+// antigravityTreeCheck replaces the process-tree emptiness check in tests.
+var antigravityTreeCheck atomic.Pointer[func(*exec.Cmd, time.Duration) bool]
+
+func antigravityTreeGone(cmd *exec.Cmd, budget time.Duration) bool {
+	if check := antigravityTreeCheck.Load(); check != nil {
+		return (*check)(cmd, budget)
+	}
+	return process.WaitEmpty(cmd, budget)
+}
+
 // acpProcess is one `agy acp` child and its ACP connection. Stderr is
 // discarded: a signed-out Antigravity prints its OAuth URL there.
 type acpProcess struct {
+	res     residency
 	cmd     *exec.Cmd
+	pid     int
 	stdin   *os.File
 	stdout  *os.File
 	conn    *acpConn
 	exited  chan struct{}
 	waitErr error
 	// cancel ends the process context, which outlives every caller.
-	cancel context.CancelFunc
+	cancel      context.CancelFunc
+	caps        acpCapabilities
+	shape       *antigravityShape
+	front       *mcpFront
+	releaseTemp func() error
+	releaseOnce sync.Once
+	fixedHandle func(acpFrame)
+
+	mu                sync.Mutex
+	turn              *antigravityTurn
+	sessionID         string
+	systemPromptHash  string
+	defaultModel      string
+	defaultEffort     string
+	appliedModel      string
+	appliedEffort     string
+	explicitModelSet  bool
+	explicitEffortSet bool
 }
 
-// startACP launches `agy acp` with any additional flags in dir. handle receives
-// the agent's notifications and requests.
+// startACP launches `agy acp` with any additional flags in dir. When handle is
+// non-nil it receives every notification and agent request; otherwise frames
+// dispatch to the currently bound turn.
 func startACP(inv Invocation, dir string, logger *slog.Logger, handle func(acpFrame), extraArgs ...string) (*acpProcess, error) {
 	stdinRead, stdinWrite, err := os.Pipe()
 	if err != nil {
@@ -63,8 +98,16 @@ func startACP(inv Invocation, dir string, logger *slog.Logger, handle func(acpFr
 	if logger != nil {
 		logRuntimeLaunch(logger, "antigravity", "acp", cmd)
 	}
-	p := &acpProcess{cmd: cmd, stdin: stdinWrite, stdout: stdoutRead, exited: make(chan struct{}), cancel: cancel}
-	p.conn = newACPConn(stdinWrite, handle)
+	p := &acpProcess{
+		cmd:         cmd,
+		pid:         cmd.Process.Pid,
+		stdin:       stdinWrite,
+		stdout:      stdoutRead,
+		exited:      make(chan struct{}),
+		cancel:      cancel,
+		fixedHandle: handle,
+	}
+	p.conn = newACPConn(stdinWrite, p.handleFrame)
 	go func() {
 		p.waitErr = cmd.Wait()
 		close(p.exited)
@@ -73,9 +116,72 @@ func startACP(inv Invocation, dir string, logger *slog.Logger, handle func(acpFr
 	return p, nil
 }
 
-// stop closes stdin and escalates until the process tree is gone. It
-// reports whether the exit of the whole tree was confirmed.
+func (p *acpProcess) handleFrame(frame acpFrame) {
+	if p.fixedHandle != nil {
+		p.fixedHandle(frame)
+		return
+	}
+	p.mu.Lock()
+	turn := p.turn
+	p.mu.Unlock()
+	if turn != nil {
+		turn.handle(frame)
+		return
+	}
+	if len(frame.ID) > 0 {
+		_ = p.conn.respondError(frame.ID, -32601, "no active turn")
+	}
+}
+
+func (p *acpProcess) bind(t *antigravityTurn) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.turn != nil || p.res.isStopping() {
+		return errAntigravityProcessBusy
+	}
+	p.turn = t
+	return nil
+}
+
+func (p *acpProcess) unbind(t *antigravityTurn) {
+	p.mu.Lock()
+	if p.turn == t {
+		p.turn = nil
+	}
+	p.mu.Unlock()
+}
+
+func (p *acpProcess) residency() *residency { return &p.res }
+
+func (p *acpProcess) residentAttrs() []any {
+	p.mu.Lock()
+	session := p.sessionID
+	p.mu.Unlock()
+	return []any{"pid", p.pid, "session_id", session}
+}
+
+func (p *acpProcess) alive() bool {
+	return !p.res.isStopping() && !acpDone(p.conn.closed) && !acpDone(p.exited)
+}
+
+func acpDone(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
+// stop is the table-serialized stop of the whole process tree.
 func (p *acpProcess) stop() bool {
+	return p.res.stop(p.stopTree)
+}
+
+// stopTree closes stdin and escalates until the process tree is gone. A
+// confirmed exit releases everything the process owns; otherwise only the
+// resident front closes so survivors cannot reach a finished Run's endpoints.
+func (p *acpProcess) stopTree() bool {
 	go func() { _ = p.stdin.Close() }()
 	if !acpWait(p.exited, antigravityExitWait) {
 		_ = process.Signal(p.cmd, syscall.SIGTERM)
@@ -85,18 +191,32 @@ func (p *acpProcess) stop() bool {
 			<-p.exited
 		}
 	}
-	if !process.WaitEmpty(p.cmd, 100*time.Millisecond) {
+	if !antigravityTreeGone(p.cmd, 100*time.Millisecond) {
 		_ = process.Signal(p.cmd, syscall.SIGKILL)
 	}
-	confirmed := process.WaitEmpty(p.cmd, antigravityGroupWait)
+	confirmed := antigravityTreeGone(p.cmd, antigravityGroupWait)
 	if !acpWait(p.conn.closed, antigravityPipeDrain) {
 		go func() { _ = p.stdout.Close() }()
 	}
-	if confirmed {
-		p.cancel()
-		process.Release(p.cmd)
+	if !confirmed {
+		p.front.Close()
+		return false
 	}
-	return confirmed
+	p.release()
+	return true
+}
+
+func (p *acpProcess) release() {
+	p.releaseOnce.Do(func() {
+		p.front.Close()
+		if p.cancel != nil {
+			p.cancel()
+		}
+		process.Release(p.cmd)
+		if p.releaseTemp != nil {
+			_ = p.releaseTemp()
+		}
+	})
 }
 
 func acpWait(done <-chan struct{}, budget time.Duration) bool {

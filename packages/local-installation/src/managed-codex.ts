@@ -86,17 +86,23 @@ async function codexConfiguration(
     );
   }
 }
-export async function readManagedModel(root: string) {
-  const rows = await inspectRuntimeDescriptors(path.resolve(root, "../.."), {
-    runtime: "codex",
-  });
+export async function readManagedModel(
+  root: string,
+  dependencies: { localmodels?: typeof runLocalmodels } = {},
+) {
+  const rows = await inspectRuntimeDescriptors(
+    path.resolve(root, "../.."),
+    { runtime: "codex" },
+    dependencies,
+  );
   return rows.find((row) => row.runtime === "codex")?.modelConfig ?? undefined;
 }
 export async function managedRuntimeEnvironment(
   home: string,
   root = home,
+  dependencies: { localmodels?: typeof runLocalmodels } = {},
 ): Promise<NodeJS.ProcessEnv> {
   return runtimeEnvironmentFromDescriptors(
-    await inspectSelectedRuntimeDescriptors(home, root),
+    await inspectSelectedRuntimeDescriptors(home, root, dependencies),
   );
 }

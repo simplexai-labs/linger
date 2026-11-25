@@ -9,6 +9,7 @@ import {
   type DaemonRuntimeStatus,
 } from "./daemon-runtime-probe.js";
 import { DEFAULT_GPU_SHARING } from "./setup-selection.js";
+import { windowsPrivateRefusal } from "./windows-private.js";
 
 export type SetupChoice = "local-models" | "codex" | "claude" | "pi";
 export type RuntimeChoice = Exclude<SetupChoice, "local-models">;
@@ -74,6 +75,23 @@ export interface SetupEstimate {
   durationSeconds: { min: number; max: number } | null;
   assumption: string;
 }
+/** One closeable GPU process reported on an upstream `stack.upgrade` hint. */
+export interface SetupUpgradeGpuApp {
+  name: string;
+  pids: number[];
+  bytes: number;
+}
+/**
+ * Upstream `stack.upgrade`: a stronger local model unlocked when other
+ * programs release memory, with the quantitative reasons blocking it now.
+ */
+export interface SetupUpgrade {
+  modelName?: string;
+  selectedGpuIndex: number | null;
+  estimate: SetupEstimate & { model: string };
+  reasons: SetupReason[];
+  gpuApps?: SetupUpgradeGpuApp[];
+}
 export interface SetupReport {
   hardware: {
     platform: string;
@@ -106,6 +124,11 @@ export interface SetupReport {
     basis?: "capacity";
     selectedGpuIndex: number | null;
     estimate: SetupEstimate & { model: string };
+    /**
+     * Upstream `stack.upgrade`, when freeing memory unlocks a stronger local
+     * model than the currently selected plan.
+     */
+    upgrade?: SetupUpgrade;
   };
   runtimes: {
     choice: RuntimeChoice;
@@ -131,6 +154,36 @@ export interface SetupOptions {
   probeRuntimes?: typeof probeRuntimesWithDaemon;
   onEvent?: (event: InstallerEvent) => void;
 }
+interface UpstreamPlan {
+  llm: { model: { id: string }; placement: { gpus: { index: number }[] } };
+  budget: {
+    download_bytes: number;
+    disk_needed_bytes: number;
+    ram_needed_bytes: number;
+  };
+}
+interface UpstreamUpgrade {
+  plan?: {
+    llm?: {
+      model?: { id?: unknown };
+      placement?: { gpus?: { index?: unknown }[] };
+    };
+    budget?: {
+      download_bytes?: unknown;
+      disk_needed_bytes?: unknown;
+      ram_needed_bytes?: unknown;
+    };
+  } | null;
+  summary?: {
+    llm?: unknown;
+    llmName?: unknown;
+    downloadBytes?: unknown;
+    diskBytes?: unknown;
+    memoryBytes?: unknown;
+  } | null;
+  reasons?: unknown;
+  gpuApps?: unknown;
+}
 interface UpstreamReport {
   schema: string;
   facts: {
@@ -154,14 +207,8 @@ interface UpstreamReport {
     basis?: "capacity" | null;
     memory?: SetupMemory | null;
     reasons: SetupReason[];
-    plan: {
-      llm: { model: { id: string }; placement: { gpus: { index: number }[] } };
-      budget: {
-        download_bytes: number;
-        disk_needed_bytes: number;
-        ram_needed_bytes: number;
-      };
-    } | null;
+    plan: UpstreamPlan | null;
+    upgrade?: UpstreamUpgrade | null;
   };
   harness?: {
     schema: string;
@@ -181,11 +228,25 @@ export const setupChoices: readonly SetupChoice[] = [
   "pi",
 ];
 /**
- * Presentation adapter only. Host probes, admission, recommendation and
- * budgets belong upstream, with one exception: when local models are blocked
- * now, a tool before setup-report `stack.state` still picks "local-models",
- * which its own install-time plan refuses; the adapter replaces that pick.
- * Remove the override and the fallbacks once the pinned tool reports `state`.
+ * Combines local-model hardware evaluation from `localmodels setup inspect`
+ * with authoritative CLI Runtime discovery, minimum-version checks, and
+ * authentication probing from `linger-computer-daemon probe-runtimes --json`.
+ *
+ * Ownership boundary:
+ * - `localmodels` owns hardware facts, resource budgets, upgrade hints, and
+ *   local-model stack eligibility (`ready` | `blocked-now` | `unavailable`).
+ * - `local-daemon` owns CLI Runtime discovery, version compatibility, auth
+ *   status, and non-local Runtime recommendation (matching
+ *   `apps/web/src/features/local-computer/computer-readiness.ts`:
+ *   `ready` -> `authentication_required` -> `incompatible` -> `installed`,
+ *   ordered `claude` -> `codex` -> `pi`, falling back to `claude` when none is
+ *   installed).
+ * - Recommendation picks `"local-models"` when the local stack is `ready` and
+ *   `available`; otherwise it delegates to `local-daemon` observations.
+ * - When no daemon binary is available (e.g., bare dev environments or unit
+ *   tests injecting `probeRuntimes: async () => null`), `inspectSetup` falls
+ *   back to upstream `harness` rows and `recommendation` (retaining the legacy
+ *   `blocked-now` override for tools before `stack.state`).
  */
 export async function inspectSetup(
   options: SetupOptions = {},
@@ -215,13 +276,6 @@ export async function inspectSetup(
       "--json",
     ];
     const tool = options.localmodels ?? runLocalmodels;
-    const mockedTool =
-      Boolean(options.localmodels) ||
-      !(tool as unknown as Record<symbol, unknown>)[
-        Symbol.for("linger.localmodels.realRunner")
-      ];
-    const shouldProbeWithDaemon =
-      Boolean(options.probeRuntimes) || !mockedTool;
     const probeEnv = options.env ?? process.env;
     const probeRuntimes = options.probeRuntimes ?? probeRuntimesWithDaemon;
     const [result, daemonObservations] = await Promise.all([
@@ -231,15 +285,13 @@ export async function inspectSetup(
         timeoutMs: 120000,
         ...(options.onEvent ? { onEvent: options.onEvent } : {}),
       }),
-      shouldProbeWithDaemon
-        ? probeRuntimes({
-            runtimes: ["codex", "claude", "pi"],
-            env: probeEnv,
-            daemonExecutable: options.daemonExecutable,
-            platform: options.platform,
-            signal: options.signal,
-          })
-        : Promise.resolve(null),
+      probeRuntimes({
+        runtimes: ["codex", "claude", "pi"],
+        env: probeEnv,
+        daemonExecutable: options.daemonExecutable,
+        platform: options.platform,
+        signal: options.signal,
+      }),
     ]);
     options.signal?.throwIfAborted();
     if (result.code !== 0) {
@@ -320,6 +372,117 @@ export async function inspectSetup(
           : {}),
       };
     };
+    const sanitizeReason = ({
+      code,
+      message,
+      gpuIndex,
+      freeBytes,
+      requiredBytes,
+      detectedCudaVersion,
+      requiredCudaVersion,
+      driverVersion,
+    }: SetupReason): SetupReason => ({
+      code,
+      message,
+      ...(ok(gpuIndex) ? { gpuIndex } : {}),
+      ...(ok(freeBytes) ? { freeBytes } : {}),
+      ...(ok(requiredBytes) ? { requiredBytes } : {}),
+      ...(version(detectedCudaVersion) ? { detectedCudaVersion } : {}),
+      ...(version(requiredCudaVersion) ? { requiredCudaVersion } : {}),
+      ...(version(driverVersion) ? { driverVersion } : {}),
+    });
+    const parseUpgrade = (
+      raw: UpstreamUpgrade | null | undefined,
+    ): SetupUpgrade | undefined => {
+      if (!raw || typeof raw !== "object") return undefined;
+      const planModel =
+        typeof raw.plan?.llm?.model?.id === "string"
+          ? raw.plan.llm.model.id.trim()
+          : "";
+      const summaryModel =
+        typeof raw.summary?.llm === "string" ? raw.summary.llm.trim() : "";
+      const model = planModel || summaryModel;
+      if (!model) return undefined;
+      const reasons = Array.isArray(raw.reasons)
+        ? raw.reasons
+            .filter(
+              (entry): entry is SetupReason =>
+                Boolean(entry) &&
+                typeof entry === "object" &&
+                typeof (entry as { code?: unknown }).code === "string" &&
+                (entry as { code: string }).code.length > 0 &&
+                typeof (entry as { message?: unknown }).message === "string",
+            )
+            .map(sanitizeReason)
+        : [];
+      if (reasons.length === 0) return undefined;
+      const modelName =
+        typeof raw.summary?.llmName === "string" && raw.summary.llmName.trim()
+          ? raw.summary.llmName.trim()
+          : undefined;
+      const firstGpu = raw.plan?.llm?.placement?.gpus?.[0]?.index;
+      const selectedGpuIndex = ok(firstGpu) ? firstGpu : null;
+      const downloadBytes = ok(raw.plan?.budget?.download_bytes)
+        ? raw.plan.budget.download_bytes
+        : ok(raw.summary?.downloadBytes)
+          ? raw.summary.downloadBytes
+          : null;
+      const diskBytes = ok(raw.plan?.budget?.disk_needed_bytes)
+        ? raw.plan.budget.disk_needed_bytes
+        : ok(raw.summary?.diskBytes)
+          ? raw.summary.diskBytes
+          : null;
+      const memoryBytes = ok(raw.plan?.budget?.ram_needed_bytes)
+        ? raw.plan.budget.ram_needed_bytes
+        : ok(raw.summary?.memoryBytes)
+          ? raw.summary.memoryBytes
+          : null;
+      const hasBudget =
+        downloadBytes !== null || diskBytes !== null || memoryBytes !== null;
+      const gpuApps = Array.isArray(raw.gpuApps)
+        ? raw.gpuApps.flatMap((entry): SetupUpgradeGpuApp[] => {
+            if (!entry || typeof entry !== "object") return [];
+            const { name, pids, bytes } = entry as {
+              name?: unknown;
+              pids?: unknown;
+              bytes?: unknown;
+            };
+            if (typeof name !== "string" || !name.trim() || !ok(bytes))
+              return [];
+            const cleanPids = Array.isArray(pids)
+              ? pids.filter(
+                  (pid): pid is number =>
+                    typeof pid === "number" &&
+                    Number.isSafeInteger(pid) &&
+                    pid >= 0,
+                )
+              : [];
+            return [{ name: name.trim(), pids: cleanPids, bytes }];
+          })
+        : [];
+      return {
+        ...(modelName ? { modelName } : {}),
+        selectedGpuIndex,
+        estimate: {
+          ...estimate(
+            hasBudget
+              ? {
+                  downloadBytes,
+                  diskBytes,
+                  memoryBytes,
+                  durationSeconds: null,
+                  assumption:
+                    "Resource plan supplied by localmodels; duration is unknown.",
+                }
+              : undefined,
+          ),
+          model,
+        },
+        reasons,
+        ...(gpuApps.length ? { gpuApps } : {}),
+      };
+    };
+    const upgrade = parseUpgrade(value.stack.upgrade);
     const memory = value.stack.memory ? counts(value.stack.memory) : undefined;
     const upstreamRuntimes = value.harness?.runtimes ?? [];
     const upstreamEstimates = new Map(
@@ -371,7 +534,7 @@ export async function inspectSetup(
       : state === "blocked-now" && value.recommendation === "local-models"
         ? ((installed.find((row) => row.authenticated) ?? installed[0])
             ?.runtime ?? "codex")
-        : (value.recommendation ?? "claude");
+        : value.recommendation!;
     return {
       hardware: {
         platform: value.facts.platform,
@@ -398,27 +561,7 @@ export async function inspectSetup(
           ? { hardwareCapable: value.stack.hardwareCapable }
           : {}),
         ...(memory ? { memory } : {}),
-        reasons: value.stack.reasons.map(
-          ({
-            code,
-            message,
-            gpuIndex,
-            freeBytes,
-            requiredBytes,
-            detectedCudaVersion,
-            requiredCudaVersion,
-            driverVersion,
-          }) => ({
-            code,
-            message,
-            ...(ok(gpuIndex) ? { gpuIndex } : {}),
-            ...(ok(freeBytes) ? { freeBytes } : {}),
-            ...(ok(requiredBytes) ? { requiredBytes } : {}),
-            ...(version(detectedCudaVersion) ? { detectedCudaVersion } : {}),
-            ...(version(requiredCudaVersion) ? { requiredCudaVersion } : {}),
-            ...(version(driverVersion) ? { driverVersion } : {}),
-          }),
-        ),
+        reasons: value.stack.reasons.map(sanitizeReason),
         ...(capacity ? { basis: "capacity" as const } : {}),
         selectedGpuIndex: plan?.llm.placement.gpus[0]?.index ?? null,
         estimate: {
@@ -436,12 +579,14 @@ export async function inspectSetup(
           ),
           model: plan?.llm.model.id ?? "",
         },
+        ...(upgrade ? { upgrade } : {}),
       },
       runtimes: reportedRuntimes,
       recommendation,
     };
-  } catch {
+  } catch (error) {
     options.signal?.throwIfAborted();
+    if (windowsPrivateRefusal(error)) throw error;
     throw Object.assign(
       new Error(
         failure

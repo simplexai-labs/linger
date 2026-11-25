@@ -89,10 +89,12 @@ usage() {
 }
 
 sha256_of() {
+  # Hash stdin: sha256sum escapes a name holding a backslash (a Windows path)
+  # by prefixing the line with one.
   if command -v sha256sum >/dev/null; then
-    sha256sum "$1" | cut -d' ' -f1
+    sha256sum <"$1" | cut -d' ' -f1
   else
-    shasum -a 256 "$1" | cut -d' ' -f1
+    shasum -a 256 <"$1" | cut -d' ' -f1
   fi
 }
 

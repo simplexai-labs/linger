@@ -78,7 +78,7 @@ func runFakeTool(args []string) int {
 			fmt.Fprintln(os.Stderr, "error: library status failed: /private/path")
 			return exit
 		}
-		status, err := os.ReadFile(filepath.Join(state, "status.json"))
+		status, err := readFileRetrying(filepath.Join(state, "status.json"))
 		if err != nil {
 			return 1
 		}
@@ -108,9 +108,64 @@ func runFakeTool(args []string) int {
 		fmt.Println(string(line.Line))
 	}
 	if script.StatusAfter != nil {
-		_ = os.WriteFile(filepath.Join(state, "status.json"), script.StatusAfter, 0o600)
+		if err := writeFileAtomic(state, "status.json", script.StatusAfter); err != nil {
+			fmt.Fprintf(os.Stderr, "write status.json: %v\n", err)
+			return 1
+		}
 	}
 	return script.Exit
+}
+
+func readFileRetrying(path string) ([]byte, error) {
+	// On Windows, a concurrent atomic rename can transiently reject opens
+	// with a sharing violation; retry briefly unless the file is absent.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil || os.IsNotExist(err) || !time.Now().Before(deadline) {
+			return data, err
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func writeFileAtomic(dir, name string, data []byte) error {
+	temp, err := os.CreateTemp(dir, "."+name+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := temp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return err
+	}
+	target := filepath.Join(dir, name)
+	// On Windows, replacing a file opened by a concurrent status subprocess
+	// can fail transiently with a sharing or access error.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		err = os.Rename(tmpPath, target)
+		if err == nil {
+			cleanup = false
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return err
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func waitForGateRemoval(gatePath string, timeout time.Duration) {
@@ -238,7 +293,7 @@ func (f *fakeTool) write(name string, value any) {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(f.state, name), encoded, 0o600); err != nil {
+	if err := writeFileAtomic(f.state, name, encoded); err != nil {
 		f.t.Fatal(err)
 	}
 }

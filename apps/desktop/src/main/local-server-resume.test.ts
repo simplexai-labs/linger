@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -17,7 +17,7 @@ import {
   type LocalServerIdentity,
 } from "./local-server.js";
 import { EventBus, ModuleHost } from "./modules.js";
-import { stubModule, tempDirectory } from "./test-support.js";
+import { fixtureNode, stubModule, tempDirectory } from "./test-support.js";
 
 async function writeDesktopInstance(home: string, port: number): Promise<void> {
   const root = instanceRoot({ name: "desktop", home });
@@ -64,7 +64,7 @@ function setupResumeFixture(
   );
   const node = path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
   mkdirSync(path.join(node, "bin"), { recursive: true });
-  symlinkSync(process.execPath, path.join(node, "bin", "node"));
+  fixtureNode(path.join(node, "bin", "node"));
   mkdirSync(path.join(home, "desktop"), { recursive: true });
   writeFileSync(
     path.join(home, "desktop", "local-server.json"),

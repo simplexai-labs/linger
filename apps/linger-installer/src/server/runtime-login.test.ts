@@ -6,6 +6,8 @@ import { RuntimeLoginManager } from "./runtime-login.js";
 vi.mock("@linger/local-installation/managed-codex", () => ({
   managedRuntimeEnvironment: async () => ({}),
 }));
+// Fixture logins run their script through Node: Windows cannot execute a
+// shebang script.
 const clean: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   for (const fn of clean.splice(0).reverse()) await fn();
@@ -19,8 +21,7 @@ it(
     const exe = path.join(home, "codex");
     await writeFile(
       exe,
-      `#!${process.execPath}\nif(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['login','--device-auth']))process.exit(2);console.log('https://auth.openai.com/codex/device');console.log('ABCD-EFGHI');console.log('SECRET-NEVER-RETURN');setTimeout(()=>process.exit(0),5000);`,
-      { mode: 0o700 },
+      `if(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['login','--device-auth']))process.exit(2);console.log('https://auth.openai.com/codex/device');console.log('ABCD-EFGHI');console.log('SECRET-NEVER-RETURN');setTimeout(()=>process.exit(0),5000);`,
     );
     let ready = false;
     const manager = new RuntimeLoginManager(
@@ -37,10 +38,14 @@ it(
           installed: true,
           authenticated: false,
           authMode: null,
-          loginCommand: { executable: exe, args: ["login"], env: {} },
+          loginCommand: {
+            executable: process.execPath,
+            args: [exe, "login"],
+            env: {},
+          },
           deviceLoginCommand: {
-            executable: exe,
-            args: ["login", "--device-auth"],
+            executable: process.execPath,
+            args: [exe, "login", "--device-auth"],
             env: {},
           },
         },
@@ -79,8 +84,7 @@ it(
     const exe = path.join(home, "claude");
     await writeFile(
       exe,
-      `#!${process.execPath}\nconsole.log('https://attacker.invalid/auth?token=secret');process.exit(1)`,
-      { mode: 0o700 },
+      `console.log('https://attacker.invalid/auth?token=secret');process.exit(1)`,
     );
     const manager = new RuntimeLoginManager(async () => ({
       runtime: "claude",
@@ -95,10 +99,14 @@ it(
         installed: true,
         authenticated: false,
         authMode: null,
-        loginCommand: { executable: exe, args: ["auth", "login"], env: {} },
+        loginCommand: {
+          executable: process.execPath,
+          args: [exe, "auth", "login"],
+          env: {},
+        },
         deviceLoginCommand: {
-          executable: exe,
-          args: ["login", "--device-auth"],
+          executable: process.execPath,
+          args: [exe, "login", "--device-auth"],
           env: {},
         },
       },
@@ -129,8 +137,7 @@ it(
       "https://claude.com/cai/oauth/authorize?code=true&state=fixture";
     await writeFile(
       exe,
-      `#!${process.execPath}\nconsole.log(${JSON.stringify(url)});setTimeout(()=>{},5000);`,
-      { mode: 0o700 },
+      `console.log(${JSON.stringify(url)});setTimeout(()=>{},5000);`,
     );
     const manager = new RuntimeLoginManager(async () => ({
       runtime: "claude",
@@ -145,10 +152,14 @@ it(
         installed: true,
         authenticated: false,
         authMode: null,
-        loginCommand: { executable: exe, args: ["auth", "login"], env: {} },
+        loginCommand: {
+          executable: process.execPath,
+          args: [exe, "auth", "login"],
+          env: {},
+        },
         deviceLoginCommand: {
-          executable: exe,
-          args: ["login", "--device-auth"],
+          executable: process.execPath,
+          args: [exe, "login", "--device-auth"],
           env: {},
         },
       },
@@ -176,8 +187,7 @@ it("uses native browser OAuth on Mac instead of requiring device-code settings",
     "https://auth.openai.com/oauth/authorize?response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=fixture";
   await writeFile(
     exe,
-    `#!${process.execPath}\nif(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['login']))process.exit(2);console.log(${JSON.stringify(url)});setTimeout(()=>{},5000);`,
-    { mode: 0o700 },
+    `if(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['login']))process.exit(2);console.log(${JSON.stringify(url)});setTimeout(()=>{},5000);`,
   );
   const manager = new RuntimeLoginManager(
     async () => ({
@@ -193,10 +203,14 @@ it("uses native browser OAuth on Mac instead of requiring device-code settings",
         installed: true,
         authenticated: false,
         authMode: null,
-        loginCommand: { executable: exe, args: ["login"], env: {} },
+        loginCommand: {
+          executable: process.execPath,
+          args: [exe, "login"],
+          env: {},
+        },
         deviceLoginCommand: {
-          executable: exe,
-          args: ["login", "--device-auth"],
+          executable: process.execPath,
+          args: [exe, "login", "--device-auth"],
           env: {},
         },
       },
@@ -225,8 +239,7 @@ it("uses browser OAuth on native Windows", async () => {
     "https://auth.openai.com/oauth/authorize?response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=fixture";
   await writeFile(
     exe,
-    `#!${process.execPath}\nif(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['login']))process.exit(2);console.log(${JSON.stringify(url)});setTimeout(()=>{},5000);`,
-    { mode: 0o700 },
+    `if(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['login']))process.exit(2);console.log(${JSON.stringify(url)});setTimeout(()=>{},5000);`,
   );
   const manager = new RuntimeLoginManager(
     async () => ({
@@ -242,10 +255,14 @@ it("uses browser OAuth on native Windows", async () => {
         installed: true,
         authenticated: false,
         authMode: null,
-        loginCommand: { executable: exe, args: ["login"], env: {} },
+        loginCommand: {
+          executable: process.execPath,
+          args: [exe, "login"],
+          env: {},
+        },
         deviceLoginCommand: {
-          executable: exe,
-          args: ["login", "--device-auth"],
+          executable: process.execPath,
+          args: [exe, "login", "--device-auth"],
           env: {},
         },
       },
@@ -272,8 +289,7 @@ it("does not expose a browser OAuth URL with a non-local callback", async () => 
   const exe = path.join(home, "codex");
   await writeFile(
     exe,
-    `#!${process.execPath}\nconsole.log('https://auth.openai.com/oauth/authorize?redirect_uri=https%3A%2F%2Fattacker.invalid%2Fauth%2Fcallback');setTimeout(()=>process.exit(1),100);`,
-    { mode: 0o700 },
+    `console.log('https://auth.openai.com/oauth/authorize?redirect_uri=https%3A%2F%2Fattacker.invalid%2Fauth%2Fcallback');setTimeout(()=>process.exit(1),100);`,
   );
   const manager = new RuntimeLoginManager(
     async () => ({
@@ -289,10 +305,14 @@ it("does not expose a browser OAuth URL with a non-local callback", async () => 
         installed: true,
         authenticated: false,
         authMode: null,
-        loginCommand: { executable: exe, args: ["login"], env: {} },
+        loginCommand: {
+          executable: process.execPath,
+          args: [exe, "login"],
+          env: {},
+        },
         deviceLoginCommand: {
-          executable: exe,
-          args: ["login", "--device-auth"],
+          executable: process.execPath,
+          args: [exe, "login", "--device-auth"],
           env: {},
         },
       },
@@ -322,8 +342,7 @@ it("lets native OAuth finish the browser callback after credentials become ready
     release = path.join(home, "release");
   await writeFile(
     exe,
-    `#!${process.execPath}\nconst http=require('node:http'),fs=require('node:fs');const s=http.createServer((req,res)=>{fs.writeFileSync(${JSON.stringify(marker)},'ready');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)})){clearInterval(timer);res.end('Signed in to Codex');s.close(()=>process.exit(0));}},10);});s.listen(0,'127.0.0.1',()=>fs.writeFileSync(${JSON.stringify(portFile)},String(s.address().port)));`,
-    { mode: 0o700 },
+    `const http=require('node:http'),fs=require('node:fs');const s=http.createServer((req,res)=>{fs.writeFileSync(${JSON.stringify(marker)},'ready');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)})){clearInterval(timer);res.end('Signed in to Codex');s.close(()=>process.exit(0));}},10);});s.listen(0,'127.0.0.1',()=>fs.writeFileSync(${JSON.stringify(portFile)},String(s.address().port)));`,
   );
   const manager = new RuntimeLoginManager(
     async () => ({
@@ -342,10 +361,14 @@ it("lets native OAuth finish the browser callback after credentials become ready
         installed: true,
         authenticated: false,
         authMode: null,
-        loginCommand: { executable: exe, args: ["login"], env: {} },
+        loginCommand: {
+          executable: process.execPath,
+          args: [exe, "login"],
+          env: {},
+        },
         deviceLoginCommand: {
-          executable: exe,
-          args: ["login", "--device-auth"],
+          executable: process.execPath,
+          args: [exe, "login", "--device-auth"],
           env: {},
         },
       },
@@ -387,8 +410,7 @@ it(
     const pidFile = path.join(home, "pid");
     await writeFile(
       exe,
-      `#!${process.execPath}\nrequire('fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));console.log('https://claude.com/cai/oauth/authorize?state=x');setInterval(()=>{},1000);`,
-      { mode: 0o700 },
+      `require('fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));console.log('https://claude.com/cai/oauth/authorize?state=x');setInterval(()=>{},1000);`,
     );
     const manager = new RuntimeLoginManager(async () => ({
       runtime: "claude",
@@ -403,7 +425,11 @@ it(
         installed: true,
         authenticated: false,
         authMode: null,
-        loginCommand: { executable: exe, args: ["auth", "login"], env: {} },
+        loginCommand: {
+          executable: process.execPath,
+          args: [exe, "auth", "login"],
+          env: {},
+        },
       },
     }));
     clean.push(async () => manager.close());
@@ -446,26 +472,24 @@ it("returns ready immediately when daemon reports CC Switch Codex ready without 
     `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)},'spawned');process.exit(1);`,
     { mode: 0o700 },
   );
-  const manager = new RuntimeLoginManager(
-    async () => ({
-      runtime: "codex",
+  const inspect = vi.fn(async () => ({
+    runtime: "codex" as const,
+    executable: exe,
+    installed: true,
+    ready: true,
+    loginCommand: `'${exe}' 'login'`,
+    descriptor: {
+      runtime: "codex" as const,
       executable: exe,
+      argvPrefix: [],
       installed: true,
-      ready: true,
-      loginCommand: `'${exe}' 'login'`,
-      descriptor: {
-        runtime: "codex",
-        executable: exe,
-        argvPrefix: [],
-        installed: true,
-        authenticated: true,
-        authMode: "authenticated",
-        status: "ready",
-        loginCommand: { executable: exe, args: ["login"], env: {} },
-      },
-    }),
-    "darwin",
-  );
+      authenticated: true,
+      authMode: "authenticated",
+      status: "ready" as const,
+      loginCommand: { executable: exe, args: ["login"], env: {} },
+    },
+  }));
+  const manager = new RuntimeLoginManager(inspect, "darwin");
   clean.push(async () => manager.close());
   const input = {
     instance: "default",
@@ -474,6 +498,45 @@ it("returns ready immediately when daemon reports CC Switch Codex ready without 
     runtime: "codex" as const,
   };
   expect(await manager.status(input)).toEqual({ state: "ready" });
+  expect(inspect).toHaveBeenCalledTimes(1);
   expect(await manager.start(input)).toEqual({ state: "ready" });
+  expect(inspect).toHaveBeenCalledTimes(2);
   await expect(access(marker)).rejects.toThrow();
+});
+
+it("polls runtime inspection once per status check using a 15s timeout", async () => {
+  const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+  clean.push(async () => timeoutSpy.mockRestore());
+  const inspect = vi.fn(async () => ({
+    runtime: "claude" as const,
+    executable: "/usr/local/bin/claude",
+    installed: true,
+    ready: false,
+    loginCommand: "'/usr/local/bin/claude' 'auth' 'login'",
+    descriptor: {
+      runtime: "claude" as const,
+      executable: "/usr/local/bin/claude",
+      argvPrefix: [],
+      installed: true,
+      authenticated: false,
+      authMode: null,
+      status: "authentication_required" as const,
+      loginCommand: {
+        executable: "/usr/local/bin/claude",
+        args: ["auth", "login"],
+        env: {},
+      },
+    },
+  }));
+  const manager = new RuntimeLoginManager(inspect, "darwin");
+  clean.push(async () => manager.close());
+  const input = {
+    instance: "default",
+    home: "/owned",
+    root: "/owned/instances/default",
+    runtime: "claude" as const,
+  };
+  expect(await manager.status(input)).toEqual({ state: "idle" });
+  expect(inspect).toHaveBeenCalledTimes(1);
+  expect(timeoutSpy).toHaveBeenCalledWith(15000);
 });

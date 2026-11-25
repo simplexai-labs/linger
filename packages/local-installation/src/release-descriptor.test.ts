@@ -187,11 +187,35 @@ describe("V2 local-installation release descriptors & decoupled bundles", () => 
     await mkdir(offlineWebDir, { recursive: true });
 
     const observedFile = path.join(home, "web-observed.json");
-    // Simulate esbuild-bundled offline static-host.mjs that stays alive and logs LINGER_WEB_ROOT.
+    // Simulate esbuild-bundled offline static-host.mjs that stays alive and logs LINGER_WEB_ROOT, HOST, API keys, and PATH.
+    const voiceBin = path.join(home, "tools", "native", "components", "voice-sha", "bin");
+    await mkdir(voiceBin, { recursive: true });
+    const exe = process.platform === "win32" ? ".exe" : "";
+    await writeFile(path.join(voiceBin, `ffmpeg${exe}`), "", "utf8");
+    await writeFile(path.join(voiceBin, `ffprobe${exe}`), "", "utf8");
+    await writeFile(
+      path.join(root, "livekit.env"),
+      "LIVEKIT_HTTP_PORT=7880\nLIVEKIT_RTC_PORT=7881\nLIVEKIT_API_KEY=lkkey12345678\nLIVEKIT_API_SECRET=lksec12345678901234567890123456789012\n",
+      { mode: 0o600 },
+    );
+    await writeFile(
+      path.join(root, "user.env"),
+      "COMPOSIO_API_KEY=comp-019\nXAI_API_KEY=xai-019\nSONIOX_API_KEY=soniox-019\n",
+      { mode: 0o600 },
+    );
     await writeFile(
       path.join(offlineWebDir, "static-host.mjs"),
       `import { writeFileSync } from "node:fs";
-writeFileSync(${JSON.stringify(observedFile)}, JSON.stringify({ webRoot: process.env.LINGER_WEB_ROOT, pid: process.pid }));
+writeFileSync(${JSON.stringify(observedFile)}, JSON.stringify({
+  webRoot: process.env.LINGER_WEB_ROOT,
+  artifactId: process.env.LINGER_WEB_ARTIFACT_ID,
+  host: process.env.HOST,
+  composio: process.env.COMPOSIO_API_KEY,
+  xai: process.env.XAI_API_KEY,
+  soniox: process.env.SONIOX_API_KEY,
+  path: process.env.PATH,
+  pid: process.pid,
+}));
 setInterval(() => {}, 60_000);
 `,
       "utf8",
@@ -299,13 +323,25 @@ setInterval(() => {}, 60_000);
       expect(pgAfter.running).toBe(true);
       expect(pgAfter.pid).toBe(pgBefore.pid);
 
-      // Web started cleanly with LINGER_WEB_ROOT pointing at the new bundle dist!
+      // Web started cleanly with LINGER_WEB_ROOT, artifactId, loopback HOST, preserved 0.1.9 user.env keys, and cached voiceTools PATH!
       await vi.waitFor(
         async () => {
           const observed = JSON.parse(await readFile(observedFile, "utf8")) as {
             webRoot: string;
+            artifactId: string;
+            host: string;
+            composio: string;
+            xai: string;
+            soniox: string;
+            path: string;
           };
           expect(observed.webRoot).toBe(webDistDir);
+          expect(observed.artifactId).toBe("web-222222222222");
+          expect(observed.host).toBe("127.0.0.1,::1");
+          expect(observed.composio).toBe("comp-019");
+          expect(observed.xai).toBe("xai-019");
+          expect(observed.soniox).toBe("soniox-019");
+          expect(observed.path.split(path.delimiter)[0]).toBe(voiceBin);
         },
         { timeout: 3_000 },
       );
@@ -313,7 +349,7 @@ setInterval(() => {}, 60_000);
       await stopNativeProcess(root, "web").catch(() => undefined);
       await stopNativeProcess(root, "postgres").catch(() => undefined);
     }
-  });
+  }, 15_000);
 
   it("restoreBaselineNativeRelease restarts selected services from .simplexai-runtime baseline while keeping postgres untouched", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "linger-restore-baseline-"));
@@ -438,5 +474,5 @@ setInterval(() => {}, 60_000);
       await stopNativeProcess(root, "node-services").catch(() => undefined);
       await stopNativeProcess(root, "postgres").catch(() => undefined);
     }
-  });
+  }, 15_000);
 });

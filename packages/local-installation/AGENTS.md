@@ -32,8 +32,10 @@ first, emits Win32 P/Invoke stubs in memory via `Reflection.Emit` instead of
 compiling C# through `Add-Type`, and reports the offending ancestor path and SID
 or sanitized exception/worker diagnostics (never raw stderr prose). A refusal leaves the installer as its code and reason
 (`windowsPrivateRefusal`), never as its words: in the `startFailure` line on
-stdout when the installer manager cannot start, and in the `--user-keys`
-outcome. The Desktop setup page branches on `UNSAFE_PARENT_ACCESS` to say where
+stdout when the installer manager cannot start, in the `--user-keys` outcome,
+and in the `--inspect` failure outcome (`inspectSetup` propagates the
+`WINDOWS_PRIVATE_PATH_UNSAFE` refusal instead of wrapping it as
+`LOCALMODELS_SETUP_UNAVAILABLE`). The Desktop setup page branches on `UNSAFE_PARENT_ACCESS` to say where
 to install instead. Repair skips propagation when the protected DACL already
 grants inheritable FullControl to the owner and SYSTEM on a directory, or
 FullControl to both on a file. Private paths with partial rights still receive
@@ -125,6 +127,18 @@ still up, so its graceful shutdown requeues in-flight Agent Runs.
 
 `inspectSetup` keeps tool downloads and state in `home`; `targetHome`, when
 provided, selects the installation paths to inspect independently of that cache.
+During setup (`inspectSetup`), runtime preparation (`installNativeRuntime`,
+`prepareRuntime`), and runtime sign-in checks (`inspectRuntime`), CLI Runtime
+discovery, minimum-version verification, and authentication status are owned by
+the Go `local-daemon` via `linger-computer-daemon probe-runtimes --json`
+(`daemon-runtime-probe.ts`, locating the binary through explicit
+`daemonExecutable`, `LINGER_COMPUTER_DAEMON`, or `PATH`), while `localmodels`
+owns hardware/memory evaluation, local-model stack admission/lifecycle, and
+managed harness installation and profile descriptors. When no daemon binary is
+available, those entrypoints fall back cleanly to `localmodels` `harness`
+status. `inspectRuntimeDescriptors` (used by `managedRuntimeEnvironment`,
+`readManagedModel`, and Computer enrollment bindings) reads `localmodels`
+descriptors only and never probes `local-daemon`.
 
 The home is `LINGER_HOME`, else `~/.simplexai` (`home.ts`). Installs from
 before the product was renamed Linger convert once in
@@ -242,7 +256,8 @@ The local source is set only by a start whose request chose local models
 (`setupChoice` or a plan approval); a restart or version upgrade from the saved
 choice keeps a source the person switched to on the Models page (leaving the
 local model stack stopped while `model-source.json` names `byok` or
-`subscription`).
+`subscription`, omitting `--main-plan` from `prepareFoundationServices`, and
+keeping the active BYOK or subscription runtime for `prepareModelGateway`).
 The installer reads `model-source.json` (`readByokEnvironment`) but never
 writes it. When a deployed local-model stack's binding reports a stopped
 service or gateway (`deployment-unavailable` or `gateway-unavailable`) and its

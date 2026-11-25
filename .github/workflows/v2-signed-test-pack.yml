@@ -346,6 +346,7 @@ jobs:
           fi
 
           echo "==> 4/4 Cross-compiling TeamHub & Computer Daemon for darwin-arm64, win32-x64, linux-x64"
+          COMPUTER_VERSION=$(node -p 'require("./apps/computer/package.json").version')
           ver_backend=$(node --input-type=module -e 'import {deriveStepVersions} from "./apps/desktop/scripts/build-v2-test-upgrade-packs.mjs"; console.log(deriveStepVersions(process.argv[1])["step-02-backend"])' "$BASE_VERSION")
           ver_faulty=$(node --input-type=module -e 'import {deriveStepVersions} from "./apps/desktop/scripts/build-v2-test-upgrade-packs.mjs"; console.log(deriveStepVersions(process.argv[1])["step-03-rollback-faulty"])' "$BASE_VERSION")
 
@@ -409,11 +410,11 @@ jobs:
               cd apps/computer/local-daemon
               CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOFLAGS="-buildvcs=false" \
                 go build -trimpath \
-                -ldflags "-s -w -X github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport.ReleaseVersion=${BASE_VERSION}" \
+                -ldflags "-s -w -X github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport.ReleaseVersion=${COMPUTER_VERSION}" \
                 -o "$stage/daemon-v0/$target/linger-computer-daemon${ext}" ./cmd/linger-computer-daemon
               CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOFLAGS="-buildvcs=false" \
                 go build -trimpath \
-                -ldflags "-s -w -X github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport.ReleaseVersion=${ver_backend}" \
+                -ldflags "-s -w -buildid=linger-v2-${ver_backend}/${target}/linger-computer-daemon -X github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport.ReleaseVersion=${COMPUTER_VERSION}" \
                 -o "$stage/daemon-v2/$target/linger-computer-daemon${ext}" ./cmd/linger-computer-daemon
             )
           done

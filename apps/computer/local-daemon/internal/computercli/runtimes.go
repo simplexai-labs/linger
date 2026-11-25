@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/computerconfig"
@@ -58,21 +57,17 @@ func checkRuntime(ctx context.Context, runtimeType string, request runtimeReques
 }
 
 func requestRuntimeChecks(ctx context.Context, types []string, request runtimeRequest) ([]runtimeCheck, error) {
-	// LINGER_<TYPE>_PATH selects a Runtime that no configured path names. The
-	// Runtime itself never receives these variables.
-	selected := map[string]string{}
-	for _, runtimeType := range runtimeTypes {
-		value := request.configuredPaths[runtimeType]
-		if value == "" {
-			value = strings.TrimSpace(selectedRuntimePath(request.environment, runtimeType))
-		}
-		if value != "" {
-			selected[runtimeType] = value
-		}
-	}
-	options := provider.DiscoveryOptions{ConfiguredPaths: selected, Environment: computerconfig.RuntimeEnvironment(request.environment, "")}
+	var selectedRuntimes []string
 	if len(types) < len(runtimeTypes) {
-		options.Runtimes = types
+		selectedRuntimes = types
+	}
+	options, err := computerconfig.RuntimeDiscoveryOptions(computerconfig.RuntimeDiscoveryRequest{
+		ConfiguredPaths: request.configuredPaths,
+		Environment:     request.environment,
+		Runtimes:        selectedRuntimes,
+	})
+	if err != nil {
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -81,7 +76,6 @@ func requestRuntimeChecks(ctx context.Context, types []string, request runtimeRe
 	if request.live {
 		discovered, live = provider.DiscoverLive(ctx, options, 75*time.Second)
 	} else {
-		var err error
 		if discovered, err = provider.Discover(ctx, options); err != nil {
 			return nil, err
 		}
@@ -117,17 +111,4 @@ func requestRuntimeChecks(ctx context.Context, types []string, request runtimeRe
 		checks = append(checks, check)
 	}
 	return checks, nil
-}
-
-// selectedRuntimePath is the executable LINGER_<TYPE>_PATH selects.
-func selectedRuntimePath(environment map[string]string, runtimeType string) string {
-	switch runtimeType {
-	case "codex":
-		return environment["LINGER_CODEX_PATH"]
-	case "claude":
-		return environment["LINGER_CLAUDE_PATH"]
-	case "pi":
-		return environment["LINGER_PI_PATH"]
-	}
-	return ""
 }

@@ -210,7 +210,7 @@ async function main(): Promise<void> {
     daemonDirectory,
     daemonExecutable: activeDaemonExecutable,
     version: VERSION,
-    env: installerEnv(loginShell),
+    inspectEnv: inspectEnv(loginShell),
     macosVersion: () => process.getSystemVersion(),
     installerDirectory: path.join(here, "../installer"),
     ...(__SOURCE_ARCHIVE__ ? { sourceArchive: __SOURCE_ARCHIVE__ } : {}),
@@ -838,9 +838,11 @@ async function resolveLoginShell(
   return login;
 }
 
-// The user's terminal environment for the installer and setup inspection,
+// The user's terminal environment for read-only setup inspection (--inspect),
 // keeping LINGER_* controls while adding the login shell's PATH and profile.
-async function installerEnv(
+// Never forwarded to --resume, BYOK checks, or the serving installer that
+// starts local services.
+async function inspectEnv(
   loginShell: Promise<Record<string, string> | undefined>,
 ): Promise<Record<string, string>> {
   const login = await loginShell;

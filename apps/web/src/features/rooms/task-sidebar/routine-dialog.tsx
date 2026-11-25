@@ -285,7 +285,7 @@ export function RoutineDialog({
           </label>
         ) : null}
         {!agentScoped && (mentionOptions.length > 0 || mention) ? (
-          <label className="block text-xs font-medium text-foreground">
+          <div className="block text-xs font-medium text-foreground">
             {t(m.mention)}
             <Select
               aria-label={t(m.mention)}
@@ -305,7 +305,7 @@ export function RoutineDialog({
                 <SelectItem value={mention}>{t(m.currentAgent)}</SelectItem>
               ) : null}
             </Select>
-          </label>
+          </div>
         ) : null}
         {error ? (
           <p className="text-xs text-destructive" role="alert">
