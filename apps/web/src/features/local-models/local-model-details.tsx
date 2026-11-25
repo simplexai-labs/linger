@@ -28,10 +28,12 @@ import {
 import {
   capabilityCopy,
   concurrencyCopy,
+  degradedDetailCopy,
   engineBadgeCopy,
   engineHintCopy,
   modelErrorCopy,
   modelNoteCopy,
+  pressureWarningCopy,
   unavailableCopy,
 } from "./local-models-copy";
 import { localModelsMessages as m } from "./local-models.messages";
@@ -282,7 +284,9 @@ export function ModelFacts({
   hasPrimaryAssignAction = false,
   isLocalDesktop = false,
   onAssignAgent,
+  onForceLoad,
   onRecheck,
+  onRetryLoad,
   onUpdateDriver,
   rechecking = false,
   view,
@@ -295,7 +299,9 @@ export function ModelFacts({
   hasPrimaryAssignAction?: boolean;
   isLocalDesktop?: boolean;
   onAssignAgent?: (agent: AssignableLocalModelAgent) => void;
+  onForceLoad?: () => void;
   onRecheck?: () => void;
+  onRetryLoad?: () => void;
   onUpdateDriver?: () => void;
   rechecking?: boolean;
   view: LocalModelsView;
@@ -386,6 +392,14 @@ export function ModelFacts({
   const hasRuntimeLinks = Boolean(
     onComputer || sourceUrl || model.endpoint || hasFooterTags,
   );
+  const degradedDetail =
+    status === "loaded" ? degradedDetailCopy(model, t) : undefined;
+  const pressureWarning =
+    status === "loaded"
+      ? pressureWarningCopy(model.memory_pressure_warning, t)
+      : undefined;
+  const loadNoRoomError =
+    model.error?.code === "LOAD_NO_ROOM" ? model.error : undefined;
 
   return (
     <div className="space-y-4">
@@ -420,6 +434,39 @@ export function ModelFacts({
                 </span>
                 <span>{modelErrorCopy(model.error, t)}</span>
               </p>
+            ) : null}
+            {loadNoRoomError &&
+            !disabled &&
+            (onRecheck ||
+              onRetryLoad ||
+              (loadNoRoomError.can_force && onForceLoad)) ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {onRecheck ? (
+                  <Button
+                    loading={rechecking}
+                    onClick={onRecheck}
+                    size="compact"
+                    tone="secondary"
+                  >
+                    {t(m.recheckMemory)}
+                  </Button>
+                ) : null}
+                {onRetryLoad ? (
+                  <Button onClick={onRetryLoad} size="compact" tone="secondary">
+                    {t(commonMessages.retry)}
+                  </Button>
+                ) : null}
+                {loadNoRoomError.can_force === true && onForceLoad ? (
+                  <Button
+                    onClick={onForceLoad}
+                    size="compact"
+                    title={t(m.loadAnywayWarning)}
+                    tone="ghost"
+                  >
+                    {t(m.actionLoadAnyway)}
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
             {status === "unavailable" ? (
               <div className="space-y-2">
@@ -478,6 +525,16 @@ export function ModelFacts({
           <p className="min-w-0 flex-1">
             {modelNoteCopy(model.note.code, placeName(view, model.pool, t), t)}
           </p>
+        </div>
+      ) : null}
+      {degradedDetail ? (
+        <div className="my-1.5">
+          <FormFeedback tone="info">{degradedDetail}</FormFeedback>
+        </div>
+      ) : null}
+      {pressureWarning ? (
+        <div className="my-1.5">
+          <FormFeedback tone="warning">{pressureWarning.detail}</FormFeedback>
         </div>
       ) : null}
       {standbyUsedNote ? (

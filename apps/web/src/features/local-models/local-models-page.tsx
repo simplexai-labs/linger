@@ -75,6 +75,7 @@ import {
   debugBannerCopy,
   hostBlockerCopy,
   libraryUnavailableCopy,
+  loadNoRoomRefusalCopy,
   memoryGuidanceCopy,
   modelSourceReadErrorCopy,
 } from "./local-models-copy";
@@ -103,8 +104,11 @@ import {
   memorySegments,
   memorySummary,
   modelEntries,
+  parseLocalModelRefusalDetails,
   poolFreeBytes,
   poolOf,
+  requiredLoadBytes,
+  type LocalModelRefusalDetails,
   type ModelCardGroup,
   type ModelEntry,
   type ModelStatus,
@@ -1101,6 +1105,7 @@ function Library({
   const [failure, setFailure] = useState<{
     code?: string;
     modelId: string;
+    refusal?: LocalModelRefusalDetails;
   } | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [pendingSwitch, setPendingSwitch] = useState<{
@@ -1185,6 +1190,10 @@ function Library({
       setFailure({
         code: error instanceof TeamHubError ? error.code : undefined,
         modelId: input.modelId,
+        refusal:
+          error instanceof TeamHubError
+            ? parseLocalModelRefusalDetails(error.details)
+            : undefined,
       });
       setPendingSwitch((current) =>
         current?.modelId === input.modelId ? null : current,
@@ -1458,7 +1467,7 @@ function Library({
               freeBytes: poolFreeBytes(dialogPool),
               kept: [],
               loaded: [],
-              needBytes: dialogEntry.model.memory_bytes,
+              needBytes: requiredLoadBytes(dialogEntry.model),
               pool: dialogPool,
             }
           : null))
@@ -1612,6 +1621,7 @@ function Library({
         }
         onCancel={() => act({ action: "cancel", modelId })}
         onDownload={() => act({ action: "download", modelId })}
+        onForceLoad={() => act({ action: "load", force: true, modelId })}
         onLoad={() => load(entry)}
         onRecheck={!offline && !readOnly ? onRefresh : undefined}
         onRemove={() => setDialog({ kind: "remove", modelId })}
@@ -1703,12 +1713,54 @@ function Library({
           {failure ? (
             <div className="mt-6">
               <FormFeedback tone="danger">
-                {failedEntry
-                  ? t(m.modelFailure, {
-                      name: failedEntry.model.name,
-                      reason: actionErrorCopy(failure.code, t),
-                    })
-                  : actionErrorCopy(failure.code, t)}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    {(() => {
+                      const reason =
+                        failure.code === "LOCAL_MODEL_NO_ROOM"
+                          ? loadNoRoomRefusalCopy(failure.refusal, t)
+                          : actionErrorCopy(failure.code, t);
+                      return failedEntry
+                        ? t(m.modelFailure, {
+                            name: failedEntry.model.name,
+                            reason,
+                          })
+                        : reason;
+                    })()}
+                  </span>
+                  {failure.code === "LOCAL_MODEL_NO_ROOM" &&
+                  failedEntry &&
+                  !offline &&
+                  !readOnly ? (
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <Button
+                        disabled={busy(failure.modelId)}
+                        onClick={() => load(failedEntry)}
+                        size="compact"
+                        tone="secondary"
+                      >
+                        {t(commonMessages.retry)}
+                      </Button>
+                      {failure.refusal?.canForce === true ? (
+                        <Button
+                          disabled={busy(failure.modelId)}
+                          onClick={() =>
+                            act({
+                              action: "load",
+                              force: true,
+                              modelId: failure.modelId,
+                            })
+                          }
+                          size="compact"
+                          title={t(m.loadAnywayWarning)}
+                          tone="ghost"
+                        >
+                          {t(m.actionLoadAnyway)}
+                        </Button>
+                      ) : null}
+                    </span>
+                  ) : null}
+                </div>
               </FormFeedback>
             </div>
           ) : null}
@@ -2017,6 +2069,20 @@ function Library({
             );
             act({
               action: "load",
+              modelId: dialogEntry.model.id,
+              unloadFirst,
+            });
+          }}
+          onForceLoad={(unloadFirst, switchAgentIds) => {
+            completedSwitchKeyRef.current = null;
+            setPendingSwitch(
+              canSwitchAgents && switchAgentIds.length
+                ? { agentIds: switchAgentIds, modelId: dialogEntry.model.id }
+                : null,
+            );
+            act({
+              action: "load",
+              force: true,
               modelId: dialogEntry.model.id,
               unloadFirst,
             });

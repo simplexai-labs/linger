@@ -6146,4 +6146,184 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     await findModels();
     expect(screen.queryByText(modelsDir)).not.toBeInTheDocument();
   });
+
+  it("shows degraded posture pill, tight memory indicator, and details banners", async () => {
+    const model = localModel({
+      degraded: true,
+      degradation_reason: "reduced_context",
+      effective_posture: { context_tokens: 32_768, slots: 1 },
+      fit: "unified",
+      id: "qwen3-8b:Q4_K_M",
+      memory_bytes: gb(8),
+      memory_pressure_warning: {
+        budget_bytes: gb(12),
+        free_bytes: gb(1.5),
+        level: "soft",
+        pool: "unified",
+      },
+      minimum_memory_bytes: gb(5),
+      name: "Qwen3 8B",
+      pool: "unified",
+      requested_posture: { context_tokens: 65_536, slots: 2 },
+      state: "loaded",
+    });
+    const fixture = setup([
+      macView({
+        models: [modelView(model)],
+        pools: [
+          memoryPool("unified", 16, [
+            { gb: 8, id: model.id, name: model.name },
+          ]),
+        ],
+      }),
+    ]);
+    await renderPage(fixture);
+    await findModels();
+
+    const row = card("Qwen3 8B");
+    expect(
+      within(row).getByText("Low-memory mode · 1 slot · 32K"),
+    ).toBeVisible();
+    expect(within(row).getByText("Tight memory")).toBeVisible();
+
+    fireEvent.click(within(row).getByRole("button", { name: "Qwen3 8B" }));
+    const details = screen.getByRole("region", { name: "Qwen3 8B details" });
+    expect(details).toHaveTextContent(
+      "Running in low-memory mode (1 slot · 32K instead of 2 slots · 64K) to fit current memory.",
+    );
+    expect(details).toHaveTextContent(
+      "Loaded under tight memory — closing unused apps improves responsiveness.",
+    );
+  });
+
+  it("shows LOAD_NO_ROOM shortfall and Load Anyway only when can_force is true", async () => {
+    const forceable = localModel({
+      error: {
+        can_force: true,
+        code: "LOAD_NO_ROOM",
+        free_bytes: gb(6),
+        need_bytes: gb(10),
+        pool: "unified",
+        shortfall_bytes: gb(4),
+      },
+      fit: "unified",
+      id: "forceable:Q4",
+      memory_bytes: gb(10),
+      minimum_memory_bytes: gb(10),
+      name: "Forceable 14B",
+      pool: "unified",
+      state: "failed",
+    });
+    const unforceable = localModel({
+      error: {
+        can_force: false,
+        code: "LOAD_NO_ROOM",
+        free_bytes: gb(2),
+        need_bytes: gb(10),
+        pool: "gpu:0",
+        shortfall_bytes: gb(8),
+      },
+      fit: "gpu",
+      id: "unforceable:Q4",
+      memory_bytes: gb(10),
+      minimum_memory_bytes: gb(10),
+      name: "Unforceable 14B",
+      pool: "gpu:0",
+      state: "failed",
+    });
+    const fixture = setup([
+      macView({
+        models: [modelView(forceable), modelView(unforceable)],
+        pools: [{ ...memoryPool("unified", 16), used_bytes: gb(10) }],
+      }),
+    ]);
+    await renderPage(fixture);
+    await findModels();
+
+    const forceRow = card("Forceable 14B");
+    expect(forceRow).toHaveTextContent(
+      "Couldn't load · needs 4 GB more free memory",
+    );
+    const forceButton = within(forceRow).getByRole("button", {
+      name: "Load Forceable 14B anyway",
+    });
+    expect(forceButton).toBeVisible();
+
+    const unforceRow = card("Unforceable 14B");
+    expect(
+      within(unforceRow).queryByRole("button", {
+        name: "Load Unforceable 14B anyway",
+      }),
+    ).toBeNull();
+
+    fireEvent.click(forceButton);
+    await waitFor(() =>
+      expect(fixture.actions).toContainEqual({
+        body: { action: "load", force: true },
+        computerId: "computer-mac",
+        modelId: "forceable:Q4",
+      }),
+    );
+  });
+
+  it("lets elastic models load when minimum_memory_bytes fits and offers Load Anyway in Make Room", async () => {
+    const elastic = localModel({
+      fit: "unified",
+      id: "elastic:Q4",
+      memory_bytes: gb(14),
+      minimum_memory_bytes: gb(6),
+      name: "Elastic 14B",
+      pool: "unified",
+      state: "idle",
+    });
+    const tight = localModel({
+      fit: "unified",
+      id: "tight:Q4",
+      memory_bytes: gb(14),
+      minimum_memory_bytes: gb(10),
+      name: "Tight 14B",
+      pool: "unified",
+      state: "idle",
+    });
+    const fixture = setup([
+      macView({
+        models: [modelView(elastic), modelView(tight)],
+        // 8 GB free out of 16 GB unified memory: fits elastic (6 GB min), short for tight (10 GB min).
+        pools: [{ ...memoryPool("unified", 16), used_bytes: gb(8) }],
+      }),
+    ]);
+    await renderPage(fixture);
+    await findModels();
+
+    // Elastic model loads directly without Make Room modal.
+    fireEvent.click(screen.getByRole("button", { name: "Load Elastic 14B" }));
+    await waitFor(() =>
+      expect(fixture.actions).toContainEqual({
+        body: { action: "load" },
+        computerId: "computer-mac",
+        modelId: "elastic:Q4",
+      }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // Tight model opens Make Room with exact shortfall and secondary Load Anyway escape hatch.
+    fireEvent.click(screen.getByRole("button", { name: "Load Tight 14B" }));
+    const dialog = screen.getByRole("dialog", { name: "Make room to load" });
+    expect(dialog).toHaveTextContent(
+      "Tight 14B needs 10 GB on Unified memory; 8 GB is free.",
+    );
+    expect(dialog).toHaveTextContent(
+      "Forcing a load overrides the memory safety guard and may cause heavy system swap or slowdown.",
+    );
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Load Anyway" }),
+    );
+    await waitFor(() =>
+      expect(fixture.actions).toContainEqual({
+        body: { action: "load", force: true },
+        computerId: "computer-mac",
+        modelId: "tight:Q4",
+      }),
+    );
+  });
 });

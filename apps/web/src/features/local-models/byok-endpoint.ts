@@ -11,6 +11,7 @@ import type { components } from "@linger/wire-contracts/teamhub-public/types";
 import type { Translate } from "@/i18n/language";
 
 import { localModelsMessages as m } from "./local-models.messages";
+import { contextThousands } from "./local-models-rules";
 import type {
   ModelSourceRuntime,
   ModelSourceStatus,
@@ -151,7 +152,8 @@ export function parseByokFullUrl(
 
 /** A context window as the BYOK form shows it. */
 export function byokContextLabel(tokens: number, t: Translate) {
-  return tokens < 1024
+  const thousands = contextThousands(tokens);
+  return thousands === undefined
     ? t(m.byokContextTokens, { tokens })
-    : t(m.byokContextKilo, { thousands: Math.round(tokens / 1024) });
+    : t(m.byokContextKilo, { thousands });
 }

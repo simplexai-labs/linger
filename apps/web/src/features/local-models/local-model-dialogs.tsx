@@ -60,6 +60,7 @@ export function MakeRoomDialog({
   entry,
   onClose,
   onConfirm,
+  onForceLoad,
   onRecheck,
   rechecking = false,
   view,
@@ -71,6 +72,7 @@ export function MakeRoomDialog({
   entry: ModelEntry;
   onClose: () => void;
   onConfirm: (unloadIds: string[], switchAgentIds: string[]) => void;
+  onForceLoad?: (unloadIds: string[], switchAgentIds: string[]) => void;
   onRecheck?: () => void;
   rechecking?: boolean;
   view: LocalModelsView;
@@ -138,6 +140,19 @@ export function MakeRoomDialog({
   );
   const canSwitchOnLoad =
     Boolean(entry.model.pi_model) && affectedAssignable.length > 0;
+  const allowForceLoad =
+    !roomFreeNow &&
+    !enough &&
+    Boolean(onForceLoad) &&
+    (check.canForce === true ||
+      entry.model.error?.can_force === true ||
+      (check.canForce !== false &&
+        entry.model.error?.can_force !== false &&
+        unifiedFitsHardware));
+  const switchAgentIds =
+    canSwitchOnLoad && switchAgents
+      ? affectedAssignable.map((agent) => agent.actorId)
+      : [];
 
   return (
     <ModalDialog
@@ -159,16 +174,18 @@ export function MakeRoomDialog({
             </Button>
           ) : null}
           <Button onClick={onClose}>{t(commonMessages.cancel)}</Button>
+          {allowForceLoad && onForceLoad ? (
+            <Button
+              disabled={disabled}
+              onClick={() => onForceLoad(effectiveSelected, switchAgentIds)}
+              tone="secondary"
+            >
+              {t(m.actionLoadAnyway)}
+            </Button>
+          ) : null}
           <Button
             disabled={disabled || !enough}
-            onClick={() =>
-              onConfirm(
-                effectiveSelected,
-                canSwitchOnLoad && switchAgents
-                  ? affectedAssignable.map((agent) => agent.actorId)
-                  : [],
-              )
-            }
+            onClick={() => onConfirm(effectiveSelected, switchAgentIds)}
             tone="primary"
           >
             {t(effectiveSelected.length ? m.unloadAndLoad : m.actionLoad)}
@@ -301,6 +318,9 @@ export function MakeRoomDialog({
               size: formatGigabytes(remainingShortfallBytes, t),
             })}
           </FormFeedback>
+        ) : null}
+        {allowForceLoad ? (
+          <FormFeedback tone="warning">{t(m.loadAnywayWarning)}</FormFeedback>
         ) : null}
         {affected.length ? (
           <FormFeedback tone="info">
