@@ -310,6 +310,9 @@ func (op *codexOperation) finish(ctx context.Context, failure codexFailure) Outc
 	out.Diagnostics, out.FailureCode = op.turnDiag, op.failureCode
 	op.mu.Unlock()
 	recordTiming(op.logger, time.Now(), timingCodexCleanupComplete, "thread_id", out.SessionID, "turn_id", out.TurnID, "code", code)
+	if out.Status != statusCompleted {
+		out.PublicDetail = out.Error
+	}
 	if failure.process {
 		out.Error = withStderr(out.Error, "codex", proc.stderr.Tail())
 		if diagnostics := proc.exitDiagnostics(); !diagnostics.empty() {

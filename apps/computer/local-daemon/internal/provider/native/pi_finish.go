@@ -212,6 +212,9 @@ func (t *piTurn) finish(began time.Time, status, failure string, interrupted boo
 
 func (t *piTurn) outcomeFor(began time.Time, status, failure string) Outcome {
 	outcome := Outcome{Status: status, Error: failure, SessionID: t.proc.sessionID, TurnID: t.id}
+	if status != statusCompleted {
+		outcome.PublicDetail = failure
+	}
 	t.mu.Lock()
 	outcome.Output = t.output
 	outcome.Usage, outcome.LastUsage = maps.Clone(t.usage), maps.Clone(t.lastUsage)

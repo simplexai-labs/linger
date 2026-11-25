@@ -143,6 +143,7 @@ type Result struct {
 	Status             string
 	Output             string
 	Error              string
+	PublicDetail       string
 	SessionID          string
 	Usage              map[string]native.TokenCount
 	TurnID             string
@@ -765,6 +766,7 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 			Status:             providerResult.Status,
 			Output:             providerResult.Output,
 			Error:              providerResult.Error,
+			PublicDetail:       providerResult.PublicDetail,
 			SessionID:          providerResult.SessionID,
 			Usage:              providerResult.Usage,
 			LastUsage:          providerResult.LastUsage,

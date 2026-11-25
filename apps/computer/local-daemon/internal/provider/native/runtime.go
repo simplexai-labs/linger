@@ -179,14 +179,17 @@ type TokenCount struct {
 }
 
 type Outcome struct {
-	Parked      bool
-	Status      string
-	Output      string
-	Error       string
-	SessionID   string
-	TurnID      string
-	ElapsedMs   int64
-	Diagnostics RuntimeFailureDiagnostics
+	Parked bool
+	Status string
+	Output string
+	Error  string
+	// PublicDetail carries redacted-eligible, public-safe failure text set
+	// only from structured provider/runtime notices (never CLI stderr).
+	PublicDetail string
+	SessionID    string
+	TurnID       string
+	ElapsedMs    int64
+	Diagnostics  RuntimeFailureDiagnostics
 	// FailureCode is a public failure code set only from a runtime-specific
 	// structured signal; empty leaves classification to Diagnostics.
 	FailureCode     string

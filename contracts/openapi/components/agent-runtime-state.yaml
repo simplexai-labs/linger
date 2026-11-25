@@ -1161,8 +1161,9 @@ components:
       additionalProperties: false
       required: [code]
       description: >-
-        Public classified failure; contains no native error text, paths, credentials, or task input.
+        Public classified failure; contains no credentials, raw secrets, or task input.
         Each code is set where the failure is observed, from structured signals only.
+        detail is an optional redacted, single-line diagnostic summary for Activity display.
         model_unavailable means the model service refused the selected model for the
         Runtime's account, so the Agent needs another model or another sign-in.
         model_not_offered means the Agent's Computer does not offer the selected model for
@@ -1236,6 +1237,13 @@ components:
           type: string
           maxLength: 80
           pattern: '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$'
+        detail:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: >-
+            Optional redacted, single-line diagnostic detail explaining why the Run failed,
+            for display in the Activity log. Must contain no credentials or control characters.
     AgentRuntimeStoppedStatusChangedEvent:
       type: object
       additionalProperties: false

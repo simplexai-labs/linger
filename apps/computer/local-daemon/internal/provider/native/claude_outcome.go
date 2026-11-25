@@ -113,6 +113,9 @@ func (t *claudeTurn) compute(end claudeEnding) Outcome {
 	if out.ResumeRefused || (t.spec.ResumeRequired && out.Status != statusCompleted && t.observedSession != t.spec.ResumeID) {
 		out.SessionID = ""
 	}
+	if out.Status != statusCompleted {
+		out.PublicDetail = out.Error
+	}
 	if out.Error != "" {
 		out.Error = withStderr(out.Error, "claude", tail)
 	}

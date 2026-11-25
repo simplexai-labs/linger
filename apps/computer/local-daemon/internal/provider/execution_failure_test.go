@@ -75,3 +75,22 @@ func TestExecutionFailureVersionAcceptsEachRuntimesOwnDecoration(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatFailureDetailRedactsAndBounds(t *testing.T) {
+	status := func(code int) *int { return &code }
+	if got := FormatFailureDetail("\n\u26a0 FAILED_PRECONDITION (code 400): User location is not supported for the API use.\n", native.RuntimeFailureDiagnostics{}); got != "\u26a0 FAILED_PRECONDITION (code 400): User location is not supported for the API use." {
+		t.Fatalf("antigravity detail=%q", got)
+	}
+	redacted := FormatFailureDetail("request failed at /Users/alice/work/app.go: Authorization: Bearer sk-1234567890abcdefghijklmnop\nnext line", native.RuntimeFailureDiagnostics{StatusCode: status(401), Code: "unauthorized", ExitCode: status(0)})
+	if strings.Contains(redacted, "sk-1234567890") || strings.Contains(redacted, "/Users/alice/") || strings.Contains(redacted, "exit code 0") || strings.Contains(redacted, "\n") || !strings.Contains(redacted, "~/work/app.go") || !strings.Contains(redacted, "HTTP 401") || !strings.Contains(redacted, "unauthorized") {
+		t.Fatalf("redacted detail=%q", redacted)
+	}
+	diagOnly := FormatFailureDetail("", native.RuntimeFailureDiagnostics{Code: "httpConnectionFailed", StatusCode: status(429), ExitCode: status(3), Signal: "SIGSEGV"})
+	if diagOnly != "HTTP 429, httpConnectionFailed, signal SIGSEGV, exit code 3" {
+		t.Fatalf("diagOnly=%q", diagOnly)
+	}
+	bounded := FormatFailureDetail(strings.Repeat("x", 700), native.RuntimeFailureDiagnostics{})
+	if len([]rune(bounded)) > maxFailureDetailRunes || !strings.HasSuffix(bounded, "...") {
+		t.Fatalf("bounded len=%d val=%q", len([]rune(bounded)), bounded)
+	}
+}
