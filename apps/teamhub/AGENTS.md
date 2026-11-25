@@ -105,11 +105,11 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
 
 - `another_me_background_failures` counts an Another Me's background model
   calls that failed in a row, as the Agent Service reports them; a completed
-  call deletes the row. `GET /v0/tenants/{tenantId}/another-me` carries
-  `background_failure` from the third failure on. The `another-me` hint goes
-  out when it appears, when its reason changes and when it clears; a higher
-  count alone shows on the next fetch. Reason codes TeamHub does not know are
-  stored as `unknown`.
+  call or a change to the Another Me's Computer, Runtime, or model deletes the
+  row. `GET /v0/tenants/{tenantId}/another-me` carries `background_failure`
+  from the third failure on. The `another-me` hint goes out when it appears,
+  when its reason changes and when it clears; a higher count alone shows on the
+  next fetch. Reason codes TeamHub does not know are stored as `unknown`.
 - The Human's default Another Me Agent is named `Linger`. Changing the Human's
   name updates the delegate description, never the Agent's display name.
   A forward migration renames generated names; custom Agent names stay.

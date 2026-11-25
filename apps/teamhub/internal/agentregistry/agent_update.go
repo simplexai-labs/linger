@@ -128,6 +128,14 @@ func (s *Service) ExecuteTenantAgentUpdate(
 	if updated != 1 {
 		return httpapi.TenantAgent{}, ErrAgentConfigurationConflict
 	}
+	if shouldClearAnotherMeBackgroundFailures(
+		row.AgentType, row.ComputerID.String, row.LocalRuntimeType.String, row.RuntimeModel,
+		*placement.ComputerId, string(*placement.RuntimeType), runtime.Model,
+	) {
+		if err := clearAnotherMeBackgroundFailuresTx(ctx, queries, tenantID, actorID); err != nil {
+			return httpapi.TenantAgent{}, err
+		}
+	}
 	if request.Name != nil {
 		if updated, err := queries.UpdateAgentActorDisplayName(ctx, store.UpdateAgentActorDisplayNameParams{
 			ID: actorID, TenantID: tenantID, DisplayName: *request.Name,

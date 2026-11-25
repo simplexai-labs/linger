@@ -125,4 +125,39 @@ VALUES($1,$2,'management-'||$1,'active','Background','Work safely','gpt-5','acto
 	if got := countRows(t, env, `SELECT count(*) FROM another_me_background_failures`); got != 0 {
 		t.Fatalf("background failure rows=%d after the run ended", got)
 	}
+
+	// Changing the Another Me's Runtime or model clears a stale banner;
+	// renaming it without changing its execution target keeps the banner.
+	for range 3 {
+		report(anotherMe, "failed", "runtime_unavailable")
+	}
+	if got := shown(); got == nil || got.ConsecutiveFailures != 3 {
+		t.Fatalf("before edits shown=%+v", got)
+	}
+	_ = hints()
+	status, _, body := env.request(alice, http.MethodPatch, "/v0/tenants/"+acmeTenant+"/agents/"+anotherMe,
+		map[string]any{"expected_configuration_revision": 1, "name": "Renamed Linger"}, "anotherme-rename")
+	if status != http.StatusOK {
+		t.Fatalf("rename Another Me status=%d body=%s", status, body)
+	}
+	if got := shown(); got == nil || got.ConsecutiveFailures != 3 {
+		t.Fatalf("rename cleared background failures: shown=%+v", got)
+	}
+	if got := hints()[anotherMeHint]; got != 0 {
+		t.Fatalf("rename sent %d Another Me hints, want 0", got)
+	}
+	status, _, body = env.request(alice, http.MethodPatch, "/v0/tenants/"+acmeTenant+"/agents/"+anotherMe,
+		map[string]any{"expected_configuration_revision": 2, "runtime": fixtureRuntime("gpt-5-new")}, "anotherme-runtime-switch")
+	if status != http.StatusOK {
+		t.Fatalf("update Another Me runtime status=%d body=%s", status, body)
+	}
+	if got := shown(); got != nil {
+		t.Fatalf("after runtime update shown=%+v, want nil", got)
+	}
+	if got := hints()[anotherMeHint]; got != 1 {
+		t.Fatalf("runtime update clearing banner sent %d Another Me hints, want 1", got)
+	}
+	if got := countRows(t, env, `SELECT count(*) FROM another_me_background_failures`); got != 0 {
+		t.Fatalf("background failure rows=%d after runtime update", got)
+	}
 }
