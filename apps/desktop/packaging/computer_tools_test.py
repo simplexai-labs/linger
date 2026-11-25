@@ -2,6 +2,7 @@
 
     python3 -m unittest discover -s apps/desktop/packaging -p '*_test.py'
 """
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -12,6 +13,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import threading
 import unittest
 import zipfile
 
@@ -323,7 +325,7 @@ class MacSigningTest(unittest.TestCase):
             self.assertEqual(members["./bin/ff"].linkname, "ffmpeg")
         self.assertEqual(self.mac.unsigned_archive_files(output), [])
 
-    def test_emit_outputs_notarizes_dmg_once_then_staples_app_for_update_archive(self):
+    def _emit_fixture(self):
         root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, root)
         stage = os.path.join(root, "stage")
@@ -333,7 +335,150 @@ class MacSigningTest(unittest.TestCase):
         os.makedirs(out_dir)
         with open(os.path.join(app, "Contents", "Info.plist"), "wb") as out:
             out.write(b"plist")
+        return root, stage, app, out_dir
 
+    def _stub_emit_tools(self, fake_build_dmg, fake_update_archive, fake_check_archive):
+        orig_build_dmg = self.mac.build_dmg
+        orig_update_archive = self.mac.update_archive
+        orig_check_archive = self.mac.computer_tools.check_archive
+
+        def restore():
+            self.mac.build_dmg = orig_build_dmg
+            self.mac.update_archive = orig_update_archive
+            self.mac.computer_tools.check_archive = orig_check_archive
+
+        self.addCleanup(restore)
+        self.mac.build_dmg = fake_build_dmg
+        self.mac.update_archive = fake_update_archive
+        self.mac.computer_tools.check_archive = fake_check_archive
+
+    def test_emit_outputs_notarizes_and_staples_app_before_parallel_dmg_and_update(self):
+        root, stage, app, out_dir = self._emit_fixture()
+        ticket = os.path.join(app, "Contents", "CodeResources")
+        lock = threading.Lock()
+        events = []
+
+        class FakeSigning:
+            notary_key = "notary.json"
+
+            def sign_dmg(self, dmg):
+                with lock:
+                    events.append(("sign_dmg", os.path.basename(dmg)))
+
+            def notarize(self, path):
+                with lock:
+                    events.append(("notarize", os.path.basename(path)))
+                if path == app:
+                    with open(ticket, "wb") as out:
+                        out.write(b"ticket")
+
+        def fake_build_dmg(dmg_stage, dmg_workdir, output, volume_name):
+            self.assertEqual(dmg_stage, stage)
+            self.assertEqual(dmg_workdir, root)
+            self.assertTrue(os.path.isfile(ticket))
+            self.assertGreater(os.path.getsize(ticket), 0)
+            with lock:
+                events.append(("build_dmg", os.path.basename(output)))
+            with open(output, "wb") as out:
+                out.write(b"dmg")
+
+        def fake_update_archive(target_app, output):
+            self.assertEqual(target_app, app)
+            self.assertTrue(os.path.isfile(ticket))
+            self.assertGreater(os.path.getsize(ticket), 0)
+            with lock:
+                events.append(("update_archive", os.path.basename(output)))
+            with open(output, "wb") as out:
+                out.write(b"tar.gz")
+
+        def fake_check_archive(archive_path, prefix, target):
+            self.assertEqual(prefix, "Linger.app/Contents/Resources/")
+            with lock:
+                events.append(("check_archive", os.path.basename(archive_path), target))
+
+        self._stub_emit_tools(fake_build_dmg, fake_update_archive, fake_check_archive)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.mac.emit_outputs(stage, app, root, out_dir, "1.2.3", "arm64", FakeSigning(), True)
+
+        notarize_app = events.index(("notarize", "Linger.app"))
+        build_dmg = events.index(("build_dmg", "Linger-1.2.3-arm64.dmg"))
+        sign_dmg = events.index(("sign_dmg", "Linger-1.2.3-arm64.dmg"))
+        notarize_dmg = events.index(("notarize", "Linger-1.2.3-arm64.dmg"))
+        pack_update = events.index(("update_archive", "Linger-1.2.3-arm64.app.tar.gz"))
+        check_update = events.index(("check_archive", "Linger-1.2.3-arm64.app.tar.gz", "darwin-arm64"))
+
+        self.assertLess(notarize_app, build_dmg)
+        self.assertLess(notarize_app, pack_update)
+        self.assertLess(build_dmg, sign_dmg)
+        self.assertLess(sign_dmg, notarize_dmg)
+        self.assertLess(pack_update, check_update)
+        self.assertEqual(len(events), 6)
+        self.assertTrue(os.path.isfile(os.path.join(out_dir, "Linger-1.2.3-arm64.dmg")))
+        self.assertTrue(os.path.isfile(os.path.join(out_dir, "Linger-1.2.3-arm64.app.tar.gz")))
+
+    def test_emit_outputs_fails_closed_if_notarized_app_lacks_stapled_ticket(self):
+        for label, ticket_bytes in (("missing", None), ("empty", b"")):
+            with self.subTest(ticket=label):
+                root, stage, app, out_dir = self._emit_fixture()
+                ticket = os.path.join(app, "Contents", "CodeResources")
+                events = []
+
+                class FakeSigning:
+                    notary_key = "notary.json"
+
+                    def sign_dmg(self, dmg):
+                        events.append(("sign_dmg", os.path.basename(dmg)))
+
+                    def notarize(self, path):
+                        events.append(("notarize", os.path.basename(path)))
+                        if path == app and ticket_bytes is not None:
+                            with open(ticket, "wb") as out:
+                                out.write(ticket_bytes)
+
+                def fake_build_dmg(dmg_stage, dmg_workdir, output, volume_name):
+                    events.append(("build_dmg", os.path.basename(output)))
+
+                def fake_update_archive(target_app, output):
+                    events.append(("update_archive", os.path.basename(output)))
+
+                def fake_check_archive(archive_path, prefix, target):
+                    events.append(("check_archive", os.path.basename(archive_path), target))
+
+                self._stub_emit_tools(fake_build_dmg, fake_update_archive, fake_check_archive)
+                with self.assertRaises(SystemExit) as stopped:
+                    self.mac.emit_outputs(stage, app, root, out_dir, "1.2.3", "arm64", FakeSigning(), True)
+                self.assertIn("CodeResources", str(stopped.exception))
+                self.assertEqual(events, [("notarize", "Linger.app")])
+                self.assertEqual(os.listdir(out_dir), [])
+
+    def test_emit_outputs_without_notary_key_and_without_update_archive(self):
+        # Ad-hoc local build: no notary_key and no update archive.
+        root, stage, app, out_dir = self._emit_fixture()
+        events = []
+
+        def fake_build_dmg(dmg_stage, dmg_workdir, output, volume_name):
+            events.append(("build_dmg", os.path.basename(output)))
+            with open(output, "wb") as out:
+                out.write(b"dmg")
+
+        def fake_update_archive(target_app, output):
+            events.append(("update_archive", os.path.basename(output)))
+
+        def fake_check_archive(archive_path, prefix, target):
+            events.append(("check_archive", os.path.basename(archive_path), target))
+
+        self._stub_emit_tools(fake_build_dmg, fake_update_archive, fake_check_archive)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.mac.emit_outputs(stage, app, root, out_dir, "1.2.3", "arm64",
+                                  self.mac.Signing("rcodesign"), False)
+        self.assertFalse(os.path.exists(os.path.join(app, "Contents", "CodeResources")))
+        self.assertEqual(events, [("build_dmg", "Linger-1.2.3-arm64.dmg")])
+        self.assertTrue(os.path.isfile(os.path.join(out_dir, "Linger-1.2.3-arm64.dmg")))
+        self.assertFalse(os.path.exists(os.path.join(out_dir, "Linger-1.2.3-arm64.app.tar.gz")))
+
+        # Notarized build without --update-archive still notarizes/staples Linger.app first.
+        root, stage, app, out_dir = self._emit_fixture()
+        ticket = os.path.join(app, "Contents", "CodeResources")
         events = []
 
         class FakeSigning:
@@ -344,48 +489,73 @@ class MacSigningTest(unittest.TestCase):
 
             def notarize(self, path):
                 events.append(("notarize", os.path.basename(path)))
+                if path == app:
+                    with open(ticket, "wb") as out:
+                        out.write(b"ticket")
 
-            def staple(self, path):
-                events.append(("staple", os.path.basename(path)))
-
-        orig_build_dmg = self.mac.build_dmg
-        orig_update_archive = self.mac.update_archive
-        orig_check_archive = self.mac.computer_tools.check_archive
-
-        def fake_build_dmg(dmg_stage, dmg_workdir, output, volume_name):
-            self.assertEqual(dmg_stage, stage)
-            self.assertEqual(dmg_workdir, root)
+        def fake_notarized_build_dmg(dmg_stage, dmg_workdir, output, volume_name):
+            self.assertTrue(os.path.isfile(ticket))
+            self.assertGreater(os.path.getsize(ticket), 0)
             events.append(("build_dmg", os.path.basename(output)))
             with open(output, "wb") as out:
                 out.write(b"dmg")
 
-        def fake_update_archive(target_app, output):
-            self.assertEqual(target_app, app)
-            events.append(("update_archive", os.path.basename(output)))
-            with open(output, "wb") as out:
-                out.write(b"tar.gz")
-
-        def fake_check_archive(archive_path, prefix, target):
-            events.append(("check_archive", os.path.basename(archive_path), target))
-
-        try:
-            self.mac.build_dmg = fake_build_dmg
-            self.mac.update_archive = fake_update_archive
-            self.mac.computer_tools.check_archive = fake_check_archive
-            self.mac.emit_outputs(stage, app, root, out_dir, "1.2.3", "arm64", FakeSigning(), True)
-        finally:
-            self.mac.build_dmg = orig_build_dmg
-            self.mac.update_archive = orig_update_archive
-            self.mac.computer_tools.check_archive = orig_check_archive
-
+        self._stub_emit_tools(fake_notarized_build_dmg, fake_update_archive, fake_check_archive)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.mac.emit_outputs(stage, app, root, out_dir, "1.2.3", "arm64", FakeSigning(), False)
         self.assertEqual(events, [
+            ("notarize", "Linger.app"),
             ("build_dmg", "Linger-1.2.3-arm64.dmg"),
             ("sign_dmg", "Linger-1.2.3-arm64.dmg"),
             ("notarize", "Linger-1.2.3-arm64.dmg"),
-            ("staple", "Linger.app"),
-            ("update_archive", "Linger-1.2.3-arm64.app.tar.gz"),
-            ("check_archive", "Linger-1.2.3-arm64.app.tar.gz", "darwin-arm64"),
         ])
+        self.assertTrue(os.path.isfile(os.path.join(out_dir, "Linger-1.2.3-arm64.dmg")))
+        self.assertFalse(os.path.exists(os.path.join(out_dir, "Linger-1.2.3-arm64.app.tar.gz")))
+
+    def test_signing_notarize_waits_then_staples_and_handles_failures(self):
+        calls = []
+        should_fail = False
+        orig_run = self.mac.run
+        orig_staple = self.mac.Signing.staple
+
+        def fake_run(*args, **kwargs):
+            calls.append(("run", args))
+            if should_fail:
+                raise subprocess.CalledProcessError(1, args)
+
+        def fake_staple(signing_self, path):
+            calls.append(("staple", path))
+
+        try:
+            self.mac.run = fake_run
+            self.mac.Signing.staple = fake_staple
+
+            # Without a notary key, notarize is a no-op.
+            self.mac.Signing("rcodesign").notarize("/tmp/Linger.app")
+            self.assertEqual(calls, [])
+
+            # With a notary key, submit waits without --staple, then delegates to staple().
+            signing = self.mac.Signing("rcodesign", "id.p12", "id.password", "notary.json")
+            signing.notarize("/tmp/Linger.app")
+            expected_args = (
+                "rcodesign", "notary-submit", "--api-key-file", "notary.json",
+                "--wait", "--max-wait-seconds", "3600", "/tmp/Linger.app",
+            )
+            self.assertNotIn("--staple", expected_args)
+            self.assertEqual(calls, [
+                ("run", expected_args),
+                ("staple", "/tmp/Linger.app"),
+            ])
+
+            # Failure during notary-submit propagates without stapling.
+            calls.clear()
+            should_fail = True
+            with self.assertRaises(subprocess.CalledProcessError):
+                signing.notarize("/tmp/Linger.app")
+            self.assertEqual(calls, [("run", expected_args)])
+        finally:
+            self.mac.run = orig_run
+            self.mac.Signing.staple = orig_staple
 
     def test_signing_staple_retries_transient_lookup_errors(self):
         calls = []
