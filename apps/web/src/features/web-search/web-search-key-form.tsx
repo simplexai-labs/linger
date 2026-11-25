@@ -2,14 +2,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { fieldControlClassName } from "@/components/ui/field";
+import { SecretInput } from "@/components/ui/secret-field";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubWebSearchKeyBackend } from "@/features/teamhub/teamhub-types";
 import type { Translate } from "@/i18n/language";
 import { RichMessage, useT } from "@/i18n/use-translation";
-import { cn } from "@/lib/cn";
 
 import { webSearchKeySite, webSearchQueryKey } from "./web-search-backends";
 import { webSearchMessages as m } from "./web-search.messages";
@@ -88,17 +87,16 @@ export function WebSearchKeyForm({
         </label>
       )}
       <div className="flex min-w-0 gap-2">
-        <input
+        <SecretInput
           aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
           aria-label={compact ? label : undefined}
           autoComplete="off"
-          className={cn(fieldControlClassName, "min-w-0 flex-1")}
           disabled={mutation.isPending}
+          frameClassName="min-w-0 flex-1"
           id={inputId}
           onChange={(event) => setApiKey(event.target.value)}
           spellCheck={false}
-          type="password"
           value={apiKey}
         />
         <Button

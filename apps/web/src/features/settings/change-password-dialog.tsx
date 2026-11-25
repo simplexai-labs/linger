@@ -1,15 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
-import {
-  type FormEvent,
-  type RefObject,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ModalDialog } from "@/components/ui/modal-dialog";
+import { SecretField } from "@/components/ui/secret-field";
 import { commonMessages } from "@/i18n/common.messages";
 import { useT } from "@/i18n/use-translation";
 
@@ -94,31 +88,32 @@ export function ChangePasswordDialog({
     >
       <form className="px-5 py-4" id={formId} onSubmit={handleSubmit}>
         <fieldset className="space-y-4" disabled={mutation.isPending}>
-          <PasswordField
+          <SecretField
             autoComplete="current-password"
             inputRef={currentPasswordRef}
             label={t(accountSettingsMessages.currentPassword)}
-            onChange={(value) => {
+            onChange={(event) => {
               resetFailure();
-              setCurrentPassword(value);
+              setCurrentPassword(event.target.value);
             }}
             value={currentPassword}
           />
-          <PasswordField
+          <SecretField
             autoComplete="new-password"
+            hint={t(accountSettingsMessages.newPasswordHint)}
             label={t(accountSettingsMessages.newPassword)}
-            onChange={(value) => {
+            onChange={(event) => {
               resetFailure();
-              setNewPassword(value);
+              setNewPassword(event.target.value);
             }}
             value={newPassword}
           />
-          <PasswordField
+          <SecretField
             autoComplete="new-password"
             label={t(accountSettingsMessages.confirmNewPassword)}
-            onChange={(value) => {
+            onChange={(event) => {
               resetFailure();
-              setConfirmation(value);
+              setConfirmation(event.target.value);
             }}
             value={confirmation}
           />
@@ -136,36 +131,5 @@ export function ChangePasswordDialog({
         ) : null}
       </form>
     </ModalDialog>
-  );
-}
-
-function PasswordField({
-  autoComplete,
-  inputRef,
-  label,
-  onChange,
-  value,
-}: {
-  autoComplete: "current-password" | "new-password";
-  inputRef?: RefObject<HTMLInputElement | null>;
-  label: string;
-  onChange: (value: string) => void;
-  value: string;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-foreground">
-        {label}
-      </span>
-      <input
-        aria-label={label}
-        autoComplete={autoComplete}
-        className="ui-field-control w-full disabled:cursor-not-allowed disabled:bg-app-surface-soft"
-        onChange={(event) => onChange(event.target.value)}
-        ref={inputRef}
-        type="password"
-        value={value}
-      />
-    </label>
   );
 }

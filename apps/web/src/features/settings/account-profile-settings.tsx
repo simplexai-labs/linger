@@ -8,7 +8,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { ModalDialog } from "@/components/ui/modal-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UnsavedChangesBlocker } from "@/components/ui/unsaved-changes-blocker";
 import {
   teamHubIdentityQueryKey,
   tenantActorsQueryKey,
@@ -156,12 +158,20 @@ export function AccountProfileSettings({
     );
   }
 
+  const account = accountQuery.data;
   const hasChanges =
-    bio !== accountQuery.data.bio ||
-    organization !== accountQuery.data.organization;
+    bio !== account.bio || organization !== account.organization;
+
+  function discardChanges() {
+    dirtyRef.current = false;
+    updateAccount.reset();
+    setBio(account.bio);
+    setOrganization(account.organization);
+  }
 
   return (
     <>
+      <UnsavedChangesBlocker when={hasChanges && !updateAccount.isPending} />
       <AccountProfileHero
         account={accountQuery.data}
         client={client}
@@ -179,6 +189,7 @@ export function AccountProfileSettings({
           updateAccount.reset();
           setBio(value);
         }}
+        onDiscard={discardChanges}
         onOrganizationChange={(value) => {
           dirtyRef.current = true;
           updateAccount.reset();
@@ -214,6 +225,9 @@ function PersonalInsightsPanel({
   pending: boolean;
 }) {
   const t = useT();
+  const [confirming, setConfirming] = useState<TeamHubPersonalInsight | null>(
+    null,
+  );
   return (
     <section className="rounded-2xl border border-border bg-background p-6">
       <div className="flex min-h-7 items-center justify-between gap-3">
@@ -254,7 +268,7 @@ function PersonalInsightsPanel({
                   dimension: item.dimension,
                 })}
                 disabled={deletingId === item.id}
-                onClick={() => onDelete(item.id)}
+                onClick={() => setConfirming(item)}
                 size="compactIcon"
                 title={t(accountSettingsMessages.deleteInsight)}
                 tone="ghost"
@@ -273,6 +287,40 @@ function PersonalInsightsPanel({
           ))}
         </div>
       )}
+      {confirming ? (
+        <ModalDialog
+          description={t(
+            accountSettingsMessages.deleteInsightConfirmDescription,
+            { dimension: confirming.dimension },
+          )}
+          footer={
+            <>
+              <Button onClick={() => setConfirming(null)} size="compact">
+                {t(commonMessages.cancel)}
+              </Button>
+              <Button
+                data-voice-risk="never"
+                onClick={() => {
+                  const id = confirming.id;
+                  setConfirming(null);
+                  onDelete(id);
+                }}
+                size="compact"
+                tone="danger"
+              >
+                {t(commonMessages.delete)}
+              </Button>
+            </>
+          }
+          onClose={() => setConfirming(null)}
+          size="sm"
+          title={t(accountSettingsMessages.deleteInsightConfirmTitle)}
+        >
+          <p className="px-5 py-4 text-sm text-foreground">
+            {confirming.statement}
+          </p>
+        </ModalDialog>
+      ) : null}
     </section>
   );
 }
@@ -281,6 +329,7 @@ function AccountIdentityPanel({
   bio,
   hasChanges,
   onBioChange,
+  onDiscard,
   onOrganizationChange,
   onSave,
   organization,
@@ -291,6 +340,7 @@ function AccountIdentityPanel({
   bio: string;
   hasChanges: boolean;
   onBioChange: (value: string) => void;
+  onDiscard: () => void;
   onOrganizationChange: (value: string) => void;
   onSave: () => void;
   organization: string;
@@ -356,18 +406,28 @@ function AccountIdentityPanel({
           </p>
         ) : null}
 
-        {hasChanges || savePending ? (
+        <div className="mt-5 flex flex-wrap items-center gap-2">
           <Button
-            className="mt-5"
-            disabled={savePending}
+            disabled={!hasChanges || savePending}
+            loading={savePending}
             type="submit"
             tone="primary"
           >
             {savePending
               ? t(accountSettingsMessages.saving)
-              : t(commonMessages.save)}
+              : t(accountSettingsMessages.saveChanges)}
           </Button>
-        ) : null}
+          {hasChanges && !savePending ? (
+            <Button
+              data-voice-risk="never"
+              onClick={onDiscard}
+              tone="ghost"
+              type="button"
+            >
+              {t(accountSettingsMessages.discardChanges)}
+            </Button>
+          ) : null}
+        </div>
       </form>
     </section>
   );

@@ -191,7 +191,7 @@ export function AccountProfileHero({
         ref={avatarInput}
         type="file"
         accept="image/jpeg,image/png,image/webp"
-        aria-label={t(accountSettingsMessages.profilePhotoFile)}
+        aria-hidden="true"
         className="sr-only"
         tabIndex={-1}
         onChange={(event) => {
@@ -203,7 +203,7 @@ export function AccountProfileHero({
         ref={backgroundInput}
         type="file"
         accept="image/jpeg,image/png,image/webp"
-        aria-label={t(accountSettingsMessages.profileCoverFile)}
+        aria-hidden="true"
         className="sr-only"
         tabIndex={-1}
         onChange={(event) => {

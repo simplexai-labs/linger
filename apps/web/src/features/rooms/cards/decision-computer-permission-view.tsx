@@ -32,6 +32,10 @@ import { CardActions, CardError } from "./approval-card-parts";
 import { CardBox, CardDone, type ReceiptTone } from "./card-shell";
 import { cardsMessages } from "./cards.messages";
 import type { DecisionMessageCard } from "./decision-card";
+import {
+  formatExpiryCountdown,
+  useDecisionExpiryClock,
+} from "./decision-expiry";
 import type { RoomCardDecision } from "./room-message-card-contract";
 
 type Subject = ComputerPermissionAction["subject"];
@@ -150,14 +154,16 @@ export function ComputerPermissionDecision({
   const { client } = useTeamHubRuntime();
   const queryClient = useQueryClient();
   const desktop = useDesktopComputer();
-  const [now] = useState(Date.now);
+  const pending = card.status === "pending";
+  const now = useDecisionExpiryClock(card.expires_at, pending);
+  const lapsed =
+    card.expires_at !== undefined && Date.parse(card.expires_at) <= now;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const owner = currentActorId === card.decision_owner.id;
-  const pending = card.status === "pending";
   const local =
     Boolean(computerId) && desktop?.status?.computerId === computerId;
-  const interactive = owner && pending && Boolean(computerId);
+  const interactive = owner && pending && !lapsed && Boolean(computerId);
 
   // Each read also lets TeamHub settle the card, so it polls on every page.
   const status = useQuery({
@@ -241,6 +247,9 @@ export function ComputerPermissionDecision({
     state === "granted" || state === "declined" || state === "expired"
       ? finishedCopy[state]
       : null;
+  const countdown = finished
+    ? null
+    : formatExpiryCountdown(card.expires_at, now, t);
   const subjectName = subjectLabels[subject];
   const subjectLabel =
     typeof subjectName === "string" ? subjectName : t(subjectName);
@@ -315,16 +324,39 @@ export function ComputerPermissionDecision({
               </p>
             ) : null}
             {owner && pending ? (
-              <CardActions>
-                <Button
-                  disabled={busy}
-                  onClick={() => void decline()}
-                  size="large"
-                  tone="subtle"
-                >
-                  {t(cardsMessages.dontAllow)}
-                </Button>
-              </CardActions>
+              <>
+                {countdown ? (
+                  <p className="flex items-center gap-1.5 pt-1 text-xs tabular-nums text-app-muted">
+                    <Icon className="shrink-0" icon={Clock01Icon} size={13} />
+                    <span>{countdown}</span>
+                  </p>
+                ) : null}
+                <CardActions>
+                  <Button
+                    disabled={busy}
+                    onClick={() => void decline()}
+                    size="large"
+                    tone="subtle"
+                  >
+                    {t(cardsMessages.dontAllow)}
+                  </Button>
+                </CardActions>
+              </>
+            ) : pending ? (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardDone
+                  icon={Clock01Icon}
+                  text={t(cardsMessages.waitingForDecision, {
+                    name: card.decision_owner.display_name,
+                  })}
+                  tone="muted"
+                />
+                {countdown ? (
+                  <span className="pb-0.5 text-xs tabular-nums text-app-muted">
+                    {countdown}
+                  </span>
+                ) : null}
+              </div>
             ) : null}
           </>
         )}

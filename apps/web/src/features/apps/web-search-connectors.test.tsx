@@ -225,6 +225,18 @@ describe("Web search connectors", () => {
       await within(dialog).findByRole("button", { name: "Make default" }),
     ).toBeVisible();
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove key" }));
+    const cancelRemove = within(dialog).getByRole("button", { name: "Cancel" });
+    expect(cancelRemove).toHaveFocus();
+    expect(requests).toEqual(['default {"backend":"tavily"}', "clear default"]);
+
+    fireEvent.click(cancelRemove);
+    expect(within(dialog).queryByRole("button", { name: "Cancel" })).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove key" }));
+    const confirmRemoveButtons = within(dialog).getAllByRole("button", {
+      name: "Remove key",
+    });
+    fireEvent.click(confirmRemoveButtons[confirmRemoveButtons.length - 1]!);
     expect(
       await within(dialog).findByRole("button", { name: "Save key" }),
     ).toBeVisible();
@@ -240,7 +252,7 @@ describe("Web search connectors", () => {
     ).toBeVisible();
   });
 
-  it("keeps backends with a saved key or a free tier under Connected only", async () => {
+  it("keeps only saved-key backends and built-in keyless defaults under Connected only", async () => {
     const runtime = createTestTeamHubRuntime();
     setBackends(runtime, {
       firecrawl: saved({ key_state: "rejected", status: "key_rejected" }),
@@ -255,9 +267,16 @@ describe("Web search connectors", () => {
         screen.getByRole("region", { name: "Application connections" }),
       ),
     ).toEqual(["Gmail"]);
+    // Unconnected You.com (with a Connect button) is excluded under Connected only.
+    const searchRegion = screen.getByRole("region", { name: "Web search" });
+    expect(cardNames(searchRegion)).toEqual([
+      "Tavily",
+      "Firecrawl",
+      "DuckDuckGo",
+    ]);
     expect(
-      cardNames(screen.getByRole("region", { name: "Web search" })),
-    ).toEqual(["You.com", "Tavily", "Firecrawl", "DuckDuckGo"]);
+      within(searchRegion).queryByRole("button", { name: "Connect You.com" }),
+    ).toBeNull();
   });
 
   it("explains a server that cannot store keys instead of showing a field", async () => {

@@ -3,6 +3,8 @@ import { defineMessages } from "@/i18n/messages";
 /** Settings › Profile and Settings › Security, with the dialogs they open. */
 export const accountSettingsMessages = defineMessages("accountSettings", {
   // Profile page
+  profileDescription:
+    "Photo, display name, bio, and insights used across this space. Manage external accounts in <link>Connectors</link>.",
   loadingAccountProfile: "Loading Account profile",
   loadingAccountProfileStatus: "Loading Account profile...",
 
@@ -28,6 +30,8 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
   organizationPlaceholder: "Your company or organization",
   handEditedHint: "Fields you edit won't be overwritten.",
   accountSaved: "Account saved",
+  saveChanges: "Save changes",
+  discardChanges: "Discard",
   saving: "Saving...",
 
   // Insights
@@ -36,6 +40,9 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
   noInsights: "No insights yet.",
   deleteInsight: "Delete insight",
   deleteNamedInsight: "Delete {dimension} insight",
+  deleteInsightConfirmTitle: "Delete insight?",
+  deleteInsightConfirmDescription:
+    "This permanently removes this Personal Insight ({dimension}) from your profile.",
 
   // Add profile sources dialog
   addProfileSources: "Add profile sources",
@@ -58,7 +65,7 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
 
   // Accounts pane
   loadingAccounts: "Loading accounts…",
-  profileAppsUnavailable: "Profile apps are unavailable right now.",
+  profileAppsUnavailable: "Profile connectors are unavailable right now.",
   waitingForAuthorization: "Waiting for authorization",
   backToAccounts: "Back to accounts",
   chooseProviderContent: "Choose {provider} content",
@@ -80,8 +87,8 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
   notConnected: "Not connected",
   continueAppAuthorization: "Continue {app} authorization",
   continue: "Continue",
-  openApps: "Open Apps",
-  needsAttentionAccount: "Needs attention in Apps: {account}",
+  openApps: "Open Connectors",
+  needsAttentionAccount: "Needs attention in Connectors: {account}",
 
   // Content picker of one connected account
   pickerDiscord: "Discord channels",
@@ -138,15 +145,17 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
   // Disconnect account dialog
   disconnectTitle: "Disconnect account?",
   disconnectDescription:
-    "{account}. Agent access and source cleanup stay on Apps.",
+    "{account}. Agent access and source cleanup stay on Connectors.",
   disconnect: "Disconnect",
 
   // Security page
+  securityDescription: "Manage your sign-in password and server API keys.",
   password: "Password",
   changePassword: "Change password",
   passwordChanged: "Password changed",
   currentPassword: "Current password",
   newPassword: "New password",
+  newPasswordHint: "At least 8 characters.",
   confirmNewPassword: "Confirm new password",
   passwordsDoNotMatch: "Passwords do not match.",
 

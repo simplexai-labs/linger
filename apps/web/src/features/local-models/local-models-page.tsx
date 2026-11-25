@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { FormFeedback } from "@/components/ui/form-feedback";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UnsavedChangesBlocker } from "@/components/ui/unsaved-changes-blocker";
 import { relativeTime } from "@/features/local-computer/computer-relative-time";
 import { useDesktopComputer } from "@/features/local-computer/desktop-computer";
 import { localComputersQueryOptions } from "@/features/local-computer/local-computer-queries";
@@ -63,7 +64,11 @@ import {
   isAgentUsingModel,
   usedByAgentNames,
 } from "./local-model-agents";
-import { FeaturedModelSpotlight } from "./featured-model-spotlight";
+import {
+  FEATURED_SPOTLIGHT_MODEL_ID,
+  FeaturedModelSpotlight,
+  isFeaturedSpotlightDismissed,
+} from "./featured-model-spotlight";
 import { AdvancedDialog } from "./local-model-details";
 import { ModelRow } from "./local-model-row";
 import {
@@ -116,7 +121,7 @@ import {
   type ModelEntry,
   type ModelStatus,
 } from "./local-models-rules";
-import { ByokPanel } from "./byok-panel";
+import { type ByokDraft, ByokPanel, isByokDraftDirty } from "./byok-panel";
 import {
   activeSourceLabel,
   ModelSourceTabs,
@@ -592,6 +597,20 @@ function ComputerModels({
     tenantId,
   });
   const switching = switcher.pending !== undefined;
+  // Preserve BYOK edits across Local model ↔ BYOK tab switches on this
+  // Computer, resetting automatically after a successful save or mode switch.
+  const byokDraftKey = status ? `${status.mode}:${switcher.saveRevision}` : "";
+  const [byokDraftState, setByokDraftState] = useState<{
+    draft: ByokDraft;
+    key: string;
+  } | null>(null);
+  const activeByokDraft =
+    byokDraftState && byokDraftState.key === byokDraftKey
+      ? byokDraftState.draft
+      : undefined;
+  const hasUnsavedByokChanges = Boolean(
+    status && activeByokDraft && isByokDraftDirty(activeByokDraft, status),
+  );
   const switchTargets = view?.available ? localSwitchTargets(view) : [];
   const refresh = useMutation<
     LocalModelsRefreshAccepted,
@@ -714,6 +733,7 @@ function ComputerModels({
 
   return (
     <>
+      <UnsavedChangesBlocker when={hasUnsavedByokChanges && !switching} />
       <header className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
         <div className="min-w-48 flex-1">
           <h1 className="text-2xl text-foreground">{t(m.title)}</h1>
@@ -818,7 +838,11 @@ function ComputerModels({
           <ByokPanel
             computerId={computerId}
             disabled={switching || offline}
-            key={`${status.mode}:${switcher.saveRevision}`}
+            draft={activeByokDraft}
+            key={byokDraftKey}
+            onDraftChange={(next) =>
+              setByokDraftState({ draft: next, key: byokDraftKey })
+            }
             status={status}
             switcher={switcher}
             tenantId={tenantId}
@@ -1549,11 +1573,20 @@ function Library({
     );
   };
 
-  const spotlightNode = (
-    <FeaturedModelSpotlight>
+  const [spotlightDismissed, setSpotlightDismissed] = useState(() =>
+    isFeaturedSpotlightDismissed(FEATURED_SPOTLIGHT_MODEL_ID),
+  );
+  const showSpotlight = !blocker && !spotlightDismissed;
+  const spotlightNode = showSpotlight ? (
+    <FeaturedModelSpotlight
+      modelId={FEATURED_SPOTLIGHT_MODEL_ID}
+      onDismiss={() => setSpotlightDismissed(true)}
+    >
       {sections.spotlight ? renderModelGroup(sections.spotlight, true) : null}
     </FeaturedModelSpotlight>
-  );
+  ) : sections.spotlight ? (
+    renderModelGroup(sections.spotlight, false)
+  ) : null;
   const unavailableLabel = t(
     sections.unavailableAllMemory
       ? m.sectionNeedsMoreMemory
@@ -1840,14 +1873,9 @@ function Library({
             </aside>
           ) : null}
           {entries.length === 0 ? (
-            <>
-              <div className="mt-5">
-                <FeaturedModelSpotlight />
-              </div>
-              <EmptyState title={t(m.noModelsTitle)}>
-                {t(m.noModelsBody, { name })}
-              </EmptyState>
-            </>
+            <EmptyState title={t(m.noModelsTitle)}>
+              {t(m.noModelsBody, { name })}
+            </EmptyState>
           ) : (
             <section aria-label={t(m.title)} className="mt-5 grid gap-4">
               {sections.spotlightPosition === "top" ? spotlightNode : null}

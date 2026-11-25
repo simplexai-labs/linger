@@ -1,3 +1,4 @@
+import { Cancel01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { DesktopBarTitle } from "@/app/desktop-frame";
 import { type MouseEvent, type ReactNode, useState } from "react";
@@ -5,6 +6,7 @@ import { useSearchParams } from "react-router";
 
 import { ActionMenu } from "@/components/ui/action-menu";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { Spinner } from "@/components/ui/spinner";
 import { UnderlineTabs } from "@/components/ui/underline-tabs";
 import { cn } from "@/lib/cn";
@@ -14,8 +16,10 @@ import type {
   TeamHubExternalAppKey,
   TeamHubExternalConnection,
 } from "@/features/teamhub/teamhub-types";
+import { webSearchBackendDescription } from "@/features/web-search/web-search-backend-text";
 import {
   connectedWebSearchBackends,
+  isWebSearchKeyBackend,
   shownWebSearchBackends,
   webSearchBackendsQueryOptions,
 } from "@/features/web-search/web-search-backends";
@@ -64,6 +68,8 @@ export function ConnectedAppsPage() {
   // "all" shows every group; otherwise one group's id.
   const [filter, setFilter] = useState("all");
   const [connectedOnly, setConnectedOnly] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const normalizedQuery = searchQuery.trim().toLowerCase();
   // TeamHub lists only Connections that are not revoked.
   const visibleConnections = connections.data?.connections ?? [];
   const allApps = apps.data?.apps ?? [];
@@ -89,20 +95,77 @@ export function ConnectedAppsPage() {
     ...groups.map(({ group }) => ({ id: group.id, label: t(group.title) })),
     { id: WEB_SEARCH_FILTER.id, label: t(WEB_SEARCH_FILTER.label) },
   ];
-  const groupApps = groups.find((entry) => entry.group.id === filter)?.apps;
+  function matchesApp(app: TeamHubExternalApp, groupTitle?: string) {
+    if (!normalizedQuery) return true;
+    const haystack = [
+      app.display_name,
+      app.key,
+      appSummary(app, t),
+      groupTitle ?? "",
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(normalizedQuery);
+  }
+  const visibleGroups = groups
+    .map((entry) => ({
+      ...entry,
+      apps: entry.apps.filter((app) => matchesApp(app, t(entry.group.title))),
+    }))
+    .filter((entry) => entry.apps.length > 0);
+  const groupEntry = groups.find((entry) => entry.group.id === filter);
+  const groupApps = groupEntry?.apps.filter((app) =>
+    matchesApp(app, t(groupEntry.group.title)),
+  );
   // Connected only narrows whichever view is open; with All it is one grid.
   const filteredApps = connectedOnly
-    ? (groupApps ?? connectedApps).filter((app) => connectedApps.includes(app))
+    ? (groupApps ?? connectedApps).filter(
+        (app) => connectedApps.includes(app) && matchesApp(app),
+      )
     : groupApps;
   const allSearchBackends = webSearch.data?.backends ?? [];
-  const searchBackends = connectedOnly
-    ? connectedWebSearchBackends(allSearchBackends)
+  // Connected only excludes key-based providers that have no saved key (such as
+  // You.com's Connect prompt) while keeping keyless built-in defaults and saved keys.
+  const connectedBackends = connectedWebSearchBackends(
+    allSearchBackends,
+  ).filter(
+    (backend) =>
+      backend.key_state !== "none" || !isWebSearchKeyBackend(backend),
+  );
+  const baseSearchBackends = connectedOnly
+    ? connectedBackends
     : shownWebSearchBackends(allSearchBackends);
+  const searchBackends = normalizedQuery
+    ? baseSearchBackends.filter((backend) =>
+        [
+          backend.name,
+          backend.id,
+          webSearchBackendDescription(backend, t),
+          t(WEB_SEARCH_FILTER.label),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedQuery),
+      )
+    : baseSearchBackends;
   const searchFilter = filter === WEB_SEARCH_FILTER.id;
-  // DuckDuckGo needs no key, so Connected only always keeps the section.
-  const showSearch = filter === "all" || searchFilter;
+  const showSearch =
+    (filter === "all" &&
+      (webSearch.isPending ||
+        Boolean(webSearch.error) ||
+        searchBackends.length > 0)) ||
+    searchFilter;
+  const hasVisibleApps = filteredApps
+    ? filteredApps.length > 0
+    : visibleGroups.length > 0;
+  const noSearchMatches =
+    Boolean(normalizedQuery) &&
+    !hasVisibleApps &&
+    (!showSearch || (!webSearch.isPending && searchBackends.length === 0));
   const showApps =
-    !searchFilter && (!showSearch || !filteredApps || filteredApps.length > 0);
+    !searchFilter &&
+    !noSearchMatches &&
+    (!showSearch || !filteredApps || filteredApps.length > 0);
 
   function renderApp(app: TeamHubExternalApp) {
     return (
@@ -147,9 +210,53 @@ export function ConnectedAppsPage() {
   return (
     <main className="workspace-scrollbar min-h-0 flex-1 overflow-y-auto bg-background [scrollbar-gutter:stable]">
       <div className="workspace-file-browser">
-        <DesktopBarTitle>
-          <h1 className="mb-5 text-2xl text-foreground">{t(m.title)}</h1>
-        </DesktopBarTitle>
+        <div className="mb-4 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:flex sm:flex-row sm:items-center">
+          <DesktopBarTitle>
+            <h1 className="text-2xl text-foreground">{t(m.title)}</h1>
+          </DesktopBarTitle>
+          {!apps.isPending &&
+          !connections.isPending &&
+          !apps.error &&
+          !connections.error ? (
+            <>
+              <div className="ui-field-frame order-3 col-span-2 min-w-0 sm:order-2 sm:ml-auto sm:w-56">
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 left-0 flex w-9 items-center justify-center text-muted-foreground"
+                >
+                  <Icon icon={Search01Icon} size={15} />
+                </span>
+                <input
+                  aria-label={t(m.searchConnectors)}
+                  className="ui-field-control h-9 w-full pl-9 pr-8 text-sm text-foreground placeholder:text-app-placeholder"
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={t(m.searchConnectorsPlaceholder)}
+                  type="search"
+                  value={searchQuery}
+                />
+                {searchQuery ? (
+                  <button
+                    aria-label={t(m.clearConnectorSearch)}
+                    className="absolute inset-y-0 right-1 my-auto grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => setSearchQuery("")}
+                    type="button"
+                  >
+                    <Icon icon={Cancel01Icon} size={14} />
+                  </button>
+                ) : null}
+              </div>
+              <Button
+                aria-pressed={connectedOnly}
+                className="order-2 shrink-0 justify-self-end sm:order-3"
+                onClick={() => setConnectedOnly((value) => !value)}
+                size="large"
+                tone={connectedOnly ? "primary" : "secondary"}
+              >
+                {t(m.connectedOnly)}
+              </Button>
+            </>
+          ) : null}
+        </div>
         {apps.isPending || connections.isPending ? (
           <PageMessage busy>{t(m.loadingConnectors)}</PageMessage>
         ) : apps.error || connections.error ? (
@@ -171,27 +278,38 @@ export function ConnectedAppsPage() {
           </div>
         ) : (
           <>
-            {/* The toggle is as tall as the tabs and lines up with them; the
-                tab row keeps its own bottom margin. */}
-            <div className="flex items-start gap-3">
+            {/* Full-width scrollable category tabs with a subtle right-edge fade
+                hint so all 8 categories stay reachable on mobile viewports. */}
+            <div className="relative min-w-0">
               <UnderlineTabs
-                className="min-w-0 flex-1"
+                className="w-full min-w-0 pr-8"
                 items={filters}
                 label={t(m.connectorCategories)}
                 onChange={setFilter}
                 value={filter}
               />
-              <Button
-                aria-pressed={connectedOnly}
-                className="shrink-0"
-                onClick={() => setConnectedOnly((value) => !value)}
-                size="large"
-                tone={connectedOnly ? "primary" : "secondary"}
-              >
-                {t(m.connectedOnly)}
-              </Button>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute top-0 right-0 bottom-5 w-8 bg-gradient-to-l from-background to-transparent"
+              />
             </div>
-            {!showApps ? null : filteredApps ? (
+            {noSearchMatches ? (
+              <div
+                className="flex flex-col items-center gap-3 py-12 text-center"
+                role="status"
+              >
+                <p className="text-sm text-muted-foreground">
+                  {t(m.noMatchingConnectors, { query: searchQuery.trim() })}
+                </p>
+                <Button
+                  onClick={() => setSearchQuery("")}
+                  size="compact"
+                  tone="secondary"
+                >
+                  {t(m.clearSearch)}
+                </Button>
+              </div>
+            ) : !showApps ? null : filteredApps ? (
               filteredApps.length ? (
                 <section
                   aria-label={t(m.applicationConnections)}
@@ -204,7 +322,7 @@ export function ConnectedAppsPage() {
               )
             ) : (
               <div aria-label={t(m.applicationConnections)} role="region">
-                {groups.map(({ group, apps: groupApps }) => (
+                {visibleGroups.map(({ group, apps: groupApps }) => (
                   <section
                     aria-labelledby={`connector-group-${group.id}`}
                     className="mb-7 last:mb-0"
@@ -223,7 +341,7 @@ export function ConnectedAppsPage() {
                 ))}
               </div>
             )}
-            {showSearch ? (
+            {showSearch && !noSearchMatches ? (
               <WebSearchSection
                 backends={searchBackends}
                 className={showApps ? "mt-7" : undefined}
@@ -318,16 +436,16 @@ function CatalogAppCard({
           <span className="block truncate text-sm font-medium text-foreground">
             {app.display_name}
           </span>
-          <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="mt-0.5 flex min-w-0 items-start gap-1.5 text-xs text-muted-foreground">
             {connectedLabel ? (
               <span
                 aria-hidden
-                className="size-1.5 shrink-0 rounded-full bg-[var(--app-status-success-text)]"
+                className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[var(--app-status-success-text)]"
               />
             ) : null}
             <span
               className={cn(
-                "truncate",
+                "line-clamp-2 min-w-0",
                 !connectedLabel && authorizing && "town-shimmer-text",
               )}
               title={connectedLabel ?? summary}

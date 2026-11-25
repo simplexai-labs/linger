@@ -108,6 +108,7 @@ export const localModelsMessages = defineMessages("localModels", {
   openChat: "Open chat",
   featured: "Featured",
   featuredSpotlightRegion: "Featured model: Inkling 2 Mini",
+  featuredDismiss: "Dismiss featured model spotlight",
   featuredByThinkingMachines: "Featured · Thinking Machines",
   featuredReadAnnouncement: "Read announcement",
   featuredHuggingFace: "Hugging Face",

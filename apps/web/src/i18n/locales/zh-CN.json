@@ -451,6 +451,7 @@
     "mailAccount": "{app} 账号"
   },
   "accountSettings": {
+    "profileDescription": "在这个空间里使用的头像、名称、简介和洞察。外部账号请在<link>连接器</link>中管理。",
     "loadingAccountProfile": "正在加载账号资料",
     "loadingAccountProfileStatus": "正在加载账号资料…",
     "profileAppearance": "个人资料外观",
@@ -560,6 +561,7 @@
     "disconnectTitle": "断开账号连接？",
     "disconnectDescription": "{account}。Agent 的访问权限和来源清理仍在连接器中管理。",
     "disconnect": "断开连接",
+    "securityDescription": "管理你的登录密码和服务器 API 密钥。",
     "password": "密码",
     "changePassword": "修改密码",
     "passwordChanged": "密码已修改",
@@ -582,7 +584,12 @@
     "voiceKeyCannotSave": "{detail} 请在服务器上设置 {variable}。",
     "composioDetail": "连接 Gmail、GitHub、Slack、Notion 等应用。",
     "composioDetailFromEnvironment": "连接 Gmail、GitHub、Slack、Notion 等应用。由服务器上的 COMPOSIO_API_KEY 设置。",
-    "composioDetailCannotSave": "此服务器未设置。"
+    "composioDetailCannotSave": "此服务器未设置。",
+    "saveChanges": "保存更改",
+    "discardChanges": "放弃更改",
+    "deleteInsightConfirmTitle": "删除这条洞察？",
+    "deleteInsightConfirmDescription": "这会从你的个人资料中永久删除这条个人洞察（{dimension}）。",
+    "newPasswordHint": "至少 8 个字符。"
   },
   "cards": {
     "cardDecisionFailed": "卡片操作失败。",
@@ -817,7 +824,12 @@
     "noticeApprovedFailedWithOutcome": "{who}批准了“{title}”，但执行失败：{outcome}",
     "noticeApprovedUnknown": "{who}批准了“{title}”，结果未知",
     "noticeApprovedUnknownWithOutcome": "{who}批准了“{title}”，结果未知：{outcome}",
-    "noticeEnded": "“{title}”已结束"
+    "noticeEnded": "“{title}”已结束",
+    "expiresInSeconds": "{seconds} 秒后过期",
+    "expiresInMinutesSeconds": "{minutes} 分 {seconds} 秒后过期",
+    "expiresInMinutes": "{minutes} 分钟后过期",
+    "waitingForDecision": "等待 {name} 决定",
+    "waitingForAnswer": "等待 {name} 回答"
   },
   "composer": {
     "messageRoom": "给 Room 发消息",
@@ -1148,7 +1160,8 @@
     "browserBusy": "有 Agent 任务正在使用这个 Chrome，请等它结束后再连接。",
     "browserConnectionDamaged": "这台电脑上保存的浏览器连接已损坏，请粘贴令牌重新连接。",
     "browserConnectFailed": "这台电脑无法连接你的浏览器，请稍后重试。",
-    "browserConnectUnavailable": "暂时无法连接浏览器，请稍后重试。"
+    "browserConnectUnavailable": "暂时无法连接浏览器，请稍后重试。",
+    "disconnectChromeConfirm": "断开 Chrome 连接？Agent 将不再使用你的浏览器和登录状态。"
   },
   "localModels": {
     "title": "模型",
@@ -1635,7 +1648,8 @@
     "guidanceConstrainedTitleGpu": "其他应用正在占用显存",
     "guidanceConstrainedBody": "其他应用占用了 {other} 内存（剩余 {free} / {total}）。关掉一些后再检查。",
     "guidanceConstrainedBodyGpu": "其他应用占用了 {other} 显存（剩余 {free} / {total}）。关掉一些后再检查。",
-    "factSystem": "系统"
+    "factSystem": "系统",
+    "featuredDismiss": "关闭精选模型推荐"
   },
   "runtimeStatus": {
     "stateCanceled": "已取消",
@@ -2111,7 +2125,7 @@
     "connectorCategories": "连接器分类",
     "connectedOnly": "只看已连接",
     "applicationConnections": "应用连接",
-    "noConnectedApps": "还没有已连接的应用。",
+    "noConnectedApps": "还没有已连接的连接器。",
     "groupMailCalendar": "邮件与日历",
     "groupMeetings": "会议",
     "groupProductivity": "效率工具",
@@ -2253,7 +2267,13 @@
     "accessUnavailable": "无法为这个 Agent 设置访问权限",
     "loadingAccess": "正在加载访问权限…",
     "retryAccess": "重新加载访问权限",
-    "allowAgentAccess": "允许 Agent 访问 {account}"
+    "allowAgentAccess": "允许 Agent 访问 {account}",
+    "searchConnectors": "搜索连接器",
+    "searchConnectorsPlaceholder": "搜索连接器…",
+    "clearConnectorSearch": "清除连接器搜索",
+    "noMatchingConnectors": "没有匹配“{query}”的连接器。",
+    "clearSearch": "清除搜索",
+    "removeKeyConfirm": "移除 {backend} 密钥？这台服务器上的所有人都将停止使用它进行网页搜索。"
   },
   "webSearch": {
     "apiKey": "{backend} API 密钥",
@@ -2429,7 +2449,9 @@
     "desktopAccountUnavailable": "无法使用这台电脑的账号。请用邮箱和密码登录。",
     "teamHubUnreachable": "无法连接 TeamHub，请重试。",
     "logoutUnconfirmed": "无法确认是否已退出登录，请重试。",
-    "logoutUnsavedDocuments": "有些文档的修改还没有保存。要退出登录并放弃这些修改吗？"
+    "logoutUnsavedDocuments": "有些文档的修改还没有保存。要退出登录并放弃这些修改吗？",
+    "logoutUnsavedDocumentsTitle": "仍有未保存的编辑，确认退出登录？",
+    "logoutAndDiscard": "退出登录并放弃"
   },
   "sidePanel": {
     "panelSidebar": "面板侧边栏",
@@ -2973,7 +2995,9 @@
     "minuteIntervalAgentOnly": "按分钟间隔运行的 Routine 只能由 Agent 编辑。",
     "saveFailed": "无法保存 Routine。",
     "deleteFailed": "无法删除 Routine。",
-    "runFailed": "无法运行 Routine。"
+    "runFailed": "无法运行 Routine。",
+    "deleteRoutineConfirmTitle": "删除这个 Routine？",
+    "deleteRoutineConfirmDescription": "“{name}”将停止运行，且无法撤销。"
   },
   "roomDocuments": {
     "title": "文件",
@@ -3740,7 +3764,12 @@
   "uiExtras": {
     "paletteField": "{name}的饱和度和亮度",
     "paletteFieldValue": "饱和度 {saturation}%，亮度 {brightness}%",
-    "paletteHue": "{name}的色相"
+    "paletteHue": "{name}的色相",
+    "showValue": "显示内容",
+    "maskValue": "隐藏内容",
+    "discardUnsavedTitle": "放弃未保存的更改？",
+    "discardUnsavedDescription": "你有未保存的更改。离开此页面并放弃它们？",
+    "discardChanges": "放弃"
   },
   "voiceChat": {
     "addToVoice": "添加到语音",

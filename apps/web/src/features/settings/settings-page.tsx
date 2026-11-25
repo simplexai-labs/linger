@@ -114,7 +114,6 @@ function SettingsLink({
             : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
         }`
       }
-      replace
       to={to}
     >
       {icon}

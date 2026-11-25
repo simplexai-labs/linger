@@ -27,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { fieldControlClassName } from "@/components/ui/field";
 import { Icon } from "@/components/ui/icon";
+import { SecretInput } from "@/components/ui/secret-field";
 import { Select, SelectItem } from "@/components/ui/select";
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
@@ -92,6 +93,47 @@ function abortController(ref: { current: AbortController | null }) {
   ref.current = null;
 }
 
+export interface ByokDraft {
+  apiKey: string;
+  baseUrl: string;
+  endpoint: string | null;
+  modelId: string;
+  path: string;
+  runtime: ModelSourceRuntime;
+}
+
+export function initialByokDraft(status: ModelSourceStatus): ByokDraft {
+  const saved = status.byok;
+  const savedRuntime = status.mode === "byok" ? status.runtime : "claude";
+  const savedEndpoint = saved.configured ? (saved.endpoint ?? "") : null;
+  return {
+    apiKey: "",
+    baseUrl: saved.base_url ?? "",
+    endpoint:
+      savedEndpoint === defaultByokEndpoint(savedRuntime)
+        ? null
+        : savedEndpoint,
+    modelId: saved.model_id ?? "",
+    path: saved.configured ? (saved.path ?? "") : DEFAULT_BYOK_PATH,
+    runtime: savedRuntime,
+  };
+}
+
+export function isByokDraftDirty(
+  draft: ByokDraft,
+  status: ModelSourceStatus,
+): boolean {
+  const baseline = initialByokDraft(status);
+  return (
+    draft.runtime !== baseline.runtime ||
+    draft.baseUrl !== baseline.baseUrl ||
+    draft.path !== baseline.path ||
+    draft.endpoint !== baseline.endpoint ||
+    draft.apiKey !== baseline.apiKey ||
+    draft.modelId !== baseline.modelId
+  );
+}
+
 /**
  * The person's own endpoint, addressed as base URL + path + endpoint. The API
  * key goes to the Computer, which keeps it private; Linger never shows it
@@ -100,12 +142,17 @@ function abortController(ref: { current: AbortController | null }) {
 export function ByokPanel({
   computerId,
   disabled,
+  draft,
+  onDraftChange,
   status,
   switcher,
   tenantId,
 }: {
   computerId: string;
   disabled: boolean;
+  /** Preserved form state across Local model ↔ BYOK tab switches on one Computer. */
+  draft?: ByokDraft;
+  onDraftChange?: (draft: ByokDraft) => void;
   status: ModelSourceStatus;
   switcher: ModelSourceSwitcher;
   tenantId: string;
@@ -114,20 +161,17 @@ export function ByokPanel({
   const { client } = useTeamHubRuntime();
   const queryClient = useQueryClient();
   const saved = status.byok;
-  const savedRuntime = status.mode === "byok" ? status.runtime : "claude";
-  const [runtime, setRuntime] = useState<ModelSourceRuntime>(savedRuntime);
-  const [baseUrl, setBaseUrl] = useState(saved.base_url ?? "");
-  // A saved endpoint reports an empty path or endpoint by leaving it out.
-  const [path, setPath] = useState(
-    saved.configured ? (saved.path ?? "") : DEFAULT_BYOK_PATH,
+  const [localDraft, setLocalDraft] = useState<ByokDraft>(
+    () => draft ?? initialByokDraft(status),
   );
-  // null follows the Runtime's default endpoint.
-  const [endpoint, setEndpoint] = useState<string | null>(() => {
-    const value = saved.configured ? (saved.endpoint ?? "") : null;
-    return value === defaultByokEndpoint(savedRuntime) ? null : value;
-  });
-  const [apiKey, setApiKey] = useState("");
-  const [modelId, setModelId] = useState(saved.model_id ?? "");
+  const currentDraft = draft ?? localDraft;
+  const { apiKey, baseUrl, endpoint, modelId, path, runtime } = currentDraft;
+
+  function updateDraft(patch: Partial<ByokDraft>) {
+    const next = { ...currentDraft, ...patch };
+    setLocalDraft(next);
+    onDraftChange?.(next);
+  }
   const [menu, setMenu] = useState<ByokMenu | null>(null);
   const [toastShown, setToastShown] = useState(false);
   const ids = useId();
@@ -281,7 +325,7 @@ export function ByokPanel({
             className="w-full"
             disabled={disabled}
             onValueChange={(value) => {
-              setRuntime(value as ModelSourceRuntime);
+              updateDraft({ runtime: value as ModelSourceRuntime });
               resetTest();
             }}
             value={runtime}
@@ -308,9 +352,11 @@ export function ByokPanel({
                 className={fieldControlClassName}
                 disabled={disabled}
                 id={`${ids}-base`}
-                onBlur={() => setBaseUrl(normalizeByokBaseUrl)}
+                onBlur={() =>
+                  updateDraft({ baseUrl: normalizeByokBaseUrl(baseUrl) })
+                }
                 onChange={(event) => {
-                  setBaseUrl(event.target.value);
+                  updateDraft({ baseUrl: event.target.value });
                   resetAll();
                 }}
                 placeholder="https://api.example.com"
@@ -335,10 +381,10 @@ export function ByokPanel({
                 inputClassName="font-mono text-xs sm:w-(--byok-fit) sm:flex-none"
                 inputStyle={fittedWidth(path)}
                 label={t(m.byokPath)}
-                onCommit={() => setPath(normalizeByokPath)}
+                onCommit={() => updateDraft({ path: normalizeByokPath(path) })}
                 onOpenChange={(open) => setMenu(open ? "path" : null)}
                 onValueChange={(value) => {
-                  setPath(value);
+                  updateDraft({ path: value });
                   resetAll();
                 }}
                 open={menu === "path"}
@@ -369,16 +415,18 @@ export function ByokPanel({
                 inputClassName="font-mono text-xs sm:w-(--byok-fit) sm:flex-none"
                 inputStyle={fittedWidth(endpoint ?? runtimeEndpoint)}
                 label={t(m.byokEndpoint)}
-                onCommit={() =>
-                  setEndpoint((current) => {
-                    if (current === null) return null;
-                    const value = normalizeByokPath(current);
-                    return value === runtimeEndpoint ? null : value;
-                  })
-                }
+                onCommit={() => {
+                  if (endpoint === null) return;
+                  const value = normalizeByokPath(endpoint);
+                  updateDraft({
+                    endpoint: value === runtimeEndpoint ? null : value,
+                  });
+                }}
                 onOpenChange={(open) => setMenu(open ? "endpoint" : null)}
                 onValueChange={(value) => {
-                  setEndpoint(value === runtimeEndpoint ? null : value);
+                  updateDraft({
+                    endpoint: value === runtimeEndpoint ? null : value,
+                  });
                   resetTest();
                 }}
                 open={menu === "endpoint"}
@@ -414,17 +462,15 @@ export function ByokPanel({
           >
             {t(m.apiKey)}
           </label>
-          <input
+          <SecretInput
             autoComplete="new-password"
-            className={fieldControlClassName}
             disabled={disabled}
             id={`${ids}-key`}
             onChange={(event) => {
-              setApiKey(event.target.value);
+              updateDraft({ apiKey: event.target.value });
               resetAll();
             }}
             placeholder={canReuseSavedKey ? t(m.keySavedHint) : undefined}
-            type="password"
             value={apiKey}
           />
         </div>
@@ -442,10 +488,10 @@ export function ByokPanel({
               disabled={disabled}
               id={`${ids}-model`}
               label={t(m.model)}
-              onCommit={() => setModelId((current) => current.trim())}
+              onCommit={() => updateDraft({ modelId: modelId.trim() })}
               onOpenChange={(open) => setMenu(open ? "model" : null)}
               onValueChange={(value) => {
-                setModelId(value);
+                updateDraft({ modelId: value });
                 resetTest();
               }}
               open={menu === "model"}
