@@ -36,7 +36,8 @@ export function probePi(executable, args, options, timeoutMs = 30_000) {
       )
         return settle();
       child.once("exit", settle);
-      child.kill();
+      // A failed kill delivers no exit event.
+      if (!child.kill()) settle();
     }
     child.stderr.setEncoding("utf8").on("data", (chunk) => {
       stderr = (stderr + chunk).slice(-1500);
