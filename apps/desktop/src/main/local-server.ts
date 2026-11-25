@@ -8,7 +8,9 @@ import {
   readFileSync,
 } from "node:fs";
 import {
+  chmod,
   constants as fsConstants,
+  copyFile,
   cp,
   mkdir,
   readdir,
@@ -377,6 +379,9 @@ export interface LocalServerOptions {
   readonly daemonExecutable?: string;
   // The bundled installer (installer.js, web/, native-process-worker.mjs).
   readonly installerDirectory: string;
+  // Shared bundled Node.js executable shipped with Computer tools
+  // (resources/runtime/bin/node(.exe)), reused for Native services.
+  readonly bundledNodePath?: string;
   readonly sourceArchive?: SourceArchive;
   readonly sourceDependencies?: SourceDependencies;
   // A linger checkout installed instead of the source package, for developers
@@ -547,6 +552,7 @@ export class LocalServerModule implements Module {
   #localModelsDegraded: LocalModelsDegradedStatus | undefined;
   #node: Promise<string> | undefined;
   #abort = new AbortController();
+  #inspectAbort: AbortController | undefined;
   #offRetry: (() => void) | undefined;
   #offUnreachable: (() => void) | undefined;
   #watch: ReturnType<typeof setInterval> | undefined;
@@ -856,8 +862,12 @@ export class LocalServerModule implements Module {
     this.#checkedAt = undefined;
     this.#ctx?.bus.emit("local-server.changed");
     const started = Date.now();
-    const signal = this.#abort.signal;
-    if (!signal.aborted) void this.#ensureNode(signal).catch(() => undefined);
+    const appSignal = this.#abort.signal;
+    const inspectAbort = new AbortController();
+    this.#inspectAbort = inspectAbort;
+    const signal = AbortSignal.any([appSignal, inspectAbort.signal]);
+    if (!appSignal.aborted)
+      void this.#ensureNode(appSignal).catch(() => undefined);
     const home = this.#location ?? this.#home;
     void this.#inspect(home, signal, (download) => {
       if (this.#check.state !== "checking") return;
@@ -866,6 +876,8 @@ export class LocalServerModule implements Module {
     })
       .then(
         ({ check, reasonLog }) => {
+          if (inspectAbort.signal.aborted && !appSignal.aborted)
+            return { state: "unchecked" } as const;
           this.#ctx?.log.info("local_server.inspected", {
             ms: Date.now() - started,
             eligible: check.state === "checked" && check.eligible,
@@ -885,6 +897,8 @@ export class LocalServerModule implements Module {
           return check;
         },
         (error: unknown) => {
+          if (inspectAbort.signal.aborted && !appSignal.aborted)
+            return { state: "unchecked" } as const;
           this.#ctx?.log.warn("local_server.inspect_failed", {
             ms: Date.now() - started,
             error: error instanceof Error ? error.message : String(error),
@@ -893,7 +907,14 @@ export class LocalServerModule implements Module {
         },
       )
       .then((check) => {
-        if (signal.aborted) return;
+        if (this.#inspectAbort === inspectAbort) this.#inspectAbort = undefined;
+        if (appSignal.aborted) return;
+        if (inspectAbort.signal.aborted) {
+          this.#check = { state: "unchecked" };
+          this.#checkedAt = undefined;
+          this.#ctx?.bus.emit("local-server.changed");
+          return;
+        }
         if (home !== (this.#location ?? this.#home)) {
           this.#check = { state: "unchecked" };
           this.inspect();
@@ -1263,6 +1284,12 @@ export class LocalServerModule implements Module {
       throw new Error("Running Linger on this computer is not supported here");
     const signal = this.#abort.signal;
     const home = this.#location ?? this.#home;
+    // In-flight inspection downloads the localmodels kit into the default
+    // home; abort it when installing into another folder so it does not
+    // compete for bandwidth, while letting default-home inspection finish so
+    // the installer can reuse its kit.
+    if (path.resolve(home) !== path.resolve(this.#options.home))
+      this.#inspectAbort?.abort();
     this.#attempt += 1;
     this.#acquireBusy();
     try {
@@ -2009,19 +2036,57 @@ export class LocalServerModule implements Module {
       "node",
       `v${NODE_RUNTIME_VERSION}`,
     );
+    const isWindows = (this.#options.platform ?? process.platform) === "win32";
     // Windows builds are zips with node.exe at the top.
-    const binary =
-      (this.#options.platform ?? process.platform) === "win32"
-        ? path.join(directory, "node.exe")
-        : path.join(directory, "bin", "node");
+    const binary = isWindows
+      ? path.join(directory, "node.exe")
+      : path.join(directory, "bin", "node");
     if (existsSync(binary)) return binary;
-    // A build that bundles the services also bundles this same Node.js: the
-    // release archive, or on macOS its signed binary.
+    // A build that bundles the services also pins this same Node.js: shared
+    // with the Computer tools under resources/runtime/bin/, or a legacy
+    // archive / folder copy inside runtime-<target>/.
     const bundle = await this.#bundledRuntime();
     const bundled = bundle?.node;
+    const expectedSharedBinary = isWindows
+      ? "runtime/bin/node.exe"
+      : "runtime/bin/node";
+    if (
+      bundle?.target === this.#target() &&
+      bundled?.shared === true &&
+      bundled.version === NODE_RUNTIME_VERSION &&
+      (bundled.binary === undefined ||
+        bundled.binary === expectedSharedBinary) &&
+      typeof bundled.sha256 === "string" &&
+      bundled.sha256.length > 0
+    ) {
+      const source = this.#sharedBundledNodePath(isWindows);
+      if (source) {
+        try {
+          await this.#copySharedNode(
+            source,
+            directory,
+            path.relative(directory, binary),
+            bundled.sha256,
+            isWindows,
+            signal,
+          );
+          return binary;
+        } catch (error) {
+          if (signal.aborted) throw error;
+          this.#ctx?.log.warn("local_server.shared_node_failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } else {
+        this.#ctx?.log.warn("local_server.shared_node_missing", {
+          target: this.#target(),
+        });
+      }
+    }
     if (
       bundle?.layout === "directory" &&
-      bundled?.version === NODE_RUNTIME_VERSION
+      bundled?.version === NODE_RUNTIME_VERSION &&
+      typeof bundled.file === "string"
     ) {
       await this.#copyBundled(
         this.#bundledRuntimeFile(path.dirname(path.dirname(bundled.file))),
@@ -2032,7 +2097,8 @@ export class LocalServerModule implements Module {
       return binary;
     }
     if (
-      bundled?.file === release.archive &&
+      typeof bundled?.file === "string" &&
+      bundled.file === release.archive &&
       bundled.sha256 === release.sha256
     ) {
       await this.#extract(
@@ -2060,6 +2126,50 @@ export class LocalServerModule implements Module {
       signal,
     );
     return binary;
+  }
+
+  #sharedBundledNodePath(isWindows: boolean): string | undefined {
+    const candidate =
+      this.#options.bundledNodePath ??
+      path.resolve(
+        this.#options.installerDirectory,
+        "../../..",
+        "runtime",
+        "bin",
+        isWindows ? "node.exe" : "node",
+      );
+    return existsSync(candidate) ? candidate : undefined;
+  }
+
+  // Copies the single shared Node.js binary from the app bundle into the
+  // user's home so running services never lock the app install directory on
+  // Windows, verifies its digest after copying, and publishes atomically.
+  async #copySharedNode(
+    source: string,
+    directory: string,
+    relativeBinary: string,
+    sha256: string,
+    isWindows: boolean,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (existsSync(path.join(directory, relativeBinary))) return;
+    const copied = `${directory}.partial`;
+    const target = path.join(copied, relativeBinary);
+    try {
+      await removeRetrying(copied);
+      await mkdir(path.dirname(target), { recursive: true });
+      await copyFile(source, target, fsConstants.COPYFILE_FICLONE);
+      const hash = createHash("sha256");
+      for await (const chunk of createReadStream(target, { signal }))
+        hash.update(chunk as Buffer);
+      if (hash.digest("hex") !== sha256)
+        throw new Error(`The bundled ${relativeBinary} is damaged`);
+      if (!isWindows) await chmod(target, 0o755);
+      await this.#unquarantine(copied, signal);
+      await this.#publish(copied, directory, relativeBinary, signal);
+    } finally {
+      await removeRetrying(copied);
+    }
   }
 
   // The source package, unpacked once into the installation folder; or the
@@ -3162,6 +3272,12 @@ export class LocalServerModule implements Module {
         instance: LOCAL_INSTANCE,
         ...lookupTimings,
       });
+    const resumeTimings = resumeTimingFields(outcome.resumeTimings);
+    if (resumeTimings)
+      this.#ctx?.log.info("local_server.installer_resume_timings", {
+        instance: LOCAL_INSTANCE,
+        ...resumeTimings,
+      });
     if (outcome.code !== 0) {
       const { code, causeCode, reasons } = outcome.details ?? {};
       const action =
@@ -3365,7 +3481,8 @@ export class LocalServerModule implements Module {
 
 // What the desktop installed, so it can start the services again.
 // dist/installer/native/runtime-<target>/manifest.json: an archive of the
-// services beside the Node.js release, or on macOS both as folders.
+// services (or on macOS a folder) plus the pinned Node.js metadata (shared
+// with Computer tools, or legacy archive / folder copy).
 interface BundledRuntime {
   target: string;
   sourceArchiveSha256: string;
@@ -3373,8 +3490,15 @@ interface BundledRuntime {
   archive?: { file: string; sha256: string };
   // runtime/files.json, when the services are a folder.
   directory?: { file: string; sha256: string };
-  // The release archive, or node/bin/node in the folder layout.
-  node?: { version?: string; file: string; sha256: string };
+  // The shared Computer tools binary, or a legacy release archive / folder copy.
+  node?: {
+    version?: string;
+    shared?: boolean;
+    binary?: string;
+    file?: string;
+    sha256: string;
+    bytes?: number;
+  };
 }
 
 // The bundled services' native packages need this glibc or newer, like the
@@ -3412,6 +3536,8 @@ interface ResumeOutcome {
   // Resume stderr is not piped (detached services could hold it open), so
   // the runtime lookup's stage timings ride in the outcome instead.
   runtimeLookupTimings?: unknown;
+  // Warm/cold resume breakdown from installer.js --resume, when reported.
+  resumeTimings?: unknown;
 }
 
 interface RuntimeLookupTimingFields {
@@ -3420,6 +3546,55 @@ interface RuntimeLookupTimingFields {
   local_models_ms: number;
   tool_ms: number;
   total_ms: number;
+}
+
+interface ResumeTimingFields {
+  path: "warm" | "cold";
+  probe_ms: number;
+  total_ms: number;
+  restore_local_models_ms?: number;
+  restore_byok_gateway_ms?: number;
+  cold_start_ms?: number;
+}
+
+function nonNegativeFinite(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+// The installer's resume stage timings, or undefined unless the required
+// fields have valid shapes; older installers omit this completely.
+function resumeTimingFields(value: unknown): ResumeTimingFields | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  const {
+    path: resumePath,
+    probeMs,
+    totalMs,
+    restoreLocalModelsMs,
+    restoreByokGatewayMs,
+    coldStartMs,
+  } = value as Record<string, unknown>;
+  if (resumePath !== "warm" && resumePath !== "cold") return undefined;
+  const probe = nonNegativeFinite(probeMs);
+  const total = nonNegativeFinite(totalMs);
+  if (probe === undefined || total === undefined) return undefined;
+  const restoreLocalModels = nonNegativeFinite(restoreLocalModelsMs);
+  const restoreByokGateway = nonNegativeFinite(restoreByokGatewayMs);
+  const coldStart = nonNegativeFinite(coldStartMs);
+  return {
+    path: resumePath,
+    probe_ms: probe,
+    total_ms: total,
+    ...(restoreLocalModels !== undefined
+      ? { restore_local_models_ms: restoreLocalModels }
+      : {}),
+    ...(restoreByokGateway !== undefined
+      ? { restore_byok_gateway_ms: restoreByokGateway }
+      : {}),
+    ...(coldStart !== undefined ? { cold_start_ms: coldStart } : {}),
+  };
 }
 
 // The installer's runtime lookup timings, or undefined unless every stage is

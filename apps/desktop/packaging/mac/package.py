@@ -381,7 +381,7 @@ class Signing:
         # Mach-O file, so the vendor-signed driver put back stays as it is.
         native = os.path.join(app, NATIVE)
         if os.path.isdir(native):
-            refresh(native, target)
+            refresh(native, target, shared_node=os.path.join(app, TOOLS_NODE))
         resources = os.path.join(app, RESOURCES)
         staged = os.path.join(computer_tools.STAGED, target, computer_tools.TOOLS)
         for relative in CUA_VENDOR_SIGNED:

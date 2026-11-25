@@ -11,17 +11,19 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { builtinModules, createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
+import { build as buildWithEsbuild } from "esbuild";
 import tar from "tar-stream";
 import yauzl from "yauzl";
 
 const computerRoot = fileURLToPath(new URL("../", import.meta.url));
+const repositoryRoot = path.resolve(computerRoot, "../..");
 export const COMPUTER_TOOL_VERSIONS = Object.freeze({
   playwright: "0.0.83",
   pi: "1.2.0",
@@ -90,6 +92,74 @@ async function packageRoot(name, from) {
     if (manifest?.name === name) return realpath(candidate);
   }
   throw new Error(`Cannot resolve tool package ${name}`);
+}
+
+// Bundle only createMcpExtension (the one symbol tools/pi-mcp.mjs imports)
+// instead of copying @earendil-works/pi-coding-agent's full dependency tree.
+async function bundlePiMcpExtension(piSource, piManifest, destination) {
+  const target = path.join(
+    destination,
+    "node_modules/@earendil-works/pi-coding-agent",
+  );
+  await mkdir(path.join(target, "dist"), { recursive: true });
+  const result = await buildWithEsbuild({
+    absWorkingDir: repositoryRoot,
+    stdin: {
+      contents:
+        'export { createMcpExtension } from "./dist/extensions/mcp/index.js";\n',
+      resolveDir: piSource,
+      loader: "js",
+    },
+    outfile: path.join(target, "dist/index.js"),
+    bundle: true,
+    metafile: true,
+    platform: "node",
+    format: "esm",
+    target: "node26",
+    minifyWhitespace: true,
+    minifySyntax: true,
+    legalComments: "none",
+    banner: {
+      js: 'import { createRequire as __lingerRequire } from "node:module"; const require = __lingerRequire(import.meta.url);',
+    },
+  });
+  const builtins = new Set(builtinModules);
+  const unresolved = Object.values(result.metafile.outputs)
+    .flatMap((output) => output.imports)
+    .filter(
+      (entry) =>
+        entry.external &&
+        !builtins.has(entry.path) &&
+        !builtins.has(entry.path.replace(/^node:/u, "")),
+    );
+  if (unresolved.length > 0)
+    throw new Error(
+      `Bundled Pi MCP extension has unresolved external imports: ${unresolved.map((entry) => entry.path).join(", ")}`,
+    );
+  await writeFile(
+    path.join(target, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "@earendil-works/pi-coding-agent",
+        version: piManifest.version,
+        type: "module",
+        main: "dist/index.js",
+        exports: { ".": "./dist/index.js" },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await cp(path.join(piSource, "LICENSE"), path.join(target, "LICENSE")).catch(
+    (error) => {
+      if (error?.code !== "ENOENT") throw error;
+    },
+  );
+  return {
+    name: "@earendil-works/pi-coding-agent",
+    version: piManifest.version,
+    path: "node_modules/@earendil-works/pi-coding-agent",
+  };
 }
 
 // Preserve upstream modules and dynamic resources. Resolution uses only this
@@ -167,7 +237,6 @@ async function stagePackages(destination) {
   for (const [name, version] of [
     ["quickjs-wasi", COMPUTER_TOOL_VERSIONS.quickjs],
     ["@playwright/mcp", COMPUTER_TOOL_VERSIONS.playwright],
-    ["@earendil-works/pi-coding-agent", COMPUTER_TOOL_VERSIONS.pi],
   ]) {
     const source = await packageRoot(name, computerRoot);
     const manifest = JSON.parse(
@@ -177,6 +246,19 @@ async function stagePackages(destination) {
       throw new Error(`Expected ${name}@${version}`);
     await copyPackage(name, computerRoot, destination);
   }
+  const piSource = await packageRoot(
+    "@earendil-works/pi-coding-agent",
+    computerRoot,
+  );
+  const piManifest = JSON.parse(
+    await readFile(path.join(piSource, "package.json"), "utf8"),
+  );
+  if (piManifest.version !== COMPUTER_TOOL_VERSIONS.pi)
+    throw new Error(
+      `Expected @earendil-works/pi-coding-agent@${COMPUTER_TOOL_VERSIONS.pi}`,
+    );
+  await copyPackage("jiti", piSource, destination);
+  versions.push(await bundlePiMcpExtension(piSource, piManifest, destination));
   return versions.sort((a, b) => a.path.localeCompare(b.path));
 }
 

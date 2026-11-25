@@ -2,7 +2,11 @@ import path from "node:path";
 import { expect, test, vi } from "vitest";
 import type { Instance } from "@linger/local-installation/instance";
 import type { installNativeSource } from "@linger/local-installation/native-source";
-import { resumeSourceInstance, type ResumeEngine } from "./resume.js";
+import {
+  resumeSourceInstance,
+  type ResumeEngine,
+  type ResumeTimings,
+} from "./resume.js";
 
 // Resume compares the resolved checkout, so the fixtures use resolved paths
 // (a drive-letter path on Windows).
@@ -435,4 +439,96 @@ test("needs an installed source instance", async () => {
   expect(
     await resumeSourceInstance(options, { load: async () => undefined }),
   ).toMatchObject({ code: 4 });
+});
+
+test("reports warm and cold resume timings via onTimings and log summary", async () => {
+  const warmLogs: string[] = [];
+  let warmTimings: ResumeTimings | undefined;
+  await resumeSourceInstance(
+    {
+      ...options,
+      log: (message) => warmLogs.push(message),
+      onTimings: (timings) => {
+        warmTimings = timings;
+      },
+    },
+    {
+      load: async () => instance,
+      engines: native(vi.fn(), true),
+      pending: async () => false,
+      restore: async () => undefined,
+      restoreByok: async () => undefined,
+    },
+  );
+  expect(warmTimings).toBeDefined();
+  expect(warmTimings?.path).toBe("warm");
+  expect(warmTimings?.probeMs).toBeGreaterThanOrEqual(0);
+  expect(warmTimings?.restoreLocalModelsMs).toBeGreaterThanOrEqual(0);
+  expect(warmTimings?.restoreByokGatewayMs).toBeGreaterThanOrEqual(0);
+  expect(warmTimings?.coldStartMs).toBeUndefined();
+  expect(warmTimings?.totalMs).toBeGreaterThanOrEqual(0);
+  expect(warmLogs.join("")).toMatch(
+    /Resume timings \(warm, ms\): probe \d+, restoreLocalModels \d+, restoreByokGateway \d+, total \d+\./,
+  );
+
+  const coldLogs: string[] = [];
+  let coldTimings: ResumeTimings | undefined;
+  await resumeSourceInstance(
+    {
+      ...options,
+      sourceRepo: "/source-next",
+      log: (message) => coldLogs.push(message),
+      onTimings: (timings) => {
+        coldTimings = timings;
+      },
+    },
+    {
+      load: async () => instance,
+      engines: native(
+        vi.fn<ResumeEngine["run"]>(async () => ({
+          code: 0,
+          state: "ready",
+          message: "ok",
+        })),
+        true,
+      ),
+    },
+  );
+  expect(coldTimings).toBeDefined();
+  expect(coldTimings?.path).toBe("cold");
+  expect(coldTimings?.probeMs).toBe(0);
+  expect(coldTimings?.coldStartMs).toBeGreaterThanOrEqual(0);
+  expect(coldTimings?.restoreLocalModelsMs).toBeUndefined();
+  expect(coldTimings?.restoreByokGatewayMs).toBeUndefined();
+  expect(coldTimings?.totalMs).toBeGreaterThanOrEqual(0);
+  expect(coldLogs.join("")).toMatch(
+    /Resume timings \(cold, ms\): probe 0, coldStart \d+, total \d+\./,
+  );
+
+  // Timings still flush on failure.
+  const failedLogs: string[] = [];
+  let failedTimings: ResumeTimings | undefined;
+  await expect(
+    resumeSourceInstance(
+      {
+        ...options,
+        log: (message) => failedLogs.push(message),
+        onTimings: (timings) => {
+          failedTimings = timings;
+        },
+      },
+      {
+        load: async () => instance,
+        engines: native(
+          vi.fn<ResumeEngine["run"]>(async () => {
+            throw new Error("cold start aborted");
+          }),
+          false,
+        ),
+      },
+    ),
+  ).rejects.toThrow("cold start aborted");
+  expect(failedTimings?.path).toBe("cold");
+  expect(failedTimings?.coldStartMs).toBeGreaterThanOrEqual(0);
+  expect(failedLogs.join("")).toMatch(/Resume timings \(cold, ms\):/);
 });

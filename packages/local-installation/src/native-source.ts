@@ -29,7 +29,12 @@ import { checkNativeRuntime } from "./native-runtime.js";
 import { checkTeamhubBinaries } from "./teamhub-binaries.js";
 import { sourceRegion } from "@linger/service-kit";
 import { npmRegistryEnvironment } from "./npm-registry.js";
-import { recordRegionFallback, resolveRegion } from "./region.js";
+import {
+  formatRegionResolution,
+  recordRegionFallback,
+  resolveRegion,
+  type RegionResolutionInfo,
+} from "./region.js";
 import { prepareNativeDatabase } from "./native-database.js";
 import {
   inspectNativeListeners,
@@ -300,14 +305,37 @@ async function waitHealthy(
   onEvent: (event: InstallerEvent) => void,
   ends: Map<string, number>,
 ) {
-  const deadline = Date.now() + 20 * 60_000;
+  const startedAt = Date.now();
+  const deadline = startedAt + 20 * 60_000;
   let last = 0;
   const occupied = new Map<string, number>();
+  const readyAt = new Map<string, string>();
   for (;;) {
     signal.throwIfAborted();
     const probed = await probeNativeSourceServices(instance, signal);
-    if (probed.every((check) => check.ready))
+    const now = Date.now();
+    for (const check of probed) {
+      if (check.ready && !readyAt.has(check.service)) {
+        const elapsed = ((now - startedAt) / 1000).toFixed(1);
+        readyAt.set(check.service, elapsed);
+        onEvent({
+          kind: "log",
+          stage: "services",
+          message: `Native service ${check.service} ready in ${elapsed}s.\n`,
+        });
+      }
+    }
+    if (probed.every((check) => check.ready)) {
+      const summary = probed
+        .map(({ service }) => `${service} ${readyAt.get(service) ?? "0.0"}`)
+        .join(", ");
+      onEvent({
+        kind: "log",
+        stage: "services",
+        message: `Native collaboration services ready (s): ${summary}.\n`,
+      });
       return probed.map(({ service, ready }) => ({ service, ready }));
+    }
     // A port another process holds never frees up by waiting; the service
     // that should listen there exits or retries until the deadline.
     for (const check of probed) {
@@ -815,8 +843,20 @@ async function runNativeSource(
         const voice = configured.liveKit ? voiceTools : undefined;
         // node-services downloads its voice model packages from the region's
         // registry first, and nothing it starts probes again.
-        const region = await resolveRegion(home, { signal });
-        emit({ kind: "log", stage, message: `Download region: ${region}.\n` });
+        let regionInfo: RegionResolutionInfo | undefined;
+        const region = await resolveRegion(home, {
+          signal,
+          onResolved: (info) => {
+            regionInfo = info;
+          },
+        });
+        emit({
+          kind: "log",
+          stage,
+          message: regionInfo
+            ? `${formatRegionResolution(regionInfo)}\n`
+            : `Download region: ${region}.\n`,
+        });
         const env: NodeJS.ProcessEnv = {
           ...process.env,
           ...tools.env,
@@ -1615,31 +1655,73 @@ async function reclaimEarlierProcesses(
 export async function stopNativeSource(
   instance: Instance,
   signal?: AbortSignal,
+  options: { log?: (message: string) => void } = {},
 ) {
   requireNative(instance);
   await withInstanceLock(instance, async () => {
-    signal?.throwIfAborted();
-    await stopComputer(instance, { signal });
-    for (const name of nativeServices) {
-      signal?.throwIfAborted();
+    const timings: [string, string][] = [];
+    const seconds = (ms: number) => (ms / 1000).toFixed(1);
+    const timedStep = async (
+      name: string,
+      label: string,
+      run: () => Promise<void>,
+    ) => {
+      const startedAt = Date.now();
+      let failed = false;
       try {
-        await stopNativeProcess(instance.root, name);
+        await run();
       } catch (error) {
-        const code = (error as NodeJS.ErrnoException | null)?.code;
-        throw Object.assign(
-          new Error(
-            error instanceof Error ? error.message : `Could not stop ${name}.`,
-            { cause: error },
-          ),
-          { code: code ?? NATIVE_SERVICE_STOP_FAILED, nativeService: name },
+        failed = true;
+        throw error;
+      } finally {
+        const elapsed = seconds(Date.now() - startedAt);
+        timings.push([name, elapsed]);
+        options.log?.(
+          failed
+            ? `Stopping ${label} failed after ${elapsed}s.`
+            : `Stopped ${label} in ${elapsed}s.`,
+        );
+      }
+    };
+    try {
+      signal?.throwIfAborted();
+      await timedStep("computer", "native computer", () =>
+        stopComputer(instance, { signal }),
+      );
+      for (const name of nativeServices) {
+        signal?.throwIfAborted();
+        await timedStep(name, `native ${name}`, async () => {
+          try {
+            await stopNativeProcess(instance.root, name);
+          } catch (error) {
+            const code = (error as NodeJS.ErrnoException | null)?.code;
+            throw Object.assign(
+              new Error(
+                error instanceof Error
+                  ? error.message
+                  : `Could not stop ${name}.`,
+                { cause: error },
+              ),
+              { code: code ?? NATIVE_SERVICE_STOP_FAILED, nativeService: name },
+            );
+          }
+        });
+      }
+      await timedStep("orphans", "native orphans", () =>
+        reclaimEarlierProcesses(instance, path.resolve(instance.root, "../..")),
+      );
+      await timedStep("gateway", "native model gateway", () =>
+        stopModelGateway(instance, signal),
+      );
+    } finally {
+      if (timings.length > 0) {
+        options.log?.(
+          `Native stop timings (s): ${timings
+            .map(([name, elapsed]) => `${name} ${elapsed}`)
+            .join(", ")}.`,
         );
       }
     }
-    await reclaimEarlierProcesses(
-      instance,
-      path.resolve(instance.root, "../.."),
-    );
-    await stopModelGateway(instance, signal);
   });
 }
 export async function nativeSourceLogs(

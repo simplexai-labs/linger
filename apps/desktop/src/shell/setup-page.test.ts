@@ -1054,6 +1054,173 @@ describe("setup page Quick Install recommendation", () => {
     );
     expect(($("signin-byok-key") as HTMLInputElement).value).toBe("");
   });
+
+  it("unblocks Install for BYOK as soon as fields are valid even while capability check or tool download runs", async () => {
+    const { run, push } = await openPage(
+      welcome({ state: "checking" }),
+      "welcome",
+    );
+    const button = $("local-install") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.dataset.busy).toBe("true");
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
+
+    $("local-customize").click();
+    document
+      .querySelector<HTMLButtonElement>(
+        '[data-plan="source"] [data-value="byok"]',
+      )!
+      .click();
+    // Before required fields are entered, Install shows plain text (no spinner) and stays disabled.
+    expect(button.disabled).toBe(true);
+    expect(button.dataset.busy).toBe("false");
+    expect(button.getAttribute("aria-busy")).toBe("false");
+    expect($("local-install-label").textContent).toBe("Install");
+    expect($("local-install-label").querySelector(".spinner")).toBeNull();
+
+    // Tool download progress arrives while the user enters BYOK fields.
+    push(
+      welcome({
+        state: "checking",
+        download: { completed: 8 * 1024 ** 2, total: 64 * 1024 ** 2 },
+      }),
+    );
+    document
+      .querySelector<HTMLButtonElement>(
+        '[data-byok="runtime"] [data-value="codex"]',
+      )!
+      .click();
+    type("byok-url", "https://api.example.com");
+    expect(button.disabled).toBe(true);
+    expect($("local-install-label").querySelector(".spinner")).toBeNull();
+
+    type("byok-model", "gpt-5.4");
+    expect(button.disabled).toBe(false);
+    expect(button.dataset.busy).toBe("false");
+    expect(button.getAttribute("aria-busy")).toBe("false");
+    expect($("local-install-label").textContent).toBe("Install");
+    expect($("local-install-label").querySelector(".spinner")).toBeNull();
+
+    button.click();
+    await vi.waitFor(() =>
+      expect(installed(run)).toEqual([
+        {
+          op: "local.start",
+          runtime: "codex",
+          byok: {
+            runtime: "codex",
+            baseUrl: "https://api.example.com",
+            path: "/v1",
+            endpoint: "/responses",
+            protocol: "openai-responses",
+            modelId: "gpt-5.4",
+          },
+        },
+      ]),
+    );
+  });
+
+  it("keeps BYOK selection and fields intact when a late capability check finishes", async () => {
+    for (const lateResult of [capable, small]) {
+      const { run, push } = await openPage(
+        welcome({ state: "checking" }),
+        "welcome",
+      );
+      $("local-customize").click();
+      document
+        .querySelector<HTMLButtonElement>(
+          '[data-plan="source"] [data-value="byok"]',
+        )!
+        .click();
+      document
+        .querySelector<HTMLButtonElement>(
+          '[data-byok="runtime"] [data-value="pi"]',
+        )!
+        .click();
+      type("byok-url", "https://llm.example.com");
+      type("byok-key", "sk-keep-me");
+      type("byok-model", "qwen3-coder");
+
+      push(welcome(lateResult));
+
+      expect(
+        document
+          .querySelector('[data-plan="source"] [data-value="byok"]')!
+          .getAttribute("aria-checked"),
+      ).toBe("true");
+      expect($("byok-row").hidden).toBe(false);
+      expect(($("byok-url") as HTMLInputElement).value).toBe(
+        "https://llm.example.com",
+      );
+      expect(($("byok-key") as HTMLInputElement).value).toBe("sk-keep-me");
+      expect(($("byok-model") as HTMLInputElement).value).toBe("qwen3-coder");
+      expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+
+      $("local-install").click();
+      await vi.waitFor(() =>
+        expect(installed(run)).toEqual([
+          {
+            op: "local.start",
+            runtime: "pi",
+            byok: {
+              runtime: "pi",
+              baseUrl: "https://llm.example.com",
+              path: "/v1",
+              endpoint: "/chat/completions",
+              protocol: "openai-chat",
+              apiKey: "sk-keep-me",
+              modelId: "qwen3-coder",
+            },
+          },
+        ]),
+      );
+    }
+  });
+
+  it("re-disables Install with spinner when switching off BYOK while capability check is still running", async () => {
+    await openPage(welcome({ state: "checking" }), "welcome");
+    const button = $("local-install") as HTMLButtonElement;
+    const source = (value: string) =>
+      document.querySelector<HTMLButtonElement>(
+        `[data-plan="source"] [data-value="${value}"]`,
+      )!;
+    const runtime = (value: string) =>
+      document.querySelector<HTMLButtonElement>(
+        `[data-plan="runtime"] [data-value="${value}"]`,
+      )!;
+
+    $("local-customize").click();
+    source("byok").click();
+    type("byok-url", "https://api.example.com");
+    type("byok-model", "claude-sonnet-4-6");
+    expect(button.disabled).toBe(false);
+
+    source("local").click();
+    expect(button.disabled).toBe(true);
+    expect(button.dataset.busy).toBe("true");
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
+
+    source("byok").click();
+    expect(button.disabled).toBe(false);
+
+    source("subscription").click();
+    runtime("recommended").click();
+    expect(button.disabled).toBe(true);
+    expect(button.dataset.busy).toBe("true");
+    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
+
+    source("byok").click();
+    expect(button.disabled).toBe(false);
+
+    // Clicking "Use defaults" closes Customize and waits for the check again.
+    $("local-customize").click();
+    expect(button.disabled).toBe(true);
+    expect(button.dataset.busy).toBe("true");
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
+  });
 });
 
 describe("setup page permissions", () => {
