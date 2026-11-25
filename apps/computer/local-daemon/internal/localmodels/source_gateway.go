@@ -66,7 +66,11 @@ func (m *ModelSource) EnsureGateway(ctx context.Context, runtimeType string) err
 	if err == nil {
 		slog.Info("model_source.gateway_remount", "phase", "succeeded", "runtime_type", runtimeType)
 	} else if sourceErr := (*ModelSourceError)(nil); errors.As(err, &sourceErr) {
-		slog.Warn("model_source.gateway_remount", "phase", "failed", "runtime_type", runtimeType, "code", sourceErr.Code)
+		args := []any{"phase", "failed", "runtime_type", runtimeType, "code", sourceErr.Code}
+		if detail := sanitizeModelSourceMessage(sourceErr.Message, "", ""); detail != "" {
+			args = append(args, "detail", detail)
+		}
+		slog.Warn("model_source.gateway_remount", args...)
 	}
 	return err
 }
@@ -80,6 +84,13 @@ func (m *ModelSource) remount(ctx context.Context, runtime string) error {
 	if err != nil {
 		if ctx.Err() != nil {
 			return errors.Join(ctx.Err(), err)
+		}
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			return &ModelSourceError{
+				Code:      "MODEL_SOURCE_TIMEOUT",
+				Message:   "Timed out starting the BYOK gateway on this Computer.",
+				Retryable: true,
+			}
 		}
 		return &ModelSourceError{
 			Code:      CodeToolFailed,

@@ -499,6 +499,7 @@ export class RunnerConnections {
               // A Computer ignores a feature it does not know, so these
               // need no release gate.
               "local_model_unavailable",
+              "model_gateway_unavailable",
               "local_models_external_holders",
             ],
           }

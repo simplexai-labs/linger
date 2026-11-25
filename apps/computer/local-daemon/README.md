@@ -415,7 +415,10 @@ mounted again with `source apply --mode byok` from the configuration
 first. A failed mount fails the Run before its Runtime starts, with the
 public failure code of the tool's structured code: `BYOK_UNREACHABLE` and
 `NETWORK_UNAVAILABLE` become `network_error`, `BYOK_AUTH_FAILED`
-`authentication_required`; any other stays `execution_failed`. Model calls
+`authentication_required`; any other (including `BYOK_GATEWAY_FAILED`,
+`TOOL_FAILED`, and a remount deadline's `MODEL_SOURCE_TIMEOUT`) becomes
+`model_gateway_unavailable` when the Agent Service's welcome names that
+service feature, else `execution_failed` for an older service. Model calls
 answer `unavailable` for the two network codes, `auth_required` for
 `BYOK_AUTH_FAILED` and `runtime_unavailable` for any other, with the tool's
 code in the reason. Runs that waited for a remount that failed meanwhile share its

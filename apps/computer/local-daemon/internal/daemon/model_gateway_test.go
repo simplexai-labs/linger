@@ -18,10 +18,14 @@ import (
 type gatewayModelSource struct {
 	fakeModelSourceManager
 	err     error
+	release <-chan struct{}
 	runtime []string
 }
 
 func (g *gatewayModelSource) EnsureGateway(_ context.Context, runtimeType string) error {
+	if g.release != nil {
+		<-g.release
+	}
 	g.runtime = append(g.runtime, runtimeType)
 	return g.err
 }
@@ -30,15 +34,22 @@ func (g *gatewayModelSource) EnsureGateway(_ context.Context, runtimeType string
 // Runtime starts, with the public code of the tool's structured cause.
 func TestDaemonEnsuresTheModelGatewayBeforeARun(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		err      error
-		terminal string
-		code     string
+		name              string
+		serviceFeatures   []string
+		waitForDisconnect bool
+		err               error
+		terminal          string
+		code              string
 	}{
-		{"gateway up", nil, protocol.EventOperationCompleted, ""},
-		{"endpoint unreachable", &localmodels.ModelSourceError{Code: "BYOK_UNREACHABLE", Message: "Could not reach the endpoint."}, protocol.EventOperationFailed, "network_error"},
-		{"key rejected", &localmodels.ModelSourceError{Code: "BYOK_AUTH_FAILED", Message: "The endpoint rejected the key."}, protocol.EventOperationFailed, "authentication_required"},
-		{"gateway failed", &localmodels.ModelSourceError{Code: "BYOK_GATEWAY_FAILED", Message: "Bifrost did not start."}, protocol.EventOperationFailed, "execution_failed"},
+		{"gateway up", []string{serviceFeatureModelGatewayUnavailable}, false, nil, protocol.EventOperationCompleted, ""},
+		{"endpoint unreachable", []string{serviceFeatureModelGatewayUnavailable}, false, &localmodels.ModelSourceError{Code: "BYOK_UNREACHABLE", Message: "Could not reach the endpoint."}, protocol.EventOperationFailed, "network_error"},
+		{"network unavailable", []string{serviceFeatureModelGatewayUnavailable}, false, &localmodels.ModelSourceError{Code: "NETWORK_UNAVAILABLE", Message: "Network is unavailable."}, protocol.EventOperationFailed, "network_error"},
+		{"key rejected", []string{serviceFeatureModelGatewayUnavailable}, false, &localmodels.ModelSourceError{Code: "BYOK_AUTH_FAILED", Message: "The endpoint rejected the key."}, protocol.EventOperationFailed, "authentication_required"},
+		{"gateway failed with feature", []string{serviceFeatureModelGatewayUnavailable}, false, &localmodels.ModelSourceError{Code: "BYOK_GATEWAY_FAILED", Message: "Bifrost did not start."}, protocol.EventOperationFailed, "model_gateway_unavailable"},
+		{"gateway failed after stream close keeps admitted feature", []string{serviceFeatureModelGatewayUnavailable}, true, &localmodels.ModelSourceError{Code: "BYOK_GATEWAY_FAILED", Message: "Bifrost did not start."}, protocol.EventOperationFailed, "model_gateway_unavailable"},
+		{"gateway timeout with feature", []string{serviceFeatureModelGatewayUnavailable}, false, &localmodels.ModelSourceError{Code: "MODEL_SOURCE_TIMEOUT", Message: "Timed out starting the BYOK gateway on this Computer."}, protocol.EventOperationFailed, "model_gateway_unavailable"},
+		{"gateway tool failed with feature", []string{serviceFeatureModelGatewayUnavailable}, false, &localmodels.ModelSourceError{Code: localmodels.CodeToolFailed, Message: "The BYOK gateway could not be started on this Computer."}, protocol.EventOperationFailed, "model_gateway_unavailable"},
+		{"gateway failed without feature", nil, false, &localmodels.ModelSourceError{Code: "BYOK_GATEWAY_FAILED", Message: "Bifrost did not start."}, protocol.EventOperationFailed, "execution_failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			device, err := transport.GenerateIdentity()
@@ -55,7 +66,7 @@ func TestDaemonEnsuresTheModelGatewayBeforeARun(t *testing.T) {
 				"input": map[string]any{"type": "text", "text": "hello"},
 			})
 			stream := &fakeStream{commands: []protocol.Command{
-				{Type: "runner.welcome", ConnectionEpoch: 7},
+				{Type: "runner.welcome", ConnectionEpoch: 7, ServiceFeatures: tc.serviceFeatures},
 				{Type: protocol.CommandRegistrationSnapshot, CommandID: "registration-snapshot-1", ConnectionEpoch: 7,
 					Payload: mustJSON([]transport.RuntimeRegistration{{
 						RegistrationID: "reg-1",
@@ -71,7 +82,11 @@ func TestDaemonEnsuresTheModelGatewayBeforeARun(t *testing.T) {
 					ExecutionContextKey: "context-1", RuntimeInstanceID: "runtime-1", ContextViewRef: testContextViewRef,
 				},
 			}}
-			source := &gatewayModelSource{err: tc.err}
+			var release chan struct{}
+			if tc.waitForDisconnect {
+				release = make(chan struct{})
+			}
+			source := &gatewayModelSource{err: tc.err, release: release}
 			started := false
 			daemon, err := newTestDaemon(t, Options{
 				ComputerID:        "computer-1",
@@ -90,6 +105,12 @@ func TestDaemonEnsuresTheModelGatewayBeforeARun(t *testing.T) {
 			daemon.daemonID = device.DaemonID
 			if err := daemon.runConnection(context.Background(), device); !errors.Is(err, io.EOF) {
 				t.Fatalf("Run() error = %v, want EOF from fake stream", err)
+			}
+			if release != nil {
+				if daemon.modelGatewayUnavailable.Load() {
+					t.Fatal("modelGatewayUnavailable was not cleared after stream close")
+				}
+				close(release)
 			}
 			var terminal protocol.Event
 			deadline := time.Now().Add(5 * time.Second)

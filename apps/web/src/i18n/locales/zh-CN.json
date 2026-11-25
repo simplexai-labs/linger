@@ -1757,6 +1757,7 @@
     "failureModelUnavailable": "模型服务没有向这个 Runtime 的账号提供所选模型。请为 Agent 换一个模型，或让 Runtime 登录一个可以使用该模型的账号。",
     "failureModelNotOffered": "Agent 的电脑不提供所选模型，或该模型不支持当前的思考强度。请打开 Agent 的设置，选择这台电脑提供的模型和思考强度。",
     "failureLocalModelUnavailable": "Agent 所在的电脑无法加载它的本地模型。请在那台电脑上打开“模型”页面：该模型可能需要更多可用内存、尚未下载完整，或仍在加载。然后重试，或为 Agent 选择其他模型。",
+    "failureModelGatewayUnavailable": "Agent 所在的电脑无法启动本地模型网关。请在那台电脑上打开“设置 › 模型”或查看 Local Computer 诊断信息，然后再试。",
     "failureContextTooLong": "对话内容已超出模型的上下文窗口。请与 Agent 开始新对话，或换一个上下文窗口更大的模型。",
     "failureModelServiceError": "模型服务报告了内部错误。请稍后重试；如果一直失败，请查看模型提供商的服务状态。",
     "failureTimeout": "Runtime 运行超过时间限制仍未完成。请重试，或把请求拆成更小的步骤。",

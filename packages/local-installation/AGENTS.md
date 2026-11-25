@@ -244,7 +244,8 @@ The local source is set only by a start whose request chose local models
 (`setupChoice` or a plan approval); a restart or version upgrade from the saved
 choice keeps a source the person switched to on the Models page (leaving the
 local model stack stopped while `model-source.json` names `byok` or
-`subscription`).
+`subscription`, omitting `--main-plan` from `prepareFoundationServices`, and
+keeping the active BYOK or subscription runtime for `prepareModelGateway`).
 The installer reads `model-source.json` (`readByokEnvironment`) but never
 writes it. When a deployed local-model stack's binding reports a stopped
 service or gateway (`deployment-unavailable` or `gateway-unavailable`) and its

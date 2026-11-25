@@ -184,6 +184,33 @@ func TestEnsureGatewaySharesARemountThatFailedWhileWaiting(t *testing.T) {
 	}
 }
 
+// Hitting the remount deadline maps to MODEL_SOURCE_TIMEOUT instead of generic
+// TOOL_FAILED so logs and callers distinguish a slow gateway start from a tool crash.
+func TestEnsureGatewayRemountTimeoutReturnsModelSourceTimeout(t *testing.T) {
+	stopped := httptest.NewServer(http.NotFoundHandler())
+	stoppedURL := stopped.URL
+	stopped.Close()
+	ft := newFakeTool(t)
+	writeModelSourceJSON(t, ft.state, map[string]any{
+		"schema": modelSourceSchema, "mode": "byok", "runtime": "pi", "gateway_url": stoppedURL,
+		"environment": map[string]string{"PI_CODING_AGENT_DIR": filepath.Join(ft.state, "byok-home", ".pi", "agent")},
+	})
+	if err := os.WriteFile(filepath.Join(ft.state, "source-apply-wait"), []byte("5000"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ms := NewModelSource(ModelSourceOptions{
+		Tool:         &ft.tool,
+		Environment:  map[string]string{"LOCALMODELS_FAKE_TOOL": "1"},
+		JobDirectory: filepath.Join(t.TempDir(), "jobs"),
+		ApplyTimeout: 100 * time.Millisecond,
+	})
+	var sourceErr *ModelSourceError
+	err := ms.EnsureGateway(t.Context(), "pi")
+	if !errors.As(err, &sourceErr) || sourceErr.Code != "MODEL_SOURCE_TIMEOUT" || !sourceErr.Retryable {
+		t.Fatalf("EnsureGateway error = %+v (%v), want retryable MODEL_SOURCE_TIMEOUT", sourceErr, err)
+	}
+}
+
 // GatewayMode names the managed gateway only for a Runtime whose profile the
 // saved local or BYOK source manages; a Runtime on its own provider, or a
 // subscription source, reaches no gateway.
