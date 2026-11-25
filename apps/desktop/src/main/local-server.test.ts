@@ -71,12 +71,13 @@ import {
   testHost,
 } from "./test-support.js";
 
-// These tests run the installer stub in real subprocesses.
-// Windows test hosts can take longer to launch them under load.
+// These tests unpack source archives with real tar and run the installer stub
+// in real subprocesses, which can exceed 1s under CI load on any host (and
+// take longer on Windows).
 const isWindowsHost = process.platform === "win32";
-if (isWindowsHost) vi.setConfig({ testTimeout: 20_000 });
+vi.setConfig({ testTimeout: isWindowsHost ? 20_000 : 15_000 });
 const waitForInstaller = (check: () => unknown) =>
-  vi.waitFor(check, { timeout: isWindowsHost ? 10_000 : 1_000 });
+  vi.waitFor(check, { timeout: isWindowsHost ? 10_000 : 5_000 });
 
 // Fake timers that still advance with real time, for the installer stub's
 // subprocess; AbortSignal.timeout runs on them too, since the native one
@@ -2548,7 +2549,7 @@ describe("LocalServerModule", () => {
     const warn = vi.spyOn(silentLog, "warn");
     await f.host.start();
     await f.module.begin({ runtime: "claude" });
-    await vi.waitFor(() =>
+    await waitForInstaller(() =>
       expect(warn).toHaveBeenCalledWith("local_server.installer_stderr", {
         line: "Something else",
       }),
@@ -3236,12 +3237,12 @@ describe("LocalServerModule install location", () => {
       await f.host.start();
       try {
         f.module.inspect();
-        await vi.waitFor(() =>
+        await waitForInstaller(() =>
           expect(f.module.status().localModels.state).toBe("checked"),
         );
         for (let attempt = 0; attempt < 2; attempt++) {
           await f.module.chooseLocation(picked);
-          await vi.waitFor(() =>
+          await waitForInstaller(() =>
             expect(f.module.status().localModels.state).toBe("checked"),
           );
           expect(f.module.status().location.path).toBe(target);
@@ -3252,7 +3253,7 @@ describe("LocalServerModule install location", () => {
           );
           if (kind === "nonempty") expect(existsSync(target)).toBe(false);
           await f.module.chooseLocation(null);
-          await vi.waitFor(() =>
+          await waitForInstaller(() =>
             expect(f.module.status().localModels.state).toBe("checked"),
           );
         }
@@ -3273,7 +3274,7 @@ describe("LocalServerModule install location", () => {
     await f.host.start();
     try {
       f.module.inspect();
-      await vi.waitFor(() =>
+      await waitForInstaller(() =>
         expect(f.module.status().localModels).toMatchObject({
           state: "checked",
           eligible: true,
@@ -3284,7 +3285,7 @@ describe("LocalServerModule install location", () => {
       mkdirSync(path.join(picked, "instances"), { recursive: true });
       writeFileSync(path.join(picked, "small-computer"), "");
       await f.module.chooseLocation(picked);
-      await vi.waitFor(() =>
+      await waitForInstaller(() =>
         expect(f.module.status().localModels).toMatchObject({
           state: "checked",
           eligible: false,
@@ -3293,7 +3294,7 @@ describe("LocalServerModule install location", () => {
       expect(inspectArgs(f.home)).toContain(picked);
       rmSync(path.join(picked, "small-computer"));
       f.module.recheck();
-      await vi.waitFor(() =>
+      await waitForInstaller(() =>
         expect(f.module.status().localModels).toMatchObject({
           state: "checked",
           eligible: true,
@@ -3311,7 +3312,7 @@ describe("LocalServerModule install location", () => {
     try {
       await f.module.chooseLocation(picked);
       f.module.inspect();
-      await vi.waitFor(() =>
+      await waitForInstaller(() =>
         expect(f.module.status().localModels.state).toBe("checked"),
       );
       expect(inspectArgs(f.home)).toEqual([
@@ -3340,12 +3341,12 @@ describe("LocalServerModule install location", () => {
       await f.host.start();
       try {
         f.module.inspect();
-        await vi.waitFor(() =>
+        await waitForInstaller(() =>
           expect(inspectArgs(f.home)).toContain("--inspect"),
         );
         await f.module.chooseLocation(picked);
         writeFileSync(path.join(f.home, "tool-ready"), "");
-        await vi.waitFor(() =>
+        await waitForInstaller(() =>
           expect(inspectArgs(f.home)).toEqual([
             "--home",
             f.home,
@@ -3354,7 +3355,7 @@ describe("LocalServerModule install location", () => {
             picked,
           ]),
         );
-        await vi.waitFor(() =>
+        await waitForInstaller(() =>
           expect(f.module.status().localModels).toMatchObject({
             state: "checked",
             eligible: true,
@@ -3363,7 +3364,7 @@ describe("LocalServerModule install location", () => {
         rmSync(path.join(f.home, "check-fails"), { force: true });
         writeFileSync(path.join(f.home, "small-computer"), "");
         await f.module.chooseLocation(null);
-        await vi.waitFor(() =>
+        await waitForInstaller(() =>
           expect(f.module.status().localModels).toMatchObject({
             state: "checked",
             eligible: false,
@@ -4185,7 +4186,9 @@ describe("LocalServerModule after a restart", () => {
         }),
       );
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("failed"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("failed"),
+      );
       expect(f.showStartFailed).toHaveBeenCalledWith(
         "The local model service isn't running. Local model installation or verification did not finish: The saved local model plan no longer fits this computer's current memory or model catalog. Existing resources were preserved. Set Up Again to review a new plan or choose another AI runtime.",
       );
@@ -4219,7 +4222,9 @@ describe("LocalServerModule after a restart", () => {
       );
     });
     await f.host.start();
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("failed"));
+    await waitForInstaller(() =>
+      expect(f.module.status().phase).toBe("failed"),
+    );
     expect(f.showStartFailed).toHaveBeenCalledWith(
       "The local model service isn't running. Local model installation or verification did not finish: Another local model operation is already running. Existing resources were preserved. Try Again to apply the approved local model plan again, or Set Up Again to review a new plan or choose another AI runtime.",
     );
@@ -4276,7 +4281,9 @@ describe("LocalServerModule after a restart", () => {
       api,
     );
     await f.host.start();
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("failed"));
+    await waitForInstaller(() =>
+      expect(f.module.status().phase).toBe("failed"),
+    );
     expect(f.showStartFailed).toHaveBeenCalledWith(
       expect.stringContaining(
         "Set Up Again to review a new plan or choose another AI runtime.",
@@ -4286,7 +4293,7 @@ describe("LocalServerModule after a restart", () => {
     const opened = vi.fn();
     f.bus.on("setup.open", opened);
     f.bus.emit("local-server.reset");
-    await vi.waitFor(() => expect(opened).toHaveBeenCalledOnce());
+    await waitForInstaller(() => expect(opened).toHaveBeenCalledOnce());
     expect(existsSync(path.join(f.home, "desktop", "local-server.json"))).toBe(
       false,
     );

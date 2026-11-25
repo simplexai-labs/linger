@@ -359,6 +359,10 @@ describe("BYOK localmodels integration", () => {
       stderr: string;
     }) => void;
     let rejectApply!: (error: Error) => void;
+    let markApplyStarted!: () => void;
+    const applyStarted = new Promise<void>((resolve) => {
+      markApplyStarted = resolve;
+    });
     const promise = prepareByokRuntime(
       {
         baseUrl: "https://api.example.com",
@@ -383,9 +387,13 @@ describe("BYOK localmodels integration", () => {
           new Promise((resolve, reject) => {
             resolveApply = resolve;
             rejectApply = reject;
+            markApplyStarted();
           }),
       },
     );
+    // Wait for async filesystem reads inside applySource to reach localmodels
+    // before advancing the fake clock.
+    await applyStarted;
     await vi.advanceTimersByTimeAsync(9_900);
     const beforeTen = events.length;
     await vi.advanceTimersByTimeAsync(200);

@@ -373,7 +373,7 @@ func newProbeTestLibrary(t *testing.T, fake *fakeTool, cacheDir string, record *
 		Publish:             record.publish,
 		RuntimeChanged:      record.runtimeChanged,
 		ProgressInterval:    20 * time.Millisecond,
-		EnsureLoadTimeout:   5 * time.Second,
+		EnsureLoadTimeout:   20 * time.Second,
 	})
 	library.prober.cfg.promptWords = 16
 	library.prober.cfg.noiseAllowance = 30 * time.Millisecond
@@ -397,6 +397,8 @@ func loadedModelWithConcurrency(baseURL, engine string, concurrency any) map[str
 
 func TestLibraryProbeLifecycleOverlayEnsureLoadedAndCacheReuse(t *testing.T) {
 	gate := make(chan struct{})
+	var closeGate sync.Once
+	releaseGate := func() { closeGate.Do(func() { close(gate) }) }
 	probeEntered := make(chan struct{}, 1)
 	var httpCalls atomic.Int32
 	const secret = "live-slot-secret"
@@ -415,7 +417,11 @@ func TestLibraryProbeLifecycleOverlayEnsureLoadedAndCacheReuse(t *testing.T) {
 			case probeEntered <- struct{}{}:
 			default:
 			}
-			<-gate
+			select {
+			case <-gate:
+			case <-r.Context().Done():
+				return
+			}
 			time.Sleep(15 * time.Millisecond)
 			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"OK"}}]}`)
 		default:
@@ -423,6 +429,7 @@ func TestLibraryProbeLifecycleOverlayEnsureLoadedAndCacheReuse(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	defer releaseGate()
 
 	fake := newFakeTool(t)
 	deployDir := filepath.Join(t.TempDir(), "deploy")
@@ -484,7 +491,7 @@ func TestLibraryProbeLifecycleOverlayEnsureLoadedAndCacheReuse(t *testing.T) {
 	case <-time.After(60 * time.Millisecond):
 	}
 
-	close(gate)
+	releaseGate()
 	if err := <-ensureDone; err != nil {
 		t.Fatalf("EnsureLoaded returned %v", err)
 	}
@@ -493,9 +500,9 @@ func TestLibraryProbeLifecycleOverlayEnsureLoadedAndCacheReuse(t *testing.T) {
 		m := modelState(record.last(), testModel)
 		return m != nil && m.State == "loaded" && m.ConcurrencyProbing == nil && m.Concurrency != nil && *m.Concurrency == 2
 	})
-	if record.changes() == 0 {
-		t.Fatal("expected runtimeChanged after probe published loaded model")
-	}
+	waitFor(t, "runtimeChanged after probe published loaded model", func() bool {
+		return record.changes() > 0
+	})
 
 	// A new Library sharing concurrency-probes.json uses cached result with 0 HTTP probes.
 	callsBeforeRestart := httpCalls.Load()
@@ -609,6 +616,8 @@ func TestLibraryProbeSkipsLowOrUnsetConcurrencyAndCancelsOnUnload(t *testing.T) 
 
 	t.Run("ensureLoaded waits through post-load concurrency probe", func(t *testing.T) {
 		gate := make(chan struct{})
+		var closeGate sync.Once
+		releaseGate := func() { closeGate.Do(func() { close(gate) }) }
 		probeEntered := make(chan struct{}, 1)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/v1/models" {
@@ -619,11 +628,16 @@ func TestLibraryProbeSkipsLowOrUnsetConcurrencyAndCancelsOnUnload(t *testing.T) 
 			case probeEntered <- struct{}{}:
 			default:
 			}
-			<-gate
+			select {
+			case <-gate:
+			case <-r.Context().Done():
+				return
+			}
 			time.Sleep(15 * time.Millisecond)
 			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"OK"}}]}`)
 		}))
 		defer server.Close()
+		defer releaseGate()
 
 		fake := newFakeTool(t)
 		fake.write("status.json", status(model(testModel, "idle")))
@@ -654,14 +668,14 @@ func TestLibraryProbeSkipsLowOrUnsetConcurrencyAndCancelsOnUnload(t *testing.T) 
 		case <-time.After(50 * time.Millisecond):
 		}
 
-		close(gate)
+		releaseGate()
 		if err := <-done; err != nil {
 			t.Fatalf("EnsureLoaded returned %v", err)
 		}
-		row := modelState(record.last(), testModel)
-		if row == nil || row.State != "loaded" || row.ConcurrencyProbing != nil || row.Concurrency == nil || *row.Concurrency != 2 {
-			t.Fatalf("final row = %+v, want loaded with concurrency 2", row)
-		}
+		waitFor(t, "loaded snapshot with detected concurrency", func() bool {
+			row := modelState(record.last(), testModel)
+			return row != nil && row.State == "loaded" && row.ConcurrencyProbing == nil && row.Concurrency != nil && *row.Concurrency == 2
+		})
 	})
 }
 

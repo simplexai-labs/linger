@@ -632,8 +632,15 @@ func (l *Library) unloadAndStartJob(ctx context.Context, action Action, deadline
 
 // startJob starts a download or load and answers from its first event.
 func (l *Library) startJob(ctx context.Context, action Action, deadline time.Time) (*wire.LocalModelActionRefusal, bool) {
+	if !l.track(1) {
+		refusal := closedRefusal
+		return &refusal, true
+	}
 	answer := newPendingAnswer()
-	l.launchJob(action, answer, false)
+	go func() {
+		defer l.wg.Done()
+		l.launchJob(action, answer, false)
+	}()
 	return answer.await(ctx, deadline)
 }
 
@@ -654,9 +661,11 @@ func (l *Library) launchJob(action Action, answer *pendingAnswer, refreshOnRefus
 		l.wg.Add(-2)
 		slog.Warn("local_models.job_output_failed", "error", err)
 		answer.give(&wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "the Computer could not start localmodels"})
-		if refreshOnRefusal {
+		if (refreshOnRefusal || answer.missed()) && l.ctx.Err() == nil {
 			l.Refresh(l.ctx)
-			l.runtimeChanged()
+			if refreshOnRefusal {
+				l.runtimeChanged()
+			}
 		}
 		return
 	}
@@ -671,9 +680,11 @@ func (l *Library) launchJob(action Action, answer *pendingAnswer, refreshOnRefus
 		_ = os.Remove(output.Name())
 		slog.Warn("local_models.job_start_failed", "action", action.Name, "error", err)
 		answer.give(&wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "the Computer could not start localmodels"})
-		if refreshOnRefusal {
+		if (refreshOnRefusal || answer.missed()) && l.ctx.Err() == nil {
 			l.Refresh(l.ctx)
-			l.runtimeChanged()
+			if refreshOnRefusal {
+				l.runtimeChanged()
+			}
 		}
 		return
 	}
