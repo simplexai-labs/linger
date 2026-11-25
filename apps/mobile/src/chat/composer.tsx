@@ -46,6 +46,7 @@ import {
   type Mentionable,
 } from "./compose-message";
 import { mentionStyle } from "./mention-style";
+import { sendRetryingOnce } from "./upload-retry";
 import { armLive } from "../voice";
 import { useOutbox } from "./outbox-context";
 import { Text, TextInput } from "../ui/text";
@@ -120,6 +121,10 @@ export function Composer(props: {
     (text.trim().length > 0 || files.length > 0) &&
     !!outbox.outbox;
 
+  const latestTeamHub = useRef(teamHub);
+  useEffect(() => {
+    latestTeamHub.current = teamHub;
+  }, [teamHub]);
   const plusRef = useRef<React.ComponentRef<typeof View>>(null);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number }>();
   const window = useWindowDimensions();
@@ -170,8 +175,14 @@ export function Composer(props: {
     setFiles((current) => [...current, { localId, name: asset.name }]);
     try {
       const bytes = await new File(asset.uri).bytes();
-      const send = () =>
-        teamHub.run((session) =>
+      const hostId = teamHub.hostId;
+      // Read through the ref so a retry uses the session open now, and only
+      // while it still belongs to the same computer.
+      const send = () => {
+        const current = latestTeamHub.current;
+        if (current.hostId !== hostId)
+          return Promise.reject(new Error("The computer changed."));
+        return current.run((session) =>
           uploadAttachment(
             session,
             props.roomId,
@@ -179,14 +190,13 @@ export function Composer(props: {
             localId,
           ),
         );
-      // A session can close under an upload, as when the phone moves from a
-      // Relay to the LAN; the same key lets the computer keep one copy.
-      const upload = await send().catch(async (error: unknown) => {
-        if (!(error instanceof SessionClosed || error instanceof NotConnected))
-          throw error;
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
-        return send();
-      });
+      };
+      // The same key lets the computer keep one copy.
+      const upload = await sendRetryingOnce(
+        send,
+        (error) =>
+          error instanceof SessionClosed || error instanceof NotConnected,
+      );
       setFiles((current) =>
         current.map((file) =>
           file.localId === localId ? { ...file, upload } : file,
