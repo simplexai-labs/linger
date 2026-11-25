@@ -175,21 +175,26 @@ SELECT e.tenant_id, e.room_id, e.event_id, e.room_seq, e.occurred_at,
        (author.kind = 'agent')::boolean AS from_agent,
        coalesce(r.direct_human_actor_id, '')::text AS direct_human_actor_id,
        (m.author_actor_id = r.direct_agent_actor_id)::boolean AS from_direct_agent,
-       EXISTS (
-           SELECT 1 FROM decisions d
+       coalesce((
+           SELECT array_agg(d.decider_actor_id ORDER BY d.decider_actor_id) FROM decisions d
            JOIN actors human ON human.id = d.decider_actor_id AND human.kind = 'human'
            WHERE d.message_id = m.id AND d.status = 'pending'
-       )::boolean AS asks_decision,
-       EXISTS (
+       ), '{}')::text[] AS decider_actor_ids,
+       -- Only a direct chat's later reply speaks for this one: in a group,
+       -- another Agent's message need not concern the Human at all.
+       (r.direct_human_actor_id IS NOT NULL AND EXISTS (
            SELECT 1 FROM room_events later
            JOIN messages lm ON lm.id = later.resource_id
            JOIN actors la ON la.id = lm.author_actor_id AND la.kind = 'agent'
            WHERE later.room_id = e.room_id AND later.event_type = 'message.created'
              AND later.room_seq > e.room_seq AND lm.message_kind = 'conversation'
-       )::boolean AS superseded,
+       ))::boolean AS superseded,
+       -- As the Room's running light: a queued Run may wait indefinitely for
+       -- an offline Computer, and a Run that replied has said its piece.
        EXISTS (
            SELECT 1 FROM room_agent_runs run
-           WHERE run.context_room_id = e.room_id AND run.status IN ('queued', 'running')
+           WHERE run.context_room_id = e.room_id AND run.status = 'running'
+             AND NOT agent_local_run_replied(run.run_id)
        )::boolean AS run_active
 FROM room_events e
 JOIN messages m ON m.id = e.resource_id
@@ -210,13 +215,13 @@ type GetMobilePushMessageRow struct {
 	FromAgent          bool               `json:"from_agent"`
 	DirectHumanActorID string             `json:"direct_human_actor_id"`
 	FromDirectAgent    bool               `json:"from_direct_agent"`
-	AsksDecision       bool               `json:"asks_decision"`
+	DeciderActorIds    []string           `json:"decider_actor_ids"`
 	Superseded         bool               `json:"superseded"`
 	RunActive          bool               `json:"run_active"`
 }
 
 // The facts a push job needs about one published Message: who wrote it and
-// where, whom it mentions, whether it asks the Human to decide something,
+// where, whom it mentions, which Humans it asks to decide something,
 // whether a later Agent message in the Room supersedes it, and whether an
 // Agent is still working in the Room.
 func (q *Queries) GetMobilePushMessage(ctx context.Context, eventID string) (GetMobilePushMessageRow, error) {
@@ -234,7 +239,7 @@ func (q *Queries) GetMobilePushMessage(ctx context.Context, eventID string) (Get
 		&i.FromAgent,
 		&i.DirectHumanActorID,
 		&i.FromDirectAgent,
-		&i.AsksDecision,
+		&i.DeciderActorIds,
 		&i.Superseded,
 		&i.RunActive,
 	)
@@ -356,7 +361,7 @@ func (q *Queries) ListPairedPhones(ctx context.Context, arg ListPairedPhonesPara
 }
 
 const listPushTargetsForRoom = `-- name: ListPushTargetsForRoom :many
-SELECT p.id, p.push_grant::text AS push_grant, p.push_service_url::text AS push_service_url,
+SELECT p.id, p.account_id, p.push_grant::text AS push_grant, p.push_service_url::text AS push_service_url,
        human.id AS human_actor_id, p.push_replies, p.push_decisions, p.push_when_active,
        coalesce(state.read_through_room_seq, 0)::bigint AS read_through_room_seq
 FROM paired_phones p
@@ -373,6 +378,7 @@ type ListPushTargetsForRoomParams struct {
 
 type ListPushTargetsForRoomRow struct {
 	ID                 string `json:"id"`
+	AccountID          string `json:"account_id"`
 	PushGrant          string `json:"push_grant"`
 	PushServiceUrl     string `json:"push_service_url"`
 	HumanActorID       string `json:"human_actor_id"`
@@ -395,6 +401,7 @@ func (q *Queries) ListPushTargetsForRoom(ctx context.Context, arg ListPushTarget
 		var i ListPushTargetsForRoomRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.AccountID,
 			&i.PushGrant,
 			&i.PushServiceUrl,
 			&i.HumanActorID,

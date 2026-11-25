@@ -406,7 +406,6 @@ function PushSetting() {
 
   const change = async (next: PushPreferences) => {
     setProblem(undefined);
-    const previous = preferences;
     setPreferences(next);
     try {
       await setPushPreferences({
@@ -416,8 +415,10 @@ function PushSetting() {
         preferences: next,
       });
     } catch {
-      setPreferences(previous);
-      setProblem("The change did not reach your computer. Try again.");
+      // The phone keeps the choice and sends it on the next session.
+      setProblem(
+        "Saved on this phone. Your computer gets it when it connects.",
+      );
     }
   };
   const option = (

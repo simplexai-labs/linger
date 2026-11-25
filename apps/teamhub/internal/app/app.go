@@ -792,10 +792,10 @@ func (a *App) startJobs(ctx context.Context, runs func(Worker) bool) error {
 				Timeout: 20 * time.Second,
 				// A grant goes only to the service the phone named, never on.
 				CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-			}, a.logger, func(roomID string) bool {
+			}, a.logger, func(accountID, roomID string) bool {
 				// The Web and the phone both send Room presence while the
-				// Human looks at the Room.
-				return a.roomPresence.recentlyPresent(roomID, time.Now())
+				// Human looks at the Room; only this Human's own counts.
+				return a.roomPresence.presentFor(accountID, roomID, time.Now())
 			}))
 	}
 	riverWorkers := features.workers

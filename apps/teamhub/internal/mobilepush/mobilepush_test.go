@@ -36,9 +36,10 @@ func TestClassify(t *testing.T) {
 		}), phone, ""},
 		{"the Human's own message", with(func(f *store.GetMobilePushMessageRow) { f.FromAgent = false }), phone, ""},
 		{"a runtime message", with(func(f *store.GetMobilePushMessageRow) { f.MessageKind = "agent_runtime" }), phone, ""},
-		{"a decision", with(func(f *store.GetMobilePushMessageRow) { f.AsksDecision = true }), phone, KindDecision},
-		{"a decision, read or not", with(func(f *store.GetMobilePushMessageRow) { f.AsksDecision = true }), store.ListPushTargetsForRoomRow{HumanActorID: human, PushDecisions: true, ReadThroughRoomSeq: 99}, KindDecision},
-		{"decisions turned off", with(func(f *store.GetMobilePushMessageRow) { f.AsksDecision = true }), store.ListPushTargetsForRoomRow{HumanActorID: human, PushReplies: true}, ""},
+		{"a decision", with(func(f *store.GetMobilePushMessageRow) { f.DeciderActorIds = []string{human} }), phone, KindDecision},
+		{"a decision, read or not", with(func(f *store.GetMobilePushMessageRow) { f.DeciderActorIds = []string{human} }), store.ListPushTargetsForRoomRow{HumanActorID: human, PushDecisions: true, ReadThroughRoomSeq: 99}, KindDecision},
+		{"decisions turned off", with(func(f *store.GetMobilePushMessageRow) { f.DeciderActorIds = []string{human} }), store.ListPushTargetsForRoomRow{HumanActorID: human, PushReplies: true}, ""},
+		{"another Human's decision", with(func(f *store.GetMobilePushMessageRow) { f.DeciderActorIds = []string{"actor_other"} }), phone, ""},
 	}
 	for _, c := range cases {
 		if got := Classify(c.facts, c.target); got != c.want {

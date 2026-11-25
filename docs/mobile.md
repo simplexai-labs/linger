@@ -378,10 +378,12 @@ A phone hears about a turn once, not about each of its messages, and not
 while the Human is already looking:
 
 - A reply waits 30 seconds (`ReplyDelay`) and then alerts only if no later
-  Agent message in the Room superseded it, no Agent in the Room is still
-  working (for up to 10 minutes), and the phone's Human has not read that
-  far on any device. A decision alerts at once.
-- Neither alerts while someone looked at the Room in the last 30 seconds.
+  Agent message in the direct chat superseded it, no Agent in the Room is
+  still running without having replied (for up to 10 minutes), and the
+  phone's Human has not read that far on any device. A decision alerts at
+  once, and only the phones of the Human it asks.
+- Neither alerts while the phone's own Human looked at the Room in the last
+  30 seconds; another member looking does not count.
   The Web sends `POST /v0/rooms/{id}/presence` every 20 seconds while a Room
   is visible and in use, and the phone does the same while a chat is on
   screen and the app is in front.

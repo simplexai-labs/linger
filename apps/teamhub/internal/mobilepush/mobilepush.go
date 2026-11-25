@@ -70,9 +70,9 @@ const (
 	RunGrace   = 10 * time.Minute
 )
 
-// Presence reports whether someone looked at the Room on any device within
-// the last half minute.
-type Presence func(roomID string) bool
+// Presence reports whether an Account looked at the Room on any device
+// within the last half minute.
+type Presence func(accountID, roomID string) bool
 
 // Worker works push jobs.
 type Worker struct {
@@ -89,7 +89,7 @@ type Worker struct {
 // present may be nil, which counts nobody as present.
 func NewWorker(pool *pgxpool.Pool, hostID string, client *http.Client, logger *slog.Logger, present Presence) *Worker {
 	if present == nil {
-		present = func(string) bool { return false }
+		present = func(string, string) bool { return false }
 	}
 	return &Worker{queries: store.New(pool), hostID: hostID, client: client, logger: logger, present: present, now: time.Now}
 }
@@ -116,7 +116,7 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
 	if err != nil {
 		return fmt.Errorf("read pushed message: %w", err)
 	}
-	if !facts.AsksDecision {
+	if len(facts.DeciderActorIds) == 0 {
 		if !facts.FromAgent || facts.MessageKind != "conversation" || facts.Superseded {
 			return nil
 		}
@@ -134,11 +134,10 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
 	if err != nil {
 		return fmt.Errorf("list push targets: %w", err)
 	}
-	present := w.present(facts.RoomID)
 	var failed error
 	for _, target := range targets {
 		kind := Classify(facts, target)
-		if kind == "" || (present && !target.PushWhenActive) {
+		if kind == "" || (!target.PushWhenActive && w.present(target.AccountID, facts.RoomID)) {
 			continue
 		}
 		request := sendRequest{Grant: target.PushGrant, Kind: kind, Handle: Handle{HostID: w.hostID, RoomID: facts.RoomID, EventID: facts.EventID}}
@@ -167,8 +166,10 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
 // while the phone has not read that far.
 func Classify(facts store.GetMobilePushMessageRow, target store.ListPushTargetsForRoomRow) string {
 	switch {
-	case facts.AsksDecision:
-		if target.PushDecisions {
+	case len(facts.DeciderActorIds) > 0:
+		// Only the Human the card asks; another member of the Space may not
+		// even see the Room.
+		if target.PushDecisions && slices.Contains(facts.DeciderActorIds, target.HumanActorID) {
 			return KindDecision
 		}
 		return ""

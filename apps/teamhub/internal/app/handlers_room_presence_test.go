@@ -55,3 +55,18 @@ func TestRoomPresenceRecentlyPresent(t *testing.T) {
 		t.Fatal("another Room shared presence")
 	}
 }
+
+func TestRoomPresenceIsPerAccount(t *testing.T) {
+	var throttle roomPresenceThrottle
+	start := time.Unix(1_700_000_000, 0)
+	throttle.allow("alice\x00room", start)
+	if !throttle.presentFor("alice", "room", start.Add(time.Second)) {
+		t.Fatal("Alice looking at the Room was not present")
+	}
+	if throttle.presentFor("bob", "room", start.Add(time.Second)) {
+		t.Fatal("Alice's presence held back Bob's alerts")
+	}
+	if throttle.presentFor("alice", "room", start.Add(roomPresenceRecentWindow)) {
+		t.Fatal("presence outlived the window")
+	}
+}
