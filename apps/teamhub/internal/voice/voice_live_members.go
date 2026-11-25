@@ -78,7 +78,7 @@ func (s *Service) addVoiceLiveRoomMembers(ctx context.Context, session voicelive
 	case err != nil:
 		return "", err
 	}
-	return voicelive.Output(map[string]any{"status": "updated", "room_id": room.ID, "room": room.Name, "added": result.Added, "already_members": result.AlreadyMembers}), nil
+	return voicelive.Output(map[string]any{"status": "updated", "room_id": room.ID, "room": room.Name, "added": result.Added, "already_members": result.AlreadyMembers, "next": voicelive.DoneNext}), nil
 }
 
 func (s *Service) matchVoiceLiveRoomMembers(ctx context.Context, session voicelive.Session, names []string) (voicelive.MemberMatch, error) {
