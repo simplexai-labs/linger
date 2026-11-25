@@ -2,16 +2,13 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
-  copyFileSync,
   existsSync,
-  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -65,6 +62,7 @@ import * as windowsPrivate from "@linger/local-installation/windows-private";
 import type { DesktopConfig } from "./config.js";
 import { EventBus, type ModuleContext } from "./modules.js";
 import {
+  fixtureNode,
   silentLog,
   stubModule,
   tempDirectory,
@@ -445,24 +443,6 @@ const server = (origin: string): LocalServerIdentity => ({
   teamhub: TEAMHUB,
   key: KEY,
 });
-
-// The simulated runtime keeps its target layout, but the installer stub runs on
-// the host. Windows can hardlink without Developer Mode and spawns the .exe.
-const fixtureNode = (binary: string): void => {
-  if (process.platform !== "win32") {
-    symlinkSync(process.execPath, binary);
-    return;
-  }
-  const put = (file: string) => {
-    try {
-      linkSync(process.execPath, file);
-    } catch {
-      copyFileSync(process.execPath, file);
-    }
-  };
-  put(binary);
-  if (path.extname(binary) !== ".exe") put(binary + ".exe");
-};
 
 const fixture = (
   overrides:

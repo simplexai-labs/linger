@@ -1,3 +1,4 @@
+import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseInstallerArguments } from "../main.js";
 import { coreAdapter } from "./core.js";
@@ -33,7 +34,7 @@ afterEach(() => vi.clearAllMocks());
 it("selects source only from trusted process options and rejects browser path injection", () => {
   expect(
     parseInstallerArguments(["--source-repo", "/checkout"]).sourceRepo,
-  ).toBe("/checkout");
+  ).toBe(path.resolve("/checkout"));
   expect(
     parseInstallerArguments([
       "--source-repo",

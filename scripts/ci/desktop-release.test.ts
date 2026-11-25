@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -344,7 +344,7 @@ describe("desktop-release.sh github-release", () => {
     chmodSync(join(bin, "gh"), 0o755);
     writeFileSync(join(dir, "SHA256SUMS.txt"), "");
     const result = run(["github-release", dir, tag, version], {
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
       ...env,
     });
     let calls = "";
@@ -395,7 +395,7 @@ describe("desktop-release.sh github-release", () => {
     writeFileSync(join(dir, "SHA256SUMS.txt"), "");
 
     const result = run(["github-release", dir, "desktop-v1.0.0", "1.0.0"], {
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
       GITHUB_REPOSITORY: "simplexai-labs/linger",
       GH_TOKEN: "token",
     });
@@ -471,7 +471,7 @@ describe("desktop-release.sh publish", () => {
     );
 
     const result = run(["publish", "desktop-v1.0.0", "--notes-file", notes], {
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
     });
 
     expect(result.status).toBe(0);
@@ -501,7 +501,7 @@ describe("desktop-release.sh publish", () => {
     ]);
 
     const result = run(["publish", "desktop-v1.0.0", "--notes-file", notes], {
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
     });
 
     expect(result.status).toBe(1);
@@ -515,7 +515,7 @@ describe("desktop-release.sh publish", () => {
     writeFileSync(emptyNotes, "   \n");
 
     const pre = run(["publish", "desktop-v1.0.0-rc.1", "--notes-file", notes], {
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
     });
     expect(pre.status).toBe(1);
     expect(pre.stderr).toContain("not prereleases");
@@ -523,7 +523,7 @@ describe("desktop-release.sh publish", () => {
     const empty = run(
       ["publish", "desktop-v1.0.0", "--notes-file", emptyNotes],
       {
-        PATH: `${bin}:${process.env.PATH ?? ""}`,
+        PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
       },
     );
     expect(empty.status).toBe(1);
@@ -590,7 +590,7 @@ describe("desktop-release.sh package Docker images", () => {
     const result = run(
       ["package", "darwin-arm64"],
       {
-        PATH: `${fixture.bin}:${process.env.PATH ?? ""}`,
+        PATH: `${fixture.bin}${delimiter}${process.env.PATH ?? ""}`,
         DESKTOP_VERSION: version,
         RELEASE_OUT: fixture.out,
         DESKTOP_PACKAGING_IMAGE_PREFIX: "ghcr.io/simplexai-labs/linger/desktop",
@@ -618,7 +618,7 @@ describe("desktop-release.sh package Docker images", () => {
     const result = run(
       ["package", "darwin-arm64"],
       {
-        PATH: `${fixture.bin}:${process.env.PATH ?? ""}`,
+        PATH: `${fixture.bin}${delimiter}${process.env.PATH ?? ""}`,
         DESKTOP_VERSION: version,
         RELEASE_OUT: fixture.out,
         DESKTOP_PACKAGING_IMAGE_PREFIX:
@@ -647,7 +647,7 @@ describe("desktop-release.sh package Docker images", () => {
     const result = run(
       ["package", "darwin-arm64"],
       {
-        PATH: `${fixture.bin}:${process.env.PATH ?? ""}`,
+        PATH: `${fixture.bin}${delimiter}${process.env.PATH ?? ""}`,
         DESKTOP_VERSION: version,
         RELEASE_OUT: fixture.out,
         DESKTOP_PACKAGING_IMAGE_PREFIX: "ghcr.io/simplexai-labs/linger/desktop",

@@ -476,7 +476,11 @@ class ArchiveHelperTest(unittest.TestCase):
         file_path = os.path.join(bundle, "hello.txt")
         with open(file_path, "wb") as out:
             out.write(b"linger\n")
-        os.symlink("hello.txt", os.path.join(bundle, "link.txt"))
+        try:
+            os.symlink("hello.txt", os.path.join(bundle, "link.txt"))
+        except OSError as error:
+            # Windows lets a standard user create links only in Developer Mode.
+            self.skipTest(f"cannot create a symlink here: {error}")
 
         owned = os.path.join(self.root, "owned.tar.gz")
         archive.tar_gz(self.root, "Linger", owned, root_owner=True)

@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { JobManager } from "./jobs.js";
 import { privateWrite } from "./storage.js";
+// Windows reports 0666 for every writable file; its private access is the
+// DACL that the Windows private-path tests check.
+const posixModes = process.platform !== "win32";
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
   for (const fn of cleanup.splice(0).reverse()) await fn();
@@ -122,9 +125,10 @@ test("public snapshots/events remove secrets and restart marks pending job inter
   expect(raw).not.toContain(input.model.apiKey);
   const saved = await readFile(path.join(dir, `${job.id}.json`), "utf8");
   expect(saved).not.toContain(input.password);
-  expect((await stat(path.join(dir, `${job.id}.json`))).mode & 0o777).toBe(
-    0o600,
-  );
+  if (posixModes)
+    expect((await stat(path.join(dir, `${job.id}.json`))).mode & 0o777).toBe(
+      0o600,
+    );
   const restarted = new JobManager(dir, async () => {});
   await restarted.load();
   expect(restarted.get(job.id)?.state).toBe("interrupted");

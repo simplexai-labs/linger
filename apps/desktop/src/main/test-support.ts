@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { copyFileSync, linkSync, mkdtempSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -14,6 +14,27 @@ export const silentLog: Logger = {
 
 export const tempDirectory = (): string =>
   mkdtempSync(path.join(os.tmpdir(), "desktop-test-"));
+
+/**
+ * Places the running Node.js at a simulated runtime's binary path. The runtime
+ * keeps its target layout, but the installer stub runs on the host: Windows
+ * can hardlink without Developer Mode and spawns the .exe.
+ */
+export function fixtureNode(binary: string): void {
+  if (process.platform !== "win32") {
+    symlinkSync(process.execPath, binary);
+    return;
+  }
+  const put = (file: string) => {
+    try {
+      linkSync(process.execPath, file);
+    } catch {
+      copyFileSync(process.execPath, file);
+    }
+  };
+  put(binary);
+  if (path.extname(binary) !== ".exe") put(binary + ".exe");
+}
 
 export const testHost = (
   modules: readonly Module[],

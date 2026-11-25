@@ -238,7 +238,7 @@ MACHO_MAGIC = {b"\xcf\xfa\xed\xfe", FAT_MAGIC}
 
 
 def macho_files(app):
-    """Bundle-relative paths of the Mach-O files in app, sorted."""
+    """Bundle-relative POSIX paths of the Mach-O files in app, sorted."""
     found = []
     for root, _, files in os.walk(app):
         for name in files:
@@ -247,7 +247,7 @@ def macho_files(app):
                 continue
             with open(path, "rb") as source:
                 if source.read(4) in MACHO_MAGIC:
-                    found.append(os.path.relpath(path, app))
+                    found.append(os.path.relpath(path, app).replace(os.sep, "/"))
     return sorted(found)
 
 
