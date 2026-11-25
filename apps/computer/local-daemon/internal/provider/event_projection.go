@@ -62,8 +62,10 @@ func (projection *eventProjection) project(message native.Event) []any {
 	pending := projection.reasoning
 	projection.reasoning, projection.titled = "", false
 	if title, _ := native.ReasoningTitle(pending, true); title != "" && title != projection.thinkingTitle {
-		projection.thinking, projection.thinkingTitle = true, title
-		lead = append(lead, map[string]any{"type": "status.changed", "status": "thinking", "title": redact.Text(title)})
+		if safe := thinkingTitle(title); safe != "" {
+			projection.thinking, projection.thinkingTitle = true, title
+			lead = append(lead, map[string]any{"type": "status.changed", "status": "thinking", "title": safe})
+		}
 	}
 	if projection.thinking {
 		switch events[0].(map[string]any)["type"] {

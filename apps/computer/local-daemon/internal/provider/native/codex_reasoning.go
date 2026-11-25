@@ -39,6 +39,7 @@ func (r *codexReasoningTitles) feed(itemID string, index int, delta string) (str
 	title, ok := ReasoningTitle(part.text.String(), false)
 	if ok {
 		part.resolved = true
+		part.text.Reset()
 	}
 	return title, ok
 }
