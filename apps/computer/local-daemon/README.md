@@ -777,7 +777,13 @@ system permissions or taking the foreground; an Agent that never uses the
 computer tools pays only this one background start. Preparation only reads the
 catalog; it opens no pages and sends no input.
 
-macOS uses the signed CuaDriver.app. The Computer starts the service with the
+On macOS, a desktop host can set `desktop.cua_socket` to connect the Computer
+to its embedded Cua service. The host starts the driver directly, provides a
+Unix socket in its private directory, and stops the driver when the daemon
+exits. Each new daemon gets a fresh driver and socket. Desktop actions require
+the driver to report both Accessibility and Screen Recording with host attribution.
+
+Without that socket the Computer launches the signed CuaDriver.app with the
 automatic permission wizard off and sets `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS` to
 0: by default Cua waits up to 1 second after each action for a window change,
 adding 0.3–0.4 seconds to every click and key press, and the Agent reads the
@@ -807,7 +813,8 @@ browser calls, unless the app is a Chromium browser other than the Computer's
 own Chrome. A queued call that is cancelled returns
 `COMPUTER_BUSY` without sending input. `check_permissions` only reads permissions
 and never requests them, and the permission answer must come from the Cua service
-itself. Only the owner's Request on a permission card asks macOS: the Daemon runs
+itself. An embedded service reports Linger's permissions and the desktop app
+handles the owner's request. For an independent service, the Daemon runs
 `cua-driver permissions grant` in the background, one at a time for at most 10
 minutes, because CuaDriver refuses to prompt from its tools.
 

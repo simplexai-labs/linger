@@ -628,9 +628,24 @@ Gateway and runs Agents. The daemon exits with the app.
   are attributed to); a `relaunch` request is answered, then quits and
   relaunches the app. The permission card in the SPA running this
   computer's own Computer takes Linger's steps (prompt, System Settings,
-  relaunch) and opens CuaDriver's System Settings pane through
-  `lingerDesktop.permissions.act` instead; CuaDriver's prompt and restart,
-  and every step from another page, go through TeamHub to the daemon.
+  relaunch) through `lingerDesktop.permissions.act`. The permission subject
+  selects the settings action. Linger registers its own screen capture before
+  opening Screen Recording settings. A `computer_use` settings action opens
+  the system pane directly. Other pages send steps through TeamHub to the daemon.
+- A packaged macOS app starts the signed embedded driver for each enrolled
+  Computer daemon with a matching credential. The first daemon config already
+  contains its private socket. Window startup proceeds during driver startup.
+  Enrollment uses its normal identity request. Driver selection needs no
+  TeamHub capability, session cookie, or extra network request. A driver crash
+  retries within the same daemon lifetime. Daemon exit, unenrollment, and app
+  quit retire that driver and its retries. A new daemon gets a fresh socket.
+  Standalone Computers and unpackaged clients retain their existing mode.
+  Verify the test build on a fresh macOS account: grant only Linger Screen
+  Recording and Accessibility, then capture a test window, click its text
+  field, and type into it. Linger owns both grants in embedded mode.
+  A settings visit alone does not request a relaunch. If the owner enables
+  Screen Recording there and defers the macOS restart, they must quit and
+  reopen Linger to apply the grant.
 - `src/main/computer-credential.ts`: the Gateway credential in
   `<userData>/computer/credential.json` (0600).
 - Installs from before the product was renamed Linger move once on start.

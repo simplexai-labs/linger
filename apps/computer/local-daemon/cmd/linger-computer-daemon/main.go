@@ -319,9 +319,14 @@ func run(args []string) (resultErr error) {
 		if override := os.Getenv("LINGER_COMPUTER_CUA_PATH"); override != "" {
 			cuaPath = override
 		}
+		var cuaSocket string
+		if computer.Desktop != nil {
+			cuaSocket = computer.Desktop.CuaSocket
+		}
 		toolManager, err = localtools.New(localtools.Options{
 			StateDirectory: computer.StateDirectory, Environment: providerEnvironment,
 			NodePath: toolInstallation.NodePath, PlaywrightEntry: toolInstallation.PlaywrightEntry, CuaPath: cuaPath,
+			CuaEmbedded: cuaSocket != "", CuaSocket: cuaSocket,
 		})
 		if err != nil {
 			return err
@@ -346,6 +351,7 @@ func run(args []string) (resultErr error) {
 	if computer.Desktop != nil {
 		desktop = newDesktopChannel(os.Stdout)
 		permissionOptions.Linger = desktop
+		permissionOptions.EmbeddedCua = computer.Desktop.CuaSocket != ""
 	}
 	if toolManager != nil {
 		permissionOptions.Cua = toolManager

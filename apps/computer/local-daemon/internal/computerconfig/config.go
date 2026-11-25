@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -56,6 +57,7 @@ type LocalModels struct {
 // closes its stdin and reports its state as JSON lines on stdout.
 type Desktop struct {
 	TeamHubCLIDirectory string
+	CuaSocket           string
 }
 
 // Owner is one tenant owner scope named by the Gateway credential.
@@ -99,6 +101,7 @@ type encodedLocalModels struct {
 
 type encodedDesktop struct {
 	TeamHubCLIDirectory string `json:"teamhub_cli_directory,omitempty"`
+	CuaSocket           string `json:"cua_socket,omitempty"`
 }
 
 type encodedCodex struct {
@@ -146,7 +149,17 @@ func Load(path string, environment map[string]string) (Config, error) {
 		if value.Desktop.TeamHubCLIDirectory != "" && !filepath.IsAbs(value.Desktop.TeamHubCLIDirectory) {
 			return Config{}, errors.New("Computer Desktop TeamHub CLI path is invalid")
 		}
-		desktop = &Desktop{TeamHubCLIDirectory: value.Desktop.TeamHubCLIDirectory}
+		socket := value.Desktop.CuaSocket
+		if socket != "" {
+			if runtime.GOOS != "darwin" {
+				return Config{}, errors.New("desktop.cua_socket requires macOS")
+			}
+			// Darwin's sockaddr_un.sun_path has 104 bytes including the terminator.
+			if !filepath.IsAbs(socket) || filepath.Clean(socket) != socket || socket == "/" || strings.IndexByte(socket, 0) >= 0 || len(socket) >= 104 {
+				return Config{}, errors.New("desktop.cua_socket must be a clean absolute Unix socket path of at most 103 bytes")
+			}
+		}
+		desktop = &Desktop{TeamHubCLIDirectory: value.Desktop.TeamHubCLIDirectory, CuaSocket: socket}
 	}
 	var localModels *LocalModels
 	if value.LocalModels != nil {

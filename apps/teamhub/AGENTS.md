@@ -449,5 +449,10 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   refusals return generic `MODEL_SOURCE_FAILED` (HTTP 502), and timeouts,
   `MODEL_SOURCE_EXPIRED`, or client disconnects return `MODEL_SOURCE_UNCONFIRMED`
   (HTTP 504).
+- Permission cards store the owner selected from the Computer's status before
+  creation. Embedded Computer Use cards target Linger. Cards settle on grants
+  for their stored subject. The request response returns the permission groups
+  used to select that subject. CLI `--wait` checks the same Computer and
+  subject throughout polling.
 - Do not add write-only audit, event, or provenance tables. A new audit table
   needs a named product or compliance reader in the same pull request.

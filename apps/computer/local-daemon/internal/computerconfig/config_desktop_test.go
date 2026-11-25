@@ -1,9 +1,12 @@
 package computerconfig
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -34,7 +37,7 @@ func TestDesktopConfigReadsTeamHubCLIDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Desktop == nil || config.Desktop.TeamHubCLIDirectory != directory {
+	if config.Desktop == nil || config.Desktop.TeamHubCLIDirectory != directory || config.Desktop.CuaSocket != "" {
 		t.Fatalf("Desktop = %+v", config.Desktop)
 	}
 	if config.GatewayToken == "" {
@@ -45,5 +48,31 @@ func TestDesktopConfigReadsTeamHubCLIDirectory(t *testing.T) {
 func TestDesktopConfigRejectsRelativeTeamHubCLIDirectory(t *testing.T) {
 	if _, err := desktopConfig(t, `,"desktop":{"teamhub_cli_directory":"teamhub-cli"}`); err == nil {
 		t.Fatal("relative TeamHub CLI directory was accepted")
+	}
+}
+
+func TestDesktopConfigCuaSocket(t *testing.T) {
+	const socket = "/tmp/linger-host/driver.sock"
+	config, err := desktopConfig(t, fmt.Sprintf(`,"desktop":{"cua_socket":%q}`, socket))
+	if runtime.GOOS != "darwin" {
+		if err == nil {
+			t.Fatal("accepted a macOS socket on another platform")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Desktop.CuaSocket != socket {
+		t.Fatalf("socket = %q", config.Desktop.CuaSocket)
+	}
+	for _, path := range []string{"driver.sock", "/", "/tmp/../driver.sock", "/tmp/driver.sock/", "/tmp/bad\x00.sock", "/" + strings.Repeat("x", 103)} {
+		encoded, err := json.Marshal(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := desktopConfig(t, fmt.Sprintf(`,"desktop":{"cua_socket":%s}`, encoded)); err == nil {
+			t.Errorf("accepted %q", path)
+		}
 	}
 }

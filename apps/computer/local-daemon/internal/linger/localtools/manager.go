@@ -37,6 +37,7 @@ type Options struct {
 	// embedding host. Its real OS grants must be attributed to that host.
 	// The ordinary signed-app installation never enables this option.
 	CuaEmbedded bool
+	CuaSocket   string
 	Environment map[string]string
 }
 
