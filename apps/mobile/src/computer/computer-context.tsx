@@ -245,7 +245,8 @@ export function ComputerProvider(props: { readonly children: ReactNode }) {
   }, [connection, forget, status]);
 
   // Reconnect when the app returns to the foreground or the network changes;
-  // a session the OS silently dropped fails the probe and reconnects.
+  // a session the OS silently dropped fails the probe and reconnects. A
+  // session on a Relay also tries the LAN, which may have just come back.
   useEffect(() => {
     const check = () => {
       const current = connectionRef.current;
@@ -255,6 +256,7 @@ export function ComputerProvider(props: { readonly children: ReactNode }) {
         current.nudge();
         return;
       }
+      if (current.route === "relay") current.upgradeToLan();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
       requestJson(session, "GET", "/v0/session", { signal: controller.signal })

@@ -21,6 +21,7 @@ import type { PairedComputer } from "./store";
 
 class FakeSession implements ManagedSession {
   closed = false;
+  openSockets = 0;
   closeFrame: { code: number; reason: string } | undefined;
   #close = new Set<(reason: string) => void>();
   #approved = new Set<() => void>();
@@ -191,6 +192,83 @@ describe("ComputerConnection", () => {
         .every((dial) => dial.session?.closed),
     ).toBe(true);
     expect(connection.session?.url).toBe(relay);
+  });
+
+  it("moves a Relay session to the LAN once the LAN answers", async () => {
+    // Round 0: the LAN is down, so the Relay wins. Later the LAN comes back.
+    const { connection, dialed, statuses } = harness((url, round) =>
+      url === relay
+        ? { at: 50 }
+        : round === 0
+          ? { at: 100, error: new SessionClosed("unreachable") }
+          : url === lanA
+            ? { at: 80 }
+            : { at: 2_000, error: new SessionClosed("unreachable") },
+    );
+    connection.start();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(connection.route).toBe("relay");
+    const relaySession = connection.session!;
+    let reconnects = 0;
+    connection.subscribe((status) => {
+      if (status.kind !== "connected") reconnects += 1;
+    });
+
+    connection.upgradeToLan();
+    connection.upgradeToLan(); // a dial already running is not repeated
+    await vi.advanceTimersByTimeAsync(100);
+    expect(dialed.filter((dial) => dial.url === relay)).toHaveLength(1);
+    expect(connection.route).toBe("lan");
+    expect(connection.session?.url).toBe(lanA);
+    expect(relaySession.closed).toBe(true);
+    expect(statuses.at(-1)).toEqual({ kind: "connected", route: "lan" });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(reconnects).toBe(0);
+    expect(connection.session?.url).toBe(lanA);
+  });
+
+  it("keeps the Relay session when the LAN does not answer, and retries every 30 s", async () => {
+    const { connection, dialed } = harness((url, round) =>
+      url === relay
+        ? { at: 50 }
+        : round < 2
+          ? { at: 100, error: new SessionClosed("unreachable") }
+          : { at: 80 },
+    );
+    connection.start();
+    await vi.advanceTimersByTimeAsync(400);
+    const relaySession = connection.session!;
+    connection.upgradeToLan();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(connection.session).toBe(relaySession);
+    expect(connection.status).toEqual({ kind: "connected", route: "relay" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(connection.route).toBe("lan");
+    expect(relaySession.closed).toBe(true);
+    expect(dialed.filter((dial) => dial.url === relay)).toHaveLength(1);
+  });
+
+  it("does not move a session with a voice call open", async () => {
+    const { connection } = harness((url, round) =>
+      url === relay
+        ? { at: 50 }
+        : round === 0
+          ? { at: 100, error: new SessionClosed("unreachable") }
+          : { at: 80 },
+    );
+    connection.start();
+    await vi.advanceTimersByTimeAsync(400);
+    const relaySession = connection.session! as FakeSession & {
+      openSockets: number;
+    };
+    relaySession.openSockets = 1;
+    connection.upgradeToLan();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(connection.session).toBe(relaySession);
+    relaySession.openSockets = 0;
+    connection.upgradeToLan();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(connection.route).toBe("lan");
   });
 
   it("tries the fastest Relay node first and the rest after 250 ms", async () => {

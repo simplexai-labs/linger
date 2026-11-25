@@ -2,8 +2,9 @@
 // every stored LAN origin at once and the Relay nodes 300 ms later (the
 // fastest one measured first, the others 250 ms after it, or only a pinned
 // node), keeps the first session that completes its handshake and closes the
-// rest; failed rounds back off from 1 s to 30 s with jitter. docs/mobile.md
-// is the specification.
+// rest; failed rounds back off from 1 s to 30 s with jitter. A session on a
+// Relay keeps trying the LAN in the background and moves to it once it
+// answers. docs/mobile.md is the specification.
 import {
   HandshakeFailed,
   PhoneSession,
@@ -36,6 +37,8 @@ export interface ManagedSession {
   readonly pending: boolean;
   readonly closed: boolean;
   readonly closeFrame: { code: number; reason: string } | undefined;
+  /** Socket streams open now, such as a voice call; absent counts as none. */
+  readonly openSockets?: number;
   onApproved(listener: () => void): () => void;
   onClose(listener: (reason: string) => void): () => void;
   close(): void;
@@ -77,6 +80,8 @@ const KEY_CHANGED_ROUNDS = 2;
 const TERMINAL_REFUSALS = new Set(["PHONE_REMOVED", "PHONE_UNKNOWN"]);
 /** A session that lived this long reconnects at once and resets the backoff. */
 const HEALTHY_SESSION_MS = 10_000;
+/** How often a session on a Relay tries the LAN without a network event. */
+export const LAN_UPGRADE_INTERVAL_MS = 30_000;
 
 /** Delay before retry number `failures` (0-based): 1 s doubling to 30 s, times 0.5-1. */
 export function backoffDelay(failures: number, random: number): number {
@@ -134,6 +139,8 @@ export class ComputerConnection<S extends ManagedSession = PhoneSession> {
   #timer: unknown;
   #round: AbortController | undefined;
   #stopped = true;
+  #upgrading: AbortController | undefined;
+  #upgradeTimer: unknown;
 
   constructor(options: ConnectionOptions<S>) {
     this.#options = options;
@@ -184,9 +191,73 @@ export class ComputerConnection<S extends ManagedSession = PhoneSession> {
     this.#session = undefined;
     this.#route = undefined;
     this.#relay = undefined;
+    this.#stopUpgrade();
     session.close();
     this.#failures = 0;
     this.#connect();
+  }
+
+  /**
+   * On a Relay, dials only the stored LAN origins in the background and,
+   * once one completes its handshake, makes it the session and closes the
+   * Relay one. The open session is untouched while dialing, and a failed
+   * dial changes nothing. A voice call in progress keeps its route.
+   */
+  upgradeToLan(): void {
+    const session = this.#session;
+    if (
+      this.#stopped ||
+      this.#upgrading ||
+      !session ||
+      this.#route !== "relay" ||
+      this.#status.kind !== "connected" ||
+      (session.openSockets ?? 0) > 0
+    )
+      return;
+    const lan = dialsFor(this.#computer).filter((dial) => dial.route === "lan");
+    if (lan.length === 0) return;
+    const upgrade = new AbortController();
+    this.#upgrading = upgrade;
+    let unsettled = lan.length;
+    const done = () => {
+      if (this.#upgrading === upgrade) this.#upgrading = undefined;
+    };
+    for (const dial of lan)
+      this.#open({
+        url: dial.url,
+        computerPublicKey: hostKeyBytes(this.#computer),
+        staticKey: this.#options.staticKey,
+        hello: { type: "resume" },
+        socketFactory: this.#options.socketFactory,
+        signal: upgrade.signal,
+      }).then(
+        (next) => {
+          unsettled -= 1;
+          const current = this.#session;
+          if (
+            upgrade.signal.aborted ||
+            this.#stopped ||
+            current !== session ||
+            this.#route !== "relay" ||
+            next.pending ||
+            (current.openSockets ?? 0) > 0
+          ) {
+            next.close();
+            if (unsettled === 0) done();
+            return;
+          }
+          upgrade.abort();
+          done();
+          // The Relay session is no longer this.#session when it closes, so
+          // its close starts no round and no backoff.
+          this.#accept(next, "lan");
+          session.close();
+        },
+        () => {
+          unsettled -= 1;
+          if (unsettled === 0) done();
+        },
+      );
   }
 
   /**
@@ -260,6 +331,7 @@ export class ComputerConnection<S extends ManagedSession = PhoneSession> {
   stop(): void {
     this.#stopped = true;
     this.#clearTimer();
+    this.#stopUpgrade();
     this.#round?.abort();
     this.#round = undefined;
     const session = this.#session;
@@ -392,10 +464,30 @@ export class ComputerConnection<S extends ManagedSession = PhoneSession> {
       relayTimer = this.#clock.setTimeout(startRelay, LAN_HEAD_START_MS);
   }
 
+  #stopUpgrade(): void {
+    this.#upgrading?.abort();
+    this.#upgrading = undefined;
+    if (this.#upgradeTimer !== undefined)
+      this.#clock.clearTimeout(this.#upgradeTimer);
+    this.#upgradeTimer = undefined;
+  }
+
+  /** Tries the LAN every LAN_UPGRADE_INTERVAL_MS while on a Relay. */
+  #scheduleUpgrade(session: S): void {
+    this.#upgradeTimer = this.#clock.setTimeout(() => {
+      this.#upgradeTimer = undefined;
+      if (this.#session !== session || this.#route !== "relay") return;
+      this.upgradeToLan();
+      this.#scheduleUpgrade(session);
+    }, LAN_UPGRADE_INTERVAL_MS);
+  }
+
   #accept(session: S, route: Route, relay?: string): void {
+    this.#stopUpgrade();
     this.#session = session;
     this.#route = route;
     this.#relay = relay;
+    if (route === "relay") this.#scheduleUpgrade(session);
     this.#acceptedAt = this.#clock.now();
     this.#handshakeRounds = 0;
     this.#options.onWelcome?.(session.welcome);
@@ -418,6 +510,7 @@ export class ComputerConnection<S extends ManagedSession = PhoneSession> {
 
   #sessionClosed(session: S): void {
     if (this.#session !== session) return;
+    this.#stopUpgrade();
     this.#session = undefined;
     this.#route = undefined;
     this.#relay = undefined;

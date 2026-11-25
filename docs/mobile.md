@@ -247,6 +247,16 @@ the stored LAN origins and nodes after a change, so a new node needs no new
 pairing. On iOS a denied Local Network permission only removes the LAN
 route.
 
+A session on a Relay does not stay there once the LAN is back. On a network
+change, on returning to the foreground and every 30 seconds, the phone dials
+only the stored LAN origins in the background, leaving the open session
+alone. When one completes its handshake it becomes the session and the Relay
+session closes; that close starts no new round and no backoff. A failed LAN
+dial changes nothing, and only one runs at a time. While a voice call holds a
+socket stream the session keeps its route. Requests cut off by the switch
+fail as a closed session: queries retry, the event stream resumes from its
+cursor, and the outbox resends with the same `Idempotency-Key`.
+
 ## Voice
 
 Dictation, Live voice mode and meeting recording keep the computer's existing

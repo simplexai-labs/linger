@@ -188,6 +188,7 @@ export class PhoneSession {
   #send: CipherState;
   #receive: CipherState;
   #streams = new Map<number, SessionStream>();
+  #sockets = new Set<number>();
   #nextStream = 1;
   #closed = false;
   #closeReason = "";
@@ -404,6 +405,7 @@ export class PhoneSession {
     this.#nextStream += 2;
     const stream = new SessionStream(id, this, handlers);
     this.#streams.set(id, stream);
+    if (kind === FrameType.socket) this.#sockets.add(id);
     this.write(kind, id, jsonBytes(head));
     return stream;
   }
@@ -420,6 +422,12 @@ export class PhoneSession {
   /** @internal */
   release(id: number): void {
     this.#streams.delete(id);
+    this.#sockets.delete(id);
+  }
+
+  /** Socket streams open now, such as a voice call's. */
+  get openSockets(): number {
+    return this.#sockets.size;
   }
 
   #keepAlive(): void {
@@ -515,6 +523,7 @@ export class PhoneSession {
     if (this.#pingTimer) clearInterval(this.#pingTimer);
     const streams = [...this.#streams.values()];
     this.#streams.clear();
+    this.#sockets.clear();
     for (const stream of streams) {
       stream.finish();
       stream.handlers.onReset?.("SESSION_CLOSED");
