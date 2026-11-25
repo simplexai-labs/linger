@@ -4873,6 +4873,19 @@ export interface components {
       cause?: "GATEWAY_HOME_NOT_PRIVATE";
       /** @description The folder the cause names, on the Computer. The public view carries it only for the Computer's owner. */
       path?: string;
+      /** @description With LOAD_NO_ROOM. */
+      pool?: components["schemas"]["LocalModelPoolId"];
+      /** Format: int64 */
+      need_bytes?: number;
+      /** Format: int64 */
+      free_bytes?: number;
+      /**
+       * Format: int64
+       * @description Minimum additional free memory needed to load even at the lowest posture rung.
+       */
+      shortfall_bytes?: number;
+      /** @description True when the owner may override admission with Load Anyway (--force). */
+      can_force?: boolean;
     };
     LocalModelNote: {
       /** @enum {string} */
@@ -4948,6 +4961,38 @@ export interface components {
       files_present: boolean;
       files: components["schemas"]["LocalModelStorageFile"][];
     };
+    /**
+     * @description Symmetric KV-cache quantization of a model posture; omitted when asymmetric or unknown.
+     * @enum {string}
+     */
+    LocalModelKvQuant: "f16" | "q8_0" | "q4_0";
+    /** @description Context length, concurrent slots, and optional KV-cache quantization for a loaded or requested model posture. */
+    LocalModelPosture: {
+      /** Format: int64 */
+      context_tokens: number;
+      slots: number;
+      kv_cache_quant?: components["schemas"]["LocalModelKvQuant"];
+    };
+    /**
+     * @description Why a loaded model stepped down from its requested posture or overrode normal memory headroom.
+     * @enum {string}
+     */
+    LocalModelDegradationReason:
+      | "reduced_slots"
+      | "reduced_context"
+      | "above_soft_budget"
+      | "oom_retry"
+      | "forced_overcommit";
+    /** @description Present when loaded under tight memory without failing. */
+    LocalModelPressureWarning: {
+      /** @enum {string} */
+      level: "soft" | "high";
+      pool?: components["schemas"]["LocalModelPoolId"];
+      /** Format: int64 */
+      free_bytes?: number;
+      /** Format: int64 */
+      budget_bytes?: number;
+    };
     /** @description One validated chat model of the catalog on this platform and its state on this Computer. Sizes are bytes; readers format them. */
     LocalModel: {
       id: components["schemas"]["LocalModelId"];
@@ -5013,6 +5058,21 @@ export interface components {
       host_ram_bytes?: number;
       /** @description On-disk storage location and files for this model; owner-only in the public view. */
       storage?: components["schemas"]["LocalModelStorage"];
+      /**
+       * Format: int64
+       * @description Estimated footprint at the lowest elastic posture rung (floor context and 1 slot).
+       */
+      minimum_memory_bytes?: number;
+      /** @description True when loaded on a lower-memory posture rung than requested or after an OOM retry. */
+      degraded?: boolean;
+      requested_posture?: components["schemas"]["LocalModelPosture"];
+      effective_posture?: components["schemas"]["LocalModelPosture"];
+      degradation_reason?: components["schemas"]["LocalModelDegradationReason"];
+      memory_pressure_warning?: components["schemas"]["LocalModelPressureWarning"];
+      /** @description Number of automatic OOM step-down retries taken before this load succeeded; omitted when 0. */
+      oom_retries?: number;
+      /** @description True when loaded via --force overriding normal memory headroom checks; omitted when false. */
+      forced?: boolean;
     };
     /** @description An Agent whose runtime model is this model on this Computer. */
     LocalModelUser: {
@@ -5087,12 +5147,14 @@ export interface components {
     LocalModelsErrorResponse: {
       error: components["schemas"]["LocalModelsError"];
     };
-    /** @description A Human's action on one model. The click is the approval; there is no separate confirm step on the Computer. unload_first only with load. */
+    /** @description A Human's action on one model. The click is the approval; there is no separate confirm step on the Computer. unload_first and force only with load. */
     LocalModelActionRequest: {
       /** @enum {string} */
       action: "download" | "cancel" | "load" | "unload" | "remove";
       /** @description Loaded models in the same pool to unload before the load starts. */
       unload_first?: components["schemas"]["LocalModelId"][];
+      /** @description Only with load. Override the memory safety guard when the Computer allows forced loading. */
+      force?: boolean;
     };
     LocalModelActionAccepted: {
       computer_id: components["schemas"]["Id"];
@@ -6807,6 +6869,11 @@ export interface components {
       type: "status.changed";
       /** @enum {string} */
       status: "queued" | "working" | "thinking" | "waiting_background";
+      /**
+       * @description Optional structured stage for queued status (for example loading_local_model while a standby local model loads before the Runtime starts). Clients branch on stage, never title prose.
+       * @enum {string}
+       */
+      stage?: "loading_local_model";
       /** @description Optional public queue label for queued, or the full provider-visible reasoning summary title for thinking. Omit for working and waiting_background; raw reasoning is never allowed. */
       title?: string;
     };

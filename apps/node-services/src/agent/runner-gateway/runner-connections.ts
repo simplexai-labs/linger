@@ -538,6 +538,8 @@ export class RunnerConnections {
               "dynamic_reasoning_efforts",
               "antigravity_history",
               "antigravity_usage_provider",
+              "local_models_admission_v2",
+              "local_model_loading_status",
             ],
           }
         : {}),

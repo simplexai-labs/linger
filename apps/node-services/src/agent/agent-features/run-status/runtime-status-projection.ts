@@ -8,6 +8,7 @@ export const projectRunEventToRuntimeStatus = (
     return {
       type: "status.changed",
       status: event.status,
+      ...(event.stage === undefined ? {} : { stage: event.stage }),
       ...(event.title === undefined ? {} : { title: event.title }),
     };
   }

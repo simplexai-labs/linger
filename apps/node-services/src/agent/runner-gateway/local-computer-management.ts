@@ -114,6 +114,11 @@ export const FIRST_LOCAL_VOICE_ASR_COMPUTER_VERSION = "0.68.0";
 // connection, so the field is omitted for it.
 export const FIRST_MODEL_INVOKE_WAKE_LOCAL_MODEL_COMPUTER_VERSION = "0.69.0";
 
+// The first release that decodes `force` on `execute` `local_models` (for
+// load). An older Computer rejects the unknown field and closes the
+// connection, so force-load actions are refused before sending.
+export const FIRST_LOCAL_MODELS_FORCE_LOAD_COMPUTER_VERSION = "0.70.0";
+
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 /** Source builds report `dev` and follow the current wire contract. */

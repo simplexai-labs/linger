@@ -440,6 +440,25 @@ components:
           type: string
           minLength: 1
           maxLength: 4096
+        pool:
+          $ref: "#/components/schemas/LocalModelPoolId"
+          description: With LOAD_NO_ROOM.
+        need_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        free_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        shortfall_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Minimum additional free memory needed to load even at the lowest posture rung.
+        can_force:
+          type: boolean
+          description: True when the owner may override admission with Load Anyway (--force).
     LocalModelNote:
       type: object
       additionalProperties: false
@@ -613,6 +632,71 @@ components:
           maxItems: 256
           items:
             $ref: "#/components/schemas/LocalModelStorageFile"
+    LocalModelKvQuant:
+      description: Symmetric KV-cache quantization of a model posture; omitted when asymmetric or unknown.
+      type: string
+      enum: [f16, q8_0, q4_0]
+      x-enum-varnames:
+        [LocalModelKvQuantF16, LocalModelKvQuantQ80, LocalModelKvQuantQ40]
+    LocalModelPosture:
+      description: Context length, concurrent slots, and optional KV-cache quantization for a loaded or requested model posture.
+      type: object
+      additionalProperties: false
+      required: [context_tokens, slots]
+      properties:
+        context_tokens:
+          type: integer
+          format: int64
+          minimum: 1
+        slots:
+          type: integer
+          minimum: 1
+          maximum: 64
+        kv_cache_quant:
+          $ref: "#/components/schemas/LocalModelKvQuant"
+    LocalModelDegradationReason:
+      description: Why a loaded model stepped down from its requested posture or overrode normal memory headroom.
+      type: string
+      enum:
+        [
+          reduced_slots,
+          reduced_context,
+          above_soft_budget,
+          oom_retry,
+          forced_overcommit,
+        ]
+      x-enum-varnames:
+        [
+          LocalModelDegradationReasonReducedSlots,
+          LocalModelDegradationReasonReducedContext,
+          LocalModelDegradationReasonAboveSoftBudget,
+          LocalModelDegradationReasonOomRetry,
+          LocalModelDegradationReasonForcedOvercommit,
+        ]
+    LocalModelPressureWarning:
+      description: Present when loaded under tight memory without failing.
+      type: object
+      additionalProperties: false
+      required: [level]
+      properties:
+        level:
+          type: string
+          enum: [soft, high]
+          x-enum-varnames:
+            [
+              LocalModelPressureWarningLevelSoft,
+              LocalModelPressureWarningLevelHigh,
+            ]
+        pool:
+          $ref: "#/components/schemas/LocalModelPoolId"
+        free_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        budget_bytes:
+          type: integer
+          format: int64
+          minimum: 0
     LocalModel:
       description: >-
         One validated chat model of the catalog on this platform and its state
@@ -762,6 +846,30 @@ components:
         storage:
           $ref: "#/components/schemas/LocalModelStorage"
           description: On-disk storage location and files for this model; owner-only in the public view.
+        minimum_memory_bytes:
+          description: Estimated footprint at the lowest elastic posture rung (floor context and 1 slot).
+          type: integer
+          format: int64
+          minimum: 0
+        degraded:
+          description: True when loaded on a lower-memory posture rung than requested or after an OOM retry.
+          type: boolean
+        requested_posture:
+          $ref: "#/components/schemas/LocalModelPosture"
+        effective_posture:
+          $ref: "#/components/schemas/LocalModelPosture"
+        degradation_reason:
+          $ref: "#/components/schemas/LocalModelDegradationReason"
+        memory_pressure_warning:
+          $ref: "#/components/schemas/LocalModelPressureWarning"
+        oom_retries:
+          description: Number of automatic OOM step-down retries taken before this load succeeded; omitted when 0.
+          type: integer
+          minimum: 0
+          maximum: 64
+        forced:
+          description: True when loaded via --force overriding normal memory headroom checks; omitted when false.
+          type: boolean
     LocalModelsUnavailableReason:
       type: object
       additionalProperties: false
@@ -842,7 +950,7 @@ components:
       description: >-
         TeamHub asks Agent Service to send one execute local_models frame to an
         owned Computer. model_id is required except for refresh; unload_first
-        only with load.
+        and force only with load.
       type: object
       additionalProperties: false
       required: [request_id, action, expires_at]
@@ -859,6 +967,9 @@ components:
           uniqueItems: true
           items:
             $ref: "#/components/schemas/LocalModelId"
+        force:
+          description: Only with load. Override the memory safety guard when the Computer allows forced loading.
+          type: boolean
         expires_at:
           $ref: "./common.yaml#/components/schemas/Timestamp"
     LocalModelActionRefusal:
@@ -883,6 +994,14 @@ components:
           type: integer
           format: int64
           minimum: 0
+        shortfall_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Minimum additional free memory needed to load even at the lowest posture rung.
+        can_force:
+          type: boolean
+          description: True when the owner may override admission with Load Anyway (--force).
     LocalModelActionAck:
       description: >-
         The Computer's immediate answer. accepted means the job started (or a
@@ -904,7 +1023,7 @@ components:
     LocalModelActionRequest:
       description: >-
         A Human's action on one model. The click is the approval; there is no
-        separate confirm step on the Computer. unload_first only with load.
+        separate confirm step on the Computer. unload_first and force only with load.
       type: object
       additionalProperties: false
       required: [action]
@@ -927,6 +1046,9 @@ components:
           uniqueItems: true
           items:
             $ref: "#/components/schemas/LocalModelId"
+        force:
+          description: Only with load. Override the memory safety guard when the Computer allows forced loading.
+          type: boolean
     LocalModelActionAccepted:
       type: object
       additionalProperties: false

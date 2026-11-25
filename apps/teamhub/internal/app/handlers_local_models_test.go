@@ -2,12 +2,16 @@ package app
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentruntimestate"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomagent"
 	"github.com/simplexai-labs/linger/contracts-go/teamhubinternal"
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
@@ -447,5 +451,121 @@ func TestSanitizeLocalModelsSnapshotStorage(t *testing.T) {
 	}
 	if snapshot.Models[4].Storage != nil {
 		t.Fatalf("absent model retained storage: %+v", snapshot.Models[4].Storage)
+	}
+}
+
+func TestValidLocalModelActionForce(t *testing.T) {
+	yes := true
+	if !validLocalModelAction("qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: httpapi.LocalModelActionRequestLoad, Force: &yes}) {
+		t.Fatal("load with force=true should be valid")
+	}
+	for _, action := range []httpapi.LocalModelActionRequestAction{
+		httpapi.LocalModelActionRequestDownload,
+		httpapi.LocalModelActionRequestCancel,
+		httpapi.LocalModelActionRequestUnload,
+		httpapi.LocalModelActionRequestRemove,
+	} {
+		if validLocalModelAction("qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: action, Force: &yes}) {
+			t.Errorf("%s with force=true should be rejected", action)
+		}
+	}
+}
+
+func TestWriteLocalModelsErrorDetailsPreservesNoRoomRefusalFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("request_id", "req-local-model-test")
+	need, free, shortfall := int64(12_000_000_000), int64(8_000_000_000), int64(4_000_000_000)
+	canForce := true
+	refusal := &roomagent.LocalModelActionRefusal{
+		Code: "LOAD_NO_ROOM", Pool: "unified", NeedBytes: &need, FreeBytes: &free,
+		ShortfallBytes: &shortfall, CanForce: &canForce,
+	}
+	app := &App{}
+	app.writeLocalModelsErrorDetails(ctx, httpapi.LocalModelsErrorCodeLOCALMODELNOROOM, localModelRefusalDetails(refusal))
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", recorder.Code)
+	}
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details []struct {
+				Field  string `json:"field"`
+				Reason string `json:"reason"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Code != string(httpapi.LocalModelsErrorCodeLOCALMODELNOROOM) {
+		t.Fatalf("error code = %q", payload.Error.Code)
+	}
+	got := map[string]string{}
+	for _, item := range payload.Error.Details {
+		got[item.Field] = item.Reason
+	}
+	want := map[string]string{
+		"pool":            "unified",
+		"need_bytes":      "12000000000",
+		"free_bytes":      "8000000000",
+		"shortfall_bytes": "4000000000",
+		"can_force":       "true",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("details[%q] = %q, want %q (all=%v)", k, got[k], v, got)
+		}
+	}
+}
+
+func TestSanitizeAndValidateElasticAdmissionSnapshotFields(t *testing.T) {
+	var snapshot teamhubinternal.LocalModelsSnapshot
+	if err := json.Unmarshal([]byte(storedLocalModelsSnapshotJSON), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	minBytes := int64(4_000_000_000)
+	degraded, forced := true, true
+	retries := 2
+	kv := teamhubinternal.LocalModelKvQuantQ80
+	reason := teamhubinternal.LocalModelDegradationReasonReducedContext
+	snapshot.Models[0].MinimumMemoryBytes = &minBytes
+	snapshot.Models[0].Degraded = &degraded
+	snapshot.Models[0].RequestedPosture = &teamhubinternal.LocalModelPosture{ContextTokens: 65536, Slots: 2}
+	snapshot.Models[0].EffectivePosture = &teamhubinternal.LocalModelPosture{ContextTokens: 32768, Slots: 1, KvCacheQuant: &kv}
+	snapshot.Models[0].DegradationReason = &reason
+	pressurePool := teamhubinternal.LocalModelPoolId("unified")
+	pressureFree := int64(1_000_000_000)
+	pressureBudget := int64(8_000_000_000)
+	snapshot.Models[0].MemoryPressureWarning = &teamhubinternal.LocalModelPressureWarning{
+		Level: teamhubinternal.LocalModelPressureWarningLevelSoft, Pool: &pressurePool, FreeBytes: &pressureFree, BudgetBytes: &pressureBudget,
+	}
+	snapshot.Models[0].OomRetries = &retries
+	snapshot.Models[0].Forced = &forced
+	if !validLocalModelsSnapshot(snapshot) {
+		t.Fatal("valid elastic admission snapshot was rejected")
+	}
+
+	// Unknown future enums and invalid values are sanitized forward-compatibly.
+	badMin := int64(-10)
+	badReason := teamhubinternal.LocalModelDegradationReason("future_reason")
+	badKV := teamhubinternal.LocalModelKvQuant("fp8")
+	badLevel := teamhubinternal.LocalModelPressureWarningLevel("critical")
+	badRetries := -1
+	snapshot.Models[0].MinimumMemoryBytes = &badMin
+	snapshot.Models[0].DegradationReason = &badReason
+	snapshot.Models[0].EffectivePosture.KvCacheQuant = &badKV
+	snapshot.Models[0].MemoryPressureWarning.Level = badLevel
+	snapshot.Models[0].OomRetries = &badRetries
+	sanitizeLocalModelsSnapshot(&snapshot)
+	if !validLocalModelsSnapshot(snapshot) {
+		t.Fatal("sanitized elastic admission snapshot was rejected")
+	}
+	if snapshot.Models[0].MinimumMemoryBytes != nil || snapshot.Models[0].DegradationReason != nil ||
+		snapshot.Models[0].EffectivePosture.KvCacheQuant != nil || snapshot.Models[0].MemoryPressureWarning != nil ||
+		snapshot.Models[0].OomRetries != nil {
+		t.Fatalf("unexpected remaining invalid elastic fields: %+v", snapshot.Models[0])
 	}
 }

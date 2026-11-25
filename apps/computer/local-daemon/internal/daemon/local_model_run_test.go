@@ -237,3 +237,92 @@ func TestPiRunHoldsAndReleasesLocalModelUseLease(t *testing.T) {
 		t.Fatalf("after terminal event: activeLeases=%d releases=%d, want 0 and 1", activeAfter, releasesAfter)
 	}
 }
+
+func TestPiRunEmitsLoadingLocalModelStatusBeforeEnsureLoaded(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		features     []string
+		standby      bool
+		wantPreStart bool
+	}{
+		{"standby with loading status feature", []string{serviceFeatureLocalModelUnavailable, serviceFeatureLocalModelLoadingStatus}, true, true},
+		{"standby without loading status feature", []string{serviceFeatureLocalModelUnavailable}, true, false},
+		{"already loaded with loading status feature", []string{serviceFeatureLocalModelUnavailable, serviceFeatureLocalModelLoadingStatus}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			device, err := transport.GenerateIdentity()
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload := mustJSON(map[string]any{
+				"kind": "run.start", "runtime": map[string]any{"type": "pi"},
+				"input": map[string]any{"type": "text", "text": "hello"},
+			})
+			stream := &fakeStream{commands: []protocol.Command{
+				{Type: "runner.welcome", ConnectionEpoch: 7, ServiceFeatures: tc.features},
+				{Type: protocol.CommandRegistrationSnapshot, CommandID: "registration-snapshot-1", ConnectionEpoch: 7,
+					Payload: mustJSON([]transport.RuntimeRegistration{{
+						RegistrationID: "reg-1",
+						Observation: transport.RegistrationObservation{
+							TenantID: "tenant-1", OwnerActorID: "owner-1", ProviderType: "pi",
+							Status: "online", Revision: 1, Capabilities: []string{"turn"},
+						},
+					}})},
+				{Type: protocol.CommandOperationStart, CommandID: "cmd-loading-1",
+					ProtocolVersion: "1.2", TenantID: "tenant-1", RunnerID: "computer-1", RegistrationID: "reg-1", AssignmentRevision: 1,
+					AgentID: "agent-1", OperationID: "op-loading-1", ConnectionEpoch: 7, Payload: payload,
+					RunnerRevision: 1, Generation: 1, ExecutionLeaseID: "lease-1", WorkspaceGrantID: "grant-1", RuntimeType: "pi",
+					ExecutionContextKey: "context-1", RuntimeInstanceID: "runtime-1", ContextViewRef: testContextViewRef,
+				},
+			}}
+			library := &fakeLocalModels{
+				standby:   map[string]bool{localRunModel: tc.standby},
+				ensureErr: &localmodels.LocalModelLoadError{Code: "LOAD_NO_ROOM", ModelID: "qwen3-4b:Q4_K_M"},
+			}
+			daemon, err := newTestDaemon(t, Options{
+				ComputerID:        "computer-1",
+				OperationResolver: localModelOperationResolver{},
+				ControlPlane:      fakeControlPlane{stream: stream},
+				IdentityStore:     fakeStore{value: device},
+				LocalModels:       library,
+				Executor: provider.Executor{NewBackend: func(string, native.Profile) (native.Runtime, error) {
+					return nil, errors.New("the Runtime must not start")
+				}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			daemon.daemonID = device.DaemonID
+			if err := daemon.runConnection(context.Background(), device); !errors.Is(err, io.EOF) {
+				t.Fatalf("runConnection error = %v, want EOF", err)
+			}
+			var foundLoadingEvent bool
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				events := stream.snapshotEvents()
+				var terminal bool
+				for _, ev := range events {
+					if ev.Type == protocol.EventOperationFailed {
+						terminal = true
+					}
+					if ev.Type == protocol.EventOperationEvent {
+						var body map[string]any
+						if json.Unmarshal(ev.Payload, &body) == nil &&
+							body["type"] == "status.changed" &&
+							body["status"] == "queued" &&
+							body["stage"] == "loading_local_model" {
+							foundLoadingEvent = true
+						}
+					}
+				}
+				if terminal {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if foundLoadingEvent != tc.wantPreStart {
+				t.Fatalf("foundLoadingEvent = %v, want %v", foundLoadingEvent, tc.wantPreStart)
+			}
+		})
+	}
+}

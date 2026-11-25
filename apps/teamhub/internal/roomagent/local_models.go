@@ -24,22 +24,25 @@ var (
 )
 
 // LocalModelActionCommand asks the owner's connected Computer to act on its
-// model library. ModelID is empty only for refresh; UnloadFirst is only for
-// load.
+// model library. ModelID is empty only for refresh; UnloadFirst and Force are
+// only for load.
 type LocalModelActionCommand struct {
 	TenantID, OwnerActorID, ComputerID string
 	RequestID                          string
 	Action                             string
 	ModelID                            string
 	UnloadFirst                        []string
+	Force                              bool
 	ExpiresAt                          time.Time
 }
 
 // LocalModelActionRefusal is the Computer's reason for not starting an
-// action. Pool, NeedBytes and FreeBytes come with a refusal for room.
+// action. Pool, NeedBytes, FreeBytes, ShortfallBytes, and CanForce come with
+// a refusal for room.
 type LocalModelActionRefusal struct {
-	Code, Detail, Pool   string
-	NeedBytes, FreeBytes *int64
+	Code, Detail, Pool                   string
+	NeedBytes, FreeBytes, ShortfallBytes *int64
+	CanForce                             *bool
 }
 
 // ActOnLocalModels forwards one local-models action and returns the
@@ -59,6 +62,10 @@ func (g *HTTPGateway) ActOnLocalModels(ctx context.Context, command LocalModelAc
 	if len(command.UnloadFirst) > 0 {
 		unloadFirst := append([]string(nil), command.UnloadFirst...)
 		request.UnloadFirst = &unloadFirst
+	}
+	if command.Force {
+		force := true
+		request.Force = &force
 	}
 	response, err := g.localModelsClient.ActOnLocalComputerModelsWithResponse(ctx, command.TenantID, command.OwnerActorID, command.ComputerID, request)
 	if err != nil {
@@ -89,7 +96,13 @@ func (g *HTTPGateway) ActOnLocalModels(ctx context.Context, command LocalModelAc
 }
 
 func localModelActionRefusal(value nodeservicesinternal.LocalModelActionRefusal) *LocalModelActionRefusal {
-	refusal := &LocalModelActionRefusal{Code: string(value.Code), NeedBytes: value.NeedBytes, FreeBytes: value.FreeBytes}
+	refusal := &LocalModelActionRefusal{
+		Code:           string(value.Code),
+		NeedBytes:      value.NeedBytes,
+		FreeBytes:      value.FreeBytes,
+		ShortfallBytes: value.ShortfallBytes,
+		CanForce:       value.CanForce,
+	}
 	if value.Detail != nil {
 		refusal.Detail = *value.Detail
 	}

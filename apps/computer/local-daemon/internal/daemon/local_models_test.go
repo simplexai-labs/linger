@@ -53,6 +53,12 @@ func (f *fakeLocalModels) IsStandbyModel(piModel string) bool {
 	return f.standby[piModel]
 }
 
+func (f *fakeLocalModels) WillLoad(piModel string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.standby[piModel]
+}
+
 func (f *fakeLocalModels) IsLoadedHealthy(_ context.Context, piModel string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -581,5 +587,128 @@ func TestPublishLocalModelsGatesStorageFields(t *testing.T) {
 	modernStorage, ok := modernModel["storage"].(map[string]any)
 	if !ok || modernStorage["primary_path"] != storage.PrimaryPath {
 		t.Fatalf("modern model lost storage: %+v", modernModel)
+	}
+}
+
+func TestLocalModelsForceLoadAndAdmissionV2Gating(t *testing.T) {
+	library := &fakeLocalModels{}
+	d := &Daemon{computerID: "computer", protocolVersion: protocol.Version, localModels: library, owners: []ComputerOwner{{TenantID: "tenant", OwnerActorID: "owner"}}}
+	expires := time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)
+	send := func(fields map[string]any) map[string]any {
+		t.Helper()
+		request := map[string]any{
+			"type": "execute", "kind": "local_models", "protocol_version": "2", "command_id": "command-force",
+			"runner_id": "computer", "tenant_id": "tenant", "owner_actor_id": "owner", "connection_epoch": 7, "expires_at": expires,
+		}
+		for key, value := range fields {
+			request[key] = value
+		}
+		payload, _ := json.Marshal(request)
+		stream := &browserEventStream{}
+		d.localModelsStream = stream
+		if err := d.handleLocalModelsCommand(t.Context(), stream, protocol.Command{
+			Type: protocol.CommandCapabilityLocalModels, ProtocolVersion: "2", CommandID: "command-force",
+			RunnerID: "computer", ConnectionEpoch: 7, Payload: payload,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var frame map[string]any
+		if err := json.Unmarshal(stream.events[0].Payload, &frame); err != nil {
+			t.Fatal(err)
+		}
+		return frame
+	}
+
+	if frame := send(map[string]any{"action": "load", "model_id": "qwen3-4b:Q4_K_M", "force": true}); frame["outcome"] != "accepted" {
+		t.Fatalf("force load outcome = %v", frame)
+	}
+	if len(library.actions) != 1 || !library.actions[0].Force {
+		t.Fatalf("force load action = %+v", library.actions)
+	}
+	for _, invalid := range []map[string]any{
+		{"action": "unload", "model_id": "qwen3-4b:Q4_K_M", "force": true},
+		{"action": "download", "model_id": "qwen3-4b:Q4_K_M", "force": true},
+		{"action": "refresh", "force": true},
+	} {
+		frame := send(invalid)
+		if frame["outcome"] != "refused" || frame["refusal"].(map[string]any)["code"] != "MODEL_UNKNOWN" {
+			t.Fatalf("%v answered %v", invalid, frame)
+		}
+	}
+
+	// Refusal shortfall_bytes and can_force are stripped unless local_models_admission_v2 is negotiated.
+	need, free, shortfall := uint64(10<<30), uint64(6<<30), uint64(4<<30)
+	canForce := true
+	library.refusal = &wire.LocalModelActionRefusal{
+		Code: "LOAD_NO_ROOM", Pool: "unified", NeedBytes: &need, FreeBytes: &free,
+		ShortfallBytes: &shortfall, CanForce: &canForce,
+	}
+	legacyFrame := send(map[string]any{"action": "load", "model_id": "qwen3-4b:Q4_K_M"})
+	legacyRefusal := legacyFrame["refusal"].(map[string]any)
+	if _, hasShortfall := legacyRefusal["shortfall_bytes"]; hasShortfall {
+		t.Fatalf("legacy refusal leaked shortfall_bytes: %+v", legacyRefusal)
+	}
+	if _, hasCanForce := legacyRefusal["can_force"]; hasCanForce {
+		t.Fatalf("legacy refusal leaked can_force: %+v", legacyRefusal)
+	}
+
+	d.localModelsAdmissionV2.Store(true)
+	v2Frame := send(map[string]any{"action": "load", "model_id": "qwen3-4b:Q4_K_M"})
+	v2Refusal := v2Frame["refusal"].(map[string]any)
+	if v2Refusal["shortfall_bytes"] != float64(shortfall) || v2Refusal["can_force"] != true {
+		t.Fatalf("admission v2 refusal lost room fields: %+v", v2Refusal)
+	}
+
+	// Snapshot elastic fields are stripped unless local_models_admission_v2 is negotiated.
+	minBytes, retries := uint64(5<<30), uint64(1)
+	pressureFree, pressureBudget := uint64(1<<30), uint64(8<<30)
+	degraded, forced := true, true
+	snap := wire.LocalModelsSnapshot{
+		Available: true, ObservedAt: "2026-11-25T00:00:00Z", Pools: []wire.LocalModelPool{},
+		Models: []wire.LocalModel{
+			{
+				ID: "m1:Q4", Name: "M1", Quant: "Q4", Fit: "gpu", Pool: "gpu:0", State: "loaded",
+				MinimumMemoryBytes: &minBytes, Degraded: &degraded, DegradationReason: "reduced_context",
+				RequestedPosture: &wire.LocalModelPosture{ContextTokens: 65536, Slots: 2},
+				EffectivePosture: &wire.LocalModelPosture{ContextTokens: 32768, Slots: 1},
+				MemoryPressureWarning: &wire.LocalModelPressureWarning{
+					Level: "soft", Pool: "gpu:0", FreeBytes: &pressureFree, BudgetBytes: &pressureBudget,
+				},
+				OomRetries: &retries, Forced: &forced,
+			},
+			{
+				ID: "m2:Q4", Name: "M2", Quant: "Q4", Fit: "gpu", Pool: "gpu:0", State: "failed",
+				Error: &wire.LocalModelError{
+					Code: "LOAD_NO_ROOM", Pool: "gpu:0", NeedBytes: &need, FreeBytes: &free,
+					ShortfallBytes: &shortfall, CanForce: &canForce,
+				},
+			},
+		},
+	}
+	publish := func(feature bool) wire.LocalModelsSnapshot {
+		stream := &browserEventStream{}
+		daemon := &Daemon{computerID: "computer", protocolVersion: protocol.Version, localModelsStream: stream}
+		daemon.localModelsAdmissionV2.Store(feature)
+		daemon.PublishLocalModels(snap)
+		var frame wire.RunnerLocalModels
+		if err := json.Unmarshal(stream.events[0].Payload, &frame); err != nil {
+			t.Fatal(err)
+		}
+		return frame.LocalModels
+	}
+	oldSnap := publish(false)
+	if oldSnap.Models[0].MinimumMemoryBytes != nil || oldSnap.Models[0].Degraded != nil ||
+		oldSnap.Models[0].EffectivePosture != nil || oldSnap.Models[0].MemoryPressureWarning != nil ||
+		oldSnap.Models[0].OomRetries != nil || oldSnap.Models[0].Forced != nil ||
+		oldSnap.Models[1].Error.Pool != "" || oldSnap.Models[1].Error.ShortfallBytes != nil || oldSnap.Models[1].Error.CanForce != nil {
+		t.Fatalf("legacy snapshot leaked admission v2 fields: %+v", oldSnap.Models)
+	}
+	v2Snap := publish(true)
+	if v2Snap.Models[0].MinimumMemoryBytes == nil || *v2Snap.Models[0].MinimumMemoryBytes != minBytes ||
+		v2Snap.Models[0].Degraded == nil || !*v2Snap.Models[0].Degraded ||
+		v2Snap.Models[0].EffectivePosture == nil || v2Snap.Models[0].MemoryPressureWarning == nil ||
+		v2Snap.Models[1].Error.ShortfallBytes == nil || *v2Snap.Models[1].Error.ShortfallBytes != shortfall ||
+		v2Snap.Models[1].Error.CanForce == nil || !*v2Snap.Models[1].Error.CanForce {
+		t.Fatalf("v2 snapshot lost admission v2 fields: %+v", v2Snap.Models)
 	}
 }

@@ -229,9 +229,19 @@ take precedence.
   (older Computers and unprobed/unmeasured loads fall back to
   `{ initial: 1, max: 8 }`). Loading another model in the library does not drop
   the endpoint to `1` or reset an existing learned limit.
-- `local_models_external_holders` is advertised to every Computer (a Daemon
+- `local_models_external_holders`, `local_models_admission_v2`, and
+  `local_model_loading_status` are advertised to every Computer (a Daemon
   ignores an unknown feature); a Daemon talking to an older Agent Service
-  strips `external_holders` from `LocalModelPool` rows.
+  strips `external_holders` from `LocalModelPool` rows, strips elastic
+  admission fields (`minimum_memory_bytes`, `degraded`, `requested_posture`,
+  `effective_posture`, `degradation_reason`, `memory_pressure_warning`,
+  `oom_retries`, `forced`, and error/refusal room fields) without
+  `local_models_admission_v2`, and omits pre-`run.started`
+  `status.changed` (`stage: "loading_local_model"`) events without
+  `local_model_loading_status`. Sending `force: true` on `execute`
+  `local_models` (`load`) requires Computer 0.70.0 or later
+  (`FIRST_LOCAL_MODELS_FORCE_LOAD_COMPUTER_VERSION`), because an older Computer
+  rejects unknown envelope fields and closes the connection.
 - `local_models_storage` is advertised to every Computer (a Daemon ignores an
   unknown feature); a Daemon talking to an older Agent Service strips
   `host.models_dir`, `host.models_dir_exists`, and per-model `storage` from

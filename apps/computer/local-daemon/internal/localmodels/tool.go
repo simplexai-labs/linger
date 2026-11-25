@@ -101,11 +101,12 @@ type Tool struct {
 }
 
 // Action is one owner-chosen library action. Model is empty only for
-// refresh; UnloadFirst is only for load.
+// refresh; UnloadFirst and Force are only for load.
 type Action struct {
 	Name        string
 	Model       string
 	UnloadFirst []string
+	Force       bool
 }
 
 // Action names, as the Runner Gateway sends them.
@@ -131,6 +132,9 @@ func (t Tool) arguments(action Action) []string {
 		args = append(args, "load", action.Model)
 		for _, other := range action.UnloadFirst {
 			args = append(args, "--unload", other)
+		}
+		if action.Force {
+			args = append(args, "--force")
 		}
 		return append(args, "--base-dir", t.BaseDirectory, "--jsonl")
 	default:

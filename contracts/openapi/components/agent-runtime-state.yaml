@@ -1118,6 +1118,13 @@ components:
         status:
           type: string
           enum: [queued, working, thinking, waiting_background]
+        stage:
+          type: string
+          enum: [loading_local_model]
+          description: >-
+            Optional structured stage for queued status (for example
+            loading_local_model while a standby local model loads before the
+            Runtime starts). Clients branch on stage, never title prose.
         title:
           type: string
           minLength: 1
