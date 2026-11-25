@@ -118,12 +118,14 @@ describe("the Dashboard in the language on screen", () => {
         }).format(new Date("2026-07-30T00:00:00Z")),
       ),
     ).toBeVisible();
+    // Folding a column only changes the view, so it carries no marker.
+    const expand = screen.getByRole("button", { name: words.expandClosed });
+    expect(expand).not.toHaveAttribute("data-voice-risk");
+    fireEvent.click(expand);
     const task = screen.getByRole("link", { name: /Retire old release/ });
     expect(
       within(task).getByText(words.taskNumber.replace("{number}", "7")),
     ).toBeVisible();
-
-    // Folding a column only changes the view, so it carries no marker.
     const collapse = screen.getByRole("button", { name: words.collapseClosed });
     expect(collapse).not.toHaveAttribute("data-voice-risk");
     fireEvent.click(collapse);

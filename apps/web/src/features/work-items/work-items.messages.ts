@@ -34,6 +34,11 @@ export const workItemsMessages = defineMessages("workItems", {
   dashboardError: "Dashboard error",
   accessDenied: "Access denied",
   dashboardUnavailable: "Dashboard unavailable",
+  workItemNotFoundTitle: "Work Item not found",
+  workItemNotFoundBody:
+    "This Work Item may have been deleted, or the link may be incorrect.",
+  backToDashboard: "Back to Dashboard",
+  backToMessages: "Back to Messages",
   loadFailed: "TeamHub could not load Work Items.",
   tryingAgain: "Trying again…",
   workItemUnavailable: "Work Item is unavailable in this Tenant.",

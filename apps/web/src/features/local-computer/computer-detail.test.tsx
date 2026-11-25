@@ -50,11 +50,13 @@ it("uses the target Computer platform for the required update", () => {
     />,
   );
   fireEvent.click(screen.getAllByRole("button", { name: "Update" })[0]!);
-  expect(screen.getByRole("combobox")).toHaveValue("");
+  const radios = screen.getAllByRole("radio");
+  expect(radios).toHaveLength(3);
+  for (const radio of radios) {
+    expect(radio).toHaveAttribute("aria-checked", "false");
+  }
   expect(screen.queryByText(/linger-computer.ps1/)).not.toBeInTheDocument();
-  fireEvent.change(screen.getByRole("combobox"), {
-    target: { value: "linux" },
-  });
+  fireEvent.click(screen.getByRole("radio", { name: "Linux" }));
   expect(screen.getByText(/curl -fsSL/)).toBeVisible();
 });
 

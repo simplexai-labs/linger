@@ -9,10 +9,10 @@ import { commonMessages } from "@/i18n/common.messages";
 import { formatLocale } from "@/i18n/language";
 import type { Message } from "@/i18n/messages";
 import { useT, useTranslation } from "@/i18n/use-translation";
-import { useCallback, useState, type RefCallback } from "react";
-import { Link, useParams, useSearchParams } from "react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonClassName } from "@/components/ui/button";
 import { Select, SelectItem } from "@/components/ui/select";
 import { tenantRoomsQueryOptions } from "@/features/rooms/room-queries";
 import { requireRoomRouteParam } from "@/features/rooms/room-route-params";
@@ -28,7 +28,7 @@ import {
 } from "./work-item-queries";
 import { capitalize, formatWorkItemDate } from "./work-item-format";
 import { WorkItemDetailDrawer } from "./work-item-detail-drawer";
-import { dashboardWorkItemPath } from "./work-item-routes";
+import { dashboardPath, dashboardWorkItemPath } from "./work-item-routes";
 import { createWorkItemRoomFilterModel } from "./work-item-room-filter";
 import { workItemsMessages as m } from "./work-items.messages";
 
@@ -47,31 +47,38 @@ const dashboardColumns: readonly DashboardColumn[] = [
 export function WorkItemsPage() {
   const t = useT();
   const { client } = useTeamHubRuntime();
+  const navigate = useNavigate();
   const params = useParams();
   const tenantId = requireRoomRouteParam(params.tenantId, "Tenant");
   const focusedWorkItemId = params.workItemId;
-  const focusedCardRef = useCallback<RefCallback<HTMLAnchorElement>>(
-    (card) => {
-      if (focusedWorkItemId) card?.focus();
+  const cardRefs = useRef(new Map<string, HTMLAnchorElement>());
+  const pendingRestoreFocusId = useRef<string | undefined>(undefined);
+  const narrowViewport = useIsNarrowViewport();
+  const registerCardRef = useCallback(
+    (itemId: string, node: HTMLAnchorElement | null) => {
+      if (node) cardRefs.current.set(itemId, node);
+      else cardRefs.current.delete(itemId);
     },
-    [focusedWorkItemId],
+    [],
   );
   const [searchParams, setSearchParams] = useSearchParams();
   const roomId = searchParams.get("room")?.trim() ?? "";
   const dashboardSearch = roomId
     ? new URLSearchParams({ room: roomId }).toString()
     : "";
-  const [dismissedWorkItemId, setDismissedWorkItemId] = useState<
-    string | undefined
-  >();
-  // The bare /dashboard route is not mounted; dismiss locally so closing the
-  // drawer on /dashboard/:workItemId stays on the work item URL instead of 404.
   const closeDetail = useCallback(() => {
-    setDismissedWorkItemId(focusedWorkItemId);
+    pendingRestoreFocusId.current = focusedWorkItemId;
+    void navigate({
+      pathname: dashboardPath(tenantId),
+      search: dashboardSearch,
+    });
+  }, [dashboardSearch, focusedWorkItemId, navigate, tenantId]);
+  useEffect(() => {
+    if (focusedWorkItemId || !pendingRestoreFocusId.current) return;
+    const restoreId = pendingRestoreFocusId.current;
+    pendingRestoreFocusId.current = undefined;
+    cardRefs.current.get(restoreId)?.focus();
   }, [focusedWorkItemId]);
-  const openDetail = useCallback(() => {
-    setDismissedWorkItemId(undefined);
-  }, []);
   const workItemsQuery = useQuery(
     tenantWorkItemsDashboardQueryOptions(client, tenantId),
   );
@@ -112,6 +119,7 @@ export function WorkItemsPage() {
           if (focusedWorkItemQuery.isError) void focusedWorkItemQuery.refetch();
           if (roomsQuery.isError) void roomsQuery.refetch();
         }}
+        tenantId={tenantId}
       />
     );
   }
@@ -120,13 +128,9 @@ export function WorkItemsPage() {
   const rooms = roomsQuery.data;
   if (!data || !rooms) return <WorkItemsLoading />;
   const items = mergeFocusedWorkItem(data.items, focusedWorkItemQuery.data);
-  const focusedWorkItem = focusedWorkItemId
+  const detailWorkItem = focusedWorkItemId
     ? items.find((item) => item.id === focusedWorkItemId)
     : undefined;
-  const detailWorkItem =
-    focusedWorkItem && dismissedWorkItemId !== focusedWorkItem.id
-      ? focusedWorkItem
-      : undefined;
   const roomFilter = createWorkItemRoomFilterModel(rooms.items, items, t);
   const filteredItems = items.filter((item) =>
     roomFilter.matches(item, roomId),
@@ -172,19 +176,21 @@ export function WorkItemsPage() {
 
       {items.length ? (
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
-          <div className="work-items-board workspace-scrollbar min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden p-4 sm:p-5">
+          <div
+            className="work-items-board workspace-scrollbar min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden p-4 sm:p-5"
+            inert={Boolean(detailWorkItem && narrowViewport)}
+          >
             <div className="grid h-full min-w-[960px] grid-cols-4 gap-3">
               {dashboardColumns.map((column) => (
                 <WorkItemColumn
                   column={column}
-                  focusedCardRef={focusedCardRef}
                   focusedWorkItemId={focusedWorkItemId}
                   items={filteredItems.filter(
                     (item) => dashboardColumnFor(item) === column.id,
                   )}
                   key={column.id}
-                  onSelectWorkItem={openDetail}
                   originRoomLabel={roomFilter.originLabel}
+                  registerCardRef={registerCardRef}
                   search={dashboardSearch}
                   tenantId={tenantId}
                 />
@@ -241,12 +247,15 @@ function WorkItemsError({
   error,
   isRetrying,
   onRetry,
+  tenantId,
 }: {
   error: Error;
   isRetrying: boolean;
   onRetry: () => void;
+  tenantId: string;
 }) {
   const t = useT();
+  const notFound = error instanceof TeamHubError && error.status === 404;
   const forbidden = error instanceof TeamHubError && error.status === 403;
   return (
     <main
@@ -256,17 +265,63 @@ function WorkItemsError({
     >
       <div className="max-w-md">
         <h1 className="text-lg text-app-ink">
-          {t(forbidden ? m.accessDenied : m.dashboardUnavailable)}
+          {t(
+            notFound
+              ? m.workItemNotFoundTitle
+              : forbidden
+                ? m.accessDenied
+                : m.dashboardUnavailable,
+          )}
         </h1>
         <p className="mt-2 text-sm leading-6 text-app-muted">
-          {error.message || t(m.loadFailed)}
+          {notFound
+            ? t(m.workItemNotFoundBody)
+            : error.message || t(m.loadFailed)}
         </p>
-        <Button className="mt-5" disabled={isRetrying} onClick={onRetry}>
-          {isRetrying ? t(m.tryingAgain) : t(commonMessages.tryAgain)}
-        </Button>
+        {notFound ? (
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+            <Link
+              className={buttonClassName({ tone: "primary" })}
+              to={dashboardPath(tenantId)}
+            >
+              {t(m.backToDashboard)}
+            </Link>
+            <Link
+              className={buttonClassName({ tone: "secondary" })}
+              to={`/t/${encodeURIComponent(tenantId)}/rooms`}
+            >
+              {t(m.backToMessages)}
+            </Link>
+          </div>
+        ) : (
+          <Button className="mt-5" disabled={isRetrying} onClick={onRetry}>
+            {isRetrying ? t(m.tryingAgain) : t(commonMessages.tryAgain)}
+          </Button>
+        )}
       </div>
     </main>
   );
+}
+
+function useIsNarrowViewport() {
+  const [narrow, setNarrow] = useState(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(max-width: 1023px)").matches
+      : false,
+  );
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    )
+      return;
+    const media = window.matchMedia("(max-width: 1023px)");
+    setNarrow(media.matches);
+    const onChange = (event: MediaQueryListEvent) => setNarrow(event.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+  return narrow;
 }
 
 function RoomFilter({
@@ -301,27 +356,31 @@ function RoomFilter({
 
 function WorkItemColumn({
   column,
-  focusedCardRef,
   focusedWorkItemId,
   items,
-  onSelectWorkItem,
   originRoomLabel,
+  registerCardRef,
   search,
   tenantId,
 }: {
   column: DashboardColumn;
-  focusedCardRef: RefCallback<HTMLAnchorElement>;
   focusedWorkItemId?: string;
   items: TeamHubWorkItem[];
-  onSelectWorkItem: () => void;
   originRoomLabel: (item: TeamHubWorkItem) => string;
+  registerCardRef: (itemId: string, node: HTMLAnchorElement | null) => void;
   search: string;
   tenantId: string;
 }) {
   const { language, t } = useTranslation();
   const locale = formatLocale(language);
-  const [closedExpanded, setClosedExpanded] = useState(true);
   const isClosed = column.id === "closed";
+  const containsFocused = Boolean(
+    focusedWorkItemId && items.some((item) => item.id === focusedWorkItemId),
+  );
+  const [closedExpanded, setClosedExpanded] = useState(
+    () => !isClosed || containsFocused,
+  );
+  const expanded = !isClosed || closedExpanded || containsFocused;
 
   return (
     <section
@@ -340,14 +399,14 @@ function WorkItemColumn({
         {isClosed ? (
           <Button
             aria-controls="work-item-column-closed-items"
-            aria-expanded={closedExpanded}
-            aria-label={t(closedExpanded ? m.collapseClosed : m.expandClosed)}
-            onClick={() => setClosedExpanded((expanded) => !expanded)}
+            aria-expanded={expanded}
+            aria-label={t(expanded ? m.collapseClosed : m.expandClosed)}
+            onClick={() => setClosedExpanded((current) => !current)}
             size="compactIcon"
-            title={t(closedExpanded ? m.collapseClosed : m.expandClosed)}
+            title={t(expanded ? m.collapseClosed : m.expandClosed)}
             tone="ghost"
           >
-            {closedExpanded ? (
+            {expanded ? (
               <Icon icon={ArrowDown01Icon} size={14} />
             ) : (
               <Icon icon={ArrowRight01Icon} size={14} />
@@ -355,7 +414,7 @@ function WorkItemColumn({
           </Button>
         ) : null}
       </header>
-      {!isClosed || closedExpanded ? (
+      {expanded ? (
         <ul
           className="workspace-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto px-1 pb-2"
           id={isClosed ? "work-item-column-closed-items" : undefined}
@@ -367,8 +426,7 @@ function WorkItemColumn({
                   item.id === focusedWorkItemId ? "location" : undefined
                 }
                 className="work-item-card block px-3 py-2.5 text-app-ink outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
-                onClick={onSelectWorkItem}
-                ref={item.id === focusedWorkItemId ? focusedCardRef : undefined}
+                ref={(node) => registerCardRef(item.id, node)}
                 to={{
                   pathname: dashboardWorkItemPath(tenantId, item.id),
                   search,

@@ -55,6 +55,11 @@ export function WorkItemDetailDrawer({
 }: WorkItemDetailDrawerProps) {
   const { language, t } = useTranslation();
   const locale = formatLocale(language);
+  const drawerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    drawerRef.current?.focus();
+  }, [item.id]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -88,8 +93,10 @@ export function WorkItemDetailDrawer({
   return (
     <aside
       aria-label={t(m.detailTitle)}
-      className="absolute inset-0 z-20 flex min-h-0 w-full flex-col overflow-hidden bg-app-surface lg:static lg:inset-auto lg:z-auto lg:w-[400px] lg:shrink-0 lg:border-l lg:border-app-border"
+      className="absolute inset-0 z-20 flex min-h-0 w-full flex-col overflow-hidden bg-app-surface outline-none lg:static lg:inset-auto lg:z-auto lg:w-[400px] lg:shrink-0 lg:border-l lg:border-app-border"
       data-voice-closable
+      ref={drawerRef}
+      tabIndex={-1}
     >
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-app-border px-5 py-3">
         <div className="flex min-w-0 items-center gap-2">
@@ -373,14 +380,18 @@ function WorkItemCommentForm({
     },
   });
 
-  function submitComment(event: FormEvent) {
-    event.preventDefault();
+  function submitDraft() {
     const trimmed = draft.trim();
     if (!trimmed || addComment.isPending) return;
     const idempotencyKey =
       submissionKeyRef.current ?? createTeamHubIdempotencyKey();
     submissionKeyRef.current = idempotencyKey;
     addComment.mutate({ body: trimmed, idempotencyKey });
+  }
+
+  function submitComment(event: FormEvent) {
+    event.preventDefault();
+    submitDraft();
   }
 
   return (
@@ -396,6 +407,16 @@ function WorkItemCommentForm({
           submissionKeyRef.current = null;
           setDraft(event.target.value);
           if (addComment.isError) addComment.reset();
+        }}
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter" &&
+            (event.metaKey || event.ctrlKey) &&
+            !event.nativeEvent.isComposing
+          ) {
+            event.preventDefault();
+            submitDraft();
+          }
         }}
         placeholder={t(m.addCommentPlaceholder)}
         rows={2}

@@ -22,9 +22,11 @@ describe("CopyValueButton", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     setClipboard({ writeText });
     render(<ComputerSetupInstructions />);
-    fireEvent.change(
-      screen.getByRole("combobox", { name: "Computer operating system" }),
-      { target: { value: "win32" } },
+    const platformGroup = screen.getByRole("radiogroup", {
+      name: "Computer operating system",
+    });
+    fireEvent.click(
+      within(platformGroup).getByRole("radio", { name: "Windows" }),
     );
     expect(screen.getByText(/Run these commands in PowerShell/)).toBeVisible();
     fireEvent.click(
@@ -41,9 +43,12 @@ describe("CopyValueButton", () => {
   it("initially selects Windows for a Windows browser", () => {
     vi.spyOn(navigator, "platform", "get").mockReturnValue("Win32");
     render(<ComputerSetupInstructions />);
+    const platformGroup = screen.getByRole("radiogroup", {
+      name: "Computer operating system",
+    });
     expect(
-      screen.getByRole("combobox", { name: "Computer operating system" }),
-    ).toHaveValue("win32");
+      within(platformGroup).getByRole("radio", { name: "Windows" }),
+    ).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText(/linger-computer.ps1/)).toBeVisible();
   });
 

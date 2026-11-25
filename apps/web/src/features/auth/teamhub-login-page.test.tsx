@@ -379,14 +379,69 @@ describe("TeamHubLoginPage", () => {
     );
   });
 
-  it("explains when the current Session expired", () => {
+  it("explains when the current Session expired and clears it on credential edit or failed submit", async () => {
     renderAuthenticationPage(
-      {},
+      {
+        login: () =>
+          teamHubErrorResponse(
+            401,
+            "INVALID_CREDENTIALS",
+            "email or password is incorrect",
+          ),
+      },
       { initialEntry: "/login?reason=session-expired" },
     );
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Your session has expired. Sign in again to continue.",
+    );
+
+    // Editing credentials dismisses the expired-session notice so two alerts never stack.
+    fillSignIn();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toHaveTextContent(
+      "Incorrect email or password. Check your credentials and try again.",
+    );
+  });
+
+  it("matches submit button visible label to accessible name, focuses email, and shows access help", () => {
+    renderAuthenticationPage({});
+
+    const submit = screen.getByRole("button", { name: "Sign in" });
+    expect(submit).toHaveTextContent("Sign in");
+    expect(submit).not.toHaveAttribute("aria-label");
+    expect(screen.getByLabelText("Email")).toHaveFocus();
+    expect(
+      screen.getByText(
+        "Need access or a password reset? Contact your workspace admin.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("returns to a deep-linked Tenant path after signing in", async () => {
+    const returnTo = "/t/tenant-northstar/dashboard?room=room-all";
+    renderAuthenticationPage(
+      {
+        login: () => ({
+          id: "session-1",
+          identity: { actors: [{ tenant_id: "tenant-northstar" }] },
+        }),
+      },
+      {
+        initialEntry: `/login?reason=session-expired&return_to=${encodeURIComponent(returnTo)}`,
+        showLocation: true,
+      },
+    );
+
+    fillSignIn();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(returnTo),
     );
   });
 });

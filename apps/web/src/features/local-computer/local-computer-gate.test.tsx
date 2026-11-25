@@ -24,6 +24,7 @@ import { RoomShell } from "@/features/rooms/room-shell";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubLocalComputerPage } from "@/features/teamhub/teamhub-types";
 import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
+import { teamHubErrorResponse } from "@/test/teamhub-test-server";
 
 type LocalComputer = TeamHubLocalComputerPage["items"][number];
 
@@ -315,6 +316,109 @@ describe("Local Computer gate", () => {
     expect(
       within(gate).getAllByText("The npm commands need Node.js."),
     ).toHaveLength(1);
+  });
+
+  it("wraps install commands, uses a segmented OS selector, exposes Settings & language, and blocks Cmd+K while gated", async () => {
+    const fixture = await renderShell();
+
+    const gate = await screen.findByRole("dialog", {
+      name: "Connect your computer",
+    });
+    const platformGroup = within(gate).getByRole("radiogroup", {
+      name: "Computer operating system",
+    });
+    expect(
+      within(platformGroup).getByRole("radio", { name: "macOS" }),
+    ).toBeVisible();
+    expect(
+      within(platformGroup).getByRole("radio", { name: "Windows" }),
+    ).toBeVisible();
+    expect(
+      within(platformGroup).getByRole("radio", { name: "Linux" }),
+    ).toBeVisible();
+
+    const installCode = within(gate).getByText(/install\/linger-computer\.sh/);
+    expect(installCode).toHaveClass("whitespace-pre-wrap", "break-all");
+
+    fireEvent.click(
+      within(platformGroup).getByRole("radio", { name: "Windows" }),
+    );
+    expect(within(gate).getByText(/install\/linger-computer\.ps1/)).toHaveClass(
+      "whitespace-pre-wrap",
+      "break-all",
+    );
+
+    // Global Cmd+K shortcut must not open Search while gated.
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.queryByRole("dialog", { name: "Search" })).toBeNull();
+
+    // Footer includes a Settings escape and language switcher alongside Sign out.
+    expect(
+      within(gate).getByRole("button", { name: "Interface language" }),
+    ).toBeVisible();
+    fireEvent.click(within(gate).getByRole("link", { name: "Settings" }));
+    await waitFor(() =>
+      expect(fixture.router.state.location.pathname).toBe(
+        "/t/tenant-northstar/settings/account",
+      ),
+    );
+  });
+
+  it("shows a retryable alert when computer status fails to load", async () => {
+    const fixture = await renderShell();
+    let fail = true;
+    fixture.runtime.server.on(
+      "GET",
+      "/v0/tenants/{tenantId}/local-computers",
+      () =>
+        fail
+          ? teamHubErrorResponse(503, "TEAMHUB_UNAVAILABLE", "Unavailable")
+          : { items: [] },
+    );
+    await act(() =>
+      fixture.queryClient.invalidateQueries({
+        queryKey: ["teamhub", "local-computers", "tenant-northstar"],
+      }),
+    );
+
+    const gate = await screen.findByRole("dialog", {
+      name: "Connect your computer",
+    });
+    const alert = await within(gate).findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Couldn't check your computer status right now. Retry to continue.",
+    );
+
+    fail = false;
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(within(gate).queryByRole("alert")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("offers Retry when creating Another Me stalls past 30 seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await renderShell({
+      ...newMac,
+      runtimes: [
+        {
+          models: [{ id: "claude-sonnet", label: "Claude Sonnet" }],
+          status: "ready",
+          type: "claude",
+          version: "2.1.0",
+        },
+      ],
+    });
+    expect(await screen.findByText(/Creating your Another Me/)).toBeVisible();
+
+    await act(() => vi.advanceTimersByTimeAsync(30_100));
+    expect(
+      screen.getByText(
+        "Setting up Another Me is taking longer than usual. Retry to check again.",
+      ),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(screen.getByText(/Creating your Another Me/)).toBeVisible();
   });
 });
 

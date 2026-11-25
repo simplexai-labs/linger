@@ -226,4 +226,47 @@ describe("TeamHub authentication runtime", () => {
     expect(navigate).toHaveBeenCalledWith("/", { replace: true });
     stop();
   });
+
+  it("redirects an unauthenticated root entry to /login without session-expired", () => {
+    const navigate = vi.fn();
+    const signals = createTeamHubAuthenticationSignals({
+      channelFactory: () => null,
+    });
+    const stop = startTeamHubAuthenticationRuntime({
+      currentLocation: () => ({ pathname: "/", search: "" }),
+      navigate,
+      queryClient: new QueryClient(),
+      signals,
+    });
+
+    signals.publish("authentication-required", "session-expired");
+
+    expect(navigate).toHaveBeenCalledWith("/login", { replace: true });
+    stop();
+  });
+
+  it("preserves a Tenant deep link when an authenticated session expires", () => {
+    const navigate = vi.fn();
+    const signals = createTeamHubAuthenticationSignals({
+      channelFactory: () => null,
+    });
+    const deepLink = "/t/tenant-northstar/dashboard?room=room-all";
+    const stop = startTeamHubAuthenticationRuntime({
+      currentLocation: () => ({
+        pathname: "/t/tenant-northstar/dashboard",
+        search: "?room=room-all",
+      }),
+      navigate,
+      queryClient: new QueryClient(),
+      signals,
+    });
+
+    signals.publish("authentication-required", "session-expired");
+
+    expect(navigate).toHaveBeenCalledWith(
+      `/login?reason=session-expired&return_to=${encodeURIComponent(deepLink)}`,
+      { replace: true },
+    );
+    stop();
+  });
 });

@@ -613,7 +613,7 @@ describe("TeamHub routes", () => {
     expect(screen.getByRole("button", { name: "Open Messages" })).toBeVisible();
   });
 
-  it("renders the in-shell not-found page for bare /t/:tenantId/dashboard", async () => {
+  it("renders the Dashboard page for bare /t/:tenantId/dashboard", async () => {
     const runtime = createTestTeamHubRuntime();
     const queryClient = testQueryClient();
     const router = createMemoryRouter(createAppRoutes(queryClient, runtime), {
@@ -623,9 +623,26 @@ describe("TeamHub routes", () => {
     renderApp(queryClient, runtime, router);
 
     expect(
+      await screen.findByRole("heading", { name: "Fixture Dashboard" }),
+    ).toBeVisible();
+  });
+
+  it("offers Go to Log in on signed-out unknown paths", async () => {
+    const runtime = createTestTeamHubRuntime();
+    const queryClient = testQueryClient();
+    const router = createMemoryRouter(createAppRoutes(queryClient, runtime), {
+      initialEntries: ["/no-such-page"],
+    });
+
+    renderApp(queryClient, runtime, router);
+
+    expect(
       await screen.findByRole("heading", { name: "Page not found" }),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Open Messages" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Go to Log in" })).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Open Messages" }),
+    ).not.toBeInTheDocument();
   });
 
   it("preloads the Room chat chunk from /, /t/:tenantId/rooms, and /t/:tenantId/rooms/:roomId loaders", async () => {

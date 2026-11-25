@@ -314,7 +314,7 @@ function RoomShellContent({
   const [searchOpen, setSearchOpen] = useState(false);
   // What a spoken search asked for; the shortcut opens an empty search.
   const [searchQuery, setSearchQuery] = useState("");
-  useGlobalSearchShortcut(() => setSearchOpen(true));
+  useGlobalSearchShortcut(() => setSearchOpen(true), { enabled: !inert });
   // Voice page actions wait while a route is loading: lazy routes commit
   // their URL only once their code has arrived.
   const navigating = useRef(false);

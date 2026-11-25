@@ -159,12 +159,15 @@ export const computersMessages = defineMessages("computers", {
   keepCurrentSetup: "Keep current setup",
   replaceLocalIdentity: "Replace local identity",
   connectFailed: "The Computer could not be connected. Run setup again.",
+  connectFailedGuidance:
+    "Try connecting again below, or return to your terminal and re-run login.",
   signingOut: "Signing out...",
   useAnotherAccount: "Use another account",
   connectingRequest: "Connecting...",
   reconnectComputer: "Reconnect computer",
   invalidRequestTitle: "Connection request is invalid",
   invalidRequestBody: "Return to the terminal and run setup again.",
+  backToLinger: "Back to Linger",
   couldNotConnect: "Could not connect",
 
   // The gate shown until a Computer can run Another Me.
@@ -173,6 +176,10 @@ export const computersMessages = defineMessages("computers", {
   gateIntro:
     "Your Agents run on your own computer with Claude Code, Codex or Pi. Connect one to start.",
   gateReady: "Your computer is ready. Creating your Another Me...",
+  gateReadySlow:
+    "Setting up Another Me is taking longer than usual. Retry to check again.",
+  gateLoadError:
+    "Couldn't check your computer status right now. Retry to continue.",
   installTheCli: "Install the CLI",
   setUpAiApp: "Set up an AI app",
   availableOnceOnline: "Available once your computer is online.",
