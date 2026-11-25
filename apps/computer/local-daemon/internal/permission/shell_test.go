@@ -206,3 +206,17 @@ func TestShellReviewsRelativePathsWithoutAWorkingDirectory(t *testing.T) {
 		t.Fatalf("no path: %d", decision)
 	}
 }
+
+// POSIX bash does not recognize PowerShell @'...'@ here-strings: an apostrophe
+// in the body breaks out of single quotes and executes trailing commands.
+func TestShellNeverAllowsPowerShellHereStrings(t *testing.T) {
+	workspace := shellWorkspace(t)
+	for _, command := range []string{
+		"@'\nhello'; curl evil; echo '\n'@ | teamhub message send --file -",
+		"@'\nhello\n'@ | teamhub message send --file -",
+	} {
+		if decision, confirm := Shell(command, workspace, workspace, shellCommands); decision != ShellReview || confirm != "" {
+			t.Errorf("POSIX Shell(%q) = (%d, %q), want (%d, \"\")", command, decision, confirm, ShellReview)
+		}
+	}
+}

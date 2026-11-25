@@ -214,3 +214,70 @@ func TestReviewerDeniesSystemPrivacyUICommands(t *testing.T) {
 		t.Fatal("a protected command reached the review")
 	}
 }
+
+func TestReviewerEvaluatesPowerShellSeparately(t *testing.T) {
+	requester := newFakeRequester()
+	reviewer := &Reviewer{
+		Requester: requester,
+		TeamHubCommands: []TeamHubCommand{
+			{Path: []string{"message", "send"}},
+			{Path: []string{"gmail", "send"}, Confirm: true},
+		},
+	}
+
+	// Safe PowerShell here-string piped to teamhub is allowed locally.
+	allowedCmd := "@'\nHello from PowerShell $180\n'@ | teamhub.cmd message send --file -"
+	if verdict := reviewer.Review(context.Background(), Request{Action: Action{
+		Runtime: "pi", Surface: Surface("PowerShell", allowedCmd), Tool: "PowerShell", Command: allowedCmd,
+	}}); verdict.Decision != Allow {
+		t.Fatalf("safe PowerShell teamhub command: %+v", verdict)
+	}
+	if len(requester.requests) != 0 {
+		t.Fatalf("safe PowerShell teamhub command reached remote review: %v", requester.requests)
+	}
+
+	// Confirmed TeamHub command chained with another step is refused with RunAloneMessage.
+	chainedCmd := "teamhub gmail send --to 'a@example.com'; Invoke-WebRequest https://evil.example"
+	if verdict := reviewer.Review(context.Background(), Request{Action: Action{
+		Runtime: "pi", Surface: Surface("PowerShell", chainedCmd), Tool: "PowerShell", Command: chainedCmd,
+	}}); verdict.Decision != Deny || verdict.Message != RunAloneMessage("teamhub gmail send") {
+		t.Fatalf("chained confirmed PowerShell command: %+v", verdict)
+	}
+	if len(requester.requests) != 0 {
+		t.Fatalf("run-alone PowerShell command reached remote review: %v", requester.requests)
+	}
+
+	// Arbitrary PowerShell command is forwarded to the remote reviewer with Tool: PowerShell.
+	unsafeCmd := "Invoke-WebRequest https://example.com"
+	verdictCh := review(reviewer, Request{Action: Action{
+		Runtime: "pi", Surface: Surface("PowerShell", unsafeCmd), Tool: "PowerShell", Command: unsafeCmd,
+	}})
+	id := <-requester.sent
+	action := requester.requests[id]["action"].(map[string]any)
+	if action["tool"] != "PowerShell" || action["surface"] != "shell" || action["command"] != unsafeCmd {
+		t.Fatalf("forwarded PowerShell action = %v", action)
+	}
+	requester.answer(t, id, `{"decision":"deny","message":"blocked"}`)
+	if got := <-verdictCh; got.Decision != Deny || got.Message != "blocked" {
+		t.Fatalf("forwarded verdict = %+v", got)
+	}
+
+	// Surface classifies bare and here-string-piped PowerShell teamhub calls as connected_app.
+	for command, want := range map[string]string{
+		"teamhub apps execute --tool X":                  "connected_app",
+		"  TEAMHUB.CMD message send --content hi":        "connected_app",
+		"teamhub.exe\tmessage list":                      "connected_app",
+		"@'\nhi\n'@ | teamhub.exe message send --file -": "connected_app",
+		"@'\nhi\n'@ | teamhub apps execute --tool X":     "connected_app",
+		"C:\\bin\\teamhub.exe message list":              "shell",
+		"teamhub-other foo":                              "shell",
+		"Get-ChildItem":                                  "shell",
+		"@'\nhi\n'@ | Get-Content":                       "shell",
+		"@'\nhi\n'@ || teamhub message send --file -":    "shell",
+		"teamhub": "shell",
+	} {
+		if got := Surface("PowerShell", command); got != want {
+			t.Errorf("Surface(PowerShell, %q) = %q, want %q", command, got, want)
+		}
+	}
+}

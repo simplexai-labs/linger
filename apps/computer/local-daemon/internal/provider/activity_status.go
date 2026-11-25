@@ -40,7 +40,7 @@ func activityPresentation(message native.Event) (string, map[string]any, activit
 	}
 	var steps []step
 	if kind == native.ActivityCommand {
-		steps = scriptSteps(command)
+		steps = scriptStepsFor(command, strings.EqualFold(message.ToolName, "powershell"))
 	} else if next, ok := toolStep(kind, message.ToolName, input); ok {
 		steps = []step{next}
 	}

@@ -9,18 +9,35 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
 )
 
-// scriptSteps names the steps of a shell script for the Room status line,
+// commandBase returns the filename of a POSIX or Windows command path.
+func commandBase(word string) string {
+	word = strings.TrimRight(word, `/\`)
+	if slash := strings.LastIndexAny(word, `/\`); slash >= 0 {
+		return word[slash+1:]
+	}
+	return word
+}
+
+// isTeamHubProgram reports whether word invokes the TeamHub CLI on POSIX or Windows.
+func isTeamHubProgram(word string) bool {
+	base := commandBase(word)
+	return strings.EqualFold(base, "teamhub") ||
+		strings.EqualFold(base, "teamhub.cmd") ||
+		strings.EqualFold(base, "teamhub.exe")
+}
+
+// scriptStepsFor names the steps of a shell script for the Room status line,
 // the same for every Runtime's shell tool: each command of its lists, a
 // pipeline by its first stage, without navigation, output shaping, or the
 // commands that only supply an argument. Unrecognized commands are left out.
-func scriptSteps(script string) []step {
-	commands := simpleCommands(script)
+func scriptStepsFor(script string, powerShell bool) []step {
+	commands := simpleCommandsFor(script, powerShell)
 	if waitsForReplies(commands) {
 		return []step{{kind: native.ActivityMessageRead, text: "Waiting for replies"}}
 	}
 	var steps []step
 	for _, command := range commands {
-		teamhub := filepath.Base(command.words[0]) == "teamhub"
+		teamhub := isTeamHubProgram(command.words[0])
 		if command.nested || command.filter && !teamhub {
 			continue
 		}
@@ -38,7 +55,7 @@ func waitsForReplies(commands []shellCommand) bool {
 		return filepath.Base(command.words[0]) == "sleep"
 	})
 	return slept && slices.ContainsFunc(commands, func(command shellCommand) bool {
-		if filepath.Base(command.words[0]) != "teamhub" {
+		if !isTeamHubProgram(command.words[0]) {
 			return false
 		}
 		path := teamhubPath(command.words[1:])
@@ -112,7 +129,7 @@ func commandStep(command shellCommand) (step, bool) {
 		}
 	}
 	program, args := filepath.Base(words[0]), words[1:]
-	if program == "teamhub" {
+	if isTeamHubProgram(words[0]) {
 		return teamhubStep(args), true
 	}
 	switch program {
@@ -271,11 +288,11 @@ var commandWord = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 // messageSends post to the Room, which shows the message itself.
 var messageSends = map[string]bool{"send": true, "direct": true, "emoji": true, "sequence": true}
 
-// createsTask reports a script that is one `teamhub task create` call. Its
+// createsTaskFor reports a script that is one `teamhub task create` call. Its
 // receipt names the Task it created, which the Room links the step to.
-func createsTask(script string) bool {
-	commands := simpleCommands(script)
-	if len(commands) != 1 || filepath.Base(commands[0].words[0]) != "teamhub" {
+func createsTaskFor(script string, powerShell bool) bool {
+	commands := simpleCommandsFor(script, powerShell)
+	if len(commands) != 1 || !isTeamHubProgram(commands[0].words[0]) {
 		return false
 	}
 	path := teamhubPath(commands[0].words[1:])
@@ -455,12 +472,12 @@ var (
 	heredocOperator = regexp.MustCompile(`^<<-?[ \t]*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
 )
 
-// simpleCommands splits a script into its simple commands, for display
+// simpleCommandsFor splits a script into its simple commands, for display
 // only. Lists, pipelines, subshells and substitutions separate commands;
 // heredoc bodies, leading keywords such as `do`, and variable assignments are
 // dropped, and redirections are kept apart from the words. An unclosed quote
 // runs to the end.
-func simpleCommands(script string) []shellCommand {
+func simpleCommandsFor(script string, powerShell bool) []shellCommand {
 	var commands []shellCommand
 	var current shellCommand
 	var heredocs []string
@@ -495,8 +512,20 @@ func simpleCommands(script string) []shellCommand {
 	for index := 0; index < len(script); index++ {
 		char := script[index]
 		switch {
-		case char == ' ' || char == '\t':
+		case char == ' ' || char == '\t' || char == '\r':
 			endWord()
+		case (!inWord || strings.HasSuffix(word.String(), "=")) &&
+			(strings.HasPrefix(script[index:], "@'") || strings.HasPrefix(script[index:], `@"`)):
+			if after, ok := skipPowerShellHereString(script, index); ok {
+				if inWord {
+					word.Reset()
+					inWord, dropWord, writeWord = false, false, false
+				}
+				index = after - 1
+			} else {
+				word.WriteByte(char)
+				inWord = true
+			}
 		case char == '\n':
 			endCommand()
 			for _, delimiter := range heredocs {
@@ -516,6 +545,20 @@ func simpleCommands(script string) []shellCommand {
 				}
 			}
 			heredocs = nil
+		case char == '\'' && powerShell:
+			index++
+			for ; index < len(script); index++ {
+				if script[index] == '\'' {
+					if index+1 < len(script) && script[index+1] == '\'' {
+						word.WriteByte('\'')
+						index++
+						continue
+					}
+					break
+				}
+				word.WriteByte(script[index])
+			}
+			inWord = true
 		case char == '\'':
 			closing := strings.IndexByte(script[index+1:], '\'')
 			if closing < 0 {
@@ -523,19 +566,46 @@ func simpleCommands(script string) []shellCommand {
 			}
 			word.WriteString(script[index+1 : index+1+closing])
 			inWord, index = true, index+1+closing
-		case char == '"':
+		case char == '"' && powerShell:
 			index++
 			for ; index < len(script) && script[index] != '"'; index++ {
-				if script[index] == '\\' && index+1 < len(script) {
+				if script[index] == '`' && index+1 < len(script) {
 					index++
 				}
 				word.WriteByte(script[index])
 			}
 			inWord = true
-		case char == '\\' && index+1 < len(script):
+		case char == '"':
 			index++
-			if script[index] != '\n' {
+			for ; index < len(script) && script[index] != '"'; index++ {
+				if script[index] == '\\' && index+1 < len(script) && strings.IndexByte("\"\\$`", script[index+1]) >= 0 {
+					index++
+				}
 				word.WriteByte(script[index])
+			}
+			inWord = true
+		case char == '`' && powerShell:
+			switch {
+			case strings.HasPrefix(script[index+1:], "\r\n"):
+				index += 2
+			case index+1 < len(script) && script[index+1] == '\n':
+				index++
+			case index+1 < len(script):
+				index++
+				word.WriteByte(script[index])
+				inWord = true
+			}
+		case !powerShell && char == '\\' && index+1 < len(script):
+			next := script[index+1]
+			switch {
+			case next == '\n':
+				index++
+			case strings.IndexByte(" \t'\"$`\\;<>|&()", next) >= 0:
+				index++
+				word.WriteByte(next)
+				inWord = true
+			default:
+				word.WriteByte(char)
 				inWord = true
 			}
 		case strings.HasPrefix(script[index:], "<<") && !strings.HasPrefix(script[index:], "<<<"):
@@ -597,6 +667,36 @@ func simpleCommands(script string) []shellCommand {
 	}
 	endCommand()
 	return commands
+}
+
+// skipPowerShellHereString skips a PowerShell @'...'@ or @"..."@ here-string
+// starting at start (when only horizontal whitespace and \r precede \n on the
+// opening line) and returns the index immediately after the closing '@ or "@,
+// or len(script) when unclosed.
+func skipPowerShellHereString(script string, start int) (int, bool) {
+	if start+2 > len(script) || script[start] != '@' || (script[start+1] != '\'' && script[start+1] != '"') {
+		return 0, false
+	}
+	closing := string([]byte{script[start+1], '@'})
+	pos := start + 2
+	for pos < len(script) && (script[pos] == ' ' || script[pos] == '\t' || script[pos] == '\r') {
+		pos++
+	}
+	if pos >= len(script) || script[pos] != '\n' {
+		return 0, false
+	}
+	pos++
+	for pos < len(script) {
+		if strings.HasPrefix(script[pos:], closing) {
+			return pos + 2, true
+		}
+		nl := strings.IndexByte(script[pos:], '\n')
+		if nl < 0 {
+			return len(script), true
+		}
+		pos += nl + 1
+	}
+	return len(script), true
 }
 
 // shellScript returns the script of `bash -lc '…'`, or the command itself.

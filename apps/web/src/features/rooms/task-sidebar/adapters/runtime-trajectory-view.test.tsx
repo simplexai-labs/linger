@@ -162,6 +162,34 @@ describe("RuntimeTrajectoryView", () => {
       "town-shimmer-text",
     );
   });
+
+  it("renders Pi powershell calls as shell commands", () => {
+    const records = [
+      pi(0, "message", "assistant", {
+        content: [
+          {
+            arguments: { command: "Get-ChildItem" },
+            id: "ps1",
+            name: "powershell",
+            type: "toolCall",
+          },
+        ],
+        role: "assistant",
+      }),
+      pi(1, "tool_result", "toolResult", {
+        content: [{ text: "notes.md", type: "text" }],
+        role: "toolResult",
+        toolCallId: "ps1",
+        toolName: "powershell",
+      }),
+    ];
+
+    render(<RuntimeTrajectoryView live={false} records={records} />);
+
+    const ran = screen.getByTitle("Ran Get-ChildItem");
+    fireEvent.click(ran);
+    expect(screen.getByText("notes.md")).toBeVisible();
+  });
 });
 
 function codex(

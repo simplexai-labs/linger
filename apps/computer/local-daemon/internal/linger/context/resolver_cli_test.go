@@ -117,3 +117,121 @@ func TestResolverRejectsCLIConfigurationThroughSymbolicParent(t *testing.T) {
 		t.Fatal("symbolic parent configuration must not be passed to the Runtime")
 	}
 }
+
+func TestSetWSLENV(t *testing.T) {
+	cases := []struct {
+		existing string
+		entries  []string
+		want     string
+	}{
+		{"", []string{"TEAMHUB_CONFIG/p", "TEAMHUB_PROFILE"}, "TEAMHUB_CONFIG/p:TEAMHUB_PROFILE"},
+		{"FOO/u::BAR/l:", []string{"TEAMHUB_CONFIG/p", "TEAMHUB_PROFILE"}, "FOO/u:BAR/l:TEAMHUB_CONFIG/p:TEAMHUB_PROFILE"},
+		{"FOO/u:TEAMHUB_CONFIG/w:BAR:TEAMHUB_PROFILE/w", []string{"TEAMHUB_CONFIG/p", "TEAMHUB_PROFILE"}, "FOO/u:BAR:TEAMHUB_CONFIG/p:TEAMHUB_PROFILE"},
+		{"FOO/u:teamhub_config/u:BAR", []string{"TEAMHUB_CONFIG/p", "TEAMHUB_PROFILE"}, "FOO/u:BAR:TEAMHUB_CONFIG/p:TEAMHUB_PROFILE"},
+		{"TEAMHUB_CONFIG/p:TEAMHUB_PROFILE", []string{"TEAMHUB_CONFIG/p", "TEAMHUB_PROFILE"}, "TEAMHUB_CONFIG/p:TEAMHUB_PROFILE"},
+	}
+	for _, tc := range cases {
+		if got := setWSLENV(tc.existing, tc.entries...); got != tc.want {
+			t.Errorf("setWSLENV(%q, %q) = %q, want %q", tc.existing, tc.entries, got, tc.want)
+		}
+	}
+}
+
+func TestResolverSetsWSLENVForWindowsCLI(t *testing.T) {
+	t.Run("fresh windows environment", func(t *testing.T) {
+		t.Setenv("WSLENV", "")
+		root := t.TempDir()
+		store := cliTestCredentialStore(t, true)
+		resolver := cliTestResolver(root, store)
+		resolver.goos = "windows"
+		spec, err := resolver.Resolve(context.Background(), cliTestCommand(""), json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex"},"session":{"threadId":""},"input":{"type":"text","text":"hi"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := spec.Environment["WSLENV"]; got != "TEAMHUB_CONFIG/p:TEAMHUB_PROFILE" {
+			t.Fatalf("WSLENV = %q", got)
+		}
+	})
+
+	t.Run("preserves existing process WSLENV", func(t *testing.T) {
+		t.Setenv("WSLENV", "FOO/u:BAR/l")
+		root := t.TempDir()
+		store := cliTestCredentialStore(t, true)
+		resolver := cliTestResolver(root, store)
+		resolver.goos = "windows"
+		spec, err := resolver.Resolve(context.Background(), cliTestCommand(""), json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex"},"session":{"threadId":""},"input":{"type":"text","text":"hi"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := spec.Environment["WSLENV"]; got != "FOO/u:BAR/l:TEAMHUB_CONFIG/p:TEAMHUB_PROFILE" {
+			t.Fatalf("WSLENV = %q", got)
+		}
+	})
+
+	t.Run("normalizes case-insensitive provider WslEnv and replaces stale flags", func(t *testing.T) {
+		t.Setenv("WSLENV", "IGNORED/u")
+		root := t.TempDir()
+		store := cliTestCredentialStore(t, true)
+		resolver := cliTestResolver(root, store)
+		resolver.goos = "windows"
+		resolver.Providers["codex"] = ProviderInstallation{
+			Type:           "codex",
+			ExecutablePath: "/trusted/codex",
+			Environment:    map[string]string{"PATH": "/bin", "WslEnv": "CUSTOM/u:teamhub_config/u:TEAMHUB_PROFILE/w:OTHER/l"},
+		}
+		spec, err := resolver.Resolve(context.Background(), cliTestCommand(""), json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex"},"session":{"threadId":""},"input":{"type":"text","text":"hi"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := spec.Environment["WSLENV"]; got != "CUSTOM/u:OTHER/l:TEAMHUB_CONFIG/p:TEAMHUB_PROFILE" {
+			t.Fatalf("WSLENV = %q", got)
+		}
+		if _, dup := spec.Environment["WslEnv"]; dup {
+			t.Fatalf("differently cased WslEnv remained: %+v", spec.Environment)
+		}
+	})
+
+	t.Run("prepare and start share windows WSLENV", func(t *testing.T) {
+		t.Setenv("WSLENV", "EXISTING/u")
+		root := t.TempDir()
+		store := cliTestCredentialStore(t, true)
+		resolver := cliTestResolver(root, store)
+		resolver.goos = "windows"
+		prepare, err := resolver.Resolve(context.Background(), cliTestCommand("context-one"), json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex"},"session":{"threadId":""},"input":{"type":"text","text":"hi"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		start, err := resolver.Resolve(context.Background(), cliTestCommand("context-one"), json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex"},"session":{"threadId":""},"input":{"type":"text","text":"hi"},"cli_run_context":{"scope":{"kind":"room","id":"room-1"}}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prepare.Environment["WSLENV"] != "EXISTING/u:TEAMHUB_CONFIG/p:TEAMHUB_PROFILE" || prepare.Environment["WSLENV"] != start.Environment["WSLENV"] {
+			t.Fatalf("prepare=%q start=%q", prepare.Environment["WSLENV"], start.Environment["WSLENV"])
+		}
+	})
+
+	t.Run("absent without credential or on POSIX", func(t *testing.T) {
+		t.Setenv("WSLENV", "HOST/u")
+		root := t.TempDir()
+		noCred := cliTestResolver(root, nil)
+		noCred.goos = "windows"
+		spec, err := noCred.Resolve(context.Background(), cliTestCommand(""), json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex"},"session":{"threadId":""},"input":{"type":"text","text":"hi"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := spec.Environment["WSLENV"]; ok {
+			t.Fatalf("WSLENV set without credential: %+v", spec.Environment)
+		}
+
+		store := cliTestCredentialStore(t, true)
+		posix := cliTestResolver(root, store)
+		posix.goos = "linux"
+		spec, err = posix.Resolve(context.Background(), cliTestCommand(""), json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex"},"session":{"threadId":""},"input":{"type":"text","text":"hi"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := spec.Environment["WSLENV"]; ok {
+			t.Fatalf("WSLENV set on POSIX: %+v", spec.Environment)
+		}
+	})
+}

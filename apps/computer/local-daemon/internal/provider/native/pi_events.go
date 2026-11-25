@@ -261,13 +261,14 @@ func piMessageText(content json.RawMessage) string {
 // piToolActivities classifies Pi's built-in tools; MCP tools follow their
 // server and anything else is a generic tool.
 var piToolActivities = map[string]string{
-	"read":  ActivityRead,
-	"edit":  ActivityFileChange,
-	"write": ActivityFileChange,
-	"grep":  ActivitySearch,
-	"find":  ActivitySearch,
-	"ls":    ActivitySearch,
-	"bash":  ActivityCommand,
+	"read":       ActivityRead,
+	"edit":       ActivityFileChange,
+	"write":      ActivityFileChange,
+	"grep":       ActivitySearch,
+	"find":       ActivitySearch,
+	"ls":         ActivitySearch,
+	"bash":       ActivityCommand,
+	"powershell": ActivityCommand,
 }
 
 // piInvocationID hashes the whole native call id, so composite ids that

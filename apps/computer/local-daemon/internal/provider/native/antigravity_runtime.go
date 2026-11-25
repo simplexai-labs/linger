@@ -1518,7 +1518,11 @@ func toolReview(runtime, tool string, isCommand bool, input map[string]any, work
 	command := ""
 	if isCommand {
 		command, _ = input["command"].(string)
-		tool = "Bash"
+		if tool == "powershell" {
+			tool = "PowerShell"
+		} else {
+			tool = "Bash"
+		}
 	}
 	request := permission.Request{Action: permission.Action{
 		Runtime: runtime, Surface: permission.Surface(tool, command), Tool: tool,
