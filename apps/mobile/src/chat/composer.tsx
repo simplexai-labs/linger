@@ -3,18 +3,15 @@
 // can be repeated byte for byte from the outbox.
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { File } from "expo-file-system";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
-  Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  useWindowDimensions,
   View,
 } from "react-native";
 
@@ -47,6 +44,7 @@ import {
 } from "./compose-message";
 import { mentionStyle } from "./mention-style";
 import { sendRetryingOnce } from "./upload-retry";
+import { AttachMenu, type AttachSource } from "./attach-menu";
 import { armLive } from "../voice";
 import { useOutbox } from "./outbox-context";
 import { Text, TextInput } from "../ui/text";
@@ -121,30 +119,35 @@ export function Composer(props: {
     (text.trim().length > 0 || files.length > 0) &&
     !!outbox.outbox;
 
+  // A chat opens ready to type, also when the Human comes back to it, as
+  // Codex's does; dragging the conversation down puts the keyboard away.
+  const input = useRef<React.ComponentRef<typeof TextInput>>(null);
+  useFocusEffect(
+    useCallback(() => {
+      // After the drawer has closed: focus taken while it slides away is
+      // dropped.
+      const timer = setTimeout(() => input.current?.focus(), 350);
+      return () => clearTimeout(timer);
+    }, []),
+  );
+
   const latestTeamHub = useRef(teamHub);
   useEffect(() => {
     latestTeamHub.current = teamHub;
   }, [teamHub]);
   const plusRef = useRef<React.ComponentRef<typeof View>>(null);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number }>();
-  const window = useWindowDimensions();
-  const openMenu = () => {
+  const toggleMenu = () => {
     tap();
+    if (menuAt) {
+      setMenuAt(undefined);
+      return;
+    }
     plusRef.current?.measureInWindow((x, y) => setMenuAt({ x, y }));
   };
-
-  // iOS cannot present a picker while the menu is still closing, so the
-  // choice waits for the menu's dismissal before the picker opens.
-  const chosen = useRef<AttachSource | undefined>(undefined);
   const pickFrom = (source: AttachSource) => {
-    chosen.current = source;
     setMenuAt(undefined);
-    if (Platform.OS !== "ios") menuClosed();
-  };
-  const menuClosed = () => {
-    const source = chosen.current;
-    chosen.current = undefined;
-    if (source) void attach(source);
+    void attach(source);
   };
 
   const attach = async (source: AttachSource) => {
@@ -286,52 +289,16 @@ export function Composer(props: {
       ) : null}
       <View style={styles.dock}>
         <View ref={plusRef} collapsable={false}>
-          <RoundButton label="Attach" onPress={openMenu} icon="add" />
+          <RoundButton label="Attach" onPress={toggleMenu} icon="add" />
         </View>
-        <Modal
-          visible={!!menuAt}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setMenuAt(undefined)}
-          onDismiss={menuClosed}
-        >
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            accessibilityLabel="Close"
-            onPress={() => setMenuAt(undefined)}
-          />
-          {menuAt ? (
-            <View
-              style={[
-                styles.menu,
-                {
-                  left: menuAt.x,
-                  bottom: window.height - menuAt.y + space.sm,
-                },
-              ]}
-              accessibilityRole="menu"
-            >
-              {ATTACH_SOURCES.map((item) => (
-                <Pressable
-                  key={item.source}
-                  accessibilityRole="menuitem"
-                  onPress={() => pickFrom(item.source)}
-                  style={({ pressed }) => [
-                    styles.menuRow,
-                    pressed && styles.menuRowPressed,
-                  ]}
-                >
-                  <View style={styles.menuIcon}>
-                    <Icon name={item.icon} size={20} color={colors.ink} />
-                  </View>
-                  <Text style={styles.menuLabel}>{item.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-        </Modal>
+        <AttachMenu
+          anchor={menuAt}
+          onClose={() => setMenuAt(undefined)}
+          onChoose={pickFrom}
+        />
         <TextInput
           style={styles.input}
+          ref={input}
           onChangeText={setText}
           selection={nextSelection.current}
           onSelectionChange={(event) => {
@@ -385,18 +352,6 @@ export function Composer(props: {
     </View>
   );
 }
-
-type AttachSource = "camera" | "photos" | "files";
-
-const ATTACH_SOURCES: readonly {
-  source: AttachSource;
-  label: string;
-  icon: IconName;
-}[] = [
-  { source: "camera", label: "Camera", icon: "camera" },
-  { source: "photos", label: "Photos", icon: "photo" },
-  { source: "files", label: "Files", icon: "attachment" },
-];
 
 class CameraNotAllowed extends Error {}
 
@@ -549,32 +504,6 @@ function MentionSheet(props: {
 }
 
 const styles = StyleSheet.create({
-  // Floats over the conversation just above the + it came from.
-  menu: {
-    position: "absolute",
-    minWidth: 200,
-    paddingVertical: space.xs,
-    borderRadius: radius.xl,
-    backgroundColor: colors.surface,
-    ...StyleSheet.flatten(shadow.md),
-  },
-  menuRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.md,
-    minHeight: 48,
-    paddingHorizontal: space.md,
-  },
-  menuRowPressed: { backgroundColor: colors.sidebarMuted },
-  menuIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.sidebarMuted,
-  },
-  menuLabel: { ...StyleSheet.flatten(type.chat), color: colors.ink },
   wrap: {
     paddingHorizontal: space.md,
     paddingTop: space.xs,

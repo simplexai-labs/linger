@@ -46,9 +46,10 @@ var (
 )
 
 // Alert texts per kind. They name the kind of event, never its content.
-var alerts = map[string]struct{ title, body string }{
-	"message":  {"Linger", "Another Me replied"},
-	"decision": {"Linger", "Linger needs your decision"},
+// A decision interrupts more than a reply.
+var alerts = map[string]struct{ title, body, level string }{
+	"message":  {"Linger", "You have a new reply", "active"},
+	"decision": {"Linger", "Linger needs your decision", "time-sensitive"},
 }
 
 // Options configures the Push Service.
@@ -184,7 +185,7 @@ func (s *Service) handleSend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, "RATE_LIMITED")
 		return
 	}
-	status, err := s.deliver(r.Context(), grant.Token, alert.title, alert.body, map[string]string{
+	status, err := s.deliver(r.Context(), grant.Token, alert.title, alert.body, alert.level, map[string]string{
 		"kind": request.Kind, "host_id": request.Handle.HostID, "room_id": request.Handle.RoomID, "event_id": request.Handle.EventID,
 	})
 	switch {
@@ -205,10 +206,15 @@ const (
 )
 
 // deliver sends one alert through Expo and reports whether the device is gone.
-func (s *Service) deliver(ctx context.Context, token, title, body string, data map[string]string) (int, error) {
+func (s *Service) deliver(ctx context.Context, token, title, body, level string, data map[string]string) (int, error) {
+	// One notification per Room and kind: a new one replaces the last on
+	// iOS (collapseId) and Android (tag), and a Room's alerts group together.
+	room := data["kind"] + ":" + data["room_id"]
 	payload, err := json.Marshal([]map[string]any{{
 		"to": token, "title": title, "body": body, "data": data,
 		"sound": "default", "priority": "high",
+		"collapseId": room, "tag": room, "threadId": data["room_id"],
+		"interruptionLevel": level,
 	}})
 	if err != nil {
 		return 0, err

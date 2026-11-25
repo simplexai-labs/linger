@@ -9,13 +9,19 @@ import {
   Animated,
   Easing,
   Keyboard,
-  LayoutAnimation,
   Platform,
   Pressable,
   StyleSheet,
   View,
 } from "react-native";
-import Reanimated, { FadeIn, FadeOut } from "react-native-reanimated";
+import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
+import Reanimated, {
+  Extrapolation,
+  FadeIn,
+  FadeOut,
+  interpolate,
+  useAnimatedStyle,
+} from "react-native-reanimated";
 
 import type { ActorRef } from "../api/types";
 import { useRoomMembers } from "../state/queries";
@@ -34,18 +40,8 @@ function useKeyboardUp(): boolean {
   useEffect(() => {
     const show = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hide = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const ease = () =>
-      LayoutAnimation.configureNext(
-        LayoutAnimation.create(260, "easeInEaseOut", "scaleXY"),
-      );
-    const a = Keyboard.addListener(show, () => {
-      ease();
-      setUp(true);
-    });
-    const b = Keyboard.addListener(hide, () => {
-      ease();
-      setUp(false);
-    });
+    const a = Keyboard.addListener(show, () => setUp(true));
+    const b = Keyboard.addListener(hide, () => setUp(false));
     return () => {
       a.remove();
       b.remove();
@@ -90,6 +86,9 @@ function useBreath(active: boolean) {
 }
 
 /** Opens an Agent's read-only profile sheet. */
+/** The bar the stage folds to while the keyboard is up. */
+const FOLDED_HEIGHT = 52;
+
 export function openAgent(agentId: string, roomId?: string): void {
   router.push({
     pathname: "/agent/[agentId]",
@@ -280,56 +279,94 @@ export function AgentStage(props: {
   const lift = breath.interpolate({ inputRange: [0, 1], outputRange: [0, -2] });
   const line = working ? working.line || "Working…" : (props.idleLine ?? "");
 
-  if (keyboard)
-    return (
-      <FoldedStage
-        roomId={props.roomId}
-        agent={props.agent}
-        record={props.record}
-        working={working ? { runId: working.run.run_id, line } : undefined}
-      />
-    );
+  // The keyboard's own progress, frame by frame and while it is dragged,
+  // shrinks the stage to the folded bar and crossfades the two, so the
+  // conversation rises with the keyboard instead of jumping at its start.
+  const { progress } = useReanimatedKeyboardAnimation();
+  const [expandedHeight, setExpandedHeight] = useState(0);
+  const frame = useAnimatedStyle(() =>
+    expandedHeight > 0
+      ? {
+          height: interpolate(
+            progress.value,
+            [0, 1],
+            [expandedHeight, FOLDED_HEIGHT],
+            Extrapolation.CLAMP,
+          ),
+        }
+      : {},
+  );
+  const expandedFade = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0, 0.5], [1, 0], Extrapolation.CLAMP),
+  }));
+  const foldedFade = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0.5, 1], [0, 1], Extrapolation.CLAMP),
+  }));
 
   return (
-    <View>
-      <TopBar record={props.record} />
-      <View style={styles.stage}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`About ${props.agent.display_name}`}
-          onPress={() => openAgent(props.agent.id, props.roomId)}
-          style={({ pressed }) => pressed && styles.facePressed}
-        >
-          <Animated.View
-            style={[
-              styles.face,
-              { transform: [{ translateY: lift }, { scale }] },
-            ]}
+    <Reanimated.View style={[styles.stageFrame, frame]}>
+      <Reanimated.View
+        style={expandedFade}
+        pointerEvents={keyboard ? "none" : "auto"}
+        accessibilityElementsHidden={keyboard}
+        importantForAccessibility={keyboard ? "no-hide-descendants" : "auto"}
+        onLayout={(event) => {
+          const height = event.nativeEvent.layout.height;
+          if (height > FOLDED_HEIGHT) setExpandedHeight(height);
+        }}
+      >
+        <TopBar record={props.record} />
+        <View style={styles.stage}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`About ${props.agent.display_name}`}
+            onPress={() => openAgent(props.agent.id, props.roomId)}
+            style={({ pressed }) => pressed && styles.facePressed}
           >
-            <AgentAvatar actorId={props.agent.id} size={72} />
-          </Animated.View>
-        </Pressable>
-        <Text style={styles.name} numberOfLines={1}>
-          {props.agent.display_name}
-        </Text>
-        {/* A fixed slot: work fades in and out without moving anything. */}
-        <View style={styles.slot}>
-          {working ? (
-            <WorkLine
-              key={working.run.run_id}
-              roomId={props.roomId}
-              runId={working.run.run_id}
-              line={line}
-              agentName={props.agent.display_name}
-            />
-          ) : line ? (
-            <Text style={[type.small, styles.idle]} numberOfLines={1}>
-              {line}
-            </Text>
-          ) : null}
+            <Animated.View
+              style={[
+                styles.face,
+                { transform: [{ translateY: lift }, { scale }] },
+              ]}
+            >
+              <AgentAvatar actorId={props.agent.id} size={72} />
+            </Animated.View>
+          </Pressable>
+          <Text style={styles.name} numberOfLines={1}>
+            {props.agent.display_name}
+          </Text>
+          {/* A fixed slot: work fades in and out without moving anything. */}
+          <View style={styles.slot}>
+            {working ? (
+              <WorkLine
+                key={working.run.run_id}
+                roomId={props.roomId}
+                runId={working.run.run_id}
+                line={line}
+                agentName={props.agent.display_name}
+              />
+            ) : line ? (
+              <Text style={[type.small, styles.idle]} numberOfLines={1}>
+                {line}
+              </Text>
+            ) : null}
+          </View>
         </View>
-      </View>
-    </View>
+      </Reanimated.View>
+      <Reanimated.View
+        style={[styles.foldedLayer, foldedFade]}
+        pointerEvents={keyboard ? "auto" : "none"}
+        accessibilityElementsHidden={!keyboard}
+        importantForAccessibility={keyboard ? "auto" : "no-hide-descendants"}
+      >
+        <FoldedStage
+          roomId={props.roomId}
+          agent={props.agent}
+          record={props.record}
+          working={working ? { runId: working.run.run_id, line } : undefined}
+        />
+      </Reanimated.View>
+    </Reanimated.View>
   );
 }
 
@@ -383,8 +420,10 @@ const styles = StyleSheet.create({
   folded: {
     flexDirection: "row",
     alignItems: "center",
-    minHeight: 52,
+    minHeight: FOLDED_HEIGHT,
   },
+  stageFrame: { overflow: "hidden" },
+  foldedLayer: { position: "absolute", top: 0, left: 0, right: 0 },
   // Both sides are as wide, so the name stays centered on the screen.
   foldedSide: { width: 64, flexDirection: "row", alignItems: "center" },
   foldedTrailing: { justifyContent: "flex-end", paddingRight: space.md },

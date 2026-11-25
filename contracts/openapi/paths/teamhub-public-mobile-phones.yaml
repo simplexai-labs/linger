@@ -121,6 +121,34 @@ phonePushGrant:
         }
       "403":
         { $ref: "../components/common.yaml#/components/responses/Forbidden" }
+phonePushPreferences:
+  put:
+    tags: [Mobile]
+    operationId: putPhonePushPreferences
+    summary: Set what the calling phone is alerted about.
+    description: >-
+      Only a paired phone may call it, through its session; other callers get
+      403 PHONE_ONLY. Replies alert once when an Agent's turn in the Human's
+      direct chat, or a group message that mentions them, has waited 30
+      seconds unread; decisions alert at once. Neither alerts while the Human
+      looks at the Room on any device unless when_active is true.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/mobile-phones.yaml#/components/schemas/PhonePushPreferences"
+    responses:
+      "204":
+        description: Preferences saved.
+      "400":
+        { $ref: "../components/common.yaml#/components/responses/BadRequest" }
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+      "403":
+        { $ref: "../components/common.yaml#/components/responses/Forbidden" }
 relays:
   get:
     tags: [Mobile]

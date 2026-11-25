@@ -354,20 +354,41 @@ does not need it: every phone uses the official Push Service.
 3. When a Message is published, a database trigger on `room_events` enqueues
    a River job (`mobile.push`) in the same transaction whenever a phone holds
    a grant. The job (`internal/mobilepush`) decides whether the Message
-   qualifies and sends `POST <service_url>/v1/push/send
+   qualifies, as described below, and sends `POST <service_url>/v1/push/send
 {"grant","kind","handle"}`. A `410` or `401` answer drops the grant; a
    `429` drops that alert.
 4. The Push Service checks the grant, that its Host ID matches the handle,
    its expiry and quotas per device, whatever grant names it (30 a minute,
    300 a day), and sends a
-   generic alert through Expo with enhanced push security on. It is enabled by
+   generic alert through Expo with enhanced push security on. The alert's
+   `collapseId` and Android `tag` are its kind and Room, so a Room's next
+   alert replaces the last instead of stacking, and `threadId` groups a
+   Room's alerts. A decision is `time-sensitive`, a reply `active`. It is
+   enabled by
    `RELAY_PUSH_SEAL_KEY` and `RELAY_PUSH_EXPO_ACCESS_TOKEN`
    (`apps/relay/README.md`).
 
-| Kind       | When                                                          | Alert text                   |
-| ---------- | ------------------------------------------------------------- | ---------------------------- |
-| `message`  | Another Me posts a visible message in the Human's direct chat | "Another Me replied"         |
-| `decision` | A decision card for the Human is created                      | "Linger needs your decision" |
+| Kind       | When                                                                                                             | Alert text                   |
+| ---------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `message`  | An Agent's turn ends with a reply in the Human's direct chat with it, or a group message that mentions the Human | "You have a new reply"       |
+| `decision` | A decision card for the Human is created                                                                         | "Linger needs your decision" |
+
+A phone hears about a turn once, not about each of its messages, and not
+while the Human is already looking:
+
+- A reply waits 30 seconds (`ReplyDelay`) and then alerts only if no later
+  Agent message in the Room superseded it, no Agent in the Room is still
+  working (for up to 10 minutes), and the phone's Human has not read that
+  far on any device. A decision alerts at once.
+- Neither alerts while someone looked at the Room in the last 30 seconds.
+  The Web sends `POST /v0/rooms/{id}/presence` every 20 seconds while a Room
+  is visible and in use, and the phone does the same while a chat is on
+  screen and the app is in front.
+- Each phone chooses, in Settings, Notifications, whether to hear about
+  replies and decisions, and whether to hear even while the Human is looking
+  at the chat elsewhere: `PUT /v0/me/phone/push-preferences
+{"replies","decisions","when_active"}`, by default on, on and off. A
+  change made offline is sent on the next session.
 
 The `handle` is `{"host_id","room_id","event_id"}`: tapping the alert opens
 that computer and Room and reads the content through the session. A push

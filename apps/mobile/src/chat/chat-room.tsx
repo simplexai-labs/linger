@@ -12,10 +12,11 @@ import {
   ActivityIndicator,
   AppState,
   FlatList,
-  KeyboardAvoidingView,
   StyleSheet,
   View,
 } from "react-native";
+import { useRoomPresence } from "./use-room-presence";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { listMessages, updateReadState } from "../api/teamhub";
@@ -151,6 +152,7 @@ export function ChatRoom(props: {
   }, [realtime, roomId, snapshotSeq, teamHub.session]);
 
   useReadState(roomId);
+  useRoomPresence(roomId);
 
   const items = useMemo<Item[]>(() => {
     const delivered = newestFirst(messages.data);
@@ -171,8 +173,10 @@ export function ChatRoom(props: {
 
   return (
     <SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
-      {/* Expo 58 draws edge to edge on Android, where the window no longer
-          resizes for the keyboard, so both platforms pad by its height. */}
+      {/* The keyboard controller follows the keyboard frame by frame, also
+          while it is dragged down, and reads its height afresh each time the
+          screen appears, so a screen left with the keyboard up comes back
+          laid out for a closed one. */}
       <KeyboardAvoidingView style={styles.flex} behavior="padding">
         {props.header}
         <StatusStrip />

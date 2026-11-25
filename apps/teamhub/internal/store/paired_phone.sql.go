@@ -170,37 +170,55 @@ func (q *Queries) DeletePendingPairedPhone(ctx context.Context, id string) error
 }
 
 const getMobilePushMessage = `-- name: GetMobilePushMessage :one
-SELECT e.tenant_id, e.room_id, e.event_id, m.id AS message_id, m.message_kind,
-       (r.direct_human_actor_id IS NOT NULL
-        AND m.author_actor_id = r.direct_agent_actor_id
-        AND EXISTS (
-            SELECT 1 FROM agent_registrations a
-            WHERE a.actor_id = m.author_actor_id AND a.agent_type = 'anotherme'
-        ))::boolean AS from_another_me_direct,
+SELECT e.tenant_id, e.room_id, e.event_id, e.room_seq, e.occurred_at,
+       m.id AS message_id, m.message_kind, m.mentioned_actor_ids,
+       (author.kind = 'agent')::boolean AS from_agent,
+       coalesce(r.direct_human_actor_id, '')::text AS direct_human_actor_id,
+       (m.author_actor_id = r.direct_agent_actor_id)::boolean AS from_direct_agent,
        EXISTS (
            SELECT 1 FROM decisions d
            JOIN actors human ON human.id = d.decider_actor_id AND human.kind = 'human'
            WHERE d.message_id = m.id AND d.status = 'pending'
-       )::boolean AS asks_decision
+       )::boolean AS asks_decision,
+       EXISTS (
+           SELECT 1 FROM room_events later
+           JOIN messages lm ON lm.id = later.resource_id
+           JOIN actors la ON la.id = lm.author_actor_id AND la.kind = 'agent'
+           WHERE later.room_id = e.room_id AND later.event_type = 'message.created'
+             AND later.room_seq > e.room_seq AND lm.message_kind = 'conversation'
+       )::boolean AS superseded,
+       EXISTS (
+           SELECT 1 FROM room_agent_runs run
+           WHERE run.context_room_id = e.room_id AND run.status IN ('queued', 'running')
+       )::boolean AS run_active
 FROM room_events e
 JOIN messages m ON m.id = e.resource_id
+JOIN actors author ON author.id = m.author_actor_id
 JOIN rooms r ON r.id = e.room_id
 WHERE e.event_id = $1 AND e.event_type = 'message.created' AND r.deleted_at IS NULL
 `
 
 type GetMobilePushMessageRow struct {
-	TenantID            string `json:"tenant_id"`
-	RoomID              string `json:"room_id"`
-	EventID             string `json:"event_id"`
-	MessageID           string `json:"message_id"`
-	MessageKind         string `json:"message_kind"`
-	FromAnotherMeDirect bool   `json:"from_another_me_direct"`
-	AsksDecision        bool   `json:"asks_decision"`
+	TenantID           string             `json:"tenant_id"`
+	RoomID             string             `json:"room_id"`
+	EventID            string             `json:"event_id"`
+	RoomSeq            int64              `json:"room_seq"`
+	OccurredAt         pgtype.Timestamptz `json:"occurred_at"`
+	MessageID          string             `json:"message_id"`
+	MessageKind        string             `json:"message_kind"`
+	MentionedActorIds  []string           `json:"mentioned_actor_ids"`
+	FromAgent          bool               `json:"from_agent"`
+	DirectHumanActorID string             `json:"direct_human_actor_id"`
+	FromDirectAgent    bool               `json:"from_direct_agent"`
+	AsksDecision       bool               `json:"asks_decision"`
+	Superseded         bool               `json:"superseded"`
+	RunActive          bool               `json:"run_active"`
 }
 
-// The facts a push job needs about one published Message: whether Another Me
-// wrote it in the Human's direct chat, and whether it asks the Human to
-// decide something.
+// The facts a push job needs about one published Message: who wrote it and
+// where, whom it mentions, whether it asks the Human to decide something,
+// whether a later Agent message in the Room supersedes it, and whether an
+// Agent is still working in the Room.
 func (q *Queries) GetMobilePushMessage(ctx context.Context, eventID string) (GetMobilePushMessageRow, error) {
 	row := q.db.QueryRow(ctx, getMobilePushMessage, eventID)
 	var i GetMobilePushMessageRow
@@ -208,10 +226,17 @@ func (q *Queries) GetMobilePushMessage(ctx context.Context, eventID string) (Get
 		&i.TenantID,
 		&i.RoomID,
 		&i.EventID,
+		&i.RoomSeq,
+		&i.OccurredAt,
 		&i.MessageID,
 		&i.MessageKind,
-		&i.FromAnotherMeDirect,
+		&i.MentionedActorIds,
+		&i.FromAgent,
+		&i.DirectHumanActorID,
+		&i.FromDirectAgent,
 		&i.AsksDecision,
+		&i.Superseded,
+		&i.RunActive,
 	)
 	return i, err
 }
@@ -330,31 +355,54 @@ func (q *Queries) ListPairedPhones(ctx context.Context, arg ListPairedPhonesPara
 	return items, nil
 }
 
-const listPushGrantsForTenant = `-- name: ListPushGrantsForTenant :many
-SELECT p.id, p.push_grant::text AS push_grant, p.push_service_url::text AS push_service_url
+const listPushTargetsForRoom = `-- name: ListPushTargetsForRoom :many
+SELECT p.id, p.push_grant::text AS push_grant, p.push_service_url::text AS push_service_url,
+       human.id AS human_actor_id, p.push_replies, p.push_decisions, p.push_when_active,
+       coalesce(state.read_through_room_seq, 0)::bigint AS read_through_room_seq
 FROM paired_phones p
 JOIN actors human ON human.account_id = p.account_id AND human.kind = 'human'
-WHERE human.tenant_id = $1 AND p.removed_at IS NULL AND p.approved_at IS NOT NULL
+LEFT JOIN room_member_states state ON state.room_id = $1::text AND state.actor_id = human.id
+WHERE human.tenant_id = $2::text AND p.removed_at IS NULL AND p.approved_at IS NOT NULL
   AND p.push_grant IS NOT NULL
 `
 
-type ListPushGrantsForTenantRow struct {
-	ID             string `json:"id"`
-	PushGrant      string `json:"push_grant"`
-	PushServiceUrl string `json:"push_service_url"`
+type ListPushTargetsForRoomParams struct {
+	RoomID   string `json:"room_id"`
+	TenantID string `json:"tenant_id"`
 }
 
-// The phones of the Account that owns a Space's Human.
-func (q *Queries) ListPushGrantsForTenant(ctx context.Context, tenantID string) ([]ListPushGrantsForTenantRow, error) {
-	rows, err := q.db.Query(ctx, listPushGrantsForTenant, tenantID)
+type ListPushTargetsForRoomRow struct {
+	ID                 string `json:"id"`
+	PushGrant          string `json:"push_grant"`
+	PushServiceUrl     string `json:"push_service_url"`
+	HumanActorID       string `json:"human_actor_id"`
+	PushReplies        bool   `json:"push_replies"`
+	PushDecisions      bool   `json:"push_decisions"`
+	PushWhenActive     bool   `json:"push_when_active"`
+	ReadThroughRoomSeq int64  `json:"read_through_room_seq"`
+}
+
+// The phones of the Account that owns a Space's Human, with what each wants
+// to hear about and how far its Human has read the Room.
+func (q *Queries) ListPushTargetsForRoom(ctx context.Context, arg ListPushTargetsForRoomParams) ([]ListPushTargetsForRoomRow, error) {
+	rows, err := q.db.Query(ctx, listPushTargetsForRoom, arg.RoomID, arg.TenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListPushGrantsForTenantRow{}
+	items := []ListPushTargetsForRoomRow{}
 	for rows.Next() {
-		var i ListPushGrantsForTenantRow
-		if err := rows.Scan(&i.ID, &i.PushGrant, &i.PushServiceUrl); err != nil {
+		var i ListPushTargetsForRoomRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PushGrant,
+			&i.PushServiceUrl,
+			&i.HumanActorID,
+			&i.PushReplies,
+			&i.PushDecisions,
+			&i.PushWhenActive,
+			&i.ReadThroughRoomSeq,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -446,6 +494,32 @@ type SetPairedPhonePushGrantParams struct {
 func (q *Queries) SetPairedPhonePushGrant(ctx context.Context, arg SetPairedPhonePushGrantParams) error {
 	_, err := q.db.Exec(ctx, setPairedPhonePushGrant, arg.ID, arg.PushGrant, arg.PushServiceUrl)
 	return err
+}
+
+const setPairedPhonePushPreferences = `-- name: SetPairedPhonePushPreferences :execrows
+UPDATE paired_phones
+SET push_replies = $2, push_decisions = $3, push_when_active = $4
+WHERE id = $1 AND removed_at IS NULL
+`
+
+type SetPairedPhonePushPreferencesParams struct {
+	ID             string `json:"id"`
+	PushReplies    bool   `json:"push_replies"`
+	PushDecisions  bool   `json:"push_decisions"`
+	PushWhenActive bool   `json:"push_when_active"`
+}
+
+func (q *Queries) SetPairedPhonePushPreferences(ctx context.Context, arg SetPairedPhonePushPreferencesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPairedPhonePushPreferences,
+		arg.ID,
+		arg.PushReplies,
+		arg.PushDecisions,
+		arg.PushWhenActive,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const touchPairedPhone = `-- name: TouchPairedPhone :exec

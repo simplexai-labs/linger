@@ -163,6 +163,20 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PairedPhone"
+    PhonePushPreferences:
+      type: object
+      additionalProperties: false
+      required: [replies, decisions, when_active]
+      properties:
+        replies:
+          type: boolean
+          description: Alert when an Agent's turn ends with a reply for the Human.
+        decisions:
+          type: boolean
+          description: Alert when the Human must make a decision.
+        when_active:
+          type: boolean
+          description: Alert even while the Human looks at the Room on another device.
     PhonePushGrantRequest:
       type: object
       additionalProperties: false

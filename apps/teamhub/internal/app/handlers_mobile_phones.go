@@ -190,6 +190,25 @@ func (a *App) deletePhonePushGrant(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+func (a *App) putPhonePushPreferences(c *gin.Context) {
+	var request httpapi.PhonePushPreferences
+	if decodeJSON(c, &request) != nil {
+		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "replies, decisions and when_active are required booleans")
+		return
+	}
+	phoneID, ok := a.callingPhone(c)
+	if !ok {
+		return
+	}
+	if err := a.pairedPhones.SetPushPreferences(c.Request.Context(), phoneID, pairedphone.PushPreferences{
+		Replies: request.Replies, Decisions: request.Decisions, WhenActive: request.WhenActive,
+	}); err != nil {
+		a.internalError(c, "save push preferences", err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // validPushServiceURL accepts an https origin with an optional path and no
 // credentials, query or fragment, because TeamHub will post to it.
 func validPushServiceURL(raw string) bool {

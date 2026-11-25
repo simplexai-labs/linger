@@ -325,24 +325,23 @@ func (s *Service) SetPushGrant(ctx context.Context, phoneID, grant, serviceURL s
 	return nil
 }
 
-// PushGrant is one phone that receives pushes.
-type PushGrant struct {
-	PhoneID string
-	Grant   string
+// PushPreferences is what a phone wants to be told about.
+type PushPreferences struct {
+	Replies, Decisions, WhenActive bool
 }
 
-// PushGrants lists the approved phones of a Space's Human that registered a
-// push grant.
-func (s *Service) PushGrants(ctx context.Context, tenantID string) ([]PushGrant, error) {
-	rows, err := s.queries.ListPushGrantsForTenant(ctx, tenantID)
+// SetPushPreferences records what a phone wants to be told about.
+func (s *Service) SetPushPreferences(ctx context.Context, phoneID string, preferences PushPreferences) error {
+	rows, err := s.queries.SetPairedPhonePushPreferences(ctx, store.SetPairedPhonePushPreferencesParams{
+		ID: phoneID, PushReplies: preferences.Replies, PushDecisions: preferences.Decisions, PushWhenActive: preferences.WhenActive,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("list push grants: %w", err)
+		return fmt.Errorf("save push preferences: %w", err)
 	}
-	grants := make([]PushGrant, 0, len(rows))
-	for _, row := range rows {
-		grants = append(grants, PushGrant{PhoneID: row.ID, Grant: row.PushGrant})
+	if rows == 0 {
+		return mobilegateway.ErrUnknownPhone
 	}
-	return grants, nil
+	return nil
 }
 
 func interval(d time.Duration) pgtype.Interval {

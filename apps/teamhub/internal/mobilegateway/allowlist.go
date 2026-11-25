@@ -57,6 +57,9 @@ var mobileRoutes = []struct {
 	{"GET", "/v0/library/documents"},
 	{"PUT", "/v0/me/phone/push-grant"},
 	{"DELETE", "/v0/me/phone/push-grant"},
+	{"PUT", "/v0/me/phone/push-preferences"},
+	// The phone says it is looking at a Room, which holds back its pushes.
+	{"POST", "/v0/rooms/:/presence"},
 	{"GET", "/v0/mobile/relays"},
 	{"GET", "/v0/rooms/:/routines"},
 	{"GET", "/v0/external-apps"},

@@ -29,6 +29,7 @@ import type {
   MessageCreateRequest,
   MessagePage,
   PhonePushGrantRequest,
+  PhonePushPreferences,
   Room,
   RoomEventPage,
   RoomPage,
@@ -480,6 +481,23 @@ export async function putPushGrant(
   await requestJson(session, "PUT", "/v0/me/phone/push-grant", {
     body: request,
   });
+}
+
+export async function putPushPreferences(
+  session: PhoneSession,
+  request: PhonePushPreferences,
+): Promise<void> {
+  await requestJson(session, "PUT", "/v0/me/phone/push-preferences", {
+    body: request,
+  });
+}
+
+/** Tells the computer the Human is looking at this Room now. */
+export async function notifyRoomPresence(
+  session: PhoneSession,
+  roomId: string,
+): Promise<void> {
+  await requestJson(session, "POST", `/v0/rooms/${segment(roomId)}/presence`);
 }
 
 export async function deletePushGrant(session: PhoneSession): Promise<void> {

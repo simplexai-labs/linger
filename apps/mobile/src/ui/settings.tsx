@@ -2,6 +2,7 @@
 // on the warm gray, a small label above a group, rows with a highlight while
 // pressed and hairlines that start after the icon, and at most one short
 // note under a group. Rows are 46pt; nothing scales on press, as in Settings.
+import { tick } from "./haptics";
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, Switch, View } from "react-native";
 
@@ -122,7 +123,10 @@ export function SettingsRow(props: SettingsRowProps) {
       accessibilityLabel={props.accessibilityLabel ?? props.title}
       accessibilityHint={props.accessibilityHint}
       accessibilityState={props.accessibilityState}
-      onPress={props.onPress}
+      onPress={() => {
+        tick();
+        props.onPress?.();
+      }}
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
     >
       {content}

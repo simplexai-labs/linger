@@ -1242,6 +1242,9 @@ type PairedPhone struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	LastSeenAt       pgtype.Timestamptz `json:"last_seen_at"`
 	RemovedAt        pgtype.Timestamptz `json:"removed_at"`
+	PushReplies      bool               `json:"push_replies"`
+	PushDecisions    bool               `json:"push_decisions"`
+	PushWhenActive   bool               `json:"push_when_active"`
 }
 
 type PersonalInsight struct {

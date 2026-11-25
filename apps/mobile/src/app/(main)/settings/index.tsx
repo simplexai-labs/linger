@@ -11,8 +11,17 @@ import { useComputer } from "../../../computer/computer-context";
 import type { ConnectionStatus } from "../../../computer/connection";
 import { relayNodesOf, sameRelayNodes } from "../../../computer/relay-nodes";
 import { documentFiles } from "../../../computer/store-expo";
-import { readPushRecord } from "../../../push/grant";
-import { disablePush, enablePush, pushSetup } from "../../../push/push";
+import {
+  DEFAULT_PUSH_PREFERENCES,
+  readPushRecord,
+  type PushPreferences,
+} from "../../../push/grant";
+import {
+  disablePush,
+  enablePush,
+  pushSetup,
+  setPushPreferences,
+} from "../../../push/push";
 import {
   diagnosticsReceiver,
   sendAppLog,
@@ -23,7 +32,6 @@ import { HttpError } from "../../../session/http";
 import { colors, radius, space, type } from "../../../theme";
 import { ConfirmDialog } from "../../../ui/confirm-dialog";
 import { Button } from "../../../ui/controls";
-import { tick } from "../../../ui/haptics";
 import { Icon } from "../../../ui/icon";
 import {
   SettingsGroup,
@@ -120,7 +128,6 @@ function RelaySetting() {
 
   const choose = (next: string) => {
     if (next === choice) return;
-    tick();
     void setRelayChoice(next);
   };
 
@@ -352,6 +359,7 @@ function DiagnosticsSetting() {
 function PushSetting() {
   const { active, session } = useComputer();
   const [enabled, setEnabled] = useState<boolean | undefined>();
+  const [preferences, setPreferences] = useState(DEFAULT_PUSH_PREFERENCES);
   const [problem, setProblem] = useState<string | undefined>();
   const setup = pushSetup();
   const hostId = active?.hostId;
@@ -360,7 +368,9 @@ function PushSetting() {
     if (!hostId) return;
     let cancelled = false;
     void readPushRecord(documentFiles, hostId).then((record) => {
-      if (!cancelled) setEnabled(record.enabled);
+      if (cancelled) return;
+      setEnabled(record.enabled);
+      setPreferences(record.preferences ?? DEFAULT_PUSH_PREFERENCES);
     });
     return () => {
       cancelled = true;
@@ -394,10 +404,51 @@ function PushSetting() {
     }
   };
 
+  const change = async (next: PushPreferences) => {
+    setProblem(undefined);
+    const previous = preferences;
+    setPreferences(next);
+    try {
+      await setPushPreferences({
+        session,
+        hostId,
+        files: documentFiles,
+        preferences: next,
+      });
+    } catch {
+      setPreferences(previous);
+      setProblem("The change did not reach your computer. Try again.");
+    }
+  };
+  const option = (
+    key: keyof PushPreferences,
+    title: string,
+    subtitle: string,
+  ) => (
+    <SettingsRow
+      key={key}
+      title={title}
+      subtitle={subtitle}
+      trailing={
+        <SettingsSwitch
+          value={preferences[key]}
+          onValueChange={(value) =>
+            void change({ ...preferences, [key]: value })
+          }
+          accessibilityLabel={title}
+        />
+      }
+    />
+  );
+
   return (
     <SettingsGroup
       footer={
-        problem ? <SettingsNote tone="warning">{problem}</SettingsNote> : null
+        problem ? (
+          <SettingsNote tone="warning">{problem}</SettingsNote>
+        ) : enabled ? (
+          "One alert when an Agent finishes, never while you are looking at the chat."
+        ) : null
       }
     >
       <SettingsRow
@@ -410,6 +461,17 @@ function PushSetting() {
           />
         }
       />
+      {enabled
+        ? [
+            option("replies", "Replies", "When an Agent finishes a reply"),
+            option("decisions", "Decisions", "When Linger needs your decision"),
+            option(
+              "whenActive",
+              "Even at My Computer",
+              "Also while you look at the chat elsewhere",
+            ),
+          ]
+        : null}
     </SettingsGroup>
   );
 }

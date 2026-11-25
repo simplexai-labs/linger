@@ -13,6 +13,35 @@ export interface PushRecord {
   readonly expoToken?: string;
   /** Push was turned off while the computer could not be told. */
   readonly revokePending?: boolean;
+  /** What to be alerted about; the computer's defaults until changed. */
+  readonly preferences?: PushPreferences;
+  /** The preferences changed while the computer could not be told. */
+  readonly preferencesPending?: boolean;
+}
+
+export interface PushPreferences {
+  /** An Agent's turn ended with a reply for the Human. */
+  readonly replies: boolean;
+  /** The Human must decide something. */
+  readonly decisions: boolean;
+  /** Also while the Human looks at the chat on another device. */
+  readonly whenActive: boolean;
+}
+
+export const DEFAULT_PUSH_PREFERENCES: PushPreferences = {
+  replies: true,
+  decisions: true,
+  whenActive: false,
+};
+
+function preferencesFrom(value: unknown): PushPreferences | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { replies, decisions, whenActive } = value as Record<string, unknown>;
+  return typeof replies === "boolean" &&
+    typeof decisions === "boolean" &&
+    typeof whenActive === "boolean"
+    ? { replies, decisions, whenActive }
+    : undefined;
 }
 
 export interface PushSetup {
@@ -87,10 +116,23 @@ export async function readPushRecord(
       grantedAt: parsed.grantedAt,
       expoToken: parsed.expoToken,
       revokePending: parsed.revokePending === true,
+      preferences: preferencesFrom(parsed.preferences),
+      preferencesPending: parsed.preferencesPending === true,
     };
   } catch {
     return { enabled: true };
   }
+}
+
+/** Changes some fields of a computer's push record and keeps the rest. */
+export async function updatePushRecord(
+  files: TextFiles,
+  hostId: string,
+  change: Partial<PushRecord>,
+): Promise<PushRecord> {
+  const next = { ...(await readPushRecord(files, hostId)), ...change };
+  await writePushRecord(files, hostId, next);
+  return next;
 }
 
 export async function writePushRecord(

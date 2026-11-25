@@ -8573,6 +8573,18 @@ type PhonePushGrantRequest struct {
 	ServiceUrl string `json:"service_url"`
 }
 
+// PhonePushPreferences defines model for PhonePushPreferences.
+type PhonePushPreferences struct {
+	// Decisions Alert when the Human must make a decision.
+	Decisions bool `json:"decisions"`
+
+	// Replies Alert when an Agent's turn ends with a reply for the Human.
+	Replies bool `json:"replies"`
+
+	// WhenActive Alert even while the Human looks at the Room on another device.
+	WhenActive bool `json:"when_active"`
+}
+
 // PocketNote defines model for PocketNote.
 type PocketNote struct {
 	// Date Calendar day in the TeamHub process time zone (TZ) that owns one Pocket Note page.
@@ -11284,6 +11296,9 @@ type ProveLocalIdentityJSONRequestBody = LocalIdentityChallenge
 
 // PutPhonePushGrantJSONRequestBody defines body for PutPhonePushGrant for application/json ContentType.
 type PutPhonePushGrantJSONRequestBody = PhonePushGrantRequest
+
+// PutPhonePushPreferencesJSONRequestBody defines body for PutPhonePushPreferences for application/json ContentType.
+type PutPhonePushPreferencesJSONRequestBody = PhonePushPreferences
 
 // CreateMobileRelayNodeJSONRequestBody defines body for CreateMobileRelayNode for application/json ContentType.
 type CreateMobileRelayNodeJSONRequestBody = CreateMobileRelayNodeRequest

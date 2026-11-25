@@ -1,5 +1,6 @@
 // Opens the drawer with the desktop's sidebar icon, where the web shows its
 // own sidebar toggle.
+import { tick } from "./haptics";
 import { useNavigation } from "expo-router";
 import { Pressable, StyleSheet } from "react-native";
 
@@ -14,7 +15,10 @@ export function SidebarButton() {
       accessibilityLabel="Open the menu"
       hitSlop={6}
       // expo-router owns the navigation tree; its drawer opens on this action.
-      onPress={() => navigation.dispatch({ type: "OPEN_DRAWER" })}
+      onPress={() => {
+        tick();
+        navigation.dispatch({ type: "OPEN_DRAWER" });
+      }}
       style={({ pressed }) => [styles.button, pressed && styles.pressed]}
     >
       <Icon name="sidebar" size={20} color={colors.secondary} />

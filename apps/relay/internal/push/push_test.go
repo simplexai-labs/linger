@@ -90,8 +90,13 @@ func TestAGrantDeliversAGenericAlertForItsComputerOnly(t *testing.T) {
 	if status, _ := send(t, server, grant, "message", host); status != http.StatusAccepted {
 		t.Fatalf("send status %d", status)
 	}
-	if len(expo.requests) != 1 || expo.requests[0]["to"] != token || expo.requests[0]["body"] != "Another Me replied" || expo.auth != "Bearer expo-secret" {
+	if len(expo.requests) != 1 || expo.requests[0]["to"] != token || expo.requests[0]["body"] != "You have a new reply" || expo.auth != "Bearer expo-secret" {
 		t.Fatalf("expo got %v auth %q", expo.requests, expo.auth)
+	}
+	// A Room's next alert replaces this one and groups with it.
+	if r := expo.requests[0]; r["collapseId"] != "message:room_1" || r["tag"] != "message:room_1" ||
+		r["threadId"] != "room_1" || r["interruptionLevel"] != "active" {
+		t.Fatalf("alert grouping %v", r)
 	}
 	data := expo.requests[0]["data"].(map[string]any)
 	if data["room_id"] != "room_1" || data["host_id"] != host || data["kind"] != "message" {

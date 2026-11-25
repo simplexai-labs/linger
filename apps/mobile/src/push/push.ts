@@ -4,14 +4,19 @@ import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
-import { deletePushGrant, putPushGrant } from "../api/teamhub";
+import {
+  deletePushGrant,
+  putPushGrant,
+  putPushPreferences,
+} from "../api/teamhub";
 import type { TextFiles } from "../computer/store";
 import type { PhoneSession } from "../session/session";
 import {
   pushSetupFrom,
   readPushRecord,
   shouldRefreshGrant,
-  writePushRecord,
+  updatePushRecord,
+  type PushPreferences,
   type PushSetup,
 } from "./grant";
 
@@ -74,9 +79,20 @@ export async function syncPushGrant(input: {
     // The computer keeps a grant until told; tell it on the next session.
     if (record.revokePending) {
       await deletePushGrant(input.session);
-      await writePushRecord(input.files, input.hostId, { enabled: false });
+      await updatePushRecord(input.files, input.hostId, {
+        revokePending: false,
+      });
     }
     return;
+  }
+  if (record.preferencesPending && record.preferences) {
+    await putPushPreferences(
+      input.session,
+      wirePreferences(record.preferences),
+    );
+    await updatePushRecord(input.files, input.hostId, {
+      preferencesPending: false,
+    });
   }
   if (!(await pushPermissionGranted())) return;
   await ensureChannel();
@@ -86,10 +102,39 @@ export async function syncPushGrant(input: {
   if (!shouldRefreshGrant(record, expoToken, Date.now())) return;
   const grant = await requestGrant(setup, expoToken, input.hostId);
   await putPushGrant(input.session, { grant, service_url: setup.serviceUrl });
-  await writePushRecord(input.files, input.hostId, {
+  await updatePushRecord(input.files, input.hostId, {
     enabled: true,
     grantedAt: new Date().toISOString(),
     expoToken,
+  });
+}
+
+function wirePreferences(preferences: PushPreferences) {
+  return {
+    replies: preferences.replies,
+    decisions: preferences.decisions,
+    when_active: preferences.whenActive,
+  };
+}
+
+/**
+ * Records what this phone wants to hear about from one computer and tells
+ * the computer, now or on the next session.
+ */
+export async function setPushPreferences(input: {
+  session: PhoneSession | undefined;
+  hostId: string;
+  files: TextFiles;
+  preferences: PushPreferences;
+}): Promise<void> {
+  await updatePushRecord(input.files, input.hostId, {
+    preferences: input.preferences,
+    preferencesPending: true,
+  });
+  if (!input.session) return;
+  await putPushPreferences(input.session, wirePreferences(input.preferences));
+  await updatePushRecord(input.files, input.hostId, {
+    preferencesPending: false,
   });
 }
 
@@ -99,13 +144,16 @@ export async function disablePush(input: {
   hostId: string;
   files: TextFiles;
 }): Promise<void> {
-  await writePushRecord(input.files, input.hostId, {
+  // The computer forgets the grant, so turning push on again needs a new one.
+  await updatePushRecord(input.files, input.hostId, {
     enabled: false,
     revokePending: true,
+    grantedAt: undefined,
+    expoToken: undefined,
   });
   if (!input.session) return;
   await deletePushGrant(input.session);
-  await writePushRecord(input.files, input.hostId, { enabled: false });
+  await updatePushRecord(input.files, input.hostId, { revokePending: false });
 }
 
 export async function enablePush(input: {
@@ -114,7 +162,7 @@ export async function enablePush(input: {
   files: TextFiles;
 }): Promise<boolean> {
   const granted = await requestPushPermission();
-  await writePushRecord(input.files, input.hostId, { enabled: true });
+  await updatePushRecord(input.files, input.hostId, { enabled: true });
   if (granted && input.session)
     await syncPushGrant({ ...input, session: input.session });
   return granted;

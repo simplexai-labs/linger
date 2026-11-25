@@ -18,6 +18,7 @@ import { useComputer } from "../../computer/computer-context";
 import type { ConnectionStatus } from "../../computer/connection";
 import type { RoomListItem } from "../../api/types";
 import { useAnotherMe, useIdentity, useRooms } from "../../state/queries";
+import { tick } from "../../ui/haptics";
 import { colors, radius, space, type } from "../../theme";
 import { ActorAvatar, AgentAvatar, useAgentBrand } from "../../ui/avatar";
 import { previewOf, when } from "../../chat/room-preview";
@@ -70,6 +71,7 @@ function AnotherMeCard(props: {
       accessibilityLabel={`${agent.display_name}, your Another Me`}
       accessibilityState={{ selected: props.active }}
       onPress={() => {
+        tick();
         props.onNavigate();
         router.navigate("/");
       }}
@@ -134,6 +136,7 @@ function ToolRow(props: {
       accessibilityLabel={props.label}
       accessibilityState={{ selected: props.active }}
       onPress={() => {
+        tick();
         props.onNavigate();
         router.navigate(props.href);
       }}
@@ -180,6 +183,7 @@ function ChatRow(props: {
       }
       accessibilityState={{ selected: props.active }}
       onPress={() => {
+        tick();
         props.onNavigate();
         router.navigate(props.href);
       }}
@@ -291,6 +295,7 @@ function DrawerMenu(props: DrawerContentComponentProps) {
         accessibilityRole="button"
         accessibilityLabel="Settings"
         onPress={() => {
+          tick();
           close();
           router.navigate("/settings");
         }}

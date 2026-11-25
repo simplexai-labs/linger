@@ -19,6 +19,7 @@ func (a *App) publicRoutes() []contractRoute {
 		route(http.MethodPost, "/v0/me/phones/:phoneId/approve", nil, session, a.approvePairedPhone),
 		route(http.MethodPut, "/v0/me/phone/push-grant", nil, session, a.putPhonePushGrant),
 		route(http.MethodDelete, "/v0/me/phone/push-grant", nil, session, a.deletePhonePushGrant),
+		route(http.MethodPut, "/v0/me/phone/push-preferences", nil, session, a.putPhonePushPreferences),
 		route(http.MethodGet, "/v0/mobile/relays", nil, session, a.listMobileRelayNodes),
 		route(http.MethodPost, "/v0/mobile/relays", nil, session, a.createMobileRelayNode),
 		route(http.MethodPatch, "/v0/mobile/relays/:relayId", nil, session, a.updateMobileRelayNode),

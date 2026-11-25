@@ -42,6 +42,7 @@ export type TeamHubDocument = Schemas["Document"];
 export type DocumentPage = Schemas["DocumentPage"];
 export type DocumentVersion = Schemas["DocumentVersion"];
 export type PhonePushGrantRequest = Schemas["PhonePushGrantRequest"];
+export type PhonePushPreferences = Schemas["PhonePushPreferences"];
 export type VoiceSession = Schemas["VoiceSession"];
 export type VoiceSessionPurpose = Schemas["VoiceSessionPurpose"];
 export type VoiceConnectionCredential = Schemas["VoiceConnectionCredential"];

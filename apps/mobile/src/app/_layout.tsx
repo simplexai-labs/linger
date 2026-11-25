@@ -4,6 +4,7 @@ import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
 import { StyleSheet } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { OutboxProvider } from "../chat/outbox-context";
@@ -26,57 +27,59 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError) return null;
   return (
     <GestureHandlerRootView style={styles.root}>
-      <SafeAreaProvider>
-        <ComputerProvider>
-          <QueryProvider client={queryClient}>
-            <RealtimeProvider>
-              <OutboxProvider>
-                <PushSync />
-                <StatusBar style="dark" />
-                <Stack
-                  screenOptions={{
-                    headerShown: false,
-                    contentStyle: { backgroundColor: colors.canvas },
-                    headerTitleStyle: { fontFamily: "Geist-SemiBold" },
-                    headerBackTitleStyle: { fontFamily: "Geist-Regular" },
-                  }}
-                >
-                  <Stack.Screen name="(main)" />
-                  <Stack.Screen
-                    name="pair"
-                    options={{ gestureEnabled: false }}
-                  />
-                  {/* A voice screen ends through its own End or Stop, never a
+      <KeyboardProvider>
+        <SafeAreaProvider>
+          <ComputerProvider>
+            <QueryProvider client={queryClient}>
+              <RealtimeProvider>
+                <OutboxProvider>
+                  <PushSync />
+                  <StatusBar style="dark" />
+                  <Stack
+                    screenOptions={{
+                      headerShown: false,
+                      contentStyle: { backgroundColor: colors.canvas },
+                      headerTitleStyle: { fontFamily: "Geist-SemiBold" },
+                      headerBackTitleStyle: { fontFamily: "Geist-Regular" },
+                    }}
+                  >
+                    <Stack.Screen name="(main)" />
+                    <Stack.Screen
+                      name="pair"
+                      options={{ gestureEnabled: false }}
+                    />
+                    {/* A voice screen ends through its own End or Stop, never a
                       swipe that would leave the microphone running. */}
-                  <Stack.Screen
-                    name="voice/[mode]"
-                    options={{
-                      presentation: "fullScreenModal",
-                      gestureEnabled: false,
-                    }}
-                  />
-                  {/* An Agent's profile slides up as a native page sheet. */}
-                  <Stack.Screen
-                    name="agent/[agentId]"
-                    options={{ presentation: "modal" }}
-                  />
-                  <Stack.Screen
-                    name="document/[documentId]"
-                    options={{
-                      headerShown: true,
-                      title: "Document",
-                      headerBackTitle: "Back",
-                      headerTintColor: colors.ink,
-                      headerStyle: { backgroundColor: colors.canvas },
-                      headerShadowVisible: false,
-                    }}
-                  />
-                </Stack>
-              </OutboxProvider>
-            </RealtimeProvider>
-          </QueryProvider>
-        </ComputerProvider>
-      </SafeAreaProvider>
+                    <Stack.Screen
+                      name="voice/[mode]"
+                      options={{
+                        presentation: "fullScreenModal",
+                        gestureEnabled: false,
+                      }}
+                    />
+                    {/* An Agent's profile slides up as a native page sheet. */}
+                    <Stack.Screen
+                      name="agent/[agentId]"
+                      options={{ presentation: "modal" }}
+                    />
+                    <Stack.Screen
+                      name="document/[documentId]"
+                      options={{
+                        headerShown: true,
+                        title: "Document",
+                        headerBackTitle: "Back",
+                        headerTintColor: colors.ink,
+                        headerStyle: { backgroundColor: colors.canvas },
+                        headerShadowVisible: false,
+                      }}
+                    />
+                  </Stack>
+                </OutboxProvider>
+              </RealtimeProvider>
+            </QueryProvider>
+          </ComputerProvider>
+        </SafeAreaProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

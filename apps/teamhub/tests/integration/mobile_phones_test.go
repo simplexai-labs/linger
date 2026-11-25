@@ -282,6 +282,13 @@ func TestMobilePhonePairsActsAndIsRemoved(t *testing.T) {
 	if status, body, _ := phone.do(http.MethodPut, "/v0/me/phone/push-grant", elsewhere); status != http.StatusBadRequest || !strings.Contains(string(body), "PUSH_SERVICE_NOT_ALLOWED") {
 		t.Fatalf("push grant naming another service = %d %s", status, body)
 	}
+	preferences := map[string]any{"replies": false, "decisions": true, "when_active": true}
+	if status, body, _ := phone.do(http.MethodPut, "/v0/me/phone/push-preferences", preferences); status != http.StatusNoContent {
+		t.Fatalf("push preferences from the phone = %d %s", status, body)
+	}
+	if status, _, _ := env.request(alice, http.MethodPut, "/v0/me/phone/push-preferences", preferences, ""); status != http.StatusForbidden {
+		t.Fatalf("push preferences from a browser = %d", status)
+	}
 	grant := map[string]any{"grant": "sealed-grant", "service_url": "https://push.example.com"}
 	if status, body, _ := phone.do(http.MethodPut, "/v0/me/phone/push-grant", grant); status != http.StatusNoContent {
 		t.Fatalf("push grant from the phone = %d %s", status, body)

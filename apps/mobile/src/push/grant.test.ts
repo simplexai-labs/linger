@@ -7,6 +7,7 @@ import {
   pushSetupFrom,
   readPushRecord,
   shouldRefreshGrant,
+  updatePushRecord,
   writePushRecord,
 } from "./grant";
 
@@ -98,5 +99,20 @@ describe("push setup and notification data", () => {
     await writePushRecord(files, "a".repeat(32), { enabled: false });
     expect((await readPushRecord(files, "a".repeat(32))).enabled).toBe(false);
     expect((await readPushRecord(files, "b".repeat(32))).enabled).toBe(true);
+  });
+
+  it("keeps the preferences when another field changes", async () => {
+    const files = new MemoryFiles();
+    const host = "a".repeat(32);
+    const preferences = { replies: false, decisions: true, whenActive: true };
+    await updatePushRecord(files, host, {
+      preferences,
+      preferencesPending: true,
+    });
+    await updatePushRecord(files, host, { grantedAt: "2026-11-26T00:00:00Z" });
+    const record = await readPushRecord(files, host);
+    expect(record.preferences).toEqual(preferences);
+    expect(record.preferencesPending).toBe(true);
+    expect(record.grantedAt).toBe("2026-11-26T00:00:00Z");
   });
 });

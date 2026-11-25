@@ -204,6 +204,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/me/phone/push-preferences": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Set what the calling phone is alerted about.
+     * @description Only a paired phone may call it, through its session; other callers get 403 PHONE_ONLY. Replies alert once when an Agent's turn in the Human's direct chat, or a group message that mentions them, has waited 30 seconds unread; decisions alert at once. Neither alerts while the Human looks at the Room on any device unless when_active is true.
+     */
+    put: operations["putPhonePushPreferences"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/mobile/relays": {
     parameters: {
       query?: never;
@@ -4531,6 +4551,14 @@ export interface components {
       service_url: string;
       /** @description The sealed push grant the Push Service issued to this phone for this computer. */
       grant: string;
+    };
+    PhonePushPreferences: {
+      /** @description Alert when an Agent's turn ends with a reply for the Human. */
+      replies: boolean;
+      /** @description Alert when the Human must make a decision. */
+      decisions: boolean;
+      /** @description Alert even while the Human looks at the Room on another device. */
+      when_active: boolean;
     };
     /** @description A Relay node in this computer's list. The computer keeps one link to every enabled node, so a phone can reach it through any of them. */
     MobileRelayNode: {
@@ -9364,6 +9392,31 @@ export interface operations {
         };
         content?: never;
       };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+    };
+  };
+  putPhonePushPreferences: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PhonePushPreferences"];
+      };
+    };
+    responses: {
+      /** @description Preferences saved. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthenticated"];
       403: components["responses"]["Forbidden"];
     };
