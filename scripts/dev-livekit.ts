@@ -49,7 +49,8 @@ export function planDevLiveKit(
     // Signalling stays on loopback and ICE/TCP stays off, as Native runs it.
     // On Windows, libwebrtc clients and workers bind non-loopback sockets when
     // available and cannot exchange UDP with 127.0.0.1, so media UDP binds and
-    // advertises local interfaces alongside loopback.
+    // advertises local interfaces alongside loopback with ICE-Lite enabled so
+    // LiveKit does not inject public STUN servers when node_ip is unset.
     config: JSON.stringify({
       port: httpPort,
       bind_addresses: ["127.0.0.1"],
@@ -57,9 +58,10 @@ export function planDevLiveKit(
         tcp_port: 0,
         udp_port: RTC_UDP_PORT,
         use_external_ip: false,
-        ...(loopbackOnlyRtc ? { node_ip: "127.0.0.1" } : {}),
         enable_loopback_candidate: true,
-        ...(loopbackOnlyRtc ? { ips: { includes: ["127.0.0.1/32"] } } : {}),
+        ...(loopbackOnlyRtc
+          ? { node_ip: "127.0.0.1", ips: { includes: ["127.0.0.1/32"] } }
+          : { use_ice_lite: true }),
       },
       logging: { level: "info" },
     }),

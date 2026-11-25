@@ -33,11 +33,10 @@ describe("planDevLiveKit", () => {
     expect(plan.config).not.toContain("devsecret");
   });
 
-  it("advertises local interfaces for UDP media on Windows while keeping signalling on loopback", () => {
+  it("advertises local interfaces with ICE-Lite for UDP media on Windows while keeping signalling on loopback", () => {
     const plan = planDevLiveKit({ ...liveKit }, "win32");
     if (plan.action !== "run") throw new Error("expected a run plan");
-    const parsed = JSON.parse(plan.config);
-    expect(parsed).toEqual({
+    expect(JSON.parse(plan.config)).toEqual({
       port: 17880,
       bind_addresses: ["127.0.0.1"],
       rtc: {
@@ -45,11 +44,10 @@ describe("planDevLiveKit", () => {
         udp_port: 7882,
         use_external_ip: false,
         enable_loopback_candidate: true,
+        use_ice_lite: true,
       },
       logging: { level: "info" },
     });
-    expect(parsed.rtc.node_ip).toBeUndefined();
-    expect(parsed.rtc.ips).toBeUndefined();
     expect(plan.config).not.toContain("devsecret");
   });
 

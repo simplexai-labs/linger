@@ -103,8 +103,11 @@ first on macOS, and a program on ::1 alone would answer for a service that
 bound 127.0.0.1 without an error. UDP allocation holds the bound IPv4 socket
 while checking ::1 (and non-loopback local interfaces when `allInterfaces` is
 set, as LiveKit's RTC UDP port requires on Windows where LiveKit binds and
-advertises local interfaces alongside loopback because Windows blocks
-cross-scope UDP between WebRTC's non-loopback sockets and `127.0.0.1`) instead
+advertises local interfaces alongside loopback with `use_ice_lite: true`
+because Windows blocks cross-scope UDP between WebRTC's non-loopback sockets
+and `127.0.0.1`, while ICE-Lite keeps LiveKit from auto-injecting public STUN
+servers when `node_ip` is unset; single-port UDPMux snapshots local interfaces
+at startup) instead
 of closing and rebinding 127.0.0.1, and falls back
 to unprivileged non-ephemeral ports when OS ephemeral UDP ports fail or
 collide. The web static host listens on both.

@@ -18,7 +18,10 @@ import {
 // and @livekit/rtc-node workers bind non-loopback interface sockets whenever
 // one exists and Windows blocks cross-scope UDP between non-loopback sockets
 // and 127.0.0.1, so LiveKit binds and advertises local interfaces alongside
-// loopback while keeping external IP discovery disabled.
+// loopback with `use_ice_lite: true` (which skips LiveKit's auto-injected
+// public STUN servers when `node_ip` is unset). Single-port UDPMux snapshots
+// local interfaces at startup, so network changes on Windows require a LiveKit
+// restart.
 export interface LiveKitSettings {
   httpPort: number;
   rtcPort: number;
@@ -68,9 +71,10 @@ export async function prepareLiveKitSettings(
   root: string,
   reserved: Set<number>,
   onMoved?: (message: string) => void,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<LiveKitSettings> {
   const existing = await readLiveKitSettings(root);
-  const rtcAllInterfaces = process.platform === "win32";
+  const rtcAllInterfaces = platform === "win32";
   let settings: LiveKitSettings;
   if (!existing)
     settings = {
@@ -141,9 +145,10 @@ export function liveKitConfig(
       tcp_port: 0,
       udp_port: settings.rtcPort,
       use_external_ip: false,
-      ...(loopbackOnlyRtc ? { node_ip: "127.0.0.1" } : {}),
       enable_loopback_candidate: true,
-      ...(loopbackOnlyRtc ? { ips: { includes: ["127.0.0.1/32"] } } : {}),
+      ...(loopbackOnlyRtc
+        ? { node_ip: "127.0.0.1", ips: { includes: ["127.0.0.1/32"] } }
+        : { use_ice_lite: true }),
     },
     logging: { level: "info" },
   });

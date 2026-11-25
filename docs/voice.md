@@ -43,11 +43,16 @@ the keys against replacement from the app.
 
 A Native installation's LiveKit signalling listens on `127.0.0.1` only (one TCP
 port for HTTP/WebSocket), with media on one UDP port (`127.0.0.1` only on macOS
-and Linux; local interfaces alongside `127.0.0.1` on Windows, where the network
-stack blocks cross-scope UDP between WebRTC's non-loopback sockets and
-`127.0.0.1`, with external IP discovery off), so no media leaves the computer
-except to the speech services (Soniox, xAI) and the voice model Node Services
-downloads when its voice role starts.
+and Linux; local interfaces alongside `127.0.0.1` with ICE-Lite on Windows,
+where the network stack blocks cross-scope UDP between WebRTC's non-loopback
+sockets and `127.0.0.1`, keeping external IP discovery and public STUN off).
+Because signalling stays loopback-only, ICE credentials never leave the
+computer, and no media leaves the computer except to the speech services
+(Soniox, xAI) and the voice model Node Services downloads when its voice role
+starts. On Windows, binding non-loopback UDP interfaces can trigger a first-run
+Windows Defender Firewall prompt, and switching networks or coming online after
+an offline start requires restarting LiveKit because its single-port UDP mux
+snapshots local interfaces at startup.
 
 Browsers allow the microphone only on `localhost` or HTTPS, so voice from
 another computer needs an HTTPS proxy in front of port 3000.
