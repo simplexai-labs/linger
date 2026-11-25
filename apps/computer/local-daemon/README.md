@@ -473,7 +473,14 @@ Computer user's own instruction files:
   from the projected `config.toml` and its profiles.
 - Pi runs with `--no-context-files`, and it always gets `--system-prompt` and
   `--append-system-prompt`, empty when there is nothing to pass, so it reads
-  neither the user's `SYSTEM.md` nor their `APPEND_SYSTEM.md`.
+  neither the user's `SYSTEM.md` nor their `APPEND_SYSTEM.md`. When the
+  Computer tools' managed Pi extension (`extensions/pi-mcp.mjs`) is installed,
+  Pi loads it on every managed run to sort and bound verbose skill descriptions
+  on small-window (`<= 128K`) and local (`localmodels/*`,
+  `localmodels-library/*`, excluding `localmodels-byok`) models, defer MCP
+  server tools behind `tool_search` with static `<mcp_servers>` descriptions
+  for KV prefix stability, and cap compaction reasoning effort and
+  summary/retention budgets on small-window and local models.
 - Antigravity is the exception: its ACP server has no switch that turns off
   the user's own rules, skills and `~/.gemini/config/mcp_config.json`, so an
   Antigravity run sees them next to the Daemon's instructions and servers.
@@ -1112,7 +1119,9 @@ commands Pi starts never resolve a package from the bundle.
 
 The same extension carries Pi's permission review and dynamic MCP attachment, so
 resident Pi processes and provider pre-starts load it with an empty managed MCP
-config file and `mcp__*` in `--tools`. On Room-presence `provider.prepare`, Pi
+config file and `tool_search,mcp__*` in `--tools`; managed servers are
+registered with `deferred` exposure, so the model loads their tools through
+`tool_search`. On Room-presence `provider.prepare`, Pi
 starts with a 40-second timeout, verifies `get_state` and applies any clamped
 thinking level, then parks without submitting a prompt. When a Run adopts a
 parked Pi process whose MCP server set changed, the Daemon writes the new

@@ -214,6 +214,7 @@ func TestPiResidentRespawnsOnShapeMismatch(t *testing.T) {
 			h.profile.PiConfigDigest = "config-b"
 		}},
 		"mcp server name": {first: RunSpec{MCPServers: mcp("one")}, second: RunSpec{MCPServers: mcp("two")}},
+		"context window":  {first: RunSpec{ContextWindow: 65536}, second: RunSpec{ContextWindow: 200000}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

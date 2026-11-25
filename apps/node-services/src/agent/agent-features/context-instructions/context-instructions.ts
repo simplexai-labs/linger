@@ -15,7 +15,10 @@ import {
   PERSONALITY_SPEC,
   PERSONALITY_SPEC_COMPACT,
 } from "../../prompt/personality-spec.js";
-import { renderPersonalContextMethod } from "../../prompt/personal-context-method.js";
+import {
+  renderCompactPersonalContextMethod,
+  renderPersonalContextMethod,
+} from "../../prompt/personal-context-method.js";
 import {
   PERSONAL_KNOWLEDGE_POLICY,
   PERSONAL_KNOWLEDGE_POLICY_COMPACT,
@@ -95,7 +98,12 @@ export const assembleExecutionContextDeveloperInstructions = (
   ];
   if (input.contextKind !== "document") {
     fragments.push(
-      renderPersonalContextMethod(input.connectedApps, input.connectedAppKeys),
+      (compact
+        ? renderCompactPersonalContextMethod
+        : renderPersonalContextMethod)(
+        input.connectedApps,
+        input.connectedAppKeys,
+      ),
       compact ? PERSONAL_KNOWLEDGE_POLICY_COMPACT : PERSONAL_KNOWLEDGE_POLICY,
     );
   }

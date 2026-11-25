@@ -499,7 +499,7 @@ func TestPiLaunchArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	mcp := json.RawMessage(`{"mcpServers":{"computer":{"type":"http","url":"http://127.0.0.1:9/mcp"}}}`)
-	_, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{AssignSessionID: "args-session", Model: "fixture/model", Effort: "none", Title: "Title", SystemPrompt: "be brief", MCPServers: mcp}))
+	_, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{AssignSessionID: "args-session", Model: "fixture/model", Effort: "none", Title: "Title", SystemPrompt: "be brief", ContextWindow: 65536, MCPServers: mcp}))
 	if outcome.Status != statusCompleted || !outcome.ExitConfirmed {
 		t.Fatalf("outcome = %+v", outcome)
 	}
@@ -507,12 +507,15 @@ func TestPiLaunchArguments(t *testing.T) {
 	sessionDir := filepath.Join(h.root, "args-session")
 	want := append([]string{"--mode", "rpc", "--session-dir", sessionDir, "--session-id", "args-session"}, PiRPCResourceArgs(filepath.Join(sessionDir, piInstructionsName))...)
 	want = append(want, "--model", "fixture/model", "--thinking", "off", "--name", "Title",
-		"--skill", filepath.Join(h.dir, ".agents", "skills"), "--extension", extension, "--tools", piBaseTools+",mcp__*")
+		"--skill", filepath.Join(h.dir, ".agents", "skills"), "--extension", extension, "--tools", piBaseTools+",tool_search,mcp__*")
 	if got := strings.Split(string(data), "\n"); strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("argv\n got %q\nwant %q", got, want)
 	}
 	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != filepath.Join(filepath.Dir(filepath.Dir(extension)), "node_modules") {
 		t.Fatalf("NODE_PATH = %q", nodePath)
+	}
+	if cw, _ := os.ReadFile(argv + ".context_window"); string(cw) != "65536" {
+		t.Fatalf("LINGER_PI_CONTEXT_WINDOW = %q", cw)
 	}
 	instructions, err := os.ReadFile(filepath.Join(sessionDir, piInstructionsName))
 	if err != nil || string(instructions) != "be brief" {
@@ -522,10 +525,24 @@ func TestPiLaunchArguments(t *testing.T) {
 		t.Fatalf("MCP config survived confirmed cleanup: %v", err)
 	}
 
+	// Without MCP servers, the installed managed extension still loads for
+	// prompt hygiene and compaction capping, without enabling tool_search/mcp.
 	_, outcome = piCollect(t, h.start(t.Context(), "go", RunSpec{Model: piDefaultModel}))
 	data, _ = os.ReadFile(argv)
-	if outcome.Status != statusCompleted || strings.Contains(string(data), "--model") || strings.Contains(string(data), "--thinking") || !strings.HasSuffix(string(data), "--tools\n"+piBaseTools) {
+	if outcome.Status != statusCompleted || strings.Contains(string(data), "--model") || strings.Contains(string(data), "--thinking") ||
+		!strings.Contains(string(data), "--extension\n"+extension) || !strings.HasSuffix(string(data), "--tools\n"+piBaseTools) {
 		t.Fatalf("default argv = %q (%+v)", data, outcome)
+	}
+	if cw, _ := os.ReadFile(argv + ".context_window"); len(cw) != 0 {
+		t.Fatalf("context window without value = %q", cw)
+	}
+
+	// Without a configured extension, neither --extension nor NODE_PATH is set.
+	noExt := piNewHarness(t, "finish", map[string]string{piFakeArgvEnv: argv})
+	_, outcome = piCollect(t, noExt.start(t.Context(), "go", RunSpec{Model: piDefaultModel}))
+	data, _ = os.ReadFile(argv)
+	if outcome.Status != statusCompleted || strings.Contains(string(data), "--extension") || !strings.HasSuffix(string(data), "--tools\n"+piBaseTools) {
+		t.Fatalf("no-extension argv = %q (%+v)", data, outcome)
 	}
 	if nodePath, _ := os.ReadFile(argv + ".node_path"); len(nodePath) != 0 {
 		t.Fatalf("NODE_PATH without an extension = %q", nodePath)

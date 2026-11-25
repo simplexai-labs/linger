@@ -10,13 +10,24 @@ import (
 )
 
 const (
-	piMCPConfigEnvKey = "LINGER_PI_MANAGED_MCP_CONFIG"
-	piNodePathKey     = "NODE_PATH"
+	piMCPConfigEnvKey     = "LINGER_PI_MANAGED_MCP_CONFIG"
+	piContextWindowEnvKey = "LINGER_PI_CONTEXT_WINDOW"
+	piNodePathKey         = "NODE_PATH"
 	// The NODE_PATH Pi would have had without the Computer tools.
 	piInheritedNodePathKey = "LINGER_PI_INHERITED_NODE_PATH"
 	// The Daemon executable the managed extension runs as shell-text-hook.
 	piShellTextHookEnvKey = "LINGER_PI_SHELL_TEXT_HOOK"
 )
+
+// piManagedExtensionPath returns extension when it names an installed regular
+// file so managed Pi prompt hygiene and compaction bounds load even without
+// MCP servers.
+func piManagedExtensionPath(extension string) string {
+	if piCheckExtension(extension) != nil {
+		return ""
+	}
+	return extension
+}
 
 // piMCPWiring is the managed MCP set prepared for one Pi process. A zero
 // value wires nothing.

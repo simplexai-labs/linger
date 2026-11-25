@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -250,18 +251,21 @@ func (p *piRuntime) launchProcess(plan piLaunchPlan, lock *os.File) (*piProcess,
 	// The session flags sit right after "--mode rpc".
 	tail := p.args(plan, instructions, mcp.wired())
 	args := append([]string{tail[0], tail[1], "--session-dir", plan.sessionDir, "--session-id", plan.sessionID}, tail[2:]...)
-	env := make(map[string]string, len(p.profile.Env)+1)
+	env := make(map[string]string, len(p.profile.Env)+4)
 	for key, value := range p.profile.Env {
 		env[key] = value
 	}
 	if mcp.wired() {
 		env[piMCPConfigEnvKey] = mcp.configPath
 	}
-	if mcp.wired() || spec.PermissionReviewer != nil || p.guardsShellText(spec) {
-		piExtensionNodePath(env, p.profile.ManagedMCPExtension)
+	if extension := p.extensionPath(spec, mcp.wired()); extension != "" {
+		piExtensionNodePath(env, extension)
 	}
 	if p.guardsShellText(spec) {
 		env[piShellTextHookEnvKey] = spec.ShellTextHook
+	}
+	if spec.ContextWindow > 0 {
+		env[piContextWindowEnvKey] = strconv.Itoa(spec.ContextWindow)
 	}
 	if p.profile.RetainProcessTemp != nil {
 		if releaseTemp, err = p.profile.RetainProcessTemp(); err != nil {
@@ -333,14 +337,15 @@ func (p *piRuntime) args(plan piLaunchPlan, instructions string, wired bool) []s
 			args = append(args, "--skill", skills)
 		}
 	}
-	// The managed extension also carries permission review: its tool_call
-	// hook asks the Daemon over RPC (piProcess.answerDialog).
+	// The managed extension carries prompt hygiene, compaction bounds, shell
+	// text checks, permission review (over RPC via piProcess.answerDialog),
+	// and deferred MCP wiring.
 	tools := piBaseTools
-	if wired || spec.PermissionReviewer != nil || p.guardsShellText(spec) {
-		args = append(args, "--extension", p.profile.ManagedMCPExtension)
+	if extension := p.extensionPath(spec, wired); extension != "" {
+		args = append(args, "--extension", extension)
 	}
 	if wired {
-		tools += ",mcp__*"
+		tools += ",tool_search,mcp__*"
 	}
 	return append(args, "--tools", tools)
 }
@@ -349,6 +354,16 @@ func (p *piRuntime) args(plan piLaunchPlan, instructions string, wired bool) []s
 // extension up front so Runs can attach or update MCP servers in place.
 func (p *piRuntime) canSyncMCP() bool {
 	return p.profile.ManagedMCPExtension != "" && piResidents.enabled()
+}
+
+// extensionPath is the managed extension a launch loads, or empty. A Run that
+// needs MCP, review, or the shell text check requires it; otherwise it loads
+// only when installed, for prompt hygiene and compaction bounds.
+func (p *piRuntime) extensionPath(spec RunSpec, wired bool) string {
+	if wired || spec.PermissionReviewer != nil || p.guardsShellText(spec) {
+		return p.profile.ManagedMCPExtension
+	}
+	return piManagedExtensionPath(p.profile.ManagedMCPExtension)
 }
 
 // guardsShellText reports whether the managed extension runs the

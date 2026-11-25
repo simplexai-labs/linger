@@ -2595,9 +2595,9 @@ processTest(
 const stagePiComputerTools = async (root: string): Promise<void> => {
   const computerRoot = path.resolve(process.cwd(), "../computer");
   const tools = path.join(root, "cli/computer-tools");
-  const piEntry = path.join(
+  const piDist = path.join(
     computerRoot,
-    "node_modules/@earendil-works/pi-coding-agent/dist/index.js",
+    "node_modules/@earendil-works/pi-coding-agent/dist",
   );
   await mkdir(path.join(root, "runtime/bin"), { recursive: true });
   await symlink(process.execPath, path.join(root, "runtime/bin/node"));
@@ -2616,10 +2616,19 @@ const stagePiComputerTools = async (root: string): Promise<void> => {
       "node_modules/@earendil-works/pi-coding-agent/package.json",
       '{"type":"module"}\n',
     ],
-    [
-      "node_modules/@earendil-works/pi-coding-agent/dist/index.js",
-      `export * from ${JSON.stringify(pathToFileURL(piEntry).href)};\n`,
-    ],
+    // The managed extension imports these Pi modules by URL; the release
+    // bundle ships the whole package.
+    ...[
+      "index.js",
+      "core/compaction/compaction.js",
+      "core/settings-defaults.js",
+    ].map(
+      (module) =>
+        [
+          `node_modules/@earendil-works/pi-coding-agent/dist/${module}`,
+          `export * from ${JSON.stringify(pathToFileURL(path.join(piDist, module)).href)};\n`,
+        ] as const,
+    ),
     [
       "node_modules/@playwright/mcp/cli.js",
       `require("node:readline").createInterface({input:process.stdin}).on("line",(l)=>{if(!l.trim())return;const r=JSON.parse(l);if(r.id==null)return;const res=r.method==="initialize"?{protocolVersion:"2025-03-26",capabilities:{tools:{}},serverInfo:{name:"fixture",version:"1.0.0"}}:r.method==="tools/list"?{tools:[]}:{};process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:r.id,result:res})+"\\n");});\n`,
@@ -2813,32 +2822,37 @@ processTest(
           llmRequests.push(parsed);
           const last = parsed.messages.at(-1);
           const active = mcpSpecs[phase];
+          const mcpTool = `mcp__${active.name}__${active.tool}`;
+          const content =
+            typeof last?.content === "string"
+              ? last.content
+              : JSON.stringify(last?.content);
+          const call = (name: string, args: object) =>
+            sse(
+              {
+                role: "assistant",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: `call_${name}`,
+                    type: "function",
+                    function: { name, arguments: JSON.stringify(args) },
+                  },
+                ],
+              },
+              "tool_calls",
+            );
+          // Managed MCP tools are deferred: load them through tool_search,
+          // call the loaded tool, then answer with its result.
+          const loaded = (parsed.tools ?? []).some(
+            (tool) => tool.function?.name === mcpTool,
+          );
           const body =
-            last?.role !== "tool"
-              ? sse(
-                  {
-                    role: "assistant",
-                    tool_calls: [
-                      {
-                        index: 0,
-                        id: `call_${active.tool}`,
-                        type: "function",
-                        function: {
-                          name: `mcp__${active.name}__${active.tool}`,
-                          arguments: JSON.stringify({ note: active.note }),
-                        },
-                      },
-                    ],
-                  },
-                  "tool_calls",
-                )
-              : sse(
-                  {
-                    role: "assistant",
-                    content: `final:${typeof last.content === "string" ? last.content : JSON.stringify(last.content)}`,
-                  },
-                  "stop",
-                );
+            last?.role === "tool" && content.includes(`${active.prefix}:`)
+              ? sse({ role: "assistant", content: `final:${content}` }, "stop")
+              : loaded
+                ? call(mcpTool, { note: active.note })
+                : call("tool_search", { query: active.tool });
           response
             .writeHead(200, { "content-type": "text/event-stream" })
             .end(body);
@@ -2898,23 +2912,33 @@ processTest(
 
     const toolNames = (index: number) =>
       (llmRequests[index]?.tools ?? []).map((t) => t.function?.name);
+    const systemPrompt = (index: number) => {
+      const content = llmRequests[index]?.messages.find(
+        (m) => m.role === "system" || m.role === "developer",
+      )?.content;
+      return typeof content === "string" ? content : JSON.stringify(content);
+    };
     const first = await harness.runPrompt("run-pi-presence", "call ping");
-    expect(toolNames(0)).toEqual(
-      expect.arrayContaining(["mcp__echo__ping", "mcp__computer__ui_exec"]),
-    );
+    expect(toolNames(0)).toContain("tool_search");
+    expect(toolNames(0)).not.toContain("mcp__echo__ping");
+    expect(systemPrompt(0)).toContain("mcp__echo");
+    expect(systemPrompt(0)).toContain("mcp__computer");
+    expect(toolNames(1)).toContain("mcp__echo__ping");
     expect(first.finalResponse).toContain("final:pong:warm-pi");
 
     // A second Run with a different MCP set swaps servers in place without restarting Pi.
     phase = "second";
     const second = await harness.runPrompt("run-pi-presence-2", "call greet");
-    expect(toolNames(2)).toContain("mcp__second__greet");
-    expect(toolNames(2)).not.toContain("mcp__echo__ping");
+    expect(systemPrompt(3)).toContain("mcp__second");
+    expect(systemPrompt(3)).not.toContain("mcp__echo");
+    expect(toolNames(4)).toContain("mcp__second__greet");
+    expect(toolNames(4)).not.toContain("mcp__echo__ping");
     expect(second.finalResponse).toContain("final:hello:second-turn");
     expect(mcpCalls).toEqual([
       { server: "echo", name: "ping", arguments: { note: "warm-pi" } },
       { server: "second", name: "greet", arguments: { note: "second-turn" } },
     ]);
-    expect(llmRequests).toHaveLength(4);
+    expect(llmRequests).toHaveLength(6);
 
     const diagnostics = await harness.readDiagnostics();
     expect(diagnostics, diagnostics).toContain("pi resident adopted");

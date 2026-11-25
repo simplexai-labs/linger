@@ -106,6 +106,7 @@ func piFake(mode string, args []string) int {
 		_ = os.WriteFile(path, []byte(strings.Join(args, "\n")), 0o600)
 		_ = os.WriteFile(path+".node_path", []byte(os.Getenv(piNodePathKey)), 0o600)
 		_ = os.WriteFile(path+".shell_text_hook", []byte(os.Getenv(piShellTextHookEnvKey)), 0o600)
+		_ = os.WriteFile(path+".context_window", []byte(os.Getenv(piContextWindowEnvKey)), 0o600)
 	}
 	reader := bufio.NewReader(os.Stdin)
 	for {

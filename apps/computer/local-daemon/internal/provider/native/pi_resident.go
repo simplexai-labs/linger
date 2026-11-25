@@ -31,6 +31,7 @@ type piShape struct {
 	settings        string
 	projectSettings string
 	mcp             string
+	contextWindow   int
 }
 
 // differs names the baked-in fields that keep a parked process from serving
@@ -55,6 +56,7 @@ func (s *piShape) differs(want *piShape, checkMCP bool) []string {
 	if checkMCP {
 		add(s.mcp != want.mcp, "mcp")
 	}
+	add(s.contextWindow != want.contextWindow, "context_window")
 	return fields
 }
 
@@ -110,6 +112,7 @@ func piShapeFor(program string, args []string, profile Profile, spec RunSpec, mc
 		settings:        profile.PiConfigDigest,
 		projectSettings: project,
 		mcp:             mcpShape,
+		contextWindow:   spec.ContextWindow,
 	}, nil
 }
 
