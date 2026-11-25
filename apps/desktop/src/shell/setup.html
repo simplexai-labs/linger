@@ -4019,7 +4019,10 @@
         plan.localModel = plan.source === "local" && !!model;
         const custom = !isDefaultPlan(local);
         // Quick Install waits for the check, so it installs what it shows.
+        // BYOK uses the user's own endpoint and does not depend on local-model
+        // inspection, so its Install button unblocks once the fields are valid.
         const checking = models.state === "checking";
+        const waitingForCheck = checking && plan.source !== "byok";
         const known =
           recommended.source === "local" ||
           recommended.runtime !== "recommended";
@@ -4049,7 +4052,7 @@
         // run downloads the localmodels tool, then the check runs. The label
         // changes only when it differs, so the spinner keeps turning.
         const fetching = checking ? models.download : undefined;
-        const label = checking
+        const label = waitingForCheck
           ? '<span class="spinner"></span>' +
             esc(t(fetching ? "downloadingTools" : "checkingComputer"))
           : esc(t(custom ? "install" : "quickInstall"));
@@ -4061,9 +4064,12 @@
         const localUnavailable = plan.source === "local" && !model;
         const location = local.location;
         $("local-install").disabled ||=
-          checking || byokIncomplete || localUnavailable || !!location.error;
-        $("local-install").dataset.busy = String(checking);
-        $("local-install").setAttribute("aria-busy", String(checking));
+          waitingForCheck ||
+          byokIncomplete ||
+          localUnavailable ||
+          !!location.error;
+        $("local-install").dataset.busy = String(waitingForCheck);
+        $("local-install").setAttribute("aria-busy", String(waitingForCheck));
         $("plan-summary").textContent = checking
           ? t("findingSetup")
           : following && known

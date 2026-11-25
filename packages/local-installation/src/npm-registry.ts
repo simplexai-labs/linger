@@ -45,6 +45,10 @@ export interface NpmRegistryProbe {
 // host, and avoids tying when both registries finish the full 4.5 MiB tarball.
 const PROBE_TARGET_BYTES = 1024 * 1024;
 const DECISIVE_RATIO = 2;
+const DECISIVE_LOW_RATE_RATIO = 4;
+// 160 KiB/s (640 KiB in the 4 s default window) sits below the 256 KiB/s
+// timeout ceiling (1 MiB / 4 s) while staying safely above cold-proxy trickles.
+const DECISIVE_MIN_BYTES_PER_SECOND = 160 * 1024;
 const MAX_PROBE_ROUNDS = 3;
 
 function compareProbe(left: NpmRegistryProbe, right: NpmRegistryProbe): number {
@@ -53,12 +57,28 @@ function compareProbe(left: NpmRegistryProbe, right: NpmRegistryProbe): number {
   return right.bytes - left.bytes || left.elapsedMs - right.elapsedMs;
 }
 
+function probeBytesPerSecond(probe: NpmRegistryProbe): number {
+  if (probe.bytes <= 0) return 0;
+  return (probe.bytes * 1000) / Math.max(probe.elapsedMs, 1);
+}
+
 function roundRatio(first: NpmRegistryProbe, second: NpmRegistryProbe): number {
   if (first.bytes <= 0) return 0;
   if (second.bytes <= 0) return Number.POSITIVE_INFINITY;
-  const firstRate = first.bytes / Math.max(first.elapsedMs, 1);
-  const secondRate = second.bytes / Math.max(second.elapsedMs, 1);
-  return firstRate / secondRate;
+  return probeBytesPerSecond(first) / probeBytesPerSecond(second);
+}
+
+function decisiveFirstRound(
+  first: NpmRegistryProbe,
+  second: NpmRegistryProbe,
+): boolean {
+  const ratio = roundRatio(first, second);
+  if (second.bytes <= 0) return ratio >= DECISIVE_RATIO;
+  return (
+    ratio >= DECISIVE_LOW_RATE_RATIO ||
+    (ratio >= DECISIVE_RATIO &&
+      probeBytesPerSecond(first) >= DECISIVE_MIN_BYTES_PER_SECOND)
+  );
 }
 
 async function probeOnce(
@@ -155,12 +175,14 @@ export async function probeNpmRegistries(
     }
     lastAnswered = results;
     wins.set(first.registry, (wins.get(first.registry) ?? 0) + 1);
-    // A full-window probe with a clear lead already measured sustained speed.
+    // A full-window probe short-circuits on a 4x margin, when the other host
+    // sent nothing, or on a 2x margin at >= 160 KiB/s sustained throughput.
+    // Slow cold-start trickles on both hosts still run confirmation rounds.
     if (
       attempt === 0 &&
       timedOut &&
       second &&
-      roundRatio(first, second) >= DECISIVE_RATIO
+      decisiveFirstRound(first, second)
     )
       return results;
     if ((wins.get(first.registry) ?? 0) >= 2) return results;

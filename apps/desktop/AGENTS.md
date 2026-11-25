@@ -87,8 +87,11 @@ Gateway and runs Agents. The daemon exits with the app.
   Computer daemon directory (`<userData>/computer`) non-destructively via
   `windowsPrivateLocation` before fetching Node or unpacking, so ancestor ACL
   refusals fail immediately with the offending ancestor path and SID instead of
-  after enrollment. It fetches the pinned Node runtime (sources in the download region's
-  order, `scripts/installs/README.md`) and unpacks the linger source package
+  after enrollment. It reuses the pinned Node.js binary shipped with Computer
+  tools (`resources/runtime/bin/node(.exe)` via `bundledNodePath`, copied and
+  SHA-256 verified into `<home>/desktop/node/v<version>/`, falling back to
+  legacy bundled manifests or downloading in the download region's order,
+  `scripts/installs/README.md`) and unpacks the linger source package
   into the install location (the default home, or a folder picked on the
   welcome screen). The selected folder's disk must have enough room for the
   services and any local model shown in the install plan. Windows validates
@@ -97,7 +100,7 @@ Gateway and runs Agents. The daemon exits with the app.
   the pure-Node extractor when `tar.exe` is missing with `ENOENT` on stripped
   Windows images. The
   finished folder is moved into place with `renameRetrying`, which waits out
-  Windows' short-lived locks on new files) and starts the bundled
+  Windows' short-lived locks on new files, and starts the bundled
   `dist/installer/installer.js` headless (`--no-open`), which runs every
   service natively. It drives the installer's local API itself (`InstallerApi`):
   the session from `installer/launch.html`, one job for instance `desktop`
@@ -250,7 +253,9 @@ Gateway and runs Agents. The daemon exits with the app.
   fallbacks go once the pinned tool reports `state`. The page adds no host rule of its own; while
   the check runs the button waits with a spinner and says what it waits for
   (the first run downloads the localmodels tool, counted by `download`
-  event lines before the report), and Customize marks the
+  event lines before the report), except when the user picks BYOK under
+  Customize, which unblocks Install as soon as the BYOK fields are valid while
+  keeping late check results from overwriting the choice; Customize marks the
   recommended runtime and model. While installing, a step that downloads
   shows its bytes, what remains and the rate from the installer's byte
   counter (`localmodels.stack-progress/v1` for the local model and
@@ -452,8 +457,11 @@ Gateway and runs Agents. The daemon exits with the app.
   away. `window.did_finish_load` logs
   `{ reason, duration_ms, target }` with origin + pathname only (never query or
   hash), and `LocalServer` resume emits `local_server.resume_started`,
-  `local_server.resume_stage` (`stage`, `ms`), `local_server.resume_succeeded`
-  (`total_ms`), and `local_server.resume_failed` (`stage`, `total_ms`,
+  `local_server.resume_stage` (`stage`, `ms`),
+  `local_server.installer_resume_timings` (`path`, `probe_ms`, `total_ms`, and
+  optional stage durations when reported by `installer.js --resume`),
+  `local_server.resume_succeeded` (`total_ms`), and `local_server.resume_failed`
+  (`stage`, `total_ms`,
   redacted `error` bounded to 500 chars with query/hash stripped). A resume
   whose saved BYOK gateway did not come back still succeeds and logs
   `local_server.byok_gateway_unavailable` (`code`, `message`); the Computer
@@ -660,11 +668,16 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
 - `scripts/build-daemon.mjs`: cross-compiles the daemon, stamped with the
   `apps/computer` release the Gateway checks.
 - `scripts/stage-computer-tools.mjs`: stages the browser and computer-control
-  tools and their Node.js for each daemon target into
-  `dist/computer-tools/<target>/` with the root
-  `scripts/computer-tool-bundle.mjs`; `packaging/computer_tools.py` puts them in
-  `resources/cli/` and `resources/runtime/` and checks every package for them
-  (see [Computer Tools](../../docs/desktop-release.md#computer-tools)).
+  tools (with `@earendil-works/pi-coding-agent`'s `createMcpExtension` bundled
+  beside `jiti`, `@playwright/mcp`, `quickjs-wasi`, and Cua drivers) and their
+  Node.js for each daemon target into `dist/computer-tools/<target>/` with the
+  root `scripts/computer-tool-bundle.mjs`; `packaging/computer_tools.py` puts
+  them in `resources/cli/` and `resources/runtime/` and checks every package
+  for them (see [Computer Tools](../../docs/desktop-release.md#computer-tools)).
+  `scripts/build-native-runtime.mjs` pins that shared `resources/runtime/bin/node(.exe)`
+  digest in `manifest.json` (`node.shared: true`) instead of duplicating Node.js
+  inside `dist/installer/native/runtime-<target>/`, and `packaging/mac/package.py`
+  refreshes the digest after signing.
 
 ## Important Conventions
 

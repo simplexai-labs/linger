@@ -309,3 +309,40 @@ test("a quit while a deployment holds the lock leaves that home's models running
   expect(outcome.failed).toEqual([]);
   expect(log.join("\n")).toContain("another local model operation holds them");
 });
+
+test("passes options.log to stopInstance and logs durations for manager, services, and localmodels stages", async () => {
+  const value = await home();
+  const logs: string[] = [];
+  const receivedLog = vi.fn();
+  const outcome = await stopDesktopInstallation(
+    { ...options(value), log: (message) => logs.push(message) },
+    {
+      load: async ({ home: at }) =>
+        instance(path.join(at!, "instances/desktop")),
+      stopInstance: async (_target, _signal, stopOptions) => {
+        stopOptions?.log?.("Stopped native web in 0.1s.");
+        receivedLog(stopOptions?.log);
+      },
+      stopModels: async () => {
+        throw new Error("localmodels stack down: timeout");
+      },
+    },
+  );
+  expect(receivedLog).toHaveBeenCalledWith(expect.any(Function));
+  expect(outcome.failed).toEqual([
+    { home: value, message: "localmodels stack down: timeout" },
+  ]);
+  expect(logs).toContain("Stopped native web in 0.1s.");
+  expect(logs).toContainEqual(
+    expect.stringMatching(/^Stop stage manager completed in [\d.]+s\.$/),
+  );
+  expect(logs).toContainEqual(
+    expect.stringMatching(/^Stop stage services completed in [\d.]+s\.$/),
+  );
+  expect(logs).toContainEqual(
+    expect.stringMatching(/^Stop stage localmodels failed after [\d.]+s\.$/),
+  );
+  expect(logs.at(-1)).toMatch(
+    /^Stop timings \(s\): manager [\d.]+, services [\d.]+, localmodels [\d.]+\.$/,
+  );
+});

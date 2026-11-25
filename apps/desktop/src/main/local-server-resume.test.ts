@@ -212,7 +212,104 @@ describe("LocalServerModule resume coordination", () => {
       (entry) => entry.event === "local_server.resume_succeeded",
     );
     expect(typeof succeeded?.fields?.total_ms).toBe("number");
+    expect(
+      f.logs.find(
+        (entry) => entry.event === "local_server.installer_resume_timings",
+      ),
+    ).toBeUndefined();
     await f.host.stop("quit");
+  });
+
+  it("logs valid warm and cold installer resumeTimings and ignores malformed shapes", async () => {
+    const warm = setupResumeFixture(`
+      process.stdout.write(JSON.stringify({
+        code: 0,
+        details: { origin: "http://localhost:3000" },
+        resumeTimings: {
+          path: "warm",
+          probeMs: 42,
+          totalMs: 185,
+          restoreLocalModelsMs: 90,
+          restoreByokGatewayMs: 12,
+        },
+      }) + "\\n");
+    `);
+    await warm.host.start();
+    await vi.waitFor(() => expect(warm.module.status().phase).toBe("ready"));
+    expect(
+      warm.logs.find(
+        (entry) => entry.event === "local_server.installer_resume_timings",
+      ),
+    ).toEqual({
+      level: "info",
+      event: "local_server.installer_resume_timings",
+      fields: {
+        instance: "desktop",
+        path: "warm",
+        probe_ms: 42,
+        total_ms: 185,
+        restore_local_models_ms: 90,
+        restore_byok_gateway_ms: 12,
+      },
+    });
+    await warm.host.stop("quit");
+
+    const cold = setupResumeFixture(`
+      process.stdout.write(JSON.stringify({
+        code: 0,
+        details: { origin: "http://localhost:3000" },
+        resumeTimings: {
+          path: "cold",
+          probeMs: 15,
+          coldStartMs: 2400,
+          totalMs: 2450,
+          restoreLocalModelsMs: -5,
+        },
+      }) + "\\n");
+    `);
+    await cold.host.start();
+    await vi.waitFor(() => expect(cold.module.status().phase).toBe("ready"));
+    expect(
+      cold.logs.find(
+        (entry) => entry.event === "local_server.installer_resume_timings",
+      ),
+    ).toEqual({
+      level: "info",
+      event: "local_server.installer_resume_timings",
+      fields: {
+        instance: "desktop",
+        path: "cold",
+        probe_ms: 15,
+        total_ms: 2450,
+        cold_start_ms: 2400,
+      },
+    });
+    await cold.host.stop("quit");
+
+    for (const invalid of [
+      null,
+      "warm",
+      { path: "unknown", probeMs: 10, totalMs: 20 },
+      { path: "warm", probeMs: -1, totalMs: 20 },
+      { path: "warm", probeMs: 10 },
+      { path: "cold", probeMs: 10, totalMs: "20" },
+    ]) {
+      const f = setupResumeFixture(`
+        process.stdout.write(JSON.stringify({
+          code: 0,
+          details: { origin: "http://localhost:3000" },
+          resumeTimings: ${JSON.stringify(invalid)},
+        }) + "\\n");
+      `);
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      expect(
+        f.logs.find(
+          (entry) => entry.event === "local_server.installer_resume_timings",
+        ),
+      ).toBeUndefined();
+      await f.host.stop("quit");
+    }
   });
 
   it.each([

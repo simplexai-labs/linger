@@ -3296,3 +3296,127 @@ test("the system proxy reaches only TeamHub and node-services, and restarts them
     vi.unstubAllEnvs();
   }
 });
+
+test("logs per-service readiness timings, summary, and region resolution metadata during startup", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ok",
+  });
+  let probeRound = 0;
+  const baseFetch = vi.mocked(fetch).getMockImplementation()!;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url, init?: RequestInit) => {
+      const target = String(url);
+      if (target.endsWith("/healthz") || target.endsWith("/readyz")) {
+        // Probe endpoints are called in groups of 4 per round:
+        // web (/healthz), teamhub (/healthz), node-services (/readyz), document-runtime (/readyz).
+        const round = Math.floor(probeRound / 4);
+        probeRound += 1;
+        // Round 0: only web & teamhub ready; Round 1: all 4 ready.
+        if (round === 0 && target.endsWith("/readyz"))
+          return new Response("not ready", { status: 503 });
+        return new Response("ok", { status: 200 });
+      }
+      return baseFetch(url, init);
+    }),
+  );
+  const logs: InstallerEvent[] = [];
+  const result = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-readiness-timings",
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: (event) => {
+      if (event.kind === "log") logs.push(event);
+    },
+  });
+  expect(result.code).toBe(0);
+  const messages = logs.map((event) => event.message);
+  expect(
+    messages.some((message) =>
+      /^Download region: global \(cache, \d+ms\)\.\n$/.test(message),
+    ),
+  ).toBe(true);
+  const serviceReadyLines = logs.filter(
+    (event) =>
+      event.stage === "services" &&
+      /^Native service \S+ ready in [\d.]+s\.\n$/.test(event.message),
+  );
+  // Each service is logged exactly once even when probed across multiple rounds.
+  expect(serviceReadyLines).toHaveLength(4);
+  for (const service of ["web", "teamhub", "node-services", "document-runtime"])
+    expect(
+      serviceReadyLines.some((event) =>
+        event.message.startsWith(`Native service ${service} ready in `),
+      ),
+    ).toBe(true);
+  expect(logs).toContainEqual({
+    kind: "log",
+    stage: "services",
+    message: expect.stringMatching(
+      /^Native collaboration services ready \(s\): web [\d.]+, teamhub [\d.]+, node-services [\d.]+, document-runtime [\d.]+\.\n$/,
+    ),
+  });
+});
+
+test("logs per-step stop timings and a summary even on partial stop failure", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ok",
+  });
+  const installed = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-stop-timings",
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(installed.code).toBe(0);
+  const saved = await loadInstance({
+    name: "native-stop-timings",
+    home: f.home,
+  });
+
+  const okLogs: string[] = [];
+  await stopNativeSource(saved!, new AbortController().signal, {
+    log: (message) => okLogs.push(message),
+  });
+  expect(okLogs).toEqual([
+    expect.stringMatching(/^Stopped native computer in [\d.]+s\.$/),
+    expect.stringMatching(/^Stopped native web in [\d.]+s\.$/),
+    expect.stringMatching(/^Stopped native node-services in [\d.]+s\.$/),
+    expect.stringMatching(/^Stopped native teamhub in [\d.]+s\.$/),
+    expect.stringMatching(/^Stopped native livekit in [\d.]+s\.$/),
+    expect.stringMatching(/^Stopped native postgres in [\d.]+s\.$/),
+    expect.stringMatching(/^Stopped native orphans in [\d.]+s\.$/),
+    expect.stringMatching(/^Stopped native model gateway in [\d.]+s\.$/),
+    expect.stringMatching(
+      /^Native stop timings \(s\): computer [\d.]+, web [\d.]+, node-services [\d.]+, teamhub [\d.]+, livekit [\d.]+, postgres [\d.]+, orphans [\d.]+, gateway [\d.]+\.$/,
+    ),
+  ]);
+
+  vi.mocked(stopNativeProcess).mockImplementation(async (_root, name) => {
+    if (name === "teamhub") throw new Error("teamhub stuck");
+  });
+  const failLogs: string[] = [];
+  await expect(
+    stopNativeSource(saved!, new AbortController().signal, {
+      log: (message) => failLogs.push(message),
+    }),
+  ).rejects.toThrow("teamhub stuck");
+  expect(failLogs).toContainEqual(
+    expect.stringMatching(/^Stopping native teamhub failed after [\d.]+s\.$/),
+  );
+  expect(failLogs.at(-1)).toMatch(
+    /^Native stop timings \(s\): computer [\d.]+, web [\d.]+, node-services [\d.]+, teamhub [\d.]+\.$/,
+  );
+});
