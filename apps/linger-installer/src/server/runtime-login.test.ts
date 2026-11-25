@@ -461,3 +461,82 @@ it(
       .toBe(false);
   },
 );
+
+it("returns ready immediately when daemon reports CC Switch Codex ready without spawning codex login", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "runtime-ccswitch-ready-"));
+  clean.push(() => rm(home, { recursive: true, force: true }));
+  const marker = path.join(home, "login-spawned");
+  const exe = path.join(home, "codex");
+  await writeFile(
+    exe,
+    `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)},'spawned');process.exit(1);`,
+    { mode: 0o700 },
+  );
+  const inspect = vi.fn(async () => ({
+    runtime: "codex" as const,
+    executable: exe,
+    installed: true,
+    ready: true,
+    loginCommand: `'${exe}' 'login'`,
+    descriptor: {
+      runtime: "codex" as const,
+      executable: exe,
+      argvPrefix: [],
+      installed: true,
+      authenticated: true,
+      authMode: "authenticated",
+      status: "ready" as const,
+      loginCommand: { executable: exe, args: ["login"], env: {} },
+    },
+  }));
+  const manager = new RuntimeLoginManager(inspect, "darwin");
+  clean.push(async () => manager.close());
+  const input = {
+    instance: "default",
+    home,
+    root: home,
+    runtime: "codex" as const,
+  };
+  expect(await manager.status(input)).toEqual({ state: "ready" });
+  expect(inspect).toHaveBeenCalledTimes(1);
+  expect(await manager.start(input)).toEqual({ state: "ready" });
+  expect(inspect).toHaveBeenCalledTimes(2);
+  await expect(access(marker)).rejects.toThrow();
+});
+
+it("polls runtime inspection once per status check using a 15s timeout", async () => {
+  const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+  clean.push(async () => timeoutSpy.mockRestore());
+  const inspect = vi.fn(async () => ({
+    runtime: "claude" as const,
+    executable: "/usr/local/bin/claude",
+    installed: true,
+    ready: false,
+    loginCommand: "'/usr/local/bin/claude' 'auth' 'login'",
+    descriptor: {
+      runtime: "claude" as const,
+      executable: "/usr/local/bin/claude",
+      argvPrefix: [],
+      installed: true,
+      authenticated: false,
+      authMode: null,
+      status: "authentication_required" as const,
+      loginCommand: {
+        executable: "/usr/local/bin/claude",
+        args: ["auth", "login"],
+        env: {},
+      },
+    },
+  }));
+  const manager = new RuntimeLoginManager(inspect, "darwin");
+  clean.push(async () => manager.close());
+  const input = {
+    instance: "default",
+    home: "/owned",
+    root: "/owned/instances/default",
+    runtime: "claude" as const,
+  };
+  expect(await manager.status(input)).toEqual({ state: "idle" });
+  expect(inspect).toHaveBeenCalledTimes(1);
+  expect(timeoutSpy).toHaveBeenCalledWith(15000);
+});

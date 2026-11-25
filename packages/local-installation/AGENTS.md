@@ -127,6 +127,18 @@ still up, so its graceful shutdown requeues in-flight Agent Runs.
 
 `inspectSetup` keeps tool downloads and state in `home`; `targetHome`, when
 provided, selects the installation paths to inspect independently of that cache.
+During setup (`inspectSetup`), runtime preparation (`installNativeRuntime`,
+`prepareRuntime`), and runtime sign-in checks (`inspectRuntime`), CLI Runtime
+discovery, minimum-version verification, and authentication status are owned by
+the Go `local-daemon` via `linger-computer-daemon probe-runtimes --json`
+(`daemon-runtime-probe.ts`, locating the binary through explicit
+`daemonExecutable`, `LINGER_COMPUTER_DAEMON`, or `PATH`), while `localmodels`
+owns hardware/memory evaluation, local-model stack admission/lifecycle, and
+managed harness installation and profile descriptors. When no daemon binary is
+available, those entrypoints fall back cleanly to `localmodels` `harness`
+status. `inspectRuntimeDescriptors` (used by `managedRuntimeEnvironment`,
+`readManagedModel`, and Computer enrollment bindings) reads `localmodels`
+descriptors only and never probes `local-daemon`.
 
 The home is `LINGER_HOME`, else `~/.simplexai` (`home.ts`). Installs from
 before the product was renamed Linger convert once in

@@ -103,6 +103,9 @@ func run(args []string) (resultErr error) {
 	if handled, err := platformEntry(args); handled {
 		return err
 	}
+	if len(args) > 0 && args[0] == "probe-runtimes" {
+		return runProbeRuntimes(context.Background(), args[1:], computerconfig.ProcessEnvironment(), os.Stdout)
+	}
 	if len(args) != 2 || args[0] != "--config" || args[1] == "" {
 		return errors.New("linger-computer-daemon requires --config <path>")
 	}

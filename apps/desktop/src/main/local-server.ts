@@ -364,6 +364,17 @@ export interface LocalServerOptions {
   readonly home: string;
   // This app's version, recorded with the source package it unpacks.
   readonly version: string;
+  // The resolved user terminal environment passed ONLY to read-only setup
+  // inspection (--inspect) so daemon runtime probing can read profile
+  // variables (e.g. ANTHROPIC_BASE_URL, OPENAI_API_KEY, CODEX_HOME). Never
+  // forwarded to --resume, BYOK checks, or the serving installer that starts
+  // local services.
+  readonly inspectEnv?:
+    | Readonly<Record<string, string>>
+    | Promise<Readonly<Record<string, string>>>;
+  // Bundled linger-computer-daemon executable used as the single source of
+  // truth for AI Runtime discovery and authentication probing during setup.
+  readonly daemonExecutable?: string;
   // The bundled installer (installer.js, web/, native-process-worker.mjs).
   readonly installerDirectory: string;
   readonly sourceArchive?: SourceArchive;
@@ -967,6 +978,26 @@ export class LocalServerModule implements Module {
           };
   }
 
+  #daemonEnv(): NodeJS.ProcessEnv {
+    return this.#options.daemonExecutable
+      ? {
+          ...process.env,
+          LINGER_COMPUTER_DAEMON: this.#options.daemonExecutable,
+        }
+      : { ...process.env };
+  }
+
+  async #inspectEnv(): Promise<NodeJS.ProcessEnv> {
+    const resolved = await this.#options.inspectEnv;
+    const base: NodeJS.ProcessEnv = resolved
+      ? { ...resolved }
+      : { ...process.env };
+    if (this.#options.daemonExecutable) {
+      base.LINGER_COMPUTER_DAEMON = this.#options.daemonExecutable;
+    }
+    return base;
+  }
+
   // Runs the installer's headless BYOK command: the endpoint and key go on
   // stdin, never in argv, and its last stdout line is the JSON answer. A
   // failure to run it comes back as { ok: false, message }.
@@ -991,7 +1022,7 @@ export class LocalServerModule implements Module {
             stdio: ["pipe", "pipe", "pipe"],
             windowsHide: true,
             env: {
-              ...process.env,
+              ...this.#daemonEnv(),
               ELECTRON_RUN_AS_NODE: "1",
               LINGER_HOME: home,
             },
@@ -1027,6 +1058,7 @@ export class LocalServerModule implements Module {
     // The tool's codes with its words, for the log only.
     reasonLog: string[];
   }> {
+    const inspectEnv = await this.#inspectEnv();
     // The app's own Node runs the check, so it needs no download of its own;
     // installing still uses the pinned Node runtime.
     const output = await new Promise<string>((resolve, reject) => {
@@ -1045,7 +1077,7 @@ export class LocalServerModule implements Module {
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
           env: {
-            ...process.env,
+            ...inspectEnv,
             ELECTRON_RUN_AS_NODE: "1",
             LINGER_HOME: this.#options.home,
           },
@@ -2577,7 +2609,7 @@ export class LocalServerModule implements Module {
         // A detached Windows process otherwise opens its own console window.
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, ...proxyEnv, LINGER_HOME: home },
+        env: { ...this.#daemonEnv(), ...proxyEnv, LINGER_HOME: home },
       },
     );
     const log = this.#ctx?.log;
@@ -3037,7 +3069,7 @@ export class LocalServerModule implements Module {
       ms: Date.now() - nodeStartedAt,
     });
     const env = {
-      ...process.env,
+      ...this.#daemonEnv(),
       ...(await proxyEnv),
       LINGER_HOME: record.home,
     };

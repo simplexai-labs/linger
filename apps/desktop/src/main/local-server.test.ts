@@ -147,10 +147,36 @@ if (args.includes("--migrate")) {
   process.stdout.write(JSON.stringify({ skipped }) + "\n");
   process.exit(0);
 }
+if (args.includes("--check-byok")) {
+  fs.mkdirSync(path.join(home, "installer"), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, "installer", "byok-env.json"),
+    JSON.stringify({
+      ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+      XAI_API_KEY: process.env.XAI_API_KEY,
+      NODE_OPTIONS: process.env.NODE_OPTIONS,
+      PGHOST: process.env.PGHOST,
+      LINGER_COMPUTER_DAEMON: process.env.LINGER_COMPUTER_DAEMON,
+    }),
+  );
+  process.stdout.write(JSON.stringify({ ok: true, protocol: "openai-responses", url: "https://byok.example/v1/responses", modelId: "m" }) + "\n");
+  process.exit(0);
+}
 if (args.includes("--inspect")) {
   const target = args.includes("--inspect-target") ? args[args.indexOf("--inspect-target") + 1] : home;
   fs.mkdirSync(path.join(home, "runtime", "localmodels", "state"), { recursive: true });
   fs.writeFileSync(path.join(home, "runtime", "inspect-args.json"), JSON.stringify(args));
+  fs.writeFileSync(
+    path.join(home, "runtime", "inspect-env.json"),
+    JSON.stringify({
+      PATH: process.env.PATH,
+      ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+      XAI_API_KEY: process.env.XAI_API_KEY,
+      NODE_OPTIONS: process.env.NODE_OPTIONS,
+      PGHOST: process.env.PGHOST,
+      LINGER_COMPUTER_DAEMON: process.env.LINGER_COMPUTER_DAEMON,
+    }),
+  );
   const hardware = { totalMemoryBytes: 64 * 1024 ** 3, diskFreeBytes: 200 * 1024 ** 3, gpus: [{ name: "RTX 4090" }] };
   const eligible = !fs.existsSync(path.join(target, "small-computer"));
   const modelFile = path.join(target, "inspect-model");
@@ -216,6 +242,16 @@ if (args.includes("--inspect")) {
 fs.mkdirSync(path.join(home, "installer"), { recursive: true });
 fs.writeFileSync(path.join(home, "installer", "args.json"), JSON.stringify(args));
 if (args.includes("--resume")) {
+  fs.writeFileSync(
+    path.join(home, "installer", "resume-env.json"),
+    JSON.stringify({
+      ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+      XAI_API_KEY: process.env.XAI_API_KEY,
+      NODE_OPTIONS: process.env.NODE_OPTIONS,
+      PGHOST: process.env.PGHOST,
+      LINGER_COMPUTER_DAEMON: process.env.LINGER_COMPUTER_DAEMON,
+    }),
+  );
   const code = fs.existsSync(path.join(home, "resume-fails")) ? 1 : 0;
   const runtimeFile = path.join(home, "resume-runtime.json");
   const runtime = fs.existsSync(runtimeFile) ? JSON.parse(fs.readFileSync(runtimeFile, "utf8")) : undefined;
@@ -243,6 +279,16 @@ if (fs.existsSync(path.join(home, "start-refused"))) {
   process.exit(1);
 }
 // serve-stderr holds what the serving installer writes to stderr.
+fs.writeFileSync(
+  path.join(home, "installer", "server-env.json"),
+  JSON.stringify({
+    ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+    XAI_API_KEY: process.env.XAI_API_KEY,
+    NODE_OPTIONS: process.env.NODE_OPTIONS,
+    PGHOST: process.env.PGHOST,
+    LINGER_COMPUTER_DAEMON: process.env.LINGER_COMPUTER_DAEMON,
+  }),
+);
 const serveStderr = path.join(home, "serve-stderr");
 if (fs.existsSync(serveStderr)) process.stderr.write(fs.readFileSync(serveStderr, "utf8"));
 const origin = "http://127.0.0.1:4321";
@@ -1888,6 +1934,126 @@ describe("LocalServerModule", () => {
       }),
     );
     info.mockRestore();
+  });
+
+  it("passes the resolved login-shell environment only to setup inspection and keeps it out of BYOK, setup server, and resume", async () => {
+    const daemonPath = "/app/resources/computer/linger-computer-daemon";
+    const shellOnlyEnv = {
+      ...(process.env as Record<string, string>),
+      PATH: `/custom/nvm/bin${path.delimiter}/usr/bin${path.delimiter}/bin`,
+      ANTHROPIC_BASE_URL: "https://shell-profile.example",
+      XAI_API_KEY: "shell-xai-secret",
+      NODE_OPTIONS: "--max-old-space-size=9999",
+      PGHOST: "shell-pg.invalid",
+    };
+
+    // 1. --inspect receives inspectEnv + LINGER_COMPUTER_DAEMON;
+    //    --check-byok and setup server receive only process.env + LINGER_COMPUTER_DAEMON.
+    const installFixture = fixture(
+      (home) => ({
+        ...withCheckout(home),
+        daemonExecutable: daemonPath,
+        inspectEnv: Promise.resolve(shellOnlyEnv),
+      }),
+      {},
+      checkout,
+      installerApi(),
+    );
+    await installFixture.host.start();
+    installFixture.module.inspect();
+    await waitForInstaller(() =>
+      expect(installFixture.module.status().localModels).toMatchObject({
+        state: "checked",
+        eligible: true,
+      }),
+    );
+    const seenInspect = JSON.parse(
+      readFileSync(
+        path.join(installFixture.home, "runtime", "inspect-env.json"),
+        "utf8",
+      ),
+    ) as Record<string, string | undefined>;
+    expect(seenInspect.PATH).toContain("/custom/nvm/bin");
+    expect(seenInspect.ANTHROPIC_BASE_URL).toBe(
+      "https://shell-profile.example",
+    );
+    expect(seenInspect.LINGER_COMPUTER_DAEMON).toBe(daemonPath);
+
+    await installFixture.module.checkByok({
+      runtime: "codex",
+      baseUrl: "https://byok.example",
+      path: "/v1",
+      endpoint: "/responses",
+      apiKey: "test-key",
+      modelId: "m",
+      protocol: "openai-responses",
+    });
+    const seenByok = JSON.parse(
+      readFileSync(
+        path.join(installFixture.home, "installer", "byok-env.json"),
+        "utf8",
+      ),
+    ) as Record<string, string | undefined>;
+    expect(seenByok.LINGER_COMPUTER_DAEMON).toBe(daemonPath);
+    expect(seenByok.XAI_API_KEY).not.toBe("shell-xai-secret");
+    expect(seenByok.NODE_OPTIONS).not.toBe("--max-old-space-size=9999");
+    expect(seenByok.PGHOST).not.toBe("shell-pg.invalid");
+    expect(seenByok.ANTHROPIC_BASE_URL).not.toBe(
+      "https://shell-profile.example",
+    );
+
+    await installFixture.module.begin();
+    const seenServer = JSON.parse(
+      readFileSync(
+        path.join(installFixture.home, "installer", "server-env.json"),
+        "utf8",
+      ),
+    ) as Record<string, string | undefined>;
+    expect(seenServer.LINGER_COMPUTER_DAEMON).toBe(daemonPath);
+    expect(seenServer.XAI_API_KEY).not.toBe("shell-xai-secret");
+    expect(seenServer.NODE_OPTIONS).not.toBe("--max-old-space-size=9999");
+    expect(seenServer.PGHOST).not.toBe("shell-pg.invalid");
+    expect(seenServer.ANTHROPIC_BASE_URL).not.toBe(
+      "https://shell-profile.example",
+    );
+    await installFixture.host.stop("quit");
+
+    // 2. --resume receives only process.env + LINGER_COMPUTER_DAEMON, never inspectEnv.
+    const resumeFixture = fixture(
+      {
+        daemonExecutable: daemonPath,
+        inspectEnv: Promise.resolve(shellOnlyEnv),
+      },
+      {
+        serverUrl: "http://localhost:3000",
+        computerId: "cmp_1",
+      },
+      (home) => {
+        mkdirSync(path.join(home, "desktop"), { recursive: true });
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({ repo: "/source", origin: "http://localhost:3000" }),
+        );
+      },
+    );
+    await resumeFixture.host.start();
+    await waitForInstaller(() =>
+      expect(resumeFixture.module.status().phase).toBe("ready"),
+    );
+    const seenResume = JSON.parse(
+      readFileSync(
+        path.join(resumeFixture.home, "installer", "resume-env.json"),
+        "utf8",
+      ),
+    ) as Record<string, string | undefined>;
+    expect(seenResume.LINGER_COMPUTER_DAEMON).toBe(daemonPath);
+    expect(seenResume.XAI_API_KEY).not.toBe("shell-xai-secret");
+    expect(seenResume.NODE_OPTIONS).not.toBe("--max-old-space-size=9999");
+    expect(seenResume.PGHOST).not.toBe("shell-pg.invalid");
+    expect(seenResume.ANTHROPIC_BASE_URL).not.toBe(
+      "https://shell-profile.example",
+    );
+    await resumeFixture.host.stop("quit");
   });
 
   it("marks checked Inkling 2 Mini models with featuredInkling using the shared matcher", async () => {

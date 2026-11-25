@@ -80,6 +80,9 @@ type DiscoveryOptions struct {
 	Runtimes []string
 	// PreferredRuntime is the type whose diagnostic is marked Preferred.
 	PreferredRuntime string
+	// SkipModelCatalog skips model catalog listing after protocol and
+	// authentication verification (used by stateless setup/auth probes).
+	SkipModelCatalog bool
 }
 
 type runtimeDefinition struct {
@@ -214,7 +217,7 @@ func diagnose(ctx context.Context, kind, executable, protocol string, options Di
 	// Catalogs use live protocol exchanges. Preserve a failed protocol/auth
 	// probe instead of replacing it with a second failure from model discovery.
 	// Logged-out Claude must not receive an initialize request.
-	catalogAllowed := outcome.Status == "ready" || ((kind == "codex" || kind == "pi") && outcome.Status == "authentication_required")
+	catalogAllowed := !options.SkipModelCatalog && (outcome.Status == "ready" || ((kind == "codex" || kind == "pi") && outcome.Status == "authentication_required"))
 	if catalogAllowed {
 		catalogCtx, stop := context.WithTimeout(ctx, budget)
 		observation.Models, observation.ModelCatalogError = probedRuntimeModels(catalogCtx, kind, canonical, environment, outcome)
