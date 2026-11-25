@@ -205,14 +205,14 @@ export function RoomSecondaryNavigation({
     <nav
       aria-label={t(roomListMessages.navigation)}
       data-voice-area="sidebar"
-      className="app-secondary-navigation relative flex w-[var(--sidebar-width)] min-w-0 flex-col bg-card"
+      className="app-secondary-navigation relative flex min-w-0 flex-col bg-card max-md:!mx-2 max-md:w-auto max-md:flex-1 md:w-[var(--sidebar-width)]"
     >
       {onCollapse ? (
         // Shares the 57px height of the chat header so both titles sit on
         // one line; a hairline fades in under it once the list scrolls.
         <header
           aria-label={t(roomListMessages.messageActions)}
-          className="app-secondary-navigation-header room-secondary-navigation-header relative z-40 flex h-(--app-header-height) shrink-0 items-center justify-between gap-2 pl-px pr-4"
+          className="app-secondary-navigation-header room-secondary-navigation-header relative z-40 flex h-(--app-header-height) shrink-0 items-center justify-between gap-2 pl-px pr-4 max-md:pr-0"
           role="toolbar"
         >
           <span className="room-secondary-navigation-title truncate">
@@ -228,60 +228,74 @@ export function RoomSecondaryNavigation({
               tenantId={tenant.id}
             />
           </div>
-          <button
-            data-voice-close
-            aria-label={t(roomListMessages.hideChatList)}
-            className="room-secondary-navigation-collapse flex size-7 shrink-0 items-center justify-center rounded-md text-app-muted transition-colors hover:bg-app-hover hover:text-app-ink"
-            onClick={onCollapse}
-            title={t(roomListMessages.hideChatList)}
-            type="button"
-          >
-            <Icon icon={SidebarLeftIcon} />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              data-voice-close
+              aria-label={t(roomListMessages.hideChatList)}
+              className="room-secondary-navigation-collapse flex size-7 shrink-0 items-center justify-center rounded-md text-app-muted transition-colors hover:bg-app-hover hover:text-app-ink max-md:hidden"
+              onClick={onCollapse}
+              title={t(roomListMessages.hideChatList)}
+              type="button"
+            >
+              <Icon icon={SidebarLeftIcon} />
+            </button>
+            <Button
+              data-voice-close
+              aria-label={t(navigationMessages.closeNavigation)}
+              className="shrink-0 md:hidden"
+              onClick={onCloseMobile}
+              size="icon"
+              tone="ghost"
+            >
+              <Icon icon={Cancel01Icon} size={16} />
+            </Button>
+          </div>
         </header>
       ) : (
         <div
-          className="xs-nav-quick flex shrink-0 items-center gap-1.5 pl-0 pr-1.5 pt-3"
+          className="xs-nav-quick flex shrink-0 flex-col gap-1.5 pt-3 md:flex-row md:items-center md:pl-0 md:pr-1.5"
           aria-label={t(roomListMessages.quickAccess)}
         >
-          <PocketNoteLauncher
-            anotherMeRoomId={anotherMeRoomId}
-            tenantId={tenant.id}
-          />
-          <RecordingEntry
-            anotherMeRoomId={anotherMeRoomId}
-            tenantId={tenant.id}
-          />
-          <button
-            aria-keyshortcuts="Control+k Meta+k"
-            aria-label={t(roomListMessages.search)}
-            title={searchTitle}
-            className="xs-nav-search"
-            onClick={() => {
-              onOpenSearch?.();
-              onCloseMobile();
-            }}
-            type="button"
-          >
-            <Icon icon={Search01Icon} size={16} />
-          </button>
+          <div className="flex min-w-0 items-center gap-1.5 md:contents">
+            <button
+              aria-keyshortcuts="Control+k Meta+k"
+              aria-label={t(roomListMessages.search)}
+              title={searchTitle}
+              className="xs-nav-search max-md:!w-auto max-md:min-w-0 max-md:flex-1 max-md:!justify-between max-md:border max-md:border-border max-md:bg-app-surface max-md:px-2.5 max-md:text-xs max-md:text-muted-foreground md:order-3"
+              onClick={() => {
+                onOpenSearch?.();
+                onCloseMobile();
+              }}
+              type="button"
+            >
+              <span className="truncate md:hidden">
+                {t(roomListMessages.searchChats)}
+              </span>
+              <Icon className="shrink-0" icon={Search01Icon} size={16} />
+            </button>
+            <Button
+              data-voice-close
+              aria-label={t(navigationMessages.closeNavigation)}
+              className="size-9 shrink-0 md:hidden"
+              onClick={onCloseMobile}
+              size="icon"
+              tone="ghost"
+            >
+              <Icon icon={Cancel01Icon} size={16} />
+            </Button>
+          </div>
+          <div className="flex min-w-0 gap-1.5 [&>.xs-nav-btn]:min-w-0 [&>.xs-nav-btn]:flex-1 [&>.xs-nav-btn]:basis-0 md:contents">
+            <PocketNoteLauncher
+              anotherMeRoomId={anotherMeRoomId}
+              tenantId={tenant.id}
+            />
+            <RecordingEntry
+              anotherMeRoomId={anotherMeRoomId}
+              tenantId={tenant.id}
+            />
+          </div>
         </div>
       )}
-
-      <div className="room-nav-controls pr-2 md:hidden">
-        <div className="mt-1 flex items-center justify-end">
-          <Button
-            data-voice-close
-            aria-label={t(navigationMessages.closeNavigation)}
-            className="md:hidden"
-            onClick={onCloseMobile}
-            size="icon"
-            tone="ghost"
-          >
-            <Icon icon={Cancel01Icon} size={16} />
-          </Button>
-        </div>
-      </div>
 
       {localAgentOpen ? (
         <Suspense fallback={null}>
@@ -305,7 +319,7 @@ export function RoomSecondaryNavigation({
 
       <div
         data-voice-scroll="sidebar"
-        className="room-secondary-navigation-list workspace-scrollbar flex-1 space-y-3 overflow-y-auto pb-1 pt-2"
+        className="room-secondary-navigation-list workspace-scrollbar flex-1 space-y-3 overflow-y-auto pb-1 pt-2 max-md:!mr-0 max-md:!pr-0"
         ref={listRef}
       >
         {onCollapse ? searchButton : null}
@@ -361,7 +375,14 @@ export function RoomSecondaryNavigation({
                         onClick={(event) => completeNavigation(event, room.id)}
                         to={`/t/${tenant.id}/rooms/${room.id}/chat`}
                       >
-                        <RoomAvatar members={room.member_preview ?? []} />
+                        <NavRowAvatar
+                          failed={
+                            failedRooms.has(room.id) &&
+                            !runningRooms.has(room.id)
+                          }
+                        >
+                          <RoomAvatar members={room.member_preview ?? []} />
+                        </NavRowAvatar>
                         <span className="min-w-0 flex-1 px-1">
                           <RoomRowTitle pinned={Boolean(room.pinned_at)}>
                             {room.name}
@@ -376,7 +397,6 @@ export function RoomSecondaryNavigation({
                           </span>
                         </span>
                         <RoomRowStatus
-                          failed={failedRooms.has(room.id)}
                           room={room}
                           working={runningRooms.has(room.id)}
                         />
@@ -564,13 +584,15 @@ function DirectRoomLink({
       onPointerLeave={() => setHovered(false)}
       to={`/t/${tenantId}/rooms/${room.id}/chat`}
     >
-      <ActorAvatar
-        actorId={peer.id}
-        animate={!inactive && (hovered || working)}
-        kind={peer.kind}
-        name={displayName}
-        size="nav"
-      />
+      <NavRowAvatar failed={Boolean(failed && !working)}>
+        <ActorAvatar
+          actorId={peer.id}
+          animate={!inactive && (hovered || working)}
+          kind={peer.kind}
+          name={displayName}
+          size="sm"
+        />
+      </NavRowAvatar>
       <span className="min-w-0 flex-1 px-1">
         <RoomRowTitle pinned={Boolean(room.pinned_at)}>
           {displayName}
@@ -583,7 +605,7 @@ function DirectRoomLink({
               : t(roomListMessages.noMessages)}
         </span>
       </span>
-      <RoomRowStatus failed={failed} room={room} working={working} />
+      <RoomRowStatus room={room} working={working} />
     </Link>
   );
 }
@@ -725,7 +747,7 @@ function AnotherMeCard({
         onClick={onNavigate}
         to={`/t/${tenantId}/rooms/${room.id}/chat`}
       >
-        <span className="another-me-card-avatar shrink-0">
+        <span className="another-me-card-avatar relative shrink-0">
           <ActorAvatar
             actorId={room.direct_peer?.id}
             animate={hovered || working}
@@ -733,6 +755,7 @@ function AnotherMeCard({
             name={name}
             size="card"
           />
+          {failed && !working ? <RowFailureBadge /> : null}
         </span>
         <span className="min-w-0 flex-1">
           <span className="another-me-card-title block truncate text-sm leading-[18px] font-medium text-app-ink">
@@ -744,18 +767,51 @@ function AnotherMeCard({
               : t(roomListMessages.personalAgent)}
           </span>
         </span>
-        <RoomRowStatus failed={failed} room={room} working={working} />
+        <RoomRowStatus room={room} working={working} />
       </Link>
     </div>
   );
 }
 
+/**
+ * Keeps the failure badge pinned to the avatar corner on the leading edge of
+ * the row so hovering to inspect it never collides with right-edge row actions
+ * or fades away under `.row-reveal-hide`.
+ */
+function NavRowAvatar({
+  children,
+  failed,
+}: {
+  children: ReactNode;
+  failed: boolean;
+}) {
+  return (
+    <span className="relative mr-1 flex size-9 shrink-0 items-center justify-center">
+      {children}
+      {failed ? <RowFailureBadge /> : null}
+    </span>
+  );
+}
+
+function RowFailureBadge() {
+  const t = useT();
+  const label = t(roomListMessages.lastRunFailed);
+  return (
+    <span
+      aria-label={label}
+      className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-card text-app-danger ring-1 ring-card"
+      role="img"
+      title={label}
+    >
+      <Icon icon={AlertCircleIcon} size={12} />
+    </span>
+  );
+}
+
 function RoomRowStatus({
-  failed = false,
   room,
   working,
 }: {
-  failed?: boolean;
   room: TeamHubRoomListItem;
   working: boolean;
 }) {
@@ -767,8 +823,8 @@ function RoomRowStatus({
   return (
     <span className="row-reveal-hide ml-auto flex shrink-0 items-center gap-1.5">
       <RoomAttentionBadge room={room} />
-      <span className="flex size-4 shrink-0 items-center justify-center">
-        {working ? (
+      {working ? (
+        <span className="flex size-4 shrink-0 items-center justify-center">
           <svg
             aria-label={t(roomListMessages.agentWorking)}
             className="size-3.5 animate-spin text-app-muted motion-reduce:animate-none"
@@ -792,16 +848,8 @@ function RoomRowStatus({
               strokeWidth="1.5"
             />
           </svg>
-        ) : failed ? (
-          <span
-            aria-label={t(roomListMessages.lastRunFailed)}
-            className="flex text-app-danger"
-            role="img"
-          >
-            <Icon icon={AlertCircleIcon} size={14} />
-          </span>
-        ) : null}
-      </span>
+        </span>
+      ) : null}
     </span>
   );
 }

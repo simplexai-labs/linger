@@ -8,6 +8,7 @@ import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { TeamHubError } from "@/features/teamhub/teamhub-client";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubRoomCreateInput } from "@/features/teamhub/teamhub-types";
+import { commonMessages } from "@/i18n/common.messages";
 import { useT } from "@/i18n/use-translation";
 
 import { roomDialogMessages as m } from "./room-dialogs.messages";
@@ -96,15 +97,20 @@ export function RoomCreateDialog({
       size="md"
       title={t(m.createRoom)}
       footer={
-        <Button
-          disabled={!trimmedName || duplicateName}
-          form={formId}
-          loading={createRoom.isPending}
-          tone="primary"
-          type="submit"
-        >
-          {t(m.createRoom)}
-        </Button>
+        <>
+          <Button disabled={createRoom.isPending} onClick={onClose}>
+            {t(commonMessages.cancel)}
+          </Button>
+          <Button
+            disabled={!trimmedName || duplicateName}
+            form={formId}
+            loading={createRoom.isPending}
+            tone="primary"
+            type="submit"
+          >
+            {t(m.createRoom)}
+          </Button>
+        </>
       }
     >
       <form className="px-5 py-4" id={formId} onSubmit={handleSubmit}>

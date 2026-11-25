@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type RefObject,
 } from "react";
 import { useReducedMotion } from "motion/react";
 
@@ -137,6 +138,7 @@ interface TaskSidebarProps {
   onOpenRoomSettings?: () => void;
   onReady?: () => void;
   onRestoreClosed?: () => void;
+  canRestoreClosed?: boolean;
   onRetryResolution?: () => void;
   open?: boolean;
   roomId: string;
@@ -172,6 +174,7 @@ export function TaskSidebar({
   onOpenRoomSettings,
   onReady,
   onRestoreClosed,
+  canRestoreClosed = false,
   onRetryResolution,
   open = true,
   roomId,
@@ -265,14 +268,15 @@ export function TaskSidebar({
 
   usePanelKeyboardShortcuts({
     activeTabId,
-    closeActiveTab: closeTab,
     onActiveChange,
     onCollapse: () => {
       if (maximized) setMaximized(false);
       else collapseSidebar();
     },
     onRestoreClosed,
+    open,
     openTabIds,
+    sidebarRef,
   });
 
   const activeAnchorId = activeTab?.anchorMessageId;
@@ -344,6 +348,7 @@ export function TaskSidebar({
         <PanelTabStrip
           includeAgentInfo={directPeer?.kind === "agent"}
           activeTabId={activeTabId}
+          canRestoreClosed={canRestoreClosed}
           launcherOpen={launcherOpen}
           maximized={maximized}
           onActivate={(tabId) => {
@@ -352,6 +357,7 @@ export function TaskSidebar({
           onClose={closeTab}
           onReorder={onReorderTab}
           onCollapse={collapseSidebar}
+          onRestoreClosed={onRestoreClosed}
           onCreate={(choice) => {
             const requestedActiveTabId = activeTabId;
             focusActiveTabRef.current = true;
@@ -456,36 +462,70 @@ export function TaskSidebar({
   );
 }
 
+function isInsideSidebar(
+  sidebar: HTMLElement | null,
+  target: EventTarget | null,
+) {
+  if (!sidebar) return false;
+  if (target instanceof Node && sidebar.contains(target)) return true;
+  const activeElement = document.activeElement;
+  return activeElement instanceof Node && sidebar.contains(activeElement);
+}
+
 function usePanelKeyboardShortcuts({
   activeTabId,
-  closeActiveTab,
   onActiveChange,
   onCollapse,
   onRestoreClosed,
+  open,
   openTabIds,
+  sidebarRef,
 }: {
   activeTabId: string | null;
-  closeActiveTab: (tabId: string) => void;
   onActiveChange: (tabId: string) => void;
   onCollapse: () => void;
   onRestoreClosed?: () => void;
+  open: boolean;
   openTabIds: string[];
+  sidebarRef: RefObject<HTMLElement | null>;
 }) {
   const handleKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (!open) return;
     const meta = event.metaKey || event.ctrlKey;
     if (meta && event.key.toLowerCase() === "k") return;
 
     if (event.key === "Escape") {
       if (shouldDeferEscape(event)) return;
+      if (
+        isEditableTarget(event.target) ||
+        isEditableTarget(document.activeElement)
+      ) {
+        return;
+      }
+      if (!isInsideSidebar(sidebarRef.current, event.target)) return;
       event.preventDefault();
-      if (activeTabId) closeActiveTab(activeTabId);
-      else onCollapse();
+      onCollapse();
       return;
     }
 
-    if (meta && event.shiftKey && event.key.toLowerCase() === "t") {
+    // Reopen closed panel tab via a non-browser-reserved chord scoped to the
+    // sidebar so Cmd/Ctrl+Shift+T stays free for the browser's own tab recovery.
+    if (
+      meta &&
+      event.altKey &&
+      event.shiftKey &&
+      event.key.toLowerCase() === "t"
+    ) {
+      if (
+        !onRestoreClosed ||
+        isEditableTarget(event.target) ||
+        isEditableTarget(document.activeElement) ||
+        !isInsideSidebar(sidebarRef.current, event.target)
+      ) {
+        return;
+      }
       event.preventDefault();
-      onRestoreClosed?.();
+      onRestoreClosed();
       return;
     }
 

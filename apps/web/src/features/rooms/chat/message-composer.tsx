@@ -1409,12 +1409,14 @@ function ComposerToolbar({
                 <Icon icon={PlusSignIcon} size={16} />
               </Button>
               <input
+                aria-hidden="true"
                 aria-label={t(composerMessages.chooseAttachments)}
-                className="sr-only"
+                className="hidden"
                 disabled={disabled}
                 multiple
                 onChange={onFilesChange}
                 ref={fileInputRef}
+                tabIndex={-1}
                 type="file"
               />
             </>
@@ -1982,13 +1984,13 @@ function MentionOption({
         <span className="block truncate text-sm font-medium">
           {item.kind === "actor" ? item.actor.display_name : item.document.name}
         </span>
-        <span className="block truncate text-[12px] text-app-subtle">
-          {item.kind === "actor"
-            ? item.actor.kind === "agent"
-              ? t(composerMessages.agent)
-              : formatMentionToken(item.actor)
-            : documentUpdatedLabel(item.document.updatedAt, translation)}
-        </span>
+        {item.kind === "actor" && item.actor.kind === "agent" ? null : (
+          <span className="block truncate text-[12px] text-app-subtle">
+            {item.kind === "actor"
+              ? formatMentionToken(item.actor)
+              : documentUpdatedLabel(item.document.updatedAt, translation)}
+          </span>
+        )}
       </span>
       <span className="shrink-0 text-[10px] font-medium text-app-muted">
         {t(

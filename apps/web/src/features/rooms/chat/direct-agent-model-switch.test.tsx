@@ -17,7 +17,10 @@ import type {
   TeamHubTenantAgentUpdateInput,
 } from "@/features/teamhub/teamhub-types";
 
-import { DirectAgentModelSwitch } from "./direct-agent-model-switch";
+import {
+  DirectAgentModelSwitch,
+  formatModelPillLabel,
+} from "./direct-agent-model-switch";
 
 const runtimeModels = [
   {
@@ -33,9 +36,112 @@ const runtimeModels = [
 ];
 
 describe("Direct Agent runtime settings", () => {
-  it("hides the entry from another Agent sponsor", () => {
+  it("renders a read-only model badge without an edit button for non-creator collaborators", async () => {
     renderSwitch({ currentActorId: "someone-else" });
     expect(screen.queryByRole("button")).toBeNull();
+    const badge = await screen.findByTestId("agent-model-readonly-badge");
+    await waitFor(() => expect(badge).toHaveTextContent("5.4 Sol"));
+    expect(badge).toHaveTextContent("Medium");
+    expect(badge).toHaveAttribute("title", expect.stringContaining("gpt-5.4"));
+    expect(badge).toHaveAttribute("title", expect.stringContaining("Codex"));
+    expect(badge).toHaveAttribute("title", expect.stringContaining("Computer"));
+  });
+
+  it("strips verbose Default and proxy namespace prefixes while preserving full details in title", async () => {
+    expect(
+      formatModelPillLabel(
+        "Default (recommended) · sub2api-claude/claude-opus-5-5",
+      ),
+    ).toBe("Claude Opus 5.5");
+    expect(
+      formatModelPillLabel("Default (recommended) · Claude Opus 5.5"),
+    ).toBe("Claude Opus 5.5");
+    expect(formatModelPillLabel("sub2api-claude/claude-sonnet-4-5")).toBe(
+      "Claude Sonnet 4.5",
+    );
+    expect(formatModelPillLabel("5.4 Sol")).toBe("5.4 Sol");
+    expect(formatModelPillLabel("Qwen3 Coder 30B")).toBe("Qwen3 Coder 30B");
+
+    const base = localAgent();
+    const proxyAgent: TeamHubTenantAgent = {
+      ...base,
+      runtime: {
+        model: "sub2api-claude/claude-opus-5-5",
+        placement: {
+          type: "local",
+          computer_id: "computer-1",
+          workspace_grant_id: "grant-1",
+          runtime_type: "claude",
+        },
+        reasoning_effort: "medium",
+      },
+    };
+    const runtime = createTestTeamHubRuntime();
+    runtime.server.on("GET", "/v0/tenants/{tenantId}/local-computers", () => ({
+      items: [
+        {
+          computer_id: "computer-1",
+          display_name: "Studio Mac",
+          status: "online",
+          runtimes: [
+            {
+              type: "claude",
+              status: "ready",
+              models: [
+                {
+                  id: "sub2api-claude/claude-opus-5-5",
+                  label:
+                    "Default (recommended) · sub2api-claude/claude-opus-5-5",
+                  allowed_reasoning_effort: ["low", "medium", "high"],
+                },
+              ],
+            },
+          ],
+          workspace_grants: [
+            {
+              grant_id: "grant-1",
+              label: "Workspace",
+              mode: "workspace-write",
+            },
+          ],
+        },
+      ],
+    }));
+
+    render(
+      <MemoryRouter>
+        <QueryClientProvider
+          client={
+            new QueryClient({ defaultOptions: { queries: { retry: false } } })
+          }
+        >
+          <DirectAgentModelSwitch
+            client={runtime.client}
+            currentActorId="actor-jenny"
+            registration={proxyAgent}
+            tenantId="tenant-northstar"
+          />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    const trigger = await screen.findByRole("button", {
+      name: "Claude Opus 5.5 Medium",
+    });
+    await waitFor(() =>
+      expect(trigger).toHaveAttribute(
+        "title",
+        expect.stringContaining("Studio Mac"),
+      ),
+    );
+    expect(trigger).toHaveAttribute(
+      "title",
+      expect.stringContaining("sub2api-claude/claude-opus-5-5"),
+    );
+    expect(trigger).toHaveAttribute(
+      "title",
+      expect.stringContaining("Claude Code"),
+    );
   });
   it("keeps one summary entry and saves only after confirming the full dialog", async () => {
     const updateTenantAgent = vi.fn(({ body }: { body: unknown }) => ({

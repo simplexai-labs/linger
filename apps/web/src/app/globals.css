@@ -3556,6 +3556,7 @@ input:focus-visible + .select-pill {
   top: 50%;
   right: 4px;
   opacity: 0;
+  pointer-events: none;
   translate: 0 -50%;
   scale: 0.92;
   transition:
@@ -3570,7 +3571,12 @@ input:focus-visible + .select-pill {
   )
   > .row-reveal-action {
   opacity: 1;
+  pointer-events: auto;
   scale: 1;
+}
+
+.group:not(.workspace-file-row):focus-within > .row-reveal-action {
+  pointer-events: auto;
 }
 
 .group:not(.workspace-file-row):has(> .row-reveal-action):is(
@@ -3610,6 +3616,32 @@ input:focus-visible + .select-pill {
 }
 
 @media (hover: none) {
+  .group:not(.workspace-file-row):not(.wiki-generated-row):has(
+      > .row-reveal-action
+    ) {
+    display: flex;
+    align-items: center;
+  }
+
+  .group:not(.workspace-file-row):not(.wiki-generated-row):has(
+      > .row-reveal-action
+    )
+    > :first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .group:not(.workspace-file-row):not(.wiki-generated-row)
+    > .row-reveal-action {
+    position: static;
+    translate: none;
+    scale: 1;
+    opacity: 1;
+    pointer-events: auto;
+    flex-shrink: 0;
+    padding-right: 4px;
+  }
+
   .wiki-generated-row.group > .wiki-display-actions {
     pointer-events: auto;
     opacity: 1;

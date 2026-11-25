@@ -405,6 +405,24 @@ describe("Room navigation", () => {
       screen.queryByRole("link", { name: "Dashboard" }),
     ).not.toBeInTheDocument();
   });
+
+  it("aligns Search and Close on one mobile drawer header row with Pocket Notes and Meetings below", async () => {
+    const fixture = await navigationFixture();
+
+    renderNavigation(fixture, new QueryClient());
+
+    const navigation = screen.getByRole("navigation", {
+      name: "Room navigation",
+    });
+    expect(navigation).toHaveClass("max-md:flex-1", "max-md:w-auto");
+    const search = within(navigation).getByRole("button", { name: "Search" });
+    const close = within(navigation).getByRole("button", {
+      name: "Close Room navigation",
+    });
+    expect(search.parentElement).toBe(close.parentElement);
+    expect(close).toHaveClass("shrink-0");
+    expect(navigation.querySelector(".room-nav-controls")).toBeNull();
+  });
 });
 
 async function navigationFixture() {

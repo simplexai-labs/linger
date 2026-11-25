@@ -140,6 +140,9 @@ export default function PocketNotePanel({
   const firstPage = notes.data?.pages[0];
   const items = notes.data?.pages.flatMap((page) => page.items) ?? [];
   const today = firstPage?.today;
+  const displayToday = today
+    ? resolvePocketNoteTodayDisplayDate(today)
+    : undefined;
   const todayNote = items.find((item) => item.date === today);
 
   return createPortal(
@@ -173,12 +176,12 @@ export default function PocketNotePanel({
         <TodayPocketNote
           anotherMeRoomId={anotherMeRoomId}
           closeGuard={closeGuard}
+          displayToday={displayToday ?? today}
           initialText={todayNote?.text ?? ""}
           key={today}
           onClose={close}
           onShowAll={() => setView({ kind: "all" })}
           tenantId={tenantId}
-          today={today}
         />
       ) : (
         <PastPocketNote
@@ -195,19 +198,19 @@ export default function PocketNotePanel({
 function TodayPocketNote({
   anotherMeRoomId,
   closeGuard,
+  displayToday,
   initialText,
   onClose,
   onShowAll,
   tenantId,
-  today,
 }: {
   anotherMeRoomId?: string;
   closeGuard: RefObject<CloseGuard | undefined>;
+  displayToday: string;
   initialText: string;
   onClose: () => void;
   onShowAll: () => void;
   tenantId: string;
-  today: string;
 }) {
   const t = useT();
   const { client } = useTeamHubRuntime();
@@ -385,7 +388,7 @@ function TodayPocketNote({
         }
         onClose={onClose}
         subtitle={status}
-        title={t(m.todayTitle, { date: formatPocketNoteDate(today) })}
+        title={t(m.todayTitle, { date: formatPocketNoteDate(displayToday) })}
       />
       <div className="relative flex min-h-0 flex-1 flex-col">
         {dictating ? (
@@ -726,8 +729,14 @@ function usePanelPosition(
       const trigger = anchorRef.current?.getBoundingClientRect();
       if (!trigger) return;
       const height = 440;
+      // Match the sidebar's rendered width when it is wider than the minimum
+      // popover width so no slivers of the Another Me card or header controls
+      // peek out behind the popover's right edge.
+      const preferredWidth = sidebar
+        ? Math.max(panelWidth, Math.round(sidebar.width))
+        : panelWidth;
       const width = Math.min(
-        panelWidth,
+        preferredWidth,
         Math.max(240, window.innerWidth - panelGap * 2),
       );
       const preferredLeft = sidebar ? sidebar.left : trigger.left;
@@ -748,7 +757,43 @@ function usePanelPosition(
   return position;
 }
 
-/** "2026-09-30" -> "Sep 30"; TeamHub already chose the page day. */
+/** Formats a Date as a local calendar YYYY-MM-DD key without UTC conversion. */
+export function localCalendarDateKey(now: Date = new Date()): string {
+  const year = String(now.getFullYear()).padStart(4, "0");
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * TeamHub may report `today` in the server's timezone (typically UTC), which
+ * can lag or lead the user's local calendar day by one day around midnight.
+ * Prefer the browser's local calendar day whenever it is within the ±1 day
+ * timezone window of the server value so Pocket Notes matches the chat timeline.
+ */
+export function resolvePocketNoteTodayDisplayDate(
+  serverToday: string,
+  now: Date = new Date(),
+): string {
+  const localToday = localCalendarDateKey(now);
+  const parsedServer = parseCalendarDayUtcMs(serverToday);
+  const parsedLocal = parseCalendarDayUtcMs(localToday);
+  if (parsedServer === null || parsedLocal === null) return localToday;
+  const dayDelta = Math.abs(parsedLocal - parsedServer) / 86_400_000;
+  return dayDelta <= 1 ? localToday : serverToday;
+}
+
+function parseCalendarDayUtcMs(value: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const ms = Date.UTC(year, month - 1, day);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** "2026-09-30" -> "Sep 30". */
 function formatPocketNoteDate(date: string) {
   const [year, month, day] = date.split("-").map(Number);
   return new Intl.DateTimeFormat(formatLocale(), {

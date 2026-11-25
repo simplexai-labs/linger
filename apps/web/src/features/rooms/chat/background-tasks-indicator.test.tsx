@@ -17,6 +17,7 @@ import {
   BackgroundTasksPill,
   runningFor,
 } from "./background-tasks-indicator";
+import { JumpToLatestButton } from "./jump-to-latest-button";
 
 const now = Date.parse("2026-10-28T14:31:00Z");
 
@@ -76,6 +77,28 @@ describe("BackgroundTasksPill", () => {
     expect(
       screen.getByRole("button", { name: "1 task running in the background" }),
     ).toBeVisible();
+  });
+
+  it("elevates above an active streaming dock and coordinates JumpToLatestButton offsets", () => {
+    const { container } = render(
+      <>
+        <BackgroundTasksPill elevated now={now} tasks={tasks.slice(0, 1)} />
+        <JumpToLatestButton
+          agentWorking={false}
+          bottomOffset="stacked"
+          onClick={vi.fn()}
+        />
+      </>,
+    );
+    const pillContainer = container.querySelector(
+      "[data-background-tasks-pill]",
+    );
+    expect(pillContainer).toHaveClass("bottom-10");
+    const jump = screen.getByRole("button", {
+      name: "Jump to latest messages",
+    });
+    expect(jump).toHaveAttribute("data-bottom-offset", "stacked");
+    expect(jump).toHaveClass("bottom-20");
   });
 });
 

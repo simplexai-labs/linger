@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -812,6 +813,8 @@ describe("MessageComposer", () => {
     expect(options).toHaveLength(2);
     expect(options[0]).toHaveAttribute("aria-selected", "true");
     expect(options[1]).toHaveAttribute("aria-selected", "false");
+    // Agent rows render the right-side "Agent" role badge once without duplicating it as a subtitle.
+    expect(within(options[0]!).getAllByText("Agent")).toHaveLength(1);
 
     fireEvent.keyDown(editor, { key: "ArrowDown" });
     expect(options[0]).toHaveAttribute("aria-selected", "false");
@@ -832,6 +835,14 @@ describe("MessageComposer", () => {
       files: [],
       mentions: [alice],
     });
+  });
+
+  it("keeps the proxy-triggered file input out of Tab order and the accessibility tree", () => {
+    render(<MessageComposer attachmentEnabled onSend={vi.fn()} />);
+    const fileInput = screen.getByLabelText("Choose message attachments");
+    expect(fileInput).toHaveAttribute("aria-hidden", "true");
+    expect(fileInput).toHaveAttribute("tabindex", "-1");
+    expect(fileInput).toHaveClass("hidden");
   });
 
   it("keeps every Room member reachable when the list exceeds eight", () => {

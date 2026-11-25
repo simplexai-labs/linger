@@ -265,53 +265,55 @@ export function RoomCreateMembers({
                 </button>
               </div>
             ) : null}
-            {(["human", "agent"] as const).map((kind) => (
-              <section
-                aria-label={t(
-                  kind === "human"
-                    ? agentInfoMessages.human
-                    : agentInfoMessages.agent,
-                )}
-                key={kind}
-              >
-                <h4 className="px-2 pb-1 pt-2 text-xs text-muted-foreground">
-                  {t(
+            {(["human", "agent"] as const)
+              .filter((kind) => matches[kind].length > 0)
+              .map((kind) => (
+                <section
+                  aria-label={t(
                     kind === "human"
                       ? agentInfoMessages.human
                       : agentInfoMessages.agent,
                   )}
-                </h4>
-                {matches[kind].map((actor) => {
-                  const checked = selected.some(
-                    (member) => member.id === actor.id,
-                  );
-                  return (
-                    <button
-                      aria-pressed={checked}
-                      className="flex min-h-[33px] w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:opacity-50"
-                      data-member-option
-                      disabled={
-                        disabled || (!checked && selected.length >= 100)
-                      }
-                      key={actor.id}
-                      onClick={() => toggle(actor)}
-                      type="button"
-                    >
-                      <ActorAvatar
-                        actorId={actor.id}
-                        kind={kind}
-                        name={actor.display_name}
-                        size="micro"
-                      />
-                      <span className="min-w-0 flex-1 truncate">
-                        {actor.display_name}
-                      </span>
-                      {checked ? <Icon icon={Tick02Icon} size={14} /> : null}
-                    </button>
-                  );
-                })}
-              </section>
-            ))}
+                  key={kind}
+                >
+                  <h4 className="px-2 pb-1 pt-2 text-xs text-muted-foreground">
+                    {t(
+                      kind === "human"
+                        ? agentInfoMessages.human
+                        : agentInfoMessages.agent,
+                    )}
+                  </h4>
+                  {matches[kind].map((actor) => {
+                    const checked = selected.some(
+                      (member) => member.id === actor.id,
+                    );
+                    return (
+                      <button
+                        aria-pressed={checked}
+                        className="flex min-h-[33px] w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:opacity-50"
+                        data-member-option
+                        disabled={
+                          disabled || (!checked && selected.length >= 100)
+                        }
+                        key={actor.id}
+                        onClick={() => toggle(actor)}
+                        type="button"
+                      >
+                        <ActorAvatar
+                          actorId={actor.id}
+                          kind={kind}
+                          name={actor.display_name}
+                          size="micro"
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {actor.display_name}
+                        </span>
+                        {checked ? <Icon icon={Tick02Icon} size={14} /> : null}
+                      </button>
+                    );
+                  })}
+                </section>
+              ))}
             {!loading &&
             !failed &&
             !matches.human.length &&

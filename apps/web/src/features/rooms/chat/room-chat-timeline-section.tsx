@@ -5,8 +5,12 @@ import { useT } from "@/i18n/use-translation";
 
 import { chatMessages } from "./chat.messages";
 
-import { JumpToLatestButton } from "./jump-to-latest-button";
+import {
+  JumpToLatestButton,
+  type JumpToLatestOffset,
+} from "./jump-to-latest-button";
 import { MessageTimeline } from "./message-timeline";
+import { useRoomBackgroundTasks } from "./use-room-background-tasks";
 import type { RoomChatData } from "./use-room-chat-data";
 import type { RoomChatConversationState } from "./use-room-chat-conversation-state";
 import type { RoomChatTimelineActions } from "./use-room-chat-timeline-actions";
@@ -25,12 +29,15 @@ export function RoomChatTimelineSection({
 }: RoomChatTimelineSectionProps) {
   const {
     actorItems,
+    client,
     linkedInTimeline,
     linkedMessage,
     linkedMessageId,
     members,
     messages,
     navigation,
+    room,
+    roomId,
     setForwardMessage,
     tenantId,
   } = data;
@@ -39,6 +46,7 @@ export function RoomChatTimelineSection({
     conversation,
     currentActorId,
     delivery,
+    dock,
     documentMetadata,
     documentTitles,
     interactions,
@@ -49,10 +57,27 @@ export function RoomChatTimelineSection({
     timeline,
     voiceLiveDraft,
   } = state;
+  const backgroundTasks = useRoomBackgroundTasks({
+    client,
+    roomId: room.participation === "left" ? "" : roomId,
+    tenantId,
+  });
+  const hasStreamingDock =
+    room.participation !== "left" &&
+    (Boolean(dock.typingAgent) || (dock.runStatuses?.length ?? 0) > 0);
+  const hasBackgroundTasks =
+    room.participation !== "left" && backgroundTasks.length > 0;
+  const jumpButtonOffset: JumpToLatestOffset =
+    hasStreamingDock && hasBackgroundTasks
+      ? "stacked"
+      : hasStreamingDock || hasBackgroundTasks
+        ? "raised"
+        : "default";
   return (
     <RoomTimelineViewport
       agentWorking={conversation.streamingRunStatuses.some(isRunWorking)}
       awayFromLatest={timeline.awayFromLatest}
+      jumpButtonOffset={jumpButtonOffset}
       onJumpToLatest={timeline.scrollToLatest}
       actorDisplayNames={actions.actorDisplayNames}
       canLoadOlder={messages.hasNextPage}
@@ -134,6 +159,7 @@ type RoomTimelineViewportProps = ComponentProps<typeof MessageTimeline> & {
   agentWorking: boolean;
   awayFromLatest: boolean;
   initialScrollReady: boolean;
+  jumpButtonOffset: JumpToLatestOffset;
   onJumpToLatest: () => void;
   viewportOnScroll: NonNullable<ComponentProps<"div">["onScroll"]>;
   viewportRef: ComponentProps<"div">["ref"];
@@ -143,6 +169,7 @@ function RoomTimelineViewport({
   agentWorking,
   awayFromLatest,
   initialScrollReady,
+  jumpButtonOffset,
   onJumpToLatest,
   viewportOnScroll,
   viewportRef,
@@ -166,6 +193,7 @@ function RoomTimelineViewport({
       {awayFromLatest ? (
         <JumpToLatestButton
           agentWorking={agentWorking}
+          bottomOffset={jumpButtonOffset}
           onClick={onJumpToLatest}
         />
       ) : null}

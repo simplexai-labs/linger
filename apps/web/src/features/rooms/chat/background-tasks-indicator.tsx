@@ -43,7 +43,8 @@ export function BackgroundTasksIndicator({
     <>
       {tasks.length ? (
         // Floats over the bottom of the timeline instead of pushing the composer.
-        <div className="relative h-0">
+        // Elevates above AgentStreamingStatusDock when that sibling dock is rendered.
+        <div className="relative h-0 [&:has(+div_[data-testid='agent-streaming-status-dock'])]:[--bg-tasks-bottom:2.5rem]">
           <BackgroundTasksPill
             onCancel={cancel}
             onOpen={setOpened}
@@ -67,11 +68,14 @@ export function BackgroundTasksIndicator({
 }
 
 export function BackgroundTasksPill({
+  elevated = false,
   now = Date.now(),
   onCancel,
   onOpen,
   tasks,
 }: {
+  /** Raises the pill above an active streaming status dock below it. */
+  elevated?: boolean;
   now?: number;
   /** Stops one Task; it settles once the Task has left the list. */
   onCancel?: (taskId: string) => Promise<void>;
@@ -101,7 +105,11 @@ export function BackgroundTasksPill({
   const count = tasks.length;
   return (
     <div
-      className="absolute bottom-2 left-1/2 z-20 -translate-x-1/2"
+      className={cn(
+        "absolute left-1/2 z-20 -translate-x-1/2",
+        elevated ? "bottom-10" : "bottom-[var(--bg-tasks-bottom,0.5rem)]",
+      )}
+      data-background-tasks-pill
       ref={root}
     >
       {open ? (
