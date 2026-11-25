@@ -559,8 +559,16 @@ archive. On every install and start, whether or not a voice key is saved,
 Native extracts the archive into
 `tools/native/components`, puts its `bin` first on the services' `PATH`
 (TeamHub and the voice workers run `ffmpeg`/`ffprobe` from it) and runs
-`livekit-server` as the `livekit` Native service: loopback only, HTTP and
-WebSocket on one free port and media on one free UDP port, both kept with
+`livekit-server` as the `livekit` Native service: HTTP and WebSocket signalling
+on one free `127.0.0.1` port and media on one free UDP port (bound to
+`127.0.0.1` on macOS and Linux, and to local interfaces alongside `127.0.0.1`
+with ICE-Lite on Windows because Windows blocks cross-scope UDP between
+WebRTC's non-loopback sockets and `127.0.0.1`; ICE-Lite keeps LiveKit from
+adding default public STUN servers when `node_ip` is unset, while signalling
+stays loopback-only so LAN peers cannot obtain ICE credentials; binding
+non-loopback UDP on Windows can trigger a Windows Defender Firewall prompt and
+single-port UDPMux snapshots local interfaces at startup so network changes
+require restarting LiveKit), both kept with
 the generated API key and secret in the owner-only `livekit.env` of the
 instance, logs in `native/logs/livekit.log`. ICE over TCP stays off because
 LiveKit binds it on every interface. Without the tools for the computer, or
