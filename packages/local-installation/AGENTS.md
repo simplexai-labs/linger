@@ -32,8 +32,10 @@ first, emits Win32 P/Invoke stubs in memory via `Reflection.Emit` instead of
 compiling C# through `Add-Type`, and reports the offending ancestor path and SID
 or sanitized exception/worker diagnostics (never raw stderr prose). A refusal leaves the installer as its code and reason
 (`windowsPrivateRefusal`), never as its words: in the `startFailure` line on
-stdout when the installer manager cannot start, and in the `--user-keys`
-outcome. The Desktop setup page branches on `UNSAFE_PARENT_ACCESS` to say where
+stdout when the installer manager cannot start, in the `--user-keys` outcome,
+and in the `--inspect` failure outcome (`inspectSetup` propagates the
+`WINDOWS_PRIVATE_PATH_UNSAFE` refusal instead of wrapping it as
+`LOCALMODELS_SETUP_UNAVAILABLE`). The Desktop setup page branches on `UNSAFE_PARENT_ACCESS` to say where
 to install instead. Repair skips propagation when the protected DACL already
 grants inheritable FullControl to the owner and SYSTEM on a directory, or
 FullControl to both on a file. Private paths with partial rights still receive
@@ -242,7 +244,8 @@ The local source is set only by a start whose request chose local models
 (`setupChoice` or a plan approval); a restart or version upgrade from the saved
 choice keeps a source the person switched to on the Models page (leaving the
 local model stack stopped while `model-source.json` names `byok` or
-`subscription`).
+`subscription`, omitting `--main-plan` from `prepareFoundationServices`, and
+keeping the active BYOK or subscription runtime for `prepareModelGateway`).
 The installer reads `model-source.json` (`readByokEnvironment`) but never
 writes it. When a deployed local-model stack's binding reports a stopped
 service or gateway (`deployment-unavailable` or `gateway-unavailable`) and its

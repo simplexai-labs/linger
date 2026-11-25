@@ -4,11 +4,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execute = promisify(execFile);
 
-it(
+// A Node child on Windows keeps its inherited stdin pipe open after closing fd 0
+// or destroying process.stdin, so the fixture cannot make the write fail there.
+it.skipIf(process.platform === "win32")(
   "a closed native login stdin reports failure without crashing the manager and permits retry",
   { timeout: 15000 },
   async () => {
@@ -78,7 +81,11 @@ try {
       );
       const result = await execute(
         process.execPath,
-        ["--import", createRequire(import.meta.url).resolve("tsx"), program],
+        [
+          "--import",
+          pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
+          program,
+        ],
         { timeout: 12000, windowsHide: true },
       );
       expect(result.stdout.trim()).toBe("manager survived and retried");

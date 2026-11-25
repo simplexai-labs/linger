@@ -212,6 +212,7 @@ export const runnerGatewayEnvelopeSchema = {
         "local_models_engine",
         "local_models_concurrency_probe",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
       ],
     },
@@ -4671,7 +4672,7 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/Id",
         },
         runtime_type: {
-          enum: ["codex", "claude", "pi"],
+          enum: ["codex", "claude", "pi", "antigravity"],
         },
         execution_context_key: {
           $ref: "#/$defs/ExecutionContextKey",
@@ -5785,6 +5786,7 @@ export const runnerGatewayEnvelopeSchema = {
             "rate_limited",
             "model_unavailable",
             "local_model_unavailable",
+            "model_gateway_unavailable",
             "context_too_long",
             "model_service_error",
             "timeout",

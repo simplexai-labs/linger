@@ -255,6 +255,38 @@ describe("RunnerGateway", () => {
     }
   });
 
+  it("records a Runtime update at the Gateway's time, not the Computer's", async () => {
+    const gateway = createTestRunnerGateway({ heartbeatIntervalMs: 60_000 });
+    const touch = vi.spyOn(testRegistryOf(gateway), "touch");
+    const connection = await gateway.acceptConnection(
+      authenticatedPrincipal(),
+      hello(),
+      new RecordingPeer(),
+    );
+    try {
+      const before = Date.now();
+      // A Computer whose clock runs behind stamps an older time than the
+      // Gateway's last heartbeat, which TeamHub would ignore.
+      await connection.receive({
+        type: "runner.runtime_diagnostics",
+        protocol_version: "2",
+        runner_id: "runner-local",
+        sent_at: "2001-01-01T00:00:00.000Z",
+        revision: 2,
+        runtime_diagnostics: runtimeDiagnostics({
+          ready: ["codex", "antigravity"],
+        }),
+      });
+      const recorded = touch.mock.calls
+        .map(([, update]) => update)
+        .filter((update) => update.runtimeDiagnostics !== undefined)
+        .at(-1);
+      expect(Date.parse(recorded?.seenAt ?? "")).toBeGreaterThanOrEqual(before);
+    } finally {
+      connection.disconnect();
+    }
+  });
+
   it("proves the Daemon Identity and names Runtime Registrations on every hello", async () => {
     const verify = vi.fn();
     const gateway = createTestRunnerGateway({

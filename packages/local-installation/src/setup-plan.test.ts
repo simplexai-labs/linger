@@ -1,6 +1,7 @@
 import path from "node:path";
 import { expect, it, vi } from "vitest";
 import { inspectSetup } from "./setup-plan.js";
+import { WINDOWS_PRIVATE_PATH_UNSAFE } from "./windows-private.js";
 
 const upstream = (available = true) => ({
   schema: "localmodels.setup-report/v1",
@@ -418,4 +419,150 @@ it("checks the installation target while keeping tool state in the existing home
     ]),
     expect.anything(),
   );
+});
+
+it("preserves WINDOWS_PRIVATE_PATH_UNSAFE refusals instead of wrapping them as LOCALMODELS_SETUP_UNAVAILABLE", async () => {
+  const refusalError = Object.assign(
+    new Error(
+      "Windows private path validation failed: C:\\Shared\\Linger is inside a folder other accounts on this computer can rename or replace. Use a current-user owned local directory without links or shared access.",
+    ),
+    {
+      code: WINDOWS_PRIVATE_PATH_UNSAFE,
+      reason: "UNSAFE_PARENT_ACCESS",
+      path: "C:\\Shared\\Linger",
+    },
+  );
+  await expect(
+    inspectSetup({
+      localmodels: vi.fn(async () => {
+        throw refusalError;
+      }),
+    }),
+  ).rejects.toBe(refusalError);
+});
+
+it("preserves upstream stack.upgrade guidance when freeing memory unlocks a stronger model", async () => {
+  const base = upstream();
+  const report = await inspectSetup({
+    localmodels: runner({
+      ...base,
+      facts: {
+        ...base.facts,
+        platform: "darwin",
+        arch: "arm64",
+        ram: { total_bytes: 24 * 1024 ** 3 },
+        gpus: [],
+      },
+      stack: {
+        ...base.stack,
+        available: true,
+        state: "ready",
+        hardwareCapable: true,
+        plan: {
+          llm: {
+            model: { id: "spark-x2.6-4b-q4km" },
+            placement: { gpus: [] },
+          },
+          budget: {
+            download_bytes: 2_800_000_000,
+            disk_needed_bytes: 3_100_000_000,
+            ram_needed_bytes: 5_000_000_000,
+          },
+        },
+        upgrade: {
+          plan: {
+            llm: {
+              model: { id: "inkling-2-mini-iq3xxs" },
+              placement: { gpus: [] },
+            },
+            budget: {
+              download_bytes: 11_800_000_000,
+              disk_needed_bytes: 12_500_000_000,
+              ram_needed_bytes: 14_900_000_000,
+            },
+          },
+          summary: {
+            llm: "inkling-2-mini-iq3xxs",
+            llmName: "Inkling 2 Mini (IQ3_XXS)",
+            downloadBytes: 11_800_000_000,
+            diskBytes: 12_500_000_000,
+            memoryBytes: 14_900_000_000,
+          },
+          reasons: [
+            {
+              code: "free-memory-required",
+              message:
+                "Close other apps to free RAM for Inkling 2 Mini (IQ3_XXS).",
+              freeBytes: 12_000_000_000,
+              requiredBytes: 14_900_000_000,
+            },
+            {
+              code: "gpu-memory-required",
+              message: "Invalid count should be stripped.",
+              gpuIndex: 0,
+              freeBytes: -5,
+              requiredBytes: 10,
+            },
+          ],
+          gpuApps: [
+            { name: "chrome.exe", pids: [101, -1, 202], bytes: 1_500_000_000 },
+            { name: "", pids: [303], bytes: 100 },
+            { name: "bad.exe", pids: [404], bytes: -1 },
+          ],
+        },
+      },
+    }),
+  });
+  expect(report.localModels.estimate.model).toBe("spark-x2.6-4b-q4km");
+  expect(report.localModels.upgrade).toEqual({
+    modelName: "Inkling 2 Mini (IQ3_XXS)",
+    selectedGpuIndex: null,
+    estimate: {
+      model: "inkling-2-mini-iq3xxs",
+      downloadBytes: 11_800_000_000,
+      diskBytes: 12_500_000_000,
+      memoryBytes: 14_900_000_000,
+      durationSeconds: null,
+      assumption: "Resource plan supplied by localmodels; duration is unknown.",
+    },
+    reasons: [
+      {
+        code: "free-memory-required",
+        message: "Close other apps to free RAM for Inkling 2 Mini (IQ3_XXS).",
+        freeBytes: 12_000_000_000,
+        requiredBytes: 14_900_000_000,
+      },
+      {
+        code: "gpu-memory-required",
+        message: "Invalid count should be stripped.",
+        gpuIndex: 0,
+        requiredBytes: 10,
+      },
+    ],
+    gpuApps: [{ name: "chrome.exe", pids: [101, 202], bytes: 1_500_000_000 }],
+  });
+});
+
+it("drops malformed or incomplete stack.upgrade hints without failing inspection", async () => {
+  const base = upstream();
+  for (const badUpgrade of [
+    null,
+    {},
+    { summary: { llm: "inkling-2-mini-iq3xxs" }, reasons: [] },
+    {
+      summary: { llm: "" },
+      reasons: [{ code: "free-memory-required", message: "Close apps." }],
+    },
+  ]) {
+    const report = await inspectSetup({
+      localmodels: runner({
+        ...base,
+        stack: {
+          ...base.stack,
+          upgrade: badUpgrade,
+        },
+      }),
+    });
+    expect(report.localModels).not.toHaveProperty("upgrade");
+  }
 });

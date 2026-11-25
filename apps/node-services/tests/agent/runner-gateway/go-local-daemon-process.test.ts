@@ -287,7 +287,7 @@ const publishContextView = async (
 };
 
 processTest(
-  "runs Memory and Wiki on a Pi-only Daemon with whatever model Pi defaults to",
+  "runs Memory and Wiki on a Pi-only Daemon using an Another Me's configured model or Pi's catalog default",
   async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "go-daemon-pi-model-"));
     const computerId = "computer-pi-background";
@@ -298,6 +298,10 @@ processTest(
     const anotherMe = {
       tenantId: owner.tenantId,
       agentActorId: "actor-pi-background",
+    };
+    const ownKeyAnotherMe = {
+      tenantId: owner.tenantId,
+      agentActorId: "actor-pi-own-key",
     };
     const piModel = "fixture-local/model";
     const token = runnerToken(computerId, owner.tenantId, owner.ownerActorId);
@@ -315,9 +319,19 @@ processTest(
           agentId: "agent-pi-background",
           agentActorId: anotherMe.agentActorId,
         },
+        {
+          tenantId: owner.tenantId,
+          ownerActorId: "human-pi-own-key",
+          computerId,
+          runtimeType: "pi",
+          agentId: "agent-pi-own-key",
+          agentActorId: ownKeyAnotherMe.agentActorId,
+          model: "fixture-own-key/hosted",
+        },
       ],
     });
     const inputs: string[] = [];
+    const authHeaders: Array<string | undefined> = [];
     const sessionErrors: string[] = [];
     const server = createServer((request, response) => {
       if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
@@ -330,6 +344,7 @@ processTest(
       });
       request.once("end", () => {
         inputs.push(input);
+        authHeaders.push(request.headers.authorization);
         const content = input.includes("Memory fixture evidence")
           ? '{"answer":"memory"}'
           : "Wiki fixture reply.";
@@ -483,17 +498,15 @@ processTest(
       ).resolves.toEqual({ output: "Wiki fixture reply.", model: piModel });
       expect(inputs).toHaveLength(2);
       expect(inputs[1]).toContain("Wiki fixture evidence");
-      // Background calls follow Pi's default, whichever provider serves it.
-      await writeFile(
-        path.join(profile, "settings.json"),
-        JSON.stringify({
-          defaultProvider: "fixture-own-key",
-          defaultModel: "hosted",
-        }),
-      );
+      // Configured Another Me placements override Pi's default model and switch providers.
       await expect(
         model.chain(
-          { kind: "wiki", key: "fixture-own-key", anotherMe, signal },
+          {
+            kind: "wiki",
+            key: "fixture-own-key",
+            anotherMe: ownKeyAnotherMe,
+            signal,
+          },
           (chain) => chain.text({ step: "write", input: "Own key evidence" }),
         ),
       ).resolves.toEqual({
@@ -502,6 +515,11 @@ processTest(
       });
       expect(inputs).toHaveLength(3);
       expect(inputs[2]).toContain("Own key evidence");
+      expect(authHeaders).toEqual([
+        "Bearer fixture",
+        "Bearer fixture",
+        "Bearer fixture-own-key",
+      ]);
       expect(inputs.every((input) => !input.includes('"tools":[{'))).toBe(true);
     } finally {
       model.close();
@@ -1948,7 +1966,7 @@ processTest(
       await writeFile(
         codex,
         `#!/bin/sh
-if [ "$1" = "--version" ]; then echo "codex-cli 0.100.0"; exit 0; fi
+if [ "$1" = "--version" ]; then echo "codex-cli 0.171.0"; exit 0; fi
 case "$CODEX_HOME" in
   */runtime-homes/codex/*) ;;
   *)
@@ -3970,7 +3988,7 @@ const observeOperationEvents = (operation: RunnerOperation) => {
 };
 
 const fakeCodexScript = (hangMarker: string): string => `#!/bin/sh
-if [ "$1" = "--version" ]; then echo "codex-cli 0.100.0"; exit 0; fi
+if [ "$1" = "--version" ]; then echo "codex-cli 0.171.0"; exit 0; fi
 case "$CODEX_HOME" in
   */runtime-homes/codex/*) ;;
   *)
@@ -4064,8 +4082,14 @@ if [ -f '${hangMarker}' ]; then
   exit 0
 fi
 if [ "$steer_mode" = "1" ]; then
-  read_request
-  reply '{"turnId":"turn-go-canary"}'
+  if read_request; then
+    reply '{"turnId":"turn-go-canary"}'
+    client_id=$(printf '%s' "$line" | /usr/bin/sed -n 's/.*"clientUserMessageId":"\\([^"]*\\)".*/\\1/p')
+    if [ -n "$client_id" ]; then
+      printf '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-go-canary","turnId":"turn-go-canary","item":{"type":"userMessage","id":"user-%s","clientId":"%s","content":[]}}}\\n' "$client_id" "$client_id"
+      printf '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-go-canary","turnId":"turn-go-canary","item":{"type":"userMessage","id":"user-%s","clientId":"%s","content":[]}}}\\n' "$client_id" "$client_id"
+    fi
+  fi
 fi
 if [ -f "$0.name-delay" ]; then
   read_thread_name

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Delete02Icon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 
 import { Button } from "@/components/ui/button";
@@ -32,9 +32,6 @@ export function RoomDeleteDialog({
   const t = useT();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const confirmationInputRef = useRef<HTMLInputElement>(null);
-  const formId = useId();
-  const [confirmation, setConfirmation] = useState("");
   const mountedRef = useRef(false);
   const deletionConfirmedRef = useRef(false);
 
@@ -87,22 +84,24 @@ export function RoomDeleteDialog({
       ? deleteRoom.error.message
       : t(m.deleteUnconfirmed)
     : undefined;
-
-  useEffect(() => {
-    confirmationInputRef.current?.focus();
-  }, []);
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (confirmation !== room.name) {
-      return;
-    }
-    deleteRoom.mutate();
-  }
+  const descriptionMessage =
+    room.kind === "direct"
+      ? m.deleteDirectRoomDescription
+      : m.deleteRoomDescription;
 
   return (
     <ModalDialog
-      description={t(m.deleteRoomDescription)}
+      description={
+        <RichMessage
+          message={descriptionMessage}
+          tags={{
+            name: (text) => (
+              <strong className="font-semibold text-foreground">{text}</strong>
+            ),
+          }}
+          values={{ name: room.name }}
+        />
+      }
       onClose={() => {
         if (!deleteRoom.isPending) {
           onClose();
@@ -117,11 +116,9 @@ export function RoomDeleteDialog({
           </Button>
           <Button
             data-voice-risk="never"
-            disabled={confirmation !== room.name}
-            form={formId}
             loading={deleteRoom.isPending}
+            onClick={() => deleteRoom.mutate()}
             tone="danger"
-            type="submit"
           >
             <Icon icon={Delete02Icon} size={16} />
             {t(m.deleteRoom)}
@@ -129,32 +126,11 @@ export function RoomDeleteDialog({
         </>
       }
     >
-      <form className="px-5 py-4" id={formId} onSubmit={handleSubmit}>
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium text-app-ink">
-            <RichMessage
-              message={m.typeToConfirm}
-              tags={{ name: (text) => <strong>{text}</strong> }}
-              values={{ name: room.name }}
-            />
-          </span>
-          <input
-            aria-label={t(m.confirmationLabel)}
-            autoComplete="off"
-            className="ui-field-control w-full"
-            disabled={deleteRoom.isPending}
-            onChange={(event) => setConfirmation(event.target.value)}
-            ref={confirmationInputRef}
-            value={confirmation}
-          />
-        </label>
-
-        {failure ? (
-          <p className="mt-3 text-sm text-app-danger" role="alert">
-            {failure}
-          </p>
-        ) : null}
-      </form>
+      {failure ? (
+        <p className="px-5 py-4 text-sm text-app-danger" role="alert">
+          {failure}
+        </p>
+      ) : null}
     </ModalDialog>
   );
 }

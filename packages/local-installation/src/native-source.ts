@@ -1215,6 +1215,10 @@ async function runNativeSource(
           signal.throwIfAborted();
           await beforeFoundation?.();
           const prepareLocalStackServices = async () => {
+            const foundationMainPlan =
+              !restoredByok &&
+              !options.byok &&
+              !(!explicitLocal && saved && saved.mode !== "local");
             await timed(
               "Preparing foundation services",
               () =>
@@ -1223,6 +1227,7 @@ async function runNativeSource(
                   signal,
                   onEvent: emit,
                   shareGpu: options.shareGpu,
+                  mainPlan: foundationMainPlan,
                 }),
               { stage: stageForLogs },
             );
@@ -1230,13 +1235,22 @@ async function runNativeSource(
             // sign-in, retires one an earlier release started.
             await prepareModelGateway(
               current,
-              // A restored BYOK source keeps its gateway whatever the saved
-              // choice: a local-models choice would require the local stack.
+              // A restored BYOK or subscription source keeps its own gateway
+              // choice whatever setup-choice.json recorded: a local-models
+              // choice would require the local stack.
               restoredByok
                 ? { runtime: restoredByok.runtime, modelSource: "byok" }
-                : options.byok && choice !== "local-models"
-                  ? { runtime: choice, modelSource: "byok" }
-                  : choice,
+                : options.byok
+                  ? {
+                      runtime:
+                        choice === "local-models"
+                          ? (options.byok.runtime ?? "claude")
+                          : choice,
+                      modelSource: "byok",
+                    }
+                  : !explicitLocal && saved?.mode === "subscription"
+                    ? saved.runtime
+                    : choice,
               {
                 home,
                 signal,

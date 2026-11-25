@@ -40,6 +40,7 @@ export type ServiceFeature =
   | "local_models_engine"
   | "local_models_concurrency_probe"
   | "local_model_unavailable"
+  | "model_gateway_unavailable"
   | "local_models_external_holders";
 export type JsonValue =
   | null
@@ -1010,7 +1011,7 @@ export interface ProviderPrepare {
   connection_epoch: PositiveInteger;
   agent_id: Id;
   workspace_grant_id: Id;
-  runtime_type: "codex" | "claude" | "pi";
+  runtime_type: "codex" | "claude" | "pi" | "antigravity";
   execution_context_key: ExecutionContextKey;
   runtime_instance_id: ExecutionContextKey;
   context_view_ref: ContextViewRef;
@@ -2290,6 +2291,7 @@ export interface RuntimeExecutionFailure {
     | "rate_limited"
     | "model_unavailable"
     | "local_model_unavailable"
+    | "model_gateway_unavailable"
     | "context_too_long"
     | "model_service_error"
     | "timeout"

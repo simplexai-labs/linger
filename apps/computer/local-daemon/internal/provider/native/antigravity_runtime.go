@@ -34,22 +34,31 @@ var antigravityQuietWindow = 15 * time.Second
 // Tests lower it.
 var antigravityBackgroundLimit = 30 * time.Minute
 
-// antigravityRuntime runs each Operation in its own `agy acp` process. The
-// conversation lives in Antigravity's own store and is reopened by id with
-// session/load, so no process is parked between turns.
+// antigravityRuntime manages `agy acp` processes. Residency-capable servers
+// park in antigravityResidents for Room-presence pre-starts and cross-turn
+// reuse; legacy servers run one-shot per Operation.
 type antigravityRuntime struct{ profile Profile }
 
 func newAntigravityRuntime(profile Profile) Runtime { return &antigravityRuntime{profile: profile} }
 
-func (r *antigravityRuntime) Start(ctx context.Context, prompt string, spec RunSpec) (*Run, error) {
-	if spec.PrepareOnly {
-		return nil, errors.New("Antigravity has no provider prepare")
+func antigravityResolveProgram(program string) (string, error) {
+	if program == "" {
+		program = "agy"
 	}
+	if filepath.IsAbs(program) {
+		return program, nil
+	}
+	return exec.LookPath(program)
+}
+
+func antigravityPromptHash(prompt string) string {
+	sum := sha256.Sum256([]byte(prompt))
+	return hex.EncodeToString(sum[:])
+}
+
+func (r *antigravityRuntime) Start(ctx context.Context, prompt string, spec RunSpec) (*Run, error) {
 	if spec.AssignSessionID != "" {
 		return nil, errors.New("Antigravity names its own sessions")
-	}
-	if strings.TrimSpace(prompt) == "" {
-		return nil, errors.New("Antigravity requires a non-empty prompt")
 	}
 	if len(spec.ComputerArgs) > 0 || len(spec.AgentArgs) > 0 {
 		return nil, errors.New("Antigravity accepts no custom launch arguments")
@@ -57,53 +66,211 @@ func (r *antigravityRuntime) Start(ctx context.Context, prompt string, spec RunS
 	if spec.Dir == "" || !filepath.IsAbs(spec.Dir) {
 		return nil, errors.New("Antigravity requires an absolute working directory")
 	}
-	servers, err := acpMCPServers(mcpNamespace(spec.MCPServers))
+	if spec.PrepareOnly {
+		if spec.WarmMCP {
+			return nil, errors.New("Antigravity has no MCP prepare")
+		}
+		program, err := antigravityResolveProgram(r.profile.Program)
+		if err != nil {
+			return nil, err
+		}
+		return r.prestart(ctx, spec, program, antigravityResidentKey(r.profile))
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return nil, errors.New("Antigravity requires a non-empty prompt")
+	}
+	mcpConfig := mcpNamespace(spec.MCPServers)
+	directServers, err := acpMCPServers(mcpConfig)
 	if err != nil {
 		return nil, err
 	}
-	program := r.profile.Program
-	if program == "" {
-		program = "agy"
+	mcpShape, targets, mcpEligible := residentMCPShape(mcpConfig)
+	program, err := antigravityResolveProgram(r.profile.Program)
+	if err != nil {
+		return nil, err
 	}
-	if !filepath.IsAbs(program) {
-		if program, err = exec.LookPath(program); err != nil {
+	key := antigravityResidentKey(r.profile)
+	fence := captureReleaseFence(r.profile)
+	epoch := antigravityResidents.currentEpoch()
+	wantShape := antigravityShapeFor(program, r.profile, spec, mcpShape, mcpEligible)
+
+	if key != "" && antigravityResidents.enabled() {
+		proc, adopted, err := antigravityResidents.take(key, antigravityMismatch(wantShape, spec), r.profile.Logger, spec.Readiness)
+		if err != nil {
+			return nil, err
+		}
+		if proc != nil {
+			run, stale, err := r.reuse(ctx, proc, prompt, spec, mcpConfig, directServers, targets, mcpEligible, wantShape, fence, adopted)
+			if err != nil || !stale {
+				return run, err
+			}
+		}
+	}
+
+	if err := antigravityResidents.stopKey(key, r.profile.Logger, spec.Readiness); err != nil {
+		return nil, err
+	}
+	parkEligible := key != "" && mcpEligible && antigravityResidents.enabled()
+	var front *mcpFront
+	servers := directServers
+	if parkEligible && len(targets) > 0 {
+		if front, err = newMCPFront(); err != nil {
+			return nil, fmt.Errorf("Antigravity MCP front could not start: %w", err)
+		}
+		if err = front.Bind(targets); err != nil {
+			front.Close()
+			return nil, err
+		}
+		rewritten, rewriteErr := front.Rewrite(mcpConfig)
+		if rewriteErr != nil {
+			front.Close()
+			return nil, rewriteErr
+		}
+		if servers, err = acpMCPServers(rewritten); err != nil {
+			front.Close()
 			return nil, err
 		}
 	}
 	var releaseTemp func() error
 	if r.profile.RetainProcessTemp != nil {
 		if releaseTemp, err = r.profile.RetainProcessTemp(); err != nil {
+			front.Close()
 			return nil, fmt.Errorf("Antigravity process temp directory could not be retained: %w", err)
 		}
 	}
 	runCtx, cancel := budgetContext(ctx, spec.Budget)
-	turn := &antigravityTurn{
-		profile: r.profile, spec: spec, runCtx: runCtx, cancel: cancel,
-		events: make(chan Event, antigravityEventBuffer), outcome: make(chan Outcome, 1),
-		tools: map[string]bool{}, requests: newModelRequestClock(GranularityDelta),
-	}
-	proc, err := startACP(profileInvocation(program, nil, r.profile.Env), spec.Dir, r.profile.Logger, turn.handle)
+	proc, err := startACP(profileInvocation(program, nil, r.profile.Env), spec.Dir, r.profile.Logger, nil)
 	if err != nil {
 		cancel()
+		front.Close()
 		if releaseTemp != nil {
 			_ = releaseTemp()
 		}
 		return nil, err
 	}
-	turn.proc = proc
+	proc.res.bind(key, r.profile)
+	proc.res.bindEpoch(epoch)
+	proc.front = front
+	proc.releaseTemp = releaseTemp
+	var parkShape *antigravityShape
+	if parkEligible {
+		parkShape = wantShape
+	}
+	turn := newAntigravityTurn(runCtx, cancel, r.profile, spec, proc, false, false, fence, parkShape)
+	if err := proc.bind(turn); err != nil {
+		cancel()
+		antigravityResidents.retire(proc)
+		return nil, err
+	}
 	spec.Readiness.spawned()
 	spec.Readiness.session(spec.ResumeID != "")
-	go turn.drive(prompt, servers, releaseTemp)
+	go turn.drive(prompt, servers)
 	return &Run{Events: turn.events, Outcome: turn.outcome}, nil
+}
+
+// reuse runs a turn on a taken resident process. stale reports that the
+// process could not be reused and the caller should fall back to a cold spawn.
+func (r *antigravityRuntime) reuse(
+	ctx context.Context, proc *acpProcess, prompt string, spec RunSpec,
+	mcpConfig json.RawMessage, directServers []any, targets map[string]string, mcpEligible bool,
+	wantShape *antigravityShape, fence releaseFence, adopted bool,
+) (run *Run, stale bool, err error) {
+	retireStale := func() (*Run, bool, error) {
+		antigravityResidents.note(proc.res.loggerOr(r.profile.Logger), proc, "recycled", "stale", nil, false)
+		spec.Readiness.recycled("stale", nil)
+		if !antigravityResidents.retire(proc) {
+			return nil, false, errResidentRecycleUnconfirmed
+		}
+		return nil, true, nil
+	}
+	if !proc.alive() {
+		return retireStale()
+	}
+	var servers []any
+	var parkShape *antigravityShape
+	if mcpEligible {
+		parkShape = wantShape
+	}
+	if adopted {
+		switch {
+		case mcpEligible && len(targets) > 0:
+			front, frontErr := newMCPFront()
+			if frontErr != nil {
+				antigravityResidents.retire(proc)
+				return nil, false, fmt.Errorf("Antigravity MCP front could not start: %w", frontErr)
+			}
+			if bindErr := front.Bind(targets); bindErr != nil {
+				front.Close()
+				antigravityResidents.retire(proc)
+				return nil, false, bindErr
+			}
+			rewritten, rewriteErr := front.Rewrite(mcpConfig)
+			if rewriteErr != nil {
+				front.Close()
+				antigravityResidents.retire(proc)
+				return nil, false, rewriteErr
+			}
+			servers, err = acpMCPServers(rewritten)
+			if err != nil {
+				front.Close()
+				antigravityResidents.retire(proc)
+				return nil, false, err
+			}
+			proc.front = front
+		case mcpEligible:
+			servers = []any{}
+		default:
+			servers = directServers
+			parkShape = nil
+		}
+	} else {
+		if len(targets) > 0 {
+			if proc.front == nil {
+				return retireStale()
+			}
+			if err := proc.front.Bind(targets); err != nil {
+				antigravityResidents.retire(proc)
+				return nil, false, err
+			}
+		}
+		servers = nil
+	}
+	runCtx, cancel := budgetContext(ctx, spec.Budget)
+	turn := newAntigravityTurn(runCtx, cancel, r.profile, spec, proc, true, adopted, fence, parkShape)
+	if err := proc.bind(turn); err != nil {
+		cancel()
+		if !adopted {
+			proc.front.Unbind()
+		}
+		return retireStale()
+	}
+	go turn.drive(prompt, servers)
+	return &Run{Events: turn.events, Outcome: turn.outcome}, false, nil
+}
+
+func newAntigravityTurn(
+	runCtx context.Context, cancel context.CancelFunc, profile Profile, spec RunSpec, proc *acpProcess,
+	reused, adopted bool, fence releaseFence, parkShape *antigravityShape,
+) *antigravityTurn {
+	return &antigravityTurn{
+		profile: profile, spec: spec, proc: proc, runCtx: runCtx, cancel: cancel,
+		reused: reused, adopted: adopted, fence: fence, parkShape: parkShape,
+		events: make(chan Event, antigravityEventBuffer), outcome: make(chan Outcome, 1),
+		tools: map[string]bool{}, requests: newModelRequestClock(GranularityDelta),
+	}
 }
 
 // antigravityTurn is the one prompt of an Operation.
 type antigravityTurn struct {
-	profile Profile
-	spec    RunSpec
-	proc    *acpProcess
-	runCtx  context.Context
-	cancel  context.CancelFunc
+	profile   Profile
+	spec      RunSpec
+	proc      *acpProcess
+	runCtx    context.Context
+	cancel    context.CancelFunc
+	reused    bool
+	adopted   bool
+	fence     releaseFence
+	parkShape *antigravityShape
 
 	events       chan Event
 	outcome      chan Outcome
@@ -117,10 +284,13 @@ type antigravityTurn struct {
 	prompting bool
 	// replayedPrompts counts the user prompts session/load replayed.
 	replayedPrompts int
-	sessionID       string
-	textID          string
-	output          strings.Builder
-	tools           map[string]bool
+	// background is set when the turn enters awaitBackground so the process is
+	// never parked with a background continuation in flight.
+	background bool
+	sessionID  string
+	textID     string
+	output     strings.Builder
+	tools      map[string]bool
 	// lastUpdate is when the prompted session last reported anything.
 	lastUpdate time.Time
 }
@@ -137,28 +307,7 @@ func (t *antigravityTurn) emit(event Event) {
 	}
 }
 
-func (t *antigravityTurn) drive(prompt string, servers []any, releaseTemp func() error) {
-	outcome := t.exchange(prompt, servers)
-	if status := interruptedStatus(t.runCtx); status != "" && outcome.Status != statusCompleted {
-		outcome.Status, outcome.FailureCode = status, ""
-		if outcome.Error == "" {
-			outcome.Error = "Antigravity turn was " + status
-		}
-	}
-	if t.proc.stop() {
-		outcome.ExitConfirmed = true
-		if releaseTemp != nil {
-			_ = releaseTemp()
-		}
-	} else {
-		outcome.ExitUnconfirmed = true
-	}
-	if outcome.Status == statusFailed && outcome.Diagnostics.empty() && t.proc.cmd.ProcessState != nil {
-		outcome.Diagnostics = processExitDiagnostics(t.proc.cmd.ProcessState)
-	}
-	t.mu.Lock()
-	outcome.SessionID = t.sessionID
-	t.mu.Unlock()
+func (t *antigravityTurn) finish(outcome Outcome) {
 	t.cancel()
 	t.emitMu.Lock()
 	t.eventsClosed = true
@@ -168,8 +317,62 @@ func (t *antigravityTurn) drive(prompt string, servers []any, releaseTemp func()
 	close(t.outcome)
 }
 
-// exchange opens the session, applies the model selection, and runs the
-// prompt to its stop reason.
+func (t *antigravityTurn) park(outcome Outcome) bool {
+	p := t.proc
+	t.mu.Lock()
+	clean := !t.background && len(t.tools) == 0 && t.sessionID != ""
+	t.mu.Unlock()
+	if outcome.Status != statusCompleted || t.runCtx.Err() != nil || !clean ||
+		p.shape == nil || !p.caps.supportsResidency() || !p.alive() ||
+		!antigravityResidents.enabled() {
+		return false
+	}
+	p.mu.Lock()
+	if t.runCtx.Err() != nil || p.res.isStopping() || p.turn != t {
+		p.mu.Unlock()
+		return false
+	}
+	p.turn = nil
+	p.mu.Unlock()
+	p.front.Unbind()
+	if !antigravityResidents.park(p, t.fence, false, t.profile.Logger, t.spec.Readiness) {
+		return false
+	}
+	t.finish(outcome)
+	return true
+}
+
+func (t *antigravityTurn) drive(prompt string, servers []any) {
+	outcome := t.exchange(prompt, servers)
+	if status := interruptedStatus(t.runCtx); status != "" && outcome.Status != statusCompleted {
+		outcome.Status, outcome.FailureCode = status, ""
+		if outcome.Error == "" {
+			outcome.Error = "Antigravity turn was " + status
+		}
+	}
+	t.mu.Lock()
+	outcome.SessionID = t.sessionID
+	t.mu.Unlock()
+	if t.park(outcome) {
+		return
+	}
+	t.proc.unbind(t)
+	confirmed := t.proc.stop()
+	outcome.ExitConfirmed = confirmed
+	outcome.ExitUnconfirmed = !confirmed
+	if confirmed {
+		antigravityResidents.forget(t.proc)
+	} else {
+		antigravityResidents.hold(t.proc)
+	}
+	if outcome.Status == statusFailed && outcome.Diagnostics.empty() && t.proc.cmd.ProcessState != nil {
+		outcome.Diagnostics = processExitDiagnostics(t.proc.cmd.ProcessState)
+	}
+	t.finish(outcome)
+}
+
+// exchange opens or updates the session, applies model and thinking options,
+// and runs the prompt to its stop reason.
 func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 	started := time.Now()
 	conn, spec := t.proc.conn, t.spec
@@ -183,85 +386,233 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 	if startedEarly {
 		t.started(spec.ResumeID, started)
 	}
-	if err := acpInitialize(t.runCtx, conn); err != nil {
-		return failed("protocol_incompatible", "Antigravity ACP handshake failed: "+err.Error())
-	}
-	params := map[string]any{"cwd": spec.Dir, "mcpServers": servers}
-	if spec.SystemPrompt != "" {
-		params["_meta"] = map[string]any{"antigravity": map[string]any{"systemPrompt": map[string]any{"append": spec.SystemPrompt}}}
-	}
-	// Antigravity names a new session itself. session/load reopens a stored
-	// one and replays it as updates, which the turn drops until its own
-	// prompt is sent.
-	method := "session/new"
-	if resumed {
-		method, params["sessionId"] = "session/load", spec.ResumeID
-	}
-	open := func() (json.RawMessage, error) {
-		return acpOpenSession(t.runCtx, conn, t.profile.Env, func() (json.RawMessage, error) {
+
+	var sessionID string
+	switch {
+	case !t.reused || t.adopted:
+		var caps acpCapabilities
+		if !t.reused {
+			var err error
+			if caps, err = acpInitialize(t.runCtx, conn); err != nil {
+				return failed("protocol_incompatible", "Antigravity ACP handshake failed: "+err.Error())
+			}
+			t.proc.caps = caps
+			if caps.supportsResidency() && t.parkShape != nil {
+				t.proc.shape = t.parkShape
+			}
+		} else {
+			caps = t.proc.caps
+			spec.Readiness.session(resumed)
+		}
+		method := "session/new"
+		if resumed {
+			if caps.SessionResume {
+				method = "session/resume"
+			} else {
+				method = "session/load"
+			}
+		}
+		params := map[string]any{"cwd": spec.Dir, "mcpServers": servers}
+		if spec.SystemPrompt != "" {
+			params["_meta"] = map[string]any{"antigravity": map[string]any{"systemPrompt": map[string]any{"append": spec.SystemPrompt}}}
+		}
+		if resumed {
+			params["sessionId"] = spec.ResumeID
+		}
+		raw, err := acpOpenSession(t.runCtx, conn, t.profile.Env, func() (json.RawMessage, error) {
 			return conn.call(t.runCtx, method, params)
 		})
-	}
-	raw, err := open()
-	if acpNeedsAuth(err) {
-		return failed("authentication_required", "Antigravity sign-in is required")
-	}
-	refusal := ""
-	var refused *acpError
-	switch {
-	case resumed && errors.As(err, &refused):
-		refusal = "Antigravity could not load session " + spec.ResumeID + ": " + err.Error()
-	case err != nil:
-		return failed("", "Antigravity "+method+" failed: "+err.Error())
-	case resumed:
+		if acpNeedsAuth(err) {
+			return failed("authentication_required", "Antigravity sign-in is required")
+		}
+		refusal := ""
+		var refused *acpError
+		switch {
+		case resumed && errors.As(err, &refused):
+			refusal = "Antigravity could not load session " + spec.ResumeID + ": " + err.Error()
+		case err != nil:
+			return failed("", "Antigravity "+method+" failed: "+err.Error())
+		case method == "session/load":
+			t.mu.Lock()
+			replayed := t.replayedPrompts
+			t.mu.Unlock()
+			// session/load accepts an id Antigravity never stored and only the
+			// prompt fails. A stored session holds at least the prompt of the
+			// turn that made it, so a load that replays no prompt found no
+			// session.
+			if replayed == 0 {
+				refusal = "Antigravity has no stored session " + spec.ResumeID
+			}
+		}
+		if refusal != "" {
+			return t.resumeRefused(failed("session_not_found", refusal))
+		}
+		var session acpSession
+		if json.Unmarshal(raw, &session) != nil || session.SessionID == "" {
+			if !resumed {
+				return failed("", "Antigravity "+method+" returned no session")
+			}
+			session.SessionID = spec.ResumeID
+		}
+		sessionID = session.SessionID
+		if t.adopted {
+			t.proc.shape = t.parkShape
+		}
+		defaultModel := acpConfigValue(session.ConfigOptions, "model")
+		defaultEffort := acpConfigValue(session.ConfigOptions, "thought_level")
 		t.mu.Lock()
-		replayed := t.replayedPrompts
+		t.sessionID = sessionID
 		t.mu.Unlock()
-		// session/load accepts an id Antigravity never stored and only the
-		// prompt fails. A stored session holds at least the prompt of the
-		// turn that made it, so a load that replays no prompt found no
-		// session.
-		if replayed == 0 {
-			refusal = "Antigravity has no stored session " + spec.ResumeID
+		t.proc.mu.Lock()
+		t.proc.sessionID = sessionID
+		t.proc.systemPromptHash = antigravityPromptHash(spec.SystemPrompt)
+		t.proc.defaultModel = defaultModel
+		t.proc.defaultEffort = defaultEffort
+		t.proc.appliedModel = defaultModel
+		t.proc.appliedEffort = defaultEffort
+		t.proc.explicitModelSet = false
+		t.proc.explicitEffortSet = false
+		t.proc.mu.Unlock()
+
+		if spec.Model != "" && spec.Model != antigravityDefaultModel {
+			options, err := t.configure(sessionID, "model", spec.Model)
+			if err != nil {
+				return failed(acpOptionFailure(err), "Antigravity model "+spec.Model+" could not be selected: "+err.Error())
+			}
+			t.proc.mu.Lock()
+			t.proc.appliedModel = spec.Model
+			t.proc.explicitModelSet = true
+			t.proc.appliedEffort = acpConfigValue(options, "thought_level")
+			t.proc.mu.Unlock()
+		}
+		if spec.Effort != "" {
+			if _, err := t.configure(sessionID, "thought_level", spec.Effort); err != nil {
+				return failed(acpOptionFailure(err), "Antigravity thinking level "+spec.Effort+" could not be selected: "+err.Error())
+			}
+			t.proc.mu.Lock()
+			t.proc.appliedEffort = spec.Effort
+			t.proc.explicitEffortSet = true
+			t.proc.mu.Unlock()
+		}
+
+	default:
+		t.proc.mu.Lock()
+		sessionID = t.proc.sessionID
+		currentPromptHash := t.proc.systemPromptHash
+		defaultModel := t.proc.defaultModel
+		defaultEffort := t.proc.defaultEffort
+		appliedModel := t.proc.appliedModel
+		appliedEffort := t.proc.appliedEffort
+		explicitModelSet := t.proc.explicitModelSet
+		explicitEffortSet := t.proc.explicitEffortSet
+		t.proc.mu.Unlock()
+
+		wantPromptHash := antigravityPromptHash(spec.SystemPrompt)
+		if wantPromptHash != currentPromptHash {
+			// Passing an empty mcpServers list keeps the already-attached MCP
+			// connections intact without opening duplicates.
+			params := map[string]any{
+				"sessionId":  sessionID,
+				"cwd":        spec.Dir,
+				"mcpServers": []any{},
+				"_meta": map[string]any{
+					"antigravity": map[string]any{
+						"systemPrompt": map[string]any{"append": spec.SystemPrompt},
+					},
+				},
+			}
+			raw, err := acpOpenSession(t.runCtx, conn, t.profile.Env, func() (json.RawMessage, error) {
+				return conn.call(t.runCtx, "session/resume", params)
+			})
+			if acpNeedsAuth(err) {
+				return failed("authentication_required", "Antigravity sign-in is required")
+			}
+			var refused *acpError
+			if errors.As(err, &refused) {
+				return t.resumeRefused(failed("session_not_found", "Antigravity could not resume session "+sessionID+": "+err.Error()))
+			}
+			if err != nil {
+				return failed("", "Antigravity session/resume failed: "+err.Error())
+			}
+			var session acpSession
+			if json.Unmarshal(raw, &session) == nil && len(session.ConfigOptions) > 0 {
+				appliedModel = acpConfigValue(session.ConfigOptions, "model")
+				appliedEffort = acpConfigValue(session.ConfigOptions, "thought_level")
+			}
+			t.proc.mu.Lock()
+			t.proc.systemPromptHash = wantPromptHash
+			t.proc.appliedModel = appliedModel
+			t.proc.appliedEffort = appliedEffort
+			t.proc.mu.Unlock()
+		}
+		t.mu.Lock()
+		t.sessionID = sessionID
+		t.mu.Unlock()
+
+		modelRequested := spec.Model != "" && spec.Model != antigravityDefaultModel
+		targetModel := ""
+		if modelRequested {
+			targetModel = spec.Model
+		} else if explicitModelSet {
+			targetModel = defaultModel
+		}
+		modelChanged := false
+		if targetModel != "" && targetModel != appliedModel {
+			options, err := t.configure(sessionID, "model", targetModel)
+			if err != nil {
+				return failed(acpOptionFailure(err), "Antigravity model "+targetModel+" could not be selected: "+err.Error())
+			}
+			appliedModel = targetModel
+			explicitModelSet = modelRequested
+			modelChanged = true
+			appliedEffort = acpConfigValue(options, "thought_level")
+			t.proc.mu.Lock()
+			t.proc.appliedModel = appliedModel
+			t.proc.appliedEffort = appliedEffort
+			t.proc.explicitModelSet = explicitModelSet
+			t.proc.mu.Unlock()
+		} else if !modelRequested && explicitModelSet {
+			t.proc.mu.Lock()
+			t.proc.explicitModelSet = false
+			t.proc.mu.Unlock()
+		}
+
+		effortRequested := spec.Effort != ""
+		targetEffort := ""
+		if effortRequested {
+			targetEffort = spec.Effort
+		} else if explicitEffortSet {
+			targetEffort = defaultEffort
+		}
+		if targetEffort != "" && (targetEffort != appliedEffort || modelChanged) {
+			if _, err := t.configure(sessionID, "thought_level", targetEffort); err != nil {
+				return failed(acpOptionFailure(err), "Antigravity thinking level "+targetEffort+" could not be selected: "+err.Error())
+			}
+			t.proc.mu.Lock()
+			t.proc.appliedEffort = targetEffort
+			t.proc.explicitEffortSet = effortRequested
+			t.proc.mu.Unlock()
+		} else if !effortRequested && explicitEffortSet {
+			t.proc.mu.Lock()
+			t.proc.explicitEffortSet = false
+			t.proc.mu.Unlock()
 		}
 	}
-	if refusal != "" {
-		return t.resumeRefused(failed("session_not_found", refusal))
-	}
-	var session acpSession
-	if json.Unmarshal(raw, &session) != nil || session.SessionID == "" {
-		if !resumed {
-			return failed("", "Antigravity "+method+" returned no session")
-		}
-		session.SessionID = spec.ResumeID
-	}
-	t.mu.Lock()
-	t.sessionID = session.SessionID
-	t.mu.Unlock()
-	if spec.Model != "" && spec.Model != antigravityDefaultModel {
-		if err := t.configure(session.SessionID, "model", spec.Model); err != nil {
-			return failed(acpOptionFailure(err), "Antigravity model "+spec.Model+" could not be selected: "+err.Error())
-		}
-	}
-	if spec.Effort != "" {
-		if err := t.configure(session.SessionID, "thought_level", spec.Effort); err != nil {
-			return failed(acpOptionFailure(err), "Antigravity thinking level "+spec.Effort+" could not be selected: "+err.Error())
-		}
-	}
+
 	t.mu.Lock()
 	t.prompting = true
 	t.mu.Unlock()
 	dispatched := time.Now()
 	t.requests.begin("", dispatched)
 	if !startedEarly {
-		t.started(session.SessionID, dispatched)
+		t.started(sessionID, dispatched)
 	}
-	raw, err = conn.call(t.runCtx, "session/prompt", map[string]any{
-		"sessionId": session.SessionID,
+	raw, err := conn.call(t.runCtx, "session/prompt", map[string]any{
+		"sessionId": sessionID,
 		"prompt":    []any{map[string]any{"type": "text", "text": prompt}},
 	})
 	if err != nil && t.runCtx.Err() != nil {
-		raw, err = t.cancelPrompt(session.SessionID)
+		raw, err = t.cancelPrompt(sessionID)
 	}
 	if err != nil {
 		if errors.Is(err, errACPClosed) {
@@ -279,7 +630,7 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 		case errors.Is(err, errACPClosed):
 			return failed("", "Antigravity exited before the turn finished")
 		case err != nil:
-			_, _ = t.cancelPrompt(session.SessionID)
+			_, _ = t.cancelPrompt(sessionID)
 			result.StopReason = "cancelled"
 		}
 	}
@@ -322,6 +673,7 @@ func (t *antigravityTurn) awaitBackground() error {
 	t.mu.Lock()
 	open := len(t.tools) > 0
 	if open {
+		t.background = true
 		// The continuation's text is a new message.
 		t.textID = ""
 	}
@@ -365,9 +717,16 @@ func (t *antigravityTurn) cancelPrompt(sessionID string) (json.RawMessage, error
 	return nil, t.runCtx.Err()
 }
 
-func (t *antigravityTurn) configure(sessionID, option, value string) error {
-	_, err := t.proc.conn.call(t.runCtx, "session/set_config_option", map[string]any{"sessionId": sessionID, "configId": option, "value": value})
-	return err
+func (t *antigravityTurn) configure(sessionID, option, value string) ([]acpConfigOption, error) {
+	raw, err := t.proc.conn.call(t.runCtx, "session/set_config_option", map[string]any{"sessionId": sessionID, "configId": option, "value": value})
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		ConfigOptions []acpConfigOption `json:"configOptions"`
+	}
+	_ = json.Unmarshal(raw, &result)
+	return result.ConfigOptions, nil
 }
 
 // acpOptionFailure classifies a refused model or level: Antigravity answers
@@ -437,7 +796,7 @@ func (t *antigravityTurn) started(sessionID string, at time.Time) {
 	if !t.spec.ExposeTurnStarted {
 		return
 	}
-	reused := false
+	reused := t.reused
 	t.emit(Event{Kind: EventStatus, Status: "running", TurnID: "antigravity-turn-" + piRandomHex(12), SessionID: sessionID, ProcessReused: &reused, SentAt: at})
 }
 

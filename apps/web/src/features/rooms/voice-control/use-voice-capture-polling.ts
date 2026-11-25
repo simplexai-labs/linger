@@ -40,7 +40,8 @@ export function useVoiceCapturePolling(
         generation === refs.capturePollGenerationRef.current
       ) {
         if (refs.voiceAccessLostRef.current) return;
-        const resync = refs.captureResyncRef.current;
+        const resyncTarget = refs.captureResyncRef.current;
+        const resync = resyncTarget !== undefined;
         if (refs.eventStreamLiveRef.current && !resync) {
           await delay(capturePollIntervalMs, signal);
           continue;
@@ -72,7 +73,8 @@ export function useVoiceCapturePolling(
             capture.status === "starting" || capture.status === "recording";
           if ((!refs.eventStreamLiveRef.current || resync) && !stopPending)
             setCapture(capture);
-          if (resync) refs.captureResyncRef.current = false;
+          if (resyncTarget && refs.captureResyncRef.current === resyncTarget)
+            refs.captureResyncRef.current = undefined;
           consecutiveFailures = 0;
           if (capture.status === "finalized" || capture.status === "failed")
             return;
@@ -108,7 +110,8 @@ export function useVoiceCapturePolling(
     let timer: number | undefined;
     const poll = async () => {
       if (refs.voiceAccessLostRef.current) return;
-      const resync = refs.captureResyncRef.current;
+      const resyncTarget = refs.captureResyncRef.current;
+      const resync = resyncTarget !== undefined;
       if (refs.eventStreamLiveRef.current && !resync) {
         if (active)
           timer = window.setTimeout(() => {
@@ -127,9 +130,10 @@ export function useVoiceCapturePolling(
             ),
           controller.signal,
         );
-        if (resync) refs.captureResyncRef.current = false;
+        if (!active) return;
+        if (resyncTarget && refs.captureResyncRef.current === resyncTarget)
+          refs.captureResyncRef.current = undefined;
         if (
-          active &&
           (!refs.eventStreamLiveRef.current || resync) &&
           refs.captureRef.current?.id === activeCaptureId &&
           refs.captureRef.current.status !== "finalizing"

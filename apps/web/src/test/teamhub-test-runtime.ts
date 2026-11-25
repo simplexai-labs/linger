@@ -756,6 +756,28 @@ function installSeedRoutes(server: TeamHubTestServer, seed: TeamHubTestSeed) {
     }))
     .on(
       "GET",
+      "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models",
+      ({ params }) => {
+        const computer = seed.localComputers.find(
+          (item) => item.computer_id === params.computerId,
+        );
+        if (!computer) return notFound("LOCAL_COMPUTER_NOT_FOUND");
+        return {
+          available: false,
+          computer: {
+            computer_id: computer.computer_id,
+            display_name: computer.display_name,
+            status: computer.status,
+          },
+          models: [],
+          pools: [],
+          reason: { code: "TOOL_NOT_INSTALLED" as const },
+          viewer_is_owner: true,
+        };
+      },
+    )
+    .on(
+      "GET",
       "/v0/tenants/{tenantId}/local-computers/{computerId}/model-source",
       ({ params }) => {
         const computer = seed.localComputers.find(

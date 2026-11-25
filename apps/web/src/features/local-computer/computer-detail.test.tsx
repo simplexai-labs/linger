@@ -204,3 +204,33 @@ it("shows agy update instead of the install script when updating an outdated Ant
     screen.queryByText(/antigravity\.google\/cli\/install\.sh/),
   ).not.toBeInTheDocument();
 });
+
+it("tells an older Computer to update Linger instead of offering Antigravity", () => {
+  const computer: TeamHubLocalComputerPage["items"][number] = {
+    computer_id: "desktop",
+    display_name: "Desktop Mac",
+    status: "online",
+    upgrade_required: false,
+    daemon_version: "0.52.0",
+    active_operations: 0,
+    workspace_grants: [],
+    runtimes: [
+      { type: "claude", status: "ready", models: [] },
+      { type: "codex", status: "ready", models: [] },
+      { type: "pi", status: "not_installed", models: [] },
+    ],
+  };
+  render(
+    <ComputerDetail
+      agents={[]}
+      agentAvailabilities={new Map()}
+      computer={computer}
+      onOpenAgent={vi.fn()}
+      onRemove={vi.fn()}
+    />,
+  );
+  const apps = screen.getByRole("region", { name: "AI apps" });
+  expect(apps).toHaveTextContent("Needs a newer Linger");
+  // Pi can still be added; Antigravity cannot until Linger is updated.
+  expect(screen.getAllByRole("button", { name: "Add" })).toHaveLength(1);
+});

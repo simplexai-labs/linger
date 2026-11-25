@@ -41,6 +41,9 @@ func (r *recorder) runtimeChanged() {
 func (r *recorder) last() wire.LocalModelsSnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if len(r.snapshots) == 0 {
+		return wire.LocalModelsSnapshot{}
+	}
 	return r.snapshots[len(r.snapshots)-1]
 }
 
@@ -325,7 +328,7 @@ func TestUnloadAndRemoveAnswerWhenTheToolFinishes(t *testing.T) {
 	}
 	waitFor(t, "the idle snapshot and a diagnostics re-run", func() bool {
 		model := modelState(record.last(), testModel)
-		return model.State == "idle" && model.Endpoint == nil && record.changes() > 0
+		return model != nil && model.State == "idle" && model.Endpoint == nil && record.changes() > 0
 	})
 	refusal, _ := library.Act(context.Background(), Action{Name: ActionRemove, Model: testModel}, soon())
 	if refusal == nil || refusal.Code != "INVALID_STATE" || refusal.Detail != "refused by the fake" {
@@ -348,14 +351,21 @@ func TestCancelStopsARunningDownload(t *testing.T) {
 	if refusal, _ := library.Act(context.Background(), Action{Name: ActionDownload, Model: testModel}, soon()); refusal != nil {
 		t.Fatalf("download refused: %+v", refusal)
 	}
-	waitFor(t, "a downloading snapshot", func() bool { return modelState(record.last(), testModel).State == "downloading" })
+	waitFor(t, "a downloading snapshot", func() bool {
+		model := modelState(record.last(), testModel)
+		return model != nil && model.State == "downloading"
+	})
 	if refusal, _ := library.Act(context.Background(), Action{Name: ActionCancel, Model: testModel}, soon()); refusal != nil {
 		t.Fatalf("cancel refused: %+v", refusal)
 	}
 	waitFor(t, "the cancelled download to end", func() bool {
 		library.mu.Lock()
 		defer library.mu.Unlock()
-		return len(library.jobs) == 0 && modelState(*library.current, testModel).State == "absent"
+		if len(library.jobs) != 0 || library.current == nil {
+			return false
+		}
+		model := modelState(*library.current, testModel)
+		return model != nil && model.State == "absent"
 	})
 	if !slices.ContainsFunc(fake.calls(), func(call string) bool { return strings.HasPrefix(call, "cancel "+testModel+" --base-dir ") }) {
 		t.Fatalf("calls = %q", fake.calls())
@@ -382,7 +392,7 @@ func TestJobThatExitsWithoutEventsIsRefusedAndOneThatCrashesIsReread(t *testing.
 	}
 	waitFor(t, "the failed state from status", func() bool {
 		model := modelState(record.last(), testModel)
-		return model.State == "failed" && model.Error != nil && model.Error.Code == "DOWNLOAD_FAILED"
+		return model != nil && model.State == "failed" && model.Error != nil && model.Error.Code == "DOWNLOAD_FAILED"
 	})
 }
 
@@ -393,9 +403,9 @@ func TestAnswerAfterTheDeadlineIsNotAGuessAndShowsInASnapshot(t *testing.T) {
 		script fakeScript
 	}{
 		{"load refused late", Action{Name: ActionLoad, Model: testModel},
-			fakeScript{Lines: []fakeLine{{Line: errorLine(testModel, "LOAD_NO_ROOM", ""), DelayMS: 250}}, Exit: 2}},
+			fakeScript{Lines: []fakeLine{{Line: errorLine(testModel, "LOAD_NO_ROOM", ""), WaitFile: "release-refusal"}}, Exit: 2}},
 		{"unload refused late", Action{Name: ActionUnload, Model: testModel},
-			fakeScript{Lines: []fakeLine{{Line: errorLine(testModel, "INVALID_STATE", ""), DelayMS: 250}}, Exit: 2}},
+			fakeScript{Lines: []fakeLine{{Line: errorLine(testModel, "INVALID_STATE", ""), WaitFile: "release-refusal"}}, Exit: 2}},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			fake := newFakeTool(t)
@@ -404,13 +414,27 @@ func TestAnswerAfterTheDeadlineIsNotAGuessAndShowsInASnapshot(t *testing.T) {
 			record := &recorder{}
 			library := newLibrary(t, fake, record, 20*time.Millisecond)
 			library.Refresh(context.Background())
+			gate := filepath.Join(fake.state, "release-refusal")
+			if err := os.WriteFile(gate, []byte("1"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Remove(gate) })
 			started := time.Now()
 			refusal, answered := library.Act(context.Background(), scenario.action, started.Add(50*time.Millisecond))
 			if answered || refusal != nil {
 				t.Fatalf("the deadline passed before the tool decided, yet the answer is %+v (answered %v)", refusal, answered)
 			}
-			if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
+			if elapsed := time.Since(started); elapsed > 2*time.Second {
 				t.Fatalf("the answer waited %s past the deadline", elapsed)
+			}
+			record.mu.Lock()
+			publishedWhileBlocked := len(record.snapshots)
+			record.mu.Unlock()
+			if publishedWhileBlocked != 1 {
+				t.Fatalf("published %d snapshots before the tool decided, want 1", publishedWhileBlocked)
+			}
+			if err := os.Remove(gate); err != nil {
+				t.Fatal(err)
 			}
 			// The late refusal changes nothing, and a fresh snapshot shows it.
 			waitFor(t, "the snapshot after the late refusal", func() bool {
@@ -418,11 +442,115 @@ func TestAnswerAfterTheDeadlineIsNotAGuessAndShowsInASnapshot(t *testing.T) {
 				defer record.mu.Unlock()
 				return len(record.snapshots) == 2
 			})
-			if got := modelState(record.last(), testModel); got.State != "idle" {
+			if got := modelState(record.last(), testModel); got == nil || got.State != "idle" {
 				t.Fatalf("model = %+v", got)
 			}
 		})
 	}
+}
+
+func TestCloseWaitsCleanlyAfterStartJobDeadlineTimeout(t *testing.T) {
+	t.Run("while gated job is running", func(t *testing.T) {
+		fake := newFakeTool(t)
+		fake.write("status.json", status(model(testModel, "idle")))
+		fake.script("load", fakeScript{
+			Lines: []fakeLine{{Line: errorLine(testModel, "LOAD_NO_ROOM", ""), WaitFile: "release-load"}},
+			Exit:  2,
+		})
+		record := &recorder{}
+		// Keep JobDirectory under fake's temp root so fake's job-exit cleanup
+		// runs before TempDir removes the job output file on Windows.
+		library := New(Options{
+			Tool:             &fake.tool,
+			Environment:      map[string]string{"LOCALMODELS_FAKE_TOOL": "1", "PATH": os.Getenv("PATH")},
+			JobDirectory:     filepath.Join(filepath.Dir(fake.state), "jobs"),
+			Publish:          record.publish,
+			RuntimeChanged:   record.runtimeChanged,
+			ProgressInterval: 20 * time.Millisecond,
+		})
+		t.Cleanup(library.Close)
+		library.Refresh(context.Background())
+		gate := filepath.Join(fake.state, "release-load")
+		if err := os.WriteFile(gate, []byte("1"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Remove(gate) })
+
+		refusal, answered := library.Act(context.Background(), Action{Name: ActionLoad, Model: testModel}, time.Now().Add(50*time.Millisecond))
+		if answered || refusal != nil {
+			t.Fatalf("Act returned refusal=%+v answered=%t, want unconfirmed timeout", refusal, answered)
+		}
+		waitFor(t, "the fake load job to start", func() bool {
+			entries, err := os.ReadDir(filepath.Join(fake.state, "jobs"))
+			return err == nil && len(entries) > 0
+		})
+		closed := make(chan struct{})
+		go func() {
+			library.Close()
+			close(closed)
+		}()
+		select {
+		case <-closed:
+		case <-time.After(5 * time.Second):
+			t.Fatal("Close stalled while a timed-out startJob child was still gated")
+		}
+		record.mu.Lock()
+		publishedAtClose := len(record.snapshots)
+		record.mu.Unlock()
+		if err := os.Remove(gate); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "the fake load job to exit", func() bool {
+			entries, err := os.ReadDir(filepath.Join(fake.state, "jobs"))
+			return err != nil || len(entries) == 0
+		})
+		record.mu.Lock()
+		publishedAfterExit := len(record.snapshots)
+		record.mu.Unlock()
+		if publishedAfterExit != publishedAtClose {
+			t.Fatalf("published %d snapshots after Close, want 0", publishedAfterExit-publishedAtClose)
+		}
+		if refusal, answered := library.Act(context.Background(), Action{Name: ActionLoad, Model: testModel}, soon()); !answered || refusal == nil || refusal.Code != CodeToolFailed {
+			t.Fatalf("Act after Close returned refusal=%+v answered=%t, want closed refusal", refusal, answered)
+		}
+	})
+
+	t.Run("racing immediate deadline and Close during launch", func(t *testing.T) {
+		root := t.TempDir()
+		nonExec := filepath.Join(root, "not-a-binary")
+		if err := os.WriteFile(nonExec, []byte("not executable"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		tool := Tool{
+			Python:          nonExec,
+			ModuleDirectory: root,
+			StateDirectory:  root,
+			BaseDirectory:   root,
+		}
+		jobDir := filepath.Join(root, "jobs")
+		for range 20 {
+			record := &recorder{}
+			library := New(Options{
+				Tool:             &tool,
+				JobDirectory:     jobDir,
+				Publish:          record.publish,
+				RuntimeChanged:   record.runtimeChanged,
+				ProgressInterval: 20 * time.Millisecond,
+			})
+			// Seed an initial snapshot so Act goes straight into startJob
+			// without spawning a status subprocess before racing Close.
+			library.current = &wire.LocalModelsSnapshot{
+				Available: true,
+				Models:    []wire.LocalModel{{ID: testModel, State: "idle"}},
+			}
+
+			_, _ = library.Act(context.Background(), Action{Name: ActionLoad, Model: testModel}, time.Now().Add(-time.Millisecond))
+			library.Close()
+			if entries, err := os.ReadDir(jobDir); err == nil && len(entries) != 0 {
+				t.Fatalf("job directory still contains %d file(s) after Close", len(entries))
+			}
+		}
+	})
 }
 
 func TestFollowingAJobSurvivesAFailedStatusRead(t *testing.T) {
@@ -502,17 +630,21 @@ func TestALoadingSnapshotShowsWhatTheLoadReservedAndFreed(t *testing.T) {
 	if refusal, _ := library.Act(context.Background(), Action{Name: ActionLoad, Model: testModel, UnloadFirst: []string{"gemma3-4b:Q4_K_M"}}, soon()); refusal != nil {
 		t.Fatal(refusal)
 	}
-	waitFor(t, "the loading snapshot", func() bool { return modelState(record.last(), testModel).State == "loading" })
+	waitFor(t, "the loading snapshot", func() bool {
+		model := modelState(record.last(), testModel)
+		return model != nil && model.State == "loading"
+	})
 	record.mu.Lock()
 	defer record.mu.Unlock()
 	for _, snapshot := range record.snapshots {
-		if modelState(snapshot, testModel).State != "loading" {
+		model := modelState(snapshot, testModel)
+		if model == nil || model.State != "loading" {
 			continue
 		}
 		if snapshot.Pools[0].UsedBytes != 4<<30 || len(snapshot.Pools[0].Holders) != 1 {
 			t.Fatalf("a loading snapshot shows the pool before its reservation: %+v", snapshot.Pools[0])
 		}
-		if freed := modelState(snapshot, "gemma3-4b:Q4_K_M"); freed.State != "idle" || freed.Endpoint != nil {
+		if freed := modelState(snapshot, "gemma3-4b:Q4_K_M"); freed == nil || freed.State != "idle" || freed.Endpoint != nil {
 			t.Fatalf("the model unloaded first still shows %+v", freed)
 		}
 	}
@@ -569,7 +701,10 @@ func TestRestartedLibraryFollowsAJobFromStatus(t *testing.T) {
 	library.Refresh(context.Background())
 	waitFor(t, "a status poll", func() bool { return len(fake.calls()) >= 3 })
 	fake.write("status.json", status(model(testModel, "idle")))
-	waitFor(t, "the finished job", func() bool { return modelState(record.last(), testModel).State == "idle" })
+	waitFor(t, "the finished job", func() bool {
+		model := modelState(record.last(), testModel)
+		return model != nil && model.State == "idle"
+	})
 	time.Sleep(200 * time.Millisecond)
 	calls := len(fake.calls())
 	time.Sleep(200 * time.Millisecond)
@@ -680,10 +815,10 @@ func TestAFailedLoadKeepsTheGatewayCauseOnItsRow(t *testing.T) {
 	}
 	waitFor(t, "the failed row with its cause", func() bool {
 		model := modelState(record.last(), testModel)
-		return model.State == "failed" && model.Error != nil && model.Error.Cause == "GATEWAY_HOME_NOT_PRIVATE" && model.Error.Path == home
+		return model != nil && model.State == "failed" && model.Error != nil && model.Error.Cause == "GATEWAY_HOME_NOT_PRIVATE" && model.Error.Path == home
 	})
-	if again := modelState(library.Refresh(context.Background()), testModel); again.Error == nil || again.Error.Cause != "GATEWAY_HOME_NOT_PRIVATE" {
-		t.Fatalf("a later read dropped the cause: %+v", again.Error)
+	if again := modelState(library.Refresh(context.Background()), testModel); again == nil || again.Error == nil || again.Error.Cause != "GATEWAY_HOME_NOT_PRIVATE" {
+		t.Fatalf("a later read dropped the cause: %+v", again)
 	}
 
 	// A retry that fails for another reason carries no stale cause.
@@ -696,7 +831,7 @@ func TestAFailedLoadKeepsTheGatewayCauseOnItsRow(t *testing.T) {
 	}
 	waitFor(t, "the cause to clear", func() bool {
 		model := modelState(library.Refresh(context.Background()), testModel)
-		return model.Error != nil && model.Error.Cause == "" && model.Error.Path == ""
+		return model != nil && model.Error != nil && model.Error.Cause == "" && model.Error.Path == ""
 	})
 }
 

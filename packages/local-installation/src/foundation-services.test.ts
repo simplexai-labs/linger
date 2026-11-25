@@ -91,6 +91,21 @@ test("local main model readiness is distinct from the background controller", as
   expect(run).toHaveBeenCalledTimes(1);
 });
 
+test("mainPlan: false omits --main-plan even when the saved setup choice is local-models", async () => {
+  const { home, instance } = await fixture();
+  const run = vi.fn(async (_home: string, args: string[]) => {
+    expect(args).not.toContain("--main-plan");
+    return { code: 2, stdout: "", stderr: "private" };
+  });
+  await prepareFoundationServices(
+    instance,
+    "local-models",
+    { home, mainPlan: false, signal: new AbortController().signal },
+    { run },
+  );
+  expect(run).toHaveBeenCalledTimes(1);
+});
+
 test("the background controller shares GPUs unless sharing was declined", async () => {
   const { home, instance } = await fixture();
   const run = vi.fn<

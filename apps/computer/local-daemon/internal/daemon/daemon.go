@@ -150,6 +150,9 @@ type Daemon struct {
 	// localModelUnavailable holds whether the current Agent Service declared
 	// serviceFeatureLocalModelUnavailable in its welcome.
 	localModelUnavailable atomic.Bool
+	// modelGatewayUnavailable holds whether the current Agent Service declared
+	// serviceFeatureModelGatewayUnavailable in its welcome.
+	modelGatewayUnavailable atomic.Bool
 	// authorityRevision counts, under admissionMu, the commands that can change
 	// what an accepted Operation may start with: Registration snapshots, Agent
 	// Runner commands and Context commands. A start whose revision is unchanged

@@ -458,6 +458,40 @@ describe("parseLiveClientEvent", () => {
       ).toBeUndefined();
     expect(parseLiveClientEvent(new TextEncoder().encode("{"))).toBeUndefined();
   });
+
+  it("keeps only declared, bounded audio stats", () => {
+    expect(
+      parseLiveClientEvent(
+        encode({
+          type: "audio_stats",
+          audio: {
+            interval_ms: 10_000,
+            concealed_samples: 480,
+            jitter_buffer_delay_ms: 42.5,
+            packets_lost: 1.5,
+            packets_sent: -1,
+            removed_samples_for_acceleration: 2e9,
+            note: "free text",
+          },
+        }),
+      ),
+    ).toEqual({
+      type: "audio_stats",
+      audio: {
+        interval_ms: 10_000,
+        concealed_samples: 480,
+        jitter_buffer_delay_ms: 42.5,
+      },
+    });
+    expect(
+      parseLiveClientEvent(
+        encode({ type: "audio_stats", audio: { concealed_samples: 1 } }),
+      ),
+    ).toBeUndefined();
+    expect(
+      parseLiveClientEvent(encode({ type: "audio_stats", audio: [] })),
+    ).toBeUndefined();
+  });
 });
 
 describe("runToolRound", () => {
@@ -1109,6 +1143,39 @@ describe("LiveVoiceWorker", () => {
     },
   );
 
+  it("keeps audio still in the track out of what an interrupted reply played", async () => {
+    const test = await harness();
+    test.source().queueFrames = true;
+    await answeredTurn(test);
+    await vi.waitFor(() => expect(test.source().frames).toHaveLength(2));
+    test.session().emit({ type: "speech_started", itemId: "item-b" });
+    await vi.waitFor(() =>
+      expect(test.session().cancel).toHaveBeenCalledOnce(),
+    );
+    // Both 20 ms frames were still queued, so the listener heard none of them.
+    expect(test.session().cancel).toHaveBeenCalledWith({
+      playedMs: 0,
+      localSpeech: false,
+    });
+    await test.shutdown();
+  });
+
+  it("reports the track running dry while reply audio waited in the worker", async () => {
+    const test = await harness();
+    test.source().holdFrames();
+    await answeredTurn(test);
+    // The first frame's 20 ms play out while the worker cannot hand over the next.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    test.source().releaseFrames();
+    await vi.waitFor(() =>
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ stalls: 1, voiceSessionId: sessionId }),
+        "Voice live reply playback stalled",
+      ),
+    );
+    await test.shutdown();
+  });
+
   it("resumes unheard audio, ignores immediate echo, and pauses the same reply for a fresh interruption", async () => {
     const test = await harness();
     await answeredTurn(test);
@@ -1373,6 +1440,31 @@ describe("LiveVoiceWorker", () => {
     );
     await vi.waitFor(() => expect(test.session().note).toHaveBeenCalledOnce());
     expect(test.session().note).toHaveBeenCalledWith("On the Pocket Note page");
+    await test.shutdown();
+  });
+
+  it("logs the publisher's audio stats, at most one report per gap", async () => {
+    const test = await harness();
+    test.send({
+      type: "audio_stats",
+      audio: { interval_ms: 10_000, concealed_samples: 960, packets_sent: 500 },
+    });
+    test.send(
+      { type: "audio_stats", audio: { interval_ms: 10_000 } },
+      { identity: "someone-else" },
+    );
+    test.send({ type: "audio_stats", audio: { interval_ms: 5 } });
+    const logged = logger.info.mock.calls.filter(
+      (call) => call[1] === "Voice live client audio stats",
+    );
+    expect(logged).toHaveLength(1);
+    expect(logged[0]![0]).toMatchObject({
+      voiceSessionId: sessionId,
+      intervalMs: 10_000,
+      concealedSamples: 960,
+      micPacketsSent: 500,
+    });
+    expect(test.session().note).not.toHaveBeenCalled();
     await test.shutdown();
   });
 

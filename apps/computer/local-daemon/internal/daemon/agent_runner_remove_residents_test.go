@@ -54,6 +54,24 @@ while IFS= read -r line; do
 done
 `
 
+const parkedAntigravityScript = `#!/bin/sh
+printf '%s\n' "$$" > "$FAKE_DIR/pid"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  method=$(printf '%s' "$line" | sed -n 's/.*"method":"\([^"]*\)".*/\1/p')
+  [ -n "$id" ] || continue
+  case "$method" in
+    initialize) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"sessionCapabilities":{"list":{},"resume":{}}}}}\n' "$id" ;;
+    session/list) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessions":[]}}\n' "$id" ;;
+    session/new|session/resume) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"agy-daemon"}}\n' "$id" ;;
+    session/prompt)
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-daemon","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;;
+    *) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+  esac
+done
+`
+
 // writeParkedScript writes one fixture executable that every resident of a
 // Runtime shares: macOS scans each new executable on its first launch, so
 // one file per Runtime keeps that wait out of every further launch.
@@ -128,6 +146,33 @@ func parkCodexFor(t *testing.T, executable, contextKey, agentID string) int {
 	return pid
 }
 
+func parkAntigravityFor(t *testing.T, executable, contextKey, agentID string) int {
+	t.Helper()
+	root := t.TempDir()
+	backend, err := native.Open("antigravity", native.Profile{
+		Program: executable, Logger: slog.Default(), ContextKey: contextKey, AgentID: agentID,
+		Env: map[string]string{"HOME": root, "FAKE_DIR": root, "PATH": "/usr/bin:/bin"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Start(t.Context(), "hello", native.RunSpec{Dir: root, Budget: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Events {
+	}
+	if result := <-session.Outcome; result.Status != "completed" || result.ExitConfirmed {
+		t.Fatalf("antigravity turn = %+v, want parked completion", result)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "pid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	return pid
+}
+
 func newRemoveTestDaemon(t *testing.T, stream *fakeStream) *Daemon {
 	t.Helper()
 	device, err := transport.GenerateIdentity()
@@ -151,16 +196,19 @@ func newRemoveTestDaemon(t *testing.T, stream *fakeStream) *Daemon {
 	return d
 }
 
-// Agent removal stops the removed Agent's Claude and Codex residents, and
-// another Agent's residents stay parked.
+// Agent removal stops the removed Agent's Claude, Codex, and Antigravity
+// residents, and another Agent's residents stay parked.
 func TestAgentRunnerRemoveStopsOnlyThatAgentsParkedResidents(t *testing.T) {
 	t.Cleanup(func() { _, _ = native.StopAllParkedResidents() })
 	claude := writeParkedScript(t, "claude", parkedClaudeScript)
 	codex := writeParkedScript(t, "codex", parkedCodexScript)
+	antigravity := writeParkedScript(t, "agy", parkedAntigravityScript)
 	removed := parkClaudeFor(t, claude, "context-a1", "agent-1")
 	removedCodex := parkCodexFor(t, codex, "context-a1", "agent-1")
+	removedAntigravity := parkAntigravityFor(t, antigravity, "context-a1", "agent-1")
 	kept := parkClaudeFor(t, claude, "context-b1", "agent-2")
 	keptCodex := parkCodexFor(t, codex, "context-b1", "agent-2")
+	keptAntigravity := parkAntigravityFor(t, antigravity, "context-b1", "agent-2")
 	stream := &fakeStream{}
 	d := newRemoveTestDaemon(t, stream)
 	ctx := context.Background()
@@ -171,7 +219,7 @@ func TestAgentRunnerRemoveStopsOnlyThatAgentsParkedResidents(t *testing.T) {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(10 * time.Second)
-	for _, pid := range []int{removed, removedCodex} {
+	for _, pid := range []int{removed, removedCodex, removedAntigravity} {
 		for syscall.Kill(pid, 0) == nil {
 			if time.Now().After(deadline) {
 				t.Fatalf("removed Agent's parked resident %d is still running", pid)
@@ -179,7 +227,7 @@ func TestAgentRunnerRemoveStopsOnlyThatAgentsParkedResidents(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
-	if syscall.Kill(kept, 0) != nil || syscall.Kill(keptCodex, 0) != nil {
+	if syscall.Kill(kept, 0) != nil || syscall.Kill(keptCodex, 0) != nil || syscall.Kill(keptAntigravity, 0) != nil {
 		t.Fatal("another Agent's parked resident was stopped")
 	}
 }

@@ -1250,6 +1250,119 @@ components:
             localmodels tool the Computer runs for its model library.
           additionalProperties:
             type: string
+    SetupReason:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        gpuIndex:
+          type: number
+          description: On gpu-memory-required, the card other programs hold memory on.
+        freeBytes:
+          type: number
+          description: On gpu-memory-required (that card's VRAM) and free-memory-required (RAM), the memory free now.
+        requiredBytes:
+          type: number
+          description: The memory the install needs free, for the same resource as freeBytes.
+        detectedCudaVersion:
+          type: string
+          pattern: '^\d+(?:\.\d+){0,2}$'
+          description: On cuda-driver-update-required, the CUDA version the installed NVIDIA driver reports.
+        requiredCudaVersion:
+          type: string
+          pattern: '^\d+(?:\.\d+){0,2}$'
+          description: On cuda-driver-update-required and cuda-driver-version-unknown, the minimum CUDA version the pinned engine requires.
+        driverVersion:
+          type: string
+          pattern: '^\d+(?:\.\d+){0,2}$'
+          description: On CUDA driver reasons, the installed NVIDIA driver version when known.
+    SetupLocalModelsEstimate:
+      type: object
+      additionalProperties: false
+      required:
+        - downloadBytes
+        - diskBytes
+        - memoryBytes
+        - durationSeconds
+        - assumption
+        - model
+      properties:
+        downloadBytes:
+          type:
+            - number
+            - "null"
+        diskBytes:
+          type:
+            - number
+            - "null"
+        memoryBytes:
+          type:
+            - number
+            - "null"
+        durationSeconds:
+          type:
+            - object
+            - "null"
+          additionalProperties: false
+          required:
+            - min
+            - max
+          properties:
+            min:
+              type: number
+            max:
+              type: number
+        assumption:
+          type: string
+        model:
+          type: string
+    SetupUpgradeGpuApp:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - pids
+        - bytes
+      properties:
+        name:
+          type: string
+        pids:
+          type: array
+          items:
+            type: integer
+        bytes:
+          type: number
+    SetupUpgrade:
+      type: object
+      additionalProperties: false
+      description: Upstream stack.upgrade, present when freeing memory unlocks a stronger local model than the currently selected plan.
+      required:
+        - selectedGpuIndex
+        - estimate
+        - reasons
+      properties:
+        modelName:
+          type: string
+        selectedGpuIndex:
+          type:
+            - number
+            - "null"
+        estimate:
+          $ref: "#/components/schemas/SetupLocalModelsEstimate"
+        reasons:
+          type: array
+          items:
+            $ref: "#/components/schemas/SetupReason"
+        gpuApps:
+          type: array
+          items:
+            $ref: "#/components/schemas/SetupUpgradeGpuApp"
     SetupReport:
       type: object
       additionalProperties: false
@@ -1350,37 +1463,7 @@ components:
               type: array
               description: Upstream stack.reasons. Clients choose their copy by code and its counts; message is upstream diagnostic text for logs, never shown or matched on.
               items:
-                type: object
-                additionalProperties: false
-                required:
-                  - code
-                  - message
-                properties:
-                  code:
-                    type: string
-                  message:
-                    type: string
-                  gpuIndex:
-                    type: number
-                    description: On gpu-memory-required, the card other programs hold memory on.
-                  freeBytes:
-                    type: number
-                    description: On gpu-memory-required (that card's VRAM) and free-memory-required (RAM), the memory free now.
-                  requiredBytes:
-                    type: number
-                    description: The memory the install needs free, for the same resource as freeBytes.
-                  detectedCudaVersion:
-                    type: string
-                    pattern: '^\d+(?:\.\d+){0,2}$'
-                    description: On cuda-driver-update-required, the CUDA version the installed NVIDIA driver reports.
-                  requiredCudaVersion:
-                    type: string
-                    pattern: '^\d+(?:\.\d+){0,2}$'
-                    description: On cuda-driver-update-required and cuda-driver-version-unknown, the minimum CUDA version the pinned engine requires.
-                  driverVersion:
-                    type: string
-                    pattern: '^\d+(?:\.\d+){0,2}$'
-                    description: On CUDA driver reasons, the installed NVIDIA driver version when known.
+                $ref: "#/components/schemas/SetupReason"
             basis:
               type: string
               enum:
@@ -1391,45 +1474,9 @@ components:
                 - number
                 - "null"
             estimate:
-              type: object
-              additionalProperties: false
-              required:
-                - downloadBytes
-                - diskBytes
-                - memoryBytes
-                - durationSeconds
-                - assumption
-                - model
-              properties:
-                downloadBytes:
-                  type:
-                    - number
-                    - "null"
-                diskBytes:
-                  type:
-                    - number
-                    - "null"
-                memoryBytes:
-                  type:
-                    - number
-                    - "null"
-                durationSeconds:
-                  type:
-                    - object
-                    - "null"
-                  additionalProperties: false
-                  required:
-                    - min
-                    - max
-                  properties:
-                    min:
-                      type: number
-                    max:
-                      type: number
-                assumption:
-                  type: string
-                model:
-                  type: string
+              $ref: "#/components/schemas/SetupLocalModelsEstimate"
+            upgrade:
+              $ref: "#/components/schemas/SetupUpgrade"
         runtimes:
           type: array
           items:

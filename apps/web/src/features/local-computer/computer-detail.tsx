@@ -56,6 +56,7 @@ import {
   appDescriptions,
   appNames,
   appOrder,
+  appSupported,
   computerReadiness,
   preferredComputerRuntime,
   type ComputerReadiness,
@@ -690,6 +691,26 @@ function AppRow({
   const hint =
     [name, runtime?.version].filter(Boolean).join(" ") +
     ` · ${t(appDescriptions[app])}`;
+  if (!appSupported(computer, app))
+    return (
+      <ComputerRow
+        hint={t(computersMessages.needsNewerLingerHint, {
+          app: name,
+          computer: computer.display_name,
+        })}
+        mark={
+          <RowMark dashed>
+            <Icon
+              className="text-muted-foreground opacity-60"
+              icon={appIcons[app]}
+              size={20}
+            />
+          </RowMark>
+        }
+        subtitle={t(computersMessages.needsNewerLinger)}
+        title={<span className="text-muted-foreground">{name}</span>}
+      />
+    );
   if (status === "not_installed")
     return (
       <ComputerRow

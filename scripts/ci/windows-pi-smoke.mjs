@@ -18,17 +18,26 @@ export function probePi(executable, args, options, timeoutMs = 30_000) {
       finished = true;
       clearTimeout(timer);
       output.close();
-      child.kill();
-      if (reason) {
-        const diagnostic = stderr.trim().slice(-1500).replaceAll("\x1b", "");
-        reject(
-          new Error(
-            `Pi smoke: ${reason}${diagnostic ? `\n${diagnostic}` : ""}`,
-          ),
-        );
-      } else {
-        resolve();
-      }
+      const diagnostic = stderr.trim().slice(-1500).replaceAll("\x1b", "");
+      const settle = () =>
+        reason
+          ? reject(
+              new Error(
+                `Pi smoke: ${reason}${diagnostic ? `\n${diagnostic}` : ""}`,
+              ),
+            )
+          : resolve();
+      // Windows keeps the working directory busy until the process exits, so
+      // the caller may remove it only after that.
+      if (
+        child.pid === undefined ||
+        child.exitCode !== null ||
+        child.signalCode !== null
+      )
+        return settle();
+      child.once("exit", settle);
+      // A failed kill delivers no exit event.
+      if (!child.kill()) settle();
     }
     child.stderr.setEncoding("utf8").on("data", (chunk) => {
       stderr = (stderr + chunk).slice(-1500);

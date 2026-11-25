@@ -151,23 +151,59 @@ func (c *acpConn) respondError(id json.RawMessage, code int, message string) err
 	return c.write(map[string]any{"jsonrpc": "2.0", "id": id, "error": acpError{Code: code, Message: message}})
 }
 
-// acpInitialize performs the ACP handshake and checks the protocol version.
-func acpInitialize(ctx context.Context, conn *acpConn) error {
+// acpCapabilities records the ACP session methods the server advertises during
+// initialize.
+type acpCapabilities struct {
+	SessionList   bool
+	SessionResume bool
+}
+
+func (c acpCapabilities) supportsResidency() bool {
+	return c.SessionList && c.SessionResume
+}
+
+func acpCapabilityPresent(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) && !bytes.Equal(trimmed, []byte("false"))
+}
+
+// acpInitialize performs the ACP handshake, checks the protocol version, and
+// returns the server's advertised session capabilities.
+func acpInitialize(ctx context.Context, conn *acpConn) (acpCapabilities, error) {
 	raw, err := conn.call(ctx, "initialize", map[string]any{
 		"protocolVersion":    acpProtocolVersion,
 		"clientCapabilities": map[string]any{"fs": map[string]any{"readTextFile": false, "writeTextFile": false}, "terminal": false},
 		"clientInfo":         map[string]any{"name": "linger-computer", "version": "1.0.0"},
 	})
 	if err != nil {
-		return err
+		return acpCapabilities{}, err
+	}
+	type sessionCapabilities struct {
+		List   json.RawMessage `json:"list"`
+		Resume json.RawMessage `json:"resume"`
 	}
 	var result struct {
-		ProtocolVersion int `json:"protocolVersion"`
+		ProtocolVersion   int `json:"protocolVersion"`
+		AgentCapabilities *struct {
+			SessionCapabilities      *sessionCapabilities `json:"sessionCapabilities"`
+			SessionCapabilitiesSnake *sessionCapabilities `json:"session_capabilities"`
+		} `json:"agentCapabilities"`
 	}
 	if json.Unmarshal(raw, &result) != nil || result.ProtocolVersion != acpProtocolVersion {
-		return errors.New("Antigravity ACP protocol version is unsupported")
+		return acpCapabilities{}, errors.New("Antigravity ACP protocol version is unsupported")
 	}
-	return nil
+	var caps acpCapabilities
+	if result.AgentCapabilities != nil {
+		sc := result.AgentCapabilities.SessionCapabilities
+		if sc == nil {
+			sc = result.AgentCapabilities.SessionCapabilitiesSnake
+		}
+		if sc != nil {
+			caps.SessionList = acpCapabilityPresent(sc.List)
+			caps.SessionResume = acpCapabilityPresent(sc.Resume)
+		}
+	}
+	return caps, nil
 }
 
 // antigravityAPIKeyEnv are the variables Antigravity reads a Gemini API key
@@ -225,4 +261,20 @@ type acpConfigOption struct {
 		Value string `json:"value"`
 		Name  string `json:"name"`
 	} `json:"options"`
+}
+
+// acpConfigValue returns the CurrentValue of the config option matching id,
+// falling back to matching Category == id.
+func acpConfigValue(options []acpConfigOption, id string) string {
+	for _, option := range options {
+		if option.ID == id {
+			return option.CurrentValue
+		}
+	}
+	for _, option := range options {
+		if option.Category == id {
+			return option.CurrentValue
+		}
+	}
+	return ""
 }

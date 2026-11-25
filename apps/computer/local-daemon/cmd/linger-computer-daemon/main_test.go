@@ -774,3 +774,56 @@ func TestTheFirstDiscoveryListsRememberedLocalModels(t *testing.T) {
 		t.Fatal("shaping changed the raw result")
 	}
 }
+
+func TestRuntimeCredentialFilesIncludesAntigravity(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	files := runtimeCredentialFiles(map[string]string{"HOME": home})
+	want := filepath.Join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	if files["antigravity"] != want {
+		t.Fatalf("antigravity credential file = %q, want %q", files["antigravity"], want)
+	}
+
+	userProfile := filepath.Join(t.TempDir(), "profile")
+	winFiles := runtimeCredentialFiles(map[string]string{"USERPROFILE": userProfile})
+	wantWin := filepath.Join(userProfile, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+	if winFiles["antigravity"] != wantWin {
+		t.Fatalf("antigravity USERPROFILE credential file = %q, want %q", winFiles["antigravity"], wantWin)
+	}
+
+	emptyFiles := runtimeCredentialFiles(map[string]string{})
+	if _, ok := emptyFiles["antigravity"]; ok {
+		t.Fatalf("unexpected antigravity credential file when home is empty: %+v", emptyFiles)
+	}
+}
+
+func TestAntigravityExecutableTrackerDetectsPathChanges(t *testing.T) {
+	discovery := func(path string) provider.DiscoveryResult {
+		if path == "" {
+			return provider.DiscoveryResult{}
+		}
+		return provider.DiscoveryResult{
+			Installations: map[string]provider.RuntimeDiagnostic{
+				"antigravity": {Type: "antigravity", ExecutablePath: path},
+			},
+		}
+	}
+	tracker := &antigravityExecutableTracker{path: "/usr/local/bin/agy"}
+	if tracker.changed(discovery("/usr/local/bin/agy")) {
+		t.Fatal("unchanged path reported changed")
+	}
+	if !tracker.changed(discovery("/opt/homebrew/bin/agy")) {
+		t.Fatal("swapped path did not report changed")
+	}
+	if tracker.changed(discovery("/opt/homebrew/bin/agy")) {
+		t.Fatal("repeated swapped path reported changed")
+	}
+	if !tracker.changed(discovery("")) {
+		t.Fatal("removed executable did not report changed")
+	}
+	if tracker.changed(discovery("")) {
+		t.Fatal("steady absent executable reported changed")
+	}
+	if !tracker.changed(discovery("/usr/local/bin/agy")) {
+		t.Fatal("reinstalled executable did not report changed")
+	}
+}

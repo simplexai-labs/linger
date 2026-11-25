@@ -19,6 +19,7 @@ export type VoiceLiveRuntimeEvent =
   components["schemas"]["VoiceLiveRuntimeEvent"];
 export type VoiceLiveClientEvent =
   components["schemas"]["VoiceLiveClientEvent"];
+export type VoiceLiveAudioStats = components["schemas"]["VoiceLiveAudioStats"];
 
 export class TeamHubVoiceRuntimeError extends Error {
   constructor(readonly status: number) {

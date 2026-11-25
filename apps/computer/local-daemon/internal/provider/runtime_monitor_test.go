@@ -212,6 +212,93 @@ func TestRuntimeMonitorSkipsFullRefreshWhileOperationsAreActive(t *testing.T) {
 	}
 }
 
+func TestChangedInstallationsNoticesAnInstallOrUpgrade(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable fixture")
+	}
+	directory := t.TempDir()
+	agy := filepath.Join(directory, "agy")
+	options := DiscoveryOptions{Environment: map[string]string{"HOME": t.TempDir()}}
+	missing := RuntimeDiagnostic{Type: "antigravity", Status: "not_installed", searchPath: directory}
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); len(changed) != 0 {
+		t.Fatalf("changed = %v before any install", changed)
+	}
+	writeExecutable := func(content string) {
+		t.Helper()
+		staged := filepath.Join(directory, "staged")
+		if err := os.WriteFile(staged, []byte(content), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// npm and the installers replace the file rather than rewrite it.
+		if err := os.Rename(staged, agy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeExecutable("#!/bin/sh\necho 1.5.0\n")
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); !reflect.DeepEqual(changed, []string{"antigravity"}) {
+		t.Fatalf("changed = %v after install, want antigravity", changed)
+	}
+	canonical, err := canonicalExecutable(agy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := RuntimeDiagnostic{Type: "antigravity", Status: "incompatible", searchPath: directory, ExecutablePath: canonical, executable: info}
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{old}, options); len(changed) != 0 {
+		t.Fatalf("changed = %v for an untouched old install", changed)
+	}
+	writeExecutable("#!/bin/sh\necho 1.5.16\n")
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{old}, options); !reflect.DeepEqual(changed, []string{"antigravity"}) {
+		t.Fatalf("changed = %v after an upgrade in place, want antigravity", changed)
+	}
+}
+
+func TestRuntimeMonitorRediscoversANewInstallWhileOperationsAreActive(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable fixture")
+	}
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "agy"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	initial := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{
+		{Type: "codex", Status: "ready", Protocol: "app-server", Version: "codex-test"},
+		{Type: "antigravity", Status: "not_installed", Protocol: "acp", searchPath: directory},
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var scopes [][]string
+	var published []RuntimeDiagnostic
+	err := MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+		Initial: initial, RefreshInterval: 5 * time.Millisecond, FullRefreshEveryTicks: 1_000_000,
+		FullRefreshAllowed: func() bool { return false },
+		Discover: func(_ context.Context, options DiscoveryOptions) (DiscoveryResult, error) {
+			scopes = append(scopes, options.Runtimes)
+			return DiscoveryResult{Diagnostics: []RuntimeDiagnostic{
+				{Type: "codex", Status: "error", Protocol: "app-server"},
+				{Type: "antigravity", Status: "ready", Protocol: "acp", Version: "1.5.16"},
+			}}, nil
+		},
+		OnChanged: func(result DiscoveryResult) error {
+			published = result.Diagnostics
+			cancel()
+			return nil
+		},
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(scopes, [][]string{{"antigravity"}}) {
+		t.Fatalf("discovery scopes = %v, want one for antigravity", scopes)
+	}
+	if len(published) != 2 || published[0].Status != "ready" || published[1].Status != "ready" {
+		t.Fatalf("published = %+v, want codex kept and antigravity ready", published)
+	}
+}
+
 // A long-running provider blocks full discovery; an authentication transport
 // failure must still recover from its cached, previously verified executable.
 func TestRuntimeMonitorRecoversFailedAuthenticationWhileOperationIsActive(t *testing.T) {

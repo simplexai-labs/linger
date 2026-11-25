@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"os"
 	"reflect"
+	"slices"
 	"time"
 
 	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
@@ -121,6 +123,19 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 					next = retainReadyRuntimesDuringInconclusiveProbes(current, published, next)
 				}
 				next = retainReadyRuntimesDuringTransientFailures(current, published, next, authenticationFailures)
+			}
+			// No Operation runs on a Runtime that is not installed or too old,
+			// so its rediscovery waits neither for the full cadence nor for
+			// active Operations to finish.
+			if err == nil {
+				if changed := changedInstallations(ctx, next.Diagnostics, activeDiscovery); len(changed) > 0 {
+					targeted := activeDiscovery
+					targeted.Runtimes = changed
+					var found DiscoveryResult
+					if found, err = discover(ctx, targeted); err == nil {
+						next = withRuntimeDiagnostics(next, found.Diagnostics, changed)
+					}
+				}
 			}
 		}
 		if err != nil {
@@ -319,6 +334,68 @@ func refreshAuthenticationProbe(ctx context.Context, diagnostic RuntimeDiagnosti
 	}
 	defer release()
 	return probeRuntimeAuthentication(probe, diagnostic.Type, diagnostic.ExecutablePath, prepared, budget, options.RuntimeHomeRoot)
+}
+
+// changedInstallations names the Runtimes discovery found not installed or
+// too old whose executable has since appeared or been replaced, by searching
+// the PATH that discovery searched. It only stats files, so it runs on every
+// tick; the rediscovery it asks for runs the probes.
+func changedInstallations(ctx context.Context, diagnostics []RuntimeDiagnostic, options DiscoveryOptions) []string {
+	environment := platformEnvironment(maps.Clone(options.Environment))
+	if environment == nil {
+		environment = make(map[string]string)
+	}
+	var changed []string
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Status != "not_installed" && diagnostic.Status != "incompatible" || diagnostic.searchPath == "" {
+			continue
+		}
+		definition := slices.IndexFunc(runtimeDefinitions, func(definition runtimeDefinition) bool { return definition.Type == diagnostic.Type })
+		if definition < 0 {
+			continue
+		}
+		environment["PATH"] = diagnostic.searchPath
+		entry, err := resolveExecutableEntry(ctx, diagnostic.Type, runtimeDefinitions[definition].Command,
+			DiscoveryOptions{ConfiguredPaths: options.ConfiguredPaths, Environment: environment})
+		canonical := ""
+		if err == nil {
+			canonical, err = canonicalExecutable(entry)
+		}
+		if err != nil {
+			// A removed executable turns a Runtime that was too old into one
+			// that is not installed.
+			if diagnostic.Status == "incompatible" {
+				changed = append(changed, diagnostic.Type)
+			}
+			continue
+		}
+		if diagnostic.Status == "not_installed" || canonical != diagnostic.ExecutablePath {
+			changed = append(changed, diagnostic.Type)
+			continue
+		}
+		// An upgrade in place (npm replaces the package, an installer rewrites
+		// the binary) keeps the path but not the file.
+		info, err := os.Stat(canonical)
+		if previous := diagnostic.executable; err == nil && previous != nil &&
+			(!os.SameFile(info, previous) || !info.ModTime().Equal(previous.ModTime()) || info.Size() != previous.Size()) {
+			changed = append(changed, diagnostic.Type)
+		}
+	}
+	return changed
+}
+
+// withRuntimeDiagnostics replaces the diagnostics of types with those found.
+func withRuntimeDiagnostics(result DiscoveryResult, found []RuntimeDiagnostic, types []string) DiscoveryResult {
+	diagnostics := slices.Clone(result.Diagnostics)
+	for _, replacement := range found {
+		if !slices.Contains(types, replacement.Type) {
+			continue
+		}
+		if index := slices.IndexFunc(diagnostics, func(diagnostic RuntimeDiagnostic) bool { return diagnostic.Type == replacement.Type }); index >= 0 {
+			diagnostics[index] = replacement
+		}
+	}
+	return DiscoveryResult{Diagnostics: diagnostics, Installations: InstallationsFromDiagnostics(diagnostics)}
 }
 
 func runtimeExecutableChanged(diagnostic RuntimeDiagnostic) bool {

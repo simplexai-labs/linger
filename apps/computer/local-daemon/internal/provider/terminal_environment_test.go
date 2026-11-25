@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -112,6 +113,57 @@ func TestTerminalEnvironmentKeepsInheritedPathOnShellFailure(t *testing.T) {
 		if !strings.Contains(environment["PATH"], userFirst) || !strings.HasPrefix(environment["PATH"], filepath.Join(root, ".local/bin")+":") {
 			t.Fatalf("PATH=%q", environment["PATH"])
 		}
+	}
+}
+
+func TestTerminalEnvironmentReusesLastCapturedPathWhenTheShellFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX terminal fixture")
+	}
+	root := t.TempDir()
+	shell := filepath.Join(root, "shell")
+	terminalPath := filepath.Join(root, ".nvm-like/bin")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\nexport PATH=\"$TERMINAL_PATH\"\nexec /bin/sh -c \"$2\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	source := map[string]string{"HOME": root, "SHELL": shell, "PATH": "/usr/bin:/bin", "TERMINAL_PATH": terminalPath}
+	if environment := terminalEnvironment(t.Context(), source); !strings.HasPrefix(environment["PATH"], terminalPath+":/usr/bin:/bin") {
+		t.Fatalf("first PATH=%q", environment["PATH"])
+	}
+	// The next read misses its budget, as a slow profile does under load.
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if environment := terminalEnvironment(t.Context(), source); !strings.HasPrefix(environment["PATH"], terminalPath+":/usr/bin:/bin") {
+		t.Fatalf("PATH after a failed read=%q", environment["PATH"])
+	}
+}
+
+func TestTerminalEnvironmentFindsNodeManagerGlobalInstalls(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX install directories")
+	}
+	root := t.TempDir()
+	older := filepath.Join(root, ".nvm/versions/node/v9.11.2/bin")
+	newer := filepath.Join(root, ".nvm/versions/node/v22.3.0/bin")
+	pnpm := filepath.Join(root, "Library/pnpm")
+	for _, directory := range []string{older, newer, pnpm} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	codex := filepath.Join(older, "codex")
+	if err := os.WriteFile(codex, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// No terminal PATH: nvm, fnm and pnpm folders come only from a profile.
+	environment := terminalEnvironment(t.Context(), map[string]string{"HOME": root, "PATH": "/usr/bin:/bin"})
+	entries := filepath.SplitList(environment["PATH"])
+	if newerAt, olderAt, pnpmAt := slices.Index(entries, newer), slices.Index(entries, older), slices.Index(entries, pnpm); newerAt < 0 || olderAt < newerAt || pnpmAt < 0 || pnpmAt > slices.Index(entries, "/usr/bin") {
+		t.Fatalf("PATH=%q", environment["PATH"])
+	}
+	if path, err := resolveExecutableEntry(t.Context(), "codex", "codex", DiscoveryOptions{Environment: environment}); err != nil || path != codex {
+		t.Fatalf("resolved %q, %v; want %q", path, err, codex)
 	}
 }
 

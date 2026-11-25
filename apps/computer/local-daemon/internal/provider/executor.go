@@ -164,13 +164,13 @@ type SteerError struct {
 }
 
 // PrepareProvider is the run.start of spec without input: it parks a Codex,
-// Claude, or Pi process for the spec's session without submitting a turn. The
-// Run's attachments, its MCP servers and prompt, are connected when the Run
-// adopts the process, so a prepare carries none. A compatible resident is
-// left parked as it is.
+// Claude, Pi, or Antigravity process for the spec's session without submitting
+// a turn. The Run's attachments, its MCP servers and prompt, are connected
+// when the Run adopts the process, so a prepare carries none. A compatible
+// resident is left parked as it is.
 func (e Executor) PrepareProvider(ctx context.Context, spec OperationSpec) (Result, error) {
-	if spec.Provider != "codex" && spec.Provider != "claude" && spec.Provider != "pi" {
-		return Result{}, errors.New("provider prepare is supported only for Codex, Claude, and Pi")
+	if spec.Provider != "codex" && spec.Provider != "claude" && spec.Provider != "pi" && spec.Provider != "antigravity" {
+		return Result{}, errors.New("provider prepare is supported only for Codex, Claude, Pi, and Antigravity")
 	}
 	spec.OperationKind = operationProviderPrepareKind
 	spec.Prompt = ""
@@ -190,6 +190,12 @@ func (e Executor) PrepareProvider(ctx context.Context, spec OperationSpec) (Resu
 	}
 	if result.CleanupUnconfirmed {
 		return result, errors.Join(ErrPreparationCleanupUnconfirmed, errors.New(result.Error), context.Cause(ctx))
+	}
+	if result.FailureCode == "not_eligible" {
+		if result.Error != "" {
+			return result, fmt.Errorf("%w: %s", native.ErrProviderPrepareNotEligible, result.Error)
+		}
+		return result, native.ErrProviderPrepareNotEligible
 	}
 	if result.Status != "completed" {
 		if result.Error == "" {
@@ -608,6 +614,8 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 			failureCode := ""
 			if errors.Is(err, native.ErrSessionNotFound) {
 				failureCode = "session_not_found"
+			} else if errors.Is(err, native.ErrProviderPrepareNotEligible) {
+				failureCode = "not_eligible"
 			}
 			finish(Result{Status: "failed", FailureCode: failureCode, Error: err.Error()})
 			return

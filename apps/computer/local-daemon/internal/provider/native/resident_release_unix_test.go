@@ -158,9 +158,22 @@ func TestReleaseAggregatesAcrossProvidersWithUnconfirmedStop(t *testing.T) {
 	pi := piNewResidentHome(t, nil)
 	pi.profile.ContextKey = "ctx-mixed"
 	piProc := pi.createParked("mixed-session", RunSpec{})
+	agy := newAgyResidentHarness(t, "turn", nil)
+	agy.profile.ContextKey = "ctx-mixed"
+	agyRun, err := agy.runtime().Start(t.Context(), "go", RunSpec{Dir: agy.dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, out := drainAgy(t, agyRun); out.Status != statusCompleted || out.ExitConfirmed {
+		t.Fatalf("antigravity turn = %+v", out)
+	}
+	agyProc, _, ok := residentEntryOf(antigravityResidents, "ctx-mixed")
+	if !ok {
+		t.Fatal("antigravity process did not park")
+	}
 
 	count, err := StopParkedResidentsForContext("ctx-mixed")
-	if count != 3 || !errors.Is(err, errResidentRecycleUnconfirmed) {
+	if count != 4 || !errors.Is(err, errResidentRecycleUnconfirmed) {
 		t.Fatalf("release = %d %v", count, err)
 	}
 	awaitTrue(t, "codex exit", 5*time.Second, codexProc.isReaped)
@@ -171,6 +184,9 @@ func TestReleaseAggregatesAcrossProvidersWithUnconfirmedStop(t *testing.T) {
 		t.Fatal("the Pi process stayed")
 	}
 	piAwaitGone(t, piProc)
+	if _, _, ok := residentEntryOf(antigravityResidents, "ctx-mixed"); ok || agyProc.alive() {
+		t.Fatal("the Antigravity process stayed")
+	}
 	if owner, retiring, _ := residentEntryOf(claudeResidents, stuckRoot); owner != stuck || !retiring {
 		t.Fatal("the unconfirmed Claude entry was not held")
 	}

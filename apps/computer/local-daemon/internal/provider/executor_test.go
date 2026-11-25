@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -360,4 +361,49 @@ func TestRunStartedOffersYieldOnlyWithNativeSession(t *testing.T) {
 			t.Fatalf("run=%v session=%q: %+v", tc.run, tc.session, start)
 		}
 	}
+}
+
+type failingStartBackend struct{ err error }
+
+func (b failingStartBackend) Start(context.Context, string, native.RunSpec) (*native.Run, error) {
+	return nil, b.err
+}
+
+func TestExecutorPrepareProviderAntigravityAndNotEligiblePropagation(t *testing.T) {
+	t.Run("not_eligible", func(t *testing.T) {
+		executor := Executor{
+			NewBackend: func(string, native.Profile) (native.Runtime, error) {
+				return failingStartBackend{err: fmt.Errorf("%w: missing capabilities", native.ErrProviderPrepareNotEligible)}, nil
+			},
+		}
+		result, err := executor.PrepareProvider(t.Context(), OperationSpec{
+			Provider: "antigravity", ExecutablePath: "/bin/agy", WorkingDirectory: t.TempDir(),
+		})
+		if !errors.Is(err, native.ErrProviderPrepareNotEligible) {
+			t.Fatalf("err=%v, want ErrProviderPrepareNotEligible", err)
+		}
+		if result.FailureCode != "not_eligible" {
+			t.Fatalf("result=%+v, want FailureCode=not_eligible", result)
+		}
+	})
+
+	t.Run("completed", func(t *testing.T) {
+		var specs []native.RunSpec
+		executor := Executor{
+			NewBackend: func(string, native.Profile) (native.Runtime, error) {
+				return sequenceBackend{specs: &specs, runs: []*native.Run{
+					finishedRun(native.Outcome{Status: "completed", Parked: true}),
+				}}, nil
+			},
+		}
+		result, err := executor.PrepareProvider(t.Context(), OperationSpec{
+			Provider: "antigravity", ExecutablePath: "/bin/agy", WorkingDirectory: t.TempDir(),
+		})
+		if err != nil || !result.PreparedParked {
+			t.Fatalf("result=%+v err=%v, want parked completion", result, err)
+		}
+		if len(specs) != 1 || !specs[0].PrepareOnly || specs[0].WarmMCP {
+			t.Fatalf("specs=%+v, want single provider prepare", specs)
+		}
+	})
 }

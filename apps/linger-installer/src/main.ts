@@ -205,6 +205,8 @@ async function inspect(options: ReturnType<typeof parseInstallerArguments>) {
     await import("@linger/local-installation/setup-plan");
   const startedAt = Date.now();
   let counted = 0;
+  let refusal: WindowsPrivateRefusal | undefined;
+  let failureMessage: string | undefined;
   // The desktop logs stderr, so a slow check says which part was slow.
   const report = await inspectSetup({
     home: options.home,
@@ -228,15 +230,19 @@ async function inspect(options: ReturnType<typeof parseInstallerArguments>) {
       );
     },
   }).catch((error: unknown) => {
+    refusal = windowsPrivateRefusal(error);
+    failureMessage = error instanceof Error ? error.message : String(error);
     process.stderr.write(
-      `The check failed: ${error instanceof Error ? error.message : String(error)}\n`,
+      `The check failed${refusal ? ` (${refusal.code})` : ""}: ${failureMessage}\n`,
     );
     return null;
   });
   process.stderr.write(
     `Checked this computer in ${((Date.now() - startedAt) / 1000).toFixed(1)}s.\n`,
   );
-  process.stdout.write(`${JSON.stringify(report)}\n`, () =>
+  const output =
+    report ?? (refusal ? { error: failureMessage ?? "", refusal } : null);
+  process.stdout.write(`${JSON.stringify(output)}\n`, () =>
     process.exit(report ? 0 : 1),
   );
 }

@@ -228,6 +228,28 @@ describe("RemoteCodexProvider provider prepare", () => {
     });
     expect(pi.prepares).toHaveLength(0);
 
+    const antigravity = new RecordingDispatcher();
+    const antigravityLogger = { log: vi.fn(), child: () => antigravityLogger };
+    const antigravityProvider = createProvider(
+      antigravity,
+      { type: "antigravity" },
+      undefined,
+      antigravityLogger,
+    );
+    const antigravitySession = await antigravityProvider.resumeSession(
+      { threadId: "existing-session" },
+      sessionOptions(),
+    );
+    antigravityProvider.prepareForAcceptedInput(antigravitySession, {
+      acceptedInputSinceMs: 0,
+    });
+    expect(antigravity.prepares).toHaveLength(0);
+    expect(antigravityLogger.log).toHaveBeenCalledWith(
+      "info",
+      "runner.provider.prepare_skipped",
+      { source: "accepted_input", reason: "runtime_unsupported" },
+    );
+
     const repeated = new RecordingDispatcher();
     const repeatedProvider = createProvider(repeated);
     const session = await repeatedProvider.resumeSession(
@@ -385,27 +407,78 @@ describe("RemoteCodexProvider presence prepare", () => {
     });
   });
 
-  it("skips presence prepare for a Pi session without an id and for Antigravity", async () => {
-    for (const [runtimeType, override, reason] of [
-      ["pi", { provider: "pi" }, "session_not_started"],
-      ["antigravity", undefined, "runtime_unsupported"],
-    ] as const) {
+  it("skips presence prepare for a Pi session without an id", async () => {
+    const dispatcher = new RecordingDispatcher();
+    const logger = { log: vi.fn(), child: () => logger };
+    const provider = createProvider(
+      dispatcher,
+      { type: "pi" },
+      undefined,
+      logger,
+    );
+    await provider.createSession(sessionOptions());
+    provider.prepareForPresence({ provider: "pi" });
+    expect(dispatcher.prepares).toHaveLength(0);
+    expect(logger.log).toHaveBeenCalledWith(
+      "info",
+      "runner.provider.prepare_skipped",
+      { source: "room_presence", reason: "session_not_started" },
+    );
+  });
+
+  it("sends an Antigravity presence prepare for both blank and resumed rooms matching run.start", async () => {
+    for (const initial of [
+      { threadId: "" },
+      { threadId: "existing-session" },
+    ]) {
       const dispatcher = new RecordingDispatcher();
       const logger = { log: vi.fn(), child: () => logger };
       const provider = createProvider(
         dispatcher,
-        { type: runtimeType },
+        { type: "antigravity" },
         undefined,
         logger,
       );
-      const created = await provider.createSession(sessionOptions());
-      provider.prepareForPresence(override ?? created);
-      expect(dispatcher.prepares).toHaveLength(0);
-      expect(logger.log).toHaveBeenCalledWith(
+      const session =
+        initial.threadId === ""
+          ? await provider.createSession(sessionOptions())
+          : await provider.resumeSession({ ...initial }, sessionOptions());
+      let startSession: unknown;
+      let startRuntime: unknown;
+      let startSessionOptions: unknown;
+      let startContextViewRef: unknown;
+      dispatcher.onRunStart = (operation) => {
+        if (operation.request.kind === "run.start") {
+          startSession = structuredClone(operation.request.session);
+          startRuntime = structuredClone(operation.request.runtime);
+          startSessionOptions = structuredClone(
+            operation.request.session_options,
+          );
+          startContextViewRef = structuredClone(
+            (operation as { readonly contextViewRef?: unknown }).contextViewRef,
+          );
+        }
+      };
+
+      provider.prepareForPresence(session);
+
+      expect(dispatcher.prepares).toHaveLength(1);
+      expect(logger.log).not.toHaveBeenCalledWith(
         "info",
         "runner.provider.prepare_skipped",
-        { source: "room_presence", reason },
+        expect.anything(),
       );
+      await provider.startRun(
+        session,
+        { type: "text", text: "work" },
+        runSpec(),
+      );
+      const [prepare] = dispatcher.prepares;
+      expect(prepare!.options.runtime).toEqual(startRuntime);
+      expect(prepare!.options.sessionOptions).toEqual(startSessionOptions);
+      expect(prepare!.options.session).toEqual(startSession);
+      expect(prepare!.options.session).toEqual(initial);
+      expect(prepare!.options.contextViewRef).toEqual(startContextViewRef);
     }
   });
 

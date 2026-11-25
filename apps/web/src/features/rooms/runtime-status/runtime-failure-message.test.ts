@@ -53,6 +53,17 @@ describe("Runtime failure messages", () => {
     expect(message).not.toMatch(/sign the Runtime in/);
   });
 
+  it("points to Settings > Models and Local Computer diagnostics when the model gateway could not start", () => {
+    const message = runtimeFailureMessage(translate, {
+      code: "model_gateway_unavailable",
+      runtime_type: "codex",
+    });
+    expect(message).toContain("Codex:");
+    expect(message).toContain("could not start its local model gateway");
+    expect(message).toContain("Open Settings > Models");
+    expect(message).toContain("Local Computer diagnostics");
+  });
+
   it("says the Agent finished but its reply did not reach the Room", () => {
     const message = runtimeFailureMessage(translate, {
       code: "reply_undelivered",

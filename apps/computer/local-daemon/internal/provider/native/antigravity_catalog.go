@@ -117,7 +117,7 @@ func ProbeAntigravity(ctx context.Context, inv Invocation) (AntigravityProbe, er
 	defer release()
 	var result AntigravityProbe
 	err = withACPProcess(ctx, inv, workDir, probeArgs, nil, func(conn *acpConn) error {
-		if err := acpInitialize(ctx, conn); err != nil {
+		if _, err := acpInitialize(ctx, conn); err != nil {
 			return err
 		}
 		raw, err := acpOpenSession(ctx, conn, env, func() (json.RawMessage, error) {

@@ -26,6 +26,7 @@ import {
   appNames,
   appOrder,
   appStatus,
+  appSupported,
   runtimeStatusLabels,
 } from "./computer-readiness";
 import { computerSetupMessages } from "./computer-setup.messages";
@@ -251,13 +252,14 @@ function AppSetup({
   tenantId: string;
 }) {
   const t = useT();
-  const missing = appOrder.filter(
+  const apps = appOrder.filter((app) => appSupported(computer, app));
+  const missing = apps.filter(
     (app) => appStatus(computer, app) === "not_installed",
   );
-  const outdated = appOrder.filter(
+  const outdated = apps.filter(
     (app) => appStatus(computer, app) === "incompatible",
   );
-  const signIn = appOrder.filter(
+  const signIn = apps.filter(
     (app) => appStatus(computer, app) === "authentication_required",
   );
   return (
@@ -266,7 +268,7 @@ function AppSetup({
         {t(computersMessages.oneReadyAppEnough)}
       </p>
       <ul className="divide-y divide-border rounded-lg border border-border">
-        {appOrder.map((app) => (
+        {apps.map((app) => (
           <AppRow app={app} key={app} status={appStatus(computer, app)} />
         ))}
       </ul>

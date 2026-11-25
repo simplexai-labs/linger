@@ -50,6 +50,12 @@ const serviceFeatureLocalModelsExternalHolders = "local_models_external_holders"
 // model_unavailable to it instead.
 const serviceFeatureLocalModelUnavailable = "local_model_unavailable"
 
+// serviceFeatureModelGatewayUnavailable in runner.welcome's service_features
+// says the Agent Service accepts the model_gateway_unavailable Run failure
+// code. An older service rejects the frame, so the Daemon reports
+// execution_failed to it instead.
+const serviceFeatureModelGatewayUnavailable = "model_gateway_unavailable"
+
 // LocalModelLibrary runs the actions a Computer owner chooses on this
 // Computer's localmodels library. The Daemon never picks a model: on its
 // own it loads only the downloaded model a Run's Agent already names, and it

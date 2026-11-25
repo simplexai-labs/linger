@@ -7,6 +7,7 @@ import type {
 import type { Message } from "@/i18n/messages";
 
 import type { ComputerDisplayStatus } from "./computer-connection-status";
+import { compareComputerVersion } from "./computer-version";
 import { computersMessages } from "./computers.messages";
 
 type LocalComputer = TeamHubLocalComputerPage["items"][number];
@@ -61,6 +62,26 @@ export function appStatus(
     computer.runtimes.find((runtime) => runtime.type === app)?.status ??
     "not_installed"
   );
+}
+
+// The first Computer release that can run each app added after the first
+// ones. An older Computer never reports the app, and installing the app
+// cannot change that; only updating Linger there can.
+const firstComputerVersion: Partial<Record<TeamHubLocalRuntimeType, string>> = {
+  antigravity: "0.56.0",
+};
+
+/** Whether the Computer's Linger can run the app once it is installed. */
+export function appSupported(
+  computer: Pick<LocalComputer, "daemon_version" | "runtimes">,
+  app: TeamHubLocalRuntimeType,
+): boolean {
+  const first = firstComputerVersion[app];
+  if (!first || !computer.daemon_version) return true;
+  // A build between releases may run it before its version says so.
+  if (computer.runtimes.some((runtime) => runtime.type === app)) return true;
+  const order = compareComputerVersion(computer.daemon_version, first);
+  return order === undefined || order >= 0;
 }
 
 function firstApp(computer: LocalComputer, status: RuntimeStatus) {

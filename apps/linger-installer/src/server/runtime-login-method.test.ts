@@ -6,6 +6,8 @@ import { RuntimeLoginManager } from "./runtime-login.js";
 vi.mock("@linger/local-installation/managed-codex", () => ({
   managedRuntimeEnvironment: async () => ({}),
 }));
+// Fixture logins run their script through Node: Windows cannot execute a
+// shebang script.
 const clean: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   for (const fn of clean.splice(0).reverse()) await fn();
@@ -21,14 +23,12 @@ async function codex(script = "") {
   const exe = path.join(home, "codex");
   await writeFile(
     exe,
-    `#!${process.execPath}
-const args = process.argv.slice(2).join(' ');
+    `const args = process.argv.slice(2).join(' ');
 ${script}
 if (args === 'login') console.log(${JSON.stringify(oauthUrl)} + (process.env.BROWSER === 'true' ? '&quiet=1' : ''));
 else if (args === 'login --device-auth') { console.log('https://auth.openai.com/codex/device'); console.log('ABCD-EFGH'); }
 else process.exit(2);
 setTimeout(() => {}, 5000);`,
-    { mode: 0o700 },
   );
   const inspect = async () => ({
     runtime: "codex" as const,
@@ -43,10 +43,14 @@ setTimeout(() => {}, 5000);`,
       installed: true,
       authenticated: false,
       authMode: null,
-      loginCommand: { executable: exe, args: ["login"], env: {} },
+      loginCommand: {
+        executable: process.execPath,
+        args: [exe, "login"],
+        env: {},
+      },
       deviceLoginCommand: {
-        executable: exe,
-        args: ["login", "--device-auth"],
+        executable: process.execPath,
+        args: [exe, "login", "--device-auth"],
         env: {},
       },
     },

@@ -34,6 +34,11 @@ type RuntimeDiagnostic struct {
 	// Internal provenance: only an authentication probe failure may be
 	// retried without rerunning version and protocol discovery.
 	authProbeFailed bool
+	// searchPath is the PATH this observation searched and executable the
+	// file it probed, so the monitor can notice an install or upgrade
+	// without a full discovery (changedInstallations).
+	searchPath string
+	executable os.FileInfo
 }
 
 type RuntimeModel struct {
@@ -156,6 +161,7 @@ func diagnose(ctx context.Context, kind, executable, protocol string, options Di
 		observation.Error = &DiagnosticError{Code: code, Message: message}
 		return observation
 	}
+	observation.searchPath = options.Environment["PATH"]
 	entry, err := resolveExecutableEntry(ctx, kind, executable, options)
 	if err != nil {
 		return reject("not_installed", "RUNTIME_NOT_INSTALLED", "Runtime executable not found")
@@ -165,6 +171,7 @@ func diagnose(ctx context.Context, kind, executable, protocol string, options Di
 		return reject("not_installed", "RUNTIME_NOT_INSTALLED", "Runtime executable not found")
 	}
 	observation.EntryPath, observation.ExecutablePath = entry, canonical
+	observation.executable, _ = os.Stat(canonical)
 	observation.ExecutionPath = options.Environment["PATH"]
 	versionEnv := options.Environment
 	if kind == "claude" {

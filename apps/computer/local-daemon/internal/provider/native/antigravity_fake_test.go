@@ -2,10 +2,14 @@ package native
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,9 +18,15 @@ import (
 // The test binary doubles as a fake `agy acp` when agyFakeEnv names a mode.
 // Every request it reads is appended to agyFakeRecordEnv as one JSON line.
 const (
-	agyFakeEnv       = "NATIVE_AGY_FAKE"
-	agyFakeRecordEnv = "AGY_FAKE_RECORD"
-	agyFakeMetaEnv   = "AGY_FAKE_META"
+	agyFakeEnv             = "NATIVE_AGY_FAKE"
+	agyFakeRecordEnv       = "AGY_FAKE_RECORD"
+	agyFakeMetaEnv         = "AGY_FAKE_META"
+	agyFakeCapabilitiesEnv = "AGY_FAKE_CAPABILITIES"
+	agyFakeMCPCallEnv      = "AGY_FAKE_MCP_CALL"
+	agyFakePIDFileEnv      = "AGY_FAKE_PID_FILE"
+	agyFakeGateEnv         = "AGY_FAKE_GATE"
+	agyFakeNoDefaultsEnv   = "AGY_FAKE_NO_DEFAULTS"
+	agyFakeSessionIDEnv    = "AGY_FAKE_SESSION_ID"
 	// agyFakeCommandEnv names the command a permission request asks for.
 	agyFakeCommandEnv = "AGY_FAKE_COMMAND"
 )
@@ -27,6 +37,12 @@ func init() {
 	}
 }
 
+type agyFakeMCPTarget struct {
+	name    string
+	url     string
+	headers map[string]string
+}
+
 type agyFakeProcess struct {
 	mode      string
 	geminiDir string
@@ -34,8 +50,11 @@ type agyFakeProcess struct {
 	out       sync.Mutex
 	record    *os.File
 	authed    bool
+	mcpMu     sync.Mutex
+	mcpList   []agyFakeMCPTarget
 	// answers carries the client's responses to the fake's own requests.
 	answers chan map[string]any
+	closed  chan struct{}
 }
 
 func (f *agyFakeProcess) send(value any) {
@@ -58,6 +77,16 @@ func (f *agyFakeProcess) update(sessionID string, update map[string]any) {
 }
 
 func agyFakeSession(id string) map[string]any {
+	configOptions := []any{
+		map[string]any{"id": "model", "category": "model", "currentValue": "gemini-pro", "options": []any{
+			map[string]any{"value": "gemini-pro", "name": "Gemini Pro"},
+			map[string]any{"value": "gemini-flash", "name": "Gemini Flash"},
+		}},
+		map[string]any{"id": "thought_level", "category": "thought_level", "currentValue": "low", "options": []any{}},
+	}
+	if os.Getenv(agyFakeNoDefaultsEnv) == "1" {
+		configOptions = []any{}
+	}
 	return map[string]any{
 		"sessionId": id,
 		"models": map[string]any{
@@ -68,14 +97,42 @@ func agyFakeSession(id string) map[string]any {
 			},
 			"currentModelId": "gemini-pro-low",
 		},
-		"configOptions": []any{
-			map[string]any{"id": "model", "category": "model", "currentValue": "gemini-pro", "options": []any{
-				map[string]any{"value": "gemini-pro", "name": "Gemini Pro"},
-				map[string]any{"value": "gemini-flash", "name": "Gemini Flash"},
-			}},
-			map[string]any{"id": "thought_level", "category": "thought_level", "currentValue": "low", "options": []any{}},
-		},
+		"configOptions": configOptions,
 	}
+}
+
+func agyFakeInitializeResult() map[string]any {
+	result := map[string]any{
+		"protocolVersion": 1,
+		"agentInfo":       map[string]any{"name": "fake"},
+	}
+	switch os.Getenv(agyFakeCapabilitiesEnv) {
+	case "full":
+		result["agentCapabilities"] = map[string]any{
+			"sessionCapabilities": map[string]any{"list": map[string]any{}, "resume": map[string]any{}},
+		}
+	case "snake":
+		result["agentCapabilities"] = map[string]any{
+			"session_capabilities": map[string]any{"list": map[string]any{}, "resume": map[string]any{}},
+		}
+	case "no-list":
+		result["agentCapabilities"] = map[string]any{
+			"sessionCapabilities": map[string]any{"resume": map[string]any{}},
+		}
+	case "no-resume":
+		result["agentCapabilities"] = map[string]any{
+			"sessionCapabilities": map[string]any{"list": map[string]any{}},
+		}
+	case "false":
+		result["agentCapabilities"] = map[string]any{
+			"sessionCapabilities": map[string]any{"list": false, "resume": false},
+		}
+	case "null":
+		result["agentCapabilities"] = map[string]any{
+			"sessionCapabilities": map[string]any{"list": nil, "resume": nil},
+		}
+	}
+	return result
 }
 
 func agyFake(mode string, args []string) int {
@@ -107,8 +164,20 @@ func agyFake(mode string, args []string) int {
 			return 2
 		}
 	}
-	f := &agyFakeProcess{mode: mode, geminiDir: geminiDir, logFile: logFile, answers: make(chan map[string]any, 1)}
+	f := &agyFakeProcess{
+		mode:      mode,
+		geminiDir: geminiDir,
+		logFile:   logFile,
+		answers:   make(chan map[string]any, 1),
+		closed:    make(chan struct{}),
+	}
 	f.writeStartupFiles(args)
+	if pidFile := os.Getenv(agyFakePIDFileEnv); pidFile != "" {
+		if file, err := os.OpenFile(pidFile, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600); err == nil {
+			_, _ = fmt.Fprintf(file, "%d\n", os.Getpid())
+			_ = file.Close()
+		}
+	}
 	if path := os.Getenv(agyFakeRecordEnv); path != "" {
 		f.record, _ = os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
 	}
@@ -126,6 +195,7 @@ func agyFake(mode string, args []string) int {
 			Result map[string]any  `json:"result"`
 		}
 		if json.Unmarshal(line, &frame) != nil {
+			close(f.closed)
 			return 3
 		}
 		if frame.Method == "" {
@@ -134,6 +204,7 @@ func agyFake(mode string, args []string) int {
 		}
 		f.handle(frame.ID, frame.Method, frame.Params)
 	}
+	close(f.closed)
 	return 0
 }
 
@@ -169,26 +240,80 @@ func (f *agyFakeProcess) writeStartupFiles(args []string) {
 	_ = os.WriteFile(metaPath, meta, 0o600)
 }
 
+func (f *agyFakeProcess) checkAuth(id json.RawMessage) bool {
+	if f.mode == "signed-out" && !f.authed {
+		f.fail(id, acpAuthRequired, "Authentication required")
+		return false
+	}
+	if f.mode == "token-file" && !f.authed {
+		token, err := os.ReadFile(filepath.Join(f.appDataDir(), "antigravity-oauth-token"))
+		if err != nil || len(token) == 0 {
+			f.fail(id, acpAuthRequired, "Authentication required")
+			return false
+		}
+	}
+	return true
+}
+
+func (f *agyFakeProcess) rememberMCPServers(raw any) {
+	list, ok := raw.([]any)
+	if !ok || len(list) == 0 {
+		return
+	}
+	var parsed []agyFakeMCPTarget
+	for _, item := range list {
+		server, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		targetURL, _ := server["url"].(string)
+		if targetURL == "" {
+			continue
+		}
+		name, _ := server["name"].(string)
+		headers := map[string]string{}
+		if rawHeaders, ok := server["headers"].([]any); ok {
+			for _, pair := range rawHeaders {
+				if obj, ok := pair.(map[string]any); ok {
+					k, _ := obj["name"].(string)
+					v, _ := obj["value"].(string)
+					if k != "" {
+						headers[k] = v
+					}
+				}
+			}
+		}
+		parsed = append(parsed, agyFakeMCPTarget{name: name, url: targetURL, headers: headers})
+	}
+	f.mcpMu.Lock()
+	f.mcpList = parsed
+	f.mcpMu.Unlock()
+}
+
 func (f *agyFakeProcess) handle(id json.RawMessage, method string, params map[string]any) {
 	switch method {
 	case "initialize":
-		f.result(id, map[string]any{"protocolVersion": 1, "agentInfo": map[string]any{"name": "fake"}})
+		f.result(id, agyFakeInitializeResult())
 	case "authenticate":
 		f.authed = params["methodId"] == "gemini-api-key"
 		f.result(id, map[string]any{})
-	case "session/new", "session/load":
-		if f.mode == "signed-out" && !f.authed {
-			f.fail(id, acpAuthRequired, "Authentication required")
+	case "session/list":
+		if !f.checkAuth(id) {
 			return
 		}
-		if f.mode == "token-file" && !f.authed {
-			token, err := os.ReadFile(filepath.Join(f.appDataDir(), "antigravity-oauth-token"))
-			if err != nil || len(token) == 0 {
-				f.fail(id, acpAuthRequired, "Authentication required")
-				return
-			}
+		if f.mode == "list-error" {
+			f.fail(id, -32603, "session list failed")
+			return
 		}
-		sessionID := "fake-session"
+		f.result(id, map[string]any{"sessions": []any{}})
+	case "session/new", "session/load", "session/resume":
+		if !f.checkAuth(id) {
+			return
+		}
+		sessionID := os.Getenv(agyFakeSessionIDEnv)
+		if sessionID == "" {
+			sessionID = "fake-session"
+		}
 		if method == "session/new" {
 			convDir := filepath.Join(f.appDataDir(), "conversations")
 			_ = os.MkdirAll(convDir, 0o700)
@@ -210,6 +335,17 @@ func (f *agyFakeProcess) handle(id json.RawMessage, method string, params map[st
 				f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "earlier reply"}})
 			}
 		}
+		if method == "session/resume" {
+			sessionID, _ = params["sessionId"].(string)
+			if f.mode == "unknown-session" || f.mode == "load-error" || f.mode == "resume-error" {
+				f.fail(id, -32603, "session could not be resumed")
+				return
+			}
+			if f.mode == "load-hang" {
+				select {}
+			}
+		}
+		f.rememberMCPServers(params["mcpServers"])
 		f.result(id, agyFakeSession(sessionID))
 	case "session/set_config_option":
 		if params["value"] == "unknown-model" {
@@ -218,14 +354,76 @@ func (f *agyFakeProcess) handle(id json.RawMessage, method string, params map[st
 		}
 		f.result(id, map[string]any{"configOptions": []any{}})
 	case "session/prompt":
-		go f.prompt(id, params["sessionId"].(string))
+		promptText := ""
+		if blocks, ok := params["prompt"].([]any); ok && len(blocks) > 0 {
+			if first, ok := blocks[0].(map[string]any); ok {
+				promptText, _ = first["text"].(string)
+			}
+		}
+		go f.prompt(id, params["sessionId"].(string), promptText)
 	case "session/cancel":
 	default:
 		f.fail(id, -32601, "method not found")
 	}
 }
 
-func (f *agyFakeProcess) prompt(id json.RawMessage, sessionID string) {
+func (f *agyFakeProcess) callMCPServers(sessionID, promptText string) error {
+	f.mcpMu.Lock()
+	targets := append([]agyFakeMCPTarget(nil), f.mcpList...)
+	f.mcpMu.Unlock()
+	client := &http.Client{Timeout: 5 * time.Second}
+	for _, target := range targets {
+		body, _ := json.Marshal(map[string]any{
+			"server":    target.name,
+			"sessionId": sessionID,
+			"prompt":    promptText,
+			"pid":       os.Getpid(),
+		})
+		req, err := http.NewRequest(http.MethodPost, target.url, bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range target.headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("MCP server %s returned %d", target.name, resp.StatusCode)
+		}
+	}
+	return nil
+}
+
+func (f *agyFakeProcess) prompt(id json.RawMessage, sessionID, promptText string) {
+	if gate := os.Getenv(agyFakeGateEnv); gate != "" {
+		_ = os.WriteFile(gate+".started", []byte(strconv.Itoa(os.Getpid())), 0o600)
+		for {
+			if _, err := os.Stat(gate); err == nil {
+				break
+			}
+			select {
+			case <-f.closed:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
+	if f.mode == "prompt-error" {
+		f.fail(id, -32603, "prompt execution failed")
+		return
+	}
+	if os.Getenv(agyFakeMCPCallEnv) == "1" {
+		if err := f.callMCPServers(sessionID, promptText); err != nil {
+			f.fail(id, -32603, err.Error())
+			return
+		}
+	}
 	f.update(sessionID, map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": "**Looking** around"}})
 	f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "Let me check."}})
 	f.update(sessionID, map[string]any{"sessionUpdate": "plan", "entries": []any{

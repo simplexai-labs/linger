@@ -69,8 +69,10 @@ export interface VoiceControlRefs {
   capturePollGenerationRef: RefObject<number>;
   eventStreamLiveRef: RefObject<boolean>;
   // The event feed starts at its bootstrap snapshot; one Capture read after
-  // it goes live catches a change committed before that snapshot.
-  captureResyncRef: RefObject<boolean>;
+  // it goes live catches a change committed before that snapshot, including an
+  // in-flight restore or Start that lands right after SSE opens. A fresh
+  // object per reconnect prevents an in-flight read from clearing a newer one.
+  captureResyncRef: RefObject<object | undefined>;
   voiceAccessLostRef: RefObject<boolean>;
   composerLeaseRef: RefObject<boolean>;
   microphoneMutedRef: RefObject<boolean>;
@@ -150,7 +152,7 @@ function createVoiceControlRefs(
     publisherLeaseRef: { current: undefined },
     capturePollGenerationRef: { current: 0 },
     eventStreamLiveRef: { current: false },
-    captureResyncRef: { current: false },
+    captureResyncRef: { current: undefined },
     voiceAccessLostRef: { current: false },
     composerLeaseRef: { current: false },
     microphoneMutedRef: { current: false },
@@ -216,6 +218,12 @@ export function useVoiceControlState(
         Date.parse(capture.updated_at) < Date.parse(previous.updated_at)
       )
         return;
+      if (
+        !capture ||
+        capture.status === "finalized" ||
+        capture.status === "failed"
+      )
+        refs.captureResyncRef.current = undefined;
       if (capture?.id !== refs.captureRef.current?.id)
         setPartialTranscript(undefined);
       if (

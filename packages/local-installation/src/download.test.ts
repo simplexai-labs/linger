@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, access, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -607,72 +607,96 @@ it("keeps downloading from a slow primary when the remaining time is short", asy
   expect(await readFile(output)).toEqual(bytes);
 });
 
-it("finishes on the primary without error when every host is equally slow", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "linger-download-"));
-  roots.push(root);
-  const bytes = Buffer.alloc(40 * 1024, 0x78);
-  const hosts: string[] = [];
-  const output = path.join(root, "slow-both.tgz");
-  const served = await downloadVerified(
+/**
+ * Advances Vitest's fake clock on each pull so throughput measurements depend
+ * only on deterministic simulated intervals, not CPU or disk-write latency.
+ */
+function fakeClockStream(
+  slice: Uint8Array,
+  chunkBytes: number,
+  intervalMs: number,
+  signal?: AbortSignal | null,
+): ReadableStream<Uint8Array> {
+  let offset = 0;
+  return new ReadableStream<Uint8Array>(
     {
-      url: "https://primary.example/slow-both.tgz",
-      mirrors: ["https://mirror.example/slow-both.tgz"],
-      output,
-      digest: createHash("sha256").update(bytes).digest("hex"),
-      algorithm: "sha256",
-      maxBytes: bytes.length,
-      signal: new AbortController().signal,
+      pull(controller) {
+        if (signal?.aborted) return;
+        vi.advanceTimersByTime(intervalMs);
+        if (signal?.aborted) return;
+        if (offset >= slice.length) {
+          controller.close();
+          return;
+        }
+        const end = Math.min(offset + chunkBytes, slice.length);
+        controller.enqueue(slice.subarray(offset, end));
+        offset = end;
+        if (offset >= slice.length) controller.close();
+      },
     },
-    async (url, init) => {
-      hosts.push(new URL(url as URL).host);
-      const range = new Headers(init?.headers).get("range");
-      const start = range ? Number(/^bytes=(\d+)-$/.exec(range)?.[1] ?? 0) : 0;
-      const slice = bytes.subarray(start);
-      const headers: Record<string, string> = {
-        "content-length": String(slice.length),
-        ...(start > 0
-          ? {
-              "content-range": `bytes ${start}-${bytes.length - 1}/${bytes.length}`,
-            }
-          : {}),
-      };
-      return new Response(
-        new ReadableStream<Uint8Array>({
-          async start(controller) {
-            for (let offset = 0; offset < slice.length; offset += 2048) {
-              await new Promise((resolve) => setTimeout(resolve, 25));
-              try {
-                controller.enqueue(slice.subarray(offset, offset + 2048));
-              } catch {
-                return;
-              }
-            }
-            try {
-              controller.close();
-            } catch {
-              // Cancelled during round 0 comparison.
-            }
-          },
-        }),
-        { status: start > 0 ? 206 : 200, headers },
-      );
-    },
-    {
-      attempts: 2,
-      retryDelayMs: 60_000,
-      idleTimeoutMs: 5_000,
-      slowCheckAfterMs: 80,
-      minBytesPerSecond: 300_000,
-      minRemainingMs: 150,
-    },
+    { highWaterMark: 0 },
   );
-  expect(served).toBe("https://primary.example/slow-both.tgz");
-  expect(hosts).toEqual([
-    "primary.example",
-    "mirror.example",
-    "primary.example",
-  ]);
-  expect(await readFile(output)).toEqual(bytes);
+}
+
+it("finishes on the primary without error when every host is equally slow", async () => {
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout", "performance"],
+  });
+  try {
+    const root = await mkdtemp(path.join(tmpdir(), "linger-download-"));
+    roots.push(root);
+    const bytes = Buffer.alloc(40 * 1024, 0x78);
+    const hosts: string[] = [];
+    const output = path.join(root, "slow-both.tgz");
+    const served = await downloadVerified(
+      {
+        url: "https://primary.example/slow-both.tgz",
+        mirrors: ["https://mirror.example/slow-both.tgz"],
+        output,
+        digest: createHash("sha256").update(bytes).digest("hex"),
+        algorithm: "sha256",
+        maxBytes: bytes.length,
+        signal: new AbortController().signal,
+      },
+      async (url, init) => {
+        hosts.push(new URL(url as URL).host);
+        const range = new Headers(init?.headers).get("range");
+        const start = range
+          ? Number(/^bytes=(\d+)-$/.exec(range)?.[1] ?? 0)
+          : 0;
+        const slice = bytes.subarray(start);
+        const headers: Record<string, string> = {
+          "content-length": String(slice.length),
+          ...(start > 0
+            ? {
+                "content-range": `bytes ${start}-${bytes.length - 1}/${bytes.length}`,
+              }
+            : {}),
+        };
+        return new Response(fakeClockStream(slice, 2048, 25, init?.signal), {
+          status: start > 0 ? 206 : 200,
+          headers,
+        });
+      },
+      {
+        attempts: 2,
+        retryDelayMs: 60_000,
+        idleTimeoutMs: 5_000,
+        slowCheckAfterMs: 80,
+        minBytesPerSecond: 300_000,
+        minRemainingMs: 150,
+      },
+    );
+    expect(served).toBe("https://primary.example/slow-both.tgz");
+    expect(hosts).toEqual([
+      "primary.example",
+      "mirror.example",
+      "primary.example",
+    ]);
+    expect(await readFile(output)).toEqual(bytes);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("moves past a hung primary at slowCheckAfterMs instead of waiting for idleTimeoutMs", async () => {
@@ -720,88 +744,79 @@ it("moves past a hung primary at slowCheckAfterMs instead of waiting for idleTim
 });
 
 it("promotes the fastest mirror when the first host hangs and the last mirror is slower", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "linger-download-"));
-  roots.push(root);
-  const bytes = Buffer.alloc(64 * 1024, 0x77);
-  const hosts: string[] = [];
-  const output = path.join(root, "kit.tgz");
-  const throttled = (
-    slice: Uint8Array,
-    chunkBytes: number,
-    intervalMs: number,
-  ) =>
-    new ReadableStream<Uint8Array>({
-      async start(controller) {
-        for (let offset = 0; offset < slice.length; offset += chunkBytes) {
-          await new Promise((resolve) => setTimeout(resolve, intervalMs));
-          try {
-            controller.enqueue(slice.subarray(offset, offset + chunkBytes));
-          } catch {
-            return;
-          }
-        }
-        try {
-          controller.close();
-        } catch {
-          // Cancelled during round 0 comparison.
-        }
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout", "performance"],
+  });
+  try {
+    const root = await mkdtemp(path.join(tmpdir(), "linger-download-"));
+    roots.push(root);
+    const bytes = Buffer.alloc(64 * 1024, 0x77);
+    const hosts: string[] = [];
+    const output = path.join(root, "kit.tgz");
+    const served = await downloadVerified(
+      {
+        url: "https://hung.example/kit.tgz",
+        mirrors: [
+          "https://medium.example/kit.tgz",
+          "https://crawl.example/kit.tgz",
+        ],
+        output,
+        digest: createHash("sha256").update(bytes).digest("hex"),
+        algorithm: "sha256",
+        maxBytes: bytes.length,
+        signal: new AbortController().signal,
       },
-    });
-  const served = await downloadVerified(
-    {
-      url: "https://hung.example/kit.tgz",
-      mirrors: [
-        "https://medium.example/kit.tgz",
-        "https://crawl.example/kit.tgz",
-      ],
-      output,
-      digest: createHash("sha256").update(bytes).digest("hex"),
-      algorithm: "sha256",
-      maxBytes: bytes.length,
-      signal: new AbortController().signal,
-    },
-    async (url, init) => {
-      const host = new URL(url as URL).host;
-      hosts.push(host);
-      if (host === "hung.example") {
-        return new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener("abort", () =>
-            reject(new DOMException("aborted", "AbortError")),
-          );
-        });
-      }
-      const range = new Headers(init?.headers).get("range");
-      const start = range ? Number(/^bytes=(\d+)-$/.exec(range)?.[1] ?? 0) : 0;
-      const slice = bytes.subarray(start);
-      const headers: Record<string, string> = {
-        "content-length": String(slice.length),
-        ...(start > 0
-          ? {
-              "content-range": `bytes ${start}-${bytes.length - 1}/${bytes.length}`,
-            }
-          : {}),
-      };
-      const chunkBytes = host === "medium.example" ? 4096 : 1024;
-      return new Response(throttled(slice, chunkBytes, 30), {
-        status: start > 0 ? 206 : 200,
-        headers,
-      });
-    },
-    {
-      attempts: 2,
-      retryDelayMs: 60_000,
-      idleTimeoutMs: 5_000,
-      slowCheckAfterMs: 90,
-      minBytesPerSecond: 300_000,
-      minRemainingMs: 200,
-    },
-  );
-  expect(served).toBe("https://medium.example/kit.tgz");
-  expect(hosts).toEqual([
-    "hung.example",
-    "medium.example",
-    "crawl.example",
-    "medium.example",
-  ]);
-  expect(await readFile(output)).toEqual(bytes);
+      async (url, init) => {
+        const host = new URL(url as URL).host;
+        hosts.push(host);
+        if (host === "hung.example") {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            );
+            queueMicrotask(() => vi.advanceTimersByTime(90));
+          });
+        }
+        const range = new Headers(init?.headers).get("range");
+        const start = range
+          ? Number(/^bytes=(\d+)-$/.exec(range)?.[1] ?? 0)
+          : 0;
+        const slice = bytes.subarray(start);
+        const headers: Record<string, string> = {
+          "content-length": String(slice.length),
+          ...(start > 0
+            ? {
+                "content-range": `bytes ${start}-${bytes.length - 1}/${bytes.length}`,
+              }
+            : {}),
+        };
+        const chunkBytes = host === "medium.example" ? 4096 : 1024;
+        return new Response(
+          fakeClockStream(slice, chunkBytes, 30, init?.signal),
+          {
+            status: start > 0 ? 206 : 200,
+            headers,
+          },
+        );
+      },
+      {
+        attempts: 2,
+        retryDelayMs: 60_000,
+        idleTimeoutMs: 5_000,
+        slowCheckAfterMs: 90,
+        minBytesPerSecond: 300_000,
+        minRemainingMs: 200,
+      },
+    );
+    expect(served).toBe("https://medium.example/kit.tgz");
+    expect(hosts).toEqual([
+      "hung.example",
+      "medium.example",
+      "crawl.example",
+      "medium.example",
+    ]);
+    expect(await readFile(output)).toEqual(bytes);
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -18,7 +18,12 @@ import { cn } from "@/lib/cn";
 
 import { appIcons } from "./computer-app-icons";
 import { Hint } from "./computer-hint";
-import { appNames, appOrder, appStatus } from "./computer-readiness";
+import {
+  appNames,
+  appOrder,
+  appStatus,
+  appSupported,
+} from "./computer-readiness";
 import { CopyValueButton } from "./computer-setup-instructions";
 import { computersMessages } from "./computers.messages";
 import { useDesktopComputer } from "./desktop-computer";
@@ -150,26 +155,28 @@ export function AppSetupDialog({
       <div className="px-5 py-4">
         {choosable ? (
           <div className="mb-4 inline-flex rounded-full bg-muted p-0.5">
-            {appOrder.map((option) => (
-              <button
-                className={cn(
-                  "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs transition-colors duration-150",
-                  option === app
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-                key={option}
-                onClick={() => {
-                  setApp(option);
-                  setReadyWhenShown(appStatus(computer, option) === "ready");
-                  setWaiting(false);
-                }}
-                type="button"
-              >
-                <Icon icon={appIcons[option]} size={14} />
-                {appNames[option]}
-              </button>
-            ))}
+            {appOrder
+              .filter((option) => appSupported(computer, option))
+              .map((option) => (
+                <button
+                  className={cn(
+                    "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs transition-colors duration-150",
+                    option === app
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                  key={option}
+                  onClick={() => {
+                    setApp(option);
+                    setReadyWhenShown(appStatus(computer, option) === "ready");
+                    setWaiting(false);
+                  }}
+                  type="button"
+                >
+                  <Icon icon={appIcons[option]} size={14} />
+                  {appNames[option]}
+                </button>
+              ))}
           </div>
         ) : null}
         <ol className="grid grid-cols-3 gap-3">

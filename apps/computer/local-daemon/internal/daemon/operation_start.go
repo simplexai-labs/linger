@@ -143,10 +143,14 @@ func (d *Daemon) handleOperationStart(ctx context.Context, stream transport.Stre
 	d.activeOperations[command.OperationID] = active
 	d.activeMu.Unlock()
 	acceptedRevision := d.authorityRevision
+	// Capture the welcomed failure-code feature before returning to the
+	// connection loop so a transient stream drop during gateway remount cannot
+	// downgrade an already-accepted Operation's failure code.
+	modelGatewayUnavailable := d.modelGatewayUnavailable.Load()
 	d.operationWG.Add(1)
 	go func() {
 		defer d.operationWG.Done()
-		d.startAcceptedOperation(operationCtx, command, spec, prepared, acceptedRevision, emitEvent, cancel)
+		d.startAcceptedOperation(operationCtx, command, spec, prepared, acceptedRevision, modelGatewayUnavailable, emitEvent, cancel)
 	}()
 	return acceptanceSendErr
 }

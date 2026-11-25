@@ -314,6 +314,11 @@ test("choosing local models makes them the model source", async () => {
   });
   expect(result.code).toBe(0);
   expect(prepareLocalModels).toHaveBeenCalled();
+  expect(prepareFoundationServices).toHaveBeenCalledWith(
+    expect.anything(),
+    "local-models",
+    expect.objectContaining({ mainPlan: true }),
+  );
   expect(applyNativeSource).toHaveBeenCalledWith(
     path.resolve(f.home),
     "local",
@@ -333,6 +338,7 @@ test("a restart of local models keeps the model source the person switched to", 
     onEvent: () => {},
   });
   vi.mocked(applyNativeSource).mockClear();
+  vi.mocked(prepareFoundationServices).mockClear();
   // A resume after a reboot or an update reads the saved choice.
   const result = await installNativeSource({
     home: f.home,
@@ -343,6 +349,11 @@ test("a restart of local models keeps the model source the person switched to", 
   });
   expect(result.code).toBe(0);
   expect(vi.mocked(prepareLocalModels).mock.calls).toHaveLength(2);
+  expect(prepareFoundationServices).toHaveBeenCalledWith(
+    expect.anything(),
+    "local-models",
+    expect.objectContaining({ mainPlan: true }),
+  );
   expect(applyNativeSource).not.toHaveBeenCalled();
 });
 
@@ -387,6 +398,7 @@ async function restartAfter(
   });
   await saveModelSource(f.home, source.mode, source.runtime);
   vi.mocked(applyNativeSource).mockClear();
+  vi.mocked(prepareFoundationServices).mockClear();
   vi.mocked(prepareLocalModels).mockClear();
   vi.mocked(prepareRuntime).mockClear();
   vi.mocked(prepareModelGateway).mockClear();
@@ -429,6 +441,11 @@ test.each(["codex", "local-models"] as const)(
     );
     expect(applyNativeSource).not.toHaveBeenCalled();
     expect(prepareLocalModels).not.toHaveBeenCalled();
+    expect(prepareFoundationServices).toHaveBeenCalledWith(
+      expect.anything(),
+      setupChoice,
+      expect.objectContaining({ mainPlan: false }),
+    );
     expect(prepareModelGateway).toHaveBeenCalledWith(
       expect.anything(),
       { runtime: "pi", modelSource: "byok" },
@@ -455,6 +472,8 @@ test.each(["byok", "subscription"] as const)(
       onEvent: () => {},
     });
     await saveModelSource(f.home, mode, "claude");
+    vi.mocked(prepareFoundationServices).mockClear();
+    vi.mocked(prepareModelGateway).mockClear();
     vi.mocked(prepareLocalModels).mockClear();
     vi.mocked(applyNativeSource).mockClear();
     vi.mocked(restoreByokSource).mockClear();
@@ -469,8 +488,27 @@ test.each(["byok", "subscription"] as const)(
     expect(upgraded.code).toBe(0);
     expect(prepareLocalModels).not.toHaveBeenCalled();
     expect(applyNativeSource).not.toHaveBeenCalled();
-    if (mode === "byok") expect(restoreByokSource).toHaveBeenCalledTimes(1);
-    else expect(restoreByokSource).not.toHaveBeenCalled();
+    expect(prepareFoundationServices).toHaveBeenCalledWith(
+      expect.anything(),
+      "local-models",
+      expect.objectContaining({ mainPlan: false }),
+    );
+    if (mode === "byok") {
+      expect(restoreByokSource).toHaveBeenCalledTimes(1);
+      expect(prepareModelGateway).toHaveBeenCalledWith(
+        expect.anything(),
+        { runtime: "claude", modelSource: "byok" },
+        expect.anything(),
+      );
+    } else {
+      expect(restoreByokSource).not.toHaveBeenCalled();
+      expect(prepareModelGateway).toHaveBeenCalledWith(
+        expect.anything(),
+        "claude",
+        expect.anything(),
+      );
+    }
+    vi.mocked(prepareFoundationServices).mockClear();
     // Explicitly choosing local models again via Set Up Again restores them.
     const explicit = await installNativeSource({
       home: f.home,
@@ -482,6 +520,11 @@ test.each(["byok", "subscription"] as const)(
     });
     expect(explicit.code).toBe(0);
     expect(prepareLocalModels).toHaveBeenCalledTimes(1);
+    expect(prepareFoundationServices).toHaveBeenCalledWith(
+      expect.anything(),
+      "local-models",
+      expect.objectContaining({ mainPlan: true }),
+    );
     expect(applyNativeSource).toHaveBeenCalledWith(
       path.resolve(f.home),
       "local",
@@ -601,9 +644,54 @@ test("a restart keeps a saved local source as before", async () => {
   });
   expect(result.code).toBe(0);
   expect(prepareLocalModels).toHaveBeenCalled();
+  expect(prepareFoundationServices).toHaveBeenCalledWith(
+    expect.anything(),
+    "local-models",
+    expect.objectContaining({ mainPlan: true }),
+  );
+  expect(prepareModelGateway).toHaveBeenCalledWith(
+    expect.anything(),
+    "local-models",
+    expect.anything(),
+  );
   expect(applyNativeSource).not.toHaveBeenCalled();
   expect(restoreByokSource).not.toHaveBeenCalled();
   expect(restoreLocalModels).not.toHaveBeenCalled();
+});
+
+test("a fresh BYOK install omits --main-plan and prepares the BYOK gateway", async () => {
+  const f = await fixture();
+  vi.mocked(prepareByokRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ok",
+  });
+  const result = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    byok: {
+      baseUrl: "https://api.example.com",
+      path: "/v1",
+      endpoint: "/chat/completions",
+      protocol: "openai-chat",
+      modelId: "vendor/model",
+      apiKey: "sk-test-key",
+    },
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(result.code).toBe(0);
+  expect(prepareFoundationServices).toHaveBeenCalledWith(
+    expect.anything(),
+    "claude",
+    expect.objectContaining({ mainPlan: false }),
+  );
+  expect(prepareModelGateway).toHaveBeenCalledWith(
+    expect.anything(),
+    { runtime: "claude", modelSource: "byok" },
+    expect.anything(),
+  );
 });
 test("a cold resume restores an adopted stack local model when setup-choice is local-models and setup binding is ready", async () => {
   const f = await fixture();

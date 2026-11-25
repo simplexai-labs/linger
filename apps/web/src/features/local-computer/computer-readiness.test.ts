@@ -6,6 +6,7 @@ import type {
 } from "@/features/teamhub/teamhub-types";
 
 import {
+  appSupported,
   computerReadiness,
   preferredComputerRuntime,
 } from "./computer-readiness";
@@ -153,5 +154,27 @@ describe("computerReadiness", () => {
       preferredComputerRuntime([agent("claude"), agent("pi"), agent("pi")]),
     ).toBe("pi");
     expect(preferredComputerRuntime([])).toBeUndefined();
+  });
+
+  it("offers Antigravity only on a Computer whose Linger can run it", () => {
+    const old = computer([], { daemon_version: "0.52.0" });
+    expect(appSupported(old, "antigravity")).toBe(false);
+    expect(appSupported(old, "codex")).toBe(true);
+    expect(
+      appSupported(computer([], { daemon_version: "0.56.0" }), "antigravity"),
+    ).toBe(true);
+    // A current Computer leaves Antigravity out until agy is installed.
+    expect(
+      appSupported(computer([], { daemon_version: "0.64.0" }), "antigravity"),
+    ).toBe(true);
+    expect(
+      appSupported(
+        computer([{ models: [], status: "ready", type: "antigravity" }], {
+          daemon_version: "0.55.0",
+        }),
+        "antigravity",
+      ),
+    ).toBe(true);
+    expect(appSupported(computer([]), "antigravity")).toBe(true);
   });
 });

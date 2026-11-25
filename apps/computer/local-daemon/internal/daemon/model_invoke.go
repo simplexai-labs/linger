@@ -159,7 +159,7 @@ func invalidModelInvokeRequest(request modelInvokeRequest) string {
 func (d *Daemon) runModelInvoke(ctx context.Context, stream transport.Stream, command protocol.Command, request modelInvokeRequest, entry *modelInvoke, receivedAt time.Time) {
 	slog.Info("runner.model.invoke", "phase", "started", "invoke_id", entry.id)
 	var result provider.ModelInvokeResult
-	if failureCode, err := d.ensureModelGateway(ctx, command.RuntimeType); err != nil {
+	if failureCode, err := d.ensureModelGateway(ctx, command.RuntimeType, false); err != nil {
 		result = modelGatewayInvokeFailure(ctx, failureCode, err)
 	} else if failureCode, err := d.ensureLocalModel(ctx, command.RuntimeType, request.Model); err != nil {
 		result = localModelInvokeFailure(ctx, failureCode, err)
