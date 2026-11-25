@@ -66,7 +66,6 @@ function useListQuery<T>(
 interface ListQuery {
   readonly isPending: boolean;
   readonly isError: boolean;
-  readonly isRefetching: boolean;
   readonly hasNextPage: boolean;
   readonly isFetchingNextPage: boolean;
   readonly refetch: () => Promise<unknown>;
@@ -88,6 +87,9 @@ function List<T>(props: {
   readonly emptyBody?: string;
 }) {
   const { query } = props;
+  // The spinner follows only the Human's pull: background refetches would
+  // set it too, and iOS can leave a spinner set from code stuck on screen.
+  const [pulling, setPulling] = useState(false);
   // Pages the list leaves out (meeting Sessions in the Wiki) can fill a whole
   // page; keep reading until something shows or nothing is left.
   const exhausted = props.sections.length > 0 || !query.hasNextPage;
@@ -133,8 +135,11 @@ function List<T>(props: {
           <ActivityIndicator style={styles.more} color={colors.muted} />
         ) : undefined
       }
-      onRefresh={() => void query.refetch()}
-      refreshing={query.isRefetching && !query.isFetchingNextPage}
+      onRefresh={() => {
+        setPulling(true);
+        void query.refetch().finally(() => setPulling(false));
+      }}
+      refreshing={pulling}
       contentContainerStyle={styles.list}
     />
   );

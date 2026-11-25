@@ -56,6 +56,10 @@ const icons = {
   securityCheck: "SecurityCheckIcon",
   camera: "Camera01Icon",
   link: "Link01Icon",
+  photo: "Image01Icon",
+  attachment: "Attachment01Icon",
+  upload: "CloudUploadIcon",
+  share: "Share08Icon",
 };
 
 const kebab = (name) => name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);

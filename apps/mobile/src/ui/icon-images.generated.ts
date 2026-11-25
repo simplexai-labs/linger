@@ -153,4 +153,20 @@ export const ICON_IMAGES = {
     regular: require("../../assets/icons/link.png"),
     bold: require("../../assets/icons/link-bold.png"),
   },
+  photo: {
+    regular: require("../../assets/icons/photo.png"),
+    bold: require("../../assets/icons/photo-bold.png"),
+  },
+  attachment: {
+    regular: require("../../assets/icons/attachment.png"),
+    bold: require("../../assets/icons/attachment-bold.png"),
+  },
+  upload: {
+    regular: require("../../assets/icons/upload.png"),
+    bold: require("../../assets/icons/upload-bold.png"),
+  },
+  share: {
+    regular: require("../../assets/icons/share.png"),
+    bold: require("../../assets/icons/share-bold.png"),
+  },
 } as const;

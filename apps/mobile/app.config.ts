@@ -5,6 +5,9 @@ import type { ExpoConfig } from "expo/config";
 
 // The official Expo project, jeffreybins-team/linger; a fork overrides it.
 const officialProjectId = "b761e929-700a-4f74-b987-a184f77866d9";
+// The camera and image picker plugins both write this key; they must agree.
+const CAMERA_USAGE =
+  "Linger uses the camera to scan your computer's pairing code and to take photos you send.";
 const MICROPHONE_USAGE =
   "Linger uses the microphone for live conversations and meeting recordings.";
 const projectId = process.env.EAS_PROJECT_ID || officialProjectId;
@@ -68,13 +71,21 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission:
-          "Linger uses the camera to scan the pairing code your computer shows.",
+        cameraPermission: CAMERA_USAGE,
         // The camera plugin owns this key: false would delete the
         // microphone string the voice features need, and App Store
         // processing rejects a build without it.
         microphonePermission: MICROPHONE_USAGE,
         recordAudioAndroid: false,
+      },
+    ],
+    [
+      "expo-image-picker",
+      {
+        cameraPermission: CAMERA_USAGE,
+        photosPermission:
+          "Linger lets you pick photos and videos to send in a chat.",
+        microphonePermission: false,
       },
     ],
     "expo-secure-store",

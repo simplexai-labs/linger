@@ -128,7 +128,6 @@ function WorkLine(props: {
   readonly runId: string;
   readonly line: string;
   readonly agentName: string;
-  readonly compact?: boolean;
 }) {
   const { stopping, stop } = useStopRun(props.roomId);
   const isStopping = stopping.has(props.runId);
@@ -136,7 +135,7 @@ function WorkLine(props: {
     <Reanimated.View
       entering={FadeIn.duration(160)}
       exiting={FadeOut.duration(160)}
-      style={[styles.work, props.compact && styles.workCompact]}
+      style={styles.work}
     >
       <ActivityIndicator
         size="small"
@@ -168,6 +167,91 @@ function WorkLine(props: {
   );
 }
 
+/**
+ * The stage while the keyboard is up: a bar like a navigation bar, the face
+ * and name centered over one line of work, and Stop where Record sits so the
+ * name never shifts. Tapping the name opens the Agent's sheet.
+ */
+function FoldedStage(props: {
+  readonly roomId: string;
+  readonly agent: Pick<ActorRef, "id" | "display_name">;
+  readonly record?: boolean;
+  readonly working?: { readonly runId: string; readonly line: string };
+}) {
+  const { stopping, stop } = useStopRun(props.roomId);
+  const working = props.working;
+  const isStopping = !!working && stopping.has(working.runId);
+  return (
+    <View style={styles.folded}>
+      <View style={styles.foldedSide}>
+        <SidebarButton />
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`About ${props.agent.display_name}`}
+        onPress={() => openAgent(props.agent.id, props.roomId)}
+        style={({ pressed }) => [
+          styles.foldedCenter,
+          pressed && styles.facePressed,
+        ]}
+      >
+        <View style={styles.foldedName}>
+          <AgentAvatar actorId={props.agent.id} size={20} />
+          <Text style={styles.foldedTitle} numberOfLines={1}>
+            {props.agent.display_name}
+          </Text>
+        </View>
+        {working ? (
+          <Reanimated.View
+            entering={FadeIn.duration(160)}
+            exiting={FadeOut.duration(160)}
+            style={styles.foldedLineBox}
+          >
+            <Text
+              style={[type.small, styles.foldedLine]}
+              numberOfLines={1}
+              accessibilityLiveRegion="polite"
+            >
+              {isStopping ? "Stopping…" : working.line}
+            </Text>
+          </Reanimated.View>
+        ) : null}
+      </Pressable>
+      <View style={[styles.foldedSide, styles.foldedTrailing]}>
+        {working ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Stop ${props.agent.display_name}`}
+            disabled={isStopping}
+            hitSlop={10}
+            onPress={() => stop(working.runId)}
+            style={({ pressed }) => [
+              styles.stop,
+              pressed && styles.stopPressed,
+              isStopping && styles.stopDisabled,
+            ]}
+          >
+            <View style={styles.stopSquare} />
+          </Pressable>
+        ) : props.record ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Record a meeting"
+            hitSlop={8}
+            onPress={() => router.push("/voice/record")}
+            style={({ pressed }) => [
+              styles.barButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Icon name="record" size={20} color={colors.secondary} />
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
 export function AgentStage(props: {
   readonly roomId: string;
   readonly agent: Pick<ActorRef, "id" | "display_name">;
@@ -190,24 +274,12 @@ export function AgentStage(props: {
 
   if (keyboard)
     return (
-      <View style={styles.folded}>
-        <SidebarButton />
-        <AgentAvatar actorId={props.agent.id} size={28} />
-        <View style={styles.foldedText}>
-          <Text style={styles.barTitle} numberOfLines={1}>
-            {props.agent.display_name}
-          </Text>
-          {working ? (
-            <WorkLine
-              roomId={props.roomId}
-              runId={working.run.run_id}
-              line={line}
-              agentName={props.agent.display_name}
-              compact
-            />
-          ) : null}
-        </View>
-      </View>
+      <FoldedStage
+        roomId={props.roomId}
+        agent={props.agent}
+        record={props.record}
+        working={working ? { runId: working.run.run_id, line } : undefined}
+      />
     );
 
   return (
@@ -287,7 +359,6 @@ const styles = StyleSheet.create({
     minHeight: 52,
     paddingRight: space.md,
   },
-  barTitle: { ...type.headline, flex: 1 },
   barButton: {
     width: 40,
     height: 40,
@@ -304,16 +375,25 @@ const styles = StyleSheet.create({
   folded: {
     flexDirection: "row",
     alignItems: "center",
-    gap: space.sm,
     minHeight: 52,
-    paddingRight: space.lg,
   },
-  foldedText: { flex: 1 },
+  // Both sides are as wide, so the name stays centered on the screen.
+  foldedSide: { width: 64, flexDirection: "row", alignItems: "center" },
+  foldedTrailing: { justifyContent: "flex-end", paddingRight: space.md },
+  foldedCenter: { flex: 1, alignItems: "center", gap: 1 },
+  foldedName: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    maxWidth: "100%",
+  },
+  foldedTitle: { ...type.headline, flexShrink: 1 },
+  foldedLineBox: { maxWidth: "100%" },
+  foldedLine: { color: colors.secondary },
   barSpacer: { flex: 1 },
   idle: { maxWidth: "80%", textAlign: "center" },
   slot: { height: 28, justifyContent: "center", maxWidth: "86%" },
   work: { flexDirection: "row", alignItems: "center", gap: space.sm },
-  workCompact: { maxWidth: "100%" },
   spinner: { transform: [{ scale: 0.75 }] },
   workText: { flexShrink: 1, color: colors.secondary },
   // A quiet round Stop, as a media control: a filled circle, an ink square.

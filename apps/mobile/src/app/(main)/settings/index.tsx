@@ -33,7 +33,7 @@ import {
   StatusLine,
 } from "../../../ui/settings";
 import { StatusStrip } from "../../../ui/status-strip";
-import { TextInput } from "../../../ui/text";
+import { Text, TextInput } from "../../../ui/text";
 
 function Check() {
   return <Icon name="check" size={20} color={colors.accent} />;
@@ -283,17 +283,22 @@ function DiagnosticsSetting() {
 
   const host = receiver ? new URL(receiver).host : "";
   return (
-    <SettingsGroup footer="Diagnostics hold this phone's events and timings, never messages, documents or keys.">
+    <SettingsGroup
+      label="Diagnostics"
+      footer="Diagnostics hold this phone's events and timings, never messages, documents or keys."
+    >
       {receiver ? (
         <SettingsRow
+          icon="upload"
           title="Send Diagnostics"
-          tone="accent"
+          subtitle="Upload for support and get a report ID"
           onPress={() => setSending({ step: "ask" })}
         />
       ) : null}
       <SettingsRow
+        icon="share"
         title="Save Diagnostics"
-        tone="accent"
+        subtitle="Share the log file yourself"
         onPress={() => void shareAppLog()}
       />
       <ConfirmDialog
@@ -448,6 +453,9 @@ export default function SettingsScreen() {
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={styles.content}
       >
+        <Text style={styles.title} accessibilityRole="header">
+          Settings
+        </Text>
         <SettingsGroup>
           {computers.map((computer) => {
             const isActive = computer.hostId === active?.hostId;
@@ -521,6 +529,15 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.sidebar },
   content: { paddingBottom: space.xxl * 2 },
+  // The groups' own inset plus their label's, so the title starts where
+  // the section labels do.
+  title: {
+    ...StyleSheet.flatten(type.title),
+    fontSize: 32,
+    lineHeight: 40,
+    paddingHorizontal: space.md + 6,
+    paddingTop: space.xs,
+  },
   check: { width: 20 },
   addForm: { padding: space.md, gap: space.sm },
   addInput: {

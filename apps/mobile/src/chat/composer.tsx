@@ -2,15 +2,19 @@
 // are picked, so the message itself only names the upload ids and its send
 // can be repeated byte for byte from the outbox.
 import * as DocumentPicker from "expo-document-picker";
+import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { File } from "expo-file-system";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from "react-native";
 
@@ -114,18 +118,47 @@ export function Composer(props: {
     (text.trim().length > 0 || files.length > 0) &&
     !!outbox.outbox;
 
-  const attach = async () => {
+  const plusRef = useRef<React.ComponentRef<typeof View>>(null);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number }>();
+  const window = useWindowDimensions();
+  const openMenu = () => {
+    tap();
+    plusRef.current?.measureInWindow((x, y) => setMenuAt({ x, y }));
+  };
+
+  // iOS cannot present a picker while the menu is still closing, so the
+  // choice waits for the menu's dismissal before the picker opens.
+  const chosen = useRef<AttachSource | undefined>(undefined);
+  const pickFrom = (source: AttachSource) => {
+    chosen.current = source;
+    setMenuAt(undefined);
+    if (Platform.OS !== "ios") menuClosed();
+  };
+  const menuClosed = () => {
+    const source = chosen.current;
+    chosen.current = undefined;
+    if (source) void attach(source);
+  };
+
+  const attach = async (source: AttachSource) => {
     setProblem(undefined);
     if (!teamHub.connected) {
       setProblem("Connect to your computer to attach files.");
       return;
     }
-    const picked = await DocumentPicker.getDocumentAsync({
-      copyToCacheDirectory: true,
-      multiple: false,
-    });
-    if (picked.canceled) return;
-    const asset = picked.assets[0];
+    let asset: PickedFile | undefined;
+    try {
+      asset = await pickFile(source);
+    } catch (error) {
+      setProblem(
+        error instanceof CameraNotAllowed
+          ? "Allow Linger to use the camera in the Settings app."
+          : source === "camera"
+            ? "The camera is not available."
+            : "That could not be opened. Try again.",
+      );
+      return;
+    }
     if (!asset) return;
     if (asset.size !== undefined && asset.size > MAX_UPLOAD_BYTES) {
       setProblem("Files from the phone can be up to 25 MB.");
@@ -231,11 +264,51 @@ export function Composer(props: {
         </View>
       ) : null}
       <View style={styles.dock}>
-        <RoundButton
-          label="Attach a file"
-          onPress={() => void attach()}
-          icon="add"
-        />
+        <View ref={plusRef} collapsable={false}>
+          <RoundButton label="Attach" onPress={openMenu} icon="add" />
+        </View>
+        <Modal
+          visible={!!menuAt}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMenuAt(undefined)}
+          onDismiss={menuClosed}
+        >
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            accessibilityLabel="Close"
+            onPress={() => setMenuAt(undefined)}
+          />
+          {menuAt ? (
+            <View
+              style={[
+                styles.menu,
+                {
+                  left: menuAt.x,
+                  bottom: window.height - menuAt.y + space.sm,
+                },
+              ]}
+              accessibilityRole="menu"
+            >
+              {ATTACH_SOURCES.map((item) => (
+                <Pressable
+                  key={item.source}
+                  accessibilityRole="menuitem"
+                  onPress={() => pickFrom(item.source)}
+                  style={({ pressed }) => [
+                    styles.menuRow,
+                    pressed && styles.menuRowPressed,
+                  ]}
+                >
+                  <View style={styles.menuIcon}>
+                    <Icon name={item.icon} size={20} color={colors.ink} />
+                  </View>
+                  <Text style={styles.menuLabel}>{item.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </Modal>
         <TextInput
           style={styles.input}
           onChangeText={setText}
@@ -290,6 +363,72 @@ export function Composer(props: {
       </View>
     </View>
   );
+}
+
+type AttachSource = "camera" | "photos" | "files";
+
+const ATTACH_SOURCES: readonly {
+  source: AttachSource;
+  label: string;
+  icon: IconName;
+}[] = [
+  { source: "camera", label: "Camera", icon: "camera" },
+  { source: "photos", label: "Photos", icon: "photo" },
+  { source: "files", label: "Files", icon: "attachment" },
+];
+
+class CameraNotAllowed extends Error {}
+
+interface PickedFile {
+  readonly uri: string;
+  readonly name: string;
+  readonly mimeType?: string;
+  readonly size?: number;
+}
+
+/** Opens the camera, the photo library or Files; undefined when cancelled. */
+async function pickFile(source: AttachSource): Promise<PickedFile | undefined> {
+  if (source === "files") {
+    const picked = await DocumentPicker.getDocumentAsync({
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    const asset = picked.canceled ? undefined : picked.assets[0];
+    return asset
+      ? {
+          uri: asset.uri,
+          name: asset.name,
+          mimeType: asset.mimeType,
+          size: asset.size,
+        }
+      : undefined;
+  }
+  if (source === "camera") {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) throw new CameraNotAllowed();
+  }
+  const options: ImagePicker.ImagePickerOptions = {
+    mediaTypes: source === "camera" ? ["images"] : ["images", "videos"],
+    quality: 0.85,
+    // HEIC photos become JPEG, which every computer can show.
+    preferredAssetRepresentationMode:
+      ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+  };
+  const picked =
+    source === "camera"
+      ? await ImagePicker.launchCameraAsync(options)
+      : await ImagePicker.launchImageLibraryAsync(options);
+  const asset = picked.canceled ? undefined : picked.assets[0];
+  if (!asset) return undefined;
+  const extension = asset.mimeType?.split("/")[1] ?? "jpg";
+  return {
+    uri: asset.uri,
+    name:
+      asset.fileName ??
+      `${asset.type === "video" ? "Video" : "Photo"} ${new Date().toISOString().slice(0, 19).replace("T", " ")}.${extension}`,
+    mimeType: asset.mimeType,
+    size: asset.fileSize,
+  };
 }
 
 function RoundButton(props: {
@@ -389,6 +528,32 @@ function MentionSheet(props: {
 }
 
 const styles = StyleSheet.create({
+  // Floats over the conversation just above the + it came from.
+  menu: {
+    position: "absolute",
+    minWidth: 200,
+    paddingVertical: space.xs,
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface,
+    ...StyleSheet.flatten(shadow.md),
+  },
+  menuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.md,
+    minHeight: 48,
+    paddingHorizontal: space.md,
+  },
+  menuRowPressed: { backgroundColor: colors.sidebarMuted },
+  menuIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.sidebarMuted,
+  },
+  menuLabel: { ...StyleSheet.flatten(type.chat), color: colors.ink },
   wrap: {
     paddingHorizontal: space.md,
     paddingTop: space.xs,
