@@ -9,11 +9,11 @@ export const roomDialogMessages = defineMessages("roomDialogs", {
     "TeamHub did not confirm whether this Room was created. Check your Rooms before you retry.",
   deleteRoom: "Delete Room",
   deleteRoomDescription:
-    "Every member will lose access to this Room. Its messages, files, and history will no longer be available.",
+    "<name>{name}</name> will be deleted. Every member will lose access to this Room. Its messages, files, and history will no longer be available.",
+  deleteDirectRoomDescription:
+    "<name>{name}</name> will be deleted. Its messages, files, and history will no longer be available.",
   deleteUnconfirmed:
     "TeamHub did not confirm whether this Room was deleted. Check your Rooms before you retry.",
-  typeToConfirm: "Type <name>{name}</name> to confirm",
-  confirmationLabel: "Room name confirmation",
   removeAgentTitle: "Remove {name}?",
   removeAgentDescription:
     "The Agent will be removed from every Room and your direct chat with it will be deleted. Messages in shared Rooms stay available.",

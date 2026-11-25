@@ -81,7 +81,6 @@ import {
 import { readPanelSidebarWidth } from "./task-sidebar/panel-width";
 import { AuthenticatedRouteLoading } from "./route-loading-surface";
 import { RoomPresentationBoundary } from "./room-presentation-boundary";
-import { GENERAL_AGENT_DEFAULT_NAME } from "./general-agent-defaults";
 import { MobileNavigationButton } from "./mobile-navigation";
 import { roomSurfaceMessages } from "./room-surface.messages";
 
@@ -344,7 +343,10 @@ function RoomSurfaceContent({
   const livePeerName = actorItems.find(
     (actor) => actor.id === room.direct_peer?.id,
   )?.display_name;
-  const roomTitle = isDirectRoom && livePeerName ? livePeerName : room.name;
+  // Deleted Agents leave the active actors catalog; fall back to direct_peer so
+  // the header, delete dialog, and sidebar always agree on the Direct Room name.
+  const peerName = livePeerName || room.direct_peer?.display_name;
+  const roomTitle = isDirectRoom && peerName ? peerName : room.name;
   const presentationRoom =
     roomTitle === room.name ? room : { ...room, name: roomTitle };
   const currentActorIsOwner = members.items.some(
@@ -568,7 +570,7 @@ function RoomSurfaceContent({
             {deleteOpen ? (
               <RoomDeleteDialog
                 onClose={() => setDeleteOpen(false)}
-                room={room}
+                room={presentationRoom}
                 tenantId={tenantId}
               />
             ) : null}
@@ -782,12 +784,7 @@ function RoomHeader({
   const isDirectRoom = room.kind === "direct";
   const headerPeer =
     room.direct_peer?.kind === "agent" ? room.direct_peer : undefined;
-  const headerName =
-    headerPeer?.display_name &&
-    (room.name === headerPeer.display_name ||
-      room.name === GENERAL_AGENT_DEFAULT_NAME)
-      ? headerPeer.display_name
-      : room.name;
+  const headerName = room.name;
 
   return (
     <header

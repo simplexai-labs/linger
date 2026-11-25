@@ -1838,10 +1838,9 @@
     "nameTaken": "你已经有一个同名的 Room，请换一个名称。",
     "createUnconfirmed": "TeamHub 未确认这个 Room 是否已创建。重试前请先查看你的 Room。",
     "deleteRoom": "删除 Room",
-    "deleteRoomDescription": "所有成员都将无法再进入这个 Room，其中的消息、文件和历史记录也将无法再查看。",
+    "deleteRoomDescription": "<name>{name}</name> 将被删除。所有成员都将无法再进入这个 Room，其中的消息、文件和历史记录也将无法再查看。",
+    "deleteDirectRoomDescription": "<name>{name}</name> 将被删除，其中的消息、文件和历史记录也将无法再查看。",
     "deleteUnconfirmed": "TeamHub 未确认这个 Room 是否已删除。重试前请先查看你的 Room。",
-    "typeToConfirm": "输入 <name>{name}</name> 以确认",
-    "confirmationLabel": "确认 Room 名称",
     "removeAgentTitle": "移除 {name}？",
     "removeAgentDescription": "这个 Agent 将从所有 Room 中移除，你与它的私聊也会被删除。共享 Room 里的消息仍会保留。",
     "removeAgent": "移除 Agent"

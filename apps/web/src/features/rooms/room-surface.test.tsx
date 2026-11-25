@@ -22,7 +22,10 @@ import {
 } from "@/test/teamhub-test-runtime";
 import type { RoomRealtimeStatus } from "@/features/teamhub/event-transport";
 import { teamHubData, teamHubDone } from "@/features/teamhub/teamhub-api";
-import type { TestRouteRequest } from "@/test/teamhub-test-server";
+import type {
+  TestRouteHandler,
+  TestRouteRequest,
+} from "@/test/teamhub-test-server";
 import {
   type TeamHubRuntime,
   TeamHubRuntimeProvider,
@@ -313,6 +316,55 @@ describe("RoomSurface command availability", () => {
       }),
     );
     expect(rooms.items.some((room) => room.id === directRoom.id)).toBe(false);
+  });
+
+  it("aligns deleted-Agent Direct Room header and delete dialog names with direct_peer", async () => {
+    const runtime = surfaceRuntime();
+    const directRoom = await teamHubData(
+      runtime.client.api.GET("/v0/rooms/{roomId}", {
+        params: { path: { roomId: "room-dm-codex" } },
+      }),
+    );
+    runtime.server.on("GET", "/v0/rooms/{roomId}", () => ({
+      ...directRoom,
+      direct_peer: {
+        ...directRoom.direct_peer!,
+        display_name: "Renamed Codex",
+      },
+      direct_peer_active: false,
+      name: "Old Codex",
+    }));
+    // Revoked Agents are excluded from the active tenant actors catalog.
+    runtime.server.on("GET", "/v0/tenants/{tenantId}/actors", () => ({
+      items: runtime.seed.actors.filter(
+        (actor) => actor.id !== directRoom.direct_peer!.id,
+      ),
+      page: { has_more: false },
+    }));
+    const deleteRoom = vi.fn<TestRouteHandler>(() => undefined);
+    runtime.server.on("DELETE", "/v0/rooms/{roomId}", deleteRoom);
+
+    const router = await renderRoomSurface("room-dm-codex", "", runtime);
+
+    expect(
+      await screen.findByRole("heading", { name: "Renamed Codex" }),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Room" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Delete Room" });
+    expect(dialog).toHaveTextContent(
+      "Renamed Codex will be deleted. Its messages, files, and history will no longer be available.",
+    );
+    expect(dialog).not.toHaveTextContent("Old Codex");
+    expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Delete Room" }),
+    );
+    await waitFor(() => expect(deleteRoom).toHaveBeenCalledOnce());
+    await screen.findByText("Rooms");
+    expect(router.state.location.pathname).toBe("/t/tenant-northstar/rooms");
   });
 
   it("defaults to Agent Info and preserves an explicit close across Room visits", async () => {
