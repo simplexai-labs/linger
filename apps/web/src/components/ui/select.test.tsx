@@ -284,16 +284,6 @@ describe("Select", () => {
     fireEvent.click(heading, { button: 0 });
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(trigger).toHaveAttribute("aria-expanded", "false");
-
-    // Also suppress if a browser forwards the click directly to label.control.
-    fireEvent.click(trigger);
-    await screen.findByRole("listbox");
-    fireEvent.pointerDown(heading, { button: 0, pointerId: 2 });
-    expect(screen.queryByRole("listbox")).toBeNull();
-    fireEvent.pointerUp(heading, { button: 0, pointerId: 2 });
-    fireEvent.click(trigger, { button: 0 });
-    expect(screen.queryByRole("listbox")).toBeNull();
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
   it("toggles closed cleanly when clicking the trigger itself while open", async () => {

@@ -32,11 +32,6 @@ function suppressFollowUpClick(originEvent: PointerEvent) {
 
   const originTarget =
     originEvent.target instanceof Node ? originEvent.target : null;
-  const originElement =
-    originTarget instanceof Element
-      ? originTarget
-      : (originTarget?.parentElement ?? null);
-  const originLabel = originElement?.closest("label") ?? null;
   const downPointerId = originEvent.pointerId;
   let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -60,19 +55,11 @@ function suppressFollowUpClick(originEvent: PointerEvent) {
     event.pointerId === undefined ||
     event.pointerId === downPointerId;
 
-  const isFollowUpTarget = (clickTarget: EventTarget | null) => {
-    if (
-      !originTarget ||
-      !originTarget.isConnected ||
-      !(clickTarget instanceof Node)
-    ) {
-      return false;
-    }
-    return (
-      clickTarget.contains(originTarget) ||
-      (originLabel !== null && originLabel.control === clickTarget)
-    );
-  };
+  const isFollowUpTarget = (clickTarget: EventTarget | null) =>
+    originTarget !== null &&
+    originTarget.isConnected &&
+    clickTarget instanceof Node &&
+    clickTarget.contains(originTarget);
 
   const onClick = (event: MouseEvent) => {
     const shouldSuppress = isFollowUpTarget(event.target);
