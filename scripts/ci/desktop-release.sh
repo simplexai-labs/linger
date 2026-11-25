@@ -201,21 +201,26 @@ out_dir() {
 }
 
 cmd_compile() {
-  local target="${1:-}" version out source
+  local target="${1:-}" version out commit shipped_source full_source
   check_target "$target"
   version="$(release_version)"
   out="$(out_dir)"
+  commit="$(git -C "$repo_root" rev-parse --verify "HEAD^{commit}")"
   rm -rf "$out/source"
-  mkdir -p "$out"
-  node "$repo_root/scripts/prepare-source-archive.mjs" --ref HEAD --output "$out/source"
-  source="$(find "$out/source" -maxdepth 1 -name '*.tar.gz' | head -1)"
-  [[ -n "$source" ]] || die "prepare-source-archive.mjs wrote no archive"
+  mkdir -p "$out/source/shipped" "$out/source/full"
+  node "$repo_root/scripts/prepare-source-archive.mjs" --ref "$commit" --mode minimal --output "$out/source/shipped"
+  node "$repo_root/scripts/prepare-source-archive.mjs" --ref "$commit" --mode full --output "$out/source/full"
+  shipped_source="$(find "$out/source/shipped" -maxdepth 1 -name '*.tar.gz' | head -1)"
+  [[ -n "$shipped_source" ]] || die "prepare-source-archive.mjs wrote no shipped archive"
+  full_source="$(find "$out/source/full" -maxdepth 1 -name '*.tar.gz' | head -1)"
+  [[ -n "$full_source" ]] || die "prepare-source-archive.mjs wrote no full archive"
   set_package_version "$version"
   (
     cd "$desktop"
     rm -rf dist
     LINGER_NATIVE_POSTGRES_DIR="$(native_dir)" \
-      LINGER_SOURCE_ARCHIVE_FILE="$source" \
+      LINGER_SOURCE_ARCHIVE_FILE="$shipped_source" \
+      LINGER_BUILD_SOURCE_ARCHIVE_FILE="$full_source" \
       LINGER_DESKTOP_DAEMON_TARGETS="$target" \
       node build.mjs
   )

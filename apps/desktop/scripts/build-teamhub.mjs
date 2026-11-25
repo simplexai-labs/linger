@@ -4,7 +4,7 @@
 // and the source they came from. The desktop copies them into the unpacked
 // source, so Native there needs no Go toolchain, module download or compile.
 //
-//   node scripts/build-teamhub.mjs --target win32-x64 --source linger-<label>.tar.gz
+//   node scripts/build-teamhub.mjs --target win32-x64 --source linger-<label>.tar.gz [--shipped-source ARCHIVE]
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
@@ -75,6 +75,23 @@ export async function sourceCommit(archive) {
   return commit;
 }
 
+// Resolves the commit and shipped source digest to stamp into build manifests.
+// When a minimal shipped archive differs from the full build archive, both must
+// come from the exact same commit so manifests never mismatch compiled code.
+export async function resolveSourceArchive(archive, shippedArchive) {
+  const commit = await sourceCommit(archive);
+  if (!shippedArchive) {
+    return { commit, sourceArchiveSha256: await sha256File(archive) };
+  }
+  const shippedCommit = await sourceCommit(shippedArchive);
+  if (shippedCommit !== commit) {
+    throw new Error(
+      `Shipped source archive commit (${shippedCommit}) does not match build source archive (${commit})`,
+    );
+  }
+  return { commit, sourceArchiveSha256: await sha256File(shippedArchive) };
+}
+
 // Throws unless `directory` holds the commands its manifest lists, built for
 // `target` from the package with `sourceArchiveSha256`.
 export async function verifyTeamhub(directory, target, sourceArchiveSha256) {
@@ -107,11 +124,14 @@ export async function buildTeamhub(
   target,
   archive,
   output = teamhubDirectory(target),
+  options = {},
 ) {
   const go = DAEMON_TARGETS[target];
   if (!go) throw new Error(`Unknown TeamHub target ${target}`);
-  const sourceArchiveSha256 = await sha256File(archive);
-  const commit = await sourceCommit(archive);
+  const { commit, sourceArchiveSha256 } = await resolveSourceArchive(
+    archive,
+    options.shippedArchive,
+  );
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
   const work = await mkdtemp(path.join(tmpdir(), "linger-teamhub-"));
@@ -200,11 +220,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const value = (name) => args[args.indexOf(name) + 1];
   if (!args.includes("--target") || !args.includes("--source"))
     throw new Error(
-      "Usage: build-teamhub.mjs --target win32-x64 --source ARCHIVE",
+      "Usage: build-teamhub.mjs --target win32-x64 --source ARCHIVE [--shipped-source ARCHIVE]",
     );
+  const hasShipped = args.includes("--shipped-source");
+  const shippedArchive = hasShipped ? value("--shipped-source") : undefined;
+  if (hasShipped && !shippedArchive)
+    throw new Error("--shipped-source requires an archive path");
   console.log(
     JSON.stringify(
-      await buildTeamhub(value("--target"), value("--source")),
+      await buildTeamhub(
+        value("--target"),
+        value("--source"),
+        undefined,
+        shippedArchive ? { shippedArchive } : undefined,
+      ),
       null,
       2,
     ),

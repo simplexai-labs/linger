@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -8,11 +9,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 
 import { afterEach, expect, it } from "vitest";
 
 import { NODE_RUNTIME_VERSION } from "../../../../scripts/local-computer-node-distributions.mjs";
 import {
+  buildRuntime,
   copyExternals,
   RUNTIME_ARCHIVE,
   RUNTIME_FILES,
@@ -226,4 +229,75 @@ it("verifies archive and directory runtimes with shared node metadata and reject
   ).resolves.toMatchObject({
     node: { file: "node/bin/node" },
   });
+});
+
+it("refuses a shipped archive from another commit before touching output", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "build-native-runtime-"));
+  roots.push(root);
+  const repo = path.join(root, "repo");
+  mkdirSync(repo, { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  const archive = (file: string, ref: string) => {
+    const tar = execFileSync("git", [
+      "-C",
+      repo,
+      "archive",
+      "--format=tar",
+      "--prefix=linger-test/",
+      ref,
+    ]);
+    writeFileSync(file, gzipSync(tar));
+  };
+  writeFileSync(path.join(repo, "package.json"), '{"name":"linger"}\n');
+  git("init", "-q");
+  git("add", ".");
+  git(
+    "-c",
+    "user.name=test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "-qm",
+    "first",
+  );
+  const firstArchive = path.join(root, "first.tar.gz");
+  archive(firstArchive, "HEAD");
+  const treeArchive = path.join(root, "tree.tar.gz");
+  archive(treeArchive, "HEAD^{tree}");
+
+  writeFileSync(path.join(repo, "README.md"), "second\n");
+  git("add", ".");
+  git(
+    "-c",
+    "user.name=test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "-qm",
+    "second",
+  );
+  const secondArchive = path.join(root, "second.tar.gz");
+  archive(secondArchive, "HEAD");
+
+  const output = path.join(root, "existing-output");
+  mkdirSync(output, { recursive: true });
+  const sentinel = path.join(output, "sentinel.txt");
+  writeFileSync(sentinel, "keep");
+
+  await expect(
+    buildRuntime("win32-x64", firstArchive, output, {
+      shippedArchive: secondArchive,
+    }),
+  ).rejects.toThrow(
+    /Shipped source archive commit .* does not match build source archive/,
+  );
+  expect(existsSync(sentinel)).toBe(true);
+
+  await expect(
+    buildRuntime("win32-x64", firstArchive, output, {
+      shippedArchive: treeArchive,
+    }),
+  ).rejects.toThrow("does not record its commit");
+  expect(existsSync(sentinel)).toBe(true);
 });

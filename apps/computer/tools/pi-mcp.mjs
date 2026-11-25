@@ -18,7 +18,7 @@ delete process.env.LINGER_PI_SHELL_TEXT_HOOK;
 // the pinned public entry by URL so this adapter keeps its shipped API.
 const { createMcpExtension } = await import(
   new URL(
-    "../node_modules/@earendil-works/pi-coding-agent/dist/index.js",
+    "../node_modules/@earendil-works/pi-coding-agent/dist/bundle/index.js",
     import.meta.url,
   ).href
 );

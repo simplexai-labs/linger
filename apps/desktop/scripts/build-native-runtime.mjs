@@ -19,7 +19,7 @@
 // there unpacked as runtime/ (RUNTIME_LAYOUTS); packaging/mac/package.py signs
 // both the services and the shared Node.js binary and refreshes the manifest.
 //
-//   node scripts/build-native-runtime.mjs --target win32-x64 --source linger-<label>.tar.gz
+//   node scripts/build-native-runtime.mjs --target win32-x64 --source linger-<label>.tar.gz [--shipped-source ARCHIVE] [--output DIR]
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import {
@@ -51,7 +51,7 @@ import {
 import { extractNodeRuntime } from "../../../scripts/prepare-local-computer-release.mjs";
 import { run } from "./build-daemon.mjs";
 import { bundleNodeServices } from "./bundle-node-services.mjs";
-import { sourceCommit } from "./build-teamhub.mjs";
+import { resolveSourceArchive } from "./build-teamhub.mjs";
 
 const desktop = fileURLToPath(new URL("../", import.meta.url));
 
@@ -345,12 +345,15 @@ export async function buildRuntime(
   target,
   archive,
   output = runtimeDirectory(target),
+  options = {},
 ) {
   const platform = PLATFORMS[target];
   if (!platform || !NODE_RUNTIME_RELEASES[target])
     throw new Error(`Unknown Native runtime target ${target}`);
-  const sourceArchiveSha256 = await sha256File(archive);
-  const commit = await sourceCommit(archive);
+  const { commit, sourceArchiveSha256 } = await resolveSourceArchive(
+    archive,
+    options.shippedArchive,
+  );
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
   const work = await mkdtemp(path.join(tmpdir(), "linger-runtime-"));
@@ -598,14 +601,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const value = (name) => args[args.indexOf(name) + 1];
   if (!args.includes("--target") || !args.includes("--source"))
     throw new Error(
-      "Usage: build-native-runtime.mjs --target win32-x64 --source ARCHIVE [--output DIR]",
+      "Usage: build-native-runtime.mjs --target win32-x64 --source ARCHIVE [--shipped-source ARCHIVE] [--output DIR]",
     );
+  const hasShipped = args.includes("--shipped-source");
+  const shippedArchive = hasShipped ? value("--shipped-source") : undefined;
+  if (hasShipped && !shippedArchive)
+    throw new Error("--shipped-source requires an archive path");
   console.log(
     JSON.stringify(
       await buildRuntime(
         value("--target"),
         value("--source"),
         args.includes("--output") ? path.resolve(value("--output")) : undefined,
+        shippedArchive ? { shippedArchive } : undefined,
       ),
       null,
       2,

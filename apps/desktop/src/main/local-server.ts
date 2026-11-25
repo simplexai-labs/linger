@@ -43,6 +43,8 @@ import { loadInstance } from "@linger/local-installation/instance";
 import { foldersInUse } from "@linger/local-installation/native-process";
 import { normalizeFailurePunctuation } from "@linger/local-installation/localmodels-failure";
 import {
+  canBuildNativeServicesFromSource,
+  canCompileTeamhubFromSource,
   localRunnerGatewayUrl,
   validateSourceRepository,
 } from "@linger/local-installation/source-checkout";
@@ -2302,8 +2304,10 @@ export class LocalServerModule implements Module {
   }
 
   // Unpacks the services this build compiled from its source package into
-  // the source, so Native installs no packages and needs no network. Without
-  // them Native installs the source's packages and runs it in development.
+  // the source, so Native installs no packages and needs no network. Release
+  // packages ship a minimal source skeleton and fail fast if the host cannot
+  // run these prebuilt binaries (for example Linux glibc < MIN_GLIBC), while
+  // full development checkouts can still fall back to installing from source.
   async #ensureNativeRuntime(
     repo: string,
     sha256: string,
@@ -2315,12 +2319,18 @@ export class LocalServerModule implements Module {
     const directory = path.join(repo, NATIVE_RUNTIME_DIRECTORY);
     const glibc = this.#glibcVersion();
     if (glibc && !atLeast(glibc, MIN_GLIBC)) {
-      // Its native packages, like the PostgreSQL build, need a newer glibc;
-      // Native installs the source's packages instead.
+      // Its native packages, like the PostgreSQL build, need glibc >= MIN_GLIBC.
+      // Fail fast on minimal release source skeletons that cannot compile from
+      // source; full development checkouts can still fall back to source install.
       this.#ctx?.log.warn("local_server.native_runtime_skipped", {
         glibc,
         required: MIN_GLIBC,
       });
+      if (!(await canBuildNativeServicesFromSource(repo))) {
+        throw new Error(
+          `Linger requires Linux with glibc ${MIN_GLIBC} or later (detected ${glibc}) because this release uses prebuilt offline services.`,
+        );
+      }
       return;
     }
     try {
@@ -2359,9 +2369,16 @@ export class LocalServerModule implements Module {
     } catch (error) {
       if (signal.aborted) throw error;
       await removeRetrying(directory).catch(() => undefined);
+      const detail = error instanceof Error ? error.message : String(error);
       this.#ctx?.log.warn("local_server.native_runtime_failed", {
-        error: error instanceof Error ? error.message : String(error),
+        error: detail,
       });
+      if (!(await canBuildNativeServicesFromSource(repo))) {
+        throw new Error(
+          `The bundled offline Linger services could not be unpacked or verified (${detail}). Reinstall Linger to restore them.`,
+          { cause: error },
+        );
+      }
     }
   }
 
@@ -2453,9 +2470,17 @@ export class LocalServerModule implements Module {
         this.#ctx?.log.info("local_server.teamhub_binaries", { target });
       }
     } catch (error) {
+      if (signal.aborted) throw error;
+      const detail = error instanceof Error ? error.message : String(error);
       this.#ctx?.log.warn("local_server.teamhub_binaries_failed", {
-        error: error instanceof Error ? error.message : String(error),
+        error: detail,
       });
+      if (!(await canCompileTeamhubFromSource(repo))) {
+        throw new Error(
+          `The bundled TeamHub binaries could not be verified (${detail}). Reinstall Linger to restore them.`,
+          { cause: error },
+        );
+      }
     }
   }
 

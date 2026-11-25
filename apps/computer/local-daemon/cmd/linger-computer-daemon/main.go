@@ -165,13 +165,25 @@ func run(args []string) (resultErr error) {
 	if computer.LocalModels != nil {
 		piCatalog = localmodels.NewPiCatalog(filepath.Join(computer.StateDirectory, "local-models"))
 	}
+	toolInstallation, err := localtools.Installed(executable)
+	if err != nil {
+		return err
+	}
+	if toolInstallation == nil {
+		// Agents on this computer then have no browser or computer-control
+		// tools; say so instead of leaving them silently missing.
+		slog.Warn("computer_tools.missing: browser and computer-control tools are disabled", "expected", localtools.ToolsDirectory(executable))
+	}
 	currentDiscoveryOptions := func() provider.DiscoveryOptions {
 		var managedPi string
 		if localModels != nil {
 			managedPi = localModels.PiExecutable()
 		}
+		configuredPaths, managedPaths, bundledPaths := daemonDiscoveryPaths(computer.RuntimePaths, localModelsStateDir, managedPi, toolInstallation)
 		return provider.DiscoveryOptions{
-			ConfiguredPaths:  withManagedPiPath(localmodels.OverlayRuntimePaths(computer.RuntimePaths, localModelsStateDir), managedPi),
+			ConfiguredPaths:  configuredPaths,
+			ManagedPaths:     managedPaths,
+			BundledPaths:     bundledPaths,
 			Runtimes:         computer.EnabledRuntimes,
 			PreferredRuntime: computer.PreferredRuntime,
 			RuntimeHomeRoot:  filepath.Join(computer.StateDirectory, "runtime-homes"),
@@ -286,15 +298,6 @@ func run(args []string) (resultErr error) {
 			return lingercontext.RegistrationBinding{}, false, nil
 		},
 	}
-	toolInstallation, err := localtools.Installed(executable)
-	if err != nil {
-		return err
-	}
-	if toolInstallation == nil {
-		// Agents on this computer then have no browser or computer-control
-		// tools; say so instead of leaving them silently missing.
-		slog.Warn("computer_tools.missing: browser and computer-control tools are disabled", "expected", localtools.ToolsDirectory(executable))
-	}
 	var toolManager *localtools.Manager
 	var toolBinder daemon.LocalToolBinder
 	var piExtension string
@@ -359,6 +362,10 @@ func run(args []string) (resultErr error) {
 		localModelsTool = &localmodels.Tool{
 			Python: tool.Python, ModuleDirectory: tool.ModuleDirectory,
 			StateDirectory: tool.StateDirectory, BaseDirectory: tool.BaseDirectory,
+		}
+		if toolInstallation != nil && toolInstallation.PiEntry != "" {
+			localModelsTool.BundledPiBinDir = filepath.Dir(toolInstallation.PiEntry)
+			localModelsTool.BundledPiVersion = toolInstallation.PiVersion
 		}
 	}
 	jobDir := filepath.Join(computer.StateDirectory, "local-models", "jobs")
@@ -966,6 +973,23 @@ func installedTeamHubCLIBinAt(executable string) string {
 		return ""
 	}
 	return directory
+}
+
+func daemonDiscoveryPaths(configured map[string]string, stateDir, managedPi string, toolInstallation *localtools.Installation) (configuredPaths, managedPaths, bundledPaths map[string]string) {
+	var bundledPiVersion string
+	if toolInstallation != nil {
+		bundledPiVersion = toolInstallation.PiVersion
+	}
+	layers := localmodels.ResolveRuntimePathsWithBundled(configured, stateDir, bundledPiVersion)
+	filteredManagedPi := localmodels.FilterManagedPiPath(managedPi, stateDir, bundledPiVersion)
+	return layers.Configured, withManagedPiPath(layers.Managed, filteredManagedPi), bundledRuntimePaths(toolInstallation)
+}
+
+func bundledRuntimePaths(installation *localtools.Installation) map[string]string {
+	if installation == nil || installation.PiEntry == "" {
+		return nil
+	}
+	return map[string]string{"pi": installation.PiEntry}
 }
 
 func withManagedPiPath(paths map[string]string, managed string) map[string]string {

@@ -1,5 +1,12 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -709,6 +716,84 @@ it("stages a compact self-contained computer-tools bundle with bundled Pi MCP, j
       { cwd: toolsDir, env: cleanEnv, timeout: 20_000 },
     );
     expect(quickjsResult.stdout.trim()).toBe("42");
+
+    if (process.platform !== "win32") {
+      // Desktop packaged layout: invoke staged bin/pi through an external
+      // symlink matching <home>/runtime/bundled-pi/bin/pi -> .../cli/computer-tools/bin/pi.
+      const runtimeBinDir = path.join(root, "runtime", "bin");
+      await mkdir(runtimeBinDir, { recursive: true });
+      await symlink(process.execPath, path.join(runtimeBinDir, "node"));
+      const externalLink = path.join(
+        root,
+        "external-home",
+        "runtime",
+        "bundled-pi",
+        "bin",
+        "pi",
+      );
+      await mkdir(path.dirname(externalLink), { recursive: true });
+      await symlink(path.join(toolsDir, "bin", "pi"), externalLink);
+      const desktopVersion = await run(externalLink, ["--version"], {
+        cwd: root,
+        env: cleanEnv,
+        timeout: 20_000,
+      });
+      expect(desktopVersion.stdout).toContain(
+        bundler.COMPUTER_TOOL_VERSIONS.pi,
+      );
+
+      // Standalone Local Computer symlink layout:
+      // lib-1.0.0/cli/computer-tools -> ../../deps-sha/computer-tools
+      // lib-1.0.0/runtime -> ../deps-sha/runtime
+      const standaloneRoot = path.join(root, "standalone");
+      const depsDir = path.join(standaloneRoot, "deps-abc");
+      await mkdir(path.join(depsDir, "runtime", "bin"), { recursive: true });
+      await rename(toolsDir, path.join(depsDir, "computer-tools"));
+      await symlink(
+        process.execPath,
+        path.join(depsDir, "runtime", "bin", "node"),
+      );
+      const standaloneCliDir = path.join(standaloneRoot, "lib-1.0.0", "cli");
+      await mkdir(standaloneCliDir, { recursive: true });
+      await symlink(
+        path.join("..", "..", "deps-abc", "computer-tools"),
+        path.join(standaloneCliDir, "computer-tools"),
+      );
+      await symlink(
+        path.join("..", "deps-abc", "runtime"),
+        path.join(standaloneRoot, "lib-1.0.0", "runtime"),
+      );
+      const standaloneDirect = await run(
+        path.join(standaloneCliDir, "computer-tools", "bin", "pi"),
+        ["--version"],
+        { cwd: standaloneRoot, env: cleanEnv, timeout: 20_000 },
+      );
+      expect(standaloneDirect.stdout).toContain(
+        bundler.COMPUTER_TOOL_VERSIONS.pi,
+      );
+
+      const standaloneLink = path.join(
+        standaloneRoot,
+        "home",
+        "runtime",
+        "bundled-pi",
+        "bin",
+        "pi",
+      );
+      await mkdir(path.dirname(standaloneLink), { recursive: true });
+      await symlink(
+        path.join(standaloneCliDir, "computer-tools", "bin", "pi"),
+        standaloneLink,
+      );
+      const standaloneViaLink = await run(standaloneLink, ["--version"], {
+        cwd: standaloneRoot,
+        env: cleanEnv,
+        timeout: 20_000,
+      });
+      expect(standaloneViaLink.stdout).toContain(
+        bundler.COMPUTER_TOOL_VERSIONS.pi,
+      );
+    }
   } finally {
     if (server) {
       await new Promise<void>((resolve) => server!.close(() => resolve()));

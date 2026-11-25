@@ -224,11 +224,13 @@ async function computerToolEntries(bundle, platform, fresh) {
   );
   const assets = manifest.assets;
   const hash = (value) => createHash("sha256").update(value).digest("hex");
+  const piEntryRequired = fresh || manifest.pi_entry !== undefined;
   if (
     manifest.schema_version !== 1 ||
     !Array.isArray(assets) ||
     manifest.playwright_entry !== "node_modules/@playwright/mcp/cli.js" ||
     manifest.pi_extension !== "extensions/pi-mcp.mjs" ||
+    (piEntryRequired && manifest.pi_entry !== "bin/pi.exe") ||
     manifest.cua_entry !== "cua/cua-driver.exe" ||
     !assets.some((a) => a.path === manifest.cua_entry) ||
     !assets.every(
@@ -278,7 +280,8 @@ async function computerToolEntries(bundle, platform, fresh) {
   }
   if (
     !expected.has(manifest.playwright_entry) ||
-    !expected.has(manifest.pi_extension)
+    !expected.has(manifest.pi_extension) ||
+    (piEntryRequired && !expected.has(manifest.pi_entry))
   )
     throw new Error("Computer tool entrypoint is missing.");
   return [...expected].sort().map((entry) => `cli/computer-tools/${entry}`);

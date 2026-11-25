@@ -1730,6 +1730,140 @@ describe("LocalServerModule", () => {
     expect(existsSync(path.join(offline, "verified.json"))).toBe(true);
   });
 
+  it("fails explicitly instead of falling back to source builds for a minimal 8-file offline skeleton", async () => {
+    const f = fixture();
+    const skeletonRoot = path.join(f.root, "skeleton-tree", "linger-1.0.0");
+    mkdirSync(path.join(skeletonRoot, "apps", "teamhub"), { recursive: true });
+    mkdirSync(path.join(skeletonRoot, "scripts"), { recursive: true });
+    writeFileSync(path.join(skeletonRoot, ".env.example"), "");
+    writeFileSync(
+      path.join(skeletonRoot, "apps", "teamhub", "go.mod"),
+      "module example.com/teamhub\n",
+    );
+    writeFileSync(
+      path.join(skeletonRoot, "package.json"),
+      JSON.stringify({ name: "linger" }),
+    );
+    writeFileSync(
+      path.join(skeletonRoot, "scripts", "env-inventory.json"),
+      JSON.stringify({ variables: [] }),
+    );
+    writeFileSync(path.join(skeletonRoot, "scripts", "local-defaults.env"), "");
+    writeFileSync(
+      path.join(skeletonRoot, "scripts", "replace-process.mjs"),
+      "",
+    );
+    writeFileSync(path.join(skeletonRoot, "scripts", "source-native.mjs"), "");
+    writeFileSync(path.join(skeletonRoot, "scripts", "with-local-env.mjs"), "");
+
+    const archiveFile = path.join(f.root, "skeleton-linger.tar.gz");
+    execFileSync("tar", [
+      "-czf",
+      archiveFile,
+      "-C",
+      path.join(f.root, "skeleton-tree"),
+      "linger-1.0.0",
+    ]);
+    const archiveBytes = readFileSync(archiveFile);
+    const archiveSha = createHash("sha256").update(archiveBytes).digest("hex");
+
+    mkdirSync(path.join(f.root, "installer", "source"), { recursive: true });
+    writeFileSync(
+      path.join(f.root, "installer", "source", "linger.tar.gz"),
+      archiveBytes,
+    );
+
+    const runtimeBundle = path.join(
+      f.root,
+      "installer",
+      "native",
+      "runtime-linux-x64",
+    );
+    const runtimeTree = path.join(f.root, "skeleton-runtime-tree", "runtime");
+    mkdirSync(runtimeTree, { recursive: true });
+    writeFileSync(
+      path.join(runtimeTree, "files.json"),
+      JSON.stringify({
+        target: "linux-x64",
+        sourceCommit: "a".repeat(40),
+        sourceArchiveSha256: archiveSha,
+        files: {},
+      }),
+    );
+    mkdirSync(runtimeBundle, { recursive: true });
+    writeFileSync(
+      path.join(runtimeBundle, "runtime.tar.zst"),
+      zstdCompressSync(
+        execFileSync("tar", [
+          "-cf",
+          "-",
+          "-C",
+          path.dirname(runtimeTree),
+          "runtime",
+        ]),
+      ),
+    );
+    const runtimeSha = createHash("sha256")
+      .update(readFileSync(path.join(runtimeBundle, "runtime.tar.zst")))
+      .digest("hex");
+    const writeRuntimeManifest = (sha256 = runtimeSha) =>
+      writeFileSync(
+        path.join(runtimeBundle, "manifest.json"),
+        JSON.stringify({
+          target: "linux-x64",
+          sourceCommit: "a".repeat(40),
+          sourceArchiveSha256: archiveSha,
+          archive: { file: "runtime.tar.zst", sha256, bytes: 1 },
+        }),
+      );
+
+    const runInstall = (glibcVersion = "2.35") =>
+      new LocalServerModule({
+        home: f.home,
+        version: APP_VERSION,
+        installerDirectory: path.join(f.root, "installer"),
+        platform: "linux",
+        arch: "x64",
+        glibcVersion,
+        sourceArchive: { file: "source/linger.tar.gz", sha256: archiveSha },
+        signIn: f.signIn,
+      }).begin();
+
+    // 1. Linux glibc older than 2.35 fails explicitly instead of skipping silently.
+    writeRuntimeManifest();
+    await expect(runInstall("2.31")).rejects.toThrow(
+      "Linger requires Linux with glibc 2.35 or later (detected 2.31) because this release uses prebuilt offline services.",
+    );
+
+    // 2. Damaged offline runtime archive fails explicitly instead of falling back.
+    writeRuntimeManifest("0".repeat(64));
+    await expect(runInstall("2.35")).rejects.toThrow(
+      /The bundled offline Linger services could not be unpacked or verified \(.*\)\. Reinstall Linger to restore them\./,
+    );
+
+    // 3. Damaged TeamHub binaries fail explicitly instead of falling back to Go compilation.
+    const teamhubBundle = path.join(
+      f.root,
+      "installer",
+      "native",
+      "teamhub-linux-x64",
+    );
+    mkdirSync(teamhubBundle, { recursive: true });
+    writeFileSync(
+      path.join(teamhubBundle, "manifest.json"),
+      JSON.stringify({
+        target: "linux-x64",
+        sourceCommit: "a".repeat(40),
+        sourceArchiveSha256: "0".repeat(64),
+        goVersion: "1.26.5",
+        binaries: {},
+      }),
+    );
+    await expect(runInstall("2.35")).rejects.toThrow(
+      /The bundled TeamHub binaries could not be verified \(.*\)\. Reinstall Linger to restore them\./,
+    );
+  });
+
   it(
     "copies the services and Node.js a Mac build bundles as folders",
     async () => {

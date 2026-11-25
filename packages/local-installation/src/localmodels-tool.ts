@@ -27,6 +27,12 @@ import {
 } from "./published-source.js";
 import type { InstallerEvent } from "./events.js";
 import { renameRetrying } from "./fs-retry.js";
+import {
+  ensureStableBundledPi,
+  resolveBundledPi,
+  withBundledPiPath,
+  type BundledPi,
+} from "./bundled-pi.js";
 export type LocalmodelsToolSource = PublishedServiceSource & {
   sourceCommit: string;
   manifestSha256: string;
@@ -40,7 +46,10 @@ interface ToolManifest {
   moduleDir: string;
   assets: Record<string, string>;
 }
-type Options = ProcessOptions & { onEvent?: (event: InstallerEvent) => void };
+type Options = ProcessOptions & {
+  onEvent?: (event: InstallerEvent) => void;
+  bundledPi?: BundledPi | null;
+};
 export function validateToolSource(value: unknown): LocalmodelsToolSource {
   const source = validatePublishedServiceSource(value);
   const extra = value as LocalmodelsToolSource;
@@ -581,6 +590,7 @@ interface BifrostAddressDependencies {
 
 interface RunCommandControl extends BifrostAddressDependencies {
   allocateBifrostAddr?: boolean;
+  resolveBundledPi?: typeof resolveBundledPi;
 }
 
 const STRIPPED_LOCALMODELS_ENVIRONMENT = new Set([
@@ -860,7 +870,10 @@ export async function runLocalmodels(
   home: string,
   args: string[],
   options: Options = {},
-  dependencies: { run?: typeof runProcess } & BifrostAddressDependencies = {},
+  dependencies: {
+    run?: typeof runProcess;
+    resolveBundledPi?: typeof resolveBundledPi;
+  } & BifrostAddressDependencies = {},
 ) {
   return runLocalmodelsCommand(
     home,
@@ -872,6 +885,7 @@ export async function runLocalmodels(
       allocateBifrostAddr: !isReadOnlyOrStopCommand(args),
       portFree: dependencies.portFree,
       freePort: dependencies.freePort,
+      resolveBundledPi: dependencies.resolveBundledPi,
     },
   );
 }
@@ -972,6 +986,19 @@ async function runLocalmodelsCommand(
   delete env.PYTHONHOME;
   delete env.PYTHONSTARTUP;
   delete env.PYTHONINSPECT;
+  const isSetupInspect = args[0] === "setup" && args[1] === "inspect";
+  const resolvedBundledPi =
+    options.bundledPi !== undefined
+      ? (options.bundledPi ?? undefined)
+      : isSetupInspect
+        ? undefined
+        : await (control.resolveBundledPi ?? resolveBundledPi)();
+  const bundledPi = resolvedBundledPi
+    ? await ensureStableBundledPi(home, resolvedBundledPi)
+    : undefined;
+  const effectiveEnv = bundledPi
+    ? await withBundledPiPath(env, { home, bundledPi })
+    : env;
   const harnessApply = args[0] === "harness" && args[1] === "apply";
   const sourceApply = args[0] === "source" && args[1] === "apply";
   const label =
@@ -1103,7 +1130,7 @@ async function runLocalmodelsCommand(
     {
       ...options,
       cwd: tool.moduleDir,
-      env,
+      env: effectiveEnv,
       onOutput,
     },
   );

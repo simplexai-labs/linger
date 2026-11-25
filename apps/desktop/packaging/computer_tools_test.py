@@ -41,12 +41,18 @@ def sha256(path):
         return hashlib.sha256(source.read()).hexdigest()
 
 
+def pi_entry(target):
+    return "bin/pi.exe" if target.startswith("win32-") else "bin/pi"
+
+
 def stage(root, target):
     """A resources/ folder holding tools laid out as stage-computer-tools.mjs writes them."""
     tools = os.path.join(root, "cli", "computer-tools")
+    pi = pi_entry(target)
     files = {
         PLAYWRIGHT_ENTRY: b"console.log('playwright')\n",
         PI_EXTENSION: b"export default {}\n",
+        pi: b"#!/bin/sh\n" if not target.startswith("win32-") else b"MZ",
         "node_modules/native/prebuilt.node": MACHO,
     }
     cua = FROZEN["cua"].get(target, {})
@@ -60,13 +66,16 @@ def stage(root, target):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as out:
             out.write(files[relative])
+        mode = 0o755 if relative == pi and not target.startswith("win32-") else 0o644
+        if mode == 0o755:
+            os.chmod(path, 0o755)
         assets.append({"path": relative, "size_bytes": len(files[relative]),
-                       "sha256": sha256(path), "mode": 0o644})
+                       "sha256": sha256(path), "mode": mode})
     # JSON.stringify of the asset list, as bundle-computer-tools.mjs digests it.
     digest = hashlib.sha256(json.dumps(assets, separators=(",", ":")).encode()).hexdigest()
     manifest = {"schema_version": 1, "versions": FROZEN["versions"], "target": target,
                 "playwright_entry": PLAYWRIGHT_ENTRY, "pi_extension": PI_EXTENSION,
-                "cua_entry": cua.get("entry", ""), "packages": [],
+                "pi_entry": pi, "cua_entry": cua.get("entry", ""), "packages": [],
                 "assets": assets, "artifact_sha256": digest}
     with open(os.path.join(tools, "manifest.json"), "w") as out:
         json.dump(manifest, out)
@@ -166,7 +175,7 @@ class ComputerToolsTest(unittest.TestCase):
         with tarfile.open(archive, "w:gz") as out:
             out.add(app, arcname="Linger")
         self.assertEqual(computer_tools.verify_archive(archive, "Linger/resources/", "linux-x64"),
-                         3 + len(FROZEN["quickjs"]))
+                         4 + len(FROZEN["quickjs"]))
 
         resources, _ = self.resources("win32-x64")
         archive = os.path.join(self.root, "Linger.zip")
@@ -176,7 +185,7 @@ class ComputerToolsTest(unittest.TestCase):
                     path = os.path.join(root, name)
                     out.write(path, "Linger/resources/" + os.path.relpath(path, resources))
         self.assertEqual(computer_tools.verify_archive(archive, "Linger/resources/", "win32-x64"),
-                         4 + len(FROZEN["quickjs"]))
+                         5 + len(FROZEN["quickjs"]))
 
         bare = os.path.join(self.root, "bare.tar.gz")
         with tarfile.open(bare, "w:gz") as out:

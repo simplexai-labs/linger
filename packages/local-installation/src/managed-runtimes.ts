@@ -49,6 +49,8 @@ export interface RuntimeDescriptor {
 }
 const root = (home: string) =>
   path.join(path.resolve(home), "runtime", "harness");
+const bundledPiRoot = (home: string) =>
+  path.join(path.resolve(home), "runtime", "bundled-pi");
 const versionFailures: Record<string, string> = {
   RUNTIME_VERSION_TIMEOUT:
     "Runtime version verification timed out after two bounded attempts.",
@@ -217,11 +219,26 @@ function defaultLoginCommands(
   return { loginCommand: null };
 }
 
+function isWithinRoot(baseDir: string, executable: string | null): boolean {
+  if (!executable || !path.isAbsolute(executable)) return false;
+  const relative = path.relative(baseDir, executable);
+  return (
+    !!relative &&
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
 function isManagedExecutable(home: string, executable: string | null): boolean {
-  if (!executable) return false;
-  const harnessRoot = root(home);
-  const relative = path.relative(harnessRoot, executable);
-  return !!relative && !relative.startsWith("..") && !path.isAbsolute(relative);
+  return isWithinRoot(root(home), executable);
+}
+
+function isStableBundledPiExecutable(
+  home: string,
+  executable: string | null,
+): boolean {
+  return isWithinRoot(bundledPiRoot(home), executable);
 }
 
 function descriptorFromDaemonObservation(
@@ -307,10 +324,12 @@ function descriptorFromDaemonObservation(
 
 /**
  * Reconciles runtime discovery, version checks and authentication status with
- * `linger-computer-daemon probe-runtimes --json` (single source of truth).
- * Managed binaries installed under `<home>/runtime/harness` are passed via
- * `--<runtime>-path` so the daemon verifies those exact executables; host
- * binaries are discovered directly by the daemon itself.
+ * `linger-computer-daemon probe-runtimes --json --include-bundled` (single
+ * source of truth). Managed binaries under `<home>/runtime/harness` and the
+ * stable bundled Pi link under `<home>/runtime/bundled-pi` are passed via
+ * `--<runtime>-path` so the daemon verifies those exact executables while
+ * falling back cleanly to bundled runtimes when a link is dangling or absent
+ * from PATH.
  */
 async function reconcileDescriptorsWithDaemon(
   home: string,
@@ -325,19 +344,25 @@ async function reconcileDescriptorsWithDaemon(
   if (rows.length === 0) return rows;
 
   const probe = dependencies.probeRuntimes ?? probeRuntimesWithDaemon;
+  const shouldConfigurePath = (row: RuntimeDescriptor): boolean =>
+    row.installed &&
+    (isManagedExecutable(home, row.executable) ||
+      (row.runtime === "pi" &&
+        isStableBundledPiExecutable(home, row.executable)));
   const hasCustomProfileEnv = rows.some(
     (row) => row.environment && Object.keys(row.environment).length > 0,
   );
   if (!hasCustomProfileEnv) {
     const configuredPaths: Partial<Record<NativeRuntime, string>> = {};
     for (const row of rows) {
-      if (row.installed && isManagedExecutable(home, row.executable)) {
+      if (shouldConfigurePath(row)) {
         configuredPaths[row.runtime] = row.executable!;
       }
     }
     const observations = await probe({
       runtimes: rows.map((row) => row.runtime),
       configuredPaths,
+      includeBundled: true,
       env: options.env ?? process.env,
       daemonExecutable: dependencies.daemonExecutable,
       platform: options.platform,
@@ -353,13 +378,13 @@ async function reconcileDescriptorsWithDaemon(
 
   return Promise.all(
     rows.map(async (row) => {
-      const configuredPaths =
-        row.installed && isManagedExecutable(home, row.executable)
-          ? { [row.runtime]: row.executable! }
-          : undefined;
+      const configuredPaths = shouldConfigurePath(row)
+        ? { [row.runtime]: row.executable! }
+        : undefined;
       const observations = await probe({
         runtimes: [row.runtime],
         configuredPaths,
+        includeBundled: true,
         env: { ...(options.env ?? process.env), ...row.environment },
         daemonExecutable: dependencies.daemonExecutable,
         platform: options.platform,
@@ -642,6 +667,7 @@ export async function inspectRuntime(
     const probe = dependencies.probeRuntimes ?? probeRuntimesWithDaemon;
     const observations = await probe({
       runtimes: [runtime],
+      includeBundled: true,
       env: options.env ?? process.env,
       daemonExecutable: dependencies.daemonExecutable,
       platform: options.platform,

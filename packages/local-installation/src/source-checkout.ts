@@ -1,4 +1,4 @@
-import { lstat, readFile, readdir, realpath } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { parseEnv } from "node:util";
 import {
@@ -101,6 +101,68 @@ export async function validateSourceRepository(
     );
   }
   return repo;
+}
+async function isExistingFile(file: string): Promise<boolean> {
+  try {
+    return (await stat(file)).isFile();
+  } catch {
+    return false;
+  }
+}
+async function isExistingDirectory(directory: string): Promise<boolean> {
+  try {
+    return (await stat(directory)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+// Unpacked desktop release skeletons carry these markers, whereas synthetic
+// unit-test checkouts only create package.json and scripts/source-native.mjs.
+async function hasReleaseSkeletonMarkers(repo: string): Promise<boolean> {
+  const [goMod, envInventory] = await Promise.all([
+    isExistingFile(path.join(repo, "apps/teamhub/go.mod")),
+    isExistingFile(path.join(repo, "scripts/env-inventory.json")),
+  ]);
+  return goMod && envInventory;
+}
+/**
+ * Reports whether `repo` holds Go sources to compile TeamHub if prebuilt
+ * binaries are unavailable. A minimal offline release skeleton carries
+ * `apps/teamhub/go.mod` and `scripts/env-inventory.json` without
+ * `apps/teamhub/cmd`.
+ */
+export async function canCompileTeamhubFromSource(
+  repo: string,
+): Promise<boolean> {
+  if (!(await hasReleaseSkeletonMarkers(repo))) return true;
+  return isExistingDirectory(path.join(repo, "apps/teamhub/cmd"));
+}
+/**
+ * Reports whether `repo` holds workspace sources to build Native services if
+ * the prebuilt offline runtime is unavailable.
+ */
+export async function canBuildNativeServicesFromSource(
+  repo: string,
+): Promise<boolean> {
+  if (!(await hasReleaseSkeletonMarkers(repo))) return true;
+  const [lockfile, nodeServices, web] = await Promise.all([
+    isExistingFile(path.join(repo, "pnpm-lock.yaml")),
+    isExistingFile(path.join(repo, "apps/node-services/package.json")),
+    isExistingFile(path.join(repo, "apps/web/package.json")),
+  ]);
+  return lockfile && nodeServices && web;
+}
+/**
+ * Reports whether `repo` is a minimal offline release skeleton lacking full
+ * Go or Node workspace compilation sources.
+ */
+export async function isMinimalSourceSkeleton(repo: string): Promise<boolean> {
+  if (!(await hasReleaseSkeletonMarkers(repo))) return false;
+  const [canCompile, canBuild] = await Promise.all([
+    canCompileTeamhubFromSource(repo),
+    canBuildNativeServicesFromSource(repo),
+  ]);
+  return !canCompile || !canBuild;
 }
 // Points an instance at another checkout of the same source; its data and
 // ports stay.

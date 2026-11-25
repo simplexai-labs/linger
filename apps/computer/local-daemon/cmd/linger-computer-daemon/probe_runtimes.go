@@ -7,16 +7,36 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/computerconfig"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/localtools"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/redact"
 )
 
 const runtimeProbeSchema = "linger.daemon.runtime-probe/v1"
+
+var resolveProbeBundledPaths = defaultProbeBundledPaths
+
+func defaultProbeBundledPaths() map[string]string {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	installation, err := localtools.Installed(executable)
+	if err != nil {
+		return nil
+	}
+	return bundledRuntimePaths(installation)
+}
 
 type runtimeProbeReport struct {
 	Schema   string              `json:"schema"`
@@ -55,10 +75,12 @@ func runProbeRuntimes(ctx context.Context, args []string, environment map[string
 	flags := flag.NewFlagSet("probe-runtimes", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	var asJSON bool
+	var includeBundled bool
 	var runtimes repeatedStringFlag
 	var codexPath, claudePath, piPath, antigravityPath string
 	var timeoutMs int
 	flags.BoolVar(&asJSON, "json", true, "emit JSON output")
+	flags.BoolVar(&includeBundled, "include-bundled", false, "include bundled runtimes such as Pi when absent from PATH")
 	flags.Var(&runtimes, "runtime", "runtime type to probe (repeatable)")
 	flags.StringVar(&codexPath, "codex-path", "", "explicit codex executable path")
 	flags.StringVar(&claudePath, "claude-path", "", "explicit claude executable path")
@@ -82,6 +104,11 @@ func runProbeRuntimes(ctx context.Context, args []string, environment map[string
 		selected = []string{"codex", "claude", "pi"}
 	}
 
+	var bundledPaths map[string]string
+	if includeBundled {
+		bundledPaths = resolveProbeBundledPaths()
+	}
+
 	options, err := computerconfig.RuntimeDiscoveryOptions(computerconfig.RuntimeDiscoveryRequest{
 		ConfiguredPaths: map[string]string{
 			"codex":       codexPath,
@@ -89,6 +116,7 @@ func runProbeRuntimes(ctx context.Context, args []string, environment map[string
 			"pi":          piPath,
 			"antigravity": antigravityPath,
 		},
+		BundledPaths:         bundledPaths,
 		Environment:          environment,
 		Runtimes:             selected,
 		SkipModelCatalog:     true,

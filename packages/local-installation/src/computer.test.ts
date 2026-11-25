@@ -865,6 +865,7 @@ it("binds approved Pi and follows upstream revisions while preserving Codex cred
   const piExecutable = path.join(home, "approved-pi");
   await privateDirectory(modelRoot);
   await privateDirectory(piDir);
+  await writeFile(piExecutable, "#!/bin/sh\n", { mode: 0o755 });
   await atomicPrivate(
     path.join(modelRoot, "binding.json"),
     JSON.stringify({

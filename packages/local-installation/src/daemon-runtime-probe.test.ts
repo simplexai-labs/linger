@@ -133,6 +133,54 @@ describe("probeRuntimesWithDaemon", () => {
     ]);
   });
 
+  it("passes --include-bundled only when includeBundled is true", async () => {
+    const run = vi.fn(async () => ({
+      code: 0,
+      stdout: JSON.stringify({
+        schema: DAEMON_RUNTIME_PROBE_SCHEMA,
+        runtimes: [
+          {
+            type: "pi",
+            status: "authentication_required",
+            installed: true,
+            authenticated: false,
+            version: "1.5.2",
+            required_version: "1.2.0",
+            executable: "/app/cli/computer-tools/bin/pi",
+          },
+        ],
+      }),
+      stderr: "",
+    }));
+
+    await probeRuntimesWithDaemon({
+      daemonExecutable: "/app/linger-computer-daemon",
+      runtimes: ["pi"],
+      env: { PATH: "/usr/bin:/bin" },
+      run,
+    });
+    expect(run).toHaveBeenNthCalledWith(
+      1,
+      "/app/linger-computer-daemon",
+      ["probe-runtimes", "--json", "--runtime", "pi"],
+      expect.anything(),
+    );
+
+    await probeRuntimesWithDaemon({
+      daemonExecutable: "/app/linger-computer-daemon",
+      runtimes: ["pi"],
+      includeBundled: true,
+      env: { PATH: "/usr/bin:/bin" },
+      run,
+    });
+    expect(run).toHaveBeenNthCalledWith(
+      2,
+      "/app/linger-computer-daemon",
+      ["probe-runtimes", "--json", "--include-bundled", "--runtime", "pi"],
+      expect.anything(),
+    );
+  });
+
   it("returns null cleanly when daemon binary is absent or fails", async () => {
     expect(
       await probeRuntimesWithDaemon({

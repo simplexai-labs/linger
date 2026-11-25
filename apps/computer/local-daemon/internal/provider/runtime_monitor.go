@@ -83,6 +83,8 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 	activeDiscovery := resolveDiscovery()
 	prevEnv := maps.Clone(activeDiscovery.Environment)
 	prevPaths := maps.Clone(activeDiscovery.ConfiguredPaths)
+	prevManaged := maps.Clone(activeDiscovery.ManagedPaths)
+	prevBundled := maps.Clone(activeDiscovery.BundledPaths)
 	transientFailures := make(map[string]int)
 	authenticationFailures := make(map[string]int)
 	termCache := options.TerminalEnvironment
@@ -113,7 +115,10 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 			continue
 		}
 		activeDiscovery = resolveDiscovery()
-		envChanged := !maps.Equal(prevEnv, activeDiscovery.Environment) || !maps.Equal(prevPaths, activeDiscovery.ConfiguredPaths)
+		envChanged := !maps.Equal(prevEnv, activeDiscovery.Environment) ||
+			!maps.Equal(prevPaths, activeDiscovery.ConfiguredPaths) ||
+			!maps.Equal(prevManaged, activeDiscovery.ManagedPaths) ||
+			!maps.Equal(prevBundled, activeDiscovery.BundledPaths)
 		executablesChanged := runtimeExecutablesChanged(current.Diagnostics)
 		var next DiscoveryResult
 		var err error
@@ -124,6 +129,8 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 				requested = false
 				prevEnv = maps.Clone(activeDiscovery.Environment)
 				prevPaths = maps.Clone(activeDiscovery.ConfiguredPaths)
+				prevManaged = maps.Clone(activeDiscovery.ManagedPaths)
+				prevBundled = maps.Clone(activeDiscovery.BundledPaths)
 				for _, diagnostic := range next.Diagnostics {
 					if diagnostic.Status == "ready" {
 						delete(authenticationFailures, diagnostic.Type)
@@ -371,7 +378,12 @@ func changedInstallations(ctx context.Context, diagnostics []RuntimeDiagnostic, 
 		}
 		environment["PATH"] = diagnostic.searchPath
 		entry, err := resolveExecutableEntry(ctx, diagnostic.Type, runtimeDefinitions[definition].Command,
-			DiscoveryOptions{ConfiguredPaths: options.ConfiguredPaths, Environment: environment})
+			DiscoveryOptions{
+				ConfiguredPaths: options.ConfiguredPaths,
+				ManagedPaths:    options.ManagedPaths,
+				BundledPaths:    options.BundledPaths,
+				Environment:     environment,
+			})
 		canonical := ""
 		if err == nil {
 			canonical, err = canonicalExecutable(entry)
