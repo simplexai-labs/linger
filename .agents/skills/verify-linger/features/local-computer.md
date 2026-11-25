@@ -267,7 +267,7 @@ through LaunchServices; it does not promise a new application instance. A probe 
 current text-field token. Never select the first restored window or kill the
 returned application PID as cleanup. A compiled, opt-in-skipped probe is not a
 desktop acceptance result.
-After an unsigned macOS desktop update, stale TCC grants for both `CuaDriver` (`com.trycua.driver`) and `Linger` (`com.simplexai.linger.desktop.preview`) can leave Screen Recording reporting **Not allowed** even while System Settings shows switches on; reset both identities with `tccutil reset ScreenCapture <bundle-id>` and `tccutil reset Accessibility <bundle-id>`, then relaunch Linger and grant again.
+If Screen Recording reports **Not allowed** while System Settings shows the switches on, the grants for `CuaDriver` (`com.trycua.driver`) and `Linger` (`com.simplexai.linger.desktop.preview`) no longer match the apps' signatures; reset both identities with `tccutil reset ScreenCapture <bundle-id>` and `tccutil reset Accessibility <bundle-id>`, then relaunch Linger and grant again.
 
 For the browser journey, have the test server return a second random receipt only after a correct form submission. Reopen the Room and match one message by the target Agent, scoped to the message list: the sidebar may preview the same text. Correlate the receipt with the server response, the browser tool calls and the finished Local Run.
 
