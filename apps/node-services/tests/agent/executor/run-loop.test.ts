@@ -1047,6 +1047,110 @@ describe("RunLoop", () => {
     harness.state.close();
   });
 
+  it("opens runtime status once on pre-start loading_local_model and transitions to working on run start", async () => {
+    const openGate = deferred<RuntimeStatusSession>();
+    const published: RuntimeStatusUpdate[][] = [];
+    const openCalls: Parameters<RuntimeStatusPublisher["open"]>[0][] = [];
+    const publisher: RuntimeStatusPublisher = {
+      open: vi.fn(async (input) => {
+        openCalls.push(input);
+        return openGate.promise;
+      }),
+      close: async () => undefined,
+    };
+    const harness = createHarness(undefined, undefined, publisher);
+    const run = new FakeRun();
+    harness.provider.startGate = deferred<AgentRun>();
+    enqueue(harness.state, message("wake standby local model"));
+    harness.execution.start();
+
+    await vi.waitFor(() => expect(harness.provider.starts).toHaveLength(1));
+    // Pre-start status arrives while the standby local model is loading.
+    expect(openCalls).toHaveLength(0);
+    harness.provider.starts[0]!.spec.onPreStartStatus?.({
+      type: "status.changed",
+      status: "queued",
+      stage: "loading_local_model",
+    });
+    await vi.waitFor(() => expect(openCalls).toHaveLength(1));
+    expect(openCalls[0]?.initialStatus).toEqual({
+      type: "status.changed",
+      status: "queued",
+      stage: "loading_local_model",
+    });
+
+    // Provider resolves run.started while the pre-start open is still in flight;
+    // RunLoop must await that open instead of opening a second session, then publish working.
+    harness.provider.startGate.resolve(run);
+    await Promise.resolve();
+    expect(openCalls).toHaveLength(1);
+    openGate.resolve({
+      publish: async (events) => {
+        published.push([...events]);
+      },
+    });
+    await vi.waitFor(() => expect(published.length).toBeGreaterThanOrEqual(1));
+    expect(openCalls).toHaveLength(1);
+    expect(published[0]).toEqual([
+      { type: "status.changed", status: "working" },
+    ]);
+
+    run.complete("done");
+    await harness.execution.drain({ cancelActive: false });
+    harness.state.close();
+  });
+
+  it("falls back to normal runtime status open when pre-start status open fails", async () => {
+    const openCalls: Parameters<RuntimeStatusPublisher["open"]>[0][] = [];
+    const published: RuntimeStatusUpdate[][] = [];
+    const publisher: RuntimeStatusPublisher = {
+      open: vi.fn(async (input) => {
+        openCalls.push(input);
+        if (openCalls.length === 1) {
+          throw new Error("transient pre-start status error");
+        }
+        return {
+          publish: async (events: readonly RuntimeStatusUpdate[]) => {
+            published.push([...events]);
+          },
+        };
+      }),
+      close: async () => undefined,
+    };
+    const harness = createHarness(undefined, undefined, publisher);
+    const run = new FakeRun([{ type: "status.changed", status: "thinking" }]);
+    harness.provider.startGate = deferred<AgentRun>();
+    enqueue(harness.state, message("wake standby fallback"));
+    harness.execution.start();
+
+    await vi.waitFor(() => expect(harness.provider.starts).toHaveLength(1));
+    harness.provider.starts[0]!.spec.onPreStartStatus?.({
+      type: "status.changed",
+      status: "queued",
+      stage: "loading_local_model",
+    });
+    await vi.waitFor(() => expect(openCalls).toHaveLength(1));
+    expect(openCalls[0]?.initialStatus).toEqual({
+      type: "status.changed",
+      status: "queued",
+      stage: "loading_local_model",
+    });
+
+    harness.provider.startGate.resolve(run);
+    await vi.waitFor(() => expect(openCalls).toHaveLength(2));
+    expect(openCalls[1]?.initialStatus).toBeUndefined();
+    await vi.waitFor(() =>
+      expect(published.flat()).toContainEqual({
+        type: "status.changed",
+        status: "thinking",
+      }),
+    );
+
+    run.complete("done");
+    await harness.execution.drain({ cancelActive: false });
+    harness.state.close();
+  });
+
   it("logs every model request and tool call on the Run's timeline", async () => {
     const harness = createHarness();
     const usage = { input: 9, cacheRead: 4, cacheWrite: 0, output: 2 };

@@ -35,6 +35,32 @@ describe("TeamHub Runtime status publisher", () => {
     ]);
   });
 
+  it("publishes an explicit queued loading_local_model initialStatus when opening early", async () => {
+    const fixture = createClientFixture();
+    const publisher = createRuntimeStatusPublisher({ client: fixture.client });
+
+    await publisher.open({
+      ...validOpenInput(),
+      initialStatus: {
+        type: "status.changed",
+        status: "queued",
+        stage: "loading_local_model",
+      },
+    });
+
+    expect(fixture.offers).toEqual([
+      {
+        command_id: expect.any(String),
+        local_run_id: "run_1",
+        event: {
+          type: "status.changed",
+          status: "queued",
+          stage: "loading_local_model",
+        },
+      },
+    ]);
+  });
+
   it("publishes each batch in one request", async () => {
     const fixture = createClientFixture();
     const publisher = createRuntimeStatusPublisher({ client: fixture.client });

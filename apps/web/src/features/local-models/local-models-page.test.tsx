@@ -6326,4 +6326,29 @@ describe("Featured Inkling 2 Mini spotlight", () => {
       }),
     );
   });
+
+  it("hides Load Anyway in Make Room for legacy Computers without admission-v2 metadata", async () => {
+    const legacy = localModel({
+      fit: "unified",
+      id: "legacy:Q4",
+      memory_bytes: gb(10),
+      name: "Legacy 14B",
+      pool: "unified",
+      state: "idle",
+    });
+    const fixture = setup([
+      macView({
+        models: [modelView(legacy)],
+        pools: [{ ...memoryPool("unified", 16), used_bytes: gb(8) }],
+      }),
+    ]);
+    await renderPage(fixture);
+    await findModels();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load Legacy 14B" }));
+    const dialog = screen.getByRole("dialog", { name: "Make room to load" });
+    expect(
+      within(dialog).queryByRole("button", { name: "Load Anyway" }),
+    ).toBeNull();
+  });
 });

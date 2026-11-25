@@ -140,6 +140,11 @@ export function MakeRoomDialog({
   );
   const canSwitchOnLoad =
     Boolean(entry.model.pi_model) && affectedAssignable.length > 0;
+  // Older Computers (< 0.66.0) reject `force` and never report
+  // `minimum_memory_bytes` or `can_force`, so pre-load unified fallback
+  // applies only when the snapshot carries admission-v2 metadata.
+  const supportsElasticAdmission =
+    entry.model.minimum_memory_bytes !== undefined;
   const allowForceLoad =
     !roomFreeNow &&
     !enough &&
@@ -148,6 +153,7 @@ export function MakeRoomDialog({
       entry.model.error?.can_force === true ||
       (check.canForce !== false &&
         entry.model.error?.can_force !== false &&
+        supportsElasticAdmission &&
         unifiedFitsHardware));
   const switchAgentIds =
     canSwitchOnLoad && switchAgents

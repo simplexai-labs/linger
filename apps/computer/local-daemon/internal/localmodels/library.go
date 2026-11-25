@@ -1656,6 +1656,9 @@ func (l *Library) WillLoad(piModel string) bool {
 	if row == nil {
 		return false
 	}
+	if l.isUnloadingLocked(row.ID) {
+		return true
+	}
 	switch loadState(*row) {
 	case "idle", "loading", "failed":
 		return true

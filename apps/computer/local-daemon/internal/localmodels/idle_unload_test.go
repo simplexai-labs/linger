@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	wire "github.com/simplexai-labs/linger/contracts-go/runnergateway"
 )
 
 type testClock struct {
@@ -322,5 +324,168 @@ func TestStandbyAndLoadedHealthyChecksNeverWakeModel(t *testing.T) {
 	library.healthCheck = func(context.Context, string) bool { return false }
 	if library.IsLoadedHealthy(context.Background(), testPiModel) {
 		t.Fatal("unhealthy loaded model must return false")
+	}
+}
+
+func TestLibraryWillLoad(t *testing.T) {
+	toolDir := t.TempDir()
+	pythonPath := filepath.Join(toolDir, "python")
+	if err := os.WriteFile(pythonPath, nil, 0o700); err != nil {
+		t.Fatalf("create fake python path: %v", err)
+	}
+	installedTool := &Tool{Python: pythonPath, ModuleDirectory: toolDir}
+	cases := []struct {
+		name      string
+		tool      *Tool
+		snapshot  *wire.LocalModelsSnapshot
+		unloading map[string]struct{}
+		piModel   string
+		want      bool
+	}{
+		{
+			name:    "idle model returns true",
+			tool:    installedTool,
+			piModel: testPiModel,
+			snapshot: &wire.LocalModelsSnapshot{
+				Available: true,
+				Models:    []wire.LocalModel{{ID: testModel, PiModel: testPiModel, State: "idle"}},
+			},
+			want: true,
+		},
+		{
+			name:    "loading model returns true",
+			tool:    installedTool,
+			piModel: testPiModel,
+			snapshot: &wire.LocalModelsSnapshot{
+				Available: true,
+				Models:    []wire.LocalModel{{ID: testModel, PiModel: testPiModel, State: "loading"}},
+			},
+			want: true,
+		},
+		{
+			name:    "failed load returns true",
+			tool:    installedTool,
+			piModel: testPiModel,
+			snapshot: &wire.LocalModelsSnapshot{
+				Available: true,
+				Models:    []wire.LocalModel{{ID: testModel, PiModel: testPiModel, State: "failed", Error: &wire.LocalModelError{Code: "LOAD_NO_ROOM"}}},
+			},
+			want: true,
+		},
+		{
+			name:    "stopped download returns false",
+			tool:    installedTool,
+			piModel: testPiModel,
+			snapshot: &wire.LocalModelsSnapshot{
+				Available: true,
+				Models:    []wire.LocalModel{{ID: testModel, PiModel: testPiModel, State: "failed", Error: &wire.LocalModelError{Code: "DOWNLOAD_FAILED"}}},
+			},
+			want: false,
+		},
+		{
+			name:    "loaded model returns false",
+			tool:    installedTool,
+			piModel: testPiModel,
+			snapshot: &wire.LocalModelsSnapshot{
+				Available: true,
+				Models:    []wire.LocalModel{{ID: testModel, PiModel: testPiModel, State: "loaded"}},
+			},
+			want: false,
+		},
+		{
+			name:    "loaded model being unloaded returns true",
+			tool:    installedTool,
+			piModel: testPiModel,
+			snapshot: &wire.LocalModelsSnapshot{
+				Available: true,
+				Models:    []wire.LocalModel{{ID: testModel, PiModel: testPiModel, State: "loaded"}},
+			},
+			unloading: map[string]struct{}{testModel: {}},
+			want:      true,
+		},
+		{
+			name:    "absent model returns false",
+			tool:    installedTool,
+			piModel: testPiModel,
+			snapshot: &wire.LocalModelsSnapshot{
+				Available: true,
+				Models:    []wire.LocalModel{{ID: testModel, PiModel: testPiModel, State: "absent"}},
+			},
+			want: false,
+		},
+		{
+			name:    "downloading model returns false",
+			tool:    installedTool,
+			piModel: testPiModel,
+			snapshot: &wire.LocalModelsSnapshot{
+				Available: true,
+				Models:    []wire.LocalModel{{ID: testModel, PiModel: testPiModel, State: "downloading"}},
+			},
+			want: false,
+		},
+		{
+			name:    "model outside library returns false",
+			tool:    installedTool,
+			piModel: "openai/gpt-5",
+			snapshot: &wire.LocalModelsSnapshot{
+				Available: true,
+				Models:    []wire.LocalModel{{ID: testModel, PiModel: testPiModel, State: "idle"}},
+			},
+			want: false,
+		},
+		{
+			name:    "empty pi model returns false",
+			tool:    installedTool,
+			piModel: "",
+			snapshot: &wire.LocalModelsSnapshot{
+				Available: true,
+				Models:    []wire.LocalModel{{ID: testModel, PiModel: testPiModel, State: "idle"}},
+			},
+			want: false,
+		},
+		{
+			name:     "nil snapshot returns false",
+			tool:     installedTool,
+			piModel:  testPiModel,
+			snapshot: nil,
+			want:     false,
+		},
+		{
+			name:    "unavailable snapshot returns false",
+			tool:    installedTool,
+			piModel: testPiModel,
+			snapshot: &wire.LocalModelsSnapshot{
+				Available: false,
+				Models:    []wire.LocalModel{{ID: testModel, PiModel: testPiModel, State: "idle"}},
+			},
+			want: false,
+		},
+		{
+			name:    "uninstalled tool returns false",
+			tool:    nil,
+			piModel: testPiModel,
+			snapshot: &wire.LocalModelsSnapshot{
+				Available: true,
+				Models:    []wire.LocalModel{{ID: testModel, PiModel: testPiModel, State: "idle"}},
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			unloading := tc.unloading
+			if unloading == nil {
+				unloading = map[string]struct{}{}
+			}
+			l := &Library{
+				tool:      tc.tool,
+				current:   tc.snapshot,
+				unloading: unloading,
+			}
+			if got := l.WillLoad(tc.piModel); got != tc.want {
+				t.Fatalf("WillLoad(%q) = %v, want %v", tc.piModel, got, tc.want)
+			}
+		})
 	}
 }

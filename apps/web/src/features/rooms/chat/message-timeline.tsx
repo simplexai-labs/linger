@@ -731,18 +731,18 @@ function resolveAgentRuntimeStatusSegment({
                       tone: "live",
                       text: t(m.stateWaitingBackground),
                     }
-                : outputs.length > 0 && lineRunning.length === 0
-                  ? { tone: "live", text: t(m.stateWorking) }
-                  : queue.length > 0
-                    ? queue.at(-1)!.content
-                    : status === "thinking"
-                      ? {
-                          tone: "live",
-                          text: title?.trim() || t(m.stateThinking),
-                        }
-                      : first && activities.length === 0
-                        ? { tone: "wait" }
-                        : { tone: "live", text: t(m.stateWorking) };
+                  : outputs.length > 0 && lineRunning.length === 0
+                    ? { tone: "live", text: t(m.stateWorking) }
+                    : queue.length > 0
+                      ? queue.at(-1)!.content
+                      : status === "thinking"
+                        ? {
+                            tone: "live",
+                            text: title?.trim() || t(m.stateThinking),
+                          }
+                        : first && activities.length === 0
+                          ? { tone: "wait" }
+                          : { tone: "live", text: t(m.stateWorking) };
   const lineQueue =
     queue.length > 0 && line === queue.at(-1)!.content ? queue : undefined;
   return {
