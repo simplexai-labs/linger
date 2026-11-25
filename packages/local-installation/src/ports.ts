@@ -138,6 +138,20 @@ function answers(port: number, host: string): Promise<boolean> {
   });
 }
 
+async function otherUdpConflict(
+  port: number,
+  options: PortCheckOptions,
+): Promise<string | undefined> {
+  const ipv6 = await bindConflict(port, "::1", "udp", true);
+  if (ipv6) return ipv6;
+  if (!options.allInterfaces) return undefined;
+  for (const external of nonLoopbackLocalHosts()) {
+    const conflict = await bindConflict(port, external, "udp", true);
+    if (conflict) return conflict;
+  }
+  return undefined;
+}
+
 async function portConflict(
   port: number,
   protocol: Protocol,
@@ -147,7 +161,7 @@ async function portConflict(
     const ipv4 = await bindUdp(port, "127.0.0.1");
     if (ipv4.error) return formatBindError("127.0.0.1", ipv4.error, false);
     try {
-      return await bindConflict(port, "::1", "udp", true);
+      return await otherUdpConflict(port, options);
     } finally {
       await closeUdpSocket(ipv4.socket!);
     }
@@ -191,12 +205,13 @@ function ephemeralTcp(): Promise<number> {
 
 async function freeUdpPort(
   reserved: Set<number>,
-  preferred?: number,
+  options: { preferred?: number; allInterfaces?: boolean } = {},
 ): Promise<number> {
+  const { preferred } = options;
   let lastConflict: string | undefined;
   let lastPort: number | undefined;
   if (preferred !== undefined && !reserved.has(preferred)) {
-    const conflict = await portConflict(preferred, "udp");
+    const conflict = await portConflict(preferred, "udp", options);
     if (conflict === undefined) {
       reserved.add(preferred);
       return preferred;
@@ -221,7 +236,7 @@ async function freeUdpPort(
         const { port } = socket.address();
         try {
           if (!reserved.has(port)) {
-            const conflict = await bindConflict(port, "::1", "udp", true);
+            const conflict = await otherUdpConflict(port, options);
             if (conflict === undefined) {
               reserved.add(port);
               return port;
@@ -238,7 +253,7 @@ async function freeUdpPort(
     const candidate = randomInt(NON_EPHEMERAL_MIN, NON_EPHEMERAL_MAX + 1);
     if (reserved.has(candidate) || triedNonEphemeral.has(candidate)) continue;
     triedNonEphemeral.add(candidate);
-    const conflict = await portConflict(candidate, "udp");
+    const conflict = await portConflict(candidate, "udp", options);
     if (conflict === undefined) {
       reserved.add(candidate);
       return candidate;
@@ -262,7 +277,7 @@ export async function freePort(
   } = {},
 ): Promise<number> {
   const protocol = options.protocol ?? "tcp";
-  if (protocol === "udp") return freeUdpPort(reserved, options.preferred);
+  if (protocol === "udp") return freeUdpPort(reserved, options);
   let port = options.preferred;
   let lastConflict: string | undefined;
   let lastPort: number | undefined;

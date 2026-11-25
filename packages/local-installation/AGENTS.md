@@ -101,7 +101,11 @@ Every port the installer chooses (`ports.ts`) must be free on both
 127.0.0.1 and ::1 with nothing answering there: `localhost` resolves to ::1
 first on macOS, and a program on ::1 alone would answer for a service that
 bound 127.0.0.1 without an error. UDP allocation holds the bound IPv4 socket
-while checking ::1 instead of closing and rebinding 127.0.0.1, and falls back
+while checking ::1 (and non-loopback local interfaces when `allInterfaces` is
+set, as LiveKit's RTC UDP port requires on Windows where LiveKit binds and
+advertises local interfaces alongside loopback because Windows blocks
+cross-scope UDP between WebRTC's non-loopback sockets and `127.0.0.1`) instead
+of closing and rebinding 127.0.0.1, and falls back
 to unprivileged non-ephemeral ports when OS ephemeral UDP ports fail or
 collide. The web static host listens on both.
 Creating an instance also reserves other instances' saved LiveKit HTTP and RTC

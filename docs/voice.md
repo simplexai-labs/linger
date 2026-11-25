@@ -41,8 +41,11 @@ the keys against replacement from the app.
   `ffmpeg` and `ffprobe` on `PATH`. Without `livekit-server` on `PATH`,
   `pnpm dev` says so and voice cannot connect.
 
-A Native installation's LiveKit and ffmpeg listen on `127.0.0.1` only (one TCP
-port for signalling, one UDP port for media), so no media leaves the computer
+A Native installation's LiveKit signalling listens on `127.0.0.1` only (one TCP
+port for HTTP/WebSocket), with media on one UDP port (`127.0.0.1` only on macOS
+and Linux; local interfaces alongside `127.0.0.1` on Windows, where the network
+stack blocks cross-scope UDP between WebRTC's non-loopback sockets and
+`127.0.0.1`, with external IP discovery off), so no media leaves the computer
 except to the speech services (Soniox, xAI) and the voice model Node Services
 downloads when its voice role starts.
 
