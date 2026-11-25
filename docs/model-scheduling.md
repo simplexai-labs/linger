@@ -58,7 +58,10 @@ Recording questions and notes, chat, the rest of a Room conversation's work
 and standalone approvals can use the last place. When the limit drops, new
 work respects the lower limit. A Computer with an explicit Operation capacity
 also reserves its last place for an interactive Run when that capacity
-exceeds one.
+exceeds one. When a higher-priority interactive Run reaches a full Computer,
+it can reclaim the reservation of a lower-priority Run still waiting for its
+model. The waiting Run keeps its claim and returns to the Computer queue
+with its original arrival time.
 
 | Work in priority order        | Unit                                                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------- |

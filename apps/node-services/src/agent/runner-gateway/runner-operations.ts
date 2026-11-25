@@ -54,6 +54,15 @@ type ModelResponded = Extract<
 
 /** Runtime failure codes that mean the model endpoint refused the work. */
 const OVERLOAD_FAILURES = new Set(["rate_limited", "model_service_error"]);
+const MODEL_WAIT_YIELDED = Symbol("model wait yielded");
+
+interface CapacityReservation {
+  target: RunnerCapacityTarget;
+  connection: ConnectedRunner;
+  queuedAt: number;
+  operationId?: string;
+  modelWait?: { priority: RunPriority; yield: () => void };
+}
 
 // These events only change what the Room shows while a Run works; nothing the
 // Run settles on reads them.
@@ -105,14 +114,7 @@ export class RunnerOperations {
   readonly #leases = new Map<string, ModelLease>();
 
   // Reconstructible reservations only: TeamHub remains the durable Run queue.
-  readonly #capacityReservations = new Map<
-    string,
-    {
-      target: RunnerCapacityTarget;
-      connection: ConnectedRunner;
-      operationId?: string;
-    }
-  >();
+  readonly #capacityReservations = new Map<string, CapacityReservation>();
 
   readonly #capacityWaiters = new Set<
     RunnerCapacityTarget & { rank?: number; queuedAt: number }
@@ -138,12 +140,13 @@ export class RunnerOperations {
   async acquireOperationCapacity(
     target: RunnerCapacityTarget,
     signal: AbortSignal,
+    queuedAt?: number,
   ): Promise<RunnerCapacityPermit> {
     const source = target.priority ?? runPriorities.chat;
     const known = typeof source === "number" || source instanceof RunPriority;
     const waiter = {
       ...target,
-      queuedAt: known ? performance.now() : source.queuedAt,
+      queuedAt: queuedAt ?? (known ? performance.now() : source.queuedAt),
       rank:
         typeof source === "number"
           ? source
@@ -246,7 +249,11 @@ export class RunnerOperations {
           (hard === undefined || occupied.length < admissionLimit(hard, rank))
         ) {
           const id = this.context.createId();
-          this.#capacityReservations.set(id, { target, connection });
+          this.#capacityReservations.set(id, {
+            target,
+            connection,
+            queuedAt: waiter.queuedAt,
+          });
           return {
             id,
             reservedForChat: occupied.length >= soft && hard !== 1,
@@ -260,8 +267,25 @@ export class RunnerOperations {
           first === waiter &&
           waiter.rank !== undefined &&
           rank <= INTERACTIVE_PRIORITY
-        )
+        ) {
+          // A Run waiting for its model has not reached the Computer. Reclaim
+          // its reservation before asking an already-started Run to stop.
+          const lowerWait = reservations
+            .flatMap(({ modelWait, queuedAt }) =>
+              modelWait && modelWait.priority.value > rank
+                ? [{ ...modelWait, queuedAt }]
+                : [],
+            )
+            .sort(
+              (a, b) =>
+                b.priority.value - a.priority.value || b.queuedAt - a.queuedAt,
+            )[0];
+          if (lowerWait) {
+            lowerWait.yield();
+            continue;
+          }
           yieldLowerRun(active, rank);
+        }
         await waitForCapacityChange(changed, signal);
       }
     } finally {
@@ -290,55 +314,96 @@ export class RunnerOperations {
     const waitSignal = target.preemptSignal
       ? AbortSignal.any([signal, target.preemptSignal])
       : signal;
-    permit ??= await this.acquireOperationCapacity(
-      { ...target, priority },
-      waitSignal,
-    );
-    try {
-      // The whole Run is one unit of its endpoint's model queue. It waits
-      // holding its capacity, and readiness is checked after both waits.
-      const lease = await this.owners.queue().acquire(
-        {
-          computerId: target.runnerId,
-          runtimeType: target.request.runtime.type,
-        },
-        {
-          priority,
-          kind: target.runKind ?? "chat",
-          key: target.request.run_context.execution_run_ref,
-        },
-        waitSignal,
-      );
+    const operationTarget = { ...target, priority };
+    let queuedAt: number | undefined;
+    for (;;) {
+      const capacity =
+        permit ??
+        (await this.acquireOperationCapacity(
+          operationTarget,
+          waitSignal,
+          queuedAt,
+        ));
+      permit = undefined;
       try {
-        if (target.beforeYieldResume) await target.beforeYieldResume();
-        waitSignal.throwIfAborted();
-        const reservation = this.#capacityReservations.get(permit.id);
-        if (
-          !reservation ||
-          reservation.operationId ||
-          reservation.target.runnerId !== target.runnerId ||
-          reservation.target.agentId !== target.agentId ||
-          reservation.target.executionContextKey !==
-            target.executionContextKey ||
-          reservation.connection !==
-            this.owners.connections().getConnection(target.runnerId)
-        ) {
-          throw new RunnerGatewayError(
-            "Operation capacity reservation is no longer valid",
-          );
-        }
-        return await this.#startReservedOperation(
-          { ...target, priority },
-          permit.id,
-          lease,
+        const reservation = this.#requireReservation(capacity.id, target);
+        queuedAt = reservation.queuedAt;
+        return await this.#startAfterModelWait(
+          operationTarget,
+          capacity,
+          reservation,
+          waitSignal,
         );
       } catch (error) {
-        lease.release({ outcome: "not_sent" });
-        throw error;
+        if (error !== MODEL_WAIT_YIELDED) throw error;
+        waitSignal.throwIfAborted();
+      } finally {
+        capacity.release();
       }
-    } finally {
-      permit.release();
     }
+  }
+
+  async #startAfterModelWait(
+    target: RunnerOperationTarget & { priority: RunPriority },
+    capacity: RunnerCapacityPermit,
+    reservation: CapacityReservation,
+    waitSignal: AbortSignal,
+  ): Promise<RunnerOperation> {
+    const { priority } = target;
+    const yielded = new AbortController();
+    reservation.modelWait = {
+      priority,
+      yield() {
+        capacity.release();
+        yielded.abort(MODEL_WAIT_YIELDED);
+      },
+    };
+    this.wakeCapacityWaiters();
+    const modelWaitSignal = AbortSignal.any([waitSignal, yielded.signal]);
+    const lease = await this.owners.queue().acquire(
+      {
+        computerId: target.runnerId,
+        runtimeType: target.request.runtime.type,
+      },
+      {
+        priority,
+        kind: target.runKind ?? "chat",
+        key: target.request.run_context.execution_run_ref,
+      },
+      modelWaitSignal,
+    );
+    reservation.modelWait = undefined;
+    try {
+      modelWaitSignal.throwIfAborted();
+      if (target.beforeYieldResume) await target.beforeYieldResume();
+      waitSignal.throwIfAborted();
+      this.#requireReservation(capacity.id, target);
+      return await this.#startReservedOperation(target, capacity.id, lease);
+    } catch (error) {
+      lease.release({ outcome: "not_sent" });
+      throw error;
+    }
+  }
+
+  #requireReservation(
+    id: string,
+    target: RunnerOperationTarget,
+  ): CapacityReservation {
+    const reservation = this.#capacityReservations.get(id);
+    if (
+      !reservation ||
+      reservation.operationId ||
+      reservation.target.runnerId !== target.runnerId ||
+      reservation.target.agentId !== target.agentId ||
+      reservation.target.executionContextKey !== target.executionContextKey ||
+      reservation.connection !==
+        this.owners.connections().getConnection(target.runnerId)
+    ) {
+      throw new RunnerGatewayError(
+        "Operation capacity reservation is no longer valid",
+      );
+    }
+    return reservation;
   }
 
   /** The running Operations on a Computer, or one of its Runtimes, and why
