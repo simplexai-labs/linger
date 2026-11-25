@@ -19,6 +19,9 @@ func TestValidAgentMemoryPendingSource(t *testing.T) {
 		{"extract without a source", `{"stage":"extract","prompt":"p"}`, false},
 		{"consolidate has no source", `{"stage":"consolidate","prompt":"p"}`, true},
 		{"consolidate with a source", `{"stage":"consolidate","prompt":"p",` + source + `}`, false},
+		{"pending with execution target", `{"stage":"consolidate","prompt":"p","attempt":3,"target":"[\"computer-1\",\"codex\",\"gpt-5\"]"}`, true},
+		{"pending with blank target", `{"stage":"consolidate","prompt":"p","target":"   "}`, false},
+		{"pending with oversized target", `{"stage":"consolidate","prompt":"p","target":"` + strings.Repeat("x", 513) + `"}`, false},
 	}
 	for _, tc := range cases {
 		var document teamhubinternal.AgentMemoryDocument

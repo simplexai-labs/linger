@@ -1851,8 +1851,10 @@ export interface components {
         source_key?: string;
         thread_id?: string;
         through?: number;
-        /** @description Invalid or timed-out outputs produced for this stage; 3 stops maintenance for this Agent. */
+        /** @description Invalid or timed-out outputs produced for this stage; 3 pauses maintenance for this Agent until its execution target or source thread changes. */
         attempt?: number;
+        /** @description Execution target (Computer, Runtime, and model) that recorded the current pending attempts; switching to another target resets an exhausted pending stage. */
+        target?: string;
       };
     };
     AgentRuntimePositiveInt64: string;

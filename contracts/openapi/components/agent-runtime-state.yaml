@@ -1840,7 +1840,18 @@ components:
               type: integer
               minimum: 0
               maximum: 3
-              description: Invalid or timed-out outputs produced for this stage; 3 stops maintenance for this Agent.
+              description: >-
+                Invalid or timed-out outputs produced for this stage; 3 pauses
+                maintenance for this Agent until its execution target or source
+                thread changes.
+            target:
+              type: string
+              minLength: 1
+              maxLength: 512
+              description: >-
+                Execution target (Computer, Runtime, and model) that recorded
+                the current pending attempts; switching to another target resets
+                an exhausted pending stage.
 
     CreateRuntimeHumanInteractionRequest:
       type: object

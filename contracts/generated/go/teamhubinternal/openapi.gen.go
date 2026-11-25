@@ -2448,13 +2448,16 @@ type AgentMemoryDocument struct {
 
 	// Pending An extract stage names its source session; a consolidate stage merges every waiting candidate.
 	Pending *struct {
-		// Attempt Invalid or timed-out outputs produced for this stage; 3 stops maintenance for this Agent.
+		// Attempt Invalid or timed-out outputs produced for this stage; 3 pauses maintenance for this Agent until its execution target or source thread changes.
 		Attempt   *int                            `json:"attempt,omitempty"`
 		Prompt    string                          `json:"prompt"`
 		SourceKey *string                         `json:"source_key,omitempty"`
 		Stage     AgentMemoryDocumentPendingStage `json:"stage"`
-		ThreadId  *string                         `json:"thread_id,omitempty"`
-		Through   *int                            `json:"through,omitempty"`
+
+		// Target Execution target (Computer, Runtime, and model) that recorded the current pending attempts; switching to another target resets an exhausted pending stage.
+		Target   *string `json:"target,omitempty"`
+		ThreadId *string `json:"thread_id,omitempty"`
+		Through  *int    `json:"through,omitempty"`
 	} `json:"pending,omitempty"`
 	Revision int `json:"revision"`
 	Sessions map[string]struct {

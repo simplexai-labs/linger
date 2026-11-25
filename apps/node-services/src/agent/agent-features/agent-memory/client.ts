@@ -22,7 +22,22 @@ export function createMemoryClient(
   }
   return {
     read: async (id, signal) => read(await client.getMemory(id, signal)),
-    commit: async (id, document, signal) =>
-      read(await client.commitMemory(id, document, signal)),
+    commit: async (id, document, signal) => {
+      const response = await client.commitMemory(id, document, signal);
+      // An older TeamHub rejects the optional pending.target field with 400;
+      // drop it once so rolling upgrades keep committing memory checkpoints.
+      if (response.status === 400 && document.pending?.target !== undefined) {
+        await response.body?.cancel();
+        const { target: _omitted, ...pendingWithoutTarget } = document.pending;
+        return read(
+          await client.commitMemory(
+            id,
+            { ...document, pending: pendingWithoutTarget },
+            signal,
+          ),
+        );
+      }
+      return read(response);
+    },
   };
 }
