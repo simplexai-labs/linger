@@ -206,10 +206,20 @@ Both copies use the same instance data directory and the same executable path
 in the supervisor's configuration hash. A matching live server keeps its
 connections during the upgrade. Its next start uses the UTF-8 copy.
 
-The desktop's bundled TeamHub binaries (`teamhub-binaries.ts`) count as current
-only when their files still match the manifest's sizes and hashes. A missing
-or damaged installed file is copied again from the bundle, so Native can use
-the verified binaries without downloading Go and compiling from source.
+The desktop's bundled TeamHub binaries (`teamhub-binaries.ts`) and native
+dependency caches (`native-dependencies.ts`) record `[size, mtimeMs, ctimeMs]`
+stamps keyed by the manifest SHA-256 digest (`STAMP_SETTLE_MS = 2_000`) via
+`verified-stamps.ts` in `<dir>.verified.json` (`prebuilt.verified.json` beside
+`prebuilt`, and `<component>.verified.json` beside extracted component trees).
+Warm restarts and resumes reuse the verified manifest without re-hashing every
+file once every recorded stamp is at least 2 seconds past coarse filesystem
+clock resolution and matches `[size, mtimeMs, ctimeMs]`; any missing stamp,
+unsettled timestamp (`< 2s`), or size/`mtimeMs`/`ctimeMs` mismatch triggers full
+SHA-256 verification against the manifest (and missing or damaged TeamHub
+binaries are copied again from the bundle before falling back to Go
+compilation). Native dependency `.simplex-files.json` manifests also preserve
+`readdir` traversal key order so older installers comparing serialized manifests
+directly still match.
 
 Every Linger release creates TeamHub's schema from the 852 baseline
 migration, which refuses a database that already holds one. A database from
@@ -480,8 +490,11 @@ a full install if missing or unreadable), and passes the inspected descriptor
 through `onRuntimeDescriptors` so callers avoid a second status probe. Within
 `release`, binary and native-runtime bundle checks run in parallel, while
 dependency and voice tool preparations stay sequential on the shared
-native-tools lock; collaboration services start concurrently when `node-services`
-is not pre-stopped for a TeamHub config restart. `runLocalmodels`
+native-tools lock; collaboration services (`teamhub`, `node-services`, and
+`web`) always start concurrently via `Promise.allSettled`, even after
+`node-services` is pre-stopped for a TeamHub configuration restart (keeping
+pre-stopped `node-services` and pre-existing `web` and `teamhub` untracked by
+`started` so rollback does not stop previously running services). `runLocalmodels`
 reads the kit's JSON event lines from stdout and stderr alike and forwards
 byte progress (`total: null` without a total) and the download
 `connecting`, `switching` and `retrying` stages of every command, labeled per

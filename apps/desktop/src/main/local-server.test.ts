@@ -2,6 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -63,6 +64,11 @@ import {
   type LocalServerOptions,
 } from "./local-server.js";
 import { localIdentityProof } from "@linger/local-installation/account";
+import * as fsRetry from "@linger/local-installation/fs-retry";
+import { ensureLocalmodelsTool } from "@linger/local-installation/localmodels-tool";
+import * as nativeProcess from "@linger/local-installation/native-process";
+import * as teamhubBinaries from "@linger/local-installation/teamhub-binaries";
+import * as verifiedStamps from "@linger/local-installation/verified-stamps";
 import * as windowsPrivate from "@linger/local-installation/windows-private";
 import type { DesktopConfig } from "./config.js";
 import { EventBus, type ModuleContext } from "./modules.js";
@@ -303,13 +309,15 @@ fs.writeFileSync(
 process.stdout.write("Installer is running at " + origin + "\n");
 `;
 
-const sourceArchive = (root: string) => {
+const sourceArchive = (root: string, variant?: string) => {
   const tree = path.join(root, "tree", "linger-1.0.0", "scripts");
   mkdirSync(tree, { recursive: true });
   writeFileSync(path.join(tree, "source-native.mjs"), "");
   writeFileSync(
     path.join(path.dirname(tree), "package.json"),
-    JSON.stringify({ name: "linger" }),
+    JSON.stringify(
+      variant ? { name: "linger", version: variant } : { name: "linger" },
+    ),
   );
   const file = path.join(root, "linger.tar.gz");
   execFileSync("tar", [
@@ -4550,11 +4558,14 @@ describe("LocalServerModule after a restart", () => {
       origin: "http://localhost:3000",
       version: APP_VERSION,
     });
-    expect(readdirSync(sources)).toEqual([path.basename(current)]);
+    await vi.waitFor(() =>
+      expect(readdirSync(sources)).toEqual([path.basename(current)]),
+    );
     await f.host.stop("quit");
   });
 
   it("keeps an older source folder a running process still starts from", async () => {
+    const info = vi.spyOn(silentLog, "info");
     const root = tempDirectory();
     const archive = sourceArchive(root);
     const f = installedBy(archive);
@@ -4572,11 +4583,17 @@ describe("LocalServerModule after a restart", () => {
       await waitForInstaller(() =>
         expect(f.module.status().phase).toBe("ready"),
       );
+      await vi.waitFor(() =>
+        expect(info).toHaveBeenCalledWith("local_server.source_in_use", {
+          source: "previous",
+        }),
+      );
       expect(readdirSync(sources).sort()).toEqual(
         [archive.sha256.slice(0, 16), "previous"].sort(),
       );
       await f.host.stop("quit");
     } finally {
+      info.mockRestore();
       service.kill("SIGKILL");
     }
   });
@@ -4643,7 +4660,9 @@ describe("LocalServerModule after a restart", () => {
         readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
       ),
     ).toMatchObject({ repo: current });
-    expect(readdirSync(sources)).toEqual([path.basename(current)]);
+    await vi.waitFor(() =>
+      expect(readdirSync(sources)).toEqual([path.basename(current)]),
+    );
     await f.host.stop("quit");
   });
 
@@ -4689,7 +4708,9 @@ describe("LocalServerModule after a restart", () => {
       origin: "http://localhost:3000",
       version: APP_VERSION,
     });
-    expect(readdirSync(sources)).toEqual([path.basename(current)]);
+    await vi.waitFor(() =>
+      expect(readdirSync(sources)).toEqual([path.basename(current)]),
+    );
     await f.host.stop("quit");
 
     // A second launch with the updated local-server.json does not re-trigger
@@ -5281,7 +5302,9 @@ describe("LocalServerModule after a restart", () => {
         readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
       ),
     ).toMatchObject({ repo: current });
-    expect(readdirSync(sources)).toEqual([path.basename(current)]);
+    await vi.waitFor(() =>
+      expect(readdirSync(sources)).toEqual([path.basename(current)]),
+    );
     await f.host.stop("quit");
   });
 
@@ -5341,9 +5364,11 @@ describe("LocalServerModule after a restart", () => {
       origin: "http://localhost:3000",
       version: APP_VERSION,
     });
-    expect(readdirSync(path.dirname(current))).toEqual([
-      path.basename(current),
-    ]);
+    await vi.waitFor(() =>
+      expect(readdirSync(path.dirname(current))).toEqual([
+        path.basename(current),
+      ]),
+    );
     await f.host.stop("quit");
   });
 
@@ -5386,6 +5411,1308 @@ describe("LocalServerModule after a restart", () => {
     expect(used.showStartFailed).toHaveBeenCalledOnce();
     expect(existsSync(path.join(chosen, "installer", "args.json"))).toBe(false);
     await used.host.stop("quit");
+  });
+
+  it("prunes older sources in the background without blocking resume ready", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const f = installedBy(archive);
+    const sources = path.join(f.home, "desktop", "source");
+    const current = path.join(sources, archive.sha256.slice(0, 16));
+    let releasePrune!: (folders: Set<string>) => void;
+    const foldersSpy = vi
+      .spyOn(nativeProcess, "foldersInUse")
+      .mockImplementation(
+        () =>
+          new Promise<Set<string>>((resolve) => {
+            releasePrune = resolve;
+          }),
+      );
+    try {
+      await f.host.start();
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
+      expect(f.setServer).toHaveBeenCalledWith(
+        "http://localhost:3000",
+        "http://localhost:3000",
+        { reason: "resume_ready" },
+      );
+      // Old source stays until the background prune settles.
+      expect(readdirSync(sources).sort()).toEqual(
+        [path.basename(current), "previous"].sort(),
+      );
+      await vi.waitFor(() => expect(foldersSpy).toHaveBeenCalledOnce());
+      releasePrune(new Set());
+      await vi.waitFor(() =>
+        expect(readdirSync(sources)).toEqual([path.basename(current)]),
+      );
+      await f.host.stop("quit");
+    } finally {
+      foldersSpy.mockRestore();
+    }
+  });
+
+  const sha256Hex = (data: string | Buffer) =>
+    createHash("sha256").update(data).digest("hex");
+
+  const buildStagedUpdateBundle = (
+    root: string,
+    options: {
+      target?: string;
+      installerDir?: string;
+      platform?: NodeJS.Platform;
+      arch?: string;
+      nativeSources?: readonly { readonly target: string }[];
+      includeNode?: boolean;
+      source?: ReturnType<typeof sourceArchive>;
+      teamhubDigest?: string;
+      runtimeDigest?: string;
+      includeTool?: boolean;
+      toolUrl?: string;
+      toolBytes?: Buffer;
+      toolSha256?: string;
+      toolManifestSha256?: string;
+      sourceFiles?: readonly string[];
+    },
+  ) => {
+    const target = options.target ?? `${process.platform}-${process.arch}`;
+    const staged = path.join(root, "Staged.app");
+    const installerDir =
+      options.installerDir ??
+      path.join(staged, "Contents", "Resources", "app", "dist", "installer");
+    mkdirSync(installerDir, { recursive: true });
+    if (options.includeTool !== false || options.nativeSources !== undefined) {
+      const distribution: Record<string, unknown> = {
+        platform: options.platform ?? process.platform,
+        arch: options.arch ?? process.arch,
+      };
+      if (options.nativeSources !== undefined) {
+        distribution.nativeSources = options.nativeSources;
+      }
+      if (options.includeTool !== false) {
+        distribution.localmodelsTool = {
+          url: options.toolUrl ?? "https://cdn.example/localmodels.tgz",
+          sha256: options.toolSha256 ?? sha256Hex(options.toolBytes ?? "tool"),
+          bytes: options.toolBytes?.length ?? 4,
+          sourceCommit: "a".repeat(40),
+          manifestSha256: options.toolManifestSha256 ?? sha256Hex("manifest"),
+        };
+      }
+      writeFileSync(
+        path.join(installerDir, "distribution.json"),
+        JSON.stringify(distribution),
+      );
+    }
+    if (options.source) {
+      const sourceDir = path.join(installerDir, "source");
+      mkdirSync(sourceDir, { recursive: true });
+      for (const name of options.sourceFiles ?? ["linger.tar.gz"])
+        writeFileSync(path.join(sourceDir, name), options.source.bytes);
+    }
+    if (options.teamhubDigest) {
+      const teamhubDir = path.join(installerDir, "native", `teamhub-${target}`);
+      mkdirSync(teamhubDir, { recursive: true });
+      const binaries = Object.fromEntries(
+        ["teamhub", "migrate", "account"].map((command) => {
+          writeFileSync(path.join(teamhubDir, command), command, {
+            mode: 0o755,
+          });
+          return [
+            command,
+            {
+              file: command,
+              sha256: sha256Hex(command),
+              bytes: command.length,
+            },
+          ];
+        }),
+      );
+      writeFileSync(
+        path.join(teamhubDir, "manifest.json"),
+        JSON.stringify({
+          target,
+          sourceCommit: "a".repeat(40),
+          sourceArchiveSha256: options.teamhubDigest,
+          goVersion: "1.26.5",
+          binaries,
+        }),
+      );
+    }
+    const runtimeDir = path.join(installerDir, "native", `runtime-${target}`);
+    if (options.runtimeDigest) {
+      mkdirSync(path.join(runtimeDir, "runtime", "web", "dist"), {
+        recursive: true,
+      });
+      mkdirSync(path.join(runtimeDir, "runtime", "node-services", "dist"), {
+        recursive: true,
+      });
+      const files: Record<string, string> = {
+        "web/static-host.mjs": "console.log('ok');",
+        "web/dist/index.html": "<html></html>",
+        "node-services/dist/main.js": "console.log('main');",
+        "node-services/dist/supervisor.js": "console.log('sup');",
+      };
+      const manifestFiles: Record<string, { bytes: number; sha256: string }> =
+        {};
+      for (const [rel, body] of Object.entries(files)) {
+        writeFileSync(path.join(runtimeDir, "runtime", rel), body);
+        manifestFiles[rel] = {
+          bytes: Buffer.byteLength(body),
+          sha256: sha256Hex(body),
+        };
+      }
+      const filesJson = JSON.stringify({
+        schema: 1,
+        target,
+        sourceCommit: "a".repeat(40),
+        sourceArchiveSha256: options.runtimeDigest,
+        files: manifestFiles,
+      });
+      writeFileSync(path.join(runtimeDir, "runtime", "files.json"), filesJson);
+      let nodeManifest:
+        | {
+            readonly version: string;
+            readonly file: string;
+            readonly sha256: string;
+          }
+        | undefined;
+      if (options.includeNode) {
+        mkdirSync(path.join(runtimeDir, "node", "bin"), { recursive: true });
+        fixtureNode(path.join(runtimeDir, "node", "bin", "node"));
+        nodeManifest = {
+          version: NODE_RUNTIME_VERSION,
+          file: "node/bin/node",
+          sha256: sha256Hex(readFileSync(process.execPath)),
+        };
+      }
+      writeFileSync(
+        path.join(runtimeDir, "manifest.json"),
+        JSON.stringify({
+          target,
+          sourceCommit: "a".repeat(40),
+          sourceArchiveSha256: options.runtimeDigest,
+          layout: "directory",
+          directory: {
+            file: "runtime/files.json",
+            sha256: sha256Hex(filesJson),
+          },
+          ...(nodeManifest ? { node: nodeManifest } : {}),
+        }),
+      );
+    }
+    return { staged, installerDir, runtimeDir };
+  };
+
+  const buildLocalmodelsArchive = (root: string) => {
+    const pkg = path.join(root, "kit", "package");
+    mkdirSync(path.join(pkg, "python"), { recursive: true });
+    mkdirSync(path.join(pkg, "modules", "localmodels"), { recursive: true });
+    writeFileSync(path.join(pkg, "python", "python"), "py", { mode: 0o755 });
+    writeFileSync(
+      path.join(pkg, "modules", "localmodels", "__init__.py"),
+      "kit",
+    );
+    const manifestBody = JSON.stringify({
+      schemaVersion: 1,
+      platform: process.platform,
+      arch: process.arch,
+      sourceCommit: "a".repeat(40),
+      python: "python/python",
+      moduleDir: "modules",
+      assets: {
+        "python/python": sha256Hex("py"),
+        "modules/localmodels/__init__.py": sha256Hex("kit"),
+      },
+    });
+    writeFileSync(path.join(pkg, "tool.json"), manifestBody);
+    const tgz = path.join(root, "localmodels.tgz");
+    execFileSync(
+      process.platform === "win32" ? "tar.exe" : "tar",
+      ["-czf", tgz, "-C", path.join(root, "kit"), "package"],
+      { env: { ...process.env, COPYFILE_DISABLE: "1" } },
+    );
+    const bytes = readFileSync(tgz);
+    return {
+      bytes,
+      sha256: sha256Hex(bytes),
+      manifestSha256: sha256Hex(manifestBody),
+    };
+  };
+
+  it.skipIf(process.platform !== "darwin")(
+    "clears macOS quarantine from copied runtime files when present and handles clean bundles",
+    async () => {
+      for (const quarantined of [true, false]) {
+        const f = fixture();
+        const archive = sourceArchive(f.root);
+        const installer = path.join(f.root, "installer");
+        const { runtimeDir } = buildStagedUpdateBundle(f.root, {
+          target: "darwin-arm64",
+          installerDir: installer,
+          platform: "darwin",
+          arch: "arm64",
+          nativeSources: [{ target: "darwin-arm64" }],
+          source: archive,
+          runtimeDigest: archive.sha256,
+          includeTool: false,
+          includeNode: true,
+        });
+        if (quarantined) {
+          execFileSync("/usr/bin/xattr", [
+            "-w",
+            "com.apple.quarantine",
+            "0081;66000000;Chrome;",
+            path.join(runtimeDir, "runtime"),
+          ]);
+          execFileSync("/usr/bin/xattr", [
+            "-w",
+            "com.apple.quarantine",
+            "0081;66000000;Chrome;",
+            path.join(runtimeDir, "runtime", "web", "static-host.mjs"),
+          ]);
+        }
+        await new LocalServerModule({
+          home: f.home,
+          version: APP_VERSION,
+          installerDirectory: installer,
+          platform: "darwin",
+          arch: "arm64",
+          sourceArchive: {
+            file: "source/linger.tar.gz",
+            sha256: archive.sha256,
+          },
+          signIn: f.signIn,
+        })
+          .begin()
+          .catch(() => undefined);
+        const offline = path.join(
+          f.home,
+          "desktop",
+          "source",
+          archive.sha256.slice(0, 16),
+          ".simplexai-runtime",
+          "offline",
+        );
+        const copiedScript = path.join(offline, "web", "static-host.mjs");
+        expect(existsSync(copiedScript)).toBe(true);
+        expect(existsSync(path.join(offline, "verified.json"))).toBe(true);
+        expect(() =>
+          execFileSync(
+            "/usr/bin/xattr",
+            ["-p", "com.apple.quarantine", copiedScript],
+            { stdio: "pipe" },
+          ),
+        ).toThrow();
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin")(
+    "clears macOS quarantine from a copied shared Node.js binary when present",
+    async () => {
+      const nodeDir = (home: string) =>
+        path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
+      const f = fixture({}, {}, (home) =>
+        rmSync(nodeDir(home), { recursive: true, force: true }),
+      );
+      const resources = path.join(
+        f.root,
+        "Linger.app",
+        "Contents",
+        "Resources",
+      );
+      const installer = path.join(resources, "app", "dist", "installer");
+      mkdirSync(installer, { recursive: true });
+      writeFileSync(
+        path.join(installer, "installer.js"),
+        readFileSync(path.join(f.root, "installer", "installer.js")),
+      );
+      writeFileSync(
+        path.join(installer, "distribution.json"),
+        JSON.stringify({
+          platform: "darwin",
+          arch: "arm64",
+          nativeSources: [{ target: "darwin-arm64" }],
+        }),
+      );
+      const sharedNode = path.join(resources, "runtime", "bin", "node");
+      mkdirSync(path.dirname(sharedNode), { recursive: true });
+      const nodeBytes = Buffer.from("#!/bin/sh\nexit 1\n");
+      writeFileSync(sharedNode, nodeBytes, { mode: 0o755 });
+      execFileSync("/usr/bin/xattr", [
+        "-w",
+        "com.apple.quarantine",
+        "0081;66000000;Chrome;",
+        sharedNode,
+      ]);
+      const bundle = path.join(installer, "native", "runtime-darwin-arm64");
+      mkdirSync(bundle, { recursive: true });
+      writeFileSync(
+        path.join(bundle, "manifest.json"),
+        JSON.stringify({
+          target: "darwin-arm64",
+          sourceArchiveSha256: "a".repeat(64),
+          layout: "directory",
+          node: {
+            version: NODE_RUNTIME_VERSION,
+            shared: true,
+            binary: "runtime/bin/node",
+            sha256: sha256Hex(nodeBytes),
+            bytes: nodeBytes.length,
+          },
+        }),
+      );
+      const archive = sourceArchive(f.root);
+      mkdirSync(path.join(installer, "source"), { recursive: true });
+      writeFileSync(
+        path.join(installer, "source", "linger.tar.gz"),
+        archive.bytes,
+      );
+      await new LocalServerModule({
+        home: f.home,
+        version: APP_VERSION,
+        installerDirectory: installer,
+        platform: "darwin",
+        arch: "arm64",
+        sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
+        signIn: f.signIn,
+      })
+        .begin()
+        .catch(() => undefined);
+      const copied = path.join(nodeDir(f.home), "bin", "node");
+      expect(existsSync(copied)).toBe(true);
+      expect(() =>
+        execFileSync("/usr/bin/xattr", ["-p", "com.apple.quarantine", copied], {
+          stdio: "pipe",
+        }),
+      ).toThrow();
+    },
+  );
+
+  it("pre-fetches localmodelsTool from a staged app bundle for locally enrolled installations", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    try {
+      const root = tempDirectory();
+      const tool = buildLocalmodelsArchive(root);
+      const { staged } = buildStagedUpdateBundle(root, {
+        toolBytes: tool.bytes,
+        toolSha256: tool.sha256,
+        toolManifestSha256: tool.manifestSha256,
+      });
+      const toolSource = {
+        url: "https://cdn.example/localmodels.tgz",
+        sha256: tool.sha256,
+        bytes: tool.bytes.length,
+        sourceCommit: "a".repeat(40),
+        manifestSha256: tool.manifestSha256,
+      };
+
+      let fetchCalls = 0;
+      const fetcher = (async (input: string | URL | Request) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (url === toolSource.url) {
+          fetchCalls += 1;
+          return new Response(tool.bytes, {
+            headers: { "content-length": String(tool.bytes.length) },
+          });
+        }
+        return new Response(null, { status: 404 });
+      }) as typeof fetch;
+
+      // Without a local installation record, nothing is downloaded.
+      const unconfigured = fixture({ fetch: fetcher }, {});
+      await unconfigured.host.start();
+      await unconfigured.module.prepareUpdateTool(
+        staged,
+        new AbortController().signal,
+      );
+      expect(fetchCalls).toBe(0);
+      await unconfigured.host.stop("quit");
+
+      // Enrolled local installation pre-fetches into its configured home.
+      const customHome = path.join(tempDirectory(), "custom-home");
+      mkdirSync(path.join(customHome, "tools", "localmodels"), {
+        recursive: true,
+      });
+      writeFileSync(
+        path.join(customHome, "region.json"),
+        JSON.stringify({
+          schema: 1,
+          region: "global",
+          resolved_at: new Date().toISOString(),
+          method: "probe",
+        }),
+      );
+      const f = fixture({ fetch: fetcher }, enrolled, (home) => {
+        mkdirSync(path.join(home, "desktop"), { recursive: true });
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home: customHome,
+            repo: "/source",
+            origin: "http://localhost:3000",
+          }),
+        );
+      });
+      await f.host.start();
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
+      await f.module.prepareUpdateTool(staged, new AbortController().signal);
+      expect(fetchCalls).toBe(1);
+      expect(info).toHaveBeenCalledWith(
+        "local_server.update_tool_prepared",
+        expect.objectContaining({
+          sha256: toolSource.sha256.slice(0, 12),
+        }),
+      );
+
+      // Re-using the cached kit later (repeat prepare or ensureLocalmodelsTool) makes zero network requests.
+      await f.module.prepareUpdateTool(staged, new AbortController().signal);
+      const resolved = await ensureLocalmodelsTool(
+        customHome,
+        {},
+        { source: toolSource },
+      );
+      expect(resolved.moduleDir).toBe(
+        path.join(
+          customHome,
+          "tools",
+          "localmodels",
+          toolSource.sha256,
+          "modules",
+        ),
+      );
+      expect(fetchCalls).toBe(1);
+      await f.host.stop("quit");
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  const deferred = <T = void>() => {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  };
+
+  const okFetch = (async () => new Response("ok")) as typeof fetch;
+
+  const startEnrolledLocalServer = async (options: {
+    readonly root?: string;
+    readonly currentArchive?: ReturnType<typeof sourceArchive>;
+    readonly repoName?: string;
+    readonly version?: string;
+    readonly resumeFails?: boolean;
+    readonly region?: boolean;
+    readonly fetch?: typeof fetch;
+    readonly rename?: LocalServerOptions["rename"];
+    readonly setup?: (home: string, repo: string) => void;
+  }) => {
+    const repoName = options.repoName ?? "active";
+    const f = fixture(
+      {
+        platform: process.platform,
+        arch: process.arch,
+        glibcVersion: "2.35",
+        ...(options.currentArchive
+          ? {
+              sourceArchive: {
+                file: "source/linger.tar.gz",
+                sha256: options.currentArchive.sha256,
+              },
+            }
+          : {}),
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+        ...(options.rename ? { rename: options.rename } : {}),
+      },
+      enrolled,
+      (home) => {
+        const repo = path.join(home, "desktop", "source", repoName);
+        unpackedSource(repo);
+        mkdirSync(path.join(home, "desktop"), { recursive: true });
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home,
+            repo,
+            origin: "http://localhost:3000",
+            ...(options.version ? { version: options.version } : {}),
+          }),
+        );
+        if (options.resumeFails) {
+          writeFileSync(path.join(home, "resume-fails"), "");
+        }
+        if (options.region) {
+          writeFileSync(
+            path.join(home, "region.json"),
+            JSON.stringify({
+              schema: 1,
+              region: "global",
+              resolved_at: new Date().toISOString(),
+              method: "probe",
+            }),
+          );
+        }
+        options.setup?.(home, repo);
+      },
+      installerApi(),
+      options.root,
+    );
+    if (
+      options.currentArchive &&
+      repoName !== options.currentArchive.sha256.slice(0, 16)
+    ) {
+      mkdirSync(path.join(f.root, "installer", "source"), { recursive: true });
+      writeFileSync(
+        path.join(f.root, "installer", "source", "linger.tar.gz"),
+        options.currentArchive.bytes,
+      );
+    }
+    await f.host.start();
+    await waitForInstaller(() =>
+      expect(f.module.status().phase).toBe(
+        options.resumeFails ? "failed" : "ready",
+      ),
+    );
+    return f;
+  };
+
+  it("pre-stages bundled source, teamhub, and runtime without changing status or getting pruned", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    const foldersSpy = vi
+      .spyOn(nativeProcess, "foldersInUse")
+      .mockResolvedValue(new Set());
+    try {
+      const root = tempDirectory();
+      const tool = buildLocalmodelsArchive(root);
+      const nextArchive = sourceArchive(path.join(root, "next-src"), "next");
+      const currentArchive = sourceArchive(path.join(root, "curr-src"), "curr");
+      const { staged } = buildStagedUpdateBundle(root, {
+        source: nextArchive,
+        teamhubDigest: nextArchive.sha256,
+        runtimeDigest: nextArchive.sha256,
+        toolBytes: tool.bytes,
+        toolSha256: tool.sha256,
+        toolManifestSha256: tool.manifestSha256,
+      });
+
+      let fetchCalls = 0;
+      let failToolDownload = false;
+      const fetcher = (async (input: string | URL | Request) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (url === "https://cdn.example/localmodels.tgz") {
+          fetchCalls += 1;
+          if (failToolDownload) return new Response(null, { status: 404 });
+          return new Response(tool.bytes, {
+            headers: { "content-length": String(tool.bytes.length) },
+          });
+        }
+        return new Response(null, { status: 404 });
+      }) as typeof fetch;
+
+      // Start with a failed resume so `record` still points to `previous`,
+      // letting us verify both status-preservation after ready and prune protection.
+      const f = await startEnrolledLocalServer({
+        currentArchive,
+        repoName: "previous",
+        resumeFails: true,
+        region: true,
+        fetch: fetcher,
+      });
+
+      // Even if the online tool download fails offline, the bundled source +
+      // teamhub + runtime still finish pre-staging before prepareUpdateTool throws.
+      failToolDownload = true;
+      await expect(
+        f.module.prepareUpdateTool(staged, new AbortController().signal),
+      ).rejects.toThrow();
+
+      const preStaged = path.join(
+        f.home,
+        "desktop",
+        "source",
+        nextArchive.sha256.slice(0, 16),
+      );
+      expect(
+        existsSync(path.join(preStaged, "scripts/source-native.mjs")),
+      ).toBe(true);
+      expect(
+        readFileSync(
+          path.join(preStaged, ".simplexai-runtime/prebuilt/teamhub"),
+          "utf8",
+        ),
+      ).toBe("teamhub");
+      expect(
+        existsSync(
+          path.join(preStaged, ".simplexai-runtime/offline/verified.json"),
+        ),
+      ).toBe(true);
+      expect(info).toHaveBeenCalledWith(
+        "local_server.update_source_prepared",
+        expect.objectContaining({
+          source: path.basename(preStaged),
+        }),
+      );
+
+      // Retry to reach ready, triggering #schedulePruneSources on `previous`.
+      rmSync(path.join(f.home, "resume-fails"));
+      f.bus.emit("local-server.retry");
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
+      await vi.waitFor(() =>
+        expect(
+          existsSync(path.join(f.home, "desktop", "source", "previous")),
+        ).toBe(false),
+      );
+      expect(existsSync(preStaged)).toBe(true);
+
+      // While ready, preparing concurrently must not mutate status or emit changed.
+      failToolDownload = false;
+      const beforeStatus = f.module.status();
+      const changed = vi.fn();
+      const offChanged = f.bus.on("local-server.changed", changed);
+      await Promise.all([
+        f.module.prepareUpdateTool(staged, new AbortController().signal),
+        f.module.prepareUpdateTool(staged, new AbortController().signal),
+      ]);
+      offChanged();
+      expect(changed).not.toHaveBeenCalled();
+      expect(f.module.status()).toEqual(beforeStatus);
+      const callsAfterPrepare = fetchCalls;
+      expect(callsAfterPrepare).toBeGreaterThanOrEqual(2);
+      await f.module.prepareUpdateTool(staged, new AbortController().signal);
+      expect(fetchCalls).toBe(callsAfterPrepare);
+      const resolved = await ensureLocalmodelsTool(
+        f.home,
+        {},
+        {
+          source: {
+            url: "https://cdn.example/localmodels.tgz",
+            sha256: tool.sha256,
+            bytes: tool.bytes.length,
+            sourceCommit: "a".repeat(40),
+            manifestSha256: tool.manifestSha256,
+          },
+        },
+      );
+      expect(resolved.moduleDir).toBe(
+        path.join(f.home, "tools", "localmodels", tool.sha256, "modules"),
+      );
+      await f.host.stop("quit");
+    } finally {
+      foldersSpy.mockRestore();
+      info.mockRestore();
+    }
+  });
+
+  it("reuses a pre-staged source checkout on update resume without re-extracting", async () => {
+    const root = tempDirectory();
+    const target = `${process.platform}-${process.arch}`;
+    const prevArchive = sourceArchive(path.join(root, "prev"), "prev");
+    const nextArchive = sourceArchive(path.join(root, "next"), "next");
+    const { staged, installerDir: stagedInstallerDir } =
+      buildStagedUpdateBundle(root, {
+        target,
+        source: nextArchive,
+        teamhubDigest: nextArchive.sha256,
+        runtimeDigest: nextArchive.sha256,
+        includeTool: false,
+      });
+
+    const oldApp = await startEnrolledLocalServer({
+      currentArchive: prevArchive,
+      repoName: prevArchive.sha256.slice(0, 16),
+      version: "0.16.0",
+    });
+    await oldApp.module.prepareUpdateTool(staged, new AbortController().signal);
+    await oldApp.host.stop("quit");
+
+    const preStaged = path.join(
+      oldApp.home,
+      "desktop",
+      "source",
+      nextArchive.sha256.slice(0, 16),
+    );
+    writeFileSync(path.join(preStaged, "pre-staged-marker"), "kept");
+    const offlineVerifiedFile = path.join(
+      preStaged,
+      ".simplexai-runtime/offline/verified.json",
+    );
+    const offlineVerifiedBody = readFileSync(offlineVerifiedFile, "utf8");
+
+    // Launch the updated version using the same home; omit the bundled tarball in
+    // its installerDirectory so resume succeeds only if it reuses the pre-staged tree.
+    const nextInstallerDir = path.join(root, "next-installer");
+    mkdirSync(nextInstallerDir, { recursive: true });
+    cpSync(
+      path.join(stagedInstallerDir, "native"),
+      path.join(nextInstallerDir, "native"),
+      { recursive: true },
+    );
+    writeFileSync(path.join(nextInstallerDir, "installer.js"), FAKE_INSTALLER);
+    writeFileSync(
+      path.join(nextInstallerDir, "package.json"),
+      '{"type":"commonjs"}',
+    );
+    writeFileSync(
+      path.join(nextInstallerDir, "distribution.json"),
+      JSON.stringify({
+        platform: process.platform,
+        arch: process.arch,
+        nativeSources: [{ target }],
+      }),
+    );
+    const nextApp = fixture(
+      {
+        home: oldApp.home,
+        platform: process.platform,
+        arch: process.arch,
+        glibcVersion: "2.35",
+        installerDirectory: nextInstallerDir,
+        sourceArchive: {
+          file: "source/linger.tar.gz",
+          sha256: nextArchive.sha256,
+        },
+        fetch: okFetch,
+      },
+      enrolled,
+    );
+    await nextApp.host.start();
+    await waitForInstaller(() =>
+      expect(nextApp.module.status().phase).toBe("ready"),
+    );
+    const args = installerArgs(oldApp.home);
+    expect(args[args.indexOf("--source-repo") + 1]).toBe(preStaged);
+    expect(
+      readFileSync(path.join(preStaged, "pre-staged-marker"), "utf8"),
+    ).toBe("kept");
+    expect(readFileSync(offlineVerifiedFile, "utf8")).toBe(offlineVerifiedBody);
+    await nextApp.host.stop("quit");
+  });
+
+  it("cleans up partial staging and keeps records untouched on abort or invalid manifests", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(path.join(root, "src"));
+    const targetDirName = archive.sha256.slice(0, 16);
+
+    // Missing manifests and disagreeing manifests skip pre-staging without error.
+    const noManifestBundle = buildStagedUpdateBundle(
+      path.join(root, "no-manifest"),
+      { source: archive, includeTool: false },
+    );
+    const mismatchBundle = buildStagedUpdateBundle(
+      path.join(root, "mismatch"),
+      {
+        source: archive,
+        teamhubDigest: archive.sha256,
+        runtimeDigest: "f".repeat(64),
+        includeTool: false,
+      },
+    );
+    const multiArchiveBundle = buildStagedUpdateBundle(
+      path.join(root, "multi"),
+      {
+        source: archive,
+        teamhubDigest: archive.sha256,
+        runtimeDigest: archive.sha256,
+        includeTool: false,
+        sourceFiles: ["a.tar.gz", "b.tar.gz"],
+      },
+    );
+
+    const controller = new AbortController();
+    const runtimeController = new AbortController();
+    let seenPartial: string | undefined;
+    let seenRuntimePartial: string | undefined;
+    let activeAbort = controller;
+    const f = await startEnrolledLocalServer({
+      repoName: "active",
+      version: "0.16.0",
+      rename: async (from, to) => {
+        if (from.endsWith(".partial")) {
+          if (activeAbort === controller) {
+            seenPartial = from;
+            expect(existsSync(from)).toBe(true);
+            controller.abort();
+            throw controller.signal.reason;
+          }
+          if (from.endsWith(path.join("offline.partial"))) {
+            seenRuntimePartial = from;
+            expect(existsSync(from)).toBe(true);
+            runtimeController.abort();
+            throw runtimeController.signal.reason;
+          }
+        }
+        await rename(from, to);
+      },
+    });
+
+    for (const bundle of [
+      noManifestBundle.staged,
+      mismatchBundle.staged,
+      multiArchiveBundle.staged,
+    ]) {
+      await f.module.prepareUpdateTool(bundle, new AbortController().signal);
+    }
+    const preStaged = path.join(f.home, "desktop", "source", targetDirName);
+    expect(existsSync(preStaged)).toBe(false);
+
+    // Abort mid-extraction during publish: cleans up `.partial` and leaves record intact.
+    const validBundle = buildStagedUpdateBundle(path.join(root, "valid"), {
+      source: archive,
+      teamhubDigest: archive.sha256,
+      runtimeDigest: archive.sha256,
+      includeTool: false,
+    });
+    await expect(
+      f.module.prepareUpdateTool(validBundle.staged, controller.signal),
+    ).rejects.toThrow();
+    expect(seenPartial).toBe(`${preStaged}.partial`);
+    expect(existsSync(`${preStaged}.partial`)).toBe(false);
+    expect(existsSync(preStaged)).toBe(false);
+
+    // Abort mid-runtime copy after source extraction succeeds: cleans up
+    // offline.partial and leaves existing records untouched.
+    activeAbort = runtimeController;
+    await expect(
+      f.module.prepareUpdateTool(validBundle.staged, runtimeController.signal),
+    ).rejects.toThrow();
+    const offline = path.join(preStaged, ".simplexai-runtime", "offline");
+    expect(seenRuntimePartial).toBe(`${offline}.partial`);
+    expect(existsSync(`${offline}.partial`)).toBe(false);
+    expect(existsSync(offline)).toBe(false);
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
+      ),
+    ).toEqual({
+      home: f.home,
+      repo: path.join(f.home, "desktop", "source", "active"),
+      origin: "http://localhost:3000",
+      version: "0.16.0",
+    });
+    await f.host.stop("quit");
+  });
+
+  it("keeps pre-staged source protection refcounted when one concurrent caller aborts before SOURCE_MARKER exists", async () => {
+    const foldersSpy = vi
+      .spyOn(nativeProcess, "foldersInUse")
+      .mockResolvedValue(new Set());
+    try {
+      const root = tempDirectory();
+      const currArchive = sourceArchive(path.join(root, "curr"), "curr");
+      const v2Archive = sourceArchive(path.join(root, "v2"), "v2");
+      const v3Archive = sourceArchive(path.join(root, "v3"), "v3");
+      const v2Bundle = buildStagedUpdateBundle(path.join(root, "s2"), {
+        source: v2Archive,
+        teamhubDigest: v2Archive.sha256,
+        runtimeDigest: v2Archive.sha256,
+        includeTool: false,
+      });
+      const v3Bundle = buildStagedUpdateBundle(path.join(root, "s3"), {
+        source: v3Archive,
+        teamhubDigest: v3Archive.sha256,
+        runtimeDigest: v3Archive.sha256,
+        includeTool: false,
+      });
+
+      const v2Dir = path.join(
+        root,
+        "home",
+        "desktop",
+        "source",
+        v2Archive.sha256.slice(0, 16),
+      );
+      const v3Dir = path.join(
+        root,
+        "home",
+        "desktop",
+        "source",
+        v3Archive.sha256.slice(0, 16),
+      );
+
+      let v2PublishCount = 0;
+      const v2Reached = deferred();
+      const allowV2Publish = deferred();
+      const v3Reached = deferred();
+      const allowV3Publish = deferred();
+
+      const c1 = new AbortController();
+      const c2 = new AbortController();
+      const c3 = new AbortController();
+      const c4 = new AbortController();
+
+      const f = await startEnrolledLocalServer({
+        root,
+        currentArchive: currArchive,
+        repoName: "previous",
+        resumeFails: true,
+        fetch: okFetch,
+        rename: async (from, to) => {
+          if (from === `${v2Dir}.partial`) {
+            v2PublishCount += 1;
+            if (v2PublishCount === 1) {
+              v2Reached.resolve();
+              await allowV2Publish.promise;
+              if (c1.signal.aborted) throw c1.signal.reason;
+            }
+          } else if (from === `${v3Dir}.partial`) {
+            v3Reached.resolve();
+            await allowV3Publish.promise;
+          }
+          await rename(from, to);
+        },
+      });
+
+      // Case 1: Active caller c1 aborts before SOURCE_MARKER exists while sibling c2 waits and succeeds.
+      const p1 = f.module.prepareUpdateTool(v2Bundle.staged, c1.signal);
+      await v2Reached.promise;
+      const p2 = f.module.prepareUpdateTool(v2Bundle.staged, c2.signal);
+      await delay(15);
+      c1.abort();
+      allowV2Publish.resolve();
+      await expect(p1).rejects.toThrow();
+      await p2;
+      expect(existsSync(path.join(v2Dir, "scripts/source-native.mjs"))).toBe(
+        true,
+      );
+
+      // Case 2: Second caller c4 aborts before SOURCE_MARKER exists while active caller c3 is still staging.
+      const p3 = f.module.prepareUpdateTool(v3Bundle.staged, c3.signal);
+      await v3Reached.promise;
+      const p4 = f.module.prepareUpdateTool(v3Bundle.staged, c4.signal);
+      await delay(15);
+      c4.abort();
+      await expect(p4).rejects.toThrow();
+      allowV3Publish.resolve();
+      await p3;
+      expect(existsSync(path.join(v3Dir, "scripts/source-native.mjs"))).toBe(
+        true,
+      );
+
+      // Trigger #schedulePruneSources via resume retry; previous is deleted while v2 & v3 remain.
+      rmSync(path.join(f.home, "resume-fails"));
+      f.bus.emit("local-server.retry");
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
+      await vi.waitFor(() =>
+        expect(
+          existsSync(path.join(f.home, "desktop", "source", "previous")),
+        ).toBe(false),
+      );
+      expect(existsSync(v2Dir)).toBe(true);
+      expect(existsSync(v3Dir)).toBe(true);
+      await f.host.stop("quit");
+    } finally {
+      foldersSpy.mockRestore();
+    }
+  });
+
+  it("blocks #stageDirectory until an active prune completes so concurrent staging finishes intact", async () => {
+    const root = tempDirectory();
+    const currArchive = sourceArchive(path.join(root, "curr"), "curr");
+    const nextArchive = sourceArchive(path.join(root, "next"), "next");
+    const { staged } = buildStagedUpdateBundle(path.join(root, "s2"), {
+      source: nextArchive,
+      teamhubDigest: nextArchive.sha256,
+      runtimeDigest: nextArchive.sha256,
+      includeTool: false,
+    });
+
+    const pruneStarted = deferred();
+    const releasePrune = deferred<Set<string>>();
+    const foldersSpy = vi
+      .spyOn(nativeProcess, "foldersInUse")
+      .mockImplementationOnce(() => {
+        pruneStarted.resolve();
+        return releasePrune.promise;
+      })
+      .mockResolvedValue(new Set());
+
+    try {
+      const f = await startEnrolledLocalServer({
+        currentArchive: currArchive,
+        repoName: "previous",
+        fetch: okFetch,
+        setup: (home) => {
+          // Leftover damaged directory matching nextArchive hash that prune will inspect.
+          const damaged = path.join(
+            home,
+            "desktop",
+            "source",
+            nextArchive.sha256.slice(0, 16),
+          );
+          mkdirSync(damaged, { recursive: true });
+          writeFileSync(path.join(damaged, "junk.txt"), "damaged");
+        },
+      });
+      await pruneStarted.promise;
+
+      const preStaged = path.join(
+        f.home,
+        "desktop",
+        "source",
+        nextArchive.sha256.slice(0, 16),
+      );
+      const prep = f.module.prepareUpdateTool(
+        staged,
+        new AbortController().signal,
+      );
+      await delay(20);
+      // Staging must wait until the in-flight prune settles before touching preStaged.
+      expect(
+        existsSync(path.join(preStaged, "scripts/source-native.mjs")),
+      ).toBe(false);
+
+      releasePrune.resolve(new Set());
+      await prep;
+      expect(
+        existsSync(path.join(f.home, "desktop", "source", "previous")),
+      ).toBe(false);
+      expect(
+        existsSync(path.join(preStaged, "scripts/source-native.mjs")),
+      ).toBe(true);
+      expect(
+        readFileSync(
+          path.join(preStaged, ".simplexai-runtime/prebuilt/teamhub"),
+          "utf8",
+        ),
+      ).toBe("teamhub");
+      expect(
+        existsSync(
+          path.join(preStaged, ".simplexai-runtime/offline/verified.json"),
+        ),
+      ).toBe(true);
+      await f.host.stop("quit");
+    } finally {
+      foldersSpy.mockRestore();
+    }
+  });
+
+  it("drains all asset cleanups in #ensureSourceAssets before allowing a waiting caller to retry", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(path.join(root, "src"));
+    const { staged } = buildStagedUpdateBundle(path.join(root, "s"), {
+      source: archive,
+      teamhubDigest: archive.sha256,
+      runtimeDigest: archive.sha256,
+      includeTool: false,
+    });
+
+    const c1 = new AbortController();
+    const c2 = new AbortController();
+    let offlineRenameCalls = 0;
+    const cleanupStarted = deferred();
+    const allowCleanupFinish = deferred();
+
+    const realRemoveRetrying = fsRetry.removeRetrying;
+    let holdFirstOfflinePartialCleanup = false;
+    const removeSpy = vi
+      .spyOn(fsRetry, "removeRetrying")
+      .mockImplementation(async (targetPath) => {
+        if (
+          holdFirstOfflinePartialCleanup &&
+          targetPath.endsWith(path.join("offline.partial"))
+        ) {
+          holdFirstOfflinePartialCleanup = false;
+          cleanupStarted.resolve();
+          await allowCleanupFinish.promise;
+        }
+        return realRemoveRetrying(targetPath);
+      });
+
+    try {
+      const f = await startEnrolledLocalServer({
+        repoName: "active",
+        rename: async (from, to) => {
+          if (from.endsWith(path.join("offline.partial"))) {
+            offlineRenameCalls += 1;
+            if (offlineRenameCalls === 1) {
+              holdFirstOfflinePartialCleanup = true;
+              c1.abort();
+              throw c1.signal.reason;
+            }
+          }
+          await rename(from, to);
+        },
+      });
+
+      const p1 = f.module.prepareUpdateTool(staged, c1.signal);
+      await cleanupStarted.promise;
+
+      // Second caller enters while c1's offline.partial cleanup is still in flight.
+      const p2 = f.module.prepareUpdateTool(staged, c2.signal);
+      await delay(20);
+      expect(offlineRenameCalls).toBe(1);
+
+      allowCleanupFinish.resolve();
+      await expect(p1).rejects.toThrow();
+      await p2;
+      expect(offlineRenameCalls).toBe(2);
+      const preStaged = path.join(
+        f.home,
+        "desktop",
+        "source",
+        archive.sha256.slice(0, 16),
+      );
+      expect(
+        existsSync(
+          path.join(preStaged, ".simplexai-runtime/offline/verified.json"),
+        ),
+      ).toBe(true);
+      expect(
+        existsSync(path.join(preStaged, ".simplexai-runtime/offline.partial")),
+      ).toBe(false);
+      await f.host.stop("quit");
+    } finally {
+      removeSpy.mockRestore();
+    }
+  });
+
+  it("skips pre-staging when the staged source hash matches the active record.repo", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    try {
+      const root = tempDirectory();
+      const archive = sourceArchive(path.join(root, "src"));
+      const { staged } = buildStagedUpdateBundle(path.join(root, "s"), {
+        source: archive,
+        teamhubDigest: archive.sha256,
+        runtimeDigest: archive.sha256,
+        includeTool: false,
+      });
+
+      const renameSpy = vi.fn(async (from: string, to: string) => {
+        await rename(from, to);
+      });
+      const f = await startEnrolledLocalServer({
+        currentArchive: archive,
+        repoName: archive.sha256.slice(0, 16),
+        rename: renameSpy,
+        setup: (_home, active) => {
+          writeFileSync(path.join(active, "live-sentinel.txt"), "live");
+          mkdirSync(path.join(active, ".simplexai-runtime/prebuilt"), {
+            recursive: true,
+          });
+          writeFileSync(
+            path.join(active, ".simplexai-runtime/prebuilt/sentinel.txt"),
+            "prebuilt",
+          );
+          mkdirSync(path.join(active, ".simplexai-runtime/offline"), {
+            recursive: true,
+          });
+          // Intentionally omit verified.json so running #ensureNativeRuntime would have removed offline.
+          writeFileSync(
+            path.join(active, ".simplexai-runtime/offline/sentinel.txt"),
+            "offline",
+          );
+        },
+      });
+
+      await f.module.prepareUpdateTool(staged, new AbortController().signal);
+      expect(renameSpy).not.toHaveBeenCalled();
+      expect(info).not.toHaveBeenCalledWith(
+        "local_server.update_source_prepared",
+        expect.anything(),
+      );
+      const active = path.join(
+        f.home,
+        "desktop",
+        "source",
+        archive.sha256.slice(0, 16),
+      );
+      expect(readFileSync(path.join(active, "live-sentinel.txt"), "utf8")).toBe(
+        "live",
+      );
+      expect(
+        readFileSync(
+          path.join(active, ".simplexai-runtime/prebuilt/sentinel.txt"),
+          "utf8",
+        ),
+      ).toBe("prebuilt");
+      expect(
+        readFileSync(
+          path.join(active, ".simplexai-runtime/offline/sentinel.txt"),
+          "utf8",
+        ),
+      ).toBe("offline");
+      await f.host.stop("quit");
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it("removes both prebuilt and prebuilt.verified.json when aborting during or right after TeamHub binary install", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(path.join(root, "src"));
+    const { staged } = buildStagedUpdateBundle(path.join(root, "s"), {
+      source: archive,
+      teamhubDigest: archive.sha256,
+      includeTool: false,
+    });
+
+    const f = await startEnrolledLocalServer({ repoName: "active" });
+
+    const preStaged = path.join(
+      f.home,
+      "desktop",
+      "source",
+      archive.sha256.slice(0, 16),
+    );
+    const binaryDir = path.join(preStaged, ".simplexai-runtime/prebuilt");
+    const stampFile = teamhubBinaries.teamhubBinaryStampsFile(binaryDir);
+
+    // Case 1: Abort during installTeamhubBinaries right as stamps are written.
+    const realWriteStamps = verifiedStamps.writeSettledStamps;
+    const c1 = new AbortController();
+    const stampSpy = vi
+      .spyOn(verifiedStamps, "writeSettledStamps")
+      .mockImplementationOnce(async (file, digest, stamps) => {
+        await realWriteStamps(file, digest, stamps);
+        expect(existsSync(binaryDir)).toBe(true);
+        expect(existsSync(stampFile)).toBe(true);
+        c1.abort();
+        throw c1.signal.reason;
+      });
+    try {
+      await expect(
+        f.module.prepareUpdateTool(staged, c1.signal),
+      ).rejects.toThrow();
+    } finally {
+      stampSpy.mockRestore();
+    }
+    expect(existsSync(binaryDir)).toBe(false);
+    expect(existsSync(stampFile)).toBe(false);
+
+    // Case 2: Post-install abort right after installTeamhubBinaries returns "installed".
+    const realInstallBinaries = teamhubBinaries.installTeamhubBinaries;
+    const c2 = new AbortController();
+    const installSpy = vi
+      .spyOn(teamhubBinaries, "installTeamhubBinaries")
+      .mockImplementationOnce(async (from, repo, expected) => {
+        expect(expected.signal).toBeDefined();
+        const state = await realInstallBinaries(from, repo, expected);
+        expect(state).toBe("installed");
+        expect(existsSync(binaryDir)).toBe(true);
+        expect(existsSync(stampFile)).toBe(true);
+        c2.abort();
+        return state;
+      });
+    try {
+      await expect(
+        f.module.prepareUpdateTool(staged, c2.signal),
+      ).rejects.toThrow();
+    } finally {
+      installSpy.mockRestore();
+    }
+    expect(existsSync(binaryDir)).toBe(false);
+    expect(existsSync(stampFile)).toBe(false);
+    await f.host.stop("quit");
   });
 
   it("forgets the installation and its enrollment when the person sets up again", async () => {

@@ -1,5 +1,5 @@
 import { copyFileSync, linkSync, mkdtempSync, symlinkSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { chmod, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -17,15 +17,39 @@ export const silentLog: Logger = {
 
 const tempDirectories: string[] = [];
 
+async function reopenForRemoval(directory: string): Promise<void> {
+  await chmod(directory, 0o700).catch(() => undefined);
+  const entries = await readdir(directory, { withFileTypes: true }).catch(
+    () => [],
+  );
+  await Promise.all(
+    entries.map(async (entry) => {
+      if (entry.isSymbolicLink()) return;
+      const child = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await reopenForRemoval(child);
+      } else if (process.platform === "win32") {
+        await chmod(child, 0o600).catch(() => undefined);
+      }
+    }),
+  );
+}
+
 afterEach(async () => {
   // Windows caps hard links per file. Do not let repeated test runs exhaust
   // the executable's links and fall back to copying it for every fixture.
   await Promise.all(
-    tempDirectories
-      .splice(0)
-      .map((directory) =>
-        rm(directory, { recursive: true, force: true, maxRetries: 5 }),
-      ),
+    tempDirectories.splice(0).map(async (directory) => {
+      try {
+        await rm(directory, { recursive: true, force: true, maxRetries: 5 });
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EACCES" && code !== "EPERM") throw error;
+        // Verified localmodels kits are sealed read-only; reopen before cleanup.
+        await reopenForRemoval(directory);
+        await rm(directory, { recursive: true, force: true, maxRetries: 5 });
+      }
+    }),
   );
 });
 

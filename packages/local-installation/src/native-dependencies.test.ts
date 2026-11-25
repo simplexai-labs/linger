@@ -5,10 +5,11 @@ import {
   readFile,
   readdir,
   rm,
+  utimes,
   writeFile,
   symlink,
 } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -24,6 +25,7 @@ import {
   validateNativeVoiceTools,
 } from "./native-dependencies.js";
 import * as downloads from "./download.js";
+import * as verifiedStamps from "./verified-stamps.js";
 import { REGION_SCHEMA, regionFile } from "./region.js";
 import type { InstallerEvent } from "./events.js";
 const roots: string[] = [];
@@ -206,6 +208,45 @@ describe("verified extraction", () => {
       ),
     ).rejects.toThrow(/cache/);
   });
+  it("reuses settled stamps once clock ticks settle while still detecting mtime-backdated tampering", async () => {
+    const f = await fixture();
+    const directory = await acquireNativeArtifact(
+      f.home,
+      f.artifact,
+      new AbortController().signal,
+      undefined,
+      f.fetcher,
+    );
+    const stampFile = `${directory}.verified.json`;
+    expect(existsSync(stampFile)).toBe(true);
+    const before = await readFile(stampFile, "utf8");
+    const baseNow = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(baseNow + 10_000);
+    await expect(
+      acquireNativeArtifact(
+        f.home,
+        f.artifact,
+        new AbortController().signal,
+        undefined,
+        f.fetcher,
+      ),
+    ).resolves.toBe(directory);
+    expect(await readFile(stampFile, "utf8")).toBe(before);
+
+    // Tamper with identical byte count and restore an older mtime; ctime still triggers re-hash.
+    const past = new Date(baseNow - 10_000);
+    await writeFile(path.join(directory, "bin/tool"), "changed");
+    await utimes(path.join(directory, "bin/tool"), past, past);
+    await expect(
+      acquireNativeArtifact(
+        f.home,
+        f.artifact,
+        new AbortController().signal,
+        undefined,
+        f.fetcher,
+      ),
+    ).rejects.toThrow(/cache/);
+  });
   it("publishes verified Windows PostgreSQL manifests separately from the original cache", async () => {
     const { home, artifact, fetcher } = await fixture();
     const signal = new AbortController().signal;
@@ -245,6 +286,71 @@ describe("verified extraction", () => {
     expect(await load(true)).toBe(prepared);
     expect(await readdir(path.join(original, "bin"))).toEqual(["tool"]);
     expect(await load(false)).toBe(original);
+  });
+  it("preserves readdir traversal key order in .simplex-files.json when entries finish hashing out of order", async () => {
+    const root = await temp(),
+      input = path.join(root, "input"),
+      home = path.join(root, "home");
+    await mkdir(path.join(input, "bin"), { recursive: true });
+    await writeFile(path.join(input, "bin/alpha"), "a", { mode: 0o755 });
+    await writeFile(path.join(input, "bin/beta"), "b", { mode: 0o755 });
+    await writeFile(path.join(input, "bin/gamma"), "g", { mode: 0o755 });
+    const archive = path.join(root, "payload.tgz");
+    await pack({ cwd: input, file: archive, gzip: true }, ["bin"]);
+    const bytes = await readFile(archive);
+    const artifact = {
+      url: "https://releases.example/tool.tgz",
+      algorithm: "sha256" as const,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+      maxBytes: bytes.length,
+    };
+    const fetcher = (async () =>
+      new Response(bytes, {
+        headers: { "content-length": String(bytes.length) },
+      })) as typeof fetch;
+
+    const realSha256File = verifiedStamps.sha256File;
+    let firstByReaddir: string | undefined;
+    let releaseFirst!: () => void;
+    const waitOthers = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const completionOrder: string[] = [];
+    let settledOthers = 0;
+    vi.spyOn(verifiedStamps, "sha256File").mockImplementation(async (file) => {
+      firstByReaddir ??= readdirSync(path.dirname(file))[0]!;
+      const digest = await realSha256File(file);
+      if (path.basename(file) === firstByReaddir) {
+        await waitOthers;
+        completionOrder.push(path.basename(file));
+      } else {
+        completionOrder.push(path.basename(file));
+        settledOthers += 1;
+        if (settledOthers === 2) releaseFirst();
+      }
+      return digest;
+    });
+
+    const directory = await acquireNativeArtifact(
+      home,
+      artifact,
+      new AbortController().signal,
+      undefined,
+      fetcher,
+    );
+    const expectedOrder = (await readdir(path.join(directory, "bin"))).map(
+      (name) => `bin/${name}`,
+    );
+    expect(completionOrder[0]).not.toBe(path.basename(expectedOrder[0]!));
+    expect(completionOrder.at(-1)).toBe(path.basename(expectedOrder[0]!));
+    const manifest = JSON.parse(
+      await readFile(path.join(directory, ".simplex-files.json"), "utf8"),
+    ) as Record<string, string>;
+    expect(Object.keys(manifest)).toEqual(expectedOrder);
+    const stamps = JSON.parse(
+      await readFile(`${directory}.verified.json`, "utf8"),
+    ) as { stamps: Record<string, unknown> };
+    expect(Object.keys(stamps.stamps)).toEqual(expectedOrder);
   });
   it("checksum failure leaves no promoted component and permits clean retry", async () => {
     const f = await fixture();

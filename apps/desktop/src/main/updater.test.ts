@@ -510,6 +510,83 @@ describe("UpdaterModule", () => {
       error: "The update feed must use https",
     });
   });
+
+  it("runs prepareUpdate on the staged app bundle before announcing ready", async () => {
+    const feed = release("0.17.0");
+    const order: string[] = [];
+    const prepared: string[] = [];
+    const { updater, applications, announced } = await setup(feed, {
+      announce: (state) => {
+        order.push(`announce:${state.kind}`);
+      },
+      prepareUpdate: async (stagedPath, signal) => {
+        expect(signal.aborted).toBe(false);
+        expect(updater.state()).toEqual({
+          kind: "downloading",
+          version: "0.17.0",
+        });
+        expect(announced).toEqual([]);
+        prepared.push(stagedPath);
+        order.push("prepare");
+      },
+    });
+    await updater.check();
+    expect(prepared).toEqual([
+      path.join(applications, ".Linger-update-0.17.0", "Linger.app"),
+    ]);
+    expect(order).toEqual(["prepare", "announce:ready"]);
+    expect(updater.state()).toEqual({ kind: "ready", version: "0.17.0" });
+  });
+
+  it("still announces ready when prepareUpdate fails", async () => {
+    const feed = release("0.17.0");
+    const warnings: Array<{ event: string; fields?: unknown }> = [];
+    const { updater, host, announced } = await setup(feed, {
+      prepareUpdate: async () => {
+        throw new Error("mirror down");
+      },
+    });
+    const spy = vi
+      .spyOn(host.ctx.log, "warn")
+      .mockImplementation((event, fields) => {
+        warnings.push({ event, fields });
+      });
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "ready", version: "0.17.0" });
+    expect(announced).toEqual([{ kind: "ready", version: "0.17.0" }]);
+    expect(warnings).toEqual([
+      {
+        event: "update.prepare_failed",
+        fields: { version: "0.17.0", error: "Error: mirror down" },
+      },
+    ]);
+    spy.mockRestore();
+  });
+
+  it("aborts an active prepareUpdate on stop() without announcing ready", async () => {
+    const feed = release("0.17.0");
+    let releasePrepare!: () => void;
+    let preparedSignal: AbortSignal | undefined;
+    const { updater, announced } = await setup(feed, {
+      prepareUpdate: async (_stagedPath, signal) => {
+        preparedSignal = signal;
+        await new Promise<void>((resolve) => {
+          releasePrepare = resolve;
+        });
+      },
+    });
+    const checking = updater.check();
+    await waitFor(() => preparedSignal !== undefined);
+    await updater.stop();
+    expect(preparedSignal!.aborted).toBe(true);
+    releasePrepare();
+    await checking;
+    expect(announced).toEqual([]);
+    expect(updater.state()).toEqual({
+      kind: "downloading",
+      version: "0.17.0",
+    });
+  });
 });
 
 describe("UpdaterModule with the Windows setup program", () => {
@@ -594,6 +671,21 @@ describe("UpdaterModule with the Windows setup program", () => {
       error: "Error: spawn EACCES",
     });
     expect(quits()).toBe(0);
+  });
+
+  it("does not invoke prepareUpdate for windows-setup updates", async () => {
+    const feed = release("0.17.0", { target: "win32-x64", file: SETUP });
+    const prepareUpdate = vi.fn(async () => {});
+    const { updater } = await setup(feed, {
+      platform: "win32",
+      arch: "x64",
+      install: { kind: "windows-setup" },
+      spawn: recorder().spawn,
+      prepareUpdate,
+    });
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "ready", version: "0.17.0" });
+    expect(prepareUpdate).not.toHaveBeenCalled();
   });
 });
 
