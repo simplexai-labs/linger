@@ -241,7 +241,7 @@ Cross-built binaries, `scripts/check-local-computer-windows.ps1` and Go tests wi
 
 ## Desktop and browser tools
 
-Read [Desktop and Browser](../../../../docs/desktop-and-browser.md), [macOS permissions](../../../../docs/macos.md), and the [Daemon guide](../../../../apps/computer/local-daemon/README.md#controlled-desktop-and-browser-tools).
+Read [Desktop and Browser](../../../../docs/desktop-and-browser.md) and the [Daemon guide](../../../../apps/computer/local-daemon/README.md#controlled-desktop-and-browser-tools).
 Each Operation exposes one Daemon-local MCP server (`computer`) with two public tools: `computer.ui_exec` and `computer.ui_reset`, running inside a bundled QuickJS-WASI sandbox (`apps/computer/local-daemon/internal/uiruntime/`) over private desktop (`ui.window` / `ui.computer.*`, Cua on macOS/Windows or X11 on Linux) and pinned Playwright browser (`ui.page` / `ui.browser.*`) drivers. Reuse `TestBridgeSetupIgnoresGuestCPUBudget`, `TestOversizedDispatchResultRejectsOnlyTheCall`, and `TestUIImageBudgetNeverFailsACompletedAction` for deterministic UI-runtime isolation.
 The browser has three targets:
 
@@ -267,7 +267,7 @@ through LaunchServices; it does not promise a new application instance. A probe 
 current text-field token. Never select the first restored window or kill the
 returned application PID as cleanup. A compiled, opt-in-skipped probe is not a
 desktop acceptance result.
-After an unsigned macOS desktop update, stale TCC grants for both `CuaDriver` (`com.trycua.driver`) and `Linger` (`com.simplexai.linger.desktop.preview`) can leave Screen Recording reporting **Not allowed** even while System Settings shows switches on; reset both identities and relaunch Linger per [macOS setup](../../../../docs/macos.md#keep-computer-permissions-after-an-update).
+After an unsigned macOS desktop update, stale TCC grants for both `CuaDriver` (`com.trycua.driver`) and `Linger` (`com.simplexai.linger.desktop.preview`) can leave Screen Recording reporting **Not allowed** even while System Settings shows switches on; reset both identities with `tccutil reset ScreenCapture <bundle-id>` and `tccutil reset Accessibility <bundle-id>`, then relaunch Linger and grant again.
 
 For the browser journey, have the test server return a second random receipt only after a correct form submission. Reopen the Room and match one message by the target Agent, scoped to the message list: the sidebar may preview the same text. Correlate the receipt with the server response, the browser tool calls and the finished Local Run.
 

@@ -9,7 +9,6 @@ Local model hardware planning, downloads, library actions, and BYOK model-source
 Authoritative references:
 
 - [Desktop Release](../../../../docs/desktop-release.md)
-- [macOS setup and permissions](../../../../docs/macos.md)
 - [Local PostgreSQL](../../../../docs/local-postgresql.md)
 - [Diagnostics upload](../../../../docs/diagnostics-upload.md)
 - [Desktop guide](../../../../apps/desktop/AGENTS.md)
@@ -88,7 +87,7 @@ Never run live verification against a developer's real `~/.simplexai`, `<appData
 
 **Journey:**
 
-1. Launch the packaged app (`Linger.app`, `./linger`, or installed `Linger.exe`). On unsigned macOS builds, record Gatekeeper handling separately (`docs/macos.md`). On Windows, record SmartScreen separately.
+1. Launch the packaged app (`Linger.app`, `./linger`, or installed `Linger.exe`). On unsigned macOS builds, record Gatekeeper handling separately. On Windows, record SmartScreen separately.
 2. On **Welcome**, open **Customize**, verify the install location picker and free-space check, select a model source (Local model, Subscription, or BYOK — see [Local Models and BYOK](local-models-and-byok.md)), and run **Quick Install**.
 3. Observe installation stage progression (`prepare` → `download` → `services`/`workspace` → optional `signin` → `connect` → `agents`).
 4. On **Ready**, confirm the generated owner email appears, verify password **Show** / **Copy** (and that the clipboard clears after 60 seconds if untouched), click **Open account file location** to confirm `local-account.json` is owner-private, and click **Open Linger**.
@@ -125,7 +124,7 @@ Never run live verification against a developer's real `~/.simplexai`, `<appData
 
 1. Verify a tampered manifest signature or mismatched asset SHA-256 is rejected without altering the installed app.
 2. Serve a valid newer version and verify platform behavior:
-   - **macOS (`app-bundle`):** `.app.tar.gz` downloads and verifies, **Restart to Update** waits for active work, swaps `Linger.app`, relaunches into `Updating Linger` source migration, and preserves Rooms and enrollment. On unsigned builds, check TCC permissions afterwards (`docs/macos.md#keep-computer-permissions-after-an-update`).
+   - **macOS (`app-bundle`):** `.app.tar.gz` downloads and verifies, **Restart to Update** waits for active work, swaps `Linger.app`, relaunches into `Updating Linger` source migration, and preserves Rooms and enrollment. On unsigned builds, check TCC permissions afterwards (see [Local Computer](local-computer.md#desktop-and-browser-tools)).
    - **Windows Setup (`windows-setup`):** `-setup.exe` downloads and verifies, **Restart to Update** runs `/update /relaunch` (passive progress page, no admin UAC), stops services, replaces `%LOCALAPPDATA%\Programs\Linger`, and relaunches. Test Cancel/locked-file recovery separately on a disposable host.
    - **Linux & Windows Portable (`download`):** tray and account menu show **Download Linger `<version>`…** / **Download Update** and open the release page without attempting in-place swap.
 
@@ -174,7 +173,7 @@ This journey proves the updater mechanics. The [upgrade from the previous releas
 - Account, Rooms, messages, the Document, Agents, Computer enrollment and the changed settings are kept; the Computer is **Online** without pairing again.
 - The local model is `loaded` and answering through its gateway. A fresh Windows install serves it only through Bifrost (`bifrost-http.exe`), with no `magpie.exe` and no `magpie/...` Pi default. A Windows install that 0.1.7 set up on Magpie may stay on Magpie after the upgrade (a known issue until such installs move to Bifrost), but it must start and its Agents must reply. A BYOK source is remounted without entering the key again.
 - Another Me and the other Agent each deliver a reply to a new marker, with no `ECONNREFUSED` and no Runtime `Update needed`.
-- On macOS, computer use still works; if the build is unsigned, record whether permissions had to be granted again (`docs/macos.md`).
+- On macOS, computer use still works; if the build is unsigned, record whether permissions had to be granted again.
 
 **Evidence:** for each target and upgrade path, the from and to versions and digests, the baseline and after records from step 2, `daemon status --json`, the process list with executable paths, persisted message and Run IDs of the replies, a **Save Diagnostics** archive, and screenshots of `Updating Linger`, the account menu version and Settings › Models. Record a failure on the first launch even when Try Again or a reboot later recovers it.
 
