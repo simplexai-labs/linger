@@ -292,6 +292,7 @@ function trajectoryCall(
       "local_shell",
       "local_shell_call",
       "bash",
+      "powershell",
     ].includes(tool)
   )
     return { ...base, detail: command, kind: "command", verb: m.ran };

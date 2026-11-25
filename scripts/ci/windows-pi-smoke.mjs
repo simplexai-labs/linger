@@ -281,6 +281,8 @@ async function main() {
         "",
         "--extension",
         extension,
+        "--tools",
+        "read,powershell,edit,write,grep,find,ls,mcp__*",
       ],
       { cwd: home, env },
     );

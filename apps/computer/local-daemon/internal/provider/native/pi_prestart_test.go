@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -62,7 +63,7 @@ func TestPiPrestartAdoptedByCreateRunAndAttachesMCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	argv := strings.Split(strings.TrimSpace(string(argvData)), "\n")
-	if !slices.Contains(argv, "--extension") || !slices.Contains(argv, extension) || !slices.Contains(argv, piBaseTools+",mcp__*") {
+	if !slices.Contains(argv, "--extension") || !slices.Contains(argv, extension) || !slices.Contains(argv, piBaseToolsFor(runtime.GOOS)+",mcp__*") {
 		t.Fatalf("pre-start argv = %q", argv)
 	}
 

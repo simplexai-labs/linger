@@ -195,7 +195,7 @@ func (f *piResidentFakeState) act(message string) {
 		f.mu.Unlock()
 		f.finish()
 	case "tools":
-		for _, name := range []string{"read", "edit", "write", "grep", "bash", "mcp__browser__navigate", "mcp__computer__run_actions", "notebook"} {
+		for _, name := range []string{"read", "edit", "write", "grep", "bash", "powershell", "mcp__browser__navigate", "mcp__computer__run_actions", "notebook"} {
 			f.tool("call_"+name, name, false)
 		}
 		f.finish()

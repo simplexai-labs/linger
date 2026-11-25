@@ -191,7 +191,7 @@ func (projection *eventProjection) projectActivity(message native.Event) []any {
 			projection.quiet[callID] = true
 			return []any{event}
 		}
-		if _, command := inputCommand(input); createsTask(command) {
+		if _, command := inputCommand(input); createsTaskFor(command, strings.EqualFold(message.ToolName, "powershell")) {
 			if projection.receipts == nil {
 				projection.receipts = make(map[string]bool)
 			}

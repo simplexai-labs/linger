@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -73,10 +74,21 @@ const teamHubWebToolGuide = "Web tools: search the web with `teamhub web search 
 // link that still has its own web tools.
 const teamHubWebOverOwnTools = "Use them instead of your built-in web search and fetch tools, which may not work through the API this model is served by."
 
+// piWindowsPowerShellGuide tells Windows Pi Agents to invoke teamhub with
+// PowerShell syntax rather than POSIX bash heredocs.
+const piWindowsPowerShellGuide = "Shell on Windows: your shell tool is `powershell` (PowerShell), not bash. Run `teamhub` with the `powershell` tool and PowerShell syntax; do not use POSIX heredocs (`<<'EOF'`). For `teamhub` text containing newlines, `$`, `%`, `&`, backticks, or quotes, pass `--file -` using a PowerShell single-quoted here-string (`@'` on its own line, the text, then `'@ | teamhub ... --file -` with `'@` at column 0)."
+
 // staticPrefixEndMarker is the internal insertion slot emitted between the
 // static prefix and volatile context sections by node-services. It is consumed
 // and removed by assembleResolvedInstructions so the model never sees it.
 const staticPrefixEndMarker = "<!-- LINGER_STATIC_PREFIX_END -->"
+
+func shellToolGuide(runtimeType, goos string, teamHubCLI bool) string {
+	if runtimeType == "pi" && goos == "windows" && teamHubCLI {
+		return piWindowsPowerShellGuide
+	}
+	return ""
+}
 
 // webToolGuide describes the web tools an Operation has. A Runtime on a
 // vendor subscription uses its own web tools first and the TeamHub CLI when
@@ -117,6 +129,15 @@ type ExecutionResolver struct {
 	Views          interface {
 		ValidatedView(context.Context, string, json.RawMessage) (ViewRecord, error)
 	}
+	// goos overrides runtime.GOOS in tests.
+	goos string
+}
+
+func (r ExecutionResolver) targetOS() string {
+	if r.goos != "" {
+		return r.goos
+	}
+	return runtime.GOOS
 }
 
 // codexLocalDefaultArgs keep reasoning summaries in the rollout consumed by
@@ -200,10 +221,13 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 	if err != nil {
 		return provider.OperationSpec{}, err
 	}
-	webGuide := webToolGuide(command.RuntimeType, installation.APILink, installation.ModelGateway,
-		cliInstalled && r.TeamHubCLIBin != "")
+	teamHubCLI := cliInstalled && r.TeamHubCLIBin != ""
+	webGuide := webToolGuide(command.RuntimeType, installation.APILink, installation.ModelGateway, teamHubCLI)
 	if webGuide != "" {
 		daemonStaticGuides = append(daemonStaticGuides, webGuide)
+	}
+	if shellGuide := shellToolGuide(command.RuntimeType, r.targetOS(), teamHubCLI); shellGuide != "" {
+		daemonStaticGuides = append(daemonStaticGuides, shellGuide)
 	}
 	resolvedBase, resolvedDeveloper, systemPrompt, baseHadMarker, devHadMarker := assembleResolvedInstructions(
 		instructionValue(request.SessionOptions.BaseInstructions),
@@ -261,6 +285,13 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 		}
 		spec.Environment["TEAMHUB_CONFIG"] = configuration
 		spec.Environment["TEAMHUB_PROFILE"] = "runtime"
+		if r.targetOS() == "windows" {
+			existing, ok := lookupEnvFold(spec.Environment, "WSLENV")
+			if !ok {
+				existing = os.Getenv("WSLENV")
+			}
+			setEnvFold(spec.Environment, "WSLENV", setWSLENV(existing, "TEAMHUB_CONFIG/p", "TEAMHUB_PROFILE"))
+		}
 		searchPath := spec.Environment["PATH"]
 		if searchPath == "" {
 			searchPath = os.Getenv("PATH")
@@ -535,6 +566,66 @@ func cloneEnvironment(input map[string]string) map[string]string {
 		result[key] = value
 	}
 	return result
+}
+
+func lookupEnvFold(env map[string]string, name string) (string, bool) {
+	if value, ok := env[name]; ok {
+		return value, true
+	}
+	for key, value := range env {
+		if strings.EqualFold(key, name) {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+func setEnvFold(env map[string]string, name, value string) {
+	for key := range env {
+		if key != name && strings.EqualFold(key, name) {
+			delete(env, key)
+		}
+	}
+	env[name] = value
+}
+
+// setWSLENV replaces any existing colon-separated WSLENV entries whose
+// variable names (matched case-insensitively before any '/') match entries,
+// preserving unrelated entries in order and appending entries with their
+// canonical names and flags.
+func setWSLENV(existing string, entries ...string) string {
+	replacing := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		name, _, _ := strings.Cut(entry, "/")
+		if name != "" {
+			replacing[strings.ToUpper(name)] = true
+		}
+	}
+	var result []string
+	for _, item := range strings.Split(existing, ":") {
+		if item == "" {
+			continue
+		}
+		name, _, _ := strings.Cut(item, "/")
+		if name == "" || replacing[strings.ToUpper(name)] {
+			continue
+		}
+		result = append(result, item)
+	}
+	seen := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		if entry == "" {
+			continue
+		}
+		name, _, _ := strings.Cut(entry, "/")
+		key := strings.ToUpper(name)
+		if name == "" || seen[key] {
+			continue
+		}
+		result = append(result, entry)
+		seen[key] = true
+	}
+	return strings.Join(result, ":")
 }
 
 func boundServiceInstructions(command []string) string {

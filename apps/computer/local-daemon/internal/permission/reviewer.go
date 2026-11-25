@@ -63,7 +63,8 @@ func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
 	if request.Action.Tool == "Bash" && SystemPrivacyUI(request.Action.Command) {
 		return Verdict{Decision: Deny, Message: SystemPrivacyUIMessage}
 	}
-	if request.Action.Tool == "Bash" {
+	switch request.Action.Tool {
+	case "Bash":
 		// Claude runs commands in its workspace; Codex may run one in any
 		// workdir its hook does not report.
 		cwd := r.Environment.Workspace
@@ -71,6 +72,13 @@ func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
 			cwd = ""
 		}
 		switch decision, confirm := Shell(request.Action.Command, cwd, r.Environment.Workspace, r.TeamHubCommands); decision {
+		case ShellAllow:
+			return Verdict{Decision: Allow}
+		case ShellRunAlone:
+			return Verdict{Decision: Deny, Message: RunAloneMessage(confirm)}
+		}
+	case "PowerShell":
+		switch decision, confirm := ShellPowerShell(request.Action.Command, r.TeamHubCommands); decision {
 		case ShellAllow:
 			return Verdict{Decision: Allow}
 		case ShellRunAlone:

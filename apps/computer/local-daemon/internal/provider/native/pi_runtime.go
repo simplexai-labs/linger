@@ -7,17 +7,40 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
 const (
-	piDefaultModel   = "pi-default"
-	piBaseTools      = "read,bash,edit,write,grep,find,ls"
-	piChildPipeDrain = time.Second
+	piDefaultModel     = "pi-default"
+	piBaseTools        = "read,bash,edit,write,grep,find,ls"
+	piWindowsBaseTools = "read,powershell,edit,write,grep,find,ls"
+	piChildPipeDrain   = time.Second
 )
 
-type piRuntime struct{ profile Profile }
+func piUsesPowerShell(goos string) bool {
+	return goos == "windows"
+}
+
+func piBaseToolsFor(goos string) string {
+	if piUsesPowerShell(goos) {
+		return piWindowsBaseTools
+	}
+	return piBaseTools
+}
+
+type piRuntime struct {
+	profile      Profile
+	goosOverride string
+}
+
+func (p *piRuntime) goos() string {
+	if p.goosOverride != "" {
+		return p.goosOverride
+	}
+	return runtime.GOOS
+}
 
 func newPiRuntime(profile Profile) Runtime { return &piRuntime{profile: profile} }
 
@@ -257,7 +280,7 @@ func (p *piRuntime) launchProcess(plan piLaunchPlan, lock *os.File) (*piProcess,
 	if mcp.wired() {
 		env[piMCPConfigEnvKey] = mcp.configPath
 	}
-	if mcp.wired() || spec.PermissionReviewer != nil || p.guardsShellText(spec) {
+	if p.needsManagedExtension(spec, mcp.wired()) {
 		piExtensionNodePath(env, p.profile.ManagedMCPExtension)
 	}
 	if p.guardsShellText(spec) {
@@ -333,16 +356,24 @@ func (p *piRuntime) args(plan piLaunchPlan, instructions string, wired bool) []s
 			args = append(args, "--skill", skills)
 		}
 	}
-	// The managed extension also carries permission review: its tool_call
-	// hook asks the Daemon over RPC (piProcess.answerDialog).
-	tools := piBaseTools
-	if wired || spec.PermissionReviewer != nil || p.guardsShellText(spec) {
+	// The managed extension also carries permission review and the Windows
+	// PowerShell UTF-8 override; its tool_call hook asks the Daemon over RPC
+	// (piProcess.answerDialog).
+	tools := piBaseToolsFor(p.goos())
+	if p.needsManagedExtension(spec, wired) {
 		args = append(args, "--extension", p.profile.ManagedMCPExtension)
 	}
 	if wired {
 		tools += ",mcp__*"
 	}
 	return append(args, "--tools", tools)
+}
+
+// needsManagedExtension reports whether Pi loads the managed extension for
+// MCP wiring, permission review, POSIX shell text guarding, or the Windows
+// PowerShell UTF-8 override.
+func (p *piRuntime) needsManagedExtension(spec RunSpec, wired bool) bool {
+	return wired || spec.PermissionReviewer != nil || p.guardsShellText(spec) || (piUsesPowerShell(p.goos()) && p.profile.ManagedMCPExtension != "")
 }
 
 // canSyncMCP reports whether a resident Pi process can load the managed
@@ -352,9 +383,10 @@ func (p *piRuntime) canSyncMCP() bool {
 }
 
 // guardsShellText reports whether the managed extension runs the
-// shell-text-hook before the Run's bash calls.
+// shell-text-hook before the Run's bash calls. Windows Pi runs PowerShell, so
+// it skips the POSIX shell text check.
 func (p *piRuntime) guardsShellText(spec RunSpec) bool {
-	return spec.ShellTextHook != "" && p.profile.ManagedMCPExtension != ""
+	return !piUsesPowerShell(p.goos()) && spec.ShellTextHook != "" && p.profile.ManagedMCPExtension != ""
 }
 
 // piResolveProgram finds the Pi executable on the Daemon's own search path.

@@ -687,7 +687,9 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
    the app's own Node (`ELECTRON_RUN_AS_NODE`) in packaged builds and on the
    `node` in PATH from source. The Desktop TeamHub shell launcher uses
    `wslpath` and `WSLENV` when WSL starts the Windows executable, so the
-   script path and `ELECTRON_RUN_AS_NODE` reach that process correctly.
+   script path, `ELECTRON_RUN_AS_NODE`, `WSL_DISTRO_NAME`, and any non-empty
+   `TEAMHUB_CONFIG` (translated from a Linux path with `wslpath -w`) and
+   `TEAMHUB_PROFILE` reach that process correctly.
    The CLI translates absolute Linux paths for local attachments, input files
    and Document file outputs using the invoking WSL distribution. Message text
    and remote paths stay unchanged. The same local file checks apply to the
