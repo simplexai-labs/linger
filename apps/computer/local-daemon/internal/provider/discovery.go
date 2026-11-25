@@ -74,6 +74,7 @@ type DiscoveryResult struct {
 type DiscoveryOptions struct {
 	RuntimeHomeRoot string
 	ConfiguredPaths map[string]string
+	BundledPaths    map[string]string
 	Environment     map[string]string
 	Timeout         time.Duration
 	// Runtimes limits discovery to these types; empty diagnoses every Runtime.
@@ -394,7 +395,12 @@ func boundedModelCatalogError(err error) string {
 
 func resolveExecutableEntry(ctx context.Context, kind, name string, options DiscoveryOptions) (string, error) {
 	if selected := options.ConfiguredPaths[kind]; selected != "" {
-		return selected, nil
+		if options.BundledPaths[kind] == "" {
+			return selected, nil
+		}
+		if _, err := canonicalExecutable(selected); err == nil {
+			return selected, nil
+		}
 	}
 	path := options.Environment["PATH"]
 	if path == "" {
@@ -411,6 +417,11 @@ func resolveExecutableEntry(ctx context.Context, kind, name string, options Disc
 			if _, err := canonicalExecutable(candidate); err == nil {
 				return candidate, nil
 			}
+		}
+	}
+	if bundled := options.BundledPaths[kind]; bundled != "" {
+		if _, err := canonicalExecutable(bundled); err == nil {
+			return bundled, nil
 		}
 	}
 	return "", os.ErrNotExist

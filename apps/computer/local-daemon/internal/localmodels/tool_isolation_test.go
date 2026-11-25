@@ -612,3 +612,126 @@ func TestCommandArgsFollowsTheInstallerLegacyToolsMarker(t *testing.T) {
 		t.Fatalf("per-home tools dir created for a legacy home: %v", err)
 	}
 }
+
+func TestCommandArgsAppendsBundledPiPathWithPrecedence(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "runtime", "localmodels", "state")
+	userHome := filepath.Join(root, "user-home")
+	userBin := filepath.Join(root, "user-bin")
+	localBin := filepath.Join(userHome, ".local", "bin")
+	bundledBin := filepath.Join(root, "cli", "computer-tools", "bin")
+	piToolsDir := filepath.Join(HarnessRoot(stateDir), "tools", "pi")
+
+	for _, dir := range []string{stateDir, userBin, localBin, bundledBin} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	piName := "pi"
+	if runtime.GOOS == "windows" {
+		piName = "pi.exe"
+	}
+	for _, ver := range []string{"1.2.0", "1.5.2", "1.6.0", "1.10.0", "unparseable"} {
+		dir := filepath.Join(piToolsDir, ver)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, piName), []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tool := Tool{
+		Python:           filepath.Join(root, "python"),
+		ModuleDirectory:  filepath.Join(root, "modules"),
+		StateDirectory:   stateDir,
+		BaseDirectory:    filepath.Join(root, "models"),
+		BundledPiBinDir:  bundledBin,
+		BundledPiVersion: "1.5.2",
+	}
+
+	env := map[string]string{
+		"HOME": userHome,
+		"PATH": userBin,
+	}
+	want := []string{
+		userBin,
+		localBin,
+	}
+	if runtime.GOOS == "windows" {
+		appData := filepath.Join(userHome, "AppData", "Roaming")
+		npmBin := filepath.Join(appData, "npm")
+		if err := os.MkdirAll(npmBin, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		env["APPDATA"] = appData
+		want = append(want, npmBin)
+	}
+	expectedBundledDir := bundledBin
+	if runtime.GOOS != "windows" {
+		expectedBundledDir = filepath.Join(root, "runtime", "bundled-pi", "bin")
+	}
+	want = append(want,
+		filepath.Join(piToolsDir, "1.10.0"),
+		filepath.Join(piToolsDir, "1.6.0"),
+		expectedBundledDir,
+	)
+
+	cmd := tool.commandArgs(env, []string{"-P", "-s", "-m", "localmodels", "source", "status"})
+	gotPath := envValue(t, cmd.Env, "PATH")
+	gotList := filepath.SplitList(gotPath)
+	if len(gotList) != len(want) {
+		t.Fatalf("PATH entries = %v, want %v", gotList, want)
+	}
+	for i := range want {
+		if gotList[i] != want[i] {
+			t.Fatalf("PATH[%d] = %q, want %q (full=%v)", i, gotList[i], want[i], gotList)
+		}
+	}
+	if _, hasOverride := envEntries(cmd.Env)["SIMPLEX_PI_PATH"]; hasOverride {
+		t.Fatal("SIMPLEX_PI_PATH must not be set")
+	}
+	if runtime.GOOS != "windows" {
+		linkPath := filepath.Join(expectedBundledDir, "pi")
+		target, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("expected stable bundled Pi symlink at %q: %v", linkPath, err)
+		}
+		wantTarget := filepath.Join(bundledBin, "pi")
+		if target != wantTarget {
+			t.Fatalf("stable bundled Pi symlink target = %q, want %q", target, wantTarget)
+		}
+		// Relocating the app bundle refreshes the stable symlink atomically.
+		movedBin := filepath.Join(root, "moved-app", "cli", "computer-tools", "bin")
+		if err := os.MkdirAll(movedBin, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		movedTool := tool
+		movedTool.BundledPiBinDir = movedBin
+		movedCmd := movedTool.commandArgs(env, []string{"-P", "-s", "-m", "localmodels", "source", "status"})
+		movedList := filepath.SplitList(envValue(t, movedCmd.Env, "PATH"))
+		if movedList[len(movedList)-1] != expectedBundledDir {
+			t.Fatalf("relocated PATH tail = %q, want stable dir %q", movedList[len(movedList)-1], expectedBundledDir)
+		}
+		refreshedTarget, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("Readlink after relocation: %v", err)
+		}
+		if wantMoved := filepath.Join(movedBin, "pi"); refreshedTarget != wantMoved {
+			t.Fatalf("refreshed symlink target = %q, want %q", refreshedTarget, wantMoved)
+		}
+	}
+
+	// setup inspect must never inject bundled Pi onto PATH so machines without
+	// Claude or Codex keep the default recommendation instead of picking pi.
+	inspectCmd := tool.commandArgs(env, []string{"-P", "-s", "-m", "localmodels", "setup", "inspect", "--json"})
+	inspectList := filepath.SplitList(envValue(t, inspectCmd.Env, "PATH"))
+	for _, entry := range inspectList {
+		if entry == bundledBin || entry == expectedBundledDir {
+			t.Fatalf("setup inspect PATH unexpectedly included bundled Pi dir %q: %v", entry, inspectList)
+		}
+	}
+	if len(inspectList) != 1 || inspectList[0] != userBin {
+		t.Fatalf("setup inspect PATH = %v, want [%q]", inspectList, userBin)
+	}
+}

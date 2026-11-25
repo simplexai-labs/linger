@@ -72,7 +72,7 @@ it("delegates all hardware policy, runtime detection, estimates and recommendati
       "en",
       "--json",
     ],
-    expect.objectContaining({ timeoutMs: 120000 }),
+    expect.objectContaining({ timeoutMs: 120000, bundledPi: null }),
   );
   expect(report.hardware.totalMemoryBytes).toBe(7);
   expect(report.localModels).toMatchObject({
@@ -717,4 +717,78 @@ it("keeps local-models as the recommendation when local models are ready even wi
   const report = await inspectSetup({ localmodels, probeRuntimes });
   expect(report.localModels).toMatchObject({ eligible: true, state: "ready" });
   expect(report.recommendation).toBe("local-models");
+});
+
+it("keeps bundled Pi excluded from both localmodels and daemon setup inspection", async () => {
+  const base = upstream(false);
+  const localmodels = runner({
+    ...base,
+    harness: {
+      schema: "localmodels.harness-status/v1",
+      runtimes: ["codex", "claude", "pi"].map((runtime) => ({
+        runtime,
+        installed: false,
+        authenticated: false,
+      })),
+    },
+    recommendation: "codex",
+  });
+  const probeRuntimes = vi.fn<NonNullable<SetupOptions["probeRuntimes"]>>(
+    async () => [
+      {
+        type: "codex" as const,
+        status: "not_installed" as const,
+        installed: false,
+        authenticated: false,
+        requiredVersion: "0.166.0",
+      },
+      {
+        type: "claude" as const,
+        status: "not_installed" as const,
+        installed: false,
+        authenticated: false,
+        requiredVersion: "2.1.282",
+      },
+      {
+        type: "pi" as const,
+        status: "not_installed" as const,
+        installed: false,
+        authenticated: false,
+        requiredVersion: "1.2.0",
+      },
+    ],
+  );
+
+  const daemonBacked = await inspectSetup({ localmodels, probeRuntimes });
+  expect(localmodels).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.any(Array),
+    expect.objectContaining({ bundledPi: null }),
+  );
+  expect(probeRuntimes).toHaveBeenCalledTimes(1);
+  expect(probeRuntimes.mock.calls[0]?.[0]?.includeBundled).not.toBe(true);
+  expect(daemonBacked.recommendation).not.toBe("pi");
+  expect(daemonBacked.recommendation).toBe("claude");
+
+  const fallbackLocalmodels = runner({
+    ...base,
+    harness: {
+      schema: "localmodels.harness-status/v1",
+      runtimes: ["codex", "claude", "pi"].map((runtime) => ({
+        runtime,
+        installed: false,
+        authenticated: false,
+      })),
+    },
+    recommendation: "codex",
+  });
+  const legacyFallback = await inspectWithoutDaemon({
+    localmodels: fallbackLocalmodels,
+  });
+  expect(fallbackLocalmodels).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.any(Array),
+    expect.objectContaining({ bundledPi: null }),
+  );
+  expect(legacyFallback.recommendation).toBe("codex");
 });

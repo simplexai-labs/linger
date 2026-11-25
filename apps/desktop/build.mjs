@@ -29,6 +29,14 @@ const daemonTargets = process.env.LINGER_DESKTOP_DAEMON_TARGETS?.split(
 // builds pin it, either bundled in the app (LINGER_SOURCE_ARCHIVE_FILE) or
 // downloaded; without it the desktop offers only an existing checkout.
 const bundledSource = process.env.LINGER_SOURCE_ARCHIVE_FILE;
+// Full committed source archive used to compile prebuilt TeamHub binaries and
+// the Native runtime when LINGER_SOURCE_ARCHIVE_FILE ships a minimal skeleton.
+const buildSource = process.env.LINGER_BUILD_SOURCE_ARCHIVE_FILE;
+if (buildSource && !bundledSource) {
+  throw new Error(
+    "LINGER_BUILD_SOURCE_ARCHIVE_FILE requires LINGER_SOURCE_ARCHIVE_FILE",
+  );
+}
 // Other hosts serving the same file, separated by spaces; the desktop tries
 // them in order when the first one fails or stalls.
 function mirrors(name, value) {
@@ -247,7 +255,10 @@ const runtimeTargets = daemonTargets.filter((target) =>
 const buildNativeOutputs = async () => {
   if (!sourceArchive || (!teamhubTargets.length && !runtimeTargets.length))
     return;
-  let archive = bundledSource;
+  let archive = buildSource || bundledSource;
+  const shippedOptions = buildSource
+    ? { shippedArchive: bundledSource }
+    : undefined;
   const work = archive
     ? undefined
     : await mkdtemp(path.join(tmpdir(), "linger-source-"));
@@ -270,7 +281,12 @@ const buildNativeOutputs = async () => {
     await Promise.all([
       (async () => {
         for (const target of teamhubTargets) {
-          const manifest = await buildTeamhub(target, archive);
+          const manifest = await buildTeamhub(
+            target,
+            archive,
+            undefined,
+            shippedOptions,
+          );
           console.log(
             `TeamHub binaries for ${target} from ${manifest.sourceCommit.slice(0, 12)}`,
           );
@@ -278,7 +294,12 @@ const buildNativeOutputs = async () => {
       })(),
       (async () => {
         for (const target of runtimeTargets) {
-          const manifest = await buildRuntime(target, archive);
+          const manifest = await buildRuntime(
+            target,
+            archive,
+            undefined,
+            shippedOptions,
+          );
           console.log(
             `Native runtime for ${target} from ${manifest.sourceCommit.slice(0, 12)}: ${manifest.layout === "directory" ? "a folder" : `${manifest.archive.bytes} bytes`}`,
           );

@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   COMPUTER_TOOL_VERSIONS,
   QUICKJS_TOOL_ASSETS,
+  piRuntimeEntry,
 } from "../computer-tool-bundle.mjs";
 
 // Installer tests already replace Node and Go with fixture executables. Keep
@@ -14,9 +15,11 @@ export const stageFixtureComputerTools = async (
   target: string,
 ) => {
   const root = path.join(bundle, "cli/computer-tools");
+  const piEntry = piRuntimeEntry(target);
   const files = [
     "extensions/pi-mcp.mjs",
     "node_modules/@playwright/mcp/cli.js",
+    piEntry,
     ...QUICKJS_TOOL_ASSETS,
   ];
   if (target.startsWith("darwin-"))
@@ -26,13 +29,16 @@ export const stageFixtureComputerTools = async (
   for (const name of files.sort()) {
     const file = path.join(root, name);
     const content = `// Fixture Computer tool: ${name}\n`;
+    const mode =
+      name === piEntry && !target.startsWith("win32-") ? 0o755 : 0o644;
     await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, content, { mode: 0o644 });
+    await writeFile(file, content, { mode });
+    if (mode === 0o755) await chmod(file, 0o755);
     assets.push({
       path: name,
       size_bytes: Buffer.byteLength(content),
       sha256: createHash("sha256").update(content).digest("hex"),
-      mode: 0o644,
+      mode,
     });
   }
   await writeFile(
@@ -43,6 +49,7 @@ export const stageFixtureComputerTools = async (
       target,
       playwright_entry: "node_modules/@playwright/mcp/cli.js",
       pi_extension: "extensions/pi-mcp.mjs",
+      pi_entry: piEntry,
       cua_entry: target.startsWith("darwin-")
         ? "cua/cua-driver"
         : target.startsWith("win32-")

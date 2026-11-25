@@ -43,6 +43,8 @@ import { loadInstance } from "@linger/local-installation/instance";
 import { foldersInUse } from "@linger/local-installation/native-process";
 import { normalizeFailurePunctuation } from "@linger/local-installation/localmodels-failure";
 import {
+  canBuildNativeServicesFromSource,
+  canCompileTeamhubFromSource,
   localRunnerGatewayUrl,
   validateSourceRepository,
 } from "@linger/local-installation/source-checkout";
@@ -2278,11 +2280,16 @@ export class LocalServerModule implements Module {
     const glibc = this.#glibcVersion();
     if (glibc && !atLeast(glibc, MIN_GLIBC)) {
       // Its native packages, like the PostgreSQL build, need a newer glibc;
-      // Native installs the source's packages instead.
+      // Native installs the source's packages instead when source files exist.
       this.#ctx?.log.warn("local_server.native_runtime_skipped", {
         glibc,
         required: MIN_GLIBC,
       });
+      if (!(await canBuildNativeServicesFromSource(repo))) {
+        throw new Error(
+          `Linger requires Linux with glibc ${MIN_GLIBC} or later (detected ${glibc}) because this release uses prebuilt offline services.`,
+        );
+      }
       return;
     }
     try {
@@ -2321,9 +2328,16 @@ export class LocalServerModule implements Module {
     } catch (error) {
       if (signal.aborted) throw error;
       await removeRetrying(directory).catch(() => undefined);
+      const detail = error instanceof Error ? error.message : String(error);
       this.#ctx?.log.warn("local_server.native_runtime_failed", {
-        error: error instanceof Error ? error.message : String(error),
+        error: detail,
       });
+      if (!(await canBuildNativeServicesFromSource(repo))) {
+        throw new Error(
+          `The bundled offline Linger services could not be unpacked or verified (${detail}). Reinstall Linger to restore them.`,
+          { cause: error },
+        );
+      }
     }
   }
 
@@ -2415,9 +2429,17 @@ export class LocalServerModule implements Module {
         this.#ctx?.log.info("local_server.teamhub_binaries", { target });
       }
     } catch (error) {
+      if (signal.aborted) throw error;
+      const detail = error instanceof Error ? error.message : String(error);
       this.#ctx?.log.warn("local_server.teamhub_binaries_failed", {
-        error: error instanceof Error ? error.message : String(error),
+        error: detail,
       });
+      if (!(await canCompileTeamhubFromSource(repo))) {
+        throw new Error(
+          `The bundled TeamHub binaries could not be verified (${detail}). Reinstall Linger to restore them.`,
+          { cause: error },
+        );
+      }
     }
   }
 

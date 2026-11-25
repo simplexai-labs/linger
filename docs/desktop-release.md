@@ -376,23 +376,33 @@ repository root.
 
 ### Source Package
 
-Release builds set `LINGER_SOURCE_ARCHIVE_URL` (https) and
-`LINGER_SOURCE_ARCHIVE_SHA256` before `node build.mjs`. Produce them from the
-release tag in the repository root:
+Release builds bundle a minimal source skeleton inside the app and compile the
+Native runtime and TeamHub binaries from a full source archive of the same
+commit. Produce both from the release tag in the repository root:
 
 ```sh
 SOURCE_ARCHIVE_REF=v1.2.3 \
 SOURCE_ARCHIVE_URL_BASE=https://github.com/simplexai-labs/linger/releases/download/v1.2.3 \
   make source-archive
+node scripts/prepare-source-archive.mjs --ref v1.2.3 --mode minimal \
+  --output .linger-runtime/source-archive/shipped
 ```
 
-Upload `.linger-runtime/source-archive/linger-v1.2.3.tar.gz` to that release
-and take both values from `source-archive.json` next to it. One commit always
-gives the same digest. To ship the package inside the app instead (about
-45 MB more, no hosting needed), set `LINGER_SOURCE_ARCHIVE_FILE` to the
-archive; the build copies it beside the installer and pins its digest. Without
-either (and without `LINGER_CHECKOUT`) the build does not offer a
-local install.
+`scripts/ci/desktop-release.sh` sets `LINGER_SOURCE_ARCHIVE_FILE` to the
+`--mode minimal` archive (an 8-file runtime skeleton shipped inside the app so
+installers do not need to ship or unpack the full repository) and sets
+`LINGER_BUILD_SOURCE_ARCHIVE_FILE` to the full archive so `node build.mjs`
+compiles TeamHub and the Native runtime from it while recording the shipped
+skeleton's digest. Alternatively, set `LINGER_SOURCE_ARCHIVE_URL` (https) and
+`LINGER_SOURCE_ARCHIVE_SHA256` from `source-archive.json` to download the source
+package at install time; one commit always gives the same digest. Without
+either (and without `LINGER_CHECKOUT`) the build does not offer a local install.
+
+The staged Computer tools (`cli/computer-tools/` and `runtime/bin/node`) also
+ship the bundled Pi 1.5.2 runtime (`cli/computer-tools/bin/pi`, or `bin/pi.exe`
+on Windows) running on the bundled Node.js runtime, so local setup and the
+Daemon can use Pi immediately without downloading npm packages while still
+preferring a user-installed or newer harness-managed Pi when present.
 
 A downloaded source package can have a dependency store for each platform
 beside it, so the native install of its packages needs no registry. Build it

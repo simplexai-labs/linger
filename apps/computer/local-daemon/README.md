@@ -110,10 +110,13 @@ authentication probe for Desktop setup and the local installer. It shares
 via `computerconfig.RuntimeEnvironment`) and `provider.Discover` (with
 `SkipModelCatalog: true`) with `linger-computer` and the resident Daemon.
 It accepts repeatable `--runtime <codex|claude|pi|antigravity>` (defaulting to
-`codex`, `claude`, and `pi`) and optional `--timeout-ms`, and emits a single
-`linger.daemon.runtime-probe/v1` JSON object on stdout carrying per-runtime
-`type`, `status`, `installed`, `authenticated`, redacted `version`,
-`required_version`, `executable`, and optional `error`.
+`codex`, `claude`, and `pi`), optional `--include-bundled` (off by default so
+setup inspection reports only host-installed runtimes; enabled for runtime
+reconciliation so bundled Pi is discovered when absent from `PATH`), and
+optional `--timeout-ms`, and emits a single `linger.daemon.runtime-probe/v1`
+JSON object on stdout carrying per-runtime `type`, `status`, `installed`,
+`authenticated`, redacted `version`, `required_version`, `executable`, and
+optional `error`.
 
 ## One-shot model calls
 

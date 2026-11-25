@@ -607,3 +607,115 @@ esac
 		t.Fatal("Discover mutated caller environment map")
 	}
 }
+
+func TestResolveExecutableEntryBundledPathsPrecedenceAndFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX executable permissions")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	userBin := filepath.Join(root, "user-bin")
+	emptyBin := filepath.Join(root, "empty-bin")
+	bundledBin := filepath.Join(root, "bundled-bin")
+	for _, dir := range []string{home, userBin, emptyBin, bundledBin} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	userPi := filepath.Join(userBin, "pi")
+	bundledPi := filepath.Join(bundledBin, "pi")
+	configuredPi := filepath.Join(root, "configured-pi")
+	for _, file := range []string{userPi, bundledPi, configuredPi} {
+		if err := os.WriteFile(file, []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// User PATH beats BundledPaths.
+	got, err := resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != userPi {
+		t.Fatalf("user PATH vs bundled: got %q, %v; want %q", got, err, userPi)
+	}
+
+	// BundledPaths is used when PATH has no pi.
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != bundledPi {
+		t.Fatalf("empty PATH fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	}
+
+	// Valid ConfiguredPaths beats both PATH and BundledPaths.
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": configuredPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != configuredPi {
+		t.Fatalf("valid configured vs PATH/bundled: got %q, %v; want %q", got, err, configuredPi)
+	}
+
+	// Stale ConfiguredPaths["pi"] falls back to PATH first, then BundledPaths.
+	stalePi := filepath.Join(root, "moved-app", "pi")
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": stalePi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != userPi {
+		t.Fatalf("stale configured fallback to PATH: got %q, %v; want %q", got, err, userPi)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": stalePi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != bundledPi {
+		t.Fatalf("stale configured fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	}
+
+	// Dangling symlink in ConfiguredPaths["pi"] also falls back to PATH first, then BundledPaths.
+	danglingPi := filepath.Join(root, "dangling-pi")
+	if err := os.Symlink(stalePi, danglingPi); err != nil {
+		t.Fatal(err)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": danglingPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != userPi {
+		t.Fatalf("dangling symlink configured fallback to PATH: got %q, %v; want %q", got, err, userPi)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": danglingPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != bundledPi {
+		t.Fatalf("dangling symlink configured fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	}
+
+	// Missing ConfiguredPaths for a non-bundled runtime keeps its explicit configured path
+	// (so diagnose reports not_installed instead of silently falling back to PATH).
+	staleCodex := filepath.Join(root, "missing-codex")
+	userCodex := filepath.Join(userBin, "codex")
+	if err := os.WriteFile(userCodex, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "codex", "codex", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"codex": staleCodex},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != staleCodex {
+		t.Fatalf("non-bundled configured path: got %q, %v; want %q", got, err, staleCodex)
+	}
+	if _, err := canonicalExecutable(got); err == nil {
+		t.Fatalf("missing configured non-bundled path %q unexpectedly canonicalized", got)
+	}
+}

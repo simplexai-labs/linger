@@ -37,6 +37,7 @@ export interface DaemonRuntimeObservation {
 export interface DaemonRuntimeProbeOptions {
   readonly runtimes?: readonly DaemonProbeRuntimeKind[];
   readonly configuredPaths?: Partial<Record<DaemonProbeRuntimeKind, string>>;
+  readonly includeBundled?: boolean;
   readonly env?: NodeJS.ProcessEnv;
   readonly daemonExecutable?: string;
   readonly platform?: NodeJS.Platform;
@@ -210,6 +211,9 @@ export async function probeRuntimesWithDaemon(
   if (!daemon) return null;
 
   const args: string[] = ["probe-runtimes", "--json"];
+  if (options.includeBundled === true) {
+    args.push("--include-bundled");
+  }
   for (const runtime of options.runtimes ?? []) {
     args.push("--runtime", runtime);
   }

@@ -28,6 +28,11 @@ import {
   installNativeSource,
   stopNativeSource,
 } from "./native-source.js";
+import {
+  canBuildNativeServicesFromSource,
+  canCompileTeamhubFromSource,
+  isMinimalSourceSkeleton,
+} from "./source-checkout.js";
 import { localIdentityProof } from "./account.js";
 import { runProcess } from "./process.js";
 import { REGION_SCHEMA, regionFile } from "./region.js";
@@ -1586,6 +1591,267 @@ test("a failed compile shows the compiler's lines on the setup page", async () =
     `Inspect ${path.join(logs, "teamhub.log")}.`,
   );
   expect(result.message).toMatch(/^Native teamhub failed to compile\.\n/);
+  expect(inspectNativeListeners).not.toHaveBeenCalled();
+});
+
+test("readiness polling checks HTTP first and confirms listener ownership once without direct process inspections", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  let started = 0;
+  vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    f.running.add(options.name);
+    if (++started === 3) {
+      vi.mocked(inspectNativeProcess).mockClear();
+      vi.mocked(inspectNativeListeners).mockClear();
+    }
+    return { running: true, pid: 100 };
+  });
+  const snapshotRounds: number[] = [];
+  let healthCalls = 0;
+  const baseFetch = globalThis.fetch;
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.mocked(inspectNativeListeners).mockImplementation(
+      async (_root, listeners) => {
+        snapshotRounds.push(Math.ceil(healthCalls / 4));
+        return listeners.map(({ name }) => ({ running: f.running.has(name) }));
+      },
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, init?: RequestInit) => {
+        const text = String(url);
+        if (!text.endsWith("/healthz") && !text.endsWith("/readyz"))
+          return baseFetch(url, init);
+        healthCalls += 1;
+        const round = Math.ceil(healthCalls / 4);
+        if (healthCalls > 1 && healthCalls % 4 === 1)
+          vi.setSystemTime(Date.now() + 500);
+        return new Response("{}", { status: round < 4 ? 503 : 200 });
+      }),
+    );
+    const result = await installNativeSource({
+      ...f,
+      name: "native-flow",
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    expect(result.code).toBe(0);
+    expect(healthCalls).toBe(20);
+    expect(inspectNativeListeners).toHaveBeenCalledTimes(1);
+    expect(snapshotRounds).toEqual([4]);
+    expect(inspectNativeProcess).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a service that exits silently while endpoints return 503 is caught on the periodic listener snapshot", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  let started = 0;
+  vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    if (options.name !== "teamhub") f.running.add(options.name);
+    if (++started === 3) {
+      vi.mocked(inspectNativeProcess).mockClear();
+      vi.mocked(inspectNativeListeners).mockClear();
+    }
+    return { running: true, pid: 100 };
+  });
+  const snapshotRounds: number[] = [];
+  let healthCalls = 0;
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.mocked(inspectNativeListeners).mockImplementation(
+      async (_root, listeners) => {
+        snapshotRounds.push(Math.ceil(healthCalls / 4));
+        return listeners.map(({ name }) => ({ running: f.running.has(name) }));
+      },
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        const text = String(url);
+        if (text.endsWith("/healthz") || text.endsWith("/readyz")) {
+          healthCalls += 1;
+          if (healthCalls === 5) vi.setSystemTime(Date.now() + 2_000);
+          else if (healthCalls === 9) vi.setSystemTime(Date.now() + 3_000);
+        }
+        return new Response("{}", { status: 503 });
+      }),
+    );
+    const result = await installNativeSource({
+      ...f,
+      name: "native-flow",
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    expect(result).toMatchObject({ code: 1, state: "failed" });
+    expect(result.message).toContain("Native teamhub stopped during startup.");
+    expect(inspectNativeListeners).toHaveBeenCalledTimes(1);
+    expect(snapshotRounds).toEqual([3]);
+    expect(inspectNativeProcess).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("aborting during HTTP readiness polling exits without taking a listener snapshot", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  let started = 0;
+  vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    f.running.add(options.name);
+    if (++started === 3) {
+      vi.mocked(inspectNativeProcess).mockClear();
+      vi.mocked(inspectNativeListeners).mockClear();
+    }
+    return { running: true, pid: 100 };
+  });
+  vi.mocked(inspectNativeListeners).mockImplementation(
+    async (_root, listeners) =>
+      listeners.map(({ name }) => ({ running: f.running.has(name) })),
+  );
+  const controller = new AbortController();
+  const healthSignals: (AbortSignal | null | undefined)[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((_url, init?: RequestInit) => {
+      const requestSignal = init?.signal;
+      healthSignals.push(requestSignal);
+      return new Promise<Response>((_resolve, reject) => {
+        const onAbort = () =>
+          reject(requestSignal?.reason ?? new Error("aborted"));
+        if (requestSignal?.aborted) {
+          onAbort();
+          return;
+        }
+        requestSignal?.addEventListener("abort", onAbort, { once: true });
+        if (healthSignals.length === 4) controller.abort();
+      });
+    }),
+  );
+  const result = await installNativeSource({
+    ...f,
+    name: "native-flow",
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: controller.signal,
+    onEvent: () => {},
+  });
+  expect(result).toMatchObject({ code: 130, state: "cancelled" });
+  expect(healthSignals).toHaveLength(4);
+  expect(healthSignals.every((signal) => signal?.aborted)).toBe(true);
+  expect(inspectNativeListeners).not.toHaveBeenCalled();
+  expect(inspectNativeProcess).not.toHaveBeenCalled();
+});
+
+test("a transient listener inspection error retries on the next tick instead of falsely reporting a stopped service", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  let started = 0;
+  vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    f.running.add(options.name);
+    if (++started === 3) {
+      vi.mocked(inspectNativeProcess).mockClear();
+      vi.mocked(inspectNativeListeners).mockClear();
+    }
+    return { running: true, pid: 100 };
+  });
+  let snapshotAttempts = 0;
+  vi.mocked(inspectNativeListeners).mockImplementation(
+    async (_root, listeners) => {
+      if (++snapshotAttempts === 1)
+        throw new Error("transient listener query failure");
+      return listeners.map(({ name }) => ({ running: f.running.has(name) }));
+    },
+  );
+  const result = await installNativeSource({
+    ...f,
+    name: "native-flow",
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(result.code).toBe(0);
+  expect(inspectNativeListeners).toHaveBeenCalledTimes(2);
+  expect(inspectNativeProcess).not.toHaveBeenCalled();
+});
+
+test("post-snapshot HTTP confirmation prevents an exiting foreign listener from passing readiness", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  let started = 0;
+  vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    f.running.add(options.name);
+    if (++started === 3) {
+      vi.mocked(inspectNativeProcess).mockClear();
+      vi.mocked(inspectNativeListeners).mockClear();
+    }
+    return { running: true, pid: 100 };
+  });
+  vi.mocked(inspectNativeListeners).mockImplementation(
+    async (_root, listeners) =>
+      listeners.map(({ name }) => ({ running: f.running.has(name) })),
+  );
+  let healthCalls = 0;
+  const baseFetch = globalThis.fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url, init?: RequestInit) => {
+      const text = String(url);
+      if (!text.endsWith("/healthz") && !text.endsWith("/readyz"))
+        return baseFetch(url, init);
+      healthCalls += 1;
+      const round = Math.ceil(healthCalls / 4);
+      // Round 1 mimics an exiting foreign listener answering 200; round 2 is
+      // the post-snapshot confirmation failing with 503 after it exited.
+      return new Response("{}", { status: round === 2 ? 503 : 200 });
+    }),
+  );
+  const logs: string[] = [];
+  const result = await installNativeSource({
+    ...f,
+    name: "native-flow",
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: (event) => {
+      if (event.kind === "log") logs.push(event.message);
+    },
+  });
+  expect(result.code).toBe(0);
+  expect(healthCalls).toBe(16);
+  expect(inspectNativeListeners).toHaveBeenCalledTimes(2);
+  expect(inspectNativeProcess).not.toHaveBeenCalled();
+  expect(logs.join("")).toContain(
+    "Waiting for native compilation and readiness (0/4 ready).",
+  );
 });
 
 test("a native module that has to compile installs Apple's tools and retries", async () => {
@@ -3419,4 +3685,176 @@ test("logs per-step stop timings and a summary even on partial stop failure", as
   expect(failLogs.at(-1)).toMatch(
     /^Native stop timings \(s\): computer [\d.]+, web [\d.]+, node-services [\d.]+, teamhub [\d.]+\.$/,
   );
+});
+
+async function makeMinimalSkeletonRepo(repo: string) {
+  await mkdir(path.join(repo, "apps/teamhub"), { recursive: true });
+  await mkdir(path.join(repo, "scripts"), { recursive: true });
+  await writeFile(path.join(repo, ".env.example"), "");
+  await writeFile(
+    path.join(repo, "apps/teamhub/go.mod"),
+    "module example.com/teamhub\n",
+  );
+  await writeFile(
+    path.join(repo, "scripts/env-inventory.json"),
+    JSON.stringify({ variables: [] }),
+  );
+  await writeFile(path.join(repo, "scripts/local-defaults.env"), "");
+  await writeFile(path.join(repo, "scripts/replace-process.mjs"), "");
+  await writeFile(path.join(repo, "scripts/with-local-env.mjs"), "");
+}
+
+async function seedVerifiedTeamhubBinaries(repo: string) {
+  const directory = path.join(repo, TEAMHUB_BINARY_DIRECTORY);
+  await mkdir(directory, { recursive: true });
+  const binaries: Record<string, object> = {};
+  for (const command of TEAMHUB_COMMANDS) {
+    const body = `${command} binary`;
+    await writeFile(path.join(directory, `${command}.exe`), body);
+    binaries[command] = {
+      file: `${command}.exe`,
+      sha256: createHash("sha256").update(body).digest("hex"),
+      bytes: body.length,
+    };
+  }
+  await writeFile(
+    path.join(directory, "manifest.json"),
+    JSON.stringify({
+      target: `${process.platform}-${process.arch}`,
+      sourceCommit: "a".repeat(40),
+      sourceArchiveSha256: "b".repeat(64),
+      goVersion: "1.26.5",
+      binaries,
+    }),
+  );
+  return directory;
+}
+
+test("minimal 8-file release skeleton fails fast without Go or pnpm fallback when prebuilt binaries or offline services are missing or damaged", async () => {
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+
+  // 0. Source skeleton classification distinguishes synthetic fixtures, minimal skeletons, and full checkouts.
+  {
+    const f = await fixture();
+    expect(await isMinimalSourceSkeleton(f.repo)).toBe(false);
+    expect(await canCompileTeamhubFromSource(f.repo)).toBe(true);
+    expect(await canBuildNativeServicesFromSource(f.repo)).toBe(true);
+
+    await makeMinimalSkeletonRepo(f.repo);
+    expect(await isMinimalSourceSkeleton(f.repo)).toBe(true);
+    expect(await canCompileTeamhubFromSource(f.repo)).toBe(false);
+    expect(await canBuildNativeServicesFromSource(f.repo)).toBe(false);
+
+    await mkdir(path.join(f.repo, "apps/teamhub/cmd"), { recursive: true });
+    await mkdir(path.join(f.repo, "apps/node-services"), { recursive: true });
+    await mkdir(path.join(f.repo, "apps/web"), { recursive: true });
+    await writeFile(path.join(f.repo, "pnpm-lock.yaml"), "");
+    await writeFile(path.join(f.repo, "apps/node-services/package.json"), "{}");
+    await writeFile(path.join(f.repo, "apps/web/package.json"), "{}");
+    expect(await isMinimalSourceSkeleton(f.repo)).toBe(false);
+    expect(await canCompileTeamhubFromSource(f.repo)).toBe(true);
+    expect(await canBuildNativeServicesFromSource(f.repo)).toBe(true);
+  }
+
+  // 1. Missing TeamHub binaries on minimal skeleton.
+  {
+    const f = await fixture();
+    await makeMinimalSkeletonRepo(f.repo);
+    const logs: string[] = [];
+    const outcome = await installNativeSource({
+      ...f,
+      name: "skeleton-missing-teamhub",
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: (event) => logs.push(event.message),
+    });
+    expect(outcome.code).toBe(1);
+    expect(outcome.message).toContain(
+      "The bundled TeamHub binaries are missing and this release does not include Go source files to compile them.",
+    );
+    expect(logs).not.toContain(
+      "The bundled TeamHub binaries do not verify; compiling TeamHub instead.\n",
+    );
+    expect(prepareNativeDependencies).not.toHaveBeenCalled();
+  }
+
+  // 2. Damaged TeamHub binaries on minimal skeleton.
+  {
+    const f = await fixture();
+    await makeMinimalSkeletonRepo(f.repo);
+    const binDir = await seedVerifiedTeamhubBinaries(f.repo);
+    await writeFile(path.join(binDir, "migrate.exe"), "corrupted");
+    const logs: string[] = [];
+    const outcome = await installNativeSource({
+      ...f,
+      name: "skeleton-damaged-teamhub",
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: (event) => logs.push(event.message),
+    });
+    expect(outcome.code).toBe(1);
+    expect(outcome.message).toContain(
+      "The bundled TeamHub binaries are damaged and could not be verified. Reinstall Linger to restore them.",
+    );
+    expect(logs).not.toContain(
+      "The bundled TeamHub binaries do not verify; compiling TeamHub instead.\n",
+    );
+    expect(prepareNativeDependencies).not.toHaveBeenCalled();
+  }
+
+  // 3. Missing offline runtime on minimal skeleton.
+  {
+    const f = await fixture();
+    await makeMinimalSkeletonRepo(f.repo);
+    await seedVerifiedTeamhubBinaries(f.repo);
+    const logs: string[] = [];
+    const outcome = await installNativeSource({
+      ...f,
+      name: "skeleton-missing-runtime",
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: (event) => logs.push(event.message),
+    });
+    expect(outcome.code).toBe(1);
+    expect(outcome.message).toContain(
+      "The bundled offline Linger services are unavailable",
+    );
+    expect(logs).not.toContain(
+      "The bundled Native services do not verify; installing the checkout's packages instead.\n",
+    );
+    expect(prepareNativeDependencies).not.toHaveBeenCalled();
+  }
+
+  // 4. Damaged offline runtime on minimal skeleton.
+  {
+    const f = await fixture();
+    await makeMinimalSkeletonRepo(f.repo);
+    await seedVerifiedTeamhubBinaries(f.repo);
+    const runtimeDir = await bundledRuntime(f.repo);
+    await writeFile(path.join(runtimeDir, "web/dist/index.html"), "tampered");
+    const logs: string[] = [];
+    const outcome = await installNativeSource({
+      ...f,
+      name: "skeleton-damaged-runtime",
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: (event) => logs.push(event.message),
+    });
+    expect(outcome.code).toBe(1);
+    expect(outcome.message).toContain(
+      "The bundled offline Linger services are damaged and could not be verified. Reinstall Linger to restore them.",
+    );
+    expect(logs).not.toContain(
+      "The bundled Native services do not verify; installing the checkout's packages instead.\n",
+    );
+    expect(prepareNativeDependencies).not.toHaveBeenCalled();
+  }
 });

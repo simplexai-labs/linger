@@ -256,3 +256,103 @@ func TestRunProbeRuntimesRejectsInvalidFlags(t *testing.T) {
 		t.Fatal("expected error for non-absolute --claude-path")
 	}
 }
+
+func TestRunProbeRuntimesBundledPiOptIn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX script fixture")
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyPath := filepath.Join(root, "empty-path")
+	home := filepath.Join(root, "home")
+	bundledDir := filepath.Join(root, "bundled-bin")
+	for _, dir := range []string{emptyPath, home, bundledDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bundledPi := filepath.Join(bundledDir, "pi")
+	piScript := `#!/bin/sh
+if [ "$1" = "--version" ]; then echo '1.5.2'; exit 0; fi
+if [ "$1" = "auth" ]; then echo '{"status":"not_ready"}'; exit 1; fi
+while IFS= read -r line; do
+  case "$line" in
+    *linger-probe*) echo '{"type":"response","id":"linger-probe","command":"get_state","success":true,"data":{"isStreaming":false}}' ;;
+    *linger-state*) echo '{"type":"response","id":"linger-state","command":"get_state","success":true,"data":{"model":null,"thinkingLevel":"off"}}' ;;
+    *linger-models*) echo '{"type":"response","id":"linger-models","command":"get_available_models","success":true,"data":{"models":[]}}' ;;
+  esac
+done
+`
+	if err := os.WriteFile(bundledPi, []byte(piScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	previous := resolveProbeBundledPaths
+	t.Cleanup(func() { resolveProbeBundledPaths = previous })
+	resolveProbeBundledPaths = func() map[string]string {
+		return map[string]string{"pi": bundledPi}
+	}
+
+	env := map[string]string{
+		"HOME":  home,
+		"PATH":  emptyPath,
+		"SHELL": filepath.Join(root, "no-shell"),
+	}
+
+	// Default (--include-bundled omitted) must ignore bundled Pi so setup
+	// inspection never treats bundled Pi as a user-installed runtime.
+	var defaultOut bytes.Buffer
+	if err := runProbeRuntimes(t.Context(), []string{"--json", "--runtime", "pi"}, env, &defaultOut); err != nil {
+		t.Fatalf("default runProbeRuntimes failed: %v", err)
+	}
+	var defaultReport runtimeProbeReport
+	if err := json.Unmarshal(defaultOut.Bytes(), &defaultReport); err != nil {
+		t.Fatalf("decode default report: %v (raw=%q)", err, defaultOut.String())
+	}
+	if len(defaultReport.Runtimes) != 1 {
+		t.Fatalf("default runtimes count = %d, want 1", len(defaultReport.Runtimes))
+	}
+	if got := defaultReport.Runtimes[0]; got.Type != "pi" || got.Status != "not_installed" || got.Installed {
+		t.Fatalf("default probe should not discover bundled Pi, got %+v", got)
+	}
+
+	// With --include-bundled, bundled Pi is discovered on an empty PATH.
+	var bundledOut bytes.Buffer
+	if err := runProbeRuntimes(t.Context(), []string{"--json", "--include-bundled", "--runtime", "pi"}, env, &bundledOut); err != nil {
+		t.Fatalf("--include-bundled runProbeRuntimes failed: %v", err)
+	}
+	var bundledReport runtimeProbeReport
+	if err := json.Unmarshal(bundledOut.Bytes(), &bundledReport); err != nil {
+		t.Fatalf("decode bundled report: %v (raw=%q)", err, bundledOut.String())
+	}
+	if len(bundledReport.Runtimes) != 1 {
+		t.Fatalf("bundled runtimes count = %d, want 1", len(bundledReport.Runtimes))
+	}
+	got := bundledReport.Runtimes[0]
+	if got.Type != "pi" || !got.Installed || got.Version != "1.5.2" || got.Executable != bundledPi {
+		t.Fatalf("--include-bundled probe entry = %+v, want installed pi 1.5.2 at %q", got, bundledPi)
+	}
+
+	// A dangling --pi-path (e.g., stale stable symlink after app move) falls
+	// back to bundled Pi when --include-bundled is enabled.
+	danglingLink := filepath.Join(home, "runtime", "bundled-pi", "bin", "pi")
+	if err := os.MkdirAll(filepath.Dir(danglingLink), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "deleted-app", "pi"), danglingLink); err != nil {
+		t.Fatal(err)
+	}
+	var fallbackOut bytes.Buffer
+	if err := runProbeRuntimes(t.Context(), []string{"--json", "--include-bundled", "--runtime", "pi", "--pi-path", danglingLink}, env, &fallbackOut); err != nil {
+		t.Fatalf("dangling --pi-path runProbeRuntimes failed: %v", err)
+	}
+	var fallbackReport runtimeProbeReport
+	if err := json.Unmarshal(fallbackOut.Bytes(), &fallbackReport); err != nil {
+		t.Fatalf("decode fallback report: %v (raw=%q)", err, fallbackOut.String())
+	}
+	if got := fallbackReport.Runtimes[0]; got.Type != "pi" || !got.Installed || got.Executable != bundledPi {
+		t.Fatalf("dangling --pi-path fallback entry = %+v, want installed pi at %q", got, bundledPi)
+	}
+}

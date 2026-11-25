@@ -1039,6 +1039,89 @@ func TestOverlayRuntimePathsDiscoversHarnessToolsAndVersionOrder(t *testing.T) {
 	}
 }
 
+func TestOverlayRuntimePathsWithBundledRespectsBundledPiVersion(t *testing.T) {
+	home := t.TempDir()
+	stateDir := filepath.Join(home, "runtime", "localmodels", "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	harness := HarnessRoot(stateDir)
+	piName := executableNames("pi")[0]
+
+	legacyPi := writeTestExecutable(t, filepath.Join(harness, "tools", "pi", "1.2.0", piName))
+	equalPi := writeTestExecutable(t, filepath.Join(harness, "tools", "pi", "1.5.2", piName))
+	writeTestExecutable(t, filepath.Join(harness, "bin", piName))
+	// Even if model-source.json still records the legacy harness Pi, bundled 1.5.2 supersedes it.
+	writeModelSourceJSON(t, stateDir, map[string]any{
+		"schema":        modelSourceSchema,
+		"mode":          "local",
+		"runtime":       "pi",
+		"runtime_paths": map[string]string{"pi": legacyPi},
+	})
+
+	if got := OverlayRuntimePathsWithBundled(nil, stateDir, "1.5.2"); got["pi"] != "" {
+		t.Fatalf("legacy/equal harness pi overlaid despite bundled 1.5.2: got %q (legacy=%q equal=%q)", got["pi"], legacyPi, equalPi)
+	}
+
+	// Non-harness path recorded in model-source.json (such as a user-installed Pi) is preserved.
+	userPi := writeTestExecutable(t, filepath.Join(t.TempDir(), piName))
+	writeModelSourceJSON(t, stateDir, map[string]any{
+		"schema":        modelSourceSchema,
+		"mode":          "local",
+		"runtime":       "pi",
+		"runtime_paths": map[string]string{"pi": userPi},
+	})
+	if got := OverlayRuntimePathsWithBundled(nil, stateDir, "1.5.2"); got["pi"] != userPi {
+		t.Fatalf("user pi in model-source.json = %q, want %q", got["pi"], userPi)
+	}
+
+	// A strictly newer harness-managed Pi upgrade still overrides bundled 1.5.2.
+	writeModelSourceJSON(t, stateDir, map[string]any{
+		"schema":        modelSourceSchema,
+		"mode":          "local",
+		"runtime":       "pi",
+		"runtime_paths": map[string]string{"pi": legacyPi},
+	})
+	newerPi := writeTestExecutable(t, filepath.Join(harness, "tools", "pi", "1.6.0", piName))
+	if got := OverlayRuntimePathsWithBundled(nil, stateDir, "1.5.2"); got["pi"] != newerPi {
+		t.Fatalf("newer harness pi = %q, want %q", got["pi"], newerPi)
+	}
+
+	// Dead overlay.RuntimePaths["pi"] (missing path or dangling symlink) is
+	// ignored and never overrides a valid base path or interferes with fallback.
+	if err := os.RemoveAll(filepath.Join(harness, "tools", "pi", "1.6.0")); err != nil {
+		t.Fatal(err)
+	}
+	missingMovedPi := filepath.Join(t.TempDir(), "moved-app", "bin", piName)
+	writeModelSourceJSON(t, stateDir, map[string]any{
+		"schema":        modelSourceSchema,
+		"mode":          "local",
+		"runtime":       "pi",
+		"runtime_paths": map[string]string{"pi": missingMovedPi},
+	})
+	if got := OverlayRuntimePathsWithBundled(nil, stateDir, "1.5.2"); got["pi"] != "" {
+		t.Fatalf("dead overlay pi leaked into OverlayRuntimePathsWithBundled: got %q, want empty", got["pi"])
+	}
+	if got := OverlayRuntimePathsWithBundled(map[string]string{"pi": userPi}, stateDir, "1.5.2"); got["pi"] != userPi {
+		t.Fatalf("dead overlay pi overwrote valid configured pi: got %q, want %q", got["pi"], userPi)
+	}
+	if runtime.GOOS != "windows" {
+		danglingPi := filepath.Join(t.TempDir(), "dangling-pi")
+		if err := os.Symlink(missingMovedPi, danglingPi); err != nil {
+			t.Fatal(err)
+		}
+		writeModelSourceJSON(t, stateDir, map[string]any{
+			"schema":        modelSourceSchema,
+			"mode":          "local",
+			"runtime":       "pi",
+			"runtime_paths": map[string]string{"pi": danglingPi},
+		})
+		if got := OverlayRuntimePathsWithBundled(nil, stateDir, "1.5.2"); got["pi"] != "" {
+			t.Fatalf("dangling symlink overlay pi leaked into OverlayRuntimePathsWithBundled: got %q, want empty", got["pi"])
+		}
+	}
+}
+
 func TestModelSourceApplyPreservesPreviousAndHarnessRuntimePaths(t *testing.T) {
 	ft := newFakeTool(t)
 	root := filepath.Dir(ft.state)

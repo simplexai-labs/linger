@@ -2051,3 +2051,82 @@ test("rejects with INSTANCE_BUSY when the kit lock stays held past lockWaitMs", 
     await holder.catch(() => {});
   }
 });
+
+test("skips bundled Pi PATH injection for setup inspect while keeping it for harness commands", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  const bundledBin = path.join(f.home, "app-bundled-pi", "bin");
+  await mkdir(bundledBin, { recursive: true });
+  const bundledExecutable = path.join(
+    bundledBin,
+    process.platform === "win32" ? "pi.exe" : "pi",
+  );
+  await writeFile(
+    bundledExecutable,
+    process.platform === "win32" ? "MZ" : "#!/bin/sh\n",
+    { mode: 0o755 },
+  );
+  const resolveBundled = vi.fn(async () => ({
+    binDir: bundledBin,
+    executable: bundledExecutable,
+    version: "1.5.2",
+  }));
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+  const basePath = path.join(f.home, "empty-path");
+
+  await runLocalmodels(
+    f.home,
+    ["setup", "inspect", "--json"],
+    { env: { PATH: basePath } },
+    { run, resolveBundledPi: resolveBundled },
+  );
+  expect(resolveBundled).not.toHaveBeenCalled();
+  const inspectEnv = (
+    run.mock.calls[0] as unknown as [
+      string,
+      string[],
+      { env: NodeJS.ProcessEnv },
+    ]
+  )[2].env;
+  const inspectPathKey = Object.keys(inspectEnv).find(
+    (key) => key.toUpperCase() === "PATH",
+  );
+  const inspectEntries = inspectEnv[inspectPathKey!]!.split(path.delimiter);
+  const stableBin = path.join(
+    path.resolve(f.home),
+    "runtime",
+    "bundled-pi",
+    "bin",
+  );
+  expect(inspectEntries).not.toContain(bundledBin);
+  expect(inspectEntries).not.toContain(stableBin);
+
+  for (const args of [
+    ["harness", "status", "--json"],
+    ["harness", "apply", "plan", "--jsonl"],
+  ]) {
+    run.mockClear();
+    resolveBundled.mockClear();
+    await runLocalmodels(
+      f.home,
+      args,
+      { env: { PATH: basePath } },
+      { run, resolveBundledPi: resolveBundled },
+    );
+    expect(resolveBundled).toHaveBeenCalledTimes(1);
+    const passedEnv = (
+      run.mock.calls[0] as unknown as [
+        string,
+        string[],
+        { env: NodeJS.ProcessEnv },
+      ]
+    )[2].env;
+    const pathKey = Object.keys(passedEnv).find(
+      (key) => key.toUpperCase() === "PATH",
+    );
+    const entries = passedEnv[pathKey!]!.split(path.delimiter);
+    expect(entries.at(-1)).toBe(
+      process.platform === "win32" ? bundledBin : stableBin,
+    );
+  }
+});
