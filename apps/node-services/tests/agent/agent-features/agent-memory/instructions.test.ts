@@ -10,8 +10,6 @@ const common = {
   agentName: "Research Partner",
   agentActorId: "actor:agent-1",
   agentType: "anotherme",
-  canSendDirectMessage: true,
-  developerInstructions: undefined,
   sponsor: { actorId: "actor:sponsor", displayName: "Test Sponsor" },
   connectedApps: true,
   connectedAppKeys: [],
@@ -37,7 +35,10 @@ describe("Agent memory beside the personal knowledge policy", () => {
   it.each(contexts)(
     "keeps one retrieval rule in the %s instructions",
     (_, context) => {
-      const base = assembleExecutionContextDeveloperInstructions(context);
+      const sections = assembleExecutionContextDeveloperInstructions(context);
+      const base = [sections.static, sections.dynamic]
+        .filter(Boolean)
+        .join("\n\n");
       const published = renderAgentMemoryNote("Orchard index");
 
       for (const memory of [undefined, published]) {

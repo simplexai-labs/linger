@@ -1,14 +1,15 @@
 /**
  * How an Agent gathers the Human's personal context across sources. Knowledge
  * search is the first step; the personal knowledge policy describes that tool.
- * The source list names only the apps with an account granted to the Agent;
- * an app without its own entry is reached through the generic app tools.
+ * Static methodology stays in the cacheable prefix, while the per-Agent
+ * granted app sources sit in the dynamic tail.
  */
-export function renderPersonalContextMethod(
+export function renderConnectedAppContextSources(
   connectedApps: boolean,
   connectedAppKeys: readonly string[],
 ): string {
-  const connected = new Set(connectedApps ? connectedAppKeys : []);
+  if (!connectedApps) return "";
+  const connected = new Set(connectedAppKeys);
   const apps = APP_SOURCES.flatMap(({ keys, render }) => {
     const present = keys.filter((key) => connected.has(key));
     return present.length > 0 ? [render(present)] : [];
@@ -16,14 +17,8 @@ export function renderPersonalContextMethod(
   const listed = new Set(APP_SOURCES.flatMap(({ keys }) => keys));
   const others = [...connected].filter((key) => !listed.has(key));
   if (others.length > 0) apps.push(otherApps(others));
-  return [
-    METHOD,
-    INTRO,
-    ...apps,
-    SHARED,
-    WEB,
-    "</personal-context-method>",
-  ].join("\n");
+  if (apps.length === 0) return "";
+  return `<connected-app-sources>\n${apps.join("\n")}\n</connected-app-sources>`;
 }
 
 const METHOD = `<personal-context-method>
@@ -37,7 +32,7 @@ When an answer depends on facts about the Human's own work and life, gather them
 A record of a past event does not by itself prove a present status. Where sources disagree, weigh recency and authority; newer is not always correct.`;
 
 const INTRO =
-  "What each source you can query here can tell you. When none of them holds a changing fact, say it is unconfirmed rather than presenting it as current.";
+  "What each source you can query here can tell you. When none of them holds a changing fact, say it is unconfirmed rather than presenting it as current. Your connected app sources appear in the dynamic context below when granted.";
 
 const CALENDAR_COMMANDS: Record<string, string> = {
   google_calendar: "teamhub gcal",
@@ -89,3 +84,11 @@ const SHARED = `- Tracking Items (teamhub tracking-items list): open commitments
 
 const WEB =
   "- web: prices, availability, schedules and public facts, checked now.";
+
+export const PERSONAL_CONTEXT_METHOD_STATIC = [
+  METHOD,
+  INTRO,
+  SHARED,
+  WEB,
+  "</personal-context-method>",
+].join("\n");

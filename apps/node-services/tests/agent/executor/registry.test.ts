@@ -3809,23 +3809,13 @@ describe("Execution Context AgentManager", () => {
     expect(instructions).not.toContain("evidence-based replies");
   });
 
-  it("identifies the meta role without replacing Ghost developer instructions", async () => {
+  it("places meta role identity after the static prefix marker", async () => {
     const harness = createHarness();
-    await harness.manager.registerAgent(
-      {
-        ...registration,
-        agent: {
-          ...registration.agent,
-          developerInstructions: "Keep the Agent-specific operating rules.",
-        },
-      },
-      { agentId: "agent-1" },
-    );
+    await harness.manager.registerAgent(registration, { agentId: "agent-1" });
     await harness.manager.ensureBinding(metaRef());
 
     const instructions = (await activationOf(harness, metaRef())).agent
       .developerInstructions;
-    expect(instructions).toContain("Keep the Agent-specific operating rules.");
     expect(instructions).toContain(
       JSON.stringify({
         display_name: registration.agent.name,
@@ -3833,12 +3823,13 @@ describe("Execution Context AgentManager", () => {
         agent_type: "general",
       }),
     );
-    expect(instructions?.indexOf("## Who you are")).toBeLessThan(
-      instructions?.indexOf("Keep the Agent-specific operating rules.") ?? -1,
+    expect(instructions).toContain("<!-- LINGER_STATIC_PREFIX_END -->");
+    expect(instructions?.indexOf("## How a turn works")).toBeLessThan(
+      instructions?.indexOf("<!-- LINGER_STATIC_PREFIX_END -->") ?? -1,
     );
     expect(
-      instructions?.indexOf("Keep the Agent-specific operating rules."),
-    ).toBeLessThan(instructions?.indexOf("## How a turn works") ?? -1);
+      instructions?.indexOf("<!-- LINGER_STATIC_PREFIX_END -->"),
+    ).toBeLessThan(instructions?.indexOf("\n## Who you are\n") ?? -1);
     expect(instructions).not.toContain("Test Sponsor");
     expect(instructions).toContain(
       "The current tool inventory is authoritative",

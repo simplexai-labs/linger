@@ -37,8 +37,9 @@ export function loadManagedMcpConfig(configPath) {
     throw new Error("Managed Pi MCP configuration must be private");
   }
   const parsed = JSON.parse(readFileSync(configPath, "utf8"));
-  const servers = Object.entries(parsed.mcpServers ?? {}).map(
-    ([name, config]) => {
+  const servers = Object.entries(parsed.mcpServers ?? {})
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([name, config]) => {
       const url = new URL(config.url);
       if (
         config.type !== "http" ||
@@ -64,9 +65,32 @@ export function loadManagedMcpConfig(configPath) {
         source: configPath,
         scope: "extension",
       };
-    },
-  );
+    });
   return { servers, autoEnableCodemode: false, errors: [] };
+}
+
+function isMcpToolName(name) {
+  return (
+    name.startsWith("mcp__") ||
+    name === "list_mcp_resources" ||
+    name === "read_mcp_resource"
+  );
+}
+
+/**
+ * Keeps built-in tools in their declared order at the front of the prompt and
+ * sorts MCP tools lexicographically at the tail so token-0 tool declarations
+ * stay byte-identical across async server connects.
+ */
+export function sortActiveToolNames(toolNames) {
+  const nonMcp = [];
+  const mcp = [];
+  for (const name of toolNames) {
+    if (isMcpToolName(name)) mcp.push(name);
+    else nonMcp.push(name);
+  }
+  mcp.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return [...nonMcp, ...mcp];
 }
 
 /**
@@ -277,6 +301,23 @@ export async function mountManagedMcp(
 // a resident Pi process may serve a reviewed Run after one without review.
 // A call the shell text check refuses never reaches review.
 export default async function managedExtension(pi) {
+  pi.on("before_agent_start", () => {
+    if (
+      typeof pi.getActiveTools !== "function" ||
+      typeof pi.setActiveTools !== "function"
+    ) {
+      return undefined;
+    }
+    const current = pi.getActiveTools();
+    const sorted = sortActiveToolNames(current);
+    if (
+      sorted.length !== current.length ||
+      sorted.some((name, index) => name !== current[index])
+    ) {
+      pi.setActiveTools(sorted);
+    }
+    return undefined;
+  });
   pi.on(
     "tool_call",
     async (event, ctx) =>
