@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -753,5 +756,498 @@ func TestRuntimeMonitorComparesAgainstTheInitialPublishedResult(t *testing.T) {
 	// What discovery finds differs from the hello, so it is published.
 	if len(published) != 1 || len(published[0].Diagnostics[0].Models) != 0 {
 		t.Fatalf("published = %+v", published)
+	}
+}
+
+func TestRuntimeMonitorWithDefaultDiscoverReusesTerminalEnvironmentCache(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX terminal fixture")
+	}
+	root := t.TempDir()
+	binV1 := filepath.Join(root, "bin-v1")
+	binV2 := filepath.Join(root, "bin-v2")
+	for _, dir := range []string{binV1, binV2} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	codexScript := `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "codex-cli 0.171.0"; exit 0; fi
+read initialize
+echo '{"id":1,"result":{"userAgent":"test"}}'
+read initialized
+read request
+case "$request" in
+  *'"method":"model/list"'*) echo '{"id":2,"result":{"data":[{"id":"m1","isDefault":true}],"nextCursor":null}}' ;;
+  *) echo '{"id":2,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}' ;;
+esac
+`
+	for _, dir := range []string{binV1, binV2} {
+		codex := filepath.Join(dir, "codex")
+		if err := os.WriteFile(codex, []byte(codexScript), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		primeTestExecutable(t, codex)
+	}
+
+	zshrc := filepath.Join(root, ".zshrc")
+	if err := os.WriteFile(zshrc, []byte("# initial\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shellCount := filepath.Join(root, "shell-count")
+	terminalPathFile := filepath.Join(root, "terminal-path")
+	if err := os.WriteFile(terminalPathFile, []byte(binV1+":/usr/bin:/bin\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shell := filepath.Join(root, "shell")
+	shellScript := `#!/bin/sh
+echo x >> "$SHELL_COUNT"
+IFS= read -r tp < "$TERMINAL_PATH_FILE"
+export PATH="$tp"
+exec /bin/sh -c "$2"
+`
+	if err := os.WriteFile(shell, []byte(shellScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	probeCount := func() int {
+		data, err := os.ReadFile(shellCount)
+		if err != nil {
+			return 0
+		}
+		return strings.Count(string(data), "x")
+	}
+
+	var envMu sync.Mutex
+	currentEnv := map[string]string{
+		"HOME":               root,
+		"SHELL":              shell,
+		"PATH":               "/usr/bin:/bin",
+		"SHELL_COUNT":        shellCount,
+		"TERMINAL_PATH_FILE": terminalPathFile,
+	}
+	resolveOptions := func() DiscoveryOptions {
+		envMu.Lock()
+		defer envMu.Unlock()
+		return DiscoveryOptions{
+			Runtimes:    []string{"codex"},
+			Environment: maps.Clone(currentEnv),
+			Timeout:     10 * time.Second,
+		}
+	}
+
+	cache := NewTerminalEnvironmentCache()
+	initial, err := cache.Discover(t.Context(), resolveOptions())
+	if err != nil || initial.Diagnostics[0].Status != "ready" {
+		t.Fatalf("initial Discover: %+v err=%v", initial, err)
+	}
+	if probeCount() != 1 {
+		t.Fatalf("initial probeCount = %d, want 1", probeCount())
+	}
+
+	// Update overlay env and fire Refresh channel while monitor runs multiple full ticks.
+	// Neither steady ticks, Refresh requests, nor non-PATH overlay env changes may re-run $SHELL.
+	overlayCodexHome := filepath.Join(root, "overlay-codex-home")
+	if err := os.MkdirAll(overlayCodexHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	refresh := make(chan struct{}, 1)
+	var resolveCalls atomic.Int32
+	resolveLive := func() DiscoveryOptions {
+		opts := resolveOptions()
+		if resolveCalls.Add(1) >= 2 {
+			opts.Environment["CODEX_HOME"] = overlayCodexHome
+		}
+		return opts
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	var onChangedCount atomic.Int32
+	var phase atomic.Int32
+	var changedPaths []string
+
+	err = MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+		Initial:               initial,
+		Discovery:             resolveOptions(),
+		ResolveDiscovery:      resolveLive,
+		TerminalEnvironment:   cache,
+		RefreshInterval:       10 * time.Millisecond,
+		FullRefreshEveryTicks: 1,
+		Refresh:               refresh,
+		FullRefreshAllowed: func() bool {
+			switch phase.Load() {
+			case 1:
+				if count := probeCount(); count != 1 {
+					t.Errorf("Refresh wakeup re-ran shell probe: count=%d", count)
+					cancel()
+					return false
+				}
+				phase.Store(2)
+			case 2:
+				if count := probeCount(); count != 1 {
+					t.Errorf("steady full tick re-ran shell probe: count=%d", count)
+					cancel()
+					return false
+				}
+				phase.Store(3)
+				if writeErr := os.WriteFile(terminalPathFile, []byte(binV2+":/usr/bin:/bin\n"), 0o600); writeErr != nil {
+					t.Errorf("write terminalPathFile: %v", writeErr)
+					cancel()
+					return false
+				}
+				if writeErr := os.WriteFile(zshrc, []byte("# updated\n"), 0o600); writeErr != nil {
+					t.Errorf("write zshrc: %v", writeErr)
+					cancel()
+					return false
+				}
+				future := time.Now().Add(2 * time.Second)
+				if chErr := os.Chtimes(zshrc, future, future); chErr != nil {
+					t.Errorf("chtimes zshrc: %v", chErr)
+					cancel()
+					return false
+				}
+			}
+			return true
+		},
+		OnChanged: func(next DiscoveryResult) error {
+			n := onChangedCount.Add(1)
+			changedPaths = append(changedPaths, next.Diagnostics[0].EntryPath)
+			if strings.HasPrefix(next.Diagnostics[0].EntryPath, binV2) {
+				cancel()
+				return nil
+			}
+			// First OnChanged happens once for the overlay envChanged; probeCount must still be 1.
+			if n == 1 {
+				if count := probeCount(); count != 1 {
+					return fmt.Errorf("overlay change re-ran shell probe: count=%d", count)
+				}
+				select {
+				case refresh <- struct{}{}:
+				default:
+				}
+				phase.Store(1)
+				return nil
+			}
+			return fmt.Errorf("unexpected OnChanged #%d with path %q", n, next.Diagnostics[0].EntryPath)
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("monitor exited with %v", err)
+	}
+	if probeCount() != 2 {
+		t.Fatalf("total shell probes = %d, want 2 (1 initial + 1 .zshrc change)", probeCount())
+	}
+	if len(changedPaths) == 0 || changedPaths[len(changedPaths)-1] != filepath.Join(binV2, "codex") {
+		t.Fatalf("changedPaths = %v, want last entry under %s", changedPaths, binV2)
+	}
+}
+
+func TestRuntimeMonitorCreatesInternalTerminalCacheWhenNil(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX terminal fixture")
+	}
+	root := t.TempDir()
+	binDir := filepath.Join(root, "term-bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	codex := filepath.Join(binDir, "codex")
+	codexScript := `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "codex-cli 0.171.0"; exit 0; fi
+read initialize
+echo '{"id":1,"result":{"userAgent":"test"}}'
+read initialized
+read request
+case "$request" in
+  *'"method":"model/list"'*) echo '{"id":2,"result":{"data":[{"id":"m1","isDefault":true}],"nextCursor":null}}' ;;
+  *) echo '{"id":2,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}' ;;
+esac
+`
+	if err := os.WriteFile(codex, []byte(codexScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	primeTestExecutable(t, codex)
+
+	shellCount := filepath.Join(root, "shell-count")
+	shell := filepath.Join(root, "shell")
+	shellScript := `#!/bin/sh
+echo x >> "$SHELL_COUNT"
+export PATH="$TERM_BIN:/usr/bin:/bin"
+exec /bin/sh -c "$2"
+`
+	if err := os.WriteFile(shell, []byte(shellScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	primeTestExecutable(t, shell, "SHELL_COUNT="+os.DevNull)
+	options := DiscoveryOptions{
+		Runtimes: []string{"codex"},
+		Environment: map[string]string{
+			"HOME":        root,
+			"SHELL":       shell,
+			"PATH":        "/usr/bin:/bin",
+			"TERM_BIN":    binDir,
+			"SHELL_COUNT": shellCount,
+		},
+		Timeout: 10 * time.Second,
+	}
+	initial := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{
+		Type: "codex", Status: "not_installed", Protocol: "app-server", Models: []RuntimeModel{},
+	}}}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	var changes atomic.Int32
+	var ticks atomic.Int32
+	err := MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+		Initial:   initial,
+		Discovery: options,
+		RefreshAllowed: func() bool {
+			if changes.Load() >= 1 && ticks.Add(1) >= 4 {
+				cancel()
+				return false
+			}
+			return true
+		},
+		RefreshInterval:       5 * time.Millisecond,
+		FullRefreshEveryTicks: 1,
+		OnChanged: func(next DiscoveryResult) error {
+			changes.Add(1)
+			return nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("monitor exited with %v, want context.Canceled", err)
+	}
+	data, err := os.ReadFile(shellCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(string(data), "x"); count != 1 {
+		t.Fatalf("internal TerminalEnvironmentCache probed shell %d times, want 1", count)
+	}
+	if changes.Load() != 1 {
+		t.Fatalf("OnChanged called %d times, want 1", changes.Load())
+	}
+}
+
+func TestRuntimeMonitorForceRecapturesTerminalEnvOnExecutableReplacement(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX terminal fixture")
+	}
+	root := t.TempDir()
+	binDir := filepath.Join(root, "term-bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	makeCodex := func(path, version string) {
+		script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--version" ]; then echo "codex-cli %s"; exit 0; fi
+read initialize
+echo '{"id":1,"result":{"userAgent":"test"}}'
+read initialized
+read request
+case "$request" in
+  *'"method":"model/list"'*) echo '{"id":2,"result":{"data":[{"id":"m1","isDefault":true}],"nextCursor":null}}' ;;
+  *) echo '{"id":2,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}' ;;
+esac
+`, version)
+		if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		primeTestExecutable(t, path)
+	}
+	codexV1 := filepath.Join(root, "codex-0.171.0")
+	codexV2 := filepath.Join(root, "codex-0.172.0")
+	makeCodex(codexV1, "0.171.0")
+	makeCodex(codexV2, "0.172.0")
+
+	entry := filepath.Join(binDir, "codex")
+	if err := os.Symlink(codexV1, entry); err != nil {
+		t.Fatal(err)
+	}
+
+	shellCount := filepath.Join(root, "shell-count")
+	shell := filepath.Join(root, "shell")
+	shellScript := `#!/bin/sh
+echo x >> "$SHELL_COUNT"
+export PATH="$TERM_BIN:/usr/bin:/bin"
+exec /bin/sh -c "$2"
+`
+	if err := os.WriteFile(shell, []byte(shellScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	primeTestExecutable(t, shell, "SHELL_COUNT="+os.DevNull)
+
+	options := DiscoveryOptions{
+		Runtimes: []string{"codex"},
+		Environment: map[string]string{
+			"HOME":        root,
+			"SHELL":       shell,
+			"PATH":        "/usr/bin:/bin",
+			"TERM_BIN":    binDir,
+			"SHELL_COUNT": shellCount,
+		},
+		Timeout: 10 * time.Second,
+	}
+	probeCount := func() int {
+		data, err := os.ReadFile(shellCount)
+		if err != nil {
+			return 0
+		}
+		return strings.Count(string(data), "x")
+	}
+
+	cache := NewTerminalEnvironmentCache()
+	initial, err := cache.Discover(t.Context(), options)
+	if err != nil || initial.Diagnostics[0].Version != "codex-cli 0.171.0" {
+		t.Fatalf("initial Discover: %+v err=%v", initial, err)
+	}
+	if probeCount() != 1 {
+		t.Fatalf("initial probeCount = %d, want 1", probeCount())
+	}
+
+	// Replace the entry symlink target without editing any watched shell startup file.
+	if err := os.Remove(entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(codexV2, entry); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	var updated DiscoveryResult
+	err = MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+		Initial:               initial,
+		Discovery:             options,
+		TerminalEnvironment:   cache,
+		RefreshInterval:       5 * time.Millisecond,
+		FullRefreshEveryTicks: 100,
+		OnChanged: func(next DiscoveryResult) error {
+			updated = next
+			cancel()
+			return nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("monitor exited with %v, want context.Canceled", err)
+	}
+	if probeCount() != 2 {
+		t.Fatalf("probeCount = %d, want 2 (forceCapture on executable change)", probeCount())
+	}
+	if updated.Diagnostics[0].Version != "codex-cli 0.172.0" {
+		t.Fatalf("updated diagnostic = %+v, want codex-cli 0.172.0", updated.Diagnostics[0])
+	}
+}
+
+func TestRuntimeMonitorChangedInstallationsReusesTerminalEnvironmentCache(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX terminal fixture")
+	}
+	root := t.TempDir()
+	binDir := filepath.Join(root, "term-bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	codexScript := `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "codex-cli 0.171.0"; exit 0; fi
+read initialize
+echo '{"id":1,"result":{"userAgent":"test"}}'
+read initialized
+read request
+case "$request" in
+  *'"method":"model/list"'*) echo '{"id":2,"result":{"data":[{"id":"m1","isDefault":true}],"nextCursor":null}}' ;;
+  *) echo '{"id":2,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}' ;;
+esac
+`
+	stagedCodex := filepath.Join(root, "codex-staged")
+	if err := os.WriteFile(stagedCodex, []byte(codexScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	primeTestExecutable(t, stagedCodex)
+	codex := filepath.Join(binDir, "codex")
+
+	shellCount := filepath.Join(root, "shell-count")
+	shell := filepath.Join(root, "shell")
+	shellScript := `#!/bin/sh
+echo x >> "$SHELL_COUNT"
+export PATH="$TERM_BIN:/usr/bin:/bin"
+exec /bin/sh -c "$2"
+`
+	if err := os.WriteFile(shell, []byte(shellScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	primeTestExecutable(t, shell, "SHELL_COUNT="+os.DevNull)
+	probeCount := func() int {
+		data, err := os.ReadFile(shellCount)
+		if err != nil {
+			return 0
+		}
+		return strings.Count(string(data), "x")
+	}
+
+	options := DiscoveryOptions{
+		Runtimes: []string{"codex"},
+		Environment: map[string]string{
+			"HOME":        root,
+			"SHELL":       shell,
+			"PATH":        "/usr/bin:/bin",
+			"TERM_BIN":    binDir,
+			"SHELL_COUNT": shellCount,
+		},
+		Timeout: 10 * time.Second,
+	}
+	cache := NewTerminalEnvironmentCache()
+	resolvedEnv := cache.Resolve(t.Context(), options.Environment, false)
+	if !strings.HasPrefix(resolvedEnv["PATH"], binDir+":") {
+		t.Fatalf("resolved PATH = %q, want %s prefix", resolvedEnv["PATH"], binDir)
+	}
+	if probeCount() != 1 {
+		t.Fatalf("initial probeCount = %d, want 1", probeCount())
+	}
+
+	initial := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{
+		Type:       "codex",
+		Status:     "not_installed",
+		Protocol:   "app-server",
+		Models:     []RuntimeModel{},
+		searchPath: binDir,
+	}}}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	var ticks atomic.Int32
+	var published DiscoveryResult
+	err := MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+		Initial:               initial,
+		Discovery:             options,
+		TerminalEnvironment:   cache,
+		RefreshInterval:       5 * time.Millisecond,
+		FullRefreshEveryTicks: 100,
+		FullRefreshAllowed:    func() bool { return false },
+		RefreshAllowed: func() bool {
+			if ticks.Add(1) == 2 {
+				if renameErr := os.Rename(stagedCodex, codex); renameErr != nil {
+					t.Errorf("install codex: %v", renameErr)
+					cancel()
+					return false
+				}
+			}
+			return true
+		},
+		OnChanged: func(next DiscoveryResult) error {
+			published = next
+			cancel()
+			return nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("monitor exited with %v, want context.Canceled", err)
+	}
+	if probeCount() != 1 {
+		t.Fatalf("probeCount = %d, want 1 (targeted rediscovery reused TerminalEnvironmentCache)", probeCount())
+	}
+	if len(published.Diagnostics) != 1 || published.Diagnostics[0].Status != "ready" ||
+		published.Diagnostics[0].EntryPath != codex ||
+		published.Diagnostics[0].ExecutionPath != resolvedEnv["PATH"] {
+		t.Fatalf("published diagnostics = %+v, want ready codex at %s with PATH %q", published.Diagnostics, codex, resolvedEnv["PATH"])
 	}
 }

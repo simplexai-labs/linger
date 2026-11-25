@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -176,8 +177,9 @@ func run(args []string) (resultErr error) {
 		}
 		return shapeDiscoveredResult(result, localModelsStateDir, localModels != nil && localModels.PiProvisionFailed(), piCatalog, snapshot)
 	}
+	terminalCache := provider.NewTerminalEnvironmentCache()
 	discover := func(ctx context.Context, options provider.DiscoveryOptions) (provider.DiscoveryResult, error) {
-		result, err := provider.Discover(ctx, options)
+		result, err := terminalCache.Discover(ctx, options)
 		if err == nil {
 			result = shapeDiscovered(result)
 		}
@@ -186,7 +188,7 @@ func run(args []string) (resultErr error) {
 	providerEnvironment := currentProviderEnvironment()
 	// The monitor refreshes from what Discover found, not from the shaped
 	// result, so it gets the unshaped one.
-	rawDiscovered, err := provider.Discover(context.Background(), currentDiscoveryOptions())
+	rawDiscovered, err := terminalCache.Discover(context.Background(), currentDiscoveryOptions())
 	if err != nil {
 		return err
 	}
@@ -329,9 +331,15 @@ func run(args []string) (resultErr error) {
 	if toolManager != nil {
 		permissionOptions.Cua = toolManager
 	}
-	inventory := &runtimeInventory{
-		computer: computer, rejected: provider.NewRejectedModels(runtimeCredentialFiles(providerEnvironment)),
-		runtimes: runtimes, diagnostics: discovered.Diagnostics, revision: runtimeObservationRevision,
+	inventory, err := newRuntimeInventory(
+		computer,
+		provider.NewRejectedModels(runtimeCredentialFiles(providerEnvironment)),
+		runtimes,
+		discovered.Diagnostics,
+		runtimeObservationRevision,
+	)
+	if err != nil {
+		return err
 	}
 	// A load or unload changes Pi's model list: the library asks for a
 	// full Runtime discovery.
@@ -381,16 +389,18 @@ func run(args []string) (resultErr error) {
 	defer localModels.Close()
 	antigravityExecutable := &antigravityExecutableTracker{path: discovered.Installations["antigravity"].ExecutablePath}
 	applyDiscovered := func(publishCtx context.Context, next provider.DiscoveryResult) error {
-		logRuntimeDiagnostics(next.Diagnostics)
-		nextProviders, nextRuntimes := providerInstallations(next, currentProviderEnvironment(), localModelsStateDir)
-		providerCatalog.Replace(nextProviders)
 		if antigravityExecutable.changed(next) && localDaemon != nil {
 			localDaemon.InvalidateAntigravityResidents("executable_changed")
 		}
-		if controller != nil {
-			controller.UpdateDiagnostics(next.Diagnostics)
-		}
-		return inventory.publish(publishCtx, nextRuntimes, next.Diagnostics)
+		return applyRuntimeDiscovery(
+			publishCtx,
+			next,
+			currentProviderEnvironment(),
+			localModelsStateDir,
+			providerCatalog,
+			controller,
+			inventory,
+		)
 	}
 	modelSource := localmodels.NewModelSource(localmodels.ModelSourceOptions{
 		Tool:         localModelsTool,
@@ -512,6 +522,7 @@ func run(args []string) (resultErr error) {
 			InitialPublished:      &discovered,
 			Discovery:             currentDiscoveryOptions(),
 			ResolveDiscovery:      currentDiscoveryOptions,
+			TerminalEnvironment:   terminalCache,
 			Shape:                 shapeDiscovered,
 			RefreshInterval:       15 * time.Second,
 			FullRefreshEveryTicks: 4,
@@ -689,17 +700,59 @@ func (t *antigravityExecutableTracker) changed(next provider.DiscoveryResult) bo
 	return true
 }
 
+func applyRuntimeDiscovery(
+	publishCtx context.Context,
+	next provider.DiscoveryResult,
+	environment map[string]string,
+	localModelsStateDir string,
+	providerCatalog *lingercontext.ProviderCatalog,
+	controller *controlController,
+	inventory *runtimeInventory,
+) error {
+	nextProviders, nextRuntimes := providerInstallations(next, environment, localModelsStateDir)
+	providerCatalog.Replace(nextProviders)
+	if controller != nil {
+		controller.UpdateDiagnostics(next.Diagnostics)
+	}
+	published, pubErr := inventory.publishIfChanged(publishCtx, nextRuntimes, next.Diagnostics)
+	if published && pubErr == nil {
+		logRuntimeDiagnostics(next.Diagnostics)
+	}
+	return pubErr
+}
+
 // runtimeInventory publishes the discovered Runtimes to the Gateway without
 // the models their current login refused.
 type runtimeInventory struct {
-	mu          sync.Mutex
-	daemon      *daemon.Daemon
-	ctx         context.Context
-	computer    computerconfig.Config
-	rejected    *provider.RejectedModels
-	runtimes    []string
-	diagnostics []provider.RuntimeDiagnostic
-	revision    uint64
+	mu                sync.Mutex
+	daemon            *daemon.Daemon
+	ctx               context.Context
+	computer          computerconfig.Config
+	rejected          *provider.RejectedModels
+	runtimes          []string
+	diagnostics       []provider.RuntimeDiagnostic
+	revision          uint64
+	hasPublished      bool
+	publishedRuntimes []string
+	publishedGateway  []byte
+}
+
+func newRuntimeInventory(computer computerconfig.Config, rejected *provider.RejectedModels, runtimes []string, diagnostics []provider.RuntimeDiagnostic, revision uint64) (*runtimeInventory, error) {
+	inventory := &runtimeInventory{
+		computer:    computer,
+		rejected:    rejected,
+		runtimes:    slices.Clone(runtimes),
+		diagnostics: slices.Clone(diagnostics),
+		revision:    revision,
+	}
+	payload, err := inventory.gatewayPayloadLocked(diagnostics)
+	if err != nil {
+		return nil, err
+	}
+	inventory.hasPublished = true
+	inventory.publishedRuntimes = slices.Clone(runtimes)
+	inventory.publishedGateway = payload
+	return inventory, nil
 }
 
 // start binds the running Daemon and makes expired refusals selectable again
@@ -724,24 +777,67 @@ func (i *runtimeInventory) start(ctx context.Context, localDaemon *daemon.Daemon
 	}()
 }
 
-func (i *runtimeInventory) publish(ctx context.Context, runtimes []string, diagnostics []provider.RuntimeDiagnostic) error {
+func (i *runtimeInventory) publishIfChanged(ctx context.Context, runtimes []string, diagnostics []provider.RuntimeDiagnostic) (bool, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	i.runtimes, i.diagnostics = runtimes, diagnostics
-	return i.publishLocked(ctx)
+	nextGateway, err := i.gatewayPayloadLocked(diagnostics)
+	if err != nil {
+		return false, err
+	}
+	clonedRuntimes := slices.Clone(runtimes)
+	clonedDiagnostics := slices.Clone(diagnostics)
+	if i.hasPublished && slices.Equal(i.publishedRuntimes, clonedRuntimes) && bytes.Equal(i.publishedGateway, nextGateway) {
+		i.runtimes, i.diagnostics = clonedRuntimes, clonedDiagnostics
+		return false, nil
+	}
+	i.runtimes, i.diagnostics = clonedRuntimes, clonedDiagnostics
+	if err := i.publishLocked(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (i *runtimeInventory) visibleDiagnosticsLocked(diagnostics []provider.RuntimeDiagnostic) []provider.RuntimeDiagnostic {
+	gateway := provider.GatewayDiagnostics(diagnostics)
+	if i.rejected == nil {
+		return gateway
+	}
+	return i.rejected.Filter(gateway)
+}
+
+func (i *runtimeInventory) gatewayPayloadLocked(diagnostics []provider.RuntimeDiagnostic) ([]byte, error) {
+	return gatewayDiagnosticsPayload(i.visibleDiagnosticsLocked(diagnostics))
+}
+
+func gatewayDiagnosticsPayload(visible []provider.RuntimeDiagnostic) ([]byte, error) {
+	normalized := make([]provider.RuntimeDiagnostic, len(visible))
+	copy(normalized, visible)
+	for index := range normalized {
+		normalized[index].CheckedAt = time.Time{}
+	}
+	return provider.DiagnosticsJSON(normalized)
 }
 
 func (i *runtimeInventory) publishLocked(ctx context.Context) error {
-	if i.daemon == nil {
-		return nil
-	}
-	visible := i.rejected.Filter(provider.GatewayDiagnostics(i.diagnostics))
-	encoded, err := provider.DiagnosticsJSON(visible)
+	visible := i.visibleDiagnosticsLocked(i.diagnostics)
+	gatewayPayload, err := gatewayDiagnosticsPayload(visible)
 	if err != nil {
 		return err
 	}
-	i.revision++
-	return i.daemon.UpdateRuntimeInventory(ctx, i.runtimes, encoded, runtimeObservations(i.computer, visible, i.revision))
+	if i.daemon != nil {
+		encoded, err := provider.DiagnosticsJSON(visible)
+		if err != nil {
+			return err
+		}
+		i.revision++
+		if err := i.daemon.UpdateRuntimeInventory(ctx, i.runtimes, encoded, runtimeObservations(i.computer, visible, i.revision)); err != nil {
+			return err
+		}
+	}
+	i.hasPublished = true
+	i.publishedRuntimes = slices.Clone(i.runtimes)
+	i.publishedGateway = gatewayPayload
+	return nil
 }
 
 // reject runs on the Operation terminal path, so it publishes asynchronously.

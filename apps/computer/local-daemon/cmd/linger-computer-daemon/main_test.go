@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,15 +18,21 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/computerconfig"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/daemon"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/assignment"
 	lingercontext "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/context"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/registration"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/localmodels"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/protocol"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
 )
 
 // Extend the transient protocol failure regression through the real discovery
@@ -453,7 +463,7 @@ func TestShapeDiscoveredResultReappliesByokOverlayAcrossPeriodicRefreshes(t *tes
 		nextProviders, nextRuntimes := providerInstallations(shaped, env, stateDir)
 		providerCatalog.Replace(nextProviders)
 		controller.UpdateDiagnostics(shaped.Diagnostics)
-		if err := inventory.publish(t.Context(), nextRuntimes, shaped.Diagnostics); err != nil {
+		if _, err := inventory.publishIfChanged(t.Context(), nextRuntimes, shaped.Diagnostics); err != nil {
 			t.Fatalf("refresh %d publish failed: %v", refresh+1, err)
 		}
 		if !reflect.DeepEqual(unshaped.Diagnostics[0].Models, nativeSnapshot) {
@@ -679,7 +689,7 @@ done
 				nextProviders, nextRuntimes := providerInstallations(next, currentEnv(), stateDir)
 				providerCatalog.Replace(nextProviders)
 				controller.UpdateDiagnostics(next.Diagnostics)
-				if pubErr := inventory.publish(ctx, nextRuntimes, next.Diagnostics); pubErr != nil {
+				if _, pubErr := inventory.publishIfChanged(ctx, nextRuntimes, next.Diagnostics); pubErr != nil {
 					return pubErr
 				}
 				return recovered
@@ -825,5 +835,851 @@ func TestAntigravityExecutableTrackerDetectsPathChanges(t *testing.T) {
 	}
 	if !tracker.changed(discovery("/usr/local/bin/agy")) {
 		t.Fatal("reinstalled executable did not report changed")
+	}
+}
+
+type mainTestIdentityStore struct{ value transport.Identity }
+
+func (s mainTestIdentityStore) LoadOrCreate(context.Context) (transport.Identity, error) {
+	return s.value, nil
+}
+
+type mainTestResolver struct{}
+
+func (mainTestResolver) Resolve(context.Context, protocol.Command, json.RawMessage) (provider.OperationSpec, error) {
+	return provider.OperationSpec{}, errors.New("not implemented")
+}
+
+type mainTestStream struct {
+	mu       sync.Mutex
+	commands []protocol.Command
+	events   []protocol.Event
+	sendErr  error
+	wait     <-chan struct{}
+}
+
+func (s *mainTestStream) Receive(ctx context.Context) (protocol.Command, error) {
+	s.mu.Lock()
+	if len(s.commands) > 0 {
+		cmd := s.commands[0]
+		s.commands = s.commands[1:]
+		s.mu.Unlock()
+		return cmd, nil
+	}
+	s.mu.Unlock()
+	if s.wait != nil {
+		select {
+		case <-s.wait:
+		case <-ctx.Done():
+			return protocol.Command{}, ctx.Err()
+		}
+	}
+	return protocol.Command{}, io.EOF
+}
+
+func (s *mainTestStream) Send(_ context.Context, event protocol.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sendErr != nil {
+		return s.sendErr
+	}
+	s.events = append(s.events, event)
+	return nil
+}
+
+func (s *mainTestStream) setSendErr(err error) {
+	s.mu.Lock()
+	s.sendErr = err
+	s.mu.Unlock()
+}
+
+func (s *mainTestStream) Close() error { return nil }
+
+func (s *mainTestStream) eventCount(eventType string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for _, event := range s.events {
+		if event.Type == eventType {
+			count++
+		}
+	}
+	return count
+}
+
+type mainTestControlPlane struct{ stream transport.Stream }
+
+func (p mainTestControlPlane) Connect(context.Context, transport.Hello) (transport.Stream, error) {
+	return p.stream, nil
+}
+
+type syncLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func inventoryRevision(inventory *runtimeInventory) uint64 {
+	inventory.mu.Lock()
+	defer inventory.mu.Unlock()
+	return inventory.revision
+}
+
+func TestApplyRuntimeDiscoverySkipsGatewayPublishWhenOnlyExecutionPathOrCheckedAtChanges(t *testing.T) {
+	var logBuf syncLogBuffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
+	identity, err := transport.GenerateIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	var closeReleaseOnce sync.Once
+	closeRelease := func() { closeReleaseOnce.Do(func() { close(release) }) }
+	defer closeRelease()
+	stream := &mainTestStream{
+		commands: []protocol.Command{{Type: "runner.welcome", ConnectionEpoch: 1}},
+		wait:     release,
+	}
+
+	codexBin := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(codexBin, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	codexCanonical, err := filepath.EvalSymlinks(codexBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t0 := time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
+	initialResult := provider.DiscoveryResult{
+		Diagnostics: []provider.RuntimeDiagnostic{
+			{
+				Type:           "codex",
+				Status:         "ready",
+				Protocol:       "app-server",
+				CheckedAt:      t0,
+				Version:        "codex-cli 0.171.0",
+				Models:         []provider.RuntimeModel{{ID: "gpt-5", Label: "GPT-5", Link: "subscription", IsDefault: true}},
+				ExecutablePath: codexCanonical,
+				EntryPath:      codexBin,
+				ExecutionPath:  "/v1/bin:/usr/bin",
+			},
+			{
+				Type:   "antigravity",
+				Status: "not_installed",
+			},
+		},
+	}
+	initialResult.Installations = provider.InstallationsFromDiagnostics(initialResult.Diagnostics)
+
+	env := map[string]string{"HOME": t.TempDir(), "PATH": "/usr/bin"}
+	initialProviders, initialRuntimes := providerInstallations(initialResult, env, "")
+	providerCatalog := lingercontext.NewProviderCatalog(initialProviders)
+	computer := computerconfig.Config{
+		ComputerID: "comp-1",
+		Owners:     []computerconfig.Owner{{TenantID: "tenant-1", OwnerActorID: "owner-1"}},
+	}
+	rejected := provider.NewRejectedModels(nil)
+	initialDiagnosticsJSON, err := provider.DiagnosticsJSON(provider.GatewayDiagnostics(initialResult.Diagnostics))
+	if err != nil {
+		t.Fatal(err)
+	}
+	localDaemon, err := daemon.New(daemon.Options{
+		ComputerID:          computer.ComputerID,
+		ControlPlane:        mainTestControlPlane{stream: stream},
+		IdentityStore:       mainTestIdentityStore{value: identity},
+		OperationResolver:   mainTestResolver{},
+		Ledger:              daemon.NewMemoryLedger(),
+		Registrations:       registration.NewMemoryStore(),
+		Assignments:         assignment.NewMemoryStore(),
+		Runtimes:            initialRuntimes,
+		RuntimeDiagnostics:  initialDiagnosticsJSON,
+		RuntimeObservations: runtimeObservations(computer, provider.GatewayDiagnostics(initialResult.Diagnostics), 10),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runCtx, cancelRun := context.WithCancel(t.Context())
+	defer cancelRun()
+	runDone := make(chan error, 1)
+	go func() { runDone <- localDaemon.Run(runCtx) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for localDaemon.GatewayState() != "connected" {
+		if time.Now().After(deadline) {
+			t.Fatal("daemon did not reach connected state")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	controller := &controlController{daemon: localDaemon, diagnostics: initialResult.Diagnostics}
+	inventory, err := newRuntimeInventory(computer, rejected, initialRuntimes, initialResult.Diagnostics, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory.start(runCtx, localDaemon)
+
+	// Changing only ExecutionPath and CheckedAt must update providerCatalog and
+	// controller, while skipping logRuntimeDiagnostics and gateway publish.
+	pathOnly := provider.DiscoveryResult{
+		Diagnostics: []provider.RuntimeDiagnostic{
+			{
+				Type:           "codex",
+				Status:         "ready",
+				Protocol:       "app-server",
+				CheckedAt:      t0.Add(time.Minute),
+				Version:        "codex-cli 0.171.0",
+				Models:         []provider.RuntimeModel{{ID: "gpt-5", Label: "GPT-5", Link: "subscription", IsDefault: true}},
+				ExecutablePath: codexCanonical,
+				EntryPath:      codexBin,
+				ExecutionPath:  "/v2/bin:/usr/bin",
+			},
+			{
+				Type:   "antigravity",
+				Status: "not_installed",
+			},
+		},
+	}
+	pathOnly.Installations = provider.InstallationsFromDiagnostics(pathOnly.Diagnostics)
+	if err := applyRuntimeDiscovery(runCtx, pathOnly, env, "", providerCatalog, controller, inventory); err != nil {
+		t.Fatalf("path-only discovery err=%v, want nil", err)
+	}
+	if got, ok, lookupErr := providerCatalog.Lookup(runCtx, "codex"); lookupErr != nil || !ok || got.Environment["PATH"] != "/v2/bin:/usr/bin" {
+		t.Fatalf("providerCatalog PATH was not updated: ok=%v err=%v env=%v", ok, lookupErr, got.Environment)
+	}
+	ctrlDiagRaw, _ := controller.Runtimes(runCtx)
+	ctrlDiags := ctrlDiagRaw.([]provider.RuntimeDiagnostic)
+	if ctrlDiags[0].ExecutionPath != "/v2/bin:/usr/bin" || !ctrlDiags[0].CheckedAt.Equal(t0.Add(time.Minute)) {
+		t.Fatalf("controller diagnostics were not updated: %+v", ctrlDiags[0])
+	}
+	if rev := inventoryRevision(inventory); rev != 10 || stream.eventCount(protocol.EventRuntimeDiagnostics) != 0 {
+		t.Fatalf("unexpected gateway publish: revision=%d events=%d", rev, stream.eventCount(protocol.EventRuntimeDiagnostics))
+	}
+	if strings.Contains(logBuf.String(), "runtime.diagnostic") {
+		t.Fatalf("unexpected runtime.diagnostic log on path-only update:\n%s", logBuf.String())
+	}
+
+	// Changing a Gateway-visible field (Models) must log and publish.
+	modelsChanged := provider.DiscoveryResult{
+		Diagnostics: []provider.RuntimeDiagnostic{
+			{
+				Type:           "codex",
+				Status:         "ready",
+				Protocol:       "app-server",
+				CheckedAt:      t0.Add(2 * time.Minute),
+				Version:        "codex-cli 0.171.0",
+				Models:         []provider.RuntimeModel{{ID: "gpt-6", Label: "GPT-6", Link: "subscription", IsDefault: true}},
+				ExecutablePath: codexCanonical,
+				EntryPath:      codexBin,
+				ExecutionPath:  "/v2/bin:/usr/bin",
+			},
+		},
+	}
+	modelsChanged.Installations = provider.InstallationsFromDiagnostics(modelsChanged.Diagnostics)
+	if err := applyRuntimeDiscovery(runCtx, modelsChanged, env, "", providerCatalog, controller, inventory); err != nil {
+		t.Fatalf("models-changed discovery err=%v, want nil", err)
+	}
+	if rev := inventoryRevision(inventory); rev != 11 || stream.eventCount(protocol.EventRuntimeDiagnostics) != 1 {
+		t.Fatalf("gateway publish did not run: revision=%d events=%d", rev, stream.eventCount(protocol.EventRuntimeDiagnostics))
+	}
+	if !strings.Contains(logBuf.String(), "runtime.diagnostic") {
+		t.Fatalf("expected runtime.diagnostic log on model change")
+	}
+
+	// Model rejection still republishes.
+	inventory.reject("codex", "gpt-6")
+	deadline = time.Now().Add(5 * time.Second)
+	for stream.eventCount(protocol.EventRuntimeDiagnostics) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("reject did not republish runtime inventory; revision=%d", inventoryRevision(inventory))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancelRun()
+	closeRelease()
+	<-runDone
+}
+
+func TestApplyRuntimeDiscoveryCommitsOnlyAfterGatewayPublishSucceeds(t *testing.T) {
+	var logBuf syncLogBuffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
+	identity, err := transport.GenerateIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	var closeReleaseOnce sync.Once
+	closeRelease := func() { closeReleaseOnce.Do(func() { close(release) }) }
+	defer closeRelease()
+	stream := &mainTestStream{
+		commands: []protocol.Command{{Type: "runner.welcome", ConnectionEpoch: 1}},
+		wait:     release,
+	}
+
+	codexBin := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(codexBin, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	codexCanonical, err := filepath.EvalSymlinks(codexBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t0 := time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
+	initialResult := provider.DiscoveryResult{
+		Diagnostics: []provider.RuntimeDiagnostic{{
+			Type:           "codex",
+			Status:         "ready",
+			Protocol:       "app-server",
+			CheckedAt:      t0,
+			Version:        "codex-cli 0.171.0",
+			Models:         []provider.RuntimeModel{{ID: "gpt-5", Label: "GPT-5", Link: "subscription", IsDefault: true}},
+			ExecutablePath: codexCanonical,
+			EntryPath:      codexBin,
+			ExecutionPath:  "/v1/bin:/usr/bin",
+		}},
+	}
+	initialResult.Installations = provider.InstallationsFromDiagnostics(initialResult.Diagnostics)
+
+	env := map[string]string{"HOME": t.TempDir(), "PATH": "/usr/bin"}
+	initialProviders, initialRuntimes := providerInstallations(initialResult, env, "")
+	providerCatalog := lingercontext.NewProviderCatalog(initialProviders)
+	computer := computerconfig.Config{
+		ComputerID: "comp-1",
+		Owners:     []computerconfig.Owner{{TenantID: "tenant-1", OwnerActorID: "owner-1"}},
+	}
+	initialDiagnosticsJSON, err := provider.DiagnosticsJSON(provider.GatewayDiagnostics(initialResult.Diagnostics))
+	if err != nil {
+		t.Fatal(err)
+	}
+	localDaemon, err := daemon.New(daemon.Options{
+		ComputerID:          computer.ComputerID,
+		ControlPlane:        mainTestControlPlane{stream: stream},
+		IdentityStore:       mainTestIdentityStore{value: identity},
+		OperationResolver:   mainTestResolver{},
+		Ledger:              daemon.NewMemoryLedger(),
+		Registrations:       registration.NewMemoryStore(),
+		Assignments:         assignment.NewMemoryStore(),
+		Runtimes:            initialRuntimes,
+		RuntimeDiagnostics:  initialDiagnosticsJSON,
+		RuntimeObservations: runtimeObservations(computer, provider.GatewayDiagnostics(initialResult.Diagnostics), 10),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runCtx, cancelRun := context.WithCancel(t.Context())
+	defer cancelRun()
+	runDone := make(chan error, 1)
+	go func() { runDone <- localDaemon.Run(runCtx) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for localDaemon.GatewayState() != "connected" {
+		if time.Now().After(deadline) {
+			t.Fatal("daemon did not reach connected state")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	controller := &controlController{daemon: localDaemon, diagnostics: initialResult.Diagnostics}
+	inventory, err := newRuntimeInventory(computer, provider.NewRejectedModels(nil), initialRuntimes, initialResult.Diagnostics, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory.start(runCtx, localDaemon)
+
+	modelsChanged := provider.DiscoveryResult{
+		Diagnostics: []provider.RuntimeDiagnostic{{
+			Type:           "codex",
+			Status:         "ready",
+			Protocol:       "app-server",
+			CheckedAt:      t0.Add(time.Minute),
+			Version:        "codex-cli 0.171.0",
+			Models:         []provider.RuntimeModel{{ID: "gpt-6", Label: "GPT-6", Link: "subscription", IsDefault: true}},
+			ExecutablePath: codexCanonical,
+			EntryPath:      codexBin,
+			ExecutionPath:  "/v2/bin:/usr/bin",
+		}},
+	}
+	modelsChanged.Installations = provider.InstallationsFromDiagnostics(modelsChanged.Diagnostics)
+
+	// Inject a transient Gateway send error: must return error, suppress
+	// runtime.diagnostic log, and leave publishedGateway uncommitted.
+	stream.setSendErr(errors.New("transient gateway send error"))
+	if err := applyRuntimeDiscovery(runCtx, modelsChanged, env, "", providerCatalog, controller, inventory); err == nil {
+		t.Fatal("expected failed publish on transient stream error")
+	}
+	if stream.eventCount(protocol.EventRuntimeDiagnostics) != 0 {
+		t.Fatalf("unexpected gateway event on failed publish: events=%d", stream.eventCount(protocol.EventRuntimeDiagnostics))
+	}
+	if strings.Contains(logBuf.String(), "runtime.diagnostic") {
+		t.Fatalf("logged runtime.diagnostic on failed gateway publish:\n%s", logBuf.String())
+	}
+
+	// Clear the transient error and retry: must commit and emit runtime.diagnostic once.
+	stream.setSendErr(nil)
+	if err := applyRuntimeDiscovery(runCtx, modelsChanged, env, "", providerCatalog, controller, inventory); err != nil {
+		t.Fatalf("retry after transient error failed: err=%v", err)
+	}
+	if stream.eventCount(protocol.EventRuntimeDiagnostics) != 1 {
+		t.Fatalf("gateway events = %d, want 1", stream.eventCount(protocol.EventRuntimeDiagnostics))
+	}
+	if got := strings.Count(logBuf.String(), "runtime.diagnostic"); got != 1 {
+		t.Fatalf("runtime.diagnostic log count = %d, want 1:\n%s", got, logBuf.String())
+	}
+
+	cancelRun()
+	closeRelease()
+	<-runDone
+}
+
+func TestResidentProcessesRemainReusableAcrossMonitorTicksWithFnmAndShellTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX terminal and resident fixture")
+	}
+	root := t.TempDir()
+	// Isolate macOS keychain lookups during Claude discovery/probes.
+	if runtime.GOOS == "darwin" {
+		secDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(secDir, "security"), []byte("#!/bin/sh\nexit 44\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", secDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+	t.Cleanup(func() {
+		_, _ = native.StopAllParkedResidents()
+		native.FlushTimings()
+	})
+
+	fnmInstall := filepath.Join(root, "fnm", "node-versions", "v22.0.0", "installation")
+	nodeBin := filepath.Join(fnmInstall, "bin")
+	multishellsDir := filepath.Join(root, "state", "fnm_multishells")
+	workDir := filepath.Join(root, "workspace")
+	runtimeHomeRoot := filepath.Join(root, "runtime-homes")
+	tempBase := filepath.Join(root, "op-tmp")
+	for _, dir := range []string{nodeBin, multishellsDir, workDir, runtimeHomeRoot, tempBase} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(nodeBin, "fixture-node"), []byte("#!/bin/sh\nexec /bin/sh \"$@\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	sed, err := exec.LookPath("sed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexTurnLog := filepath.Join(root, "codex-turns.log")
+	claudeTurnLog := filepath.Join(root, "claude-turns.log")
+	piTurnLog := filepath.Join(root, "pi-turns.log")
+
+	codexScript := `#!/usr/bin/env fixture-node
+if [ "$1" = "--version" ]; then echo "codex-cli 0.171.0"; exit 0; fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | "$LINGER_TEST_SED" -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  method=$(printf '%s' "$line" | "$LINGER_TEST_SED" -n 's/.*"method":"\([^"]*\)".*/\1/p')
+  [ -n "$id" ] || continue
+  case "$method" in
+  config/read) result='{"config":{"features":{"memories":false,"memory_tool":false}}}' ;;
+  account/read) result='{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}' ;;
+  model/list) result='{"data":[{"id":"gpt-test","isDefault":true}],"nextCursor":null}' ;;
+  thread/start|thread/resume)
+    result='{"thread":{"id":"thread-1"}}' ;;
+  turn/start)
+    echo "$$" >> "$CODEX_TURN_LOG"
+    printf '{"jsonrpc":"2.0","id":%s,"result":{"turn":{"id":"turn-1"}}}\n' "$id"
+    printf '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}\n'
+    printf '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}}\n'
+    continue ;;
+  *) result='{}' ;;
+  esac
+  printf '{"jsonrpc":"2.0","id":%s,"result":%s}\n' "$id" "$result"
+done
+`
+	claudeScript := `#!/usr/bin/env fixture-node
+if [ "$1" = "--version" ]; then echo "claude 2.1.284"; exit 0; fi
+if [ "$1" = "--help" ]; then echo "--effort <level> (low, medium, high)"; exit 0; fi
+if [ "$1 $2 $3" = "auth status --json" ]; then echo '{"loggedIn":true}'; exit 0; fi
+while IFS= read -r line; do
+  case "$line" in
+  *'"request_id":"linger-catalog"'*)
+    printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"linger-catalog","response":{"models":[{"value":"claude-test","displayName":"Claude test"}]}}}' ;;
+  *'"type":"control_request"'*)
+    rid=$(printf '%s' "$line" | "$LINGER_TEST_SED" -n 's/.*"request_id":"\([^"]*\)".*/\1/p')
+    printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{}}}\n' "$rid" ;;
+  *'"type":"user"'*)
+    echo "$$" >> "$CLAUDE_TURN_LOG"
+    uuid=$(printf '%s' "$line" | "$LINGER_TEST_SED" -n 's/.*"uuid":"\([^"]*\)".*/\1/p')
+    printf '{"type":"system","subtype":"init","session_id":"12345678-4321-4321-8321-123456789012"}\n'
+    printf '{"type":"user","isReplay":true,"uuid":"%s","session_id":"12345678-4321-4321-8321-123456789012"}\n' "$uuid"
+    printf '{"type":"result","subtype":"success","is_error":false,"terminal_reason":"completed","result":"done","session_id":"12345678-4321-4321-8321-123456789012","user_message_uuid":"%s"}\n' "$uuid" ;;
+  esac
+done
+`
+	piScript := `#!/usr/bin/env fixture-node
+if [ "$1" = "--version" ]; then echo "1.2.0"; exit 0; fi
+if [ "$1" = "auth" ]; then echo '{"status":"ready"}'; exit 0; fi
+session_dir=""
+session_id=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+  --session-dir) session_dir="$2"; shift 2 ;;
+  --session-id) session_id="$2"; shift 2 ;;
+  *) shift ;;
+  esac
+done
+while IFS= read -r line; do
+  rid=$(printf '%s' "$line" | "$LINGER_TEST_SED" -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  case "$line" in
+  *linger-probe*) printf '{"type":"response","id":"linger-probe","command":"get_state","success":true,"data":{"isStreaming":false}}\n' ;;
+  *linger-state*) printf '{"type":"response","id":"linger-state","command":"get_state","success":true,"data":{"thinkingLevel":"off"}}\n' ;;
+  *linger-models*) printf '{"type":"response","id":"linger-models","command":"get_available_models","success":true,"data":{"models":[{"provider":"builtin","id":"pi-test","name":"Pi test"}]}}\n' ;;
+  *'"type":"get_state"'*)
+    printf '{"type":"response","id":"%s","command":"get_state","success":true,"data":{"sessionId":"%s","isStreaming":false,"isCompacting":false,"pendingMessageCount":0}}\n' "$rid" "$session_id" ;;
+  *'"type":"prompt"'*)
+    echo "$$" >> "$PI_TURN_LOG"
+    printf '{"type":"session","id":"%s","cwd":"%s"}\n' "$session_id" "$PWD" > "$session_dir/fixture_${session_id}.jsonl"
+    printf '{"type":"response","id":"%s","command":"prompt","success":true,"data":{"disposition":"started"}}\n' "$rid"
+    printf '{"type":"agent_start"}\n'
+    printf '{"type":"message_start","message":{"role":"assistant"}}\n'
+    printf '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"done"}}\n'
+    printf '{"type":"message_end","message":{"role":"assistant","model":"fixture/model","stopReason":"stop","content":[{"type":"text","text":"done"}]}}\n'
+    printf '{"type":"agent_end"}\n'
+    printf '{"type":"agent_settled","aborted":false}\n' ;;
+  esac
+done
+`
+	for name, body := range map[string]string{"codex": codexScript, "claude": claudeScript, "pi": piScript} {
+		if err := os.WriteFile(filepath.Join(nodeBin, name), []byte(body), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	zshrc := filepath.Join(root, ".zshrc")
+	if err := os.WriteFile(zshrc, []byte("# initial\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shellSeqFile := filepath.Join(root, "shell-seq")
+	shellTimeoutGate := filepath.Join(root, "shell-timeout")
+	shellTimeoutStarted := filepath.Join(root, "shell-timeout-started")
+	shell := filepath.Join(root, "fnm-login-shell")
+	shellScript := `#!/bin/sh
+seq=0
+if [ -f "$SHELL_SEQ_FILE" ]; then read seq < "$SHELL_SEQ_FILE"; fi
+seq=$((seq + 1))
+echo "$seq" > "$SHELL_SEQ_FILE"
+link="$MULTISHELLS_DIR/shell_${seq}_$$"
+ln -s "$FNM_INSTALL_DIR" "$link"
+if [ -f "$SHELL_TIMEOUT_GATE" ]; then
+  printf 'started\n' > "$SHELL_TIMEOUT_STARTED"
+  sleep 8
+  exit 0
+fi
+export FNM_MULTISHELL_PATH="$link"
+export PATH="$link/bin:/usr/bin:/bin"
+exec /bin/sh -c "$2"
+`
+	if err := os.WriteFile(shell, []byte(shellScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	baseEnv := map[string]string{
+		"HOME":                  root,
+		"SHELL":                 shell,
+		"PATH":                  "/usr/bin:/bin",
+		"XDG_STATE_HOME":        filepath.Join(root, "state"),
+		"LINGER_TEST_SED":       sed,
+		"FNM_INSTALL_DIR":       fnmInstall,
+		"MULTISHELLS_DIR":       multishellsDir,
+		"SHELL_SEQ_FILE":        shellSeqFile,
+		"SHELL_TIMEOUT_GATE":    shellTimeoutGate,
+		"SHELL_TIMEOUT_STARTED": shellTimeoutStarted,
+		"CODEX_TURN_LOG":        codexTurnLog,
+		"CLAUDE_TURN_LOG":       claudeTurnLog,
+		"PI_TURN_LOG":           piTurnLog,
+	}
+	currentOptions := func() provider.DiscoveryOptions {
+		return provider.DiscoveryOptions{
+			Runtimes:        []string{"codex", "claude", "pi"},
+			RuntimeHomeRoot: runtimeHomeRoot,
+			Environment:     maps.Clone(baseEnv),
+			Timeout:         10 * time.Second,
+		}
+	}
+
+	termCache := provider.NewTerminalEnvironmentCache()
+	initial, err := termCache.Discover(t.Context(), currentOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rt := range []string{"codex", "claude", "pi"} {
+		if _, ok := initial.Installations[rt]; !ok {
+			t.Fatalf("%s was not discovered: %+v", rt, initial.Diagnostics)
+		}
+		if !strings.HasPrefix(initial.Installations[rt].ExecutionPath, nodeBin+":") {
+			t.Fatalf("%s ExecutionPath=%q, want stabilized %q prefix", rt, initial.Installations[rt].ExecutionPath, nodeBin)
+		}
+	}
+	if leftover, err := os.ReadDir(multishellsDir); err != nil || len(leftover) != 0 {
+		t.Fatalf("fnm_multishells leaked symlinks after initial discover: entries=%v err=%v", leftover, err)
+	}
+
+	initialProviders, initialRuntimes := providerInstallations(initial, baseEnv, "")
+	providerCatalog := lingercontext.NewProviderCatalog(initialProviders)
+	inventory, err := newRuntimeInventory(computerconfig.Config{ComputerID: "comp-1"}, provider.NewRejectedModels(nil), initialRuntimes, initial.Diagnostics, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller := &controlController{diagnostics: initial.Diagnostics}
+	executor := provider.Executor{TempBase: tempBase, RuntimeHomeRoot: runtimeHomeRoot}
+
+	runTurn := func(runtimeType, sessionID, resumeID string) provider.Result {
+		t.Helper()
+		installed, ok, lookupErr := providerCatalog.Lookup(t.Context(), runtimeType)
+		if lookupErr != nil || !ok {
+			t.Fatalf("lookup %s: ok=%v err=%v", runtimeType, ok, lookupErr)
+		}
+		execEnv := maps.Clone(installed.Environment)
+		execEnv["TEAMHUB_CONFIG"] = filepath.Join(root, "teamhub.json")
+		execEnv["TEAMHUB_PROFILE"] = "runtime"
+		spec := provider.OperationSpec{
+			OperationKind:    "run.start",
+			Provider:         runtimeType,
+			ExecutablePath:   installed.ExecutablePath,
+			WorkingDirectory: workDir,
+			Prompt:           "hello",
+			Environment:      execEnv,
+			Timeout:          15 * time.Second,
+			CodexVersion:     "0.171.0",
+			TenantID:         "tenant-1",
+			OwnerActorID:     "owner-1",
+			AgentID:          "agent-1",
+			ScopeID:          "context-1",
+		}
+		if runtimeType == "codex" {
+			spec.ResumeSessionID = resumeID
+		} else if resumeID != "" {
+			spec.ResumeSessionID = resumeID
+		} else {
+			spec.CreateProviderSessionID = sessionID
+		}
+		execution, startErr := executor.Start(t.Context(), spec, func(context.Context, protocol.Event) error { return nil })
+		if startErr != nil {
+			t.Fatalf("%s Start failed: %v", runtimeType, startErr)
+		}
+		result := <-execution.Result
+		if result.Status != "completed" {
+			t.Fatalf("%s turn failed: %+v", runtimeType, result)
+		}
+		return result
+	}
+
+	const claudeSession = "12345678-4321-4321-8321-123456789012"
+	const piSession = "87654321-4321-4321-8321-123456789012"
+	codexFirst := runTurn("codex", "", "")
+	runTurn("claude", claudeSession, "")
+	runTurn("pi", piSession, "")
+
+	// Run MonitorRuntimeDiagnostics across:
+	// 1) steady full ticks (no shell launch)
+	// 2) .zshrc change creating a new fnm_multishells symlink (stabilized + cleaned up)
+	// 3) .zshrc change with shell timeout (never degrades cached PATH)
+	monitorCtx, cancelMonitor := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancelMonitor()
+
+	var fullRefreshCount atomic.Int32
+	var phase atomic.Int32
+	modTime := time.Now().Add(2 * time.Second)
+	touchZshrc := func() {
+		modTime = modTime.Add(time.Second)
+		_ = os.WriteFile(zshrc, []byte(fmt.Sprintf("# edit %d\n", modTime.Unix())), 0o600)
+		_ = os.Chtimes(zshrc, modTime, modTime)
+	}
+
+	concurrentUserTab := filepath.Join(multishellsDir, "concurrent_user_tab")
+	concurrentDone := make(chan struct{})
+	var concurrentStarted atomic.Bool
+	var concurrentErr error
+	t.Cleanup(func() {
+		if concurrentStarted.Load() {
+			<-concurrentDone
+		}
+	})
+
+	assertPostTimeoutMultishells := func(tb testing.TB) {
+		tb.Helper()
+		if _, statErr := os.Lstat(concurrentUserTab); statErr != nil {
+			tb.Errorf("concurrent fnm_multishells symlink %s was deleted: %v", concurrentUserTab, statErr)
+		}
+		entries, readErr := os.ReadDir(multishellsDir)
+		if readErr != nil {
+			tb.Errorf("read fnm_multishells: %v", readErr)
+			return
+		}
+		var names []string
+		hasTimeoutLink := false
+		hasConcurrent := false
+		for _, entry := range entries {
+			name := entry.Name()
+			names = append(names, name)
+			switch {
+			case name == "concurrent_user_tab":
+				hasConcurrent = true
+			case strings.HasPrefix(name, "shell_3_"):
+				hasTimeoutLink = true
+			case strings.HasPrefix(name, "shell_1_") || strings.HasPrefix(name, "shell_2_"):
+				tb.Errorf("healthy tick symlink %s leaked after timeout: entries=%v", name, names)
+			default:
+				tb.Errorf("unexpected fnm_multishells entry %s after timeout: entries=%v", name, names)
+			}
+		}
+		if !hasConcurrent || !hasTimeoutLink || len(entries) != 2 {
+			tb.Errorf("fnm_multishells entries after timeout = %v, want concurrent_user_tab and one shell_3_*", names)
+		}
+	}
+
+	monitorErr := provider.MonitorRuntimeDiagnostics(monitorCtx, provider.RuntimeMonitorOptions{
+		Initial:               initial,
+		Discovery:             currentOptions(),
+		ResolveDiscovery:      currentOptions,
+		TerminalEnvironment:   termCache,
+		RefreshInterval:       10 * time.Millisecond,
+		FullRefreshEveryTicks: 1,
+		RefreshAllowed: func() bool {
+			tick := fullRefreshCount.Add(1)
+			switch {
+			case tick == 3 && phase.CompareAndSwap(0, 1):
+				// Verify steady ticks did not re-run the shell.
+				seqData, _ := os.ReadFile(shellSeqFile)
+				if strings.TrimSpace(string(seqData)) != "1" {
+					t.Errorf("steady monitor ticks re-ran shell: seq=%q", string(seqData))
+				}
+				// Trigger a .zshrc reload with a brand-new fnm_multishells symlink.
+				touchZshrc()
+			case tick == 5 && phase.CompareAndSwap(1, 2):
+				seqData, _ := os.ReadFile(shellSeqFile)
+				if strings.TrimSpace(string(seqData)) != "2" {
+					t.Errorf(".zshrc edit did not trigger shell re-capture: seq=%q", string(seqData))
+				}
+				if leftover, readErr := os.ReadDir(multishellsDir); readErr != nil || len(leftover) != 0 {
+					t.Errorf("fnm_multishells leaked symlinks after healthy ticks: entries=%v err=%v", leftover, readErr)
+				}
+				// Trigger a .zshrc reload while the shell times out and a concurrent
+				// user session creates a symlink in the shared fnm_multishells dir.
+				_ = os.WriteFile(shellTimeoutGate, []byte("1\n"), 0o600)
+				concurrentStarted.Store(true)
+				go func() {
+					defer close(concurrentDone)
+					ticker := time.NewTicker(5 * time.Millisecond)
+					defer ticker.Stop()
+					for {
+						if _, statErr := os.Stat(shellTimeoutStarted); statErr == nil {
+							concurrentErr = os.Symlink(fnmInstall, concurrentUserTab)
+							return
+						}
+						select {
+						case <-monitorCtx.Done():
+							concurrentErr = monitorCtx.Err()
+							return
+						case <-ticker.C:
+						}
+					}
+				}()
+				touchZshrc()
+			case tick >= 8 && phase.Load() == 2:
+				if concurrentStarted.Load() {
+					select {
+					case <-concurrentDone:
+					case <-monitorCtx.Done():
+					}
+					if concurrentErr != nil {
+						t.Errorf("failed to create concurrent fnm_multishells symlink during timeout: %v", concurrentErr)
+					}
+				}
+				seqData, _ := os.ReadFile(shellSeqFile)
+				if strings.TrimSpace(string(seqData)) != "3" {
+					t.Errorf("shell timeout did not invoke once and back off across monitor ticks: seq=%q, want 3", string(seqData))
+				}
+				assertPostTimeoutMultishells(t)
+				cancelMonitor()
+				return false
+			}
+			return true
+		},
+		OnChanged: func(next provider.DiscoveryResult) error {
+			return applyRuntimeDiscovery(monitorCtx, next, baseEnv, "", providerCatalog, controller, inventory)
+		},
+	})
+	if !errors.Is(monitorErr, context.Canceled) {
+		t.Fatalf("monitor exited with %v, want context.Canceled", monitorErr)
+	}
+	assertPostTimeoutMultishells(t)
+	if rev := inventoryRevision(inventory); rev != 1 {
+		t.Fatalf("Gateway inventory revision bumped unnecessarily: got %d, want 1", rev)
+	}
+
+	// Second turn for all 3 Runtimes must adopt the parked residents without recycling.
+	runTurn("codex", "", codexFirst.SessionID)
+	runTurn("claude", "", claudeSession)
+	runTurn("pi", "", piSession)
+
+	for _, pair := range []struct {
+		name string
+		log  string
+	}{
+		{"codex", codexTurnLog},
+		{"claude", claudeTurnLog},
+		{"pi", piTurnLog},
+	} {
+		data, readErr := os.ReadFile(pair.log)
+		if readErr != nil {
+			t.Fatalf("read %s turn log: %v", pair.name, readErr)
+		}
+		pids := strings.Fields(strings.TrimSpace(string(data)))
+		if len(pids) != 2 || pids[0] != pids[1] {
+			t.Fatalf("%s did not reuse resident process across monitor ticks: turn pids=%v", pair.name, pids)
+		}
+	}
+
+	diagLogs, err := filepath.Glob(filepath.Join(runtimeHomeRoot, "*", "*", "runner-diagnostics.log"))
+	if err != nil || len(diagLogs) == 0 {
+		t.Fatalf("missing runner-diagnostics.log files: %v %v", diagLogs, err)
+	}
+	var combined strings.Builder
+	for _, path := range diagLogs {
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		combined.Write(data)
+	}
+	allLogs := combined.String()
+	if strings.Contains(allLogs, "resident recycled") {
+		t.Fatalf("unexpected resident recycle in diagnostics log:\n%s", allLogs)
+	}
+	if strings.Contains(allLogs, `"mismatch":"env"`) || strings.Contains(allLogs, `"mismatch":"config_args"`) {
+		t.Fatalf("unexpected env/config_args mismatch in diagnostics log:\n%s", allLogs)
+	}
+	for _, reused := range []string{"codex resident reused", "claude resident reused", "pi resident reused"} {
+		if !strings.Contains(allLogs, reused) {
+			t.Fatalf("missing %q in diagnostics log:\n%s", reused, allLogs)
+		}
 	}
 }
