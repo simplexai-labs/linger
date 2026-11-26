@@ -1,225 +1,39 @@
 name: Desktop release
-
-# Pushing a desktop-v<version> tag builds the macOS (Apple silicon), Linux x64
-# and Windows x64 packages and uploads them, with SHA256SUMS.txt, to the
-# GitHub Release of that tag in RELEASE_REPO (simplexai-labs/linger unless the
-# variable says otherwise). Stable tags create a draft release so release notes
-# are attached before notifying subscribers or updating releases/latest
-# (`scripts/ci/desktop-release.sh publish`); versions with a hyphen publish
-# immediately as prereleases. A manual run builds a version from the chosen
-# branch and keeps the files as workflow artifacts unless "publish" is set.
-# scripts/ci/desktop-release.sh does the work; docs/desktop-release.md lists
-# the variables and secrets. This is the only workflow that publishes desktop
-# releases.
 on:
-  push:
-    tags: ["desktop-v*"]
   workflow_dispatch:
-    inputs:
-      version:
-        description: Version to build, such as 0.16.33 or 0.16.33-rc.1
-        required: true
-      publish:
-        description: Also create the desktop-v<version> release at this commit
-        type: boolean
-        default: false
-
 permissions:
   contents: read
-
-concurrency:
-  group: desktop-release-${{ github.ref }}-${{ inputs.version }}
-  cancel-in-progress: false
-
-env:
-  # owner/name of the repository that receives the release.
-  RELEASE_REPO: ${{ vars.RELEASE_REPO || 'simplexai-labs/linger' }}
-  # https folder serving the PostgreSQL and voice tools archives that
-  # apps/desktop/distribution/*.json pin: the assets of the native-deps
-  # prerelease, unless a secret or variable names another folder.
-  LINGER_NATIVE_DEPS_URL: ${{ secrets.LINGER_NATIVE_DEPS_URL || vars.LINGER_NATIVE_DEPS_URL || 'https://github.com/simplexai-labs/linger/releases/download/native-deps' }}
-  # rcodesign reads RCODESIGN_* variables as its configuration, so these
-  # carry another prefix.
-  APPLE_CODESIGN_VERSION: 0.29.0
-  APPLE_CODESIGN_SHA256: dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002
-
 jobs:
-  prepare:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    outputs:
-      tag: ${{ steps.version.outputs.tag }}
-      version: ${{ steps.version.outputs.version }}
-      prerelease: ${{ steps.version.outputs.prerelease }}
-      publish: ${{ steps.version.outputs.publish }}
-    steps:
-      - uses: actions/checkout@v7
-      - id: version
-        shell: bash
-        env:
-          INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
-          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
-          HAS_RELEASE_TOKEN: ${{ secrets.LINGER_RELEASE_TOKEN != '' }}
-          HAS_MACOS_DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 != '' && secrets.MACOS_DEVELOPER_ID_PASSWORD != '' }}
-          HAS_MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY_JSON != '' }}
-          HAS_UPDATE_KEY: ${{ secrets.DESKTOP_UPDATE_KEY_PEM != '' }}
-        run: |
-          set -euo pipefail
-          scripts/ci/desktop-release.sh version "$INPUT" | tee -a "$GITHUB_OUTPUT"
-          echo "publish=$PUBLISH" >>"$GITHUB_OUTPUT"
-          # Stop before building when the release could not be published or
-          # when an official simplexai-labs/linger release lacks required
-          # signing/update credentials.
-          if [ "$PUBLISH" = true ] && [ "$RELEASE_REPO" != "$GITHUB_REPOSITORY" ] && [ "$HAS_RELEASE_TOKEN" != true ]; then
-            echo "::error::Publishing to $RELEASE_REPO from $GITHUB_REPOSITORY needs the LINGER_RELEASE_TOKEN secret, a token with contents write access to $RELEASE_REPO (see docs/desktop-release.md)."
-            exit 1
-          fi
-          if [ "$PUBLISH" = true ] && [ "$RELEASE_REPO" = simplexai-labs/linger ]; then
-            missing=()
-            [ "$HAS_MACOS_DEVELOPER_ID" = true ] || missing+=(MACOS_DEVELOPER_ID_P12_BASE64/MACOS_DEVELOPER_ID_PASSWORD)
-            [ "$HAS_MACOS_NOTARY_KEY" = true ] || missing+=(MACOS_NOTARY_KEY_JSON)
-            [ "$HAS_UPDATE_KEY" = true ] || missing+=(DESKTOP_UPDATE_KEY_PEM)
-            if [ "${#missing[@]}" -gt 0 ]; then
-              echo "::error::Publishing to $RELEASE_REPO requires secrets: ${missing[*]} (see docs/desktop-release.md)."
-              exit 1
-            fi
-          fi
-          echo "Release repository: $RELEASE_REPO"
-
-  build:
-    needs: prepare
-    # The packaging scripts build the DMG and the Windows installer on Linux
-    # with Docker, which the macOS and Windows runners do not offer.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    permissions:
-      contents: read
-      packages: read
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [darwin-arm64, linux-x64]
-        include:
-          - target: darwin-arm64
-            docker_image: dmgtool
-          - target: linux-x64
-            docker_image: ""
-    env:
-      DESKTOP_VERSION: ${{ needs.prepare.outputs.version }}
-      RELEASE_OUT: ${{ github.workspace }}/.linger-runtime/desktop-release
-      LINGER_NATIVE_POSTGRES_DIR: ${{ github.workspace }}/.linger-runtime/native-deps
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/desktop-build
-        with:
-          target: ${{ matrix.target }}
-          docker-image: ${{ matrix.docker_image }}
-          require-macos-signing: ${{ needs.prepare.outputs.publish == 'true' && env.RELEASE_REPO == 'simplexai-labs/linger' }}
-          ghcr-token: ${{ github.token }}
-          diagnostics-upload-url: ${{ secrets.LINGER_DIAGNOSTICS_UPLOAD_URL }}
-          macos-developer-id-p12-base64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
-          macos-developer-id-password: ${{ secrets.MACOS_DEVELOPER_ID_PASSWORD }}
-          macos-notary-key-json: ${{ secrets.MACOS_NOTARY_KEY_JSON }}
-
-  # Split from the build matrix so windows-smoke starts as soon as win32-x64
-  # finishes instead of waiting for darwin-arm64 packaging and notarization.
-  build-win32:
-    name: build (win32-x64)
-    needs: prepare
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    permissions:
-      contents: read
-      packages: read
-    env:
-      DESKTOP_VERSION: ${{ needs.prepare.outputs.version }}
-      RELEASE_OUT: ${{ github.workspace }}/.linger-runtime/desktop-release
-      LINGER_NATIVE_POSTGRES_DIR: ${{ github.workspace }}/.linger-runtime/native-deps
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/desktop-build
-        with:
-          target: win32-x64
-          docker-image: wintool
-          ghcr-token: ${{ github.token }}
-          diagnostics-upload-url: ${{ secrets.LINGER_DIAGNOSTICS_UPLOAD_URL }}
-          windows-signing-p12-base64: ${{ secrets.WINDOWS_SIGNING_P12_BASE64 }}
-          windows-signing-password: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
-
-  windows-smoke:
-    needs: [prepare, build-win32]
+  windows-native-lifecycle:
     runs-on: windows-2022
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
-          persist-credentials: false
-      - uses: actions/download-artifact@v8
+          node-version-file: .node-version
+      - uses: actions/setup-go@v7
         with:
-          name: Linger-${{ needs.prepare.outputs.version }}-windows-x64-setup.exe
-          path: candidate
-          skip-decompress: true
-      - uses: actions/download-artifact@v8
-        with:
-          name: windows-setup.sha256
-          path: candidate
-          skip-decompress: true
-      - name: Smoke the packaged Pi runtime with its managed MCP extension
-        shell: powershell
-        env:
-          DESKTOP_VERSION: ${{ needs.prepare.outputs.version }}
+          go-version-file: apps/computer/local-daemon/go.mod
+          cache: false
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Run Windows installer lifecycle
+        shell: pwsh
         run: |
-          $setup = "candidate\Linger-$env:DESKTOP_VERSION-windows-x64-setup.exe"
-          $digest = (Get-Content -LiteralPath 'candidate\windows-setup.sha256' -Raw).Split(' ')[0]
-          scripts/ci/windows-desktop-smoke.ps1 -Setup $setup -ExpectedSha256 $digest
-
-  release:
-    needs: [prepare, build, build-win32, windows-smoke]
-    if: needs.prepare.outputs.publish == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+          $testTemp = 'C:\LingerNativeCI'
+          New-Item -ItemType Directory -Force $testTemp | Out-Null
+          $env:TEMP = $testTemp
+          $env:TMP = $testTemp
+          $env:LINGER_TEST_PWSH = (Get-Command pwsh).Source
+          pnpm exec vitest run --no-file-parallelism scripts/local-computer-windows-native.test.ts 2>&1 | Tee-Object -FilePath native-lifecycle.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain test log
+        if: always()
+        uses: actions/upload-artifact@v7
         with:
-          pattern: Linger-${{ needs.prepare.outputs.version }}-*
-          path: release
-          merge-multiple: true
-          skip-decompress: true
-      - uses: actions/download-artifact@v8
-        with:
-          name: windows-setup.sha256
-          path: release
-          skip-decompress: true
-      - name: Verify the Windows Setup that passed smoke
-        working-directory: release
-        run: sha256sum -c windows-setup.sha256 && rm windows-setup.sha256
-      # The signed update manifest over every platform's package. Official
-      # simplexai-labs/linger releases require the key (prepare checks early);
-      # forks without the key still publish with a warning and no manifest.
-      - name: Sign the update manifest
-        env:
-          DESKTOP_UPDATE_KEY_PEM: ${{ secrets.DESKTOP_UPDATE_KEY_PEM }}
-          DESKTOP_REQUIRE_UPDATE_KEY: ${{ env.RELEASE_REPO == 'simplexai-labs/linger' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          umask 077
-          if [ -n "$DESKTOP_UPDATE_KEY_PEM" ]; then
-            key="$RUNNER_TEMP/update.pem"
-            trap 'rm -f "$key"' EXIT
-            printf '%s\n' "$DESKTOP_UPDATE_KEY_PEM" >"$key"
-            export DESKTOP_UPDATE_KEY="$key"
-          fi
-          scripts/ci/desktop-release.sh manifest release "${{ needs.prepare.outputs.version }}"
-      - run: scripts/ci/desktop-release.sh checksums release "${{ needs.prepare.outputs.version }}"
-      # GITHUB_TOKEN can write only this repository; a release in another one
-      # takes LINGER_RELEASE_TOKEN, which prepare checked.
-      - name: Create or update the GitHub Release
-        env:
-          GH_TOKEN: ${{ env.RELEASE_REPO == github.repository && github.token || secrets.LINGER_RELEASE_TOKEN }}
-        run: >-
-          scripts/ci/desktop-release.sh github-release release
-          "${{ needs.prepare.outputs.tag }}" "${{ needs.prepare.outputs.version }}"
+          name: windows-native-lifecycle-log
+          path: native-lifecycle.log
+          if-no-files-found: ignore
+          retention-days: 14
