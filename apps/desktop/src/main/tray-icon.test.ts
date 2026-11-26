@@ -31,26 +31,38 @@ describe("renderTrayIcon", () => {
     expect(pixels(png)).toHaveLength(32 * (32 * 4 + 1));
   });
 
-  it("draws a different image for every state and busy frame", () => {
-    for (const template of [true, false]) {
-      const images = new Set(
-        [
-          { tone: "online" as const },
-          { tone: "offline" as const },
-          { tone: "error" as const },
-          { tone: "busy" as const, frame: 0 },
-          { tone: "busy" as const, frame: 1 },
-        ].map((spec) =>
-          renderTrayIcon({
-            ...spec,
-            size: 16,
-            template,
-            artwork: artwork(16),
-          }).toString("hex"),
-        ),
-      );
-      expect(images.size).toBe(5);
-    }
+  it("renders a clean mark for macOS busy while preserving error badge and non-macOS busy animation", () => {
+    const render = (
+      template: boolean,
+      tone: "online" | "offline" | "error" | "busy",
+      frame?: number,
+    ) =>
+      renderTrayIcon({
+        tone,
+        ...(frame !== undefined ? { frame } : {}),
+        size: 16,
+        template,
+        artwork: artwork(16),
+      }).toString("hex");
+
+    // macOS template icons render busy as the clean mark (identical to online)
+    // while keeping distinct offline and error states.
+    const macOnline = render(true, "online");
+    const macOffline = render(true, "offline");
+    const macError = render(true, "error");
+    expect(render(true, "busy", 0)).toBe(macOnline);
+    expect(render(true, "busy", 1)).toBe(macOnline);
+    expect(new Set([macOnline, macOffline, macError]).size).toBe(3);
+
+    // Non-macOS tile icons keep distinct states and animate the busy dot.
+    const tileImages = new Set([
+      render(false, "online"),
+      render(false, "offline"),
+      render(false, "error"),
+      render(false, "busy", 0),
+      render(false, "busy", 1),
+    ]);
+    expect(tileImages.size).toBe(5);
   });
 
   it("keeps template images monochrome and draws the L and dot", () => {

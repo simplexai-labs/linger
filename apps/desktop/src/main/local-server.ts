@@ -79,6 +79,7 @@ import {
   NODE_RUNTIME_VERSION,
   nodeRuntimeDownloadUrls,
 } from "../../../../scripts/local-computer-node-distributions.mjs";
+import type { DesktopConfig } from "./config.js";
 import type { Logger } from "./log.js";
 import type { Module, ModuleContext, StopReason } from "./modules.js";
 import {
@@ -553,6 +554,7 @@ export class LocalServerModule implements Module {
   #recovering = false;
   #recoveredAt: number | undefined;
   #offReset: (() => void) | undefined;
+  #offServerChanged: (() => void) | undefined;
   #offDaemon: (() => void) | undefined;
   #offDaemonConnection: (() => void) | undefined;
   #offComputerChanged: (() => void) | undefined;
@@ -606,6 +608,16 @@ export class LocalServerModule implements Module {
       config.serverUrl !== undefined &&
       sameOrigin(config.serverUrl, record.origin) &&
       !!config.computerId;
+    if (
+      !record &&
+      !migrationFailure &&
+      (await this.#isOrphanedLocalServer(config))
+    ) {
+      ctx.log.warn("local_server.orphaned_config_reset", {
+        server_url: config.serverUrl,
+      });
+      await this.#reset();
+    }
     this.#started = true;
     if (migrationFailure) {
       // Resume would fail on the legacy record with a less useful error;
@@ -643,6 +655,12 @@ export class LocalServerModule implements Module {
       record = undefined;
       void this.#reset();
     });
+    this.#offServerChanged = ctx.bus.on("server.changed", (serverUrl) => {
+      if (this.#origin && sameOrigin(this.#origin, serverUrl)) return;
+      this.#origin = undefined;
+      if (ctx.config.get().localServer !== false)
+        ctx.config.update({ localServer: false });
+    });
     const grace = this.#options.unreachableGraceMs ?? UNREACHABLE_GRACE_MS;
     this.#offUnreachable = ctx.bus.on("local-server.unreachable", () => {
       void this.#recoverUnreachable("load_failed", grace, true);
@@ -659,6 +677,7 @@ export class LocalServerModule implements Module {
     this.#offUnreachable?.();
     clearInterval(this.#watch);
     this.#offReset?.();
+    this.#offServerChanged?.();
     this.#offDaemon?.();
     this.#offDaemonConnection?.();
     this.#offComputerChanged?.();
@@ -2685,6 +2704,14 @@ export class LocalServerModule implements Module {
     this.#ctx
       ?.get<WindowManagerModule>("WindowManager")
       ?.setServer(origin, previous, { reason });
+    const serverUrl = this.#ctx?.config.get().serverUrl;
+    const stillOurs =
+      reason === "local_ready" ||
+      !serverUrl ||
+      sameOrigin(serverUrl, origin) ||
+      (previous !== undefined && sameOrigin(serverUrl, previous));
+    if (stillOurs && this.#ctx?.config.get().localServer !== true)
+      this.#ctx?.config.update({ localServer: true });
   }
 
   // The server sets up the Another Me once this computer offers a signed-in
@@ -2820,11 +2847,21 @@ export class LocalServerModule implements Module {
     this.#acquireBusy();
     try {
       const update = this.#sourceUpdate(currentRecord);
+      const versionChanged =
+        !currentRecord.version ||
+        compareVersions(this.#options.version, currentRecord.version) > 0;
       if (update) {
-        // The services restart even if they still answer.
-        this.#preparing = "updating";
-        this.#set("preparing", "Updating Linger on this computer…");
-        windows?.showUpdating();
+        // The services restart even if they still answer. A same-version
+        // bundle refresh shows Starting instead of claiming a new version.
+        if (versionChanged) {
+          this.#preparing = "updating";
+          this.#set("preparing", "Updating Linger on this computer…");
+          windows?.showUpdating();
+        } else {
+          this.#preparing = "starting";
+          this.#set("preparing", "Starting Linger on this computer…");
+          windows?.showStarting();
+        }
       } else {
         this.#preparing = "starting";
         this.#set("preparing", "Starting Linger on this computer…");
@@ -2893,8 +2930,13 @@ export class LocalServerModule implements Module {
         // The record moves, and the older folder goes, only once the
         // services run from the new one and answer; until then the older
         // services keep running from their folder, and Retry moves them.
+        const [servingSource, expectedRepo] = await Promise.all([
+          serving.source ? canonicalPath(serving.source) : undefined,
+          canonicalPath(repo),
+        ]);
         if (
-          serving.source !== (await realpath(repo).catch(() => repo)) ||
+          !servingSource ||
+          servingSource !== expectedRepo ||
           !(await this.#reachable(origin))
         )
           throw new Error(
@@ -2939,6 +2981,22 @@ export class LocalServerModule implements Module {
     }
   }
 
+  async #isOrphanedLocalServer(config: DesktopConfig): Promise<boolean> {
+    if (!config.serverUrl || !config.computerId) return false;
+    if (!isManagedLocalServerConfig(config)) return false;
+    try {
+      await stat(this.#recordFile());
+      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+    }
+    return !(await answers(
+      this.#options.fetch ?? fetch,
+      config.serverUrl,
+      ORPHANED_SERVER_PROBE_MS,
+    ));
+  }
+
   // The person gave up on the installation the window used, whose services
   // do not start (it may have been removed or left broken by an uninstall):
   // forget it and this computer's enrollment with it, and show setup. Its
@@ -2952,8 +3010,10 @@ export class LocalServerModule implements Module {
       this.#set("idle", "");
       ctx.log.info("local_server.reset");
       await ctx.get<EnrollmentModule>("Enrollment").unenroll();
-      ctx.config.update({ serverUrl: undefined });
-      ctx.get<WindowManagerModule>("WindowManager").loadServer();
+      ctx.config.update({ serverUrl: undefined, localServer: undefined });
+      const windows = ctx.get<WindowManagerModule>("WindowManager");
+      windows?.hide?.();
+      windows?.loadServer();
     } catch (error) {
       ctx.log.warn("local_server.reset_failed", { error: String(error) });
     }
@@ -3657,6 +3717,33 @@ async function answers(
   } catch {
     return false;
   }
+}
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+const ORPHANED_SERVER_PROBE_MS = 1_500;
+
+const canonicalPath = (file: string): Promise<string> =>
+  realpath(file).catch(() => path.resolve(file));
+
+// Whether Desktop's saved server config belongs to a Desktop-managed local
+// server rather than a remote team server or an external developer server.
+export function isManagedLocalServerConfig(
+  config: Pick<
+    DesktopConfig,
+    "serverUrl" | "localServer" | "preferredRuntime" | "runtimeEnvironment"
+  >,
+): boolean {
+  if (!config.serverUrl) return false;
+  let hostname: string;
+  try {
+    hostname = new URL(config.serverUrl).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (!LOOPBACK_HOSTS.has(hostname)) return false;
+  if (config.localServer === true) return true;
+  if (config.localServer === false) return false;
+  return Boolean(config.preferredRuntime || config.runtimeEnvironment);
 }
 
 // Done: services run and the owner exists. A runtime sign-in still missing

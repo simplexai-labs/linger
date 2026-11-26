@@ -290,12 +290,23 @@ Gateway and runs Agents. The daemon exits with the app.
   replaces the recorded one. The record also names the app
   version that unpacked the source; when this app brings another source
   package (it was installed over an older one), that launch unpacks it and
-  resumes on it, with the "Updating Linger" page instead of the older
-  interface. Only when the installer reports the services serving from the
-  new folder (`details.source`) and the origin answers does it record that
-  folder and prune the older one; otherwise the older services keep running
-  from their folder, the record keeps naming it, and the start failure page's
-  Retry moves them again. A prune never removes a folder a running process
+  resumes on it, showing "Updating Linger" when the app version increased and
+  "Starting Linger" for a same-version source bundle refresh. Only when the
+  installer reports the services serving from the new folder (`details.source`,
+  compared after canonicalizing symlinks/paths on both sides) and the origin
+  answers does it record that folder and prune the older one; otherwise the
+  older services keep running from their folder, the record keeps naming it,
+  and the start failure page's Retry moves them again. `LocalServer` marks
+  `localServer: true` in `config.json` when it owns the active server
+  (explicitly set to `false` on `server.changed` to another origin, preserved on
+  `server.moved`, and cleared with `serverUrl` on reset while keeping
+  `preferredRuntime`/`runtimeEnvironment`); during `LocalServer.start()`, when a
+  Desktop-managed loopback config has `ENOENT` on `desktop/local-server.json`
+  and the server does not answer, it logs `local_server.orphaned_config_reset`
+  and runs `#reset()` (clearing credentials and enrollment via
+  `Enrollment.unenroll()` and hiding the main window) so `SetupWindow.start()`,
+  which evaluates `show` after `LocalServer` starts, opens Setup cleanly without
+  disturbing external loopback dev servers. A prune never removes a folder a running process
   still starts from (`foldersInUse`; when processes cannot be listed, it
   removes nothing) and logs `local_server.source_in_use` instead. An app older than the recorded version
   (a downgrade) leaves the services on their newer source and logs

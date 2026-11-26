@@ -9,6 +9,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -4138,6 +4139,143 @@ describe("LocalServerModule after a restart", () => {
       ),
     ).toMatchObject({ repo: current });
     expect(readdirSync(sources)).toEqual([path.basename(current)]);
+    await f.host.stop("quit");
+  });
+
+  it("uses Starting instead of Updating for a same-version source bundle refresh and updates local-server.json", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const f = fixture(
+      {
+        sourceArchive: {
+          url: "https://cdn.example/linger.tar.gz",
+          sha256: archive.sha256,
+        },
+        fetch: (async () => new Response(archive.bytes)) as typeof fetch,
+      },
+      enrolled,
+      (home) => {
+        const sources = path.join(home, "desktop", "source");
+        unpackedSource(path.join(sources, "previous"));
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home,
+            repo: path.join(sources, "previous"),
+            origin: "http://localhost:3000",
+            version: APP_VERSION,
+          }),
+        );
+      },
+    );
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    const sources = path.join(f.home, "desktop", "source");
+    const current = path.join(sources, archive.sha256.slice(0, 16));
+    expect(f.showStarting).toHaveBeenCalledOnce();
+    expect(f.showUpdating).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
+      ),
+    ).toEqual({
+      home: f.home,
+      repo: current,
+      origin: "http://localhost:3000",
+      version: APP_VERSION,
+    });
+    expect(readdirSync(sources)).toEqual([path.basename(current)]);
+    await f.host.stop("quit");
+
+    // A second launch with the updated local-server.json does not re-trigger
+    // a source update or download.
+    const download = vi.fn(
+      async (_url: string | URL | Request) =>
+        new Response(null, { status: 200 }),
+    );
+    const second = fixture(
+      {
+        home: f.home,
+        sourceArchive: {
+          url: "https://cdn.example/linger.tar.gz",
+          sha256: archive.sha256,
+        },
+        fetch: download as typeof fetch,
+      },
+      enrolled,
+    );
+    await second.host.start();
+    await waitForInstaller(() =>
+      expect(second.module.status().phase).toBe("ready"),
+    );
+    expect(second.showUpdating).not.toHaveBeenCalled();
+    expect(second.showStarting).not.toHaveBeenCalled();
+    expect(
+      download.mock.calls.some(([url]) =>
+        String(url).startsWith("https://cdn.example/"),
+      ),
+    ).toBe(false);
+    await second.host.stop("quit");
+  });
+
+  it("shows Updating when moving services to a newer version's source package", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const f = fixture(
+      {
+        sourceArchive: {
+          url: "https://cdn.example/linger.tar.gz",
+          sha256: archive.sha256,
+        },
+        fetch: (async () => new Response(archive.bytes)) as typeof fetch,
+      },
+      enrolled,
+      (home) => {
+        const sources = path.join(home, "desktop", "source");
+        unpackedSource(path.join(sources, "previous"));
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home,
+            repo: path.join(sources, "previous"),
+            origin: "http://localhost:3000",
+            version: "0.16.0",
+          }),
+        );
+      },
+    );
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    expect(f.showUpdating).toHaveBeenCalledOnce();
+    expect(f.showStarting).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+
+  it("normalizes trailing slashes and symlinks in serving.source so moved records do not stay stale", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const f = installedBy(archive);
+    const current = path.join(
+      f.home,
+      "desktop",
+      "source",
+      archive.sha256.slice(0, 16),
+    );
+    let reported = `${current}${path.sep}`;
+    if (!isWindowsHost) {
+      const link = path.join(f.root, "home-link");
+      symlinkSync(f.home, link);
+      reported = `${path.join(link, "desktop", "source", archive.sha256.slice(0, 16))}${path.sep}`;
+    }
+    writeFileSync(path.join(f.home, "resume-serving"), reported);
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    expect(f.showStartFailed).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
+      ),
+    ).toMatchObject({ repo: current, version: APP_VERSION });
     await f.host.stop("quit");
   });
 

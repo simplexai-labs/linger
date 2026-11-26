@@ -4084,20 +4084,7 @@
                   .filter(Boolean)
                   .join(" · ")
               : held
-                ? cudaDriverHeld(models)
-                  ? t("heldWhyCudaDriver", {
-                      reasons: reasonsText(models, true),
-                      plan: named(plan),
-                    })
-                  : memoryHeld(models)
-                    ? t("heldWhy", {
-                        reasons: reasonsText(models, true),
-                        plan: named(plan),
-                      })
-                    : t("heldWhyGeneric", {
-                        reasons: reasonsText(models, true),
-                        plan: named(plan),
-                      })
+                ? t("heldWhy", { reasons: reasonsText(models, true) })
                 : (models.state === "checked" && !models.eligible) ||
                     models.state === "unavailable"
                   ? unavailableText
@@ -4136,17 +4123,12 @@
           checking ||
           !following ||
           !inklingRecommended;
-        $("featured-spotlight").hidden = !local.available || customizing;
+        $("featured-spotlight").hidden =
+          !local.available || customizing || !inklingRecommended;
         $("featured-spotlight").dataset.recommended =
           String(inklingRecommended);
-        $("featured-spotlight-note").textContent = t(
-          inklingRecommended
-            ? "featuredModelSelected"
-            : "featuredModelLibraryNote",
-        );
-        $("featured-spotlight-link").textContent = t(
-          inklingRecommended ? "learnMoreLink" : "thinkingMachinesLink",
-        );
+        $("featured-spotlight-note").textContent = t("featuredModelSelected");
+        $("featured-spotlight-link").textContent = t("learnMoreLink");
         $("local-model-featured").hidden = !shownIsInkling;
         $("local-spotlight").dataset.recommended = String(shownIsInkling);
         $("local-spotlight-text").textContent = t(

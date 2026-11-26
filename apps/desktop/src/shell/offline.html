@@ -60,20 +60,7 @@
         width: 52px;
         height: 52px;
       }
-      .mark .badge {
-        position: absolute;
-        right: -2px;
-        bottom: 2px;
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        border: 3px solid var(--surface);
-        background: #a3a3a3;
-      }
-      [data-mode="setup"] .badge,
-      [data-mode="updating"] .badge,
       [data-mode="updating"] .actions,
-      [data-mode="starting"] .badge,
       [data-mode="starting"] .actions,
       [data-mode="failed"] #edit,
       [data-mode="failed"] .countdown {
@@ -222,7 +209,7 @@
   <body data-mode="offline">
     <main>
       <div class="mark">
-        <img src="app://offline/logo.png" alt="" /><span class="badge"></span>
+        <img src="app://offline/logo.png" alt="" />
       </div>
       <h1 id="title" data-t="unreachableTitle"></h1>
       <p id="reason"></p>
