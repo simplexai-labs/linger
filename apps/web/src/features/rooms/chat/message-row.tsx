@@ -1,6 +1,7 @@
 /* oxlint-disable react-doctor/no-giant-component -- ConversationMessageRow still owns card, attachment, Thread, and runtime presentation; splitting that ownership is a separate refactor. */
 import {
   AlarmClockIcon,
+  AudioWave02Icon,
   AtIcon,
   Cancel01Icon,
   Copy01Icon,
@@ -10,6 +11,7 @@ import {
   RotateLeft01Icon,
   SentIcon,
   SmilePlusIcon,
+  StopCircleIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { AnimatePresence, motion } from "motion/react";
@@ -65,6 +67,10 @@ import {
   type MessageTextBlock,
 } from "./message-body-blocks";
 import { chatMessages } from "./chat.messages";
+import {
+  useMessageReadAloud,
+  type ReadAloudState,
+} from "./message-read-aloud";
 import { MessageCard } from "./message-card";
 import { MessageHtmlFragment } from "./message-html-fragment";
 import { MessageMeetingNotes } from "./message-meeting-notes";
@@ -819,6 +825,7 @@ function ConversationMessageActions({
   const [copied, setCopied] = useState(false);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
+  const readAloud = useMessageReadAloud(message.id, message.raw_message);
   const overflowItems: ActionMenuItem[] = [];
 
   if (onForwardMessage) {
@@ -903,6 +910,17 @@ function ConversationMessageActions({
           <Icon icon={Copy01Icon} size={16} />
         )}
       </MessageActionButton>
+      {message.raw_message.trim() ? (
+        <ReadAloudButton
+          onClick={() =>
+            readAloud.state === "playing" || readAloud.state === "loading"
+              ? readAloud.stop()
+              : readAloud.speak()
+          }
+          state={readAloud.state}
+          t={t}
+        />
+      ) : null}
       {overflowItems.length ? (
         <ActionMenu
           buttonClassName="message-inline-action-button flex items-center justify-center rounded-lg p-0.5 text-muted-foreground hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-app-focus"
@@ -950,6 +968,48 @@ function MessageActionButton({
         {tooltip}
       </span>
     </span>
+  );
+}
+
+function readAloudButtonLabel(
+  state: ReadAloudState,
+  t: import("@/i18n/language").Translate,
+): string {
+  switch (state) {
+    case "loading":
+      return t(chatMessages.readingAloud);
+    case "playing":
+      return t(chatMessages.stopReading);
+    case "error":
+      return t(chatMessages.readAloudUnavailable);
+    case "idle":
+      return t(chatMessages.readAloud);
+  }
+}
+
+function ReadAloudButton({
+  onClick,
+  state,
+  t,
+}: {
+  onClick: () => void;
+  state: ReadAloudState;
+  t: import("@/i18n/language").Translate;
+}) {
+  const label = readAloudButtonLabel(state, t);
+  return (
+    <MessageActionButton
+      aria-label={label}
+      aria-pressed={state === "playing" || undefined}
+      onClick={onClick}
+      tooltip={label}
+    >
+      {state === "playing" || state === "loading" ? (
+        <Icon icon={StopCircleIcon} size={16} />
+      ) : (
+        <Icon icon={AudioWave02Icon} size={16} />
+      )}
+    </MessageActionButton>
   );
 }
 
