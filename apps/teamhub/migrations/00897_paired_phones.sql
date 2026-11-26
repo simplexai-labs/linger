@@ -1,11 +1,14 @@
 -- +goose Up
+-- Every statement here may run again: the mobile preview desktop build
+-- (0.1.9-mobile.1) recorded these objects under 00894, and earlier builds of
+-- this branch under 00895, so goose can run this on a database that has them.
 -- Phones pair with this computer through the Mobile Gateway. A Pairing Invite
 -- works once and only for ten minutes. A Paired Phone is identified by the
 -- static key its session handshake proves; it stays pending until the Human
 -- approves it after comparing its confirmation code, and then acts through
 -- its own device Session, which no cookie can present because no raw token
 -- exists for it.
-CREATE TABLE mobile_pairing_invites (
+CREATE TABLE IF NOT EXISTS mobile_pairing_invites (
     id text PRIMARY KEY,
     account_id text NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     token_hash bytea NOT NULL UNIQUE CHECK (octet_length(token_hash) = 32),
@@ -15,9 +18,9 @@ CREATE TABLE mobile_pairing_invites (
     CHECK (expires_at > created_at)
 );
 
-CREATE INDEX mobile_pairing_invites_account_id_idx ON mobile_pairing_invites (account_id);
+CREATE INDEX IF NOT EXISTS mobile_pairing_invites_account_id_idx ON mobile_pairing_invites (account_id);
 
-CREATE TABLE paired_phones (
+CREATE TABLE IF NOT EXISTS paired_phones (
     id text PRIMARY KEY,
     account_id text NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     public_key bytea NOT NULL UNIQUE CHECK (octet_length(public_key) = 32),
@@ -35,10 +38,10 @@ CREATE TABLE paired_phones (
     CHECK ((push_grant IS NULL) = (push_service_url IS NULL))
 );
 
-CREATE INDEX paired_phones_account_id_idx ON paired_phones (account_id) WHERE removed_at IS NULL;
-CREATE UNIQUE INDEX paired_phones_session_id_key ON paired_phones (session_id);
+CREATE INDEX IF NOT EXISTS paired_phones_account_id_idx ON paired_phones (account_id) WHERE removed_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS paired_phones_session_id_key ON paired_phones (session_id);
 
-ALTER TABLE auth_sessions DROP CONSTRAINT auth_sessions_revocation_reason_check;
+ALTER TABLE auth_sessions DROP CONSTRAINT IF EXISTS auth_sessions_revocation_reason_check;
 ALTER TABLE auth_sessions ADD CONSTRAINT auth_sessions_revocation_reason_check CHECK (
     (revoked_at IS NULL AND revoked_reason IS NULL)
     OR (revoked_at IS NOT NULL AND revoked_reason = ANY (ARRAY['logout', 'password_reset', 'phone_removed', 'phone_rotated']))
@@ -49,7 +52,7 @@ ALTER TABLE auth_sessions ADD CONSTRAINT auth_sessions_revocation_reason_check C
 -- nothing. The job decides whether the Message qualifies; this trigger only
 -- skips deployments without a phone that registered a push grant.
 -- +goose StatementBegin
-CREATE FUNCTION enqueue_mobile_push() RETURNS trigger
+CREATE OR REPLACE FUNCTION enqueue_mobile_push() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
@@ -70,6 +73,7 @@ END;
 $$;
 -- +goose StatementEnd
 
+DROP TRIGGER IF EXISTS room_events_mobile_push ON room_events;
 CREATE TRIGGER room_events_mobile_push
     AFTER INSERT ON room_events
     FOR EACH ROW
