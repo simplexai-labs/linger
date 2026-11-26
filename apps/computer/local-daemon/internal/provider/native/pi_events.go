@@ -121,6 +121,7 @@ func (t *piTurn) noteFailure(message string) {
 	}
 	t.mu.Lock()
 	t.failure = message
+	t.aborted = false
 	t.mu.Unlock()
 }
 
@@ -206,7 +207,8 @@ func (t *piTurn) applyMessageEnd(message piWireMessage, observed time.Time) {
 		t.output = piFilterMarkup(t.output)
 	}
 	t.failure = ""
-	if message.StopReason == "error" || message.StopReason == "aborted" {
+	t.aborted = message.StopReason == "aborted"
+	if message.StopReason == "error" || t.aborted {
 		t.failure = message.ErrorMessage
 		if t.failure == "" {
 			t.failure = "Pi assistant message stopped: " + message.StopReason

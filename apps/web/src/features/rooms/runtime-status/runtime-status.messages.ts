@@ -153,7 +153,7 @@ export const runtimeStatusMessages = defineMessages("runtimeStatus", {
   failureReplyUndelivered: "Its reply didn't reach this chat.",
   failureReplyNotSent: "It finished without replying. Ask again.",
   failureInterrupted:
-    "Its computer restarted or it was stopped. Check the result before asking again.",
+    "The run was interrupted. Check the result before asking again.",
   failureComputerUnavailable: "Its computer wasn't available.",
   failureCleanupUnconfirmed: "Couldn't confirm it stopped on its computer.",
   failureResponseTooLarge:

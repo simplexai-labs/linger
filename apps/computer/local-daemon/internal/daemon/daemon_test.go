@@ -405,17 +405,19 @@ func TestDaemonDoesNotReportCancelledWhenProviderCleanupIsUnconfirmed(t *testing
 
 func TestSchedulerYieldRequiresConfirmedCleanup(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		result  provider.Result
-		want    string
-		blocked bool
+		name, runtime, requestReason string
+		result                       provider.Result
+		want, terminalReason         string
+		blocked                      bool
 	}{
-		{"confirmed interrupt", provider.Result{Status: "aborted", CleanupConfirmed: true}, protocol.EventOperationCancelled, false},
-		{"confirmed Pi interrupt", provider.Result{Status: "cancelled", CleanupConfirmed: true}, protocol.EventOperationCancelled, false},
-		{"missing confirmation", provider.Result{Status: "aborted"}, protocol.EventOperationFailed, true},
-		{"unconfirmed interrupt", provider.Result{Status: "failed", CleanupUnconfirmed: true}, protocol.EventOperationFailed, true},
-		{"already finished", provider.Result{Status: "completed", Output: "done"}, protocol.EventOperationCompleted, false},
-		{"failed before interrupt", provider.Result{Status: "failed", CleanupConfirmed: true}, protocol.EventOperationFailed, false},
+		{"confirmed interrupt", "codex", schedulerYield, provider.Result{Status: "aborted", CleanupConfirmed: true}, protocol.EventOperationCancelled, schedulerYield, false},
+		{"confirmed Pi interrupt", "pi", schedulerYield, provider.Result{Status: "cancelled", CleanupConfirmed: true}, protocol.EventOperationCancelled, schedulerYield, false},
+		{"Pi model aborted", "pi", "", provider.Result{Status: "aborted", CleanupConfirmed: true}, protocol.EventOperationCancelled, "runtime_aborted", false},
+		{"Pi model aborted before yield", "pi", schedulerYield, provider.Result{Status: "aborted", CleanupConfirmed: true}, protocol.EventOperationCancelled, "runtime_aborted", false},
+		{"missing confirmation", "codex", schedulerYield, provider.Result{Status: "aborted"}, protocol.EventOperationFailed, "", true},
+		{"unconfirmed interrupt", "codex", schedulerYield, provider.Result{Status: "failed", CleanupUnconfirmed: true}, protocol.EventOperationFailed, "", true},
+		{"already finished", "codex", schedulerYield, provider.Result{Status: "completed", Output: "done"}, protocol.EventOperationCompleted, "", false},
+		{"failed before interrupt", "codex", schedulerYield, provider.Result{Status: "failed", CleanupConfirmed: true}, protocol.EventOperationFailed, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stream := &fakeStream{}
@@ -425,6 +427,7 @@ func TestSchedulerYieldRequiresConfirmedCleanup(t *testing.T) {
 			}
 			d.operationStream = stream
 			start := daemonOperationStart("yield", "agent-1")
+			start.RuntimeType = tc.runtime
 			_, err = d.ledger.Begin(t.Context(), operationIdentity(start))
 			if err != nil {
 				t.Fatal(err)
@@ -432,15 +435,23 @@ func TestSchedulerYieldRequiresConfirmedCleanup(t *testing.T) {
 			_, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			d.activeOperations[start.OperationID] = &activeOperation{identity: operationIdentity(start), cancel: cancel}
-			stop := operationCancelCommand(start)
-			stop.Payload = mustJSON(map[string]string{"reason": schedulerYield})
-			if err := d.handleOperationCancel(stop); err != nil {
-				t.Fatal(err)
+			if tc.requestReason != "" {
+				stop := operationCancelCommand(start)
+				stop.Payload = mustJSON(map[string]string{"reason": tc.requestReason})
+				if err := d.handleOperationCancel(stop); err != nil {
+					t.Fatal(err)
+				}
 			}
 			d.finishOperation(t.Context(), start, provider.OperationSpec{OperationKind: "run.start", Provider: start.RuntimeType}, tc.result)
 			events := stream.snapshotEvents()
 			if len(events) != 1 || events[0].Type != tc.want {
 				t.Fatalf("terminal=%+v, want %s", events, tc.want)
+			}
+			if tc.terminalReason != "" {
+				var terminal struct{ Reason string }
+				if err := json.Unmarshal(events[0].Payload, &terminal); err != nil || terminal.Reason != tc.terminalReason {
+					t.Fatalf("payload=%s, want reason %q", events[0].Payload, tc.terminalReason)
+				}
 			}
 			if d.runtimeCleanupUnconfirmed(start.RuntimeType) != tc.blocked {
 				t.Fatal("incorrect Runtime availability")

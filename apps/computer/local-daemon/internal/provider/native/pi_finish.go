@@ -51,7 +51,7 @@ func (t *piTurn) drive(prompt string) {
 				break
 			}
 			t.mu.Lock()
-			clean := t.failure == "" && !t.settleAborted && t.sawAssistant && t.steering == nil
+			clean := t.failure == "" && t.sawAssistant && t.steering == nil
 			t.mu.Unlock()
 			if !clean || t.runCtx.Err() != nil || !t.proc.alive() {
 				break
@@ -75,7 +75,7 @@ func (t *piTurn) drive(prompt string) {
 	}
 	t.mu.Lock()
 	t.stopping = true
-	streamFailure := t.failure
+	streamFailure, aborted := t.failure, t.aborted
 	t.mu.Unlock()
 	interrupted := t.runCtx.Err() != nil && !settled
 	switch {
@@ -83,7 +83,9 @@ func (t *piTurn) drive(prompt string) {
 		status, failure = piInterruption(t.runCtx)
 	case status == statusCompleted && !settled:
 		status, failure = statusFailed, "Pi exited before agent_settled"
-		if streamFailure != "" {
+		if aborted {
+			status, failure = statusAborted, streamFailure
+		} else if streamFailure != "" {
 			failure = streamFailure
 		}
 	}
@@ -146,7 +148,7 @@ func piInterruption(ctx context.Context) (string, string) {
 func (t *piTurn) park(began time.Time) bool {
 	p := t.proc
 	t.mu.Lock()
-	clean := t.failure == "" && !t.settleAborted && t.sawAssistant && t.steering == nil
+	clean := t.failure == "" && t.sawAssistant && t.steering == nil
 	t.mu.Unlock()
 	if p.shape == nil || !clean || p.res.isStopping() || t.runCtx.Err() != nil || !p.alive() || !piResidents.enabled() {
 		return false
@@ -179,21 +181,24 @@ func (t *piTurn) park(began time.Time) bool {
 // exit holds the process in the table so no spawn reuses its session.
 func (t *piTurn) finish(began time.Time, status, failure string, interrupted bool) {
 	p := t.proc
-	if status != statusCompleted {
-		t.abortQueue()
-	}
+	abortAccepted := status != statusCompleted && t.abortQueue()
 	confirmed := p.stop()
 	if confirmed && status == piStatusCancelled {
-		// A natural settle can arrive while the abort request is in flight.
-		select {
-		case <-t.settledCh():
-			if settled, reason := t.settledStatus(); settled != statusAborted {
-				status, failure = settled, reason
-			}
-		default:
+		t.mu.Lock()
+		hasResult, running := t.settledClosed || t.aborted, t.running
+		t.mu.Unlock()
+		if hasResult {
+			status, failure = t.settledStatus(abortAccepted)
+		} else if running && !p.terminated.Load() {
+			status, failure = statusFailed, "Pi exited before agent_settled"
+			interrupted = false
 		}
 	} else if status == statusCompleted {
-		status, failure = t.settledStatus()
+		status, failure = t.settledStatus(false)
+	}
+	if (status == statusAborted || status == piStatusCancelled) && p.waitErr != nil && !p.terminated.Load() {
+		status, failure = statusFailed, "Pi exited unsuccessfully: "+p.waitErr.Error()
+		interrupted = false
 	}
 	outcome := t.outcomeFor(began, status, failure)
 	outcome.ExitConfirmed, outcome.ExitUnconfirmed = confirmed, !confirmed
@@ -225,26 +230,36 @@ func (t *piTurn) outcomeFor(began time.Time, status, failure string) Outcome {
 	return outcome
 }
 
-// abortQueue clears queued input before aborting; abort alone would let
-// queued steering continue. Errors are ignored.
-func (t *piTurn) abortQueue() {
+// abortQueue clears queued steering before aborting and reports whether Pi
+// accepted the abort while the turn was still pending.
+func (t *piTurn) abortQueue() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), piAbortBudget)
 	defer cancel()
 	_, _ = t.proc.call(ctx, "clear_queue", nil, nil)
-	_, _ = t.proc.call(ctx, "abort", nil, nil)
+	_, err := t.proc.call(ctx, "abort", nil, func() bool {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		// Pi can report its own interruption while clear_queue is in flight.
+		return !t.aborted && !t.settledClosed
+	})
+	return err == nil
 }
 
 // settledStatus decides a turn that settled normally, after the stop.
-func (t *piTurn) settledStatus() (string, string) {
+func (t *piTurn) settledStatus(abortAccepted bool) (string, string) {
 	t.mu.Lock()
-	failure, aborted, sawAssistant := t.failure, t.settleAborted, t.sawAssistant
+	failure, aborted, sawAssistant := t.failure, t.aborted, t.sawAssistant
+	// An idle Pi also accepts abort. Only an aborted settle attributes it to this turn.
+	cancelled := abortAccepted && t.settleAborted
 	t.mu.Unlock()
 	p := t.proc
 	switch {
+	case aborted && cancelled:
+		return piStatusCancelled, "operation cancelled"
+	case aborted:
+		return statusAborted, failure
 	case failure != "":
 		return statusFailed, failure
-	case aborted:
-		return statusAborted, "Pi aborted the turn"
 	case !sawAssistant:
 		return statusFailed, "Pi settled without an assistant result"
 	case p.waitErr != nil:

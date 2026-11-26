@@ -2115,7 +2115,7 @@ describe("Room Message timeline cards", () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    expect(shownStatus()).toMatch(/^Codex: Its computer restarted/);
+    expect(shownStatus()).toMatch(/^Codex: The run was interrupted/);
     expect(shownStatus()).not.toMatch(/Claude:|Couldn't finish/);
   });
 
@@ -2144,7 +2144,7 @@ describe("Room Message timeline cards", () => {
       </QueryClientProvider>,
     );
     expect(shownStatus()).toMatch(
-      /^Codex: Its computer restarted.* Your follow-up may not have arrived\.$/,
+      /^Codex: The run was interrupted.* Your follow-up may not have arrived\.$/,
     );
     expect(shownStatus()).not.toMatch(/Couldn't finish|\.\./);
   });

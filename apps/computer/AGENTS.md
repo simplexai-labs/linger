@@ -88,6 +88,11 @@
   invalid-request interrupt rejection the Daemon also accepts an idle status on
   the same thread. Terminal cleanup and process exit checks still apply.
 
+- A Pi assistant message with `stopReason: "aborted"` interrupts the turn.
+  A scheduler cancellation resumes the same Run only after the native turn
+  stops for that cancellation and cleanup is confirmed. An independent Pi
+  abort ends the Run as interrupted, including when a yield arrives late.
+
 - Default tests use deterministic providers and real fixture child processes;
   they never call a live model.
 - Process-test watchdogs are harness budgets for loaded developer machines, not

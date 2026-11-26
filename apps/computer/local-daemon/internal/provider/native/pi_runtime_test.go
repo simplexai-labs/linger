@@ -270,6 +270,50 @@ func TestPiSteerCompletionRace(t *testing.T) {
 	}
 }
 
+func TestPiModelAbort(t *testing.T) {
+	for _, tc := range []struct{ mode, status string }{
+		{"model-aborted", statusAborted},
+		{"model-aborted-exit", statusAborted},
+		{"model-aborted-hold", statusAborted},
+		{"abort-during-clear", statusAborted},
+		{"abort-rejected", statusAborted},
+		{"abort-after-settle", statusAborted},
+		{"model-error", statusFailed},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			h := piNewHarness(t, tc.mode, nil)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			run := h.start(ctx, "go", RunSpec{Budget: 10 * time.Second})
+			switch tc.mode {
+			case "abort-during-clear", "abort-rejected", "abort-after-settle":
+				piWaitRunning(t, run)
+				cancel()
+			case "model-aborted-hold":
+				// Deliver the local cancel after message_end and before agent_settled.
+				for event := range run.Events {
+					if event.Kind == EventModelResponse {
+						cancel()
+						break
+					}
+				}
+			}
+			_, outcome := piCollect(t, run)
+			if outcome.Status != tc.status || outcome.Error != "Request was aborted" || !outcome.ExitConfirmed {
+				t.Fatalf("outcome = %+v", outcome)
+			}
+		})
+	}
+}
+
+func TestPiCrashAfterModelAbort(t *testing.T) {
+	h := piNewHarness(t, "model-aborted-crash", nil)
+	_, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{}))
+	if outcome.Status != statusFailed || !outcome.ExitConfirmed || outcome.Diagnostics.ExitCode == nil || *outcome.Diagnostics.ExitCode != 23 {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+}
+
 func TestPiCompletionRacingAbort(t *testing.T) {
 	h := piNewHarness(t, "complete-on-abort", nil)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -326,13 +370,24 @@ func piWaitFile(t *testing.T, path string) {
 }
 
 func TestPiPrematureExit(t *testing.T) {
-	h := piNewHarness(t, "exit-early", nil)
-	_, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{}))
-	if outcome.Status != statusFailed || !strings.Contains(outcome.Error, "settled") {
-		t.Fatalf("outcome = %+v", outcome)
-	}
-	if outcome.Diagnostics.ExitCode == nil || *outcome.Diagnostics.ExitCode != 0 {
-		t.Fatalf("diagnostics = %+v", outcome.Diagnostics)
+	for _, mode := range []string{"exit-early", "exit-during-clear"} {
+		t.Run(mode, func(t *testing.T) {
+			h := piNewHarness(t, mode, nil)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			run := h.start(ctx, "go", RunSpec{})
+			if mode == "exit-during-clear" {
+				piWaitRunning(t, run)
+				cancel()
+			}
+			_, outcome := piCollect(t, run)
+			if outcome.Status != statusFailed || !strings.Contains(outcome.Error, "settled") {
+				t.Fatalf("outcome = %+v", outcome)
+			}
+			if outcome.Diagnostics.ExitCode == nil || *outcome.Diagnostics.ExitCode != 0 {
+				t.Fatalf("diagnostics = %+v", outcome.Diagnostics)
+			}
+		})
 	}
 }
 

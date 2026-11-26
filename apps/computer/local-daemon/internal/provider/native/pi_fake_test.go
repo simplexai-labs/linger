@@ -212,6 +212,13 @@ func (f *piFakeProcess) handle(id, kind, message, level string) int {
 		f.finish()
 	case "clear_queue":
 		f.cleared = true
+		if f.mode == "exit-during-clear" {
+			return 0
+		}
+		if f.mode == "abort-during-clear" {
+			f.assistantEnd("", "aborted", "Request was aborted")
+			f.send(map[string]any{"type": "agent_settled", "aborted": true})
+		}
 		f.reply(id, kind, nil)
 	case "abort":
 		if !f.cleared {
@@ -222,7 +229,14 @@ func (f *piFakeProcess) handle(id, kind, message, level string) int {
 			f.reply(id, kind, nil)
 			return -1
 		}
-		f.send(map[string]any{"type": "agent_settled", "aborted": true})
+		f.assistantEnd("", "aborted", "Request was aborted")
+		// Pi also accepts abort on an idle session. Its settle identifies
+		// whether the command interrupted the active turn.
+		f.send(map[string]any{"type": "agent_settled", "aborted": f.mode != "abort-after-settle"})
+		if f.mode == "abort-rejected" {
+			f.send(map[string]any{"type": "response", "command": kind, "id": id, "success": false, "error": "turn already ended"})
+			return -1
+		}
 		f.reply(id, kind, nil)
 	default:
 		return 25
@@ -232,7 +246,21 @@ func (f *piFakeProcess) handle(id, kind, message, level string) int {
 
 func (f *piFakeProcess) act() int {
 	switch f.mode {
-	case "steer", "steer-race", "steer-unconsumed", "complete-on-abort":
+	case "steer", "steer-race", "steer-unconsumed", "complete-on-abort", "abort-during-clear", "abort-rejected", "abort-after-settle", "exit-during-clear":
+	case "model-aborted", "model-aborted-exit", "model-aborted-hold", "model-aborted-crash":
+		f.assistantEnd("", "aborted", "Request was aborted")
+		if f.mode == "model-aborted-crash" {
+			return 23
+		}
+		if f.mode == "model-aborted-exit" {
+			return 0
+		}
+		if f.mode != "model-aborted-hold" {
+			f.send(map[string]any{"type": "agent_settled", "aborted": false})
+		}
+	case "model-error":
+		f.assistantEnd("", "error", "Request was aborted")
+		f.send(map[string]any{"type": "agent_settled", "aborted": false})
 	case "retry":
 		f.assistantEnd("", "error", "retryable")
 		f.send(map[string]any{"type": "agent_end"})

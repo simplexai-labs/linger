@@ -81,6 +81,10 @@ func (d *Daemon) finishOperation(ctx context.Context, command protocol.Command, 
 		d.activeMu.Unlock()
 		d.admissionMu.Unlock()
 	}
+	// Pi reports "cancelled" for our abort RPC and "aborted" for its own interruption.
+	if spec.Provider == "pi" && result.Status == "aborted" && result.CleanupConfirmed && (reason == "" || yieldRequested) {
+		reason = "runtime_aborted"
+	}
 	terminalType := protocol.EventOperationCompleted
 	if reason != "" && !result.CleanupUnconfirmed {
 		terminalType = protocol.EventOperationCancelled
@@ -91,7 +95,8 @@ func (d *Daemon) finishOperation(ctx context.Context, command protocol.Command, 
 		}
 	}
 	slog.Info("runner.operation.finished", "operation_id", command.OperationID, "kind", spec.OperationKind,
-		"provider", spec.Provider, "status", terminalType, "failure_code", result.FailureCode,
+		"provider", spec.Provider, "status", terminalType, "provider_status", result.Status,
+		"scheduler_yield_requested", yieldRequested, "failure_code", result.FailureCode,
 		"error", receiptReason(redact.Text(result.Error)))
 	includeDetail := d.runtimeFailureDetail.Load()
 	payload := terminalPayloadFor(spec, result, includeDetail)
