@@ -214,7 +214,7 @@ export class SetupWindowModule implements Module {
       fullscreenable: false,
       show: false,
       title: this.#t(dialogMessages.setupTitle),
-      backgroundColor: "#ffffff",
+      backgroundColor: "#fbfbf9",
       icon: nativeImage.createFromBuffer(Buffer.from(iconPng)),
       ...(process.platform === "darwin"
         ? {

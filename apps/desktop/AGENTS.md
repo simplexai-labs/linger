@@ -113,7 +113,12 @@ Gateway and runs Agents. The daemon exits with the app.
   with the chosen AI runtime and local models, then the job's progress, which
   the setup page shows as one progress bar with one short line that changes
   with the step (a download, such as the local model's, folds into the same
-  line with its bytes); there is no checklist and no timings. Each Install
+  line with its bytes); there is no checklist and no timings. When the job
+  completes the bar fills, folds up into the orb, the orb blooms with one
+  ring ripple, its check draws, and "Linger is ready" and Open Linger rise
+  in while the agent cards settle (about 1.5 s, no confetti). Every motion
+  moves only transform and opacity; with `prefers-reduced-motion` nothing
+  flies, bounces or blooms, and parts fade in briefly instead. Each Install
   is a new attempt: its timers and bar start over, and the bar never moves
   back within one. A failure shows a brief message and one button, Report
   issue: Send Diagnostics' consent flow when a receiver is set up, else Save
@@ -218,9 +223,15 @@ Gateway and runs Agents. The daemon exits with the app.
   where the minimum comes from.
   The welcome has two steps in one window of fixed size, with the main
   button in a fixed place (`data-stage` on the section: `checking`,
-  `choose`, `settings`). Step 1 shows only a spinner while it checks this
-  computer (after 20 s "Choose now" offers the cards while the check runs
-  on), then offers three source cards, each a title and one short line,
+  `choose`, `settings`). While it checks this computer the welcome shows
+  only the orb and "Welcome to Linger" (no words about the check; after
+  20 s "Choose now" offers the cards while the check runs on); the orb
+  forms, the words rise, and the orb gives one soft bounce. It stays at
+  least `introMs` (2.6 s, 1.2 s with reduced motion; the page tests pass
+  0), then the orb flies along a curve into the picked card's orb (a
+  shared-element move with a soft spring, about 780 ms) while the title
+  fades and the cards rise in one after another. Step 1 offers three
+  source cards, each a title and one short line,
   with no subtitle, badges or tags: Local model ("On this computer"), BYOK
   ("Your API key") and Subscription ("ChatGPT or Claude plan").
   The card picked first is the advice: the Local model when the
@@ -232,7 +243,21 @@ Gateway and runs Agents. The daemon exits with the app.
   settings, Back (or Escape) and Install. The install location shows only
   when the default one fails its check, with the error and Change inline;
   setup takes no app keys. The Local model installs Pi with the planned
-  model (`runtime: "local"`); step 2 names the model and its download size. BYOK
+  model (`runtime: "local"`). Step 2 shows it as a card: name, publisher,
+  parameters and Standard or Compact when the kit has two builds of it,
+  why it was picked (the kit's `smartest`/`fastest` role), quality (the
+  peer `docs/local-inference.md` names for the three catalog models, else
+  a band of the kit's score), estimated speed, download size and a memory
+  bar of this computer's total. Change opens a sheet that slides up with
+  every model the kit lists here (`localModels.models`, from
+  `listSetupModels` in the local-installation package): name, publisher and
+  build, a size chip, Best fit on the recommended one and Fastest only
+  where the kit says so, and small Quality and Speed bars from the kit's
+  numbers; a model that cannot fit is dimmed with what it needs ("Needs a
+  96 GB Mac", rounded up to a size Macs are sold in, of which a model may
+  use three quarters). A pick other than the kit's is priced again for
+  this computer (`local.model.check`, the answer as state's `modelCheck`);
+  Install waits for it and passes `model` only when one was picked. BYOK
   asks only for the URL, API key and Model ID and always runs on Pi
   (`runtime: "pi"`); the URL picks the format (a path ending in a format's
   endpoint such as `/messages` or `/chat/completions` uses that format, a
@@ -254,11 +279,11 @@ Gateway and runs Agents. The daemon exits with the app.
   is configured too (`linkedRuntimes`, `linked-runtimes.json` in the
   instance). BYOK and Subscription offer "Also download the local model in
   the background" (off by default), which downloads the planned model into
-  the model library (`--download-local-model`) for Settings › Models. While
-  the Local model's installation downloads, its wait offers Use Subscription
-  and Use BYOK (`local.leave-local`): the installer's job is cancelled, the
-  model keeps downloading in the background and step 2 of the other source
-  shows "Local model NN%". Setup asks nothing about the
+  the model library (`--download-local-model`) for Settings › Models. While the Local model's installation downloads, its wait offers "Use
+  Subscription or BYOK meanwhile" (`local.leave-local`), back to step 1: the installer's job is
+  cancelled, the model keeps downloading in the background, step 1's Local
+  model card says "Downloading · NN%" and step 2 of the other source shows
+  "Local model NN%". Setup asks nothing about the
   sign-in: the installer gives a new installation's owner `admin@gmail.com`
   (`DEFAULT_OWNER_EMAIL`) and a generated password in the owner-only
   `local-account.json`, and an existing or upgraded installation keeps its

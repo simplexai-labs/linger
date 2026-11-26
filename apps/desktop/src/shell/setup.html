@@ -468,88 +468,6 @@
         background: #f4f4f5;
       }
 
-      /* The welcome view: check this computer, choose a source, then that
-         source's settings, all in one window size. */
-      main {
-        position: relative;
-      }
-      section[data-step="welcome"],
-      section[data-step="installing"],
-      section[data-step="ready"] {
-        /* A long error scrolls instead of pushing the title into the scene. */
-        justify-content: safe center;
-        overflow-y: auto;
-        padding-bottom: 40px;
-      }
-      section[data-step="welcome"][data-local="true"] {
-        justify-content: flex-start;
-        /* Room for the focus rings of what sits at its edges. */
-        margin: -6px -6px -2px;
-        padding: 6px;
-      }
-      section[data-step="welcome"]:not([data-local="true"]) .eyebrow {
-        margin-top: auto;
-      }
-      h1 {
-        margin-bottom: 8px;
-        font-size: 26px;
-        font-weight: 600;
-        line-height: 34px;
-        letter-spacing: -0.022em;
-      }
-      section[data-step="welcome"][data-local="true"] h1 {
-        margin-bottom: 4px;
-        font-size: 23px;
-        line-height: 28px;
-      }
-      .lead {
-        font-size: 13.5px;
-        letter-spacing: -0.003em;
-      }
-      .lead.tight {
-        margin-bottom: 0;
-      }
-      /* Back sits beside the badge above the title. */
-      .stage-bar {
-        position: relative;
-        display: flex;
-        justify-content: center;
-        margin-bottom: 4px;
-      }
-      .stage-bar .eyebrow {
-        margin-bottom: 0;
-      }
-      /* On step 2 Back sits beside the title, and the bar keeps a row only
-         for the local model's progress. */
-      section[data-stage="settings"] .stage-bar:has(> #model-behind[hidden]) {
-        top: 14px;
-        height: 0;
-        margin-bottom: 0;
-      }
-      .stage-bar > .link {
-        position: absolute;
-        top: 50%;
-        right: 0;
-        transform: translateY(-50%);
-      }
-      .stage-bar > .back {
-        right: auto;
-        left: 0;
-        display: inline-flex;
-        align-items: center;
-        gap: 2px;
-        padding-left: 0;
-        text-decoration: none;
-      }
-      .stage-bar > .back svg {
-        width: 14px;
-        height: 14px;
-        fill: none;
-        stroke: currentColor;
-        stroke-width: 2;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-      }
       section[data-step="welcome"] [hidden] {
         display: none !important;
       }
@@ -565,352 +483,6 @@
       /* Focus lands on the title when a stage opens; it is not a control. */
       #welcome-title:focus {
         outline: none;
-      }
-      /* Forward comes in from the right, Back from the left, and the
-         choices rise in once the check ends. The button keeps its place. */
-      @keyframes stage-forward {
-        from {
-          opacity: 0;
-          transform: translateX(14px);
-        }
-      }
-      @keyframes stage-back {
-        from {
-          opacity: 0;
-          transform: translateX(-14px);
-        }
-      }
-      @keyframes stage-reveal {
-        from {
-          opacity: 0;
-          transform: translateY(6px);
-        }
-      }
-      @keyframes stage-fade {
-        from {
-          opacity: 0;
-        }
-      }
-      section[data-motion="forward"] .stage {
-        animation: stage-forward 200ms var(--ease) both;
-      }
-      section[data-motion="back"] .stage {
-        animation: stage-back 200ms var(--ease) both;
-      }
-      section[data-motion="reveal"] :is(.lead, .source-card, .plan-why) {
-        animation: stage-reveal 220ms var(--ease) both;
-      }
-      section[data-motion="reveal"] .source-card:nth-child(2) {
-        animation-delay: 40ms;
-      }
-      section[data-motion="reveal"] :is(.source-card:nth-child(3), .plan-why) {
-        animation-delay: 80ms;
-      }
-      section[data-motion] :is(.stage-bar > .link, .plan-line) {
-        animation: stage-fade 200ms ease both;
-      }
-      @media (prefers-reduced-motion: reduce) {
-        section[data-motion] * {
-          animation: none !important;
-        }
-      }
-      /* Checking this computer: one quiet spinner in the room the cards
-         take next. */
-      .checking {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 14px;
-        min-height: 216px;
-        padding-top: 72px;
-      }
-      .checking .spinner {
-        width: 18px;
-        height: 18px;
-        margin-right: 0;
-        color: #a3a29a;
-      }
-      /* The local model left downloading behind BYOK or a subscription. */
-      .eyebrow.behind {
-        gap: 8px;
-        padding: 3px 10px;
-        color: var(--ink);
-        font-variant-numeric: tabular-nums;
-      }
-      .behind-bar {
-        position: relative;
-        width: 34px;
-        height: 4px;
-        overflow: hidden;
-        border-radius: 999px;
-        background: #e7e7e2;
-      }
-      .behind-bar span {
-        position: absolute;
-        inset: 0 auto 0 0;
-        border-radius: inherit;
-        background: var(--ink);
-        transition: width 900ms var(--ease);
-      }
-      .setup-card {
-        width: 100%;
-        margin: 12px auto 0;
-        text-align: left;
-      }
-      section[data-stage="choose"] .setup-card {
-        margin-top: 24px;
-      }
-      .source-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 10px;
-      }
-      /* Every card is the same height in every state. */
-      .source-card {
-        position: relative;
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 5px;
-        min-width: 0;
-        height: 136px;
-        padding: 18px 14px 12px;
-        border: 1px solid #e6e6e1;
-        border-radius: 12px;
-        background: #fafaf8;
-        text-align: left;
-        transition:
-          border-color 150ms ease,
-          background-color 150ms ease,
-          box-shadow 150ms ease;
-      }
-      .source-card:hover:not(:disabled) {
-        border-color: #c8c8c0;
-        background: #fff;
-      }
-      /* A source this computer cannot use stays in its place, switched off. */
-      .source-card:disabled {
-        opacity: 1;
-      }
-      .source-card:disabled .source-top strong,
-      .source-card:disabled .source-about {
-        color: #a3a299;
-      }
-      .source-card[aria-checked="true"] {
-        border-color: var(--ink);
-        background: #fff;
-        box-shadow:
-          0 0 0 0.5px var(--ink),
-          0 6px 16px -12px rgba(20, 20, 16, 0.32);
-      }
-      .source-top strong {
-        color: var(--ink);
-        font-size: 14.5px;
-        font-weight: 580;
-        line-height: 20px;
-        letter-spacing: -0.01em;
-        white-space: nowrap;
-      }
-      /* A card that cannot be picked says why on its top edge. */
-      .source-pill {
-        position: absolute;
-        top: -9px;
-        left: 11px;
-        padding: 0 7px;
-        border: 1px solid #cfe3d3;
-        border-radius: 999px;
-        background: #edf6ef;
-        color: #25693a;
-        font-size: 10px;
-        font-weight: 600;
-        line-height: 16px;
-        letter-spacing: 0.01em;
-        white-space: nowrap;
-      }
-      .source-pill {
-        border-color: #e3e3dc;
-        background: #f4f4ef;
-        color: #5f5e55;
-      }
-      .source-pill[data-warn="true"] {
-        border-color: #f3dccb;
-        background: #fdf3ec;
-        color: #9a4715;
-      }
-      .source-about {
-        width: 100%;
-        color: var(--muted);
-        font-size: 12.5px;
-        line-height: 17px;
-        text-wrap: pretty;
-      }
-      .source-panel {
-        padding: 4px 16px;
-        border: 1px solid rgba(20, 20, 16, 0.08);
-        border-radius: 14px;
-        background: #fff;
-        box-shadow:
-          0 1px 2px rgba(20, 20, 16, 0.03),
-          0 10px 26px -18px rgba(20, 20, 16, 0.2);
-      }
-      /* A row has a line above it only under a row that shows; the other
-         sources' rows are still there, hidden. */
-      .source-panel > :not([hidden]) ~ .choice {
-        border-top: 1px solid #f1f1ee;
-      }
-      .choice.local .sub {
-        white-space: normal;
-      }
-      .facts {
-        width: 100%;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        min-width: 0;
-        padding: 8px 10px;
-        border-radius: 9px;
-        background: #f8f8f5;
-      }
-      .facts small {
-        color: var(--muted);
-        font-size: 11px;
-        line-height: 1.4;
-        font-variant-numeric: tabular-nums;
-      }
-      /* Subscription: one row per runtime with the one thing left to do on
-         the right. Every state keeps the row's height. */
-      .runtimes .choice.runtime + .choice.runtime {
-        border-top: 1px solid #f1f1ee;
-      }
-      .choice.runtime {
-        flex-wrap: wrap;
-        min-height: 42px;
-        padding: 3px 0;
-      }
-      .choice.runtime strong {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-      }
-      .choice.runtime .sub {
-        font-variant-numeric: tabular-nums;
-      }
-      .choice.runtime .sub[data-warn="true"] {
-        color: var(--error);
-      }
-      .runtime-act {
-        display: flex;
-        flex: none;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 6px;
-        min-width: 150px;
-      }
-      .runtime-progress {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        width: 150px;
-      }
-      .runtime-progress .track {
-        flex: 1;
-        margin-top: 0;
-      }
-      .runtime-progress .pct {
-        min-width: 32px;
-        color: var(--ink);
-        font-size: 12px;
-        font-weight: 500;
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .runtime-wait {
-        display: inline-flex;
-        align-items: center;
-        color: var(--muted);
-        font-size: 12px;
-        white-space: nowrap;
-      }
-      .runtime-wait .spinner {
-        width: 11px;
-        height: 11px;
-        color: #8a897f;
-      }
-      /* While signing in: the link and code, for when no browser opens. */
-      .runtime-extra {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 2px 6px;
-        width: 100%;
-        color: var(--muted);
-        font-size: 11.5px;
-      }
-      .runtime-extra .link {
-        padding: 0 2px;
-        font-size: 11.5px;
-      }
-      .runtime-code strong {
-        color: var(--ink);
-        font:
-          600 12.5px ui-monospace,
-          SFMono-Regular,
-          Menlo,
-          monospace;
-        letter-spacing: 0.06em;
-        user-select: all;
-        -webkit-user-select: all;
-      }
-      .runtime-paste {
-        display: flex;
-        gap: 6px;
-        width: 100%;
-      }
-      .runtime-paste input {
-        flex: 1;
-        min-width: 0;
-        height: 26px;
-        padding: 0 8px;
-        border: 1px solid #e6e6e1;
-        border-radius: 7px;
-        font: inherit;
-        font-size: 12px;
-        user-select: text;
-        -webkit-user-select: text;
-      }
-      /* Also download the local model, under BYOK or a subscription. */
-      .also {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        align-items: center;
-        gap: 0 10px;
-        padding: 4px 0;
-        border-top: 1px solid #f1f1ee;
-      }
-      .also input {
-        width: 15px;
-        height: 15px;
-        margin: 0;
-        accent-color: var(--ink);
-        cursor: pointer;
-      }
-      .also input:focus-visible {
-        outline: 2px solid var(--ink);
-        outline-offset: 2px;
-      }
-      .also label {
-        color: var(--ink);
-        font-size: 12.5px;
-        font-weight: 550;
-        letter-spacing: -0.005em;
-        cursor: pointer;
-      }
-      .also .sub {
-        grid-column: 2;
-        color: var(--muted);
-        font-size: 11.5px;
-        line-height: 1.4;
-        font-variant-numeric: tabular-nums;
       }
       .eyebrow {
         display: inline-flex;
@@ -931,98 +503,6 @@
         width: 12px;
         height: 12px;
         stroke-width: 2;
-      }
-      .start {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        padding-top: 16px;
-      }
-      .primary.large {
-        position: relative;
-        min-width: 232px;
-        min-height: 44px;
-        padding: 0 22px;
-        overflow: hidden;
-        border: 0;
-        border-radius: 12px;
-        background: linear-gradient(180deg, #2f2f2c 0%, #1b1b19 100%);
-        box-shadow:
-          0 0 0 1px rgba(20, 20, 16, 0.9),
-          0 1px 2px rgba(20, 20, 16, 0.2),
-          0 10px 24px -12px rgba(20, 20, 16, 0.55),
-          inset 0 1px 0 rgba(255, 255, 255, 0.12);
-        font-size: 14px;
-        font-weight: 550;
-        letter-spacing: -0.006em;
-        transition:
-          box-shadow 200ms ease,
-          transform 200ms var(--ease);
-      }
-      .primary.large:hover:not(:disabled) {
-        background: linear-gradient(180deg, #353532 0%, #1f1f1d 100%);
-        box-shadow:
-          0 0 0 1px rgba(20, 20, 16, 0.9),
-          0 2px 4px rgba(20, 20, 16, 0.2),
-          0 16px 30px -14px rgba(20, 20, 16, 0.6),
-          inset 0 1px 0 rgba(255, 255, 255, 0.14);
-        transform: translateY(-1px);
-      }
-      .primary.large:active:not(:disabled) {
-        transform: translateY(0);
-      }
-      .primary.large svg {
-        width: 15px;
-        height: 15px;
-        stroke-width: 2;
-        transition: transform 240ms var(--ease);
-      }
-      .primary.large:hover:not(:disabled) svg {
-        transform: translateX(2px);
-      }
-      /* Checking this computer: the button waits with what it is doing. */
-      .primary.large[data-busy="true"] {
-        opacity: 0.8;
-        cursor: progress;
-      }
-      .primary.large[data-busy="true"] svg {
-        display: none;
-      }
-      /* What the button does, in words. Always two lines high, so a long
-         plan never moves the button above it. */
-      .plan-line {
-        display: -webkit-box;
-        -webkit-box-orient: vertical;
-        -webkit-line-clamp: 2;
-        width: 100%;
-        height: 34px;
-        margin: 10px 0 0;
-        overflow: hidden;
-        color: var(--faint);
-        font-size: 12px;
-        line-height: 17px;
-        font-variant-numeric: tabular-nums;
-        text-wrap: balance;
-      }
-      section[data-step="welcome"][data-local="true"] .start {
-        margin-top: auto;
-        padding-top: 12px;
-      }
-      .plan-why {
-        max-width: 440px;
-        margin-top: 4px;
-        color: var(--faint);
-        font-size: 11.5px;
-        line-height: 1.45;
-        font-variant-numeric: tabular-nums;
-      }
-      .plan-actions {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        margin-top: 8px;
       }
       .link.quiet {
         padding: 2px 4px;
@@ -1379,52 +859,6 @@
         font-size: 0.95em;
         overflow-wrap: anywhere;
       }
-      .choice {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        padding: 5px 0;
-      }
-      .choice + .choice {
-        border-top: 1px solid #f1f1ee;
-      }
-      .choice .text {
-        flex: 1;
-        min-width: 0;
-      }
-      .choice strong {
-        display: block;
-        color: var(--ink);
-        font-size: 13px;
-        font-weight: 550;
-        letter-spacing: -0.005em;
-      }
-      .choice .sub {
-        display: block;
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1.45;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      /* The local model: one card naming it and what it needs. */
-      .choice.local {
-        flex-wrap: wrap;
-        row-gap: 6px;
-      }
-      .pick-head {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 6px;
-        width: 100%;
-      }
-      .pick-name {
-        color: var(--ink);
-        font-size: 12px;
-        font-weight: 550;
-      }
       /* Opens the system folder picker. */
       .change {
         flex: none;
@@ -1447,91 +881,7 @@
       .change:active:not(:disabled) {
         background: #f1f1ee;
       }
-      .choice .sub[data-warn="true"] {
-        color: var(--error);
-      }
-      .team {
-        margin: auto 0 0;
-        padding-top: 10px;
-        color: var(--faint);
-        font-size: 12px;
-      }
-      .team .link {
-        padding: 2px 4px;
-        color: var(--muted);
-        text-decoration-color: #d4d4cd;
-      }
-      /* The button sits at the same place on both steps: under it step 2's
-         plan takes two lines, step 1's plan one line and the team link the
-         other. */
-      section[data-stage="choose"] .plan-line {
-        height: 17px;
-        -webkit-line-clamp: 1;
-      }
-      section[data-step="welcome"][data-local="true"] .team {
-        margin-top: 0;
-        padding-top: 0;
-        line-height: 17px;
-      }
-      section[data-step="welcome"][data-local="true"] .team .link {
-        padding-block: 0;
-      }
-      /* A long BYOK error scrolls the settings instead of moving the button;
-         the padding keeps the card's shadow in view. */
-      section[data-stage="settings"] .stage {
-        min-height: 0;
-        margin: 0 -8px -12px;
-        padding: 0 8px 12px;
-        overflow-y: auto;
-      }
 
-      /* Installing: one bar, and one line under it that says what is
-         happening now. */
-      .progress {
-        width: 360px;
-        margin: 28px auto 0;
-        text-align: left;
-      }
-      .progress .track {
-        margin-top: 0;
-      }
-      .now {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: 12px;
-        min-height: 18px;
-        margin: 12px 0 0;
-        color: var(--muted);
-        font-size: 12.5px;
-        line-height: 18px;
-        font-variant-numeric: tabular-nums;
-      }
-      .now #installing-step {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .now .pct {
-        flex: none;
-        color: var(--ink);
-        font-weight: 500;
-      }
-      /* While the local model downloads: one quiet line to install
-         another source instead. */
-      .leave {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 4px;
-        margin: 18px 0 0;
-        color: var(--faint);
-        font-size: 12px;
-      }
-      .leave[hidden] {
-        display: none;
-      }
       #leave-error:empty {
         display: none;
       }
@@ -1566,10 +916,6 @@
         transform: translateX(-100%);
         animation: sheen 1.8s ease-in-out infinite;
       }
-      /* A failure shows its message instead of the bar. */
-      section[data-failed="true"] .progress {
-        display: none;
-      }
       @keyframes sheen {
         to {
           transform: translateX(100%);
@@ -1590,47 +936,6 @@
       }
       .problem:empty {
         display: none;
-      }
-      /* A failure in a few lines; the whole message is its tooltip and
-         goes with the report. */
-      #installing-error {
-        width: 360px;
-        margin-top: 18px;
-        display: -webkit-box;
-        -webkit-box-orient: vertical;
-        -webkit-line-clamp: 3;
-        overflow: hidden;
-        overflow-wrap: anywhere;
-      }
-      #installing-error:empty {
-        display: none;
-      }
-      footer.report {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 10px;
-        margin-top: 20px;
-      }
-      footer.report[hidden] {
-        display: none;
-      }
-      footer.report output {
-        max-width: 360px;
-        color: #52524b;
-        font-size: 12px;
-        text-align: center;
-        overflow-wrap: anywhere;
-        user-select: text;
-        -webkit-user-select: text;
-      }
-      footer.report output:empty {
-        display: none;
-      }
-      #installing-error.folded {
-        max-height: 7.5em;
-        overflow: hidden;
-        mask-image: linear-gradient(#000 70%, transparent);
       }
       /* The AI runtime's own sign-in: a small dialog over the progress while
          the "signin" step waits. */
@@ -1841,223 +1146,1647 @@
         -webkit-user-select: all;
       }
 
-      /* Ready: the check draws itself, then a short receipt. */
-      .mark {
-        position: relative;
-        display: grid;
-        place-items: center;
-        width: 52px;
+      /* ---------- Wizard look (welcome, installing, ready) ----------
+         One 760x660 window: a quiet wash, the logo and two step pips on
+         top, a 440px stage, and the orb that carries the eye from the
+         welcome through step 1, the settings and the install. Ported from
+         the round-4 prototype; motion is transform and opacity only. */
+      body[data-look="wizard"] {
+        --ink: #1a1a16;
+        --body: #2c2c27;
+        --line: #eeeee9;
+        --field: #f6f6f2;
+        --ok: #3f8a4c;
+        --blue: #0a6fc2;
+        --r-lg: 16px;
+        --sh-card:
+          0 0 0 1px rgba(26, 25, 26, 0.055), 0 1px 2px rgba(0, 0, 0, 0.04),
+          0 8px 24px -12px rgba(26, 26, 22, 0.12);
+        --ease-io: cubic-bezier(0.65, 0.05, 0.25, 1);
+        background: #fbfbf9;
+        isolation: isolate;
+      }
+      body[data-look="wizard"] .scene {
+        display: none;
+      }
+      .wash {
+        display: none;
+      }
+      body[data-look="wizard"] .wash {
+        display: block;
+        position: fixed;
+        inset: -20%;
+        z-index: -1;
+        pointer-events: none;
+        background:
+          radial-gradient(
+            40% 32% at 50% 34%,
+            rgba(94, 200, 229, 0.1),
+            transparent 70%
+          ),
+          radial-gradient(
+            36% 30% at 58% 38%,
+            rgba(241, 154, 180, 0.1),
+            transparent 70%
+          );
+        transition: opacity 0.8s var(--ease);
+      }
+      body[data-scene] .wash {
+        opacity: 0.55;
+      }
+      /* A drag strip along the top, under the traffic lights. */
+      .drag {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
         height: 52px;
-        /* A tall receipt overflows the section; the circle must not shrink. */
-        flex-shrink: 0;
-        margin: 0 auto 18px;
-        border-radius: 50%;
-        background: linear-gradient(180deg, #2f2f2c, #1b1b19);
-        box-shadow:
-          0 0 0 6px #f4f4f0,
-          0 14px 28px -14px rgba(20, 20, 16, 0.6);
+        z-index: 1;
+        -webkit-app-region: drag;
       }
-      section.active .mark {
-        animation: pop 560ms var(--ease) both;
+      body[data-look="wizard"] .topbar {
+        top: 14px;
+        right: 24px;
+        height: 28px;
+        z-index: 20;
+        transition: opacity 0.6s var(--ease);
       }
-      .mark svg {
-        width: 22px;
-        height: 22px;
-        stroke: #fff;
-        stroke-width: 2.4;
-        stroke-dasharray: 24;
-        stroke-dashoffset: 24;
+      body[data-look="wizard"] .topbar .brand {
+        height: 21px;
       }
-      section.active .mark svg {
-        animation: draw 420ms 260ms var(--ease) forwards;
+      .pips {
+        display: none;
       }
-      @keyframes pop {
-        from {
-          opacity: 0;
-          transform: scale(0.7);
-        }
-      }
-      @keyframes draw {
-        to {
-          stroke-dashoffset: 0;
-        }
-      }
-      .connected {
+      body[data-look="wizard"] .pips {
         display: flex;
-        width: max-content;
+        gap: 5px;
         align-items: center;
-        gap: 8px;
-        margin: 18px auto 0;
-        padding: 6px 12px;
-        border: 1px solid #ecece7;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.8);
-        color: var(--ink);
-        font-size: 12px;
-        font-weight: 500;
+        transition: opacity 0.45s var(--ease);
       }
-      .connected .live {
+      .pips i {
+        display: block;
+        height: 4px;
         width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--ok);
-        box-shadow: 0 0 0 3px rgba(47, 158, 68, 0.15);
+        border-radius: 4px;
+        background: #dcdcd5;
+        transition:
+          width 0.45s var(--ease),
+          background 0.45s var(--ease);
       }
-      section.active .connected {
-        animation: enter 420ms 120ms var(--ease) both;
+      .pips i[data-on="true"] {
+        width: 18px;
+        background: var(--ink);
       }
-      /* The owner account of the finished install. */
-      /* Folded away by default: a quiet link that opens the card. */
-      .account {
-        width: 100%;
-        max-width: 420px;
-        margin: 14px auto 0;
-        text-align: center;
+      body[data-look="wizard"] #step-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
       }
-      .account-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        padding: 4px 6px;
-        border: 0;
-        border-radius: 6px;
-        background: none;
-        color: var(--muted);
-        font: inherit;
-        font-size: 12px;
-        cursor: pointer;
+      /* The intro and the install scene show the window without its chrome. */
+      body[data-chrome="off"] .topbar {
+        opacity: 0;
       }
-      .account-toggle:hover {
-        color: var(--ink);
-      }
-      .account-toggle svg {
-        width: 11px;
-        height: 11px;
-        fill: none;
-        stroke: currentColor;
-        stroke-width: 1.5;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        transition: transform 160ms var(--ease);
-      }
-      .account-toggle[aria-expanded="true"] svg {
-        transform: rotate(90deg);
-      }
-      .account-body {
-        margin-top: 6px;
-        padding: 12px 14px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: rgba(255, 255, 255, 0.86);
+      body[data-look="wizard"] main {
+        position: fixed;
+        inset: 0;
+        width: auto;
+        margin: 0;
+        padding: 0;
         text-align: left;
       }
-      .account dl {
-        display: grid;
-        grid-template-columns: 64px 1fr auto auto;
-        align-items: center;
-        gap: 6px 8px;
-        margin: 0;
+      body[data-look="wizard"]
+        section:is(
+          [data-step="welcome"],
+          [data-step="installing"],
+          [data-step="ready"]
+        ) {
+        position: absolute;
+        inset: 0;
+        display: none;
+        animation: none;
       }
-      .account dt {
-        color: #5f5e55;
-        font-size: 12px;
-        font-weight: 500;
+      body[data-look="wizard"]
+        section:is(
+          [data-step="welcome"],
+          [data-step="installing"],
+          [data-step="ready"]
+        ).active {
+        display: block;
       }
-      .account dd {
-        min-width: 0;
+      body[data-look="wizard"] h1 {
         margin: 0;
-        overflow: hidden;
+        font-size: 24px;
+        line-height: 32px;
+        font-weight: 600;
+        letter-spacing: -0.012em;
         color: var(--ink);
+      }
+      body[data-look="wizard"] :is(.src-row, .mrow):disabled {
+        opacity: 1;
+        cursor: default;
+      }
+
+      /* ---------- The orb: a soft gradient sphere ----------
+         o-base glow behind, o-fill the colour body, o-solid the ready fill,
+         o-shade light and contact shadow, o-ring a hairline on large orbs,
+         o-arc the highlight. */
+      .orb {
+        --s: 44px;
+        --a: #5ccbe8;
+        --b: #a3aaf4;
+        --c: #f3a3c2;
+        --d: #c9b8f6;
+        position: relative;
+        display: inline-block;
+        width: var(--s);
+        height: var(--s);
+        flex: none;
+      }
+      .orb i {
+        position: absolute;
+        display: block;
+        border-radius: 50%;
+        pointer-events: none;
+      }
+      .orb .o-base {
+        inset: -40%;
+        background: radial-gradient(
+          closest-side,
+          color-mix(in srgb, var(--b) 24%, transparent) 30%,
+          color-mix(in srgb, var(--c) 10%, transparent) 60%,
+          transparent
+        );
+      }
+      .orb .o-fill {
+        inset: 0;
+        background:
+          radial-gradient(66% 66% at 26% 24%, var(--a), transparent 84%),
+          radial-gradient(72% 72% at 82% 78%, var(--c), transparent 84%),
+          radial-gradient(60% 60% at 84% 20%, var(--d), transparent 82%),
+          radial-gradient(
+            62% 62% at 18% 84%,
+            color-mix(in srgb, var(--b) 60%, var(--c)),
+            transparent 82%
+          ),
+          var(--b);
+      }
+      .orb .o-solid {
+        inset: 0;
+        opacity: 0;
+        background: linear-gradient(
+          150deg,
+          color-mix(in srgb, var(--a) 88%, #1d6fd8) 8%,
+          color-mix(in srgb, var(--b) 92%, #4b4fd0) 52%,
+          color-mix(in srgb, var(--c) 90%, #d9467e) 96%
+        );
+      }
+      .orb .o-shade {
+        inset: 0;
+        background:
+          radial-gradient(
+            46% 40% at 36% 28%,
+            rgba(255, 255, 255, 0.62),
+            rgba(255, 255, 255, 0) 72%
+          ),
+          radial-gradient(
+            circle at 44% 40%,
+            transparent 62%,
+            rgba(46, 40, 110, 0.07) 100%
+          );
+        box-shadow:
+          inset 0 calc(var(--s) * -0.06) calc(var(--s) * 0.14)
+            rgba(255, 255, 255, 0.34),
+          0 calc(var(--s) * 0.16) calc(var(--s) * 0.3) calc(var(--s) * -0.14)
+            color-mix(in srgb, var(--b) 50%, transparent);
+      }
+      .orb .o-ring {
+        inset: -11%;
+        display: none;
+        border: 1px solid color-mix(in srgb, var(--b) 20%, transparent);
+      }
+      .orb.big .o-ring {
+        display: block;
+      }
+      .orb .o-arc {
+        left: 23%;
+        top: 13%;
+        width: 26%;
+        height: 15%;
+        transform: rotate(-28deg);
+        background: radial-gradient(
+          closest-side,
+          rgba(255, 255, 255, 0.9),
+          rgba(255, 255, 255, 0)
+        );
+      }
+      .orb.k-byok {
+        --a: #62d0c0;
+        --b: #9dc3ee;
+        --c: #f6b49c;
+        --d: #b7e3dc;
+      }
+      .orb.k-sub {
+        --a: #8f97f6;
+        --b: #bba6f2;
+        --c: #f5b896;
+        --d: #e1b3e8;
+      }
+      .orb.k-off {
+        --a: #c9c9c3;
+        --b: #d6d6d0;
+        --c: #c2c2bc;
+        --d: #dcdcd6;
+      }
+      .orb.breathe {
+        animation: orb-breathe 4.2s ease-in-out infinite;
+      }
+      .orb.breathe .o-base {
+        animation: orb-glow 4.2s ease-in-out infinite;
+      }
+      .orb.turn .o-fill {
+        animation: orb-turn 16s linear infinite;
+      }
+      @keyframes orb-breathe {
+        50% {
+          transform: scale(1.03);
+        }
+      }
+      @keyframes orb-glow {
+        50% {
+          opacity: 0.7;
+        }
+      }
+      @keyframes orb-turn {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .orb .o-check {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        opacity: 0;
+      }
+      body[data-look="wizard"] .orb .o-check svg {
+        width: 36%;
+        height: 36%;
+        filter: drop-shadow(0 1px 2px rgba(40, 40, 120, 0.25));
+      }
+      /* Ready: the orb is solid and carries the check. */
+      body[data-scene="ready"] #sc-ball .o-solid {
+        opacity: 0.92;
+      }
+      body[data-scene="ready"] #sc-ball .o-check {
+        opacity: 1;
+      }
+      body[data-scene="ready"] #sc-check {
+        stroke-dashoffset: 0;
+      }
+      .o-ripple {
+        position: absolute;
+        inset: -11%;
+        border-radius: 50%;
+        border: 1.5px solid rgba(163, 170, 244, 0.55);
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      /* ---------- The welcome: the orb forms, the words rise ---------- */
+      .intro {
+        position: absolute;
+        inset: 0;
+        z-index: 15;
+      }
+      .intro-orb {
+        position: absolute;
+        left: 324px;
+        top: 212px;
+        width: 112px;
+        height: 112px;
+        transform-origin: 0 0;
+      }
+      .intro-orb > .orb {
+        transform-origin: 50% 100%;
+      }
+      body[data-look="wizard"] .intro-title {
+        position: absolute;
+        top: 350px;
+        left: 0;
+        right: 0;
+        margin: 0;
+        text-align: center;
+        font-size: 30px;
+        line-height: 38px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        color: var(--ink);
+      }
+      .intro-title span {
+        display: inline-block;
+        white-space: pre;
+      }
+      .intro .skip {
+        position: absolute;
+        top: 420px;
+        left: 0;
+        right: 0;
+        text-align: center;
+      }
+      #flyer {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 40;
+      }
+      #flyer .orb {
+        position: absolute;
+        left: 0;
+        top: 0;
+        transform-origin: 0 0;
+      }
+
+      /* ---------- The stage: step 1 and the settings ---------- */
+      .wz-stage {
+        position: absolute;
+        top: 112px;
+        left: 160px;
+        width: 440px;
+        height: 520px;
+      }
+      .wz-hd {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        text-align: center;
+      }
+      .wz-hd .slot {
+        height: 44px;
+        margin: 0 auto 14px;
+        display: flex;
+        justify-content: center;
+      }
+      section[data-stage="choose"] .wz-hd .slot {
+        display: none;
+      }
+      .wz-body {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 112px;
+        height: 272px;
+      }
+      section[data-stage="choose"] .wz-body {
+        top: 54px;
+        height: 330px;
+      }
+      .wz-act {
+        position: absolute;
+        top: 404px;
+        left: 0;
+        right: 0;
+        display: flex;
+        gap: 10px;
+      }
+      .wz-aux {
+        position: absolute;
+        top: 460px;
+        left: 0;
+        right: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        text-align: center;
         font-size: 12.5px;
-        text-overflow: ellipsis;
+        color: var(--faint);
+      }
+      .wz-aux p {
+        margin: 0;
+      }
+      .wz-aux .team .link {
+        font-size: 12.5px;
+        color: var(--muted);
+        text-decoration: none;
+        border-bottom: 1px solid #d9d9d2;
+        border-radius: 0;
+        padding: 0;
+      }
+      .wz-aux .plan-why,
+      .wz-aux #local-driver-status {
+        max-width: 420px;
+        color: var(--muted);
+        text-wrap: pretty;
+      }
+      .wz-aux .error:not(:empty) {
+        color: var(--error);
+      }
+      .wz-aux .plan-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+      }
+      #plan-line:empty {
+        display: none;
+      }
+      .wz-behind {
+        position: absolute;
+        top: 498px;
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: center;
+      }
+
+      /* Buttons */
+      .btn-primary,
+      .btn-ghost,
+      .btn-sec {
+        height: 44px;
+        border-radius: 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        border: 0;
+        font: inherit;
+        font-size: 14px;
+        font-weight: 550;
+        cursor: pointer;
+        transition:
+          transform 0.15s var(--ease),
+          opacity 0.25s,
+          box-shadow 0.25s,
+          background 0.2s;
+      }
+      .btn-primary {
+        flex: 1;
+        padding: 0 20px;
+        background: var(--ink);
+        color: #fff;
+        box-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.1) inset,
+          0 1px 2px rgba(0, 0, 0, 0.16),
+          0 6px 14px -8px rgba(26, 26, 22, 0.5);
+      }
+      .btn-primary kbd {
+        font:
+          500 11px/1 "Geist Variable",
+          system-ui;
+        opacity: 0.5;
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        border-radius: 5px;
+        padding: 3px 5px 2px;
+      }
+      .btn-primary:disabled {
+        opacity: 0.32;
+        box-shadow: none;
+        cursor: default;
+      }
+      .btn-primary .spinner {
+        border-color: rgba(255, 255, 255, 0.35);
+        border-top-color: #fff;
+      }
+      .btn-ghost {
+        width: 96px;
+        flex: none;
+        background: #fff;
+        color: var(--ink);
+        box-shadow: var(--sh-card);
+      }
+      .btn-sec {
+        padding: 0 20px;
+        background: #fff;
+        color: var(--ink);
+        box-shadow: var(--sh-card);
+      }
+      .btn-primary:active:not(:disabled),
+      .btn-ghost:active:not(:disabled),
+      .btn-sec:active:not(:disabled) {
+        transform: scale(0.98);
+      }
+      .btn-primary:focus-visible,
+      .btn-ghost:focus-visible,
+      .btn-sec:focus-visible,
+      .src-row:focus-visible,
+      .mrow:focus-visible,
+      .m-chip:focus-visible {
+        outline: 2px solid rgba(10, 111, 194, 0.5);
+        outline-offset: 2px;
+      }
+
+      /* Step 1: three sources, one glider marks the pick. */
+      .src-list {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .src-row {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        height: 102px;
+        padding: 0 22px 0 24px;
+        border: 0;
+        border-radius: var(--r-lg);
+        background: #fff;
+        box-shadow: var(--sh-card);
+        text-align: left;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+        transition: box-shadow 0.3s var(--ease);
+      }
+      .src-row:hover:not(:disabled) {
+        box-shadow:
+          0 0 0 1px rgba(26, 25, 26, 0.07),
+          0 1px 2px rgba(0, 0, 0, 0.05),
+          0 12px 28px -12px rgba(26, 26, 22, 0.16);
+      }
+      .src-row:disabled {
+        cursor: default;
+      }
+      .src-row:disabled .orb {
+        filter: grayscale(0.85);
+        opacity: 0.6;
+      }
+      .src-row .tx {
+        flex: 1;
+        min-width: 0;
+      }
+      .src-row b {
+        display: block;
+        font-size: 15px;
+        line-height: 20px;
+        font-weight: 600;
+        color: var(--ink);
+        letter-spacing: -0.006em;
+      }
+      .src-row small {
+        display: block;
+        font-size: 13px;
+        line-height: 18px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+      .src-row:disabled b {
+        color: var(--faint);
+      }
+      .radio {
+        width: 20px;
+        height: 20px;
+        flex: none;
+        border-radius: 50%;
+        box-shadow: inset 0 0 0 1.5px #d9d9d2;
+        display: grid;
+        place-items: center;
+        transition:
+          background 0.25s var(--ease),
+          box-shadow 0.25s;
+      }
+      body[data-look="wizard"] .radio svg {
+        width: 11px;
+        height: 11px;
+        opacity: 0;
+        transform: scale(0.4);
+        transition:
+          opacity 0.3s var(--ease),
+          transform 0.3s var(--ease);
+      }
+      [aria-checked="true"] > .radio {
+        background: var(--ink);
+        box-shadow: none;
+      }
+      body[data-look="wizard"] [aria-checked="true"] > .radio svg {
+        opacity: 1;
+        transform: none;
+      }
+      .glider {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        height: 102px;
+        border-radius: var(--r-lg);
+        pointer-events: none;
+        z-index: 2;
+        box-shadow:
+          0 0 0 1.5px var(--ink),
+          0 14px 30px -16px rgba(26, 26, 22, 0.3);
+        transition: transform 0.42s var(--ease);
+      }
+
+      /* The local model card */
+      .mcard {
+        position: relative;
+        height: 272px;
+        padding: 22px 22px 20px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        border-radius: var(--r-lg);
+        background: #fff;
+        box-shadow: var(--sh-card);
+      }
+      .m-top {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .m-name {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--ink);
+        letter-spacing: -0.01em;
+        line-height: 24px;
+      }
+      .m-sub {
+        font-size: 12.5px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+      .m-chip {
+        margin-left: auto;
+        height: 30px;
+        padding: 0 10px 0 12px;
+        border: 0;
+        border-radius: 9px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex: none;
+        font: inherit;
+        font-size: 12.5px;
+        font-weight: 540;
+        color: var(--body);
+        background: var(--field);
+        box-shadow: inset 0 0 0 1px var(--line);
+        cursor: pointer;
+      }
+      .m-chip:hover:not(:disabled) {
+        background: #f1f1ec;
+      }
+      body[data-look="wizard"] .m-chip svg {
+        width: 12px;
+        height: 12px;
+        opacity: 0.6;
+      }
+      .m-why {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--body);
+        min-height: 20px;
+      }
+      body[data-look="wizard"] .m-why svg {
+        width: 14px;
+        height: 14px;
+        flex: none;
+      }
+      .m-why[data-tone="err"] {
+        color: var(--error);
+      }
+      .m-why .spinner {
+        width: 13px;
+        height: 13px;
+      }
+      .m-specs {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+      .m-specs > div {
+        padding: 12px 0 11px;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
+      }
+      .m-specs > div + div {
+        padding-left: 16px;
+        border-left: 1px solid var(--line);
+      }
+      .m-specs b {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--ink);
+        letter-spacing: -0.01em;
+        font-variant-numeric: tabular-nums;
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .m-specs span {
+        font-size: 11.5px;
+        color: var(--faint);
+      }
+      .m-mem-l {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 7px;
+      }
+      .m-mem-l b {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .membar {
+        height: 6px;
+        border-radius: 6px;
+        background: #efefea;
+        overflow: hidden;
+      }
+      .membar i {
+        display: block;
+        height: 100%;
+        border-radius: 6px;
+        background: linear-gradient(90deg, #43c6e8, #a9b3f2 55%, #f29ab6);
+        transform-origin: 0 50%;
+        transition: transform 0.5s var(--ease);
+      }
+      .memkey {
+        display: flex;
+        gap: 14px;
+        margin-top: 7px;
+        font-size: 11px;
+        color: var(--faint);
+      }
+      .memkey i {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        border-radius: 2px;
+        margin-right: 5px;
+      }
+
+      /* The model picker: a sheet that slides up inside the window. */
+      .msheet {
+        position: absolute;
+        inset: 0;
+        z-index: 30;
+      }
+      .msheet .scrim {
+        position: absolute;
+        inset: 0;
+        background: rgba(26, 26, 22, 0.18);
+      }
+      .msheet .panel {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 76px;
+        bottom: 0;
+        display: flex;
+        flex-direction: column;
+        border-radius: 20px 20px 0 0;
+        background: #fbfbf9;
+        box-shadow:
+          0 -1px 0 rgba(26, 25, 26, 0.06),
+          0 -18px 40px -20px rgba(26, 26, 22, 0.28);
+      }
+      .msheet .grab {
+        width: 36px;
+        height: 4px;
+        margin: 8px auto 0;
+        border-radius: 4px;
+        background: #deded8;
+      }
+      .msheet .head {
+        width: 480px;
+        margin: 0 auto;
+        padding: 16px 0 12px;
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+      }
+      body[data-look="wizard"] .msheet h2 {
+        margin: 0;
+        font-size: 17px;
+        line-height: 24px;
+        font-weight: 600;
+        color: var(--ink);
+        letter-spacing: -0.01em;
+      }
+      .msheet .head p {
+        margin: 2px 0 0;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .msheet .close {
+        width: 30px;
+        height: 30px;
+        border: 0;
+        border-radius: 9px;
+        display: grid;
+        place-items: center;
+        background: var(--field);
+        box-shadow: inset 0 0 0 1px var(--line);
+        color: var(--muted);
+        cursor: pointer;
+      }
+      body[data-look="wizard"] .msheet .close svg {
+        width: 10px;
+        height: 10px;
+      }
+      .mlist {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 6px 0 24px;
+        -webkit-mask-image: linear-gradient(
+          to bottom,
+          transparent 0,
+          #000 14px,
+          #000 calc(100% - 28px),
+          transparent 100%
+        );
+        mask-image: linear-gradient(
+          to bottom,
+          transparent 0,
+          #000 14px,
+          #000 calc(100% - 28px),
+          transparent 100%
+        );
+      }
+      .mlist::-webkit-scrollbar {
+        width: 0;
+      }
+      .mlist-in {
+        width: 480px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .mrow {
+        position: relative;
+        display: grid;
+        grid-template-columns: 20px 1fr auto;
+        column-gap: 14px;
+        align-items: start;
+        width: 100%;
+        padding: 16px 18px 15px 16px;
+        border: 0;
+        border-radius: 14px;
+        background: #fff;
+        box-shadow: var(--sh-card);
+        text-align: left;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+        transition:
+          box-shadow 0.25s var(--ease),
+          background 0.2s;
+      }
+      .mrow:hover:not(:disabled):not([aria-checked="true"]) {
+        box-shadow:
+          0 0 0 1px rgba(26, 25, 26, 0.08),
+          0 1px 2px rgba(0, 0, 0, 0.05),
+          0 10px 24px -12px rgba(26, 26, 22, 0.18);
+      }
+      .mrow[aria-checked="true"] {
+        box-shadow:
+          0 0 0 1.5px var(--ink),
+          0 12px 26px -16px rgba(26, 26, 22, 0.3);
+      }
+      .mrow[data-rec="true"]:not([aria-checked="true"]) {
+        box-shadow:
+          0 0 0 1px rgba(92, 203, 232, 0.45),
+          0 8px 24px -14px rgba(92, 160, 232, 0.35);
+      }
+      .mrow:disabled {
+        cursor: default;
+        background: #f7f7f3;
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+      .mrow .radio {
+        margin-top: 2px;
+      }
+      .mrow:disabled .radio {
+        opacity: 0.5;
+      }
+      .mrow .nm {
+        display: block;
+        font-size: 14px;
+        line-height: 20px;
+        font-weight: 600;
+        color: var(--ink);
+        letter-spacing: -0.006em;
+      }
+      .mrow .tg {
+        display: block;
+        font-size: 12px;
+        line-height: 16px;
+        color: var(--muted);
+        margin-top: 1px;
+      }
+      .mrow:disabled :is(.nm, .tg) {
+        color: #b3b3ab;
+      }
+      .mrow .chips {
+        display: flex;
+        gap: 6px;
+        justify-content: flex-end;
+      }
+      .mrow .mc {
+        height: 22px;
+        padding: 0 8px;
+        border-radius: 7px;
+        display: inline-flex;
+        align-items: center;
+        font-size: 11.5px;
+        font-weight: 540;
+        color: var(--body);
+        background: var(--field);
+        box-shadow: inset 0 0 0 1px var(--line);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .mrow .mc[data-kind="best"] {
+        color: #1d5f86;
+        background: linear-gradient(
+          90deg,
+          rgba(67, 198, 232, 0.14),
+          rgba(242, 154, 182, 0.14)
+        );
+        box-shadow: inset 0 0 0 1px rgba(92, 170, 232, 0.25);
+      }
+      .mrow:disabled .mc {
+        color: #b3b3ab;
+        background: transparent;
+      }
+      .mrow .meters {
+        grid-column: 2 / 4;
+        display: flex;
+        gap: 22px;
+        margin-top: 11px;
+        font-size: 11px;
+        color: var(--faint);
+      }
+      .mrow .meter {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .mrow .meter s {
+        position: relative;
+        display: block;
+        width: 72px;
+        height: 4px;
+        border-radius: 4px;
+        background: #edede7;
+        overflow: hidden;
+        text-decoration: none;
+      }
+      .mrow .meter s i {
+        position: absolute;
+        inset: 0;
+        border-radius: 4px;
+        background: var(--ink);
+        transform-origin: 0 50%;
+      }
+      .mrow .meter em {
+        font-style: normal;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .mrow .needs {
+        grid-column: 2 / 4;
+        margin-top: 8px;
+        font-size: 12px;
+        color: #a35a3a;
+      }
+
+      /* Grouped fields (BYOK, the sign-in details) */
+      .grp {
+        background: #fff;
+        border-radius: var(--r-lg);
+        box-shadow: var(--sh-card);
+        overflow: hidden;
+      }
+      .grp + .grp,
+      .byok-box + .grp {
+        margin-top: 16px;
+      }
+      .grp.byok-fields {
+        display: block;
+      }
+      .fld {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 64px;
+        padding: 0 16px 0 20px;
+        transition: box-shadow 0.2s;
+      }
+      .fld + .fld {
+        border-top: 1px solid var(--line);
+      }
+      .fld .lb {
+        width: 84px;
+        flex: none;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .fld .vw {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      body[data-look="wizard"] .fld input {
+        width: 100%;
+        height: 24px;
+        padding: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        font: inherit;
+        font-size: 14px;
+        color: var(--ink);
+        box-shadow: none;
         user-select: text;
         -webkit-user-select: text;
       }
-      .account dd.email {
-        grid-column: 2 / 4;
+      .fld input::placeholder {
+        color: #bdbdb5;
       }
-      .account dd.secret {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        letter-spacing: 0.02em;
+      .fld input[type="password"] {
+        letter-spacing: 0.08em;
       }
-      .account-note {
-        margin: 8px 0 0;
+      .fld input[type="password"]:placeholder-shown {
+        letter-spacing: 0;
+      }
+      .fld:focus-within::after {
+        content: "";
+        position: absolute;
+        inset: 6px 8px;
+        border-radius: 10px;
+        box-shadow:
+          0 0 0 3px rgba(10, 111, 194, 0.14),
+          inset 0 0 0 1px rgba(10, 111, 194, 0.45);
+        pointer-events: none;
+      }
+      .fld[data-bad="true"] {
+        box-shadow: inset 2px 0 0 var(--error);
+      }
+      .fld .eye {
+        width: 28px;
+        height: 28px;
+        flex: none;
+        border: 0;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background: none;
         color: var(--muted);
-        font-size: 11.5px;
+        opacity: 0.7;
+        cursor: pointer;
       }
-      .account-note .link {
-        padding: 2px 4px;
-        font-size: 11.5px;
+      body[data-look="wizard"] .fld .eye svg {
+        width: 16px;
+        height: 16px;
       }
-      /* A new password, typed in place of the note. */
-      .account-change {
+      body[data-look="wizard"] .fld .byok-status {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin: 2px 0 0;
+        padding: 0;
+        font-size: 12px;
+        line-height: 16px;
+        color: var(--error);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      body[data-look="wizard"] .fld .byok-status svg {
+        width: 13px;
+        height: 13px;
+        flex: none;
+      }
+      .fld .byok-status[hidden] {
+        display: none !important;
+      }
+      .fld .val {
+        flex: 1;
+        min-width: 0;
+        font-size: 14px;
+        color: var(--ink);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .lnk {
+        border: 0;
+        padding: 0;
+        background: none;
+        font: inherit;
+        font-size: 12.5px;
+        font-weight: 540;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      .lnk:hover:not(:disabled) {
+        color: var(--ink);
+      }
+      .lnk + .lnk {
+        margin-left: 12px;
+      }
+      /* A switch row with a small orb: also download the local model. */
+      .tgl {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 64px;
+        padding: 0 18px 0 20px;
+        font-size: 13.5px;
+        color: var(--body);
+        cursor: pointer;
+      }
+      .tgl .tl {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .tgl .orb {
+        --s: 26px;
+      }
+      body[data-look="wizard"] input.sw {
+        appearance: none;
+        -webkit-appearance: none;
+        position: relative;
+        width: 32px;
+        height: 19px;
+        margin: 0;
+        border-radius: 19px;
+        background: #e4e4de;
+        flex: none;
+        cursor: pointer;
+        transition: background 0.25s;
+      }
+      input.sw::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+        transition: transform 0.25s var(--ease);
+      }
+      body[data-look="wizard"] input.sw:checked {
+        background: var(--ink);
+      }
+      input.sw:checked::after {
+        transform: translateX(13px);
+      }
+      input.sw:focus-visible {
+        outline: 2px solid rgba(10, 111, 194, 0.5);
+        outline-offset: 2px;
+      }
+
+      /* Subscription runtimes */
+      .rt {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0 16px;
+        min-height: 96px;
+        padding: 0 20px;
+      }
+      .rt + .rt {
+        border-top: 1px solid var(--line);
+      }
+      .tile {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        display: grid;
+        place-items: center;
+        flex: none;
+        background: linear-gradient(180deg, #fff, #f6f6f2);
+        box-shadow:
+          inset 0 0 0 1px rgba(26, 25, 26, 0.08),
+          0 1px 2px rgba(0, 0, 0, 0.04);
+        color: var(--ink);
+      }
+      body[data-look="wizard"] .tile svg {
+        width: 24px;
+        height: 24px;
+        display: block;
+        fill: none;
+        stroke: currentColor;
+      }
+      .rt .text {
+        flex: 1;
+        min-width: 0;
+      }
+      .rt .text strong {
+        display: block;
+        font-size: 15px;
+        line-height: 20px;
+        font-weight: 600;
+        color: var(--ink);
+        letter-spacing: -0.006em;
+      }
+      .rt .sub {
+        display: block;
+        margin-top: 2px;
+        font-size: 13px;
+        line-height: 18px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .rt .sub[data-warn="true"] {
+        color: var(--error);
+      }
+      .runtime-act {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: none;
+      }
+      body[data-look="wizard"] .runtime-act .change {
+        height: 30px;
+        padding: 0 14px;
+        border: 0;
+        border-radius: 9px;
+        font-size: 12.5px;
+        font-weight: 550;
+        background: #fff;
+        color: var(--ink);
+        box-shadow:
+          0 0 0 1px rgba(26, 25, 26, 0.1),
+          0 1px 2px rgba(0, 0, 0, 0.05);
+      }
+      body[data-look="wizard"] .runtime-act [data-runtime-signin] {
+        background: var(--ink);
+        color: #fff;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+      }
+      .runtime-progress {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12.5px;
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
+      }
+      .runtime-progress .track {
+        width: 96px;
+        height: 3px;
+        border-radius: 3px;
+        background: rgba(26, 26, 22, 0.08);
+      }
+      .runtime-progress .fill {
+        background: var(--ink);
+      }
+      .runtime-progress .fill::after {
+        display: none;
+      }
+      .runtime-wait {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .rt .badge {
+        display: inline-flex;
+        background: none;
+        padding: 0;
+      }
+      body[data-look="wizard"] .rt .badge svg {
+        width: 24px;
+        height: 24px;
+      }
+      .runtime-extra {
+        flex-basis: 100%;
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 6px;
-        margin-top: 10px;
+        gap: 6px 14px;
+        padding: 0 0 14px 60px;
+        margin-top: -12px;
+        font-size: 12.5px;
+        color: var(--muted);
       }
-      .account-change input {
-        flex: 1 1 160px;
-        min-width: 0;
-        height: 28px;
+      .runtime-paste {
+        display: flex;
+        gap: 8px;
+        flex-basis: 100%;
+      }
+      body[data-look="wizard"] .runtime-paste input {
+        flex: 1;
+        height: 30px;
         padding: 0 10px;
-        border: 1px solid #e6e6e1;
+        border: 0;
         border-radius: 8px;
-        outline: none;
-        background: #fff;
-        color: var(--ink);
+        background: var(--field);
+        box-shadow: inset 0 0 0 1px var(--line);
         font: inherit;
         font-size: 12.5px;
+      }
+
+      /* ---------- Install, failure and ready: one calm scene ---------- */
+      .sc {
+        display: none;
+      }
+      body[data-scene] .sc {
+        display: block;
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+      }
+      .sc-orb {
+        position: absolute;
+        left: 320px;
+        top: 214px;
+        transition: transform 0.5s var(--ease);
+      }
+      .sc-orb > .orb {
+        --s: 120px;
+      }
+      body[data-expanded] .sc-orb,
+      body[data-expanded] .sc-ready {
+        transform: translateY(-104px);
+      }
+      .floaters {
+        position: absolute;
+        inset: 0;
+        opacity: 0.4;
+        transition:
+          opacity 1.2s var(--ease),
+          filter 0.6s;
+      }
+      body[data-scene="ready"] .floaters,
+      body[data-agents] .floaters {
+        opacity: 0.85;
+      }
+      body[data-failed] .floaters {
+        opacity: 0.22;
+        filter: grayscale(1);
+      }
+      .agent {
+        position: absolute;
+        width: 156px;
+        padding: 20px 14px 18px;
+        border-radius: 20px;
+        background: #fff;
+        box-shadow:
+          0 0 0 1px rgba(26, 25, 26, 0.05),
+          0 18px 40px -20px rgba(26, 26, 22, 0.2);
+        text-align: center;
+      }
+      .agent .orb {
+        --s: 44px;
+        display: block;
+        margin: 2px auto 14px;
+      }
+      .agent b {
+        display: block;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--ink);
+        letter-spacing: -0.004em;
+      }
+      .agent small {
+        display: block;
+        font-size: 11px;
+        line-height: 15px;
+        color: var(--faint);
+        margin-top: 3px;
+      }
+      .agent.a1 {
+        left: 44px;
+        top: 246px;
+        rotate: -6deg;
+        animation: agent-drift 9s ease-in-out infinite;
+      }
+      .agent.a2 {
+        left: 560px;
+        top: 246px;
+        rotate: 6deg;
+        animation: agent-drift 9s ease-in-out -4.5s infinite;
+      }
+      @keyframes agent-drift {
+        50% {
+          transform: translateY(-8px);
+        }
+      }
+      .sc-part {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 370px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+      .sc-bar {
+        width: 260px;
+        height: 3px;
+        border-radius: 3px;
+        background: rgba(26, 26, 22, 0.08);
+        overflow: hidden;
+      }
+      .sc-bar i {
+        display: block;
+        height: 100%;
+        width: 100%;
+        border-radius: 3px;
+        background: var(--ink);
+        transform: scaleX(0);
+        transform-origin: 0 50%;
+        transition: transform 0.6s var(--ease);
+      }
+      .sc-line {
+        position: relative;
+        height: 22px;
+        width: 340px;
+        margin: 16px 0 0;
+        font-size: 14px;
+        color: var(--body);
+        font-variant-numeric: tabular-nums;
+      }
+      .sc-line > span:not(.sr-only) {
+        position: absolute;
+        left: 0;
+        right: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .sc-meanwhile {
+        margin: 18px 0 0;
+        font-size: 12.5px;
+        color: var(--faint);
+      }
+      .sc-meanwhile button {
+        border: 0;
+        padding: 0;
+        background: none;
+        font: inherit;
+        color: var(--muted);
+        border-bottom: 1px solid #d9d9d2;
+        cursor: pointer;
+      }
+      body[data-look="wizard"] .sc-part h1,
+      body[data-look="wizard"] .sc-part h2 {
+        font-size: 22px;
+        line-height: 30px;
+      }
+      section[data-step="installing"]:not([data-failed="true"])
+        #installing-title {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+      section[data-failed="true"] :is(.sc-bar, .sc-line, .sc-meanwhile) {
+        display: none;
+      }
+      section[data-step="installing"] .problem {
+        max-width: 420px;
+        margin: 6px 0 22px;
+        padding: 0;
+        border: 0;
+        background: none;
+        font-size: 13.5px;
+        color: var(--muted);
+        text-align: center;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
         user-select: text;
         -webkit-user-select: text;
       }
-      .account-change input:focus {
-        border-color: var(--ink);
-      }
-      .account-change input[aria-invalid="true"] {
-        border-color: var(--error);
-      }
-      .account-problem {
-        width: 100%;
-        margin: 0;
-        color: var(--error);
-        font-size: 11.5px;
-      }
-      .account-problem:empty {
+      section[data-step="installing"] .problem:empty {
         display: none;
       }
-      .account-error {
-        margin: 0;
-        color: var(--error);
-        font-size: 12px;
+      .sc-report {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
       }
-      section.active .account {
-        animation: enter 420ms 160ms var(--ease) both;
-      }
-      /* The earlier Simplex app's data this install could not upgrade. */
-      .legacy-note {
-        width: 100%;
+      .sc-report output {
         max-width: 420px;
-        margin: 12px auto 0;
-        color: var(--muted);
         font-size: 12px;
-        text-align: left;
-        overflow-wrap: anywhere;
+        color: var(--faint);
       }
-      /* Confetti for a finished install, drawn over the whole window. */
-      #confetti {
-        position: fixed;
-        inset: 0;
-        z-index: 50;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
+      .sc-ready .btn-primary {
+        flex: none;
+        width: 280px;
+        margin-top: 24px;
       }
-      section[data-step="ready"] .start {
-        padding-top: 22px;
+      .disclose {
+        margin-top: 14px;
+        border: 0;
+        padding: 0;
+        background: none;
+        font: inherit;
+        font-size: 12.5px;
+        color: var(--muted);
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
       }
+      body[data-look="wizard"] .disclose svg {
+        width: 11px;
+        height: 11px;
+        transition: transform 0.3s var(--ease);
+      }
+      .disclose[aria-expanded="true"] svg {
+        transform: rotate(180deg);
+      }
+      .acct {
+        width: 360px;
+        margin-top: 12px;
+      }
+      .acct .fld {
+        height: 48px;
+      }
+      .acct .fld .lb {
+        width: 72px;
+      }
+      .acct-foot {
+        display: flex;
+        justify-content: center;
+        gap: 14px;
+        margin: 10px 0 0;
+        font-size: 12.5px;
+      }
+      .acct-foot .link {
+        font-size: 12.5px;
+        color: var(--muted);
+        text-decoration: none;
+        border-bottom: 1px solid #d9d9d2;
+        border-radius: 0;
+        padding: 0;
+      }
+      .acct .account-change {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      body[data-look="wizard"] .acct .account-change input {
+        flex: 1;
+        height: 36px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: var(--sh-card);
+        font: inherit;
+        font-size: 13px;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .acct .account-problem,
+      .acct .account-error {
+        flex-basis: 100%;
+        margin: 4px 0 0;
+        font-size: 12px;
+        color: var(--error);
+      }
+      .acct .account-problem:empty {
+        display: none;
+      }
+      .sc-ready .legacy-note {
+        max-width: 420px;
+        margin: 12px 0 0;
+        font-size: 12px;
+        color: var(--faint);
+      }
+
       @media (prefers-reduced-motion: reduce) {
         *,
         *::before,
@@ -2070,33 +2799,61 @@
   </head>
   <body data-platform="darwin">
     <div class="scene" aria-hidden="true"></div>
+    <div class="wash" aria-hidden="true"></div>
+    <div class="drag" aria-hidden="true"></div>
     <header class="topbar">
       <img class="brand" src="logo.png" alt="Linger" />
+      <span class="pips" id="pips" aria-hidden="true"><i></i><i></i></span>
       <span id="step-label"></span>
     </header>
+    <!-- The install scene: one orb and two of the agents it sets up,
+         shared by installing, its failure and ready. -->
+    <div class="sc" id="sc" aria-hidden="true">
+      <div class="floaters" id="floaters">
+        <div class="agent a1">
+          <span class="orb k-byok"></span><b data-t="agentInbox"></b
+          ><small data-t="agentInboxAbout"></small>
+        </div>
+        <div class="agent a2">
+          <span class="orb"></span><b data-t="agentAssistant"></b
+          ><small data-t="agentAssistantAbout"></small>
+        </div>
+      </div>
+      <div class="sc-orb" id="sc-orb">
+        <span class="orb big" id="sc-ball"
+          ><span class="o-check"
+            ><svg viewBox="0 0 24 24">
+              <path
+                id="sc-check"
+                d="M5 12.5 10 17 19 7.5"
+                fill="none"
+                stroke="#fff"
+                stroke-width="2.6"
+                stroke-dasharray="24"
+                stroke-dashoffset="24"
+              /></svg></span
+          ><span class="o-ripple" id="sc-ripple"></span
+        ></span>
+      </div>
+    </div>
+    <div id="flyer" aria-hidden="true"></div>
 
     <main>
       <section data-step="welcome" aria-labelledby="welcome-title">
-        <div class="stage-bar" id="stage-bar">
-          <button class="link back" id="source-back" type="button" hidden>
-            <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></svg
-            ><span data-t="back"></span>
-          </button>
-          <span class="eyebrow behind" id="model-behind" hidden
-            ><span class="behind-bar"><span id="model-behind-fill"></span></span
-            ><span id="model-behind-text"></span
-          ></span>
-        </div>
-        <div class="stage">
-          <h1 id="welcome-title" tabindex="-1" data-t="welcomeTitle"></h1>
-          <div
-            class="checking"
-            id="welcome-checking"
-            role="status"
-            data-t-aria-label="gettingReady"
-            hidden
-          >
-            <span class="spinner"></span>
+        <!-- The welcome: the orb forms and the title rises while this
+             computer is checked; it hands off to step 1. -->
+        <div
+          class="intro"
+          id="welcome-checking"
+          role="status"
+          data-t-aria-label="gettingReady"
+          hidden
+        >
+          <div class="intro-orb" id="intro-orb" aria-hidden="true">
+            <span class="orb big" id="intro-ball" style="--s: 112px"></span>
+          </div>
+          <p class="intro-title" id="intro-title" aria-hidden="true"></p>
+          <div class="skip">
             <button
               class="link quiet"
               id="checking-skip"
@@ -2105,102 +2862,171 @@
               data-t="chooseNow"
             ></button>
           </div>
-          <div class="setup-card" id="local-setup" hidden>
+        </div>
+        <div class="wz-stage" id="wz-stage">
+          <div class="wz-hd" data-in>
+            <div class="slot" aria-hidden="true">
+              <span class="orb" id="hd-orb"></span>
+            </div>
+            <h1 id="welcome-title" tabindex="-1" data-t="welcomeTitle"></h1>
+          </div>
+          <div class="wz-body setup-card" id="local-setup" hidden>
             <div
-              class="source-grid"
+              class="src-list source-grid"
               id="source-grid"
               role="radiogroup"
               data-t-aria-label="modelSource"
             >
+              <span class="glider" id="glider" aria-hidden="true"></span>
               <button
                 type="button"
-                class="source-card"
+                class="source-card src-row"
                 role="radio"
                 data-value="local"
+                data-in
               >
-                <span class="source-top"
-                  ><strong data-t="localModel"></strong></span
-                ><span class="source-about" id="source-local-about"></span>
+                <span class="orb" aria-hidden="true"></span
+                ><span class="tx"
+                  ><b data-t="localModel"></b
+                  ><small
+                    class="source-about"
+                    id="source-local-about"
+                  ></small></span
+                ><span class="radio" aria-hidden="true"></span>
               </button>
               <button
                 type="button"
-                class="source-card"
+                class="source-card src-row"
                 role="radio"
                 data-value="byok"
+                data-in
               >
-                <span class="source-top"><strong>BYOK</strong></span
-                ><span
-                  class="source-about"
-                  id="source-byok-about"
-                  data-t="sourceByokAbout"
-                ></span>
+                <span class="orb k-byok" aria-hidden="true"></span
+                ><span class="tx"
+                  ><b>BYOK</b
+                  ><small
+                    class="source-about"
+                    id="source-byok-about"
+                    data-t="sourceByokAbout"
+                  ></small></span
+                ><span class="radio" aria-hidden="true"></span>
               </button>
               <button
                 type="button"
-                class="source-card"
+                class="source-card src-row"
                 role="radio"
                 data-value="subscription"
+                data-in
               >
-                <span class="source-top"
-                  ><strong data-t="subscription"></strong></span
-                ><span
-                  class="source-about"
-                  id="source-sub-about"
-                  data-t="sourceSubAbout"
-                ></span>
+                <span class="orb k-sub" aria-hidden="true"></span
+                ><span class="tx"
+                  ><b data-t="subscription"></b
+                  ><small
+                    class="source-about"
+                    id="source-sub-about"
+                    data-t="sourceSubAbout"
+                  ></small></span
+                ><span class="radio" aria-hidden="true"></span>
               </button>
             </div>
-            <p class="plan-why" id="plan-why" hidden></p>
-            <p class="plan-why" id="local-driver-status" hidden></p>
-            <div class="plan-actions" id="local-plan-actions" hidden>
-              <button
-                class="secondary"
-                id="local-driver-install"
-                type="button"
-                hidden
-                data-t="installDriverUpdate"
-              ></button>
-              <button
-                class="secondary"
-                id="local-driver-action"
-                type="button"
-                hidden
-              ></button>
-              <button
-                class="link quiet"
-                id="local-driver-guide"
-                type="button"
-                hidden
-                data-t="driverUpdateGuide"
-              ></button>
-              <button
-                class="link quiet"
-                id="local-recheck"
-                type="button"
-                hidden
-                data-t="checkAgain"
-              ></button>
-            </div>
             <div class="source-panel" id="source-panel" hidden>
-              <div class="choice local" id="local-row" hidden>
-                <div class="facts" id="local-facts">
-                  <span class="pick-head"
-                    ><span class="pick-name" id="local-model-name"></span></span
-                  ><small id="local-model-needs"></small>
+              <!-- The local model: what it is, how good and fast it is
+                   here, and the memory it takes. -->
+              <div class="mcard" id="local-row" data-in hidden>
+                <div class="m-top">
+                  <div>
+                    <div class="m-name" id="local-model-name"></div>
+                    <div class="m-sub" id="local-model-sub"></div>
+                  </div>
+                  <button
+                    class="m-chip"
+                    id="model-change"
+                    type="button"
+                    aria-haspopup="dialog"
+                    aria-controls="model-sheet"
+                    hidden
+                  >
+                    <span data-t="changeModel"></span
+                    ><svg viewBox="0 0 12 12" aria-hidden="true">
+                      <path
+                        d="M3.5 4.5 6 2l2.5 2.5M3.5 7.5 6 10l2.5-2.5"
+                        stroke-width="1.4"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <div class="m-why" id="local-model-why-row" aria-live="polite">
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <defs>
+                      <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0" stop-color="#43c6e8" />
+                        <stop offset="1" stop-color="#f29ab6" />
+                      </linearGradient>
+                    </defs>
+                    <path
+                      d="M8 1.5 9.4 6.6 14.5 8 9.4 9.4 8 14.5 6.6 9.4 1.5 8 6.6 6.6Z"
+                      fill="url(#spark)"
+                      stroke="none"
+                    />
+                  </svg>
+                  <span id="local-model-why"></span>
+                </div>
+                <div class="m-specs" id="local-facts">
+                  <div>
+                    <b id="local-model-quality"></b
+                    ><span data-t="quality"></span>
+                  </div>
+                  <div>
+                    <b id="local-model-speed"></b
+                    ><span data-t="speedEstimate"></span>
+                  </div>
+                  <div>
+                    <b id="local-model-needs"></b
+                    ><span data-t="download"></span>
+                  </div>
+                </div>
+                <div class="m-mem" id="local-model-memory">
+                  <div class="m-mem-l">
+                    <span data-t="memory"></span
+                    ><span id="local-model-mem"></span>
+                  </div>
+                  <div class="membar">
+                    <i id="local-model-bar"></i>
+                  </div>
+                  <div class="memkey">
+                    <span
+                      ><i
+                        style="
+                          background: linear-gradient(90deg, #43c6e8, #f29ab6);
+                        "
+                      ></i
+                      ><span id="local-model-key"></span
+                    ></span>
+                  </div>
                 </div>
               </div>
               <div
-                class="runtimes"
+                class="grp runtimes"
                 id="subscription-row"
                 role="list"
                 data-t-aria-label="runtimesLabel"
+                data-in
                 hidden
               >
                 <div
-                  class="choice runtime"
+                  class="choice runtime rt"
                   data-runtime="claude"
                   role="listitem"
                 >
+                  <!-- Hugeicons ClaudeIcon (MIT), as in the app's icons. -->
+                  <span class="tile" aria-hidden="true"
+                    ><svg viewBox="0 0 24 24" fill="none">
+                      <path
+                        d="M13 12L18.5 5M7.63965 3L12.5 12L13.6865 3M4.48381 6.71679L11.9872 12M3 12L11.9872 12.473M12.2244 13.177L7 20M4.84194 16.8682L11.2824 12.9758M11.5 21L12.665 13.177M21 14L13.1846 12.668M21 10.5788L13 12.3223M16.779 19.646L12.8876 13.3772M19.3566 18.207L13.313 12.9893"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                      /></svg
+                  ></span>
                   <div class="text">
                     <strong>Claude Code</strong
                     ><span class="sub" data-runtime-sub></span>
@@ -2278,10 +3104,37 @@
                   </div>
                 </div>
                 <div
-                  class="choice runtime"
+                  class="choice runtime rt"
                   data-runtime="codex"
                   role="listitem"
                 >
+                  <!-- Hugeicons ChatGptIcon (MIT), as in the app's icons. -->
+                  <span class="tile" aria-hidden="true"
+                    ><svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                    >
+                      <path
+                        d="M11.7453 14.85L6.90436 12V7C6.90436 4.79086 8.72949 3 10.9809 3C12.3782 3 13.6113 3.6898 14.3458 4.74128"
+                      />
+                      <path
+                        d="M9.59961 19.1791C10.3266 20.2757 11.5866 21.0008 13.0192 21.0008C15.2707 21.0008 17.0958 19.21 17.0958 17.0008V12.0008L12.1612 9.0957"
+                      />
+                      <path
+                        d="M9.45166 13.5L9.45123 7.66938L13.8642 5.16938C15.814 4.06481 18.3072 4.72031 19.4329 6.63348C20.1593 7.86806 20.1388 9.32466 19.5089 10.4995"
+                      />
+                      <path
+                        d="M4.48963 13.4993C3.8595 14.6742 3.83887 16.131 4.56539 17.3657C5.6911 19.2789 8.18428 19.9344 10.1341 18.8298L14.5471 16.3298L14.643 10.7344"
+                      />
+                      <path
+                        d="M17.0959 17.6309C18.4415 17.5734 19.7295 16.8634 20.4529 15.634C21.5786 13.7209 20.9106 11.2745 18.9608 10.1699L14.5478 7.66992L9.48907 10.4255"
+                      />
+                      <path
+                        d="M6.90454 6.36938C5.55865 6.42662 4.27032 7.13672 3.54684 8.3663C2.42113 10.2795 3.08917 12.7258 5.03896 13.8304L9.45196 16.3304L14.5 13.5807"
+                      /></svg
+                  ></span>
                   <div class="text">
                     <strong>Codex</strong
                     ><span class="sub" data-runtime-sub></span>
@@ -2358,65 +3211,160 @@
                   </div>
                 </div>
               </div>
-              <div class="choice byok-box" id="byok-row" hidden>
-                <div class="byok-fields" id="byok-fields"></div>
+              <div class="byok-box" id="byok-row" data-in hidden>
+                <div class="grp byok-fields" id="byok-fields"></div>
               </div>
-              <div class="also" id="background-row" hidden>
-                <input type="checkbox" id="background-model" /><label
-                  for="background-model"
-                  data-t="alsoDownload"
-                ></label>
+              <div class="grp" id="background-row" data-in hidden>
+                <label class="tgl" for="background-model"
+                  ><span class="tl"
+                    ><span class="orb" aria-hidden="true"></span
+                    ><span data-t="alsoDownload"></span></span
+                  ><input type="checkbox" class="sw" id="background-model"
+                /></label>
               </div>
-              <div class="choice" id="location-row" hidden>
-                <div class="text">
-                  <strong data-t="installLocation"></strong
-                  ><span class="sub" id="location-sub" data-warn="true"></span>
+              <div class="grp" id="location-row" hidden>
+                <div class="rt">
+                  <div class="text">
+                    <strong data-t="installLocation"></strong
+                    ><span
+                      class="sub"
+                      id="location-sub"
+                      data-warn="true"
+                    ></span>
+                  </div>
+                  <div class="runtime-act">
+                    <button
+                      type="button"
+                      class="change"
+                      id="location-reset"
+                      data-t="useDefaults"
+                      hidden
+                    ></button>
+                    <button
+                      type="button"
+                      class="change"
+                      id="location-change"
+                      data-t="changeLocation"
+                    ></button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  class="change"
-                  id="location-reset"
-                  data-t="useDefaults"
-                  hidden
-                ></button>
-                <button
-                  type="button"
-                  class="change"
-                  id="location-change"
-                  data-t="changeLocation"
-                ></button>
               </div>
             </div>
           </div>
+          <div class="wz-act start" data-in>
+            <button
+              class="btn-ghost"
+              id="source-back"
+              type="button"
+              hidden
+              data-t="back"
+            ></button>
+            <button class="btn-primary" id="source-continue" type="button">
+              <span data-t="continue"></span><kbd aria-hidden="true">↵</kbd>
+            </button>
+            <button class="btn-primary" id="local-install" type="button">
+              <span id="local-install-label" data-t="install"></span
+              ><kbd aria-hidden="true">↵</kbd>
+            </button>
+            <button
+              class="btn-primary"
+              id="get-started"
+              data-go="server"
+              type="button"
+              data-t="getStarted"
+            ></button>
+          </div>
+          <div class="wz-aux" data-in>
+            <p class="plan-line" id="plan-line"></p>
+            <p class="error" id="local-error" role="alert"></p>
+            <p class="plan-why" id="plan-why" hidden></p>
+            <p class="plan-why" id="local-driver-status" hidden></p>
+            <div class="plan-actions" id="local-plan-actions" hidden>
+              <button
+                class="btn-sec"
+                id="local-driver-install"
+                type="button"
+                hidden
+                data-t="installDriverUpdate"
+              ></button>
+              <button
+                class="btn-sec"
+                id="local-driver-action"
+                type="button"
+                hidden
+              ></button>
+              <button
+                class="link quiet"
+                id="local-driver-guide"
+                type="button"
+                hidden
+                data-t="driverUpdateGuide"
+              ></button>
+              <button
+                class="link quiet"
+                id="local-recheck"
+                type="button"
+                hidden
+                data-t="checkAgain"
+              ></button>
+            </div>
+            <p class="team" id="team">
+              <span data-t="teamServer"></span>
+              <button
+                class="link"
+                data-go="server"
+                type="button"
+                data-t="connectInstead"
+              ></button>
+            </p>
+          </div>
+          <div class="wz-behind stage-bar" id="stage-bar">
+            <span class="eyebrow behind" id="model-behind" hidden
+              ><span class="behind-bar"
+                ><span id="model-behind-fill"></span></span
+              ><span id="model-behind-text"></span
+            ></span>
+          </div>
         </div>
-        <div class="start">
-          <button class="primary large" id="source-continue" type="button">
-            <span data-t="continue"></span
-            ><svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" /></svg>
-          </button>
-          <button class="primary large" id="local-install" type="button">
-            <span id="local-install-label" data-t="install"></span
-            ><svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" /></svg>
-          </button>
-          <button
-            class="primary large"
-            id="get-started"
-            data-go="server"
-            type="button"
-            data-t="getStarted"
-          ></button>
-          <p class="plan-line" id="plan-line"></p>
+        <!-- The model picker: every model the localmodels kit lists here,
+             in a sheet that slides up inside the window. -->
+        <div
+          class="msheet"
+          id="model-sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="model-sheet-title"
+          hidden
+        >
+          <div class="scrim" id="model-sheet-scrim"></div>
+          <div class="panel" id="model-sheet-panel">
+            <span class="grab" aria-hidden="true"></span>
+            <div class="head">
+              <div>
+                <h2 id="model-sheet-title"></h2>
+                <p id="model-sheet-lead"></p>
+              </div>
+              <button
+                class="close"
+                id="model-sheet-close"
+                type="button"
+                data-t-aria-label="close"
+              >
+                <svg viewBox="0 0 10 10" aria-hidden="true">
+                  <path d="m1.5 1.5 7 7m0-7-7 7" stroke-width="1.5" />
+                </svg>
+              </button>
+            </div>
+            <div class="mlist">
+              <div
+                class="mlist-in"
+                id="model-list"
+                role="radiogroup"
+                aria-labelledby="model-sheet-title"
+              ></div>
+            </div>
+          </div>
         </div>
-        <p class="error" id="local-error" role="alert"></p>
-        <p class="team" id="team">
-          <span data-t="teamServer"></span>
-          <button
-            class="link"
-            data-go="server"
-            type="button"
-            data-t="connectInstead"
-          ></button>
-        </p>
         <p
           class="sr-only"
           id="welcome-live"
@@ -2426,37 +3374,41 @@
       </section>
 
       <section data-step="installing" aria-labelledby="installing-title">
-        <h1 id="installing-title" data-t="installingTitle"></h1>
-        <div
-          class="progress"
-          role="progressbar"
-          id="installing-bar"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          aria-labelledby="installing-title"
-        >
-          <div class="track"><div class="fill" id="installing-fill"></div></div>
-          <p class="now" aria-live="polite">
+        <div class="sc-part" id="sc-install">
+          <h1 id="installing-title" data-t="installingTitle"></h1>
+          <div
+            class="sc-bar"
+            role="progressbar"
+            id="installing-bar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-labelledby="installing-title"
+          >
+            <i id="installing-fill"></i>
+          </div>
+          <p class="sc-line" id="installing-line" aria-live="polite">
             <span id="installing-step"></span
-            ><span class="pct" id="installing-count"></span>
+            ><span class="sr-only" id="installing-count"></span>
           </p>
+          <p class="sc-meanwhile leave" id="local-model-leave" hidden>
+            <button
+              type="button"
+              data-leave="choose"
+              data-t="useMeanwhile"
+            ></button>
+          </p>
+          <p class="error" id="leave-error" role="alert"></p>
+          <p class="problem" id="installing-error" role="alert"></p>
+          <footer class="sc-report report" id="installing-actions" hidden>
+            <button
+              class="btn-sec"
+              id="report-issue"
+              type="button"
+              data-t="reportIssue"
+            ></button>
+            <output id="diagnostics-note"></output>
+          </footer>
         </div>
-        <p class="leave" id="local-model-leave" hidden>
-          <button
-            class="link quiet"
-            type="button"
-            data-leave="subscription"
-            data-t="useSubscription"
-          ></button
-          ><span aria-hidden="true">·</span
-          ><button
-            class="link quiet"
-            type="button"
-            data-leave="byok"
-            data-t="useByok"
-          ></button>
-        </p>
-        <p class="error" id="leave-error" role="alert"></p>
         <div
           class="signin-modal"
           id="runtime-signin"
@@ -2596,7 +3548,6 @@
             </details>
           </div>
         </div>
-        <p class="problem" id="installing-error" role="alert"></p>
         <div
           class="signin-modal send-modal"
           id="send-modal"
@@ -2627,118 +3578,111 @@
             </div>
           </div>
         </div>
-        <footer class="report" id="installing-actions" hidden>
-          <button
-            class="primary"
-            id="report-issue"
-            type="button"
-            data-t="reportIssue"
-          ></button>
-          <output id="diagnostics-note"></output>
-        </footer>
       </section>
 
       <section data-step="ready" aria-labelledby="ready-title">
-        <span class="mark"
-          ><svg viewBox="0 0 24 24"><path d="m5 12 5 5 9-10" /></svg
-        ></span>
-        <h1 id="ready-title" data-t="readyTitle"></h1>
-        <p class="connected">
-          <span class="live"></span><span data-t="computerConnected"></span>
-        </p>
-        <div class="account" id="account" hidden>
-          <button
-            class="account-toggle"
-            id="account-toggle"
-            type="button"
-            aria-expanded="false"
-            aria-controls="account-body"
-          >
-            <span data-t="accountTitle"></span
-            ><svg viewBox="0 0 12 12" aria-hidden="true">
-              <path d="m4.5 3 3 3-3 3" />
-            </svg>
+        <div class="sc-part sc-ready" id="sc-ready">
+          <h1 id="ready-title" tabindex="-1" data-t="readyTitle" data-r></h1>
+          <button class="btn-primary" id="open" type="button" data-r>
+            <span data-t="openLinger"></span><kbd aria-hidden="true">↵</kbd>
           </button>
-          <div class="account-body" id="account-body" hidden>
-            <dl id="account-fields">
-              <dt data-t="email"></dt>
-              <dd class="email" id="account-email"></dd>
-              <button
-                class="change"
-                id="account-copy-email"
-                type="button"
-                data-t="copy"
-              ></button>
-              <dt data-t="password"></dt>
-              <dd class="secret" id="account-password"></dd>
-              <button
-                class="change"
-                id="account-show"
-                type="button"
-                data-t="show"
-              ></button>
-              <button
-                class="change"
-                id="account-copy"
-                type="button"
-                data-t="copy"
-              ></button>
-            </dl>
-            <form class="account-change" id="account-change" novalidate hidden>
-              <input
-                id="account-new-password"
-                type="password"
-                autocomplete="new-password"
-                spellcheck="false"
-                autocapitalize="off"
-                data-t-placeholder="newPassword"
-                data-t-aria-label="newPassword"
-              />
-              <button
-                class="change"
-                id="account-new-show"
-                type="button"
-                data-t="show"
-              ></button>
-              <button class="change" id="account-new-save" type="submit">
-                <span id="account-new-save-label" data-t="save"></span>
-              </button>
-              <button
-                class="link quiet"
-                id="account-new-cancel"
-                type="button"
-                data-t="cancel"
-              ></button>
-              <p
-                class="account-problem"
-                id="account-new-error"
-                role="alert"
-              ></p>
-            </form>
-            <p class="account-note" id="account-note">
-              <span data-t="accountNote"></span>
-              <button
-                class="link"
-                id="account-change-open"
-                type="button"
-                data-t="changePassword"
-              ></button>
-              <button
-                class="link"
-                id="account-reveal"
-                type="button"
-                data-t="accountReveal"
-              ></button>
-            </p>
-            <p class="account-error" id="account-error" role="alert"></p>
+          <div class="account" id="account" data-r hidden>
+            <button
+              class="disclose"
+              id="account-toggle"
+              type="button"
+              aria-expanded="false"
+              aria-controls="account-body"
+            >
+              <span data-t="accountTitle"></span
+              ><svg viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M3 4.5 6 7.5l3-3" stroke-width="1.5" />
+              </svg>
+            </button>
+            <div class="acct" id="account-body" hidden>
+              <div class="grp" id="account-fields">
+                <div class="fld">
+                  <span class="lb" data-t="email"></span
+                  ><span class="val email" id="account-email"></span
+                  ><button
+                    class="lnk"
+                    id="account-copy-email"
+                    type="button"
+                    data-t="copy"
+                  ></button>
+                </div>
+                <div class="fld">
+                  <span class="lb" data-t="password"></span
+                  ><span class="val secret" id="account-password"></span
+                  ><button
+                    class="lnk"
+                    id="account-show"
+                    type="button"
+                    data-t="show"
+                  ></button
+                  ><button
+                    class="lnk"
+                    id="account-copy"
+                    type="button"
+                    data-t="copy"
+                  ></button>
+                </div>
+              </div>
+              <form
+                class="account-change"
+                id="account-change"
+                novalidate
+                hidden
+              >
+                <input
+                  id="account-new-password"
+                  type="password"
+                  autocomplete="new-password"
+                  spellcheck="false"
+                  autocapitalize="off"
+                  data-t-placeholder="newPassword"
+                  data-t-aria-label="newPassword"
+                />
+                <button
+                  class="lnk"
+                  id="account-new-show"
+                  type="button"
+                  data-t="show"
+                ></button>
+                <button class="lnk" id="account-new-save" type="submit">
+                  <span id="account-new-save-label" data-t="save"></span>
+                </button>
+                <button
+                  class="lnk"
+                  id="account-new-cancel"
+                  type="button"
+                  data-t="cancel"
+                ></button>
+                <p
+                  class="account-problem"
+                  id="account-new-error"
+                  role="alert"
+                ></p>
+              </form>
+              <div class="acct-foot account-note" id="account-note">
+                <span class="sr-only" data-t="accountNote"></span>
+                <button
+                  class="lnk"
+                  id="account-change-open"
+                  type="button"
+                  data-t="changePassword"
+                ></button>
+                <button
+                  class="lnk"
+                  id="account-reveal"
+                  type="button"
+                  data-t="accountReveal"
+                ></button>
+              </div>
+              <p class="account-error" id="account-error" role="alert"></p>
+            </div>
           </div>
-        </div>
-        <p class="legacy-note" id="legacy-note" hidden></p>
-        <div class="start">
-          <button class="primary large" id="open" type="button">
-            <span data-t="openLinger"></span
-            ><svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" /></svg>
-          </button>
+          <p class="legacy-note" id="legacy-note" hidden></p>
         </div>
       </section>
 
@@ -2988,6 +3932,180 @@
       // The steps of connecting to a team server.
       const ORDER = ["server", "signin", "connect", "permissions"];
       const check = '<svg viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg>';
+      // A signed-in tick in a soft green disc.
+      const CHECK =
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="rgba(63,138,76,.11)" stroke="none"/><path d="M7.8 12.3 10.6 15 16.3 9.2" fill="none" stroke="#3f8a4c" stroke-width="1.7"/></svg>';
+      const RADIO =
+        '<svg viewBox="0 0 12 12"><path d="M2.5 6.2 5 8.6 9.6 3.6" fill="none" stroke="#fff" stroke-width="1.8"/></svg>';
+      const ORB_LAYERS =
+        '<i class="o-base"></i><i class="o-fill"></i><i class="o-solid"></i><i class="o-shade"></i><i class="o-ring"></i><i class="o-arc"></i>';
+      for (const orb of document.querySelectorAll(".orb"))
+        orb.insertAdjacentHTML("afterbegin", ORB_LAYERS);
+      for (const radio of document.querySelectorAll(".radio"))
+        radio.innerHTML = RADIO;
+
+      // Motion moves only transform and opacity. With reduced motion it
+      // fades briefly instead: nothing flies, bounces, breathes or drifts.
+      const REDUCE = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+      const EASE_IO = "cubic-bezier(0.65, 0.05, 0.25, 1)";
+      // A soft spring: a few percent past the end, then settled.
+      const SPRING =
+        "linear(0, 0.06 3%, 0.24 7%, 0.52 13%, 0.78 20%, 0.93 27%, 1.01 34%, 1.035 41%, 1.03 48%, 1.012 58%, 1 70%, 0.998 82%, 1)";
+      // A Web Animation where the page has them (jsdom has none).
+      const anim = (el, frames, options) =>
+        el && typeof el.animate === "function"
+          ? el.animate(frames, { fill: "backwards", ...options })
+          : null;
+      const fadeIn = (el, delay = 0) =>
+        anim(el, [{ opacity: 0 }, { opacity: 1 }], {
+          duration: 150,
+          delay,
+          easing: "linear",
+        });
+      // Arriving elements rise in, from the side they come from, one after
+      // another.
+      const enter = (els, base = 0, gap = 75, dx = 0) =>
+        els.forEach((el, i) =>
+          REDUCE
+            ? fadeIn(el)
+            : anim(
+                el,
+                [
+                  { opacity: 0, transform: `translate(${dx}px, 10px)` },
+                  { opacity: 1, transform: "none" },
+                ],
+                { duration: 520, delay: base + i * gap, easing: EASE },
+              ),
+        );
+      // The orb's colour for each source.
+      const KIND = { local: "", byok: " k-byok", subscription: " k-sub" };
+      const kindOf = (el) =>
+        [...el.classList]
+          .filter((name) => name.startsWith("k-"))
+          .map((name) => " " + name)
+          .join("");
+      // Flies a copy of an orb from one place to another along a gentle
+      // arc, scaling as it goes; the destination shows once it lands. The
+      // copy is drawn at the larger size, so it never scales up blurred.
+      const flyOrb = (from, kind, toEl, duration, big = false) => {
+        if (REDUCE || !from?.width || typeof toEl?.animate !== "function")
+          return;
+        const to = toEl.getBoundingClientRect();
+        if (!to.width) return;
+        const base = Math.max(from.width, to.width);
+        const orb = document.createElement("span");
+        orb.className = "orb" + kind + (big ? " big" : "");
+        orb.style.setProperty("--s", base + "px");
+        orb.innerHTML = ORB_LAYERS;
+        $("flyer").append(orb);
+        toEl.style.opacity = "0";
+        const k0 = from.width / base;
+        const k1 = to.width / base;
+        const dx = to.left - from.left;
+        const dy = to.top - from.top;
+        // The control point lifts the path into a soft curve.
+        const cx = dx * 0.2;
+        const cy = dy * 0.9 - 24;
+        const frames = [];
+        for (let i = 0; i <= 12; i++) {
+          const p = i / 12;
+          const x = from.left + 2 * p * (1 - p) * cx + p * p * dx;
+          const y = from.top + 2 * p * (1 - p) * cy + p * p * dy;
+          const s = k0 + (k1 - k0) * p;
+          frames.push({ transform: `translate(${x}px, ${y}px) scale(${s})` });
+        }
+        const flight = orb.animate(frames, {
+          duration,
+          easing: SPRING,
+          fill: "forwards",
+        });
+        const land = () => {
+          toEl.style.opacity = "";
+          orb.remove();
+          anim(toEl, [{ transform: "scale(1.08)" }, { transform: "none" }], {
+            duration: 420,
+            easing: EASE,
+          });
+        };
+        flight.finished.then(land, land);
+      };
+      // What moves in on the welcome's current stage.
+      const stageParts = () =>
+        [...document.querySelectorAll("#wz-stage [data-in]")].filter(
+          (el) => !el.closest("[hidden]"),
+        );
+      const selectedOrb = () =>
+        document.querySelector('.source-card[aria-checked="true"] .orb');
+
+      // The local models the picker offers, in the page's words. The
+      // quality peers are the ones docs/local-inference.md names.
+      const GB = 1024 ** 3;
+      const MAC_SIZES = [16, 24, 32, 36, 48, 64, 96, 128, 192, 256, 512];
+      const QUALITY_PEERS = [
+        [/^inkling-2-mini/, "≈ Sonnet 4.6"],
+        [/^spark-x2\.6-4b-q4km/, "≈ Gemini 2.5 Pro"],
+        [/^qwen3\.8-flash-next-iq2xs/, "≈ Opus 4.6"],
+      ];
+      const onMac = () => state.platform === "darwin";
+      const qualityText = (option) => {
+        const peer = QUALITY_PEERS.find(([pattern]) =>
+          pattern.test(option.library ?? ""),
+        );
+        if (peer) return peer[1];
+        const score = option.quality;
+        if (score == null) return "–";
+        return t(
+          score >= 60
+            ? "qualityCutting"
+            : score >= 50
+              ? "qualityFrontier"
+              : score >= 35
+                ? "qualityCapable"
+                : "qualityEveryday",
+        );
+      };
+      const speedText = (option) =>
+        option.decodeTokS != null
+          ? "~" + Math.round(option.decodeTokS) + " tok/s"
+          : "–";
+      const paramsText = (option) =>
+        option.parameters
+          ? option.activeParameters
+            ? t("moeParams", {
+                total: option.parameters,
+                active: option.activeParameters,
+              })
+            : option.parameters
+          : "";
+      // Two builds of one model: the larger download is the standard one.
+      const buildText = (option, options) => {
+        const same = options.filter((other) => other.name === option.name);
+        if (same.length < 2) return "";
+        const largest = Math.max(...same.map((other) => other.downloadBytes));
+        return t(option.downloadBytes === largest ? "standard" : "compact");
+      };
+      const whyText = (option) =>
+        t(
+          (option.role === "smartest"
+            ? "whySmartest"
+            : option.role === "fastest"
+              ? "whyFastest"
+              : "whyFits") + (onMac() ? "Mac" : "Computer"),
+        );
+      // What a model too large for this computer needs: memory as a
+      // computer is sold with it, of which a model may use three quarters.
+      const needsText = (option, total) => {
+        if (!option.tooLarge) return t("needsFreeMemory");
+        const wanted = (option.needsMemoryBytes ?? option.memoryBytes) / 0.75;
+        const size =
+          MAC_SIZES.find(
+            (gb) => gb * GB >= wanted && (!total || gb * GB > total),
+          ) ?? Math.ceil(wanted / GB);
+        return t(onMac() ? "needsMac" : "needsComputer", {
+          size: String(size),
+        });
+      };
       let state;
       let step;
       // The one action in flight; every control waits for it.
@@ -3078,7 +4196,6 @@
       const SLOW_CHECK_MS = 20_000;
       let slowCheck = false;
       let slowTimer = 0;
-      let motionTimer = 0;
       let runtimesAsked = false;
       // Also download the local model in the background.
       let background = false;
@@ -3087,17 +4204,25 @@
       let passwordEdit = null;
       // The ready screen's sign-in details, folded until asked for.
       let accountOpen = false;
-      // What a runtime row just copied: { runtime, what }.
+      // What a row just copied: { runtime, what }.
       let runtimeCopied;
-      const enterStage = (next, motion) => {
+      // The local model picked in the picker, by its library name; until
+      // then the kit's recommendation.
+      let pickedModel;
+      let sheetOpen = false;
+      // The welcome: the orb forms and the title rises for this long, and
+      // at least as long as the check runs, then it hands off to step 1.
+      const INTRO_MS = setup.introMs ?? (REDUCE ? 1200 : 2600);
+      let introDone = INTRO_MS <= 0;
+      let introStarted = false;
+      // The welcome's orb is flying into step 1.
+      let handing = false;
+      // The install has finished and the bar is folding into the orb.
+      let finishing = false;
+      const enterStage = (next) => {
         const section = document.querySelector('[data-step="welcome"]');
         stage = next;
         section.dataset.stage = next;
-        clearTimeout(motionTimer);
-        if (motion) {
-          section.dataset.motion = motion;
-          motionTimer = setTimeout(() => delete section.dataset.motion, 320);
-        } else delete section.dataset.motion;
         clearTimeout(slowTimer);
         slowCheck = false;
         // Only a check that runs very long offers a way on without it.
@@ -3107,12 +4232,180 @@
             render();
           }, SLOW_CHECK_MS);
       };
-      // Moves between the welcome's stages and says where it went.
+      // The orb where the welcome is now: the picked card's on step 1, the
+      // title's on step 2.
+      const stageOrb = () => (stage === "choose" ? selectedOrb() : $("hd-orb"));
+      // Moves between the welcome's stages and says where it went: the orb
+      // flies from the card to the title or back, and the new stage's parts
+      // rise in from the side they come from.
       const setStage = (next, motion) => {
-        enterStage(next, motion);
+        const fromOrb = stageOrb();
+        const from = fromOrb?.getBoundingClientRect();
+        const kind = fromOrb ? kindOf(fromOrb) : "";
+        enterStage(next);
         render();
         $("welcome-title").focus({ preventScroll: true });
         $("welcome-live").textContent = $("welcome-title").textContent;
+        flyOrb(from, kind, stageOrb(), 640);
+        enter(stageParts(), 40, 75, motion === "back" ? -14 : 14);
+      };
+
+      // The welcome's title, word by word.
+      const introWords = () => {
+        const title = $("intro-title");
+        title.replaceChildren(
+          ...t("welcomeTitle")
+            .split(/(?<=\s)/)
+            .map((word) => {
+              const span = document.createElement("span");
+              span.textContent = word;
+              return span;
+            }),
+        );
+        return [...title.children];
+      };
+      // The orb forms, the words rise one after another, then the orb gives
+      // one soft bounce while the check finishes.
+      const startIntro = () => {
+        if (introStarted) return;
+        introStarted = true;
+        const words = introWords();
+        const ball = $("intro-ball");
+        if (!REDUCE) ball.classList.add("breathe", "turn");
+        if (REDUCE) {
+          fadeIn(ball);
+          words.forEach((word) => fadeIn(word, 200));
+        } else {
+          anim(
+            ball,
+            [
+              { opacity: 0, transform: "scale(0.55)" },
+              { opacity: 1, transform: "none" },
+            ],
+            { duration: 1100, easing: EASE },
+          );
+          words.forEach((word, i) =>
+            anim(
+              word,
+              [
+                { opacity: 0, transform: "translateY(14px)" },
+                { opacity: 1, transform: "none" },
+              ],
+              { duration: 800, delay: 520 + i * 110, easing: EASE },
+            ),
+          );
+          // One bounce, once the words are up: a squash, a soft hop that
+          // overshoots a little, then settled.
+          const bounceAt = Math.max(1100, Math.min(1700, INTRO_MS - 900));
+          anim(
+            ball,
+            [
+              { transform: "none" },
+              { transform: "scale(1.04, 0.95)", offset: 0.14 },
+              { transform: "translateY(-12px) scale(1.08)", offset: 0.42 },
+              { transform: "scale(1.05, 0.93)", offset: 0.68 },
+              { transform: "scale(0.97)", offset: 0.84 },
+              { transform: "none" },
+            ],
+            {
+              duration: 720,
+              delay: bounceAt,
+              easing: "ease-in-out",
+              fill: "none",
+              composite: "add",
+            },
+          );
+        }
+        if (!introDone)
+          setTimeout(() => {
+            introDone = true;
+            render();
+          }, INTRO_MS);
+      };
+      // The hand-off to step 1: the welcome's orb flies along a gentle curve
+      // into the picked card's orb, the title fades, and the cards rise in.
+      const handOff = () => {
+        const from = $("intro-orb").getBoundingClientRect();
+        introDone = true;
+        handing = !REDUCE && typeof $("intro-orb").animate === "function";
+        enterStage("choose");
+        if (!handing) {
+          setTimeout(() => enter(stageParts(), 0, 60));
+          return;
+        }
+        requestAnimationFrame(() => flyIntro(from));
+      };
+      const flyIntro = (from) => {
+        const orb = $("intro-orb");
+        const target = selectedOrb();
+        const glider = $("glider");
+        const to = target?.getBoundingClientRect();
+        if (!to?.width || !from.width) {
+          handing = false;
+          render();
+          enter(stageParts(), 0, 60);
+          return;
+        }
+        target.style.opacity = "0";
+        glider.style.opacity = "0";
+        const k = to.width / from.width;
+        const dx = to.left - from.left;
+        const dy = to.top - from.top;
+        const cx = dx * 0.2;
+        const cy = dy * 0.9;
+        const frames = [];
+        for (let i = 0; i <= 12; i++) {
+          const p = i / 12;
+          const x = 2 * p * (1 - p) * cx + p * p * dx;
+          const y = 2 * p * (1 - p) * cy + p * p * dy;
+          frames.push({
+            transform: `translate(${x}px, ${y}px) scale(${1 + (k - 1) * p})`,
+          });
+        }
+        const flight = orb.animate(frames, {
+          duration: 780,
+          easing: SPRING,
+          fill: "forwards",
+        });
+        for (const word of $("intro-title").children)
+          anim(
+            word,
+            [
+              { opacity: 1, transform: "none" },
+              { opacity: 0, transform: "translateY(-8px)" },
+            ],
+            { duration: 320, easing: "ease-in", fill: "forwards" },
+          );
+        enter(stageParts(), 260, 85);
+        const land = () => {
+          target.style.opacity = "";
+          glider.style.opacity = "";
+          handing = false;
+          render();
+          flight.cancel();
+          for (const word of $("intro-title").children)
+            word.getAnimations?.().forEach((a) => a.cancel());
+          anim(target, [{ transform: "scale(1.1)" }, { transform: "none" }], {
+            duration: 420,
+            easing: EASE,
+          });
+          fadeIn(glider);
+          anim(
+            target.closest(".source-card")?.querySelector(".radio"),
+            [{ transform: "scale(0.6)" }, { transform: "none" }],
+            { duration: 360, easing: SPRING },
+          );
+          anim(
+            $("source-continue"),
+            [
+              { transform: "none" },
+              { transform: "scale(1.035)" },
+              { transform: "none" },
+            ],
+            { duration: 520, delay: 900, easing: "ease-in-out", fill: "none" },
+          );
+        };
+        flight.finished.then(land, land);
       };
       // The local model still downloading after the person left its wait.
       const modelBehind = (local) =>
@@ -3726,29 +5019,54 @@
       // endpoint serves the runtime signing in.
       const byokRuntime = "pi";
       let signInByokOpen = false;
-      // The setup form's BYOK: an address, a key and a model, nothing else.
-      // The address may be a base URL or a whole request URL; a bare host
-      // gets the usual /v1, and an ending that names a format picks it, as
-      // the full form's defaults do. Install tests it once, quietly.
+      const EYE =
+        '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 8s2.4-4.6 6.4-4.6S14.4 8 14.4 8s-2.4 4.6-6.4 4.6S1.6 8 1.6 8Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>';
+      // The setup form's BYOK: an address, a key and a model, one labelled
+      // row each. The address may be a base URL or a whole request URL; a
+      // bare host gets the usual /v1, and an ending that names a format
+      // picks it, as the full form's defaults do. Install tests it once,
+      // quietly, and a failure shows under the row it is about.
       const simpleByok = (root, prefix, runtime) => {
-        root.innerHTML = `
-          <input class="byok-key" id="${prefix}-url" type="url"
-            autocomplete="off" spellcheck="false"
-            aria-label="${esc(t("baseUrl"))}"
-            placeholder="${esc(t("baseUrlPlaceholder"))}" />
-          <input class="byok-key" id="${prefix}-key" type="password"
-            autocomplete="off" spellcheck="false" aria-label="${esc(t("apiKey"))}"
-            placeholder="${esc(t("apiKeyPlaceholder"))}" />
-          <input class="byok-key" id="${prefix}-model" type="text"
-            autocomplete="off" spellcheck="false" aria-label="${esc(t("model"))}"
-            placeholder="${esc(t("modelPlaceholder"))}" />
-          <p class="byok-status" id="${prefix}-status" data-tone="err"
+        const row = (field, label, input, extra = "") => `
+          <div class="fld" data-field="${field}">
+            <label class="lb" for="${prefix}-${field}">${esc(label)}</label>
+            <div class="vw">${input}</div>${extra}
+          </div>`;
+        root.innerHTML =
+          row(
+            "url",
+            t("baseUrl"),
+            `<input id="${prefix}-url" type="url" autocomplete="off"
+              spellcheck="false"
+              placeholder="${esc(t("baseUrlPlaceholder"))}" />`,
+          ) +
+          row(
+            "key",
+            t("apiKey"),
+            `<input id="${prefix}-key" type="password" autocomplete="off"
+              spellcheck="false"
+              placeholder="${esc(t("apiKeyPlaceholder"))}" />`,
+            `<button type="button" class="eye" aria-pressed="false"
+              aria-label="${esc(t("showKey"))}">${EYE}</button>`,
+          ) +
+          row(
+            "model",
+            t("byokModelId"),
+            `<input id="${prefix}-model" type="text" autocomplete="off"
+              spellcheck="false"
+              placeholder="${esc(t("byokModelPlaceholder"))}" />`,
+          ) +
+          `<p class="byok-status" id="${prefix}-status" data-tone="err"
             role="alert" hidden></p>`;
         const [url, key, model] = root.querySelectorAll("input");
         const status = root.querySelector(".byok-status");
+        const eye = root.querySelector(".eye");
         let f = { url: "", apiKey: "", modelId: "" };
-        // Why the last Install's test failed, until the fields change.
+        // Why the last Install's test failed, and which row it is about,
+        // until the fields change.
         let failure = "";
+        let failed = "url";
+        let keyVisible = false;
         const edit = (next) => {
           f = { ...f, ...next };
           failure = "";
@@ -3757,6 +5075,10 @@
         url.addEventListener("input", () => edit({ url: url.value }));
         key.addEventListener("input", () => edit({ apiKey: key.value }));
         model.addEventListener("input", () => edit({ modelId: model.value }));
+        eye.addEventListener("click", () => {
+          keyVisible = !keyVisible;
+          render();
+        });
         const address = () => {
           const typed = f.url.trim().replace(/\/+$/, "");
           for (const [protocol, { suffix }] of Object.entries(BYOK_FORMATS))
@@ -3792,8 +5114,22 @@
               runtime,
             };
           },
-          fail: (message) => {
+          fail: (message, field = "url") => {
             failure = message;
+            failed = field;
+            const bad = root.querySelector(`[data-field="${field}"]`);
+            if (!REDUCE)
+              anim(
+                bad,
+                [
+                  { transform: "none" },
+                  { transform: "translateX(-3px)" },
+                  { transform: "translateX(3px)" },
+                  { transform: "translateX(-2px)" },
+                  { transform: "none" },
+                ],
+                { duration: 260, easing: "ease-out" },
+              );
           },
           clearKey: () => {
             f = { ...f, apiKey: "" };
@@ -3808,8 +5144,38 @@
             if (key.value !== f.apiKey) key.value = f.apiKey;
             if (model.value !== f.modelId) model.value = f.modelId;
             for (const input of [url, key, model]) input.disabled = busy;
+            key.type = keyVisible ? "text" : "password";
+            eye.setAttribute("aria-pressed", String(keyVisible));
+            eye.setAttribute(
+              "aria-label",
+              t(keyVisible ? "hideKey" : "showKey"),
+            );
+            eye.disabled = busy;
+            for (const [field, input] of [
+              ["url", url],
+              ["key", key],
+              ["model", model],
+            ]) {
+              const bad = !!failure && field === failed;
+              const fld = input.closest(".fld");
+              fld.dataset.bad = String(bad);
+              if (bad) {
+                input.setAttribute("aria-invalid", "true");
+                input.setAttribute("aria-describedby", status.id);
+                if (status.parentElement !== fld.querySelector(".vw"))
+                  fld.querySelector(".vw").append(status);
+              } else {
+                input.removeAttribute("aria-invalid");
+                input.removeAttribute("aria-describedby");
+              }
+            }
             status.hidden = !failure;
-            status.textContent = failure;
+            if (status.dataset.text !== failure) {
+              status.dataset.text = failure;
+              status.innerHTML = failure
+                ? ICONS.err + `<span>${esc(failure)}</span>`
+                : "";
+            }
           },
         };
       };
@@ -3831,83 +5197,138 @@
         }
       };
 
-      // Two bursts of confetti from the lower corners, then gone.
-      const celebrate = () => {
-        if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-        const canvas = document.createElement("canvas");
-        canvas.id = "confetti";
-        document.body.append(canvas);
-        const ratio = devicePixelRatio || 1;
-        const width = innerWidth;
-        const height = innerHeight;
-        canvas.width = width * ratio;
-        canvas.height = height * ratio;
-        const ctx = canvas.getContext("2d");
-        ctx.scale(ratio, ratio);
-        const colors = [
-          "#1b1b19",
-          "#f2c94c",
-          "#eb5757",
-          "#2f9e44",
-          "#2d9cdb",
-          "#bb6bd9",
-          "#f2994a",
-        ];
-        const pieces = [];
-        for (const side of [-1, 1])
-          for (let i = 0; i < 90; i++) {
-            const angle =
-              ((side < 0 ? 60 : 120) + (Math.random() - 0.5) * 40) *
-              (Math.PI / 180);
-            const speed = 9 + Math.random() * 9;
-            pieces.push({
-              x: side < 0 ? -10 : width + 10,
-              y: height * 0.75,
-              vx: Math.cos(angle) * speed,
-              vy: -Math.sin(angle) * speed,
-              size: 5 + Math.random() * 5,
-              spin: Math.random() * Math.PI,
-              turn: (Math.random() - 0.5) * 0.3,
-              wobble: Math.random() * 10,
-              color: colors[i % colors.length],
-              round: Math.random() < 0.3,
-            });
-          }
-        const begun = performance.now();
-        const frame = (now) => {
-          const age = (now - begun) / 1000;
-          ctx.clearRect(0, 0, width, height);
-          ctx.globalAlpha = Math.min(1, Math.max(0, 3.2 - age));
-          for (const p of pieces) {
-            p.vx *= 0.985;
-            p.vy = p.vy * 0.985 + 0.32;
-            p.x += p.vx + Math.sin(age * 4 + p.wobble) * 0.6;
-            p.y += p.vy;
-            p.spin += p.turn;
-            ctx.save();
-            ctx.translate(p.x, p.y);
-            ctx.rotate(p.spin);
-            ctx.fillStyle = p.color;
-            if (p.round) {
-              ctx.beginPath();
-              ctx.arc(0, 0, p.size / 2.4, 0, Math.PI * 2);
-              ctx.fill();
-            } else {
-              ctx.scale(1, Math.cos(age * 6 + p.wobble));
-              ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
-            }
-            ctx.restore();
-          }
-          if (age < 3.2) requestAnimationFrame(frame);
-          else canvas.remove();
-        };
-        requestAnimationFrame(frame);
+      // The install line: when what is happening changes, the old words
+      // drift up and out as the new ones rise in; a download's count
+      // changes in place.
+      let lineHead = "";
+      const setLine = (text) => {
+        const el = $("installing-step");
+        if (el.textContent === text) return;
+        const head = text.split(" · ")[0];
+        const old = el.textContent;
+        const moving =
+          !REDUCE && old && head !== lineHead && step === "installing";
+        lineHead = head;
+        el.textContent = text;
+        if (!moving) return;
+        const ghost = document.createElement("span");
+        ghost.className = "line-out";
+        ghost.setAttribute("aria-hidden", "true");
+        ghost.textContent = old;
+        el.after(ghost);
+        const out = anim(
+          ghost,
+          [
+            { opacity: 1, transform: "none" },
+            { opacity: 0, transform: "translateY(-8px)" },
+          ],
+          { duration: 420, easing: EASE, fill: "forwards" },
+        );
+        const drop = () => ghost.remove();
+        if (out) out.finished.then(drop, drop);
+        else drop();
+        anim(
+          el,
+          [
+            { opacity: 0, transform: "translateY(8px)" },
+            { opacity: 1, transform: "none" },
+          ],
+          { duration: 420, delay: 300, easing: EASE },
+        );
+      };
+
+      // The install's end: the bar fills, folds into the orb, the orb
+      // blooms with a ripple, the check draws, and the ready words rise.
+      const completeInstall = () => {
+        if (REDUCE || finishing || typeof $("sc-ball").animate !== "function")
+          return show("ready");
+        finishing = true;
+        $("installing-fill").style.transform = "scaleX(1)";
+        $("installing-bar").setAttribute("aria-valuenow", "100");
+        setLine(t("lineAlmost"));
+        setTimeout(() => {
+          const parts = [
+            $("installing-bar"),
+            $("installing-line"),
+            $("local-model-leave"),
+          ];
+          const out = parts.map((el) =>
+            anim(
+              el,
+              [
+                { opacity: 1, transform: "none" },
+                { opacity: 0, transform: "translateY(-40px) scale(0.6)" },
+              ],
+              { duration: 420, easing: EASE_IO, fill: "forwards" },
+            ),
+          );
+          setTimeout(() => {
+            finishing = false;
+            show("ready");
+            out.forEach((a) => a?.cancel());
+            readyMoment();
+          }, 360);
+        }, 520);
+      };
+      const readyMoment = () => {
+        const ball = $("sc-ball");
+        anim(
+          ball.querySelector(".o-solid"),
+          [{ opacity: 0 }, { opacity: 0.92 }],
+          {
+            duration: 700,
+            easing: EASE,
+          },
+        );
+        anim(
+          ball,
+          [
+            { transform: "none" },
+            { transform: "scale(1.1)", offset: 0.4 },
+            { transform: "scale(0.98)", offset: 0.75 },
+            { transform: "none" },
+          ],
+          { duration: 900, easing: "ease-in-out", composite: "add" },
+        );
+        anim(
+          $("sc-ripple"),
+          [
+            { opacity: 0.7, transform: "scale(1)" },
+            { opacity: 0, transform: "scale(1.7)" },
+          ],
+          { duration: 1100, delay: 140, easing: EASE, fill: "none" },
+        );
+        anim(ball.querySelector(".o-check"), [{ opacity: 0 }, { opacity: 1 }], {
+          duration: 300,
+          delay: 340,
+          easing: "linear",
+        });
+        anim(
+          $("sc-check"),
+          [{ strokeDashoffset: 24 }, { strokeDashoffset: 0 }],
+          { duration: 520, delay: 380, easing: EASE },
+        );
+        enter(
+          [...document.querySelectorAll("#sc-ready [data-r]")].filter(
+            (el) => !el.hidden,
+          ),
+          620,
+          140,
+        );
+        anim(
+          $("floaters"),
+          [
+            { transform: "translateY(6px) scale(0.985)" },
+            { transform: "none" },
+          ],
+          { duration: 1400, easing: EASE },
+        );
       };
 
       const show = (next) => {
         // Leaving the sign-in step stops waiting for it.
         if (pending === "signin.open") pending = null;
-        if (next === "ready" && step !== "ready") setTimeout(celebrate, 320);
+        if (next !== "welcome") closeSheet(false);
         step = next;
         for (const el of document.querySelectorAll("section"))
           el.classList.toggle("active", el.dataset.step === step);
@@ -4161,8 +5582,272 @@
           models.reasons?.some((reason) => CUDA_DRIVER_CODES.has(reason.code)),
         );
 
-      // The welcome view: a short check of this computer, the three
-      // sources, then the chosen source's settings with Install.
+      // The model step 2 shows: the one picked, else the kit's pick, from
+      // the list the picker offers when the kit could list them.
+      const chosenModel = (models) => {
+        if (models.state !== "checked") return undefined;
+        const list = models.models ?? [];
+        const fallback = models.model && {
+          library: models.model.library,
+          name: models.model.name,
+          downloadBytes: models.model.downloadBytes,
+          memoryBytes: models.model.memoryBytes,
+          fits: true,
+        };
+        return (
+          list.find((option) => option.library === pickedModel) ??
+          list.find((option) => option.recommended) ??
+          list.find((option) => option.library === models.model?.library) ??
+          fallback ??
+          undefined
+        );
+      };
+      // Why the picked model cannot be installed, in the page's words.
+      const modelCheckText = (priced) =>
+        priced.code === "MEMORY_INSUFFICIENT"
+          ? t("modelNoMemory", { needed: size(priced.memoryBytes ?? 0) })
+          : priced.code === "DISK_INSUFFICIENT"
+            ? t("modelNoDisk", {
+                needed: size(priced.diskBytes ?? 0),
+                free: size(priced.diskFreeBytes ?? 0),
+              })
+            : t("modelCantPlan");
+      const cardSub = (option, options) =>
+        [option.publisher, paramsText(option), buildText(option, options)]
+          .filter(Boolean)
+          .join(" · ");
+      // Sets a text only when it changed, so a cross-fade is not restarted.
+      const setText = (el, text) => {
+        if (el.textContent !== text) el.textContent = text;
+      };
+
+      // The model card on step 2: what the model is, how good and fast it
+      // is here, the download and the memory it takes on this computer.
+      const renderModelCard = (local, models, option, busy) => {
+        const options = models.models ?? [];
+        const total = models.totalMemoryBytes ?? models.memoryBytes;
+        const priced =
+          pickedModel && local.modelCheck?.library === pickedModel
+            ? local.modelCheck
+            : undefined;
+        const held = models.state === "checked" && !!models.blockedNow;
+        setText(
+          $("local-model-name"),
+          option ? option.name : t("localNotAvailable"),
+        );
+        setText($("local-model-sub"), option ? cardSub(option, options) : "");
+        $("local-model-sub").hidden = !$("local-model-sub").textContent;
+        $("model-change").hidden = options.length < 2;
+        $("model-change").disabled = busy;
+        const why = $("local-model-why-row");
+        const whyLine = held
+          ? ["err", reasonsText(models, true)]
+          : priced?.state === "checking"
+            ? ["busy", t("checkingModel")]
+            : priced?.state === "checked" && !priced.fits
+              ? ["err", modelCheckText(priced)]
+              : option
+                ? ["", whyText(option)]
+                : ["err", ""];
+        why.dataset.tone = whyLine[0];
+        setText($("local-model-why"), whyLine[1]);
+        why.hidden = !whyLine[1];
+        const quality = option ? qualityText(option) : "–";
+        const speed = option ? speedText(option) : "–";
+        setText($("local-model-quality"), quality);
+        setText($("local-model-speed"), speed);
+        $("local-model-quality").parentElement.hidden = quality === "–";
+        $("local-model-speed").parentElement.hidden = speed === "–";
+        setText(
+          $("local-model-needs"),
+          option?.downloadBytes != null ? size(option.downloadBytes) : "",
+        );
+        $("local-model-needs").parentElement.hidden =
+          option?.downloadBytes == null;
+        const memory = option?.memoryBytes;
+        $("local-model-memory").hidden = !memory || !total;
+        if (memory && total) {
+          setText(
+            $("local-model-mem"),
+            t("memOf", { used: gigabytes(memory), total: gigabytes(total) }),
+          );
+          $("local-model-bar").style.transform =
+            `scaleX(${Math.min(1, Math.max(0.02, memory / total))})`;
+          setText($("local-model-key"), option.name);
+        }
+        return {
+          checking: priced?.state === "checking",
+          refused: priced?.state === "checked" && !priced.fits,
+        };
+      };
+
+      // The model picker: every model the kit lists here, best first, with
+      // how good and fast each is; one that cannot run here is dimmed and
+      // says what it needs.
+      let pickerKey = "";
+      const renderPicker = (models, chosen, busy) => {
+        const options = models.state === "checked" ? (models.models ?? []) : [];
+        const total = models.totalMemoryBytes ?? models.memoryBytes;
+        $("model-sheet-title").textContent = t(
+          onMac() ? "pickerTitleMac" : "pickerTitleComputer",
+        );
+        $("model-sheet-lead").textContent = t("pickerLead");
+        const key = JSON.stringify([
+          options,
+          total,
+          document.documentElement.lang,
+        ]);
+        const list = $("model-list");
+        if (key !== pickerKey) {
+          pickerKey = key;
+          const fastest = Math.max(
+            1,
+            ...options.filter((o) => o.fits).map((o) => o.decodeTokS ?? 0),
+          );
+          list.innerHTML = options
+            .map((option) => {
+              const chips = [
+                `<span class="mc">${esc(size(option.downloadBytes))}</span>`,
+                option.recommended
+                  ? `<span class="mc" data-kind="best">${esc(t("bestFit"))}</span>`
+                  : "",
+                option.role === "fastest" && !option.recommended
+                  ? `<span class="mc">${esc(t("fastest"))}</span>`
+                  : "",
+              ].join("");
+              const meter = (label, value, text = "") =>
+                `<span class="meter">${esc(label)}<s><i style="transform: scaleX(${Math.min(1, Math.max(0.04, value)).toFixed(3)})"></i></s>${text ? `<em>${esc(text)}</em>` : ""}</span>`;
+              const lower = option.fits
+                ? `<span class="meters">${
+                    option.quality != null
+                      ? meter(t("quality"), option.quality / 80)
+                      : ""
+                  }${
+                    option.decodeTokS != null
+                      ? meter(
+                          t("speed"),
+                          option.decodeTokS / fastest,
+                          speedText(option),
+                        )
+                      : ""
+                  }</span>`
+                : `<span class="needs">${esc(needsText(option, total))}</span>`;
+              return `<button type="button" class="mrow" role="radio"
+                data-library="${esc(option.library)}"
+                data-rec="${option.recommended ? "true" : "false"}"
+                aria-checked="false"><span class="radio" aria-hidden="true">${RADIO}</span><span><span class="nm">${esc(option.name)}</span><span class="tg">${esc(cardSub(option, options))}</span></span><span class="chips">${chips}</span>${lower}</button>`;
+            })
+            .join("");
+        }
+        for (const row of list.querySelectorAll(".mrow")) {
+          const option = options.find((o) => o.library === row.dataset.library);
+          const on = option?.library === chosen?.library;
+          row.setAttribute("aria-checked", String(on));
+          row.disabled = busy || !option?.fits;
+          row.tabIndex = on ? 0 : -1;
+        }
+      };
+      const sheetRows = () =>
+        [...$("model-list").querySelectorAll(".mrow")].filter(
+          (row) => !row.disabled,
+        );
+      const openSheet = () => {
+        if (sheetOpen) return;
+        sheetOpen = true;
+        $("model-sheet").hidden = false;
+        $("model-change").setAttribute("aria-expanded", "true");
+        render();
+        const rows = [...$("model-list").querySelectorAll(".mrow")];
+        if (REDUCE) {
+          fadeIn($("model-sheet"));
+        } else {
+          anim($("model-sheet-scrim"), [{ opacity: 0 }, { opacity: 1 }], {
+            duration: 300,
+            easing: "linear",
+          });
+          anim(
+            $("model-sheet-panel"),
+            [{ transform: "translateY(100%)" }, { transform: "none" }],
+            { duration: 420, easing: EASE },
+          );
+          rows.forEach((row, i) =>
+            anim(
+              row,
+              [
+                { opacity: 0, transform: "translateY(12px)" },
+                { opacity: 1, transform: "none" },
+              ],
+              { duration: 420, delay: 140 + i * 45, easing: EASE },
+            ),
+          );
+        }
+        (
+          $("model-list").querySelector('.mrow[aria-checked="true"]') ??
+          sheetRows()[0] ??
+          $("model-sheet-close")
+        ).focus({ preventScroll: true });
+      };
+      const closeSheet = (refocus = true) => {
+        if (!sheetOpen) return;
+        sheetOpen = false;
+        $("model-change").setAttribute("aria-expanded", "false");
+        const done = () => {
+          if (sheetOpen) return;
+          $("model-sheet").hidden = true;
+          for (const el of [$("model-sheet-scrim"), $("model-sheet-panel")])
+            el.getAnimations?.().forEach((a) => a.cancel());
+        };
+        const out = REDUCE
+          ? null
+          : anim(
+              $("model-sheet-panel"),
+              [{ transform: "none" }, { transform: "translateY(100%)" }],
+              { duration: 320, easing: EASE_IO, fill: "forwards" },
+            );
+        anim($("model-sheet-scrim"), [{ opacity: 1 }, { opacity: 0 }], {
+          duration: REDUCE ? 150 : 300,
+          easing: "linear",
+          fill: "forwards",
+        });
+        if (out) out.finished.then(done, done);
+        else done();
+        if (refocus) $("model-change").focus({ preventScroll: true });
+      };
+      // A pick closes the picker, the card changes to it, and the model is
+      // priced again for this computer's memory and disk.
+      const pickModel = (library) => {
+        const models = state.localServer.localModels;
+        const option = (models.models ?? []).find((o) => o.library === library);
+        if (!option?.fits) return;
+        const changed = chosenModel(models)?.library !== library;
+        pickedModel = library;
+        render();
+        setTimeout(() => closeSheet(), REDUCE ? 0 : 160);
+        if (!changed) return;
+        anim(
+          $("local-row"),
+          [
+            { opacity: 0.35, transform: "translateY(4px)" },
+            { opacity: 1, transform: "none" },
+          ],
+          {
+            duration: REDUCE ? 150 : 420,
+            delay: REDUCE ? 0 : 200,
+            easing: EASE,
+          },
+        );
+        if (!option.recommended)
+          setup
+            .run({ op: "local.model.check", model: library })
+            .then((next) => {
+              state = next;
+              render();
+            })
+            .catch(() => {});
+      };
+
+      // The welcome view: the welcome while this computer is checked, the
+      // three sources, then the chosen source's settings with Install.
       const renderWelcome = (local, busy) => {
         const section = document.querySelector('[data-step="welcome"]');
         const available = local.available;
@@ -4170,9 +5855,10 @@
         const models = local.localModels;
         const checking = models.state === "checking";
         if (available && step === "welcome") {
-          if (stage === undefined) enterStage(checking ? "checking" : "choose");
-          else if (stage === "checking" && !checking)
-            enterStage("choose", "reveal");
+          if (stage === undefined)
+            enterStage(checking || !introDone ? "checking" : "choose");
+          if (stage === "checking") startIntro();
+          if (stage === "checking" && !checking && introDone) handOff();
           if (!runtimesAsked) {
             runtimesAsked = true;
             // The rows come through onState; the reply may be older than
@@ -4181,7 +5867,6 @@
           }
         }
         if (!picked) source = defaults();
-        const recommended = defaults();
         const known =
           models.state === "checked" || models.state === "unavailable";
         const model =
@@ -4201,10 +5886,10 @@
         const choosing = available && stage === "choose";
         const checkingStage = available && stage === "checking";
 
-        // The bar above the title: Back on step 2, or the local model's
-        // progress.
-        $("stage-bar").hidden =
-          !available || checkingStage || (!settings && !behind);
+        // The bar under the stage: the local model's progress after the
+        // person left its wait.
+        $("wz-stage").hidden = checkingStage;
+        $("stage-bar").hidden = !available || checkingStage || !behind;
         $("source-back").hidden = !settings;
         $("model-behind").hidden = !behind;
         if (behind) {
@@ -4218,14 +5903,23 @@
           byok: "BYOK",
           subscription: t("subscription"),
         };
-        $("welcome-title").textContent = settings
-          ? NAMES[source]
-          : t("welcomeTitle");
+        setText(
+          $("welcome-title"),
+          settings
+            ? NAMES[source]
+            : available
+              ? t("chooseTitle")
+              : t("welcomeTitle"),
+        );
+        // Step 2's title carries the chosen source's orb.
+        const hdOrb = "orb" + KIND[source];
+        if ($("hd-orb").className !== hdOrb) $("hd-orb").className = hdOrb;
 
-        // Checking: only a quiet spinner under the title, and a way on once
-        // it has run very long.
-        $("welcome-checking").hidden = !checkingStage;
-        $("checking-skip").hidden = !slowCheck;
+        // The welcome: the orb and the title, and a way on once the check
+        // has run very long.
+        $("welcome-checking").hidden = !checkingStage && !handing;
+        $("checking-skip").hidden = !slowCheck || !checkingStage;
+        if (!introStarted) introWords();
 
         $("local-setup").hidden = !choosing && !settings;
         $("source-grid").hidden = !choosing;
@@ -4236,17 +5930,20 @@
         const localCard = document.querySelector(
           '.source-card[data-value="local"]',
         );
-        $("source-local-about").textContent = behind
-          ? t("localMetaBehind", {
-              percent: modelPercent(local.backgroundModel),
-            })
-          : model
-            ? t("sourceLocalAbout")
-            : held
-              ? t("onHold")
-              : known
-                ? t("localNotAvailable")
-                : t("rtChecking");
+        setText(
+          $("source-local-about"),
+          behind
+            ? t("localMetaBehind", {
+                percent: modelPercent(local.backgroundModel),
+              })
+            : model
+              ? t("sourceLocalAbout")
+              : held
+                ? t("onHold")
+                : known
+                  ? t("localNotAvailable")
+                  : t("rtChecking"),
+        );
         for (const card of document.querySelectorAll(".source-card")) {
           const value = card.dataset.value;
           const off = value === "local" && !localUsable;
@@ -4257,6 +5954,16 @@
         }
         if (localCard.disabled && source === "local" && !busy)
           localCard.tabIndex = 0;
+        // The selection glides to the picked card.
+        const selected = document.querySelector(
+          '.source-card[aria-checked="true"]',
+        );
+        $("glider").hidden = !selected;
+        if (selected) {
+          const y = `translateY(${selected.offsetTop}px)`;
+          if ($("glider").style.transform !== y)
+            $("glider").style.transform = y;
+        }
 
         // Why the local model cannot be picked, under the cards.
         const unavailableText = known
@@ -4278,18 +5985,13 @@
         $("local-row").hidden = source !== "local";
         $("subscription-row").hidden = source !== "subscription";
         $("byok-row").hidden = source !== "byok";
-        const shown = model || heldModel;
-        $("local-model-name").textContent = shown
-          ? shown.name
-          : t("localNotAvailable");
-        $("local-model-needs").textContent =
-          shown && !held
-            ? shown.downloadBytes != null
-              ? size(shown.downloadBytes)
-              : ""
-            : held
-              ? reasonsText(models, true)
-              : unavailableText;
+        const option = model || heldModel ? chosenModel(models) : undefined;
+        const card = renderModelCard(local, models, option, busy);
+        if (!option && !held) {
+          setText($("local-model-why"), unavailableText);
+          $("local-model-why-row").hidden = !unavailableText;
+        }
+        renderPicker(models, option, busy);
         renderRuntimes(rows, busy);
         mainByok.sync(busy || byokTesting);
         // The local model can come along in the background, off unless
@@ -4320,7 +6022,7 @@
         $("get-started").hidden = available;
         const ready =
           source === "local"
-            ? localUsable && !held
+            ? localUsable && !held && !card.checking && !card.refused
             : source === "byok"
               ? mainByok.complete()
               : signedIn.length > 0;
@@ -4338,8 +6040,7 @@
         const order = ["codex", "claude"].filter((runtime) =>
           signedIn.includes(runtime),
         );
-        // One short line under the button, on step 2 only; step 1 keeps its
-        // empty room so the button stays where it is on step 2.
+        // One short line under the button, on step 2 only.
         $("plan-line").hidden = !available || checkingStage;
         $("plan-line").textContent =
           !settings || source !== "subscription"
@@ -4471,12 +6172,12 @@
                     ? row.message || t("rtInstallFailed")
                     : row.failed === "signin"
                       ? row.message || t("signInFailed")
-                      : row.installed
-                        ? t("rtInstalledNotSignedIn")
-                        : t("rtNotInstalled");
+                      : done
+                        ? t("signedIn")
+                        : row.installed
+                          ? t("rtInstalledNotSignedIn")
+                          : t("rtNotInstalled");
           sub.title = sub.textContent;
-          // Done says so once, in the badge on the right.
-          sub.hidden = idle && done && !row.failed;
           const install = el.querySelector("[data-runtime-install]");
           install.hidden = !idle || row.installed;
           install.textContent = t(
@@ -4524,8 +6225,8 @@
           cancel.disabled = busy;
           const badge = el.querySelector("[data-runtime-done]");
           badge.hidden = !idle || !done;
-          const badgeHtml = check + esc(t("signedIn"));
-          if (badge.innerHTML !== badgeHtml) badge.innerHTML = badgeHtml;
+          // Signed in says so under the name; the tick only marks it.
+          if (!badge.firstElementChild) badge.innerHTML = CHECK;
           // The link and code for a browser that did not open, and a
           // pasted code for Claude Code's page.
           const extra = el.querySelector("[data-runtime-extra]");
@@ -4555,6 +6256,13 @@
         }
       };
 
+      // What the local model's download says: its name when known.
+      const modelLine = (local) => {
+        const option = chosenModel(local.localModels);
+        return option?.name
+          ? t("stepModelNamed", { model: option.name })
+          : t("stepModel");
+      };
       const renderLocal = (busy) => {
         const local = state.localServer;
         renderWelcome(local, busy);
@@ -4579,42 +6287,54 @@
         const section = document.querySelector('[data-step="installing"]');
         const steps = ALL_STEPS.filter(([id]) => local.steps.includes(id));
         section.dataset.failed = String(failed);
+        // The scene's orb wears the source's colour, grey once it failed,
+        // and breathes while it works.
+        const ball =
+          "orb big" +
+          (failed ? " k-off" : (KIND[local.source ?? source] ?? "")) +
+          (REDUCE || failed ? "" : " breathe turn");
+        if ($("sc-ball").className !== ball) $("sc-ball").className = ball;
+        if (finishing) {
+          renderSignIn(local, busy);
+          return;
+        }
         const at = Math.max(
           0,
           steps.findIndex(([id]) => id === local.step),
         );
         startAttempt(local);
         const percent = Math.round(shownProgress(local, at) * 100);
-        $("installing-fill").style.width = Math.max(2, percent) + "%";
+        $("installing-fill").style.transform =
+          `scaleX(${Math.max(2, percent) / 100})`;
         $("installing-bar").setAttribute("aria-valuenow", String(percent));
         // One bar and one line under it: what is happening now, a download
         // folded in with how far it is.
         const transfer = !failed && !starting ? local.transfer : undefined;
         const waiting =
           !failed && !starting && !transfer && local.waiting === "runtime";
-        $("installing-step").textContent = failed
-          ? ""
-          : starting
-            ? t(
-                local.preparing === "updating"
-                  ? "preparingUpdate"
-                  : "preparingStart",
-              )
-            : transfer
-              ? [
-                  // The installer's own words name tools and timings; the
-                  // line says only what downloads: the local model, which
-                  // the runtime stage fetches, or Linger.
-                  t(
+        setLine(
+          failed
+            ? ""
+            : starting
+              ? t(
+                  local.preparing === "updating"
+                    ? "preparingUpdate"
+                    : "preparingStart",
+                )
+              : transfer
+                ? [
+                    // The installer's own words name tools and timings; the
+                    // line says only what downloads: the local model, which
+                    // the runtime stage fetches, or Linger.
                     local.source === "local" && steps[at][0] === "services"
-                      ? "stepModel"
-                      : "stepDownload",
-                  ),
-                  transferAmount(transfer),
-                ].join(" · ")
-              : waiting
-                ? t("waitingRuntime")
-                : steps[at][1]();
+                      ? modelLine(local)
+                      : t("stepDownload"),
+                    transferAmount(transfer),
+                  ].join(" · ")
+                : waiting
+                  ? t("waitingRuntime")
+                  : steps[at][1](),
+        );
         $("installing-count").textContent =
           starting || failed ? "" : percent + "%";
         // A failure says why in a line or two, with one way on: report it.
@@ -4722,6 +6442,35 @@
         if (pending === "signin.open") $("signin").disabled = false;
 
         renderLocal(busy);
+        // The wizard's look, and the install scene behind installing and
+        // ready.
+        const local = state.localServer;
+        const body = document.body.dataset;
+        const wizard = ["welcome", "installing", "ready"].includes(step);
+        if (wizard) body.look = "wizard";
+        else delete body.look;
+        if (step === "installing" || step === "ready") body.scene = step;
+        else delete body.scene;
+        if (step === "installing" && local.phase === "failed")
+          body.failed = "true";
+        else delete body.failed;
+        if (step === "installing" && local.step === "agents")
+          body.agents = "true";
+        else delete body.agents;
+        if (step === "ready" && accountOpen) body.expanded = "true";
+        else delete body.expanded;
+        const intro =
+          step === "welcome" && local.available && stage === "checking";
+        if (intro) body.chrome = "off";
+        else delete body.chrome;
+        const pips =
+          step === "welcome" &&
+          local.available &&
+          (stage === "choose" || stage === "settings");
+        $("pips").hidden = !pips;
+        const [first, second] = $("pips").children;
+        first.dataset.on = String(pips);
+        second.dataset.on = String(pips && stage === "settings");
         const at = ORDER.indexOf(step);
         // Setting up this computer takes two steps: a source, then its
         // settings.
@@ -4918,6 +6667,11 @@
               BYOK_FAILURES[answer.code]
                 ? t(BYOK_FAILURES[answer.code])
                 : answer.message,
+              answer.code === "BYOK_AUTH_FAILED"
+                ? "key"
+                : answer.code === "BYOK_NOT_FOUND"
+                  ? "model"
+                  : "url",
             );
             render();
             return;
@@ -4936,12 +6690,28 @@
                   : "subscription",
             ...(byokPayload ? { byok: byokPayload } : {}),
             ...(background && chosen !== "local" ? { background: true } : {}),
+            // The model picked in the picker; else the kit's pick.
+            ...(pickedModel && (chosen === "local" || background)
+              ? { model: pickedModel }
+              : {}),
           },
           "local-error",
         );
         // Saved or not, the keys leave the page once sent.
         if (ok) clearKeys();
-        if (ok && state.localServer.phase !== "idle") show("installing");
+        if (ok && state.localServer.phase !== "idle") {
+          // The title's orb flies on into the install scene.
+          const from = $("hd-orb").getBoundingClientRect();
+          const kind = kindOf($("hd-orb"));
+          show("installing");
+          flyOrb(from, kind, $("sc-ball"), 820, true);
+          enter([$("installing-bar"), $("installing-line")], 260, 90);
+          anim($("floaters"), [{ opacity: 0 }, { opacity: 1 }], {
+            duration: 900,
+            delay: 400,
+            easing: "linear",
+          });
+        }
       };
       $("local-install").addEventListener("click", install);
       $("runtime-signin-start").addEventListener("click", () =>
@@ -5116,12 +6886,79 @@
       $("source-back").addEventListener("click", () =>
         setStage("choose", "back"),
       );
-      $("checking-skip").addEventListener("click", () =>
-        setStage("choose", "reveal"),
-      );
+      $("checking-skip").addEventListener("click", () => {
+        handOff();
+        render();
+      });
+      // The model picker.
+      $("model-change").addEventListener("click", openSheet);
+      $("model-sheet-close").addEventListener("click", () => closeSheet());
+      $("model-sheet-scrim").addEventListener("click", () => closeSheet());
+      $("model-list").addEventListener("click", (event) => {
+        const row = event.target.closest(".mrow");
+        if (row && !row.disabled) pickModel(row.dataset.library);
+      });
+      $("model-sheet").addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          closeSheet();
+          return;
+        }
+        const rows = sheetRows();
+        const at = rows.indexOf(document.activeElement);
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          if (!rows.length) return;
+          const next =
+            rows[
+              (at + (event.key === "ArrowDown" ? 1 : -1) + rows.length) %
+                rows.length
+            ];
+          next.focus();
+          return;
+        }
+        // Tab stays inside the sheet: the checked row and Close.
+        if (event.key === "Tab") {
+          const stops = [
+            $("model-sheet-close"),
+            $("model-list").querySelector('.mrow[aria-checked="true"]') ??
+              rows[0],
+          ].filter(Boolean);
+          const i = stops.indexOf(document.activeElement);
+          event.preventDefault();
+          stops[
+            (i + (event.shiftKey ? -1 : 1) + stops.length) % stops.length
+          ].focus();
+        }
+      });
+      // Enter takes the primary button on screen, unless a control has
+      // focus that does something else with it.
+      document.addEventListener("keydown", (event) => {
+        if (
+          event.key !== "Enter" ||
+          event.defaultPrevented ||
+          event.isComposing ||
+          sheetOpen ||
+          event.target.closest?.(
+            "input, button, select, textarea, [role=radio], .signin-modal",
+          ) ||
+          [...document.querySelectorAll(".signin-modal")].some(
+            (el) => !el.hidden,
+          )
+        )
+          return;
+        const primary = ["source-continue", "local-install", "open"]
+          .map((id) => $(id))
+          .find((el) => el.offsetParent !== null && !el.disabled);
+        if (!primary) return;
+        event.preventDefault();
+        primary.click();
+      });
       document.addEventListener("keydown", (event) => {
         if (
           event.key !== "Escape" ||
+          sheetOpen ||
           step !== "welcome" ||
           stage !== "settings" ||
           combos.some((combo) => combo.open)
@@ -5204,10 +7041,14 @@
       for (const leave of document.querySelectorAll("[data-leave]"))
         leave.addEventListener("click", async () => {
           if (!(await run({ op: "local.leave-local" }, "leave-error"))) return;
-          picked = true;
-          source = leave.dataset.leave;
+          // Back to step 1, to pick another source meanwhile.
+          picked = false;
+          introDone = true;
+          enterStage("choose");
           show("welcome");
-          setStage("settings", "forward");
+          $("welcome-title").focus({ preventScroll: true });
+          $("welcome-live").textContent = $("welcome-title").textContent;
+          enter(stageParts(), 0, 75, -14);
         });
       $("location-change").addEventListener("click", () =>
         run({ op: "local.location.pick" }),
@@ -5267,6 +7108,14 @@
       $("open").addEventListener("click", () => run({ op: "finish" }));
       $("account-toggle").addEventListener("click", () => {
         accountOpen = !accountOpen;
+        if (accountOpen)
+          setTimeout(() =>
+            enter(
+              [...$("account-body").children].filter((el) => !el.hidden),
+              120,
+              70,
+            ),
+          );
         // Folding away puts the password back out of sight.
         if (!accountOpen) {
           passwordEdit = null;
@@ -5409,7 +7258,7 @@
           state?.localServer.phase !== "ready";
         state = next;
         if (pending === "signin.open" && next.signedIn) pending = null;
-        if (localReady && step === "installing") show("ready");
+        if (localReady && step === "installing") completeInstall();
         else if (signedInNow && step === "signin") show("connect");
         else render();
       });

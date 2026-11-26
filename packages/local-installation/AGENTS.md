@@ -353,6 +353,22 @@ written beside the file and renamed over it, owner-only). A plan whose model
 names a quantization carries `libraryModel` (`<id>:<quant>`,
 `LIBRARY_MODEL_ID`), which setup downloads in the background while another
 source runs.
+`inspectSetup` also lists every model the kit's catalog offers there
+(`listSetupModels`, `setup-models.ts`) as `models` with `totalMemoryBytes`,
+for the setup page's model picker: `library status --json` gives each model,
+its download, memory and whether it fits (or needs more memory, or can never
+fit), and `stack hardware --json` (which takes no GPU-sharing flag; its
+estimates are for the model alone) gives the kit's quality score, the
+estimated decode speed and its `smartest`/`fastest` picks. A score of 0 means
+unscored and is left out. A failing library report leaves the list empty
+(the page keeps the planned model alone) and a failing hardware report
+leaves it without estimates; neither fails the inspection. `checkSetupModel`
+prices one picked model for this computer with `stack plan --llm <id>
+--quant <q> --decision none --defer-services --offline` (and the GPU-sharing
+flag), into a temporary file: whether it fits, else the kit's refusal code
+(such as `MEMORY_INSUFFICIENT` or `DISK_INSUFFICIENT`), `PLAN_FAILED` when it
+names none, or `MODEL_SUBSTITUTED` when the plan picked another model; and
+its memory, download and disk needs.
 Deployments, that check and the quit-time stop share one lock per home
 (`withLocalModelsLock`); the check waits up to 180 s for it, past the stop's
 150 s hard exit, then reports `LOCAL_MODELS_RECOVERY_REQUIRED` (or

@@ -15,6 +15,7 @@ import {
   type SetupCommand,
   type SetupLocalAccount,
   type SetupLocalModelsCheck,
+  type SetupModelOption,
   type SetupReason,
   type SetupRuntimeRow,
   type SetupState,
@@ -98,6 +99,8 @@ const openPage = async (
   Object.assign(window, {
     matchMedia: () => ({ matches: true }),
     lingerSetup: {
+      // No welcome animation to wait out.
+      introMs: 0,
       nvidiaDriverDownloadUrl: NVIDIA_DRIVER_DOWNLOAD_URL,
       nvidiaDriverGuideUrl: NVIDIA_DRIVER_GUIDE_URL,
       minDriverForCuda: minNvidiaDriverForCuda,
@@ -345,11 +348,13 @@ describe("setup page two-step welcome", () => {
       "welcome",
     );
     expect(stage()).toBe("checking");
-    // Only a quiet spinner: no words about what the check is doing.
+    // The orb and a welcome: no words about what the check is doing.
     expect($("welcome-checking").hidden).toBe(false);
+    expect($("intro-title").textContent).toBe("Welcome to Linger");
     const shown = () =>
       $("welcome-checking")
         .textContent!.replace($("checking-skip").textContent!, "")
+        .replace($("intro-title").textContent!, "")
         .trim();
     expect(shown()).toBe("");
     expect($("checking-skip").hidden).toBe(true);
@@ -842,11 +847,11 @@ describe("setup page subscription runtimes", () => {
         runtimes: rows({ installed: true, signedIn: true }, {}, {}),
       }),
     );
-    expect(inRow("claude", "[data-runtime-done]").textContent).toBe(
-      "Signed in",
-    );
+    // Signed in says so under the name; the tick only marks it.
+    expect(inRow("claude", "[data-runtime-sub]").textContent).toBe("Signed in");
+    expect(inRow("claude", "[data-runtime-done]").hidden).toBe(false);
+    expect(inRow("claude", "[data-runtime-done]").textContent).toBe("");
     expect(button("local-install").disabled).toBe(false);
-    expect(inRow("claude", "[data-runtime-sub]").hidden).toBe(true);
     expect($("plan-line").textContent).toBe("");
     $("local-install").click();
     await vi.waitFor(() =>
@@ -1345,15 +1350,18 @@ describe("setup page leaving the local model's wait", () => {
       },
     });
     run.mockImplementationOnce(async () => behind);
-    document
-      .querySelector<HTMLButtonElement>('[data-leave="subscription"]')!
-      .click();
+    document.querySelector<HTMLButtonElement>('[data-leave="choose"]')!.click();
     await vi.waitFor(() =>
       expect(
         document.querySelector('section[data-step="welcome"].active'),
       ).not.toBeNull(),
     );
     expect(run).toHaveBeenCalledWith({ op: "local.leave-local" });
+    // Back on step 1, the model still coming in its card.
+    expect(stage()).toBe("choose");
+    expect(card("local").disabled).toBe(true);
+    expect($("source-local-about").textContent).toBe("Downloading · 42%");
+    open("subscription");
     expect(stage()).toBe("settings");
     expect($("welcome-title").textContent).toBe("Subscription");
     expect($("model-behind").hidden).toBe(false);
@@ -1376,7 +1384,7 @@ describe("setup page leaving the local model's wait", () => {
   it("says where a failed switch went wrong", async () => {
     const { run } = await openPage(downloading());
     run.mockRejectedValueOnce(new Error("The installer stopped answering."));
-    document.querySelector<HTMLButtonElement>('[data-leave="byok"]')!.click();
+    document.querySelector<HTMLButtonElement>('[data-leave="choose"]')!.click();
     await vi.waitFor(() =>
       expect($("leave-error").textContent).toBe(
         "The installer stopped answering.",
@@ -1399,7 +1407,7 @@ describe("setup page leaving the local model's wait", () => {
       ...base,
       localServer: { ...base.localServer, backgroundModel: background },
     });
-    expect($("installing-step").textContent).toBe("Starting services…");
+    expect($("installing-step").textContent).toBe("Setting up your workspace");
     const ready = state("ready", { email: "admin@gmail.com" });
     push({
       ...ready,
@@ -1551,7 +1559,7 @@ describe("setup page installing", () => {
     const { push } = await openPage(withLocal("installing"));
     const section = document.querySelector('[data-step="installing"]')!;
     // No checklist, timings or second line.
-    expect(section.querySelectorAll(".progress")).toHaveLength(1);
+    expect(section.querySelectorAll('[role="progressbar"]')).toHaveLength(1);
     for (const id of [
       "installing-checks",
       "installing-transfer",
@@ -1559,10 +1567,10 @@ describe("setup page installing", () => {
       "installing-plan",
     ])
       expect(document.getElementById(id)).toBeNull();
-    expect($("installing-step").textContent).toBe("Starting services…");
+    expect($("installing-step").textContent).toBe("Setting up your workspace");
     expect($("installing-count").textContent).toMatch(/^\d+%$/u);
     push(withLocal("installing", { step: "agents" }));
-    expect($("installing-step").textContent).toBe("Preparing your agents…");
+    expect($("installing-step").textContent).toBe("Waking up your agents");
     // The runtime lookup says what the bar waits on, in the same line.
     push(withLocal("installing", { waiting: "runtime" }));
     expect($("installing-step").textContent).toBe("Checking the AI runtime…");
@@ -1582,7 +1590,7 @@ describe("setup page installing", () => {
       }),
     );
     expect($("installing-step").textContent).toBe(
-      "Downloading Linger… · 26 MB of 62 MB",
+      "Downloading Linger · 26 MB of 62 MB",
     );
     // The local model downloads while the services start.
     push(
@@ -1597,7 +1605,7 @@ describe("setup page installing", () => {
       }),
     );
     expect($("installing-step").textContent).toBe(
-      "Downloading the local model… · 12.0 GB of 31.0 GB",
+      "Downloading the local model · 12.0 GB of 31.0 GB",
     );
     push(
       withLocal("installing", {
@@ -1611,10 +1619,10 @@ describe("setup page installing", () => {
       }),
     );
     expect($("installing-step").textContent).toBe(
-      "Downloading the local model… · This file: 3.0 GB of 4.0 GB",
+      "Downloading the local model · This file: 3.0 GB of 4.0 GB",
     );
     push(withLocal("installing", { source: "local" }));
-    expect($("installing-step").textContent).toBe("Starting services…");
+    expect($("installing-step").textContent).toBe("Setting up your workspace");
   });
 
   it("says what went wrong, with only Report issue", async () => {
@@ -1814,9 +1822,7 @@ describe("setup page in Chinese", () => {
   it("speaks the language it was served in", async () => {
     await openPage(welcome(capable), "welcome", "zh-CN");
     // The harness loads the body only; static text comes from data-t.
-    expect(document.querySelector('[data-t="welcomeTitle"]')!.textContent).toBe(
-      zh.welcomeTitle,
-    );
+    expect($("intro-title").textContent).toBe(zh.welcomeTitle);
     expect($("step-label").textContent).toBe(
       fill(zh.stepOf, { step: "1", total: "2" }),
     );
@@ -1844,7 +1850,7 @@ describe("setup page in Chinese", () => {
     expect(inRow("claude", "[data-runtime-sub]").textContent).toBe(
       zh.rtInstalledNotSignedIn,
     );
-    expect(inRow("codex", "[data-runtime-done]").textContent).toBe(zh.signedIn);
+    expect(inRow("codex", "[data-runtime-sub]").textContent).toBe(zh.signedIn);
   });
 
   it("words a held local model from the catalog", async () => {
@@ -1896,6 +1902,209 @@ describe("setup page in Chinese", () => {
       zh.newPassword,
     );
     expect($("account-new-save-label").textContent).toBe(zh.save);
+  });
+});
+
+describe("setup page model picker", () => {
+  // What the kit lists on a 36 GB Mac: two builds of one model, a smaller
+  // and faster one, and one that needs a larger Mac.
+  const option = (
+    fields: Partial<SetupModelOption> & { library: string },
+  ): SetupModelOption => ({
+    name: "Inkling 2 Mini",
+    publisher: "Inkling",
+    quant: "UD-Q4_K_M",
+    parameters: "26.4B",
+    activeParameters: "3.4B",
+    downloadBytes: 16 * GB,
+    memoryBytes: 18 * GB,
+    fits: true,
+    ...fields,
+  });
+  const listed: SetupLocalModelsCheck = {
+    ...capable,
+    memoryBytes: 36 * GB,
+    totalMemoryBytes: 36 * GB,
+    model: {
+      name: "Inkling 2 Mini",
+      library: "inkling-2-mini:UD-Q4_K_M",
+      downloadBytes: 16 * GB,
+      diskBytes: 17 * GB,
+      memoryBytes: 18 * GB,
+    },
+    models: [
+      option({
+        library: "inkling-2-mini:UD-Q4_K_M",
+        quality: 61,
+        decodeTokS: 63.2,
+        recommended: true,
+        role: "smartest",
+      }),
+      option({
+        library: "inkling-2-mini:IQ3_XXS",
+        quant: "IQ3_XXS",
+        downloadBytes: 11 * GB,
+        memoryBytes: 13 * GB,
+        quality: 58,
+        decodeTokS: 71,
+      }),
+      option({
+        library: "spark-x2.6-4b-q4km:Q4_K_M",
+        name: "Spark X2.6 4B",
+        publisher: "Spark",
+        parameters: "4B",
+        activeParameters: undefined,
+        downloadBytes: 3 * GB,
+        memoryBytes: 5 * GB,
+        quality: 44,
+        decodeTokS: 140,
+        role: "fastest",
+      }),
+      option({
+        library: "qwen3.8-flash-next-iq2xs:IQ2_XS",
+        name: "Qwen 3.8 Flash Next",
+        publisher: "Qwen",
+        parameters: "80B",
+        activeParameters: "3B",
+        downloadBytes: 48 * GB,
+        memoryBytes: 52 * GB,
+        fits: false,
+        tooLarge: true,
+        needsMemoryBytes: 52 * GB,
+      }),
+    ],
+  };
+  const onMac = () => ({ ...welcome(listed), platform: "darwin" as const });
+  const rowFor = (library: string) =>
+    document.querySelector<HTMLButtonElement>(
+      `#model-list .mrow[data-library="${library}"]`,
+    )!;
+
+  it("shows the kit's pick on the card with its estimates", async () => {
+    await openPage(onMac(), "welcome");
+    open("local");
+    expect($("local-model-name").textContent).toBe("Inkling 2 Mini");
+    expect($("local-model-sub").textContent).toBe(
+      "Inkling · 26.4B · 3.4B active · Standard",
+    );
+    expect($("local-model-why").textContent).toBe(
+      "The smartest model this Mac can run",
+    );
+    expect($("local-model-quality").textContent).toBe("≈ Sonnet 4.6");
+    expect($("local-model-speed").textContent).toBe("~63 tok/s");
+    expect($("local-model-needs").textContent).toBe("16.0 GB");
+    expect($("local-model-mem").textContent).toBe("18 GB of 36 GB");
+    expect($("model-change").hidden).toBe(false);
+    expect($("model-sheet").hidden).toBe(true);
+  });
+
+  it("lists every model with its estimates, and dims one too large", async () => {
+    await openPage(onMac(), "welcome");
+    open("local");
+    $("model-change").click();
+    expect($("model-sheet").hidden).toBe(false);
+    expect($("model-change").getAttribute("aria-expanded")).toBe("true");
+    expect($("model-sheet-title").textContent).toBe("Models for this Mac");
+    const rows = document.querySelectorAll("#model-list .mrow");
+    expect(rows).toHaveLength(4);
+    const best = rowFor("inkling-2-mini:UD-Q4_K_M");
+    expect(best.getAttribute("aria-checked")).toBe("true");
+    expect(document.activeElement).toBe(best);
+    expect(best.querySelector(".tg")!.textContent).toBe(
+      "Inkling · 26.4B · 3.4B active · Standard",
+    );
+    expect([...best.querySelectorAll(".mc")].map((c) => c.textContent)).toEqual(
+      ["16.0 GB", "Best fit"],
+    );
+    expect(best.querySelectorAll(".meter")).toHaveLength(2);
+    expect(
+      rowFor("inkling-2-mini:IQ3_XXS").querySelector(".tg")!.textContent,
+    ).toBe("Inkling · 26.4B · 3.4B active · Compact");
+    // Fastest only where the kit says so.
+    expect(
+      [...rowFor("spark-x2.6-4b-q4km:Q4_K_M").querySelectorAll(".mc")].map(
+        (c) => c.textContent,
+      ),
+    ).toEqual(["3.0 GB", "Fastest"]);
+    const large = rowFor("qwen3.8-flash-next-iq2xs:IQ2_XS");
+    expect(large.disabled).toBe(true);
+    expect(large.querySelector(".needs")!.textContent).toBe(
+      "Needs a 96 GB Mac",
+    );
+    expect(large.querySelector(".meter")).toBeNull();
+    $("model-sheet").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    expect($("model-change").getAttribute("aria-expanded")).toBe("false");
+    expect($("model-sheet").hidden).toBe(true);
+    expect(stage()).toBe("settings");
+  });
+
+  it("changes the card to a picked model, checks it fits, and installs it", async () => {
+    const { run, push } = await openPage(onMac(), "welcome");
+    open("local");
+    $("model-change").click();
+    rowFor("spark-x2.6-4b-q4km:Q4_K_M").click();
+    await vi.waitFor(() => expect($("model-sheet").hidden).toBe(true));
+    expect($("local-model-name").textContent).toBe("Spark X2.6 4B");
+    expect($("local-model-why").textContent).toBe(
+      "The fastest model on this Mac",
+    );
+    expect($("local-model-quality").textContent).toBe("≈ Gemini 2.5 Pro");
+    expect(run).toHaveBeenCalledWith({
+      op: "local.model.check",
+      model: "spark-x2.6-4b-q4km:Q4_K_M",
+    });
+    const base = onMac();
+    const priced = (modelCheck: SetupState["localServer"]["modelCheck"]) =>
+      push({ ...base, localServer: { ...base.localServer, modelCheck } });
+    priced({ library: "spark-x2.6-4b-q4km:Q4_K_M", state: "checking" });
+    expect($("local-model-why").textContent).toBe(
+      "Checking it fits this computer…",
+    );
+    expect(button("local-install").disabled).toBe(true);
+    priced({
+      library: "spark-x2.6-4b-q4km:Q4_K_M",
+      state: "checked",
+      fits: false,
+      code: "MEMORY_INSUFFICIENT",
+      memoryBytes: 30 * GB,
+    });
+    expect($("local-model-why").textContent).toBe(
+      "Needs 30.0 GB of free memory.",
+    );
+    expect(button("local-install").disabled).toBe(true);
+    priced({
+      library: "spark-x2.6-4b-q4km:Q4_K_M",
+      state: "checked",
+      fits: true,
+    });
+    expect(button("local-install").disabled).toBe(false);
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)[0]).toMatchObject({
+        runtime: "local",
+        model: "spark-x2.6-4b-q4km:Q4_K_M",
+      }),
+    );
+  });
+
+  it("installs the kit's pick without a model when none was picked", async () => {
+    const { run } = await openPage(onMac(), "welcome");
+    open("local");
+    $("local-install").click();
+    await vi.waitFor(() => expect(installed(run)).toHaveLength(1));
+    expect(installed(run)[0]).not.toHaveProperty("model");
+    expect(run).not.toHaveBeenCalledWith(
+      expect.objectContaining({ op: "local.model.check" }),
+    );
+  });
+
+  it("offers no picker when the kit lists one model or none", async () => {
+    await openPage(welcome(capable), "welcome");
+    open("local");
+    expect($("model-change").hidden).toBe(true);
+    expect($("local-model-name").textContent).toBe("qwen3-8b");
   });
 });
 
