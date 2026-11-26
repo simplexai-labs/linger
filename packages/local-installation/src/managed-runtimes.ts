@@ -4,10 +4,15 @@ import { setTimeout as delay } from "node:timers/promises";
 import { readSetupChoice } from "./setup-selection.js";
 import { privateDirectory } from "./instance.js";
 import { runLocalmodels } from "./localmodels-tool.js";
-import type { runProcess } from "./process.js";
+import { runProcess } from "./process.js";
 import { localmodelsFailure } from "./localmodels-failure.js";
 import type { InstallOutcome, InstallerEvent } from "./events.js";
 import type { PreparationOptions } from "./dependencies.js";
+import {
+  ensureStableBundledPi,
+  findHigherPrecedencePi,
+  resolveBundledPi,
+} from "./bundled-pi.js";
 import {
   probeRuntimesWithDaemon,
   type DaemonRuntimeObservation,
@@ -21,6 +26,7 @@ export interface RuntimeDependencies {
   localmodels?: typeof runLocalmodels;
   probeRuntimes?: typeof probeRuntimesWithDaemon;
   daemonExecutable?: string;
+  resolveBundledPi?: typeof resolveBundledPi;
 }
 export interface RuntimeDescriptor {
   configFingerprint?: string | null;
@@ -480,6 +486,98 @@ export function runtimeEnvironmentFromDescriptors(
   }
   return env;
 }
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function matchesBundledPiVersion(stdout: string, version: string): boolean {
+  const firstLine = stdout
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (!firstLine) return false;
+  if (firstLine === version) return true;
+  const pattern = new RegExp(`(?:^|\\s)${escapeRegExp(version)}(?:\\s|$)`, "u");
+  return pattern.test(firstLine);
+}
+
+async function tryFastBindBundledPi(
+  options: RuntimePreparationOptions,
+  dependencies: RuntimeDependencies,
+): Promise<InstallOutcome | undefined> {
+  const platform = options.platform ?? process.platform;
+  const bundledPi = await (dependencies.resolveBundledPi ?? resolveBundledPi)({
+    platform,
+  });
+  if (!bundledPi) return undefined;
+  const effectiveEnv = options.env
+    ? { ...process.env, ...options.env }
+    : process.env;
+  const higher = await findHigherPrecedencePi(effectiveEnv, {
+    home: options.home,
+    bundledPi,
+    platform,
+  });
+  if (higher) return undefined;
+  options.signal.throwIfAborted();
+  const stable = await ensureStableBundledPi(options.home, bundledPi, {
+    platform,
+  });
+  options.signal.throwIfAborted();
+  try {
+    const result = await (dependencies.run ?? runProcess)(
+      stable.executable,
+      ["--version"],
+      {
+        env: effectiveEnv,
+        signal: options.signal,
+        timeoutMs: 15_000,
+      },
+    );
+    if (
+      result.code !== 0 ||
+      !matchesBundledPiVersion(result.stdout, bundledPi.version)
+    ) {
+      options.onEvent({
+        kind: "log",
+        stage: "runtime",
+        message: `Bundled Pi ${bundledPi.version} version check did not match; falling back to harness plan/apply.\n`,
+      });
+      return undefined;
+    }
+  } catch (error) {
+    if (options.signal.aborted) throw error;
+    options.onEvent({
+      kind: "log",
+      stage: "runtime",
+      message: `Bundled Pi ${bundledPi.version} verification failed; falling back to harness plan/apply.\n`,
+    });
+    return undefined;
+  }
+  const descriptor: RuntimeDescriptor = {
+    runtime: "pi",
+    executable: stable.executable,
+    argvPrefix: [],
+    installed: true,
+    authenticated: false,
+    authMode: null,
+    status: "authentication_required",
+    version: bundledPi.version,
+    loginCommand: null,
+  };
+  options.onEvent({
+    kind: "log",
+    stage: "runtime",
+    message: `Reusing verified bundled Pi ${bundledPi.version} directly (skipped harness plan/apply).\n`,
+  });
+  return {
+    code: 0,
+    state: "ready",
+    message: "pi is installed. Authentication will be checked separately.",
+    details: { executable: stable.executable, descriptor },
+  };
+}
+
 /** Upstream owns artifact locks, discovery, install strategy, verification and publication. */
 export async function installNativeRuntime(
   runtime: NativeRuntime,
@@ -487,6 +585,10 @@ export async function installNativeRuntime(
   dependencies: RuntimeDependencies = {},
 ): Promise<InstallOutcome> {
   options.signal.throwIfAborted();
+  if (runtime === "pi" && options.skipHarnessWhenBundledPiMatches) {
+    const fastBound = await tryFastBindBundledPi(options, dependencies);
+    if (fastBound) return fastBound;
+  }
   const tool = dependencies.localmodels ?? runLocalmodels;
   const plans = path.join(path.resolve(options.home), "setup", "harness-plans");
   await privateDirectory(plans);
