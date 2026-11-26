@@ -57,6 +57,7 @@ fi
 	}{
 		{name: "one transient failure", failures: "1", exitCode: "2", output: "probe unavailable", want: nil},
 		{name: "sustained probe failure", failures: "9", exitCode: "2", output: "probe unavailable", want: []string{"error", "ready"}},
+		{name: "single transient codex auth flap", failures: "1", exitCode: "1", output: "Not logged in", want: nil},
 		{name: "actual logout", failures: "9", exitCode: "1", output: "Not logged in", want: []string{"authentication_required", "ready"}},
 		{name: "sustained probe failure while busy", failures: "9", exitCode: "2", output: "probe unavailable", busy: true, want: nil},
 		{name: "actual logout while busy", failures: "9", exitCode: "1", output: "Not logged in", busy: true, want: []string{"authentication_required", "ready"}},

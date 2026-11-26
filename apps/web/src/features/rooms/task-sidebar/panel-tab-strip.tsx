@@ -166,7 +166,7 @@ export function PanelTabStrip({
             const { label, name: visibleLabel } = panelTabText(tab, t);
             return (
               <div
-                className={`panel-tab-item group relative flex h-7 w-[128px] flex-none items-stretch rounded-full motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out ${isGhost ? "outline outline-1 outline-dashed outline-app-focus bg-app-hover [&>button]:opacity-25" : ""} ${
+                className={`panel-tab-item group relative flex h-7 min-w-[72px] max-w-[136px] flex-[0_1_128px] items-stretch rounded-full motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out ${isGhost ? "outline outline-1 outline-dashed outline-app-focus bg-app-hover [&>button]:opacity-25" : ""} ${
                   selected
                     ? "bg-card text-foreground shadow-outline"
                     : "bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground"

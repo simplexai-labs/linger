@@ -25,6 +25,16 @@ const unauthenticatedPaths = new Set<TeamHubApiPath>([
   "/v0/shared-room-history/read",
 ]);
 
+const QUIET_AUTHENTICATION_HEADER = "x-linger-quiet-auth";
+
+/**
+ * Marks an API request as an unauthenticated bootstrap probe whose 401 should
+ * reject the caller without publishing a global session-expired redirect.
+ */
+export function quietAuthenticationHeaders(): HeadersInit {
+  return { [QUIET_AUTHENTICATION_HEADER]: "1" };
+}
+
 /**
  * Creates the one typed TeamHub client: it sends the Session cookie, maps a
  * non-2xx response to TeamHubError (reporting a lost Session on 401), and
@@ -36,10 +46,19 @@ export function createTeamHubApi(options: {
   onAuthenticationRequired: (reason: TeamHubAuthenticationReason) => void;
 }): TeamHubApi {
   const { fetchRequest, onAuthenticationRequired } = options;
+  const quietRequests = new WeakSet<Request>();
   const api = createClient<paths>({
     baseUrl: options.baseUrl.href,
     credentials: "include",
-    fetch: (request) => fetchRequest(request),
+    fetch: (request) => {
+      // Check in the synchronous fetch wrapper rather than onRequest middleware
+      // so openapi-fetch does not defer transport dispatch by a microtask.
+      if (request.headers.has(QUIET_AUTHENTICATION_HEADER)) {
+        quietRequests.add(request);
+        request.headers.delete(QUIET_AUTHENTICATION_HEADER);
+      }
+      return fetchRequest(request);
+    },
   });
   const errors: Middleware = {
     async onResponse({ request, response, schemaPath }) {
@@ -48,7 +67,8 @@ export function createTeamHubApi(options: {
       request.signal.throwIfAborted();
       if (
         response.status === 401 &&
-        !unauthenticatedPaths.has(schemaPath as TeamHubApiPath)
+        !unauthenticatedPaths.has(schemaPath as TeamHubApiPath) &&
+        !quietRequests.has(request)
       ) {
         onAuthenticationRequired("session-expired");
       }

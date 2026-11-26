@@ -166,6 +166,7 @@ export class TrayModule implements Module {
       {
         status,
         preventSleep: power.alwaysOn(),
+        preventSleepPausedOnBattery: power.pausedOnBattery(),
         enrolled: !!this.#ctx!.config.get().computerId,
         update,
         canSendDiagnostics:

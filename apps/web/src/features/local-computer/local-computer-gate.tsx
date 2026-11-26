@@ -88,14 +88,14 @@ export function LocalComputerGate({
   const command = computerCommand();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-2 backdrop-blur-sm sm:p-4">
       <section
         aria-labelledby="local-computer-gate-title"
         aria-modal="true"
-        className="workspace-scrollbar flex max-h-full w-full max-w-[560px] flex-col overflow-y-auto rounded-2xl border border-border bg-card text-foreground shadow-lg"
+        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-[560px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-foreground shadow-lg sm:max-h-[calc(100dvh-2rem)]"
         role="dialog"
       >
-        <header className="px-6 pb-4 pt-5">
+        <header className="shrink-0 px-4 pb-4 pt-4 sm:px-6 sm:pt-5">
           <h2 className="text-lg" id="local-computer-gate-title">
             {t(computersMessages.gateTitle)}
           </h2>
@@ -107,76 +107,78 @@ export function LocalComputerGate({
           )}
         </header>
 
-        {ready ? (
-          <p
-            className="flex items-center justify-center gap-2 px-6 py-10 text-sm"
-            role="status"
-          >
-            <Spinner size={14} />
-            {t(computersMessages.gateReady)}
-          </p>
-        ) : (
-          <ol className="px-6">
-            {desktopOnlyStep && desktop ? (
-              <GateStep
-                number={1}
-                state={online ? "done" : "current"}
-                title={t(computerSetupMessages.connectThisComputer)}
-              >
-                {online && computer ? (
-                  <p className="mt-2 text-xs text-app-success" role="status">
-                    {t(computersMessages.computerOnline, {
-                      computer: computer.display_name,
-                    })}
-                  </p>
-                ) : (
-                  <DesktopComputerSetup desktop={desktop} />
-                )}
-              </GateStep>
-            ) : (
-              <>
+        <div className="workspace-scrollbar min-h-0 flex-1 overflow-y-auto">
+          {ready ? (
+            <p
+              className="flex items-center justify-center gap-2 px-4 py-10 text-sm sm:px-6"
+              role="status"
+            >
+              <Spinner size={14} />
+              {t(computersMessages.gateReady)}
+            </p>
+          ) : (
+            <ol className="px-4 sm:px-6">
+              {desktopOnlyStep && desktop ? (
                 <GateStep
                   number={1}
-                  state={computer ? "done" : "current"}
-                  title={t(computersMessages.installTheCli)}
-                >
-                  <CommandLine
-                    command={computerInstallCommand(platform)}
-                    key={platform}
-                  />
-                </GateStep>
-                <GateStep
-                  number={2}
-                  state={online ? "done" : computer ? "current" : "next"}
+                  state={online ? "done" : "current"}
                   title={t(computerSetupMessages.connectThisComputer)}
                 >
-                  <CommandLine command={`${command} login`} />
-                  <ConnectionStatus command={command} computer={computer} />
+                  {online && computer ? (
+                    <p className="mt-2 text-xs text-app-success" role="status">
+                      {t(computersMessages.computerOnline, {
+                        computer: computer.display_name,
+                      })}
+                    </p>
+                  ) : (
+                    <DesktopComputerSetup desktop={desktop} />
+                  )}
                 </GateStep>
-              </>
-            )}
-            <GateStep
-              number={desktopOnlyStep ? 2 : 3}
-              state={online ? "current" : "next"}
-              title={t(computersMessages.setUpAiApp)}
-            >
-              {computer && online ? (
-                <AppSetup computer={computer} tenantId={tenantId} />
               ) : (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {t(computersMessages.availableOnceOnline)}
-                </p>
+                <>
+                  <GateStep
+                    number={1}
+                    state={computer ? "done" : "current"}
+                    title={t(computersMessages.installTheCli)}
+                  >
+                    <CommandLine
+                      command={computerInstallCommand(platform)}
+                      key={platform}
+                    />
+                  </GateStep>
+                  <GateStep
+                    number={2}
+                    state={online ? "done" : computer ? "current" : "next"}
+                    title={t(computerSetupMessages.connectThisComputer)}
+                  >
+                    <CommandLine command={`${command} login`} />
+                    <ConnectionStatus command={command} computer={computer} />
+                  </GateStep>
+                </>
               )}
-            </GateStep>
-          </ol>
-        )}
-        {ready || desktop ? null : (
-          <div className="px-6 pb-5">
-            <ServerConnection tenantId={tenantId} />
-          </div>
-        )}
+              <GateStep
+                number={desktopOnlyStep ? 2 : 3}
+                state={online ? "current" : "next"}
+                title={t(computersMessages.setUpAiApp)}
+              >
+                {computer && online ? (
+                  <AppSetup computer={computer} tenantId={tenantId} />
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t(computersMessages.availableOnceOnline)}
+                  </p>
+                )}
+              </GateStep>
+            </ol>
+          )}
+          {ready || desktop ? null : (
+            <div className="px-4 pb-5 sm:px-6">
+              <ServerConnection tenantId={tenantId} />
+            </div>
+          )}
+        </div>
 
-        <footer className="flex justify-end bg-muted/40 px-6 py-3">
+        <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 bg-muted/40 px-4 py-3 sm:px-6">
           <Button
             data-voice-risk="never"
             disabled={signingOut}

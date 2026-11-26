@@ -1,6 +1,8 @@
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -10,6 +12,7 @@ import * as fs from "node:fs";
 import * as childProcess from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { finished } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +21,7 @@ import {
   ComputerDaemonModule,
   TOKEN_ENV,
   connectionState,
+  createRotatingLogStream,
   daemonConfig,
   daemonEnvironment,
   restartDelay,
@@ -905,5 +909,36 @@ describe.skipIf(process.platform === "win32")("spawnDaemon", () => {
     );
     expect(code).toBe(2);
     expect(reason).toBe("panic: assignment to entry in nil map");
+  });
+
+  it("rotates daemon logs and retains at most the configured backup count", async () => {
+    const directory = mkdtempSync(
+      path.join(os.tmpdir(), "rotating-daemon-log-"),
+    );
+    const logFile = path.join(directory, "logs", "computer-daemon.log");
+    const stream = createRotatingLogStream(logFile, 64, 3);
+    for (let index = 0; index < 10; index++) {
+      stream.write(
+        `entry-${String(index).padStart(2, "0")}-${"x".repeat(40)}\n`,
+      );
+    }
+    stream.write("tail-line\n");
+    stream.end();
+    await new Promise<void>((resolve, reject) =>
+      finished(stream, (error) => (error ? reject(error) : resolve())),
+    );
+    const logsDir = path.join(directory, "logs");
+    expect(readdirSync(logsDir).sort()).toEqual([
+      "computer-daemon.log",
+      "computer-daemon.log.1",
+      "computer-daemon.log.2",
+      "computer-daemon.log.3",
+    ]);
+    expect(existsSync(`${logFile}.4`)).toBe(false);
+    expect(readFileSync(logFile, "utf8")).toContain("tail-line\n");
+    if (process.platform !== "win32") {
+      expect(statSync(logFile).mode & 0o077).toBe(0);
+    }
+    rmSync(directory, { recursive: true, force: true });
   });
 });

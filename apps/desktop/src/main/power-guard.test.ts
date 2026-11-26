@@ -4,6 +4,7 @@ import {
   MODEL_ACTIVITY_TAIL_MS,
   PowerGuardModule,
   type PowerApi,
+  type PowerEventKind,
 } from "./power-guard.js";
 import { stubModule, testHost } from "./test-support.js";
 
@@ -13,10 +14,15 @@ afterEach(() => {
 
 const setup = async (
   preventSleep = false,
-  initial: { readonly running?: number; readonly modelInvokes?: number } = {},
+  initial: {
+    readonly running?: number;
+    readonly modelInvokes?: number;
+    readonly onBattery?: boolean;
+  } = {},
 ) => {
   const blocks: number[] = [];
-  let powerListener: ((kind: "suspend" | "resume") => void) | undefined;
+  let powerListener: ((kind: PowerEventKind) => void) | undefined;
+  let onBattery = initial.onBattery ?? false;
   let next = 0;
   const power: PowerApi = {
     block: () => {
@@ -27,8 +33,13 @@ const setup = async (
     unblock: (id) => {
       blocks.splice(blocks.indexOf(id), 1);
     },
+    isOnBattery: () => onBattery,
     onPowerEvent: (listener) => {
-      powerListener = listener;
+      powerListener = (kind) => {
+        if (kind === "on-battery") onBattery = true;
+        else if (kind === "on-ac") onBattery = false;
+        listener(kind);
+      };
       return () => (powerListener = undefined);
     },
   };
@@ -181,5 +192,40 @@ describe("PowerGuard module", () => {
     expect(power()).toBeDefined();
     await host.stop("quit");
     expect(power()).toBeUndefined();
+  });
+
+  it("pauses always-on sleep prevention on battery while keeping active work protected", async () => {
+    const { host, guard, blocks, power } = await setup(true, {
+      onBattery: true,
+    });
+    expect(guard.alwaysOn()).toBe(true);
+    expect(guard.active()).toBe(false);
+    expect(guard.pausedOnBattery()).toBe(true);
+    expect(blocks).toEqual([]);
+
+    // Active work still acquires the sleep blocker even on battery.
+    host.ctx.bus.emit("runtime.activity", 1);
+    expect(guard.active()).toBe(true);
+    expect(guard.pausedOnBattery()).toBe(false);
+    expect(blocks).toEqual([1]);
+
+    // Completing work releases the blocker again while still on battery.
+    host.ctx.bus.emit("runtime.activity", 0);
+    expect(guard.active()).toBe(false);
+    expect(guard.pausedOnBattery()).toBe(true);
+    expect(blocks).toEqual([]);
+
+    // Plugging back into AC resumes the always-on blocker.
+    power()?.("on-ac");
+    expect(guard.active()).toBe(true);
+    expect(guard.pausedOnBattery()).toBe(false);
+    expect(blocks).toEqual([2]);
+
+    // Switching back to battery releases the always-on blocker while idle.
+    power()?.("on-battery");
+    expect(guard.active()).toBe(false);
+    expect(guard.pausedOnBattery()).toBe(true);
+    expect(blocks).toEqual([]);
+    await host.stop("quit");
   });
 });

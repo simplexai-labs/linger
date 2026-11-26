@@ -15,11 +15,16 @@ import {
   type TestRouteHandler,
 } from "@/test/teamhub-test-server";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
+import { resetLanguageForTest } from "@/i18n/language";
+import zhCN from "@/i18n/locales/zh-CN.json";
 
 import { DESKTOP_LOCAL_ACCOUNT_CHECK_MS } from "./desktop-local-account";
 import { TeamHubLoginPage } from "./teamhub-login-page";
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  resetLanguageForTest();
+});
 
 describe("TeamHubLoginPage", () => {
   it.each(["login", "getSession"] as const)(
@@ -387,6 +392,46 @@ describe("TeamHubLoginPage", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Your session has expired. Sign in again to continue.",
+    );
+  });
+
+  it("hides the session-expired banner when showing an authentication error", async () => {
+    renderAuthenticationPage(
+      {
+        login: () =>
+          teamHubErrorResponse(
+            401,
+            "INVALID_CREDENTIALS",
+            "email or password is incorrect",
+          ),
+      },
+      { initialEntry: "/login?reason=session-expired" },
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Your session has expired. Sign in again to continue.",
+    );
+
+    fillSignIn();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => {
+      const alerts = screen.getAllByRole("alert");
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]).toHaveTextContent("Email or password is incorrect.");
+    });
+  });
+
+  it("lets visitors switch interface language on the login page", async () => {
+    renderAuthenticationPage({});
+
+    const switcher = screen.getByLabelText("Interface language");
+    fireEvent.change(switcher, { target: { value: "zh-CN" } });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: zhCN.auth.loginTitle }),
+      ).toBeVisible(),
     );
   });
 });

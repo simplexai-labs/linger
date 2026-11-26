@@ -114,8 +114,9 @@ function RoomShellReady({
   // settled lets them land together, instead of the card arriving later and
   // pushing every row down.
   const navigationPending = roomsQuery.isPending || anotherMeQuery.isPending;
-  // Settings stays open under the gate: a Computer whose only app is Pi gets
-  // its first model from Settings › Models.
+  // Settings stays open under the gate as a deliberate product invariant: a
+  // Computer whose only app is Pi must reach Settings › Models to load its
+  // first local model before Another Me can come online.
   const onSettings = useMatch("/t/:tenantId/settings/*") !== null;
   const gated =
     anotherMeQuery.isSuccess && !anotherMe?.agent_actor_id && !onSettings;

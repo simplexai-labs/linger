@@ -60,6 +60,29 @@ describe("readTeamHubError", () => {
     expect(error.message).toBe("Your sign-in has expired. Sign in again.");
   });
 
+  it("words INVALID_CREDENTIALS in English and Chinese while keeping serverMessage", async () => {
+    const englishError = await readTeamHubError(
+      teamHubResponse(
+        "INVALID_CREDENTIALS",
+        "email or password is incorrect",
+        401,
+      ),
+    );
+    expect(englishError.message).toBe("Email or password is incorrect.");
+    expect(englishError.serverMessage).toBe("email or password is incorrect");
+
+    await setLanguage("zh-CN");
+    const chineseError = await readTeamHubError(
+      teamHubResponse(
+        "INVALID_CREDENTIALS",
+        "email or password is incorrect",
+        401,
+      ),
+    );
+    expect(chineseError.message).toBe(zhCN.teamHubErrors.invalidCredentials);
+    expect(chineseError.serverMessage).toBe("email or password is incorrect");
+  });
+
   it.each([
     ["CONFLICT", "This email was already sent.", 409],
     ["FORBIDDEN", "Only the decision owner can decide this request.", 403],

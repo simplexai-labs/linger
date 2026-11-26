@@ -481,9 +481,21 @@ a[href][aria-disabled="true"],
   position: absolute;
   top: 2rem;
   left: 5.5rem;
+  right: 2.5rem;
   z-index: 3;
-  display: inline-flex;
-  width: fit-content;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.auth-language-select {
+  min-height: 2rem;
+  padding: 0.25rem 0.625rem;
+  font-size: var(--chat-card-meta-size);
+  line-height: var(--chat-card-meta-leading);
+  color: hsl(var(--town-foreground));
+  border-radius: 9999px;
 }
 
 .auth-brand-wordmark {
@@ -844,6 +856,7 @@ a[href][aria-disabled="true"],
 
   .auth-brand {
     position: static;
+    width: 100%;
   }
 
   .auth-stage {
@@ -2975,6 +2988,12 @@ a[href][aria-disabled="true"],
 
 .room-avatar[data-size="header"] {
   --room-avatar-unit: 0.8px;
+}
+
+/* Fit cleanly inside the 32px header pill with equal top/bottom clearance. */
+.room-header .room-avatar[data-size="header"] {
+  --room-avatar-unit: 0.6px;
+  --room-avatar-ring: hsl(var(--town-card));
 }
 
 .room-avatar[data-size="lg"] {

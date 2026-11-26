@@ -847,12 +847,24 @@ it("prepares real executable launchers and reuses verified warm dependencies ent
     await writeFile(options.output, await readFile(archives[name]!));
     return options.url;
   });
-  const withoutGo = await prepareNativeDependencies({
-    repo,
-    home: path.join(root, "home-without-go"),
-    signal: new AbortController().signal,
-    go: false,
-  });
+  const savedGooroot = process.env.GOROOT;
+  const savedGobin = process.env.GOBIN;
+  process.env.GOROOT = "/mise/installs/go/1.24.0";
+  process.env.GOBIN = "/mise/installs/go/1.24.0/bin";
+  let withoutGo;
+  try {
+    withoutGo = await prepareNativeDependencies({
+      repo,
+      home: path.join(root, "home-without-go"),
+      signal: new AbortController().signal,
+      go: false,
+    });
+  } finally {
+    if (savedGooroot === undefined) delete process.env.GOROOT;
+    else process.env.GOROOT = savedGooroot;
+    if (savedGobin === undefined) delete process.env.GOBIN;
+    else process.env.GOBIN = savedGobin;
+  }
   expect(download).toHaveBeenCalledTimes(3);
   expect(withoutGo.env.GOROOT).toBeUndefined();
   expect(withoutGo.env.GOBIN).toBeUndefined();

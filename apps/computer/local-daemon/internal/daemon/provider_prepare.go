@@ -74,7 +74,7 @@ func (d *Daemon) handleProviderPrepare(ctx context.Context, stream transport.Str
 		return d.sendProviderPrepared(ctx, stream, command, request.PrepareID, "not_eligible", "Runtime is not enabled on this Computer", 0)
 	}
 	key := command.ExecutionContextKey
-	slog.Info("runner.provider.prepare", "phase", "received", "prepare_id", request.PrepareID,
+	slog.Debug("runner.provider.prepare", "phase", "received", "prepare_id", request.PrepareID,
 		"execution_context_key", key, "agent_id", command.AgentID)
 	d.admissionMu.Lock()
 	if d.draining {
@@ -277,7 +277,11 @@ func (d *Daemon) sendProviderPrepared(ctx context.Context, stream transport.Stre
 		PrepareID: prepareID, ExecutionContextKey: command.ExecutionContextKey, Outcome: outcome,
 		DurationMs: uint64(max(duration.Milliseconds(), 0)), Reason: receiptReason(reason),
 	}
-	slog.Info("runner.provider.prepare", "phase", outcome, "prepare_id", prepareID,
+	logFn := slog.Info
+	if outcome == "already_ready" {
+		logFn = slog.Debug
+	}
+	logFn("runner.provider.prepare", "phase", outcome, "prepare_id", prepareID,
 		"execution_context_key", command.ExecutionContextKey, "duration_ms", duration.Milliseconds(),
 		"reason", redact.Text(payload.Reason))
 	return stream.Send(ctx, protocol.Event{

@@ -27,6 +27,7 @@ export type TrayMenuItem =
 export interface TrayMenuState {
   readonly status: StatusSummary;
   readonly preventSleep: boolean;
+  readonly preventSleepPausedOnBattery?: boolean;
   readonly enrolled: boolean;
   // The updater's progress; a failure says why, since it is otherwise only
   // in the log.
@@ -55,7 +56,10 @@ export const trayMenu = (
   {
     kind: "action",
     action: "toggle-prevent-sleep",
-    label: t(m.preventSleep),
+    label:
+      state.preventSleep && state.preventSleepPausedOnBattery
+        ? t(m.preventSleepPausedOnBattery)
+        : t(m.preventSleep),
     checked: state.preventSleep,
   },
   { kind: "separator" },

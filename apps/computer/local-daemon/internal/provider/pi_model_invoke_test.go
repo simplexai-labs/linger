@@ -179,10 +179,46 @@ func TestClassifyPiModelInvokeFailureSanitizesAndDistinguishesCauses(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			got := classifyPiModelInvokeFailure(tc.err, native.Outcome{Status: "failed", Error: tc.answerError})
 			if got.Outcome != tc.wantOutcome || got.Reason != tc.wantReason {
-				t.Fatalf("got = %+v; want outcome=%q reason=%q", got, tc.wantOutcome, tc.wantReason)
+				t.Fatalf("classifyPiModelInvokeFailure = %+v, want outcome=%q reason=%q", got, tc.wantOutcome, tc.wantReason)
 			}
 			if strings.Contains(got.Reason, "127.0.0.1") || strings.Contains(got.Reason, "sk-secret") || strings.Contains(got.Reason, "secret.example") {
 				t.Fatalf("reason leaked sensitive details: %q", got.Reason)
+			}
+		})
+	}
+}
+
+func TestStripMarkdownJSONFence(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "strips json fenced valid object",
+			in:   "  ```json\n{\"ok\":true,\"items\":[1,2]}\n```  ",
+			want: "{\"ok\":true,\"items\":[1,2]}",
+		},
+		{
+			name: "strips unlabeled fenced valid array",
+			in:   "```\n[\"a\",\"b\"]\n```",
+			want: "[\"a\",\"b\"]",
+		},
+		{
+			name: "leaves invalid json fenced content intact for rejection",
+			in:   "```json\n{\"broken\":\n```",
+			want: "```json\n{\"broken\":\n```",
+		},
+		{
+			name: "leaves plain json untouched",
+			in:   "{\"ok\":true}",
+			want: "{\"ok\":true}",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stripMarkdownJSONFence(tc.in); got != tc.want {
+				t.Fatalf("stripMarkdownJSONFence(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}

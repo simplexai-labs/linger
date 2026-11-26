@@ -74,8 +74,9 @@ const serviceFeatureDynamicReasoningEfforts = "dynamic_reasoning_efforts"
 
 // LocalModelLibrary runs the actions a Computer owner chooses on this
 // Computer's localmodels library. The Daemon never picks a model: on its
-// own it loads only the downloaded model a Run's Agent already names, and it
-// never downloads a model or unloads another one to make room.
+// own it loads only the downloaded model a Run's Agent already names, it
+// never downloads a model or unloads another one to make room, and idle
+// loaded models are unloaded after an inactivity window.
 type LocalModelLibrary interface {
 	// Act answers once the tool accepted (nil) or refused the action;
 	// answered is false when the deadline passed before the tool decided.
@@ -88,6 +89,12 @@ type LocalModelLibrary interface {
 	EnsureLoaded(ctx context.Context, piModel string) error
 }
 
+func (d *Daemon) touchLocalModelActivity() {
+	if tracker, ok := d.localModels.(interface{ TouchActivity() }); ok {
+		tracker.TouchActivity()
+	}
+}
+
 // ensureLocalModel loads the library model a Pi Run names before the Run
 // starts, so a model a quit unloaded does not fail every Run until someone
 // loads it by hand. On failure it returns the public Run failure code.
@@ -96,7 +103,11 @@ func (d *Daemon) ensureLocalModel(ctx context.Context, runtimeType, model string
 		return "", nil
 	}
 	err := d.localModels.EnsureLoaded(ctx, model)
-	if err == nil || ctx.Err() != nil {
+	if err == nil {
+		d.touchLocalModelActivity()
+		return "", nil
+	}
+	if ctx.Err() != nil {
 		return "", err
 	}
 	var loadErr *localmodels.LocalModelLoadError

@@ -356,11 +356,11 @@ export function CommandLine({
   const commandRef = useRef<HTMLElement>(null);
   return (
     <div
-      className="mt-2 flex min-w-0 items-center gap-2 rounded-lg bg-muted px-3 py-1.5"
+      className="mt-2 flex min-w-0 items-start gap-2 rounded-lg bg-muted px-3 py-1.5 sm:items-center"
       onClickCapture={onCopy}
     >
       <code
-        className="workspace-scrollbar min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs text-foreground"
+        className="workspace-scrollbar min-w-0 flex-1 break-all whitespace-pre-wrap font-mono text-xs text-foreground sm:break-normal sm:overflow-x-auto sm:whitespace-nowrap"
         ref={commandRef}
       >
         {command}

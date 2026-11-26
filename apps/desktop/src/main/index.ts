@@ -493,14 +493,21 @@ function electronPower(): PowerApi {
   return {
     block: () => powerSaveBlocker.start("prevent-app-suspension"),
     unblock: (id) => powerSaveBlocker.stop(id),
+    isOnBattery: () => powerMonitor.isOnBatteryPower(),
     onPowerEvent: (listener) => {
       const suspend = (): void => listener("suspend");
       const resume = (): void => listener("resume");
+      const onBattery = (): void => listener("on-battery");
+      const onAc = (): void => listener("on-ac");
       powerMonitor.on("suspend", suspend);
       powerMonitor.on("resume", resume);
+      powerMonitor.on("on-battery", onBattery);
+      powerMonitor.on("on-ac", onAc);
       return () => {
         powerMonitor.off("suspend", suspend);
         powerMonitor.off("resume", resume);
+        powerMonitor.off("on-battery", onBattery);
+        powerMonitor.off("on-ac", onAc);
       };
     },
   };

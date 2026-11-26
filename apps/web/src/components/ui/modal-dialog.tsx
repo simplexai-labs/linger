@@ -97,6 +97,11 @@ export function ModalDialog({
       return;
     }
 
+    const previousFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
     if (typeof dialog.showModal === "function") {
       if (!dialog.open) {
         dialog.showModal();
@@ -121,10 +126,17 @@ export function ModalDialog({
     }
 
     return () => {
+      const focusInsideDialog =
+        dialog.contains(document.activeElement) ||
+        document.activeElement === document.body ||
+        document.activeElement === null;
       if (dialog.open && typeof dialog.close === "function") {
         dialog.close();
       } else {
         dialog.removeAttribute("open");
+      }
+      if (previousFocus?.isConnected && focusInsideDialog) {
+        previousFocus.focus({ preventScroll: true });
       }
     };
   }, []);

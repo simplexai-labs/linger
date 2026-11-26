@@ -1,5 +1,9 @@
 import type { ReactNode } from "react";
 
+import { isLanguage, LANGUAGES, setLanguage } from "@/i18n/language";
+import { useTranslation } from "@/i18n/use-translation";
+
+import { authMessages as m } from "./auth.messages";
 import { AuthIllustration } from "./auth-illustration";
 
 export function AuthShell({
@@ -11,6 +15,8 @@ export function AuthShell({
   subtitle: string;
   title: string;
 }) {
+  const { language, t } = useTranslation();
+
   return (
     <main className="auth-page min-h-dvh text-foreground">
       <header className="auth-brand">
@@ -22,6 +28,23 @@ export function AuthShell({
           src="/linger-wordmark.svg"
           width={1225}
         />
+        <select
+          aria-label={t(m.interfaceLanguage)}
+          className="ui-field-control auth-language-select"
+          onChange={(event) => {
+            const next = event.target.value;
+            if (isLanguage(next) && next !== language) {
+              void setLanguage(next).catch(() => {});
+            }
+          }}
+          value={language}
+        >
+          {LANGUAGES.map(({ name, tag }) => (
+            <option key={tag} lang={tag} value={tag}>
+              {name}
+            </option>
+          ))}
+        </select>
       </header>
 
       <div className="auth-stage">

@@ -20,6 +20,7 @@ export const trayMessages = defineMessages("tray", {
   reconnect: "Reconnect This Computer",
   connect: "Connect This Computer…",
   preventSleep: "Prevent Sleep",
+  preventSleepPausedOnBattery: "Prevent Sleep (Paused on Battery)",
   showLogs: "Show Logs",
   saveDiagnostics: "Save Diagnostics…",
   sendDiagnostics: "Send Diagnostics…",

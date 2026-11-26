@@ -43,6 +43,10 @@ const (
 	// firstReadTimeout bounds the status read a Run waits for when the
 	// Library has none yet.
 	firstReadTimeout = 5 * time.Second
+	// defaultIdleUnloadAfter unloads loaded local models after inactivity.
+	defaultIdleUnloadAfter = 15 * time.Minute
+	// defaultIdleCheckInterval caps how often idle unload timers are checked.
+	defaultIdleCheckInterval = time.Minute
 )
 
 // Options configures a Library.
@@ -78,6 +82,15 @@ type Options struct {
 	EnsurePiRetryInterval time.Duration
 	// EnsureLoadTimeout bounds EnsureLoaded's wait for one model.
 	EnsureLoadTimeout time.Duration
+	// IdleUnloadAfter unloads idle loaded models after this inactivity
+	// duration. Zero defaults to 15 minutes; negative values disable unloading.
+	IdleUnloadAfter time.Duration
+	// IdleCheckInterval bounds how frequently idle inactivity is checked.
+	// Zero derives a bounded interval automatically.
+	IdleCheckInterval time.Duration
+	// IsBusy reports whether an active Daemon operation or model invocation
+	// currently needs loaded local models.
+	IsBusy func() bool
 }
 
 // Library runs the localmodels tool for one Computer.
@@ -113,6 +126,10 @@ type Library struct {
 	ensurePiTimeout       time.Duration
 	ensurePiRetryInterval time.Duration
 	ensureLoadTimeout     time.Duration
+	idleUnloadAfter       time.Duration
+	idleCheckInterval     time.Duration
+	isBusy                func() bool
+	hygieneOnce           sync.Once
 	now                   func() time.Time
 	healthCheck           func(ctx context.Context, healthURL string) bool
 	ctx                   context.Context
@@ -131,7 +148,9 @@ type Library struct {
 	current *wire.LocalModelsSnapshot
 	// loaded identifies the loaded models of the last status read; nil
 	// before the first one.
-	loaded *string
+	loaded        *string
+	lastActivity  time.Time
+	idleUnloading bool
 	// testWaiting and testInstallerBusy let tests order goroutines: they
 	// are told when waitLoaded starts and when a lock probe finds the
 	// installer busy. Nil outside tests.
@@ -191,6 +210,9 @@ func New(options Options) *Library {
 		progressInterval: options.ProgressInterval, statusTimeout: options.StatusTimeout, actionTimeout: options.ActionTimeout,
 		ensurePiTimeout: options.EnsurePiTimeout, ensurePiRetryInterval: options.EnsurePiRetryInterval,
 		ensureLoadTimeout: options.EnsureLoadTimeout,
+		idleUnloadAfter:   options.IdleUnloadAfter,
+		idleCheckInterval: options.IdleCheckInterval,
+		isBusy:            options.IsBusy,
 		now:               time.Now, healthCheck: gatewayAnswers, ctx: ctx, stop: stop, jobs: make(map[string]*job), probes: make(map[string]*activeProbe), probeUnknown: make(map[string]probeFingerprint),
 		causes:            make(map[string]*wire.LocalModelError),
 		installerLockWait: defaultInstallerLockWait, installerLockRetry: defaultInstallerLockRetry, settledCh: make(chan struct{}),
@@ -210,6 +232,19 @@ func New(options Options) *Library {
 	library.prober = newConcurrencyProber(probeCacheDir, toolStateDir)
 	if library.ensureLoadTimeout <= 0 {
 		library.ensureLoadTimeout = defaultEnsureLoadTimeout
+	}
+	if library.idleUnloadAfter == 0 {
+		library.idleUnloadAfter = defaultIdleUnloadAfter
+	}
+	if library.idleUnloadAfter > 0 && library.idleCheckInterval <= 0 {
+		interval := defaultIdleCheckInterval
+		if half := library.idleUnloadAfter / 2; half < interval {
+			interval = half
+		}
+		if interval < 10*time.Millisecond {
+			interval = 10 * time.Millisecond
+		}
+		library.idleCheckInterval = interval
 	}
 	if library.progressInterval <= 0 {
 		library.progressInterval = defaultProgressInterval
@@ -239,7 +274,100 @@ func New(options Options) *Library {
 		// Output files of jobs a previous Daemon started are no longer read.
 		_ = os.RemoveAll(library.jobDirectory)
 	}
+	if library.tool != nil && library.tool.installed() && library.idleUnloadAfter > 0 {
+		library.wg.Add(1)
+		go library.idleUnloadLoop()
+	}
 	return library
+}
+
+// TouchActivity records local-model activity so automatic idle unloading
+// defers its inactivity timeout until local work stops.
+func (l *Library) TouchActivity() {
+	l.mu.Lock()
+	l.lastActivity = l.now()
+	l.mu.Unlock()
+}
+
+func (l *Library) scheduleHygiene() {
+	if l.tool == nil || !l.tool.installed() {
+		return
+	}
+	l.hygieneOnce.Do(func() {
+		if !l.track(1) {
+			return
+		}
+		go func() {
+			defer l.wg.Done()
+			l.runStartupHygiene(l.ctx)
+		}()
+	})
+}
+
+func (l *Library) idleUnloadLoop() {
+	defer l.wg.Done()
+	ticker := time.NewTicker(l.idleCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-l.ctx.Done():
+			return
+		case <-ticker.C:
+			l.maybeUnloadIdle()
+		}
+	}
+}
+
+func (l *Library) maybeUnloadIdle() {
+	if l.isBusy != nil && l.isBusy() {
+		l.TouchActivity()
+		return
+	}
+	l.mu.Lock()
+	if l.closed || l.current == nil || len(l.jobs) > 0 || len(l.probes) > 0 || l.idleUnloading {
+		l.mu.Unlock()
+		return
+	}
+	var loadedIDs []string
+	for _, model := range l.current.Models {
+		if model.State == "loaded" {
+			loadedIDs = append(loadedIDs, model.ID)
+		}
+	}
+	if len(loadedIDs) == 0 {
+		l.mu.Unlock()
+		return
+	}
+	now := l.now()
+	if l.lastActivity.IsZero() {
+		l.lastActivity = now
+		l.mu.Unlock()
+		return
+	}
+	idleFor := now.Sub(l.lastActivity)
+	if idleFor < l.idleUnloadAfter {
+		l.mu.Unlock()
+		return
+	}
+	l.idleUnloading = true
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		l.idleUnloading = false
+		l.mu.Unlock()
+	}()
+
+	for _, id := range loadedIDs {
+		if l.ctx.Err() != nil {
+			return
+		}
+		if l.isBusy != nil && l.isBusy() {
+			l.TouchActivity()
+			return
+		}
+		slog.Info("local_models.idle_unload", "model", id, "idle_for", idleFor.Round(time.Second).String())
+		l.Act(l.ctx, Action{Name: ActionUnload, Model: id}, l.now().Add(l.actionTimeout))
+	}
 }
 
 // Close stops supervision and polling, and returns only after the Library's
@@ -354,6 +482,7 @@ func (l *Library) scheduleEnsurePi() {
 
 // Refresh reads the library now, publishes the snapshot and returns it.
 func (l *Library) Refresh(ctx context.Context) wire.LocalModelsSnapshot {
+	l.scheduleHygiene()
 	l.refreshMu.Lock()
 	snapshot := l.read(ctx)
 	if ctx.Err() != nil {
@@ -373,8 +502,12 @@ func (l *Library) Refresh(ctx context.Context) wire.LocalModelsSnapshot {
 	if snapshot.Available {
 		key := loadedKey(snapshot)
 		hasLoaded = key != ""
+		firstLoaded := l.loaded == nil && hasLoaded
 		changed = l.loaded != nil && *l.loaded != key
 		l.loaded = &key
+		if firstLoaded || (changed && hasLoaded) {
+			l.lastActivity = l.now()
+		}
 		// The Pi catalog the Daemon reports also lists every downloaded
 		// library model, so a finished download or a removal changes it too,
 		// as does the first read that finds any.
@@ -1194,6 +1327,7 @@ func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
 	}
 	row := snapshot.Models[index]
 	if row.State == "loaded" && l.localGatewayHealthy(ctx) {
+		l.TouchActivity()
 		return nil
 	}
 	state := loadState(row)
@@ -1202,7 +1336,11 @@ func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
 		// treat it as failed so ensureByID resets and reloads it cleanly.
 		state = "failed"
 	}
-	return l.ensureByID(ctx, row.ID, state, waitedFrom)
+	err := l.ensureByID(ctx, row.ID, state, waitedFrom)
+	if err == nil {
+		l.TouchActivity()
+	}
+	return err
 }
 
 // ensureByID loads id, last seen in state, unless it is loaded, and waits

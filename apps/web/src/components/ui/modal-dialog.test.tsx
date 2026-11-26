@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { useState } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModalDialog } from "./modal-dialog";
@@ -60,5 +61,39 @@ describe("ModalDialog initial focus", () => {
     );
 
     expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
+  });
+
+  it("restores focus to the triggering element when closed via Escape", () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <div>
+          <button onClick={() => setOpen(true)} type="button">
+            Open modal
+          </button>
+          {open ? (
+            <ModalDialog onClose={() => setOpen(false)} title="Create">
+              <input aria-label="Name" />
+            </ModalDialog>
+          ) : null}
+        </div>
+      );
+    }
+
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "Open modal" });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const input = screen.getByRole("textbox", { name: "Name" });
+    expect(input).toHaveFocus();
+
+    const dialog = screen.getByRole("dialog", { name: "Create" });
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+
+    expect(
+      screen.queryByRole("dialog", { name: "Create" }),
+    ).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 });

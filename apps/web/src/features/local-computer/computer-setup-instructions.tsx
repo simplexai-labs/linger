@@ -132,9 +132,9 @@ function SetupStep({
       <StepNumber>{number}</StepNumber>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-foreground">{title}</p>
-        <div className="mt-2 flex min-w-0 items-center gap-1.5 rounded-lg border border-border bg-muted/60 px-2.5 py-2">
+        <div className="mt-2 flex min-w-0 items-start gap-1.5 rounded-lg border border-border bg-muted/60 px-2.5 py-2 sm:items-center">
           <code
-            className="workspace-scrollbar min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs text-foreground"
+            className="workspace-scrollbar min-w-0 flex-1 break-all whitespace-pre-wrap font-mono text-xs text-foreground sm:break-normal sm:overflow-x-auto sm:whitespace-nowrap"
             ref={commandRef}
           >
             {command}

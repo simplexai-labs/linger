@@ -10,7 +10,10 @@ import {
   TeamHubError,
   type TeamHubClient,
 } from "@/features/teamhub/teamhub-client";
-import { teamHubData } from "@/features/teamhub/teamhub-api";
+import {
+  quietAuthenticationHeaders,
+  teamHubData,
+} from "@/features/teamhub/teamhub-api";
 import { teamHubClientErrorMessages } from "@/features/teamhub/teamhub-client-errors.messages";
 import { collectTeamHubCursorPages } from "@/features/teamhub/teamhub-cursor-pages";
 import type {
@@ -197,9 +200,20 @@ export function teamHubIdentityQueryOptions(client: TeamHubClient) {
   });
 }
 
-export function teamHubTenantsQueryOptions(client: TeamHubClient) {
+export function teamHubTenantsQueryOptions(
+  client: TeamHubClient,
+  options?: { readonly quietAuth?: boolean },
+) {
   return queryOptions({
-    queryFn: () => teamHubData(client.api.GET("/v0/tenants")),
+    queryFn: () =>
+      teamHubData(
+        client.api.GET(
+          "/v0/tenants",
+          options?.quietAuth
+            ? { headers: quietAuthenticationHeaders() }
+            : undefined,
+        ),
+      ),
     queryKey: teamHubTenantsQueryKey,
     staleTime: 30_000,
   });

@@ -182,4 +182,35 @@ describe("the tray in Chinese", () => {
       body: zhCN.tray.ready.replace("{version}", "0.17.0"),
     });
   });
+
+  it("notes when Prevent Sleep is paused on battery in EN and zh-CN", () => {
+    const enPaused = menu({
+      status: { tone: "online", label: "Online · Idle" },
+      preventSleep: true,
+      preventSleepPausedOnBattery: true,
+      enrolled: true,
+    });
+    expect(enPaused).toContainEqual({
+      kind: "action",
+      action: "toggle-prevent-sleep",
+      label: "Prevent Sleep (Paused on Battery)",
+      checked: true,
+    });
+    const zh = translator("zh-CN");
+    const zhPaused = trayMenu(
+      {
+        status: { tone: "online", label: zhCN.status.idle },
+        preventSleep: true,
+        preventSleepPausedOnBattery: true,
+        enrolled: true,
+      },
+      zh,
+    );
+    expect(zhPaused).toContainEqual({
+      kind: "action",
+      action: "toggle-prevent-sleep",
+      label: zhCN.tray.preventSleepPausedOnBattery,
+      checked: true,
+    });
+  });
 });

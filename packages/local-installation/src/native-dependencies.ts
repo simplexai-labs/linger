@@ -872,6 +872,11 @@ export async function prepareNativeDependencies(options: {
   // Windows keeps one case-insensitive Path; a second spelling would shadow ours.
   for (const key of Object.keys(inherited))
     if (key !== "PATH" && key.toUpperCase() === "PATH") delete inherited[key];
+  // Never inherit host Go toolchain variables (such as mise shims) when Go is omitted.
+  if (!go) {
+    delete inherited.GOROOT;
+    delete inherited.GOBIN;
+  }
   const env = {
     ...inherited,
     PATH: [bin, path.join(pg, "bin"), process.env.PATH ?? ""].join(

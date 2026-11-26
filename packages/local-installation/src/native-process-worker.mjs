@@ -1,9 +1,10 @@
 // Persistent owner of one native service group. Only redacted lines reach disk.
 import { spawn } from "node:child_process";
-import { constants, closeSync, existsSync, writeSync } from "node:fs";
-import { open, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { constants, open, rm } from "node:fs/promises";
 import path from "node:path";
 import { lineRedactor } from "./redaction.ts";
+import { openRotatingNativeLog } from "./native-log.ts";
 import {
   nativeLeaseProcesses,
   nativeProcessIdentity,
@@ -53,7 +54,8 @@ async function endLeftovers(lease) {
 const privateOwner = (info) =>
   process.platform === "win32" ||
   (info.uid === process.getuid?.() && !(info.mode & 0o077));
-let output;
+
+let log;
 try {
   const input = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
   let job;
@@ -82,38 +84,15 @@ try {
     ![undefined, true].includes(job.withoutAdministrators)
   )
     throw new Error("Invalid native job");
-  output = await open(
-    job.log,
-    constants.O_CREAT |
-      constants.O_APPEND |
-      constants.O_WRONLY |
-      constants.O_NOFOLLOW,
-    0o600,
-  );
-  const info = await output.stat();
-  if (!info.isFile() || !privateOwner(info))
-    throw new Error("Unsafe native log");
+  log = openRotatingNativeLog({
+    path: job.log,
+    droppedLineMessage: (dropped) =>
+      `[linger-supervisor] ${job.name} could not write ${dropped} log lines\n`,
+  });
   const secrets = job.redactions
     .filter((value) => typeof value === "string" && value.length)
     .sort((a, b) => b.length - a.length);
-  let dropped = 0;
-  const append = (line) => {
-    try {
-      if (dropped) {
-        writeSync(
-          output.fd,
-          `[linger-supervisor] ${job.name} could not write ${dropped} log lines\n`,
-        );
-        dropped = 0;
-      }
-      writeSync(output.fd, line);
-    } catch {
-      // Keep draining the pipes and retain the process owner even when disk
-      // writes fail, and try again with the next line: a full disk frees up.
-      // Never fall back to an unredacted stream or crash here.
-      dropped++;
-    }
-  };
+  const append = (line) => log.append(line);
   const streams = [0, 1].map(() =>
     lineRedactor((line) => {
       for (const secret of secrets)
@@ -239,7 +218,7 @@ try {
       // Air and other watchers create new groups. Their inherited lease
       // keeps ownership provable even after their original parent exits.
       if (!(await nativeLeaseProcesses(lease)).length) {
-        closeSync(output.fd);
+        log.close();
         process.exit(0);
       }
     } catch {
@@ -250,6 +229,6 @@ try {
   void check();
 } catch {
   process.send?.("failed");
-  await output?.close().catch(() => {});
+  log?.close();
   process.exit(1);
 }

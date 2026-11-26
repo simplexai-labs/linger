@@ -77,7 +77,9 @@ export function createAppRoutes(
         try {
           const [sessionResult, tenantsResult] = await Promise.allSettled([
             queryClient.fetchQuery(teamHubSessionQueryOptions(client)),
-            queryClient.fetchQuery(teamHubTenantsQueryOptions(client)),
+            queryClient.fetchQuery(
+              teamHubTenantsQueryOptions(client, { quietAuth: true }),
+            ),
           ]);
 
           // Inspect session before tenants so a 401 always redirects to /login
@@ -174,7 +176,9 @@ export function createAppRoutes(
         try {
           await Promise.all([
             queryClient.ensureQueryData(teamHubSessionQueryOptions(client)),
-            queryClient.ensureQueryData(teamHubTenantsQueryOptions(client)),
+            queryClient.ensureQueryData(
+              teamHubTenantsQueryOptions(client, { quietAuth: true }),
+            ),
           ]);
           return null;
         } catch (error) {

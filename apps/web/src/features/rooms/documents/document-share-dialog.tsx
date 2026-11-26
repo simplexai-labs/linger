@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert02Icon,
   ArrowLeft01Icon,
@@ -15,6 +15,7 @@ import { Select, SelectItem } from "@/components/ui/select";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { ActorAvatar } from "@/features/rooms/members/actor-avatar";
 import { writeClipboardText } from "@/lib/clipboard";
+import { roomDocumentsQueryKey } from "@/features/rooms/room-queries";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { type TeamHubClient } from "@/features/teamhub/teamhub-client";
 import { DocumentLinkSharing } from "./document-link-sharing";
@@ -49,6 +50,7 @@ export function DocumentShareDialog({
   tenantId: string;
 }) {
   const t = useT();
+  const queryClient = useQueryClient();
   const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [view, setView] = useState<"share" | "manage">("share");
@@ -148,7 +150,15 @@ export function DocumentShareDialog({
           },
         ),
       );
-      await share.refetch();
+      await Promise.all([
+        share.refetch(),
+        queryClient.invalidateQueries({
+          queryKey: roomDocumentsQueryKey(tenantId, roomId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["teamhub", tenantId, "shareable-documents"],
+        }),
+      ]);
     } catch {
       setActionError(translate(m.removeFromRoomFailed));
       throw new Error("Remove from Room failed");

@@ -1421,6 +1421,7 @@ function ComposerToolbar({
                 multiple
                 onChange={onFilesChange}
                 ref={fileInputRef}
+                tabIndex={-1}
                 type="file"
               />
             </>

@@ -879,19 +879,23 @@ export class RemoteRuntimeProvider implements AgentProvider {
       });
       return;
     }
-    this.#logger?.log("info", "runner.provider.prepare_sent", {
-      prepareId: prepared.prepareId,
-      executionContextKey: prepared.executionContextKey,
-      source,
-      ...(acceptedInputSinceMs !== undefined
-        ? {
-            acceptToPrepareMs: Math.max(
-              0,
-              Math.round(performance.now() - acceptedInputSinceMs),
-            ),
-          }
-        : {}),
-    });
+    this.#logger?.log(
+      source === "room_presence" ? "debug" : "info",
+      "runner.provider.prepare_sent",
+      {
+        prepareId: prepared.prepareId,
+        executionContextKey: prepared.executionContextKey,
+        source,
+        ...(acceptedInputSinceMs !== undefined
+          ? {
+              acceptToPrepareMs: Math.max(
+                0,
+                Math.round(performance.now() - acceptedInputSinceMs),
+              ),
+            }
+          : {}),
+      },
+    );
   }
 
   /**

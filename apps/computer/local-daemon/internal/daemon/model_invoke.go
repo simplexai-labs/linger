@@ -179,6 +179,7 @@ func (d *Daemon) runModelInvoke(ctx context.Context, stream transport.Stream, co
 		delete(d.modelInvokes, entry.id)
 	}
 	d.modelInvokeMu.Unlock()
+	d.touchLocalModelActivity()
 	if err := d.sendModelInvoked(context.WithoutCancel(ctx), stream, command, entry.id, result, time.Since(receivedAt)); err != nil {
 		slog.Debug("runner.model.invoke receipt unavailable", "invoke_id", entry.id)
 	}

@@ -130,6 +130,7 @@ func (d *Daemon) finishOperation(ctx context.Context, command protocol.Command, 
 	d.activeMu.Lock()
 	delete(d.activeOperations, command.OperationID)
 	d.activeMu.Unlock()
+	d.touchLocalModelActivity()
 }
 
 func (d *Daemon) handleOperationCancel(command protocol.Command) error {

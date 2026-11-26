@@ -455,7 +455,11 @@ describe("MessageComposer", () => {
 
     fireEvent.change(editor, { target: { value: "@Cod" } });
     fireEvent.click(screen.getByRole("option", { name: /Codex/ }));
-    fireEvent.change(screen.getByLabelText("Choose message attachments"), {
+    const attachmentsInput = screen.getByLabelText(
+      "Choose message attachments",
+    );
+    expect(attachmentsInput).toHaveAttribute("tabindex", "-1");
+    fireEvent.change(attachmentsInput, {
       target: { files: [file] },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -490,7 +494,11 @@ describe("MessageComposer", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("Choose message attachments"), {
+    const attachmentsInput = screen.getByLabelText(
+      "Choose message attachments",
+    );
+    expect(attachmentsInput).toHaveAttribute("tabindex", "-1");
+    fireEvent.change(attachmentsInput, {
       target: { files: [file] },
     });
 
@@ -541,7 +549,11 @@ describe("MessageComposer", () => {
         onStageAttachment={onStageAttachment}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Choose message attachments"), {
+    const attachmentsInput = screen.getByLabelText(
+      "Choose message attachments",
+    );
+    expect(attachmentsInput).toHaveAttribute("tabindex", "-1");
+    fireEvent.change(attachmentsInput, {
       target: { files: [file] },
     });
 
@@ -562,7 +574,11 @@ describe("MessageComposer", () => {
         onStageAttachment={onStageAttachment}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Choose message attachments"), {
+    const attachmentsInput = screen.getByLabelText(
+      "Choose message attachments",
+    );
+    expect(attachmentsInput).toHaveAttribute("tabindex", "-1");
+    fireEvent.change(attachmentsInput, {
       target: { files: [file] },
     });
 
@@ -602,7 +618,11 @@ describe("MessageComposer", () => {
       />
     );
     const first = render(composer());
-    fireEvent.change(screen.getByLabelText("Choose message attachments"), {
+    const attachmentsInput = screen.getByLabelText(
+      "Choose message attachments",
+    );
+    expect(attachmentsInput).toHaveAttribute("tabindex", "-1");
+    fireEvent.change(attachmentsInput, {
       target: { files: [file] },
     });
     expect(await screen.findByText("plan.md")).toBeVisible();

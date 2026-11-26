@@ -9,6 +9,7 @@ import { teamHubErrorMessages as m } from "./teamhub-error.messages";
 // "This email was already sent." A case worth its own wording needs its own
 // code from TeamHub first.
 const worded: Readonly<Record<string, Message<string>>> = {
+  INVALID_CREDENTIALS: m.invalidCredentials,
   UNAUTHENTICATED: m.unauthenticated,
   RATE_LIMITED: m.rateLimited,
   INTERNAL_ERROR: m.internal,

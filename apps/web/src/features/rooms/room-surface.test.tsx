@@ -235,10 +235,17 @@ describe("RoomSurface command availability", () => {
 
     const title = within(header).getByRole("heading", { name: "all" });
     const titleRegion = title.parentElement;
+    const mobileNavSlot = within(header)
+      .getByRole("button", { name: /Open Room navigation/i })
+      .closest("div");
     const actions = header.querySelector(
       "[data-panel-trigger-slot]",
     )?.parentElement;
 
+    expect(header).toHaveClass(
+      "grid-cols-[minmax(max-content,1fr)_minmax(0,auto)_minmax(max-content,1fr)]",
+    );
+    expect(mobileNavSlot).toHaveClass("shrink-0");
     expect(titleRegion).toHaveClass("min-w-0");
     expect(titleRegion).not.toHaveClass("md:shrink-0");
     expect(title).toHaveClass("truncate");

@@ -3,6 +3,7 @@ import { defineMessages } from "@/i18n/messages";
 export const authMessages = defineMessages("auth", {
   loginTitle: "Log in",
   loginSubtitle: "Welcome back to Linger.",
+  interfaceLanguage: "Interface language",
   sessionExpired: "Your session has expired. Sign in again to continue.",
   localAccountSignIn: "Sign in with this computer's account",
   or: "or",

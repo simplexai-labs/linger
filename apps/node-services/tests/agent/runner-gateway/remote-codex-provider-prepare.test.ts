@@ -360,6 +360,38 @@ describe("RemoteCodexProvider presence prepare", () => {
     });
   });
 
+  it("logs runner.provider.prepare_sent at debug for room_presence and info for accepted_input", async () => {
+    const dispatcher = new RecordingDispatcher();
+    const events: Array<{ level: string; event: string; source?: unknown }> =
+      [];
+    const logger = {
+      log(level: string, event: string, fields?: Record<string, unknown>) {
+        events.push({ level, event, source: fields?.source });
+      },
+    } as unknown as AgentLogger;
+    const provider = createProvider(dispatcher, undefined, undefined, logger);
+    const session = await provider.resumeSession(
+      { ...resumedSession },
+      sessionOptions(),
+    );
+
+    provider.prepareForPresence(session);
+    provider.prepareForAcceptedInput(session, { acceptedInputSinceMs: 0 });
+
+    expect(events).toEqual([
+      {
+        level: "debug",
+        event: "runner.provider.prepare_sent",
+        source: "room_presence",
+      },
+      {
+        level: "info",
+        event: "runner.provider.prepare_sent",
+        source: "accepted_input",
+      },
+    ]);
+  });
+
   it("sends a Claude presence prepare with the conversation id the following run.start sends", async () => {
     const dispatcher = new RecordingDispatcher();
     const provider = createProvider(dispatcher, { type: "claude" });

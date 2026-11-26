@@ -393,11 +393,9 @@ func carryOrResolveModelLinks(ctx context.Context, kind string, environment map[
 	}
 }
 
-func refreshAuthenticationProbe(ctx context.Context, diagnostic RuntimeDiagnostic, environment map[string]string, options DiscoveryOptions) runtimeProbeOutcome {
-	budget := boundedAuthTimeout(options.Timeout)
-	if diagnostic.Type != "codex" {
-		return probeRuntimeAuthentication(ctx, diagnostic.Type, diagnostic.ExecutablePath, environment, budget, options.RuntimeHomeRoot)
-	}
+var codexAuthConfirmDelay = 250 * time.Millisecond
+
+func probeCodexAuthenticationOnce(ctx context.Context, diagnostic RuntimeDiagnostic, environment map[string]string, budget time.Duration, runtimeHomeRoot string) runtimeProbeOutcome {
 	probe, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	// An authentication probe lists no models, so its home needs no cache.
@@ -406,7 +404,26 @@ func refreshAuthenticationProbe(ctx context.Context, diagnostic RuntimeDiagnosti
 		return runtimeProbeOutcome{Status: "error", Code: "RUNTIME_DIAGNOSTIC_FAILED", Message: "Codex diagnostic home could not be prepared"}
 	}
 	defer release()
-	return probeRuntimeAuthentication(probe, diagnostic.Type, diagnostic.ExecutablePath, prepared, budget, options.RuntimeHomeRoot)
+	return probeRuntimeAuthentication(probe, diagnostic.Type, diagnostic.ExecutablePath, prepared, budget, runtimeHomeRoot)
+}
+
+func refreshAuthenticationProbe(ctx context.Context, diagnostic RuntimeDiagnostic, environment map[string]string, options DiscoveryOptions) runtimeProbeOutcome {
+	budget := boundedAuthTimeout(options.Timeout)
+	if diagnostic.Type != "codex" {
+		return probeRuntimeAuthentication(ctx, diagnostic.Type, diagnostic.ExecutablePath, environment, budget, options.RuntimeHomeRoot)
+	}
+	outcome := probeCodexAuthenticationOnce(ctx, diagnostic, environment, budget, options.RuntimeHomeRoot)
+	if diagnostic.Status != "ready" || outcome.Status != "authentication_required" {
+		return outcome
+	}
+	timer := time.NewTimer(codexAuthConfirmDelay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		return outcome
+	}
+	return probeCodexAuthenticationOnce(ctx, diagnostic, environment, budget, options.RuntimeHomeRoot)
 }
 
 // changedInstallations names the Runtimes discovery found not installed or

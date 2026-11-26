@@ -1,11 +1,14 @@
 import type { ComputerDaemonModule } from "./computer-daemon.js";
 import type { Module, ModuleContext } from "./modules.js";
 
+export type PowerEventKind = "suspend" | "resume" | "on-battery" | "on-ac";
+
 // Electron's powerSaveBlocker and powerMonitor, injected for tests.
 export interface PowerApi {
   block(): number;
   unblock(id: number): void;
-  onPowerEvent(listener: (kind: "suspend" | "resume") => void): () => void;
+  isOnBattery?(): boolean;
+  onPowerEvent(listener: (kind: PowerEventKind) => void): () => void;
 }
 
 // Keeps the system awake briefly after a background model call finishes so
@@ -14,8 +17,8 @@ export interface PowerApi {
 export const MODEL_ACTIVITY_TAIL_MS = 3 * 60_000;
 
 // Keeps the system awake while operations, background model invocations, or
-// installations run, or in always-on mode. The daemon reconnects by itself
-// after a resume.
+// installations run, or in always-on mode while on AC power. The daemon
+// reconnects by itself after a resume.
 export class PowerGuardModule implements Module {
   readonly name = "PowerGuard";
   readonly dependsOn = ["ComputerDaemon"];
@@ -26,9 +29,14 @@ export class PowerGuardModule implements Module {
   #modelTail: NodeJS.Timeout | undefined;
   #installing = false;
   #updatingDriver = false;
+  #onBattery = false;
   #blocker: number | undefined;
   #lastEmitted:
-    | { readonly active: boolean; readonly alwaysOn: boolean }
+    | {
+        readonly active: boolean;
+        readonly alwaysOn: boolean;
+        readonly pausedOnBattery: boolean;
+      }
     | undefined;
   readonly #unsubscribe: (() => void)[] = [];
 
@@ -41,6 +49,7 @@ export class PowerGuardModule implements Module {
     const daemon = ctx.get<ComputerDaemonModule>("ComputerDaemon");
     this.#running = daemon.running();
     this.#modelInvokes = daemon.modelInvokes();
+    this.#onBattery = this.#power.isOnBattery?.() ?? false;
     this.#unsubscribe.push(
       ctx.bus.on("runtime.activity", (running) => {
         this.#running = running;
@@ -63,6 +72,13 @@ export class PowerGuardModule implements Module {
       }),
       this.#power.onPowerEvent((kind) => {
         ctx.log.info("power.event", { kind });
+        if (kind === "on-battery" || kind === "on-ac") {
+          const onBattery = kind === "on-battery";
+          if (this.#onBattery !== onBattery) {
+            this.#onBattery = onBattery;
+            this.#apply();
+          }
+        }
       }),
     );
     this.#apply();
@@ -87,6 +103,10 @@ export class PowerGuardModule implements Module {
     return this.#blocker !== undefined;
   }
 
+  pausedOnBattery(): boolean {
+    return this.alwaysOn() && this.#onBattery && !this.active();
+  }
+
   #armModelTail(): void {
     this.#clearModelTail();
     this.#modelTail = setTimeout(() => {
@@ -104,13 +124,13 @@ export class PowerGuardModule implements Module {
 
   #apply(): void {
     const alwaysOn = this.alwaysOn();
-    const want =
-      alwaysOn ||
+    const hasWork =
       this.#running > 0 ||
       this.#modelInvokes > 0 ||
       this.#modelTail !== undefined ||
       this.#installing ||
       this.#updatingDriver;
+    const want = (alwaysOn && !this.#onBattery) || hasWork;
     if (want && this.#blocker === undefined) {
       this.#blocker = this.#power.block();
       this.#ctx!.log.info("power.blocking", {
@@ -118,17 +138,20 @@ export class PowerGuardModule implements Module {
         model_invokes: this.#modelInvokes,
         installing: this.#installing,
         updating_driver: this.#updatingDriver,
+        on_battery: this.#onBattery,
       });
     } else if (!want) {
       this.#release();
     }
     const active = this.active();
+    const pausedOnBattery = alwaysOn && this.#onBattery && !active;
     if (
       this.#lastEmitted?.active === active &&
-      this.#lastEmitted.alwaysOn === alwaysOn
+      this.#lastEmitted.alwaysOn === alwaysOn &&
+      this.#lastEmitted.pausedOnBattery === pausedOnBattery
     )
       return;
-    this.#lastEmitted = { active, alwaysOn };
+    this.#lastEmitted = { active, alwaysOn, pausedOnBattery };
     this.#ctx!.bus.emit("power.changed");
   }
 

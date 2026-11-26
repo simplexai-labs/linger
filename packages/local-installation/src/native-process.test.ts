@@ -1,9 +1,12 @@
 import {
+  mkdir,
   mkdtemp,
   readFile,
   readdir,
   readlink,
   rm,
+  stat,
+  truncate,
   writeFile,
 } from "node:fs/promises";
 import net from "node:net";
@@ -511,6 +514,38 @@ test.for(["ENOSPC", "EIO"])(
     }
   },
 );
+
+test("rotates oversized native logs at 10 MiB before logging new output", async (context) => {
+  const { expect } = context;
+  const root = await fixture(context);
+  const logDir = path.join(root, "native/logs");
+  await mkdir(logDir, { recursive: true, mode: 0o700 });
+  const activeLog = path.join(logDir, "web.log");
+  await writeFile(activeLog, "", { mode: 0o600 });
+  await truncate(activeLog, 10 * 1024 * 1024);
+
+  await startNativeProcess({
+    root,
+    name: "web",
+    executable: process.execPath,
+    cwd: root,
+    env: process.env,
+    args: ["-e", 'console.log("rotated-ok"); setInterval(() => {}, 1000);'],
+  });
+  await expect
+    .poll(async () => readFile(activeLog, "utf8").catch(() => ""))
+    .toContain("rotated-ok");
+  const files = await readdir(logDir);
+  expect(files).toContain("web.log");
+  expect(files).toContain("web.log.1");
+  const activeStat = await stat(activeLog);
+  expect(activeStat.size).toBeLessThan(1024 * 1024);
+  if (!windows) {
+    expect(activeStat.mode & 0o077).toBe(0);
+    expect((await stat(path.join(logDir, "web.log.1"))).mode & 0o077).toBe(0);
+  }
+  await stopNativeProcess(root, "web");
+});
 
 posix.for([false, true])(
   "stops leased orphan descendants across groups (owner killed: %s)",

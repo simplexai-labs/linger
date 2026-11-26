@@ -1353,10 +1353,11 @@ describe("Unified Document page", () => {
       remove,
     );
 
-    renderUnifiedDocumentPage(
+    const { queryClient } = renderUnifiedDocumentPage(
       runtime,
       `/t/tenant-northstar/documents/${document.id}`,
     );
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     fireEvent.click(await screen.findByRole("button", { name: "Share" }));
     fireEvent.click(
       await screen.findByRole("button", { name: "Remove from Room" }),
@@ -1371,6 +1372,15 @@ describe("Unified Document page", () => {
         }),
       ),
     );
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: [
+        "teamhub",
+        "tenant-northstar",
+        "room",
+        "room-launch",
+        "documents",
+      ],
+    });
   });
 
   it("shares the Document with a picked Agent", async () => {
@@ -2383,7 +2393,7 @@ function renderUnifiedDocumentPage(
       </TeamHubRuntimeProvider>
     </QueryClientProvider>,
   );
-  return { ...rendered, router };
+  return { ...rendered, queryClient, router };
 }
 
 const versionCreatedAt = "2026-08-28T00:00:00Z";

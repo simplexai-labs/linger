@@ -2,9 +2,11 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
 	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
@@ -46,7 +48,11 @@ func invokePiModel(ctx context.Context, request ModelInvokeRequest, installed Mo
 	case len(answer.Output) > ModelInvokeMaxTextBytes:
 		return ModelInvokeResult{Outcome: ModelInvokeOutputLimited, Reason: "Pi background reply exceeds 1 MiB"}
 	}
-	result := ModelInvokeResult{Outcome: ModelInvokeCompleted, Text: answer.Output, Model: model}
+	text := answer.Output
+	if request.Mode == ModelInvokeStructured {
+		text = stripMarkdownJSONFence(text)
+	}
+	result := ModelInvokeResult{Outcome: ModelInvokeCompleted, Text: text, Model: model}
 	for _, count := range answer.Usage {
 		if result.Usage == nil {
 			result.Usage = &ModelInvokeUsage{}
@@ -56,6 +62,26 @@ func invokePiModel(ctx context.Context, request ModelInvokeRequest, installed Mo
 		result.Usage.CachedInputTokens += count.CacheRead
 	}
 	return result
+}
+
+func stripMarkdownJSONFence(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "```") {
+		return raw
+	}
+	newline := strings.IndexByte(trimmed, '\n')
+	if newline < 0 {
+		return raw
+	}
+	inner := strings.TrimRight(trimmed[newline+1:], " \t\r\n")
+	if !strings.HasSuffix(inner, "```") {
+		return raw
+	}
+	candidate := strings.TrimSpace(strings.TrimSuffix(inner, "```"))
+	if candidate == "" || !json.Valid([]byte(candidate)) {
+		return raw
+	}
+	return candidate
 }
 
 // classifyPiModelInvokeFailure maps Pi background call errors to sanitized

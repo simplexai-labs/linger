@@ -278,7 +278,9 @@ that the shared `owned.json` owns, every call gets that directory as
 `owned.json` records, and the choice is recorded once in
 `<home>/runtime/localmodels/tools-dir` for the installer and the Daemon to
 follow. Isolating such a home would read its deployments as removed and its
-plan as changed, and the upgraded app could not start.
+plan as changed, and the upgraded app could not start. Legacy `~/.simplexai`
+directories from older installations are likewise kept intact on disk for
+backward compatibility and are not automatically deleted.
 
 Setup sets the Computer's model source through `localmodels source apply`
 (`byok-source.ts`): BYOK after the Runtime is ready, a local model after the

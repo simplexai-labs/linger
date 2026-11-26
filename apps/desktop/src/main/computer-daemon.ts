@@ -2,13 +2,17 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   createWriteStream,
+  existsSync,
   mkdirSync,
   renameSync,
+  statSync,
+  unlinkSync,
   writeFileSync,
+  type WriteStream,
 } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { finished } from "node:stream";
+import { finished, Writable } from "node:stream";
 
 import {
   localModelsConfig,
@@ -611,6 +615,137 @@ const LOG_RECORD =
 // The first line of a Go runtime crash.
 const GO_CRASH = /^(?:panic|fatal error): /;
 
+const DAEMON_LOG_MAX_BYTES = 10 * 1024 * 1024;
+const DAEMON_LOG_MAX_BACKUPS = 3;
+
+function shiftRotatedLogs(logFile: string, maxBackups: number): void {
+  const oldest = `${logFile}.${maxBackups}`;
+  try {
+    if (existsSync(oldest)) unlinkSync(oldest);
+  } catch {
+    // Best-effort pruning; daemon stdio must stay writable.
+  }
+  for (let index = maxBackups - 1; index >= 1; index--) {
+    const source = `${logFile}.${index}`;
+    const target = `${logFile}.${index + 1}`;
+    try {
+      if (existsSync(source)) renameSync(source, target);
+    } catch {
+      // Skip transient backup conflicts.
+    }
+  }
+  renameSync(logFile, `${logFile}.1`);
+}
+
+export function createRotatingLogStream(
+  logFile: string,
+  maxBytes = DAEMON_LOG_MAX_BYTES,
+  maxBackups = DAEMON_LOG_MAX_BACKUPS,
+): Writable {
+  mkdirSync(path.dirname(logFile), { recursive: true, mode: 0o700 });
+  let size = 0;
+  try {
+    size = statSync(logFile).size;
+    if (size >= maxBytes) {
+      shiftRotatedLogs(logFile, maxBackups);
+      size = 0;
+    }
+  } catch {
+    // Missing or unreadable log file starts from zero.
+  }
+
+  let active: WriteStream | undefined;
+  let failed = false;
+
+  const openStream = (): void => {
+    const next = createWriteStream(logFile, { flags: "a", mode: 0o600 });
+    next.on("error", () => {
+      failed = true;
+      if (active === next) active = undefined;
+    });
+    active = next;
+  };
+
+  openStream();
+
+  return new Writable({
+    write(chunk, encoding, callback) {
+      if (failed || !active || active.destroyed || active.writableEnded) {
+        callback();
+        return;
+      }
+      const data = Buffer.isBuffer(chunk)
+        ? chunk
+        : Buffer.from(chunk, encoding);
+      const current = active;
+      let settled = false;
+      const done = (): void => {
+        if (settled) return;
+        settled = true;
+        callback();
+      };
+      const onError = (): void => {
+        failed = true;
+        if (active === current) active = undefined;
+        done();
+      };
+      current.once("error", onError);
+      current.write(data, (error) => {
+        current.off("error", onError);
+        if (settled) return;
+        if (error || failed) {
+          failed = true;
+          if (active === current) active = undefined;
+          done();
+          return;
+        }
+        size += data.byteLength;
+        if (size < maxBytes) {
+          done();
+          return;
+        }
+        current.end();
+        finished(current, (finishError) => {
+          if (active === current) active = undefined;
+          if (finishError || failed) {
+            failed = true;
+            done();
+            return;
+          }
+          try {
+            shiftRotatedLogs(logFile, maxBackups);
+            size = 0;
+            openStream();
+          } catch {
+            failed = true;
+          }
+          done();
+        });
+      });
+    },
+    final(callback) {
+      const current = active;
+      active = undefined;
+      if (current && !current.destroyed && !current.closed) {
+        current.end();
+        finished(current, () => callback());
+        return;
+      }
+      callback();
+    },
+    destroy(error, callback) {
+      const current = active;
+      active = undefined;
+      if (current && !current.destroyed && !current.closed) {
+        current.destroy();
+        finished(current, () => callback(error));
+        return;
+      }
+      callback(error);
+    },
+  });
+}
+
 export const spawnDaemon =
   (executable: string, logFile: string): SpawnDaemon =>
   (configFile, env) => {
@@ -623,7 +758,7 @@ export const spawnDaemon =
       detached: process.platform !== "win32",
       windowsHide: true,
     });
-    const log = createWriteStream(logFile, { flags: "a", mode: 0o600 });
+    const log = createRotatingLogStream(logFile);
     // A full disk can break the log while the daemon is still serving. Keep
     // consuming its output and reporting its status until it actually exits.
     log.on("error", () => {});

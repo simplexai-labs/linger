@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createHttpTeamHubClient } from "@/features/teamhub/teamhub-client";
 import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
 import {
   teamHubErrorResponse,
@@ -146,8 +147,20 @@ describe("TeamHub routes", () => {
   });
 
   it("redirects an unauthenticated Product Client to TeamHub login", async () => {
-    const runtime = createTestTeamHubRuntime();
+    const onAuthenticationRequired = vi.fn();
+    const baseRuntime = createTestTeamHubRuntime();
+    const runtime = {
+      ...baseRuntime,
+      client: createHttpTeamHubClient({
+        fetchRequest: baseRuntime.server.fetch,
+        onAuthenticationRequired,
+        xhrFactory: baseRuntime.server.xhrFactory,
+      }),
+    };
     runtime.server.on("GET", "/v0/session", () =>
+      teamHubErrorResponse(401, "UNAUTHENTICATED", "Sign in to continue."),
+    );
+    runtime.server.on("GET", "/v0/tenants", () =>
       teamHubErrorResponse(401, "UNAUTHENTICATED", "Sign in to continue."),
     );
     const queryClient = testQueryClient();
@@ -162,6 +175,7 @@ describe("TeamHub routes", () => {
     ).toBeVisible();
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
     expect(router.state.location.search).toBe("");
+    expect(onAuthenticationRequired).not.toHaveBeenCalled();
   });
 
   it("keeps an unauthenticated visitor on the login page", async () => {

@@ -1744,4 +1744,183 @@ describe("Structured model invoke outcomes and interactive-isolated background b
     expect(textReply.output).toBe("ok");
     expect(invokeModel).toHaveBeenCalledTimes(3);
   });
+
+  it("skips retrying timed_out background Pi calls and trips exponential backoff 2m -> 5m -> 15m", async () => {
+    const piPlacement: ModelPlacement = { ...alice, runtimeType: "pi" };
+    const { modelCall, invokeModel, advance } = setup({
+      placements: [piPlacement],
+      outcomes: [
+        { outcome: "timed_out", duration_ms: 10 },
+        { outcome: "timed_out", duration_ms: 10 },
+        { outcome: "timed_out", duration_ms: 10 },
+        { outcome: "timed_out", duration_ms: 10 },
+        { outcome: "timed_out", duration_ms: 10 },
+        {
+          outcome: "completed",
+          text: "recovered",
+          model: "localmodels/spark",
+          duration_ms: 5,
+        },
+      ],
+    });
+
+    // Two consecutive timed_out calls make 1 attempt each (no retry) and open 2m backoff.
+    await expect(
+      modelCall.text({
+        kind: "agent_memory",
+        key: "pi-timeout:1",
+        placement: piPlacement,
+        input: "a",
+      }),
+    ).rejects.toMatchObject({ kind: "timed_out" });
+    await expect(
+      modelCall.text({
+        kind: "agent_memory",
+        key: "pi-timeout:2",
+        placement: piPlacement,
+        input: "b",
+      }),
+    ).rejects.toMatchObject({ kind: "timed_out" });
+    expect(invokeModel).toHaveBeenCalledTimes(2);
+
+    // Blocked while open (< 2m).
+    advance(119_000);
+    await expect(
+      modelCall.text({
+        kind: "agent_memory",
+        key: "pi-timeout:3",
+        placement: piPlacement,
+        input: "c",
+      }),
+    ).rejects.toMatchObject({ kind: "runtime_unavailable" });
+    expect(invokeModel).toHaveBeenCalledTimes(2);
+
+    // Unrelated background kinds and interactive calls are still admitted.
+    await expect(
+      modelCall.text({
+        kind: "wiki",
+        key: "pi-wiki:1",
+        placement: piPlacement,
+        input: "other",
+      }),
+    ).rejects.toMatchObject({ kind: "timed_out" });
+    expect(invokeModel).toHaveBeenCalledTimes(3);
+
+    // Probe after 2m fails -> backs off 5m.
+    advance(1_000);
+    await expect(
+      modelCall.text({
+        kind: "agent_memory",
+        key: "pi-timeout:4",
+        placement: piPlacement,
+        input: "d",
+      }),
+    ).rejects.toMatchObject({ kind: "timed_out" });
+    expect(invokeModel).toHaveBeenCalledTimes(4);
+
+    advance(4 * 60_000);
+    await expect(
+      modelCall.text({
+        kind: "agent_memory",
+        key: "pi-timeout:5",
+        placement: piPlacement,
+        input: "e",
+      }),
+    ).rejects.toMatchObject({ kind: "runtime_unavailable" });
+    expect(invokeModel).toHaveBeenCalledTimes(4);
+
+    // Probe after 5m fails -> backs off 15m.
+    advance(60_000);
+    await expect(
+      modelCall.text({
+        kind: "agent_memory",
+        key: "pi-timeout:6",
+        placement: piPlacement,
+        input: "f",
+      }),
+    ).rejects.toMatchObject({ kind: "timed_out" });
+    expect(invokeModel).toHaveBeenCalledTimes(5);
+
+    advance(14 * 60_000);
+    await expect(
+      modelCall.text({
+        kind: "agent_memory",
+        key: "pi-timeout:7",
+        placement: piPlacement,
+        input: "g",
+      }),
+    ).rejects.toMatchObject({ kind: "runtime_unavailable" });
+    expect(invokeModel).toHaveBeenCalledTimes(5);
+
+    // Probe after 15m succeeds and resets the breaker.
+    advance(60_000);
+    const probeSuccess = await modelCall.text({
+      kind: "agent_memory",
+      key: "pi-timeout:8",
+      placement: piPlacement,
+      input: "h",
+    });
+    expect(probeSuccess.output).toBe("recovered");
+    expect(invokeModel).toHaveBeenCalledTimes(6);
+  });
+
+  it("caps invalid_output repair attempts for background Pi calls and backs off after 3 failures", async () => {
+    vi.useFakeTimers();
+    try {
+      const piPlacement: ModelPlacement = { ...alice, runtimeType: "pi" };
+      let calls = 0;
+      const { modelCall, invokeModel, advance } = setup({
+        placements: [piPlacement],
+        invoke: async () => {
+          calls += 1;
+          return calls <= 6
+            ? completed("not json at all")
+            : completed('{"answer":"recovered"}');
+        },
+      });
+
+      for (let i = 1; i <= 3; i += 1) {
+        const promise = modelCall.call({
+          kind: "agent_memory",
+          key: `pi-invalid:${i}`,
+          placement: piPlacement,
+          input: `extract ${i}`,
+          schemaName: "Memory",
+          outputSchema: schema,
+        });
+        const caught = promise.catch((error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(await caught).toMatchObject({ kind: "invalid_output" });
+      }
+      // 3 calls x max 2 attempts (1 initial + 1 repair) = 6 invocations.
+      expect(invokeModel).toHaveBeenCalledTimes(6);
+
+      // 4th call is blocked for 2 minutes by the task breaker.
+      await expect(
+        modelCall.call({
+          kind: "agent_memory",
+          key: "pi-invalid:4",
+          placement: piPlacement,
+          input: "extract 4",
+          schemaName: "Memory",
+          outputSchema: schema,
+        }),
+      ).rejects.toMatchObject({ kind: "runtime_unavailable" });
+      expect(invokeModel).toHaveBeenCalledTimes(6);
+
+      advance(2 * 60_000);
+      const recovered = await modelCall.call({
+        kind: "agent_memory",
+        key: "pi-invalid:5",
+        placement: piPlacement,
+        input: "extract 5",
+        schemaName: "Memory",
+        outputSchema: schema,
+      });
+      expect(recovered.output).toEqual({ answer: "recovered" });
+      expect(invokeModel).toHaveBeenCalledTimes(7);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

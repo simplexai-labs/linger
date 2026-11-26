@@ -1,5 +1,5 @@
 import { replaceEqualDeep } from "@tanstack/react-query";
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 
 import {
   presentTeamHubMessageAttachments,
@@ -20,9 +20,21 @@ interface RoomMessagePresentationInput {
   roomMessagePresentations: Readonly<RoomMessagePresentations>;
 }
 
+interface CachedMessagePresentation {
+  deliveryPresentation: TeamHubMessagePresentation | undefined;
+  mentionOptions: TeamHubActorRef[];
+  roomPresentation: TeamHubMessagePresentation | undefined;
+  value: TeamHubMessagePresentation;
+}
+
+const cachedByMessage = new WeakMap<
+  TeamHubMessage,
+  CachedMessagePresentation
+>();
+
 /**
- * Resolves presentations and keeps every entry whose content did not change
- * from the previous result, so memoized rows skip unrelated Messages.
+ * Resolves presentations and keeps every entry whose inputs or content did not
+ * change, so memoized rows skip unrelated Messages without mutating refs.
  */
 export function useRoomMessagePresentations({
   deliveryPresentations,
@@ -30,18 +42,40 @@ export function useRoomMessagePresentations({
   messages,
   roomMessagePresentations,
 }: RoomMessagePresentationInput) {
-  const previous = useRef<RoomMessagePresentations | undefined>(undefined);
   return useMemo(() => {
-    previous.current = replaceEqualDeep(
-      previous.current,
-      resolveRoomMessagePresentations({
-        deliveryPresentations,
+    const presentations: RoomMessagePresentations = {
+      ...deliveryPresentations,
+      ...roomMessagePresentations,
+    };
+    for (const message of messages) {
+      const deliveryPresentation = deliveryPresentations[message.id];
+      const roomPresentation = roomMessagePresentations[message.id];
+      const cached = cachedByMessage.get(message);
+      if (
+        cached &&
+        cached.deliveryPresentation === deliveryPresentation &&
+        cached.roomPresentation === roomPresentation &&
+        cached.mentionOptions === mentionOptions
+      ) {
+        presentations[message.id] = cached.value;
+        continue;
+      }
+      const next = resolveOneMessagePresentation(
+        message,
+        deliveryPresentation,
+        roomPresentation,
         mentionOptions,
-        messages,
-        roomMessagePresentations,
-      }),
-    );
-    return previous.current;
+      );
+      const value = cached ? replaceEqualDeep(cached.value, next) : next;
+      cachedByMessage.set(message, {
+        deliveryPresentation,
+        mentionOptions,
+        roomPresentation,
+        value,
+      });
+      presentations[message.id] = value;
+    }
+    return presentations;
   }, [
     deliveryPresentations,
     mentionOptions,
@@ -62,24 +96,36 @@ export function resolveRoomMessagePresentations({
   };
 
   for (const message of messages) {
-    const deliveryPresentation = deliveryPresentations[message.id];
-    const roomPresentation = roomMessagePresentations[message.id];
-    const mentions = roomPresentation?.mentions.length
-      ? roomPresentation.mentions
-      : deliveryPresentation?.mentions.length
-        ? deliveryPresentation.mentions
-        : referencedMessageActors(message.segments, mentionOptions);
-    presentations[message.id] = {
-      attachments: firstPresentedAttachments(
-        roomPresentation?.attachments,
-        deliveryPresentation?.attachments,
-        presentTeamHubMessageAttachments(message),
-      ),
-      mentions,
-    };
+    presentations[message.id] = resolveOneMessagePresentation(
+      message,
+      deliveryPresentations[message.id],
+      roomMessagePresentations[message.id],
+      mentionOptions,
+    );
   }
 
   return presentations;
+}
+
+function resolveOneMessagePresentation(
+  message: TeamHubMessage,
+  deliveryPresentation: TeamHubMessagePresentation | undefined,
+  roomPresentation: TeamHubMessagePresentation | undefined,
+  mentionOptions: TeamHubActorRef[],
+): TeamHubMessagePresentation {
+  const mentions = roomPresentation?.mentions.length
+    ? roomPresentation.mentions
+    : deliveryPresentation?.mentions.length
+      ? deliveryPresentation.mentions
+      : referencedMessageActors(message.segments, mentionOptions);
+  return {
+    attachments: firstPresentedAttachments(
+      roomPresentation?.attachments,
+      deliveryPresentation?.attachments,
+      presentTeamHubMessageAttachments(message),
+    ),
+    mentions,
+  };
 }
 
 function firstPresentedAttachments(

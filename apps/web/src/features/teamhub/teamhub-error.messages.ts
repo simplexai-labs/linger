@@ -6,6 +6,7 @@ import { defineMessages } from "@/i18n/messages";
  * message.
  */
 export const teamHubErrorMessages = defineMessages("teamHubErrors", {
+  invalidCredentials: "Email or password is incorrect.",
   unauthenticated: "Your sign-in has expired. Sign in again.",
   rateLimited: "Too many requests. Wait a moment and try again.",
   unavailable: "The server is temporarily unavailable. Try again shortly.",

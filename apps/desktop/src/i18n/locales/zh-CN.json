@@ -345,6 +345,7 @@
     "reconnect": "重新连接这台电脑",
     "connect": "连接这台电脑…",
     "preventSleep": "防止休眠",
+    "preventSleepPausedOnBattery": "防止休眠（电池供电时已暂停）",
     "showLogs": "查看日志",
     "saveDiagnostics": "保存诊断信息…",
     "sendDiagnostics": "发送诊断信息…",

@@ -41,6 +41,7 @@ export function TeamHubLoginPage({
   const localAccount = useDesktopLocalAccount();
   const t = useT();
   const authenticationNotice =
+    !authentication.state.error &&
     searchParams.get("reason") === "session-expired"
       ? t(m.sessionExpired)
       : null;

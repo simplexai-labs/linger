@@ -312,6 +312,27 @@ describe("Local Computer gate", () => {
     ).toBeVisible();
     expect(within(gate).getAllByText("Needs Node.js.")).toHaveLength(1);
   });
+
+  it("pins the header and Sign out footer while keeping CLI commands wrappable on narrow viewports", async () => {
+    await renderShell(newMac);
+
+    const gate = await screen.findByRole("dialog", {
+      name: "Connect your computer",
+    });
+    const header = gate.querySelector("header");
+    const footer = gate.querySelector("footer");
+    const commandCode = (
+      await within(gate).findByText(/install\/linger-computer\.sh/)
+    ).closest("code")!;
+
+    expect(gate).toHaveClass("flex", "flex-col", "overflow-hidden");
+    expect(header).toHaveClass("shrink-0");
+    expect(footer).toHaveClass("shrink-0");
+    expect(
+      within(footer!).getByRole("button", { name: "Sign out" }),
+    ).toBeVisible();
+    expect(commandCode).toHaveClass("break-all", "whitespace-pre-wrap");
+  });
 });
 
 async function renderShell(

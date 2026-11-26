@@ -2,7 +2,11 @@ import { sentRequests } from "./teamhub-client-test-support";
 import { describe, expect, it, vi } from "vitest";
 
 import { FakeXmlHttpRequest } from "./teamhub-client-test-support";
-import { teamHubData, teamHubDone } from "./teamhub-api";
+import {
+  quietAuthenticationHeaders,
+  teamHubData,
+  teamHubDone,
+} from "./teamhub-api";
 import {
   createHttpTeamHubClient,
   TeamHubTransportError,
@@ -276,6 +280,47 @@ describe("TeamHubClient", () => {
       }),
     );
     expect(onAuthenticationRequired).not.toHaveBeenCalled();
+  });
+
+  it("strips the internal quiet-auth header and suppresses session-expired on 401 when requested", async () => {
+    const onAuthenticationRequired = vi.fn();
+    const fetchRequest = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse(
+        {
+          error: {
+            code: "UNAUTHENTICATED",
+            message: "Sign in required.",
+            request_id: "request-quiet-bootstrap",
+          },
+        },
+        401,
+      ),
+    );
+    const client = createHttpTeamHubClient({
+      fetchRequest,
+      onAuthenticationRequired,
+    });
+
+    await expect(
+      teamHubData(
+        client.api.GET("/v0/tenants", {
+          headers: quietAuthenticationHeaders(),
+        }),
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: "UNAUTHENTICATED",
+        status: 401,
+      }),
+    );
+    expect(onAuthenticationRequired).not.toHaveBeenCalled();
+    const firstCall = fetchRequest.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const [forwardedRequest] = firstCall!;
+    expect(forwardedRequest).toBeInstanceOf(Request);
+    expect(
+      (forwardedRequest as Request).headers.has("x-linger-quiet-auth"),
+    ).toBe(false);
   });
 
   it("reports a 401 before falling back from a malformed TeamHub error body", async () => {

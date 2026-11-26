@@ -394,6 +394,9 @@ func run(args []string) (resultErr error) {
 		// The library publishes only from Act and Refresh, which the Daemon
 		// calls once it runs.
 		Publish: func(snapshot wire.LocalModelsSnapshot) { localDaemon.PublishLocalModels(snapshot) },
+		IsBusy: func() bool {
+			return localDaemon != nil && (localDaemon.ActiveOperationCount() > 0 || localDaemon.ActiveModelInvokeCount() > 0)
+		},
 		RuntimeChanged: func() {
 			select {
 			case runtimeRefresh <- struct{}{}:
