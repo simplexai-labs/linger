@@ -169,12 +169,12 @@ func TestAgentCreationApprovalPostgreSQLVerticalSlice(t *testing.T) {
 	roomInput := agentcreationapproval.Input{
 		RequestKind: "room_creation",
 		RoomCaller: &agentcreationapproval.RoomCallerInput{
-			Name: roomName, MemberIDs: []string{"actor_acme_official"},
+			Name: roomName, MemberIDs: []string{"actor_acme_official", discussionAgentActorID},
 			Artifacts:              []string{nativeArtifactID, roomArtifact.ID},
 			InitialMessageSegments: []messagecreation.Segment{{Type: "text", Content: "Start the new Room."}},
 		},
 		RoomEffective: &agentcreationapproval.RoomEffectivePayload{
-			Name: roomName, MemberIDs: []string{"actor_acme_official"},
+			Name: roomName, MemberIDs: []string{"actor_acme_official", discussionAgentActorID},
 			Artifacts:              []string{nativeArtifactID, roomArtifact.ID},
 			InitialMessageSegments: []messagecreation.Segment{{Type: "text", Content: "Start the new Room."}},
 		},
@@ -200,6 +200,9 @@ func TestAgentCreationApprovalPostgreSQLVerticalSlice(t *testing.T) {
 	if got := countRows(t, env, `SELECT count(*) FROM rooms room JOIN room_members member ON member.room_id=room.id
 		WHERE room.id=$1 AND room.name=$2 AND member.actor_id='actor_acme_alice' AND member.role='owner'`, createdRoomID, roomName); got != 1 {
 		t.Fatalf("created Room owned by the Sponsor=%d want=1", got)
+	}
+	if got := countRows(t, env, `SELECT count(*) FROM room_members WHERE room_id=$1 AND actor_id=$2 AND role='member'`, createdRoomID, discussionAgentActorID); got != 1 {
+		t.Fatalf("invited Agent memberships=%d want=1", got)
 	}
 	if got := countRows(t, env, `SELECT count(*) FROM decisions WHERE room_id=$1`, originRoomID); got != 0 {
 		t.Fatalf("Room creation posted %d cards", got)
@@ -415,6 +418,39 @@ func TestAgentCreationApprovalPostgreSQLVerticalSlice(t *testing.T) {
 		handoffDigest := sha256.Sum256([]byte("room-creation-handoff:" + pending.DecisionID))
 		if got := countRows(t, env, `SELECT count(*) FROM messages WHERE id=$1`, fmt.Sprintf("message_%x", handoffDigest[:16])); got != 0 {
 			t.Fatal("denial sent a Room Creation handoff")
+		}
+	})
+	t.Run("only a Human-approved snapshot admits an Agent with a different Sponsor", func(t *testing.T) {
+		seedPeerHumanActor(t, env.pool)
+		if _, err := env.pool.Exec(t.Context(), `UPDATE agent_registrations SET created_by_actor_id='actor_acme_bob' WHERE actor_id=$1`, workspaceAgentActorID); err != nil {
+			t.Fatal(err)
+		}
+		snapshot := typedcard.RoomCreationSnapshot{
+			OriginRoomID: originRoomID, Name: "Agent admission " + suffix, MemberIDs: []string{workspaceAgentActorID},
+			InitialMessageSegments: []messagecreation.Segment{{Type: "text", Content: "Start the discussion."}},
+		}
+		input := roomCreationApprovalInputFor(t, snapshot, mcpCreationInvocationID(t.Name())[24:56])
+		cards := typedcard.New(env.pool)
+		tx, err := env.pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = cards.CreateRoomInTx(t.Context(), tx, input)
+		if rollbackErr := tx.Rollback(t.Context()); rollbackErr != nil {
+			t.Fatal(rollbackErr)
+		}
+		if !errors.Is(err, typedcard.ErrForbidden) {
+			t.Fatalf("immediate admission error = %v, want ErrForbidden", err)
+		}
+
+		pending := postRoomCreationCard(t, env, input)
+		if _, err := cards.DecideDecision(t.Context(), "account_alice", pending.DecisionID,
+			typedcard.DecisionAnswerCommand{Decision: "approve", ExpectedVersion: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if got := countRows(t, env, `SELECT count(*) FROM decisions d JOIN room_members m ON m.room_id=d.result->'data'->>'created_room_id'
+			WHERE d.id=$1 AND m.actor_id=$2 AND m.role='member'`, pending.DecisionID, workspaceAgentActorID); got != 1 {
+			t.Fatalf("approved Agent memberships=%d want=1", got)
 		}
 	})
 }

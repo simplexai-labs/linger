@@ -455,7 +455,7 @@ export interface paths {
     put?: never;
     /**
      * Create one Room the Agent requested
-     * @description Resolves the Agent and Tenant exclusively from the Agent credential, re-authorizes create_room in the caller's Room Context, revalidates every derived value, and creates the Room at once, owned by the Agent's Sponsor, with its initial message and the Agent's handoff. Caller identity is intentionally absent from the request body.
+     * @description Resolves the Agent and Tenant exclusively from the Agent credential, re-authorizes create_room in the caller's Room Context, revalidates every derived value, and creates the Room at once, owned by the Agent's Sponsor, with its initial message and the Agent's handoff. Each Agent added to the new Room must have the same Sponsor as the caller. Caller identity is intentionally absent from the request body.
      */
     post: operations["submitAgentCreationApprovalRequest"];
     delete?: never;

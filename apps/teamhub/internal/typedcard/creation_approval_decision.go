@@ -74,6 +74,7 @@ func (a roomCreationApproval) approve(ctx context.Context, tx pgx.Tx, queries *s
 	room, err := createSnapshotRoom(ctx, tx, queries, snapshotRoomSpec{
 		tenantID: a.tenantID, originRoomID: a.originRoomID, agentActorID: a.agentActorID, accountID: a.accountID,
 		owner: decisionOwner, snapshot: a.snapshot, bindingKey: "room-create-artifacts:" + a.decisionID,
+		humanApproved: true,
 	})
 	if err != nil {
 		return decisionOutcome{}, "", err
@@ -120,6 +121,7 @@ type snapshotRoomSpec struct {
 	tenantID, originRoomID, agentActorID, accountID string
 	owner                                           store.Actor
 	snapshot                                        json.RawMessage
+	humanApproved                                   bool
 	// bindingKey makes the Documents' Room bindings idempotent.
 	bindingKey string
 }
@@ -179,7 +181,7 @@ func createSnapshotRoom(ctx context.Context, tx pgx.Tx, queries *store.Queries, 
 		TenantID: spec.tenantID, Name: snapshot.Name, Description: snapshot.Description,
 		Creator: agent, Owner: owner,
 		MemberActorIDs:   creationRoomMemberIDs(snapshot.MemberIDs, agent.ID, owner.ID),
-		AgentsAuthorized: true,
+		AgentsAuthorized: spec.humanApproved,
 	})
 	if err != nil {
 		return snapshotRoom{}, mapCreationDecisionError(err)
@@ -392,6 +394,8 @@ func creationDecisionAgent(
 
 func mapCreationDecisionError(err error) error {
 	switch {
+	case errors.Is(err, roomcreation.ErrAgentSponsorRequired):
+		return ErrForbidden
 	case errors.Is(err, roomcreation.ErrInvalid),
 		errors.Is(err, roomcreation.ErrNotFound), errors.Is(err, roomcreation.ErrAgentUnavailable),
 		errors.Is(err, messagecreation.ErrInvalid), errors.Is(err, messagecreation.ErrInvalidReference),
