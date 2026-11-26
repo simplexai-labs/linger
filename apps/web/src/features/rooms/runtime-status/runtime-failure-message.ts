@@ -54,3 +54,18 @@ export function runtimeFailureReason(
   if (!failure || !Object.hasOwn(messages, failure.code)) return undefined;
   return t(messages[failure.code]);
 }
+
+/**
+ * The machine identifiers behind a failure, such as
+ * `codex 0.170.0 · execution_failed`, for someone diagnosing it. They are not
+ * translated: support and logs use the same words.
+ */
+export function runtimeFailureDiagnostic(
+  failure?: RuntimeExecutionFailure,
+): string | undefined {
+  if (!failure) return undefined;
+  const runtime = [failure.runtime_type, failure.runtime_version]
+    .filter(Boolean)
+    .join(" ");
+  return [runtime, failure.code].filter(Boolean).join(" \u00b7 ");
+}

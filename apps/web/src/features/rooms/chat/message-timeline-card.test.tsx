@@ -2092,6 +2092,38 @@ describe("Room Message timeline cards", () => {
     expect(resend()).toBeInTheDocument();
   });
 
+  it("shows a failed Run whose Agent awaits a decision card as waiting", () => {
+    const failed = {
+      "run-status-1": [
+        {
+          ...runtimeTerminalStatusRecord("2", "failed"),
+          event: {
+            type: "status.changed" as const,
+            status: "stopped" as const,
+            outcome: "failed" as const,
+          },
+        },
+      ],
+    };
+    const dock = (waiting?: ReadonlySet<string>) => (
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <AgentStreamingStatusDock
+            runStatuses={[runStatus({ status: "aborted" })]}
+            runtimePresentationEventsByRunStatusId={failed}
+            {...(waiting ? { waitingDecisionAgentIds: waiting } : {})}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const { unmount } = render(dock());
+    expect(shownStatus()).toMatch(/^Codex: Couldn't finish/);
+    unmount();
+    // A fresh Dock, since a shown line holds before it changes.
+    render(dock(new Set(["agent-1"])));
+    expect(shownStatus()).toBe("Codex: Waiting for you to answer its request");
+  });
+
   it("keeps an interrupted Run in the Dock as a stop, not a failure", () => {
     render(
       <QueryClientProvider client={new QueryClient()}>

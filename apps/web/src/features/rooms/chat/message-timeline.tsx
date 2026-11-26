@@ -886,6 +886,7 @@ export function AgentStreamingStatusDock({
   runtimePresentationEventsByRunStatusId = EMPTY_RUNTIME_EVENTS,
   scopeKey = EMPTY_SCOPE_KEY,
   typingAgent,
+  waitingDecisionAgentIds,
 }: {
   cancelRoomRun?: (
     runId: string,
@@ -910,6 +911,8 @@ export function AgentStreamingStatusDock({
   scopeKey?: readonly string[];
   /** Shown only while that Agent has no Run status; it offers no Stop. */
   typingAgent?: AgentStreamingTypingAgent;
+  /** Agents with a decision card still pending in this Room or Thread. */
+  waitingDecisionAgentIds?: ReadonlySet<string>;
 }) {
   const t = useT();
   const runtimeViewCache = useRef<RuntimeTimelineViewCache>(new Map());
@@ -949,12 +952,12 @@ export function AgentStreamingStatusDock({
     () =>
       entries.map((entry) => ({
         id: entry.key,
-        content: dockEntryLine(entry),
+        content: dockEntryLine(entry, waitingDecisionAgentIds, t),
         ...(entry.runtimeStatus?.lineQueue
           ? { queue: entry.runtimeStatus.lineQueue }
           : {}),
       })),
-    [entries],
+    [entries, waitingDecisionAgentIds, t],
   );
   const line = useAgentStatusLine(lineTargets, hovered);
   const workingEntries = entries.filter(
@@ -1186,9 +1189,21 @@ function dockRuntimeStatuses(
   );
 }
 
-function dockEntryLine(entry: AgentStreamingDockEntry): AgentStatusLineContent {
-  if (entry.runtimeStatus) return entry.runtimeStatus.line;
-  return { tone: "wait" };
+function dockEntryLine(
+  entry: AgentStreamingDockEntry,
+  waitingDecisionAgentIds: ReadonlySet<string> | undefined,
+  t: Translate,
+): AgentStatusLineContent {
+  const status = entry.runtimeStatus;
+  if (!status) return { tone: "wait" };
+  // A Run that ended while its Agent asked a Human for something, such as a
+  // macOS permission, is waiting on that Human, not broken.
+  if (
+    (status.state === "Failed" || status.state === "Stopped") &&
+    waitingDecisionAgentIds?.has(entry.key)
+  )
+    return { tone: "waiting", text: t(m.waitingForDecision) };
+  return status.line;
 }
 
 function statusLineText(content: AgentStatusLineContent, t: Translate) {
@@ -1206,19 +1221,43 @@ function StatusLineText({
   const t = useT();
   if (content.tone === "wait")
     return <TypingDots className="text-app-subtle" />;
+  const ended =
+    content.tone === "danger" ||
+    content.tone === "warn" ||
+    content.tone === "waiting";
   const text = (
     <span
       className={cn(
         "block min-w-0 truncate leading-4",
         content.tone === "live" && "town-status-shimmer",
         content.tone === "muted" && "text-app-subtle",
-        content.tone === "danger" && "text-app-danger",
-        content.tone === "warn" && "text-app-warning",
+        ended && "text-app-muted",
       )}
     >
       {content.text}
     </span>
   );
+  // An ended Run reads as a quiet note: an amber dot, never error red, so a
+  // hiccup does not look like a broken product. The line opens the Activity
+  // panel, where the full reason is.
+  if (ended)
+    return (
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span
+          aria-hidden="true"
+          className={cn(
+            "size-1.5 shrink-0 rounded-full bg-app-warning",
+            content.tone === "waiting" && "motion-safe:animate-pulse",
+          )}
+        />
+        {text}
+        {content.tone === "danger" ? (
+          <span className="shrink-0 leading-4 text-app-subtle underline decoration-app-border-strong underline-offset-2">
+            {t(m.details)}
+          </span>
+        ) : null}
+      </span>
+    );
   if (!minutes) return text;
   return (
     <span className="flex min-w-0 items-center gap-1">

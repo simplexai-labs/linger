@@ -1655,6 +1655,8 @@
     "runCanceled": "运行已取消",
     "runFailed": "没能完成",
     "runFailedWith": "没能完成。{reason}",
+    "waitingForDecision": "在等你处理它的请求",
+    "details": "详情",
     "followUpUnconfirmed": "你的追问可能没送达",
     "stoppedFollowUpUnconfirmed": "{reason}你的追问可能没送达。",
     "elapsedMinutes": "{minutes} 分钟",

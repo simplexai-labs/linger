@@ -96,6 +96,10 @@ export function useRoomConversation({
       ),
     [agentStreaming.runStatuses, directPeerAgentId],
   );
+  const waitingDecisionAgentIds = useMemo(
+    () => pendingDecisionRequesterIds(messages, Date.now()),
+    [messages],
+  );
   const dock: ComponentProps<typeof AgentStreamingStatusDock> = {
     cancelRoomRun: (runId, requestId) =>
       teamHubData(
@@ -129,6 +133,7 @@ export function useRoomConversation({
     runtimePresentationEventsByRunStatusId:
       agentStreaming.runtimePresentationEventsByRunStatusId,
     scopeKey: ["teamhub", tenantId, roomId],
+    waitingDecisionAgentIds,
   };
 
   return {
@@ -167,4 +172,18 @@ function compareRoomMessages(
     return leftNotice ? -1 : 1;
   }
   return left.id < right.id ? -1 : 1;
+}
+
+/** The Agents whose decision cards in these Messages still await a Human. */
+export function pendingDecisionRequesterIds(
+  messages: readonly TeamHubMessage[],
+  now: number,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const { card } of messages) {
+    if (card?.status !== "pending") continue;
+    if (card.expires_at && Date.parse(card.expires_at) <= now) continue;
+    ids.add(card.requester.id);
+  }
+  return ids;
 }
