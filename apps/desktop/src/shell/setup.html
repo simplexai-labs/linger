@@ -2418,6 +2418,10 @@
       .rt .sub[data-warn="true"] {
         color: var(--error);
       }
+      /* The location's warning reads whole; its path stays one line. */
+      #location-sub {
+        white-space: normal;
+      }
       .runtime-act {
         display: flex;
         align-items: center;
@@ -3226,6 +3230,7 @@
                 <div class="rt">
                   <div class="text">
                     <strong data-t="installLocation"></strong
+                    ><span class="sub path" id="location-path"></span
                     ><span
                       class="sub"
                       id="location-sub"
@@ -3237,7 +3242,7 @@
                       type="button"
                       class="change"
                       id="location-reset"
-                      data-t="useDefaults"
+                      data-t="resetLocation"
                       hidden
                     ></button>
                     <button
@@ -5591,6 +5596,7 @@
           library: models.model.library,
           name: models.model.name,
           downloadBytes: models.model.downloadBytes,
+          diskBytes: models.model.diskBytes,
           memoryBytes: models.model.memoryBytes,
           fits: true,
         };
@@ -6004,12 +6010,41 @@
         $("background-model").disabled = busy;
 
         // The install location shows only when it is the problem, with
-        // what is wrong and a way to change it.
+        // what is wrong and a way to change it: a folder Linger cannot use,
+        // or a disk without room for the services and the local model.
         const location = local.location;
-        $("location-row").hidden = !location.error;
-        $("location-sub").textContent = location.error ?? "";
-        $("location-sub").title = location.path;
-        $("location-reset").hidden = !location.custom;
+        const modelCheck = local.modelCheck;
+        const modelDisk =
+          source !== "local" || !option
+            ? 0
+            : (modelCheck?.library === option.library &&
+                modelCheck?.diskBytes) ||
+              option.diskBytes ||
+              option.downloadBytes ||
+              0;
+        const neededBytes = (location.minFreeBytes ?? 0) + modelDisk;
+        const spaceLow =
+          !location.error &&
+          location.freeBytes != null &&
+          neededBytes > 0 &&
+          location.freeBytes < neededBytes;
+        const locationWarning =
+          location.error ??
+          (spaceLow
+            ? t("locationSpaceLow", {
+                needed: String(Math.ceil(neededBytes / GB)),
+                free: String(Math.floor(location.freeBytes / GB)),
+              })
+            : "");
+        const shownPath =
+          (location.error && location.rejectedPath) || location.path;
+        $("location-row").hidden = !locationWarning;
+        $("location-row").dataset.warn = String(Boolean(locationWarning));
+        $("location-path").textContent = shownPath;
+        $("location-path").title = shownPath;
+        $("location-sub").textContent = locationWarning;
+        $("location-sub").hidden = !locationWarning;
+        $("location-reset").hidden = !location.custom && !location.error;
         $("location-change").disabled = busy;
         $("location-reset").disabled = busy;
 
@@ -6031,7 +6066,7 @@
           !ready ||
           byokTesting ||
           Boolean(working) ||
-          Boolean(location.error);
+          Boolean(locationWarning);
         const label = byokTesting
           ? '<span class="spinner"></span>' + esc(t("checkingByok"))
           : esc(t(behind ? "continueSetup" : "install"));

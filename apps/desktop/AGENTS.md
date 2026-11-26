@@ -96,8 +96,9 @@ Gateway and runs Agents. The daemon exits with the app.
   into the install location (the default home, or a folder picked in
   setup, which shows the location only when the default one has a problem
   or too little free space). The selected folder's disk must have enough
-  room for the services (`LOCATION_FREE_BYTES`) plus any local model shown
-  in the install plan: `freeDiskBytes` performs a read-only `statfs`
+  room for the services (`LOCATION_FREE_BYTES`) plus the local model when it
+  is the source (the model picked in setup, priced by its check, else the
+  kit's pick): `freeDiskBytes` performs a read-only `statfs`
   pre-check (refreshed when opening Setup, picking or resetting a folder,
   rechecking, or refocusing Setup) so the setup page warns by plan, and
   `checkLocation` enforces write access and free space on all platforms

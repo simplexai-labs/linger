@@ -1250,6 +1250,20 @@ export class LocalServerModule implements Module {
     return this.begin(plan);
   }
 
+  // The disk a model picked in setup takes: its check's estimate, else
+  // its download size from the list.
+  #modelDiskBytes(plan: LocalServerPlan): number | undefined {
+    const library = plan.runtime === "local" ? plan.localModel : undefined;
+    if (!library) return undefined;
+    const priced = this.#modelCheck;
+    if (priced?.library === library && priced.state === "checked")
+      if (priced.diskBytes) return priced.diskBytes;
+    return this.#check.state === "checked"
+      ? this.#check.models?.find((option) => option.library === library)
+          ?.downloadBytes
+      : undefined;
+  }
+
   // Setup's subscription runtimes: their install and sign-in.
   setupRuntimes(): SetupRuntimes {
     return this.#runtimes;
@@ -2418,7 +2432,8 @@ export class LocalServerModule implements Module {
           : undefined;
       const error = await checkLocation(
         home,
-        this.#freeBytes() + (model?.diskBytes ?? 0),
+        this.#freeBytes() +
+          (this.#modelDiskBytes(plan) ?? model?.diskBytes ?? 0),
       );
       if (error) throw new Error(`${home}: ${error}`);
       // On Windows, pre-check both the install home and the Computer daemon

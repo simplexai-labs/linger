@@ -82,7 +82,6 @@ export const setupMessages = defineMessages("setup", {
   changeLocation: "Change…",
   resetLocation: "Reset",
   locationSpaceLow: "Needs {needed} GB free; this disk has {free} GB.",
-  useDefaults: "Use the defaults",
   install: "Install",
   getStarted: "Get Started",
   checkAgain: "Check again",

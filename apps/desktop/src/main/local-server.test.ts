@@ -10331,6 +10331,45 @@ describe("LocalServerModule setup sources", () => {
     await f.host.stop("quit");
   });
 
+  it("holds the install when the disk has no room for the picked model", async () => {
+    const commands = setupCommands({
+      "--check-local-model": [
+        {
+          library: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+          fits: true,
+          diskBytes: 9e15,
+        },
+      ],
+    });
+    const api = installerApi([], {
+      state: "succeeded",
+      setupChoice: "local-models",
+      origin: "http://localhost:3000",
+    });
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      withPicker,
+      api,
+    );
+    await f.host.start();
+    f.module.inspect();
+    await waitForInstaller(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+      }),
+    );
+    await f.module.checkModel("inkling-2-mini-iq3xxs:UD-IQ3_XXS");
+    await expect(
+      f.module.beginSetup({
+        runtime: "local",
+        localModel: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+      }),
+    ).rejects.toThrow(/Needs \d+ GB free/);
+    expect(f.api.created).toEqual([]);
+    await f.host.stop("quit");
+  });
+
   it("reports a pick the kit refuses, and keeps an unlisted model out of the install", async () => {
     const commands = setupCommands({
       "--check-local-model": [
