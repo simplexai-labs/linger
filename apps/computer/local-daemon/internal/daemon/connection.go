@@ -23,7 +23,7 @@ import (
 )
 
 func (d *Daemon) runConnection(ctx context.Context, deviceIdentity transport.Identity) (err error) {
-	hello, err := d.connectionHello(ctx, deviceIdentity)
+	hello, helloRev, err := d.connectionHello(ctx, deviceIdentity)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func (d *Daemon) runConnection(ctx context.Context, deviceIdentity transport.Ide
 			}
 			return err
 		}
-		if err := d.handleConnectionCommand(ctx, connectionCtx, stream, dispatch, command); err != nil {
+		if err := d.handleConnectionCommand(ctx, connectionCtx, stream, dispatch, command, helloRev); err != nil {
 			return err
 		}
 	}
@@ -79,33 +79,33 @@ func (d *Daemon) runConnection(ctx context.Context, deviceIdentity transport.Ide
 
 // connectionHello builds the signed hello that opens a Gateway connection from
 // the retained Registrations, Assignments and active Operations.
-func (d *Daemon) connectionHello(ctx context.Context, deviceIdentity transport.Identity) (hello transport.Hello, err error) {
+func (d *Daemon) connectionHello(ctx context.Context, deviceIdentity transport.Identity) (hello transport.Hello, helloRev uint64, err error) {
 	knownRegistrations, err := d.registrations.List(ctx)
 	if err != nil {
-		return transport.Hello{}, fmt.Errorf("load Local Runtime Registrations: %w", err)
+		return transport.Hello{}, 0, fmt.Errorf("load Local Runtime Registrations: %w", err)
 	}
 	assignedRunners, err := d.assignments.List(ctx)
 	if err != nil {
-		return transport.Hello{}, fmt.Errorf("load Agent Runtime Assignments: %w", err)
+		return transport.Hello{}, 0, fmt.Errorf("load Agent Runtime Assignments: %w", err)
 	}
 	if assignedRunners == nil {
 		assignedRunners = []assignment.Record{}
 	}
 	agentRunners, err := json.Marshal(assignedRunners)
 	if err != nil {
-		return transport.Hello{}, fmt.Errorf("encode Agent Runner snapshots: %w", err)
+		return transport.Hello{}, 0, fmt.Errorf("encode Agent Runner snapshots: %w", err)
 	}
 	activeOperations, err := d.ledger.Active(ctx)
 	if err != nil {
-		return transport.Hello{}, fmt.Errorf("load active Operation snapshots: %w", err)
+		return transport.Hello{}, 0, fmt.Errorf("load active Operation snapshots: %w", err)
 	}
 	nonce, err := connectionNonce()
 	if err != nil {
-		return transport.Hello{}, err
+		return transport.Hello{}, 0, err
 	}
-	runtimes, runtimeDiagnostics, runtimeObservations := d.runtimeInventory()
+	runtimes, runtimeDiagnostics, runtimeObservations, snapshotRev := d.runtimeInventoryWithRevision()
 	registrations := d.enabledRegistrationObservations(mergeRegistrationObservations(runtimeObservations, registrationObservations(knownRegistrations)))
-	d.advanceDiagnosticsRevisionAbove(registrations)
+	helloRev = d.advanceDiagnosticsRevisionAbove(registrations, snapshotRev)
 	hello = transport.Hello{
 		ProtocolVersion:    d.protocolVersion,
 		RunnerID:           d.computerID,
@@ -124,14 +124,14 @@ func (d *Daemon) connectionHello(ctx context.Context, deviceIdentity transport.I
 	}
 	hello.Signature, err = deviceIdentity.Sign(transport.IdentityProofPayload(hello))
 	if err != nil {
-		return transport.Hello{}, err
+		return transport.Hello{}, 0, err
 	}
-	return hello, nil
+	return hello, helloRev, nil
 }
 
 // handleConnectionCommand applies one Gateway command on the live connection.
 // An error ends the connection.
-func (d *Daemon) handleConnectionCommand(ctx, connectionCtx context.Context, stream transport.Stream, dispatch *commandDispatcher, command protocol.Command) error {
+func (d *Daemon) handleConnectionCommand(ctx, connectionCtx context.Context, stream transport.Stream, dispatch *commandDispatcher, command protocol.Command, helloRev uint64) error {
 	switch command.Type {
 	case protocol.CommandRegistrationSnapshot:
 		if err := dispatch.awaitAll(); err != nil {
@@ -141,7 +141,7 @@ func (d *Daemon) handleConnectionCommand(ctx, connectionCtx context.Context, str
 			return err
 		}
 	case protocol.CommandRunnerWelcome:
-		if err := d.acceptRunnerWelcome(ctx, connectionCtx, stream, command); err != nil {
+		if err := d.acceptRunnerWelcome(ctx, connectionCtx, stream, command, helloRev); err != nil {
 			return err
 		}
 	case protocol.CommandRunnerReconciled:
@@ -320,7 +320,7 @@ func (d *Daemon) handleConnectionCommand(ctx, connectionCtx context.Context, str
 }
 
 // acceptRunnerWelcome activates the connection once the Gateway welcomes it.
-func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream transport.Stream, command protocol.Command) error {
+func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream transport.Stream, command protocol.Command, helloRev uint64) error {
 	if command.ConnectionEpoch == 0 {
 		return errors.New("Runner Gateway welcome omitted connection epoch")
 	}
@@ -350,7 +350,7 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 	d.runtimeFailureDetail.Store(slices.Contains(command.ServiceFeatures, serviceFeatureRuntimeFailureDetail))
 	d.operationBackgroundWait.Store(slices.Contains(command.ServiceFeatures, serviceFeatureOperationBackgroundWait))
 	localModels := slices.Contains(command.ServiceFeatures, serviceFeatureLocalModels)
-	if err := d.activateStreamAndReplay(ctx, stream, command.ReconcileOperationIDs, localModels); err != nil {
+	if err := d.activateStreamAndReplayWithHelloRevision(ctx, stream, command.ReconcileOperationIDs, localModels, helloRev); err != nil {
 		return err
 	}
 	go d.heartbeatLoop(connectionCtx, stream, command.HeartbeatIntervalMs)
@@ -406,6 +406,7 @@ func (d *Daemon) UpdateRuntimeInventory(ctx context.Context, runtimes []string, 
 	}
 	d.diagnosticsRevision = nextRevisionAbove(saturatingIncrement(d.diagnosticsRevision), d.runtimeObservations)
 	revision := d.diagnosticsRevision
+	payload := append(json.RawMessage(nil), d.runtimeDiagnostics...)
 	d.inventoryMu.Unlock()
 
 	if antigravityInventoryChanged(previousDiagnostics, diagnostics) {
@@ -413,16 +414,19 @@ func (d *Daemon) UpdateRuntimeInventory(ctx context.Context, runtimes []string, 
 	}
 
 	d.connectionMu.Lock()
-	stream := d.diagnosticsStream
-	d.connectionMu.Unlock()
-	if stream == nil {
+	defer d.connectionMu.Unlock()
+	if d.diagnosticsStream == nil || revision <= d.sentDiagnosticsRevision {
 		return nil
 	}
-	return stream.Send(ctx, protocol.Event{
+	if err := d.diagnosticsStream.Send(ctx, protocol.Event{
 		Type: protocol.EventRuntimeDiagnostics, ProtocolVersion: d.protocolVersion,
 		RunnerID: d.computerID, Revision: revision, SentAt: time.Now().UTC(),
-		Payload: append(json.RawMessage(nil), diagnostics...),
-	})
+		Payload: payload,
+	}); err != nil {
+		return err
+	}
+	d.sentDiagnosticsRevision = max(d.sentDiagnosticsRevision, revision)
+	return nil
 }
 
 // InvalidateAntigravityResidents cancels in-flight Antigravity provider
@@ -468,10 +472,13 @@ func antigravityInventoryChanged(previous, next json.RawMessage) bool {
 	return prev.Status == "ready" && prev.Version != curr.Version
 }
 
-func (d *Daemon) runtimeInventory() ([]string, json.RawMessage, []transport.RegistrationObservation) {
+func (d *Daemon) runtimeInventoryWithRevision() ([]string, json.RawMessage, []transport.RegistrationObservation, uint64) {
 	d.inventoryMu.RLock()
 	defer d.inventoryMu.RUnlock()
-	return append([]string(nil), d.runtimes...), append(json.RawMessage(nil), d.runtimeDiagnostics...), append([]transport.RegistrationObservation(nil), d.runtimeObservations...)
+	return append([]string(nil), d.runtimes...),
+		append(json.RawMessage(nil), d.runtimeDiagnostics...),
+		append([]transport.RegistrationObservation(nil), d.runtimeObservations...),
+		d.diagnosticsRevision
 }
 
 func nextRevisionAbove(minimum uint64, observations []transport.RegistrationObservation) uint64 {
@@ -491,19 +498,25 @@ func saturatingIncrement(revision uint64) uint64 {
 	return revision + 1
 }
 
-func (d *Daemon) advanceDiagnosticsRevisionAbove(observations []transport.RegistrationObservation) {
+func (d *Daemon) advanceDiagnosticsRevisionAbove(observations []transport.RegistrationObservation, snapshotRevision uint64) uint64 {
 	if len(observations) == 0 {
-		return
+		return snapshotRevision
 	}
 	d.inventoryMu.Lock()
+	defer d.inventoryMu.Unlock()
+	previous := d.diagnosticsRevision
 	d.diagnosticsRevision = nextRevisionAbove(d.diagnosticsRevision, observations)
-	d.inventoryMu.Unlock()
+	if previous == snapshotRevision {
+		return d.diagnosticsRevision
+	}
+	return snapshotRevision
 }
 
 func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 	d.connectionMu.Lock()
 	if d.diagnosticsStream == stream {
 		d.diagnosticsStream = nil
+		d.sentDiagnosticsRevision = 0
 		d.modelInvokeOutcomes.Store(false)
 		d.modelGatewayUnavailable.Store(false)
 		d.runtimeFailureDetail.Store(false)
@@ -629,15 +642,41 @@ func (d *Daemon) replayRetainedEvents(ctx context.Context, stream transport.Stre
 // activateStreamAndReplay makes stream the live connection; localModels says
 // whether its Agent Service accepts runner.local_models.
 func (d *Daemon) activateStreamAndReplay(ctx context.Context, stream transport.Stream, operationIDs []string, localModels bool) error {
+	return d.activateStreamAndReplayWithHelloRevision(ctx, stream, operationIDs, localModels, 0)
+}
+
+func (d *Daemon) activateStreamAndReplayWithHelloRevision(ctx context.Context, stream transport.Stream, operationIDs []string, localModels bool, helloRev uint64) error {
 	d.connectionMu.Lock()
 	defer d.connectionMu.Unlock()
 	d.diagnosticsStream = stream
+	d.sentDiagnosticsRevision = helloRev
 	d.operationStream = stream
 	d.localModelsStream = nil
 	if localModels {
 		d.localModelsStream = stream
 	}
-	return d.replayRetainedEvents(ctx, stream, operationIDs)
+	if err := d.replayRetainedEvents(ctx, stream, operationIDs); err != nil {
+		return err
+	}
+	if helloRev == 0 {
+		return nil
+	}
+	// Lock order is strictly connectionMu -> inventoryMu; never invert.
+	d.inventoryMu.RLock()
+	latestRev := d.diagnosticsRevision
+	latestDiag := append(json.RawMessage(nil), d.runtimeDiagnostics...)
+	d.inventoryMu.RUnlock()
+	if latestRev > d.sentDiagnosticsRevision && len(latestDiag) > 0 {
+		if err := stream.Send(ctx, protocol.Event{
+			Type: protocol.EventRuntimeDiagnostics, ProtocolVersion: d.protocolVersion,
+			RunnerID: d.computerID, Revision: latestRev, SentAt: time.Now().UTC(),
+			Payload: latestDiag,
+		}); err != nil {
+			return err
+		}
+		d.sentDiagnosticsRevision = latestRev
+	}
+	return nil
 }
 
 // deliverRecordedOperationEvent reports how long the delivery waited for the

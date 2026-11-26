@@ -289,13 +289,27 @@ func (l *Library) PiProvisionFailed() bool {
 	return l.piExecutable == "" && !l.piEnsuring && l.piFailures > 0
 }
 
+// SetHarnessDirectory updates the harness directory used for on-demand Pi
+// provisioning. Setting a non-empty directory after a loaded local model has
+// already been observed schedules Pi provisioning immediately.
+func (l *Library) SetHarnessDirectory(dir string) {
+	l.mu.Lock()
+	l.harnessDirectory = dir
+	shouldEnsure := dir != "" && l.loaded != nil && *l.loaded != ""
+	l.mu.Unlock()
+	if shouldEnsure {
+		l.scheduleEnsurePi()
+	}
+}
+
 func (l *Library) scheduleEnsurePi() {
-	if l.harnessDirectory == "" || l.tool == nil || !l.tool.installed() {
+	if l.tool == nil || !l.tool.installed() {
 		return
 	}
 	l.mu.Lock()
+	harnessDir := l.harnessDirectory
 	now := l.now()
-	if l.closed || l.ctx.Err() != nil || l.piExecutable != "" || l.piEnsuring || (!l.piRetryAt.IsZero() && now.Before(l.piRetryAt)) {
+	if harnessDir == "" || l.closed || l.ctx.Err() != nil || l.piExecutable != "" || l.piEnsuring || (!l.piRetryAt.IsZero() && now.Before(l.piRetryAt)) {
 		l.mu.Unlock()
 		return
 	}
@@ -306,7 +320,7 @@ func (l *Library) scheduleEnsurePi() {
 	go func() {
 		defer l.wg.Done()
 		ctx, cancel := context.WithTimeout(l.ctx, l.ensurePiTimeout)
-		executable, err := l.tool.EnsurePi(ctx, l.environment, l.harnessDirectory, l.nodePath)
+		executable, err := l.tool.EnsurePi(ctx, l.environment, harnessDir, l.nodePath)
 		cancel()
 
 		l.mu.Lock()
