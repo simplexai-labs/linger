@@ -93,9 +93,12 @@ Gateway and runs Agents. The daemon exits with the app.
   legacy bundled manifests or downloading in the download region's order,
   `scripts/installs/README.md`) and unpacks the linger source package
   into the install location (the default home, or a folder picked under
-  Customize; tar runs inside the target with relative paths, falling back to
+  Customize; the selected folder's disk must have enough room for the
+  services and any local model shown in the install plan; Windows validates
+  private access for a picked folder and checks the default disk's free space;
+  tar runs inside the target with relative paths, falling back to
   the pure-Node extractor when `tar.exe` is missing with `ENOENT` on stripped
-  Windows images, and the
+  Windows images. The
   finished folder is moved into place with `renameRetrying`, which waits out
   Windows' short-lived locks on new files) and starts the bundled
   `dist/installer/installer.js` headless (`--no-open`), which runs every

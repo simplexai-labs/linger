@@ -29,7 +29,11 @@ import {
 
 import { NODE_RUNTIME_VERSION } from "../../../../scripts/local-computer-node-distributions.mjs";
 import { rename } from "node:fs/promises";
-import { composeProject } from "@linger/local-installation/instance";
+import {
+  atomicPrivate,
+  composeProject,
+  privateDirectory,
+} from "@linger/local-installation/instance";
 
 import { CredentialStore } from "./computer-credential.js";
 import { EnrollmentModule } from "./enrollment.js";
@@ -73,6 +77,7 @@ import {
   stubModule,
   tempDirectory,
   testHost,
+  waitForInstaller,
 } from "./test-support.js";
 
 // These tests unpack source archives with real tar and run the installer stub
@@ -80,8 +85,6 @@ import {
 // take longer on Windows).
 const isWindowsHost = process.platform === "win32";
 vi.setConfig({ testTimeout: isWindowsHost ? 20_000 : 15_000 });
-const waitForInstaller = (check: () => unknown) =>
-  vi.waitFor(check, { timeout: isWindowsHost ? 10_000 : 5_000 });
 
 // Fake timers that still advance with real time, for the installer stub's
 // subprocess; AbortSignal.timeout runs on them too, since the native one
@@ -1905,41 +1908,88 @@ describe("LocalServerModule", () => {
     writeFileSync(
       path.join(bundle, "manifest.json"),
       JSON.stringify({
+  it(
+    "copies the services and Node.js a Mac build bundles as folders",
+    async () => {
+      const node = (home: string) =>
+        path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
+      const f = fixture({}, {}, (home) =>
+        rmSync(node(home), { recursive: true, force: true }),
+      );
+      const installer = path.join(f.root, "installer");
+      const archive = sourceArchive(f.root);
+      mkdirSync(path.join(installer, "source"));
+      writeFileSync(
+        path.join(installer, "source", "linger.tar.gz"),
+        archive.bytes,
+      );
+      writeFileSync(
+        path.join(installer, "distribution.json"),
+        JSON.stringify({
+          platform: "darwin",
+          arch: "arm64",
+          nativeSources: [{ target: "darwin-arm64" }],
+        }),
+      );
+      const bundle = path.join(installer, "native", "runtime-darwin-arm64");
+      mkdirSync(path.join(bundle, "runtime", "web"), { recursive: true });
+      mkdirSync(path.join(bundle, "node", "bin"), { recursive: true });
+      const files = JSON.stringify({
         target: "darwin-arm64",
         sourceCommit: "a".repeat(40),
         sourceArchiveSha256: archive.sha256,
-        layout: "directory",
-        directory: { file: "runtime/files.json", sha256: sha256(files) },
-        node: {
-          version: NODE_RUNTIME_VERSION,
-          file: "node/bin/node",
-          sha256: sha256(readFileSync(process.execPath)),
-        },
-      }),
-    );
-    await new LocalServerModule({
-      home: f.home,
-      version: APP_VERSION,
-      installerDirectory: installer,
-      platform: "darwin",
-      arch: "arm64",
-      sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
-      signIn: f.signIn,
-    })
-      .begin()
-      .catch(() => undefined);
-    expect(sha256(readFileSync(path.join(node(f.home), "bin", "node")))).toBe(
-      sha256(readFileSync(process.execPath)),
-    );
-    const args = installerArgs(f.home);
-    const offline = path.join(
-      args[args.indexOf("--source-repo") + 1]!,
-      ".simplexai-runtime/offline",
-    );
-    expect(readFileSync(path.join(offline, "files.json"), "utf8")).toBe(files);
-    expect(existsSync(path.join(offline, "web", "static-host.mjs"))).toBe(true);
-    expect(existsSync(`${offline}.partial`)).toBe(false);
-  });
+        files: {},
+      });
+      writeFileSync(path.join(bundle, "runtime", "files.json"), files);
+      writeFileSync(path.join(bundle, "runtime", "web", "static-host.mjs"), "");
+      // The signed binary; here the Node.js running the tests.
+      fixtureNode(path.join(bundle, "node", "bin", "node"));
+      const sha256 = (data: string | Buffer) =>
+        createHash("sha256").update(data).digest("hex");
+      writeFileSync(
+        path.join(bundle, "manifest.json"),
+        JSON.stringify({
+          target: "darwin-arm64",
+          sourceCommit: "a".repeat(40),
+          sourceArchiveSha256: archive.sha256,
+          layout: "directory",
+          directory: { file: "runtime/files.json", sha256: sha256(files) },
+          node: {
+            version: NODE_RUNTIME_VERSION,
+            file: "node/bin/node",
+            sha256: sha256(readFileSync(process.execPath)),
+          },
+        }),
+      );
+      await new LocalServerModule({
+        home: f.home,
+        version: APP_VERSION,
+        installerDirectory: installer,
+        platform: "darwin",
+        arch: "arm64",
+        sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
+        signIn: f.signIn,
+      })
+        .begin()
+        .catch(() => undefined);
+      expect(sha256(readFileSync(path.join(node(f.home), "bin", "node")))).toBe(
+        sha256(readFileSync(process.execPath)),
+      );
+      const args = installerArgs(f.home);
+      const offline = path.join(
+        args[args.indexOf("--source-repo") + 1]!,
+        ".simplexai-runtime/offline",
+      );
+      expect(readFileSync(path.join(offline, "files.json"), "utf8")).toBe(
+        files,
+      );
+      expect(existsSync(path.join(offline, "web", "static-host.mjs"))).toBe(
+        true,
+      );
+      expect(existsSync(`${offline}.partial`)).toBe(false);
+    },
+    isWindowsHost ? 40_000 : 15_000,
+  );
 
   it("reuses the shared Computer tools Node.js on Windows and macOS without network downloads", async () => {
     const sha256 = (data: string | Buffer) =>
@@ -4088,6 +4138,40 @@ describe("LocalServerModule install location", () => {
       "Choose a folder on this computer.",
     );
   });
+
+  it("checks the default Windows data folder before launching the installer", async () => {
+    const f = fixture({
+      checkout: "/src",
+      platform: "win32",
+      freeBytes: Number.MAX_SAFE_INTEGER,
+    });
+    await f.host.start();
+    try {
+      await expect(f.module.begin()).rejects.toThrow(/Needs \d+ GB free/);
+      expect(f.module.status().message).toContain(f.home);
+      expect(existsSync(path.join(f.home, "installer", "args.json"))).toBe(
+        false,
+      );
+    } finally {
+      await f.host.stop("quit");
+    }
+  });
+
+  it("reports an unsafe Windows folder without selecting it", async () => {
+    const f = fixture({
+      platform: "win32",
+      checkPrivateLocation: async () => {
+        throw new Error("This folder has shared access.");
+      },
+    });
+    const picked = path.join(f.root, "shared");
+    await f.module.chooseLocation(picked);
+    expect(f.module.status().location).toEqual({
+      path: f.home,
+      custom: false,
+      error: "This folder has shared access.",
+    });
+  });
 });
 
 describe("LocalServerModule after a restart", () => {
@@ -4211,17 +4295,17 @@ describe("LocalServerModule after a restart", () => {
   });
 
   it("syncs the local Runner Gateway URL when node-services moved to a new port on resume", async () => {
-    const writeDesktopInstance = (
+    // Owner-only, as loadInstance requires; plain writes on Windows inherit
+    // the folder's shared DACL.
+    const writeDesktopInstance = async (
       home: string,
       webPort: number,
       nodeServicesPort: number,
     ) => {
       const instanceRoot = path.join(home, "instances", LOCAL_INSTANCE);
-      mkdirSync(instanceRoot, { recursive: true, mode: 0o700 });
-      chmodSync(instanceRoot, 0o700);
-      const file = path.join(instanceRoot, "instance.json");
-      writeFileSync(
-        file,
+      await privateDirectory(instanceRoot);
+      await atomicPrivate(
+        path.join(instanceRoot, "instance.json"),
         JSON.stringify({
           schemaVersion: 1,
           name: LOCAL_INSTANCE,
@@ -4244,14 +4328,10 @@ describe("LocalServerModule after a restart", () => {
             },
           },
         }),
-        { mode: 0o600 },
       );
-      chmodSync(file, 0o600);
     };
-    const f = fixture({}, enrolled, (home) => {
-      record(home);
-      writeDesktopInstance(home, 3000, 59894);
-    });
+    const f = fixture({}, enrolled, record);
+    await writeDesktopInstance(f.home, 3000, 59894);
     await f.host.start();
     await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(f.syncLocalGatewayUrl).toHaveBeenCalledWith(

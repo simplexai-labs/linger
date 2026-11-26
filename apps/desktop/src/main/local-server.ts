@@ -1004,6 +1004,19 @@ export class LocalServerModule implements Module {
     } else {
       const home = await installLocation(picked);
       this.#locationError = await checkLocation(home, this.#freeBytes());
+      if (
+        !this.#locationError &&
+        (this.#options.platform ?? process.platform) === "win32"
+      ) {
+        try {
+          await (this.#options.checkPrivateLocation ?? windowsPrivateLocation)(
+            home,
+          );
+        } catch (error) {
+          this.#locationError =
+            error instanceof Error ? error.message : String(error);
+        }
+      }
       if (!this.#locationError)
         this.#location = home === this.#home ? undefined : home;
     }
@@ -1474,21 +1487,27 @@ export class LocalServerModule implements Module {
         ]),
       );
       signal.throwIfAborted();
-      // A chosen folder may have filled up or gone since it was picked.
-      if (this.#location) {
+      const platform = this.#options.platform ?? process.platform;
+      // On Windows the default data location also needs a space check. A
+      // custom folder may have filled up or gone since it was picked.
+      if (platform === "win32" || this.#location) {
         const model =
-          this.#check.state === "checked" ? this.#check.model : undefined;
+          this.#check.state === "checked" &&
+          (plan.runtime === "local" ||
+            (plan.runtime === "recommended" &&
+              this.#check.recommendation === "local-models"))
+            ? this.#check.model
+            : undefined;
         const error = await checkLocation(
           home,
-          this.#freeBytes() +
-            (plan.runtime === "local" ? (model?.diskBytes ?? 0) : 0),
+          this.#freeBytes() + (model?.diskBytes ?? 0),
         );
-        if (error) throw new Error(error);
+        if (error) throw new Error(`${home}: ${error}`);
       }
       // On Windows, pre-check both the install home and the Computer daemon
       // directory (<userData>/computer) before unpacking so ancestor ACL
       // refusals fail immediately instead of after installation and enrollment.
-      if ((this.#options.platform ?? process.platform) === "win32") {
+      if (platform === "win32") {
         const checkPrivate =
           this.#options.checkPrivateLocation ?? windowsPrivateLocation;
         await this.#timed("private_paths", async () => {

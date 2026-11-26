@@ -2186,19 +2186,28 @@
                 </div>
                 <p class="keys-note" id="keys-note"></p>
               </details>
-              <div class="choice">
-                <div class="text">
-                  <strong data-t="installLocation"></strong
-                  ><span class="sub" id="location-sub"></span>
-                </div>
-                <button
-                  type="button"
-                  class="change"
-                  id="location-change"
-                  data-t="changeLocation"
-                ></button>
-              </div>
             </div>
+          </div>
+        </div>
+        <div class="choices" id="install-location" hidden>
+          <div class="choice">
+            <div class="text">
+              <strong data-t="installLocation"></strong
+              ><span class="sub" id="location-sub"></span>
+            </div>
+            <button
+              type="button"
+              class="change"
+              id="location-reset"
+              data-t="useDefaults"
+              hidden
+            ></button>
+            <button
+              type="button"
+              class="change"
+              id="location-change"
+              data-t="changeLocation"
+            ></button>
           </div>
         </div>
         <div class="start">
@@ -4053,10 +4062,11 @@
           String(customizing && local.available);
         const byokIncomplete = plan.source === "byok" && !mainByok.complete();
         const localUnavailable = plan.source === "local" && !model;
+        const location = local.location;
         $("local-install").disabled ||=
-          waitingForCheck || byokIncomplete || localUnavailable;
-        $("local-install").dataset.busy = String(waitingForCheck);
-        $("local-install").setAttribute("aria-busy", String(waitingForCheck));
+          checking || byokIncomplete || localUnavailable || !!location.error;
+        $("local-install").dataset.busy = String(checking);
+        $("local-install").setAttribute("aria-busy", String(checking));
         $("plan-summary").textContent = checking
           ? t("findingSetup")
           : following && known
@@ -4109,10 +4119,11 @@
           !local.available || customizing || !$("plan-why").textContent;
         $("plan-line").hidden = !local.available;
         $("welcome-eyebrow").hidden = !local.available;
-        const location = local.location;
+        $("install-location").hidden = !local.available;
+        $("location-reset").hidden = !location.custom && !location.error;
         $("location-sub").textContent =
           location.error || shortPath(location.path);
-        $("location-sub").title = location.error ? "" : location.path;
+        $("location-sub").title = location.error || location.path;
         $("location-sub").dataset.warn = String(!!location.error);
         for (const input of document.querySelectorAll("[data-key]")) {
           const provider = input.dataset.key;
@@ -4869,9 +4880,6 @@
           byokRuntime = "claude";
           mainByok.reset();
           clearKeys();
-          const location = state.localServer.location;
-          if (location.custom || location.error)
-            run({ op: "local.location.reset" });
         }
         render();
       });
@@ -4921,6 +4929,9 @@
         });
       $("location-change").addEventListener("click", () =>
         run({ op: "local.location.pick" }),
+      );
+      $("location-reset").addEventListener("click", () =>
+        run({ op: "local.location.reset" }),
       );
       $("local-recheck").addEventListener("click", () =>
         run({ op: "local.recheck" }, "local-error"),
