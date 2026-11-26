@@ -7,11 +7,14 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   downloadInRegion,
   forcedRegion,
+  formatRegionDownloadEvent,
   recordRegionFallback,
   REGION_SCHEMA,
   regionFile,
   resolveRegion,
+  type RegionDownloadEvent,
   type RegionRecord,
+  type RegionResolutionInfo,
 } from "./region.js";
 
 const roots: string[] = [];
@@ -471,4 +474,128 @@ it("keeps the saved region when a slow primary is still faster than the mirror",
     region: "cn",
     method: "probe",
   });
+});
+
+it("reports region resolution method, duration, and probe rates via onResolved", async () => {
+  // env
+  const envHome = await home();
+  vi.stubEnv("SIMPLEX_REGION", "cn");
+  let envInfo: RegionResolutionInfo | undefined;
+  expect(
+    await resolveRegion(envHome, {
+      onResolved: (info) => {
+        envInfo = info;
+      },
+    }),
+  ).toBe("cn");
+  expect(envInfo).toMatchObject({ region: "cn", method: "env" });
+  expect(envInfo?.ms).toBeGreaterThanOrEqual(0);
+  vi.stubEnv("SIMPLEX_REGION", "");
+
+  // cache
+  const cacheHome = await home();
+  await saved(cacheHome, { region: "cn", method: "probe" });
+  let cacheInfo: RegionResolutionInfo | undefined;
+  expect(
+    await resolveRegion(cacheHome, {
+      onResolved: (info) => {
+        cacheInfo = info;
+      },
+    }),
+  ).toBe("cn");
+  expect(cacheInfo).toMatchObject({ region: "cn", method: "cache" });
+
+  // probe
+  const probeHome = await home();
+  let probeInfo: RegionResolutionInfo | undefined;
+  expect(
+    await resolveRegion(probeHome, {
+      fetcher: probe(4096, 16),
+      onResolved: (info) => {
+        probeInfo = info;
+      },
+    }),
+  ).toBe("cn");
+  expect(probeInfo).toMatchObject({ region: "cn", method: "probe" });
+  expect(probeInfo?.probes).toHaveLength(2);
+  expect(probeInfo?.probes?.[0]).toMatchObject({
+    host: "registry.npmmirror.com",
+    bytes: 4096,
+  });
+  expect(probeInfo?.probes?.[0]?.bytesPerSecond).toBeGreaterThan(0);
+
+  // fallback
+  await recordRegionFallback(probeHome, "global");
+  let fallbackInfo: RegionResolutionInfo | undefined;
+  expect(
+    await resolveRegion(probeHome, {
+      onResolved: (info) => {
+        fallbackInfo = info;
+      },
+    }),
+  ).toBe("global");
+  expect(fallbackInfo).toMatchObject({ region: "global", method: "fallback" });
+
+  // default when neither registry answers
+  const defaultHome = await home();
+  let defaultInfo: RegionResolutionInfo | undefined;
+  expect(
+    await resolveRegion(defaultHome, {
+      fetcher: probe(-1, -1),
+      onResolved: (info) => {
+        defaultInfo = info;
+      },
+    }),
+  ).toBe("global");
+  expect(defaultInfo).toMatchObject({ region: "global", method: "default" });
+  expect(defaultInfo?.probes).toHaveLength(2);
+});
+
+it("emits region resolution, mirror switch, and region fallback events from downloadInRegion", async () => {
+  const directory = await home();
+  await saved(directory, { region: "cn" });
+  const events: RegionDownloadEvent[] = [];
+  const { fetcher } = server(["cdn.npmmirror.com"]);
+  await downloadInRegion(
+    directory,
+    {
+      ...sources,
+      output: path.join(directory, "node.tgz"),
+      algorithm: "sha256",
+      digest,
+      maxBytes: 1024,
+      signal: new AbortController().signal,
+      onEvent: (event) => events.push(event),
+    },
+    fetcher,
+    timing,
+  );
+  expect(events.map((event) => event.kind)).toEqual([
+    "region_resolved",
+    "host_switch",
+    "region_fallback",
+  ]);
+  expect(events[0]).toMatchObject({
+    kind: "region_resolved",
+    region: "cn",
+    method: "cache",
+  });
+  expect(events[1]).toEqual({
+    kind: "host_switch",
+    fromHost: "cdn.npmmirror.com",
+    toHost: "nodejs.org",
+    reason: "HTTP 404",
+    completed: 0,
+  });
+  expect(events[2]).toEqual({
+    kind: "region_fallback",
+    fromRegion: "cn",
+    toRegion: "global",
+    host: "nodejs.org",
+  });
+  expect(events.map(formatRegionDownloadEvent)).toEqual([
+    expect.stringMatching(/^Download region: cn \(cache, \d+ms\)\.$/),
+    "Download failed on cdn.npmmirror.com (HTTP 404); switching to nodejs.org.",
+    "Download region fallback: cn -> global (nodejs.org).",
+  ]);
 });

@@ -1,8 +1,11 @@
 import { revokeFoundationGpuSharing } from "./foundation-services.js";
 import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { access, rm, stat } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { sleep } from "@linger/service-kit";
+import { resolveBundledPi } from "./bundled-pi.js";
 import {
   atomicPrivate,
   INSTANCE_BUSY,
@@ -325,8 +328,68 @@ function reasonMessage(observed: Binding | null): string | undefined {
     ? message.trim()
     : undefined;
 }
+export interface LocalModelsEnvironmentOptions {
+  readonly resolveBundledPi?: typeof resolveBundledPi;
+  readonly platform?: NodeJS.Platform;
+}
+async function isExecutableFile(
+  file: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<boolean> {
+  try {
+    const info = await stat(file);
+    if (!info.isFile()) return false;
+    if (platform !== "win32") await access(file, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function expandHomePath(rawPath: string): string {
+  if (rawPath === "~") return os.homedir();
+  if (rawPath.startsWith("~/") || rawPath.startsWith("~\\"))
+    return path.join(os.homedir(), rawPath.slice(2));
+  return rawPath;
+}
+async function hasMissingReusedPiPath(planJson: string): Promise<boolean> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(planJson);
+  } catch {
+    return false;
+  }
+  const tools = (parsed as { harness?: { tools?: unknown } } | null)?.harness
+    ?.tools;
+  if (!Array.isArray(tools)) return false;
+  for (const entry of tools) {
+    if (!entry || typeof entry !== "object") continue;
+    const tool = entry as {
+      tool?: unknown;
+      action?: unknown;
+      path?: unknown;
+    };
+    if (
+      tool.tool !== "pi" ||
+      tool.action !== "reuse" ||
+      typeof tool.path !== "string"
+    )
+      continue;
+    const trimmed = tool.path.trim();
+    if (!trimmed) continue;
+    const expanded = expandHomePath(trimmed);
+    if (!path.isAbsolute(expanded)) continue;
+    try {
+      const info = await stat(expanded);
+      if (!info.isFile()) return true;
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
 export async function localModelsEnvironment(
   instance: Instance,
+  options: LocalModelsEnvironmentOptions = {},
 ): Promise<NodeJS.ProcessEnv> {
   if ((await readSetupChoice(instance)) !== "local-models") return {};
   const raw = await readPrivate(
@@ -338,9 +401,13 @@ export async function localModelsEnvironment(
   if (!raw) return {};
   const b = binding(JSON.parse(raw));
   if (!b.ready || !b.pi) return {};
+  const platform = options.platform ?? process.platform;
+  const piExecutable = (await isExecutableFile(b.pi.executable, platform))
+    ? b.pi.executable
+    : (await (options.resolveBundledPi ?? resolveBundledPi)())?.executable;
   return {
     ...b.pi.environment,
-    LINGER_PI_PATH: b.pi.executable,
+    ...(piExecutable ? { LINGER_PI_PATH: piExecutable } : {}),
     LINGER_LOCAL_MODELS_REVISION: b.pi.configFingerprint,
   };
 }
@@ -686,7 +753,20 @@ export async function prepareLocalModels(
       // If `stack up` did not restore the binding (for example drift, missing
       // files, or a Pi without extension support from an earlier localmodels),
       // applying the approved plan again can still repair it while the
-      // approval it was deployed under holds.
+      // approval it was deployed under holds, unless the saved plan pins a
+      // reused Pi executable that no longer exists on disk.
+      if (saved && (await hasMissingReusedPiPath(saved))) {
+        options.onEvent({
+          kind: "log",
+          stage: "runtime",
+          message:
+            "The saved local model plan's reused Pi executable no longer exists; skipping stack apply.\n",
+        });
+        return action(
+          "LOCAL_MODELS_RECOVERY_REQUIRED",
+          "The saved local model plan references a Pi executable that no longer exists (for example after moving the Linger app). Review a new plan; existing resources were preserved.",
+        );
+      }
       options.onEvent({
         kind: "log",
         stage: "runtime",

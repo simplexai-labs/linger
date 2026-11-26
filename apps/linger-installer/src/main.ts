@@ -7,6 +7,7 @@ import {
 import type { LegacyInstanceSkipped } from "@linger/local-installation/legacy-migration";
 import type { RuntimeDescriptor } from "@linger/local-installation/managed-runtimes";
 import type { RuntimeLookupTimings } from "./server/instance-runtime.js";
+import type { ResumeTimings } from "./server/resume.js";
 import { fileURLToPath } from "node:url";
 import { launchInstaller } from "./server/launch.js";
 export { startInstallerServer } from "./server/server.js";
@@ -154,6 +155,7 @@ async function resume(options: ReturnType<typeof parseInstallerArguments>) {
   const controller = new AbortController();
   process.once("SIGTERM", () => controller.abort());
   let runtimeDescriptors: RuntimeDescriptor[] | undefined;
+  let resumeTimings: ResumeTimings | undefined;
   const outcome = await resumeSourceInstance({
     home: options.home,
     sourceRepo: options.sourceRepo!,
@@ -161,6 +163,9 @@ async function resume(options: ReturnType<typeof parseInstallerArguments>) {
     externalComputer: options.externalComputer,
     onRuntimeDescriptors: (descriptors) => {
       runtimeDescriptors = descriptors;
+    },
+    onTimings: (timings) => {
+      resumeTimings = timings;
     },
     signal: controller.signal,
     log: (message) => process.stderr.write(message.replace(/\n?$/, "\n")),
@@ -193,6 +198,7 @@ async function resume(options: ReturnType<typeof parseInstallerArguments>) {
       ...outcome,
       ...(runtime ? { runtime } : {}),
       ...(runtimeLookupTimings ? { runtimeLookupTimings } : {}),
+      ...(resumeTimings ? { resumeTimings } : {}),
     })}\n`,
     () => process.exit(outcome.code),
   );
@@ -207,36 +213,47 @@ async function inspect(options: ReturnType<typeof parseInstallerArguments>) {
   let counted = 0;
   let refusal: WindowsPrivateRefusal | undefined;
   let failureMessage: string | undefined;
+  const controller = new AbortController();
+  const onTerm = () => controller.abort();
+  process.once("SIGTERM", onTerm);
   // The desktop logs stderr, so a slow check says which part was slow.
-  const report = await inspectSetup({
-    home: options.home,
-    targetHome: options.inspectTarget,
-    signal: AbortSignal.timeout(10 * 60_000),
-    onEvent: (event) => {
-      if (event.kind === "log")
-        process.stderr.write(event.message.replace(/\n?$/, "\n"));
-      const progress = event.progress;
-      if (event.kind !== "stage" || progress?.unit !== "bytes") return;
-      // A download reports every chunk; a few lines a second are enough.
-      const done = progress.total === progress.completed;
-      if (!done && Date.now() - counted < 250) return;
-      counted = Date.now();
-      process.stdout.write(
-        `${JSON.stringify({
-          event: "download",
-          completed: progress.completed,
-          ...(progress.total ? { total: progress.total } : {}),
-        })}\n`,
+  let report: Awaited<ReturnType<typeof inspectSetup>> | null;
+  try {
+    report = await inspectSetup({
+      home: options.home,
+      targetHome: options.inspectTarget,
+      signal: AbortSignal.any([
+        controller.signal,
+        AbortSignal.timeout(10 * 60_000),
+      ]),
+      onEvent: (event) => {
+        if (event.kind === "log")
+          process.stderr.write(event.message.replace(/\n?$/, "\n"));
+        const progress = event.progress;
+        if (event.kind !== "stage" || progress?.unit !== "bytes") return;
+        // A download reports every chunk; a few lines a second are enough.
+        const done = progress.total === progress.completed;
+        if (!done && Date.now() - counted < 250) return;
+        counted = Date.now();
+        process.stdout.write(
+          `${JSON.stringify({
+            event: "download",
+            completed: progress.completed,
+            ...(progress.total ? { total: progress.total } : {}),
+          })}\n`,
+        );
+      },
+    }).catch((error: unknown) => {
+      refusal = windowsPrivateRefusal(error);
+      failureMessage = error instanceof Error ? error.message : String(error);
+      process.stderr.write(
+        `The check failed${refusal ? ` (${refusal.code})` : ""}: ${failureMessage}\n`,
       );
-    },
-  }).catch((error: unknown) => {
-    refusal = windowsPrivateRefusal(error);
-    failureMessage = error instanceof Error ? error.message : String(error);
-    process.stderr.write(
-      `The check failed${refusal ? ` (${refusal.code})` : ""}: ${failureMessage}\n`,
-    );
-    return null;
-  });
+      return null;
+    });
+  } finally {
+    process.off("SIGTERM", onTerm);
+  }
   process.stderr.write(
     `Checked this computer in ${((Date.now() - startedAt) / 1000).toFixed(1)}s.\n`,
   );

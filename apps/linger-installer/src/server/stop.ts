@@ -31,7 +31,11 @@ export interface StopOutcome {
 
 export interface StopDependencies {
   load?: typeof loadInstance;
-  stopInstance?: (instance: Instance, signal: AbortSignal) => Promise<void>;
+  stopInstance?: (
+    instance: Instance,
+    signal: AbortSignal,
+    options?: { log?: (message: string) => void },
+  ) => Promise<void>;
   stopModels?: (
     home: string,
     options: {
@@ -65,23 +69,47 @@ export async function stopDesktopInstallation(
     options.onFailure,
   );
   for (const home of await installationHomes(options.home)) {
+    const stageTimings: [string, string][] = [];
+    const runStage = async (
+      stage: "manager" | "services" | "localmodels",
+      step: () => Promise<void>,
+    ) => {
+      const startedAt = Date.now();
+      let stageFailed = false;
+      await attempt(
+        home,
+        async () => {
+          try {
+            await step();
+          } catch (error) {
+            stageFailed = true;
+            throw error;
+          }
+        },
+        stage,
+      );
+      const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+      stageTimings.push([stage, elapsed]);
+      options.log(
+        stageFailed
+          ? `Stop stage ${stage} failed after ${elapsed}s.`
+          : `Stop stage ${stage} completed in ${elapsed}s.`,
+      );
+    };
     // The services stop even when the manager could not: an earlier release's
     // manager has no /api/stop, and a stale session may name another server.
-    await attempt(home, () => stopManager(home, options, fetcher), "manager");
-    await attempt(
-      home,
-      async () => {
-        const instance = await load({ name: options.instanceName, home });
-        if (!instance) return;
-        options.log(`Stopping the services in ${instance.root}.`);
-        await stopInstance(instance, options.signal);
-      },
-      "services",
+    await runStage("manager", () => stopManager(home, options, fetcher));
+    await runStage("services", async () => {
+      const instance = await load({ name: options.instanceName, home });
+      if (!instance) return;
+      options.log(`Stopping the services in ${instance.root}.`);
+      await stopInstance(instance, options.signal, { log: options.log });
+    });
+    await runStage("localmodels", () =>
+      stopModels(home, { signal: options.signal, log: options.log }),
     );
-    await attempt(
-      home,
-      () => stopModels(home, { signal: options.signal, log: options.log }),
-      "localmodels",
+    options.log(
+      `Stop timings (s): ${stageTimings.map(([stage, elapsed]) => `${stage} ${elapsed}`).join(", ")}.`,
     );
   }
   return { failed };

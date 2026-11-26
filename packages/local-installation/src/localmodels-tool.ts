@@ -3,11 +3,17 @@ import { createReadStream } from "node:fs";
 import { lstat, readdir, readFile, rm, chmod } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { sleep } from "@linger/service-kit";
 import { x as extract } from "tar";
-import { downloadInRegion, resolveRegion } from "./region.js";
+import {
+  downloadInRegion,
+  formatRegionDownloadEvent,
+  resolveRegion,
+} from "./region.js";
 import {
   atomicPrivate,
+  INSTANCE_BUSY,
   privateDirectory,
   readPrivate,
   withInstanceLock,
@@ -21,6 +27,12 @@ import {
 } from "./published-source.js";
 import type { InstallerEvent } from "./events.js";
 import { renameRetrying } from "./fs-retry.js";
+import {
+  ensureStableBundledPi,
+  resolveBundledPi,
+  withBundledPiPath,
+  type BundledPi,
+} from "./bundled-pi.js";
 export type LocalmodelsToolSource = PublishedServiceSource & {
   sourceCommit: string;
   manifestSha256: string;
@@ -34,7 +46,10 @@ interface ToolManifest {
   moduleDir: string;
   assets: Record<string, string>;
 }
-type Options = ProcessOptions & { onEvent?: (event: InstallerEvent) => void };
+type Options = ProcessOptions & {
+  onEvent?: (event: InstallerEvent) => void;
+  bundledPi?: BundledPi | null;
+};
 export function validateToolSource(value: unknown): LocalmodelsToolSource {
   const source = validatePublishedServiceSource(value);
   const extra = value as LocalmodelsToolSource;
@@ -325,10 +340,18 @@ async function installedKit(directory: string, source: LocalmodelsToolSource) {
   if (tool.hashed > 0) await writeStamps(directory, source, tool.stamps);
   return location(tool);
 }
+interface ToolPrepareDependencies {
+  source?: LocalmodelsToolSource;
+  fetcher?: typeof fetch;
+  lockPollMs?: number;
+  lockWaitMs?: number;
+}
+const KIT_LOCK_POLL_MS = 250;
+const KIT_LOCK_WAIT_MS = 10 * 60_000;
 async function prepareLocalmodelsTool(
   home: string,
   options: Options = {},
-  dependencies: { source?: LocalmodelsToolSource; fetcher?: typeof fetch } = {},
+  dependencies: ToolPrepareDependencies = {},
 ) {
   const pinned = dependencies.source ?? pinnedToolSource();
   if (!pinned)
@@ -347,100 +370,165 @@ async function prepareLocalmodelsTool(
   } catch {
     // An altered kit is replaced below, under the publication lock.
   }
+  const signal = options.signal ?? new AbortController().signal;
   const lock = path.join(base, "lock");
   await privateDirectory(lock);
-  return withInstanceLock({ root: lock } as Instance, async () => {
-    let damaged = false;
+  const lockPollMs = dependencies.lockPollMs ?? KIT_LOCK_POLL_MS;
+  const lockWaitMs = dependencies.lockWaitMs ?? KIT_LOCK_WAIT_MS;
+  const lockDeadline = Date.now() + lockWaitMs;
+  let waited = false;
+  for (;;) {
+    signal.throwIfAborted();
     try {
       const tool = await installedKit(directory, source);
       if (tool) return tool;
-    } catch (error) {
-      if (/owned directory/.test((error as Error).message)) throw error;
-      damaged = true;
+    } catch {
+      // An altered kit is replaced below, under the publication lock.
     }
-    const signal = options.signal ?? new AbortController().signal;
-    signal.throwIfAborted();
-    if (damaged) {
-      // Re-fetch the same pinned kit; the altered copy is moved aside first so
-      // the published path only ever holds a verified kit.
-      const invalid = path.join(base, `invalid-${randomUUID()}`);
-      // macOS also requires the source directory to be writable when moving
-      // a sealed directory. Ownership was checked above; reopen only its root
-      // before quarantine, then reopen descendants at the quarantined path.
-      if (process.platform !== "win32") await chmod(directory, 0o700);
-      await renameRetrying(directory, invalid, { signal });
-      await setKitMode(invalid, false);
-      await rm(invalid, { recursive: true, force: true });
-    }
-    const stage = path.join(base, `pending-${randomUUID()}`);
-    await privateDirectory(stage);
-    const archive = path.join(base, `${randomUUID()}.tgz`);
+    let acquired = false;
     try {
-      options.onEvent?.({
-        kind: "stage",
-        stage: "preflight",
-        state: "running",
-        message: damaged
-          ? "Repairing the model and Harness installation tool…"
-          : "Preparing the model and Harness installation tool…",
+      return await withInstanceLock({ root: lock } as Instance, async () => {
+        acquired = true;
+        let damaged = false;
+        try {
+          const tool = await installedKit(directory, source);
+          if (tool) return tool;
+        } catch (error) {
+          if (/owned directory/.test((error as Error).message)) throw error;
+          damaged = true;
+        }
+        signal.throwIfAborted();
+        if (damaged) {
+          // Re-fetch the same pinned kit; the altered copy is moved aside first so
+          // the published path only ever holds a verified kit.
+          const invalid = path.join(base, `invalid-${randomUUID()}`);
+          // macOS also requires the source directory to be writable when moving
+          // a sealed directory. Ownership was checked above; reopen only its root
+          // before quarantine, then reopen descendants at the quarantined path.
+          if (process.platform !== "win32") await chmod(directory, 0o700);
+          await renameRetrying(directory, invalid, { signal });
+          await setKitMode(invalid, false);
+          await rm(invalid, { recursive: true, force: true });
+        }
+        const stage = path.join(base, `pending-${randomUUID()}`);
+        await privateDirectory(stage);
+        const archive = path.join(base, `${randomUUID()}.tgz`);
+        try {
+          options.onEvent?.({
+            kind: "stage",
+            stage: "preflight",
+            state: "running",
+            message: damaged
+              ? "Repairing the model and Harness installation tool…"
+              : "Preparing the model and Harness installation tool…",
+          });
+          const downloadStartedAt = Date.now();
+          await downloadInRegion(
+            home,
+            {
+              url: source.url,
+              mirrors: source.mirrors,
+              output: archive,
+              algorithm: "sha256",
+              digest: source.sha256,
+              maxBytes: source.bytes,
+              signal,
+              onEvent: (event) =>
+                options.onEvent?.({
+                  kind: "log",
+                  stage: "preflight",
+                  message: `${formatRegionDownloadEvent(event)}\n`,
+                }),
+              onProgress: (completed, total) =>
+                options.onEvent?.({
+                  kind: "stage",
+                  stage: "preflight",
+                  state: "running",
+                  message:
+                    "Downloading the model and Harness installation tool…",
+                  progress: { completed, total, unit: "bytes" },
+                }),
+            },
+            dependencies.fetcher,
+          );
+          const unpackStartedAt = Date.now();
+          await unpack(archive, stage);
+          // The kit is an npm tarball: its files sit under package/.
+          const kit = path.join(stage, "package");
+          const verifyStartedAt = Date.now();
+          const tool = await verify(kit, source);
+          const verifiedAt = Date.now();
+          if (process.platform !== "win32") await chmod(tool.python, 0o700);
+          // The kit manifest is private state; publisher bytes stay unchanged for digest checks.
+          const manifest = path.join(kit, "tool.json");
+          const body = await readFile(manifest, "utf8");
+          // A read-only archive manifest cannot be replaced on Windows until
+          // it is writable. Seal the replacement as well as the verified assets.
+          if (
+            process.platform === "win32" &&
+            !tool.writable.includes(manifest)
+          ) {
+            await chmod(manifest, 0o600);
+            tool.writable.push(manifest);
+          }
+          await atomicPrivate(manifest, body);
+          await sealWindowsFiles(tool.writable);
+          signal.throwIfAborted();
+          await renameRetrying(kit, directory, { signal });
+          // Every file and stamp was just verified inside the locked private stage
+          // before this atomic rename, so only confirm the published entry path.
+          const { file: publishedPython } = await regular(
+            directory,
+            tool.pythonRel,
+          );
+          await setKitMode(directory, true);
+          await writeStamps(directory, source, tool.stamps);
+          const seconds = (ms: number) => (ms / 1000).toFixed(1);
+          options.onEvent?.({
+            kind: "log",
+            stage: "preflight",
+            message: `localmodels kit prepared (s): download ${seconds(unpackStartedAt - downloadStartedAt)}, unpack ${seconds(verifyStartedAt - unpackStartedAt)}, verify ${seconds(verifiedAt - verifyStartedAt)}.\n`,
+          });
+          return {
+            python: publishedPython,
+            moduleDir: path.join(directory, tool.moduleDirRel),
+            sourceCommit: tool.sourceCommit,
+          };
+        } finally {
+          await rm(stage, { recursive: true, force: true });
+          await rm(archive, { force: true });
+        }
       });
-      await downloadInRegion(
-        home,
-        {
-          url: source.url,
-          mirrors: source.mirrors,
-          output: archive,
-          algorithm: "sha256",
-          digest: source.sha256,
-          maxBytes: source.bytes,
-          signal,
-          onProgress: (completed, total) =>
-            options.onEvent?.({
-              kind: "stage",
-              stage: "preflight",
-              state: "running",
-              message: "Downloading the model and Harness installation tool…",
-              progress: { completed, total, unit: "bytes" },
-            }),
-        },
-        dependencies.fetcher,
-      );
-      await unpack(archive, stage);
-      // The kit is an npm tarball: its files sit under package/.
-      const kit = path.join(stage, "package");
-      const tool = await verify(kit, source);
-      if (process.platform !== "win32") await chmod(tool.python, 0o700);
-      // The kit manifest is private state; publisher bytes stay unchanged for digest checks.
-      const manifest = path.join(kit, "tool.json");
-      const body = await readFile(manifest, "utf8");
-      // A read-only archive manifest cannot be replaced on Windows until
-      // it is writable. Seal the replacement as well as the verified assets.
-      if (process.platform === "win32" && !tool.writable.includes(manifest)) {
-        await chmod(manifest, 0o600);
-        tool.writable.push(manifest);
+    } catch (error) {
+      if (
+        acquired ||
+        (error as { code?: unknown } | null)?.code !== INSTANCE_BUSY
+      )
+        throw error;
+      if (Date.now() >= lockDeadline) throw error;
+      if (!waited) {
+        waited = true;
+        options.onEvent?.({
+          kind: "stage",
+          stage: "preflight",
+          state: "running",
+          message:
+            "Waiting for the model and Harness installation tool download already in progress…",
+        });
+        options.onEvent?.({
+          kind: "log",
+          stage: "preflight",
+          message:
+            "Waiting for another process preparing the localmodels kit…\n",
+        });
       }
-      await atomicPrivate(manifest, body);
-      await sealWindowsFiles(tool.writable);
-      signal.throwIfAborted();
-      await renameRetrying(kit, directory, { signal });
-      // Every file and stamp was just verified inside the locked private stage
-      // before this atomic rename, so only confirm the published entry path.
-      const { file: publishedPython } = await regular(
-        directory,
-        tool.pythonRel,
+      await delay(
+        Math.min(lockPollMs, Math.max(1, lockDeadline - Date.now())),
+        undefined,
+        { signal },
       );
-      await setKitMode(directory, true);
-      await writeStamps(directory, source, tool.stamps);
-      return {
-        python: publishedPython,
-        moduleDir: path.join(directory, tool.moduleDirRel),
-        sourceCommit: tool.sourceCommit,
-      };
-    } finally {
-      await rm(stage, { recursive: true, force: true });
-      await rm(archive, { force: true });
     }
-  });
+  }
 }
 type ToolLocation = Awaited<ReturnType<typeof prepareLocalmodelsTool>>;
 const preparing = new Map<string, Promise<ToolLocation>>();
@@ -457,7 +545,7 @@ function configuredDevTool(): ToolLocation | undefined {
 export async function ensureLocalmodelsTool(
   home: string,
   options: Options = {},
-  dependencies: { source?: LocalmodelsToolSource; fetcher?: typeof fetch } = {},
+  dependencies: ToolPrepareDependencies = {},
 ): Promise<ToolLocation> {
   options.signal?.throwIfAborted();
   const devTool = configuredDevTool();
@@ -502,6 +590,7 @@ interface BifrostAddressDependencies {
 
 interface RunCommandControl extends BifrostAddressDependencies {
   allocateBifrostAddr?: boolean;
+  resolveBundledPi?: typeof resolveBundledPi;
 }
 
 const STRIPPED_LOCALMODELS_ENVIRONMENT = new Set([
@@ -781,7 +870,10 @@ export async function runLocalmodels(
   home: string,
   args: string[],
   options: Options = {},
-  dependencies: { run?: typeof runProcess } & BifrostAddressDependencies = {},
+  dependencies: {
+    run?: typeof runProcess;
+    resolveBundledPi?: typeof resolveBundledPi;
+  } & BifrostAddressDependencies = {},
 ) {
   return runLocalmodelsCommand(
     home,
@@ -793,6 +885,7 @@ export async function runLocalmodels(
       allocateBifrostAddr: !isReadOnlyOrStopCommand(args),
       portFree: dependencies.portFree,
       freePort: dependencies.freePort,
+      resolveBundledPi: dependencies.resolveBundledPi,
     },
   );
 }
@@ -893,13 +986,48 @@ async function runLocalmodelsCommand(
   delete env.PYTHONHOME;
   delete env.PYTHONSTARTUP;
   delete env.PYTHONINSPECT;
+  const isSetupInspect = args[0] === "setup" && args[1] === "inspect";
+  const resolvedBundledPi =
+    options.bundledPi !== undefined
+      ? (options.bundledPi ?? undefined)
+      : isSetupInspect
+        ? undefined
+        : await (control.resolveBundledPi ?? resolveBundledPi)();
+  const bundledPi = resolvedBundledPi
+    ? await ensureStableBundledPi(home, resolvedBundledPi)
+    : undefined;
+  const effectiveEnv = bundledPi
+    ? await withBundledPiPath(env, { home, bundledPi })
+    : env;
   const harnessApply = args[0] === "harness" && args[1] === "apply";
+  const sourceApply = args[0] === "source" && args[1] === "apply";
   const label =
     args[0] === "gateway"
       ? "Downloading the application model gateway"
-      : args[0] === "source" && args[1] === "apply"
+      : sourceApply
         ? "Downloading the model gateway"
         : "Downloading the selected Harness";
+  type LocalmodelsPhase = "download" | "extract" | "verify" | "install";
+  const phaseMs: Partial<Record<LocalmodelsPhase, number>> = {};
+  let activePhase: LocalmodelsPhase | undefined;
+  let phaseStartedAt: number | undefined;
+  let lastDownloadAt: number | undefined;
+  let downloadRetries = 0;
+  let downloadSwitches = 0;
+  const closePhase = (at: number) => {
+    if (!activePhase || phaseStartedAt === undefined) return;
+    phaseMs[activePhase] =
+      (phaseMs[activePhase] ?? 0) + Math.max(0, at - phaseStartedAt);
+    activePhase = undefined;
+    phaseStartedAt = undefined;
+  };
+  const enterPhase = (phase: LocalmodelsPhase, at: number) => {
+    if (activePhase === phase) return;
+    closePhase(at);
+    activePhase = phase;
+    phaseStartedAt = at;
+    phaseMs[phase] ??= 0;
+  };
   let pending = "";
   const onOutput = (chunk: string) => {
     options.onOutput?.(chunk);
@@ -915,6 +1043,11 @@ async function runLocalmodelsCommand(
         continue;
       }
       if (value?.kind === "stage" && value.stage === "download") {
+        const now = Date.now();
+        if (value.state === "retrying") downloadRetries += 1;
+        else if (value.state === "switching") downloadSwitches += 1;
+        enterPhase("download", now);
+        lastDownloadAt = now;
         const message = downloadStageMessage(value, label, harnessApply);
         if (message)
           options.onEvent?.({
@@ -926,6 +1059,13 @@ async function runLocalmodelsCommand(
         continue;
       }
       if (harnessApply && value?.kind === "stage") {
+        const now = Date.now();
+        const key = `${String(value.stage)}:${String(value.state)}`;
+        if (key === "extract:running") enterPhase("extract", now);
+        else if (key === "verify:running") enterPhase("verify", now);
+        else if (key === "install:running") enterPhase("install", now);
+        else if (key === "install:succeeded" || key === "reuse:succeeded")
+          closePhase(now);
         const messages: Record<string, string> = {
           "extract:running":
             "Extracting Harness files and applying private permissions…",
@@ -936,8 +1076,7 @@ async function runLocalmodelsCommand(
           "reuse:succeeded":
             "Reusing the existing Harness; checking runtime status…",
         };
-        const message =
-          messages[`${String(value.stage)}:${String(value.state)}`];
+        const message = messages[key];
         if (message)
           options.onEvent?.({
             kind: "stage",
@@ -965,6 +1104,9 @@ async function runLocalmodelsCommand(
           value.completed > value.total)
       )
         continue;
+      const now = Date.now();
+      enterPhase("download", now);
+      lastDownloadAt = now;
       options.onEvent?.({
         kind: "stage",
         stage: "runtime",
@@ -988,14 +1130,46 @@ async function runLocalmodelsCommand(
     {
       ...options,
       cwd: tool.moduleDir,
-      env,
+      env: effectiveEnv,
       onOutput,
     },
   );
+  const endedAt = Date.now();
+  let postDownloadMs: number | undefined;
+  if (
+    sourceApply &&
+    activePhase === "download" &&
+    lastDownloadAt !== undefined
+  ) {
+    closePhase(lastDownloadAt);
+    postDownloadMs = Math.max(0, endedAt - lastDownloadAt);
+  } else {
+    closePhase(endedAt);
+  }
   const seconds = (ms: number) => (ms / 1000).toFixed(1);
+  const parts: string[] = [];
+  if (phaseMs.download !== undefined)
+    parts.push(`download ${seconds(phaseMs.download)}s`);
+  if (downloadRetries > 0) parts.push(`retries ${downloadRetries}`);
+  if (downloadSwitches > 0) parts.push(`switches ${downloadSwitches}`);
+  if (phaseMs.extract !== undefined)
+    parts.push(`extract ${seconds(phaseMs.extract)}s`);
+  if (phaseMs.verify !== undefined)
+    parts.push(`verify ${seconds(phaseMs.verify)}s`);
+  if (phaseMs.install !== undefined)
+    parts.push(`install ${seconds(phaseMs.install)}s`);
+  if (postDownloadMs !== undefined)
+    parts.push(`post-download ${seconds(postDownloadMs)}s`);
+  if (parts.length > 0) {
+    options.onEvent?.({
+      kind: "log",
+      stage: "runtime",
+      message: `localmodels ${args.slice(0, 2).join(" ")} phases: ${parts.join(", ")}.\n`,
+    });
+  }
   options.onEvent?.({
     kind: "log",
-    message: `localmodels ${args.slice(0, 2).join(" ")}: tool checked in ${seconds(checkedAt - startedAt)}s, ran in ${seconds(Date.now() - checkedAt)}s.\n`,
+    message: `localmodels ${args.slice(0, 2).join(" ")}: tool checked in ${seconds(checkedAt - startedAt)}s, ran in ${seconds(endedAt - checkedAt)}s.\n`,
   });
   return result;
 }
@@ -1068,6 +1242,7 @@ export async function stopLocalmodels(
   ) => {
     options.signal.throwIfAborted();
     options.log?.(`Stopping the local models (localmodels ${name}).`);
+    const startedAt = Date.now();
     const result = await run(home, args, {
       signal: options.signal,
       timeoutMs: 30_000,
@@ -1081,6 +1256,12 @@ export async function stopLocalmodels(
         stderr: "",
       };
     });
+    const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+    options.log?.(
+      result.code === 0
+        ? `Stopped localmodels ${name} in ${elapsed}s.`
+        : `localmodels ${name} failed in ${elapsed}s.`,
+    );
     if (report && result.code !== 0)
       failed.push(`localmodels ${name}: ${stopFailure(result)}`);
     return result;

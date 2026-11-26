@@ -671,6 +671,7 @@ export async function prepareByokRuntime(
   const validated = validateByokConfiguration(config);
   const runtime = validated.runtime ?? "claude";
   let preparedDescriptor: RuntimeDescriptor | undefined;
+  const nativeStartedAt = Date.now();
   const nativeFailure = await prepareByokNativeRuntime(
     runtime,
     {
@@ -682,7 +683,15 @@ export async function prepareByokRuntime(
     },
     dependencies,
   );
-  if (nativeFailure) return nativeFailure;
+  const nativeSeconds = ((Date.now() - nativeStartedAt) / 1000).toFixed(1);
+  if (nativeFailure) {
+    options.onEvent({
+      kind: "log",
+      stage: "runtime",
+      message: `BYOK native runtime (${runtime}) preparation ended in ${nativeSeconds}s.\n`,
+    });
+    return nativeFailure;
+  }
 
   options.onEvent({
     kind: "stage",
@@ -718,6 +727,12 @@ export async function prepareByokRuntime(
     );
   } finally {
     clearInterval(heartbeat);
+    const gatewaySeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+    options.onEvent({
+      kind: "log",
+      stage: "runtime",
+      message: `BYOK preparation timings (s): runtime ${nativeSeconds}, gateway ${gatewaySeconds}.\n`,
+    });
   }
   if (result.code !== 0)
     return sourceApplyFailure(

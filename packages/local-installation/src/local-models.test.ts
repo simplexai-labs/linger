@@ -1,10 +1,12 @@
 import {
+  chmod,
   mkdtemp,
   mkdir,
   writeFile,
   readFile,
   rm,
   stat,
+  symlink,
 } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -54,12 +56,15 @@ async function fixture() {
     components: ["upstream-selected", "Pi"],
     warnings: ["upstream license warning"],
   };
+  const piExecutable = path.join(home, "upstream-pi");
+  await writeFile(piExecutable, "#!/bin/sh\n", { mode: 0o755 });
+  if (process.platform !== "win32") await chmod(piExecutable, 0o755);
   const binding = {
     schema: "localmodels.stack-binding/v1",
     ready: true,
     planId: id,
     pi: {
-      executable: "/upstream/pi",
+      executable: piExecutable,
       environment: { PI_CODING_AGENT_DIR: "/upstream/profile" },
       configFingerprint: "b".repeat(64),
     },
@@ -773,10 +778,106 @@ test("Computer environment consumes the authoritative binding without parsing Pi
     { localmodels: f.call },
   );
   expect(await localModelsEnvironment(f.instance)).toEqual({
-    LINGER_PI_PATH: "/upstream/pi",
+    LINGER_PI_PATH: f.binding.pi.executable,
     PI_CODING_AGENT_DIR: "/upstream/profile",
     LINGER_LOCAL_MODELS_REVISION: "b".repeat(64),
   });
+});
+
+test("localModelsEnvironment falls back to current bundled Pi or omits LINGER_PI_PATH when binding path is missing", async () => {
+  const f = await fixture();
+  await writeSetupChoice(f.instance, "local-models");
+  await prepareLocalModels(f.instance, f.options, { localmodels: f.call });
+  await prepareLocalModels(
+    f.instance,
+    { ...f.options, localModelsApproval: f.id },
+    { localmodels: f.call },
+  );
+  // Simulate moving or deleting the app directory persisted in binding.json.
+  await rm(f.binding.pi.executable);
+
+  const fallbackBin = path.join(f.home, "moved-app", "bin");
+  await mkdir(fallbackBin, { recursive: true });
+  const fallbackExe = path.join(fallbackBin, "pi");
+  await writeFile(fallbackExe, "#!/bin/sh\n", { mode: 0o755 });
+
+  expect(
+    await localModelsEnvironment(f.instance, {
+      resolveBundledPi: async () => ({
+        binDir: fallbackBin,
+        executable: fallbackExe,
+        version: "1.5.2",
+      }),
+    }),
+  ).toEqual({
+    LINGER_PI_PATH: fallbackExe,
+    PI_CODING_AGENT_DIR: "/upstream/profile",
+    LINGER_LOCAL_MODELS_REVISION: "b".repeat(64),
+  });
+
+  // When no bundled Pi is available, omit LINGER_PI_PATH instead of emitting a dead path.
+  const withoutFallback = await localModelsEnvironment(f.instance, {
+    resolveBundledPi: async () => undefined,
+  });
+  expect(withoutFallback).toEqual({
+    PI_CODING_AGENT_DIR: "/upstream/profile",
+    LINGER_LOCAL_MODELS_REVISION: "b".repeat(64),
+  });
+  expect(withoutFallback).not.toHaveProperty("LINGER_PI_PATH");
+
+  if (process.platform !== "win32") {
+    // A dangling symlink in binding.json is also treated as unusable.
+    await symlink(
+      path.join(f.home, "gone-app", "bin", "pi"),
+      f.binding.pi.executable,
+    );
+    expect(
+      await localModelsEnvironment(f.instance, {
+        resolveBundledPi: async () => ({
+          binDir: fallbackBin,
+          executable: fallbackExe,
+          version: "1.5.2",
+        }),
+      }),
+    ).toEqual({
+      LINGER_PI_PATH: fallbackExe,
+      PI_CODING_AGENT_DIR: "/upstream/profile",
+      LINGER_LOCAL_MODELS_REVISION: "b".repeat(64),
+    });
+  }
+});
+
+test("prepareLocalModels stops with recovery guidance instead of running doomed stack apply when a saved plan reuses a missing Pi executable", async () => {
+  const f = await deployedThenNotReady("pi-unavailable");
+  const missingPi = path.join(f.home, "Downloads", "Linger.app", "bin", "pi");
+  const planPath = path.join(f.home, "runtime/localmodels/plan.json");
+  await writeFile(
+    planPath,
+    JSON.stringify({
+      schema: "localmodels.stack-plan/v1",
+      plan_id: f.id,
+      harness: {
+        tools: [{ tool: "pi", action: "reuse", path: missingPi }],
+      },
+    }),
+    { mode: 0o600 },
+  );
+
+  const outcome = await prepareLocalModels(f.instance, f.options, {
+    localmodels: f.call,
+  });
+  expect(outcome).toMatchObject({
+    code: 4,
+    state: "action_required",
+    message:
+      "The saved local model plan references a Pi executable that no longer exists (for example after moving the Linger app). Review a new plan; existing resources were preserved.",
+    details: { code: "LOCAL_MODELS_RECOVERY_REQUIRED" },
+  });
+  expect(
+    f.call.mock.calls.some(
+      ([, args]) => args[0] === "stack" && args[1] === "apply",
+    ),
+  ).toBe(false);
 });
 // A deployed local-models setup that a quit stopped, with the model source
 // saved as `mode`, or none saved.

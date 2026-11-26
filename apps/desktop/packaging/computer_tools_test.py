@@ -41,12 +41,18 @@ def sha256(path):
         return hashlib.sha256(source.read()).hexdigest()
 
 
+def pi_entry(target):
+    return "bin/pi.exe" if target.startswith("win32-") else "bin/pi"
+
+
 def stage(root, target):
     """A resources/ folder holding tools laid out as stage-computer-tools.mjs writes them."""
     tools = os.path.join(root, "cli", "computer-tools")
+    pi = pi_entry(target)
     files = {
         PLAYWRIGHT_ENTRY: b"console.log('playwright')\n",
         PI_EXTENSION: b"export default {}\n",
+        pi: b"#!/bin/sh\n" if not target.startswith("win32-") else b"MZ",
         "node_modules/native/prebuilt.node": MACHO,
     }
     cua = FROZEN["cua"].get(target, {})
@@ -60,13 +66,16 @@ def stage(root, target):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as out:
             out.write(files[relative])
+        mode = 0o755 if relative == pi and not target.startswith("win32-") else 0o644
+        if mode == 0o755:
+            os.chmod(path, 0o755)
         assets.append({"path": relative, "size_bytes": len(files[relative]),
-                       "sha256": sha256(path), "mode": 0o644})
+                       "sha256": sha256(path), "mode": mode})
     # JSON.stringify of the asset list, as bundle-computer-tools.mjs digests it.
     digest = hashlib.sha256(json.dumps(assets, separators=(",", ":")).encode()).hexdigest()
     manifest = {"schema_version": 1, "versions": FROZEN["versions"], "target": target,
                 "playwright_entry": PLAYWRIGHT_ENTRY, "pi_extension": PI_EXTENSION,
-                "cua_entry": cua.get("entry", ""), "packages": [],
+                "pi_entry": pi, "cua_entry": cua.get("entry", ""), "packages": [],
                 "assets": assets, "artifact_sha256": digest}
     with open(os.path.join(tools, "manifest.json"), "w") as out:
         json.dump(manifest, out)
@@ -166,7 +175,7 @@ class ComputerToolsTest(unittest.TestCase):
         with tarfile.open(archive, "w:gz") as out:
             out.add(app, arcname="Linger")
         self.assertEqual(computer_tools.verify_archive(archive, "Linger/resources/", "linux-x64"),
-                         3 + len(FROZEN["quickjs"]))
+                         4 + len(FROZEN["quickjs"]))
 
         resources, _ = self.resources("win32-x64")
         archive = os.path.join(self.root, "Linger.zip")
@@ -176,7 +185,7 @@ class ComputerToolsTest(unittest.TestCase):
                     path = os.path.join(root, name)
                     out.write(path, "Linger/resources/" + os.path.relpath(path, resources))
         self.assertEqual(computer_tools.verify_archive(archive, "Linger/resources/", "win32-x64"),
-                         4 + len(FROZEN["quickjs"]))
+                         5 + len(FROZEN["quickjs"]))
 
         bare = os.path.join(self.root, "bare.tar.gz")
         with tarfile.open(bare, "w:gz") as out:
@@ -633,6 +642,122 @@ class MacSigningTest(unittest.TestCase):
             refreshed = json.load(source)["files"]
         self.assertEqual(refreshed["addon.node"]["sha256"], sha256(addon))
         self.assertEqual(refreshed["index.js"]["sha256"], sha256(script_file))
+
+    def test_native_bundle_check_and_refresh_shared_node_macos(self):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root)
+        resources = os.path.join(root, "Linger.app", "Contents", "Resources")
+        native_dir = os.path.join(resources, "app", "dist", "installer", "native")
+        runtime_dir = os.path.join(native_dir, "runtime-darwin-arm64")
+        runtime_files_dir = os.path.join(runtime_dir, "runtime")
+        shared_node = os.path.join(resources, "runtime", "bin", "node")
+        os.makedirs(runtime_files_dir)
+        os.makedirs(os.path.dirname(shared_node))
+
+        addon = os.path.join(runtime_files_dir, "addon.node")
+        with open(addon, "wb") as out:
+            out.write(MACHO)
+        with open(shared_node, "wb") as out:
+            out.write(MACHO)
+
+        files_json = os.path.join(runtime_files_dir, "files.json")
+        with open(files_json, "w") as out:
+            json.dump({
+                "schema": 1,
+                "target": "darwin-arm64",
+                "files": {
+                    "addon.node": {"bytes": os.path.getsize(addon), "sha256": sha256(addon)},
+                },
+            }, out)
+        manifest_path = os.path.join(runtime_dir, "manifest.json")
+        with open(manifest_path, "w") as out:
+            json.dump({
+                "schema": 1,
+                "target": "darwin-arm64",
+                "layout": "directory",
+                "directory": {"file": "runtime/files.json", "bytes": os.path.getsize(files_json), "sha256": sha256(files_json)},
+                "node": {
+                    "version": "26.5.0",
+                    "shared": True,
+                    "binary": "runtime/bin/node",
+                    "bytes": os.path.getsize(shared_node),
+                    "sha256": sha256(shared_node),
+                },
+            }, out)
+
+        native_bundle.check_runtime("darwin-arm64", native=native_dir, computer_tools_dir=resources)
+
+        # Signing rewrites both addon.node and the shared Contents/Resources/runtime/bin/node.
+        signed_addon = self.signed_macho(0x10000, b"cms-addon")
+        signed_node = self.signed_macho(0x10000, b"cms-node-signed")
+        with open(addon, "wb") as out:
+            out.write(signed_addon)
+        with open(shared_node, "wb") as out:
+            out.write(signed_node)
+
+        # Before refresh, check_runtime rejects the modified shared node.
+        with self.assertRaises(SystemExit):
+            native_bundle.check_runtime("darwin-arm64", native=native_dir, computer_tools_dir=resources)
+
+        native_bundle.refresh(native_dir, "darwin-arm64", shared_node=shared_node)
+        native_bundle.check_runtime("darwin-arm64", native=native_dir, computer_tools_dir=resources)
+        with open(manifest_path) as source:
+            refreshed = json.load(source)
+        self.assertTrue(refreshed["node"]["shared"])
+        self.assertEqual(refreshed["node"]["sha256"], sha256(shared_node))
+        self.assertEqual(refreshed["node"]["bytes"], os.path.getsize(shared_node))
+
+        # Two-argument refresh resolves the shared node relative to Contents/Resources/app/dist/installer/native.
+        resigned_node = self.signed_macho(0x10000, b"cms-node-resigned-v2")
+        with open(shared_node, "wb") as out:
+            out.write(resigned_node)
+        native_bundle.refresh(native_dir, "darwin-arm64")
+        native_bundle.check_runtime("darwin-arm64", native=native_dir, computer_tools_dir=resources)
+        with open(manifest_path) as source:
+            refreshed_again = json.load(source)
+        self.assertEqual(refreshed_again["node"]["sha256"], sha256(shared_node))
+        self.assertEqual(refreshed_again["node"]["bytes"], os.path.getsize(shared_node))
+
+    def test_native_bundle_check_shared_node_archive_layout(self):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root)
+        native_dir = os.path.join(root, "native")
+        runtime_dir = os.path.join(native_dir, "runtime-win32-x64")
+        tools_dir = os.path.join(root, "computer-tools", "win32-x64")
+        shared_node = os.path.join(tools_dir, "runtime", "bin", "node.exe")
+        os.makedirs(runtime_dir)
+        os.makedirs(os.path.dirname(shared_node))
+
+        archive_path = os.path.join(runtime_dir, "runtime.tar.zst")
+        with open(archive_path, "wb") as out:
+            out.write(b"zstd-payload")
+        with open(shared_node, "wb") as out:
+            out.write(b"MZ-node-binary")
+
+        with open(os.path.join(runtime_dir, "manifest.json"), "w") as out:
+            json.dump({
+                "schema": 1,
+                "target": "win32-x64",
+                "layout": "archive",
+                "archive": {
+                    "file": "runtime.tar.zst",
+                    "bytes": os.path.getsize(archive_path),
+                    "sha256": sha256(archive_path),
+                },
+                "node": {
+                    "version": "26.5.0",
+                    "shared": True,
+                    "binary": "runtime/bin/node.exe",
+                    "bytes": os.path.getsize(shared_node),
+                    "sha256": sha256(shared_node),
+                },
+            }, out)
+
+        native_bundle.check_runtime("win32-x64", native=native_dir, computer_tools_dir=tools_dir)
+        with open(shared_node, "wb") as out:
+            out.write(b"tampered")
+        with self.assertRaises(SystemExit):
+            native_bundle.check_runtime("win32-x64", native=native_dir, computer_tools_dir=tools_dir)
 
 
 class ArchiveHelperTest(unittest.TestCase):

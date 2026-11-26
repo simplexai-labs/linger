@@ -3,12 +3,36 @@ package computercli
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/computerconfig"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/localtools"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 )
+
+var resolveBundledRuntimePaths = defaultBundledRuntimePaths
+
+func defaultBundledRuntimePaths() map[string]string {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	return bundledRuntimePathsForExecutable(executable)
+}
+
+func bundledRuntimePathsForExecutable(executable string) map[string]string {
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	installation, err := localtools.Installed(executable)
+	if err != nil || installation == nil || installation.PiEntry == "" {
+		return nil
+	}
+	return map[string]string{"pi": installation.PiEntry}
+}
 
 // runtimeDiagnostic is one Runtime as login, doctor and runtime check see it.
 type runtimeDiagnostic struct {
@@ -63,6 +87,7 @@ func requestRuntimeChecks(ctx context.Context, types []string, request runtimeRe
 	}
 	options, err := computerconfig.RuntimeDiscoveryOptions(computerconfig.RuntimeDiscoveryRequest{
 		ConfiguredPaths: request.configuredPaths,
+		BundledPaths:    resolveBundledRuntimePaths(),
 		Environment:     request.environment,
 		Runtimes:        selectedRuntimes,
 	})

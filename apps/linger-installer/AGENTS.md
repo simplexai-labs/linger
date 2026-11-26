@@ -108,10 +108,14 @@ the desktop's Computer follows them. The HTTP lookup writes one JSON line to
 stderr, `{"event":"installer.runtime_lookup_timings","instance",...,"timings"}`,
 whose `timings` holds `config`, `runtime`, `localModels`, `tool` and `total`
 in ms; the `--resume` outcome carries the same object as
-`runtimeLookupTimings` whenever the lookup ran. The desktop logs both at info
-as `local_server.installer_runtime_timings`, keyed on that event name and
-field shape, which are its contract. The route's response body does not carry
-these timings.
+`runtimeLookupTimings` whenever the lookup ran, plus `resumeTimings`
+(`path`, `probeMs`, optional `restoreLocalModelsMs` / `restoreByokGatewayMs` /
+`coldStartMs`, and `totalMs`), and logs `Resume timings (<path>, ms): ...`
+on stderr. The desktop logs `runtimeLookupTimings` (from both the HTTP lookup
+stderr event and `--resume`) at info as `local_server.installer_runtime_timings`,
+keyed on that event name and field shape, and logs `resumeTimings` at info as
+`local_server.installer_resume_timings`. The route's response body does not
+carry these timings.
 
 A desktop-owned install uses the selected runtime descriptor to return the
 paths on its live completed job and emits the same timings event. Listing jobs
@@ -135,7 +139,8 @@ JSON line with what failed. It needs nothing beside `installer.js`, so
 setup can run it from a copy on an earlier release's `Linger.exe`. It also
 stops what the pinned localmodels kit runs for each home: the model
 library's running loads (cancelled) and loaded models, the model controller, and the stack with its
-gateway (`stopLocalmodels`).
+gateway (`stopLocalmodels`), forwards `options.log` into `stopNativeSource`,
+and logs durations for the `manager`, `services`, and `localmodels` stop stages.
 
 `--stop-local-models` is the desktop's quit: in the default home and the
 location `desktop/local-server.json` names, it cancels the model library's

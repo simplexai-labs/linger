@@ -866,3 +866,105 @@ it("inspectRuntimeDescriptors reads localmodels descriptors without invoking loc
   expect(rows[0]).toMatchObject({ runtime: "codex", installed: true });
   await expect(access(marker)).rejects.toThrow();
 });
+
+it("passes includeBundled and stable bundled Pi executable in configuredPaths during daemon reconciliation", async () => {
+  const options = await fixture();
+  const id = "f".repeat(64);
+  const stableBundledPi = path.join(
+    options.home,
+    "runtime",
+    "bundled-pi",
+    "bin",
+    "pi",
+  );
+  const localmodels = vi.fn(async (_home: string, args: string[]) => {
+    if (args[1] === "plan") {
+      await writeFile(
+        args[args.indexOf("--out") + 1]!,
+        JSON.stringify({
+          schema: "localmodels.harness-plan/v1",
+          id,
+          runtime: "pi",
+        }),
+      );
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    const row = status("pi", false);
+    row.runtimes[0]!.executable = stableBundledPi;
+    if (args[1] === "status") {
+      (
+        row.runtimes[0] as { environment?: Record<string, string> }
+      ).environment = {
+        PI_CODING_AGENT_DIR: path.join(options.home, "runtime", "pi-home"),
+      };
+    }
+    return { code: 0, stdout: JSON.stringify(row), stderr: "" };
+  });
+  const probeRuntimes = vi.fn(async () => [
+    {
+      type: "pi" as const,
+      status: "authentication_required" as const,
+      installed: true,
+      authenticated: false,
+      version: "1.5.2",
+      requiredVersion: "1.2.0",
+      executable: stableBundledPi,
+    },
+  ]);
+
+  const installed = await installNativeRuntime("pi", options, {
+    localmodels,
+    probeRuntimes,
+  });
+  expect(installed).toMatchObject({
+    code: 0,
+    state: "ready",
+    details: { executable: stableBundledPi },
+  });
+  expect(probeRuntimes).toHaveBeenNthCalledWith(
+    1,
+    expect.objectContaining({
+      runtimes: ["pi"],
+      includeBundled: true,
+      configuredPaths: { pi: stableBundledPi },
+    }),
+  );
+
+  const inspected = await inspectRuntime("pi", options, {
+    localmodels,
+    probeRuntimes,
+  });
+  expect(inspected).toMatchObject({
+    runtime: "pi",
+    installed: true,
+    executable: stableBundledPi,
+  });
+  expect(probeRuntimes).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({
+      runtimes: ["pi"],
+      includeBundled: true,
+      configuredPaths: { pi: stableBundledPi },
+      env: expect.objectContaining({
+        PI_CODING_AGENT_DIR: path.join(options.home, "runtime", "pi-home"),
+      }),
+    }),
+  );
+
+  // Fallback path when localmodels fails must also pass includeBundled: true.
+  await inspectRuntime("pi", options, {
+    localmodels: vi.fn(async () => ({
+      code: 1,
+      stdout: "",
+      stderr: "unavailable",
+    })),
+    probeRuntimes,
+  });
+  expect(probeRuntimes).toHaveBeenNthCalledWith(
+    3,
+    expect.objectContaining({
+      runtimes: ["pi"],
+      includeBundled: true,
+    }),
+  );
+});

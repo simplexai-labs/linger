@@ -376,23 +376,33 @@ repository root.
 
 ### Source Package
 
-Release builds set `LINGER_SOURCE_ARCHIVE_URL` (https) and
-`LINGER_SOURCE_ARCHIVE_SHA256` before `node build.mjs`. Produce them from the
-release tag in the repository root:
+Release builds bundle a minimal source skeleton inside the app and compile the
+Native runtime and TeamHub binaries from a full source archive of the same
+commit. Produce both from the release tag in the repository root:
 
 ```sh
 SOURCE_ARCHIVE_REF=v1.2.3 \
 SOURCE_ARCHIVE_URL_BASE=https://github.com/simplexai-labs/linger/releases/download/v1.2.3 \
   make source-archive
+node scripts/prepare-source-archive.mjs --ref v1.2.3 --mode minimal \
+  --output .linger-runtime/source-archive/shipped
 ```
 
-Upload `.linger-runtime/source-archive/linger-v1.2.3.tar.gz` to that release
-and take both values from `source-archive.json` next to it. One commit always
-gives the same digest. To ship the package inside the app instead (about
-45 MB more, no hosting needed), set `LINGER_SOURCE_ARCHIVE_FILE` to the
-archive; the build copies it beside the installer and pins its digest. Without
-either (and without `LINGER_CHECKOUT`) the build does not offer a
-local install.
+`scripts/ci/desktop-release.sh` sets `LINGER_SOURCE_ARCHIVE_FILE` to the
+`--mode minimal` archive (an 8-file runtime skeleton shipped inside the app so
+installers do not need to ship or unpack the full repository) and sets
+`LINGER_BUILD_SOURCE_ARCHIVE_FILE` to the full archive so `node build.mjs`
+compiles TeamHub and the Native runtime from it while recording the shipped
+skeleton's digest. Alternatively, set `LINGER_SOURCE_ARCHIVE_URL` (https) and
+`LINGER_SOURCE_ARCHIVE_SHA256` from `source-archive.json` to download the source
+package at install time; one commit always gives the same digest. Without
+either (and without `LINGER_CHECKOUT`) the build does not offer a local install.
+
+The staged Computer tools (`cli/computer-tools/` and `runtime/bin/node`) also
+ship the bundled Pi 1.5.2 runtime (`cli/computer-tools/bin/pi`, or `bin/pi.exe`
+on Windows) running on the bundled Node.js runtime, so local setup and the
+Daemon can use Pi immediately without downloading npm packages while still
+preferring a user-installed or newer harness-managed Pi when present.
 
 A downloaded source package can have a dependency store for each platform
 beside it, so the native install of its packages needs no registry. Build it
@@ -593,20 +603,26 @@ sha256 before each start) instead of `go run` / `go build`. Without them, or
 when they do not verify, Native downloads Go and compiles as before.
 
 The same targets ship the services Native runs, built from that package
-(`scripts/build-native-runtime.mjs`): Web's production files, Node
+(`scripts/build-native-runtime.mjs`): Web's production files and Node
 Services bundled with esbuild beside the node_modules it loads at runtime,
-and the pinned Node.js, in `dist/installer/native/runtime-<target>/` with a
-`manifest.json` (schema 1). Windows and Linux ship `runtime.tar.zst` beside
-the Node.js release archive. Apple silicon ships the `runtime/` folder and
-`node/bin/node` unpacked instead, because the app's signature must cover
-every Mach-O file: `packaging/mac/package.py` signs them with the app (Node.js
-with `node-entitlements.plist`: JIT, and native modules under the hardened
-runtime its release signature keeps), records the signed bytes in the
+in `dist/installer/native/runtime-<target>/` with a `manifest.json`
+(schema 1). Windows and Linux ship `runtime.tar.zst`, and Apple silicon
+ships the `runtime/` folder unpacked because the app's signature must cover
+every Mach-O file. Rather than shipping a second copy of Node.js inside
+`runtime-<target>/`, `manifest.json` records `node.shared: true` with the
+expected path, byte size and sha256 of the pinned Node.js already bundled
+with Computer tools (`resources/runtime/bin/node` or
+`resources/runtime/bin/node.exe`), which `packaging/native_bundle.py`
+verifies on every target. On Apple silicon, `packaging/mac/package.py`
+signs the unpacked `runtime/` binaries and the shared
+`resources/runtime/bin/node` with the app (Node.js with
+`node-entitlements.plist`: JIT, and native modules under the hardened
+runtime its release signature keeps), records the signed bytes in both
 manifests and seals them with a shallow signature. The desktop unpacks or
 copies the services into `.simplexai-runtime/offline/` of the source and
-Node.js into its own folder, removing `com.apple.quarantine` on macOS;
-`checkNativeRuntime` then verifies every file, and Native installs no
-packages and needs no registry. On Linux the services need glibc 2.35
+copies and sha256-verifies the shared Node.js binary into its own folder,
+removing `com.apple.quarantine` on macOS; `checkNativeRuntime` then
+verifies every file, and Native installs no packages and needs no registry. On Linux the services need glibc 2.35
 (Ubuntu 22.04, Debian 12), like the PostgreSQL build; with an older glibc the
 desktop leaves them out and Native installs from the network. Model data
 (Voice) is not bundled: Node Services downloads it on first use. Dependencies

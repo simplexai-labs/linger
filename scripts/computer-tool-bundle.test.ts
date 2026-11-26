@@ -18,6 +18,7 @@ import {
   COMPUTER_TOOL_VERSIONS,
   QUICKJS_TOOL_ASSETS,
   nodeRuntimeEntry,
+  piRuntimeEntry,
   recordSignedComputerTools,
   validatedComputerToolBundle,
 } from "./computer-tool-bundle.mjs";
@@ -43,10 +44,14 @@ async function stagedBundle(target: string) {
   const bundle = await mkdtemp(path.join(os.tmpdir(), "computer-tool-bundle-"));
   temporaryRoots.push(bundle);
   const tools = path.join(bundle, "cli/computer-tools");
+  const piEntry = piRuntimeEntry(target);
   const files: Record<string, Buffer> = {
     "extensions/pi-mcp.mjs": Buffer.from("export default {}\n"),
     "node_modules/@playwright/mcp/cli.js": Buffer.from("console.log(1)\n"),
     "node_modules/native/prebuilt.node": macho("native"),
+    [piEntry]: Buffer.from(
+      target.startsWith("win32-") ? "MZ" : "#!/bin/sh\nexit 0\n",
+    ),
   };
   for (const name of QUICKJS_TOOL_ASSETS) files[name] = Buffer.from("engine");
   if (target.startsWith("darwin-")) {
@@ -55,13 +60,17 @@ async function stagedBundle(target: string) {
   }
   const assets = [];
   for (const name of Object.keys(files).sort()) {
-    await mkdir(path.dirname(path.join(tools, name)), { recursive: true });
-    await writeFile(path.join(tools, name), files[name]);
+    const file = path.join(tools, name);
+    const mode =
+      name === piEntry && !target.startsWith("win32-") ? 0o755 : 0o644;
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, files[name], { mode });
+    if (mode === 0o755) await chmod(file, 0o755);
     assets.push({
       path: name,
       size_bytes: files[name].length,
       sha256: checksum(files[name]),
-      mode: 0o644,
+      mode,
     });
   }
   await writeFile(
@@ -72,6 +81,7 @@ async function stagedBundle(target: string) {
       target,
       playwright_entry: "node_modules/@playwright/mcp/cli.js",
       pi_extension: "extensions/pi-mcp.mjs",
+      pi_entry: piEntry,
       cua_entry: target.startsWith("darwin-") ? "cua/cua-driver" : "",
       packages: [],
       assets,
@@ -132,6 +142,36 @@ describe("Computer tool bundle", () => {
     await expect(
       validatedComputerToolBundle(bundle, "linux-x64"),
     ).rejects.toThrow("Invalid Computer tool manifest");
+  });
+
+  it("rejects a missing or non-executable Pi runtime entrypoint", async () => {
+    const missing = await stagedBundle("linux-x64");
+    const missingManifestFile = path.join(missing.tools, "manifest.json");
+    const missingManifest = JSON.parse(
+      await readFile(missingManifestFile, "utf8"),
+    );
+    delete missingManifest.pi_entry;
+    await writeFile(missingManifestFile, JSON.stringify(missingManifest));
+    await expect(
+      validatedComputerToolBundle(missing.bundle, "linux-x64"),
+    ).rejects.toThrow("Invalid Computer tool entrypoints");
+
+    const nonExec = await stagedBundle("linux-x64");
+    await chmod(path.join(nonExec.tools, "bin/pi"), 0o644);
+    const nonExecManifestFile = path.join(nonExec.tools, "manifest.json");
+    const nonExecManifest = JSON.parse(
+      await readFile(nonExecManifestFile, "utf8"),
+    );
+    for (const asset of nonExecManifest.assets) {
+      if (asset.path === "bin/pi") asset.mode = 0o644;
+    }
+    nonExecManifest.artifact_sha256 = checksum(
+      Buffer.from(JSON.stringify(nonExecManifest.assets)),
+    );
+    await writeFile(nonExecManifestFile, JSON.stringify(nonExecManifest));
+    await expect(
+      validatedComputerToolBundle(nonExec.bundle, "linux-x64"),
+    ).rejects.toThrow("Pi entrypoint is not executable");
   });
 
   it("records re-signed Mach-O files but keeps vendor-signed ones as they were", async () => {
