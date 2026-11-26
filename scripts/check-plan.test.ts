@@ -147,6 +147,7 @@ describe("local plan", () => {
       "check-docs",
       "check-packages",
       "check-voice-runtime",
+      "check-mobile",
       "check-teamhub-cli",
       "check-installer",
       "check-desktop",
