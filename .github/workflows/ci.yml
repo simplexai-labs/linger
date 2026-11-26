@@ -322,7 +322,7 @@ jobs:
       # Builds every package and test for Windows, then runs the packages that
       # hold the Windows launcher, process Job, CLI and overlay path code.
       - run: go test -run '^$' ./...
-      - run: go test ./cmd/linger-computer-launcher ./cmd/linger-pi-launcher ./internal/computercli ./internal/computerconfig ./internal/localmodels ./internal/process
+      - run: go test ./cmd/linger-computer-launcher ./cmd/linger-pi-launcher ./cmd/linger-teamhub-launcher ./internal/computercli ./internal/computerconfig ./internal/localmodels ./internal/process
       # A failed run saves unpruned; the next successful push prunes.
       - if: success() && github.event_name == 'push'
         run: |

@@ -98,13 +98,14 @@
     },
     "desktop": {
       "owner": "out-of-env",
-      "description": "Read by the desktop client on user machines: the bridge state directory it migrates from, the daemon and update overrides, the source checkout for \"Run on This Computer\", and whether a parent agent session that opened the app manages its model provider. Not part of .env.",
+      "description": "Read by the desktop client on user machines: the bridge state directory it migrates from, the daemon and update overrides, the source checkout for \"Run on This Computer\", the TeamHub CLI launcher Node override, and whether a parent agent session that opened the app manages its model provider. Not part of .env.",
       "names": [
         "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
         "LINGER_BRIDGE_STATE_DIR",
         "LINGER_COMPUTER_DAEMON",
         "LINGER_DESKTOP_USER_DATA",
         "LINGER_CHECKOUT",
+        "LINGER_NODE",
         "LINGER_SERVER_URL",
         "XDG_STATE_HOME"
       ]

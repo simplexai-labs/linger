@@ -119,8 +119,8 @@ func TestPlaygroundCardRefusesAnInvalidCardOrMissingCredential(t *testing.T) {
 	}
 }
 
-// Desktop ships only scripts beside its CLI on Windows; the card runs the app
-// as Node rather than through cmd.exe.
+// Both the Computer bundle and Desktop ship teamhub.exe on Windows and teamhub
+// on other platforms; cmd.exe batch wrappers are never invoked.
 func TestPlaygroundCardFindsTheCLIOnEveryLayout(t *testing.T) {
 	touch := func(name string) {
 		t.Helper()
@@ -131,24 +131,23 @@ func TestPlaygroundCardFindsTheCLIOnEveryLayout(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	bundle := t.TempDir()
-	touch(filepath.Join(bundle, "teamhub.exe"))
-	if program, prefix, _, ok := cardCLIProgram(bundle, "windows"); !ok || program != filepath.Join(bundle, "teamhub.exe") || prefix != nil {
-		t.Fatalf("Computer bundle: %s %v %v", program, prefix, ok)
+	windowsDir := t.TempDir()
+	touch(filepath.Join(windowsDir, "teamhub.exe"))
+	if program, ok := cardCLIProgram(windowsDir, "windows"); !ok || program != filepath.Join(windowsDir, "teamhub.exe") {
+		t.Fatalf("Windows CLI: %s %v", program, ok)
 	}
-	app := t.TempDir()
-	desktop := filepath.Join(app, "resources", "app", "dist", "teamhub-cli")
-	touch(filepath.Join(desktop, "teamhub.cmd"))
-	touch(filepath.Join(desktop, "teamhub.js"))
-	if _, _, _, ok := cardCLIProgram(desktop, "windows"); ok {
-		t.Fatal("ran teamhub.cmd without the app beside it")
+	cmdOnly := t.TempDir()
+	touch(filepath.Join(cmdOnly, "teamhub.cmd"))
+	touch(filepath.Join(cmdOnly, "teamhub.js"))
+	if _, ok := cardCLIProgram(cmdOnly, "windows"); ok {
+		t.Fatal("accepted teamhub.cmd without teamhub.exe")
 	}
-	touch(filepath.Join(app, "Linger.exe"))
-	program, prefix, environment, ok := cardCLIProgram(desktop, "windows")
-	if !ok || program != filepath.Join(app, "Linger.exe") || len(prefix) != 2 || prefix[1] != filepath.Join(desktop, "teamhub.js") || environment[0] != "ELECTRON_RUN_AS_NODE=1" {
-		t.Fatalf("Desktop: %s %v %v %v", program, prefix, environment, ok)
+	posixDir := t.TempDir()
+	touch(filepath.Join(posixDir, "teamhub"))
+	if program, ok := cardCLIProgram(posixDir, "darwin"); !ok || program != filepath.Join(posixDir, "teamhub") {
+		t.Fatalf("POSIX CLI: %s %v", program, ok)
 	}
-	if _, _, _, ok := cardCLIProgram(t.TempDir(), "darwin"); ok {
+	if _, ok := cardCLIProgram(t.TempDir(), "darwin"); ok {
 		t.Fatal("found a CLI in an empty directory")
 	}
 }

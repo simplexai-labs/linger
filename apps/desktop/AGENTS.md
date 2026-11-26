@@ -724,7 +724,8 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
   `src/main/legacy-bridge.ts` keeps only the old bridge paths and the socket
   handshake that this needs; the bridge itself was deleted.
 - `scripts/build-daemon.mjs`: cross-compiles the daemon, stamped with the
-  `apps/computer` release the Gateway checks.
+  `apps/computer` release the Gateway checks, and the Windows Desktop TeamHub
+  CLI launcher (`cmd/linger-teamhub-launcher`) to `dist/teamhub-cli/teamhub.exe`.
 - `scripts/stage-computer-tools.mjs`: stages the browser and computer-control
   tools (with `@earendil-works/pi-coding-agent`'s `createMcpExtension` bundled
   beside `jiti`, `@playwright/mcp`, `quickjs-wasi`, and Cua drivers) and their
@@ -768,13 +769,18 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
    `AGENT_RUNNER_PUBLIC_GATEWAY_URL` and `TEAMHUB_CLI_BASE_URL` to origins the
    computer can reach.
 4. The computer needs Codex or Claude Code installed and signed in; the
-   daemon finds them through the login shell PATH. The teamhub CLI runs on
-   the app's own Node (`ELECTRON_RUN_AS_NODE`) in packaged builds and on the
-   `node` in PATH from source. The Desktop TeamHub shell launcher uses
-   `wslpath` and `WSLENV` when WSL starts the Windows executable, so the
-   script path, `ELECTRON_RUN_AS_NODE`, `WSL_DISTRO_NAME`, and any non-empty
-   `TEAMHUB_CONFIG` (translated from a Linux path with `wslpath -w`) and
-   `TEAMHUB_PROFILE` reach that process correctly.
+   daemon finds them through the login shell PATH. On Windows, the teamhub CLI
+   runs through the native `dist/teamhub-cli/teamhub.exe` launcher (preferring
+   `resources/runtime/bin/node.exe`, then `Linger.exe` with
+   `ELECTRON_RUN_AS_NODE=1`, then `LINGER_NODE` or `node` on PATH from source)
+   so arguments pass directly without `cmd.exe`. On macOS, Linux, Git Bash, and
+   WSL, the POSIX `teamhub` launcher (`scripts/teamhub.sh`) runs it on the
+   app's own Node (`ELECTRON_RUN_AS_NODE`) in packaged builds and on
+   `LINGER_NODE` or `node` in PATH from source, using `wslpath` and `WSLENV`
+   when WSL starts the Windows executable so the script path,
+   `ELECTRON_RUN_AS_NODE`, `WSL_DISTRO_NAME`, and any non-empty `TEAMHUB_CONFIG`
+   (translated from a Linux path with `wslpath -w`) and `TEAMHUB_PROFILE` reach
+   that process correctly.
    The CLI translates absolute Linux paths for local attachments, input files
    and Document file outputs using the invoking WSL distribution. Message text
    and remote paths stay unchanged. The same local file checks apply to the
