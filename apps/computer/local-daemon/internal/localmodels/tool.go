@@ -429,6 +429,8 @@ func isReadOnlyOrStopSubcommand(args []string) bool {
 		return verb == "down" || verb == "remove"
 	case "library":
 		return verb == "status" || verb == "unload" || verb == "remove" || verb == "cancel"
+	case "speech":
+		return verb == "status" || verb == "unload" || verb == "remove" || verb == "cancel" || verb == "stop"
 	case "foundations":
 		return verb == "stop"
 	case "gateway":

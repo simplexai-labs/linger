@@ -19,11 +19,11 @@ WITH authority AS (
 )
 INSERT INTO voice_sessions(
   id,tenant_id,room_id,created_by_actor_id,status,provider_room_name,participant_identity,
-  purpose,auth_session_id
+  purpose,auth_session_id,speech_config
 )
 SELECT sqlc.arg(id)::text,authority.tenant_id,sqlc.arg(room_id)::text,authority.actor_id,
   'provisioning',sqlc.arg(provider_room_name)::text,sqlc.arg(participant_identity)::text,
-  sqlc.arg(purpose)::text,sqlc.narg(auth_session_id)::text
+  sqlc.arg(purpose)::text,sqlc.narg(auth_session_id)::text,sqlc.narg(speech_config)::jsonb
 FROM authority
 RETURNING *;
 

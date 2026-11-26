@@ -244,6 +244,45 @@ paths:
           $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
       security:
         - agentManagementBearer: []
+  /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-speech-actions:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/OwnerActorId"
+      - $ref: "#/components/parameters/ComputerId"
+    post:
+      summary: Send one local-speech action to an owned Local Computer
+      description:
+        Agent Service sends execute with kind local_speech_action and returns the
+        Computer's immediate accepted or refused answer. Progress and outcomes
+        arrive as runner.local_speech snapshots, which Agent Service records in TeamHub.
+      operationId: actOnLocalComputerSpeech
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../components/local-speech.yaml#/components/schemas/LocalSpeechActionCommand
+      responses:
+        "200":
+          description: The Computer's answer.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/local-speech.yaml#/components/schemas/LocalSpeechActionAck
+        "400":
+          $ref: ../components/common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+        "404":
+          $ref: ../components/common.yaml#/components/responses/NotFound
+        "409":
+          $ref: ../components/common.yaml#/components/responses/Conflict
+        "502":
+          $ref: ../components/common.yaml#/components/responses/BadGateway
+        "503":
+          $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
+      security:
+        - agentManagementBearer: []
   /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/model-source:
     parameters:
       - $ref: "#/components/parameters/TenantId"
@@ -1308,6 +1347,48 @@ paths:
                 $ref: "#/components/schemas/VoiceWorkersReconcileResult"
         "401":
           $ref: ../components/common.yaml#/components/responses/Unauthenticated
+      security:
+        - agentManagementBearer: []
+  /internal/v1/voice/local-asr/transcribe:
+    post:
+      tags: [Voice]
+      summary: Relay one WAV audio segment to an owned Local Computer's localmodels speech engine
+      description:
+        Voice Runtime calls this internal endpoint on node-services to transcribe
+        a 16 kHz mono PCM WAV segment over the Runner Gateway WebSocket without
+        direct container-to-host networking.
+      operationId: transcribeLocalAsr
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../components/local-speech.yaml#/components/schemas/LocalAsrTranscribeRequest
+      responses:
+        "200":
+          description: Transcription result from the Computer's local speech sidecar.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/local-speech.yaml#/components/schemas/LocalAsrTranscribeResponse
+        "400":
+          $ref: ../components/common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+        "404":
+          $ref: ../components/common.yaml#/components/responses/NotFound
+        "409":
+          $ref: ../components/common.yaml#/components/responses/Conflict
+        "502":
+          $ref: ../components/common.yaml#/components/responses/BadGateway
+        "503":
+          $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
+        "504":
+          description: Local ASR transcription timed out waiting for the Computer.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/common.yaml#/components/schemas/ErrorResponse
       security:
         - agentManagementBearer: []
   /v1/local-computer-tools:call:

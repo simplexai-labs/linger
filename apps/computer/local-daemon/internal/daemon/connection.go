@@ -295,6 +295,24 @@ func (d *Daemon) handleConnectionCommand(ctx, connectionCtx context.Context, str
 				slog.Warn("local_models.outcome_not_sent", "error", err)
 			}
 		}()
+	case protocol.CommandCapabilityLocalSpeechAction:
+		if !d.welcomeSeen || command.ConnectionEpoch != d.connectionEpoch {
+			return errors.New("Local speech action command uses a stale connection epoch")
+		}
+		go func() {
+			if err := d.handleLocalSpeechActionCommand(connectionCtx, stream, command); err != nil {
+				slog.Warn("local_speech.outcome_not_sent", "error", err)
+			}
+		}()
+	case protocol.CommandCapabilityLocalAsrTranscribe:
+		if !d.welcomeSeen || command.ConnectionEpoch != d.connectionEpoch {
+			return errors.New("Local ASR transcribe command uses a stale connection epoch")
+		}
+		go func() {
+			if err := d.handleLocalAsrTranscribeCommand(connectionCtx, stream, command); err != nil {
+				slog.Warn("local_asr.outcome_not_sent", "error", err)
+			}
+		}()
 	case protocol.CommandCapabilityModelSource:
 		if !d.welcomeSeen || command.ConnectionEpoch != d.connectionEpoch {
 			return errors.New("Model source command uses a stale connection epoch")
@@ -357,12 +375,17 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 	d.antigravityHistory.Store(slices.Contains(command.ServiceFeatures, serviceFeatureAntigravityHistory))
 	d.antigravityUsageProvider.Store(slices.Contains(command.ServiceFeatures, serviceFeatureAntigravityUsageProvider))
 	localModels := slices.Contains(command.ServiceFeatures, serviceFeatureLocalModels)
+	localVoiceAsr := slices.Contains(command.ServiceFeatures, serviceFeatureLocalVoiceAsr)
 	if err := d.activateStreamAndReplay(ctx, stream, command.ReconcileOperationIDs, localModels, helloRev); err != nil {
 		return err
 	}
+	d.setLocalSpeechStream(stream, localVoiceAsr)
 	go d.heartbeatLoop(connectionCtx, stream, command.HeartbeatIntervalMs)
 	if localModels {
 		d.refreshLocalModels(connectionCtx)
+	}
+	if localVoiceAsr {
+		d.refreshLocalSpeech(connectionCtx)
 	}
 	return nil
 }
@@ -545,6 +568,9 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 		d.localModelsExternalHolders.Store(false)
 		d.localModelUnavailable.Store(false)
 	}
+	if d.localSpeechStream == stream {
+		d.localSpeechStream = nil
+	}
 	d.connectionMu.Unlock()
 }
 
@@ -656,6 +682,17 @@ func (d *Daemon) replayRetainedEvents(ctx context.Context, stream transport.Stre
 		}
 	}
 	return nil
+}
+
+// setLocalSpeechStream updates the live stream used to publish runner.local_speech snapshots.
+func (d *Daemon) setLocalSpeechStream(stream transport.Stream, enabled bool) {
+	d.connectionMu.Lock()
+	if enabled {
+		d.localSpeechStream = stream
+	} else {
+		d.localSpeechStream = nil
+	}
+	d.connectionMu.Unlock()
 }
 
 // activateStreamAndReplay makes stream the live connection; localModels says

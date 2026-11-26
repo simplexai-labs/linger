@@ -387,6 +387,9 @@ func purgeAndRemoveLocalComputer(ctx context.Context, queries *store.Queries, co
 	if err := queries.DeleteLocalComputerModelSnapshot(ctx, computerID); err != nil {
 		return err
 	}
+	if err := queries.DeleteLocalComputerSpeechSnapshot(ctx, computerID); err != nil {
+		return err
+	}
 	_, err := queries.RemoveAgentRuntimeLocalComputer(ctx, computerID)
 	return err
 }

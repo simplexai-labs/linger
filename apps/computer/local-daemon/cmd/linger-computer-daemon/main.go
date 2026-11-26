@@ -457,6 +457,13 @@ func run(args []string) (resultErr error) {
 		}).Warmup,
 	})
 	defer localModels.Close()
+	localSpeech := localmodels.NewSpeech(localmodels.SpeechOptions{
+		Tool:         localModelsTool,
+		Environment:  baseProviderEnvironment,
+		JobDirectory: filepath.Join(computer.StateDirectory, "local-speech", "jobs"),
+		Publish:      func(snapshot wire.LocalSpeechSnapshot) { localDaemon.PublishLocalSpeech(snapshot) },
+	})
+	defer localSpeech.Close()
 	antigravityExecutable := &antigravityExecutableTracker{path: discovered.Installations["antigravity"].ExecutablePath}
 	applyDiscovered := func(publishCtx context.Context, next provider.DiscoveryResult) error {
 		reconcileLocalModelsHarness(localModels, piEnabled, localModelsStateDir, next)
@@ -524,6 +531,7 @@ func run(args []string) (resultErr error) {
 		CLICredentials:      cliCredentials,
 		TeamHubCLIBin:       teamhubBin,
 		LocalModels:         localModels,
+		LocalSpeech:         localSpeech,
 		ModelSource:         modelSource,
 		ModelInvoker: provider.ModelInvoker{
 			TempBase:         operationTempBase,

@@ -394,6 +394,17 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   seconds at most), and Soniox's HTTP status gives a refusal its code
   (`VOICE_KEY_REJECTED`, `VOICE_KEY_NO_BALANCE`,
   `VOICE_KEY_NO_REALTIME_PERMISSION`, else `VOICE_PROVIDER_UNAVAILABLE`).
+  Per-account voice transcription preferences live in `voice_settings`
+  (`GET/PUT /v0/tenants/{tenantId}/voice-settings`) and per-Computer local
+  speech snapshots live in `local_computer_speech_snapshots`
+  (`GET/POST /v0/tenants/{tenantId}/local-computers/{computerId}/local-speech`,
+  `POST .../local-speech/actions`, and internal
+  `POST /v0/agent-runtime/local-computers/local-speech` publishing
+  `local-speech` invalidations). `voice_sessions.speech_config` persists the
+  resolved `SpeechDispatchConfig` for a session so LiveKit dispatch metadata
+  stays identical across reconnects and reconciles. `VoiceMediaPolicy` keeps
+  `voice_media_supported` as the unified boolean while adding optional
+  `active_speech_provider`, `local_speech_available`, and `local_speech_ready`.
 - Web search: `internal/websearch` runs Agent searches and page reads through
   Tavily, Brave, Firecrawl and You.com with deployment-wide keys in
   `web_search_keys` (sealed with `TEAMHUB_SECRET_ENCRYPTION_KEY`, read at each

@@ -136,8 +136,13 @@
     },
     "voice-workers": {
       "owner": "runtime",
-      "description": "Private port assigned by the node-services voice supervisor to its ASR, recorder and Live child processes, and the NODE_PATH it prepends with the downloaded model packages; never a user configuration setting.",
-      "names": ["NODE_PATH", "VOICE_WORKER_PORT"]
+      "description": "Private port, internal local-ASR relay URL/token, and NODE_PATH assigned by the node-services voice supervisor to its ASR, recorder and Live child processes; never user configuration settings.",
+      "names": [
+        "NODE_PATH",
+        "NODE_SERVICES_INTERNAL_TOKEN",
+        "NODE_SERVICES_INTERNAL_URL",
+        "VOICE_WORKER_PORT"
+      ]
     },
     "voice-compose": {
       "owner": "code-default",

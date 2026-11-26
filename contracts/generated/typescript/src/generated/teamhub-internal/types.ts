@@ -778,6 +778,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/agent-runtime/local-computers/local-speech": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Store the latest local speech snapshot a Computer reported.
+     * @description Agent Service forwards every runner.local_speech snapshot. TeamHub replaces the Computer's stored snapshot, keeps it while the Computer is offline, and publishes a local-speech invalidation hint with the Computer ID.
+     */
+    post: operations["recordAgentRuntimeLocalSpeech"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/agents/{agentId}/identity": {
     parameters: {
       query?: never;
@@ -1447,6 +1467,10 @@ export interface components {
     VoiceRuntimeProviderKeys: {
       soniox_api_key?: string;
       xai_api_key?: string;
+      /** @description True when local speech transcription is enabled for at least one enrolled Computer or via deployment override, so node-services starts ASR and recorder workers without a Soniox key. */
+      local_asr_enabled?: boolean;
+      /** @description Optional direct OpenAI-compatible speech transcription base URL for headless deployments without an enrolled Computer. */
+      local_asr_url?: string;
     };
     VoiceObservationReceipt: {
       event_id: components["schemas"]["VoiceId"];
@@ -2889,6 +2913,137 @@ export interface components {
     RecordLocalModelsRequest: {
       computer_id: components["schemas"]["Id"];
       snapshot: components["schemas"]["LocalModelsSnapshot"];
+    };
+    /** @enum {string} */
+    LocalSpeechUnavailableCode:
+      | "TOOL_NOT_INSTALLED"
+      | "SPEECH_UNSUPPORTED"
+      | "TOOL_FAILED";
+    LocalSpeechUnavailableReason: {
+      code: components["schemas"]["LocalSpeechUnavailableCode"];
+      detail?: string;
+    };
+    /** @description Stable localmodels speech catalog id, such as sensevoice-small or whisper-large-v3-turbo. */
+    LocalSpeechModelId: string;
+    /** @description Speech recognition language: auto (default) or an ISO-639-1 / BCP-47 language tag such as zh, en, ja, ko, or yue. */
+    LocalSpeechLanguage: string;
+    LocalSpeechConfig: {
+      model_id?: components["schemas"]["LocalSpeechModelId"];
+      use_gpu: boolean;
+      /** @description -1 never unloads while the sidecar runs; 0 unloads immediately after transcription; positive values set idle TTL seconds (default 900). */
+      keep_loaded_seconds: number;
+      language: components["schemas"]["LocalSpeechLanguage"];
+    };
+    /** @enum {string} */
+    LocalSpeechRuntimeState:
+      | "stopped"
+      | "standby"
+      | "loading"
+      | "loaded"
+      | "error";
+    /** @enum {string} */
+    LocalSpeechEngine: "sherpa-onnx" | "whisper.cpp";
+    /** @enum {string} */
+    LocalSpeechRequestedDevice: "gpu" | "cpu";
+    /** @enum {string} */
+    LocalSpeechEffectiveDevice:
+      | "cuda"
+      | "metal"
+      | "vulkan"
+      | "directml"
+      | "cpu";
+    /** @enum {string} */
+    LocalSpeechFallbackReason:
+      | "insufficient_vram"
+      | "insufficient_unified_memory"
+      | "memory_pressure_warn"
+      | "memory_pressure_critical"
+      | "driver_update_required"
+      | "vulkan_unavailable"
+      | "gpu_engine_unavailable"
+      | "gpu_unsupported_platform"
+      | "cpu_optimal_for_int8"
+      | "gpu_init_failed"
+      | "runtime_oom_fallback"
+      | "yielded_to_llm"
+      | "no_supported_gpu";
+    LocalSpeechRuntime: {
+      running: boolean;
+      state: components["schemas"]["LocalSpeechRuntimeState"];
+      active_model?: components["schemas"]["LocalSpeechModelId"];
+      engine?: components["schemas"]["LocalSpeechEngine"];
+      requested_device: components["schemas"]["LocalSpeechRequestedDevice"];
+      effective_device?: components["schemas"]["LocalSpeechEffectiveDevice"];
+      fallback_reason?: components["schemas"]["LocalSpeechFallbackReason"];
+      fallback_detail?: string | null;
+      /** Format: int64 */
+      vram_used_bytes: number;
+      /** Format: int64 */
+      ram_used_bytes: number;
+      keep_loaded_seconds: number;
+      idle_remaining_seconds?: number | null;
+      active_sessions: number;
+    };
+    /** @enum {string} */
+    LocalSpeechQualityRating: "fast-cjk" | "high-multilingual";
+    /** @enum {string} */
+    LocalSpeechModelState:
+      | "absent"
+      | "downloading"
+      | "idle"
+      | "loading"
+      | "loaded"
+      | "failed";
+    LocalSpeechDownloadProgress: {
+      /** @enum {string} */
+      step: "download" | "verify";
+      /** Format: int64 */
+      done_bytes: number;
+      /** Format: int64 */
+      total_bytes: number;
+      /** Format: int64 */
+      bytes_per_second: number;
+      source?: string;
+      connections?: number;
+    };
+    LocalSpeechModelError: {
+      code: string;
+      message: string;
+    };
+    LocalSpeechModel: {
+      id: components["schemas"]["LocalSpeechModelId"];
+      name: string;
+      engine: components["schemas"]["LocalSpeechEngine"];
+      languages: string[];
+      language_count: number;
+      quality_rating: components["schemas"]["LocalSpeechQualityRating"];
+      license: string;
+      license_url: string;
+      commercial_notice?: string | null;
+      /** Format: int64 */
+      disk_size_bytes: number;
+      /** Format: int64 */
+      vram_estimate_bytes: number;
+      /** Format: int64 */
+      ram_estimate_bytes: number;
+      gpu_supported: boolean;
+      state: components["schemas"]["LocalSpeechModelState"];
+      active: boolean;
+      download?: components["schemas"]["LocalSpeechDownloadProgress"];
+      error?: components["schemas"]["LocalSpeechModelError"];
+    };
+    LocalSpeechSnapshot: {
+      available: boolean;
+      reason?: components["schemas"]["LocalSpeechUnavailableReason"];
+      observed_at: components["schemas"]["Timestamp"];
+      tool_version?: string;
+      config?: components["schemas"]["LocalSpeechConfig"];
+      runtime?: components["schemas"]["LocalSpeechRuntime"];
+      models: components["schemas"]["LocalSpeechModel"][];
+    };
+    RecordLocalSpeechRequest: {
+      computer_id: components["schemas"]["Id"];
+      snapshot: components["schemas"]["LocalSpeechSnapshot"];
     };
     /**
      * @description Persisted Agent runtime type.
@@ -4911,6 +5066,32 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["RecordLocalModelsRequest"];
+      };
+    };
+    responses: {
+      /** @description Stored. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      500: components["responses"]["InternalError"];
+    };
+  };
+  recordAgentRuntimeLocalSpeech: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RecordLocalSpeechRequest"];
       };
     };
     responses: {

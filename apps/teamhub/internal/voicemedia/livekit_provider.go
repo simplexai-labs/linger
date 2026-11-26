@@ -130,7 +130,7 @@ func (p *LiveKitProvider) EnsureSession(ctx context.Context, session providerSes
 	if err != nil {
 		return err
 	}
-	metadata := voiceRuntimeDispatchMetadata(session.CreatedAt, session.Purpose)
+	metadata := voiceRuntimeDispatchMetadata(session.CreatedAt, session.Purpose, session.SpeechConfig)
 	agentName := voiceRuntimeAgentName
 	if session.Purpose == PurposeChatLive {
 		agentName = "linger-live-runtime"
@@ -172,14 +172,15 @@ func (p *LiveKitProvider) ensureAgentDispatch(
 	return err
 }
 
-func voiceRuntimeDispatchMetadata(createdAt time.Time, purpose string) string {
+func voiceRuntimeDispatchMetadata(createdAt time.Time, purpose string, speechConfig json.RawMessage) string {
 	if purpose == "" {
 		purpose = PurposeHardwareControl
 	}
 	encoded, _ := json.Marshal(struct {
-		VoiceSessionCreatedAt string `json:"voice_session_created_at"`
-		VoicePurpose          string `json:"voice_purpose"`
-	}{VoiceSessionCreatedAt: createdAt.UTC().Format(time.RFC3339Nano), VoicePurpose: purpose})
+		VoiceSessionCreatedAt string          `json:"voice_session_created_at"`
+		VoicePurpose          string          `json:"voice_purpose"`
+		Speech                json.RawMessage `json:"speech,omitempty"`
+	}{VoiceSessionCreatedAt: createdAt.UTC().Format(time.RFC3339Nano), VoicePurpose: purpose, Speech: speechConfig})
 	return string(encoded)
 }
 

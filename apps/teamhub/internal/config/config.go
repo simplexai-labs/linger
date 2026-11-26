@@ -138,6 +138,10 @@ type VoiceConfig struct {
 	// Recording, Voice Mode dictation and Pocket Notes dictation, with archive
 	// recovery for recordings. It wins over a key saved in the product.
 	SonioxAPIKey string
+	// LocalASRURL is VOICE_LOCAL_ASR_URL: an optional direct OpenAI-compatible
+	// speech transcription base URL for headless deployments without an
+	// enrolled Computer.
+	LocalASRURL string
 	// LiveKitURL is the ws(s) origin browsers dial. LiveKitAPIURL is where
 	// TeamHub calls the LiveKit API: LIVEKIT_API_URL when TeamHub reaches
 	// LiveKit at another address (the root docker-compose.yml), otherwise the
@@ -322,6 +326,7 @@ func applyEnvironment(cfg *Config) {
 	setNonemptyEnvironment(&cfg.LocalIdentityKey, "TEAMHUB_LOCAL_IDENTITY_KEY")
 	setNonemptyEnvironment(&cfg.Voice.SonioxAPIKey, "SONIOX_API_KEY")
 	setNonemptyEnvironment(&cfg.Voice.XaiAPIKey, "XAI_API_KEY")
+	setNonemptyEnvironment(&cfg.Voice.LocalASRURL, "VOICE_LOCAL_ASR_URL")
 	setNonemptyEnvironment(&cfg.Voice.LiveKitURL, "LIVEKIT_URL")
 	setNonemptyEnvironment(&cfg.Voice.LiveKitAPIURL, "LIVEKIT_API_URL")
 	setNonemptyEnvironment(&cfg.Voice.LiveKitAPIKey, "LIVEKIT_API_KEY")

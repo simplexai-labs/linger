@@ -42,12 +42,15 @@ const (
 	// InvalidateLocalModels: a Local Computer's model library snapshot
 	// changed. The id is the Computer ID.
 	InvalidateLocalModels = "local-models"
+	// InvalidateLocalSpeech: a Local Computer's local speech snapshot changed.
+	// The id is the Computer ID.
+	InvalidateLocalSpeech = "local-speech"
 )
 
 var invalidationResources = map[string]bool{
 	InvalidateRoom: true, InvalidateDirectory: true, InvalidateAgents: true, InvalidateAnotherMe: true,
 	InvalidateComputers: true, InvalidateConnections: true, InvalidateWorkItems: true, InvalidateDocument: true,
-	InvalidateDocumentAccess: true, InvalidateLocalModels: true,
+	InvalidateDocumentAccess: true, InvalidateLocalModels: true, InvalidateLocalSpeech: true,
 }
 
 // ValidInvalidationResource reports whether resource is a published hint type.

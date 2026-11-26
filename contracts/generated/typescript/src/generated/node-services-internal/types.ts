@@ -127,6 +127,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-speech-actions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        ownerActorId: components["parameters"]["OwnerActorId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Send one local-speech action to an owned Local Computer
+     * @description Agent Service sends execute with kind local_speech_action and returns the Computer's immediate accepted or refused answer. Progress and outcomes arrive as runner.local_speech snapshots, which Agent Service records in TeamHub.
+     */
+    post: operations["actOnLocalComputerSpeech"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/model-source": {
     parameters: {
       query?: never;
@@ -649,6 +673,26 @@ export interface paths {
      * @description Runs a reconcile, or joins the one in flight, then waits until every worker the effective keys require is registered and ready, up to a bounded wait. It never carries keys; workers read keys from TeamHub. `ready=false` means the wait ended first or the keys could not be read.
      */
     post: operations["reconcileVoiceWorkers"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/internal/v1/voice/local-asr/transcribe": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Relay one WAV audio segment to an owned Local Computer's localmodels speech engine
+     * @description Voice Runtime calls this internal endpoint on node-services to transcribe a 16 kHz mono PCM WAV segment over the Runner Gateway WebSocket without direct container-to-host networking.
+     */
+    post: operations["transcribeLocalAsr"];
     delete?: never;
     options?: never;
     head?: never;
@@ -1580,6 +1624,58 @@ export interface components {
       /** @description Present only when refused. */
       refusal?: components["schemas"]["LocalModelActionRefusal"];
     };
+    /** @enum {string} */
+    LocalSpeechActionKind:
+      | "download"
+      | "cancel"
+      | "remove"
+      | "load"
+      | "unload"
+      | "configure"
+      | "refresh";
+    /** @description Stable localmodels speech catalog id, such as sensevoice-small or whisper-large-v3-turbo. */
+    LocalSpeechModelId: string;
+    /** @description Speech recognition language: auto (default) or an ISO-639-1 / BCP-47 language tag such as zh, en, ja, ko, or yue. */
+    LocalSpeechLanguage: string;
+    /** @description TeamHub asks Agent Service to send one execute local_speech_action frame to an owned Computer. */
+    LocalSpeechActionCommand: {
+      request_id: components["schemas"]["Id"];
+      action: components["schemas"]["LocalSpeechActionKind"];
+      model_id?: components["schemas"]["LocalSpeechModelId"];
+      use_gpu?: boolean;
+      keep_loaded_seconds?: number;
+      language?: components["schemas"]["LocalSpeechLanguage"];
+      include_gpu_engine?: boolean;
+      expires_at: components["schemas"]["Timestamp"];
+    };
+    /** @enum {string} */
+    LocalSpeechActionRefusalCode:
+      | "MODEL_UNKNOWN"
+      | "INVALID_STATE"
+      | "JOB_RUNNING"
+      | "DISK_INSUFFICIENT"
+      | "MEMORY_INSUFFICIENT"
+      | "PLATFORM_UNSUPPORTED"
+      | "DOWNLOAD_FAILED"
+      | "CHECKSUM_MISMATCH"
+      | "NETWORK_UNAVAILABLE"
+      | "ENGINE_START_FAILED"
+      | "MODEL_FILES_MISSING"
+      | "CANCELLED"
+      | "SPEECH_UNSUPPORTED"
+      | "TOOL_NOT_INSTALLED"
+      | "TOOL_FAILED"
+      | "UNKNOWN_ERROR";
+    LocalSpeechActionRefusal: {
+      code: components["schemas"]["LocalSpeechActionRefusalCode"];
+      detail?: string;
+    };
+    LocalSpeechActionAck: {
+      request_id: components["schemas"]["Id"];
+      /** @enum {string} */
+      outcome: "accepted" | "refused";
+      refusal?: components["schemas"]["LocalSpeechActionRefusal"];
+    };
     /**
      * @description Active model source mode on a Local Computer.
      * @enum {string}
@@ -2080,6 +2176,55 @@ export interface components {
     ApplyDocumentChangeResult:
       | components["schemas"]["AppliedDocumentChangeResult"]
       | components["schemas"]["ConflictedDocumentChangeResult"];
+    LocalAsrTranscribeRequest: {
+      tenant_id: components["schemas"]["Id"];
+      owner_actor_id: components["schemas"]["Id"];
+      computer_id: components["schemas"]["Id"];
+      model_id?: components["schemas"]["LocalSpeechModelId"];
+      language?: components["schemas"]["LocalSpeechLanguage"];
+      use_gpu?: boolean;
+      keep_loaded_seconds?: number;
+      audio_wav_base64: string;
+    };
+    /** @enum {string} */
+    LocalSpeechRequestedDevice: "gpu" | "cpu";
+    /** @enum {string} */
+    LocalSpeechEffectiveDevice:
+      | "cuda"
+      | "metal"
+      | "vulkan"
+      | "directml"
+      | "cpu";
+    /** @enum {string} */
+    LocalSpeechFallbackReason:
+      | "insufficient_vram"
+      | "insufficient_unified_memory"
+      | "memory_pressure_warn"
+      | "memory_pressure_critical"
+      | "driver_update_required"
+      | "vulkan_unavailable"
+      | "gpu_engine_unavailable"
+      | "gpu_unsupported_platform"
+      | "cpu_optimal_for_int8"
+      | "gpu_init_failed"
+      | "runtime_oom_fallback"
+      | "yielded_to_llm"
+      | "no_supported_gpu";
+    LocalAsrTranscribeSegment: {
+      start: number;
+      end: number;
+      text: string;
+    };
+    LocalAsrTranscribeResponse: {
+      text: string;
+      language?: string | null;
+      duration?: number | null;
+      model: string;
+      requested_device: components["schemas"]["LocalSpeechRequestedDevice"];
+      effective_device?: components["schemas"]["LocalSpeechEffectiveDevice"];
+      fallback_reason?: components["schemas"]["LocalSpeechFallbackReason"];
+      segments?: components["schemas"]["LocalAsrTranscribeSegment"][];
+    };
     /** @description An actor_id closes only that Actor's connections; without it every connection of the Document closes. */
     DisconnectDocumentConnectionsRequest: {
       actor_id?: components["schemas"]["DocumentInternalId"];
@@ -2401,6 +2546,40 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["LocalModelActionAck"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      502: components["responses"]["BadGateway"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  actOnLocalComputerSpeech: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        ownerActorId: components["parameters"]["OwnerActorId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalSpeechActionCommand"];
+      };
+    };
+    responses: {
+      /** @description The Computer's answer. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalSpeechActionAck"];
         };
       };
       400: components["responses"]["BadRequest"];
@@ -3365,6 +3544,45 @@ export interface operations {
         };
       };
       401: components["responses"]["Unauthenticated"];
+    };
+  };
+  transcribeLocalAsr: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalAsrTranscribeRequest"];
+      };
+    };
+    responses: {
+      /** @description Transcription result from the Computer's local speech sidecar. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalAsrTranscribeResponse"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      502: components["responses"]["BadGateway"];
+      503: components["responses"]["ServiceUnavailable"];
+      /** @description Local ASR transcription timed out waiting for the Computer. */
+      504: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
     };
   };
   callLocalComputerTool: {

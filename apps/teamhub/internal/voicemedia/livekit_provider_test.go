@@ -51,11 +51,21 @@ func TestLiveKitDictationCommitUsesReliableServerData(t *testing.T) {
 		t.Fatalf("unexpected dictation control packet: %+v", &sent)
 	}
 	var metadata map[string]string
-	if err := json.Unmarshal([]byte(voiceRuntimeDispatchMetadata(time.Unix(100, 0), PurposeChatDictation)), &metadata); err != nil {
+	if err := json.Unmarshal([]byte(voiceRuntimeDispatchMetadata(time.Unix(100, 0), PurposeChatDictation, nil)), &metadata); err != nil {
 		t.Fatal(err)
 	}
 	if metadata["voice_purpose"] != PurposeChatDictation || metadata["voice_session_created_at"] != "1970-01-01T00:01:40Z" {
 		t.Fatalf("dictation dispatch metadata=%v", metadata)
+	}
+	withSpeech := voiceRuntimeDispatchMetadata(time.Unix(100, 0), PurposeChatDictation, json.RawMessage(`{"provider":"local","model_id":"sensevoice-small"}`))
+	var speechMeta struct {
+		Speech SpeechDispatchConfig `json:"speech"`
+	}
+	if err := json.Unmarshal([]byte(withSpeech), &speechMeta); err != nil {
+		t.Fatal(err)
+	}
+	if speechMeta.Speech.Provider != "local" || speechMeta.Speech.ModelID != "sensevoice-small" {
+		t.Fatalf("dictation speech dispatch metadata=%+v", speechMeta.Speech)
 	}
 }
 
@@ -369,7 +379,7 @@ func TestLiveKitConfigRejectsIncompleteProvider(t *testing.T) {
 
 func TestVoiceRuntimeDispatchDetectionIsIdempotent(t *testing.T) {
 	createdAt := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
-	metadata := voiceRuntimeDispatchMetadata(createdAt, PurposeHardwareControl)
+	metadata := voiceRuntimeDispatchMetadata(createdAt, PurposeHardwareControl, nil)
 	dispatches := []*livekit.AgentDispatch{
 		{AgentName: "another-agent"},
 		{
@@ -391,7 +401,7 @@ func TestVoiceRuntimeDispatchDetectionIsIdempotent(t *testing.T) {
 }
 
 func TestRunningVoiceRuntimeDispatchRequiresItsAgentParticipant(t *testing.T) {
-	metadata := voiceRuntimeDispatchMetadata(time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC), PurposeHardwareControl)
+	metadata := voiceRuntimeDispatchMetadata(time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC), PurposeHardwareControl, nil)
 	dispatch := &livekit.AgentDispatch{
 		Id: "dispatch-1", AgentName: voiceRuntimeAgentName, Metadata: metadata,
 		State: &livekit.AgentDispatchState{Jobs: []*livekit.Job{{
@@ -414,7 +424,7 @@ func TestRunningVoiceRuntimeDispatchRequiresItsAgentParticipant(t *testing.T) {
 }
 
 func TestStartingVoiceRuntimeDispatchIsNotReplacedBeforeItJoins(t *testing.T) {
-	metadata := voiceRuntimeDispatchMetadata(time.Now(), PurposeHardwareControl)
+	metadata := voiceRuntimeDispatchMetadata(time.Now(), PurposeHardwareControl, nil)
 	dispatch := &livekit.AgentDispatch{AgentName: voiceRuntimeAgentName, Metadata: metadata,
 		State: &livekit.AgentDispatchState{Jobs: []*livekit.Job{{State: &livekit.JobState{
 			Status: livekit.JobStatus_JS_RUNNING, ParticipantIdentity: "joining-agent", StartedAt: time.Now().Add(-10 * time.Second).UnixNano(),
@@ -436,7 +446,7 @@ func TestStartingVoiceRuntimeDispatchIsNotReplacedBeforeItJoins(t *testing.T) {
 }
 
 func TestUnassignedVoiceRuntimeDispatchExpiresAfterWorkerOutage(t *testing.T) {
-	metadata := voiceRuntimeDispatchMetadata(time.Now(), PurposeHardwareControl)
+	metadata := voiceRuntimeDispatchMetadata(time.Now(), PurposeHardwareControl, nil)
 	for _, jobs := range [][]*livekit.Job{nil, {{State: &livekit.JobState{Status: livekit.JobStatus_JS_PENDING}}}, {{State: &livekit.JobState{Status: livekit.JobStatus_JS_RUNNING}}}} {
 		dispatch := &livekit.AgentDispatch{Id: "unassigned", AgentName: voiceRuntimeAgentName, Metadata: metadata,
 			State: &livekit.AgentDispatchState{CreatedAt: time.Now().Add(-10 * time.Second).UnixNano(), Jobs: jobs}}
@@ -454,7 +464,7 @@ func TestUnassignedVoiceRuntimeDispatchExpiresAfterWorkerOutage(t *testing.T) {
 }
 
 func TestJobLessVoiceRuntimeDispatchIsReplacedSoonAfterAssignmentTimeout(t *testing.T) {
-	metadata := voiceRuntimeDispatchMetadata(time.Now(), PurposeHardwareControl)
+	metadata := voiceRuntimeDispatchMetadata(time.Now(), PurposeHardwareControl, nil)
 	dispatch := &livekit.AgentDispatch{Id: "dropped", AgentName: voiceRuntimeAgentName, Metadata: metadata,
 		State: &livekit.AgentDispatchState{CreatedAt: time.Now().Add(-12 * time.Second).UnixNano()}}
 	if !hasVoiceRuntimeDispatch(voiceRuntimeAgentName, []*livekit.AgentDispatch{dispatch}, metadata, nil, time.Time{}) {
@@ -570,7 +580,7 @@ func TestHardwareSessionDispatchesASRAndRecorderSeparately(t *testing.T) {
 }
 
 func TestTerminalVoiceRuntimeDispatchMustBeReplaced(t *testing.T) {
-	metadata := voiceRuntimeDispatchMetadata(time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC), PurposeHardwareControl)
+	metadata := voiceRuntimeDispatchMetadata(time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC), PurposeHardwareControl, nil)
 	for _, status := range []livekit.JobStatus{
 		livekit.JobStatus_JS_SUCCESS,
 		livekit.JobStatus_JS_FAILED,
@@ -594,7 +604,7 @@ func TestVoiceRuntimeDispatchWithWrongSessionEpochMustBeReplaced(t *testing.T) {
 	dispatch := &livekit.AgentDispatch{
 		Id: "dispatch-1", AgentName: voiceRuntimeAgentName, Metadata: `{}`,
 	}
-	expected := voiceRuntimeDispatchMetadata(time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC), PurposeHardwareControl)
+	expected := voiceRuntimeDispatchMetadata(time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC), PurposeHardwareControl, nil)
 	if hasVoiceRuntimeDispatch(voiceRuntimeAgentName, []*livekit.AgentDispatch{dispatch}, expected, nil, time.Time{}) {
 		t.Fatal("dispatch with stale epoch metadata was treated as active")
 	}

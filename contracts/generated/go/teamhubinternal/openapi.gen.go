@@ -1280,6 +1280,234 @@ func (e LocalRuntimeType) Valid() bool {
 	}
 }
 
+// Defines values for LocalSpeechDownloadProgressStep.
+const (
+	LocalSpeechDownloadStepDownload LocalSpeechDownloadProgressStep = "download"
+	LocalSpeechDownloadStepVerify   LocalSpeechDownloadProgressStep = "verify"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechDownloadProgressStep enum.
+func (e LocalSpeechDownloadProgressStep) Valid() bool {
+	switch e {
+	case LocalSpeechDownloadStepDownload:
+		return true
+	case LocalSpeechDownloadStepVerify:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechEffectiveDevice.
+const (
+	LocalSpeechEffectiveDeviceCpu      LocalSpeechEffectiveDevice = "cpu"
+	LocalSpeechEffectiveDeviceCuda     LocalSpeechEffectiveDevice = "cuda"
+	LocalSpeechEffectiveDeviceDirectml LocalSpeechEffectiveDevice = "directml"
+	LocalSpeechEffectiveDeviceMetal    LocalSpeechEffectiveDevice = "metal"
+	LocalSpeechEffectiveDeviceVulkan   LocalSpeechEffectiveDevice = "vulkan"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechEffectiveDevice enum.
+func (e LocalSpeechEffectiveDevice) Valid() bool {
+	switch e {
+	case LocalSpeechEffectiveDeviceCpu:
+		return true
+	case LocalSpeechEffectiveDeviceCuda:
+		return true
+	case LocalSpeechEffectiveDeviceDirectml:
+		return true
+	case LocalSpeechEffectiveDeviceMetal:
+		return true
+	case LocalSpeechEffectiveDeviceVulkan:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechEngine.
+const (
+	LocalSpeechEngineSherpaOnnx LocalSpeechEngine = "sherpa-onnx"
+	LocalSpeechEngineWhisperCpp LocalSpeechEngine = "whisper.cpp"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechEngine enum.
+func (e LocalSpeechEngine) Valid() bool {
+	switch e {
+	case LocalSpeechEngineSherpaOnnx:
+		return true
+	case LocalSpeechEngineWhisperCpp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechFallbackReason.
+const (
+	LocalSpeechFallbackCpuOptimalForInt8         LocalSpeechFallbackReason = "cpu_optimal_for_int8"
+	LocalSpeechFallbackDriverUpdateRequired      LocalSpeechFallbackReason = "driver_update_required"
+	LocalSpeechFallbackGpuEngineUnavailable      LocalSpeechFallbackReason = "gpu_engine_unavailable"
+	LocalSpeechFallbackGpuInitFailed             LocalSpeechFallbackReason = "gpu_init_failed"
+	LocalSpeechFallbackGpuUnsupportedPlatform    LocalSpeechFallbackReason = "gpu_unsupported_platform"
+	LocalSpeechFallbackInsufficientUnifiedMemory LocalSpeechFallbackReason = "insufficient_unified_memory"
+	LocalSpeechFallbackInsufficientVram          LocalSpeechFallbackReason = "insufficient_vram"
+	LocalSpeechFallbackMemoryPressureCritical    LocalSpeechFallbackReason = "memory_pressure_critical"
+	LocalSpeechFallbackMemoryPressureWarn        LocalSpeechFallbackReason = "memory_pressure_warn"
+	LocalSpeechFallbackNoSupportedGpu            LocalSpeechFallbackReason = "no_supported_gpu"
+	LocalSpeechFallbackRuntimeOomFallback        LocalSpeechFallbackReason = "runtime_oom_fallback"
+	LocalSpeechFallbackVulkanUnavailable         LocalSpeechFallbackReason = "vulkan_unavailable"
+	LocalSpeechFallbackYieldedToLlm              LocalSpeechFallbackReason = "yielded_to_llm"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechFallbackReason enum.
+func (e LocalSpeechFallbackReason) Valid() bool {
+	switch e {
+	case LocalSpeechFallbackCpuOptimalForInt8:
+		return true
+	case LocalSpeechFallbackDriverUpdateRequired:
+		return true
+	case LocalSpeechFallbackGpuEngineUnavailable:
+		return true
+	case LocalSpeechFallbackGpuInitFailed:
+		return true
+	case LocalSpeechFallbackGpuUnsupportedPlatform:
+		return true
+	case LocalSpeechFallbackInsufficientUnifiedMemory:
+		return true
+	case LocalSpeechFallbackInsufficientVram:
+		return true
+	case LocalSpeechFallbackMemoryPressureCritical:
+		return true
+	case LocalSpeechFallbackMemoryPressureWarn:
+		return true
+	case LocalSpeechFallbackNoSupportedGpu:
+		return true
+	case LocalSpeechFallbackRuntimeOomFallback:
+		return true
+	case LocalSpeechFallbackVulkanUnavailable:
+		return true
+	case LocalSpeechFallbackYieldedToLlm:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechModelState.
+const (
+	LocalSpeechModelStateAbsent      LocalSpeechModelState = "absent"
+	LocalSpeechModelStateDownloading LocalSpeechModelState = "downloading"
+	LocalSpeechModelStateFailed      LocalSpeechModelState = "failed"
+	LocalSpeechModelStateIdle        LocalSpeechModelState = "idle"
+	LocalSpeechModelStateLoaded      LocalSpeechModelState = "loaded"
+	LocalSpeechModelStateLoading     LocalSpeechModelState = "loading"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechModelState enum.
+func (e LocalSpeechModelState) Valid() bool {
+	switch e {
+	case LocalSpeechModelStateAbsent:
+		return true
+	case LocalSpeechModelStateDownloading:
+		return true
+	case LocalSpeechModelStateFailed:
+		return true
+	case LocalSpeechModelStateIdle:
+		return true
+	case LocalSpeechModelStateLoaded:
+		return true
+	case LocalSpeechModelStateLoading:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechQualityRating.
+const (
+	LocalSpeechQualityFastCjk          LocalSpeechQualityRating = "fast-cjk"
+	LocalSpeechQualityHighMultilingual LocalSpeechQualityRating = "high-multilingual"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechQualityRating enum.
+func (e LocalSpeechQualityRating) Valid() bool {
+	switch e {
+	case LocalSpeechQualityFastCjk:
+		return true
+	case LocalSpeechQualityHighMultilingual:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechRequestedDevice.
+const (
+	LocalSpeechRequestedDeviceCpu LocalSpeechRequestedDevice = "cpu"
+	LocalSpeechRequestedDeviceGpu LocalSpeechRequestedDevice = "gpu"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechRequestedDevice enum.
+func (e LocalSpeechRequestedDevice) Valid() bool {
+	switch e {
+	case LocalSpeechRequestedDeviceCpu:
+		return true
+	case LocalSpeechRequestedDeviceGpu:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechRuntimeState.
+const (
+	LocalSpeechRuntimeStateError   LocalSpeechRuntimeState = "error"
+	LocalSpeechRuntimeStateLoaded  LocalSpeechRuntimeState = "loaded"
+	LocalSpeechRuntimeStateLoading LocalSpeechRuntimeState = "loading"
+	LocalSpeechRuntimeStateStandby LocalSpeechRuntimeState = "standby"
+	LocalSpeechRuntimeStateStopped LocalSpeechRuntimeState = "stopped"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechRuntimeState enum.
+func (e LocalSpeechRuntimeState) Valid() bool {
+	switch e {
+	case LocalSpeechRuntimeStateError:
+		return true
+	case LocalSpeechRuntimeStateLoaded:
+		return true
+	case LocalSpeechRuntimeStateLoading:
+		return true
+	case LocalSpeechRuntimeStateStandby:
+		return true
+	case LocalSpeechRuntimeStateStopped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechUnavailableCode.
+const (
+	LocalSpeechUnavailableSpeechUnsupported LocalSpeechUnavailableCode = "SPEECH_UNSUPPORTED"
+	LocalSpeechUnavailableToolFailed        LocalSpeechUnavailableCode = "TOOL_FAILED"
+	LocalSpeechUnavailableToolNotInstalled  LocalSpeechUnavailableCode = "TOOL_NOT_INSTALLED"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechUnavailableCode enum.
+func (e LocalSpeechUnavailableCode) Valid() bool {
+	switch e {
+	case LocalSpeechUnavailableSpeechUnsupported:
+		return true
+	case LocalSpeechUnavailableToolFailed:
+		return true
+	case LocalSpeechUnavailableToolNotInstalled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for McpContextErrorCode.
 const (
 	McpContextErrorCodeContextIdentityInvalid McpContextErrorCode = "context_identity_invalid"
@@ -3670,6 +3898,128 @@ type LocalModelsUnavailableReason struct {
 // LocalRuntimeType defines model for LocalRuntimeType.
 type LocalRuntimeType string
 
+// LocalSpeechConfig defines model for LocalSpeechConfig.
+type LocalSpeechConfig struct {
+	// KeepLoadedSeconds -1 never unloads while the sidecar runs; 0 unloads immediately after transcription; positive values set idle TTL seconds (default 900).
+	KeepLoadedSeconds int `json:"keep_loaded_seconds"`
+
+	// Language Speech recognition language: auto (default) or an ISO-639-1 / BCP-47 language tag such as zh, en, ja, ko, or yue.
+	Language LocalSpeechLanguage `json:"language"`
+
+	// ModelId Stable localmodels speech catalog id, such as sensevoice-small or whisper-large-v3-turbo.
+	ModelId *LocalSpeechModelId `json:"model_id,omitempty"`
+	UseGpu  bool                `json:"use_gpu"`
+}
+
+// LocalSpeechDownloadProgress defines model for LocalSpeechDownloadProgress.
+type LocalSpeechDownloadProgress struct {
+	BytesPerSecond int64                           `json:"bytes_per_second"`
+	Connections    *int                            `json:"connections,omitempty"`
+	DoneBytes      int64                           `json:"done_bytes"`
+	Source         *string                         `json:"source,omitempty"`
+	Step           LocalSpeechDownloadProgressStep `json:"step"`
+	TotalBytes     int64                           `json:"total_bytes"`
+}
+
+// LocalSpeechDownloadProgressStep defines model for LocalSpeechDownloadProgress.Step.
+type LocalSpeechDownloadProgressStep string
+
+// LocalSpeechEffectiveDevice defines model for LocalSpeechEffectiveDevice.
+type LocalSpeechEffectiveDevice string
+
+// LocalSpeechEngine defines model for LocalSpeechEngine.
+type LocalSpeechEngine string
+
+// LocalSpeechFallbackReason defines model for LocalSpeechFallbackReason.
+type LocalSpeechFallbackReason string
+
+// LocalSpeechLanguage Speech recognition language: auto (default) or an ISO-639-1 / BCP-47 language tag such as zh, en, ja, ko, or yue.
+type LocalSpeechLanguage = string
+
+// LocalSpeechModel defines model for LocalSpeechModel.
+type LocalSpeechModel struct {
+	Active           bool                         `json:"active"`
+	CommercialNotice *string                      `json:"commercial_notice,omitempty"`
+	DiskSizeBytes    int64                        `json:"disk_size_bytes"`
+	Download         *LocalSpeechDownloadProgress `json:"download,omitempty"`
+	Engine           LocalSpeechEngine            `json:"engine"`
+	Error            *LocalSpeechModelError       `json:"error,omitempty"`
+	GpuSupported     bool                         `json:"gpu_supported"`
+
+	// Id Stable localmodels speech catalog id, such as sensevoice-small or whisper-large-v3-turbo.
+	Id                LocalSpeechModelId       `json:"id"`
+	LanguageCount     int                      `json:"language_count"`
+	Languages         []string                 `json:"languages"`
+	License           string                   `json:"license"`
+	LicenseUrl        string                   `json:"license_url"`
+	Name              string                   `json:"name"`
+	QualityRating     LocalSpeechQualityRating `json:"quality_rating"`
+	RamEstimateBytes  int64                    `json:"ram_estimate_bytes"`
+	State             LocalSpeechModelState    `json:"state"`
+	VramEstimateBytes int64                    `json:"vram_estimate_bytes"`
+}
+
+// LocalSpeechModelError defines model for LocalSpeechModelError.
+type LocalSpeechModelError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// LocalSpeechModelId Stable localmodels speech catalog id, such as sensevoice-small or whisper-large-v3-turbo.
+type LocalSpeechModelId = string
+
+// LocalSpeechModelState defines model for LocalSpeechModelState.
+type LocalSpeechModelState string
+
+// LocalSpeechQualityRating defines model for LocalSpeechQualityRating.
+type LocalSpeechQualityRating string
+
+// LocalSpeechRequestedDevice defines model for LocalSpeechRequestedDevice.
+type LocalSpeechRequestedDevice string
+
+// LocalSpeechRuntime defines model for LocalSpeechRuntime.
+type LocalSpeechRuntime struct {
+	// ActiveModel Stable localmodels speech catalog id, such as sensevoice-small or whisper-large-v3-turbo.
+	ActiveModel          *LocalSpeechModelId         `json:"active_model,omitempty"`
+	ActiveSessions       int                         `json:"active_sessions"`
+	EffectiveDevice      *LocalSpeechEffectiveDevice `json:"effective_device,omitempty"`
+	Engine               *LocalSpeechEngine          `json:"engine,omitempty"`
+	FallbackDetail       *string                     `json:"fallback_detail,omitempty"`
+	FallbackReason       *LocalSpeechFallbackReason  `json:"fallback_reason,omitempty"`
+	IdleRemainingSeconds *int                        `json:"idle_remaining_seconds,omitempty"`
+	KeepLoadedSeconds    int                         `json:"keep_loaded_seconds"`
+	RamUsedBytes         int64                       `json:"ram_used_bytes"`
+	RequestedDevice      LocalSpeechRequestedDevice  `json:"requested_device"`
+	Running              bool                        `json:"running"`
+	State                LocalSpeechRuntimeState     `json:"state"`
+	VramUsedBytes        int64                       `json:"vram_used_bytes"`
+}
+
+// LocalSpeechRuntimeState defines model for LocalSpeechRuntimeState.
+type LocalSpeechRuntimeState string
+
+// LocalSpeechSnapshot defines model for LocalSpeechSnapshot.
+type LocalSpeechSnapshot struct {
+	Available bool               `json:"available"`
+	Config    *LocalSpeechConfig `json:"config,omitempty"`
+	Models    []LocalSpeechModel `json:"models"`
+
+	// ObservedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	ObservedAt  Timestamp                     `json:"observed_at"`
+	Reason      *LocalSpeechUnavailableReason `json:"reason,omitempty"`
+	Runtime     *LocalSpeechRuntime           `json:"runtime,omitempty"`
+	ToolVersion *string                       `json:"tool_version,omitempty"`
+}
+
+// LocalSpeechUnavailableCode defines model for LocalSpeechUnavailableCode.
+type LocalSpeechUnavailableCode string
+
+// LocalSpeechUnavailableReason defines model for LocalSpeechUnavailableReason.
+type LocalSpeechUnavailableReason struct {
+	Code   LocalSpeechUnavailableCode `json:"code"`
+	Detail *string                    `json:"detail,omitempty"`
+}
+
 // ManagedAgentAccessCredentialRequest defines model for ManagedAgentAccessCredentialRequest.
 type ManagedAgentAccessCredentialRequest struct {
 	// ComputerId The Local Computer the Runner Gateway installs this credential on. Together with workspace_grant_id it must match the Agent's current placement; a Computer the Agent moved away from is refused. The credential does not expire: it ends when the Agent's placement changes, when the Agent is deleted, or when the next credential for the Agent is issued.
@@ -3986,6 +4336,13 @@ type RecordLocalModelsRequest struct {
 
 	// Snapshot A Computer's model library as its Daemon reported it in runner.local_models, mapped from localmodels.library-status/v1. When available is false only reason and observed_at carry meaning and the lists are empty.
 	Snapshot LocalModelsSnapshot `json:"snapshot"`
+}
+
+// RecordLocalSpeechRequest defines model for RecordLocalSpeechRequest.
+type RecordLocalSpeechRequest struct {
+	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	ComputerId Id                  `json:"computer_id"`
+	Snapshot   LocalSpeechSnapshot `json:"snapshot"`
 }
 
 // RequeueAgentLocalRunRequest defines model for RequeueAgentLocalRunRequest.
@@ -4719,6 +5076,11 @@ type VoiceRecordingReportState string
 
 // VoiceRuntimeProviderKeys defines model for VoiceRuntimeProviderKeys.
 type VoiceRuntimeProviderKeys struct {
+	// LocalAsrEnabled True when local speech transcription is enabled for at least one enrolled Computer or via deployment override, so node-services starts ASR and recorder workers without a Soniox key.
+	LocalAsrEnabled *bool `json:"local_asr_enabled,omitempty"`
+
+	// LocalAsrUrl Optional direct OpenAI-compatible speech transcription base URL for headless deployments without an enrolled Computer.
+	LocalAsrUrl  *string `json:"local_asr_url,omitempty"`
 	SonioxApiKey *string `json:"soniox_api_key,omitempty"`
 	XaiApiKey    *string `json:"xai_api_key,omitempty"`
 }
@@ -5077,6 +5439,9 @@ type ConnectAgentRuntimeLocalComputerJSONRequestBody = ConnectAgentRuntimeLocalC
 
 // RecordAgentRuntimeLocalModelsJSONRequestBody defines body for RecordAgentRuntimeLocalModels for application/json ContentType.
 type RecordAgentRuntimeLocalModelsJSONRequestBody = RecordLocalModelsRequest
+
+// RecordAgentRuntimeLocalSpeechJSONRequestBody defines body for RecordAgentRuntimeLocalSpeech for application/json ContentType.
+type RecordAgentRuntimeLocalSpeechJSONRequestBody = RecordLocalSpeechRequest
 
 // RemoveAgentRuntimeLocalComputerJSONRequestBody defines body for RemoveAgentRuntimeLocalComputer for application/json ContentType.
 type RemoveAgentRuntimeLocalComputerJSONRequestBody = AgentRuntimeLocalComputerCredentialRequest

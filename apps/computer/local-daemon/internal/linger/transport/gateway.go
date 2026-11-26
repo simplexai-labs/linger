@@ -177,28 +177,30 @@ func (s *gatewayStream) Receive(ctx context.Context) (protocol.Command, error) {
 // agentShapes decodes each Agent frame into its generated shape, which checks
 // the keys and fixed values the schema requires.
 var agentShapes = map[string]func() wire.Shape{
-	"RunnerWelcome":                func() wire.Shape { return &wire.RunnerWelcome{} },
-	"RunnerReconciled":             func() wire.Shape { return &wire.RunnerReconciled{} },
-	"RuntimeRegistrationSnapshot":  func() wire.Shape { return &wire.RuntimeRegistrationSnapshot{} },
-	"AgentRunnerEnsure":            func() wire.Shape { return &wire.AgentRunnerEnsure{} },
-	"AgentRunnerRemove":            func() wire.Shape { return &wire.AgentRunnerRemove{} },
-	"AgentCliCredentialPut":        func() wire.Shape { return &wire.AgentCliCredentialPut{} },
-	"DebugInspect":                 func() wire.Shape { return &wire.DebugInspect{} },
-	"CapabilitySkillsScan":         func() wire.Shape { return &wire.CapabilitySkillsScan{} },
-	"CapabilityBrowserConnect":     func() wire.Shape { return &wire.CapabilityBrowserConnect{} },
-	"CapabilityComputerPermission": func() wire.Shape { return &wire.CapabilityComputerPermission{} },
-	"CapabilityLocalModelsExecute": func() wire.Shape { return &wire.CapabilityLocalModelsExecute{} },
-	"CapabilityModelSource":        func() wire.Shape { return &wire.CapabilityModelSource{} },
-	"OperationPrepare":             func() wire.Shape { return &wire.OperationPrepare{} },
-	"ProviderPrepare":              func() wire.Shape { return &wire.ProviderPrepare{} },
-	"SessionCompact":               func() wire.Shape { return &wire.SessionCompact{} },
-	"ModelInvoke":                  func() wire.Shape { return &wire.ModelInvoke{} },
-	"OperationStart":               func() wire.Shape { return &wire.OperationStart{} },
-	"OperationInput":               func() wire.Shape { return &wire.OperationInput{} },
-	"OperationCancel":              func() wire.Shape { return &wire.OperationCancel{} },
-	"ModelInvokeCancel":            func() wire.Shape { return &wire.ModelInvokeCancel{} },
-	"OperationAck":                 func() wire.Shape { return &wire.OperationAck{} },
-	"ComputerToolCall":             func() wire.Shape { return &wire.ComputerToolCall{} },
+	"RunnerWelcome":                       func() wire.Shape { return &wire.RunnerWelcome{} },
+	"RunnerReconciled":                    func() wire.Shape { return &wire.RunnerReconciled{} },
+	"RuntimeRegistrationSnapshot":         func() wire.Shape { return &wire.RuntimeRegistrationSnapshot{} },
+	"AgentRunnerEnsure":                   func() wire.Shape { return &wire.AgentRunnerEnsure{} },
+	"AgentRunnerRemove":                   func() wire.Shape { return &wire.AgentRunnerRemove{} },
+	"AgentCliCredentialPut":               func() wire.Shape { return &wire.AgentCliCredentialPut{} },
+	"DebugInspect":                        func() wire.Shape { return &wire.DebugInspect{} },
+	"CapabilitySkillsScan":                func() wire.Shape { return &wire.CapabilitySkillsScan{} },
+	"CapabilityBrowserConnect":            func() wire.Shape { return &wire.CapabilityBrowserConnect{} },
+	"CapabilityComputerPermission":        func() wire.Shape { return &wire.CapabilityComputerPermission{} },
+	"CapabilityLocalModelsExecute":        func() wire.Shape { return &wire.CapabilityLocalModelsExecute{} },
+	"CapabilityLocalSpeechActionExecute":  func() wire.Shape { return &wire.CapabilityLocalSpeechActionExecute{} },
+	"CapabilityLocalAsrTranscribeExecute": func() wire.Shape { return &wire.CapabilityLocalAsrTranscribeExecute{} },
+	"CapabilityModelSource":               func() wire.Shape { return &wire.CapabilityModelSource{} },
+	"OperationPrepare":                    func() wire.Shape { return &wire.OperationPrepare{} },
+	"ProviderPrepare":                     func() wire.Shape { return &wire.ProviderPrepare{} },
+	"SessionCompact":                      func() wire.Shape { return &wire.SessionCompact{} },
+	"ModelInvoke":                         func() wire.Shape { return &wire.ModelInvoke{} },
+	"OperationStart":                      func() wire.Shape { return &wire.OperationStart{} },
+	"OperationInput":                      func() wire.Shape { return &wire.OperationInput{} },
+	"OperationCancel":                     func() wire.Shape { return &wire.OperationCancel{} },
+	"ModelInvokeCancel":                   func() wire.Shape { return &wire.ModelInvokeCancel{} },
+	"OperationAck":                        func() wire.Shape { return &wire.OperationAck{} },
+	"ComputerToolCall":                    func() wire.Shape { return &wire.ComputerToolCall{} },
 }
 
 func decodeGatewayCommand(encoded []byte) (protocol.Command, error) {
@@ -323,6 +325,7 @@ func decodeGatewayCommand(encoded []byte) (protocol.Command, error) {
 		protocol.CommandDebugInspect, protocol.CommandAgentCLICredentialPut,
 		protocol.CommandCapabilitySkillsScan, protocol.CommandCapabilityBrowserConnect,
 		protocol.CommandCapabilityComputerPermission, protocol.CommandCapabilityLocalModels,
+		protocol.CommandCapabilityLocalSpeechAction, protocol.CommandCapabilityLocalAsrTranscribe,
 		protocol.CommandCapabilityModelSource:
 		// Their handlers decode the generated shape from the frame itself.
 		command.Payload = append(json.RawMessage(nil), encoded...)
@@ -497,8 +500,10 @@ func (s *gatewayStream) Send(ctx context.Context, event protocol.Event) error {
 		event.Type == protocol.EventCapabilityBrowserConnected || event.Type == protocol.EventCapabilityBrowserFailed ||
 		event.Type == protocol.EventCapabilityComputerPermissionSucceeded || event.Type == protocol.EventCapabilityComputerPermissionFailed ||
 		event.Type == protocol.EventCapabilityLocalModelsAccepted || event.Type == protocol.EventCapabilityLocalModelsRefused ||
+		event.Type == protocol.EventCapabilityLocalSpeechActionAccepted || event.Type == protocol.EventCapabilityLocalSpeechActionRefused ||
+		event.Type == protocol.EventCapabilityLocalAsrTranscribeSucceeded || event.Type == protocol.EventCapabilityLocalAsrTranscribeFailed ||
 		event.Type == protocol.EventCapabilityModelSourceSucceeded || event.Type == protocol.EventCapabilityModelSourceFailed ||
-		event.Type == protocol.EventLocalModels ||
+		event.Type == protocol.EventLocalModels || event.Type == protocol.EventLocalSpeech ||
 		event.Type == protocol.EventProviderPrepared || event.Type == protocol.EventSessionCompacted ||
 		event.Type == protocol.EventModelInvoked || event.Type == protocol.EventComputerToolResult:
 		// Their handlers already encode the generated wire shape.

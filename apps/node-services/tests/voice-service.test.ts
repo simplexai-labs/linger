@@ -69,6 +69,7 @@ async function harness(
   const service = await startVoiceService({
     logger: { log } as unknown as JsonLogger,
     http: {
+      url: "http://127.0.0.1:4319",
       mount: (mounted: HttpRoute) => {
         route = mounted;
         return unmount;
@@ -448,5 +449,77 @@ describe("voice worker reconcile", () => {
     expect(of("live")).toHaveLength(2);
     expect(teamHub.calls).toBe(calls);
     expect(unmount).toHaveBeenCalledOnce();
+  });
+
+  it("starts asr and recorder workers when local_asr_enabled is true without SONIOX_API_KEY", async () => {
+    const { spawned, of, teamHub, service, shutdown, route } = await harness();
+    teamHub.keys = {
+      local_asr_enabled: true,
+      local_asr_url: "http://127.0.0.1:18771",
+    };
+    await service.reconcile();
+    expect(spawned.map(({ worker }) => worker)).toEqual(["asr", "recorder"]);
+    expect(of("asr")[0]!.spec.env).toMatchObject({
+      SONIOX_API_KEY: "",
+      XAI_API_KEY: "",
+      VOICE_LOCAL_ASR_URL: "http://127.0.0.1:18771",
+      NODE_SERVICES_INTERNAL_URL: "http://127.0.0.1:4319",
+      NODE_SERVICES_INTERNAL_TOKEN: serviceCredential(
+        "node-services-internal",
+        environment,
+      ),
+    });
+    expect(of("asr")[0]!.spec.env).not.toHaveProperty(
+      "VOICE_LOCAL_ASR_ENABLED",
+    );
+    expect(of("recorder")[0]!.spec.env).toMatchObject({
+      SONIOX_API_KEY: "",
+      XAI_API_KEY: "",
+    });
+    expect(of("live")).toHaveLength(0);
+    const health = await route.fetch(new Request("http://x/voice/health"));
+    expect(await health.json()).toEqual({ workers: ["asr", "recorder"] });
+
+    // Turning off local_asr_enabled without Soniox drains both workers.
+    teamHub.keys = { local_asr_enabled: false };
+    await service.reconcile();
+    expect(of("asr")[0]!.child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(of("recorder")[0]!.child.kill).toHaveBeenCalledWith("SIGTERM");
+    await shutdown();
+  });
+
+  it("does not restart asr or recorder when local_asr_enabled flips while SONIOX_API_KEY is set", async () => {
+    const { spawned, of, teamHub, service, shutdown } = await harness({
+      keys: { soniox_api_key: SONIOX, local_asr_enabled: false },
+    });
+    expect(spawned.map(({ worker }) => worker)).toEqual(["asr", "recorder"]);
+
+    teamHub.keys = { soniox_api_key: SONIOX, local_asr_enabled: true };
+    await service.reconcile();
+    teamHub.keys = { soniox_api_key: SONIOX, local_asr_enabled: false };
+    await service.reconcile();
+
+    expect(of("asr")).toHaveLength(1);
+    expect(of("recorder")).toHaveLength(1);
+    expect(of("asr")[0]!.child.kill).not.toHaveBeenCalled();
+    expect(of("recorder")[0]!.child.kill).not.toHaveBeenCalled();
+
+    // Changing local_asr_url replaces only asr and leaves recorder running.
+    teamHub.keys = {
+      soniox_api_key: SONIOX,
+      local_asr_enabled: true,
+      local_asr_url: "http://127.0.0.1:18771",
+    };
+    await service.reconcile();
+    expect(of("asr")[0]!.child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(of("recorder")[0]!.child.kill).not.toHaveBeenCalled();
+    of("asr")[0]!.child.emit("exit", 0, null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(of("asr")).toHaveLength(2);
+    expect(of("asr")[1]!.spec.env.VOICE_LOCAL_ASR_URL).toBe(
+      "http://127.0.0.1:18771",
+    );
+    expect(of("recorder")).toHaveLength(1);
+    await shutdown();
   });
 });

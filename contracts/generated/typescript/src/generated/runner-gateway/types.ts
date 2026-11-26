@@ -15,6 +15,8 @@ export type AgentToDaemonEnvelope =
   | CapabilityBrowserConnect
   | CapabilityComputerPermission
   | CapabilityLocalModelsExecute
+  | CapabilityLocalSpeechActionExecute
+  | CapabilityLocalAsrTranscribeExecute
   | CapabilityModelSource
   | OperationPrepare
   | ProviderPrepare
@@ -46,7 +48,8 @@ export type ServiceFeature =
   | "operation_background_wait"
   | "dynamic_reasoning_efforts"
   | "antigravity_history"
-  | "antigravity_usage_provider";
+  | "antigravity_usage_provider"
+  | "local_voice_asr";
 export type JsonValue =
   | null
   | boolean
@@ -130,6 +133,40 @@ export type CapabilityLocalModelsExecute = LocalSkillCommandIdentity & {
  * Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
  */
 export type LocalModelId = string;
+/**
+ * Ask the Computer to act on its localmodels speech library or runtime configuration.
+ */
+export type CapabilityLocalSpeechActionExecute = LocalSkillCommandIdentity & {
+  type: "execute";
+  kind: "local_speech_action";
+  action:
+    | "download"
+    | "cancel"
+    | "remove"
+    | "load"
+    | "unload"
+    | "configure"
+    | "refresh";
+  model_id?: LocalSpeechModelId;
+  use_gpu?: boolean;
+  keep_loaded_seconds?: number;
+  language?: LocalSpeechLanguage;
+  include_gpu_engine?: boolean;
+};
+export type LocalSpeechModelId = string;
+export type LocalSpeechLanguage = string;
+/**
+ * Relay one 16 kHz mono PCM WAV segment to the Computer's localmodels speech sidecar for transcription.
+ */
+export type CapabilityLocalAsrTranscribeExecute = LocalSkillCommandIdentity & {
+  type: "execute";
+  kind: "local_asr_transcribe";
+  model_id?: LocalSpeechModelId;
+  language?: LocalSpeechLanguage;
+  use_gpu?: boolean;
+  keep_loaded_seconds?: number;
+  audio_wav_base64: string;
+};
 export type CapabilityModelSource = LocalSkillCommandIdentity & {
   type: "execute";
   kind: "model_source";
@@ -223,6 +260,7 @@ export type DaemonToAgentEnvelope =
   | RunnerHeartbeat
   | RunnerRuntimeDiagnostics
   | RunnerLocalModels
+  | RunnerLocalSpeech
   | RuntimeRegistrationObserved
   | AgentRunnerReady
   | AgentRunnerRemoved
@@ -238,6 +276,10 @@ export type DaemonToAgentEnvelope =
   | CapabilityComputerPermissionFailed
   | CapabilityLocalModelsAccepted
   | CapabilityLocalModelsRefused
+  | CapabilityLocalSpeechActionAccepted
+  | CapabilityLocalSpeechActionRefused
+  | CapabilityLocalAsrTranscribeSucceeded
+  | CapabilityLocalAsrTranscribeFailed
   | CapabilityModelSourceSucceeded
   | CapabilityModelSourceFailed
   | OperationPrepared
@@ -393,6 +435,42 @@ export type LocalModelCapability =
   | "reasoning"
   | "coding"
   | "multilingual";
+export type LocalSpeechRuntimeState =
+  | "stopped"
+  | "standby"
+  | "loading"
+  | "loaded"
+  | "error";
+export type LocalSpeechEngine = "sherpa-onnx" | "whisper.cpp";
+export type LocalSpeechRequestedDevice = "gpu" | "cpu";
+export type LocalSpeechEffectiveDevice =
+  | "cuda"
+  | "metal"
+  | "vulkan"
+  | "directml"
+  | "cpu";
+export type LocalSpeechFallbackReason =
+  | "insufficient_vram"
+  | "insufficient_unified_memory"
+  | "memory_pressure_warn"
+  | "memory_pressure_critical"
+  | "driver_update_required"
+  | "vulkan_unavailable"
+  | "gpu_engine_unavailable"
+  | "gpu_unsupported_platform"
+  | "cpu_optimal_for_int8"
+  | "gpu_init_failed"
+  | "runtime_oom_fallback"
+  | "yielded_to_llm"
+  | "no_supported_gpu";
+export type LocalSpeechQualityRating = "fast-cjk" | "high-multilingual";
+export type LocalSpeechModelState =
+  | "absent"
+  | "downloading"
+  | "idle"
+  | "loading"
+  | "loaded"
+  | "failed";
 export type AgentRunnerReady = AgentRunnerWireIdentity & {
   type: "agent_runner.state";
   runner_pid: PositiveInteger;
@@ -525,6 +603,89 @@ export type LocalModelActionRefusalCode =
   | "UNKNOWN_ERROR"
   | "TOOL_NOT_INSTALLED"
   | "TOOL_FAILED";
+/**
+ * The Computer started the local speech action or queued a refresh.
+ */
+export type CapabilityLocalSpeechActionAccepted = LocalSkillCommandIdentity & {
+  type: "executed";
+  kind: "local_speech_action";
+  action:
+    | "download"
+    | "cancel"
+    | "remove"
+    | "load"
+    | "unload"
+    | "configure"
+    | "refresh";
+  model_id?: LocalSpeechModelId;
+  outcome: "accepted";
+};
+/**
+ * The Computer refused the local speech action.
+ */
+export type CapabilityLocalSpeechActionRefused = LocalSkillCommandIdentity & {
+  type: "executed";
+  kind: "local_speech_action";
+  action:
+    | "download"
+    | "cancel"
+    | "remove"
+    | "load"
+    | "unload"
+    | "configure"
+    | "refresh";
+  model_id?: LocalSpeechModelId;
+  refusal: LocalSpeechActionRefusal;
+  outcome: "refused";
+};
+export type LocalSpeechActionRefusalCode =
+  | "MODEL_UNKNOWN"
+  | "INVALID_STATE"
+  | "JOB_RUNNING"
+  | "DISK_INSUFFICIENT"
+  | "MEMORY_INSUFFICIENT"
+  | "PLATFORM_UNSUPPORTED"
+  | "DOWNLOAD_FAILED"
+  | "CHECKSUM_MISMATCH"
+  | "NETWORK_UNAVAILABLE"
+  | "ENGINE_START_FAILED"
+  | "MODEL_FILES_MISSING"
+  | "CANCELLED"
+  | "SPEECH_UNSUPPORTED"
+  | "TOOL_NOT_INSTALLED"
+  | "TOOL_FAILED"
+  | "UNKNOWN_ERROR";
+/**
+ * Transcription result returned from the Computer's local speech sidecar.
+ */
+export type CapabilityLocalAsrTranscribeSucceeded =
+  LocalSkillCommandIdentity & {
+    type: "executed";
+    kind: "local_asr_transcribe";
+    outcome: "succeeded";
+    text: string;
+    language?: string;
+    duration?: number;
+    model: string;
+    requested_device: LocalSpeechRequestedDevice;
+    effective_device?: LocalSpeechEffectiveDevice;
+    fallback_reason?: LocalSpeechFallbackReason;
+    /**
+     * @maxItems 1000
+     */
+    segments?: LocalAsrTranscribeSegment[];
+  };
+/**
+ * Local ASR transcription failed on the Computer.
+ */
+export type CapabilityLocalAsrTranscribeFailed = LocalSkillCommandIdentity & {
+  type: "executed";
+  kind: "local_asr_transcribe";
+  outcome: "failed";
+  error_code: string;
+  error_message?: string;
+  retryable?: boolean;
+};
 export type CapabilityModelSourceSucceeded = LocalSkillCommandIdentity & {
   type: "executed";
   kind: "model_source";
@@ -1733,6 +1894,88 @@ export interface LocalModelsDebugInfo {
    */
   config_path?: string;
 }
+/**
+ * The Computer's local speech status. Sent after a runner.welcome whose service_features names local_voice_asr, after every speech change, and at most every 2 seconds while a download or load runs.
+ */
+export interface RunnerLocalSpeech {
+  type: "runner.local_speech";
+  protocol_version: ProtocolVersion;
+  runner_id: Id;
+  sent_at: Timestamp;
+  revision: PositiveInteger;
+  local_speech: LocalSpeechSnapshot;
+}
+export interface LocalSpeechSnapshot {
+  available: boolean;
+  reason?: LocalSpeechUnavailableReason;
+  observed_at: Timestamp;
+  tool_version?: string;
+  config?: LocalSpeechConfig;
+  runtime?: LocalSpeechRuntime;
+  /**
+   * @maxItems 64
+   */
+  models: LocalSpeechModel[];
+}
+export interface LocalSpeechUnavailableReason {
+  code: "TOOL_NOT_INSTALLED" | "SPEECH_UNSUPPORTED" | "TOOL_FAILED";
+  detail?: string;
+}
+export interface LocalSpeechConfig {
+  model_id?: LocalSpeechModelId;
+  use_gpu: boolean;
+  keep_loaded_seconds: number;
+  language: LocalSpeechLanguage;
+}
+export interface LocalSpeechRuntime {
+  running: boolean;
+  state: LocalSpeechRuntimeState;
+  active_model?: LocalSpeechModelId;
+  engine?: LocalSpeechEngine;
+  requested_device: LocalSpeechRequestedDevice;
+  effective_device?: LocalSpeechEffectiveDevice;
+  fallback_reason?: LocalSpeechFallbackReason;
+  fallback_detail?: string;
+  vram_used_bytes: NonNegativeInteger;
+  ram_used_bytes: NonNegativeInteger;
+  keep_loaded_seconds: number;
+  idle_remaining_seconds?: number;
+  active_sessions: NonNegativeInteger;
+}
+export interface LocalSpeechModel {
+  id: LocalSpeechModelId;
+  name: string;
+  engine: LocalSpeechEngine;
+  /**
+   * @maxItems 256
+   */
+  languages: string[];
+  language_count: number;
+  quality_rating: LocalSpeechQualityRating;
+  license: string;
+  license_url: string;
+  commercial_notice?: string;
+  disk_size_bytes: NonNegativeInteger;
+  vram_estimate_bytes: NonNegativeInteger;
+  ram_estimate_bytes: NonNegativeInteger;
+  gpu_supported: boolean;
+  state: LocalSpeechModelState;
+  active: boolean;
+  download?: LocalSpeechDownloadProgress;
+  error?: LocalSpeechError;
+}
+export interface LocalSpeechDownloadProgress {
+  step: "download" | "verify";
+  done_bytes: NonNegativeInteger;
+  total_bytes: NonNegativeInteger;
+  bytes_per_second: NonNegativeInteger;
+  source?: string;
+  connections?: number;
+}
+export interface LocalSpeechError {
+  code: string;
+  message: string;
+}
 export interface RuntimeRegistrationObserved {
   type: "runtime.registration.observed";
   protocol_version: ProtocolVersion;
@@ -2140,6 +2383,15 @@ export interface LocalModelActionRefusal {
    * With LOAD_NO_ROOM, MEMORY_INSUFFICIENT or DISK_INSUFFICIENT.
    */
   free_bytes?: number;
+}
+export interface LocalSpeechActionRefusal {
+  code: LocalSpeechActionRefusalCode;
+  detail?: string;
+}
+export interface LocalAsrTranscribeSegment {
+  start: number;
+  end: number;
+  text: string;
 }
 export interface ModelSourceStatus {
   mode: "local" | "subscription" | "byok";

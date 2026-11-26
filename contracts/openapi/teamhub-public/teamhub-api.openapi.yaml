@@ -841,6 +841,91 @@ paths:
           $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
         '504':
           $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+  /v0/tenants/{tenantId}/local-computers/{computerId}/local-speech:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/ComputerId'
+    get:
+      tags: [Local Computers]
+      operationId: getLocalComputerSpeech
+      summary: Read the local speech status one Local Computer last reported.
+      description: >-
+        TeamHub answers from the latest snapshot the Computer sent, so an offline Computer shows
+        what it last reported. Tenant members who can see the Computer may read; only its owner
+        may act. A local-speech invalidation hint with the Computer ID follows every stored snapshot.
+      responses:
+        '200':
+          description: The Computer and its local speech status.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/local-speech.yaml#/components/schemas/LocalSpeechView'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
+    post:
+      tags: [Local Computers]
+      operationId: refreshLocalComputerSpeech
+      summary: Ask an owned Local Computer to refresh its local speech status.
+      responses:
+        '202':
+          description: The Computer started refreshing its local speech status.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/local-speech.yaml#/components/schemas/LocalSpeechRefreshAccepted'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '../components/local-speech.yaml#/components/responses/LocalSpeechRefused'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
+        '409':
+          $ref: '../components/local-speech.yaml#/components/responses/LocalSpeechRefused'
+        '502':
+          $ref: '../components/local-speech.yaml#/components/responses/LocalSpeechRefused'
+        '503':
+          $ref: '../components/local-speech.yaml#/components/responses/LocalSpeechRefused'
+        '504':
+          $ref: '../components/local-speech.yaml#/components/responses/LocalSpeechRefused'
+  /v0/tenants/{tenantId}/local-computers/{computerId}/local-speech/actions:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/ComputerId'
+    post:
+      tags: [Local Computers]
+      operationId: actOnLocalComputerSpeech
+      summary: Download, cancel, remove, load, unload, or configure local speech on an owned Local Computer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../components/local-speech.yaml#/components/schemas/LocalSpeechActionRequest'
+      responses:
+        '202':
+          description: The Computer started the local speech action.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/local-speech.yaml#/components/schemas/LocalSpeechActionAccepted'
+        '400':
+          $ref: '../components/common.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '../components/local-speech.yaml#/components/responses/LocalSpeechRefused'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
+        '409':
+          $ref: '../components/local-speech.yaml#/components/responses/LocalSpeechRefused'
+        '502':
+          $ref: '../components/local-speech.yaml#/components/responses/LocalSpeechRefused'
+        '503':
+          $ref: '../components/local-speech.yaml#/components/responses/LocalSpeechRefused'
+        '504':
+          $ref: '../components/local-speech.yaml#/components/responses/LocalSpeechRefused'
   /v0/tenants/{tenantId}/local-computers/{computerId}/model-source:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -2135,6 +2220,10 @@ paths:
     parameters:
       - $ref: '#/components/parameters/TenantId'
     $ref: '../paths/teamhub-public-voice-media.yaml#/tenantVoiceMediaPolicy'
+  /v0/tenants/{tenantId}/voice-settings:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    $ref: '../paths/teamhub-public-voice-media.yaml#/tenantVoiceSettings'
   /v0/voice-provider-keys/{provider}:
     parameters:
       - name: provider

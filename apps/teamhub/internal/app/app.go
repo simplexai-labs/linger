@@ -120,7 +120,8 @@ type App struct {
 	localComputers           roomagent.LocalComputerManagement
 	voiceMedia               voicemedia.Plane
 	// voiceKeys resolves the Soniox and xAI keys at each use.
-	voiceKeys *voicekey.Service
+	voiceKeys        *voicekey.Service
+	voiceLocalASRURL string
 	// webSearch runs the Agents' web searches with the saved keys.
 	webSearch *websearch.Service
 	// urlPreview reads sites' framing rules for the Web link preview panel.
@@ -143,6 +144,8 @@ type App struct {
 	voiceCaptureAnswerer           voicecaptureqa.Answerer
 	voiceQuickNotes                voicequicknotes.Writer
 	agentRuntimeState              *agentruntimestate.Service
+	recordLocalSpeech              func(context.Context, agentruntimestate.RecordLocalSpeechInput) (bool, error)
+	resolveRoomSpeech              func(context.Context, string, string, bool) (voice.SpeechResolution, error)
 	presentationSequences          *agentsendmessage.PresentationSequenceService
 	typedCards                     *typedcard.Service
 	mcpContexts                    mcpContextService

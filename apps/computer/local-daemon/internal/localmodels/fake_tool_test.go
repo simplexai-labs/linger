@@ -52,6 +52,9 @@ func runFakeTool(args []string) int {
 	if len(args) >= 6 && strings.Join(args[:5], " ") == "-P -s -m localmodels harness" {
 		return runFakeHarness(state, args[5:])
 	}
+	if len(args) >= 6 && strings.Join(args[:5], " ") == "-P -s -m localmodels speech" {
+		return runFakeSpeechTool(state, args[5:])
+	}
 	if len(args) < 6 || strings.Join(args[:5], " ") != "-P -s -m localmodels library" {
 		fmt.Fprintln(os.Stderr, "unexpected invocation", args)
 		return 3
@@ -244,6 +247,44 @@ func runFakeHarness(state string, args []string) int {
 		return 0
 	default:
 		return 3
+	}
+}
+
+func runFakeSpeechTool(state string, args []string) int {
+	if len(args) < 1 {
+		return 3
+	}
+	verb := args[0]
+	log, _ := os.OpenFile(filepath.Join(state, "calls.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	_, _ = fmt.Fprintf(log, "speech %s\n", strings.Join(args, " "))
+	_ = log.Close()
+
+	if rawCode, err := os.ReadFile(filepath.Join(state, "speech-exit")); err == nil {
+		var exit int
+		_, _ = fmt.Sscan(string(rawCode), &exit)
+		if rawErr, err := os.ReadFile(filepath.Join(state, "speech-stderr")); err == nil {
+			_, _ = os.Stderr.Write(rawErr)
+		}
+		return exit
+	}
+	if verb == "download" && len(args) >= 2 && args[1] == "bad-model" {
+		fmt.Println(`{"schema":"localmodels.speech-event/v1","event":"error","error":{"code":"MODEL_UNKNOWN","message":"unknown"}}`)
+		return 2
+	}
+	if data, err := os.ReadFile(filepath.Join(state, "speech-"+verb+".json")); err == nil {
+		_, _ = os.Stdout.Write(data)
+		return 0
+	}
+	switch verb {
+	case "download", "load":
+		fmt.Println(`{"schema":"localmodels.speech-event/v1","event":"progress","done_bytes":10,"total_bytes":100}`)
+		return 0
+	case "configure":
+		fmt.Println(`{"schema":"localmodels.speech-config/v1","config":{"language":"zh"}}`)
+		return 0
+	default:
+		fmt.Println(`{"schema":"localmodels.speech-event/v1","event":"done"}`)
+		return 0
 	}
 }
 

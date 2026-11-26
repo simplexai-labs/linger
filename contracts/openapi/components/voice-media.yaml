@@ -16,7 +16,21 @@ components:
       properties:
         voice_media_supported:
           type: boolean
-          description: Soniox ASR is configured, so Recording, Pocket notes dictation and Voice Mode dictation are available.
+          description: Speech transcription is ready (either local speech or cloud Soniox), so Recording, Pocket notes dictation and Voice Mode dictation are available.
+        active_speech_provider:
+          type: string
+          enum: [local, cloud, none]
+          x-enum-varnames:
+            - VoiceMediaActiveSpeechProviderLocal
+            - VoiceMediaActiveSpeechProviderCloud
+            - VoiceMediaActiveSpeechProviderNone
+          description: Effective speech transcription backend resolved from voice settings, online local speech availability, and cloud Soniox configuration.
+        local_speech_available:
+          type: boolean
+          description: At least one owned online Local Computer reports local speech support.
+        local_speech_ready:
+          type: boolean
+          description: The selected or default owned online Local Computer has a downloaded local speech model ready for transcription.
         active_room_id:
           $ref: "./common.yaml#/components/schemas/Id"
         live_supported:
@@ -32,6 +46,72 @@ components:
           $ref: "#/components/schemas/VoiceProviderKeyStatus"
         xai_key:
           $ref: "#/components/schemas/VoiceProviderKeyStatus"
+    VoiceSpeechProvider:
+      type: string
+      enum: [auto, local, cloud]
+      x-enum-varnames:
+        - VoiceSpeechProviderAuto
+        - VoiceSpeechProviderLocal
+        - VoiceSpeechProviderCloud
+    VoiceSettings:
+      type: object
+      additionalProperties: false
+      required:
+        - speech_provider
+        - language
+        - silence_timeout_seconds
+        - use_gpu
+        - keep_loaded_seconds
+      properties:
+        speech_provider:
+          $ref: "#/components/schemas/VoiceSpeechProvider"
+        local_computer_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+          nullable: true
+        local_model_id:
+          $ref: "./local-speech.yaml#/components/schemas/LocalSpeechModelId"
+          nullable: true
+        language:
+          $ref: "./local-speech.yaml#/components/schemas/LocalSpeechLanguage"
+        silence_timeout_seconds:
+          type: integer
+          minimum: 0
+          maximum: 300
+          description: Seconds of silence before dictation auto-stops (0 disables auto-stop). Enforced client-side by the Web dictation client across both local and cloud transcription.
+        use_gpu:
+          type: boolean
+        keep_loaded_seconds:
+          type: integer
+          minimum: -1
+          maximum: 86400
+          description: "-1 never unloads while sidecar runs; 0 unloads immediately; positive values set idle TTL in seconds (default 900)."
+        updated_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+    UpdateVoiceSettingsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        speech_provider:
+          $ref: "#/components/schemas/VoiceSpeechProvider"
+        local_computer_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+          nullable: true
+        local_model_id:
+          $ref: "./local-speech.yaml#/components/schemas/LocalSpeechModelId"
+          nullable: true
+        language:
+          $ref: "./local-speech.yaml#/components/schemas/LocalSpeechLanguage"
+        silence_timeout_seconds:
+          type: integer
+          minimum: 0
+          maximum: 300
+          description: Seconds of silence before dictation auto-stops (0 disables auto-stop). Enforced client-side by the Web dictation client across both local and cloud transcription.
+        use_gpu:
+          type: boolean
+        keep_loaded_seconds:
+          type: integer
+          minimum: -1
+          maximum: 86400
     VoiceProvider:
       type: string
       enum: [soniox, xai]

@@ -1591,6 +1591,24 @@ SELECT snapshot,host
 FROM local_computer_model_snapshots
 WHERE computer_id=sqlc.arg(computer_id)::text;
 
+-- name: UpsertLocalComputerSpeechSnapshot :exec
+INSERT INTO local_computer_speech_snapshots(computer_id,snapshot,observed_at,updated_at)
+VALUES(sqlc.arg(computer_id)::text,sqlc.arg(snapshot)::jsonb,
+       sqlc.arg(observed_at)::timestamptz,clock_timestamp())
+ON CONFLICT (computer_id) DO UPDATE
+SET snapshot=EXCLUDED.snapshot,
+    observed_at=EXCLUDED.observed_at,
+    updated_at=EXCLUDED.updated_at;
+
+-- name: DeleteLocalComputerSpeechSnapshot :exec
+DELETE FROM local_computer_speech_snapshots
+WHERE computer_id=sqlc.arg(computer_id)::text;
+
+-- name: GetLocalComputerSpeechSnapshot :one
+SELECT snapshot
+FROM local_computer_speech_snapshots
+WHERE computer_id=sqlc.arg(computer_id)::text;
+
 -- name: ListLocalModelUsersOnComputer :many
 -- Active Agents on runtime pi placed on a Computer, limited to those the
 -- viewer sees in the Tenant Agent directory (ListTenantAgentsForAccount).

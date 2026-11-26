@@ -49,6 +49,12 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/CapabilityLocalModelsExecute",
         },
         {
+          $ref: "#/$defs/CapabilityLocalSpeechActionExecute",
+        },
+        {
+          $ref: "#/$defs/CapabilityLocalAsrTranscribeExecute",
+        },
+        {
           $ref: "#/$defs/CapabilityModelSource",
         },
         {
@@ -98,6 +104,9 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/RunnerLocalModels",
         },
         {
+          $ref: "#/$defs/RunnerLocalSpeech",
+        },
+        {
           $ref: "#/$defs/RuntimeRegistrationObserved",
         },
         {
@@ -141,6 +150,18 @@ export const runnerGatewayEnvelopeSchema = {
         },
         {
           $ref: "#/$defs/CapabilityLocalModelsRefused",
+        },
+        {
+          $ref: "#/$defs/CapabilityLocalSpeechActionAccepted",
+        },
+        {
+          $ref: "#/$defs/CapabilityLocalSpeechActionRefused",
+        },
+        {
+          $ref: "#/$defs/CapabilityLocalAsrTranscribeSucceeded",
+        },
+        {
+          $ref: "#/$defs/CapabilityLocalAsrTranscribeFailed",
         },
         {
           $ref: "#/$defs/CapabilityModelSourceSucceeded",
@@ -219,6 +240,7 @@ export const runnerGatewayEnvelopeSchema = {
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_voice_asr",
       ],
     },
     ReasoningEffort: {
@@ -3116,6 +3138,683 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/LocalModelsSnapshot",
         },
       },
+    },
+    LocalSpeechModelId: {
+      type: "string",
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$",
+    },
+    LocalSpeechLanguage: {
+      type: "string",
+      pattern: "^(auto|[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*)$",
+      maxLength: 32,
+    },
+    LocalSpeechEngine: {
+      type: "string",
+      enum: ["sherpa-onnx", "whisper.cpp"],
+    },
+    LocalSpeechQualityRating: {
+      type: "string",
+      enum: ["fast-cjk", "high-multilingual"],
+    },
+    LocalSpeechModelState: {
+      type: "string",
+      enum: ["absent", "downloading", "idle", "loading", "loaded", "failed"],
+    },
+    LocalSpeechRuntimeState: {
+      type: "string",
+      enum: ["stopped", "standby", "loading", "loaded", "error"],
+    },
+    LocalSpeechRequestedDevice: {
+      type: "string",
+      enum: ["gpu", "cpu"],
+    },
+    LocalSpeechEffectiveDevice: {
+      type: "string",
+      enum: ["cuda", "metal", "vulkan", "directml", "cpu"],
+    },
+    LocalSpeechFallbackReason: {
+      type: "string",
+      enum: [
+        "insufficient_vram",
+        "insufficient_unified_memory",
+        "memory_pressure_warn",
+        "memory_pressure_critical",
+        "driver_update_required",
+        "vulkan_unavailable",
+        "gpu_engine_unavailable",
+        "gpu_unsupported_platform",
+        "cpu_optimal_for_int8",
+        "gpu_init_failed",
+        "runtime_oom_fallback",
+        "yielded_to_llm",
+        "no_supported_gpu",
+      ],
+    },
+    LocalSpeechDownloadProgress: {
+      type: "object",
+      additionalProperties: false,
+      required: ["step", "done_bytes", "total_bytes", "bytes_per_second"],
+      properties: {
+        step: {
+          enum: ["download", "verify"],
+        },
+        done_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        total_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        bytes_per_second: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        source: {
+          type: "string",
+          maxLength: 200,
+        },
+        connections: {
+          type: "integer",
+          minimum: 0,
+          maximum: 64,
+        },
+      },
+    },
+    LocalSpeechError: {
+      type: "object",
+      additionalProperties: false,
+      required: ["code", "message"],
+      properties: {
+        code: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+        },
+        message: {
+          type: "string",
+          maxLength: 4000,
+        },
+      },
+    },
+    LocalSpeechConfig: {
+      type: "object",
+      additionalProperties: false,
+      required: ["use_gpu", "keep_loaded_seconds", "language"],
+      properties: {
+        model_id: {
+          $ref: "#/$defs/LocalSpeechModelId",
+        },
+        use_gpu: {
+          type: "boolean",
+        },
+        keep_loaded_seconds: {
+          type: "integer",
+          minimum: -1,
+          maximum: 86400,
+        },
+        language: {
+          $ref: "#/$defs/LocalSpeechLanguage",
+        },
+      },
+    },
+    LocalSpeechModel: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "id",
+        "name",
+        "engine",
+        "languages",
+        "language_count",
+        "quality_rating",
+        "license",
+        "license_url",
+        "disk_size_bytes",
+        "vram_estimate_bytes",
+        "ram_estimate_bytes",
+        "gpu_supported",
+        "state",
+        "active",
+      ],
+      properties: {
+        id: {
+          $ref: "#/$defs/LocalSpeechModelId",
+        },
+        name: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+        },
+        engine: {
+          $ref: "#/$defs/LocalSpeechEngine",
+        },
+        languages: {
+          type: "array",
+          maxItems: 256,
+          items: {
+            type: "string",
+            minLength: 1,
+            maxLength: 32,
+          },
+        },
+        language_count: {
+          type: "integer",
+          minimum: 0,
+          maximum: 1000,
+        },
+        quality_rating: {
+          $ref: "#/$defs/LocalSpeechQualityRating",
+        },
+        license: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+        },
+        license_url: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2048,
+        },
+        commercial_notice: {
+          type: "string",
+          maxLength: 1000,
+        },
+        disk_size_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        vram_estimate_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        ram_estimate_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        gpu_supported: {
+          type: "boolean",
+        },
+        state: {
+          $ref: "#/$defs/LocalSpeechModelState",
+        },
+        active: {
+          type: "boolean",
+        },
+        download: {
+          $ref: "#/$defs/LocalSpeechDownloadProgress",
+        },
+        error: {
+          $ref: "#/$defs/LocalSpeechError",
+        },
+      },
+    },
+    LocalSpeechRuntime: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "running",
+        "state",
+        "requested_device",
+        "vram_used_bytes",
+        "ram_used_bytes",
+        "keep_loaded_seconds",
+        "active_sessions",
+      ],
+      properties: {
+        running: {
+          type: "boolean",
+        },
+        state: {
+          $ref: "#/$defs/LocalSpeechRuntimeState",
+        },
+        active_model: {
+          $ref: "#/$defs/LocalSpeechModelId",
+        },
+        engine: {
+          $ref: "#/$defs/LocalSpeechEngine",
+        },
+        requested_device: {
+          $ref: "#/$defs/LocalSpeechRequestedDevice",
+        },
+        effective_device: {
+          $ref: "#/$defs/LocalSpeechEffectiveDevice",
+        },
+        fallback_reason: {
+          $ref: "#/$defs/LocalSpeechFallbackReason",
+        },
+        fallback_detail: {
+          type: "string",
+          maxLength: 1000,
+        },
+        vram_used_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        ram_used_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        keep_loaded_seconds: {
+          type: "integer",
+          minimum: -1,
+          maximum: 86400,
+        },
+        idle_remaining_seconds: {
+          type: "integer",
+          minimum: 0,
+          maximum: 86400,
+        },
+        active_sessions: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+      },
+    },
+    LocalSpeechUnavailableReason: {
+      type: "object",
+      additionalProperties: false,
+      required: ["code"],
+      properties: {
+        code: {
+          enum: ["TOOL_NOT_INSTALLED", "SPEECH_UNSUPPORTED", "TOOL_FAILED"],
+        },
+        detail: {
+          type: "string",
+          maxLength: 4000,
+        },
+      },
+    },
+    LocalSpeechSnapshot: {
+      type: "object",
+      additionalProperties: false,
+      required: ["available", "observed_at", "models"],
+      properties: {
+        available: {
+          type: "boolean",
+        },
+        reason: {
+          $ref: "#/$defs/LocalSpeechUnavailableReason",
+        },
+        observed_at: {
+          $ref: "#/$defs/Timestamp",
+        },
+        tool_version: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+        },
+        config: {
+          $ref: "#/$defs/LocalSpeechConfig",
+        },
+        runtime: {
+          $ref: "#/$defs/LocalSpeechRuntime",
+        },
+        models: {
+          type: "array",
+          maxItems: 64,
+          items: {
+            $ref: "#/$defs/LocalSpeechModel",
+          },
+        },
+      },
+    },
+    LocalSpeechActionRefusalCode: {
+      type: "string",
+      enum: [
+        "MODEL_UNKNOWN",
+        "INVALID_STATE",
+        "JOB_RUNNING",
+        "DISK_INSUFFICIENT",
+        "MEMORY_INSUFFICIENT",
+        "PLATFORM_UNSUPPORTED",
+        "DOWNLOAD_FAILED",
+        "CHECKSUM_MISMATCH",
+        "NETWORK_UNAVAILABLE",
+        "ENGINE_START_FAILED",
+        "MODEL_FILES_MISSING",
+        "CANCELLED",
+        "SPEECH_UNSUPPORTED",
+        "TOOL_NOT_INSTALLED",
+        "TOOL_FAILED",
+        "UNKNOWN_ERROR",
+      ],
+    },
+    LocalSpeechActionRefusal: {
+      type: "object",
+      additionalProperties: false,
+      required: ["code"],
+      properties: {
+        code: {
+          $ref: "#/$defs/LocalSpeechActionRefusalCode",
+        },
+        detail: {
+          type: "string",
+          maxLength: 4000,
+        },
+      },
+    },
+    LocalAsrTranscribeSegment: {
+      type: "object",
+      additionalProperties: false,
+      required: ["start", "end", "text"],
+      properties: {
+        start: {
+          type: "number",
+          minimum: 0,
+        },
+        end: {
+          type: "number",
+          minimum: 0,
+        },
+        text: {
+          type: "string",
+          maxLength: 200000,
+        },
+      },
+    },
+    RunnerLocalSpeech: {
+      description:
+        "The Computer's local speech status. Sent after a runner.welcome whose service_features names local_voice_asr, after every speech change, and at most every 2 seconds while a download or load runs.",
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "type",
+        "protocol_version",
+        "runner_id",
+        "sent_at",
+        "revision",
+        "local_speech",
+      ],
+      properties: {
+        type: {
+          const: "runner.local_speech",
+        },
+        protocol_version: {
+          $ref: "#/$defs/ProtocolVersion",
+        },
+        runner_id: {
+          $ref: "#/$defs/Id",
+        },
+        sent_at: {
+          $ref: "#/$defs/Timestamp",
+        },
+        revision: {
+          $ref: "#/$defs/PositiveInteger",
+        },
+        local_speech: {
+          $ref: "#/$defs/LocalSpeechSnapshot",
+        },
+      },
+    },
+    CapabilityLocalSpeechActionExecute: {
+      description:
+        "Ask the Computer to act on its localmodels speech library or runtime configuration.",
+      type: "object",
+      unevaluatedProperties: false,
+      allOf: [
+        {
+          $ref: "#/$defs/LocalSkillCommandIdentity",
+        },
+        {
+          type: "object",
+          required: ["type", "kind", "action"],
+          properties: {
+            type: {
+              const: "execute",
+            },
+            kind: {
+              const: "local_speech_action",
+            },
+            action: {
+              enum: [
+                "download",
+                "cancel",
+                "remove",
+                "load",
+                "unload",
+                "configure",
+                "refresh",
+              ],
+            },
+            model_id: {
+              $ref: "#/$defs/LocalSpeechModelId",
+            },
+            use_gpu: {
+              type: "boolean",
+            },
+            keep_loaded_seconds: {
+              type: "integer",
+              minimum: -1,
+              maximum: 86400,
+            },
+            language: {
+              $ref: "#/$defs/LocalSpeechLanguage",
+            },
+            include_gpu_engine: {
+              type: "boolean",
+            },
+          },
+        },
+      ],
+    },
+    CapabilityLocalSpeechActionAccepted: {
+      description:
+        "The Computer started the local speech action or queued a refresh.",
+      type: "object",
+      unevaluatedProperties: false,
+      allOf: [
+        {
+          $ref: "#/$defs/LocalSkillCommandIdentity",
+        },
+        {
+          type: "object",
+          required: ["type", "kind", "action", "outcome"],
+          properties: {
+            type: {
+              const: "executed",
+            },
+            kind: {
+              const: "local_speech_action",
+            },
+            action: {
+              enum: [
+                "download",
+                "cancel",
+                "remove",
+                "load",
+                "unload",
+                "configure",
+                "refresh",
+              ],
+            },
+            model_id: {
+              $ref: "#/$defs/LocalSpeechModelId",
+            },
+            outcome: {
+              const: "accepted",
+            },
+          },
+        },
+      ],
+    },
+    CapabilityLocalSpeechActionRefused: {
+      description: "The Computer refused the local speech action.",
+      type: "object",
+      unevaluatedProperties: false,
+      allOf: [
+        {
+          $ref: "#/$defs/LocalSkillCommandIdentity",
+        },
+        {
+          type: "object",
+          required: ["type", "kind", "action", "refusal", "outcome"],
+          properties: {
+            type: {
+              const: "executed",
+            },
+            kind: {
+              const: "local_speech_action",
+            },
+            action: {
+              enum: [
+                "download",
+                "cancel",
+                "remove",
+                "load",
+                "unload",
+                "configure",
+                "refresh",
+              ],
+            },
+            model_id: {
+              $ref: "#/$defs/LocalSpeechModelId",
+            },
+            refusal: {
+              $ref: "#/$defs/LocalSpeechActionRefusal",
+            },
+            outcome: {
+              const: "refused",
+            },
+          },
+        },
+      ],
+    },
+    CapabilityLocalAsrTranscribeExecute: {
+      description:
+        "Relay one 16 kHz mono PCM WAV segment to the Computer's localmodels speech sidecar for transcription.",
+      type: "object",
+      unevaluatedProperties: false,
+      allOf: [
+        {
+          $ref: "#/$defs/LocalSkillCommandIdentity",
+        },
+        {
+          type: "object",
+          required: ["type", "kind", "audio_wav_base64"],
+          properties: {
+            type: {
+              const: "execute",
+            },
+            kind: {
+              const: "local_asr_transcribe",
+            },
+            model_id: {
+              $ref: "#/$defs/LocalSpeechModelId",
+            },
+            language: {
+              $ref: "#/$defs/LocalSpeechLanguage",
+            },
+            use_gpu: {
+              type: "boolean",
+            },
+            keep_loaded_seconds: {
+              type: "integer",
+              minimum: -1,
+              maximum: 86400,
+            },
+            audio_wav_base64: {
+              type: "string",
+              minLength: 1,
+              maxLength: 3145728,
+            },
+          },
+        },
+      ],
+    },
+    CapabilityLocalAsrTranscribeSucceeded: {
+      description:
+        "Transcription result returned from the Computer's local speech sidecar.",
+      type: "object",
+      unevaluatedProperties: false,
+      allOf: [
+        {
+          $ref: "#/$defs/LocalSkillCommandIdentity",
+        },
+        {
+          type: "object",
+          required: [
+            "type",
+            "kind",
+            "outcome",
+            "text",
+            "model",
+            "requested_device",
+          ],
+          properties: {
+            type: {
+              const: "executed",
+            },
+            kind: {
+              const: "local_asr_transcribe",
+            },
+            outcome: {
+              const: "succeeded",
+            },
+            text: {
+              type: "string",
+              maxLength: 200000,
+            },
+            language: {
+              type: "string",
+              maxLength: 32,
+            },
+            duration: {
+              type: "number",
+              minimum: 0,
+            },
+            model: {
+              type: "string",
+              minLength: 1,
+              maxLength: 160,
+            },
+            requested_device: {
+              $ref: "#/$defs/LocalSpeechRequestedDevice",
+            },
+            effective_device: {
+              $ref: "#/$defs/LocalSpeechEffectiveDevice",
+            },
+            fallback_reason: {
+              $ref: "#/$defs/LocalSpeechFallbackReason",
+            },
+            segments: {
+              type: "array",
+              maxItems: 1000,
+              items: {
+                $ref: "#/$defs/LocalAsrTranscribeSegment",
+              },
+            },
+          },
+        },
+      ],
+    },
+    CapabilityLocalAsrTranscribeFailed: {
+      description: "Local ASR transcription failed on the Computer.",
+      type: "object",
+      unevaluatedProperties: false,
+      allOf: [
+        {
+          $ref: "#/$defs/LocalSkillCommandIdentity",
+        },
+        {
+          type: "object",
+          required: ["type", "kind", "outcome", "error_code"],
+          properties: {
+            type: {
+              const: "executed",
+            },
+            kind: {
+              const: "local_asr_transcribe",
+            },
+            outcome: {
+              const: "failed",
+            },
+            error_code: {
+              type: "string",
+              minLength: 1,
+              maxLength: 128,
+            },
+            error_message: {
+              type: "string",
+              maxLength: 4000,
+            },
+            retryable: {
+              type: "boolean",
+            },
+          },
+        },
+      ],
     },
     RunnerHello: {
       type: "object",

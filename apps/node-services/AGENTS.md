@@ -8,7 +8,7 @@
   (`src/http-host.ts`, `NODE_SERVICES_HTTP_ADDRESS` as `host:port`,
   default `127.0.0.1:4319`; `DOCUMENT_RUNTIME_HTTP_ADDRESS`, default
   `127.0.0.1:4321`, for the Document Runtime). Each role mounts its own path prefixes: Agent
-  `/v1/` (plus the `/v1/runner-gateway` WebSocket upgrade),
+  `/v1/` and `/internal/v1/voice/local-asr/transcribe` (plus the `/v1/runner-gateway` WebSocket upgrade),
   Memory `/internal/v1/`, LLM Wiki `/v0/document-normalizations`
   and `/internal/v1/wiki-refreshes/`; the longest prefix wins. Prefixes must
   not collide. The host alone answers `/healthz` (process alive), `/startupz`
@@ -21,7 +21,7 @@
   a producer may reuse its backing buffer before delivering the next chunk.
 - The `document` role keeps its own port (4321 by default) on its own worker
   thread (`src/document/main.ts`) because it installs jsdom globals and
-  replaces the global `Request`/`Response`. The `voice` role supervises separate ASR, recorder and Live child processes, each on a health port the system offers when it starts (`VOICE_WORKER_PORT`); it does not run audio jobs on the main thread. Voice workers follow TeamHub's effective provider keys (`GET /internal/v1/voice/provider-keys` with the `voice-runtime` credential): a Soniox key runs ASR and recorder, an xAI key runs Live. The role reconciles at startup, on TeamHub's `POST /v1/voice/workers:reconcile` (`node-services-internal` bearer), and every 60 seconds, so workers start, drain, or restart with a new key without restarting node-services. The reconcile route answers `{ready}` only after every wanted worker's health port reports it registered with LiveKit, or after 20 seconds, so TeamHub answers a key save once a voice session can be dispatched. Keys reach a worker only through its environment; a failed key fetch leaves the running workers unchanged. Other roles run on the main thread
+  replaces the global `Request`/`Response`. The `voice` role supervises separate ASR, recorder and Live child processes, each on a health port the system offers when it starts (`VOICE_WORKER_PORT`); it does not run audio jobs on the main thread. Voice workers follow TeamHub's effective provider keys (`GET /internal/v1/voice/provider-keys` with the `voice-runtime` credential): either a Soniox key or `local_asr_enabled` runs ASR and recorder (injecting `NODE_SERVICES_INTERNAL_URL`, `NODE_SERVICES_INTERNAL_TOKEN`, and optional `VOICE_LOCAL_ASR_URL` into the ASR child), while an xAI key runs Live independently. The role reconciles at startup, on TeamHub's `POST /v1/voice/workers:reconcile` (`node-services-internal` bearer), and every 60 seconds, so workers start, drain, or restart with a new key without restarting node-services. The reconcile route answers `{ready}` only after every wanted worker's health port reports it registered with LiveKit, or after 20 seconds, so TeamHub answers a key save once a voice session can be dispatched. Keys reach a worker only through its environment; a failed key fetch leaves the running workers unchanged. Other roles run on the main thread
   and must not install process globals.
 - `NODE_SERVICES_ROLES` selects roles as a comma-separated list. An unset or
   empty value starts every role; an unknown role fails startup. Selected roles

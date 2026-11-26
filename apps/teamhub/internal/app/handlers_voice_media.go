@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -49,27 +50,59 @@ func (a *App) createVoiceSession(c *gin.Context) {
 		a.writeError(c, http.StatusBadRequest, "INVALID_VOICE_PURPOSE", "Voice session purpose is invalid")
 		return
 	}
-	// Live runs on xAI alone; every other purpose transcribes with Soniox.
-	// The key is read now, so one saved a moment ago already counts.
-	provider := voicekey.Soniox
+	roomID := c.Param("roomId")
+	var speechConfig json.RawMessage
 	if purpose == voicemedia.PurposeChatLive {
-		provider = voicekey.XAI
+		// Live runs on xAI alone; the key is read now so a recent save counts.
+		key, err := a.voiceKeys.Effective(c.Request.Context(), voicekey.XAI)
+		if err == nil && key == "" {
+			err = voicemedia.ErrProviderUnavailable
+		}
+		if a.writeVoiceMediaError(c, "resolve voice provider key", err) {
+			return
+		}
+	} else {
+		// Dictation and recording use either local speech or cloud Soniox
+		// according to the caller's voice settings and owned online Computers.
+		sonioxKey, err := a.voiceKeys.Effective(c.Request.Context(), voicekey.Soniox)
+		if a.writeVoiceMediaError(c, "resolve Soniox key", err) {
+			return
+		}
+		accountID := currentPrincipal(c).Session.AccountID
+		speech, err := a.resolveRoomSpeechState(c.Request.Context(), accountID, roomID, sonioxKey != "")
+		if a.writeVoiceMediaError(c, "resolve voice speech state", err) {
+			return
+		}
+		if speech.ActiveSpeechProvider == "none" || speech.Dispatch == nil {
+			a.writeVoiceMediaError(c, "resolve voice speech provider", voicemedia.ErrProviderUnavailable)
+			return
+		}
+		encoded, err := json.Marshal(speech.Dispatch)
+		if a.writeVoiceMediaError(c, "encode voice speech dispatch config", err) {
+			return
+		}
+		speechConfig = encoded
 	}
-	key, err := a.voiceKeys.Effective(c.Request.Context(), provider)
-	if err == nil && key == "" {
-		err = voicemedia.ErrProviderUnavailable
-	}
-	if a.writeVoiceMediaError(c, "resolve voice provider key", err) {
-		return
-	}
+	principal := currentPrincipal(c)
 	session, err := a.voiceMedia.CreateVoiceSession(c.Request.Context(), voicemedia.CreateVoiceSessionRequest{
-		AccountID: currentPrincipal(c).Session.AccountID, AuthSessionID: currentPrincipal(c).Session.ID,
-		RoomID: c.Param("roomId"), Purpose: purpose,
+		AccountID: principal.Session.AccountID, AuthSessionID: principal.Session.ID,
+		RoomID: roomID, Purpose: purpose, SpeechConfig: speechConfig,
 	})
 	if a.writeVoiceMediaError(c, "create VoiceSession", err) {
 		return
 	}
 	c.JSON(http.StatusCreated, voice.VoiceSessionModel(session))
+}
+
+func (a *App) resolveRoomSpeechState(ctx context.Context, accountID, roomID string, sonioxConfigured bool) (voice.SpeechResolution, error) {
+	if a.resolveRoomSpeech != nil {
+		return a.resolveRoomSpeech(ctx, accountID, roomID, sonioxConfigured)
+	}
+	tenantID, actorID, err := a.voice.RoomAccountContext(ctx, accountID, roomID)
+	if err != nil {
+		return voice.SpeechResolution{}, err
+	}
+	return a.voice.ResolveSpeechState(ctx, accountID, tenantID, actorID, sonioxConfigured, a.voiceLocalASRURL, time.Now())
 }
 
 func (a *App) commitVoiceDictationTurn(c *gin.Context) {

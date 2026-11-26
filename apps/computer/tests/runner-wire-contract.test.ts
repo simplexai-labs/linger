@@ -156,6 +156,23 @@ const agentFrames = [
   },
   {
     type: "execute",
+    kind: "local_speech_action",
+    ...localCapability,
+    action: "download",
+    model_id: "sensevoice-small",
+  },
+  {
+    type: "execute",
+    kind: "local_asr_transcribe",
+    ...localCapability,
+    model_id: "sensevoice-small",
+    language: "auto",
+    use_gpu: true,
+    keep_loaded_seconds: 900,
+    audio_wav_base64: "UklGRg==",
+  },
+  {
+    type: "execute",
     kind: "model_source",
     ...localCapability,
     action: "test",

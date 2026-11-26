@@ -23,6 +23,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/document"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/permissionreview"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/retention"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/voice"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicekey"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicemedia"
 )
@@ -174,7 +175,7 @@ func TestVoiceRuntimeCallbacksNeedVoiceMedia(t *testing.T) {
 	}
 }
 
-// Live runs on xAI alone; dictation and Recording transcribe with Soniox.
+// Live runs on xAI alone; dictation and Recording transcribe with local speech or Soniox.
 func TestVoiceSessionPurposeNeedsItsProvider(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
@@ -190,10 +191,23 @@ func TestVoiceSessionPurposeNeedsItsProvider(t *testing.T) {
 			if tc.transcription {
 				environment[voicekey.Soniox] = "soniox-key"
 			}
-			a := &App{voiceMedia: voicemedia.New(nil, nil, nil), voiceKeys: voicekey.New(nil, nil, voicekey.Config{Enabled: true, Environment: environment}, nil)}
+			a := &App{
+				voiceMedia: voicemedia.New(nil, nil, nil),
+				voiceKeys:  voicekey.New(nil, nil, voicekey.Config{Enabled: true, Environment: environment}, nil),
+				resolveRoomSpeech: func(_ context.Context, _, _ string, sonioxConfigured bool) (voice.SpeechResolution, error) {
+					if !sonioxConfigured {
+						return voice.SpeechResolution{ActiveSpeechProvider: "none"}, nil
+					}
+					return voice.SpeechResolution{
+						ActiveSpeechProvider: "cloud",
+						Dispatch:             &voicemedia.SpeechDispatchConfig{Provider: "cloud", Language: "auto"},
+					}, nil
+				},
+			}
 			engine := gin.New()
 			engine.POST("/v0/rooms/:roomId/voice-sessions", func(c *gin.Context) {
 				c.Set("request_id", "request")
+				c.Set(principalKey, principal{Session: spaceTestSession()})
 				a.createVoiceSession(c)
 			})
 			request := httptest.NewRequest(http.MethodPost, "/v0/rooms/room/voice-sessions", strings.NewReader(`{"purpose":"`+tc.purpose+`"}`))

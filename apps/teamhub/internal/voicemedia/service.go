@@ -104,6 +104,7 @@ func (s *Service) CreateVoiceSession(ctx context.Context, input CreateVoiceSessi
 			ProviderRoomName: "voice-" + id, ParticipantIdentity: "publisher-" + id,
 			Purpose:       input.Purpose,
 			AuthSessionID: pgtype.Text{String: input.AuthSessionID, Valid: true},
+			SpeechConfig:  input.SpeechConfig,
 		})
 		if createErr != nil {
 			return createErr
@@ -744,6 +745,7 @@ func providerSessionModel(record store.VoiceSession) providerSession {
 		VoiceSessionID: record.ID, RoomName: record.ProviderRoomName,
 		Purpose:             record.Purpose,
 		ParticipantIdentity: record.ParticipantIdentity, CreatedAt: record.CreatedAt.Time,
+		SpeechConfig: record.SpeechConfig,
 	}
 	if record.LastInputStartedMs.Valid {
 		model.LastInputStartedAt = record.CreatedAt.Time.Add(time.Duration(record.LastInputStartedMs.Int64) * time.Millisecond)
