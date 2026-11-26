@@ -2181,3 +2181,4 @@ test("readPublishedTool returns undefined when the staged path is not a director
   await expect(
     readPublishedTool(path.join(setupFile, "Contents", "distribution.json")),
   ).resolves.toBeUndefined();
+});
