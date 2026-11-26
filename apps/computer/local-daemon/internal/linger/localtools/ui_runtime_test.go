@@ -374,6 +374,16 @@ func TestUnifiedUIImageHandleExpiresAfterScriptFailure(t *testing.T) {
 	if json.Unmarshal([]byte(envelope.Content[1].Text), &reply.Structured) != nil || len(reply.Structured.Value) == 0 {
 		t.Fatal(string(first))
 	}
+	// A whole observation delivers its screenshot, and a note beside it does
+	// not take the screenshot's place.
+	for _, script := range []string{
+		`return await ui.browser.take_screenshot({});`,
+		`console.log('clicked'); return await ui.browser.take_screenshot({});`,
+	} {
+		if got := f.execute(t, script); !strings.Contains(string(got), `"data":"aW1hZ2U="`) || strings.Contains(string(got), `"structuredContent"`) {
+			t.Fatalf("%s did not deliver the returned screenshot: %s", script, got)
+		}
+	}
 	if text := f.execute(t, `return 1`); !strings.Contains(string(text), `"structuredContent":{`) {
 		t.Fatalf("a result without images lost structuredContent: %s", text)
 	}

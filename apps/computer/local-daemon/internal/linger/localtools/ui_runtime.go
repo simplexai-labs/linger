@@ -198,26 +198,30 @@ func (u *uiExecution) call(ctx context.Context, name string, args json.RawMessag
 	content := []json.RawMessage{}
 	expandedBytes := 0
 	hasImage := false
-	outputs := result.Output
-	if len(outputs) == 0 {
-		outputs = u.returnedImages(result.Value)
+	expand := func(outputs []json.RawMessage) bool {
+		for _, output := range outputs {
+			var outputHasImage bool
+			parts, expandErr := u.expandContent(output, 0, &outputHasImage)
+			for _, part := range parts {
+				expandedBytes += len(part)
+			}
+			if expandedBytes > maxMCPBytes/2 {
+				expandErr = errors.New("UI expanded output exceeds its byte limit")
+			}
+			if expandErr != nil {
+				err = errors.Join(err, expandErr)
+				summary["error"] = err.Error()
+				return false
+			}
+			content = append(content, parts...)
+			hasImage = hasImage || outputHasImage
+		}
+		return true
 	}
-	for _, output := range outputs {
-		var outputHasImage bool
-		parts, expandErr := u.expandContent(output, 0, &outputHasImage)
-		for _, part := range parts {
-			expandedBytes += len(part)
-		}
-		if expandedBytes > maxMCPBytes/2 {
-			expandErr = errors.New("UI expanded output exceeds its byte limit")
-		}
-		if expandErr != nil {
-			err = errors.Join(err, expandErr)
-			summary["error"] = err.Error()
-			break
-		}
-		content = append(content, parts...)
-		hasImage = hasImage || outputHasImage
+	// Notes and emitted text do not stand in for a returned screenshot: when
+	// the script selected no image, the ones in its returned observation go.
+	if expand(result.Output) && !hasImage {
+		expand(u.returnedImages(result.Value))
 	}
 	// A returned string, usually page text, reads poorly once escaped inside
 	// the summary JSON, so the model gets it verbatim and the summary omits it.
