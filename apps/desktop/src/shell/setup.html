@@ -1544,6 +1544,19 @@
         top: 54px;
         height: 330px;
       }
+      /* A location problem takes the title orb's room and the model's
+         one-line pitch, so the step still fits above the fixed buttons. */
+      section[data-stage="settings"]:has(#location-row:not([hidden]))
+        :is(.wz-hd .slot, .m-why[data-tone=""]) {
+        display: none;
+      }
+      section[data-stage="settings"]:has(#location-row:not([hidden])) .wz-body {
+        top: 54px;
+        height: 330px;
+      }
+      section[data-stage="settings"]:has(#location-row:not([hidden])) .mcard {
+        height: 232px;
+      }
       .wz-act {
         position: absolute;
         top: 404px;
@@ -2440,6 +2453,13 @@
       /* The location's warning reads whole; its path stays one line. */
       #location-sub {
         white-space: normal;
+      }
+      #location-row {
+        margin-top: 12px;
+      }
+      #location-row .rt {
+        min-height: 0;
+        padding: 12px 20px;
       }
       .runtime-act {
         display: flex;
