@@ -22,6 +22,9 @@ export const routinesMessages = defineMessages("routines", {
   newRoutine: "New routine",
   editRoutine: "Edit routine",
   deleteRoutine: "Delete routine",
+  deleteRoutineConfirmTitle: "Delete routine?",
+  deleteRoutineConfirmDescription:
+    "“{name}” will stop running and cannot be undone.",
   pauseRoutine: "Pause routine",
   enableRoutine: "Enable routine",
   watchingApp: "Watching {app}",

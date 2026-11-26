@@ -22,12 +22,17 @@ export function isGlobalSearchShortcut(event: KeyboardEvent) {
   return event.key.toLowerCase() === "k";
 }
 
-export function useGlobalSearchShortcut(onOpen: () => void) {
+export function useGlobalSearchShortcut(
+  onOpen: () => void,
+  options?: { enabled?: boolean },
+) {
+  const enabled = options?.enabled ?? true;
   const open = useEffectEvent(onOpen);
   // A layout effect arms the shortcut in the same commit that paints the
   // shell; a passive effect can run later, dropping a keystroke pressed as
   // soon as the shell appears.
   useLayoutEffect(() => {
+    if (!enabled) return;
     function onKeyDown(event: KeyboardEvent) {
       if (!isGlobalSearchShortcut(event)) return;
       // Capture phase plus stopPropagation: editors that bind the same key
@@ -38,5 +43,5 @@ export function useGlobalSearchShortcut(onOpen: () => void) {
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, []);
+  }, [enabled]);
 }

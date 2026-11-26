@@ -245,6 +245,62 @@ describe("ActionMenu", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("navigates submenu items with ArrowDown, ArrowUp, Home, and End without leaking focus to the parent menu", async () => {
+    render(
+      <ActionMenu
+        items={[
+          {
+            children: [
+              { label: "Markdown" },
+              { disabled: true, label: "PDF" },
+              { label: "HTML" },
+              { label: "Plain text" },
+            ],
+            label: "New File",
+          },
+          { label: "Upload" },
+        ]}
+        label="Create"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    const menu = await screen.findByRole("menu", { name: "Create" });
+    const newFile = within(menu).getByRole("menuitem", { name: "New File" });
+    const upload = within(menu).getByRole("menuitem", { name: "Upload" });
+
+    fireEvent.keyDown(newFile, { key: "ArrowRight" });
+    const submenu = await screen.findByRole("menu", { name: "New File" });
+    const markdown = within(submenu).getByRole("menuitem", {
+      name: "Markdown",
+    });
+    const html = within(submenu).getByRole("menuitem", { name: "HTML" });
+    const plain = within(submenu).getByRole("menuitem", {
+      name: "Plain text",
+    });
+
+    await vi.waitFor(() => expect(markdown).toHaveFocus());
+
+    fireEvent.keyDown(markdown, { key: "ArrowDown" });
+    expect(html).toHaveFocus();
+    expect(upload).not.toHaveFocus();
+
+    fireEvent.keyDown(html, { key: "ArrowDown" });
+    expect(plain).toHaveFocus();
+
+    fireEvent.keyDown(plain, { key: "ArrowDown" });
+    expect(markdown).toHaveFocus();
+
+    fireEvent.keyDown(markdown, { key: "ArrowUp" });
+    expect(plain).toHaveFocus();
+
+    fireEvent.keyDown(plain, { key: "Home" });
+    expect(markdown).toHaveFocus();
+
+    fireEvent.keyDown(markdown, { key: "End" });
+    expect(plain).toHaveFocus();
+  });
+
   it("opens a nested menu inward when the trigger is near the right edge", async () => {
     const originalInnerWidth = window.innerWidth;
     const bounds = vi

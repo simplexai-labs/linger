@@ -40,16 +40,10 @@ export const roomSettingsMessages = defineMessages("roomSettings", {
   everyoneAdded: "Every Tenant Actor is already in this Room.",
 
   addRoomMembers: "Add Room members",
-  goBack: "Go back",
   skipForNow: "Skip for now",
   addMembers: "Add members",
   addFailed:
     "Could not add {names}. Retry these members; successful additions are already saved.",
-  skipAdding: "Skip adding members",
-  // <avatars> is replaced by the Room's member avatars; its text is their
-  // accessible name and is not shown.
-  skipPrompt:
-    "<strong>Skip adding members?</strong> You can add people and agents later using the member avatar list <avatars>Room member avatar list</avatars> at the top right of this room.",
 
   chooseExisting: "Choose existing members",
   roomOwner: "Room owner",

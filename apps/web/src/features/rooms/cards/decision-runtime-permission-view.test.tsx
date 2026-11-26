@@ -77,7 +77,7 @@ function renderCard(
 }
 
 describe("Runtime permission decisions", () => {
-  it("heads the box with the title and shows the action as one row that opens to the full call and diff", () => {
+  it("heads the box with the title and expands the full call and diff by default while pending", () => {
     renderCard(permissionCard());
 
     const box = screen.getByRole("region", { name: "Permission request" });
@@ -90,14 +90,10 @@ describe("Runtime permission decisions", () => {
     expect(document.querySelector(".card-prompt")).toBeNull();
     // The title reads once, as the heading; the row names the tool.
     expect(screen.getAllByText("Edit deploy/prod/values.yaml")).toHaveLength(1);
-    const row = screen.getByRole("button", { expanded: false });
+    const row = screen.getByRole("button", { expanded: true });
     expect(row).toHaveTextContent("apply_patch");
     expect(row).not.toHaveTextContent("Edit deploy/prod/values.yaml");
     expect(row).toHaveTextContent("+1 −1");
-    expect(screen.queryByText(/Full call/)).not.toBeInTheDocument();
-
-    fireEvent.click(row);
-    expect(row).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Full call · apply_patch")).toBeInTheDocument();
     expect(
       screen.getByText(/"command": "\*\*\* Begin Patch/),
@@ -106,6 +102,11 @@ describe("Runtime permission decisions", () => {
     expect(
       screen.getByText("+    tag: 0.22.0", { normalizer: (text) => text }),
     ).toBeInTheDocument();
+
+    fireEvent.click(row);
+    expect(row).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(row);
+    expect(row).toHaveAttribute("aria-expanded", "true");
   });
 
   it("shows the title as the heading and the tool in the row without a reason", () => {
@@ -117,7 +118,7 @@ describe("Runtime permission decisions", () => {
       }),
     ).toBeVisible();
     expect(document.querySelector(".card-prompt")).toBeNull();
-    const row = screen.getByRole("button", { expanded: false });
+    const row = screen.getByRole("button", { expanded: true });
     expect(row).toHaveTextContent("apply_patch");
     expect(row).not.toHaveTextContent("Edit deploy/prod/values.yaml");
   });
@@ -254,14 +255,12 @@ describe("Runtime permission decisions", () => {
     expect(toggle).toHaveClass("rounded-r-lg");
   });
 
-  it("shows other members the box without actions or copy", () => {
+  it("shows other members who needs to decide without action buttons", () => {
     renderCard(permissionCard(), "actor_someone_else");
     expect(
       screen.getByRole("region", { name: "Permission request" }),
     ).toBeVisible();
-    expect(
-      screen.queryByText(/Waiting for|can decide/),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("Waiting for Leo Xing to decide")).toBeVisible();
     expect(
       screen.queryByRole("group", { name: "Approval actions" }),
     ).not.toBeInTheDocument();
@@ -389,7 +388,7 @@ describe("Runtime permission decisions", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the page element of a GUI action under Details", () => {
+  it("shows the page element of a GUI action by default while pending", () => {
     renderCard(
       permissionCard({
         input: '{"ref":"e42","element":"Merge"}',
@@ -405,7 +404,7 @@ describe("Runtime permission decisions", () => {
         tool: "mcp__browser__browser_click",
       }),
     );
-    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    expect(screen.getByRole("button", { expanded: true })).toBeVisible();
     expect(screen.getByText("Page element")).toBeInTheDocument();
     expect(screen.getByText('button "Merge"')).toBeInTheDocument();
     expect(

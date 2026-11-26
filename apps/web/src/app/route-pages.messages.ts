@@ -2,9 +2,11 @@ import { defineMessages } from "@/i18n/messages";
 
 /** Pages a route falls back to: the unknown address and the loading error. */
 export const routePagesMessages = defineMessages("routePages", {
+  loadingLinger: "Loading Linger…",
   notFoundTitle: "Page not found",
   openMessages: "Open Messages",
-  loadingError: "TeamHub loading error",
+  goToLogin: "Go to Log in",
+  loadingError: "Linger loading error",
   rooms: "Rooms",
   roomNavigation: "Room navigation",
   backToRooms: "Back to my Rooms",

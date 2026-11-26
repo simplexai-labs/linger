@@ -188,6 +188,11 @@ export function useTeamHubAuthentication(input: {
 }
 
 function readAuthenticationError(error: unknown) {
-  if (error instanceof TeamHubError) return error.message;
+  if (error instanceof TeamHubError) {
+    if (error.code === "INVALID_CREDENTIALS") {
+      return translate(m.invalidCredentials);
+    }
+    return error.message;
+  }
   return translate(m.teamHubUnreachable);
 }

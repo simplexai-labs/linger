@@ -3102,9 +3102,9 @@ a[href][aria-disabled="true"],
 }
 
 .another-me-card[data-active="true"] {
-  border-color: transparent;
-  background-color: var(--am-brand);
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--am-brand) 36%, var(--app-border));
+  background-color: color-mix(in srgb, var(--am-brand) 10%, var(--app-surface));
+  box-shadow: var(--town-shadow-sm);
 }
 
 .another-me-card[data-active="true"]::before {
@@ -3155,12 +3155,12 @@ a[href][aria-disabled="true"],
 }
 
 .another-me-card[data-active="true"] .another-me-card-title {
-  color: var(--am-text);
+  color: var(--app-ink);
 }
 
 .another-me-card[data-active="true"] .another-me-card-sub {
-  color: var(--am-text);
-  opacity: var(--am-sub-opacity);
+  color: var(--app-muted);
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3556,6 +3556,7 @@ input:focus-visible + .select-pill {
   top: 50%;
   right: 4px;
   opacity: 0;
+  pointer-events: none;
   translate: 0 -50%;
   scale: 0.92;
   transition:
@@ -3570,7 +3571,12 @@ input:focus-visible + .select-pill {
   )
   > .row-reveal-action {
   opacity: 1;
+  pointer-events: auto;
   scale: 1;
+}
+
+.group:not(.workspace-file-row):focus-within > .row-reveal-action {
+  pointer-events: auto;
 }
 
 .group:not(.workspace-file-row):has(> .row-reveal-action):is(
@@ -3610,6 +3616,32 @@ input:focus-visible + .select-pill {
 }
 
 @media (hover: none) {
+  .group:not(.workspace-file-row):not(.wiki-generated-row):has(
+      > .row-reveal-action
+    ) {
+    display: flex;
+    align-items: center;
+  }
+
+  .group:not(.workspace-file-row):not(.wiki-generated-row):has(
+      > .row-reveal-action
+    )
+    > :first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .group:not(.workspace-file-row):not(.wiki-generated-row)
+    > .row-reveal-action {
+    position: static;
+    translate: none;
+    scale: 1;
+    opacity: 1;
+    pointer-events: auto;
+    flex-shrink: 0;
+    padding-right: 4px;
+  }
+
   .wiki-generated-row.group > .wiki-display-actions {
     pointer-events: auto;
     opacity: 1;
@@ -4423,6 +4455,30 @@ button.question-choice:focus-visible {
   .message-composer-send {
     width: 44px !important;
     height: 44px !important;
+  }
+
+  /* Expand compact touch hit areas to at least 44x44px without inflating desktop density. */
+  .app-dialog-close,
+  .ui-button-compact,
+  .ui-button-icon-compact {
+    position: relative;
+  }
+
+  .app-dialog-close::after,
+  .ui-button-icon-compact::after {
+    position: absolute;
+    inset: -8px;
+    content: "";
+  }
+
+  .ui-button-compact {
+    min-width: 2.75rem;
+  }
+
+  .ui-button-compact::after {
+    position: absolute;
+    inset: -8px 0;
+    content: "";
   }
 }
 
@@ -5557,8 +5613,12 @@ button.question-choice:focus-visible {
   }
   .meeting-heatmap-cell:hover {
     transform: none;
+    box-shadow: 0 0 0 1.5px var(--app-ink);
   }
-  .meeting-today,
+  .meeting-today {
+    animation: none;
+    box-shadow: 0 0 0 1.5px var(--app-ink);
+  }
   .meeting-tip {
     animation: none;
   }

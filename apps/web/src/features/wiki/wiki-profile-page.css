@@ -386,3 +386,17 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .wiki-profile-source-chip,
+  .wiki-profile-source-tip {
+    transition: none;
+  }
+
+  .wiki-profile-source:is(:hover, :focus-within) .wiki-profile-source-chip {
+    transform: none;
+    box-shadow:
+      0 0 0 2px var(--app-surface),
+      inset 0 0 0 1.5px var(--app-ink);
+  }
+}

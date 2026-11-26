@@ -296,9 +296,7 @@ build:assets` to check the initial JS budget.
 - Use Tailwind and local components; do not add a broad UI library. Render UI icons
   only through `Icon` from `src/components/ui/icon.tsx` with
   `@hugeicons/core-free-icons` (14px in rows and menus, 16px in buttons and the
-  rail); `lucide-react` remains only in the Runtime activity views
-  (`src/features/rooms/task-sidebar/adapters/runtime-history-view.tsx` and
-  `src/features/rooms/runtime-status/runtime-tool-presentation.ts`).
+  rail).
 - Styling: Tailwind utilities plus design tokens are the standard. Use token
   classes (Town semantic tokens such as `text-muted-foreground`, or
   `--color-app-*` roles such as `text-app-ink`) instead of hex arbitrary values;

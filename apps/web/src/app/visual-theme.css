@@ -11,24 +11,24 @@
   --town-secondary: 240 4.8% 95.9%;
   --town-secondary-foreground: 53 7% 23.7%;
   --town-muted: 60 16% 95%;
-  --town-muted-foreground: 55 6% 42.5%;
+  --town-muted-foreground: 55 6% 38%;
   --town-accent: 240 4.8% 95.9%;
   --town-accent-foreground: 60 8% 9.4%;
   --town-destructive: 14 89% 41%;
   --town-destructive-foreground: 0 0% 100%;
-  --town-info: 207 92% 42%;
-  --town-success: 98 48% 35%;
-  --town-warning: 37 100% 39%;
+  --town-info: 207 92% 35%;
+  --town-success: 98 48% 30%;
+  --town-warning: 35 100% 30%;
   --town-border: 72 9% 92%;
   --town-border-hover: 72 9% 85%;
   --town-border-heavy: 60 8% 9.4%;
-  --town-input: 72 9% 92%;
-  --town-input-hover: 72 9% 85%;
+  --town-input: 68 8% 54%;
+  --town-input-hover: 68 8% 44%;
   --town-sidebar: 75 23% 96.5%;
   --town-sidebar-foreground: 60 8% 9.4%;
   --town-sidebar-muted: 70 15% 92%;
   --town-sidebar-border: 240 6% 90%;
-  --town-highlight: 207 95% 40%;
+  --town-highlight: 207 95% 32%;
   --town-button-accent: 208 54% 35%;
   --town-comment-amber: 45 93% 47%;
   --town-send: 221 97% 53%;
@@ -53,11 +53,11 @@
   --app-ink: hsl(var(--town-foreground));
   --app-body: hsl(var(--town-foreground));
   --app-muted: hsl(var(--town-muted-foreground));
-  --app-placeholder: hsl(var(--town-foreground) / 0.4);
+  --app-placeholder: hsl(var(--town-foreground) / 0.62);
   --app-subtle: hsl(var(--town-muted-foreground));
   --app-border: hsl(var(--town-border));
   --app-border-strong: hsl(var(--town-border-hover));
-  --app-border-interactive: hsl(var(--town-foreground) / 0.25);
+  --app-border-interactive: hsl(var(--town-foreground) / 0.48);
   /* Same as the Message list row hover (muted at 70%). */
   --app-hover: hsl(var(--town-muted) / 0.7);
   --app-selected: hsl(var(--town-muted));
@@ -135,49 +135,49 @@
   --composer-action-hover: hsl(var(--town-primary) / 0.09);
   --composer-send: hsl(var(--town-primary));
   --composer-send-hover: hsl(var(--town-primary) / 0.9);
-  /* File-type tints come from the Town nature palette. */
+  /* File-type tints come from the Town nature palette (500 surface, 700 text). */
   --composer-attachment-pdf-surface: color-mix(
     in srgb,
     #d95b31 15%,
     transparent
   );
-  --composer-attachment-pdf-text: #d95b31;
+  --composer-attachment-pdf-text: #912b00;
   --composer-attachment-code-surface: color-mix(
     in srgb,
     #a17cb9 15%,
     transparent
   );
-  --composer-attachment-code-text: #a17cb9;
+  --composer-attachment-code-text: #65417b;
   --composer-attachment-presentation-surface: color-mix(
     in srgb,
     #b88022 15%,
     transparent
   );
-  --composer-attachment-presentation-text: #b88022;
+  --composer-attachment-presentation-text: #6e4b0f;
   --composer-attachment-document-surface: color-mix(
     in srgb,
     #698cc7 15%,
     transparent
   );
-  --composer-attachment-document-text: #698cc7;
+  --composer-attachment-document-text: #2e518d;
   --composer-attachment-sheet-surface: color-mix(
     in srgb,
     #5e9662 15%,
     transparent
   );
-  --composer-attachment-sheet-text: #5e9662;
+  --composer-attachment-sheet-text: #39603c;
   --composer-attachment-compressed-surface: color-mix(
     in srgb,
     #a08e00 15%,
     transparent
   );
-  --composer-attachment-compressed-text: #a08e00;
+  --composer-attachment-compressed-text: #5f5302;
   --composer-attachment-universal-surface: color-mix(
     in srgb,
     #4e9ba2 15%,
     transparent
   );
-  --composer-attachment-universal-text: #4e9ba2;
+  --composer-attachment-universal-text: #2c5b60;
   --composer-shadow-color: rgba(0, 0, 0, 0.06);
   --composer-shadow-focus-color: rgba(0, 0, 0, 0.07);
   --app-scrollbar: hsl(var(--town-muted-foreground) / 0.4);

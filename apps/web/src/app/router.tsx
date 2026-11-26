@@ -47,7 +47,6 @@ import {
   type TeamHubClient,
 } from "@/features/teamhub/teamhub-client";
 import type { TeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
-import { commonMessages } from "@/i18n/common.messages";
 import { translate } from "@/i18n/language";
 import { useT } from "@/i18n/use-translation";
 import {
@@ -150,8 +149,13 @@ export function createAppRoutes(
       }),
       path: "/login",
     },
-    { lazy: loadSharedDocumentPage, path: "/shared-documents" },
     {
+      HydrateFallback: InitialAppLoading,
+      lazy: loadSharedDocumentPage,
+      path: "/shared-documents",
+    },
+    {
+      HydrateFallback: InitialAppLoading,
       path: "/shared-room-history",
       lazy: async () => {
         const { SharedRoomHistoryPage } =
@@ -165,6 +169,7 @@ export function createAppRoutes(
     },
     {
       ErrorBoundary: FullPageRouteErrorSurface,
+      HydrateFallback: InitialAppLoading,
       lazy: () =>
         authenticationOperation(
           new AbortController().signal,
@@ -294,7 +299,7 @@ export function createAppRoutes(
         createWorkItemDashboardRoute(
           queryClient,
           client,
-          "dashboard/:workItemId",
+          "dashboard/:workItemId?",
         ),
         createWorkspaceRoute(),
         {
@@ -337,7 +342,13 @@ export function createAppRoutes(
           ]);
         } catch (error) {
           request.signal.throwIfAborted();
-          redirectAuthenticationError(error, queryClient);
+          const current = new URL(request.url);
+          const returnTo = `${current.pathname}${current.search}`;
+          redirectAuthenticationError(
+            error,
+            queryClient,
+            `/login?reason=session-expired&return_to=${encodeURIComponent(returnTo)}`,
+          );
           throw error;
         }
 
@@ -355,7 +366,7 @@ export function createAppRoutes(
 function createWorkItemDashboardRoute(
   queryClient: QueryClient,
   client: TeamHubClient,
-  path: "dashboard/:workItemId",
+  path: "dashboard/:workItemId?",
 ): RouteObject {
   return {
     ErrorBoundary: PanelRouteErrorSurface,
@@ -788,11 +799,11 @@ export function InitialAppLoading() {
   return (
     <main
       aria-busy="true"
-      aria-label={t(commonMessages.loadingApp)}
+      aria-label={t(routePagesMessages.loadingLinger)}
       className="flex min-h-dvh items-center justify-center gap-2 bg-app-canvas text-sm text-app-muted"
     >
       <Spinner />
-      {t(commonMessages.loadingRoom)}
+      {t(routePagesMessages.loadingLinger)}
     </main>
   );
 }
@@ -820,10 +831,16 @@ function NotFoundRoute({ inShell = false }: { inShell?: boolean }) {
       <h1 className="text-lg">{t(routePagesMessages.notFoundTitle)}</h1>
       <Button
         onClick={() => {
-          void navigate(tenantId ? `/t/${tenantId}/rooms` : "/");
+          void navigate(
+            inShell && tenantId ? `/t/${tenantId}/rooms` : "/login",
+          );
         }}
       >
-        {t(routePagesMessages.openMessages)}
+        {t(
+          inShell && tenantId
+            ? routePagesMessages.openMessages
+            : routePagesMessages.goToLogin,
+        )}
       </Button>
     </main>
   );

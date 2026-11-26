@@ -48,9 +48,12 @@ export function DesktopComputerSetup({
   const problem = desktopSetupProblem(desktop.status);
   if (problem) {
     return (
-      <p role="alert" className="text-xs text-app-danger">
+      <div
+        className="mt-2 rounded-lg border border-[var(--app-status-danger-border)] bg-[var(--app-status-danger-surface)] px-3 py-2 text-xs leading-5 text-app-danger"
+        role="alert"
+      >
         {t(problem)}
-      </p>
+      </div>
     );
   }
   return (

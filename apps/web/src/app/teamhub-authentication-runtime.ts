@@ -28,6 +28,10 @@ export function startTeamHubAuthenticationRuntime({
   const invalidate = (reason: TeamHubAuthenticationReason) => {
     clearLocalAuthenticatedState(queryClient);
     const location = currentLocation?.();
+    if (location?.pathname === "/") {
+      void navigate("/login", { replace: true });
+      return;
+    }
     const returnTo = location
       ? safeAuthenticationReturnTo(
           location.pathname === "/login"

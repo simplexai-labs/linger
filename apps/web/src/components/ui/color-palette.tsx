@@ -63,10 +63,12 @@ export function ColorPalette({
       target.removeEventListener("pointermove", move);
       target.removeEventListener("pointerup", stop);
       target.removeEventListener("pointercancel", stop);
+      target.removeEventListener("lostpointercapture", stop);
     };
     target.addEventListener("pointermove", move);
     target.addEventListener("pointerup", stop);
     target.addEventListener("pointercancel", stop);
+    target.addEventListener("lostpointercapture", stop);
   }
 
   function nudgeField(event: KeyboardEvent<HTMLDivElement>) {
@@ -121,7 +123,7 @@ export function ColorPalette({
           brightness: Math.round(current.v * 100),
           saturation: Math.round(current.s * 100),
         })}
-        className="color-palette-field"
+        className="color-palette-field touch-none"
         onKeyDown={nudgeField}
         onPointerDown={(event) =>
           track(event, (x, y) => emit({ ...current, s: x, v: 1 - y }))
@@ -144,7 +146,7 @@ export function ColorPalette({
         aria-valuemax={360}
         aria-valuemin={0}
         aria-valuenow={Math.round(hue)}
-        className="color-palette-hue"
+        className="color-palette-hue touch-none"
         onKeyDown={nudgeHue}
         onPointerDown={(event) =>
           track(event, (x) => emit({ ...current, h: x * 359.9 }))

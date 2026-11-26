@@ -4,7 +4,7 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -149,19 +149,19 @@ function WebSearchBackendCard({
               </span>
             ) : null}
           </span>
-          <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="mt-0.5 flex min-w-0 items-start gap-1.5 text-xs text-muted-foreground">
             {state ? (
               <span
                 aria-hidden
                 className={cn(
-                  "size-1.5 shrink-0 rounded-full",
+                  "mt-1.5 size-1.5 shrink-0 rounded-full",
                   state.tone === "danger"
                     ? "bg-[var(--app-status-danger-text)]"
                     : "bg-[var(--app-status-success-text)]",
                 )}
               />
             ) : null}
-            <span className="truncate" title={line}>
+            <span className="line-clamp-2 min-w-0" title={line}>
               {line}
             </span>
           </span>
@@ -241,6 +241,8 @@ function KeySection({
   const { client } = useTeamHubRuntime();
   const queryClient = useQueryClient();
   const saved = backend.key_state !== "none";
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const confirmBoxRef = useRef<HTMLDivElement>(null);
   const remove = useMutation({
     mutationFn: () =>
       teamHubDone(
@@ -248,9 +250,20 @@ function KeySection({
           params: { path: { backend: backend.id } },
         }),
       ),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: webSearchQueryKey }),
+    onSuccess: () => {
+      setConfirmingRemove(false);
+      return queryClient.invalidateQueries({ queryKey: webSearchQueryKey });
+    },
   });
+
+  useEffect(() => {
+    if (confirmingRemove) {
+      confirmBoxRef.current
+        ?.querySelector<HTMLButtonElement>("button")
+        ?.focus();
+    }
+  }, [confirmingRemove]);
+
   return (
     <section aria-label={t(m.apiKey)} className="space-y-3">
       {saved ? <p>{savedKeyText(backend, t)}</p> : null}
@@ -263,15 +276,44 @@ function KeySection({
         <WebSearchKeysUnavailable />
       )}
       {saved ? (
-        <div className="space-y-1.5">
-          <Button
-            data-voice-risk="never"
-            loading={remove.isPending}
-            onClick={() => remove.mutate()}
-            tone="danger"
-          >
-            {t(m.removeKey)}
-          </Button>
+        <div className="space-y-2">
+          {confirmingRemove ? (
+            <div
+              className="rounded-lg border border-[var(--app-status-danger-border)] bg-[var(--app-status-danger-surface)] p-3"
+              ref={confirmBoxRef}
+              role="group"
+            >
+              <p className="text-xs text-foreground">
+                {t(m.removeKeyConfirm, { backend: backend.name })}
+              </p>
+              <div className="mt-2.5 flex justify-end gap-2">
+                <Button
+                  disabled={remove.isPending}
+                  onClick={() => setConfirmingRemove(false)}
+                  size="compact"
+                >
+                  {t(commonMessages.cancel)}
+                </Button>
+                <Button
+                  data-voice-risk="never"
+                  loading={remove.isPending}
+                  onClick={() => remove.mutate()}
+                  size="compact"
+                  tone="danger"
+                >
+                  {t(m.removeKey)}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              data-voice-risk="never"
+              onClick={() => setConfirmingRemove(true)}
+              tone="danger"
+            >
+              {t(m.removeKey)}
+            </Button>
+          )}
           {remove.error ? (
             <p className="text-xs text-app-danger" role="alert">
               {remove.error.message}

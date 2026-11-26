@@ -37,7 +37,7 @@ describe("RuntimeHistoryView", () => {
     expect(screen.getByText("Inspecting Room context")).toBeVisible();
     expect(screen.queryByText("Recorded data")).not.toBeInTheDocument();
     expect(container.querySelector('[aria-label="Activity log"]')).toHaveClass(
-      "bg-white",
+      "bg-card",
     );
   });
 

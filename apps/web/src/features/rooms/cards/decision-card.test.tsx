@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -611,16 +612,57 @@ describe("DecisionCard", () => {
     );
   });
 
-  it("shows other members the box without actions or copy", () => {
+  it("shows other members who needs to decide without showing action buttons", () => {
     renderCard(connectorCard(), "actor_someone_else");
     expect(
       screen.getByRole("region", { name: "Confirmation request" }),
     ).toBeVisible();
     expect(screen.getByRole("button", { expanded: false })).toBeVisible();
-    expect(screen.queryByText(/Waiting for|Only /)).not.toBeInTheDocument();
+    expect(screen.getByText("Waiting for Leo Xing to decide")).toBeVisible();
     expect(
       screen.queryByRole("group", { name: "Approval actions" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows a live countdown near expiry and transitions automatically to Expired", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-26T10:00:00Z"));
+      const expiresAt = "2026-11-26T10:00:05Z";
+      const card = connectorCard(messageDetail(), { expires_at: expiresAt });
+      const onDecision = vi.fn();
+      const { rerender } = renderCard(card, sponsor.id, onDecision);
+
+      expect(screen.getByText("Expires in 5s")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+
+      // Unrelated rerenders must not break or recreate the countdown progression.
+      rerender(
+        <DecisionCard
+          card={card}
+          currentActorId={sponsor.id}
+          messageId="message_1"
+          onDecision={vi.fn()}
+          roomId="room_1"
+          tenantId="tenant_1"
+        />,
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(3_000);
+      });
+      expect(screen.getByText("Expires in 2s")).toBeVisible();
+
+      act(() => {
+        vi.advanceTimersByTime(2_000);
+      });
+      expect(screen.getByText("Expired")).toBeVisible();
+      expect(
+        screen.queryByRole("group", { name: "Approval actions" }),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("puts a done line in place of the actions once a request is decided or expired", () => {

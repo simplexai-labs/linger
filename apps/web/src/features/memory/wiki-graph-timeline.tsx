@@ -140,7 +140,7 @@ export function WikiGraphTimeline({
     if (event.button !== 0 || !count) return;
     cancelAnimationFrame(animation.current);
     settling.current = false;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     drag.current = {
       x: event.clientX,
       origin: positionRef.current,
@@ -214,6 +214,14 @@ export function WikiGraphTimeline({
       else snapTo(value, value);
     };
     animation.current = requestAnimationFrame(glide);
+  };
+
+  const onPointerCancel = () => {
+    const current = drag.current;
+    drag.current = undefined;
+    setDragging(false);
+    if (!current) return;
+    snapTo(positionRef.current, positionRef.current);
   };
 
   const onWheel = (event: WheelEvent<HTMLDivElement>) => {
@@ -305,10 +313,11 @@ export function WikiGraphTimeline({
           locale,
           t,
         )}
-        className="wiki-graph-ruler"
+        className="wiki-graph-ruler touch-none"
         data-dragging={dragging || undefined}
         onKeyDown={onKeyDown}
-        onPointerCancel={onPointerUp}
+        onLostPointerCapture={onPointerCancel}
+        onPointerCancel={onPointerCancel}
         onPointerLeave={() => !drag.current && hoverAt(undefined)}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

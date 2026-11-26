@@ -76,7 +76,7 @@ describe("Web app route contract", () => {
         "rooms/:roomId",
         "chat",
         "profile",
-        "dashboard/:workItemId",
+        "dashboard/:workItemId?",
         "documents/:documentId",
         "settings",
         "account",
@@ -87,21 +87,55 @@ describe("Web app route contract", () => {
     );
   });
 
-  it("keeps Work Item links and Room chat reachable", () => {
+  it("keeps Work Item links, bare Dashboard, and Room chat reachable", () => {
     const routes = createAppRoutes(
       new QueryClient(),
       createTestTeamHubRuntime(),
     );
     expect(
       matchRoutes(routes, "/t/tenant-a/dashboard")?.at(-1)?.route.path,
-    ).toBe("*");
+    ).toBe("dashboard/:workItemId?");
     expect(
       matchRoutes(routes, "/t/tenant-a/dashboard/work-item-a")?.at(-1)?.route
         .path,
-    ).toBe("dashboard/:workItemId");
+    ).toBe("dashboard/:workItemId?");
     expect(
       matchRoutes(routes, "/t/tenant-a/rooms/room-a/chat")?.at(-1)?.route.path,
     ).toBe("chat");
+  });
+
+  it("redirects /t/:tenantId 401 failures to /login with reason=session-expired and return_to", async () => {
+    const runtime = createTestTeamHubRuntime();
+    runtime.server.on("GET", "/v0/session", () =>
+      teamHubErrorResponse(401, "UNAUTHENTICATED", "Sign in required"),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const tenantLoader = createAppRoutes(queryClient, runtime).find(
+      (route) => route.path === "/t/:tenantId",
+    )!.loader as LoaderFunction;
+    let thrown: unknown;
+    try {
+      await tenantLoader({
+        context: new RouterContextProvider(),
+        params: { tenantId: "tenant-northstar" },
+        pattern: "/t/:tenantId",
+        request: new Request(
+          "http://localhost/t/tenant-northstar/dashboard?room=room-all",
+        ),
+        url: new URL(
+          "http://localhost/t/tenant-northstar/dashboard?room=room-all",
+        ),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).headers.get("Location")).toBe(
+      `/login?reason=session-expired&return_to=${encodeURIComponent("/t/tenant-northstar/dashboard?room=room-all")}`,
+    );
+    queryClient.clear();
   });
 
   it("mounts My Documents, Shared with me, and Wiki below Library", () => {

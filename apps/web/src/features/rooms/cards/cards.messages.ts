@@ -12,6 +12,11 @@ export const cardsMessages = defineMessages("cards", {
   decisionMismatch:
     "Card decision response does not match the active Room command.",
   expired: "Expired",
+  expiresInSeconds: "Expires in {seconds}s",
+  expiresInMinutesSeconds: "Expires in {minutes}m {seconds}s",
+  expiresInMinutes: "Expires in {minutes}m",
+  waitingForDecision: "Waiting for {name} to decide",
+  waitingForAnswer: "Waiting for {name} to answer",
   connected: "Connected",
   notConnected: "Not connected",
   connect: "Connect",
@@ -150,6 +155,11 @@ export const cardsMessages = defineMessages("cards", {
   fileNoLongerAvailable:
     "A file is no longer available. Remove it and upload it again.",
   replyConnected: "Connected",
+  continueWithConnected: {
+    one: "Continue ({count} connected)",
+    other: "Continue ({count} connected)",
+  },
+  continueSetup: "Continue",
   skipForNow: "Skip for now",
   connectYourApps: "Connect your apps",
   more: "More",

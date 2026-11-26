@@ -117,6 +117,7 @@ export function RoomTaskSidebarImpl({
   )?.id;
   const { mentionOptions } = useRoomMentionOptions({
     client,
+    currentActorId,
     members,
     tenantId,
   });
@@ -320,6 +321,7 @@ export function RoomTaskSidebarImpl({
       }}
       onOpenProfile={onOpenProfile}
       onOpenRoomSettings={onOpenRoomSettings}
+      canRestoreClosed={tabState.closedStack.length > 0}
       onRestoreClosed={() => {
         const next = restoreClosedPanelTab(scope);
         setTabState(next);

@@ -106,9 +106,12 @@ describe("BrowserConnectionDialog", () => {
     expect(input).toHaveAttribute("autocomplete", "off");
     const pasted = ` PLAYWRIGHT_MCP_EXTENSION_TOKEN=${token} `;
     fireEvent.change(input, { target: { value: pasted } });
+    fireEvent.click(screen.getByRole("button", { name: "Show value" }));
+    expect(input).toHaveAttribute("type", "text");
+    fireEvent.click(screen.getByRole("button", { name: "Mask value" }));
+    expect(input).toHaveAttribute("type", "password");
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
-    expect(input).toHaveValue("");
     expect(await screen.findByRole("status")).toHaveTextContent("Connected");
     // A healthy connection needs no detail.
     expect(screen.queryByText("Chrome 147 connected")).toBeNull();
@@ -161,18 +164,32 @@ describe("BrowserConnectionDialog", () => {
     expect(picker).toHaveAttribute("value", "computer-pc");
   });
 
-  it("disconnects a connected Chrome", async () => {
+  it("confirms before disconnecting a connected Chrome and focuses Cancel by default", async () => {
     const { route } = setup(async (method) =>
       method === "DELETE" ? isolated : connected,
     );
 
     fireEvent.click(await screen.findByRole("button", { name: "Disconnect" }));
+    const confirmGroup = screen.getByRole("group");
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expect(cancel).toHaveFocus();
+    expect(route).not.toHaveBeenCalledWith("DELETE", undefined);
+
+    fireEvent.click(cancel);
+    expect(screen.queryByText(/Disconnect Chrome\?/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    const confirmButtons = screen.getAllByRole("button", {
+      name: "Disconnect",
+    });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]!);
 
     expect(await screen.findByLabelText("Extension token")).toBeVisible();
     expect(route).toHaveBeenCalledWith("DELETE", undefined);
+    expect(confirmGroup).not.toBeInTheDocument();
   });
 
-  it("explains a rejected token and asks for a new paste", async () => {
+  it("retains the pasted token on failure so transient errors can be retried in one click", async () => {
     setup(async (method) => {
       if (method === "GET") return { ...connected, state: "token_invalid" };
       throw new TeamHubError({
@@ -195,7 +212,7 @@ describe("BrowserConnectionDialog", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Can't read this token",
     );
-    expect(input).toHaveValue("");
+    expect(input).toHaveValue("not a token");
   });
 
   it("tells a token the extension refused apart from a retryable failure", async () => {

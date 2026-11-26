@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { getTranslation } from "@/i18n/language";
@@ -224,5 +224,107 @@ describe("QuestionDecision", () => {
 
   it("keeps a waiting question a card", () => {
     expect(settledCardNotice(questionsCard("pending"), assignee.id)).toBeNull();
+  });
+
+  it("guards rapid double-clicks on radio options and cleans up timers on unmount", () => {
+    vi.useFakeTimers();
+    try {
+      const onDecision = vi.fn();
+      const { unmount } = renderCard(questionsCard("pending"), onDecision);
+
+      const walk = screen.getByRole("button", { name: "Go for a walk" });
+      fireEvent.click(walk);
+      fireEvent.click(walk);
+      expect(walk).toBeDisabled();
+
+      act(() => {
+        vi.advanceTimersByTime(140);
+      });
+      expect(screen.getByRole("heading", { name: "Which day?" })).toBeVisible();
+      expect(onDecision).not.toHaveBeenCalled();
+
+      const saturday = screen.getByRole("button", { name: "Saturday" });
+      fireEvent.click(saturday);
+      fireEvent.click(saturday);
+      act(() => {
+        vi.advanceTimersByTime(140);
+      });
+      expect(onDecision).toHaveBeenCalledTimes(1);
+
+      // Unmounting during the radio beat cancels the pending timer.
+      unmount();
+      const onDecisionAfterUnmount = vi.fn();
+      const singleStep = renderCard(
+        {
+          ...questionsCard("pending"),
+          question: {
+            questions: [questionsCard("pending").question!.questions[1]!],
+          },
+        },
+        onDecisionAfterUnmount,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Sunday" }));
+      singleStep.unmount();
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(onDecisionAfterUnmount).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("submits or advances Other… on non-IME Enter and collapses empty Other… on Escape", () => {
+    const onDecision = vi.fn();
+    renderCard(questionsCard("pending"), onDecision);
+
+    fireEvent.click(screen.getByRole("button", { name: "Other…" }));
+    const firstInput = screen.getByRole("textbox", {
+      name: "Your own answer to What would you rather do this weekend?",
+    });
+    fireEvent.keyDown(firstInput, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Other…" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Other…" }));
+    const reopened = screen.getByRole("textbox", {
+      name: "Your own answer to What would you rather do this weekend?",
+    });
+    fireEvent.change(reopened, { target: { value: "Read a book" } });
+    fireEvent.keyDown(reopened, {
+      isComposing: true,
+      key: "Enter",
+      keyCode: 229,
+    });
+    expect(
+      screen.queryByRole("heading", { name: "Which day?" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(reopened, { key: "Enter" });
+    expect(screen.getByRole("heading", { name: "Which day?" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Other…" }));
+    const secondInput = screen.getByRole("textbox", {
+      name: "Your own answer to Which day?",
+    });
+    fireEvent.change(secondInput, { target: { value: "Friday evening" } });
+    fireEvent.keyDown(secondInput, { key: "Enter" });
+    expect(onDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answers: { day: "Friday evening", hobby: "Read a book" },
+        decision: "submit",
+      }),
+    );
+  });
+
+  it("tells non-owners who needs to answer", () => {
+    render(
+      <QuestionDecision
+        card={questionsCard("pending")}
+        currentActorId="someone-else"
+        messageId="message-1"
+        onDecision={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Waiting for mallory to answer")).toBeVisible();
   });
 });

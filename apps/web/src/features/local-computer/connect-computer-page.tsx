@@ -7,9 +7,10 @@ import {
 import { Icon } from "@/components/ui/icon";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { useLocation, useSearchParams } from "react-router";
+import { Link, useLocation, useSearchParams } from "react-router";
 
-import { Button } from "@/components/ui/button";
+import { BrandMark } from "@/components/ui/brand-mark";
+import { Button, buttonClassName } from "@/components/ui/button";
 import { Select, SelectItem } from "@/components/ui/select";
 import { authMessages } from "@/features/auth/auth.messages";
 import { useLogout } from "@/features/auth/use-logout";
@@ -20,6 +21,7 @@ import {
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
+import { translate } from "@/i18n/language";
 import { RichMessage, useT } from "@/i18n/use-translation";
 
 import { computerSetupMessages } from "./computer-setup.messages";
@@ -61,7 +63,7 @@ export function ConnectComputerPage({
   const enrollment = useMutation({
     mutationFn: async () => {
       if (!request || !selectedTenant) {
-        throw new Error("Connection request is unavailable.");
+        throw new Error(translate(computersMessages.invalidRequestTitle));
       }
       return await teamHubData(
         client.api.POST("/v0/tenants/{tenantId}/local-computer-enrollments", {
@@ -246,12 +248,21 @@ export function ConnectComputerPage({
               </div>
             </div>
           ) : enrollment.error ? (
-            <p
-              className="rounded-lg border border-[var(--app-status-danger-border)] bg-[var(--app-status-danger-surface)] px-3 py-2.5 text-sm text-app-danger"
+            <div
+              className="space-y-1.5 rounded-lg border border-[var(--app-status-danger-border)] bg-[var(--app-status-danger-surface)] px-3 py-2.5 text-sm text-app-danger"
               role="alert"
             >
-              {t(computersMessages.connectFailed)}
-            </p>
+              <p className="font-medium">
+                {t(computersMessages.connectFailed)}
+              </p>
+              {enrollment.error instanceof TeamHubError &&
+              enrollment.error.message ? (
+                <p className="text-xs">{enrollment.error.message}</p>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                {t(computersMessages.connectFailedGuidance)}
+              </p>
+            </div>
           ) : null}
 
           {switchAccount.error ? (
@@ -304,13 +315,24 @@ const requiresLocalIdentityReplacement = (error: unknown): boolean =>
 function InvalidConnectionRequest() {
   const t = useT();
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-6 text-center text-foreground">
-      <div className="max-w-sm">
-        <h1 className="text-lg">{t(computersMessages.invalidRequestTitle)}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
+    <main className="flex min-h-dvh items-center justify-center bg-background px-6 py-10 text-center text-foreground">
+      <section className="w-full max-w-sm rounded-2xl border border-border bg-card px-6 py-8 shadow-md">
+        <BrandMark className="mx-auto size-10" />
+        <h1 className="mt-4 text-lg">
+          {t(computersMessages.invalidRequestTitle)}
+        </h1>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
           {t(computersMessages.invalidRequestBody)}
         </p>
-      </div>
+        <div className="mt-6 flex justify-center">
+          <Link
+            className={buttonClassName({ size: "large", tone: "primary" })}
+            to="/"
+          >
+            {t(computersMessages.backToLinger)}
+          </Link>
+        </div>
+      </section>
     </main>
   );
 }

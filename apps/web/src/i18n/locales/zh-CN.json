@@ -191,7 +191,6 @@
     "checkingNew": "正在查找新的本地电脑…",
     "checkingOnline": "正在查找在线的本地电脑…",
     "operatingSystem": "电脑操作系统",
-    "chooseOperatingSystem": "选择操作系统",
     "copyCommand": "复制命令",
     "commandCopied": "命令已复制",
     "commandSelected": "命令已选中",
@@ -444,6 +443,7 @@
     "mailAccount": "{app} 账号"
   },
   "accountSettings": {
+    "profileDescription": "在这个空间里使用的头像、名称、简介和洞察。外部账号请在<link>连接器</link>中管理。",
     "loadingAccountProfile": "正在加载账号资料",
     "loadingAccountProfileStatus": "正在加载账号资料…",
     "profileAppearance": "个人资料外观",
@@ -553,6 +553,7 @@
     "disconnectTitle": "断开账号连接？",
     "disconnectDescription": "{account}。Agent 的访问权限和来源清理仍在连接器中管理。",
     "disconnect": "断开连接",
+    "securityDescription": "管理你的登录密码和服务器 API 密钥。",
     "password": "密码",
     "changePassword": "修改密码",
     "passwordChanged": "密码已修改",
@@ -575,7 +576,12 @@
     "voiceKeyCannotSave": "{detail} 请在服务器上设置 {variable}。",
     "composioDetail": "连接 Gmail、GitHub、Slack、Notion 等应用。",
     "composioDetailFromEnvironment": "连接 Gmail、GitHub、Slack、Notion 等应用。由服务器上的 COMPOSIO_API_KEY 设置。",
-    "composioDetailCannotSave": "此服务器未设置。"
+    "composioDetailCannotSave": "此服务器未设置。",
+    "saveChanges": "保存更改",
+    "discardChanges": "放弃更改",
+    "deleteInsightConfirmTitle": "删除这条洞察？",
+    "deleteInsightConfirmDescription": "这会从你的个人资料中永久删除这条个人洞察（{dimension}）。",
+    "newPasswordHint": "至少 8 个字符。"
   },
   "cards": {
     "cardDecisionFailed": "卡片操作失败。",
@@ -708,6 +714,8 @@
     "sharedSources": "已分享的资料",
     "fileNoLongerAvailable": "有个文件已失效，请移除后重新上传。",
     "replyConnected": "连接好了",
+    "continueWithConnected": { "other": "继续（已连接 {count} 个）" },
+    "continueSetup": "继续",
     "skipForNow": "暂时跳过",
     "connectYourApps": "连接你的应用",
     "more": "更多",
@@ -810,7 +818,12 @@
     "noticeApprovedFailedWithOutcome": "{who}批准了“{title}”，但执行失败：{outcome}",
     "noticeApprovedUnknown": "{who}批准了“{title}”，结果未知",
     "noticeApprovedUnknownWithOutcome": "{who}批准了“{title}”，结果未知：{outcome}",
-    "noticeEnded": "“{title}”已结束"
+    "noticeEnded": "“{title}”已结束",
+    "expiresInSeconds": "{seconds} 秒后过期",
+    "expiresInMinutesSeconds": "{minutes} 分 {seconds} 秒后过期",
+    "expiresInMinutes": "{minutes} 分钟后过期",
+    "waitingForDecision": "等待 {name} 决定",
+    "waitingForAnswer": "等待 {name} 回答"
   },
   "composer": {
     "messageRoom": "给 Room 发消息",
@@ -1055,16 +1068,20 @@
     "keepCurrentSetup": "保留当前设置",
     "replaceLocalIdentity": "替换本地身份",
     "connectFailed": "无法连接这台电脑，请重新运行设置命令。",
+    "connectFailedGuidance": "请在下方重试连接，或返回终端重新运行登录命令。",
     "signingOut": "正在退出登录…",
     "useAnotherAccount": "使用其他账号",
     "connectingRequest": "正在连接…",
     "reconnectComputer": "重新连接电脑",
     "invalidRequestTitle": "连接请求无效",
     "invalidRequestBody": "请回到终端，重新运行设置命令。",
+    "backToLinger": "返回 Linger",
     "couldNotConnect": "无法连接",
     "gateTitle": "连接你的电脑",
     "gateIntro": "你的 Agent 通过 Claude Code、Codex 或 Pi 在你自己的电脑上运行。先连接一台电脑再开始。",
     "gateReady": "你的电脑已就绪，正在创建你的 Another Me…",
+    "gateReadySlow": "创建 Another Me 的时间比平时更长，请点击重试重新检查。",
+    "gateLoadError": "暂时无法检查你的电脑状态，请重试后继续。",
     "installTheCli": "安装 CLI",
     "setUpAiApp": "设置一个 AI 应用",
     "availableOnceOnline": "电脑上线后即可操作。",
@@ -1143,7 +1160,8 @@
     "browserBusy": "有 Agent 任务正在使用这个 Chrome，请等它结束后再连接。",
     "browserConnectionDamaged": "这台电脑上保存的浏览器连接已损坏，请粘贴令牌重新连接。",
     "browserConnectFailed": "这台电脑无法连接你的浏览器，请稍后重试。",
-    "browserConnectUnavailable": "暂时无法连接浏览器，请稍后重试。"
+    "browserConnectUnavailable": "暂时无法连接浏览器，请稍后重试。",
+    "disconnectChromeConfirm": "断开 Chrome 连接？Agent 将不再使用你的浏览器和登录状态。"
   },
   "localModels": {
     "title": "模型",
@@ -2109,7 +2127,7 @@
     "connectorCategories": "连接器分类",
     "connectedOnly": "只看已连接",
     "applicationConnections": "应用连接",
-    "noConnectedApps": "还没有已连接的应用。",
+    "noConnectedApps": "还没有已连接的连接器。",
     "groupMailCalendar": "邮件与日历",
     "groupMeetings": "会议",
     "groupProductivity": "效率工具",
@@ -2251,7 +2269,13 @@
     "accessUnavailable": "无法为这个 Agent 设置访问权限",
     "loadingAccess": "正在加载访问权限…",
     "retryAccess": "重新加载访问权限",
-    "allowAgentAccess": "允许 Agent 访问 {account}"
+    "allowAgentAccess": "允许 Agent 访问 {account}",
+    "searchConnectors": "搜索连接器",
+    "searchConnectorsPlaceholder": "搜索连接器…",
+    "clearConnectorSearch": "清除连接器搜索",
+    "noMatchingConnectors": "没有匹配“{query}”的连接器。",
+    "clearSearch": "清除搜索",
+    "removeKeyConfirm": "移除 {backend} 密钥？这台服务器上的所有人都将停止使用它进行网页搜索。"
   },
   "webSearch": {
     "apiKey": "{backend} API 密钥",
@@ -2410,8 +2434,8 @@
     "showPassword": "显示密码",
     "hidePassword": "隐藏密码",
     "signIn": "登录",
-    "logIn": "登录",
-    "working": "正在处理…",
+    "invalidCredentials": "邮箱或密码不正确，请检查后重试。",
+    "accessHelp": "需要开通权限或重置密码？请联系你的工作区管理员。",
     "artTitleFirst": "你的个人 AI，",
     "artTitleSecond": "总是先你一步。",
     "artLede": "Linger 运行在你自己的电脑上，记着你手头的工作，在事情被落下之前主动提醒你。",
@@ -2427,7 +2451,9 @@
     "desktopAccountUnavailable": "无法使用这台电脑的账号。请用邮箱和密码登录。",
     "teamHubUnreachable": "无法连接 TeamHub，请重试。",
     "logoutUnconfirmed": "无法确认是否已退出登录，请重试。",
-    "logoutUnsavedDocuments": "有些文档的修改还没有保存。要退出登录并放弃这些修改吗？"
+    "logoutUnsavedDocuments": "有些文档的修改还没有保存。要退出登录并放弃这些修改吗？",
+    "logoutUnsavedDocumentsTitle": "仍有未保存的编辑，确认退出登录？",
+    "logoutAndDiscard": "退出登录并放弃"
   },
   "sidePanel": {
     "panelSidebar": "面板侧边栏",
@@ -2437,6 +2463,7 @@
     "addPanelView": "添加面板视图",
     "maximizeSidebar": "最大化侧边栏",
     "restoreSidebar": "还原侧边栏",
+    "reopenClosedTab": "重新打开已关闭的标签页",
     "closeTab": "关闭 {title}",
     "agentTab": "Agent · {name}",
     "activityTab": "活动 · {name}",
@@ -2623,12 +2650,9 @@
     "loadingAgents": "正在加载你的 Agent…",
     "everyoneAdded": "所有可添加的成员和 Agent 都已在这个 Room 中。",
     "addRoomMembers": "添加 Room 成员",
-    "goBack": "返回",
     "skipForNow": "暂时跳过",
     "addMembers": "添加成员",
     "addFailed": "无法添加 {names}。请重试这些成员；已成功添加的成员已保存。",
-    "skipAdding": "跳过添加成员",
-    "skipPrompt": "<strong>跳过添加成员？</strong>之后可以通过这个 Room 右上角的成员头像列表 <avatars>Room 成员头像列表</avatars> 添加成员和 Agent。",
     "chooseExisting": "选择已有成员",
     "roomOwner": "Room 所有者",
     "youOwner": "（你，所有者）",
@@ -2853,9 +2877,11 @@
     "repeatedCursor": "加载报告时分页返回了重复的游标。"
   },
   "routePages": {
+    "loadingLinger": "正在加载 Linger…",
     "notFoundTitle": "找不到页面",
     "openMessages": "打开消息",
-    "loadingError": "TeamHub 加载出错",
+    "goToLogin": "前往登录",
+    "loadingError": "Linger 加载出错",
     "rooms": "Room",
     "roomNavigation": "Room 导航",
     "backToRooms": "返回我的 Room",
@@ -2971,7 +2997,9 @@
     "minuteIntervalAgentOnly": "按分钟间隔运行的 Routine 只能由 Agent 编辑。",
     "saveFailed": "无法保存 Routine。",
     "deleteFailed": "无法删除 Routine。",
-    "runFailed": "无法运行 Routine。"
+    "runFailed": "无法运行 Routine。",
+    "deleteRoutineConfirmTitle": "删除这个 Routine？",
+    "deleteRoutineConfirmDescription": "“{name}”将停止运行，且无法撤销。"
   },
   "roomDocuments": {
     "title": "文件",
@@ -3738,7 +3766,12 @@
   "uiExtras": {
     "paletteField": "{name}的饱和度和亮度",
     "paletteFieldValue": "饱和度 {saturation}%，亮度 {brightness}%",
-    "paletteHue": "{name}的色相"
+    "paletteHue": "{name}的色相",
+    "showValue": "显示内容",
+    "maskValue": "隐藏内容",
+    "discardUnsavedTitle": "放弃未保存的更改？",
+    "discardUnsavedDescription": "你有未保存的更改。离开此页面并放弃它们？",
+    "discardChanges": "放弃"
   },
   "voiceChat": {
     "addToVoice": "添加到语音",
@@ -3847,6 +3880,10 @@
     "dashboardError": "仪表盘错误",
     "accessDenied": "无权访问",
     "dashboardUnavailable": "仪表盘不可用",
+    "workItemNotFoundTitle": "找不到工作项",
+    "workItemNotFoundBody": "这个工作项可能已被删除，或者链接有误。",
+    "backToDashboard": "返回仪表盘",
+    "backToMessages": "返回消息",
     "loadFailed": "TeamHub 无法加载工作项。",
     "tryingAgain": "正在重试…",
     "workItemUnavailable": "这个工作区中没有这个工作项。",

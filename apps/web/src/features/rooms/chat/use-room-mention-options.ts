@@ -13,10 +13,12 @@ import {
 
 export function useRoomMentionOptions({
   client,
+  currentActorId,
   members,
   tenantId,
 }: {
   client: TeamHubClient;
+  currentActorId?: string;
   members: TeamHubRoomMemberPage;
   tenantId: string;
 }) {
@@ -61,12 +63,21 @@ export function useRoomMentionOptions({
     members.items,
   ]);
   const mentionOptions = useMemo(() => {
-    const actors = [];
+    const otherAgents = [];
+    const otherHumans = [];
+    const selfActors = [];
     for (const member of members.items) {
-      if (!blockedAgentIds.has(member.actor.id)) actors.push(member.actor);
+      if (blockedAgentIds.has(member.actor.id)) continue;
+      if (currentActorId && member.actor.id === currentActorId) {
+        selfActors.push(member.actor);
+      } else if (member.actor.kind === "agent") {
+        otherAgents.push(member.actor);
+      } else {
+        otherHumans.push(member.actor);
+      }
     }
-    return actors;
-  }, [blockedAgentIds, members.items]);
+    return [...otherAgents, ...otherHumans, ...selfActors];
+  }, [blockedAgentIds, currentActorId, members.items]);
 
   return {
     agentAvailability,

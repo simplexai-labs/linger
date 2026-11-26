@@ -17,7 +17,6 @@ export const computerSetupMessages = defineMessages("computerSetup", {
   checkingNew: "Checking for a new Local Computer...",
   checkingOnline: "Checking for an online Local Computer...",
   operatingSystem: "Computer operating system",
-  chooseOperatingSystem: "Choose operating system",
   copyCommand: "Copy command",
   commandCopied: "Command copied",
   commandSelected: "Command selected",

@@ -130,7 +130,7 @@ export function MermaidSvgPreview({
       </div>
       <div
         ref={viewport}
-        className="mermaid-svg-preview__viewport workspace-scrollbar"
+        className="mermaid-svg-preview__viewport workspace-scrollbar touch-none"
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- keyboard-focusable scroll region so keyboard users can scroll it
         tabIndex={0}
         role="region"
@@ -144,7 +144,7 @@ export function MermaidSvgPreview({
             left: element.scrollLeft,
             top: element.scrollTop,
           };
-          element.setPointerCapture(event.pointerId);
+          element.setPointerCapture?.(event.pointerId);
         }}
         onPointerMove={(event) => {
           if (!drag.current) return;

@@ -73,6 +73,7 @@ export function useRoomChatConversationState({
   const { agentAvailability, agentDirectory, mentionOptions } =
     useRoomMentionOptions({
       client,
+      currentActorId,
       members,
       tenantId,
     });

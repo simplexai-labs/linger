@@ -880,6 +880,34 @@ describe("VoiceFocusSurface", () => {
       expect(await screen.findByText(allowAccess)).toBeVisible();
     });
   });
+
+  it("navigates Transcript and Ask tabs with roving tabindex and arrow keys", () => {
+    const onViewChange = vi.fn();
+    render(
+      <VoiceControlContext.Provider value={voiceValue()}>
+        <VoiceFocusSurface
+          onExit={vi.fn()}
+          onViewChange={onViewChange}
+          panels={{
+            ask: <div>Ask panel</div>,
+            askComposer: <div>Composer</div>,
+          }}
+          view="transcript"
+        />
+      </VoiceControlContext.Provider>,
+    );
+
+    const transcript = screen.getByRole("tab", { name: "Transcript" });
+    const ask = screen.getByRole("tab", { name: "Ask" });
+
+    expect(transcript).toHaveAttribute("tabindex", "0");
+    expect(ask).toHaveAttribute("tabindex", "-1");
+
+    transcript.focus();
+    fireEvent.keyDown(transcript, { key: "ArrowRight" });
+    expect(onViewChange).toHaveBeenCalledWith("ask");
+    expect(ask).toHaveFocus();
+  });
 });
 
 function stubMicrophonePermission(result: Promise<PermissionStatus>) {

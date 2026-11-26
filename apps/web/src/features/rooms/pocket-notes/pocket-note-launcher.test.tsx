@@ -17,6 +17,10 @@ import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
 
 import type { VoiceModeEvent } from "../chat/voice-mode/voice-mode-controller";
 import { PocketNoteLauncher } from "./pocket-note-launcher";
+import {
+  localCalendarDateKey,
+  resolvePocketNoteTodayDisplayDate,
+} from "./pocket-note-panel";
 
 const voice = vi.hoisted(() => ({
   open: vi.fn(),
@@ -193,6 +197,72 @@ describe("PocketNoteLauncher", () => {
         value: originalHeight,
       });
     }
+  });
+
+  it("matches wider sidebar columns so no slivers peek out behind the right edge", async () => {
+    const originalWidth = window.innerWidth;
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1440,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 900,
+    });
+    try {
+      const runtime = createTestTeamHubRuntime();
+      runtime.server.on("GET", "/v0/tenants/{tenantId}/me/pocket-notes", () =>
+        Promise.resolve(page),
+      );
+      const { container } = render(
+        <QueryClientProvider client={new QueryClient()}>
+          <TeamHubRuntimeProvider runtime={runtime}>
+            <nav className="app-secondary-navigation">
+              <PocketNoteLauncher tenantId="tenant-1" />
+            </nav>
+          </TeamHubRuntimeProvider>
+        </QueryClientProvider>,
+      );
+
+      const sidebar = container.querySelector(".app-secondary-navigation")!;
+      vi.spyOn(sidebar, "getBoundingClientRect").mockReturnValue(
+        new DOMRect(66, 0, 380, 900),
+      );
+      const button = screen.getByRole("button", { name: "Pocket Notes" });
+      vi.spyOn(button, "getBoundingClientRect").mockReturnValue(
+        new DOMRect(66, 12, 160, 36),
+      );
+
+      fireEvent.click(button);
+      const dialog = await screen.findByRole("dialog", {
+        name: "Pocket notes",
+      });
+      expect(dialog.style.left).toBe("66px");
+      expect(dialog.style.width).toBe("380px");
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalWidth,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalHeight,
+      });
+    }
+  });
+
+  it("uses the user's local calendar date for Today when the server date lags by timezone", () => {
+    // Local 02:30 on Nov 26 (e.g. UTC+8) when a UTC server still reports Nov 25.
+    const localMorning = new Date(2026, 10, 26, 2, 30, 0);
+    expect(localCalendarDateKey(localMorning)).toBe("2026-11-26");
+    expect(resolvePocketNoteTodayDisplayDate("2026-11-25", localMorning)).toBe(
+      "2026-11-26",
+    );
+    // Historical server fixture far from clock keeps the server date.
+    expect(resolvePocketNoteTodayDisplayDate("2026-10-01", localMorning)).toBe(
+      "2026-10-01",
+    );
   });
 
   it("opens on today's blank page and autosaves what the Human writes", async () => {

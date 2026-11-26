@@ -450,6 +450,27 @@ function RoomSurfaceContent({
     setSearchParams(roomProfileSearchParams(searchParams));
   }
 
+  function handleHeaderChipClick() {
+    const headerPeer =
+      presentationRoom.direct_peer?.kind === "agent"
+        ? presentationRoom.direct_peer
+        : undefined;
+    const headerTabId = headerPeer
+      ? panelTabKey("agentInfo", { actorId: headerPeer.id })
+      : panelTabKey("roomSettings", {});
+    if (panelVisible && readPanelTabState(scope).activeTabId === headerTabId) {
+      closePanel();
+      return;
+    }
+    if (headerPeer) openProfile(headerPeer.id);
+    else {
+      openPanelTab({
+        kind: "roomSettings",
+        title: PANEL_COLLECTION_TAB_TITLES.roomSettings,
+      });
+    }
+  }
+
   return (
     <RoomChromeProvider value={roomOutletContext}>
       <RoomCollaborationScope
@@ -484,16 +505,10 @@ function RoomSurfaceContent({
                 isChatView={isChatView}
                 members={members.items}
                 onAppliedRoomSeq={setLastAppliedRoomSeq}
+                onHeaderChipClick={handleHeaderChipClick}
                 onMessageCreated={openCanvasMessage}
                 onTeamMdPublished={openCollaboration}
-                onOpenAgent={openProfile}
                 onOpenDelete={() => setDeleteOpen(true)}
-                onOpenSettings={() =>
-                  openPanelTab({
-                    kind: "roomSettings",
-                    title: PANEL_COLLECTION_TAB_TITLES.roomSettings,
-                  })
-                }
                 onTogglePanel={togglePanel}
                 onStatusChange={setRealtimeStatus}
                 canDeleteDeletedAgentRoom={canDeleteDeletedAgentRoom}
@@ -747,11 +762,10 @@ function RoomHeader({
   isChatView,
   members,
   onAppliedRoomSeq,
+  onHeaderChipClick,
   onMessageCreated,
   onTeamMdPublished,
-  onOpenAgent,
   onOpenDelete,
-  onOpenSettings,
   onTogglePanel,
   onStatusChange,
   panelOpen,
@@ -768,11 +782,10 @@ function RoomHeader({
   isChatView: boolean;
   members: TeamHubRoomMember[];
   onAppliedRoomSeq: (roomSeq: number) => void;
+  onHeaderChipClick: () => void;
   onMessageCreated: (message: TeamHubMessage) => void;
   onTeamMdPublished: () => void;
-  onOpenAgent: (actorId: string) => void;
   onOpenDelete: () => void;
-  onOpenSettings: () => void;
   onTogglePanel: () => void;
   onStatusChange: (status: RoomRealtimeStatus) => void;
   panelOpen: boolean;
@@ -803,11 +816,7 @@ function RoomHeader({
               name: room.name,
             })}
             className="flex shrink-0 items-center justify-center rounded-full after:absolute after:inset-0 after:rounded-full after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-app-focus"
-            onClick={() => {
-              if (panelOpen) onTogglePanel();
-              else if (headerPeer) onOpenAgent(headerPeer.id);
-              else onOpenSettings();
-            }}
+            onClick={onHeaderChipClick}
           >
             {headerPeer ? (
               <span className="relative block">

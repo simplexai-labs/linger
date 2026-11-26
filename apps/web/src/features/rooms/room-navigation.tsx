@@ -136,7 +136,9 @@ export function RoomNavigation({
         <nav
           aria-label={t(navigationMessages.primary)}
           data-voice-area="navigation"
-          className="app-primary-navigation flex min-h-0 shrink-0 flex-col bg-card"
+          className={`app-primary-navigation flex min-h-0 shrink-0 flex-col bg-card ${
+            expanded ? "" : "max-md:!w-[60px]"
+          }`}
         >
           <div className="primary-navigation-topbar">
             {expanded ? (
@@ -193,10 +195,15 @@ export function RoomNavigation({
               </button>
             </div>
           ) : null}
-          <div className="primary-navigation-items min-h-0 flex-1">
+          <div
+            className={`primary-navigation-items min-h-0 flex-1 ${
+              expanded ? "" : "max-md:!px-2"
+            }`}
+          >
             <RailLink
               active={roomNavigationVisible}
-              icon={<RoomRailGlyph icon={Message01Icon} />}
+              expanded={expanded}
+              icon={<RoomRailGlyph expanded={expanded} icon={Message01Icon} />}
               label={t(navigationMessages.messages)}
               onNavigate={onCloseMobile}
               to={
@@ -207,21 +214,24 @@ export function RoomNavigation({
             />
             <RailLink
               active={workspaceVisible}
-              icon={<RoomRailGlyph icon={LibrariesIcon} />}
+              expanded={expanded}
+              icon={<RoomRailGlyph expanded={expanded} icon={LibrariesIcon} />}
               label={t(navigationMessages.library)}
               onNavigate={onCloseMobile}
               to={`/t/${tenant.id}/library`}
             />
             <RailLink
               active={wikiVisible}
-              icon={<RoomRailGlyph icon={BookOpen01Icon} />}
+              expanded={expanded}
+              icon={<RoomRailGlyph expanded={expanded} icon={BookOpen01Icon} />}
               label={t(navigationMessages.wiki)}
               onNavigate={onCloseMobile}
               to={`/t/${tenant.id}/library/wiki`}
             />
             <RailLink
               active={effectivePathname === `/t/${tenant.id}/apps`}
-              icon={<RoomRailGlyph icon={Plug01Icon} />}
+              expanded={expanded}
+              icon={<RoomRailGlyph expanded={expanded} icon={Plug01Icon} />}
               label={t(navigationMessages.connectors)}
               onNavigate={onCloseMobile}
               to={`/t/${tenant.id}/apps`}
@@ -262,10 +272,18 @@ export function RoomNavigation({
   );
 }
 
-function RoomRailGlyph({ icon }: { icon: IconSvgElement }) {
+function RoomRailGlyph({
+  expanded = false,
+  icon,
+}: {
+  expanded?: boolean;
+  icon: IconSvgElement;
+}) {
   return (
     <Icon
-      className="room-rail-glyph pointer-events-none size-5 shrink-0"
+      className={`room-rail-glyph pointer-events-none size-5 shrink-0 ${
+        expanded ? "" : "max-md:!mx-0"
+      }`}
       icon={icon}
       size={20}
     />
@@ -274,12 +292,14 @@ function RoomRailGlyph({ icon }: { icon: IconSvgElement }) {
 
 function RailLink({
   active,
+  expanded,
   icon,
   label,
   onNavigate,
   to,
 }: {
   active: boolean;
+  expanded: boolean;
   icon: ReactNode;
   label: string;
   onNavigate: () => void;
@@ -290,8 +310,8 @@ function RailLink({
       aria-current={active ? "page" : undefined}
       aria-label={label}
       className={`room-rail-link flex select-none items-center ${
-        active ? "text-app-ink" : "text-app-muted"
-      }`}
+        expanded ? "" : "max-md:!justify-center"
+      } ${active ? "text-app-ink" : "text-app-muted"}`}
       onClick={onNavigate}
       to={to}
     >
