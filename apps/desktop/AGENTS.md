@@ -541,8 +541,8 @@ Gateway and runs Agents. The daemon exits with the app.
   is open the page is not background-throttled. Only a window the main page
   itself opened is kept; one from a frame in it is destroyed. It opens at the
   bottom right of the main window's screen and resizes down to 240x96. Its
-  title is the one the page gives it in the interface language ("Meeting",
-  "会议"); a blank title keeps "Linger". It is moved by its native title bar,
+  title is the one the page gives it in the interface language (in English,
+  "Meeting"); a blank title keeps "Linger". It is moved by its native title bar,
   cannot be minimized, and its close button ends the call or the recording;
   it has no way back into the page or to the main window, and the app has no
   in-page voice windows. `lingerDesktop.voiceWindow.floats` tells the SPA the

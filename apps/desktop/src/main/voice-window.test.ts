@@ -188,8 +188,9 @@ describe("adoptVoiceWindow", () => {
     const f = fakes();
     adopt(f);
     const event = { preventDefault: vi.fn() };
-    f.child.emit("page-title-updated", event, "会议");
-    expect(f.child.setTitle).toHaveBeenCalledWith("会议");
+    // "Meeting" in Chinese.
+    f.child.emit("page-title-updated", event, "\u4f1a\u8bae");
+    expect(f.child.setTitle).toHaveBeenCalledWith("\u4f1a\u8bae");
     f.child.emit("page-title-updated", event, "  ");
     expect(f.child.setTitle).toHaveBeenCalledOnce();
   });
