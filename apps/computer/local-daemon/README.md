@@ -414,8 +414,10 @@ the `byok_endpoint` service feature. `localmodels` writes
 non-harness paths from before the rewrite alongside any `runtime_paths` that
 `apply` reported, without pinning paths inside `<home>/runtime/harness`. The
 Daemon re-reads the file on every discovery tick to overlay the Runtimes'
-environment (`OverlayEnvironment`) and executable paths (`OverlayRuntimePaths`),
-scanning `<home>/runtime/harness/bin/<runtime>` and the highest-version
+environment (`OverlayEnvironment`) and executable paths
+(`ResolveRuntimePathsWithBundled`, which keeps harness-managed Pi in
+`ManagedPaths` after user `PATH` and before bundled Pi), scanning
+`<home>/runtime/harness/bin/<runtime>` and the highest-version
 `<home>/runtime/harness/tools/<runtime>/<version>/<runtime>` on each read so
 managed Runtime updates take effect without rewriting `model-source.json`. It
 also drops any stale `byok-home` entry in `local` mode in favor of the managed

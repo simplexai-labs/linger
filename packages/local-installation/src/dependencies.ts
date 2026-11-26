@@ -20,6 +20,12 @@ export interface PreparationOptions {
   /** Desktop installers use the OS agent; passwords never pass through Linger. */
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
+  /**
+   * When true for `pi`, binds the verified bundled Pi directly instead of
+   * running `localmodels harness plan` and `apply` when no higher-precedence
+   * Pi exists.
+   */
+  skipHarnessWhenBundledPiMatches?: boolean;
 }
 export async function prepareDependencies(
   options: PreparationOptions,

@@ -30,6 +30,64 @@ describe("ActionMenu", () => {
     fireEvent.pointerLeave(screen.getByRole("menu"));
     await vi.waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   });
+  it("keeps a tapped hover menu's dismissal from reaching the control below", () => {
+    render(
+      <ActionMenu
+        openOnHover
+        label="Agent"
+        items={[{ label: "Open Agent Info" }]}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Agent" });
+    // On touch a hover menu opens by tap, so the tap is the person using it.
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu")).toBeVisible();
+
+    const under = document.createElement("button");
+    const onUnder = vi.fn();
+    under.addEventListener("click", onUnder);
+    document.body.append(under);
+    try {
+      fireEvent.pointerDown(under, {
+        button: 0,
+        pointerId: 1,
+        pointerType: "touch",
+      });
+      fireEvent.click(under, { pointerId: 1 });
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(onUnder).not.toHaveBeenCalled();
+    } finally {
+      under.remove();
+    }
+  });
+
+  it("leaves a brushed hover menu's next click to the control below", () => {
+    render(
+      <ActionMenu
+        openOnHover
+        label="Agent"
+        items={[{ label: "Open Agent Info" }]}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Agent" });
+    // A pointer that merely crossed the trigger never meant to use the menu.
+    fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
+    expect(screen.getByRole("menu")).toBeVisible();
+
+    const under = document.createElement("button");
+    const onUnder = vi.fn();
+    under.addEventListener("click", onUnder);
+    document.body.append(under);
+    try {
+      fireEvent.pointerDown(under, { button: 0, pointerId: 2 });
+      fireEvent.click(under, { pointerId: 2 });
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(onUnder).toHaveBeenCalledTimes(1);
+    } finally {
+      under.remove();
+    }
+  });
+
   it("dismisses a hover card with Escape while retaining the original input focus", () => {
     render(
       <>

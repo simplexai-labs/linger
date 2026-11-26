@@ -719,3 +719,109 @@ func TestResolveExecutableEntryBundledPathsPrecedenceAndFallback(t *testing.T) {
 		t.Fatalf("missing configured non-bundled path %q unexpectedly canonicalized", got)
 	}
 }
+
+func TestResolveExecutableEntryManagedPathsPrecedenceAndFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX executable permissions")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	userBin := filepath.Join(root, "user-bin")
+	emptyBin := filepath.Join(root, "empty-bin")
+	managedBin := filepath.Join(root, "managed-bin")
+	bundledBin := filepath.Join(root, "bundled-bin")
+	for _, dir := range []string{home, userBin, emptyBin, managedBin, bundledBin} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	userPi := filepath.Join(userBin, "pi")
+	managedPi := filepath.Join(managedBin, "pi")
+	bundledPi := filepath.Join(bundledBin, "pi")
+	configuredPi := filepath.Join(root, "configured-pi")
+	for _, file := range []string{userPi, managedPi, bundledPi, configuredPi} {
+		if err := os.WriteFile(file, []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Valid ConfiguredPaths beats PATH, ManagedPaths, and BundledPaths.
+	got, err := resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": configuredPi},
+		ManagedPaths:    map[string]string{"pi": managedPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != configuredPi {
+		t.Fatalf("configured vs PATH/managed/bundled: got %q, %v; want %q", got, err, configuredPi)
+	}
+
+	// User PATH beats ManagedPaths and BundledPaths.
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ManagedPaths: map[string]string{"pi": managedPi},
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != userPi {
+		t.Fatalf("user PATH vs managed/bundled: got %q, %v; want %q", got, err, userPi)
+	}
+
+	// ManagedPaths beats BundledPaths when user PATH has no pi.
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ManagedPaths: map[string]string{"pi": managedPi},
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != managedPi {
+		t.Fatalf("managed vs bundled on empty PATH: got %q, %v; want %q", got, err, managedPi)
+	}
+
+	// Stale ManagedPaths falls through to BundledPaths.
+	staleManagedPi := filepath.Join(root, "missing-managed", "pi")
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ManagedPaths: map[string]string{"pi": staleManagedPi},
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != bundledPi {
+		t.Fatalf("stale managed fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	}
+
+	// Stale ConfiguredPaths falls back through PATH -> ManagedPaths -> BundledPaths.
+	staleConfiguredPi := filepath.Join(root, "missing-configured", "pi")
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": staleConfiguredPi},
+		ManagedPaths:    map[string]string{"pi": managedPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != userPi {
+		t.Fatalf("stale configured fallback to PATH: got %q, %v; want %q", got, err, userPi)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": staleConfiguredPi},
+		ManagedPaths:    map[string]string{"pi": managedPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != managedPi {
+		t.Fatalf("stale configured fallback to managed: got %q, %v; want %q", got, err, managedPi)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": staleConfiguredPi},
+		ManagedPaths:    map[string]string{"pi": managedPi},
+		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != managedPi {
+		t.Fatalf("stale configured fallback to managed without bundled: got %q, %v; want %q", got, err, managedPi)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": staleConfiguredPi},
+		ManagedPaths:    map[string]string{"pi": staleManagedPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != bundledPi {
+		t.Fatalf("stale configured and managed fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	}
+}

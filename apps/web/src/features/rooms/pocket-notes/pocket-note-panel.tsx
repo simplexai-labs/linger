@@ -1,3 +1,4 @@
+import { suppressFollowUpClick } from "@/components/ui/suppress-follow-up-click";
 import {
   ArrowLeft01Icon,
   Cancel01Icon,
@@ -117,6 +118,8 @@ export default function PocketNotePanel({
       ) {
         return;
       }
+      // The paired click would otherwise activate the control under the panel.
+      if ((event.button ?? 0) === 0) suppressFollowUpClick(event);
       latestClose.current();
     }
     function closeOnEscape(event: KeyboardEvent) {

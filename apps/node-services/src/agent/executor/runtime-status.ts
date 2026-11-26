@@ -162,8 +162,14 @@ const toContractEvent = (
   update: RuntimeStatusUpdate,
 ): OfferedEvent["event"] => {
   if (update.type === "status.changed") {
-    if (update.status !== "working" && update.status !== "thinking") {
-      throw new TypeError("Runtime status must be working or thinking");
+    if (
+      update.status !== "working" &&
+      update.status !== "thinking" &&
+      update.status !== "waiting_background"
+    ) {
+      throw new TypeError(
+        "Runtime status must be working, thinking, or waiting_background",
+      );
     }
     if (update.title !== undefined) {
       if (
@@ -172,7 +178,7 @@ const toContractEvent = (
         [...update.title].length > 50_000
       ) {
         throw new TypeError(
-          "Runtime thinking title must be a non-empty string of at most 50000 characters",
+          "Runtime status title must be a non-empty string of at most 50000 characters",
         );
       }
     }

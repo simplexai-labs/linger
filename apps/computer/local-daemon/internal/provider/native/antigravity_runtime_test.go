@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -452,12 +455,17 @@ func TestAntigravityTurnKeepsDefaultGeminiDir(t *testing.T) {
 		Args      []string `json:"args"`
 		GeminiDir string   `json:"geminiDir"`
 		LogFile   string   `json:"logFile"`
+		AddDir    string   `json:"addDir"`
 	}
 	if err := json.Unmarshal(rawMeta, &meta); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(meta.Args, []string{"acp"}) || meta.GeminiDir != "" || meta.LogFile != "" {
-		t.Fatalf("real turns must keep default agy store: %+v", meta)
+	ep, epErr := AntigravitySharedHookEndpoint()
+	if epErr != nil {
+		t.Fatal(epErr)
+	}
+	if !reflect.DeepEqual(meta.Args, []string{"acp", "--add-dir", ep.Dir()}) || meta.GeminiDir != "" || meta.LogFile != "" || meta.AddDir != ep.Dir() {
+		t.Fatalf("real turns must keep default agy store with only managed --add-dir: %+v", meta)
 	}
 }
 
@@ -602,4 +610,347 @@ func TestAntigravityBoundsTheBackgroundWait(t *testing.T) {
 	if outcome.Status != statusCompleted || outcome.Output != "Running in the background." {
 		t.Fatalf("outcome=%+v", outcome)
 	}
+}
+
+func TestAntigravitySteersMidTurnViaPreInvocationHook(t *testing.T) {
+	h := newAgyHarness(t, "steer-hook", nil)
+	run, err := h.runtime.Start(t.Context(), "start task", RunSpec{Dir: h.dir, ExposeTurnStarted: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Steer == nil {
+		t.Fatal("Run.Steer is nil for Antigravity")
+	}
+
+	var turnID string
+	var events []Event
+	steerStarted := false
+	steerRes := make(chan error, 1)
+	var steerAck SteerAck
+
+	timeout := time.After(15 * time.Second)
+drain:
+	for {
+		select {
+		case event, ok := <-run.Events:
+			if !ok {
+				break drain
+			}
+			events = append(events, event)
+			if event.Kind == EventStatus && event.TurnID != "" {
+				turnID = event.TurnID
+			}
+			if event.Kind == EventToolCall && !steerStarted {
+				steerStarted = true
+				go func() {
+					var steerErr error
+					steerAck, steerErr = run.Steer(t.Context(), SteerRequest{ExpectedTurnID: turnID, Input: "BANANA_STEER"})
+					steerRes <- steerErr
+				}()
+			}
+		case <-timeout:
+			t.Fatal("steer-hook run did not finish")
+		}
+	}
+	outcome := <-run.Outcome
+	if err := <-steerRes; err != nil || steerAck.TurnID != turnID {
+		t.Fatalf("steer ack=%+v err=%v want turnID=%q", steerAck, err, turnID)
+	}
+	if outcome.Status != statusCompleted || outcome.Output != "STEERED:BANANA_STEER" {
+		t.Fatalf("outcome=%+v events=%+v", outcome, events)
+	}
+}
+
+func TestAntigravityWaitingBackgroundStopHookAndPathBWake(t *testing.T) {
+	h := newAgyHarness(t, "waiting-background-v2", nil)
+	run, err := h.runtime.Start(t.Context(), "schedule work", RunSpec{Dir: h.dir, ExposeTurnStarted: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var turnID string
+	var events []Event
+	woken := make(chan error, 1)
+	var wakeAck SteerAck
+
+	timeout := time.After(15 * time.Second)
+drain:
+	for {
+		select {
+		case event, ok := <-run.Events:
+			if !ok {
+				break drain
+			}
+			events = append(events, event)
+			if event.Kind == EventStatus && event.TurnID != "" {
+				turnID = event.TurnID
+			}
+			if event.Kind == EventBackgroundWaiting {
+				if len(event.BackgroundTools) != 1 || event.BackgroundTools[0].ToolName != "schedule" {
+					t.Fatalf("unexpected background tools: %+v", event.BackgroundTools)
+				}
+				go func() {
+					var steerErr error
+					wakeAck, steerErr = run.Steer(t.Context(), SteerRequest{ExpectedTurnID: turnID, Input: "check now"})
+					woken <- steerErr
+				}()
+			}
+		case <-timeout:
+			t.Fatal("waiting-background-v2 run did not finish")
+		}
+	}
+	outcome := <-run.Outcome
+	if err := <-woken; err != nil || wakeAck.TurnID != turnID {
+		t.Fatalf("wake steer ack=%+v err=%v", wakeAck, err)
+	}
+	if outcome.Status != statusCompleted || outcome.Output != "Woken:check now" {
+		t.Fatalf("outcome=%+v", outcome)
+	}
+	if usage := outcome.Usage[antigravityDefaultModel]; usage.Input != 30 || usage.Output != 7 {
+		t.Fatalf("aggregated usage=%+v, want input=30 output=7", usage)
+	}
+	var resumed []Event
+	for _, ev := range events {
+		if ev.Kind == EventBackgroundResumed {
+			resumed = append(resumed, ev)
+		}
+	}
+	if len(resumed) != 1 || resumed[0].BackgroundTrigger != "user_input" {
+		t.Fatalf("resumed=%+v", resumed)
+	}
+}
+
+func TestAntigravityLegacyAwaitBackgroundWakesOnSteer(t *testing.T) {
+	quiet := antigravityQuietWindow
+	antigravityQuietWindow = 250 * time.Millisecond
+	t.Cleanup(func() { antigravityQuietWindow = quiet })
+
+	h := newAgyHarness(t, "background-wake", nil)
+	run, err := h.runtime.Start(t.Context(), "start bg", RunSpec{Dir: h.dir, ExposeTurnStarted: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var turnID string
+	var sawWaiting bool
+	var sawResumed bool
+	woken := make(chan error, 1)
+	timeout := time.After(15 * time.Second)
+drain:
+	for {
+		select {
+		case event, ok := <-run.Events:
+			if !ok {
+				break drain
+			}
+			if event.Kind == EventStatus && event.TurnID != "" {
+				turnID = event.TurnID
+			}
+			if event.Kind == EventBackgroundWaiting {
+				sawWaiting = true
+				go func() {
+					_, steerErr := run.Steer(t.Context(), SteerRequest{ExpectedTurnID: turnID, Input: "wake legacy"})
+					woken <- steerErr
+				}()
+			}
+			if event.Kind == EventBackgroundResumed && event.BackgroundTrigger == "user_input" {
+				sawResumed = true
+			}
+		case <-timeout:
+			t.Fatal("background-wake run did not finish")
+		}
+	}
+	outcome := <-run.Outcome
+	if err := <-woken; err != nil {
+		t.Fatalf("wake steer err=%v", err)
+	}
+	if !sawWaiting || !sawResumed || outcome.Status != statusCompleted || !strings.Contains(outcome.Output, "WokenLegacy:wake legacy") {
+		t.Fatalf("sawWaiting=%v sawResumed=%v outcome=%+v", sawWaiting, sawResumed, outcome)
+	}
+}
+
+func TestAntigravitySteerRefusalsAndCancellation(t *testing.T) {
+	h := newAgyHarness(t, "hang", nil)
+	ctx, cancelRun := context.WithCancel(t.Context())
+	run, err := h.runtime.Start(ctx, "hang", RunSpec{Dir: h.dir, ExposeTurnStarted: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := <-run.Events
+	turnID := started.TurnID
+	if turnID == "" {
+		t.Fatal("expected TurnID on started event")
+	}
+
+	// Mismatched turn ID is rejected with target_mismatch.
+	var steerErr *SteerError
+	if _, err := run.Steer(t.Context(), SteerRequest{ExpectedTurnID: "wrong-turn", Input: "x"}); !errors.As(err, &steerErr) || steerErr.Effect != "definitely_not_applied" || steerErr.Reason != "target_mismatch" || steerErr.ActualTurnID != turnID {
+		t.Fatalf("mismatch err=%v steerErr=%+v", err, steerErr)
+	}
+
+	// Cancelling the steer context withdraws unconsumed steer cleanly.
+	steerCtx, cancelSteer := context.WithCancel(t.Context())
+	steerDone := make(chan error, 1)
+	go func() {
+		_, err := run.Steer(steerCtx, SteerRequest{ExpectedTurnID: turnID, Input: "withdrawn"})
+		steerDone <- err
+	}()
+	time.Sleep(30 * time.Millisecond)
+	cancelSteer()
+	steerErr = nil
+	if err := <-steerDone; !errors.As(err, &steerErr) || steerErr.Effect != "definitely_not_applied" {
+		t.Fatalf("withdrawn steer err=%v steerErr=%+v", err, steerErr)
+	}
+
+	// Ending the turn while a steer is queued rejects it with definitely_not_applied.
+	pendingErr := make(chan error, 1)
+	go func() {
+		_, err := run.Steer(t.Context(), SteerRequest{ExpectedTurnID: turnID, Input: "too late"})
+		pendingErr <- err
+	}()
+	time.Sleep(30 * time.Millisecond)
+	cancelRun()
+	drainAgy(t, run)
+	steerErr = nil
+	if err := <-pendingErr; !errors.As(err, &steerErr) || steerErr.Effect != "definitely_not_applied" || steerErr.Reason != "no_active_turn" {
+		t.Fatalf("ended steer err=%v steerErr=%+v", err, steerErr)
+	}
+
+	// Steering after turn completion is also rejected.
+	steerErr = nil
+	if _, err := run.Steer(t.Context(), SteerRequest{ExpectedTurnID: turnID, Input: "after"}); !errors.As(err, &steerErr) || steerErr.Effect != "definitely_not_applied" || steerErr.Reason != "no_active_turn" {
+		t.Fatalf("post-end steer err=%v steerErr=%+v", err, steerErr)
+	}
+}
+
+func TestAntigravityEmptyWakeDoesNotWedgeTurn(t *testing.T) {
+	t.Run("finishes_after_withdrawn_steer", func(t *testing.T) {
+		quiet := antigravityQuietWindow
+		antigravityQuietWindow = 600 * time.Millisecond
+		t.Cleanup(func() { antigravityQuietWindow = quiet })
+		t.Cleanup(func() { antigravityBeforeWakePrompt = nil })
+
+		h := newAgyHarness(t, "background", nil)
+		run, err := h.runtime.Start(t.Context(), "run bg", RunSpec{Dir: h.dir, ExposeTurnStarted: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		steerCtx, cancelSteer := context.WithCancel(t.Context())
+		defer cancelSteer()
+		steerDone := make(chan error, 1)
+		var steerErrResult error
+		intercepted := make(chan struct{})
+		var interceptOnce sync.Once
+		antigravityBeforeWakePrompt = func() {
+			interceptOnce.Do(func() {
+				cancelSteer()
+				select {
+				case steerErrResult = <-steerDone:
+				case <-time.After(5 * time.Second):
+				}
+				close(intercepted)
+			})
+		}
+
+		var turnID string
+		var steerStarted bool
+		timeout := time.After(15 * time.Second)
+	drain:
+		for {
+			select {
+			case event, ok := <-run.Events:
+				if !ok {
+					break drain
+				}
+				if event.Kind == EventStatus && event.TurnID != "" {
+					turnID = event.TurnID
+				}
+				if event.Kind == EventBackgroundWaiting && !steerStarted {
+					steerStarted = true
+					id := turnID
+					go func() {
+						_, steerErr := run.Steer(steerCtx, SteerRequest{ExpectedTurnID: id, Input: "withdrawn wake"})
+						steerDone <- steerErr
+					}()
+				}
+			case <-timeout:
+				t.Fatal("background run wedged after empty wake")
+			}
+		}
+		select {
+		case <-intercepted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("expected empty wake interception")
+		}
+		var steerErr *SteerError
+		if !errors.As(steerErrResult, &steerErr) || steerErr.Effect != "definitely_not_applied" {
+			t.Fatalf("steerErr=%v", steerErrResult)
+		}
+		outcome := <-run.Outcome
+		if outcome.Status != statusCompleted || !strings.Contains(outcome.Output, "Found a.txt") {
+			t.Fatalf("outcome=%+v", outcome)
+		}
+	})
+
+	t.Run("cancels_after_withdrawn_steer", func(t *testing.T) {
+		t.Cleanup(func() { antigravityBeforeWakePrompt = nil })
+
+		h := newAgyHarness(t, "background-stuck", nil)
+		runCtx, cancelRun := context.WithCancel(t.Context())
+		defer cancelRun()
+		run, err := h.runtime.Start(runCtx, "stuck bg", RunSpec{Dir: h.dir, ExposeTurnStarted: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		steerCtx, cancelSteer := context.WithCancel(t.Context())
+		defer cancelSteer()
+		steerDone := make(chan error, 1)
+		intercepted := make(chan struct{})
+		var interceptOnce sync.Once
+		antigravityBeforeWakePrompt = func() {
+			interceptOnce.Do(func() {
+				cancelSteer()
+				select {
+				case <-steerDone:
+				case <-time.After(5 * time.Second):
+				}
+				close(intercepted)
+			})
+		}
+
+		var turnID string
+		var steerStarted bool
+		timeout := time.After(15 * time.Second)
+	waitIntercept:
+		for {
+			select {
+			case event, ok := <-run.Events:
+				if !ok {
+					t.Fatal("run ended unexpectedly before cancellation")
+				}
+				if event.Kind == EventStatus && event.TurnID != "" {
+					turnID = event.TurnID
+				}
+				if event.Kind == EventBackgroundWaiting && !steerStarted {
+					steerStarted = true
+					id := turnID
+					go func() {
+						_, steerErr := run.Steer(steerCtx, SteerRequest{ExpectedTurnID: id, Input: "withdrawn wake"})
+						steerDone <- steerErr
+					}()
+				}
+			case <-intercepted:
+				break waitIntercept
+			case <-timeout:
+				t.Fatal("timed out waiting for empty wake interception")
+			}
+		}
+		cancelRun()
+		_, outcome := drainAgy(t, run)
+		if outcome.Status != statusAborted {
+			t.Fatalf("outcome=%+v, want aborted", outcome)
+		}
+	})
 }

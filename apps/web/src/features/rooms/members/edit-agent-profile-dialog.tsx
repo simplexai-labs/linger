@@ -104,11 +104,6 @@ export function EditAgentProfileDialog({
 
   return (
     <ModalDialog
-      description={
-        canEditName
-          ? t(agentInfoMessages.profileDescription)
-          : t(agentInfoMessages.avatarDescription)
-      }
       onClose={onClose}
       size="md"
       title={t(

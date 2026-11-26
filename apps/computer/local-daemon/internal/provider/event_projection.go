@@ -12,9 +12,10 @@ import (
 )
 
 type eventProjection struct {
-	operationID string
-	canYield    bool
-	tools       map[string]string
+	operationID            string
+	canYield               bool
+	supportsBackgroundWait bool
+	tools                  map[string]string
 	// quiet holds tool calls that stay in history without a Room activity.
 	quiet map[string]bool
 	// receipts holds the tool calls that create a Task, whose output is
@@ -34,6 +35,60 @@ type eventProjection struct {
 // title. Thinking without a title gets one from its text, the way Codex
 // titles its reasoning summaries.
 func (projection *eventProjection) project(message native.Event) []any {
+	if message.Kind == native.EventBackgroundWaiting {
+		if !projection.supportsBackgroundWait {
+			return nil
+		}
+		projection.thinking, projection.thinkingTitle = false, ""
+		projection.reasoning, projection.titled = "", false
+		observedAt := message.ObservedAt
+		if observedAt.IsZero() {
+			observedAt = time.Now()
+		}
+		tools := make([]map[string]any, 0, len(message.BackgroundTools))
+		for _, tool := range message.BackgroundTools {
+			toolName := clip(tool.ToolName, 200)
+			if toolName == "" {
+				toolName = "provider_tool"
+			}
+			callID := tool.CallID
+			if callID == "" {
+				callID = stableEventID("call", projection.operationID+"\x00"+toolName)
+			}
+			startedAt := tool.StartedAt
+			if startedAt.IsZero() {
+				startedAt = observedAt
+			}
+			tools = append(tools, map[string]any{
+				"call_id":            callID,
+				"tool_name":          toolName,
+				"started_at_unix_ms": startedAt.UnixMilli(),
+			})
+		}
+		return []any{map[string]any{
+			"type":                "run.background_waiting",
+			"observed_at_unix_ms": observedAt.UnixMilli(),
+			"tools":               tools,
+		}}
+	}
+	if message.Kind == native.EventBackgroundResumed {
+		if !projection.supportsBackgroundWait {
+			return nil
+		}
+		observedAt := message.ObservedAt
+		if observedAt.IsZero() {
+			observedAt = time.Now()
+		}
+		trigger := message.BackgroundTrigger
+		if trigger != "user_input" {
+			trigger = "background_continuation"
+		}
+		return []any{map[string]any{
+			"type":                "run.background_resumed",
+			"observed_at_unix_ms": observedAt.UnixMilli(),
+			"trigger":             trigger,
+		}}
+	}
 	if message.Kind == native.EventModelResponse {
 		if message.Response == nil {
 			return nil

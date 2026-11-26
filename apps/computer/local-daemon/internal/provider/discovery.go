@@ -74,9 +74,12 @@ type DiscoveryResult struct {
 type DiscoveryOptions struct {
 	RuntimeHomeRoot string
 	ConfiguredPaths map[string]string
-	BundledPaths    map[string]string
-	Environment     map[string]string
-	Timeout         time.Duration
+	// ManagedPaths holds installer- or harness-managed Runtime executables
+	// checked after user PATH and macOS app bundles, and before BundledPaths.
+	ManagedPaths map[string]string
+	BundledPaths map[string]string
+	Environment  map[string]string
+	Timeout      time.Duration
 	// Runtimes limits discovery to these types; empty diagnoses every Runtime.
 	Runtimes []string
 	// PreferredRuntime is the type whose diagnostic is marked Preferred.
@@ -95,6 +98,48 @@ var runtimeDefinitions = []runtimeDefinition{
 	{"claude", "claude", "stream-json"},
 	{"pi", "pi", "rpc"},
 	{"antigravity", "agy", "acp"},
+}
+
+// AllRuntimeTypes returns every supported Runtime type in canonical discovery order.
+func AllRuntimeTypes() []string {
+	types := make([]string, len(runtimeDefinitions))
+	for i, definition := range runtimeDefinitions {
+		types[i] = definition.Type
+	}
+	return types
+}
+
+// MergeRuntimeDiagnostics combines base diagnostics with additions, replacing
+// matching types and ordering known Runtimes in canonical discovery order.
+func MergeRuntimeDiagnostics(base, additions []RuntimeDiagnostic) DiscoveryResult {
+	byType := make(map[string]RuntimeDiagnostic, len(base)+len(additions))
+	for _, diagnostic := range base {
+		byType[diagnostic.Type] = diagnostic
+	}
+	for _, diagnostic := range additions {
+		byType[diagnostic.Type] = diagnostic
+	}
+	merged := make([]RuntimeDiagnostic, 0, len(byType))
+	for _, definition := range runtimeDefinitions {
+		if diagnostic, ok := byType[definition.Type]; ok {
+			merged = append(merged, diagnostic)
+			delete(byType, definition.Type)
+		}
+	}
+	if len(byType) > 0 {
+		for _, source := range [][]RuntimeDiagnostic{base, additions} {
+			for _, diagnostic := range source {
+				if value, ok := byType[diagnostic.Type]; ok {
+					merged = append(merged, value)
+					delete(byType, diagnostic.Type)
+				}
+			}
+		}
+	}
+	return DiscoveryResult{
+		Diagnostics:   merged,
+		Installations: InstallationsFromDiagnostics(merged),
+	}
 }
 
 // ValidateRuntimeSelection accepts an omitted scope or a nonempty unique supported subset.
@@ -395,7 +440,7 @@ func boundedModelCatalogError(err error) string {
 
 func resolveExecutableEntry(ctx context.Context, kind, name string, options DiscoveryOptions) (string, error) {
 	if selected := options.ConfiguredPaths[kind]; selected != "" {
-		if options.BundledPaths[kind] == "" {
+		if options.ManagedPaths[kind] == "" && options.BundledPaths[kind] == "" {
 			return selected, nil
 		}
 		if _, err := canonicalExecutable(selected); err == nil {
@@ -417,6 +462,11 @@ func resolveExecutableEntry(ctx context.Context, kind, name string, options Disc
 			if _, err := canonicalExecutable(candidate); err == nil {
 				return candidate, nil
 			}
+		}
+	}
+	if managed := options.ManagedPaths[kind]; managed != "" {
+		if _, err := canonicalExecutable(managed); err == nil {
+			return managed, nil
 		}
 	}
 	if bundled := options.BundledPaths[kind]; bundled != "" {

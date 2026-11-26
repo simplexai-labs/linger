@@ -184,7 +184,7 @@ describe("BrowserConnectionDialog", () => {
 
     expect(
       await screen.findByText(
-        "Token expired. Copy a new token from the extension, then reconnect.",
+        "Copy a new token from the extension, then reconnect.",
       ),
     ).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Replace token" }));

@@ -116,6 +116,7 @@ RUN --mount=type=cache,id=computer-go-modules,target=/root/go/pkg/mod \
         sleep $((attempt * 5)); \
     done; \
     exit 1
+COPY apps/computer/local-daemon/internal/platform ./apps/computer/local-daemon/internal/platform
 COPY apps/computer/local-daemon/cmd/linger-pi-launcher ./apps/computer/local-daemon/cmd/linger-pi-launcher
 COPY scripts/local-computer-node-distributions.mjs scripts/managed-tools-runtime-files.mjs scripts/prepare-local-computer-release.mjs scripts/publish-windows-installers.mjs ./scripts/
 COPY apps/computer/scripts/bundle-computer-tools.mjs ./apps/computer/scripts/

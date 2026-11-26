@@ -3,12 +3,11 @@
 package main
 
 import (
-	"errors"
-	"fmt"
 	"os/exec"
 	"syscall"
 	"unsafe"
 
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/winprocess"
 	"golang.org/x/sys/windows"
 )
 
@@ -30,40 +29,6 @@ func createKillOnCloseJob() (windows.Handle, error) {
 		return 0, err
 	}
 	return job, nil
-}
-
-// resumeProcess resumes the initial thread of a child started with
-// CREATE_SUSPENDED once Job Object ownership has been configured.
-func resumeProcess(pid int) error {
-	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = windows.CloseHandle(snapshot) }()
-	entry := windows.ThreadEntry32{Size: uint32(unsafe.Sizeof(windows.ThreadEntry32{}))}
-	resumed := 0
-	for err = windows.Thread32First(snapshot, &entry); err == nil; err = windows.Thread32Next(snapshot, &entry) {
-		if entry.OwnerProcessID != uint32(pid) {
-			continue
-		}
-		thread, openErr := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, entry.ThreadID)
-		if openErr != nil {
-			return openErr
-		}
-		_, resumeErr := windows.ResumeThread(thread)
-		_ = windows.CloseHandle(thread)
-		if resumeErr != nil {
-			return resumeErr
-		}
-		resumed++
-	}
-	if err != nil && !errors.Is(err, windows.ERROR_NO_MORE_FILES) {
-		return err
-	}
-	if resumed == 0 {
-		return fmt.Errorf("no initial thread for process %d", pid)
-	}
-	return nil
 }
 
 // runOwned binds the child Node process to a kill-on-close job before it
@@ -88,7 +53,7 @@ func runOwned(cmd *exec.Cmd) error {
 		_ = windows.AssignProcessToJobObject(job, process)
 		_ = windows.CloseHandle(process)
 	}
-	if err := resumeProcess(cmd.Process.Pid); err != nil {
+	if err := winprocess.Resume(cmd.Process.Pid); err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		return err

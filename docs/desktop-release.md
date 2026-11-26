@@ -240,15 +240,15 @@ linked; verify the file bytes and Agent logs separately with
 
 ## Release Files
 
-| File                                        | Contents                                                        |
-| ------------------------------------------- | --------------------------------------------------------------- |
-| `Linger-<version>-macos-arm64.dmg`          | macOS 14.0 or later, Apple silicon                              |
-| `Linger-<version>-linux-x64.tar.gz`         | Linux x64 (glibc 2.35 or newer for the bundled Native services) |
-| `Linger-<version>-windows-x64-setup.exe`    | Windows x64 per-user installer                                  |
-| `Linger-<version>-windows-x64-portable.zip` | Windows x64 folder to run without installing                    |
-| `Linger-<version>-macos-arm64.app.tar.gz`   | macOS app the updater swaps in                                  |
-| `manifest.json`, `manifest.json.sig`        | only with the update key: the [auto-update](#auto-update) feed  |
-| `SHA256SUMS.txt`                            | SHA-256 of every file above                                     |
+| File                                        | Contents                                                       |
+| ------------------------------------------- | -------------------------------------------------------------- |
+| `Linger-<version>-macos-arm64.dmg`          | macOS 14.0 or later, Apple silicon                             |
+| `Linger-<version>-linux-x64.tar.gz`         | Linux x64 (requires glibc 2.35 or newer)                       |
+| `Linger-<version>-windows-x64-setup.exe`    | Windows x64 per-user installer                                 |
+| `Linger-<version>-windows-x64-portable.zip` | Windows x64 folder to run without installing                   |
+| `Linger-<version>-macos-arm64.app.tar.gz`   | macOS app the updater swaps in                                 |
+| `manifest.json`, `manifest.json.sig`        | only with the update key: the [auto-update](#auto-update) feed |
+| `SHA256SUMS.txt`                            | SHA-256 of every file above                                    |
 
 Each package bundles the source package, PostgreSQL, voice tools, TeamHub and
 the Native services as described in
@@ -566,21 +566,27 @@ Linux with `node scripts/prepare-native-voice-tools.mjs --target <target>
 and it checks the versions, the ffmpeg components the voice workers use,
 static linking and the Mach-O signatures. Licenses ship in `licenses/` of the
 archive. On every install and start, whether or not a voice key is saved,
-Native extracts the archive into
-`tools/native/components`, puts its `bin` first on the services' `PATH`
-(TeamHub and the voice workers run `ffmpeg`/`ffprobe` from it) and runs
-`livekit-server` as the `livekit` Native service: HTTP and WebSocket signalling
-on one free `127.0.0.1` port and media on one free UDP port (bound to
-`127.0.0.1` on macOS and Linux, and to local interfaces alongside `127.0.0.1`
-with ICE-Lite on Windows because Windows blocks cross-scope UDP between
-WebRTC's non-loopback sockets and `127.0.0.1`; ICE-Lite keeps LiveKit from
-adding default public STUN servers when `node_ip` is unset, while signalling
-stays loopback-only so LAN peers cannot obtain ICE credentials; binding
-non-loopback UDP on Windows can trigger a Windows Defender Firewall prompt and
-single-port UDPMux snapshots local interfaces at startup so network changes
-require restarting LiveKit), both kept with
-the generated API key and secret in the owner-only `livekit.env` of the
-instance, logs in `native/logs/livekit.log`. ICE over TCP stays off because
+Native places the component's `bin` under `tools/native/components` first on
+the services' `PATH`, passes it to TeamHub as `TEAMHUB_VOICE_TOOLS_BIN`
+(TeamHub resolves `ffmpeg`/`ffprobe` lazily from it, and the voice workers run
+them from `PATH`), and runs `livekit-server` as the `livekit` Native service:
+HTTP and WebSocket signalling on one free `127.0.0.1` port and media on one
+free UDP port (bound to `127.0.0.1` on macOS and Linux, and to local interfaces
+alongside `127.0.0.1` with ICE-Lite on Windows because Windows blocks
+cross-scope UDP between WebRTC's non-loopback sockets and `127.0.0.1`; ICE-Lite
+keeps LiveKit from adding default public STUN servers when `node_ip` is unset,
+while signalling stays loopback-only so LAN peers cannot obtain ICE
+credentials; binding non-loopback UDP on Windows can trigger a Windows Defender
+Firewall prompt and single-port UDPMux snapshots local interfaces at startup so
+network changes require restarting LiveKit), both kept with the generated API
+key and secret in the owner-only `livekit.env` of the instance, logs in
+`native/logs/livekit.log`. On a cold first install where the archive is not yet
+extracted (and no voice provider key is configured), a detached background
+installer worker extracts and verifies the voice tools asynchronously while the
+main install temporarily holds LiveKit's loopback HTTP port so foundation
+services cannot claim it, then releases the port and signals the worker to
+start `livekit-server` once the core services are ready; subsequent starts
+reuse the extracted tools directly. ICE over TCP stays off because
 LiveKit binds it on every interface. Without the tools for the computer, or
 when they fail to prepare, Native logs it, keeps voice off, gives TeamHub
 `TEAMHUB_VOICE_MEDIA=off` and finishes the install. The macOS tools live in
@@ -599,8 +605,11 @@ refuse binaries that do not match the manifest or the bundled package
 (`packaging/native_bundle.py`). The desktop copies them into the unpacked source
 (`.simplexai-runtime/prebuilt/`), the installer checks them again and then
 skips the Go download, and `scripts/source-native.mjs` runs them (checking the
-sha256 before each start) instead of `go run` / `go build`. Without them, or
-when they do not verify, Native downloads Go and compiles as before.
+sha256 before each start) instead of `go run` / `go build`. In a full source
+checkout during development, missing or unverified binaries fall back to
+downloading Go and compiling from source; release packages ship the minimal
+offline source skeleton and fail fast if the prebuilt binaries are missing or
+corrupted.
 
 The same targets ship the services Native runs, built from that package
 (`scripts/build-native-runtime.mjs`): Web's production files and Node
@@ -622,9 +631,12 @@ manifests and seals them with a shallow signature. The desktop unpacks or
 copies the services into `.simplexai-runtime/offline/` of the source and
 copies and sha256-verifies the shared Node.js binary into its own folder,
 removing `com.apple.quarantine` on macOS; `checkNativeRuntime` then
-verifies every file, and Native installs no packages and needs no registry. On Linux the services need glibc 2.35
-(Ubuntu 22.04, Debian 12), like the PostgreSQL build; with an older glibc the
-desktop leaves them out and Native installs from the network. Model data
+verifies every file, and Native installs no packages and needs no registry. On
+Linux the services need glibc 2.35 (Ubuntu 22.04, Debian 12), like the
+PostgreSQL build; because release packages ship the minimal offline source
+skeleton without source files to compile from the network, systems with an
+older glibc fail fast with an explicit glibc 2.35 error (while full development
+checkouts without bundled services can still install from source). Model data
 (Voice) is not bundled: Node Services downloads it on first use. Dependencies
 the services never load are left out too: officeparser imports its OCR
 engine, tesseract.js, only for OCR, which document extraction never asks for.

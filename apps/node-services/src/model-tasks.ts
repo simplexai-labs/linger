@@ -85,6 +85,10 @@ export interface ModelLeaseResult {
 export interface ModelLease {
   /** A sent approval or chain step keeps the place until its Runtime reply. */
   borrow(): Pick<ModelLease, "release">;
+  /** Temporarily yields the model slot while waiting on background tool completion. */
+  suspend(): void;
+  /** Reclaims the model slot upon resuming active execution. */
+  resume(): void;
   /** Frees the place once all borrowers finish. Later calls do nothing. */
   release(result: ModelLeaseResult): void;
 }

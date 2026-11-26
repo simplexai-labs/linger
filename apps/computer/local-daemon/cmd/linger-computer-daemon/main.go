@@ -35,6 +35,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 	localprocess "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/process"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/redact"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/selfupdate"
 	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
@@ -55,6 +56,10 @@ func main() {
 	}
 	if len(os.Args) == 3 && os.Args[1] == "stop-hook" {
 		os.Exit(permission.CodexRunStopHook(os.Stdin, os.Stdout, os.Stderr, os.Args[2]))
+	}
+	// Antigravity runs this for managed PreInvocation and Stop hooks.
+	if len(os.Args) == 3 && os.Args[1] == "antigravity-hook" {
+		os.Exit(native.AntigravityRunHook(os.Stdin, os.Stdout, os.Stderr, os.Args[2]))
 	}
 	if handoff := recoverPendingUpgrade(os.Args[1:]); handoff != nil {
 		if execErr := handoff.Exec(); execErr != nil {
@@ -169,18 +174,16 @@ func run(args []string) (resultErr error) {
 		// tools; say so instead of leaving them silently missing.
 		slog.Warn("computer_tools.missing: browser and computer-control tools are disabled", "expected", localtools.ToolsDirectory(executable))
 	}
-	var bundledPiVersion string
-	if toolInstallation != nil {
-		bundledPiVersion = toolInstallation.PiVersion
-	}
 	currentDiscoveryOptions := func() provider.DiscoveryOptions {
 		var managedPi string
 		if localModels != nil {
 			managedPi = localModels.PiExecutable()
 		}
+		configuredPaths, managedPaths, bundledPaths := daemonDiscoveryPaths(computer.RuntimePaths, localModelsStateDir, managedPi, toolInstallation)
 		return provider.DiscoveryOptions{
-			ConfiguredPaths:  withManagedPiPath(localmodels.OverlayRuntimePathsWithBundled(computer.RuntimePaths, localModelsStateDir, bundledPiVersion), managedPi),
-			BundledPaths:     bundledRuntimePaths(toolInstallation),
+			ConfiguredPaths:  configuredPaths,
+			ManagedPaths:     managedPaths,
+			BundledPaths:     bundledPaths,
 			Runtimes:         computer.EnabledRuntimes,
 			PreferredRuntime: computer.PreferredRuntime,
 			RuntimeHomeRoot:  filepath.Join(computer.StateDirectory, "runtime-homes"),
@@ -203,9 +206,14 @@ func run(args []string) (resultErr error) {
 		return result, err
 	}
 	providerEnvironment := currentProviderEnvironment()
+	initialRuntimes, backfillRuntimes := startupDiscoverySplit(computer.PreferredRuntime, computer.EnabledRuntimes)
+	initialOptions := currentDiscoveryOptions()
+	if len(backfillRuntimes) > 0 {
+		initialOptions.Runtimes = initialRuntimes
+	}
 	// The monitor refreshes from what Discover found, not from the shaped
 	// result, so it gets the unshaped one.
-	rawDiscovered, err := terminalCache.Discover(context.Background(), currentDiscoveryOptions())
+	rawDiscovered, err := terminalCache.Discover(context.Background(), initialOptions)
 	if err != nil {
 		return err
 	}
@@ -372,8 +380,9 @@ func run(args []string) (resultErr error) {
 	}
 	piEnabled := len(computer.EnabledRuntimes) == 0 || slices.Contains(computer.EnabledRuntimes, "pi")
 	_, hasPi := discovered.Installations["pi"]
+	piDeferred := slices.Contains(backfillRuntimes, "pi")
 	libraryHarnessDir := ""
-	if piEnabled && !hasPi {
+	if piEnabled && !hasPi && !piDeferred {
 		libraryHarnessDir = localmodels.HarnessRoot(localModelsStateDir)
 	}
 	localModels = localmodels.New(localmodels.Options{
@@ -401,6 +410,7 @@ func run(args []string) (resultErr error) {
 	defer localModels.Close()
 	antigravityExecutable := &antigravityExecutableTracker{path: discovered.Installations["antigravity"].ExecutablePath}
 	applyDiscovered := func(publishCtx context.Context, next provider.DiscoveryResult) error {
+		reconcileLocalModelsHarness(localModels, piEnabled, localModelsStateDir, next)
 		if antigravityExecutable.changed(next) && localDaemon != nil {
 			localDaemon.InvalidateAntigravityResidents("executable_changed")
 		}
@@ -532,6 +542,7 @@ func run(args []string) (resultErr error) {
 		monitorDone <- provider.MonitorRuntimeDiagnostics(ctx, provider.RuntimeMonitorOptions{
 			Initial:               rawDiscovered,
 			InitialPublished:      &discovered,
+			BackfillRuntimes:      backfillRuntimes,
 			Discovery:             currentDiscoveryOptions(),
 			ResolveDiscovery:      currentDiscoveryOptions,
 			TerminalEnvironment:   terminalCache,
@@ -970,6 +981,53 @@ func installedTeamHubCLIBinAt(executable string) string {
 		return ""
 	}
 	return directory
+}
+
+func daemonDiscoveryPaths(configured map[string]string, stateDir, managedPi string, toolInstallation *localtools.Installation) (configuredPaths, managedPaths, bundledPaths map[string]string) {
+	var bundledPiVersion string
+	if toolInstallation != nil {
+		bundledPiVersion = toolInstallation.PiVersion
+	}
+	layers := localmodels.ResolveRuntimePathsWithBundled(configured, stateDir, bundledPiVersion)
+	filteredManagedPi := localmodels.FilterManagedPiPath(managedPi, stateDir, bundledPiVersion)
+	return layers.Configured, withManagedPiPath(layers.Managed, filteredManagedPi), bundledRuntimePaths(toolInstallation)
+}
+
+// startupDiscoverySplit splits startup Runtime discovery into an immediate
+// phase for the preferred Runtime and an asynchronous backfill phase for the
+// remaining enabled Runtimes when more than one Runtime is in scope.
+func startupDiscoverySplit(preferred string, enabled []string) (initial []string, backfill []string) {
+	full := enabled
+	if len(full) == 0 {
+		full = provider.AllRuntimeTypes()
+	}
+	if preferred == "" || len(full) <= 1 || !slices.Contains(full, preferred) {
+		return enabled, nil
+	}
+	backfill = make([]string, 0, len(full)-1)
+	for _, runtimeType := range provider.AllRuntimeTypes() {
+		if runtimeType != preferred && slices.Contains(full, runtimeType) {
+			backfill = append(backfill, runtimeType)
+		}
+	}
+	return []string{preferred}, backfill
+}
+
+func hasRuntimeDiagnostic(diagnostics []provider.RuntimeDiagnostic, runtimeType string) bool {
+	return slices.ContainsFunc(diagnostics, func(diagnostic provider.RuntimeDiagnostic) bool {
+		return diagnostic.Type == runtimeType
+	})
+}
+
+func reconcileLocalModelsHarness(library *localmodels.Library, piEnabled bool, localModelsStateDir string, next provider.DiscoveryResult) {
+	if library == nil || !piEnabled || !hasRuntimeDiagnostic(next.Diagnostics, "pi") {
+		return
+	}
+	if _, ok := next.Installations["pi"]; ok {
+		library.SetHarnessDirectory("")
+		return
+	}
+	library.SetHarnessDirectory(localmodels.HarnessRoot(localModelsStateDir))
 }
 
 func bundledRuntimePaths(installation *localtools.Installation) map[string]string {

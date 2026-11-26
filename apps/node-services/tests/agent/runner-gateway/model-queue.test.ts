@@ -165,6 +165,46 @@ describe("ModelQueue", () => {
     expect(second.value).toBeDefined();
     expect(third.value).toBeUndefined();
   });
+
+  it("frees a slot while suspended and avoids double-decrementing if finished while suspended", async () => {
+    const queue = new ModelQueue(() => fixed(1));
+    const first = await queue.acquire(codex, run("r1"), signal);
+    const second = track(queue.acquire(codex, run("r2"), signal));
+    await flush();
+    expect(second.value).toBeUndefined();
+
+    // Suspending the sole active lease keeps endpoint state alive and admits r2.
+    first.suspend();
+    first.suspend();
+    await flush();
+    expect(second.value).toBeDefined();
+
+    // Releasing r2 opens space for a third waiter; resuming r1 restores its occupancy without blocking.
+    const third = track(queue.acquire(codex, run("r3"), signal));
+    first.resume();
+    first.resume();
+    await flush();
+    expect(third.value).toBeUndefined();
+
+    second.value!.release(done);
+    await flush();
+    expect(third.value).toBeUndefined();
+
+    first.release(done);
+    await flush();
+    expect(third.value).toBeDefined();
+    third.value!.release(done);
+    await flush();
+
+    // Finishing while suspended must not underflow active count.
+    const fourth = await queue.acquire(codex, run("r4"), signal);
+    const fifth = track(queue.acquire(codex, run("r5"), signal));
+    fourth.suspend();
+    fourth.release(done);
+    await flush();
+    expect(fifth.value).toBeDefined();
+    fifth.value!.release(done);
+  });
 });
 
 describe("ModelQueue limit", () => {

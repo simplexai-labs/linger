@@ -715,4 +715,23 @@ describe("WindowManagerModule", () => {
       Object.defineProperty(process, "platform", platform);
     }
   });
+
+  it("hide() cancels a pending startup reveal so a subsequent offline load stays hidden", async () => {
+    const { manager, host, config } = setup({
+      serverUrl: "http://localhost:3000",
+    });
+    await host.start();
+    const win = state.windows[0]!;
+    const content = contentView().webContents;
+    expect(win.show).not.toHaveBeenCalled();
+
+    config.update({ serverUrl: undefined });
+    manager.hide();
+    manager.loadServer();
+    content.emit("did-finish-load");
+
+    expect(win.hide).toHaveBeenCalledOnce();
+    expect(win.show).not.toHaveBeenCalled();
+    await host.stop("quit");
+  });
 });

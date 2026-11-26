@@ -23,7 +23,6 @@ import {
   externalConnectionQueryOptions,
   externalConnectionsQueryKey,
 } from "./connected-apps-queries";
-import { appDescription } from "./app-groups";
 import { ConnectAppStatus, useConnectAppFlow } from "./connect-app-flow";
 import {
   establishedExternalConnections,
@@ -83,7 +82,6 @@ export function AppManageDialog({
     <>
       <ModalDialog
         closeOnBackdrop
-        description={appDescription(app, t)}
         onClose={onClose}
         size="md"
         title={app.display_name}
@@ -430,15 +428,9 @@ export function DisconnectConnectionDialog({
       <div className="px-5 py-4">
         <p className="text-sm text-muted-foreground">{t(m.disconnectBody)}</p>
         {ended ? (
-          <div
-            className="mt-4 space-y-1 border-y border-border py-3 text-sm"
-            role="status"
-          >
-            <p>{t(m.accessStopped)}</p>
-            <p className="text-muted-foreground">
-              {t(providerAuthorization(ended))}
-            </p>
-          </div>
+          <p className="mt-4 border-y border-border py-3 text-sm" role="status">
+            {t(providerAuthorization(ended))}
+          </p>
         ) : null}
         {disconnect.error || current.error ? (
           <p className="mt-3 text-sm text-app-danger" role="alert">

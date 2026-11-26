@@ -56,8 +56,9 @@ export interface SetupWindowOptions {
   readonly preload: string;
   readonly version: string;
   readonly defaultDisplayName: string;
-  // Open on start; set when this computer is not connected yet.
-  readonly show: boolean;
+  // Open on start; set when this computer is not connected yet. Accepts a
+  // predicate so recovery during LocalServer.start() is observed before show.
+  readonly show: boolean | (() => boolean);
   readonly loginItem: {
     get(): boolean;
     set(on: boolean): void;
@@ -170,7 +171,11 @@ export class SetupWindowModule implements Module {
       ctx.bus.on("server.moved", onCookie),
       ctx.bus.on("setup.open", () => this.show()),
     );
-    if (this.#options.show) this.show();
+    const show =
+      typeof this.#options.show === "function"
+        ? this.#options.show()
+        : this.#options.show;
+    if (show) this.show();
   }
 
   async stop(): Promise<void> {
@@ -236,6 +241,9 @@ export class SetupWindowModule implements Module {
     window.on("closed", () => {
       if (this.#window === window) this.#window = undefined;
       this.#account?.hide();
+      // Idle background pre-staging and Bifrost pre-fetch stop when setup
+      // closes before Install is started.
+      this.#ctx?.get<LocalServerModule>("LocalServer").cancelPrestage();
       // A report waiting on this page's consent would block other sends.
       const sender = this.#ctx?.get<DiagnosticsModule>("Diagnostics").sender;
       if (sender?.state().phase === "confirm") void sender.cancel();

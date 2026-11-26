@@ -71,6 +71,34 @@ describe("BackgroundTasksPill", () => {
     ).toBeNull();
   });
 
+  it("closes on an outside click without activating what is under the panel", () => {
+    render(<BackgroundTasksPill now={now} tasks={tasks} />);
+    const pill = screen.getByRole("button", {
+      name: "2 tasks running in the background",
+    });
+    fireEvent.click(pill);
+    expect(
+      screen.getByRole("region", { name: "Background tasks" }),
+    ).toBeVisible();
+
+    // A control that sits under the pointer when the person clicks blank space.
+    const under = document.createElement("button");
+    const onUnder = vi.fn();
+    under.addEventListener("click", onUnder);
+    document.body.append(under);
+    try {
+      fireEvent.pointerDown(under, { button: 0, pointerId: 1 });
+      fireEvent.click(under, { pointerId: 1 });
+      expect(
+        screen.queryByRole("region", { name: "Background tasks" }),
+      ).toBeNull();
+      // The dismissal swallows the paired click, so the control never fires.
+      expect(onUnder).not.toHaveBeenCalled();
+    } finally {
+      under.remove();
+    }
+  });
+
   it("says one task in the singular", () => {
     render(<BackgroundTasksPill now={now} tasks={tasks.slice(0, 1)} />);
     expect(

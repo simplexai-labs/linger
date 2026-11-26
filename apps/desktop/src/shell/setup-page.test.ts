@@ -294,7 +294,7 @@ describe("setup page Quick Install recommendation", () => {
       "Recommended for this computer: Codex",
     );
     expect($("plan-why").textContent).toBe(
-      "Local model on hold. Other programs are using the memory it needs. Close other programs. Quick Install sets up Codex now, or choose Check again once memory is free.",
+      "Local model on hold: Not enough free memory. Close other apps.",
     );
     expect($("local-recheck").hidden).toBe(false);
     $("local-customize").click();
@@ -370,7 +370,7 @@ describe("setup page Quick Install recommendation", () => {
       "Recommended for this computer: Codex",
     );
     expect($("plan-why").textContent).toBe(
-      "Local model on hold. Other programs are using GPU 1's memory (3.0 GB free, 9.0 GB needed). Close programs that use the GPU, such as games, video or other AI apps. Other programs are using the memory it needs (2.7 GB free, 12.7 GB needed). Close other programs. Quick Install sets up Codex now, or choose Check again once memory is free.",
+      "Local model on hold: Other programs are using GPU 1's memory (3.0 GB free, 9.0 GB needed). Close apps using the GPU. Not enough free memory (2.7 GB free, 12.7 GB needed). Close other apps.",
     );
     expect($("local-recheck").hidden).toBe(false);
     customizeLocal();
@@ -384,7 +384,7 @@ describe("setup page Quick Install recommendation", () => {
       "welcome",
     );
     expect($("plan-why").textContent).toBe(
-      "Local model on hold. Other programs are using the memory it needs (2.7 GB free, 12.7 GB needed). Close other programs. Quick Install sets up Codex now, or choose Check again once memory is free.",
+      "Local model on hold: Not enough free memory (2.7 GB free, 12.7 GB needed). Close other apps.",
     );
     customizeLocal();
     expect($("local-sub").textContent).toBe(
@@ -396,7 +396,7 @@ describe("setup page Quick Install recommendation", () => {
     for (const [code, expectWhy, expectSub] of [
       [
         "gateway-port-in-use",
-        "Another program is using the port Linger's local model gateway needs. Close the program using that port.",
+        "Another program is using the local model gateway port.",
         "On hold: free the gateway port, then Check again.",
       ],
       [
@@ -416,7 +416,7 @@ describe("setup page Quick Install recommendation", () => {
       };
       const { run } = await openPage(welcome(blockedWithoutPlan), "welcome");
       expect($("plan-why").textContent).toBe(
-        `Local model on hold. ${expectWhy} Quick Install sets up Codex now, or choose Check again once the issue is resolved.`,
+        `Local model on hold: ${expectWhy}`,
       );
       expect($("plan-why").textContent).not.toContain("memory is free");
       expect($("local-recheck").hidden).toBe(false);
@@ -458,7 +458,7 @@ describe("setup page Quick Install recommendation", () => {
     };
     const { run } = await openPage(welcome(blockedCuda), "welcome");
     expect($("plan-why").textContent).toBe(
-      "Local model on hold. Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again. Quick Install sets up Codex now.",
+      "Local model on hold: Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
     );
     expect(
       $("plan-why").textContent?.match(/choose Check again/g),
@@ -507,15 +507,15 @@ describe("setup page Quick Install recommendation", () => {
     const cases: [SetupLocalModelsCheck, string][] = [
       [
         { ...held, reasons: [reason({ code: "gpu-sharing-required" })] },
-        "Local model on hold. Other work is running on the GPU. Close it.",
+        "Local model on hold: Another app is using the GPU.",
       ],
       [
         { ...held, reasons: [reason({ code: "plan-unavailable" })] },
-        "Local model on hold. Another app is holding the memory it needs, such as another AI app. Quit it.",
+        "Local model on hold: Another app is using the memory it needs. Quit it.",
       ],
       [
         { ...small, reasons: [reason({ code: "gpu-ownership-unknown" })] },
-        "Linger couldn't tell which programs are using the GPU, so it can't share it. Close programs that use the GPU.",
+        "Couldn't check which apps are using the GPU. Close GPU apps.",
       ],
       [
         { ...small, reasons: [reason({ code: "facts-unavailable" })] },
@@ -629,7 +629,7 @@ describe("setup page Quick Install recommendation", () => {
       "Not available on this computer",
     );
     expect($("local-model-needs").textContent).toBe(
-      "Linger couldn't tell which programs are using the GPU, so it can't share it. Close programs that use the GPU.",
+      "Couldn't check which apps are using the GPU. Close GPU apps.",
     );
     expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
     expect(document.body.textContent).not.toContain(TOOL_WORDS);
@@ -1559,7 +1559,7 @@ describe("setup page in Chinese", () => {
   it("words a held local model from the catalog", async () => {
     await openPage(welcome(held), "welcome", "zh-CN");
     expect($("plan-why").textContent).toBe(
-      fill(zh.heldWhy, { reasons: zh.reasonHeld, plan: "Codex" }),
+      fill(zh.heldWhy, { reasons: zh.reasonHeld }),
     );
   });
 
@@ -1620,13 +1620,7 @@ describe("setup page in Chinese", () => {
 
     await openPage(welcome(capable), "welcome", "zh-CN");
     expect($("plan-featured-badge").hidden).toBe(true);
-    expect($("featured-spotlight").hidden).toBe(false);
-    expect($("featured-spotlight-note").textContent).toBe(
-      zh.featuredModelLibraryNote,
-    );
-    expect($("featured-spotlight-link").textContent).toBe(
-      zh.thinkingMachinesLink,
-    );
+    expect($("featured-spotlight").hidden).toBe(true);
     $("local-customize").click();
     expect($("local-model-featured").hidden).toBe(true);
     expect($("local-spotlight-text").textContent).toBe(
@@ -1707,26 +1701,12 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
     expect($("featured-spotlight").dataset.recommended).toBe("true");
   });
 
-  it("shows the library spotlight strip with Thinking Machines link when another model or subscription is recommended", async () => {
+  it("hides the welcome spotlight when another model or subscription is recommended while keeping the Customize note", async () => {
     for (const check of [capable, small, held]) {
       const { run } = await openPage(welcome(check), "welcome");
       expect($("plan-featured-badge").hidden).toBe(true);
-      expect($("featured-spotlight").hidden).toBe(false);
+      expect($("featured-spotlight").hidden).toBe(true);
       expect($("featured-spotlight").dataset.recommended).toBe("false");
-      expect($("featured-spotlight-note").textContent).toContain(
-        "Settings → Models",
-      );
-      expect($("featured-spotlight-link").textContent).toBe(
-        "Thinking Machines ↗",
-      );
-
-      $("featured-spotlight-link").click();
-      await vi.waitFor(() =>
-        expect(run).toHaveBeenCalledWith({
-          op: "external.open",
-          url: INKLING_2_MINI_ANNOUNCEMENT_URL,
-        }),
-      );
 
       $("local-customize").click();
       document
@@ -1741,11 +1721,16 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
       );
       expect($("local-spotlight-link").textContent).toBe("Thinking Machines ↗");
       $("local-spotlight-link").click();
-      await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() =>
+        expect(run).toHaveBeenCalledWith({
+          op: "external.open",
+          url: INKLING_2_MINI_ANNOUNCEMENT_URL,
+        }),
+      );
     }
   });
 
-  it("badges a held Inkling 2 Mini card in Customize without claiming Quick Install selected it", async () => {
+  it("badges a held Inkling 2 Mini card in Customize without showing the welcome spotlight", async () => {
     await openPage(
       welcome({
         ...held,
@@ -1760,6 +1745,7 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
       "welcome",
     );
     expect($("plan-featured-badge").hidden).toBe(true);
+    expect($("featured-spotlight").hidden).toBe(true);
     expect($("featured-spotlight").dataset.recommended).toBe("false");
     $("local-customize").click();
     document

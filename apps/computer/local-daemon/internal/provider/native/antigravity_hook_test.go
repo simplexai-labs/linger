@@ -1,0 +1,138 @@
+package native
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestAntigravityHookEndpointWritesHooksConfigAndRoutesBySession(t *testing.T) {
+	ep, err := newAntigravityHookEndpoint("/opt/linger/daemon's-bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ep.Close() })
+
+	hooksPath := filepath.Join(ep.Dir(), ".agents", "hooks.json")
+	raw, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]map[string][]map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("hooks.json is invalid JSON: %v", err)
+	}
+	entry := doc["linger-steer"]
+	if len(entry["PreInvocation"]) != 1 || len(entry["Stop"]) != 1 {
+		t.Fatalf("unexpected hooks.json structure: %s", raw)
+	}
+	cmd, _ := entry["PreInvocation"][0]["command"].(string)
+	if !strings.Contains(cmd, "antigravity-hook") || !strings.Contains(cmd, ep.URL()) {
+		t.Fatalf("hook command=%q missing antigravity-hook or URL %q", cmd, ep.URL())
+	}
+
+	// Unregistered sessions fail open with {}.
+	var out, errBuf bytes.Buffer
+	code := AntigravityRunHook(strings.NewReader(`{"hookEventName":"PreInvocation","conversationId":"unknown","invocationNum":1}`), &out, &errBuf, ep.URL())
+	if code != 0 || strings.TrimSpace(out.String()) != "{}" {
+		t.Fatalf("unregistered hook code=%d out=%q", code, out.String())
+	}
+
+	// Registered session receives the event and returns injectSteps.
+	var seenReq AntigravityHookRequest
+	unreg := ep.Register("sess-1", func(_ context.Context, req AntigravityHookRequest) AntigravityHookResponse {
+		seenReq = req
+		if req.HookEventName == "PreInvocation" {
+			return AntigravityHookResponse{
+				InjectSteps: []AntigravityInjectStep{{UserMessage: "change direction"}},
+			}
+		}
+		return AntigravityHookResponse{}
+	})
+	defer unreg()
+
+	out.Reset()
+	code = AntigravityRunHook(strings.NewReader(`{"hookEventName":"PreInvocation","conversationId":"sess-1","invocationNum":2}`), &out, &errBuf, ep.URL())
+	if code != 0 {
+		t.Fatalf("registered hook exit code=%d", code)
+	}
+	if seenReq.ConversationID != "sess-1" || seenReq.InvocationNum != 2 || seenReq.HookEventName != "PreInvocation" {
+		t.Fatalf("seenReq=%+v", seenReq)
+	}
+	var resp AntigravityHookResponse
+	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response %q: %v", out.String(), err)
+	}
+	if len(resp.InjectSteps) != 1 || resp.InjectSteps[0].UserMessage != "change direction" {
+		t.Fatalf("resp=%+v", resp)
+	}
+
+	// After unregistering, the session fails open again.
+	unreg()
+	out.Reset()
+	code = AntigravityRunHook(strings.NewReader(`{"hookEventName":"Stop","conversationId":"sess-1","fullyIdle":false}`), &out, &errBuf, ep.URL())
+	if code != 0 || strings.TrimSpace(out.String()) != "{}" {
+		t.Fatalf("after unregister code=%d out=%q", code, out.String())
+	}
+}
+
+func TestAntigravityRunHookFailsOpenWhenEndpointUnreachable(t *testing.T) {
+	ep, err := newAntigravityHookEndpoint("/bin/daemon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := ep.URL()
+	_ = ep.Close()
+
+	var out, errBuf bytes.Buffer
+	code := AntigravityRunHook(strings.NewReader(`{"hookEventName":"PreInvocation","conversationId":"sess-1"}`), &out, &errBuf, url)
+	if code != 0 || out.String() != "{}\n" {
+		t.Fatalf("unreachable hook code=%d out=%q", code, out.String())
+	}
+
+	out.Reset()
+	code = AntigravityRunHook(strings.NewReader(`{}`), &out, &errBuf, "http://127.0.0.1:1/bad")
+	if code != 0 || out.String() != "{}\n" {
+		t.Fatalf("closed port hook code=%d out=%q", code, out.String())
+	}
+
+	out.Reset()
+	code = AntigravityRunHook(strings.NewReader(`{}`), &out, &errBuf, "https://example.com/not-loopback")
+	if code != 0 || out.String() != "{}\n" {
+		t.Fatalf("non-loopback hook code=%d out=%q", code, out.String())
+	}
+}
+
+func TestAntigravitySharedHookEndpointCloseCleansTempDir(t *testing.T) {
+	t.Cleanup(func() { _ = CloseAntigravitySharedHookEndpoint() })
+
+	ep1, err := AntigravitySharedHookEndpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir1 := ep1.Dir()
+	if _, err := os.Stat(filepath.Join(dir1, ".agents", "hooks.json")); err != nil {
+		t.Fatalf("expected hooks.json in %q: %v", dir1, err)
+	}
+	if err := CloseAntigravitySharedHookEndpoint(); err != nil {
+		t.Fatalf("CloseAntigravitySharedHookEndpoint error: %v", err)
+	}
+	if _, err := os.Stat(dir1); !os.IsNotExist(err) {
+		t.Fatalf("expected temp dir %q removed after close, stat err=%v", dir1, err)
+	}
+	if err := CloseAntigravitySharedHookEndpoint(); err != nil {
+		t.Fatalf("idempotent close error: %v", err)
+	}
+
+	ep2, err := AntigravitySharedHookEndpoint()
+	if err != nil {
+		t.Fatalf("re-init error: %v", err)
+	}
+	if ep2.Dir() == dir1 {
+		t.Fatalf("expected fresh temp dir after close, got %q again", dir1)
+	}
+}

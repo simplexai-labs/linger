@@ -103,20 +103,36 @@ func (c *acpConn) write(value any) error {
 // call sends one request and waits for its response. A JSON-RPC error is
 // returned as *acpError.
 func (c *acpConn) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	reply, release, err := c.sendRequest(method, params)
+	if err != nil {
+		return nil, err
+	}
+	return c.awaitReply(ctx, reply, release)
+}
+
+// sendRequest writes one request synchronously and returns its single-reply
+// channel plus a cleanup callback to unregister it.
+func (c *acpConn) sendRequest(method string, params any) (<-chan acpFrame, func(), error) {
 	c.mu.Lock()
 	c.nextID++
 	id := strconv.FormatInt(c.nextID, 10)
 	reply := make(chan acpFrame, 1)
 	c.pending[id] = reply
 	c.mu.Unlock()
-	defer func() {
+	release := func() {
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-	}()
-	if err := c.write(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(id), "method": method, "params": params}); err != nil {
-		return nil, err
 	}
+	if err := c.write(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(id), "method": method, "params": params}); err != nil {
+		release()
+		return nil, func() {}, err
+	}
+	return reply, release, nil
+}
+
+func (c *acpConn) awaitReply(ctx context.Context, reply <-chan acpFrame, release func()) (json.RawMessage, error) {
+	defer release()
 	select {
 	case frame := <-reply:
 		if frame.Error != nil {

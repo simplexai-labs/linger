@@ -1,12 +1,14 @@
 import { commonMessages } from "@/i18n/common.messages";
 import { formatLocale } from "@/i18n/language";
-import { useT, useTranslation } from "@/i18n/use-translation";
+import { RichMessage, useT, useTranslation } from "@/i18n/use-translation";
 import { formatDateTime } from "@/lib/date-format";
 import type { PropsWithChildren } from "react";
 
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/features/local-computer/computer-row";
-import { LocalRuntimeAuthenticationGuidance } from "@/features/local-computer/local-runtime-authentication-guidance";
+import { computerSetupMessages } from "@/features/local-computer/computer-setup.messages";
+import { useDesktopComputer } from "@/features/local-computer/desktop-computer";
+import { signInCommand } from "@/features/local-computer/local-runtime-commands";
 import { localRuntimeMessage } from "@/features/local-computer/local-runtime-message";
 import type {
   TeamHubRoom,
@@ -139,67 +141,62 @@ function LocalRuntimeAttentionNotice({
   >;
 }) {
   const { language, t } = useTranslation();
-  const authenticationRequired = status.status === "authentication_required";
+  const desktop = useDesktopComputer();
   const reconnecting = status.connection_status === "reconnecting";
   const unknown =
     status.status === "unknown" || status.connection_status === "unknown";
-  if (
+  const transient =
     (reconnecting || unknown) &&
-    (status.status === "ready" || status.status === "unknown")
-  ) {
-    // One short line with a status dot; the last confirmation is on hover.
-    return (
-      <div
-        className="room-notice-enter room-readable flex items-center gap-2 py-2 text-xs text-app-muted"
-        role="status"
-        title={
-          status.observed_at
-            ? t(composerMessages.lastConfirmedAt, {
-                time: formatDateTime(
-                  status.observed_at,
-                  undefined,
-                  formatLocale(language),
-                ),
-              })
-            : undefined
-        }
-      >
-        <StatusDot tone="warning" />
-        <span className="font-medium text-app-ink">
-          {t(
-            reconnecting
-              ? composerMessages.reconnectingLocalComputer
-              : composerMessages.checkingLocalComputer,
-          )}
-        </span>
-        <span>{t(composerMessages.keepSending)}</span>
-      </div>
-    );
-  }
+    (status.status === "ready" || status.status === "unknown");
+  const reason = transient
+    ? t(
+        reconnecting
+          ? composerMessages.reconnectingLocalComputer
+          : composerMessages.checkingLocalComputer,
+        { computer: status.display_name },
+      )
+    : (localRuntimeMessage(
+        status,
+        status.runtime_type,
+        status.display_name,
+        t,
+      ) ?? t(composerMessages.checkLocalRuntime));
+  // One line: the cause, and for a sign-in the command that fixes it. The
+  // composer stays usable, so it needs no reassurance line.
   return (
     <div
-      className="room-readable border-t border-[var(--app-status-warning-border)] py-4 text-sm text-app-body"
+      className="room-notice-enter room-readable flex items-center gap-2 py-2 text-xs text-app-muted"
       role="status"
+      title={
+        status.observed_at
+          ? t(composerMessages.lastConfirmedAt, {
+              time: formatDateTime(
+                status.observed_at,
+                undefined,
+                formatLocale(language),
+              ),
+            })
+          : status.message
+      }
     >
-      <p className="mb-1 font-medium">{t(composerMessages.agentUnavailable)}</p>
-      {authenticationRequired ? (
-        <LocalRuntimeAuthenticationGuidance
-          runtimeType={status.runtime_type}
-          computerName={status.display_name}
-        />
-      ) : (
-        <p className="mt-1 text-app-muted" title={status.message}>
-          {localRuntimeMessage(
-            status,
-            status.runtime_type,
-            status.display_name,
-            t,
-          ) ?? t(composerMessages.checkLocalRuntime)}
-        </p>
-      )}
-      <p className="mt-1 text-app-muted">
-        {t(composerMessages.agentCannotReply)}
-      </p>
+      <StatusDot tone="warning" />
+      <span className="font-medium text-app-ink">{reason}</span>
+      {status.status === "authentication_required" ? (
+        <span>
+          <RichMessage
+            message={composerMessages.signInHint}
+            tags={{ code: (text) => <code className="font-mono">{text}</code> }}
+            values={{
+              command: signInCommand(status.runtime_type, undefined, desktop),
+            }}
+          />
+          {status.runtime_type === "pi"
+            ? ` ${t(computerSetupMessages.piSignIn)}`
+            : status.runtime_type === "antigravity"
+              ? ` ${t(computerSetupMessages.antigravitySignIn)}`
+              : null}
+        </span>
+      ) : null}
     </div>
   );
 }

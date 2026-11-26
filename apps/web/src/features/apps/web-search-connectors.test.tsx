@@ -146,9 +146,6 @@ describe("Web search connectors", () => {
     const section = await screen.findByRole("region", { name: "Web search" });
     fireEvent.click(within(section).getByRole("button", { name: "Tavily" }));
     const dialog = await screen.findByRole("dialog", { name: "Tavily" });
-    expect(dialog).toHaveTextContent(
-      "The real-time search engine for AI agents.",
-    );
     expect(dialog).toHaveTextContent("DoesSearches the web and reads pages");
     expect(
       within(dialog).getByRole("link", { name: /app\.tavily\.com\/home/ }),

@@ -10,6 +10,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -38,6 +39,8 @@ import {
 import { CredentialStore } from "./computer-credential.js";
 import { EnrollmentModule } from "./enrollment.js";
 import {
+  FAST_POLL_MS,
+  FAST_POLL_WINDOW_MS,
   LOCAL_INSTANCE,
   LOCAL_STEPS,
   LocalServerModule,
@@ -52,8 +55,10 @@ import {
   installLocation,
   legacyMigrationResult,
   parseSetCookie,
+  pollDelayMs,
   LocalServerUnverifiedError,
   proveLocalServer,
+  runChild,
   RUNTIME_LOOKUP_HINT_MS,
   RUNTIME_LOOKUP_LIMIT_MS,
   SignInRejectedError,
@@ -171,7 +176,44 @@ if (args.includes("--check-byok")) {
   process.stdout.write(JSON.stringify({ ok: true, protocol: "openai-responses", url: "https://byok.example/v1/responses", modelId: "m" }) + "\n");
   process.exit(0);
 }
-if (args.includes("--inspect")) {
+if (args.includes("--list-byok-models")) {
+  process.stdout.write(JSON.stringify({ url: "https://byok.example/v1/models", models: [{ id: "m" }] }) + "\n");
+  process.exit(0);
+}
+if (args.includes("--prefetch-bifrost")) {
+  const trackDir = path.dirname(home);
+  const trackFile = path.join(trackDir, "prefetch-events.jsonl");
+  const trackEnabled = fs.existsSync(path.join(trackDir, "prefetch-track"));
+  const record = (entry) => {
+    if (trackEnabled) fs.appendFileSync(trackFile, JSON.stringify({ home, ...entry }) + "\n");
+  };
+  record({ event: "started", args, runAsNode: process.env.ELECTRON_RUN_AS_NODE });
+  if (fs.existsSync(path.join(home, "prefetch-hang")) || fs.existsSync(path.join(trackDir, "prefetch-hang"))) {
+    let exiting = false;
+    const exitOn = (event, code) => {
+      if (exiting) return;
+      exiting = true;
+      const delayMs = fs.existsSync(path.join(trackDir, "prefetch-exit-delay")) ? 120 : 0;
+      setTimeout(() => {
+        record({ event });
+        process.exit(code);
+      }, delayMs);
+    };
+    process.on("SIGTERM", () => exitOn("sigterm", 143));
+    if (args.includes("--abort-on-stdin-close")) {
+      process.stdin.once("end", () => exitOn("stdin_end", 1));
+      process.stdin.once("close", () => exitOn("stdin_end", 1));
+      process.stdin.resume();
+    }
+    setInterval(() => {}, 1000);
+  } else if (fs.existsSync(path.join(home, "prefetch-unsupported"))) {
+    process.stdout.write(JSON.stringify({ ok: false, unsupported: true, message: "no build" }) + "\n");
+    process.exit(0);
+  } else {
+    process.stdout.write(JSON.stringify({ ok: true, cached: false, version: "1.4.2", name: "bifrost-bin", bytes: 1024 }) + "\n");
+    process.exit(0);
+  }
+} else if (args.includes("--inspect")) {
   const target = args.includes("--inspect-target") ? args[args.indexOf("--inspect-target") + 1] : home;
   fs.mkdirSync(path.join(home, "runtime", "localmodels", "state"), { recursive: true });
   fs.writeFileSync(path.join(home, "runtime", "inspect-args.json"), JSON.stringify(args));
@@ -247,7 +289,7 @@ if (args.includes("--inspect")) {
   const finalEstimate = oldDriver || portBlocked ? { model: "", downloadBytes: null, diskBytes: null, memoryBytes: null } : estimate;
   process.stdout.write(JSON.stringify({ hardware, localModels: { ...local, reasons, estimate: finalEstimate }, recommendation }) + "\n");
   process.exit(0);
-}
+} else {
 fs.mkdirSync(path.join(home, "installer"), { recursive: true });
 fs.writeFileSync(path.join(home, "installer", "args.json"), JSON.stringify(args));
 if (args.includes("--resume")) {
@@ -306,6 +348,7 @@ fs.writeFileSync(
   '<meta http-equiv="refresh" content="0;url=' + origin + '/#token=abc&amp;x">',
 );
 process.stdout.write("Installer is running at " + origin + "\n");
+}
 `;
 
 const sourceArchive = (root: string) => {
@@ -445,6 +488,16 @@ const installerApi = (
             : (finishes[retried.length] ?? DONE),
         ),
       );
+    if (url.pathname === "/api/instances")
+      return Response.json({
+        items: [
+          {
+            name: LOCAL_INSTANCE,
+            origin: "http://localhost:3000",
+            mode: "source-native",
+          },
+        ],
+      });
     if (url.pathname === `/api/instances/${LOCAL_INSTANCE}/login`)
       return !installed && created.length === 0
         ? Response.json(
@@ -540,6 +593,8 @@ const fixture = (
   const showStarting = vi.fn();
   const showStartFailed = vi.fn();
   const loadServer = vi.fn();
+  const prewarmAssets = vi.fn(async () => {});
+  const preloadAuthenticated = vi.fn();
   const enroll = vi.fn(async () => {});
   const unenroll = vi.fn(async () => {});
   const syncLocalGatewayUrl = vi.fn(() => false);
@@ -585,8 +640,8 @@ const fixture = (
         showStarting,
         showStartFailed,
         loadServer,
-        prewarmAssets: vi.fn(async () => {}),
-        preloadAuthenticated: vi.fn(),
+        prewarmAssets,
+        preloadAuthenticated,
       } as never,
       {
         ...stubModule("Enrollment"),
@@ -612,6 +667,8 @@ const fixture = (
     showStarting,
     showStartFailed,
     loadServer,
+    prewarmAssets,
+    preloadAuthenticated,
     bus,
     enroll,
     unenroll,
@@ -2014,6 +2071,7 @@ describe("LocalServerModule", () => {
         bundledNodePath: sharedNode,
         platform: "win32",
         arch: "x64",
+        freeBytes: 1,
         checkPrivateLocation: async () => {},
         sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
         signIn: f.signIn,
@@ -2170,6 +2228,7 @@ describe("LocalServerModule", () => {
         bundledNodePath: sharedNode,
         platform: "win32",
         arch: "x64",
+        freeBytes: 1,
         checkPrivateLocation: async () => {},
         sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
         signIn: f.signIn,
@@ -4658,6 +4717,143 @@ describe("LocalServerModule after a restart", () => {
     await vi.waitFor(() =>
       expect(readdirSync(sources)).toEqual([path.basename(current)]),
     );
+    await f.host.stop("quit");
+  });
+
+  it("uses Starting instead of Updating for a same-version source bundle refresh and updates local-server.json", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const f = fixture(
+      {
+        sourceArchive: {
+          url: "https://cdn.example/linger.tar.gz",
+          sha256: archive.sha256,
+        },
+        fetch: (async () => new Response(archive.bytes)) as typeof fetch,
+      },
+      enrolled,
+      (home) => {
+        const sources = path.join(home, "desktop", "source");
+        unpackedSource(path.join(sources, "previous"));
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home,
+            repo: path.join(sources, "previous"),
+            origin: "http://localhost:3000",
+            version: APP_VERSION,
+          }),
+        );
+      },
+    );
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    const sources = path.join(f.home, "desktop", "source");
+    const current = path.join(sources, archive.sha256.slice(0, 16));
+    expect(f.showStarting).toHaveBeenCalledOnce();
+    expect(f.showUpdating).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
+      ),
+    ).toEqual({
+      home: f.home,
+      repo: current,
+      origin: "http://localhost:3000",
+      version: APP_VERSION,
+    });
+    expect(readdirSync(sources)).toEqual([path.basename(current)]);
+    await f.host.stop("quit");
+
+    // A second launch with the updated local-server.json does not re-trigger
+    // a source update or download.
+    const download = vi.fn(
+      async (_url: string | URL | Request) =>
+        new Response(null, { status: 200 }),
+    );
+    const second = fixture(
+      {
+        home: f.home,
+        sourceArchive: {
+          url: "https://cdn.example/linger.tar.gz",
+          sha256: archive.sha256,
+        },
+        fetch: download as typeof fetch,
+      },
+      enrolled,
+    );
+    await second.host.start();
+    await waitForInstaller(() =>
+      expect(second.module.status().phase).toBe("ready"),
+    );
+    expect(second.showUpdating).not.toHaveBeenCalled();
+    expect(second.showStarting).not.toHaveBeenCalled();
+    expect(
+      download.mock.calls.some(([url]) =>
+        String(url).startsWith("https://cdn.example/"),
+      ),
+    ).toBe(false);
+    await second.host.stop("quit");
+  });
+
+  it("shows Updating when moving services to a newer version's source package", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const f = fixture(
+      {
+        sourceArchive: {
+          url: "https://cdn.example/linger.tar.gz",
+          sha256: archive.sha256,
+        },
+        fetch: (async () => new Response(archive.bytes)) as typeof fetch,
+      },
+      enrolled,
+      (home) => {
+        const sources = path.join(home, "desktop", "source");
+        unpackedSource(path.join(sources, "previous"));
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home,
+            repo: path.join(sources, "previous"),
+            origin: "http://localhost:3000",
+            version: "0.16.0",
+          }),
+        );
+      },
+    );
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    expect(f.showUpdating).toHaveBeenCalledOnce();
+    expect(f.showStarting).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+
+  it("normalizes trailing slashes and symlinks in serving.source so moved records do not stay stale", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const f = installedBy(archive);
+    const current = path.join(
+      f.home,
+      "desktop",
+      "source",
+      archive.sha256.slice(0, 16),
+    );
+    let reported = `${current}${path.sep}`;
+    if (!isWindowsHost) {
+      const link = path.join(f.root, "home-link");
+      symlinkSync(f.home, link);
+      reported = `${path.join(link, "desktop", "source", archive.sha256.slice(0, 16))}${path.sep}`;
+    }
+    writeFileSync(path.join(f.home, "resume-serving"), reported);
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    expect(f.showStartFailed).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
+      ),
+    ).toMatchObject({ repo: current, version: APP_VERSION });
     await f.host.stop("quit");
   });
 
@@ -7722,5 +7918,931 @@ describe("InstallerApi polling", () => {
       (await open(fake.fetcher)).run(plan, controller.signal, () => {}),
     ).rejects.toThrow();
     expect(fake.reads()).toBe(1);
+  });
+});
+
+describe("pollDelayMs", () => {
+  it("uses fast polling for the first 10s then relaxes to basePollMs without exceeding basePollMs", () => {
+    const start = 10_000;
+    expect(FAST_POLL_MS).toBe(200);
+    expect(FAST_POLL_WINDOW_MS).toBe(10_000);
+    expect(pollDelayMs(start, 1_000, start)).toBe(200);
+    expect(pollDelayMs(start, 1_000, start + 9_999)).toBe(200);
+    expect(pollDelayMs(start, 1_000, start + 10_000)).toBe(1_000);
+    expect(pollDelayMs(start, 1_000, start + 30_000)).toBe(1_000);
+    expect(pollDelayMs(start, 10, start)).toBe(10);
+    expect(pollDelayMs(start, 10, start + 15_000)).toBe(10);
+  });
+});
+
+describe("LocalServerModule background pre-staging, Bifrost pre-fetch, and early prewarm", () => {
+  const readPrefetchEvents = (root: string) => {
+    const file = path.join(root, "prefetch-events.jsonl");
+    if (!existsSync(file)) return [];
+    return readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            home: string;
+            event: string;
+            args?: string[];
+            runAsNode?: string;
+          },
+      );
+  };
+
+  // Sets up a bundled local source archive plus a directory-layout offline
+  // native runtime and bundled TeamHub binary for pre-staging tests.
+  const setupBundledArchiveFixture = (
+    platform: NodeJS.Platform = "darwin",
+    arch = "arm64",
+    api = installerApi(),
+  ) => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const sha256 = (data: string | Buffer) =>
+      createHash("sha256").update(data).digest("hex");
+    const target = `${platform}-${arch}`;
+    const f = fixture(
+      {
+        platform,
+        arch,
+        sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
+      },
+      {},
+      (home) => {
+        const installer = path.join(path.dirname(home), "installer");
+        mkdirSync(path.join(installer, "source"), { recursive: true });
+        writeFileSync(
+          path.join(installer, "source", "linger.tar.gz"),
+          archive.bytes,
+        );
+        const bundle = path.join(installer, "native", `runtime-${target}`);
+        mkdirSync(path.join(bundle, "runtime", "web"), { recursive: true });
+        const files = JSON.stringify({
+          target,
+          sourceCommit: "a".repeat(40),
+          sourceArchiveSha256: archive.sha256,
+          files: {},
+        });
+        writeFileSync(path.join(bundle, "runtime", "files.json"), files);
+        writeFileSync(
+          path.join(bundle, "runtime", "web", "static-host.mjs"),
+          "",
+        );
+        writeFileSync(
+          path.join(bundle, "manifest.json"),
+          JSON.stringify({
+            target,
+            sourceCommit: "a".repeat(40),
+            sourceArchiveSha256: archive.sha256,
+            layout: "directory",
+            directory: { file: "runtime/files.json", sha256: sha256(files) },
+          }),
+        );
+        const teamhubDir = path.join(installer, "native", `teamhub-${target}`);
+        mkdirSync(teamhubDir, { recursive: true });
+        const ext = platform === "win32" ? ".exe" : "";
+        const binaries: Record<
+          string,
+          { file: string; sha256: string; bytes: number }
+        > = {};
+        for (const cmd of ["teamhub", "migrate", "account"]) {
+          const file = `${cmd}${ext}`;
+          const binBytes = Buffer.from(`#!/bin/sh\n# ${cmd}\n`);
+          writeFileSync(path.join(teamhubDir, file), binBytes, {
+            mode: 0o755,
+          });
+          binaries[cmd] = {
+            file,
+            sha256: sha256(binBytes),
+            bytes: binBytes.length,
+          };
+        }
+        writeFileSync(
+          path.join(teamhubDir, "manifest.json"),
+          JSON.stringify({
+            target,
+            sourceCommit: "a".repeat(40),
+            sourceArchiveSha256: archive.sha256,
+            goVersion: "1.24.0",
+            binaries,
+          }),
+        );
+      },
+      api,
+      root,
+    );
+    return { ...f, archive };
+  };
+
+  it("silently pre-stages bundled source and native runtime during inspect() and joins on begin() with granular timings", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    const f = setupBundledArchiveFixture("linux", "x64");
+    const phases: string[] = [];
+    const progresses: number[] = [];
+    f.bus.on("local-server.changed", () => {
+      const s = f.module.status();
+      phases.push(s.phase);
+      progresses.push(s.progress);
+    });
+    await f.host.start();
+    try {
+      f.module.inspect();
+      await waitForInstaller(() =>
+        expect(info).toHaveBeenCalledWith(
+          "local_server.prestage",
+          expect.objectContaining({ status: "completed" }),
+        ),
+      );
+      // Silent pre-staging must never mutate phase/progress or emit installing.
+      expect(f.module.status().phase).toBe("idle");
+      expect(f.module.status().progress).toBe(0);
+      expect(phases).not.toContain("installing");
+      expect(progresses.every((p) => p === 0)).toBe(true);
+
+      const stagedRepo = path.join(
+        f.home,
+        "desktop",
+        "source",
+        f.archive.sha256.slice(0, 16),
+      );
+      expect(
+        existsSync(path.join(stagedRepo, "scripts/source-native.mjs")),
+      ).toBe(true);
+      expect(
+        existsSync(
+          path.join(stagedRepo, ".simplexai-runtime/offline/files.json"),
+        ),
+      ).toBe(true);
+      expect(
+        existsSync(
+          path.join(stagedRepo, ".simplexai-runtime/prebuilt/teamhub"),
+        ),
+      ).toBe(true);
+
+      // Granular timings were logged with prestage: true.
+      const timingCalls = () =>
+        info.mock.calls
+          .filter(([event]) => event === "local_server.timing")
+          .map(([, fields]) => fields as Record<string, unknown>);
+      const prestageSteps = timingCalls()
+        .filter((fields) => fields.prestage === true)
+        .map((fields) => fields.step);
+      expect(prestageSteps).toEqual(
+        expect.arrayContaining([
+          "teamhub_binaries",
+          "native_runtime",
+          "native_runtime_cp",
+          "native_runtime_verify",
+          "native_runtime_xattr",
+          "native_runtime_publish",
+          "native_runtime_mark_verified",
+        ]),
+      );
+
+      // Subsequent begin() joins the completed pre-stage without duplicating
+      // native_runtime copy/unpack steps.
+      const cpCountBefore = timingCalls().filter(
+        (fields) => fields.step === "native_runtime_cp",
+      ).length;
+      expect(cpCountBefore).toBe(1);
+
+      await f.module.begin();
+      expect(f.module.status().phase).toBe("ready");
+      expect(info).toHaveBeenCalledWith(
+        "local_server.prestage",
+        expect.objectContaining({ status: "joined" }),
+      );
+      const cpCountAfter = timingCalls().filter(
+        (fields) => fields.step === "native_runtime_cp",
+      ).length;
+      expect(cpCountAfter).toBe(1);
+    } finally {
+      info.mockRestore();
+      await f.host.stop("quit");
+    }
+  });
+
+  it("does not pre-stage remote URL sourceArchive or developer checkout during inspect()", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    const fetchMock = vi.fn(async () => {
+      throw new Error("remote archive must not be fetched during inspect");
+    }) as unknown as typeof fetch;
+    const remote = fixture({
+      sourceArchive: {
+        url: "https://downloads.example/linger.tar.gz",
+        sha256: "a".repeat(64),
+      },
+      fetch: fetchMock,
+    });
+    const dev = fixture(withCheckout, {}, checkout);
+    await remote.host.start();
+    await dev.host.start();
+    try {
+      remote.module.inspect();
+      dev.module.inspect();
+      await waitForInstaller(() =>
+        expect(remote.module.status().localModels.state).toBe("checked"),
+      );
+      await waitForInstaller(() =>
+        expect(dev.module.status().localModels.state).toBe("checked"),
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(existsSync(path.join(remote.home, "desktop", "source"))).toBe(
+        false,
+      );
+      expect(info).not.toHaveBeenCalledWith(
+        "local_server.prestage",
+        expect.anything(),
+      );
+    } finally {
+      info.mockRestore();
+      await remote.host.stop("quit");
+      await dev.host.stop("quit");
+    }
+  });
+
+  it("aborts in-flight pre-staging and Bifrost pre-fetch on cancelPrestage() and chooseLocation() without leaving .partial directories", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    // 1. Abort in-flight pre-stage via cancelPrestage() while rename is paused,
+    //    verifying .partial is cleaned up and final directory is not published.
+    let releaseRename!: () => void;
+    let renameEntered!: () => void;
+    const renameReady = new Promise<void>((resolve) => {
+      renameEntered = resolve;
+    });
+    const f = setupBundledArchiveFixture("linux", "x64");
+    const blocked = new LocalServerModule({
+      home: f.home,
+      version: APP_VERSION,
+      installerDirectory: path.join(f.root, "installer"),
+      platform: "linux",
+      arch: "x64",
+      pollMs: 10,
+      freeBytes: 1,
+      sourceArchive: {
+        file: "source/linger.tar.gz",
+        sha256: f.archive.sha256,
+      },
+      signIn: f.signIn,
+      rename: async (from, to) => {
+        renameEntered();
+        await new Promise<void>((resolve) => {
+          releaseRename = resolve;
+        });
+        await rename(from, to);
+      },
+    });
+    const bus = new EventBus();
+    const host = testHost(
+      [
+        {
+          ...stubModule("WindowManager"),
+          setServer: vi.fn(() => true),
+          prewarmAssets: vi.fn(async () => {}),
+          preloadAuthenticated: vi.fn(),
+        } as never,
+        {
+          ...stubModule("Enrollment"),
+          enroll: vi.fn(async () => {}),
+          unenroll: vi.fn(async () => {}),
+          syncLocalGatewayUrl: vi.fn(() => false),
+        } as never,
+        blocked,
+      ],
+      {},
+      bus,
+    );
+    writeFileSync(path.join(f.root, "prefetch-track"), "");
+    writeFileSync(path.join(f.root, "prefetch-hang"), "");
+    await host.start();
+    try {
+      blocked.inspect();
+      await renameReady;
+      // Wait for inspect to finish and spawn the hanging Bifrost pre-fetch.
+      await waitForInstaller(() =>
+        expect(
+          readPrefetchEvents(f.root).some((e) => e.event === "started"),
+        ).toBe(true),
+      );
+      blocked.cancelPrestage();
+      releaseRename();
+      await waitForInstaller(() =>
+        expect(info).toHaveBeenCalledWith(
+          "local_server.prestage",
+          expect.objectContaining({ status: "aborted" }),
+        ),
+      );
+      await waitForInstaller(() =>
+        expect(info).toHaveBeenCalledWith(
+          "local_server.bifrost_prefetch",
+          expect.objectContaining({ status: "aborted" }),
+        ),
+      );
+      const sourceRoot = path.join(f.home, "desktop", "source");
+      const entries = existsSync(sourceRoot) ? readdirSync(sourceRoot) : [];
+      expect(entries.some((entry) => entry.endsWith(".partial"))).toBe(false);
+      // Because cancelPrestage() aborted before teamhub/native_runtime ran,
+      // the offline runtime directory was never published either.
+      const stagedRepo = path.join(sourceRoot, f.archive.sha256.slice(0, 16));
+      expect(
+        existsSync(path.join(stagedRepo, ".simplexai-runtime/offline")),
+      ).toBe(false);
+      expect(
+        existsSync(path.join(stagedRepo, ".simplexai-runtime/offline.partial")),
+      ).toBe(false);
+    } finally {
+      await host.stop("quit");
+    }
+
+    // 2. Switching location via chooseLocation() also cancels Bifrost pre-fetch
+    //    for the old home and leaves the new candidate untouched.
+    const f2 = fixture(withCheckout, {}, checkout);
+    writeFileSync(path.join(f2.root, "prefetch-track"), "");
+    writeFileSync(path.join(f2.root, "prefetch-hang"), "");
+    const picked = path.join(f2.root, "other-home");
+    await f2.host.start();
+    try {
+      f2.module.inspect();
+      await waitForInstaller(() =>
+        expect(
+          readPrefetchEvents(f2.root).some((e) => e.event === "started"),
+        ).toBe(true),
+      );
+      await f2.module.chooseLocation(picked);
+      await waitForInstaller(() =>
+        expect(
+          readPrefetchEvents(f2.root).some(
+            (e) => e.event === "sigterm" || e.event === "stdin_end",
+          ),
+        ).toBe(true),
+      );
+      expect(existsSync(picked)).toBe(false);
+    } finally {
+      info.mockRestore();
+      await f2.host.stop("quit");
+    }
+  });
+
+  it("fires Bifrost pre-fetch on inspect(), checkByok(), and listByokModels() without blocking, and hands off cleanly before installer_job across platforms", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    // 1. checkByok() and listByokModels() fire pre-fetch without blocking even
+    //    when --prefetch-bifrost hangs, and begin() stops and awaits its exit
+    //    BEFORE starting installer_job so localmodels' archive lock is released.
+    let sawExitedBeforeJobCreate = false;
+    const byokApi = installerApi();
+    const origHandle = byokApi.handle;
+    let fByokRoot = "";
+    byokApi.handle = async (url, init) => {
+      if (url.pathname === "/api/jobs" && init?.method === "POST") {
+        sawExitedBeforeJobCreate = readPrefetchEvents(fByokRoot).some(
+          (e) => e.event === "sigterm" || e.event === "stdin_end",
+        );
+      }
+      return origHandle(url, init);
+    };
+    const fByok = fixture(withCheckout, {}, checkout, byokApi);
+    fByokRoot = fByok.root;
+    writeFileSync(path.join(fByok.root, "prefetch-track"), "");
+    writeFileSync(path.join(fByok.root, "prefetch-hang"), "");
+    writeFileSync(path.join(fByok.root, "prefetch-exit-delay"), "");
+    await fByok.host.start();
+    try {
+      await fByok.module.checkByok({
+        runtime: "codex",
+        baseUrl: "https://byok.example",
+        path: "/v1",
+        endpoint: "/responses",
+        apiKey: "k",
+        modelId: "m",
+        protocol: "openai-responses",
+      });
+      expect(fByok.module.status().byokCheck?.state).toBe("ready");
+      await fByok.module.listByokModels({
+        baseUrl: "https://byok.example",
+        path: "/v1",
+        endpoint: "/responses",
+        protocol: "openai-responses",
+      });
+      expect(fByok.module.status().byokModels?.state).toBe("ready");
+      await waitForInstaller(() =>
+        expect(
+          readPrefetchEvents(fByok.root).filter((e) => e.event === "started"),
+        ).toHaveLength(1),
+      );
+      expect(readPrefetchEvents(fByok.root)[0]?.args).toContain(
+        "--abort-on-stdin-close",
+      );
+
+      await fByok.module.begin({
+        runtime: "codex",
+        byok: {
+          runtime: "codex",
+          baseUrl: "https://byok.example",
+          path: "/v1",
+          endpoint: "/responses",
+          apiKey: "k",
+          modelId: "m",
+          protocol: "openai-responses",
+        },
+      });
+      expect(sawExitedBeforeJobCreate).toBe(true);
+    } finally {
+      await fByok.host.stop("quit");
+    }
+
+    // 2. Pure subscription install (claude/codex) aborts in-flight Bifrost pre-fetch.
+    const fSub = fixture(withCheckout, {}, checkout);
+    writeFileSync(path.join(fSub.root, "prefetch-track"), "");
+    writeFileSync(path.join(fSub.root, "prefetch-hang"), "");
+    await fSub.host.start();
+    try {
+      fSub.module.inspect();
+      await waitForInstaller(() =>
+        expect(
+          readPrefetchEvents(fSub.root).some((e) => e.event === "started"),
+        ).toBe(true),
+      );
+      await fSub.module.begin({ runtime: "claude" });
+      await waitForInstaller(() =>
+        expect(
+          readPrefetchEvents(fSub.root).some(
+            (e) => e.event === "sigterm" || e.event === "stdin_end",
+          ),
+        ).toBe(true),
+      );
+    } finally {
+      await fSub.host.stop("quit");
+    }
+
+    // 3. On Windows (no SIGTERM sent), closing stdin cleanly terminates the
+    //    pre-fetch child via --abort-on-stdin-close before installer_job starts.
+    let winExitedBeforeJobCreate = false;
+    const winApi = installerApi();
+    const origWinHandle = winApi.handle;
+    let fWinRoot = "";
+    winApi.handle = async (url, init) => {
+      if (url.pathname === "/api/jobs" && init?.method === "POST") {
+        winExitedBeforeJobCreate = readPrefetchEvents(fWinRoot).some(
+          (e) => e.event === "stdin_end",
+        );
+      }
+      return origWinHandle(url, init);
+    };
+    const fWin = fixture(
+      (home) => ({
+        ...withCheckout(home),
+        platform: "win32",
+        arch: "x64",
+        checkPrivateLocation: async () => {},
+      }),
+      {},
+      (home) => {
+        checkout(home);
+        writeFileSync(
+          path.join(path.dirname(home), "installer", "distribution.json"),
+          JSON.stringify({
+            platform: "win32",
+            arch: "x64",
+            nativeSources: [{ target: "win32-x64" }],
+          }),
+        );
+        const nodeDir = path.join(
+          home,
+          "desktop",
+          "node",
+          `v${NODE_RUNTIME_VERSION}`,
+        );
+        fixtureNode(path.join(nodeDir, "node.exe"));
+      },
+      winApi,
+    );
+    fWinRoot = fWin.root;
+    writeFileSync(path.join(fWin.root, "prefetch-track"), "");
+    writeFileSync(path.join(fWin.root, "prefetch-hang"), "");
+    await fWin.host.start();
+    try {
+      fWin.module.inspect();
+      await waitForInstaller(() =>
+        expect(
+          readPrefetchEvents(fWin.root).some((e) => e.event === "started"),
+        ).toBe(true),
+      );
+      await fWin.module.begin({ runtime: "local" });
+      expect(winExitedBeforeJobCreate).toBe(true);
+      expect(
+        readPrefetchEvents(fWin.root).some((e) => e.event === "sigterm"),
+      ).toBe(false);
+    } finally {
+      info.mockRestore();
+      await fWin.host.stop("quit");
+    }
+  });
+
+  it("triggers early prewarmAssets once when services succeed without preloading authenticated window before enroll, and overlaps installer_runtime with sign_in_as", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    let releaseRuntime!: () => void;
+    const api = installerApi(
+      [],
+      {
+        state: "succeeded",
+        origin: "http://localhost:3000",
+        stages: [
+          { id: "services", state: "succeeded" },
+          { id: "account", state: "succeeded" },
+        ],
+      },
+      Response.json({ recommendation: "claude" }),
+      [
+        {
+          state: "running",
+          stage: "account",
+          stages: [
+            { id: "services", state: "succeeded" },
+            { id: "account", state: "running" },
+          ],
+        },
+        {
+          state: "running",
+          stage: "account",
+          stages: [
+            { id: "services", state: "succeeded" },
+            { id: "account", state: "running" },
+          ],
+        },
+      ],
+    );
+    api.runtime.lookup = new Promise<void>((resolve) => {
+      releaseRuntime = resolve;
+    });
+    const order: string[] = [];
+    const f = fixture(withCheckout, {}, checkout, api);
+    f.prewarmAssets.mockImplementation(async () => {
+      order.push("prewarmAssets");
+    });
+    f.signIn.mockImplementation(async () => {
+      order.push("signIn");
+    });
+    f.enroll.mockImplementation(async () => {
+      order.push("enroll");
+    });
+    f.preloadAuthenticated.mockImplementation(() => {
+      order.push("preloadAuthenticated");
+    });
+    await f.host.start();
+    try {
+      const installing = f.module.begin();
+      // Early prewarm fires during polling, and sign_in_as overlaps while
+      // installer_runtime is still pending — neither enroll nor
+      // preloadAuthenticated has run yet.
+      await waitForInstaller(() => expect(api.runtime.asked).toBe(1));
+      await waitForInstaller(() => expect(f.signIn).toHaveBeenCalledOnce());
+      expect(f.prewarmAssets).toHaveBeenCalledOnce();
+      expect(f.prewarmAssets).toHaveBeenCalledWith("http://localhost:3000");
+      expect(f.enroll).not.toHaveBeenCalled();
+      expect(f.preloadAuthenticated).not.toHaveBeenCalled();
+
+      releaseRuntime();
+      await installing;
+
+      expect(f.module.status().phase).toBe("ready");
+      // Deduplicated: prewarmAssets was NOT called a second time after job end.
+      expect(f.prewarmAssets).toHaveBeenCalledOnce();
+      expect(order).toEqual([
+        "prewarmAssets",
+        "signIn",
+        "enroll",
+        "preloadAuthenticated",
+      ]);
+      const timedSteps = info.mock.calls
+        .filter(([event]) => event === "local_server.timing")
+        .map(([, fields]) => (fields as { step: string }).step);
+      expect(timedSteps).toEqual(
+        expect.arrayContaining(["installer_runtime", "sign_in_as"]),
+      );
+    } finally {
+      info.mockRestore();
+      await f.host.stop("quit");
+    }
+  });
+
+  it("serializes a new same-home install behind a cancelled pre-stage's cleanup so .partial never races", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    let releaseFirstRename!: () => void;
+    let firstRenameEntered!: () => void;
+    const firstReady = new Promise<void>((resolve) => {
+      firstRenameEntered = resolve;
+    });
+    let renameCalls = 0;
+    const api = installerApi();
+    const base = setupBundledArchiveFixture("linux", "x64", api);
+    const mod = new LocalServerModule({
+      home: base.home,
+      version: APP_VERSION,
+      installerDirectory: path.join(base.root, "installer"),
+      platform: "linux",
+      arch: "x64",
+      pollMs: 10,
+      freeBytes: 1,
+      sourceArchive: {
+        file: "source/linger.tar.gz",
+        sha256: base.archive.sha256,
+      },
+      signIn: base.signIn,
+      serverIdentity: async (_h, origin) => ({
+        origin,
+        teamhub: TEAMHUB,
+        key: KEY,
+      }),
+      proveServer: async () => {},
+      fetch: ((input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(
+          input instanceof Request ? input.url : String(input),
+        );
+        return api.handle(url, init);
+      }) as typeof fetch,
+      rename: async (from, to) => {
+        renameCalls += 1;
+        if (renameCalls === 1) {
+          firstRenameEntered();
+          await new Promise<void>((resolve) => {
+            releaseFirstRename = resolve;
+          });
+          // Simulate an interrupted publish so the first task's finally block
+          // removes `${directory}.partial` after cancellation.
+          throw new Error("interrupted");
+        }
+        await rename(from, to);
+      },
+    });
+    const bus = new EventBus();
+    const host = testHost(
+      [
+        {
+          ...stubModule("WindowManager"),
+          setServer: vi.fn(() => true),
+          prewarmAssets: vi.fn(async () => {}),
+          preloadAuthenticated: vi.fn(),
+        } as never,
+        {
+          ...stubModule("Enrollment"),
+          enroll: vi.fn(async () => {}),
+          unenroll: vi.fn(async () => {}),
+          syncLocalGatewayUrl: vi.fn(() => false),
+        } as never,
+        mod,
+      ],
+      {},
+      bus,
+    );
+    await host.start();
+    try {
+      mod.inspect();
+      await firstReady;
+      // Cancel pre-staging while its first task still holds `.partial`, then
+      // immediately start begin() on the same default home.
+      mod.cancelPrestage();
+      const installing = mod.begin();
+      await delay(60);
+      // The foreground install must wait for the cancelled pre-stage to finish
+      // cleaning up `.partial` before starting a new extraction/rename.
+      expect(renameCalls).toBe(1);
+
+      releaseFirstRename();
+      await installing;
+
+      expect(mod.status().phase).toBe("ready");
+      expect(renameCalls).toBeGreaterThanOrEqual(2);
+      const stagedRepo = path.join(
+        base.home,
+        "desktop",
+        "source",
+        base.archive.sha256.slice(0, 16),
+      );
+      expect(
+        existsSync(path.join(stagedRepo, "scripts/source-native.mjs")),
+      ).toBe(true);
+      expect(existsSync(`${stagedRepo}.partial`)).toBe(false);
+    } finally {
+      info.mockRestore();
+      await host.stop("quit");
+    }
+  });
+
+  it("checks Windows private-path safety before silently pre-staging and writes nothing on refusal", async () => {
+    const warn = vi.spyOn(silentLog, "warn");
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const checkPrivateLocation = vi.fn(async () => {
+      throw Object.assign(new Error("unsafe ancestor ACL"), {
+        code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+        reason: "UNSAFE_PARENT_ACCESS",
+      });
+    });
+    const f = fixture(
+      {
+        platform: "win32",
+        arch: "x64",
+        sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
+        checkPrivateLocation,
+      },
+      {},
+      (home) => {
+        const installer = path.join(path.dirname(home), "installer");
+        mkdirSync(path.join(installer, "source"), { recursive: true });
+        writeFileSync(
+          path.join(installer, "source", "linger.tar.gz"),
+          archive.bytes,
+        );
+      },
+      installerApi(),
+      root,
+    );
+    await f.host.start();
+    try {
+      f.module.inspect();
+      await waitForInstaller(() =>
+        expect(warn).toHaveBeenCalledWith(
+          "local_server.prestage",
+          expect.objectContaining({ status: "failed" }),
+        ),
+      );
+      expect(checkPrivateLocation).toHaveBeenCalledWith(f.home);
+      expect(existsSync(path.join(f.home, "desktop", "source"))).toBe(false);
+      expect(f.module.status().phase).toBe("idle");
+      expect(f.module.status().refusal).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+      await f.host.stop("quit");
+    }
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "runChild waits for child close before rejecting when aborted on SIGTERM",
+    async () => {
+      const dir = tempDirectory();
+      const startedFile = path.join(dir, "started");
+      const exitedFile = path.join(dir, "exited");
+      const script = [
+        `const fs = require("node:fs");`,
+        `process.on("SIGTERM", () => {`,
+        `  setTimeout(() => { fs.writeFileSync(${JSON.stringify(exitedFile)}, "1"); process.exit(0); }, 150);`,
+        `});`,
+        `fs.writeFileSync(${JSON.stringify(startedFile)}, "1");`,
+        `setInterval(() => {}, 1000);`,
+      ].join("\n");
+      const controller = new AbortController();
+      const running = runChild(
+        process.execPath,
+        ["-e", script],
+        dir,
+        controller.signal,
+      );
+      await waitForInstaller(() => expect(existsSync(startedFile)).toBe(true));
+      controller.abort(new Error("stop-now"));
+      await expect(running).rejects.toThrow("stop-now");
+      // runChild must NOT have rejected before the child finished its 150ms
+      // cleanup and closed.
+      expect(existsSync(exitedFile)).toBe(true);
+    },
+  );
+
+  it("removes TEAMHUB_BINARY_DIRECTORY when aborted after installTeamhubBinaries wrote manifest.json and before unquarantine completes", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    const f = setupBundledArchiveFixture("linux", "x64");
+    const realInstall = teamhubBinaries.installTeamhubBinaries;
+    let abortedOnce = false;
+    const spy = vi
+      .spyOn(teamhubBinaries, "installTeamhubBinaries")
+      .mockImplementation(async (...args) => {
+        const state = await realInstall(...args);
+        if (!abortedOnce && state === "installed") {
+          abortedOnce = true;
+          f.module.cancelPrestage();
+        }
+        return state;
+      });
+    await f.host.start();
+    try {
+      f.module.inspect();
+      await waitForInstaller(() =>
+        expect(info).toHaveBeenCalledWith(
+          "local_server.prestage",
+          expect.objectContaining({ status: "aborted" }),
+        ),
+      );
+      expect(abortedOnce).toBe(true);
+      const stagedRepo = path.join(
+        f.home,
+        "desktop",
+        "source",
+        f.archive.sha256.slice(0, 16),
+      );
+      const prebuiltDir = path.join(stagedRepo, ".simplexai-runtime/prebuilt");
+      // Prebuilt directory was cleaned up so the next run reinstalls and
+      // completes unquarantine instead of seeing a stale manifest.json.
+      expect(existsSync(prebuiltDir)).toBe(false);
+
+      spy.mockRestore();
+      await f.module.begin();
+      expect(f.module.status().phase).toBe("ready");
+      expect(existsSync(path.join(prebuiltDir, "teamhub"))).toBe(true);
+      expect(info).toHaveBeenCalledWith(
+        "local_server.teamhub_binaries",
+        expect.objectContaining({ target: "linux-x64" }),
+      );
+    } finally {
+      spy.mockRestore();
+      info.mockRestore();
+      await f.host.stop("quit");
+    }
+  });
+
+  it("suppresses late Bifrost pre-fetch when setup closes during inspect() and cleans up BYOK pre-fetch started during sign-in", async () => {
+    // (a) Closing setup via cancelPrestage() while inspect() is in flight
+    //     prevents inspect()'s completion from spawning --prefetch-bifrost.
+    const fLate = fixture(withCheckout, {}, (home) => {
+      checkout(home);
+      writeFileSync(path.join(home, "tool-download"), "");
+    });
+    writeFileSync(path.join(fLate.root, "prefetch-track"), "");
+    await fLate.host.start();
+    try {
+      fLate.module.inspect();
+      await waitForInstaller(() =>
+        expect(fLate.module.status().localModels).toEqual({
+          state: "checking",
+          download: { completed: 5, total: 10 },
+        }),
+      );
+      // Setup closes while inspect() is still running.
+      fLate.module.cancelPrestage();
+      writeFileSync(path.join(fLate.home, "tool-ready"), "");
+      await waitForInstaller(() =>
+        expect(fLate.module.status().localModels.state).toBe("checked"),
+      );
+      await delay(80);
+      expect(readPrefetchEvents(fLate.root)).toEqual([]);
+    } finally {
+      writeFileSync(path.join(fLate.home, "tool-ready"), "");
+      await fLate.host.stop("quit");
+    }
+
+    // (b) Testing BYOK during #awaitSignIn starts --prefetch-bifrost; finishing
+    //     subscription sign-in stops and cleans it up before ready.
+    const signInApi = installerApi([], {
+      state: "waiting_user",
+      errorCode: "RUNTIME_AUTH_REQUIRED",
+      origin: "http://localhost:3000",
+      setupChoice: "codex",
+    });
+    signInApi.runtime.login = { state: "idle" };
+    const fSignIn = fixture(
+      (home) => ({
+        ...withCheckout(home),
+        signInPollMs: 20,
+      }),
+      {},
+      checkout,
+      signInApi,
+    );
+    writeFileSync(path.join(fSignIn.root, "prefetch-track"), "");
+    writeFileSync(path.join(fSignIn.root, "prefetch-hang"), "");
+    await fSignIn.host.start();
+    try {
+      const installing = fSignIn.module.begin({ runtime: "codex" });
+      await waitForInstaller(() =>
+        expect(fSignIn.module.status().signIn?.state).toBe("required"),
+      );
+      await fSignIn.module.checkByok({
+        runtime: "codex",
+        baseUrl: "https://byok.example",
+        path: "/v1",
+        endpoint: "/responses",
+        apiKey: "k",
+        modelId: "m",
+        protocol: "openai-responses",
+      });
+      await waitForInstaller(() =>
+        expect(
+          readPrefetchEvents(fSignIn.root).some((e) => e.event === "started"),
+        ).toBe(true),
+      );
+      // Complete subscription sign-in without switching to BYOK.
+      signInApi.runtime.login = { state: "ready" };
+      await installing;
+      expect(fSignIn.module.status().phase).toBe("ready");
+      expect(
+        readPrefetchEvents(fSignIn.root).some(
+          (e) => e.event === "sigterm" || e.event === "stdin_end",
+        ),
+      ).toBe(true);
+    } finally {
+      await fSignIn.host.stop("quit");
+    }
   });
 });

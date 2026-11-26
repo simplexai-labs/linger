@@ -207,6 +207,7 @@ describe("Runner Gateway local models", () => {
         "model_gateway_unavailable",
         "local_models_external_holders",
         "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -222,6 +223,7 @@ describe("Runner Gateway local models", () => {
         "model_gateway_unavailable",
         "local_models_external_holders",
         "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -236,6 +238,7 @@ describe("Runner Gateway local models", () => {
         "model_gateway_unavailable",
         "local_models_external_holders",
         "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -250,6 +253,7 @@ describe("Runner Gateway local models", () => {
         "model_gateway_unavailable",
         "local_models_external_holders",
         "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -264,6 +268,7 @@ describe("Runner Gateway local models", () => {
         "model_gateway_unavailable",
         "local_models_external_holders",
         "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -277,6 +282,7 @@ describe("Runner Gateway local models", () => {
         "model_gateway_unavailable",
         "local_models_external_holders",
         "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -289,6 +295,7 @@ describe("Runner Gateway local models", () => {
         "model_gateway_unavailable",
         "local_models_external_holders",
         "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -301,6 +308,7 @@ describe("Runner Gateway local models", () => {
         "model_gateway_unavailable",
         "local_models_external_holders",
         "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -312,6 +320,7 @@ describe("Runner Gateway local models", () => {
         "model_gateway_unavailable",
         "local_models_external_holders",
         "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -323,6 +332,7 @@ describe("Runner Gateway local models", () => {
         "model_gateway_unavailable",
         "local_models_external_holders",
         "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -333,6 +343,7 @@ describe("Runner Gateway local models", () => {
         "model_gateway_unavailable",
         "local_models_external_holders",
         "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -343,6 +354,7 @@ describe("Runner Gateway local models", () => {
         "model_gateway_unavailable",
         "local_models_external_holders",
         "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     ["0.51.0", undefined],

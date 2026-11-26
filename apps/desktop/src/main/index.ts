@@ -252,7 +252,7 @@ async function main(): Promise<void> {
     preload: path.join(here, "../preload/setup.cjs"),
     version: VERSION,
     defaultDisplayName,
-    show: !background && needsSetup,
+    show: () => !background && !config.get().computerId,
     loginItem: {
       get: () => app.getLoginItemSettings().openAtLogin,
       set: (on) =>

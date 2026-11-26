@@ -16,8 +16,6 @@ import {
 } from "./local-models-copy";
 import {
   buildModelGroups,
-  collapsedRowBadges,
-  compactContextLabel,
   contextLabel,
   downloadPercent,
   downloadStatusDetail,
@@ -532,59 +530,23 @@ describe("local models rules", () => {
     ).toEqual(["vision"]);
   });
 
-  it("formats parameter scale, architecture, and collapsed row badges", () => {
+  it("formats parameter scale and architecture", () => {
     const moe = localModel({
       active_parameters: "3B",
       architecture: "moe",
-      capabilities: ["coding", "reasoning", "tool_use", "vision"],
       id: "qwen3-coder-30b:Q4_K_M",
       name: "Qwen3 Coder 30B",
       parameters: "30B",
-      vision: true,
     });
     expect(parametersLabel(moe, translate)).toBe("30B · 3B active (MoE)");
-    expect(collapsedRowBadges(moe, translate)).toEqual({
-      badges: ["3B active", "Vision", "Tool use", "+3"],
-      overflowTitle: "Reasoning, Coding, 128K",
-    });
 
     const dense = localModel({
       architecture: "dense",
-      capabilities: ["tool_use"],
       id: "qwen3-4b:Q4_K_M",
       name: "Qwen3 4B",
       parameters: "4B",
     });
     expect(parametersLabel(dense, translate)).toBe("4B (Dense)");
-    expect(collapsedRowBadges(dense, translate)).toEqual({
-      badges: ["4B", "Tool use", "128K"],
-    });
-
-    // Collapsed badges depend strictly on structured fields, never name or description.
-    expect(
-      collapsedRowBadges(
-        {
-          ...dense,
-          description: "Vision reasoning model with 70B scale.",
-          name: "Renamed Without Size",
-        },
-        translate,
-      ),
-    ).toEqual(collapsedRowBadges(dense, translate));
-
-    expect(
-      collapsedRowBadges(
-        localModel({
-          context_tokens: 0,
-          id: "llama3.3:Q4_K_M",
-          name: "Llama 3.3",
-          parameters: "70B",
-        }),
-        translate,
-      ),
-    ).toEqual({ badges: ["70B"] });
-    expect(compactContextLabel(512, translate)).toBeUndefined();
-    expect(compactContextLabel(204_800, translate)).toBe("200K");
   });
 
   it("identifies models on the computer and formats Agent usage chips", () => {

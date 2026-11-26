@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,22 +46,50 @@ type stagingStore interface {
 }
 
 type HLSMaterializer struct {
-	queries *store.Queries
-	staging stagingStore
-	objects artifactstore.ObjectStore
-	ffmpeg  string
-	ffprobe string
+	queries  *store.Queries
+	staging  stagingStore
+	objects  artifactstore.ObjectStore
+	toolsBin string
+	toolsMu  sync.Mutex
+	ffmpeg   string
+	ffprobe  string
 }
 
 // ErrMediaToolsMissing means ffmpeg or ffprobe is not on PATH, so this
 // computer cannot materialize recordings.
 var ErrMediaToolsMissing = errors.New("voice media tools are missing")
 
+// NewHLSMaterializer constructs an HLSMaterializer that requires ffmpeg and
+// ffprobe to be resolvable on PATH at construction time.
 func NewHLSMaterializer(
 	pool *pgxpool.Pool,
 	objects artifactstore.ObjectStore,
 	staging *LocalStagingStore,
 ) (*HLSMaterializer, error) {
+	return NewHLSMaterializerWithToolsBin(pool, objects, staging, "")
+}
+
+// NewHLSMaterializerWithToolsBin constructs an HLSMaterializer. When toolsBin
+// is non-empty, it prefers ffmpeg and ffprobe inside toolsBin (without locking
+// in system PATH binaries at startup) and resolves them lazily once extracted.
+// When toolsBin is empty, both tools must be resolvable on PATH immediately.
+func NewHLSMaterializerWithToolsBin(
+	pool *pgxpool.Pool,
+	objects artifactstore.ObjectStore,
+	staging *LocalStagingStore,
+	toolsBin string,
+) (*HLSMaterializer, error) {
+	toolsBin = strings.TrimSpace(toolsBin)
+	if toolsBin != "" {
+		return &HLSMaterializer{
+			queries:  store.New(pool),
+			staging:  staging,
+			objects:  objects,
+			toolsBin: toolsBin,
+			ffmpeg:   findExecutableInDir(toolsBin, "ffmpeg"),
+			ffprobe:  findExecutableInDir(toolsBin, "ffprobe"),
+		}, nil
+	}
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		return nil, fmt.Errorf("ffmpeg is required for voice media materialization: %w", ErrMediaToolsMissing)
@@ -73,6 +102,55 @@ func NewHLSMaterializer(
 		queries: store.New(pool), staging: staging, objects: objects,
 		ffmpeg: ffmpeg, ffprobe: ffprobe,
 	}, nil
+}
+
+func (m *HLSMaterializer) resolveFFmpeg() (string, error) {
+	return m.resolveTool(&m.ffmpeg, "ffmpeg", "materialization")
+}
+
+func (m *HLSMaterializer) resolveFFprobe() (string, error) {
+	return m.resolveTool(&m.ffprobe, "ffprobe", "validation")
+}
+
+func (m *HLSMaterializer) resolveTool(cached *string, name, purpose string) (string, error) {
+	m.toolsMu.Lock()
+	defer m.toolsMu.Unlock()
+	if *cached != "" {
+		return *cached, nil
+	}
+	if m.toolsBin != "" {
+		if candidate := findExecutableInDir(m.toolsBin, name); candidate != "" {
+			*cached = candidate
+			return candidate, nil
+		}
+		// Fall back to system PATH without caching so subsequent calls switch
+		// to the verified bundled tool once toolsBin finishes extracting.
+		if found, err := exec.LookPath(name); err == nil {
+			return found, nil
+		}
+		return "", fmt.Errorf("%s is required for voice media %s: %w", name, purpose, ErrMediaToolsMissing)
+	}
+	if found, err := exec.LookPath(name); err == nil {
+		*cached = found
+		return found, nil
+	}
+	return "", fmt.Errorf("%s is required for voice media %s: %w", name, purpose, ErrMediaToolsMissing)
+}
+
+func findExecutableInDir(dir, name string) string {
+	exeSuffix := ""
+	if runtime.GOOS == "windows" {
+		exeSuffix = ".exe"
+	}
+	candidate := filepath.Join(dir, name+exeSuffix)
+	info, err := os.Stat(candidate)
+	if err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		return ""
+	}
+	return candidate
 }
 
 // DeleteCaptureStaging removes every epoch the recorder wrote for the Capture.
@@ -321,7 +399,11 @@ func (m *HLSMaterializer) joinSegments(
 	if err = transport.Close(); err != nil {
 		return err
 	}
-	command := exec.CommandContext(ctx, m.ffmpeg,
+	ffmpeg, err := m.resolveFFmpeg()
+	if err != nil {
+		return err
+	}
+	command := exec.CommandContext(ctx, ffmpeg,
 		"-hide_banner", "-loglevel", "error", "-y",
 		"-thread_queue_size", voiceMediaPacketQueueSize, "-f", inputFormat, "-i", transportPath,
 		"-map", "0:a:0", "-c:a", "copy", "-movflags", "+faststart", outputPath,
@@ -372,7 +454,11 @@ func (m *HLSMaterializer) excludeMediaRanges(ctx context.Context, inputPath, tem
 	}
 	outputPath := filepath.Join(temporary, "excluded.m4a")
 	bitstream := "noise=amount=0:drop=" + strings.Join(parts, "+") + ",setts=ts=N*1024"
-	command := exec.CommandContext(ctx, m.ffmpeg,
+	ffmpeg, err := m.resolveFFmpeg()
+	if err != nil {
+		return "", err
+	}
+	command := exec.CommandContext(ctx, ffmpeg,
 		"-hide_banner", "-loglevel", "error", "-y",
 		"-thread_queue_size", voiceMediaPacketQueueSize, "-i", inputPath, "-map", "0:a:0", "-c:a", "copy", "-bsf:a", bitstream,
 		"-movflags", "+faststart", outputPath,
@@ -395,7 +481,11 @@ func (m *HLSMaterializer) trimToRange(
 		return joinedPath, nil
 	}
 	outputPath := filepath.Join(temporary, "trimmed.m4a")
-	command := exec.CommandContext(ctx, m.ffmpeg,
+	ffmpeg, err := m.resolveFFmpeg()
+	if err != nil {
+		return "", err
+	}
+	command := exec.CommandContext(ctx, ffmpeg,
 		"-hide_banner", "-loglevel", "error", "-y",
 		"-ss", fmt.Sprintf("%.3f", float64(startMS)/1000),
 		"-thread_queue_size", voiceMediaPacketQueueSize, "-i", joinedPath, "-t", fmt.Sprintf("%.3f", float64(durationMS)/1000),
@@ -623,7 +713,11 @@ func (m *HLSMaterializer) listContiguousSegments(ctx context.Context, prefix str
 }
 
 func (m *HLSMaterializer) probe(ctx context.Context, file string) (int64, error) {
-	output, err := exec.CommandContext(ctx, m.ffprobe,
+	ffprobe, err := m.resolveFFprobe()
+	if err != nil {
+		return 0, err
+	}
+	output, err := exec.CommandContext(ctx, ffprobe,
 		"-v", "error", "-show_entries", "format=duration:stream=codec_type",
 		"-of", "json", file,
 	).Output()

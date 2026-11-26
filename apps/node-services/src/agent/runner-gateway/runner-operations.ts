@@ -358,6 +358,16 @@ export class RunnerOperations {
         execution_context_key: operation.start.execution_context_key,
         runtime_type: operation.start.runtime_type,
         priority: operation.priority,
+        phase: operation.phase,
+        ...(operation.phase === "waiting_background"
+          ? {
+              background_tools: operation.backgroundTools.map((tool) => ({
+                call_id: tool.callId,
+                tool_name: tool.toolName,
+                started_at_unix_ms: tool.startedAtUnixMs,
+              })),
+            }
+          : {}),
         yield_blocker: operation.yieldBlocker ?? null,
       }));
   }
@@ -772,7 +782,16 @@ export class RunnerOperations {
       return;
     }
     const wasYieldable = operation.yieldBlocker === undefined;
+    const previousPhase = operation.phase;
     const acknowledgement = await operation.receive(envelope);
+    if (!operation.terminal && operation.phase !== previousPhase) {
+      const lease = this.#leases.get(operation.start.operation_id);
+      if (operation.phase === "waiting_background") {
+        lease?.suspend();
+      } else {
+        lease?.resume();
+      }
+    }
     if (
       envelope.type === "operation.event" &&
       envelope.event.type === "model.responded"

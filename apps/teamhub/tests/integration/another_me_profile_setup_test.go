@@ -642,3 +642,237 @@ func TestAnotherMeSourcesCardOffersTheProfileAfterAWaitingStatus(t *testing.T) {
 		t.Fatalf("finished status=%s", finished)
 	}
 }
+
+// When an idle reminder fired while setup was still open, a Human who has
+// never written in the Room and still has no Profile starts the Profile upon
+// finishing the setup cards, whether they skip the sources card or add links.
+func TestAnotherMeFinishedSetupStartsProfileAfterIdleReminderWhileQuiet(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	for name, tc := range map[string]struct {
+		answer map[string]any
+		want   []string
+	}{
+		"sources skipped": {
+			answer: map[string]any{"decision": "skipped"},
+			want: []string{
+				"Setup cards: finished.",
+				"- Gmail alice@example.test, connection connection_onboarding_gmail",
+				"Links: none.",
+				"Tell the Human you are starting their profile from these sources",
+			},
+		},
+		"sources with link": {
+			answer: map[string]any{"decision": "done", "links": []string{"https://alice.example"}},
+			want: []string{
+				"Setup cards: finished.",
+				"- Gmail alice@example.test, connection connection_onboarding_gmail",
+				"Links: https://alice.example",
+				"Tell the Human you are starting their profile from these sources",
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newProfileSetupFixture(t, newFakeComposio(t).configure)
+			_, appsMessageID, _ := f.card(t, typedcard.DecisionKindProfileSetupApps)
+			f.grantGmail(t)
+			f.quiet(t)
+			f.runProfileReminder(t)
+			if reminder := f.onboardingStatus(t, appsMessageID); !strings.Contains(reminder.body, "has not finished setup") {
+				t.Fatalf("reminder status=%s", reminder.body)
+			}
+
+			f.decideApps(t, "connected")
+			decisionID, sourcesMessageID, version := f.card(t, typedcard.DecisionKindProfileSetupSources)
+			if status, body := f.decide(f.human, decisionID, version, tc.answer, "after-reminder-sources"); status != http.StatusOK {
+				t.Fatalf("sources decision status=%d body=%s", status, body)
+			}
+			finished := f.onboardingStatus(t, sourcesMessageID)
+			if !finished.humanWaiting {
+				t.Fatalf("finished status %s does not wait on AnotherMe", finished.id)
+			}
+			if got := f.disposition(t, finished.id); got != "notify" {
+				t.Fatalf("finished status disposition=%s want notify", got)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(finished.body, want) {
+					t.Fatalf("finished status lacks %q: %s", want, finished.body)
+				}
+			}
+			if strings.Contains(finished.body, "do not ask the Human about it again") {
+				t.Fatalf("finished status unexpectedly treated reminder as alreadyAsked: %s", finished.body)
+			}
+
+			before := f.rowCounts(t)
+			if status, body := f.decide(f.human, decisionID, version, tc.answer, "after-reminder-sources"); status != http.StatusConflict {
+				t.Fatalf("repeated decision status=%d body=%s", status, body)
+			}
+			if after := f.rowCounts(t); after != before {
+				t.Fatalf("repeated decision wrote rows before=%v after=%v", before, after)
+			}
+		})
+	}
+}
+
+// Once a Profile is already started or published after an idle reminder fired,
+// finishing setup while quiet preserves the offered guard: skipping sources
+// adds no second status, and adding links hands them over without asking again.
+func TestAnotherMeFinishedSetupRespectsAlreadyStartedProfileAfterIdleReminder(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	profileStates := map[string]func(*testing.T, profileSetupFixture){
+		"build in progress": func(t *testing.T, f profileSetupFixture) {
+			if _, err := f.pool.Exec(t.Context(), `
+				INSERT INTO personal_profile_builds(tenant_id,owner_actor_id,expires_at)
+				VALUES($1,'actor_acme_alice',now()+interval '30 minutes')
+			`, acmeTenant); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"published profile": func(t *testing.T, f profileSetupFixture) {
+			if _, err := f.pool.Exec(t.Context(), `
+				INSERT INTO personal_profile_revisions(id,tenant_id,owner_actor_id,prompt_version,markdown,profile)
+				VALUES('profile_setup_existing',$1,'actor_acme_alice','user-profile-v1','Existing profile','{}')
+			`, acmeTenant); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.pool.Exec(t.Context(), `
+				INSERT INTO personal_profile_currents(tenant_id,owner_actor_id,revision_id)
+				VALUES($1,'actor_acme_alice','profile_setup_existing')
+			`, acmeTenant); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for stateName, seedProfile := range profileStates {
+		t.Run(stateName+"/sources skipped", func(t *testing.T) {
+			f := newProfileSetupFixture(t, newFakeComposio(t).configure)
+			f.grantGmail(t)
+			f.quiet(t)
+			f.runProfileReminder(t)
+			if got := f.statuses(t); got != 1 {
+				t.Fatalf("reminder statuses=%d want 1", got)
+			}
+			seedProfile(t, f)
+
+			f.decideApps(t, "connected")
+			decisionID, _, version := f.card(t, typedcard.DecisionKindProfileSetupSources)
+			if status, body := f.decide(f.human, decisionID, version, map[string]any{"decision": "skipped"}, "started-after-reminder-skip"); status != http.StatusOK {
+				t.Fatalf("sources decision status=%d body=%s", status, body)
+			}
+			if got := f.statuses(t); got != 1 {
+				t.Fatalf("statuses=%d want 1 (only the idle reminder)", got)
+			}
+		})
+		t.Run(stateName+"/sources with link", func(t *testing.T) {
+			f := newProfileSetupFixture(t, newFakeComposio(t).configure)
+			f.grantGmail(t)
+			f.quiet(t)
+			f.runProfileReminder(t)
+			seedProfile(t, f)
+
+			f.decideApps(t, "connected")
+			decisionID, sourcesMessageID, version := f.card(t, typedcard.DecisionKindProfileSetupSources)
+			if status, body := f.decide(f.human, decisionID, version, map[string]any{"decision": "done", "links": []string{"https://alice.example"}}, "started-after-reminder-link"); status != http.StatusOK {
+				t.Fatalf("sources decision status=%d body=%s", status, body)
+			}
+			finished := f.onboardingStatus(t, sourcesMessageID)
+			for _, want := range []string{
+				"Setup cards: finished.",
+				"Links: https://alice.example",
+				"do not ask the Human about it again",
+			} {
+				if !strings.Contains(finished.body, want) {
+					t.Fatalf("finished status lacks %q: %s", want, finished.body)
+				}
+			}
+			if strings.Contains(finished.body, "Tell the Human you are starting their profile") {
+				t.Fatalf("finished status unexpectedly starts a duplicate profile: %s", finished.body)
+			}
+		})
+	}
+}
+
+// When a Profile was already started or published outside the Direct Room (no
+// chat messages and no idle reminder in the Room), finishing setup tells
+// AnotherMe to add any uncovered sources without starting another initial build.
+func TestAnotherMeFinishedSetupRespectsAlreadyStartedProfileWithoutReminder(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	profileStates := map[string]func(*testing.T, profileSetupFixture){
+		"build in progress": func(t *testing.T, f profileSetupFixture) {
+			if _, err := f.pool.Exec(t.Context(), `
+				INSERT INTO personal_profile_builds(tenant_id,owner_actor_id,expires_at)
+				VALUES($1,'actor_acme_alice',now()+interval '30 minutes')
+			`, acmeTenant); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"published profile": func(t *testing.T, f profileSetupFixture) {
+			if _, err := f.pool.Exec(t.Context(), `
+				INSERT INTO personal_profile_revisions(id,tenant_id,owner_actor_id,prompt_version,markdown,profile)
+				VALUES('profile_setup_existing_no_reminder',$1,'actor_acme_alice','user-profile-v1','Existing profile','{}')
+			`, acmeTenant); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.pool.Exec(t.Context(), `
+				INSERT INTO personal_profile_currents(tenant_id,owner_actor_id,revision_id)
+				VALUES($1,'actor_acme_alice','profile_setup_existing_no_reminder')
+			`, acmeTenant); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	sourcesAnswers := map[string]struct {
+		answer map[string]any
+		want   []string
+	}{
+		"sources skipped": {
+			answer: map[string]any{"decision": "skipped"},
+			want: []string{
+				"Setup cards: finished.",
+				"- Gmail alice@example.test, connection connection_onboarding_gmail",
+				"Links: none.",
+				"Their profile is already started or done; do not start another initial build.",
+				"Add any sources here that it does not cover yet with the personal-profile Skill",
+			},
+		},
+		"sources with link": {
+			answer: map[string]any{"decision": "done", "links": []string{"https://alice.example"}},
+			want: []string{
+				"Setup cards: finished.",
+				"- Gmail alice@example.test, connection connection_onboarding_gmail",
+				"Links: https://alice.example",
+				"Their profile is already started or done; do not start another initial build.",
+				"Add any sources here that it does not cover yet with the personal-profile Skill",
+			},
+		},
+	}
+	for stateName, seedProfile := range profileStates {
+		for answerName, tc := range sourcesAnswers {
+			t.Run(stateName+"/"+answerName, func(t *testing.T) {
+				f := newProfileSetupFixture(t, newFakeComposio(t).configure)
+				f.grantGmail(t)
+				seedProfile(t, f)
+
+				f.decideApps(t, "connected")
+				decisionID, sourcesMessageID, version := f.card(t, typedcard.DecisionKindProfileSetupSources)
+				if status, body := f.decide(f.human, decisionID, version, tc.answer, "started-no-reminder"); status != http.StatusOK {
+					t.Fatalf("sources decision status=%d body=%s", status, body)
+				}
+				finished := f.onboardingStatus(t, sourcesMessageID)
+				if !finished.humanWaiting {
+					t.Fatalf("finished status %s does not wait on AnotherMe", finished.id)
+				}
+				if got := f.disposition(t, finished.id); got != "notify" {
+					t.Fatalf("finished status disposition=%s want notify", got)
+				}
+				for _, want := range tc.want {
+					if !strings.Contains(finished.body, want) {
+						t.Fatalf("finished status lacks %q: %s", want, finished.body)
+					}
+				}
+				if strings.Contains(finished.body, "Tell the Human you are starting their profile") {
+					t.Fatalf("finished status unexpectedly starts a duplicate profile: %s", finished.body)
+				}
+			})
+		}
+	}
+}

@@ -13,8 +13,7 @@ export const computerSetupMessages = defineMessages("computerSetup", {
   connectedTitle: "Computer connected",
   waitingNewTitle: "Waiting for a new computer",
   waitingTitle: "Waiting for your computer",
-  connectedStatus:
-    "Computer is online. Check its Runtime status before running tasks.",
+  connectedStatus: "Your computer is online.",
   checkingNew: "Checking for a new Local Computer...",
   checkingOnline: "Checking for an online Local Computer...",
   operatingSystem: "Computer operating system",
@@ -28,7 +27,7 @@ export const computerSetupMessages = defineMessages("computerSetup", {
   copyUnavailable: "Copy is unavailable on this connection.",
   serverSummary: "Connect a server · No browser on this computer?",
   serverIntro:
-    "Install the CLI using step 1, then use a temporary token instead of browser sign-in. The server only needs an outbound connection.",
+    "Install the CLI (step 1), then use a token instead of browser sign-in.",
   serverName: "Server name",
   serverNamePlaceholder: "My server",
   generating: "Generating…",
@@ -36,18 +35,13 @@ export const computerSetupMessages = defineMessages("computerSetup", {
   tokenFailed:
     "Could not generate a token. Check your connection and try again.",
   tokenInstructions:
-    "Run the command on the server, paste this token at the prompt, then press Enter. Expires at {time}. Keep it private.",
+    "Run the command on the server and paste this token. Expires {time}.",
   tokenLabel: "Server connection token",
-  waitingForServer:
-    "Waiting for the server to connect. If exchange is interrupted, retry the same token before it expires.",
   generateAnother: "Generate another token",
   signInRequired: "{app} sign-in required",
-  signInGuidance:
-    "Run <code>{command}</code> or update the configured {app} credentials on {computer}, using the same OS user that runs Local Computer.",
-  piSignIn:
-    "In Pi, enter /login to sign in, or configure an API key in Pi auth.json.",
-  antigravitySignIn:
-    "Antigravity can also use a Gemini API key set as GEMINI_API_KEY for Local Computer.",
+  signInGuidance: "Run <code>{command}</code> on {computer}.",
+  piSignIn: "Or enter /login in Pi.",
+  antigravitySignIn: "Or set GEMINI_API_KEY.",
   installRuntime:
     "Install a Runtime on {computer} as the OS user that runs Local Computer. It appears here within a minute.",
   installRuntimePowerShell:
@@ -57,19 +51,14 @@ export const computerSetupMessages = defineMessages("computerSetup", {
   updateRuntimePowerShell:
     "Update a Runtime on {computer} as the OS user that runs Local Computer, in PowerShell. It appears here within a minute.",
   runtimeCommand: "{app}: <code>{command}</code>",
-  npmNeedsNode: "The npm commands need Node.js.",
+  npmNeedsNode: "Needs Node.js.",
   updateRequiredTitle: "{app} update required",
-  updateRequiredBody:
-    "{app} on {computer} needs an update before Agents can run with it.",
-  updateRequiredBodyWithVersion:
-    "{app} ({version}) on {computer} needs an update before Agents can run with it.",
   updateRunInTerminal: "Run in Terminal on {computer}:",
   updateRunInPowerShell: "Run in PowerShell on {computer}:",
   updateAlternativeMac:
     "If you installed {app} from Homebrew or its macOS app, update it there instead.",
-  readyAfterUpdate: "It turns ready here on its own shortly after you update.",
-  computerUpgradeRequiredTitle: "Linger Computer update required",
-  openComputerSettings: "Open <link>Settings › Computers</link> to update it.",
+  computerUpgradeRequired:
+    "{computer} needs a Linger update. Open <link>Settings › Computers</link>.",
   checkingRuntimeTitle: "Checking {app}",
   checkingRuntimeBody:
     "Waiting for {computer} to report {app} status. It updates here on its own.",
@@ -79,19 +68,15 @@ export const computerSetupMessages = defineMessages("computerSetup", {
   piCheckingSetup: "Checking Pi model setup on {computer}…",
   piNeedsModelTitle: "Pi needs a model",
   piNeedsModelBody:
-    "No local model is downloaded on {computer} yet, and Pi has no ready model source.",
-  piNeedsModelAction:
-    "Download a local model or configure a Pi model source in <link>Settings › Models</link>.",
+    "No local model on {computer} yet. Download one or set a model source in <link>Settings › Models</link>.",
   piDownloadingTitle: "Downloading local model",
   piDownloadingBody:
-    "{model} is downloading on {computer}. Once it finishes, Pi can use it when Local model is selected as the model source.",
+    "{model} is downloading on {computer}. See <link>Settings › Models</link>.",
   piDownloadingBodyWithPercent:
-    "{model} is downloading on {computer} ({percent}%). Once it finishes, Pi can use it when Local model is selected as the model source.",
-  piDownloadingAction: "View progress in <link>Settings › Models</link>.",
+    "{model} is downloading on {computer} ({percent}%). See <link>Settings › Models</link>.",
   piLoadingTitle: "Loading local model",
   piLoadingBody:
-    "{model} is loading on {computer}. Once it finishes, Pi can use it when Local model is selected as the model source.",
-  piLoadingAction: "View status in <link>Settings › Models</link>.",
+    "{model} is loading on {computer}. See <link>Settings › Models</link>.",
   piDownloadStoppedTitle: "Local model download stopped",
   piDownloadStoppedBody:
     "{model} didn't finish downloading on {computer}. Resume the download or choose another model in <link>Settings › Models</link> to run Agents with Pi.",

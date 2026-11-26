@@ -42,6 +42,9 @@ type OperationSpec struct {
 	PermissionReview bool
 	// StopHook asks Agent Service before a Runtime finishes a turn.
 	StopHook bool
+	// SupportsBackgroundWait reports whether Agent Service accepts
+	// run.background_waiting and run.background_resumed events.
+	SupportsBackgroundWait bool
 	// TeamHubCLIBin is the bundled TeamHub CLI directory; its command manifest
 	// names the TeamHub commands that run without review.
 	TeamHubCLIBin        string
@@ -643,7 +646,11 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 			}
 		}
 		emittedResponseText := false
-		projection := eventProjection{operationID: spec.TaskID, canYield: spec.OperationKind == "run.start"}
+		projection := eventProjection{
+			operationID:            spec.TaskID,
+			canYield:               spec.OperationKind == "run.start",
+			supportsBackgroundWait: spec.SupportsBackgroundWait,
+		}
 		emitProjected := func(events []any) {
 			for _, projected := range events {
 				payload, marshalErr := json.Marshal(projected)

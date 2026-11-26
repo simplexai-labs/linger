@@ -51,12 +51,7 @@ export const setupMessages = defineMessages("setup", {
   downloadAmount: "{size} download",
   diskAmount: "{size} disk",
   memoryWithServices: "{size} memory with its services",
-  heldWhy:
-    "Local model on hold. {reasons} Quick Install sets up {plan} now, or choose Check again once memory is free.",
-  heldWhyGeneric:
-    "Local model on hold. {reasons} Quick Install sets up {plan} now, or choose Check again once the issue is resolved.",
-  heldWhyCudaDriver:
-    "Local model on hold. {reasons} Quick Install sets up {plan} now.",
+  heldWhy: "Local model on hold: {reasons}",
   keyRemovedOnInstall: "Removed when you install",
   keySaved: "Saved · type to replace",
   apiKey: "API key",
@@ -79,8 +74,6 @@ export const setupMessages = defineMessages("setup", {
   featuredModelSpecs:
     "26.4B Looped MoE · 3.4B active · Vision & Agentic Coding · Apache 2.0",
   featuredModelSelected: "Selected for Quick Install on this computer.",
-  featuredModelLibraryNote:
-    "Featured in Linger's local model library · Switchable anytime in Settings → Models",
   featuredModelCustomizeNote:
     "Featured: Inkling 2 Mini by Thinking Machines · Switchable anytime in Settings → Models",
   featuredModelAriaLabel:
@@ -103,16 +96,15 @@ export const setupMessages = defineMessages("setup", {
   // code of the localmodels tool.
   memoryCounts: " ({free} free, {needed} needed)",
   reasonGpuMemory:
-    "Other programs are using the GPU's memory{counts}. Close programs that use the GPU, such as games, video or other AI apps.",
+    "Other programs are using GPU memory{counts}. Close apps using the GPU.",
   reasonGpuMemoryOf:
-    "Other programs are using GPU {gpu}'s memory{counts}. Close programs that use the GPU, such as games, video or other AI apps.",
-  reasonFreeMemory:
-    "Other programs are using the memory it needs{counts}. Close other programs.",
-  reasonGpuSharing: "Other work is running on the GPU. Close it.",
+    "Other programs are using GPU {gpu}'s memory{counts}. Close apps using the GPU.",
+  reasonFreeMemory: "Not enough free memory{counts}. Close other apps.",
+  reasonGpuSharing: "Another app is using the GPU.",
   reasonGpuOwnership:
-    "Linger couldn't tell which programs are using the GPU, so it can't share it. Close programs that use the GPU.",
+    "Couldn't check which apps are using the GPU. Close GPU apps.",
   reasonGatewayPortInUse:
-    "Another program is using the port Linger's local model gateway needs. Close the program using that port.",
+    "Another program is using the local model gateway port.",
   reasonHarnessUnavailable:
     "The Pi runtime required for local models isn't ready right now. Check your connection or permissions.",
   reasonFacts: "Linger couldn't read this computer's memory, disk or GPU.",
@@ -154,13 +146,10 @@ export const setupMessages = defineMessages("setup", {
   reasonCudaUnknown:
     "Linger couldn't read the CUDA version from your NVIDIA driver. Update or reinstall your NVIDIA driver, then choose Check again.",
   reasonUnsupported: "Local models don't run on this system.",
-  reasonPlanHeld:
-    "Another app is holding the memory it needs, such as another AI app. Quit it.",
+  reasonPlanHeld: "Another app is using the memory it needs. Quit it.",
   reasonPlanUnavailable: "No local model fits this computer.",
-  reasonHeld:
-    "Other programs are using the memory it needs. Close other programs.",
-  reasonHeldGeneric:
-    "Something on this computer is temporarily blocking the local model.",
+  reasonHeld: "Not enough free memory. Close other apps.",
+  reasonHeldGeneric: "Temporarily blocked on this computer.",
   reasonUnavailable: "This computer can't run a local model now.",
   heldGpu: "On hold: The GPU has {free} free, needs {needed}",
   heldGpuOf: "On hold: GPU {gpu} has {free} free, needs {needed}",

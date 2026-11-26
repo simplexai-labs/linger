@@ -3,8 +3,6 @@ import { defineMessages } from "@/i18n/messages";
 /** Settings › Profile and Settings › Security, with the dialogs they open. */
 export const accountSettingsMessages = defineMessages("accountSettings", {
   // Profile page
-  profileDescription:
-    "Photo, name, and connected accounts used across this space.",
   loadingAccountProfile: "Loading Account profile",
   loadingAccountProfileStatus: "Loading Account profile...",
 
@@ -28,8 +26,7 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
   bioPlaceholder: "A short description of how you work.",
   organization: "Organization",
   organizationPlaceholder: "Your company or organization",
-  handEditedHint:
-    "Hand-edited fields stay yours. Later generations fill only the fields you have not changed.",
+  handEditedHint: "Fields you edit won't be overwritten.",
   accountSaved: "Account saved",
   saving: "Saving...",
 
@@ -43,15 +40,12 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
   // Add profile sources dialog
   addProfileSources: "Add profile sources",
   addToProfile: "Add to your profile",
-  addToProfileHint: "Choose an account, file, or AI summary to add.",
   profileSources: "Profile sources",
   accounts: "Accounts",
   files: "Files",
   anotherAI: "Another AI",
-  privacyAccounts:
-    "Only the account and content you choose are used for this profile update. Connections remain available in Apps.",
-  privacyAI:
-    "The pasted summary updates your Profile. It is not added to Personal Wiki or used as Personal Insight evidence.",
+  privacyAccounts: "Only what you choose is used.",
+  privacyAI: "Only updates your Profile.",
   privacyFiles: "Files stay in your library.",
   pasteSummaryFirst: "Paste an AI summary first.",
   addFileFirst: "Add a file first.",
@@ -81,7 +75,7 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
     other: "{count} connected accounts",
   },
   unavailable: "Unavailable",
-  connectionNeedsAttention: "Connection needs attention in Apps",
+  connectionNeedsAttention: "Needs attention",
   authorizationInProgress: "Authorization in progress",
   notConnected: "Not connected",
   continueAppAuthorization: "Continue {app} authorization",
@@ -148,13 +142,9 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
   disconnect: "Disconnect",
 
   // Security page
-  securityDescription: "Manage your sign-in password.",
   password: "Password",
-  passwordHint: "Update the password used to sign in.",
   changePassword: "Change password",
   passwordChanged: "Password changed",
-  changePasswordDescription:
-    "Confirm your current password before choosing a new one. Other browsers and devices will be signed out; this browser stays signed in.",
   currentPassword: "Current password",
   newPassword: "New password",
   confirmNewPassword: "Confirm new password",
@@ -163,12 +153,7 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
   // API keys
   apiKeys: "API keys",
   apiKeysDescription:
-    "Used by everyone on this server. Stored encrypted and never shown again.",
-  sonioxDetail:
-    "Transcribes meetings, {pocketNotes} dictation and Voice Mode dictation.",
-  xaiDetail: "Turns Voice Mode into a live conversation with Grok.",
-  composioDialogDescription:
-    "Connects Gmail, GitHub, Slack, Notion and other apps for everyone here.",
+    "Shared by everyone on this server. Stored encrypted and never shown again.",
   providerKey: "{provider} key",
   providerKeySaved: "{provider} key saved",
   keySetByServer: "Set by your server",
@@ -179,12 +164,9 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
   replaceKey: "Replace key",
   addKey: "Add key",
   voiceKeyFromEnvironment: "{detail} Set with {variable} on the server.",
-  voiceKeyCannotSave:
-    "{detail} Set {variable} on the server, or set TEAMHUB_SECRET_ENCRYPTION_KEY to save the key here.",
-  composioDetail:
-    "Connects Gmail, GitHub, Slack, Notion and other apps. Use a key with full read and write access.",
+  voiceKeyCannotSave: "{detail} Set {variable} on the server.",
+  composioDetail: "Connects Gmail, GitHub, Slack, Notion and other apps.",
   composioDetailFromEnvironment:
-    "Connects Gmail, GitHub, Slack, Notion and other apps. Set with COMPOSIO_API_KEY on the server, in user.env when Linger is installed on this computer.",
-  composioDetailCannotSave:
-    "Connects Gmail, GitHub, Slack, Notion and other apps. When Linger is installed on this computer, set COMPOSIO_API_KEY in user.env, then reopen the Linger app. On a server you run yourself, set it there, or set TEAMHUB_SECRET_ENCRYPTION_KEY to save the key here.",
+    "Connects Gmail, GitHub, Slack, Notion and other apps. Set with COMPOSIO_API_KEY on the server.",
+  composioDetailCannotSave: "Not set on this server.",
 });

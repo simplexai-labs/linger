@@ -18,7 +18,19 @@ const (
 	catalogExchangePipeBudget = time.Second
 	catalogBootstrapLimit     = 4096
 	catalogResponseLimit      = 32 << 20
+	catalogStderrLimit        = 16 << 10
 )
+
+// catalogExchangeError pairs a catalog process failure with the bounded stderr
+// tail captured from the child process.
+type catalogExchangeError struct {
+	err    error
+	stderr string
+}
+
+func (e *catalogExchangeError) Error() string { return e.err.Error() }
+
+func (e *catalogExchangeError) Unwrap() error { return e.err }
 
 // catalogReceiver handles one stdout frame of a catalog exchange. send
 // writes more JSON lines to the child's stdin. Returning done ends the
@@ -52,17 +64,26 @@ func exchangeCatalog(ctx context.Context, inv Invocation, args []string, request
 		return err
 	}
 	session := &catalogSession{stdin: stdin, receive: receive, cancel: cancel}
+	stderr := newErrorTail(nil, catalogStderrLimit)
 	cmd.Stdout = session
+	cmd.Stderr = stderr
 	runErr := process.Run(exchangeCtx, cmd, catalogExchangePipeBudget)
+	stderrTail := stderr.Tail()
+	wrapErr := func(err error) error {
+		if stderrTail == "" {
+			return err
+		}
+		return &catalogExchangeError{err: err, stderr: stderrTail}
+	}
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	switch {
 	case session.err != nil:
-		return session.err
+		return wrapErr(session.err)
 	case runErr != nil:
-		return fmt.Errorf("catalog process failed: %w", ExplainExecError(runErr))
+		return wrapErr(fmt.Errorf("catalog process failed: %w", ExplainExecError(runErr)))
 	case !session.done:
-		return errors.New("catalog process closed before the expected response")
+		return wrapErr(errors.New("catalog process closed before the expected response"))
 	}
 	return nil
 }

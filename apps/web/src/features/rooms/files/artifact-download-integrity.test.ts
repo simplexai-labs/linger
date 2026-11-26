@@ -36,7 +36,7 @@ describe("Artifact download integrity", () => {
           mediaType: "text/plain",
         },
       ),
-    ).rejects.toThrow(/SHA-256 does not match/);
+    ).rejects.toThrow("This file changed while loading. Reload to preview it.");
   });
 
   it("rejects size and media-type disagreement before hashing", async () => {

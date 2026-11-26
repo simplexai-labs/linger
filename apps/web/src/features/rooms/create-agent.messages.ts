@@ -5,8 +5,6 @@ import { OFFLINE_COMPUTER_HINT } from "./members/agent-move-target";
 /** The create-agent dialog, from choosing a Computer to opening the chat. */
 export const createAgentMessages = defineMessages("createAgent", {
   title: "Create local agent",
-  connectDescription: "Connect a computer, then choose your runtime and model.",
-  chooseDescription: "Choose a computer, runtime and model for your Agent.",
   back: "Back",
   cancel: "Cancel",
   useThisComputer: "Use this computer",

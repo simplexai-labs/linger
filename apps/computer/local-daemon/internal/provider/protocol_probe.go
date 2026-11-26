@@ -37,6 +37,9 @@ type runtimeProbeOutcome struct {
 }
 
 func probeRuntime(ctx context.Context, runtimeType, executable string, environment map[string]string, timeout time.Duration, runtimeHomeRoot ...string) runtimeProbeOutcome {
+	if runtimeType == "pi" {
+		return probePiRuntime(ctx, executable, environment, timeout)
+	}
 	policy := runtimeDetectionPolicies[runtimeType]
 	authentication := runtimeProbeOutcome{Status: "ready"}
 	if policy.authenticationBeforeProtocol && policy.authenticationProbe != nil {

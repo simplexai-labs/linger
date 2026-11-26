@@ -2452,3 +2452,83 @@ func TestTerminalPayloadFailureDetailOptIn(t *testing.T) {
 		t.Fatalf("stderr leaked into detail: %v", got)
 	}
 }
+
+func TestDaemonFlushesRuntimeInventoryUpdatedBeforeWelcome(t *testing.T) {
+	initialDiag := json.RawMessage(`[{"type":"pi","status":"ready","protocol":"rpc","checked_at":"2026-09-01T00:00:00Z"}]`)
+	backfillDiag := json.RawMessage(`[{"type":"codex","status":"ready","protocol":"app-server","checked_at":"2026-09-01T00:00:05Z"},{"type":"pi","status":"ready","protocol":"rpc","checked_at":"2026-09-01T00:00:00Z"}]`)
+	laterDiag := json.RawMessage(`[{"type":"codex","status":"authentication_required","protocol":"app-server","checked_at":"2026-09-01T00:00:10Z"},{"type":"pi","status":"ready","protocol":"rpc","checked_at":"2026-09-01T00:00:00Z"}]`)
+
+	for _, phase := range []string{"during_connect", "before_welcome"} {
+		t.Run(phase, func(t *testing.T) {
+			device, err := transport.GenerateIdentity()
+			if err != nil {
+				t.Fatal(err)
+			}
+			release := make(chan struct{})
+			stream := &fakeStream{
+				commands: []protocol.Command{{Type: protocol.CommandRunnerWelcome, ConnectionEpoch: 7}},
+				wait:     release,
+			}
+			controlPlane := &sequenceControlPlane{streams: []*fakeStream{stream}}
+			d, err := newTestDaemon(t, Options{
+				ComputerID:         "computer-1",
+				ControlPlane:       controlPlane,
+				IdentityStore:      fakeStore{value: device},
+				OperationResolver:  fakeOperationResolver{},
+				Runtimes:           []string{"pi"},
+				RuntimeDiagnostics: initialDiag,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.daemonID = device.DaemonID
+
+			updateErrCh := make(chan error, 1)
+			triggerUpdate := func() {
+				updateErrCh <- d.UpdateRuntimeInventory(context.Background(), []string{"codex", "pi"}, backfillDiag, nil)
+			}
+			if phase == "during_connect" {
+				controlPlane.onConnect = func(int) { triggerUpdate() }
+			} else {
+				stream.beforeCommand = func(cmd protocol.Command) error {
+					if cmd.Type == protocol.CommandRunnerWelcome {
+						triggerUpdate()
+					}
+					return nil
+				}
+			}
+
+			done := make(chan error, 1)
+			go func() { done <- d.runConnection(context.Background(), device) }()
+
+			waitForEvents(t, stream, 2)
+			if updateErr := <-updateErrCh; updateErr != nil {
+				t.Fatalf("UpdateRuntimeInventory() error = %v", updateErr)
+			}
+			if len(controlPlane.hellos) != 1 || string(controlPlane.hellos[0].RuntimeDiagnostics) != string(initialDiag) {
+				t.Fatalf("hello diagnostics = %s, want %s", string(controlPlane.hellos[0].RuntimeDiagnostics), string(initialDiag))
+			}
+			events := stream.snapshotEvents()
+			if events[0].Type != protocol.EventDaemonHello {
+				t.Fatalf("event[0] = %+v, want %s", events[0], protocol.EventDaemonHello)
+			}
+			if events[1].Type != protocol.EventRuntimeDiagnostics || events[1].Revision != 2 || string(events[1].Payload) != string(backfillDiag) {
+				t.Fatalf("flushed diagnostics event = %+v, want revision 2 payload %s", events[1], string(backfillDiag))
+			}
+
+			if err := d.UpdateRuntimeInventory(context.Background(), []string{"codex", "pi"}, laterDiag, nil); err != nil {
+				t.Fatalf("post-welcome UpdateRuntimeInventory() error = %v", err)
+			}
+			waitForEvents(t, stream, 3)
+			events = stream.snapshotEvents()
+			if events[2].Type != protocol.EventRuntimeDiagnostics || events[2].Revision != 3 || string(events[2].Payload) != string(laterDiag) {
+				t.Fatalf("post-welcome diagnostics event = %+v, want revision 3 payload %s", events[2], string(laterDiag))
+			}
+
+			close(release)
+			if err := <-done; !errors.Is(err, io.EOF) {
+				t.Fatalf("runConnection() error = %v", err)
+			}
+		})
+	}
+}

@@ -38,7 +38,6 @@ export function EditAgentInstructionsDialog({
 
   return (
     <ModalDialog
-      description={t(agentInfoMessages.instructionsDescription)}
       onClose={onClose}
       size="md"
       title={t(agentInfoMessages.editInstructions)}

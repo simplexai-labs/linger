@@ -4,8 +4,6 @@ import { defineMessages } from "@/i18n/messages";
 export const voiceKeyMessages = defineMessages("voiceKey", {
   title: "{provider} key",
   turnOnVoice: "Turn on voice",
-  chooseProvider:
-    "Voice needs a Soniox or xAI key. Keys are used by everyone on this server.",
   voiceProvider: "Voice provider",
   sonioxPurpose:
     "Transcribes meetings, Pocket Notes dictation and Voice Mode dictation.",
@@ -14,7 +12,6 @@ export const voiceKeyMessages = defineMessages("voiceKey", {
   stepCreate: "Create an API key.",
   stepPaste: "Copy the key, paste it below, and select Save key.",
   apiKey: "{provider} API key",
-  keyHint: "Stored encrypted and never shown again.",
   turningOn: "Turning on voice…",
   savedButOff: "The key is saved, but voice could not be turned on. Try again.",
   cannotSaveHere:

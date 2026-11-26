@@ -17,6 +17,7 @@ func TestOutputsAndTheStoppedEventCloseTheirSegment(t *testing.T) {
 		{"status.changed", `{"type":"status.changed","status":"stopped","outcome":"completed"}`, true},
 		{"status.changed", `{"type":"status.changed","status":"working"}`, false},
 		{"status.changed", `{"type":"status.changed","status":"queued"}`, false},
+		{"status.changed", `{"type":"status.changed","status":"waiting_background"}`, false},
 		{"activity.finished", `{"type":"activity.finished","activity_id":"a","outcome":"succeeded"}`, false},
 		{"plan.updated", `{"type":"plan.updated","steps":[]}`, false},
 	} {

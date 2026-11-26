@@ -72,7 +72,19 @@ voice tools for this computer, Native prepares them and runs LiveKit with
 the key pair and ports in the instance's `livekit.env`, with or without a
 voice key; without them, or when they fail to prepare or LiveKit cannot
 reserve a local port, TeamHub gets `TEAMHUB_VOICE_MEDIA=off` and the install
-continues. The services' `voice`
+continues. On cold first installs (no provisioned account, no `SONIOX_API_KEY`
+or `XAI_API_KEY`, and an unextracted, undamaged voice-tools archive), Native
+reserves LiveKit's loopback HTTP port before launching the parallel `runtime`
+branch (reclaiming orphans once on `EADDRINUSE` and disabling voice if still
+occupied), passes `TEAMHUB_VOICE_TOOLS_BIN` to TeamHub only, spawns a detached
+`--prepare-voice-tools` worker strictly after `reclaimEarlierProcesses`, and
+releases the reservation and commits `"go\n"` only right before returning a
+kept-running outcome (aborting the worker on cancellation or rollback);
+upgrades, existing accounts, configured voice keys, and damaged caches keep
+voice preparation and LiveKit startup synchronous. `acquireNativeArtifact`
+locks per artifact under `tools/native/components/.locks/<key>` with bounded
+`INSTANCE_BUSY` retries so concurrent component preparations do not contend.
+The services' `voice`
 setting tracks only the tools, so a key change never restarts them through
 it. A native process restarts when its generated environment changes.
 The desktop passes the system proxy it resolved for Soniox as
@@ -477,14 +489,13 @@ upgrades and live re-runs keep `migrate` sequential after `runtime`. When
 source's runtime) once and skips
 `harness plan` and `harness apply` when it is already installed (falling back to
 a full install if missing or unreadable), and passes the inspected descriptor
-through `onRuntimeDescriptors` so callers avoid a second status probe. Within
-`release`, binary and native-runtime bundle checks run in parallel, while
-dependency and voice tool preparations stay sequential on the shared
-native-tools lock; collaboration services (`teamhub`, `node-services`, and
-`web`) always start concurrently via `Promise.allSettled`, even after
-`node-services` and `web` were pre-stopped for a TeamHub configuration restart
-(keeping pre-existing `node-services`, `web`, and `teamhub` untracked by
-`started` so rollback does not stop previously running services). `runLocalmodels`
+through `onRuntimeDescriptors` so callers avoid a second status probe. For BYOK
+with `pi`, the installer binds a verified bundled Pi directly when no higher
+precedence Pi exists; otherwise it falls back to harness plan and apply. Within
+`release`, binary and native-runtime checks run in parallel; per-artifact locks
+allow independent native tools to prepare concurrently. Collaboration services
+start concurrently even when a TeamHub configuration restart pre-stopped some
+services, preserving pre-existing services during rollback. `runLocalmodels`
 reads the kit's JSON event lines from stdout and stderr alike and forwards
 byte progress (`total: null` without a total) and the download
 `connecting`, `switching` and `retrying` stages of every command, labeled per

@@ -42,7 +42,8 @@ export type ServiceFeature =
   | "local_model_unavailable"
   | "model_gateway_unavailable"
   | "local_models_external_holders"
-  | "runtime_failure_detail";
+  | "runtime_failure_detail"
+  | "operation_background_wait";
 export type JsonValue =
   | null
   | boolean
@@ -727,6 +728,20 @@ export type RunEvent =
   | {
       type: "file.created" | "file.updated" | "file.deleted";
       path: string;
+    }
+  | {
+      type: "run.background_waiting";
+      observed_at_unix_ms: NonNegativeInteger;
+      tools: {
+        call_id: Id;
+        tool_name: string;
+        started_at_unix_ms: NonNegativeInteger;
+      }[];
+    }
+  | {
+      type: "run.background_resumed";
+      observed_at_unix_ms: NonNegativeInteger;
+      trigger: "background_continuation" | "user_input";
     }
   | {
       type: "run.completed";
@@ -2291,6 +2306,7 @@ export interface RuntimeExecutionFailure {
     | "network_error"
     | "rate_limited"
     | "model_unavailable"
+    | "model_not_offered"
     | "local_model_unavailable"
     | "model_gateway_unavailable"
     | "context_too_long"

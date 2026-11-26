@@ -35,6 +35,15 @@ export function localRunnerGatewayUrl(port: number): string {
   return `ws://127.0.0.1:${port}/v1/runner-gateway`;
 }
 
+export interface BackgroundVoiceToolsHandle {
+  commit(): void;
+  abort(): void;
+}
+export interface BackgroundVoiceToolsLaunchOptions {
+  home: string;
+  instanceName: string;
+  env: NodeJS.ProcessEnv;
+}
 // A Native installation of one Linger source checkout: the desktop client's
 // unpacked source package, or a developer's clone.
 export interface SourceInstallOptions {
@@ -68,6 +77,13 @@ export interface SourceInstallOptions {
   // Passes runtime descriptors inspected during startup so callers avoid a
   // second runtime status probe.
   onRuntimeDescriptors?: (descriptors: RuntimeDescriptor[]) => void;
+  // Overrides the detached background voice-tools worker launcher, or disables
+  // background voice-tools preparation when set to false.
+  launchVoiceToolsBackground?:
+    | ((
+        options: BackgroundVoiceToolsLaunchOptions,
+      ) => BackgroundVoiceToolsHandle | undefined)
+    | false;
 }
 export interface EnvironmentReport {
   platform: string;

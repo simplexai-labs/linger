@@ -200,9 +200,6 @@ export function ComputerDetail({
               <span className="block truncate text-sm text-foreground">
                 {t(computersMessages.manageLocalModels)}
               </span>
-              <span className="block truncate text-sm text-muted-foreground">
-                {t(computersMessages.manageLocalModelsHint)}
-              </span>
             </span>
             <Icon
               className="text-muted-foreground/60"
@@ -519,12 +516,8 @@ function SummaryStatus({
           : t(computersMessages.ready)}
       </>
     );
-  return (
-    <>
-      <StatusDot tone="warning" />
-      {t(computersMessages.oneStepLeft)}
-    </>
-  );
+  // The chips and the primary button name the remaining step.
+  return null;
 }
 
 function OfflineSteps({

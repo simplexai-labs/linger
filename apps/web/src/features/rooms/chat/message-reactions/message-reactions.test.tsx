@@ -208,6 +208,33 @@ describe("Reaction state", () => {
 });
 
 describe("Message Reactions in the timeline", () => {
+  it("dismisses the picker without letting the click reach what is underneath", async () => {
+    const onToggleReaction = vi.fn().mockResolvedValue(undefined);
+    renderTimeline([message()], { onToggleReaction });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add reaction" }));
+    await screen.findByRole("dialog", { name: "Add reaction" });
+
+    // A control that sits under the pointer when the person clicks blank space.
+    const under = document.createElement("button");
+    const onUnder = vi.fn();
+    under.addEventListener("click", onUnder);
+    document.body.append(under);
+    try {
+      fireEvent.pointerDown(under, { button: 0, pointerId: 1 });
+      fireEvent.click(under, { pointerId: 1 });
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("dialog", { name: "Add reaction" }),
+        ).toBeNull(),
+      );
+      // The dismissal swallows the paired click, so the control never fires.
+      expect(onUnder).not.toHaveBeenCalled();
+    } finally {
+      under.remove();
+    }
+  });
+
   it("opens a dot-style searchable keyboard picker from the action strip", async () => {
     const onToggleReaction = vi.fn().mockResolvedValue(undefined);
     renderTimeline([message()], { onToggleReaction });

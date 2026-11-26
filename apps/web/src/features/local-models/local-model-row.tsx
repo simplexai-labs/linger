@@ -47,7 +47,6 @@ import type {
   LocalModelsView,
 } from "./local-models-queries";
 import {
-  collapsedRowBadges,
   downloadPercent,
   downloadStatusDetail,
   downloadStopped,
@@ -257,16 +256,14 @@ function RowStatusLine({
                   : undefined
           }
         >
-          {t(tag.label)}
+          {status === "available" ? availableSummary : t(tag.label)}
         </span>
         {slower ? (
           <>
             {" · "}
-            {availableSummary}
-            {" · "}
             <span className="text-app-warning">{t(m.runsSlower)}</span>
           </>
-        ) : detail ? (
+        ) : detail && status !== "available" ? (
           ` · ${detail}`
         ) : null}
       </span>
@@ -275,20 +272,7 @@ function RowStatusLine({
 }
 
 function availableDetailCopy(model: LocalModel, t: Translate): string {
-  const download = formatGigabytes(model.download_bytes, t);
-  if (model.memory_bytes <= 0) return download;
-  const memory = formatGigabytes(model.memory_bytes, t);
-  if (model.fit === "gpu") {
-    if (model.host_ram_bytes && model.host_ram_bytes > 0) {
-      return t(m.availableDetailWithVramAndRam, {
-        download,
-        ram: formatGigabytes(model.host_ram_bytes, t),
-        vram: memory,
-      });
-    }
-    return t(m.availableDetailWithVram, { download, vram: memory });
-  }
-  return t(m.availableDetailWithMemory, { download, memory });
+  return formatGigabytes(model.download_bytes, t);
 }
 
 function loadedMemoryCopy(model: LocalModel, t: Translate): string {
@@ -326,22 +310,18 @@ function variantDetailCopy(entry: ModelEntry, t: Translate): string {
 }
 
 function RowMetadataPills({
-  badges,
   engine,
   engineBadge,
   engineTitle,
   featured,
-  overflowTitle,
   status,
   usedBy,
   usedByTitle,
 }: {
-  badges: string[];
   engine?: LocalModel["engine"];
   engineBadge?: string;
   engineTitle?: string;
   featured: boolean;
-  overflowTitle?: string;
   status: ModelStatus;
   usedBy?: string;
   usedByTitle?: string;
@@ -393,15 +373,6 @@ function RowMetadataPills({
           {engineBadge}
         </span>
       ) : null}
-      {badges.map((badge, index) => (
-        <span
-          className="inline-flex h-[22px] items-center rounded-sm bg-muted px-2 text-xs text-muted-foreground"
-          key={badge}
-          title={index === badges.length - 1 ? overflowTitle : undefined}
-        >
-          {badge}
-        </span>
-      ))}
     </div>
   );
 }
@@ -453,7 +424,6 @@ export function ModelRow({
   disabled,
   entry,
   expanded,
-  hasReadyAlternatives = false,
   inSpotlight = false,
   onAssignAgent,
   onRecheck,
@@ -475,7 +445,6 @@ export function ModelRow({
   disabled: boolean;
   entry: ModelEntry;
   expanded: boolean;
-  hasReadyAlternatives?: boolean;
   /** Rendered inside `FeaturedModelSpotlight`, which already carries the partner header. */
   inSpotlight?: boolean;
   onAssignAgent?: (agent: AssignableLocalModelAgent) => void;
@@ -568,12 +537,7 @@ export function ModelRow({
       ? engineBadgeCopy(model.engine)
       : undefined;
   const engineTitle = model.engine_label ?? engineBadge;
-  const { badges, overflowTitle } = collapsedRowBadges(model, t);
-  const hasMeta =
-    showFeaturedPill ||
-    Boolean(usedBy) ||
-    Boolean(engineBadge) ||
-    badges.length > 0;
+  const hasMeta = showFeaturedPill || Boolean(usedBy) || Boolean(engineBadge);
   const damagedFiles =
     status === "failed" &&
     (model.error?.code === "CHECKSUM_MISMATCH" ||
@@ -708,12 +672,10 @@ export function ModelRow({
         </button>
         {hasMeta ? (
           <RowMetadataPills
-            badges={badges}
             engine={model.engine}
             engineBadge={engineBadge}
             engineTitle={engineTitle}
             featured={showFeaturedPill}
-            overflowTitle={overflowTitle}
             status={status}
             usedBy={usedBy}
             usedByTitle={usedByTitle}
@@ -762,16 +724,6 @@ export function ModelRow({
                 );
               })}
             </Select>
-          ) : model.quant ? (
-            <span
-              className={cn(
-                "inline-flex h-7 max-w-44 shrink-0 items-center truncate rounded-full border border-border/70 bg-muted/40 px-2.5 text-xs font-medium text-muted-foreground",
-                status === "unavailable" && "opacity-60",
-              )}
-              title={`${t(m.factVersion)}: ${model.quant}`}
-            >
-              {model.quant}
-            </span>
           ) : null}
           {status === "loaded" && handlers.onUseForAgents ? (
             <Button
@@ -901,7 +853,6 @@ export function ModelRow({
               disabled={disabled}
               entry={entry}
               hasPrimaryAssignAction={showsPrimaryAssignButton}
-              hasReadyAlternatives={hasReadyAlternatives}
               onAssignAgent={onAssignAgent}
               onRecheck={onRecheck}
               onUpdateDriver={onUpdateDriver}

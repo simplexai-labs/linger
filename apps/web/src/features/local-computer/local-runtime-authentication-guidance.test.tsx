@@ -19,14 +19,14 @@ it.each([
     );
     expect(screen.getByText(`${name} sign-in required`)).toBeVisible();
     expect(screen.getByText(command)).toBeVisible();
-    expect(screen.getByText(/same OS user/)).toHaveTextContent(
+    expect(screen.getByText(/^Run/)).toHaveTextContent(
       "example-computer / acceptance-user",
     );
     expect(
       screen.queryByText(/expired|recover automatically/),
     ).not.toBeInTheDocument();
     if (runtimeType === "pi")
-      expect(screen.getByText(/In Pi, enter \/login/)).toBeVisible();
+      expect(screen.getByText("Or enter /login in Pi.")).toBeVisible();
     if (runtimeType !== "claude")
       expect(screen.queryByText("claude auth login")).not.toBeInTheDocument();
   },
