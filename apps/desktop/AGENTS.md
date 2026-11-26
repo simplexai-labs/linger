@@ -162,7 +162,10 @@ Gateway and runs Agents. The daemon exits with the app.
   dropped connection (the installer joins the running lookup), and gives up
   only after `RUNTIME_LOOKUP_LIMIT_MS` (10 minutes) with the typed `failure`
   `runtime_lookup_timed_out` or, once unreachable for the reconnect window,
-  `runtime_lookup_unreachable`; the setup page words both. After 15 seconds
+  `runtime_lookup_unreachable`; the setup page words both. An install job
+  the installer stops answering for that window fails with
+  `installer_unreachable`, worded without a retry because setup's only way
+  on from a failure is Report issue. After 15 seconds
   the status carries `waiting: "runtime"` and the page says what the bar
   waits on. Desktop also saves the runtime its `setupChoice` runs (`local-models` runs
   on Pi) as `preferredRuntime`. The daemon config carries that as

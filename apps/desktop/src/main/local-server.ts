@@ -348,11 +348,13 @@ export interface RuntimeSignIn {
 export type RuntimeLoginReason = "unavailable" | "timed_out" | "ended";
 
 // Why an installation stopped, for failures the setup page words itself:
-// the runtime lookup outlasted RUNTIME_LOOKUP_LIMIT_MS, or the installer
-// stopped answering while it ran.
+// the runtime lookup outlasted RUNTIME_LOOKUP_LIMIT_MS, the installer
+// stopped answering while that lookup ran, or it stopped answering while
+// the job ran.
 export type LocalServerFailure =
   | "runtime_lookup_timed_out"
-  | "runtime_lookup_unreachable";
+  | "runtime_lookup_unreachable"
+  | "installer_unreachable";
 
 // What a running step still waits on once it has taken a while; the page
 // says so, since the bar does not move meanwhile.
@@ -5788,6 +5790,7 @@ export const RUNTIME_LOOKUP_HINT_MS = 15_000;
 const FAILURES: ReadonlySet<string> = new Set<LocalServerFailure>([
   "runtime_lookup_timed_out",
   "runtime_lookup_unreachable",
+  "installer_unreachable",
 ]);
 const localServerFailure = (code: unknown): LocalServerFailure | undefined =>
   typeof code === "string" && FAILURES.has(code)
@@ -6134,9 +6137,11 @@ export class InstallerApi {
         });
         since ??= Date.now();
         if (Date.now() - since >= this.#reconnect.windowMs)
-          throw new Error(
-            "Couldn't read the installation progress. Try again to reconnect to the running installation.",
-            { cause: error },
+          throw Object.assign(
+            new Error("Couldn't reconnect to the installation.", {
+              cause: error,
+            }),
+            { code: "installer_unreachable" },
           );
         onReconnect();
         await delay(wait, undefined, { signal });

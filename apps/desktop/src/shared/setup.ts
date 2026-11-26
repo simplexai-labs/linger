@@ -82,8 +82,11 @@ export interface SetupLocalServer {
   readonly refusal?: WindowsPrivateRefusal;
   // While failed for a reason the page words itself: checking the AI
   // runtime did not finish in time, or the installer stopped answering
-  // while it ran.
-  readonly failure?: "runtime_lookup_timed_out" | "runtime_lookup_unreachable";
+  // while it ran or while the job ran.
+  readonly failure?:
+    | "runtime_lookup_timed_out"
+    | "runtime_lookup_unreachable"
+    | "installer_unreachable";
   // Step 2's subscription runtimes, once first checked.
   readonly runtimes?: readonly SetupRuntimeRow[];
   // The local model downloading in the background while another source

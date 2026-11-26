@@ -9105,9 +9105,10 @@ describe("InstallerApi polling", () => {
         new AbortController().signal,
         () => {},
       ),
-    ).rejects.toThrow(
-      "Couldn't read the installation progress. Try again to reconnect to the running installation.",
-    );
+    ).rejects.toMatchObject({
+      message: "Couldn't reconnect to the installation.",
+      code: "installer_unreachable",
+    });
     expect(fake.created).toHaveLength(1);
   });
 

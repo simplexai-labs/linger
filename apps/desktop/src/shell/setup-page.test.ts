@@ -1677,6 +1677,32 @@ describe("setup page installing", () => {
     );
     expect($("report-issue").textContent).toBe(zhCN.setup.reportIssue);
   });
+
+  it("words a lost installer without asking to try again", async () => {
+    for (const [language, want] of [
+      ["en", "Couldn't reconnect to the installation."],
+      ["zh-CN", zhCN.setup.installerUnreachable],
+    ] as const) {
+      const { push } = await openPage(
+        withLocal("installing"),
+        "installing",
+        language,
+      );
+      push(
+        withLocal("failed", {
+          message: "Couldn't reconnect to the installation.",
+          failure: "installer_unreachable",
+        }),
+      );
+      expect($("installing-error").textContent).toBe(want);
+      expect($("installing-error").textContent).not.toMatch(/try again/i);
+      const section = document.querySelector('[data-step="installing"]')!;
+      const shown = [...section.querySelectorAll<HTMLButtonElement>("button")]
+        .filter((el) => !el.closest("[hidden]"))
+        .map((el) => el.id);
+      expect(shown).toEqual(["report-issue"]);
+    }
+  });
 });
 
 describe("setup page Report issue", () => {

@@ -231,6 +231,7 @@ export const setupMessages = defineMessages("setup", {
   agentAssistantAbout: "Works on your tasks",
   runtimeLookupTimedOut: "Checking the AI runtime took too long.",
   runtimeLookupUnreachable: "Lost the connection to the installer.",
+  installerUnreachable: "Couldn't reconnect to the installation.",
   reportIssue: "Report issue",
   showLogs: "Show Logs",
   savedDiagnostics: "Saved {file}. Send it to Linger support.",

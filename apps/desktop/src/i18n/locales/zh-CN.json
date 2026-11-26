@@ -179,6 +179,7 @@
     "waitingRuntime": "正在检查 AI 运行环境…",
     "runtimeLookupTimedOut": "检查 AI 运行环境超时。",
     "runtimeLookupUnreachable": "与安装程序的连接中断了。",
+    "installerUnreachable": "无法重新连接到正在进行的安装。",
     "reportIssue": "报告问题",
     "showLogs": "查看日志",
     "savedDiagnostics": "已保存 {file}，请发给 Linger 支持团队。",

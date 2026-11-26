@@ -4210,7 +4210,9 @@
           ? t("runtimeLookupTimedOut")
           : local.failure === "runtime_lookup_unreachable"
             ? t("runtimeLookupUnreachable")
-            : local.message;
+            : local.failure === "installer_unreachable"
+              ? t("installerUnreachable")
+              : local.message;
       // What step 2 offers first: the local model when the localmodels tool
       // picked it for this computer and no subscription runtime is signed
       // in already; else the subscription. BYOK is never the advice.
