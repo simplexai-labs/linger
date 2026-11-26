@@ -21,6 +21,7 @@ import {
   prepareNativeDependencies,
   prepareNativeVoiceTools,
   readPublishedVoiceTools,
+  resolveNativeVoiceToolsPlan,
   validateNativeVoiceTools,
 } from "./native-dependencies.js";
 import * as downloads from "./download.js";
@@ -336,6 +337,107 @@ describe("verified extraction", () => {
         f.fetcher,
       ),
     ).rejects.toThrow(/archive/);
+  });
+  it("locks per artifact without blocking distinct artifacts and waits on INSTANCE_BUSY for the same artifact", async () => {
+    const base = path.join(await temp(), "components");
+    async function makeArchive(name: string, payload: string) {
+      const root = await temp();
+      const input = path.join(root, "input");
+      await mkdir(path.join(input, "bin"), { recursive: true });
+      await writeFile(path.join(input, "bin", name), payload, { mode: 0o755 });
+      const archive = path.join(root, `${name}.tgz`);
+      await pack({ cwd: input, file: archive, gzip: true }, ["bin"]);
+      const bytes = await readFile(archive);
+      return {
+        bytes,
+        artifact: {
+          url: `https://releases.example/${name}.tgz`,
+          algorithm: "sha256" as const,
+          digest: createHash("sha256").update(bytes).digest("hex"),
+          maxBytes: bytes.length,
+        },
+      };
+    }
+    const first = await makeArchive("tool-a", "payload-a");
+    const second = await makeArchive("tool-b", "payload-b");
+
+    let firstStarted!: () => void;
+    let releaseFirst!: () => void;
+    const started = new Promise<void>((resolve) => {
+      firstStarted = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const blockingFetcher = (async () => {
+      firstStarted();
+      await gate;
+      return new Response(first.bytes, {
+        headers: { "content-length": String(first.bytes.length) },
+      });
+    }) as typeof fetch;
+
+    const firstPromise = acquireNativeArtifact(
+      base,
+      first.artifact,
+      new AbortController().signal,
+      undefined,
+      blockingFetcher,
+    );
+    await started;
+
+    // A distinct artifact acquires its own lock and finishes while the first holds its lock.
+    const secondDir = await acquireNativeArtifact(
+      base,
+      second.artifact,
+      new AbortController().signal,
+      undefined,
+      async () =>
+        new Response(second.bytes, {
+          headers: { "content-length": String(second.bytes.length) },
+        }),
+    );
+    expect(await readFile(path.join(secondDir, "bin/tool-b"), "utf8")).toBe(
+      "payload-b",
+    );
+
+    // A waiting caller on the same artifact respects signal abort cleanly.
+    const abortWaiter = new AbortController();
+    const abortedWait = acquireNativeArtifact(
+      base,
+      first.artifact,
+      abortWaiter.signal,
+      undefined,
+      vi.fn<typeof fetch>(),
+      undefined,
+      { lockWaitMs: 10_000, lockPollMs: 25 },
+    );
+    setTimeout(() => abortWaiter.abort(), 60);
+    await expect(abortedWait).rejects.toThrow();
+
+    // A second caller on the same artifact waits on INSTANCE_BUSY and reuses the published cache.
+    const waiterFetcher = vi.fn<typeof fetch>();
+    const waiterPromise = acquireNativeArtifact(
+      base,
+      first.artifact,
+      new AbortController().signal,
+      undefined,
+      waiterFetcher,
+      undefined,
+      { lockWaitMs: 10_000, lockPollMs: 25 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    releaseFirst();
+
+    const [firstDir, waiterDir] = await Promise.all([
+      firstPromise,
+      waiterPromise,
+    ]);
+    expect(waiterDir).toBe(firstDir);
+    expect(waiterFetcher).not.toHaveBeenCalled();
+    expect(await readFile(path.join(waiterDir, "bin/tool-a"), "utf8")).toBe(
+      "payload-a",
+    );
   });
 });
 
@@ -866,4 +968,76 @@ describe("native voice tools", () => {
       );
     },
   );
+  it("resolves deterministic voice tools plan paths and prepared state without extracting", async () => {
+    const home = await temp();
+    const target = `${process.platform}-${process.arch}`;
+    const exe = process.platform === "win32" ? ".exe" : "";
+    const entry = {
+      ...voice,
+      target,
+      file: path.join(home, "voice-tools.tar.gz"),
+      sha256: "c".repeat(64),
+    };
+
+    vi.stubEnv("LINGER_NATIVE_VOICE_TOOLS_JSON", "");
+    expect(await resolveNativeVoiceToolsPlan(home)).toBeUndefined();
+
+    vi.stubEnv(
+      "LINGER_NATIVE_VOICE_TOOLS_JSON",
+      JSON.stringify([
+        {
+          ...entry,
+          target: target === "win32-x64" ? "linux-x64" : "win32-x64",
+        },
+      ]),
+    );
+    expect(await resolveNativeVoiceToolsPlan(home)).toBeUndefined();
+
+    vi.stubEnv("LINGER_NATIVE_VOICE_TOOLS_JSON", "{invalid");
+    await expect(resolveNativeVoiceToolsPlan(home)).rejects.toThrow(/invalid/i);
+
+    vi.stubEnv("LINGER_NATIVE_VOICE_TOOLS_JSON", JSON.stringify([entry]));
+    // Missing bundled archive file is rejected up front instead of deferring.
+    await expect(resolveNativeVoiceToolsPlan(home)).rejects.toThrow(
+      /Bundled native voice tools archive is missing/,
+    );
+
+    await writeFile(entry.file, "archive-bytes");
+    const directory = path.join(
+      path.resolve(home),
+      "tools",
+      "native",
+      "components",
+      entry.sha256,
+    );
+    const bin = path.join(directory, "bin");
+    const livekit = path.join(bin, `livekit-server${exe}`);
+
+    expect(await resolveNativeVoiceToolsPlan(home)).toEqual({
+      bin,
+      livekit,
+      prepared: false,
+      damaged: false,
+    });
+
+    await mkdir(bin, { recursive: true });
+    await writeFile(path.join(directory, ".simplex-files.json"), "{}");
+    await writeFile(livekit, "livekit");
+    await writeFile(path.join(bin, `ffmpeg${exe}`), "ffmpeg");
+    // Component directory exists without all required files -> damaged.
+    expect(await resolveNativeVoiceToolsPlan(home)).toEqual({
+      bin,
+      livekit,
+      prepared: false,
+      damaged: true,
+    });
+
+    await writeFile(path.join(bin, `ffprobe${exe}`), "ffprobe");
+    expect(await resolveNativeVoiceToolsPlan(home)).toEqual({
+      bin,
+      livekit,
+      prepared: true,
+      damaged: false,
+    });
+  });
 });
