@@ -175,7 +175,7 @@ export function RoomMembersSection({
                 aria-label={t(agentInfoMessages.openProfile, {
                   name: member.actor.display_name,
                 })}
-                className="flex min-h-11 min-w-0 flex-1 items-center gap-2.5 py-2 pl-3.5 pr-2 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-app-focus"
+                className="flex min-h-11 min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-3.5 pr-2 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-app-focus"
                 onClick={() => onOpenProfile?.(member.actor.id)}
                 type="button"
               >
@@ -185,38 +185,38 @@ export function RoomMembersSection({
                   name={member.actor.display_name}
                   size="sm"
                 />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5">
-                    <span className="truncate text-[14px] font-medium leading-[18px]">
-                      {member.actor.display_name}
+                {/* One line per member: the name and its tags, then an
+                    Agent's status at the end; only a non-member role is named. */}
+                <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <span className="truncate text-[14px] font-medium leading-[18px]">
+                    {member.actor.display_name}
+                  </span>
+                  {member.role !== "member" ? (
+                    <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
+                      {role ? t(role) : member.role}
                     </span>
-                    {member.actor.kind === "agent" ? (
-                      <span className="rounded-sm bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
-                        {t(agentInfoMessages.agent)}
-                      </span>
-                    ) : null}
-                    {sponsoredAgentIds.has(member.actor.id) ? (
-                      <span className="rounded-sm bg-muted px-1.5 py-0.5 text-2xs font-medium text-foreground">
-                        {t(m.yours)}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="mt-px flex min-w-0 items-center gap-1.5 text-xs leading-[17px] text-muted-foreground">
-                    <span>{role ? t(role) : member.role}</span>
-                    {member.actor.kind === "agent" &&
-                    agent &&
-                    availabilityByActorId.has(member.actor.id) ? (
-                      <>
-                        <span aria-hidden>·</span>
-                        <AgentStatus
-                          availability={
-                            availabilityByActorId.get(member.actor.id)!
-                          }
-                          showDetails
-                        />
-                      </>
-                    ) : null}
-                  </span>
+                  ) : null}
+                  {member.actor.kind === "agent" ? (
+                    <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
+                      {t(agentInfoMessages.agent)}
+                    </span>
+                  ) : null}
+                  {sponsoredAgentIds.has(member.actor.id) ? (
+                    <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-2xs font-medium text-foreground">
+                      {t(m.yours)}
+                    </span>
+                  ) : null}
+                  {member.actor.kind === "agent" &&
+                  agent &&
+                  availabilityByActorId.has(member.actor.id) ? (
+                    <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground">
+                      <AgentStatus
+                        availability={
+                          availabilityByActorId.get(member.actor.id)!
+                        }
+                      />
+                    </span>
+                  ) : null}
                 </span>
               </button>
               {isOwner && member.actor.id !== currentActorId ? (

@@ -24,7 +24,6 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
-import { SettingsGroup } from "@/components/ui/settings-group";
 import { Icon } from "@/components/ui/icon";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
@@ -67,6 +66,7 @@ import { agentTemplateMessages } from "../agent-templates/agent-templates.messag
 import { roomDialogMessages } from "../room-dialogs.messages";
 import { sidePanelMessages } from "../task-sidebar/side-panel.messages";
 import { agentInfoMessages } from "./agent-info.messages";
+import { PanelFooterAction, PanelFooterActions } from "./panel-footer-actions";
 import { AgentInstructions } from "./agent-instructions";
 import { agentRuntimeMessages } from "./agent-runtime.messages";
 import { EditAgentInstructionsDialog } from "./edit-agent-instructions-dialog";
@@ -869,17 +869,12 @@ function PanelAgentInfoActions({
   const t = useT();
   if (!canDelete) return null;
   return (
-    <SettingsGroup ariaLabel={t(agentInfoMessages.agentActions)}>
-      <button
-        data-voice-risk="never"
-        className="flex min-h-11 w-full items-center justify-center gap-2 px-3.5 text-[14px] font-medium text-destructive transition-colors duration-150 hover:bg-destructive/5 focus-visible:bg-destructive/5 focus-visible:outline-none"
-        onClick={onDelete}
-        type="button"
-      >
-        <Icon icon={Delete02Icon} size={16} />
+    <PanelFooterActions label={t(agentInfoMessages.agentActions)}>
+      <PanelFooterAction danger data-voice-risk="never" onClick={onDelete}>
+        <Icon icon={Delete02Icon} size={14} />
         {t(roomDialogMessages.removeAgent)}
-      </button>
-    </SettingsGroup>
+      </PanelFooterAction>
+    </PanelFooterActions>
   );
 }
 

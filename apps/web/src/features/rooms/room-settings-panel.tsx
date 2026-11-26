@@ -6,9 +6,8 @@ import {
   Logout01Icon,
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
-import { type ReactNode, Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { SettingsGroup } from "@/components/ui/settings-group";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { TeamHubError } from "@/features/teamhub/teamhub-client";
@@ -26,6 +25,10 @@ import {
   teamHubIdentityQueryOptions,
   tenantRoomsQueryKey,
 } from "./room-queries";
+import {
+  PanelFooterAction,
+  PanelFooterActions,
+} from "./members/panel-footer-actions";
 import { RoomAvatar } from "./members/room-avatar";
 import { RoomMembersSection } from "./members/room-members-section";
 import { RoomDeleteDialog } from "./room-delete-dialog";
@@ -95,7 +98,7 @@ function RoomSettingsContent({
   const groupRoom = room.kind === "room";
   return (
     <div
-      className="agent-settings-column workspace-scrollbar flex h-full min-h-0 flex-col gap-5 overflow-y-auto bg-sidebar/50 pb-6 [scrollbar-gutter:stable_both-edges]"
+      className="agent-settings-column workspace-scrollbar flex h-full min-h-0 flex-col gap-8 overflow-y-auto bg-sidebar/50 pb-4 [scrollbar-gutter:stable_both-edges]"
       data-testid="panel-room-settings"
     >
       <RoomHeader
@@ -126,40 +129,30 @@ function RoomSettingsContent({
             </div>
           ) : null}
           {owner || room.participation !== "left" ? (
-            // Leaving and deleting are separate bars, so the destructive one
-            // is never a row away from the everyday one.
-            <div
-              aria-label={t(m.roomActions)}
-              className="flex flex-col gap-2"
-              role="group"
-            >
+            <PanelFooterActions label={t(m.roomActions)}>
               {room.participation === "left" ? null : (
-                <SettingsGroup>
-                  <PanelCommand
-                    data-voice-risk="never"
-                    onClick={() => {
-                      leave.reset();
-                      setLeaving(true);
-                    }}
-                  >
-                    <Icon icon={Logout01Icon} size={16} />
-                    {t(m.leaveRoom)}
-                  </PanelCommand>
-                </SettingsGroup>
+                <PanelFooterAction
+                  data-voice-risk="never"
+                  onClick={() => {
+                    leave.reset();
+                    setLeaving(true);
+                  }}
+                >
+                  <Icon icon={Logout01Icon} size={14} />
+                  {t(m.leaveRoom)}
+                </PanelFooterAction>
               )}
               {owner ? (
-                <SettingsGroup>
-                  <PanelCommand
-                    danger
-                    data-voice-risk="never"
-                    onClick={() => setDeleting(true)}
-                  >
-                    <Icon icon={Delete02Icon} size={16} />
-                    {t(roomDialogMessages.deleteRoom)}
-                  </PanelCommand>
-                </SettingsGroup>
+                <PanelFooterAction
+                  danger
+                  data-voice-risk="never"
+                  onClick={() => setDeleting(true)}
+                >
+                  <Icon icon={Delete02Icon} size={14} />
+                  {t(roomDialogMessages.deleteRoom)}
+                </PanelFooterAction>
               ) : null}
-            </div>
+            </PanelFooterActions>
           ) : null}
         </>
       ) : null}
@@ -214,34 +207,6 @@ function RoomSettingsContent({
         </ModalDialog>
       ) : null}
     </div>
-  );
-}
-
-/** A full-width command in a SettingsGroup, like Remove Agent in an Agent's panel. */
-function PanelCommand({
-  children,
-  danger = false,
-  onClick,
-  "data-voice-risk": voiceRisk,
-}: {
-  children: ReactNode;
-  danger?: boolean;
-  onClick: () => void;
-  "data-voice-risk"?: "never";
-}) {
-  return (
-    <button
-      className={`flex min-h-11 w-full items-center justify-center gap-2 px-3.5 text-[14px] font-medium transition-colors duration-150 focus-visible:outline-none ${
-        danger
-          ? "text-destructive hover:bg-destructive/5 focus-visible:bg-destructive/5"
-          : "text-foreground hover:bg-accent focus-visible:bg-accent"
-      }`}
-      data-voice-risk={voiceRisk}
-      onClick={onClick}
-      type="button"
-    >
-      {children}
-    </button>
   );
 }
 
@@ -307,7 +272,7 @@ function RoomHeader({
       : t(m.saveUnconfirmed)
     : undefined;
   return (
-    <header className="relative mx-auto flex w-full max-w-[780px] flex-col items-center px-5 pb-4 pt-5 text-center">
+    <header className="relative mx-auto flex w-full max-w-[780px] flex-col items-center px-5 pt-8 text-center">
       {onShare ? (
         <div className="absolute right-3 top-3">
           <button
