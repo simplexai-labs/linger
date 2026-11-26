@@ -16,8 +16,6 @@ import {
 } from "./message-mentions";
 import type { ComposerDraft } from "./use-composer-draft";
 
-/** Keeps the Docs candidate list bounded when the Tenant catalog is large. */
-const MENTION_DOCUMENT_LIMIT = 50;
 const mentionTabs = ["all", "people", "docs"] as const;
 const peopleMentionTabs = ["all", "people"] as const;
 export type MentionTab = (typeof mentionTabs)[number];
@@ -56,7 +54,7 @@ export function useComposerPicker({
   const matchingDocuments = findDocumentCandidates(
     mentionQuery,
     documentMentionsEnabled ? documentOptions : [],
-  ).slice(0, MENTION_DOCUMENT_LIMIT);
+  );
   const availableMentionTabs = documentMentionsEnabled
     ? mentionTabs
     : peopleMentionTabs;
