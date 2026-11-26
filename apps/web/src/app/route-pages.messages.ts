@@ -6,7 +6,7 @@ export const routePagesMessages = defineMessages("routePages", {
   notFoundTitle: "Page not found",
   openMessages: "Open Messages",
   goToLogin: "Go to Log in",
-  loadingError: "TeamHub loading error",
+  loadingError: "Linger loading error",
   rooms: "Rooms",
   roomNavigation: "Room navigation",
   backToRooms: "Back to my Rooms",

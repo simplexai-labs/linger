@@ -488,6 +488,51 @@ function ActionSubmenu({
   ref: Ref<HTMLDivElement>;
   side: "left" | "right";
 }) {
+  const submenuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  submenuItemRefs.current.length = items.length;
+
+  function handleSubmenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowLeft" || event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onBack();
+      return;
+    }
+    if (
+      event.key !== "ArrowDown" &&
+      event.key !== "ArrowUp" &&
+      event.key !== "Home" &&
+      event.key !== "End"
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const enabled = submenuItemRefs.current.filter(
+      (item): item is HTMLButtonElement => Boolean(item && !item.disabled),
+    );
+    if (enabled.length === 0) return;
+    if (event.key === "Home") {
+      enabled[0]?.focus();
+      return;
+    }
+    if (event.key === "End") {
+      enabled[enabled.length - 1]?.focus();
+      return;
+    }
+    const direction = event.key === "ArrowDown" ? 1 : -1;
+    const current = enabled.indexOf(
+      document.activeElement as HTMLButtonElement,
+    );
+    const next =
+      current === -1
+        ? direction > 0
+          ? 0
+          : enabled.length - 1
+        : (current + direction + enabled.length) % enabled.length;
+    enabled[next]?.focus();
+  }
+
   return (
     // eslint-disable-next-line jsx-a11y/interactive-supports-focus -- composite widget: focus is managed on its child items
     <div
@@ -495,17 +540,11 @@ function ActionSubmenu({
       className={`app-popover-card absolute top-0 w-[180px] p-1 max-sm:static max-sm:mt-1 max-sm:w-full ${
         side === "left" ? "right-[calc(100%+4px)]" : "left-[calc(100%+4px)]"
       }`}
-      onKeyDown={(event) => {
-        if (event.key === "ArrowLeft" || event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          onBack();
-        }
-      }}
+      onKeyDown={handleSubmenuKeyDown}
       ref={ref}
       role="menu"
     >
-      {items.map((child) => (
+      {items.map((child, index) => (
         <button
           className="flex min-h-[33px] w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-foreground outline-none hover:bg-accent focus:bg-accent disabled:pointer-events-none disabled:opacity-50"
           data-voice-risk={child.voiceRisk}
@@ -516,6 +555,9 @@ function ActionSubmenu({
             event.stopPropagation();
             onClose();
             child.onSelect?.();
+          }}
+          ref={(node) => {
+            submenuItemRefs.current[index] = node;
           }}
           role="menuitem"
           tabIndex={-1}

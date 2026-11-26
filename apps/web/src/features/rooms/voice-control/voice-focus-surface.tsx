@@ -20,6 +20,7 @@ import {
 import { AutoHeight } from "@/components/ui/auto-height";
 import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
+import { useTablistKeyboard } from "@/components/ui/tablist-keyboard";
 import { commonMessages } from "@/i18n/common.messages";
 import type { Translate } from "@/i18n/language";
 import type { Message } from "@/i18n/messages";
@@ -45,6 +46,11 @@ import {
 import { recordingMessages as m } from "./recording.messages";
 
 export type RecordingView = "transcript" | "ask";
+
+const RECORDING_TAB_ITEMS: readonly { id: RecordingView }[] = [
+  { id: "transcript" },
+  { id: "ask" },
+];
 
 /** What a running recording adds beyond its transcript. */
 export interface RecordingPanels {
@@ -135,6 +141,12 @@ export function VoiceFocusSurface({
     livekit?.listenerStatus === "listening" ||
       livekit?.listenerStatus === "transcribing",
   );
+  const bodyView = panels ? (view ?? lastView) : "transcript";
+  const { getTabProps, registerTab } = useTablistKeyboard({
+    items: RECORDING_TAB_ITEMS,
+    onChange: (next) => onViewChange?.(next),
+    value: bodyView,
+  });
 
   if (!voice) return null;
   const captureActive =
@@ -257,7 +269,6 @@ export function VoiceFocusSurface({
   const standbyOrMic = standby || voice.composerMicrophoneActive;
   // Window controls are available before the Capture arrives too.
   const shown = onViewChange || panels ? view : "transcript";
-  const bodyView = panels ? (view ?? lastView) : "transcript";
   const pip = floating === "pip";
   // A minimized window is one row tall, in the page or floating, and a page
   // window can sit at the bottom of the viewport; Stop asks inside that row,
@@ -451,22 +462,28 @@ export function VoiceFocusSurface({
           className="flex shrink-0 items-center gap-1 border-b border-app-border px-4 py-2"
           role="tablist"
         >
-          {tabs.map((tab) => (
-            <button
-              aria-selected={bodyView === tab.id}
-              className={`inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[12px] leading-[18px] font-medium transition-colors focus:outline-none focus-visible:shadow-[0_0_0_2px_var(--app-ring)] ${
-                bodyView === tab.id
-                  ? "bg-app-surface-soft text-app-ink"
-                  : "text-app-muted hover:bg-app-surface-soft/50 hover:text-app-ink"
-              }`}
-              key={tab.id}
-              onClick={() => onViewChange?.(tab.id)}
-              role="tab"
-              type="button"
-            >
-              {tab.label}
-            </button>
-          ))}
+          {tabs.map((tab) => {
+            const keyboardProps = getTabProps(tab.id);
+            return (
+              <button
+                aria-selected={bodyView === tab.id}
+                className={`inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[12px] leading-[18px] font-medium transition-colors focus:outline-none focus-visible:shadow-[0_0_0_2px_var(--app-ring)] ${
+                  bodyView === tab.id
+                    ? "bg-app-surface-soft text-app-ink"
+                    : "text-app-muted hover:bg-app-surface-soft/50 hover:text-app-ink"
+                }`}
+                key={tab.id}
+                onClick={() => onViewChange?.(tab.id)}
+                onKeyDown={keyboardProps.onKeyDown}
+                ref={registerTab(tab.id)}
+                role="tab"
+                tabIndex={keyboardProps.tabIndex}
+                type="button"
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
       ) : null}
       <VoiceFocusNotices

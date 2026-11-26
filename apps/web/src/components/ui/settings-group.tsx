@@ -29,7 +29,7 @@ export function SettingsGroup({
         <div className="flex min-h-7 items-center gap-1.5 px-1.5 pb-1">
           <h3 className="text-xs font-medium text-muted-foreground">{label}</h3>
           {meta ? (
-            <span className="text-xs tabular-nums text-muted-foreground/80">
+            <span className="text-xs tabular-nums text-muted-foreground">
               {meta}
             </span>
           ) : null}
