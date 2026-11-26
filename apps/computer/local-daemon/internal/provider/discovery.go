@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -273,7 +274,7 @@ func diagnose(ctx context.Context, kind, executable, protocol string, options Di
 	catalogAllowed := !options.SkipModelCatalog && (outcome.Status == "ready" || ((kind == "codex" || kind == "pi") && outcome.Status == "authentication_required"))
 	if catalogAllowed {
 		catalogCtx, stop := context.WithTimeout(ctx, budget)
-		observation.Models, observation.ModelCatalogError = probedRuntimeModels(catalogCtx, kind, canonical, environment, outcome)
+		observation.Models, observation.ModelCatalogError = probedRuntimeModels(catalogCtx, kind, canonical, environment, outcome, options.TempBase)
 		if observation.ModelCatalogError == "" {
 			getModelLink := newGetModelLink(catalogCtx, kind, environment)
 			for i := range observation.Models {
@@ -320,15 +321,24 @@ func versionProbeTimedOut(err error) bool {
 
 // probedRuntimeModels uses the catalog the probe already read, or discovers
 // it.
-func probedRuntimeModels(ctx context.Context, kind, executable string, environment map[string]string, outcome runtimeProbeOutcome) ([]RuntimeModel, string) {
+func probedRuntimeModels(ctx context.Context, kind, executable string, environment map[string]string, outcome runtimeProbeOutcome, tempBase string) ([]RuntimeModel, string) {
 	if outcome.catalog != nil {
 		return catalogModels(*outcome.catalog, nil)
 	}
-	return discoverRuntimeModels(ctx, kind, executable, environment)
+	return discoverRuntimeModels(ctx, kind, executable, environment, tempBase)
 }
 
-func discoverRuntimeModels(ctx context.Context, kind, executable string, environment map[string]string) ([]RuntimeModel, string) {
-	return catalogModels(native.DiscoverModels(ctx, kind, native.NewInvocation(executable, nil).WithEnvironment(environment)))
+func discoverRuntimeModels(ctx context.Context, kind, executable string, environment map[string]string, tempBase string) ([]RuntimeModel, string) {
+	inv := native.NewInvocation(executable, nil).WithEnvironment(environment)
+	if kind == "antigravity" {
+		catalog, err := native.DiscoverAntigravityModels(ctx, inv, tempBase)
+		if errors.Is(err, native.ErrAntigravityProbePrepare) {
+			slog.Warn("runner.runtime_models.prepare_failed", "runtime_type", kind, "error", redact.Text(err.Error()))
+			return []RuntimeModel{}, "Antigravity diagnostic environment could not be prepared"
+		}
+		return catalogModels(catalog, err)
+	}
+	return catalogModels(native.DiscoverModels(ctx, kind, inv))
 }
 
 func catalogModels(catalog native.ModelList, err error) ([]RuntimeModel, string) {

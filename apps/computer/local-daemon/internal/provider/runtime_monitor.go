@@ -351,7 +351,7 @@ func refreshRuntimeAuthentication(ctx context.Context, current DiscoveryResult, 
 		if (diagnostic.Type == "pi" || diagnostic.Type == "antigravity") && diagnostic.Status == "ready" {
 			previousModels := diagnostic.Models
 			catalogCtx, cancel := context.WithTimeout(ctx, boundedAuthTimeout(options.Timeout))
-			diagnostic.Models, diagnostic.ModelCatalogError = probedRuntimeModels(catalogCtx, diagnostic.Type, diagnostic.ExecutablePath, environment, outcome)
+			diagnostic.Models, diagnostic.ModelCatalogError = probedRuntimeModels(catalogCtx, diagnostic.Type, diagnostic.ExecutablePath, environment, outcome, options.TempBase)
 			if diagnostic.ModelCatalogError == "" {
 				carryOrResolveModelLinks(catalogCtx, diagnostic.Type, environment, previousModels, diagnostic.Models)
 			}

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/permission"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 type agyHarness struct {
@@ -327,7 +329,7 @@ func TestAntigravityTimeoutStopsTheProcess(t *testing.T) {
 
 func TestAntigravityProbeListsModelFamiliesWithTheirLevels(t *testing.T) {
 	h := newAgyHarness(t, "turn", nil)
-	probe, err := ProbeAntigravity(t.Context(), h.inv)
+	probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +348,7 @@ func TestAntigravityProbeListsModelFamiliesWithTheirLevels(t *testing.T) {
 	}
 
 	signedOut := newAgyHarness(t, "signed-out", nil)
-	if probe, err := ProbeAntigravity(t.Context(), signedOut.inv); err != nil || !probe.AuthenticationRequired {
+	if probe, err := ProbeAntigravity(t.Context(), signedOut.inv, ""); err != nil || !probe.AuthenticationRequired {
 		t.Fatalf("signed out probe=%+v err=%v", probe, err)
 	}
 }
@@ -369,7 +371,7 @@ func TestAntigravityProbeIsolatesStateAndSeedsCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	probe, err := ProbeAntigravity(t.Context(), h.inv)
+	probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +428,7 @@ func TestAntigravityProbeIsolatesStateAndSeedsCredentials(t *testing.T) {
 
 func TestAntigravityProbeHandlesMissingUserGeminiDir(t *testing.T) {
 	h := newAgyHarness(t, "token-file", nil)
-	probe, err := ProbeAntigravity(t.Context(), h.inv)
+	probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,6 +437,114 @@ func TestAntigravityProbeHandlesMissingUserGeminiDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(h.dir, ".gemini")); !os.IsNotExist(err) {
 		t.Fatalf("probe created .gemini under HOME: err=%v", err)
+	}
+}
+
+func TestAntigravityProbeUsesTempBaseAndCleansUp(t *testing.T) {
+	if _, _, err := PrepareAntigravityProtocolProbe("relative-temp-base"); !errors.Is(err, ErrAntigravityProbePrepare) {
+		t.Fatalf("PrepareAntigravityProtocolProbe(relative) err = %v, want ErrAntigravityProbePrepare", err)
+	}
+
+	tempBase := t.TempDir()
+	unrelatedFile := filepath.Join(tempBase, "keep-me")
+	if err := os.WriteFile(unrelatedFile, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	args1, release1, err := PrepareAntigravityProtocolProbe(tempBase)
+	if err != nil {
+		t.Fatalf("PrepareAntigravityProtocolProbe(%q) #1: %v", tempBase, err)
+	}
+	args2, release2, err := PrepareAntigravityProtocolProbe(tempBase)
+	if err != nil {
+		release1()
+		t.Fatalf("PrepareAntigravityProtocolProbe(%q) #2: %v", tempBase, err)
+	}
+	if len(args1) != 4 || args1[0] != "--gemini-dir" || args1[2] != "--log-file" {
+		release1()
+		release2()
+		t.Fatalf("unexpected args1 = %v", args1)
+	}
+	if len(args2) != 4 || args2[0] != "--gemini-dir" || args2[2] != "--log-file" {
+		release1()
+		release2()
+		t.Fatalf("unexpected args2 = %v", args2)
+	}
+	probeDir1 := filepath.Dir(args1[1])
+	probeDir2 := filepath.Dir(args2[1])
+	if probeDir1 == probeDir2 {
+		release1()
+		release2()
+		t.Fatalf("concurrent probes in the same tempBase collided on %q", probeDir1)
+	}
+	for _, probeDir := range []string{probeDir1, probeDir2} {
+		if filepath.Dir(probeDir) != tempBase || !strings.HasPrefix(filepath.Base(probeDir), localworkspace.TaskTempDirPrefix) {
+			release1()
+			release2()
+			t.Fatalf("probeDir = %q, want unique %s* child under %q", probeDir, localworkspace.TaskTempDirPrefix, tempBase)
+		}
+		for _, dir := range []string{tempBase, probeDir, filepath.Join(probeDir, "gemini"), filepath.Join(probeDir, "workspace")} {
+			if err := privatefs.CheckPath(dir, "directory", true); err != nil {
+				release1()
+				release2()
+				t.Fatalf("privatefs check failed for %q: %v", dir, err)
+			}
+		}
+	}
+	if args1[3] != filepath.Join(probeDir1, "acp.log") || args2[3] != filepath.Join(probeDir2, "acp.log") {
+		release1()
+		release2()
+		t.Fatalf("unexpected log files: args1=%v args2=%v", args1, args2)
+	}
+
+	release1()
+	release1() // idempotent
+	if _, err := os.Stat(probeDir1); !os.IsNotExist(err) {
+		release2()
+		t.Fatalf("probeDir1 survived release: %v", err)
+	}
+	if _, err := os.Stat(probeDir2); err != nil {
+		release2()
+		t.Fatalf("releasing probeDir1 disturbed active probeDir2: %v", err)
+	}
+	release2()
+	if _, err := os.Stat(probeDir2); !os.IsNotExist(err) {
+		t.Fatalf("probeDir2 survived release: %v", err)
+	}
+	if _, err := os.Stat(unrelatedFile); err != nil {
+		t.Fatalf("release removed unrelated file %q in tempBase: %v", unrelatedFile, err)
+	}
+
+	metaFile := filepath.Join(t.TempDir(), "probe-in-meta.json")
+	h := newAgyHarness(t, "turn", map[string]string{agyFakeMetaEnv: metaFile})
+	models, err := DiscoverAntigravityModels(t.Context(), h.inv, tempBase)
+	if err != nil {
+		t.Fatalf("DiscoverAntigravityModels: %v", err)
+	}
+	if len(models.Models) != 2 {
+		t.Fatalf("models = %+v, want 2 models", models)
+	}
+	rawMeta, err := os.ReadFile(metaFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta struct {
+		GeminiDir string `json:"geminiDir"`
+		LogFile   string `json:"logFile"`
+	}
+	if err := json.Unmarshal(rawMeta, &meta); err != nil {
+		t.Fatal(err)
+	}
+	usedProbeDir := filepath.Dir(meta.GeminiDir)
+	if filepath.Dir(usedProbeDir) != tempBase || !strings.HasPrefix(filepath.Base(usedProbeDir), localworkspace.TaskTempDirPrefix) ||
+		meta.GeminiDir != filepath.Join(usedProbeDir, "gemini") || meta.LogFile != filepath.Join(usedProbeDir, "acp.log") {
+		t.Fatalf("probe paths = %+v, want unique %s* subdir under %q", meta, localworkspace.TaskTempDirPrefix, tempBase)
+	}
+	if _, err := os.Stat(usedProbeDir); !os.IsNotExist(err) {
+		t.Fatalf("probe subdir survived DiscoverAntigravityModels: %v", err)
+	}
+	if _, err := os.Stat(unrelatedFile); err != nil {
+		t.Fatalf("DiscoverAntigravityModels removed unrelated file %q in tempBase: %v", unrelatedFile, err)
 	}
 }
 
@@ -1177,7 +1287,7 @@ func TestAntigravityProbeContextWindowsFromUsageUpdates(t *testing.T) {
 				"gemini-small": 128000
 			}`,
 		})
-		probe, err := ProbeAntigravity(t.Context(), h.inv)
+		probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1212,7 +1322,7 @@ func TestAntigravityProbeContextWindowsFromUsageUpdates(t *testing.T) {
 				h := newAgyHarness(t, "turn", map[string]string{
 					agyFakeUsageWindowsEnv: `{"gemini-pro": ` + rawSize + `}`,
 				})
-				probe, err := ProbeAntigravity(t.Context(), h.inv)
+				probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1230,7 +1340,7 @@ func TestAntigravityProbeContextWindowsFromUsageUpdates(t *testing.T) {
 
 	t.Run("no_usage_update_skips_model_switching", func(t *testing.T) {
 		h := newAgyHarness(t, "turn", nil)
-		probe, err := ProbeAntigravity(t.Context(), h.inv)
+		probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1254,7 +1364,7 @@ func TestAntigravityProbeContextWindowsFromUsageUpdates(t *testing.T) {
 				"gemini-small": 128000
 			}`,
 		})
-		probe, err := ProbeAntigravity(t.Context(), h.inv)
+		probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1290,7 +1400,7 @@ func TestAntigravityProbeContextWindowsFromUsageUpdates(t *testing.T) {
 						"gemini-valid": 128000
 					}`,
 				})
-				probe, err := ProbeAntigravity(t.Context(), h.inv)
+				probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1324,7 +1434,7 @@ func TestAntigravityProbeContextWindowsFromUsageUpdates(t *testing.T) {
 				"gemini-small": 128000
 			}`,
 		})
-		probe, err := ProbeAntigravity(t.Context(), h.inv)
+		probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1357,7 +1467,7 @@ func TestAntigravityProbeContextWindowsFromUsageUpdates(t *testing.T) {
 				"gemini-flash": 200000
 			}`,
 		})
-		probe, err := ProbeAntigravity(t.Context(), h.inv)
+		probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1388,7 +1498,7 @@ func TestAntigravityProbeContextWindowsFromUsageUpdates(t *testing.T) {
 					"gemini-same-as-pro": 1048576
 				}`,
 			})
-			probe, err := ProbeAntigravity(t.Context(), h.inv)
+			probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1420,7 +1530,7 @@ func TestAntigravityProbeContextWindowsFromUsageUpdates(t *testing.T) {
 					"gemini-same-as-pro": 1048576
 				}`,
 			})
-			probe, err := ProbeAntigravity(t.Context(), h.inv)
+			probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1447,7 +1557,7 @@ func TestAntigravityProbeContextWindowsFromUsageUpdates(t *testing.T) {
 				"gemini-flash": 1048576
 			}`,
 		})
-		probe, err := ProbeAntigravity(t.Context(), h.inv)
+		probe, err := ProbeAntigravity(t.Context(), h.inv, "")
 		if err != nil {
 			t.Fatal(err)
 		}

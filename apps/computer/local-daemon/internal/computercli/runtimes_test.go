@@ -110,11 +110,12 @@ done
 
 	diagnostics, err := diagnoseRuntimes(
 		context.Background(),
-		nil,
-		map[string]string{
-			"PATH":  emptyPath,
-			"HOME":  home,
-			"SHELL": filepath.Join(root, "no-shell"),
+		runtimeRequest{
+			environment: map[string]string{
+				"PATH":  emptyPath,
+				"HOME":  home,
+				"SHELL": filepath.Join(root, "no-shell"),
+			},
 		},
 		[]string{"pi"},
 	)
