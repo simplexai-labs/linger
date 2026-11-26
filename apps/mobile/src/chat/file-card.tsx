@@ -217,7 +217,7 @@ export function FileCard(props: {
         <Text style={styles.detail} numberOfLines={1}>
           {attachment.available
             ? t(m.details, {
-                type: fileTypeLabel(attachment.filename, media),
+                type: fileTypeLabel(t, attachment.filename, media),
                 size: fileSize(attachment.size_bytes),
               })
             : t(m.unavailable)}

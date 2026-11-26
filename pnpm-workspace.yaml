@@ -10,6 +10,7 @@ allowBuilds:
   "@livekit/local-inference": true
   "@scarf/scarf": false
   better-sqlite3: true
+  core-js: false
   esbuild: true
   protobufjs: false
   # The Mobile App disables code highlighting and math, the only assets its

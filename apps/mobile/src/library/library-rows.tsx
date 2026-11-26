@@ -104,7 +104,7 @@ export function DocumentRow(props: {
   const { document } = props;
   const filename = documentFileName(document, translation.t);
   const title = documentTitle(document, translation.t);
-  const meta = `${fileTypeLabel(filename)} · ${shortWhen(document.updated_at, translation)}`;
+  const meta = `${fileTypeLabel(translation.t, filename)} · ${shortWhen(document.updated_at, translation)}`;
   return (
     <LibraryRow
       leading={<FileTile filename={filename} size={TILE} />}

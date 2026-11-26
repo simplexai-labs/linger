@@ -3,7 +3,7 @@ declare module "*.css" {
   const text: string;
   export default text;
 }
-declare module "pdfjs-dist/build/pdf.worker.min.mjs" {
+declare module "pdfjs-dist/legacy/build/pdf.worker.min.mjs" {
   const source: string;
   export default source;
 }

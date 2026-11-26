@@ -584,5 +584,16 @@
     "sendAgain": "重新发送",
     "confirmStopTitle": "停止录音？",
     "keepRecording": "继续录音"
+  },
+  "fileKind": {
+    "archive": "压缩包",
+    "audio": "音频",
+    "code": "代码",
+    "document": "文档",
+    "image": "图片",
+    "presentation": "幻灯片",
+    "spreadsheet": "表格",
+    "text": "文本",
+    "video": "视频"
   }
 }

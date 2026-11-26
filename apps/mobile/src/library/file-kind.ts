@@ -4,6 +4,9 @@
 // the app: text, Markdown, images, audio and video natively, and the rest in
 // the offline viewer page (file-viewer.tsx). Only what the desktop cannot
 // preview either goes to the system viewer.
+import type { Translate } from "../i18n/language";
+import type { Message } from "../i18n/messages";
+import { fileKindMessages as m } from "./file-kind.messages";
 import type { WebKind } from "./file-viewer";
 
 export type FileKind =
@@ -68,28 +71,33 @@ export function fileKind(filename: string, mediaType = ""): FileKind {
   );
 }
 
-const labels: Record<FileKind, string> = {
-  archive: "Archive",
-  audio: "Audio",
-  code: "Code",
-  document: "Document",
+const labels: Record<FileKind, Message | string> = {
+  archive: m.archive,
+  audio: m.audio,
+  code: m.code,
+  document: m.document,
   html: "HTML",
-  image: "Image",
+  image: m.image,
   markdown: "Markdown",
   pdf: "PDF",
-  presentation: "Slides",
-  spreadsheet: "Spreadsheet",
-  text: "Text",
-  video: "Video",
+  presentation: m.presentation,
+  spreadsheet: m.spreadsheet,
+  text: m.text,
+  video: m.video,
 };
 
-export function fileTypeLabel(filename: string, mediaType = ""): string {
+export function fileTypeLabel(
+  t: Translate,
+  filename: string,
+  mediaType = "",
+): string {
   const extension = extensionOf(filename);
   if (extension === "doc" || extension === "docx") return "Word";
   if (extension === "ppt" || extension === "pptx") return "PowerPoint";
   if (extension === "xls" || extension === "xlsx") return "Excel";
   if (extension === "csv" || extension === "tsv") return "CSV";
-  return labels[fileKind(filename, mediaType)];
+  const label = labels[fileKind(filename, mediaType)];
+  return typeof label === "string" ? label : t(label);
 }
 
 export function fileSize(bytes: number): string {

@@ -17,6 +17,7 @@ const result = await build({
   format: "esm",
   platform: "browser",
   // iOS 15.1 is the app's floor; WebKit there runs ES2022 and module workers.
+  // esbuild lowers syntax only; viewer/main.ts loads the missing APIs.
   target: ["safari15", "chrome100"],
   minify: true,
   write: false,
@@ -30,13 +31,7 @@ const result = await build({
       name: "text-worker",
       setup(builder) {
         builder.onResolve({ filter: /pdf\.worker\.min\.mjs$/ }, (args) => ({
-          path: join(
-            app,
-            "node_modules",
-            "pdfjs-dist",
-            "build",
-            args.path.split("/").pop(),
-          ),
+          path: join(app, "node_modules", args.path),
           namespace: "worker-text",
         }));
         builder.onLoad(
@@ -96,6 +91,16 @@ const html = `<!doctype html>
 </head>
 <body>
 <div id="root"></div>
+<script>
+  // A library that throws while the module loads would leave the app waiting
+  // forever; report it so the app offers the phone's own viewer instead.
+  // viewer/main.ts removes this once its own code starts.
+  window.viewerStartupFailed = function () {
+    window.ReactNativeWebView &&
+      window.ReactNativeWebView.postMessage('{"kind":"failed","detail":"Startup"}');
+  };
+  addEventListener("error", window.viewerStartupFailed);
+</script>
 <script type="module">${script}</script>
 </body>
 </html>

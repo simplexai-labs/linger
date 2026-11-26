@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import type { Translate } from "../i18n/language";
+import { formatMessage } from "../i18n/messages";
 import { fileKind, fileSize, fileTypeLabel, viewerFor } from "./file-kind";
+
+const t: Translate = (message, ...values) =>
+  formatMessage(message, "en", undefined, values[0]);
 
 describe("fileKind", () => {
   it("reads the extension first, then the media type", () => {
@@ -50,9 +55,9 @@ describe("viewerFor", () => {
 
 describe("labels", () => {
   it("names the type and size like the web", () => {
-    expect(fileTypeLabel("plan.docx")).toBe("Word");
-    expect(fileTypeLabel("table.csv")).toBe("CSV");
-    expect(fileTypeLabel("source.m4a")).toBe("Audio");
+    expect(fileTypeLabel(t, "plan.docx")).toBe("Word");
+    expect(fileTypeLabel(t, "table.csv")).toBe("CSV");
+    expect(fileTypeLabel(t, "source.m4a")).toBe("Audio");
     expect(fileSize(645_384)).toBe("630 KB");
     expect(fileSize(3 * 1024 * 1024)).toBe("3.0 MB");
   });

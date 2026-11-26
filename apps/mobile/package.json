@@ -70,6 +70,7 @@
     "@types/node": "26.0.1",
     "@types/papaparse": "5.5.2",
     "@types/react": "19.3.0",
+    "core-js": "3.51.0",
     "esbuild": "0.28.1",
     "mermaid": "11.16.0",
     "papaparse": "5.5.4",

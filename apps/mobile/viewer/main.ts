@@ -6,12 +6,18 @@
 // Content-Security-Policy allows only file:, data: and blob:), and reports to
 // the app only "loaded", "truncated" or "failed": the app owns every word
 // the reader sees.
+//
+// The app runs from iOS 15.1, whose WebKit lacks APIs these libraries call
+// (Iterator helpers arrived in iOS 18.4), so core-js fills them in before any
+// library loads, and pdf.js comes from its legacy build, which does the same
+// inside its worker.
+import "core-js/stable";
 import { createViewer, officePlugin } from "@open-file-viewer/core";
 import officeStyles from "@open-file-viewer/core/style.css";
 import mermaid from "mermaid";
 import Papa from "papaparse";
-import * as pdfjs from "pdfjs-dist";
-import pdfWorkerSource from "pdfjs-dist/build/pdf.worker.min.mjs";
+import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
+import pdfWorkerSource from "pdfjs-dist/legacy/build/pdf.worker.min.mjs";
 
 interface NativeBridge {
   postMessage(message: string): void;
@@ -19,8 +25,14 @@ interface NativeBridge {
 declare global {
   interface Window {
     ReactNativeWebView?: NativeBridge;
+    /** The page's startup guard; see scripts/build-viewer.mjs. */
+    viewerStartupFailed?: () => void;
   }
 }
+
+// Every library loaded; errors from here on are this page's to report.
+if (window.viewerStartupFailed)
+  removeEventListener("error", window.viewerStartupFailed);
 
 /** The renderers this page has; the app picks one per file. */
 type Kind =

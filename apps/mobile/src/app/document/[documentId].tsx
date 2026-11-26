@@ -61,6 +61,7 @@ interface FileFacts {
 /** The file's head: its tile, name, and type and size. */
 function FileHead(props: { readonly facts: FileFacts }) {
   const { facts } = props;
+  const { t } = useTranslation();
   return (
     <View style={styles.head}>
       <FileTile
@@ -72,7 +73,7 @@ function FileHead(props: { readonly facts: FileFacts }) {
         {facts.filename}
       </Text>
       <Text style={type.chatMeta}>
-        {fileTypeLabel(facts.filename, facts.mediaType)}
+        {fileTypeLabel(t, facts.filename, facts.mediaType)}
         {facts.size !== undefined ? ` · ${fileSize(facts.size)}` : ""}
       </Text>
     </View>
