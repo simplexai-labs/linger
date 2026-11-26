@@ -665,14 +665,20 @@ Gateway and runs Agents. The daemon exits with the app.
   never error text or paths; a successful retry keeps the first failure.
   It keeps `%APPDATA%\Linger` and the Linger home with all their data; a
   later install starts the services again (resume, or setup's Install).
-  Setup over an installed release stops it the same way before it replaces
-  the files, since the services run on `Linger.exe` and hold it open. Setup
-  always stops them with its own `installer.js`, copied to the plugins
-  folder, on the old `Linger.exe`: an earlier release's script may not stop
-  them (0.1.2's left TeamHub, web and node-services running on Windows). Each
-  install writes `resources\stops-services`; a release without it would start
-  on `--quit`, so setup skips `--quit` for it (CloseLinger asks the person to
-  quit a running app). Retry in that prompt runs the stop again. Nothing running: the stop finds nothing and setup goes on. The
+  Manual setup over an installed release stops it the same way with a full
+  `--stop` before replacing files (as does the uninstaller), using setup's own
+  `installer.js`, copied to the plugins folder, on the old `Linger.exe`: an
+  earlier release's script may not stop its services (0.1.2's left TeamHub, web
+  and node-services running on Windows). Self-updates (`/update`) skip that
+  initial full `--stop` after `Linger.exe --quit` so warm external-Node services
+  stay running for the new version's in-place resume; if `Linger.exe` remains
+  locked after waiting (for example upgrading from an earlier release whose
+  services ran on `Linger.exe`), `StopLinger` falls back once to `--stop` before
+  `CloseLinger` prompts. Each install writes `resources\stops-services`; a
+  release without it would start on `--quit`, so setup skips `--quit` and runs
+  `--stop` directly (CloseLinger asks the person to quit a running app). Retry
+  in that prompt always forces a full `--stop` again. Nothing running: the stop
+  finds nothing and setup goes on. The
   stop also asks the pinned localmodels kit, when that kit is installed in the
   home, to unload every model its model library loaded (`library status`,
   then `library cancel` for each `loading` model, `library status` every
@@ -702,7 +708,10 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
   model source to a subscription; a BYOK source gets its gateway mounted
   again instead. A
   quit for an update or a relaunch, and the `--quit` of setup or the
-  uninstaller (which stop the models themselves right after), leave them.
+  uninstaller, leave local models running: manual setup and the uninstaller
+  stop services and local models themselves right after `--quit`, whereas
+  `/update` leaves them warm for in-place resume unless the wait-expiry
+  fallback or Retry forces `--stop`.
 - `src/main/legacy-migration.ts`: on start, stops a bridge an older version
   left running and moves its credential and the Desktop 0.16 daemon identity
   into the daemon layout, so the computer keeps its id.
