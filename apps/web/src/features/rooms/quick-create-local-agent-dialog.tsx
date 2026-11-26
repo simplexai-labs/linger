@@ -53,7 +53,6 @@ import { runtimeModelLabel } from "./members/runtime-model-label";
 import {
   ComputerStatus,
   EffortSegments,
-  ModelHeading,
   OptionList,
   Placeholder,
   SettingRow,
@@ -352,11 +351,6 @@ export function QuickCreateLocalAgentDialog({
           </>
         ) : (
           <>
-            <ModelHeading>
-              {selectedModel
-                ? runtimeModelLabel(selectedModel, t)
-                : t(createAgentMessages.noModels)}
-            </ModelHeading>
             <SettingRow
               label={t(createAgentMessages.computer)}
               onToggle={() => toggle("computer")}
@@ -468,7 +462,7 @@ export function QuickCreateLocalAgentDialog({
                         </>
                       ),
                       label: localRuntimeLabels[runtime.type],
-                      leading: <RuntimeLogo size={22} type={runtime.type} />,
+                      leading: <RuntimeLogo type={runtime.type} />,
                       value: runtime.type,
                     }))}
                     value={selectedRuntime?.type ?? ""}

@@ -1,8 +1,4 @@
-import {
-  AiBrain01Icon,
-  ArrowRight01Icon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import { ArrowRight01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { type ReactNode, useId } from "react";
 
 import { Icon } from "@/components/ui/icon";
@@ -14,20 +10,6 @@ import { agentRuntimeMessages } from "./agent-runtime.messages";
 
 /* The pieces Runtime settings and Create local agent share: a heading for the
    model, rows that open in place onto their choices, and the choices. */
-
-/** The model an Agent runs, as the dialog's heading. */
-export function ModelHeading({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex flex-col items-center gap-2 px-2 pb-3 pt-1 text-center">
-      <span className="grid size-12 place-items-center rounded-xl bg-muted text-foreground">
-        <Icon icon={AiBrain01Icon} size={24} />
-      </span>
-      <p className="max-w-full truncate text-base font-semibold text-foreground">
-        {children}
-      </p>
-    </div>
-  );
-}
 
 export type StatusTone = "ok" | "off" | "warn";
 
@@ -119,11 +101,13 @@ export function SettingRow({
   const panelId = useId();
   const expanded = open && !disabled;
   return (
-    <div>
+    // Open, the row and its choices share one tinted block, like a menu
+    // that unfolds from the row.
+    <div className={`rounded-lg ${expanded ? "bg-accent" : ""}`}>
       <button
         aria-controls={expanded ? panelId : undefined}
         aria-expanded={disabled ? undefined : expanded}
-        className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring enabled:hover:bg-accent disabled:cursor-default ${expanded ? "bg-accent" : ""}`}
+        className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default ${expanded ? "" : "enabled:hover:bg-accent"}`}
         disabled={disabled}
         onClick={onToggle}
         type="button"
@@ -142,7 +126,7 @@ export function SettingRow({
         )}
       </button>
       {expanded ? (
-        <div className="pb-2 pt-1" id={panelId}>
+        <div className="px-1.5 pb-1.5" id={panelId}>
           {children}
         </div>
       ) : null}
@@ -200,7 +184,7 @@ function OptionRow({
   const labelId = useId();
   const descriptionId = useId();
   return (
-    <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-accent has-[:disabled]:cursor-default has-[:disabled]:opacity-50 has-[:disabled]:hover:bg-transparent has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
+    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors hover:bg-background/60 has-[:checked]:bg-background has-[:disabled]:cursor-default has-[:disabled]:opacity-50 has-[:disabled]:hover:bg-transparent has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
       <input
         aria-describedby={option.description ? descriptionId : undefined}
         aria-labelledby={labelId}
@@ -213,23 +197,23 @@ function OptionRow({
         value={option.value}
       />
       {option.leading}
-      <span className="min-w-0 flex-1">
-        <span
-          className="block truncate font-medium text-foreground"
-          id={labelId}
-        >
-          {option.label}
-        </span>
-        {option.description ? (
-          <span
-            className="flex items-center gap-1.5 text-xs text-muted-foreground"
-            id={descriptionId}
-          >
-            {option.description}
-          </span>
-        ) : null}
+      <span
+        className="min-w-0 flex-1 truncate font-medium text-foreground"
+        id={labelId}
+      >
+        {option.label}
       </span>
-      {checked ? <Icon className="shrink-0" icon={Tick02Icon} /> : null}
+      {option.description ? (
+        <span
+          className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+          id={descriptionId}
+        >
+          {option.description}
+        </span>
+      ) : null}
+      <span className="flex w-4 shrink-0 justify-center">
+        {checked ? <Icon icon={Tick02Icon} size={14} /> : null}
+      </span>
     </label>
   );
 }
@@ -252,7 +236,7 @@ export function EffortSegments({
   return (
     <div
       aria-label={label}
-      className="grid auto-cols-fr grid-flow-col gap-0.5 rounded-lg bg-muted p-[3px]"
+      className="grid auto-cols-fr grid-flow-col gap-0.5 rounded-md bg-background/50 p-[3px]"
       role="radiogroup"
     >
       {efforts.map((effort) => (

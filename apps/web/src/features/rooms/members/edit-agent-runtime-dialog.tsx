@@ -48,7 +48,6 @@ import { agentRuntimeMessages } from "./agent-runtime.messages";
 import {
   ComputerStatus,
   EffortSegments,
-  ModelHeading,
   OptionList,
   Placeholder,
   SettingRow,
@@ -213,7 +212,6 @@ export function EditAgentRuntimeDialog({
     >
       <form id={formId} onSubmit={submit}>
         <fieldset className="min-w-0 px-3 pb-1" disabled={isPending || loading}>
-          <ModelHeading>{modelText}</ModelHeading>
           <SettingRow
             disabled={placementLocked}
             label={t(agentRuntimeMessages.computer)}
@@ -292,7 +290,7 @@ export function EditAgentRuntimeDialog({
                   </>
                 ),
                 label: runtimeLabels[item.type],
-                leading: <RuntimeLogo size={22} type={item.type} />,
+                leading: <RuntimeLogo type={item.type} />,
                 value: item.type,
               }))}
               value={selection.runtimeType}
