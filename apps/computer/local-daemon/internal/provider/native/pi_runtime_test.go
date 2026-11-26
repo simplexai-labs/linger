@@ -620,11 +620,11 @@ func TestPiLaunchArguments(t *testing.T) {
 
 	_, outcome = piCollect(t, h.start(t.Context(), "go", RunSpec{Model: piDefaultModel}))
 	data, _ = os.ReadFile(argv)
-	if outcome.Status != statusCompleted || strings.Contains(string(data), "--model") || strings.Contains(string(data), "--thinking") || !strings.HasSuffix(string(data), "--tools\n"+piBaseTools) {
+	if outcome.Status != statusCompleted || strings.Contains(string(data), "--model") || strings.Contains(string(data), "--thinking") || !strings.HasSuffix(string(data), "--extension\n"+extension+"\n--tools\n"+piBaseTools) {
 		t.Fatalf("default argv = %q (%+v)", data, outcome)
 	}
-	if nodePath, _ := os.ReadFile(argv + ".node_path"); len(nodePath) != 0 {
-		t.Fatalf("NODE_PATH without an extension = %q", nodePath)
+	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != filepath.Join(filepath.Dir(filepath.Dir(extension)), "node_modules") {
+		t.Fatalf("NODE_PATH = %q", nodePath)
 	}
 
 	// The managed extension runs the shell-text-hook without MCP servers.
@@ -639,6 +639,85 @@ func TestPiLaunchArguments(t *testing.T) {
 	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != filepath.Join(filepath.Dir(filepath.Dir(extension)), "node_modules") {
 		t.Fatalf("NODE_PATH = %q", nodePath)
 	}
+
+	// Without a configured managed extension, a plain Run omits --extension and NODE_PATH.
+	program := h.runtime.(*piRuntime).profile.Program
+	plain, err := Open("pi", Profile{Program: program, Env: h.env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := plain.Start(t.Context(), "go", RunSpec{Dir: h.dir, Model: piDefaultModel})
+	if err != nil {
+		t.Fatalf("plain start: %v", err)
+	}
+	_, outcome = piCollect(t, run)
+	data, _ = os.ReadFile(argv)
+	if outcome.Status != statusCompleted || strings.Contains(string(data), "--extension") || !strings.HasSuffix(string(data), "--tools\n"+piBaseTools) {
+		t.Fatalf("plain argv = %q (%+v)", data, outcome)
+	}
+	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != "" {
+		t.Fatalf("plain NODE_PATH = %q", nodePath)
+	}
+
+	// A missing configured managed extension fails fast even on a plain Run and releases its session lock.
+	broken, err := Open("pi", Profile{
+		Program:             program,
+		Env:                 h.env,
+		ManagedMCPExtension: filepath.Join(t.TempDir(), "missing-extension.mjs"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := broken.Start(t.Context(), "go", RunSpec{Dir: h.dir, AssignSessionID: "broken-extension-session"}); err == nil || !strings.Contains(err.Error(), "repair") {
+		t.Fatalf("broken extension start = %v", err)
+	}
+	run, err = plain.Start(t.Context(), "go", RunSpec{Dir: h.dir, AssignSessionID: "broken-extension-session"})
+	if err != nil {
+		t.Fatalf("post-failure start on same session: %v", err)
+	}
+	if _, outcome = piCollect(t, run); outcome.Status != statusCompleted {
+		t.Fatalf("post-failure outcome = %+v", outcome)
+	}
+}
+
+func TestPiReviewedRunRefusesExtensionlessResident(t *testing.T) {
+	t.Run("prestart", func(t *testing.T) {
+		h := piNewResidentHome(t, nil)
+		out := h.prestart(RunSpec{AssignSessionID: "prestart-no-ext"})
+		if out.Status != statusCompleted || !out.Parked || h.parked("prestart-no-ext") == nil {
+			t.Fatalf("pre-start = %+v parked=%v", out, h.parked("prestart-no-ext") != nil)
+		}
+		_, err := h.runtime().Start(t.Context(), "go", RunSpec{
+			Dir:                h.dir,
+			AssignSessionID:    "prestart-no-ext",
+			PermissionReviewer: &permission.Reviewer{},
+		})
+		if err == nil || !strings.Contains(err.Error(), "repair") {
+			t.Fatalf("reviewed start after extension-less prestart = %v", err)
+		}
+		if prompts := h.lines("prompt"); prompts != 0 {
+			t.Fatalf("prompts sent to extension-less prestart = %d, want 0", prompts)
+		}
+	})
+
+	t.Run("parked unreviewed run", func(t *testing.T) {
+		h := piNewResidentHome(t, nil)
+		h.createParked("parked-no-ext", RunSpec{})
+		if prompts := h.lines("prompt"); prompts != 1 {
+			t.Fatalf("initial prompts = %d, want 1", prompts)
+		}
+		_, err := h.runtime().Start(t.Context(), "again", RunSpec{
+			Dir:                h.dir,
+			ResumeID:           "parked-no-ext",
+			PermissionReviewer: &permission.Reviewer{},
+		})
+		if err == nil || !strings.Contains(err.Error(), "repair") {
+			t.Fatalf("reviewed resume of extension-less resident = %v", err)
+		}
+		if prompts := h.lines("prompt"); prompts != 1 {
+			t.Fatalf("prompts after refused reviewed resume = %d, want 1", prompts)
+		}
+	})
 }
 
 func TestPiExtensionNodePath(t *testing.T) {

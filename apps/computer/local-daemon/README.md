@@ -527,9 +527,15 @@ heredoc (`internal/permission/shell_text.go`). Named variables such as `"$id"`,
 - Codex runs `linger-computer-daemon shell-text-hook` as a
   PreToolUse hook for every shell command. Codex on Windows runs PowerShell,
   so it gets no hook.
-- Pi loads the managed extension (`extensions/pi-mcp.mjs`) for every Run. It
-  runs the same hook before a `bash` call that names `teamhub` and holds `$` or
-  a backquote.
+- Pi loads the managed extension (`extensions/pi-mcp.mjs`) for every Run.
+  Before a `bash` call runs, it runs the shell text check (for calls naming
+  `teamhub` with `$` or a backquote) and permission review on the original
+  command, then prepends `pipefail` for bash and zsh (skipping unsupported
+  POSIX `sh` fallbacks) only after the call is allowed. Under `pipefail`, a
+  producer killed by `SIGPIPE` when a downstream reader closes early (such as
+  `| head`, exit `141`) or a non-zero upstream stage (such as `grep` with no
+  matches piped to `wc -l`) fails the pipeline; a command that wants to ignore
+  upstream failures can run `set +o pipefail`.
 - Antigravity is not checked: its permission request can only allow or reject
   a call, with no reason the Agent would read.
 
