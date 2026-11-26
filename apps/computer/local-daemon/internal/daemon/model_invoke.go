@@ -275,7 +275,7 @@ func runtimeModelForEffort(models []provider.RuntimeModel, requestedModel string
 func filterModelInvokeEfforts(runtimeType string, efforts []string) []string {
 	supported := make([]string, 0, len(efforts))
 	for _, raw := range efforts {
-		value := strings.ToLower(strings.TrimSpace(raw))
+		value := strings.TrimSpace(raw)
 		if validModelInvokeEffort(runtimeType, value) {
 			supported = append(supported, value)
 		}
@@ -285,16 +285,8 @@ func filterModelInvokeEfforts(runtimeType string, efforts []string) []string {
 
 func validModelInvokeEffort(runtimeType, effort string) bool {
 	switch runtimeType {
-	case "claude":
-		switch effort {
-		case "none", "low", "medium", "high", "xhigh", "max":
-			return true
-		}
-	case "codex":
-		switch effort {
-		case "none", "minimal", "low", "medium", "high", "xhigh":
-			return true
-		}
+	case "claude", "codex":
+		return provider.ValidRuntimeReasoningEffort(effort)
 	}
 	return false
 }

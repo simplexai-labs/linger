@@ -67,6 +67,29 @@ func validCatalogToken(token string) bool {
 	return true
 }
 
+// ValidEffortToken reports whether value matches the wire reasoning-effort
+// token grammar: 1..20 ASCII bytes starting with an alphanumeric character and
+// continuing with alphanumeric, underscore, or hyphen.
+func ValidEffortToken(value string) bool {
+	if len(value) == 0 || len(value) > 20 {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		isAlphaNum := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+		if i == 0 {
+			if !isAlphaNum {
+				return false
+			}
+			continue
+		}
+		if !isAlphaNum && c != '_' && c != '-' {
+			return false
+		}
+	}
+	return true
+}
+
 func effortLabel(value string) string {
 	switch value {
 	case "xhigh":

@@ -266,6 +266,12 @@ export interface LocalServerLocation {
   readonly custom: boolean;
   // Why the folder last chosen cannot be used.
   readonly error?: string;
+  // The folder last chosen that failed validation (when `error` is set).
+  readonly rejectedPath?: string;
+  // Available disk space on the target path's filesystem (read-only statfs).
+  readonly freeBytes?: number;
+  // Base free space required for services before any local model disk budget.
+  readonly minFreeBytes?: number;
 }
 
 export type LocalRuntime = "codex" | "claude" | "pi";
@@ -421,6 +427,8 @@ export interface LocalServerOptions {
   readonly pollMs?: number;
   // The free space a picked folder needs; LOCATION_FREE_BYTES by default.
   readonly freeBytes?: number;
+  // Read-only free-space lookup for the install location; freeDiskBytes by default.
+  readonly freeDiskBytes?: (directory: string) => Promise<number | undefined>;
   // Where the Desktop Computer daemon stores its config and state
   // (<userData>/computer); validated on Windows during setup preflight so
   // ancestor ACL refusals fail immediately instead of after installation.
@@ -583,6 +591,9 @@ export class LocalServerModule implements Module {
   #home: string;
   #location: string | undefined;
   #locationError: string | undefined;
+  #locationRejectedPath: string | undefined;
+  #locationFreeBytes: number | undefined;
+  #locationChoiceSeq = 0;
   #refusal: WindowsPrivateRefusal | undefined;
   #failure: LocalServerFailure | undefined;
   #waiting: LocalServerWaiting | undefined;
@@ -1021,6 +1032,15 @@ export class LocalServerModule implements Module {
         path: this.#location ?? this.#home,
         custom: this.#location !== undefined,
         ...(this.#locationError ? { error: this.#locationError } : {}),
+        ...(this.#locationRejectedPath
+          ? { rejectedPath: this.#locationRejectedPath }
+          : {}),
+        ...(this.#locationFreeBytes !== undefined
+          ? {
+              freeBytes: this.#locationFreeBytes,
+              minFreeBytes: this.#freeBytes(),
+            }
+          : {}),
       },
       keys: {
         composio: !!keys.composio,
@@ -1043,23 +1063,65 @@ export class LocalServerModule implements Module {
   begin(plan: LocalServerPlan = QUICK_INSTALL): Promise<void> {
     this.#running ??= this.#install(plan).finally(() => {
       this.#running = undefined;
+      if (this.#phase === "failed") void this.refreshLocationSpace();
     });
     return this.#running;
+  }
+
+  // Refreshes the target install location's free disk space non-destructively
+  // (statfs only). Emits local-server.changed only when freeBytes changes.
+  async refreshLocationSpace(): Promise<void> {
+    if (
+      this.#abort.signal.aborted ||
+      this.#running ||
+      (this.#phase !== "idle" && this.#phase !== "failed") ||
+      !this.status().available
+    )
+      return;
+    const target = this.#location ?? this.#home;
+    const free = await this.#probeLocationSpace(target);
+    if (
+      this.#abort.signal.aborted ||
+      this.#running ||
+      (this.#phase !== "idle" && this.#phase !== "failed") ||
+      (this.#location ?? this.#home) !== target
+    )
+      return;
+    if (free !== this.#locationFreeBytes) {
+      this.#locationFreeBytes = free;
+      this.#ctx?.bus.emit("local-server.changed");
+    }
+  }
+
+  async #probeLocationSpace(target: string): Promise<number | undefined> {
+    try {
+      return await (this.#options.freeDiskBytes ?? freeDiskBytes)(target);
+    } catch {
+      return undefined;
+    }
   }
 
   // Installs into a folder the person picked, once it can hold Linger; null
   // goes back to the default.
   async chooseLocation(picked: string | null): Promise<void> {
     if (this.#running) return;
-    const previous = this.#location;
+    const choiceSeq = ++this.#locationChoiceSeq;
+    let nextLocation: string | undefined;
+    let nextError: string | undefined;
+    let nextRejectedPath: string | undefined;
+    let nextFreeBytes: number | undefined;
+    let updateFreeBytes = false;
     if (picked === null) {
-      this.#location = undefined;
-      this.#locationError = undefined;
+      nextLocation = undefined;
+      nextError = undefined;
+      nextRejectedPath = undefined;
+      nextFreeBytes = await this.#probeLocationSpace(this.#home);
+      updateFreeBytes = true;
     } else {
       const home = await installLocation(picked);
-      this.#locationError = await checkLocation(home, this.#freeBytes());
+      let locationError = await checkLocation(home, this.#freeBytes());
       if (
-        !this.#locationError &&
+        !locationError &&
         (this.#options.platform ?? process.platform) === "win32"
       ) {
         try {
@@ -1067,12 +1129,32 @@ export class LocalServerModule implements Module {
             home,
           );
         } catch (error) {
-          this.#locationError =
+          locationError =
             error instanceof Error ? error.message : String(error);
         }
       }
-      if (!this.#locationError)
-        this.#location = home === this.#home ? undefined : home;
+      nextError = locationError;
+      if (!nextError) {
+        nextLocation = home === this.#home ? undefined : home;
+        nextRejectedPath = undefined;
+        nextFreeBytes = await this.#probeLocationSpace(home);
+        updateFreeBytes = true;
+      } else {
+        nextRejectedPath = home;
+      }
+    }
+    if (
+      this.#running ||
+      this.#abort.signal.aborted ||
+      choiceSeq !== this.#locationChoiceSeq
+    )
+      return;
+    const previous = this.#location;
+    this.#locationError = nextError;
+    this.#locationRejectedPath = nextRejectedPath;
+    if (updateFreeBytes) {
+      this.#location = nextLocation;
+      this.#locationFreeBytes = nextFreeBytes;
     }
     if (previous !== this.#location) {
       this.#cancelPrestage("location_changed");
@@ -1109,6 +1191,7 @@ export class LocalServerModule implements Module {
     this.#check = { state: "checking" };
     this.#checkedAt = undefined;
     this.#ctx?.bus.emit("local-server.changed");
+    void this.refreshLocationSpace();
     const started = Date.now();
     const appSignal = this.#abort.signal;
     const inspectAbort = new AbortController();
@@ -1186,12 +1269,12 @@ export class LocalServerModule implements Module {
   // Checks again, for example after the person closed other programs to free
   // the memory the local model needs.
   recheck(): void {
-    if (
-      this.#check.state === "checking" ||
-      this.#running ||
-      (this.#phase !== "idle" && this.#phase !== "failed")
-    )
+    if (this.#running || (this.#phase !== "idle" && this.#phase !== "failed"))
       return;
+    if (this.#check.state === "checking") {
+      void this.refreshLocationSpace();
+      return;
+    }
     this.#check = { state: "unchecked" };
     this.inspect();
   }
@@ -1989,22 +2072,20 @@ export class LocalServerModule implements Module {
       );
       signal.throwIfAborted();
       const platform = this.#options.platform ?? process.platform;
-      // On Windows the default data location also needs a space check. A
-      // custom folder may have filled up or gone since it was picked.
-      if (platform === "win32" || this.#location) {
-        const model =
-          this.#check.state === "checked" &&
-          (plan.runtime === "local" ||
-            (plan.runtime === "recommended" &&
-              this.#check.recommendation === "local-models"))
-            ? this.#check.model
-            : undefined;
-        const error = await checkLocation(
-          home,
-          this.#freeBytes() + (model?.diskBytes ?? 0),
-        );
-        if (error) throw new Error(`${home}: ${error}`);
-      }
+      // Check the target install location (default or custom) for write access
+      // and free space, including any planned local model's disk budget.
+      const model =
+        this.#check.state === "checked" &&
+        (plan.runtime === "local" ||
+          (plan.runtime === "recommended" &&
+            this.#check.recommendation === "local-models"))
+          ? this.#check.model
+          : undefined;
+      const error = await checkLocation(
+        home,
+        this.#freeBytes() + (model?.diskBytes ?? 0),
+      );
+      if (error) throw new Error(`${home}: ${error}`);
       // On Windows, pre-check both the install home and the Computer daemon
       // directory (<userData>/computer) before unpacking so ancestor ACL
       // refusals fail immediately instead of after installation and enrollment.
@@ -3835,6 +3916,8 @@ export class LocalServerModule implements Module {
     previous?: string,
     reason: WindowLoadReason = "local_ready",
   ): void {
+    this.#locationRejectedPath = undefined;
+    this.#locationFreeBytes = undefined;
     this.#origin = origin;
     this.#ctx
       ?.get<WindowManagerModule>("WindowManager")
@@ -5853,6 +5936,36 @@ export const installLocation = async (picked: string): Promise<string> => {
     : path.join(picked, "Linger");
 };
 
+// Walks up from `directory` to the nearest existing directory without creating
+// anything; undefined for non-absolute paths or when the root does not exist.
+const nearestExistingDirectory = async (
+  directory: string,
+): Promise<string | undefined> => {
+  if (!path.isAbsolute(directory)) return undefined;
+  let existing = directory;
+  while (!(await isDirectory(existing))) {
+    if (path.dirname(existing) === existing) return undefined;
+    existing = path.dirname(existing);
+  }
+  return existing;
+};
+
+// Available disk bytes on `directory`'s filesystem without creating folders or
+// writing probe files; undefined when the path or filesystem cannot be read.
+export async function freeDiskBytes(
+  directory: string,
+): Promise<number | undefined> {
+  const existing = await nearestExistingDirectory(directory);
+  if (!existing) return undefined;
+  try {
+    const disk = await statfs(existing);
+    const free = Number(disk.bavail) * Number(disk.bsize);
+    return Number.isFinite(free) && free >= 0 ? free : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Why Linger cannot install into `directory`, or undefined when it can: the
 // folder (or the one it will be made in) must take files and its disk must
 // have `neededBytes` free.
@@ -5861,12 +5974,8 @@ export const checkLocation = async (
   neededBytes: number,
 ): Promise<string | undefined> => {
   if (!path.isAbsolute(directory)) return "Choose a folder on this computer.";
-  let existing = directory;
-  while (!(await isDirectory(existing))) {
-    if (path.dirname(existing) === existing)
-      return "This folder can't be found.";
-    existing = path.dirname(existing);
-  }
+  const existing = await nearestExistingDirectory(directory);
+  if (!existing) return "This folder can't be found.";
   const probe = path.join(existing, `.linger-${randomUUID()}`);
   try {
     await writeFile(probe, "", { flag: "wx" });

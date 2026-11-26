@@ -29,10 +29,12 @@ const maxAntigravityHookBytes = 1 << 20
 // AntigravityHookRequest holds the fields Antigravity passes on stdin to
 // PreInvocation and Stop hooks that the Daemon consumes.
 type AntigravityHookRequest struct {
-	HookEventName  string `json:"hookEventName"`
-	ConversationID string `json:"conversationId"`
-	InvocationNum  int    `json:"invocationNum"`
-	FullyIdle      *bool  `json:"fullyIdle,omitempty"`
+	HookEventName   string `json:"hookEventName"`
+	ConversationID  string `json:"conversationId"`
+	InvocationNum   int    `json:"invocationNum"`
+	FullyIdle       *bool  `json:"fullyIdle,omitempty"`
+	TranscriptPath  string `json:"transcriptPath,omitempty"`
+	InitialNumSteps *int   `json:"initialNumSteps,omitempty"`
 }
 
 // AntigravityInjectStep injects one step before Antigravity's next model
@@ -116,6 +118,9 @@ func newAntigravityHookEndpoint(daemonExecutable string) (*AntigravityHookEndpoi
 	dir, err := os.MkdirTemp("", "linger-agy-hooks-*")
 	if err != nil {
 		return nil, err
+	}
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil && resolved != "" {
+		dir = resolved
 	}
 	agentsDir := filepath.Join(dir, ".agents")
 	if err := os.MkdirAll(agentsDir, 0o700); err != nil {
@@ -268,11 +273,27 @@ func writeAntigravityHooksFile(path, daemonExecutable, endpointURL string) error
 }
 
 func antigravityHookCommand(daemonExecutable, endpointURL string) string {
-	return quoteAntigravityHookArg(daemonExecutable) + " antigravity-hook " + quoteAntigravityHookArg(endpointURL)
+	return antigravityHookCommandForOS(runtime.GOOS, daemonExecutable, endpointURL)
 }
 
-func quoteAntigravityHookArg(value string) string {
-	if runtime.GOOS == "windows" {
+func antigravityHookCommandForOS(goos, daemonExecutable, endpointURL string) string {
+	if goos == "windows" {
+		quotedExe := quoteAntigravityHookArgForOS(goos, daemonExecutable)
+		if !strings.ContainsAny(daemonExecutable, "&<>()@^|") {
+			// The loopback endpoint URL contains only safe characters, so leaving it
+			// unquoted keeps a 2-quote command that both `cmd /c` and `cmd /d /s /c`
+			// execute without stripping quotes around spaces in daemonExecutable.
+			return quotedExe + " antigravity-hook " + endpointURL
+		}
+		// cmd /c strips the leading and trailing quotes when quoted text contains
+		// special characters (&<>()@^|), so wrap the whole command in outer quotes.
+		return `"` + quotedExe + " antigravity-hook " + quoteAntigravityHookArgForOS(goos, endpointURL) + `"`
+	}
+	return quoteAntigravityHookArgForOS(goos, daemonExecutable) + " antigravity-hook " + quoteAntigravityHookArgForOS(goos, endpointURL)
+}
+
+func quoteAntigravityHookArgForOS(goos, value string) string {
+	if goos == "windows" {
 		return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 	}
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"

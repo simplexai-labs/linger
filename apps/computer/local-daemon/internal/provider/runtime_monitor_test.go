@@ -1459,3 +1459,83 @@ func TestRuntimeMonitorRecoversFromBackfillErrorOnNextTick(t *testing.T) {
 		t.Fatalf("recovered diagnostics = %+v", published.Diagnostics)
 	}
 }
+
+func TestRuntimeMonitorDebouncesTransientNotInstalledForReadyRuntime(t *testing.T) {
+	// Simulate a CLI executable that existed when initial ready state was probed,
+	// then briefly disappears (e.g. during self-update) and comes back, vs staying
+	// gone across two consecutive probes.
+	missingPath := filepath.Join(t.TempDir(), "codex")
+	ready := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{
+		Type: "codex", Status: "ready", Protocol: "app-server",
+		EntryPath: missingPath, ExecutablePath: missingPath,
+		Models: []RuntimeModel{{ID: "gpt-5", Label: "GPT-5", AllowedReasoningEffort: []string{}}},
+	}}}
+	notInstalled := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{
+		Type: "codex", Status: "not_installed", Protocol: "app-server",
+		Models: []RuntimeModel{},
+		Error:  &DiagnosticError{Code: "RUNTIME_NOT_INSTALLED", Message: "Runtime executable not found"},
+	}}}
+
+	t.Run("single transient not_installed retains ready", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		calls := 0
+		var statuses []string
+		err := MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+			Initial: ready, RefreshInterval: 5 * time.Millisecond, FullRefreshEveryTicks: 1,
+			Discover: func(context.Context, DiscoveryOptions) (DiscoveryResult, error) {
+				calls++
+				if calls == 1 {
+					return notInstalled, nil
+				}
+				if calls == 2 {
+					return ready, nil
+				}
+				// A second single transient miss after recovery must also be debounced.
+				if calls == 3 {
+					return notInstalled, nil
+				}
+				cancel()
+				return ready, nil
+			},
+			OnChanged: func(result DiscoveryResult) error {
+				statuses = append(statuses, result.Diagnostics[0].Status)
+				return nil
+			},
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("monitor exited with %v", err)
+		}
+		if len(statuses) != 0 {
+			t.Fatalf("published statuses = %v, want none on single transient not_installed", statuses)
+		}
+	})
+
+	t.Run("two consecutive not_installed probes publish not_installed", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		calls := 0
+		var statuses []string
+		err := MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+			Initial: ready, RefreshInterval: 5 * time.Millisecond, FullRefreshEveryTicks: 1,
+			Discover: func(context.Context, DiscoveryOptions) (DiscoveryResult, error) {
+				calls++
+				return notInstalled, nil
+			},
+			OnChanged: func(result DiscoveryResult) error {
+				statuses = append(statuses, result.Diagnostics[0].Status)
+				cancel()
+				return nil
+			},
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("monitor exited with %v", err)
+		}
+		if calls != transientRuntimeFailureThreshold {
+			t.Fatalf("discover calls = %d, want %d", calls, transientRuntimeFailureThreshold)
+		}
+		if !reflect.DeepEqual(statuses, []string{"not_installed"}) {
+			t.Fatalf("published statuses = %v, want [not_installed]", statuses)
+		}
+	})
+}

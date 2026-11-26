@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -152,6 +153,26 @@ it.skipIf(!wslAvailable)(
       );
       expect(saved.exit, JSON.stringify(saved)).toBe(0);
       expect(wsl(["cat", output])).toBe("image fixture");
+      const linuxConfig = wsl(["wslpath", "-u", path.join(cli, "config.json")]);
+      const forwarded = JSON.parse(
+        wsl([
+          "env",
+          `LINGER_NODE=${node}`,
+          `TEAMHUB_CONFIG=${linuxConfig}`,
+          "TEAMHUB_PROFILE=work",
+          "/bin/sh",
+          launcher,
+          "message",
+          "send",
+          "--content",
+          content,
+          "--attach",
+          attachment,
+        ]),
+      );
+      expect(forwarded.exit, JSON.stringify(forwarded)).toBe(0);
+      expect(forwarded.teamhubConfig).toBe(path.join(cli, "config.json"));
+      expect(forwarded.teamhubProfile).toBe("work");
     } catch (error) {
       primaryError = error;
     }
@@ -185,7 +206,8 @@ const calls = [];
 const configured = {
   WSL_DISTRO_NAME: process.env.WSL_DISTRO_NAME,
   SystemRoot: process.env.SystemRoot,
-  TEAMHUB_CONFIG: path.join(path.dirname(process.argv[1]), "config.json"),
+  TEAMHUB_CONFIG: process.env.TEAMHUB_CONFIG || path.join(path.dirname(process.argv[1]), "config.json"),
+  ...(process.env.TEAMHUB_PROFILE ? { TEAMHUB_PROFILE: process.env.TEAMHUB_PROFILE } : {}),
 };
 let stdout = "", stderr = "";
 const exit = await runCli(process.argv.slice(2), {
@@ -204,5 +226,162 @@ const exit = await runCli(process.argv.slice(2), {
     return Response.json({ accepted: true, target: { type: "room", id: "room_example" }, inbox_id: "room_example", message_id: "message_example", resources: [{kind: "document", segment_index: 1, status: "published", document_id: "document_example", version_id: "version_example", name: "attachment with spaces.txt"}], duplicate_request: false });
   },
 });
-process.stdout.write(JSON.stringify({ exit, node: process.env.ELECTRON_RUN_AS_NODE, calls, stdout, stderr }));
+process.stdout.write(JSON.stringify({ exit, node: process.env.ELECTRON_RUN_AS_NODE, teamhubConfig: process.env.TEAMHUB_CONFIG, teamhubProfile: process.env.TEAMHUB_PROFILE, calls, stdout, stderr }));
 `;
+
+it.skipIf(process.platform === "win32")(
+  "translates Linux TEAMHUB_CONFIG and forwards WSLENV safely in teamhub.sh",
+  () => {
+    const root = mkdtempSync(path.join(tmpdir(), "linger-teamhub-sh-"));
+    try {
+      const cliDir = path.join(root, "resources", "app", "dist", "teamhub-cli");
+      const binDir = path.join(root, "bin");
+      const workDir = path.join(root, "cwd");
+      mkdirSync(cliDir, { recursive: true });
+      mkdirSync(binDir, { recursive: true });
+      mkdirSync(workDir, { recursive: true });
+      // File matching FOO* in cwd catches accidental glob expansion of WSLENV.
+      writeFileSync(path.join(workDir, "FOO_EXPANDED"), "glob trap");
+
+      const launcher = path.join(cliDir, "teamhub.sh");
+      writeFileSync(
+        launcher,
+        readFileSync(path.resolve("scripts/teamhub.sh"), "utf8").replace(
+          /\r\n/g,
+          "\n",
+        ),
+      );
+      chmodSync(launcher, 0o700);
+      writeFileSync(path.join(cliDir, "teamhub.js"), "// fixture\n");
+
+      const fakeExe = path.join(root, "Linger.exe");
+      writeFileSync(
+        fakeExe,
+        `#!/bin/sh
+exec ${JSON.stringify(process.execPath)} -e '
+  process.stdout.write(JSON.stringify({
+    argv: process.argv.slice(1),
+    ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE ?? null,
+    WSLENV: process.env.WSLENV ?? null,
+    hasConfig: Object.prototype.hasOwnProperty.call(process.env, "TEAMHUB_CONFIG"),
+    TEAMHUB_CONFIG: process.env.TEAMHUB_CONFIG ?? null,
+    hasProfile: Object.prototype.hasOwnProperty.call(process.env, "TEAMHUB_PROFILE"),
+    TEAMHUB_PROFILE: process.env.TEAMHUB_PROFILE ?? null,
+  }));
+' -- "$@"
+`,
+      );
+      chmodSync(fakeExe, 0o700);
+
+      const wslpathLog = path.join(root, "wslpath.log");
+      const fakeWslpath = path.join(binDir, "wslpath");
+      writeFileSync(
+        fakeWslpath,
+        `#!/bin/sh
+printf '%s\\n' "$2" >> ${JSON.stringify(wslpathLog)}
+case "$2" in
+  /mnt/c/*)
+    rest=\${2#/mnt/c/}
+    printf 'C:\\%s\\n' "$(printf '%s' "$rest" | tr '/' '\\\\')"
+    ;;
+  *)
+    printf 'W:%s\\n' "$2"
+    ;;
+esac
+`,
+      );
+      chmodSync(fakeWslpath, 0o700);
+
+      const invoke = (extraEnv: Record<string, string>) => {
+        writeFileSync(wslpathLog, "");
+        const stdout = execFileSync("/bin/sh", [launcher, "message", "list"], {
+          cwd: workDir,
+          encoding: "utf8",
+          env: {
+            PATH: `${binDir}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+            ...extraEnv,
+          },
+        });
+        const calls = readFileSync(wslpathLog, "utf8")
+          .split("\n")
+          .filter(Boolean);
+        return {
+          result: JSON.parse(stdout) as {
+            argv: string[];
+            ELECTRON_RUN_AS_NODE: string | null;
+            WSLENV: string | null;
+            hasConfig: boolean;
+            TEAMHUB_CONFIG: string | null;
+            hasProfile: boolean;
+            TEAMHUB_PROFILE: string | null;
+          },
+          wslpathCalls: calls,
+        };
+      };
+
+      // 1. Linux TEAMHUB_CONFIG + TEAMHUB_PROFILE + existing WSLENV with duplicates.
+      const linuxCase = invoke({
+        TEAMHUB_CONFIG: "/mnt/c/work/config.json",
+        TEAMHUB_PROFILE: "runtime",
+        WSLENV: "FOO/u:TEAMHUB_CONFIG/p:TEAMHUB_PROFILE",
+      });
+      expect(linuxCase.result.ELECTRON_RUN_AS_NODE).toBe("1");
+      expect(linuxCase.result.TEAMHUB_CONFIG).toBe("C:\\work\\config.json");
+      expect(linuxCase.result.TEAMHUB_PROFILE).toBe("runtime");
+      expect(linuxCase.result.WSLENV).toBe(
+        "FOO/u:ELECTRON_RUN_AS_NODE:WSL_DISTRO_NAME:TEAMHUB_CONFIG:TEAMHUB_PROFILE",
+      );
+      expect(linuxCase.wslpathCalls).toHaveLength(2);
+      expect(linuxCase.wslpathCalls[1]).toBe("/mnt/c/work/config.json");
+
+      // 2. Windows drive path and UNC path skip wslpath -w on TEAMHUB_CONFIG.
+      for (const winPath of [
+        "C:\\Users\\alice\\config.json",
+        "C:/Users/alice/config.json",
+        "\\\\wsl.localhost\\Ubuntu\\home\\u\\config.json",
+      ]) {
+        const winCase = invoke({
+          TEAMHUB_CONFIG: winPath,
+          TEAMHUB_PROFILE: "runtime",
+        });
+        expect(winCase.result.TEAMHUB_CONFIG).toBe(winPath);
+        expect(winCase.result.WSLENV).toBe(
+          "ELECTRON_RUN_AS_NODE:WSL_DISTRO_NAME:TEAMHUB_CONFIG:TEAMHUB_PROFILE",
+        );
+        expect(winCase.wslpathCalls).toEqual([path.join(cliDir, "teamhub.js")]);
+      }
+
+      // 3. Unset TEAMHUB_CONFIG and TEAMHUB_PROFILE are not exported and clear stale WSLENV entries.
+      const unsetCase = invoke({
+        WSLENV: "FOO/u:TEAMHUB_CONFIG/p:TEAMHUB_PROFILE",
+      });
+      expect(unsetCase.result.hasConfig).toBe(false);
+      expect(unsetCase.result.hasProfile).toBe(false);
+      expect(unsetCase.result.WSLENV).toBe(
+        "FOO/u:ELECTRON_RUN_AS_NODE:WSL_DISTRO_NAME",
+      );
+
+      // 4. Empty TEAMHUB_CONFIG and TEAMHUB_PROFILE are unset and cleared from WSLENV.
+      const emptyCase = invoke({
+        TEAMHUB_CONFIG: "",
+        TEAMHUB_PROFILE: "",
+        WSLENV: "FOO/u:TEAMHUB_CONFIG/p:TEAMHUB_PROFILE",
+      });
+      expect(emptyCase.result.hasConfig).toBe(false);
+      expect(emptyCase.result.hasProfile).toBe(false);
+      expect(emptyCase.result.WSLENV).toBe(
+        "FOO/u:ELECTRON_RUN_AS_NODE:WSL_DISTRO_NAME",
+      );
+
+      // 5. Glob characters in WSLENV are preserved literally without expansion.
+      const globCase = invoke({
+        WSLENV: "FOO*:BAR/u",
+      });
+      expect(globCase.result.WSLENV).toBe(
+        "FOO*:BAR/u:ELECTRON_RUN_AS_NODE:WSL_DISTRO_NAME",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

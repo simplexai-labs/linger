@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { build } from "esbuild";
 
-import { buildDaemon } from "./scripts/build-daemon.mjs";
+import { buildDaemon, buildTeamhubLauncher } from "./scripts/build-daemon.mjs";
 import { stageDesktopComputerTools } from "./scripts/stage-computer-tools.mjs";
 import { hostedDiagnosticsUploadUrl } from "./scripts/diagnostics-upload-url.mjs";
 import { buildTeamhub, TEAMHUB_TARGETS } from "./scripts/build-teamhub.mjs";
@@ -313,32 +313,32 @@ const buildNativeOutputs = async () => {
 
 // The teamhub CLI that runtimes use to reply, built from the same checkout as
 // the server so their API versions match (as the Go daemon bundles it). The
-// launcher runs it with the app's own Node, so the computer needs no Node.
+// launcher runs it with the bundled Node or the app's own Node, so the
+// computer needs no system Node.
 const buildTeamhubCli = async () => {
   await run(
     "../teamhub-cli/scripts/build-cli.mjs",
     ["--outdir", "dist/teamhub-cli"],
     "teamhub CLI build failed",
   );
+  await Promise.all([
+    rm("dist/teamhub-cli/teamhub.cmd", { force: true }),
+    rm("dist/teamhub-cli/teamhub.exe", { force: true }),
+  ]);
   await writeFile(
     "dist/teamhub-cli/teamhub",
     (await readFile("scripts/teamhub.sh", "utf8")).replace(/\r\n/g, "\n"),
     { mode: 0o755 },
   );
-  // The same for cmd and PowerShell on Windows, which run `teamhub.cmd`; Git
-  // Bash takes the script above. The Computer's live voice cards start the app
-  // at this relative path directly (cardCLIProgram in the local daemon's
-  // playground_tools.go), so a layout change updates both.
-  await writeFile(
-    "dist/teamhub-cli/teamhub.cmd",
-    `@echo off\r
-setlocal\r
-set "app=%~dp0..\\..\\..\\..\\Linger.exe"\r
-if not exist "%app%" set "app=node"\r
-set ELECTRON_RUN_AS_NODE=1\r
-"%app%" --use-env-proxy "%~dp0teamhub.js" %*\r
-`,
+  const windowsTarget = daemonTargets.find((target) =>
+    target.startsWith("win32-"),
   );
+  if (windowsTarget) {
+    await buildTeamhubLauncher(
+      windowsTarget,
+      path.resolve("dist/teamhub-cli/teamhub.exe"),
+    );
+  }
 };
 
 // The Go Local Computer daemon (dist/computer/<platform>-<arch>/) for each

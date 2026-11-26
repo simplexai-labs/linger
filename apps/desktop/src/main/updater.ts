@@ -84,6 +84,7 @@ export interface UpdaterOptions {
   readonly checkDelayMs?: number;
   readonly checkIntervalMs?: number;
   readonly retryDelayMs?: number;
+  readonly cleanupDelayMs?: number;
 }
 
 export interface SetupProcess {
@@ -105,6 +106,8 @@ const CHECK_DELAY_MS = 60_000;
 const CHECK_INTERVAL_MS = 60 * 60_000;
 // A dropped connection should not cost a whole check interval.
 const RETRY_DELAY_MS = 5 * 60_000;
+const CLEANUP_DELAY_MS = 60_000;
+const POST_BUSY_CLEANUP_DELAY_MS = 5_000;
 const STAGED_PREFIX = ".Linger-update-";
 const OLD_PREFIX = ".Linger-old-";
 
@@ -131,6 +134,8 @@ export class UpdaterModule implements Module {
   // (Windows), with the package it came from.
   #staged: { path: string; pkg: UpdatePackage } | undefined;
   #timer: NodeJS.Timeout | undefined;
+  #cleanupTimer: NodeJS.Timeout | undefined;
+  #cleanupOnce: Promise<void> | undefined;
   #checking: Promise<void> | undefined;
   #prepareAbort: AbortController | undefined;
   #generation = 0;
@@ -149,8 +154,29 @@ export class UpdaterModule implements Module {
     const generation = ++this.#generation;
     clearTimeout(this.#timer);
     this.#timer = undefined;
+    clearTimeout(this.#cleanupTimer);
+    this.#cleanupTimer = undefined;
+    for (const off of this.#unsubscribe.splice(0)) off();
     if (!this.#options.install) return;
-    void this.#cleanup();
+    const fallbackDelay = Math.max(
+      0,
+      this.#options.cleanupDelayMs ?? CLEANUP_DELAY_MS,
+    );
+    this.#scheduleCleanup(generation, fallbackDelay);
+    this.#unsubscribe.push(
+      ctx.bus.on("local-server.busy", (busy) => {
+        if (this.#generation !== generation || this.#cleanupOnce) return;
+        if (busy) {
+          clearTimeout(this.#cleanupTimer);
+          this.#cleanupTimer = undefined;
+          return;
+        }
+        this.#scheduleCleanup(
+          generation,
+          Math.min(POST_BUSY_CLEANUP_DELAY_MS, fallbackDelay),
+        );
+      }),
+    );
     const schedule = (delay: number): void => {
       if (this.#generation !== generation) return;
       this.#timer = setTimeout(() => {
@@ -173,6 +199,8 @@ export class UpdaterModule implements Module {
     this.#generation += 1;
     clearTimeout(this.#timer);
     this.#timer = undefined;
+    clearTimeout(this.#cleanupTimer);
+    this.#cleanupTimer = undefined;
     this.#prepareAbort?.abort();
     this.#prepareAbort = undefined;
     for (const off of this.#unsubscribe.splice(0)) off();
@@ -283,15 +311,20 @@ export class UpdaterModule implements Module {
         });
         return;
       }
+      if (this.#generation !== generation) return;
       this.#setState({ kind: "downloading", version });
+      await this.#runCleanupOnce();
+      if (this.#generation !== generation) return;
       const file = path.join(this.#options.downloadDirectory, pkg.file);
       await this.#download(packageUrl(feed, version, pkg.file), file, pkg);
-      this.#staged =
+      if (this.#generation !== generation) return;
+      const stagedPath =
         install.kind === "app-bundle"
-          ? { path: await this.#extract(file, version), pkg }
-          : { path: file, pkg };
+          ? await this.#extract(file, version)
+          : file;
       if (install.kind === "app-bundle") await rm(file, { force: true });
       if (this.#generation !== generation) return;
+      this.#staged = { path: stagedPath, pkg };
       if (
         install.kind === "app-bundle" &&
         this.#options.prepareUpdate &&
@@ -441,6 +474,24 @@ export class UpdaterModule implements Module {
     if (install?.kind !== "app-bundle")
       throw new UpdateError("This installation has no app bundle");
     return install.appBundle;
+  }
+
+  #scheduleCleanup(generation: number, delayMs: number): void {
+    clearTimeout(this.#cleanupTimer);
+    this.#cleanupTimer = undefined;
+    if (this.#generation !== generation || this.#cleanupOnce) return;
+    this.#cleanupTimer = setTimeout(() => {
+      this.#cleanupTimer = undefined;
+      if (this.#generation !== generation) return;
+      void this.#runCleanupOnce();
+    }, delayMs);
+    this.#cleanupTimer.unref?.();
+  }
+
+  #runCleanupOnce(): Promise<void> {
+    clearTimeout(this.#cleanupTimer);
+    this.#cleanupTimer = undefined;
+    return (this.#cleanupOnce ??= this.#cleanup());
   }
 
   // Leftovers from an earlier update: downloads, the replaced bundle and

@@ -4619,15 +4619,7 @@ export interface components {
      * @enum {string}
      */
     AgentType: "general" | "anotherme";
-    /** @enum {string} */
-    AgentReasoningEffort:
-      | "none"
-      | "low"
-      | "medium"
-      | "high"
-      | "xhigh"
-      | "max"
-      | "ultra";
+    AgentReasoningEffort: string;
     /** @enum {string} */
     LocalRuntimeType: "codex" | "claude" | "pi" | "antigravity";
     /** @description Agents run on one of the Sponsor's Local Computers. Placement requires computer_id, runtime_type, and workspace_grant_id; TeamHub validates that invariant before persistence. */

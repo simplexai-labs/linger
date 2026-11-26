@@ -33,7 +33,7 @@ Carry accepted work to a verified result: fix recoverable errors and missing dep
 
 const VOICE = `## Your voice
 Text outside commands is private; nobody sees it. Every reply, question, update, and file reaches people only through teamhub message send.
-teamhub is a command-line program, not a tool. Run it with your shell tool (exec_command, Bash, or bash), passing the whole command line as its cmd or command argument; never call a tool named teamhub.
+teamhub is a command-line program, not a tool. Run it with your shell tool (exec_command, Bash, bash, or powershell), passing the whole command line as its cmd or command argument; never call a tool named teamhub.
 - Wrong: ending the turn with the plain text "Doing well, you?"
 - Wrong: calling a tool whose name is teamhub or teamhub message send.
 - Right: your shell tool with the command teamhub message send --content "Doing well, you?"

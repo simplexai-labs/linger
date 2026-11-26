@@ -94,9 +94,12 @@ Gateway and runs Agents. The daemon exits with the app.
   `scripts/installs/README.md`) and unpacks the linger source package
   into the install location (the default home, or a folder picked on the
   welcome screen). The selected folder's disk must have enough room for the
-  services and any local model shown in the install plan. Windows validates
-  private access when a folder is picked and checks the default disk's free
-  space too. Tar runs inside the target with relative paths, falling back to
+  services (`LOCATION_FREE_BYTES`) plus any local model shown in the install
+  plan: `freeDiskBytes` performs a read-only `statfs` pre-check (refreshed
+  when opening Setup, picking or resetting a folder, rechecking, or refocusing
+  Setup) so the welcome screen warns dynamically by plan, and `checkLocation`
+  enforces write access and free space on all platforms before unpacking.
+  Windows also validates private access when a folder is picked. Tar runs inside the target with relative paths, falling back to
   the pure-Node extractor when `tar.exe` is missing with `ENOENT` on stripped
   Windows images. The
   finished folder is moved into place with `renameRetrying`, which waits out
@@ -443,6 +446,12 @@ Gateway and runs Agents. The daemon exits with the app.
   in parallel (with a scoped `AbortController` so any failure cancels a pending
   runtime lookup) before recording state, calling `enroll()`, preloading the
   hidden window (`preloadAuthenticated`), and awaiting agents.
+- `src/main/updater.ts`: `UpdaterModule` defers startup leftover cleanup
+  (`.Linger-old-*`, stale `.Linger-update-*`, and previous downloads) until 5 s
+  after `local-server.busy` clears (pausing while busy, with a 60 s fallback
+  when no busy event arrives), runs it at most once via a memoized promise, and
+  flushes or coalesces onto any in-flight cleanup before downloading in
+  `check()`.
 - `src/main/diagnostics.ts`: Diagnostics, "Show Logs" (opens
   `<userData>/logs`) and "Save Diagnostics" (a redacted
   `linger-diagnostics-<time>.zip` in Downloads) for the setup page's failed
@@ -665,14 +674,20 @@ Gateway and runs Agents. The daemon exits with the app.
   never error text or paths; a successful retry keeps the first failure.
   It keeps `%APPDATA%\Linger` and the Linger home with all their data; a
   later install starts the services again (resume, or setup's Install).
-  Setup over an installed release stops it the same way before it replaces
-  the files, since the services run on `Linger.exe` and hold it open. Setup
-  always stops them with its own `installer.js`, copied to the plugins
-  folder, on the old `Linger.exe`: an earlier release's script may not stop
-  them (0.1.2's left TeamHub, web and node-services running on Windows). Each
-  install writes `resources\stops-services`; a release without it would start
-  on `--quit`, so setup skips `--quit` for it (CloseLinger asks the person to
-  quit a running app). Retry in that prompt runs the stop again. Nothing running: the stop finds nothing and setup goes on. The
+  Manual setup over an installed release stops it the same way with a full
+  `--stop` before replacing files (as does the uninstaller), using setup's own
+  `installer.js`, copied to the plugins folder, on the old `Linger.exe`: an
+  earlier release's script may not stop its services (0.1.2's left TeamHub, web
+  and node-services running on Windows). Self-updates (`/update`) skip that
+  initial full `--stop` after `Linger.exe --quit` so warm external-Node services
+  stay running for the new version's in-place resume; if `Linger.exe` remains
+  locked after waiting (for example upgrading from an earlier release whose
+  services ran on `Linger.exe`), `StopLinger` falls back once to `--stop` before
+  `CloseLinger` prompts. Each install writes `resources\stops-services`; a
+  release without it would start on `--quit`, so setup skips `--quit` and runs
+  `--stop` directly (CloseLinger asks the person to quit a running app). Retry
+  in that prompt always forces a full `--stop` again. Nothing running: the stop
+  finds nothing and setup goes on. The
   stop also asks the pinned localmodels kit, when that kit is installed in the
   home, to unload every model its model library loaded (`library status`,
   then `library cancel` for each `loading` model, `library status` every
@@ -702,14 +717,18 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
   model source to a subscription; a BYOK source gets its gateway mounted
   again instead. A
   quit for an update or a relaunch, and the `--quit` of setup or the
-  uninstaller (which stop the models themselves right after), leave them.
+  uninstaller, leave local models running: manual setup and the uninstaller
+  stop services and local models themselves right after `--quit`, whereas
+  `/update` leaves them warm for in-place resume unless the wait-expiry
+  fallback or Retry forces `--stop`.
 - `src/main/legacy-migration.ts`: on start, stops a bridge an older version
   left running and moves its credential and the Desktop 0.16 daemon identity
   into the daemon layout, so the computer keeps its id.
   `src/main/legacy-bridge.ts` keeps only the old bridge paths and the socket
   handshake that this needs; the bridge itself was deleted.
 - `scripts/build-daemon.mjs`: cross-compiles the daemon, stamped with the
-  `apps/computer` release the Gateway checks.
+  `apps/computer` release the Gateway checks, and the Windows Desktop TeamHub
+  CLI launcher (`cmd/linger-teamhub-launcher`) to `dist/teamhub-cli/teamhub.exe`.
 - `scripts/stage-computer-tools.mjs`: stages the browser and computer-control
   tools (with `@earendil-works/pi-coding-agent`'s `createMcpExtension` bundled
   beside `jiti`, `@playwright/mcp`, `quickjs-wasi`, and Cua drivers) and their
@@ -753,11 +772,18 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
    `AGENT_RUNNER_PUBLIC_GATEWAY_URL` and `TEAMHUB_CLI_BASE_URL` to origins the
    computer can reach.
 4. The computer needs Codex or Claude Code installed and signed in; the
-   daemon finds them through the login shell PATH. The teamhub CLI runs on
-   the app's own Node (`ELECTRON_RUN_AS_NODE`) in packaged builds and on the
-   `node` in PATH from source. The Desktop TeamHub shell launcher uses
-   `wslpath` and `WSLENV` when WSL starts the Windows executable, so the
-   script path and `ELECTRON_RUN_AS_NODE` reach that process correctly.
+   daemon finds them through the login shell PATH. On Windows, the teamhub CLI
+   runs through the native `dist/teamhub-cli/teamhub.exe` launcher (preferring
+   `resources/runtime/bin/node.exe`, then `Linger.exe` with
+   `ELECTRON_RUN_AS_NODE=1`, then `LINGER_NODE` or `node` on PATH from source)
+   so arguments pass directly without `cmd.exe`. On macOS, Linux, Git Bash, and
+   WSL, the POSIX `teamhub` launcher (`scripts/teamhub.sh`) runs it on the
+   app's own Node (`ELECTRON_RUN_AS_NODE`) in packaged builds and on
+   `LINGER_NODE` or `node` in PATH from source, using `wslpath` and `WSLENV`
+   when WSL starts the Windows executable so the script path,
+   `ELECTRON_RUN_AS_NODE`, `WSL_DISTRO_NAME`, and any non-empty `TEAMHUB_CONFIG`
+   (translated from a Linux path with `wslpath -w`) and `TEAMHUB_PROFILE` reach
+   that process correctly.
    The CLI translates absolute Linux paths for local attachments, input files
    and Document file outputs using the invoking WSL distribution. Message text
    and remote paths stay unchanged. The same local file checks apply to the

@@ -1874,18 +1874,10 @@ async function runNativeSource(
             (Boolean(options.setupChoice || options.byok) &&
               (!hadProvisionedAccount || Boolean(legacyBackup))));
         // Without `stageForLogs`, timings log under the current stage.
-        // `beforeFoundation` runs once the runtime is ready, before the
-        // foundation services.
-        const prepareRuntimeSide = async (
+        const prepareLocalStackServices = async (
           stageForLogs?: InstallStage,
-          beforeFoundation?: () => Promise<unknown>,
         ) => {
-          await timed("Waiting for runtime preparation", () => runtime, {
-            stage: stageForLogs,
-          });
-          signal.throwIfAborted();
-          await beforeFoundation?.();
-          const prepareLocalStackServices = async () => {
+          const runLocalStack = async () => {
             const foundationMainPlan =
               !restoredByok &&
               !options.byok &&
@@ -1931,7 +1923,7 @@ async function runNativeSource(
           };
           if (localModelsDegraded) {
             try {
-              await prepareLocalStackServices();
+              await runLocalStack();
             } catch (error) {
               signal.throwIfAborted();
               emit({
@@ -1941,8 +1933,15 @@ async function runNativeSource(
               });
             }
           } else {
-            await prepareLocalStackServices();
+            await runLocalStack();
           }
+        };
+        const prepareRuntimeSide = async (stageForLogs?: InstallStage) => {
+          await timed("Waiting for runtime preparation", () => runtime, {
+            stage: stageForLogs,
+          });
+          signal.throwIfAborted();
+          await prepareLocalStackServices(stageForLogs);
         };
         const migrate = (stageForLogs?: InstallStage) =>
           timed(
@@ -1966,15 +1965,16 @@ async function runNativeSource(
             state: "succeeded",
             message: "Local account is ready.",
           });
-        let checks: { service: string; ready: boolean }[];
-        if (overlapWithRuntime) {
-          // LiveKit binds before the fork so the runtime branch's foundation
-          // services can never take its port.
-          const ends = await beginServices();
-          await bindLiveKit();
-          // Each second counts once, toward the critical path: services and
-          // account while branch2 runs, then runtime only for the wait beyond.
-          timer.enter("services");
+        // Runs the runtime/local-stack branch concurrently with service startup
+        // and account verification. Each wall-clock second counts once toward
+        // the critical path: services and account while branch2 runs, then
+        // runtime only for any wait beyond a fulfilled branch2.
+        const runParallelTail = async (
+          branch1Work: () => Promise<void>,
+          branch2Work: (
+            setBranchStage: (next: InstallStage) => void,
+          ) => Promise<{ service: string; ready: boolean }[]>,
+        ): Promise<{ service: string; ready: boolean }[]> => {
           let firstFailure: { error: unknown; stage: InstallStage } | undefined;
           const failBranch = (
             error: unknown,
@@ -1986,7 +1986,7 @@ async function runNativeSource(
           };
           const branch1 = (async () => {
             try {
-              await prepareRuntimeSide("runtime");
+              await branch1Work();
             } catch (error) {
               return failBranch(error, "runtime");
             }
@@ -1994,18 +1994,9 @@ async function runNativeSource(
           const branch2 = (async () => {
             let branchStage: InstallStage = "services";
             try {
-              await migrate(branchStage);
-              const probed = await startAndAwaitServices(ends);
-              branchStage = "account";
-              timer.enter("account");
-              emit({
-                kind: "stage",
-                stage: branchStage,
-                state: "running",
-                message: "Preparing local account and workspace…",
+              return await branch2Work((next) => {
+                branchStage = next;
               });
-              await provisionAccount();
-              return probed;
             } catch (error) {
               return failBranch(error, branchStage);
             }
@@ -2016,7 +2007,8 @@ async function runNativeSource(
             return result;
           });
           const [result2] = await Promise.allSettled([branch2]);
-          if (branch1Pending) timer.enter("runtime");
+          if (branch1Pending && result2.status === "fulfilled")
+            timer.enter("runtime");
           const result1 = await settled1;
           if (result1.status === "rejected" || result2.status === "rejected") {
             stage = runtimeAborted
@@ -2029,29 +2021,68 @@ async function runNativeSource(
                 ? result1.reason
                 : (result2 as PromiseRejectedResult).reason;
           }
-          checks = result2.value;
+          return result2.value;
+        };
+        let checks: { service: string; ready: boolean }[];
+        if (overlapWithRuntime) {
+          // LiveKit binds before the fork so the runtime branch's foundation
+          // services can never take its port.
+          const ends = await beginServices();
+          await bindLiveKit();
+          timer.enter("services");
+          checks = await runParallelTail(
+            () => prepareRuntimeSide("runtime"),
+            async (setStage) => {
+              await migrate("services");
+              const probed = await startAndAwaitServices(ends);
+              setStage("account");
+              timer.enter("account");
+              emit({
+                kind: "stage",
+                stage: "account",
+                state: "running",
+                message: "Preparing local account and workspace…",
+              });
+              await provisionAccount();
+              return probed;
+            },
+          );
           await servicesSucceeded();
           stage = "account";
           accountSucceeded();
         } else {
           // The runtime is ready before the checkout's migrations run: when it is
           // not, services still running from an earlier checkout keep the
-          // schema they know.
-          let ends: Awaited<ReturnType<typeof logEnds>> | undefined;
-          // Count only the runtime wait beyond the parallel work.
+          // schema they know. Count only the runtime wait beyond the parallel work.
           if (runtimePending) timer.enter("runtime");
-          await prepareRuntimeSide(undefined, async () => {
-            timer.enter("services");
-            await migrate();
-            ends = await beginServices();
-            await bindLiveKit();
-          });
-          checks = await startAndAwaitServices(ends!);
+          await timed("Waiting for runtime preparation", () => runtime);
+          signal.throwIfAborted();
+          timer.enter("services");
+          await migrate();
+          const ends = await beginServices();
+          await bindLiveKit();
+          // LiveKit has bound its port and migrations have succeeded; foundation
+          // and gateway preparation can now overlap with service startup and
+          // account verification.
+          checks = await runParallelTail(
+            () => prepareLocalStackServices("runtime"),
+            async (setStage) => {
+              const probed = await startAndAwaitServices(ends);
+              setStage("account");
+              timer.enter("account");
+              emit({
+                kind: "stage",
+                stage: "account",
+                state: "running",
+                message: "Preparing local account and workspace…",
+              });
+              await provisionAccount();
+              return probed;
+            },
+          );
           await servicesSucceeded();
-          step("account", "Preparing local account and workspace…");
-          await provisionAccount();
+          stage = "account";
           accountSucceeded();
-          await runtime;
           signal.throwIfAborted();
         }
         const finalizeBackgroundVoice = async () => {

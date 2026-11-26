@@ -87,6 +87,37 @@ export const buildDaemon = async (targets) => {
   );
 };
 
+export async function buildTeamhubLauncher(target, outputPath) {
+  const go = DAEMON_TARGETS[target];
+  if (!go) throw new Error(`Unknown daemon target ${target}`);
+  const resolvedOutput = path.resolve(outputPath);
+  await run(
+    "go",
+    [
+      "build",
+      "-trimpath",
+      "-buildvcs=false",
+      "-ldflags",
+      "-s -w",
+      "-o",
+      resolvedOutput,
+      "./cmd/linger-teamhub-launcher",
+    ],
+    {
+      cwd: localDaemon,
+      env: {
+        ...process.env,
+        CGO_ENABLED: "0",
+        GOOS: go.goos,
+        GOARCH: go.goarch,
+      },
+    },
+  ).catch((error) => {
+    if (error?.code === "ENOENT") throw error;
+    throw new Error(`Go build of the teamhub launcher for ${target} failed`);
+  });
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const targets = args.includes("--all")

@@ -125,6 +125,14 @@ func (s *Service) SwitchComputerRuntime(ctx context.Context, input ComputerRunti
 		}
 		if row.LocalRuntimeType.String == input.RuntimeType && row.RuntimeModel == input.Model &&
 			row.RuntimeReasoningEffort.String == input.ReasoningEffort {
+			// Re-applying the same BYOK runtime, model, and effort (for example
+			// after fixing an API key or endpoint URL) clears stale Another Me
+			// background failures without bumping ConfigurationRevision.
+			if row.AgentType == "anotherme" {
+				if err := clearAnotherMeBackgroundFailuresTx(ctx, queries, input.TenantID, placement.ActorID); err != nil {
+					return ComputerRuntimeSwitchResult{}, err
+				}
+			}
 			continue
 		}
 		changed, err := queries.ApplyAgentConfigurationUpdate(ctx, store.ApplyAgentConfigurationUpdateParams{
@@ -141,8 +149,21 @@ func (s *Service) SwitchComputerRuntime(ctx context.Context, input ComputerRunti
 			return ComputerRuntimeSwitchResult{}, ErrAgentConfigurationConflict
 		}
 		if shouldClearAnotherMeBackgroundFailures(
-			row.AgentType, row.ComputerID.String, row.LocalRuntimeType.String, row.RuntimeModel,
-			input.ComputerID, input.RuntimeType, input.Model,
+			row.AgentType,
+			anotherMeRuntimeTarget{
+				computerID:       row.ComputerID.String,
+				runtimeType:      row.LocalRuntimeType.String,
+				workspaceGrantID: row.WorkspaceGrantID.String,
+				model:            row.RuntimeModel,
+				reasoningEffort:  row.RuntimeReasoningEffort.String,
+			},
+			anotherMeRuntimeTarget{
+				computerID:       input.ComputerID,
+				runtimeType:      input.RuntimeType,
+				workspaceGrantID: row.WorkspaceGrantID.String,
+				model:            input.Model,
+				reasoningEffort:  input.ReasoningEffort,
+			},
 		) {
 			if err := clearAnotherMeBackgroundFailuresTx(ctx, queries, input.TenantID, placement.ActorID); err != nil {
 				return ComputerRuntimeSwitchResult{}, err

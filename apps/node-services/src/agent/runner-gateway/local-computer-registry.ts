@@ -86,15 +86,23 @@ export interface LocalComputerRegistry {
   ): Promise<LocalComputerRemovalResult>;
 }
 
+type TeamHubLocalComputerClient = Pick<
+  TeamHubRuntimeStateClient,
+  | "getLocalComputer"
+  | "connectLocalComputer"
+  | "touchLocalComputer"
+  | "removeLocalComputer"
+  | "recordLocalModels"
+>;
+
 export const createTeamHubLocalComputerRegistry = (
-  client: Pick<
-    TeamHubRuntimeStateClient,
-    | "getLocalComputer"
-    | "connectLocalComputer"
-    | "touchLocalComputer"
-    | "removeLocalComputer"
-    | "recordLocalModels"
-  >,
+  client: TeamHubLocalComputerClient,
+): LocalComputerRegistry =>
+  buildTeamHubLocalComputerRegistry(client, createMonotonicSeenAt());
+
+const buildTeamHubLocalComputerRegistry = (
+  client: TeamHubLocalComputerClient,
+  seenAt: ReturnType<typeof createMonotonicSeenAt>,
 ): LocalComputerRegistry => ({
   async credentialGeneration(computerId, owner) {
     let computer: RuntimeStateSchemas["AgentRuntimeLocalComputer"];
@@ -131,7 +139,7 @@ export const createTeamHubLocalComputerRegistry = (
         daemon_public_key: hello.daemon_identity.public_key,
         identity_version: String(hello.daemon_identity.identity_version),
         status,
-        seen_at: new Date().toISOString(),
+        seen_at: seenAt.next(computerId),
         display_name: hello.display_name ?? computerId,
         platform: hello.platform,
         // A rolling upgrade can still route this reconnect to an older TeamHub.
@@ -170,7 +178,7 @@ export const createTeamHubLocalComputerRegistry = (
     await client.touchLocalComputer({
       computer_id: computerId,
       status: touch.status,
-      seen_at: touch.seenAt,
+      seen_at: seenAt.next(computerId, touch.seenAt),
       ...(touch.activeOperations === undefined
         ? {}
         : { active_operations: touch.activeOperations }),
@@ -199,6 +207,12 @@ export const createTeamHubLocalComputerRegistry = (
       computer_id: computerId,
       owner: { tenant_id: tenantId, owner_actor_id: ownerActorId },
     });
+    if (
+      response.status === "removed" ||
+      response.status === "already_removed"
+    ) {
+      seenAt.forget(computerId);
+    }
     switch (response.status) {
       case "already_removed":
         return "already-removed";
@@ -211,6 +225,28 @@ export const createTeamHubLocalComputerRegistry = (
     }
   },
 });
+
+// TeamHub ignores a touch whose seen_at is not strictly newer than the last
+// write, so keep per-computer timestamps strictly monotonic even within 1ms.
+function createMonotonicSeenAt() {
+  const lastSeenAtMs = new Map<string, number>();
+  return {
+    next(computerId: string, candidate?: string): string {
+      const parsed =
+        candidate === undefined ? Date.now() : Date.parse(candidate);
+      const candidateMs = Number.isFinite(parsed) ? parsed : Date.now();
+      const nextMs = Math.max(
+        candidateMs,
+        (lastSeenAtMs.get(computerId) ?? 0) + 1,
+      );
+      lastSeenAtMs.set(computerId, nextMs);
+      return new Date(nextMs).toISOString();
+    },
+    forget(computerId: string): void {
+      lastSeenAtMs.delete(computerId);
+    },
+  };
+}
 
 /**
  * Names the Computer's Runtime of one owner. The name is the same on every

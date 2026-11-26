@@ -33,4 +33,40 @@ describe("parseTaskCommand", () => {
       ),
     ).toEqual({ name: "Rivals", operation: "create" });
   });
+
+  it("parses Windows teamhub.cmd, teamhub.exe, and full Windows paths", () => {
+    expect(parseTaskCommand("teamhub.cmd task create --name 'Check'")).toEqual({
+      name: "Check",
+      operation: "create",
+    });
+    expect(
+      parseTaskCommand(
+        "C:\\Users\\alice\\cli\\teamhub.exe task create --name 'Check'",
+      ),
+    ).toEqual({
+      name: "Check",
+      operation: "create",
+    });
+  });
+
+  it("reads a --message-file - message from a PowerShell single-quoted here-string", () => {
+    expect(
+      parseTaskCommand(
+        "@'\nCheck logs\nKeep $180 & check\n'@ | teamhub.cmd task send --task-id workitem_1 --message-file -",
+      ),
+    ).toEqual({
+      message: "Check logs\nKeep $180 & check",
+      operation: "send",
+      taskId: "workitem_1",
+    });
+    expect(
+      parseTaskCommand(
+        "@'\r\nCheck logs\r\n'@ | teamhub.cmd task send --task-id workitem_1 --message-file -",
+      ),
+    ).toEqual({
+      message: "Check logs",
+      operation: "send",
+      taskId: "workitem_1",
+    });
+  });
 });

@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/winprocess"
 )
 
 const launcherName = "linger bundled pi"
@@ -67,7 +69,7 @@ func run(executable string, args []string, stdin io.Reader, stdout, stderr io.Wr
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	return runOwned(cmd)
+	return winprocess.RunInKillOnCloseJob(cmd)
 }
 
 func main() {

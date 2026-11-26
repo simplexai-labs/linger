@@ -308,17 +308,18 @@ type acpPromptResult struct {
 
 // antigravityTurn is the one prompt of an Operation.
 type antigravityTurn struct {
-	profile   Profile
-	spec      RunSpec
-	proc      *acpProcess
-	runCtx    context.Context
-	cancel    context.CancelFunc
-	reused    bool
-	adopted   bool
-	fence     releaseFence
-	parkShape *antigravityShape
-	turnID    string
-	hookEP    *AntigravityHookEndpoint
+	profile    Profile
+	spec       RunSpec
+	proc       *acpProcess
+	runCtx     context.Context
+	cancel     context.CancelFunc
+	reused     bool
+	adopted    bool
+	compaction bool
+	fence      releaseFence
+	parkShape  *antigravityShape
+	turnID     string
+	hookEP     *AntigravityHookEndpoint
 
 	events       chan Event
 	outcome      chan Outcome
@@ -347,6 +348,7 @@ type antigravityTurn struct {
 	steers         []*antigravitySteer
 	unregisterHook func()
 	sessionID      string
+	preTokens      *int64
 	textID         string
 	output         strings.Builder
 	tools          map[string]BackgroundTool
@@ -415,6 +417,9 @@ func (t *antigravityTurn) snapshotToolsLocked() []BackgroundTool {
 }
 
 func (t *antigravityTurn) emit(event Event) {
+	if t.compaction {
+		return
+	}
 	t.emitMu.RLock()
 	defer t.emitMu.RUnlock()
 	if t.eventsClosed || t.runCtx.Err() != nil {
@@ -533,6 +538,7 @@ func (t *antigravityTurn) steer(ctx context.Context, request SteerRequest) (Stee
 }
 
 func (t *antigravityTurn) onHook(_ context.Context, req AntigravityHookRequest) AntigravityHookResponse {
+	t.proc.noteTranscriptPath(req)
 	switch req.HookEventName {
 	case "PreInvocation":
 		t.mu.Lock()
@@ -1303,6 +1309,7 @@ type acpUpdate struct {
 	Status        string          `json:"status"`
 	RawInput      json.RawMessage `json:"rawInput"`
 	RawOutput     json.RawMessage `json:"rawOutput"`
+	Used          *int64          `json:"used,omitempty"`
 	Entries       []struct {
 		Content string `json:"content"`
 		Status  string `json:"status"`
@@ -1399,6 +1406,15 @@ func (t *antigravityTurn) update(params json.RawMessage, observed time.Time) {
 		t.toolResult(update, observed)
 	case "tool_call_update":
 		t.toolResult(update, observed)
+	case "usage_update":
+		if t.compaction && update.Used != nil && *update.Used > 0 {
+			used := *update.Used
+			t.mu.Lock()
+			if t.preTokens == nil {
+				t.preTokens = &used
+			}
+			t.mu.Unlock()
+		}
 	case "plan":
 		t.mu.Lock()
 		t.sawActivity = true
@@ -1483,9 +1499,11 @@ func (t *antigravityTurn) permission(frame acpFrame) {
 		_ = t.proc.conn.respondError(frame.ID, -32602, "invalid permission request")
 		return
 	}
-	allow := true
-	if reviewer := t.spec.PermissionReviewer; reviewer != nil {
-		allow = reviewer.Review(t.runCtx, antigravityReview(request.ToolCall, t.spec.Dir)).Decision == permission.Allow
+	allow := !t.compaction
+	if allow {
+		if reviewer := t.spec.PermissionReviewer; reviewer != nil {
+			allow = reviewer.Review(t.runCtx, antigravityReview(request.ToolCall, t.spec.Dir)).Decision == permission.Allow
+		}
 	}
 	wanted := []string{"reject_once", "reject_always"}
 	if allow {
@@ -1518,7 +1536,11 @@ func toolReview(runtime, tool string, isCommand bool, input map[string]any, work
 	command := ""
 	if isCommand {
 		command, _ = input["command"].(string)
-		tool = "Bash"
+		if tool == "powershell" {
+			tool = "PowerShell"
+		} else {
+			tool = "Bash"
+		}
 	}
 	request := permission.Request{Action: permission.Action{
 		Runtime: runtime, Surface: permission.Surface(tool, command), Tool: tool,

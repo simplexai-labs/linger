@@ -211,7 +211,10 @@ export class RemoteRuntimeProvider implements AgentProvider {
     }
     const runtimeType = options.runtime.type;
     if (
-      (runtimeType === "codex" || runtimeType === "claude") &&
+      (runtimeType === "codex" ||
+        runtimeType === "claude" ||
+        runtimeType === "pi" ||
+        runtimeType === "antigravity") &&
       options.dispatcher.compactParkedSession
     ) {
       this.compactSession = (session, compactOptions) =>
@@ -225,7 +228,7 @@ export class RemoteRuntimeProvider implements AgentProvider {
    * Context without a parked process cannot be compacted now.
    */
   async #compactSession(
-    runtimeType: "codex" | "claude",
+    runtimeType: "codex" | "claude" | "pi" | "antigravity",
     session: RuntimeSession,
     options: ProviderCompactOptions,
   ): Promise<ProviderCompactResult> {

@@ -136,3 +136,49 @@ func TestAntigravitySharedHookEndpointCloseCleansTempDir(t *testing.T) {
 		t.Fatalf("expected fresh temp dir after close, got %q again", dir1)
 	}
 }
+
+func TestAntigravityHookEndpointCanonicalizesDir(t *testing.T) {
+	ep, err := newAntigravityHookEndpoint("/bin/daemon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ep.Close() })
+
+	resolved, err := filepath.EvalSymlinks(ep.Dir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", ep.Dir(), err)
+	}
+	if ep.Dir() != resolved {
+		t.Fatalf("ep.Dir()=%q, want canonical symlink-resolved path %q", ep.Dir(), resolved)
+	}
+}
+
+func TestAntigravityHookCommandForOS(t *testing.T) {
+	const endpointURL = "http://127.0.0.1:54321/antigravity-hook/0123456789abcdef"
+
+	winStandard := antigravityHookCommandForOS("windows", `C:\Program Files\Linger\linger-computer-daemon.exe`, endpointURL)
+	wantWinStandard := `"C:\Program Files\Linger\linger-computer-daemon.exe" antigravity-hook ` + endpointURL
+	if winStandard != wantWinStandard {
+		t.Fatalf("windows standard command=%q, want %q", winStandard, wantWinStandard)
+	}
+	if strings.HasPrefix(winStandard, `"`) && strings.HasSuffix(winStandard, `"`) && strings.Count(winStandard, `"`) > 2 {
+		t.Fatalf("windows standard command would have quotes stripped by cmd /c: %q", winStandard)
+	}
+
+	for _, specialExe := range []string{
+		`C:\Program Files (x86)\Linger\linger-computer-daemon.exe`,
+		`C:\Users\A&B\linger-computer-daemon.exe`,
+	} {
+		got := antigravityHookCommandForOS("windows", specialExe, endpointURL)
+		want := `""` + specialExe + `" antigravity-hook "` + endpointURL + `""`
+		if got != want {
+			t.Fatalf("windows special exe (%q) command=%q, want %q", specialExe, got, want)
+		}
+	}
+
+	posix := antigravityHookCommandForOS("darwin", "/opt/linger/daemon's-bin", endpointURL)
+	wantPosix := `'/opt/linger/daemon'\''s-bin' antigravity-hook '` + endpointURL + `'`
+	if posix != wantPosix {
+		t.Fatalf("posix command=%q, want %q", posix, wantPosix)
+	}
+}

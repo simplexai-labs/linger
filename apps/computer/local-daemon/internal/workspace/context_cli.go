@@ -15,7 +15,7 @@ func CodexContextCLIArgs(environment map[string]string) []string {
 		return nil
 	}
 	var args []string
-	for _, name := range []string{"TEAMHUB_CONFIG", "TEAMHUB_PROFILE", "PATH"} {
+	for _, name := range []string{"TEAMHUB_CONFIG", "TEAMHUB_PROFILE", "WSLENV", "PATH"} {
 		if environment[name] == "" {
 			continue
 		}

@@ -134,8 +134,56 @@ describe("context-restart feature", () => {
     ).toBeNull();
   });
 
+  it("triggers idle compaction for Pi on idle timer and idle suspend", () => {
+    const { composed, advance, succeed, timers, now } = setup({
+      runtimeType: "pi",
+    });
+    succeed();
+    expect(timers.set).toHaveBeenLastCalledWith(
+      expect.anything(),
+      IDLE_TIMER,
+      now() + PERIOD,
+    );
+    advance(PERIOD - 1);
+    expect(
+      composed.decideMaintenance({ kind: "timer", name: IDLE_TIMER }),
+    ).toBeNull();
+    expect(composed.decideMaintenance({ kind: "idle_suspend" })).toBeNull();
+    advance(1);
+    expect(
+      composed.decideMaintenance({ kind: "timer", name: IDLE_TIMER }),
+    ).toMatchObject({ kind: "compact", reason: "idle" });
+    expect(composed.decideMaintenance({ kind: "idle_suspend" })).toMatchObject({
+      kind: "compact",
+      reason: "since_last_compaction",
+    });
+  });
+
+  it("compacts Antigravity Contexts on idle timer and idle suspend", () => {
+    const { composed, advance, succeed, timers, now } = setup({
+      runtimeType: "antigravity",
+    });
+    succeed();
+    expect(timers.set).toHaveBeenLastCalledWith(
+      expect.anything(),
+      IDLE_TIMER,
+      now() + PERIOD,
+    );
+    advance(PERIOD);
+    expect(
+      composed.decideMaintenance({ kind: "timer", name: IDLE_TIMER }),
+    ).toMatchObject({ kind: "compact", reason: "idle" });
+    expect(composed.decideMaintenance({ kind: "idle_suspend" })).toMatchObject({
+      kind: "compact",
+      reason: "since_last_compaction",
+      instructions: expect.stringContaining("Task ids"),
+    });
+  });
+
   it("does not compact Runtimes without native compaction", () => {
-    const { composed, advance, succeed, timers } = setup({ runtimeType: "pi" });
+    const { composed, advance, succeed, timers } = setup({
+      runtimeType: "other",
+    });
     succeed();
     advance(PERIOD);
     expect(timers.set).not.toHaveBeenCalled();

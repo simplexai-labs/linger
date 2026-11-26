@@ -98,7 +98,7 @@ case "$1 $2" in
   case "$account" in
     *'"method":"model/list"'*)
       echo '{"models":[{"slug":"gpt-runtime","context_window":272000}]}' > "$CODEX_HOME/models_cache.json"
-      echo '{"id":2,"result":{"data":[{"id":"gpt-runtime","model":"gpt-runtime","displayName":"GPT Runtime","isDefault":true,"defaultReasoningEffort":"high","supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high"},{"reasoningEffort":"future"}]}]}}'
+      echo '{"id":2,"result":{"data":[{"id":"gpt-runtime","model":"gpt-runtime","displayName":"GPT Runtime","isDefault":true,"defaultReasoningEffort":"high","supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high"},{"reasoningEffort":"future"},{"reasoningEffort":"bad effort"}]}]}}'
       exit 0 ;;
   esac
       echo '{"id":2,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}'
@@ -121,7 +121,7 @@ esac
 	diagnostic := result.Diagnostics[0]
 	if len(diagnostic.Models) != 1 || diagnostic.Models[0].ID != "gpt-runtime" ||
 		diagnostic.Models[0].DefaultReasoningEffort != "high" ||
-		len(diagnostic.Models[0].AllowedReasoningEffort) != 2 ||
+		!reflect.DeepEqual(diagnostic.Models[0].AllowedReasoningEffort, []string{"low", "high", "future"}) ||
 		!diagnostic.Models[0].IsDefault || diagnostic.Models[0].Link != linkSubscription ||
 		diagnostic.Models[0].ContextWindow != 272000 {
 		t.Fatalf("Codex diagnostic = %+v", diagnostic)
@@ -823,5 +823,88 @@ func TestResolveExecutableEntryManagedPathsPrecedenceAndFallback(t *testing.T) {
 	})
 	if err != nil || got != bundledPi {
 		t.Fatalf("stale configured and managed fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	}
+}
+
+func TestValidRuntimeReasoningEffortAndLegacyFilter(t *testing.T) {
+	for _, valid := range []string{"none", "minimal", "off", "low", "medium", "high", "xhigh", "max", "ultra", "custom_2", "tier-1", "a1234567890123456789"} {
+		if !ValidRuntimeReasoningEffort(valid) {
+			t.Fatalf("ValidRuntimeReasoningEffort(%q) = false, want true", valid)
+		}
+	}
+	for _, invalid := range []string{"", "-minimal", "_minimal", "bad effort", "high!", "a12345678901234567890"} {
+		if ValidRuntimeReasoningEffort(invalid) {
+			t.Fatalf("ValidRuntimeReasoningEffort(%q) = true, want false", invalid)
+		}
+	}
+
+	legacyOnly := []RuntimeDiagnostic{{
+		Type: "codex", Status: "ready",
+		Models: []RuntimeModel{{
+			ID:                     "gpt-5",
+			Label:                  "GPT-5",
+			AllowedReasoningEffort: []string{"low", "medium", "high"},
+			DefaultReasoningEffort: "medium",
+		}},
+	}}
+	if _, changed := FilterLegacyReasoningEfforts(legacyOnly); changed {
+		t.Fatal("legacy-only diagnostics reported changed")
+	}
+
+	dynamic := []RuntimeDiagnostic{{
+		Type: "codex", Status: "ready",
+		Models: []RuntimeModel{{
+			ID:                     "gpt-5",
+			Label:                  "GPT-5",
+			AllowedReasoningEffort: []string{"minimal", "low", "high", "custom_2"},
+			DefaultReasoningEffort: "minimal",
+		}},
+	}}
+	filtered, changed := FilterLegacyReasoningEfforts(dynamic)
+	if !changed {
+		t.Fatal("dynamic diagnostics were not filtered")
+	}
+	if !reflect.DeepEqual(filtered[0].Models[0].AllowedReasoningEffort, []string{"low", "high"}) {
+		t.Fatalf("filtered allowed = %v, want [low high]", filtered[0].Models[0].AllowedReasoningEffort)
+	}
+	if filtered[0].Models[0].DefaultReasoningEffort != "" {
+		t.Fatalf("filtered default = %q, want empty", filtered[0].Models[0].DefaultReasoningEffort)
+	}
+	if !reflect.DeepEqual(dynamic[0].Models[0].AllowedReasoningEffort, []string{"minimal", "low", "high", "custom_2"}) {
+		t.Fatalf("FilterLegacyReasoningEfforts mutated input: %v", dynamic[0].Models[0].AllowedReasoningEffort)
+	}
+}
+
+func TestNormalizeRuntimeModelsCapsReasoningEffortsAt32(t *testing.T) {
+	options := make([]native.EffortOption, 0, 40)
+	for i := range 40 {
+		options = append(options, native.EffortOption{Value: fmt.Sprintf("tier_%02d", i)})
+	}
+	models := normalizeRuntimeModels([]native.ModelOption{{
+		ID:      "gpt-many-efforts",
+		Label:   "GPT Many Efforts",
+		Default: true,
+		Effort: &native.EffortSupport{
+			Options: options,
+			Default: "tier_35",
+		},
+	}})
+	if len(models) != 1 {
+		t.Fatalf("models count = %d, want 1", len(models))
+	}
+	if len(models[0].AllowedReasoningEffort) != MaxRuntimeModelReasoningEfforts {
+		t.Fatalf("allowed efforts len = %d, want %d", len(models[0].AllowedReasoningEffort), MaxRuntimeModelReasoningEfforts)
+	}
+	if models[0].DefaultReasoningEffort != "" {
+		t.Fatalf("default effort outside capped 32 = %q, want empty", models[0].DefaultReasoningEffort)
+	}
+	if !ValidRuntimeModel(models[0]) {
+		t.Fatalf("normalized capped model failed ValidRuntimeModel: %+v", models[0])
+	}
+
+	overLimit := models[0]
+	overLimit.AllowedReasoningEffort = append(append([]string(nil), models[0].AllowedReasoningEffort...), "tier_32")
+	if ValidRuntimeModel(overLimit) {
+		t.Fatal("ValidRuntimeModel accepted 33 allowed reasoning efforts")
 	}
 }

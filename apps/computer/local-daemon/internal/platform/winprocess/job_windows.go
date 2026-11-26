@@ -1,13 +1,12 @@
 //go:build windows
 
-package main
+package winprocess
 
 import (
 	"os/exec"
 	"syscall"
 	"unsafe"
 
-	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/winprocess"
 	"golang.org/x/sys/windows"
 )
 
@@ -31,10 +30,10 @@ func createKillOnCloseJob() (windows.Handle, error) {
 	return job, nil
 }
 
-// runOwned binds the child Node process to a kill-on-close job before it
-// executes user code so terminating pi.exe also terminates node.exe instead
-// of leaving it holding cwd busy.
-func runOwned(cmd *exec.Cmd) error {
+// RunInKillOnCloseJob binds the child process to a kill-on-close Job Object
+// before it executes user code so terminating the launcher also terminates
+// the child instead of leaving it orphaned.
+func RunInKillOnCloseJob(cmd *exec.Cmd) error {
 	job, err := createKillOnCloseJob()
 	if err != nil {
 		return cmd.Run()
@@ -53,7 +52,7 @@ func runOwned(cmd *exec.Cmd) error {
 		_ = windows.AssignProcessToJobObject(job, process)
 		_ = windows.CloseHandle(process)
 	}
-	if err := winprocess.Resume(cmd.Process.Pid); err != nil {
+	if err := Resume(cmd.Process.Pid); err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		return err

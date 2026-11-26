@@ -58,7 +58,7 @@
     },
     "platform": {
       "owner": "out-of-env",
-      "description": "Variables injected by the runtime environment: image build info, the teamhub-cli runtime, Computer on user machines, deployment platforms, and the Room Document E2E harness. On Linux the Computer reads the desktop session's DISPLAY and WAYLAND_DISPLAY before it opens a browser window. The Desktop WSL launcher passes WSL_DISTRO_NAME to the Windows TeamHub CLI so it can resolve local attachment paths. Not part of .env.",
+      "description": "Variables injected by the runtime environment: image build info, the teamhub-cli runtime, Computer on user machines, deployment platforms, and the Room Document E2E harness. On Linux the Computer reads the desktop session's DISPLAY and WAYLAND_DISPLAY before it opens a browser window. The Desktop WSL launcher and Windows Local Computer Daemon use WSLENV and WSL_DISTRO_NAME to forward TeamHub CLI configuration and resolve local attachment paths across the Windows/WSL boundary. Not part of .env.",
       "names": [
         "APP_VERSION",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
@@ -92,18 +92,20 @@
         "TEAMHUB_TOKEN_FILE",
         "TEAMHUB_URL",
         "WAYLAND_DISPLAY",
-        "WSL_DISTRO_NAME"
+        "WSL_DISTRO_NAME",
+        "WSLENV"
       ]
     },
     "desktop": {
       "owner": "out-of-env",
-      "description": "Read by the desktop client on user machines: the bridge state directory it migrates from, the daemon and update overrides, the source checkout for \"Run on This Computer\", and whether a parent agent session that opened the app manages its model provider. Not part of .env.",
+      "description": "Read by the desktop client on user machines: the bridge state directory it migrates from, the daemon and update overrides, the source checkout for \"Run on This Computer\", the TeamHub CLI launcher Node override, and whether a parent agent session that opened the app manages its model provider. Not part of .env.",
       "names": [
         "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
         "LINGER_BRIDGE_STATE_DIR",
         "LINGER_COMPUTER_DAEMON",
         "LINGER_DESKTOP_USER_DATA",
         "LINGER_CHECKOUT",
+        "LINGER_NODE",
         "LINGER_SERVER_URL",
         "XDG_STATE_HOME"
       ]

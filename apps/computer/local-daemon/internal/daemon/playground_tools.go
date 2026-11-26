@@ -192,7 +192,7 @@ const agentCLIUnknown = "It may have been done; check before trying again."
 // that targets roomID, and returns what it printed. The credential stays in
 // its file; the CLI reads it.
 func (d *Daemon) runAgentCLI(ctx context.Context, installation clicredential.Installation, roomID string, arguments []string, stdin string) ([]byte, error) {
-	program, prefix, environment, ok := cardCLIProgram(d.teamhubCLIBin, runtime.GOOS)
+	program, ok := cardCLIProgram(d.teamhubCLIBin, runtime.GOOS)
 	if !ok {
 		return nil, &playgroundFailure{"cli_unavailable", "This Computer has no TeamHub CLI; update the Computer."}
 	}
@@ -213,9 +213,9 @@ func (d *Daemon) runAgentCLI(ctx context.Context, installation clicredential.Ins
 	if err := os.WriteFile(configPath, config, 0o600); err != nil {
 		return nil, err
 	}
-	command := exec.CommandContext(ctx, program, append(prefix, arguments...)...)
+	command := exec.CommandContext(ctx, program, arguments...)
 	command.Dir = home
-	command.Env = append(append(cardCLIEnvironment(os.Environ()), environment...), "TEAMHUB_CONFIG="+configPath, "TEAMHUB_PROFILE=live")
+	command.Env = append(cardCLIEnvironment(os.Environ()), "TEAMHUB_CONFIG="+configPath, "TEAMHUB_PROFILE=live")
 	command.Stdin = strings.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
@@ -234,29 +234,19 @@ func (d *Daemon) runAgentCLI(ctx context.Context, installation clicredential.Ins
 	return stdout.Bytes(), nil
 }
 
-// cardCLIProgram is how to start the bundled CLI in directory. The Computer
-// bundle has a teamhub program on every platform. Desktop has only scripts on
-// Windows; its teamhub.cmd is not run, since cmd.exe would parse the card's
-// text, so the app it names runs teamhub.js as Node instead.
-func cardCLIProgram(directory, goos string) (program string, prefix, environment []string, ok bool) {
+// cardCLIProgram is how to start the bundled CLI in directory. Both the
+// Computer bundle and Desktop ship a native teamhub.exe on Windows and a
+// teamhub command on other platforms.
+func cardCLIProgram(directory, goos string) (string, bool) {
 	if directory == "" {
-		return "", nil, nil, false
+		return "", false
 	}
-	if goos != "windows" {
-		program = filepath.Join(directory, "teamhub")
-		return program, nil, nil, regularFile(program)
+	name := "teamhub"
+	if goos == "windows" {
+		name = "teamhub.exe"
 	}
-	if program = filepath.Join(directory, "teamhub.exe"); regularFile(program) {
-		return program, nil, nil, true
-	}
-	script := filepath.Join(directory, "teamhub.js")
-	// The same relative app path teamhub.cmd names; apps/desktop/build.mjs
-	// writes both.
-	app := filepath.Join(directory, "..", "..", "..", "..", "Linger.exe")
-	if !regularFile(script) || !regularFile(app) {
-		return "", nil, nil, false
-	}
-	return filepath.Clean(app), []string{"--use-env-proxy", script}, []string{"ELECTRON_RUN_AS_NODE=1"}, true
+	program := filepath.Join(directory, name)
+	return program, regularFile(program)
 }
 
 func regularFile(name string) bool {

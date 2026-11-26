@@ -18,15 +18,21 @@ import (
 // The test binary doubles as a fake `agy acp` when agyFakeEnv names a mode.
 // Every request it reads is appended to agyFakeRecordEnv as one JSON line.
 const (
-	agyFakeEnv             = "NATIVE_AGY_FAKE"
-	agyFakeRecordEnv       = "AGY_FAKE_RECORD"
-	agyFakeMetaEnv         = "AGY_FAKE_META"
-	agyFakeCapabilitiesEnv = "AGY_FAKE_CAPABILITIES"
-	agyFakeMCPCallEnv      = "AGY_FAKE_MCP_CALL"
-	agyFakePIDFileEnv      = "AGY_FAKE_PID_FILE"
-	agyFakeGateEnv         = "AGY_FAKE_GATE"
-	agyFakeNoDefaultsEnv   = "AGY_FAKE_NO_DEFAULTS"
-	agyFakeSessionIDEnv    = "AGY_FAKE_SESSION_ID"
+	agyFakeEnv                    = "NATIVE_AGY_FAKE"
+	agyFakeRecordEnv              = "AGY_FAKE_RECORD"
+	agyFakeMetaEnv                = "AGY_FAKE_META"
+	agyFakeCapabilitiesEnv        = "AGY_FAKE_CAPABILITIES"
+	agyFakeMCPCallEnv             = "AGY_FAKE_MCP_CALL"
+	agyFakePIDFileEnv             = "AGY_FAKE_PID_FILE"
+	agyFakeGateEnv                = "AGY_FAKE_GATE"
+	agyFakeNoDefaultsEnv          = "AGY_FAKE_NO_DEFAULTS"
+	agyFakeSessionIDEnv           = "AGY_FAKE_SESSION_ID"
+	agyFakeTranscriptEnv          = "AGY_FAKE_TRANSCRIPT"
+	agyFakeCompactTranscriptEnv   = "AGY_FAKE_COMPACT_TRANSCRIPT"
+	agyFakeCompactInitialStepsEnv = "AGY_FAKE_COMPACT_INITIAL_STEPS"
+	agyFakeCompactModeEnv         = "AGY_FAKE_COMPACT_MODE"
+	agyFakeCompactGateEnv         = "AGY_FAKE_COMPACT_GATE"
+	agyFakeCompactPermOutEnv      = "AGY_FAKE_COMPACT_PERM_OUT"
 	// agyFakeCommandEnv names the command a permission request asks for.
 	agyFakeCommandEnv = "AGY_FAKE_COMMAND"
 )
@@ -490,6 +496,11 @@ func (f *agyFakeProcess) prompt(id json.RawMessage, sessionID, promptText string
 	}
 	f.promptMu.Unlock()
 
+	if f.mode == "compact" {
+		f.promptCompactMode(id, sessionID, promptText)
+		return
+	}
+
 	if f.mode == "steer-hook" {
 		f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "Before tool."}})
 		f.update(sessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "call-1", "name": "run_command", "title": "ls", "kind": "execute", "status": "pending", "rawInput": map[string]any{"CommandLine": "ls"}})
@@ -639,4 +650,167 @@ func (f *agyFakeProcess) prompt(id json.RawMessage, sessionID, promptText string
 		return
 	}
 	f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 10, "outputTokens": 4, "thoughtTokens": 2, "cachedReadTokens": 3}})
+}
+
+func agyFakeCountLines(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func agyFakeAppendJSONL(path string, entry map[string]any) {
+	if path == "" {
+		return
+	}
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	if err != nil {
+		return
+	}
+	_, _ = file.Write(append(encoded, '\n'))
+	_ = file.Close()
+}
+
+func (f *agyFakeProcess) promptCompactMode(id json.RawMessage, sessionID, promptText string) {
+	transcript := os.Getenv(agyFakeTranscriptEnv)
+	compactMode := os.Getenv(agyFakeCompactModeEnv)
+
+	if !strings.HasPrefix(promptText, "/compact") {
+		initialSteps := agyFakeCountLines(transcript)
+		if transcript != "" {
+			agyFakeAppendJSONL(transcript, map[string]any{"step_index": initialSteps, "type": "USER_INPUT"})
+			if compactMode != "no-hook-on-normal" && compactMode != "no-hook-on-normal-empty" && compactMode != "no-transcript" {
+				f.callHook(map[string]any{
+					"hookEventName":   "PreInvocation",
+					"conversationId":  sessionID,
+					"invocationNum":   0,
+					"transcriptPath":  transcript,
+					"initialNumSteps": initialSteps,
+				})
+				f.callHook(map[string]any{
+					"hookEventName":  "Stop",
+					"conversationId": sessionID,
+					"fullyIdle":      true,
+					"transcriptPath": transcript,
+				})
+			}
+		}
+		f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "ok"}})
+		f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 10, "outputTokens": 4}})
+		return
+	}
+
+	if gate := os.Getenv(agyFakeCompactGateEnv); gate != "" {
+		_ = os.WriteFile(gate+".started", []byte(strconv.Itoa(os.Getpid())), 0o600)
+		for {
+			if _, err := os.Stat(gate); err == nil {
+				break
+			}
+			select {
+			case <-f.closed:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
+
+	compactTranscript := os.Getenv(agyFakeCompactTranscriptEnv)
+	if compactTranscript == "" {
+		compactTranscript = transcript
+	}
+	initialSteps := agyFakeCountLines(compactTranscript)
+	omitInitialSteps := false
+	if rawSteps := os.Getenv(agyFakeCompactInitialStepsEnv); rawSteps == "omit" {
+		omitInitialSteps = true
+	} else if rawSteps != "" {
+		if parsed, err := strconv.Atoi(rawSteps); err == nil {
+			initialSteps = parsed
+		}
+	}
+	if compactTranscript != "" && compactMode != "no-transcript" {
+		payload := map[string]any{
+			"hookEventName":  "PreInvocation",
+			"conversationId": sessionID,
+			"invocationNum":  0,
+			"transcriptPath": compactTranscript,
+		}
+		if !omitInitialSteps {
+			payload["initialNumSteps"] = initialSteps
+		}
+		f.callHook(payload)
+	}
+	if compactMode == "hang" {
+		<-f.closed
+		return
+	}
+
+	// Emit pre-compaction usage first, followed by a smaller post-compaction
+	// update so tests verify the first positive observation is preserved.
+	f.update(sessionID, map[string]any{"sessionUpdate": "usage_update", "used": 12345, "size": 200000})
+	f.update(sessionID, map[string]any{"sessionUpdate": "usage_update", "used": 2222, "size": 200000})
+
+	if compactMode == "permission" || compactMode == "permission-no-reject" {
+		options := []any{map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"}}
+		if compactMode == "permission" {
+			options = append([]any{map[string]any{"optionId": "deny", "name": "Deny", "kind": "reject_once"}}, options...)
+		}
+		f.send(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      901,
+			"method":  "session/request_permission",
+			"params": map[string]any{
+				"sessionId": sessionID,
+				"toolCall":  map[string]any{"toolCallId": "compact-call-1", "title": "rm -rf /", "kind": "execute", "rawInput": map[string]any{"CommandLine": "rm -rf /"}},
+				"options":   options,
+			},
+		})
+		select {
+		case answer := <-f.answers:
+			if outPath := os.Getenv(agyFakeCompactPermOutEnv); outPath != "" {
+				encoded, _ := json.Marshal(answer)
+				_ = os.WriteFile(outPath, encoded, 0o600)
+			}
+		case <-f.closed:
+			return
+		}
+	}
+
+	if compactMode == "open-tool" {
+		f.update(sessionID, map[string]any{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "compact-open-1",
+			"name":          "run_command",
+			"title":         "sleep 60",
+			"kind":          "execute",
+			"status":        "pending",
+			"rawInput":      map[string]any{"CommandLine": "sleep 60"},
+		})
+	}
+
+	switch compactMode {
+	case "empty", "no-hook-on-normal-empty", "no-transcript":
+	default:
+		agyFakeAppendJSONL(compactTranscript, map[string]any{"step_index": initialSteps, "type": "CHECKPOINT"})
+	}
+
+	if compactTranscript != "" && compactMode != "no-transcript" {
+		f.callHook(map[string]any{
+			"hookEventName":  "Stop",
+			"conversationId": sessionID,
+			"fullyIdle":      true,
+			"transcriptPath": compactTranscript,
+		})
+	}
+	f.result(id, map[string]any{"stopReason": "end_turn"})
 }

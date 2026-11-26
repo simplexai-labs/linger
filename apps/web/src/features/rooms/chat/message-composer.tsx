@@ -196,6 +196,8 @@ export interface MessageComposerProps {
   }) => Promise<void>;
   /** Reports the open Document mention query so the owner can search the catalog. */
   onDocumentQueryChange?: (query: string | null) => void;
+  /** Asks the owner for more Documents once the `@` list is scrolled to its end. */
+  onLoadMoreDocuments?: () => void;
   onOpenDocument?: (document: MessageDocumentOption) => void;
   onOpenDocumentContext?: (context: RoomComposerDocumentContext) => void;
   onOpenProfile?: (actorId: string) => void;
@@ -281,6 +283,7 @@ function useMessageComposer(
     onCancelAttachment,
     onDocumentQueryChange,
     onDraftStateChange,
+    onLoadMoreDocuments,
     onVoiceModePresentation,
     onOpenDocument,
     onOpenDocumentContext,
@@ -424,6 +427,7 @@ function useMessageComposer(
     mentionTab: picker.mentionTab,
     mentions: currentReferences.mentions,
     messageError: draft.messageError,
+    onLoadMoreDocuments,
     onOpenDocument,
     onOpenDocumentContext,
     onCancel,
@@ -590,6 +594,7 @@ function ComposerPickerMenus({
     mentionListId,
     mentionQuery,
     mentionTab,
+    onLoadMoreDocuments,
     setMentionSelection,
     setMentionTab,
     skillOptions,
@@ -605,6 +610,7 @@ function ComposerPickerMenus({
           activeIndex={activeMentionIndex}
           items={atPickerItems}
           listId={mentionListId}
+          onReachEnd={mentionTab === "people" ? undefined : onLoadMoreDocuments}
           onSelect={insertAtPickerItem}
           onSelectionChange={setMentionSelection}
           onTabChange={(tab) => {
@@ -1739,6 +1745,9 @@ function attachmentTokenPresentation(file: File) {
   };
 }
 
+/** Starts the next Docs page about two rows before the list runs out. */
+const MENTION_LIST_LOAD_MORE_THRESHOLD_PX = 96;
+
 const mentionTabMessages = {
   all: composerMessages.mentionTabAll,
   docs: composerMessages.mentionTabDocs,
@@ -1749,6 +1758,7 @@ function MentionMenu({
   activeIndex,
   items,
   listId,
+  onReachEnd,
   onSelect,
   onSelectionChange,
   onTabChange,
@@ -1758,6 +1768,8 @@ function MentionMenu({
   activeIndex: number;
   items: AtPickerItem[];
   listId: string;
+  /** Called when the list is scrolled, or keyboard-navigated, near its end. */
+  onReachEnd?: () => void;
   onSelect: (item: AtPickerItem) => void;
   onSelectionChange: (index: number) => void;
   onTabChange: (tab: MentionTab) => void;
@@ -1899,6 +1911,14 @@ function MentionMenu({
           aria-label={t(composerMessages.mentionPicker)}
           className="workspace-scrollbar min-h-0 flex-1 overflow-y-auto p-1.5"
           id={listId}
+          onScroll={(event) => {
+            const list = event.currentTarget;
+            if (
+              list.scrollTop + list.clientHeight >=
+              list.scrollHeight - MENTION_LIST_LOAD_MORE_THRESHOLD_PX
+            )
+              onReachEnd?.();
+          }}
           ref={listRef}
           role="listbox"
         >

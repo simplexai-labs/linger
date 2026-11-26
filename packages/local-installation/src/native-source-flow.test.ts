@@ -4135,6 +4135,570 @@ for (const variant of ["resume", "setup choice"] as const)
     expect(migrateSawRuntimeDone).toBe(true);
   });
 
+test("checkout switch orders runtime, migrate, and LiveKit, then runs local stack in parallel with services and defers source binding", async () => {
+  const f = await fixture();
+  const name = "native-flow-switch-parallel";
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const initial = await installNativeSource({
+    ...f,
+    name,
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(initial.code).toBe(0);
+  const saved = await loadInstance({ name, home: f.home });
+  const repoA = saved!.releaseDir;
+  await stopNativeSource(saved!, new AbortController().signal);
+
+  const next = path.join(f.home, "next");
+  await cp(f.repo, next, { recursive: true });
+  const repoB = await realpath(next);
+
+  const actualLiveKit = await vi.importActual<
+    typeof import("./native-livekit.js")
+  >("./native-livekit.js");
+  vi.mocked(readLiveKitSettings).mockImplementation(
+    actualLiveKit.readLiveKitSettings,
+  );
+  vi.mocked(prepareNativeVoiceTools).mockResolvedValue({
+    bin: path.join(f.home, "voice"),
+    livekit: path.join(f.home, "voice", "livekit-server"),
+  });
+
+  const order: string[] = [];
+  let runtimeDone = false;
+  let liveKitBound = false;
+  vi.mocked(prepareRuntime).mockImplementationOnce(async () => {
+    runtimeDone = true;
+    order.push("runtime");
+    return { code: 0, state: "ready", message: "ready" };
+  });
+
+  const baseRun = vi.mocked(runProcess).getMockImplementation()!;
+  vi.mocked(runProcess).mockImplementation(async (command, args, options) => {
+    if (args.includes("migrate")) {
+      expect(runtimeDone).toBe(true);
+      order.push("migrate");
+    }
+    return baseRun(command, args, options);
+  });
+
+  vi.mocked(startNativeLiveKit).mockClear();
+  vi.mocked(startNativeLiveKit).mockImplementationOnce(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    f.running.add("livekit");
+    liveKitBound = true;
+    order.push("livekit");
+  });
+
+  vi.mocked(prepareFoundationServices).mockImplementationOnce(async () => {
+    expect(liveKitBound).toBe(true);
+    order.push("foundation");
+  });
+
+  // Bidirectional barrier proves prepareModelGateway and startNativeProcess
+  // run concurrently: sequential execution in either order would deadlock.
+  let markGatewayEntered!: () => void;
+  const gatewayEntered = new Promise<void>((resolve) => {
+    markGatewayEntered = resolve;
+  });
+  let markServiceStartEntered!: () => void;
+  const serviceStartEntered = new Promise<void>((resolve) => {
+    markServiceStartEntered = resolve;
+  });
+  let releaseGateway!: () => void;
+  const gatewayReleased = new Promise<void>((resolve) => {
+    releaseGateway = resolve;
+  });
+
+  vi.mocked(prepareModelGateway).mockImplementationOnce(async () => {
+    markGatewayEntered();
+    await serviceStartEntered;
+    await gatewayReleased;
+  });
+
+  const baseStart = vi.mocked(startNativeProcess).getMockImplementation()!;
+  vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    markServiceStartEntered();
+    await gatewayEntered;
+    return baseStart(options);
+  });
+
+  let clock = 0;
+  let loginCalled = false;
+  let markWaitingForBranch1!: () => void;
+  const waitingForBranch1 = new Promise<void>((resolve) => {
+    markWaitingForBranch1 = resolve;
+  });
+  const baseFetch = vi.mocked(fetch).getMockImplementation()!;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url, init?: RequestInit) => {
+      const response = await baseFetch(url, init);
+      if (String(url).endsWith("/v0/auth/login")) loginCalled = true;
+      return response;
+    }),
+  );
+
+  const events: InstallerEvent[] = [];
+  const runPromise = installNativeSource(
+    {
+      ...f,
+      repo: next,
+      name,
+      externalComputer: true,
+      resume: true,
+      signal: new AbortController().signal,
+      onEvent: (event) => events.push(event),
+    },
+    () => {
+      // After /v0/auth/login finishes, the next stageTimer read is
+      // timer.enter("runtime") once branch2 has settled while branch1 is open.
+      if (loginCalled) markWaitingForBranch1();
+      return clock;
+    },
+  );
+
+  await waitingForBranch1;
+  // Branch 2 finished service startup and account verification while Branch 1
+  // is still pending: source binding and succeeded events must stay deferred.
+  expect((await loadInstance({ name, home: f.home }))?.releaseDir).toBe(repoA);
+  expect(
+    events.some(
+      (event) =>
+        event.kind === "stage" &&
+        (event.stage === "services" || event.stage === "account") &&
+        event.state === "succeeded",
+    ),
+  ).toBe(false);
+
+  clock += 3000;
+  releaseGateway();
+  const outcome = await runPromise;
+
+  expect(outcome.code, outcome.message).toBe(0);
+  expect(startNativeLiveKit).toHaveBeenCalledTimes(1);
+  expect(order).toEqual(["runtime", "migrate", "livekit", "foundation"]);
+  expect((await loadInstance({ name, home: f.home }))?.releaseDir).toBe(repoB);
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      kind: "stage",
+      stage: "services",
+      state: "succeeded",
+    }),
+  );
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      kind: "stage",
+      stage: "account",
+      state: "succeeded",
+    }),
+  );
+  expect(
+    (outcome.details as { timings: Record<string, number> }).timings.runtime,
+  ).toBe(3);
+});
+
+for (const failureKind of ["throw", "outcome"] as const)
+  test(`checkout switch skips migrate, local stack, and service start when runtime fails by ${failureKind}`, async () => {
+    const f = await fixture();
+    const name = `native-flow-switch-runtime-${failureKind}`;
+    vi.mocked(prepareRuntime).mockResolvedValue({
+      code: 0,
+      state: "ready",
+      message: "ready",
+    });
+    const initial = await installNativeSource({
+      ...f,
+      name,
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    expect(initial.code).toBe(0);
+    const saved = await loadInstance({ name, home: f.home });
+    const repoA = saved!.releaseDir;
+    await stopNativeSource(saved!, new AbortController().signal);
+
+    const next = path.join(f.home, "next");
+    await cp(f.repo, next, { recursive: true });
+
+    vi.mocked(runProcess).mockClear();
+    vi.mocked(prepareFoundationServices).mockClear();
+    vi.mocked(prepareModelGateway).mockClear();
+    vi.mocked(startNativeProcess).mockClear();
+
+    // Hold runtime failure until PostgreSQL is ready so execution reaches the
+    // !overlapWithRuntime runtime wait immediately before migrate().
+    let markDatabaseReady!: () => void;
+    const databaseReady = new Promise<void>((resolve) => {
+      markDatabaseReady = resolve;
+    });
+    const baseDb = vi.mocked(prepareNativeDatabase).getMockImplementation()!;
+    vi.mocked(prepareNativeDatabase).mockImplementationOnce(async (options) => {
+      const result = await baseDb(options);
+      markDatabaseReady();
+      return result;
+    });
+    vi.mocked(prepareRuntime).mockImplementationOnce(async () => {
+      await databaseReady;
+      if (failureKind === "throw") throw new Error("runtime upgrade failed");
+      return {
+        code: 4,
+        state: "action_required",
+        message: "The runtime is not ready.",
+        details: { code: "LOCAL_MODELS_RECOVERY_REQUIRED" },
+      };
+    });
+
+    const outcome = await installNativeSource({
+      ...f,
+      repo: next,
+      name,
+      externalComputer: true,
+      resume: true,
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+
+    if (failureKind === "throw") {
+      expect(outcome).toMatchObject({
+        code: 1,
+        state: "failed",
+        details: { stage: "runtime" },
+      });
+      expect(outcome.message).toContain("runtime upgrade failed");
+    } else {
+      expect(outcome).toMatchObject({
+        code: 4,
+        state: "action_required",
+        message: "The runtime is not ready.",
+        details: {
+          code: "LOCAL_MODELS_RECOVERY_REQUIRED",
+          stage: "runtime",
+        },
+      });
+    }
+    expect(
+      vi
+        .mocked(runProcess)
+        .mock.calls.some(([, args]) => args.includes("migrate")),
+    ).toBe(false);
+    expect(prepareFoundationServices).not.toHaveBeenCalled();
+    expect(prepareModelGateway).not.toHaveBeenCalled();
+    expect(startNativeProcess).not.toHaveBeenCalled();
+    expect((await loadInstance({ name, home: f.home }))?.releaseDir).toBe(
+      repoA,
+    );
+  });
+
+test("checkout switch gateway failure aborts service startup, drains before rollback, and preserves earlier checkout binding", async () => {
+  const f = await fixture();
+  const name = "native-flow-switch-gateway-fail";
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const initial = await installNativeSource({
+    ...f,
+    name,
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(initial.code).toBe(0);
+  const saved = await loadInstance({ name, home: f.home });
+  const repoA = saved!.releaseDir;
+  await stopNativeSource(saved!, new AbortController().signal);
+
+  const next = path.join(f.home, "next");
+  await cp(f.repo, next, { recursive: true });
+
+  vi.mocked(startNativeProcess).mockClear();
+  vi.mocked(stopNativeProcess).mockClear();
+
+  let markReadyzEntered!: () => void;
+  const readyzEntered = new Promise<void>((resolve) => {
+    markReadyzEntered = resolve;
+  });
+  let branch2Aborted = false;
+  let pendingReadyz = 0;
+  const baseFetch = vi.mocked(fetch).getMockImplementation()!;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url, init?: RequestInit) => {
+      if (String(url).endsWith("/readyz")) {
+        pendingReadyz += 1;
+        markReadyzEntered();
+        return new Promise<Response>((_resolve, reject) => {
+          const onAbort = () => {
+            branch2Aborted = true;
+            setTimeout(() => {
+              pendingReadyz -= 1;
+              reject(new DOMException("Aborted", "AbortError"));
+            }, 15);
+          };
+          if (init?.signal?.aborted) onAbort();
+          else init?.signal?.addEventListener("abort", onAbort, { once: true });
+        });
+      }
+      return baseFetch(url, init);
+    }),
+  );
+
+  vi.mocked(prepareModelGateway).mockImplementationOnce(async () => {
+    await readyzEntered;
+    throw new Error("gateway failed during upgrade");
+  });
+
+  const baseStop = vi.mocked(stopNativeProcess).getMockImplementation()!;
+  let rollbackSawPendingBranch2 = false;
+  const stopped: string[] = [];
+  vi.mocked(stopNativeProcess).mockImplementation(async (root, service) => {
+    if (pendingReadyz > 0) rollbackSawPendingBranch2 = true;
+    stopped.push(service);
+    await baseStop(root, service);
+  });
+
+  const outcome = await installNativeSource({
+    ...f,
+    repo: next,
+    name,
+    externalComputer: true,
+    resume: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+
+  expect(outcome).toMatchObject({
+    code: 1,
+    state: "failed",
+    details: { stage: "runtime" },
+  });
+  expect(outcome.message).toContain("gateway failed during upgrade");
+  expect(branch2Aborted).toBe(true);
+  expect(pendingReadyz).toBe(0);
+  expect(rollbackSawPendingBranch2).toBe(false);
+  expect(stopped).toEqual(["web", "node-services", "teamhub", "postgres"]);
+  expect(f.running.size).toBe(0);
+  expect((await loadInstance({ name, home: f.home }))?.releaseDir).toBe(repoA);
+});
+
+for (const failingStage of ["services", "account"] as const)
+  test(`checkout switch ${failingStage} failure aborts local stack branch, drains before rollback, and preserves earlier checkout binding`, async () => {
+    const f = await fixture();
+    const name = `native-flow-switch-${failingStage}-fail`;
+    vi.mocked(prepareRuntime).mockResolvedValue({
+      code: 0,
+      state: "ready",
+      message: "ready",
+    });
+    const initial = await installNativeSource({
+      ...f,
+      name,
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    expect(initial.code).toBe(0);
+    const saved = await loadInstance({ name, home: f.home });
+    const repoA = saved!.releaseDir;
+    await stopNativeSource(saved!, new AbortController().signal);
+
+    const next = path.join(f.home, "next");
+    await cp(f.repo, next, { recursive: true });
+
+    vi.mocked(stopNativeProcess).mockClear();
+
+    let markBranch1Entered!: () => void;
+    const branch1Entered = new Promise<void>((resolve) => {
+      markBranch1Entered = resolve;
+    });
+    let branch1Aborted = false;
+    let branch1Settled = false;
+    const holdUntilAborted = (signal: AbortSignal) =>
+      new Promise<void>((_resolve, reject) => {
+        markBranch1Entered();
+        const onAbort = () => {
+          branch1Aborted = true;
+          setTimeout(() => {
+            branch1Settled = true;
+            reject(new DOMException("Aborted", "AbortError"));
+          }, 15);
+        };
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      });
+
+    if (failingStage === "services") {
+      vi.mocked(prepareFoundationServices).mockImplementationOnce(
+        (_instance, _choice, options) => holdUntilAborted(options.signal),
+      );
+      const baseStart = vi.mocked(startNativeProcess).getMockImplementation()!;
+      vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+        if (options.name === "teamhub") {
+          await branch1Entered;
+          throw new Error("teamhub failed on upgrade");
+        }
+        return baseStart(options);
+      });
+    } else {
+      vi.mocked(prepareModelGateway).mockImplementationOnce(
+        (_instance, _choice, options) => holdUntilAborted(options.signal),
+      );
+      const baseFetch = vi.mocked(fetch).getMockImplementation()!;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url, init?: RequestInit) => {
+          if (String(url).endsWith("/v0/auth/login")) {
+            await branch1Entered;
+            return new Response("{}", { status: 401 });
+          }
+          return baseFetch(url, init);
+        }),
+      );
+      const baseRun = vi.mocked(runProcess).getMockImplementation()!;
+      vi.mocked(runProcess).mockImplementation(
+        async (command, args, options) => {
+          if (args.includes("owner"))
+            return { code: 1, stdout: "", stderr: "" };
+          return baseRun(command, args, options);
+        },
+      );
+    }
+
+    const baseStop = vi.mocked(stopNativeProcess).getMockImplementation()!;
+    let settledBeforeRollback = true;
+    vi.mocked(stopNativeProcess).mockImplementation(async (root, service) => {
+      if (!branch1Settled) settledBeforeRollback = false;
+      await baseStop(root, service);
+    });
+
+    const outcome = await installNativeSource({
+      ...f,
+      repo: next,
+      name,
+      externalComputer: true,
+      resume: true,
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+
+    expect(outcome).toMatchObject({
+      code: 1,
+      state: "failed",
+      details: { stage: failingStage },
+    });
+    expect(branch1Aborted).toBe(true);
+    expect(branch1Settled).toBe(true);
+    expect(settledBeforeRollback).toBe(true);
+    expect((await loadInstance({ name, home: f.home }))?.releaseDir).toBe(
+      repoA,
+    );
+    expect(
+      (outcome.details as { timings?: Record<string, number> }).timings,
+    ).not.toHaveProperty("runtime");
+  });
+
+test("checkout switch degraded local-models resume swallows non-abort gateway failure while running in parallel", async () => {
+  const f = await fixture();
+  const name = "native-flow-switch-degraded-local";
+  vi.mocked(prepareLocalModels).mockResolvedValueOnce(undefined);
+  const initial = await installNativeSource({
+    ...f,
+    name,
+    setupChoice: "local-models",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(initial.code).toBe(0);
+  const saved = await loadInstance({ name, home: f.home });
+  await stopNativeSource(saved!, new AbortController().signal);
+
+  const next = path.join(f.home, "next");
+  await cp(f.repo, next, { recursive: true });
+  const repoB = await realpath(next);
+
+  vi.mocked(prepareLocalModels).mockResolvedValueOnce({
+    code: 4,
+    state: "action_required",
+    message: "The upstream tool could not verify the local stack binding.",
+    details: {
+      code: "LOCAL_MODELS_RECOVERY_REQUIRED",
+      reasons: ["binding-unavailable"],
+    },
+  });
+
+  let markGatewayEntered!: () => void;
+  const gatewayEntered = new Promise<void>((resolve) => {
+    markGatewayEntered = resolve;
+  });
+  let markServiceStartEntered!: () => void;
+  const serviceStartEntered = new Promise<void>((resolve) => {
+    markServiceStartEntered = resolve;
+  });
+  vi.mocked(prepareModelGateway).mockImplementationOnce(async () => {
+    markGatewayEntered();
+    await serviceStartEntered;
+    throw new Error("local model gateway unavailable");
+  });
+  const baseStart = vi.mocked(startNativeProcess).getMockImplementation()!;
+  vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    markServiceStartEntered();
+    await gatewayEntered;
+    return baseStart(options);
+  });
+
+  const logs: InstallerEvent[] = [];
+  const upgraded = await installNativeSource({
+    ...f,
+    repo: next,
+    name,
+    externalComputer: true,
+    resume: true,
+    signal: new AbortController().signal,
+    onEvent: (event) => {
+      if (event.kind === "log") logs.push(event);
+    },
+  });
+
+  expect(upgraded).toMatchObject({
+    code: 0,
+    state: "ready",
+    details: {
+      localModelsDegraded: {
+        code: "LOCAL_MODELS_RECOVERY_REQUIRED",
+        message: "The upstream tool could not verify the local stack binding.",
+        reasons: ["binding-unavailable"],
+      },
+    },
+  });
+  expect((await loadInstance({ name, home: f.home }))?.releaseDir).toBe(repoB);
+  expect(logs).toContainEqual(
+    expect.objectContaining({
+      kind: "log",
+      stage: "runtime",
+      message: expect.stringContaining(
+        "Local model gateway preparation skipped during degraded resume: local model gateway unavailable",
+      ),
+    }),
+  );
+  expect(logs.map((event) => event.message).join("")).toContain(
+    "Linger is starting without local models",
+  );
+});
+
 test("a repeated resume after a successful resume succeeds without provisioning the owner again", async () => {
   const f = await fixture();
   vi.mocked(prepareRuntime).mockResolvedValue({

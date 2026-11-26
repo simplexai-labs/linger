@@ -167,7 +167,7 @@ func TestCodexModelsCacheIgnoresClientVersionMismatch(t *testing.T) {
 
 func TestCodexModelsCacheSkipsCorruptAndOversizedCandidates(t *testing.T) {
 	fixture := newSeedFixture(t)
-	valid := seedCache(fixture.now.Add(-time.Hour), "0.153.4")
+	valid := seedCache(fixture.now.Add(-20*time.Minute), "0.153.4")
 	makeSibling(t, fixture.codexRoot, "corrupt", seedAccountAuth, `{"fetched_at":`, fixture.now.Add(-time.Minute))
 	oversized := `{"fetched_at":"` + fixture.now.UTC().Format(time.RFC3339Nano) + `","client_version":"0.153.4","pad":"` + strings.Repeat("x", codexModelsCacheMaxBytes) + `"}`
 	makeSibling(t, fixture.codexRoot, "oversized", seedAccountAuth, oversized, fixture.now.Add(-2*time.Minute))
@@ -198,7 +198,7 @@ func TestCodexModelsCacheKeepsAFreshOwnCache(t *testing.T) {
 
 func TestCodexModelsCacheRenewsAStaleOwnCacheNewerThanEveryPeer(t *testing.T) {
 	fixture := newSeedFixture(t)
-	makeSibling(t, fixture.codexRoot, "sibling", seedAccountAuth, seedCache(fixture.now.Add(-time.Hour), "0.153.4"), fixture.now)
+	makeSibling(t, fixture.codexRoot, "sibling", seedAccountAuth, seedCache(fixture.now.Add(-45*time.Minute), "0.153.4"), fixture.now)
 	if _, err := PrepareCodexHome(fixture.home, fixture.opts, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestCodexModelsCacheReplacesAStaleOwnCacheWithANewerPeer(t *testing.T) {
 	if _, err := PrepareCodexHome(fixture.home, fixture.opts, nil); err != nil {
 		t.Fatal(err)
 	}
-	projectionWrite(t, filepath.Join(fixture.home, codexModelsCacheName), seedCache(fixture.now.Add(-time.Hour), "0.153.4"))
+	projectionWrite(t, filepath.Join(fixture.home, codexModelsCacheName), seedCache(fixture.now.Add(-45*time.Minute), "0.153.4"))
 	logs := seedPrepare(t, fixture)
 	assertSeedOutcome(t, logs, "seeded")
 	assertSeededFrom(t, fixture.home, peer, fixture.now)
@@ -225,7 +225,7 @@ func TestCodexModelsCacheReplacesAStaleOwnCacheWithANewerPeer(t *testing.T) {
 func TestCodexModelsCacheMatchesAProbedVersionBanner(t *testing.T) {
 	fixture := newSeedFixture(t)
 	fixture.opts.CodexVersion = "codex-cli 0.153.4"
-	cache := seedCache(fixture.now.Add(-time.Hour), "0.153.4")
+	cache := seedCache(fixture.now.Add(-20*time.Minute), "0.153.4")
 	makeSibling(t, fixture.codexRoot, "sibling", seedAccountAuth, cache, fixture.now)
 	logs := seedPrepare(t, fixture)
 	assertSeedOutcome(t, logs, "seeded")
@@ -234,14 +234,14 @@ func TestCodexModelsCacheMatchesAProbedVersionBanner(t *testing.T) {
 
 func TestCodexModelsCacheSeedsFromTheSourceAndNamedHomes(t *testing.T) {
 	fixture := newSeedFixture(t)
-	source := seedCache(fixture.now.Add(-2*time.Hour), "0.153.4")
+	source := seedCache(fixture.now.Add(-40*time.Minute), "0.153.4")
 	projectionWrite(t, filepath.Join(fixture.opts.SharedHome, codexModelsCacheName), source)
 	logs := seedPrepare(t, fixture)
 	assertSeedOutcome(t, logs, "seeded")
 	assertSeededFrom(t, fixture.home, source, fixture.now)
 
 	// A named home outside the roots is a peer too; the newest by mtime wins.
-	session := makeSibling(t, t.TempDir(), "session-home", seedAccountAuth, seedCache(fixture.now.Add(-time.Hour), "0.153.4"), fixture.now.Add(time.Minute))
+	session := makeSibling(t, t.TempDir(), "session-home", seedAccountAuth, seedCache(fixture.now.Add(-20*time.Minute), "0.153.4"), fixture.now.Add(time.Minute))
 	named := projectionRead(t, filepath.Join(session, codexModelsCacheName))
 	fixture.opts.ModelsCache.Homes = []string{session}
 	fixture.home = filepath.Join(fixture.codexRoot, "second-context")
@@ -269,7 +269,7 @@ func TestCodexModelsCacheSeedsNothingWithoutPeers(t *testing.T) {
 
 func TestCodexInvokeHomeSeedsItsModelsCache(t *testing.T) {
 	fixture := newSeedFixture(t)
-	cache := seedCache(fixture.now.Add(-time.Hour), "0.153.4")
+	cache := seedCache(fixture.now.Add(-20*time.Minute), "0.153.4")
 	makeSibling(t, fixture.codexRoot, "context", seedAccountAuth, cache, fixture.now)
 	home := filepath.Join(t.TempDir(), "codex-home")
 	if _, err := PrepareCodexInvokeHome(home, fixture.opts.SharedHome, "codex-cli 0.153.4", CodexModelsCachePeers{Roots: []string{fixture.codexRoot}}); err != nil {
@@ -282,7 +282,7 @@ func TestCodexRuntimeHomeSeedsFromOtherContextsAndNamedHomes(t *testing.T) {
 	fixture := newSeedFixture(t)
 	root := t.TempDir()
 	identity := RuntimeHomeIdentity{TenantID: "tenant", OwnerActorID: "owner", AgentID: "agent", ScopeID: "scope", ProviderType: "codex"}
-	cache := seedCache(fixture.now.Add(-time.Hour), "0.153.4")
+	cache := seedCache(fixture.now.Add(-20*time.Minute), "0.153.4")
 	makeSibling(t, CodexRuntimeHomesDir(root), "other-context", seedAccountAuth, cache, fixture.now)
 	home, err := PrepareCodexRuntimeHome(context.Background(), root, fixture.opts.SharedHome, identity, "codex-cli 0.153.4", nil, "")
 	if err != nil {
@@ -310,7 +310,7 @@ func TestCodexModelsCacheNoAuthSkipsSeedingButPrepares(t *testing.T) {
 
 func TestCodexModelsCacheIgnoresUnreadableAndLinkedSiblings(t *testing.T) {
 	fixture := newSeedFixture(t)
-	valid := seedCache(fixture.now.Add(-time.Hour), "0.153.4")
+	valid := seedCache(fixture.now.Add(-20*time.Minute), "0.153.4")
 	// Root reads through mode 0, so the unreadable sibling exists only for other users.
 	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
 		locked := makeSibling(t, fixture.codexRoot, "locked", seedAccountAuth, "", fixture.now)
@@ -336,7 +336,7 @@ func TestCodexModelsCacheIgnoresUnreadableAndLinkedSiblings(t *testing.T) {
 
 func TestCodexModelsCacheConsidersOnlyNewestEightByMtime(t *testing.T) {
 	fixture := newSeedFixture(t)
-	valid := seedCache(fixture.now.Add(-time.Hour), "0.153.4")
+	valid := seedCache(fixture.now.Add(-20*time.Minute), "0.153.4")
 	for i := range codexModelsCacheMaxCandidates {
 		makeSibling(t, fixture.codexRoot, "corrupt-"+strings.Repeat("a", i+1), seedAccountAuth, `{"fetched_at":`, fixture.now.Add(-time.Duration(i)*time.Minute))
 	}
@@ -351,10 +351,247 @@ func TestCodexModelsCacheConsidersOnlyNewestEightByMtime(t *testing.T) {
 
 func TestCodexModelsCacheParsesFractionalFetchedAt(t *testing.T) {
 	fixture := newSeedFixture(t)
-	fetched := time.Date(2026, 10, 25, 8, 0, 0, 123456789, time.UTC)
+	fetched := fixture.now.Add(-15 * time.Minute).UTC().Truncate(time.Second).Add(123456789 * time.Nanosecond)
 	body := `{"fetched_at":"` + fetched.Format(time.RFC3339Nano) + `","client_version":"0.153.4"}`
 	makeSibling(t, fixture.codexRoot, "fraction", seedAccountAuth, body, fixture.now)
 	logs := seedPrepare(t, fixture)
 	assertSeedOutcome(t, logs, "seeded")
 	assertSeededFrom(t, fixture.home, body, fixture.now)
+}
+
+func TestCodexModelsCacheSkipsCachesOlderThanMaxSeedAge(t *testing.T) {
+	t.Run("skips stale peer cache", func(t *testing.T) {
+		fixture := newSeedFixture(t)
+		stale := seedCache(fixture.now.Add(-2*time.Hour), "0.153.4")
+		makeSibling(t, fixture.codexRoot, "stale", seedAccountAuth, stale, fixture.now)
+		logs := seedPrepare(t, fixture)
+		assertSeedOutcome(t, logs, "no_candidate")
+		if _, err := os.Stat(filepath.Join(fixture.home, codexModelsCacheName)); !os.IsNotExist(err) {
+			t.Fatalf("stale peer cache was seeded: %v", err)
+		}
+	})
+
+	t.Run("skips stale peer in favor of fresh peer", func(t *testing.T) {
+		fixture := newSeedFixture(t)
+		stale := seedCache(fixture.now.Add(-3*time.Hour), "0.153.4")
+		fresh := seedCache(fixture.now.Add(-20*time.Minute), "0.153.4")
+		makeSibling(t, fixture.codexRoot, "stale", seedAccountAuth, stale, fixture.now)
+		makeSibling(t, fixture.codexRoot, "fresh", seedAccountAuth, fresh, fixture.now.Add(-time.Minute))
+		logs := seedPrepare(t, fixture)
+		assertSeedOutcome(t, logs, "seeded")
+		assertSeededFrom(t, fixture.home, fresh, fixture.now)
+	})
+
+	t.Run("does not renew own cache older than max seed age", func(t *testing.T) {
+		fixture := newSeedFixture(t)
+		if _, err := PrepareCodexHome(fixture.home, fixture.opts, nil); err != nil {
+			t.Fatal(err)
+		}
+		staleOwn := seedCache(fixture.now.Add(-2*time.Hour), "0.153.4")
+		projectionWrite(t, filepath.Join(fixture.home, codexModelsCacheName), staleOwn)
+		logs := seedPrepare(t, fixture)
+		assertSeedOutcome(t, logs, "no_candidate")
+		if got := projectionRead(t, filepath.Join(fixture.home, codexModelsCacheName)); got != staleOwn {
+			t.Fatalf("stale own cache was re-stamped: %s", got)
+		}
+	})
+}
+
+func TestCodexModelsCacheOriginTimeCapsRenewalAndPreservesMtime(t *testing.T) {
+	t0 := time.Now().UTC().Truncate(time.Second).Add(-2 * time.Hour)
+
+	t.Run("repeated renewals stop once origin time exceeds max seed age", func(t *testing.T) {
+		fixture := newSeedFixture(t)
+		if _, err := PrepareCodexHome(fixture.home, fixture.opts, nil); err != nil {
+			t.Fatal(err)
+		}
+		cachePath := filepath.Join(fixture.home, codexModelsCacheName)
+		projectionWrite(t, cachePath, seedCache(t0, "0.153.4"))
+		if err := os.Chtimes(cachePath, t0, t0); err != nil {
+			t.Fatal(err)
+		}
+		root, err := os.OpenRoot(fixture.home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer root.Close()
+
+		var report codexModelsCacheReport
+		if err := planCodexModelsCacheSeed(root, fixture.home, fixture.opts.SharedHome, "0.153.4", *fixture.opts.ModelsCache, t0.Add(30*time.Minute), &report); err != nil {
+			t.Fatal(err)
+		}
+		if report.outcome != "renewed" {
+			t.Fatalf("t0+30m outcome = %q, want renewed", report.outcome)
+		}
+		info, err := os.Stat(cachePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.ModTime().Equal(t0) {
+			t.Fatalf("t0+30m mtime = %v, want %v", info.ModTime(), t0)
+		}
+
+		report = codexModelsCacheReport{}
+		if err := planCodexModelsCacheSeed(root, fixture.home, fixture.opts.SharedHome, "0.153.4", *fixture.opts.ModelsCache, t0.Add(55*time.Minute), &report); err != nil {
+			t.Fatal(err)
+		}
+		if report.outcome != "renewed" {
+			t.Fatalf("t0+55m outcome = %q, want renewed", report.outcome)
+		}
+		info, err = os.Stat(cachePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.ModTime().Equal(t0) {
+			t.Fatalf("t0+55m mtime = %v, want %v", info.ModTime(), t0)
+		}
+		beforeExpired := projectionRead(t, cachePath)
+
+		report = codexModelsCacheReport{}
+		if err := planCodexModelsCacheSeed(root, fixture.home, fixture.opts.SharedHome, "0.153.4", *fixture.opts.ModelsCache, t0.Add(65*time.Minute), &report); err != nil {
+			t.Fatal(err)
+		}
+		if report.outcome != "no_candidate" {
+			t.Fatalf("t0+65m outcome = %q, want no_candidate", report.outcome)
+		}
+		if got := projectionRead(t, cachePath); got != beforeExpired {
+			t.Fatalf("expired cache was re-stamped: %s", got)
+		}
+	})
+
+	t.Run("seeded home preserves origin mtime and loses to fresher peer", func(t *testing.T) {
+		fixture := newSeedFixture(t)
+		sourceCache := seedCache(t0, "0.153.4")
+		makeSibling(t, fixture.codexRoot, "origin-peer", seedAccountAuth, sourceCache, t0)
+
+		seededHome := filepath.Join(fixture.codexRoot, "seeded-home")
+		if err := os.MkdirAll(seededHome, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		projectionWrite(t, filepath.Join(seededHome, "auth.json"), seedAccountAuth)
+		seededRoot, err := os.OpenRoot(seededHome)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer seededRoot.Close()
+
+		var report codexModelsCacheReport
+		if err := planCodexModelsCacheSeed(seededRoot, seededHome, fixture.opts.SharedHome, "0.153.4", *fixture.opts.ModelsCache, t0.Add(30*time.Minute), &report); err != nil {
+			t.Fatal(err)
+		}
+		if report.outcome != "seeded" {
+			t.Fatalf("seededHome outcome = %q, want seeded", report.outcome)
+		}
+		seededCachePath := filepath.Join(seededHome, codexModelsCacheName)
+		info, err := os.Stat(seededCachePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.ModTime().Equal(t0) {
+			t.Fatalf("seeded cache mtime = %v, want %v", info.ModTime(), t0)
+		}
+
+		// A genuinely fresher peer fetched at t0+20m must outrank seededHome (stamped at t0+30m, origin t0).
+		fresherCache := seedCache(t0.Add(20*time.Minute), "0.153.4")
+		makeSibling(t, fixture.codexRoot, "fresher-peer", seedAccountAuth, fresherCache, t0.Add(20*time.Minute))
+
+		consumerHome := filepath.Join(fixture.codexRoot, "consumer-home")
+		if err := os.MkdirAll(consumerHome, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		projectionWrite(t, filepath.Join(consumerHome, "auth.json"), seedAccountAuth)
+		consumerRoot, err := os.OpenRoot(consumerHome)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer consumerRoot.Close()
+
+		report = codexModelsCacheReport{}
+		if err := planCodexModelsCacheSeed(consumerRoot, consumerHome, fixture.opts.SharedHome, "0.153.4", *fixture.opts.ModelsCache, t0.Add(40*time.Minute), &report); err != nil {
+			t.Fatal(err)
+		}
+		if report.outcome != "seeded" {
+			t.Fatalf("consumerHome outcome = %q, want seeded", report.outcome)
+		}
+		var got, want map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(projectionRead(t, filepath.Join(consumerHome, codexModelsCacheName))), &got); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(fresherCache), &want); err != nil {
+			t.Fatal(err)
+		}
+		if string(got["etag"]) != string(want["etag"]) {
+			t.Fatalf("consumerHome etag = %s, want fresher peer %s", got["etag"], want["etag"])
+		}
+
+		// At t0+70m, seededHome (origin t0) cannot seed another home even though it was stamped at t0+30m.
+		lateHome := filepath.Join(fixture.codexRoot, "late-home")
+		if err := os.MkdirAll(lateHome, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		projectionWrite(t, filepath.Join(lateHome, "auth.json"), seedAccountAuth)
+		lateRoot, err := os.OpenRoot(lateHome)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lateRoot.Close()
+
+		report = codexModelsCacheReport{}
+		if err := planCodexModelsCacheSeed(lateRoot, lateHome, fixture.opts.SharedHome, "0.153.4", CodexModelsCachePeers{Homes: []string{seededHome}}, t0.Add(70*time.Minute), &report); err != nil {
+			t.Fatal(err)
+		}
+		if report.outcome != "no_candidate" {
+			t.Fatalf("t0+70m from seededHome outcome = %q, want no_candidate", report.outcome)
+		}
+	})
+
+	t.Run("fresh Codex write restores reusability", func(t *testing.T) {
+		fixture := newSeedFixture(t)
+		if _, err := PrepareCodexHome(fixture.home, fixture.opts, nil); err != nil {
+			t.Fatal(err)
+		}
+		cachePath := filepath.Join(fixture.home, codexModelsCacheName)
+		projectionWrite(t, cachePath, seedCache(t0, "0.153.4"))
+		if err := os.Chtimes(cachePath, t0, t0); err != nil {
+			t.Fatal(err)
+		}
+		root, err := os.OpenRoot(fixture.home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer root.Close()
+
+		// Confirm expired at t0+70m before Codex refreshes it.
+		var report codexModelsCacheReport
+		if err := planCodexModelsCacheSeed(root, fixture.home, fixture.opts.SharedHome, "0.153.4", *fixture.opts.ModelsCache, t0.Add(70*time.Minute), &report); err != nil {
+			t.Fatal(err)
+		}
+		if report.outcome != "no_candidate" {
+			t.Fatalf("expired pre-refresh outcome = %q, want no_candidate", report.outcome)
+		}
+
+		// Simulate Codex overwriting models_cache.json with a fresh fetched_at and mtime at t0+70m.
+		freshAt := t0.Add(70 * time.Minute)
+		freshBody := seedCache(freshAt, "0.153.4")
+		projectionWrite(t, cachePath, freshBody)
+		if err := os.Chtimes(cachePath, freshAt, freshAt); err != nil {
+			t.Fatal(err)
+		}
+
+		// Ten minutes later (t0+80m), the cache is older than Codex's 5m TTL but within the 1h seed window.
+		report = codexModelsCacheReport{}
+		if err := planCodexModelsCacheSeed(root, fixture.home, fixture.opts.SharedHome, "0.153.4", *fixture.opts.ModelsCache, freshAt.Add(10*time.Minute), &report); err != nil {
+			t.Fatal(err)
+		}
+		if report.outcome != "renewed" {
+			t.Fatalf("post-refresh outcome = %q, want renewed", report.outcome)
+		}
+		info, err := os.Stat(cachePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.ModTime().Equal(freshAt) {
+			t.Fatalf("post-refresh mtime = %v, want %v", info.ModTime(), freshAt)
+		}
+	})
 }

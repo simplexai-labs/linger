@@ -11,7 +11,7 @@ import (
 func TestChooseAnotherMeLocalPlacementUsesAnyReadyRuntime(t *testing.T) {
 	grants := []httpapi.LocalComputerWorkspaceGrant{{GrantId: "grant_files", Mode: httpapi.WorkspaceWrite}}
 	efforts := func(values ...httpapi.AgentReasoningEffort) *[]httpapi.AgentReasoningEffort { return &values }
-	high := httpapi.AgentReasoningEffort("high")
+	high := "high"
 	isDefault := true
 	for _, test := range []struct {
 		name      string

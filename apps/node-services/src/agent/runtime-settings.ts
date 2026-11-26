@@ -1,21 +1,13 @@
 import { isRecord } from "@linger/service-kit";
 
 import {
+  isLocalReasoningEffort,
   parseLocalPlacement,
   type LocalPlacementRequirement,
+  type LocalReasoningEffort,
 } from "./runner-gateway/local-computer-management.js";
 
-export const agentReasoningEfforts = [
-  "none",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-  "ultra",
-] as const;
-
-export type AgentReasoningEffort = (typeof agentReasoningEfforts)[number];
+export type AgentReasoningEffort = LocalReasoningEffort;
 
 /** Every Agent runs on a Local Computer reached through the Runner Gateway. */
 export interface LocalRuntimeSettings {
@@ -63,21 +55,16 @@ const parseLocalRuntimeSettings = (
   }
   if (
     value.reasoningEffort !== undefined &&
-    (typeof value.reasoningEffort !== "string" ||
-      !agentReasoningEfforts.includes(
-        value.reasoningEffort as AgentReasoningEffort,
-      ))
+    !isLocalReasoningEffort(value.reasoningEffort)
   ) {
-    throw new TypeError(
-      `runtime.reasoningEffort must be one of ${agentReasoningEfforts.join(", ")}`,
-    );
+    throw new TypeError("runtime.reasoningEffort must be a valid effort token");
   }
   return {
     type: "local",
     ...(value.model === undefined ? {} : { model: value.model }),
     ...(value.reasoningEffort === undefined
       ? {}
-      : { reasoningEffort: value.reasoningEffort as AgentReasoningEffort }),
+      : { reasoningEffort: value.reasoningEffort }),
     placement,
   };
 };

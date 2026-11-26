@@ -188,39 +188,6 @@ func (e AgentDebugRuntimeHistorySource) Valid() bool {
 	}
 }
 
-// Defines values for AgentReasoningEffort.
-const (
-	AgentReasoningEffortHigh   AgentReasoningEffort = "high"
-	AgentReasoningEffortLow    AgentReasoningEffort = "low"
-	AgentReasoningEffortMax    AgentReasoningEffort = "max"
-	AgentReasoningEffortMedium AgentReasoningEffort = "medium"
-	AgentReasoningEffortNone   AgentReasoningEffort = "none"
-	AgentReasoningEffortUltra  AgentReasoningEffort = "ultra"
-	AgentReasoningEffortXhigh  AgentReasoningEffort = "xhigh"
-)
-
-// Valid indicates whether the value is a known member of the AgentReasoningEffort enum.
-func (e AgentReasoningEffort) Valid() bool {
-	switch e {
-	case AgentReasoningEffortHigh:
-		return true
-	case AgentReasoningEffortLow:
-		return true
-	case AgentReasoningEffortMax:
-		return true
-	case AgentReasoningEffortMedium:
-		return true
-	case AgentReasoningEffortNone:
-		return true
-	case AgentReasoningEffortUltra:
-		return true
-	case AgentReasoningEffortXhigh:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for BrowserConnectionStatusBrowser.
 const (
 	BrowserConnectionBrowserChrome BrowserConnectionStatusBrowser = "chrome"
@@ -1048,19 +1015,19 @@ func (e MemoryRebuildStatusPhase) Valid() bool {
 
 // Defines values for ModelCallEffort.
 const (
-	ModelCallEffortHigh   ModelCallEffort = "high"
-	ModelCallEffortLow    ModelCallEffort = "low"
-	ModelCallEffortMedium ModelCallEffort = "medium"
+	High   ModelCallEffort = "high"
+	Low    ModelCallEffort = "low"
+	Medium ModelCallEffort = "medium"
 )
 
 // Valid indicates whether the value is a known member of the ModelCallEffort enum.
 func (e ModelCallEffort) Valid() bool {
 	switch e {
-	case ModelCallEffortHigh:
+	case High:
 		return true
-	case ModelCallEffortLow:
+	case Low:
 		return true
-	case ModelCallEffortMedium:
+	case Medium:
 		return true
 	default:
 		return false
@@ -1412,7 +1379,7 @@ type AgentDebugRuntimeHistorySource string
 type AgentId = string
 
 // AgentReasoningEffort defines model for AgentReasoningEffort.
-type AgentReasoningEffort string
+type AgentReasoningEffort = string
 
 // AgentRuntimeContextKey defines model for AgentRuntimeContextKey.
 type AgentRuntimeContextKey = string

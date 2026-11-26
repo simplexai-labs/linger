@@ -96,7 +96,7 @@ components:
           maxLength: 120
         allowed_reasoning_effort:
           type: array
-          maxItems: 7
+          maxItems: 32
           uniqueItems: true
           items:
             $ref: "#/components/schemas/AgentReasoningEffort"
@@ -107,7 +107,9 @@ components:
           description: The model the Runtime runs when none is selected.
     AgentReasoningEffort:
       type: string
-      enum: [none, low, medium, high, xhigh, max, ultra]
+      minLength: 1
+      maxLength: 20
+      pattern: "^[A-Za-z0-9][A-Za-z0-9_-]*$"
     AgentType:
       type: string
       description: Persisted Agent runtime type.

@@ -21,7 +21,6 @@ import { teamHubData, teamHubDone } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type {
   TeamHubActor,
-  TeamHubAgentReasoningEffort,
   TeamHubAgentTemplate,
 } from "@/features/teamhub/teamhub-types";
 import { commonMessages } from "@/i18n/common.messages";
@@ -618,9 +617,7 @@ function TemplateSetup({
                 disabled={!modelSelection.reasoningEffort}
                 onValueChange={(value) => {
                   beginNewCommand();
-                  modelSelection.selectReasoningEffort(
-                    value as TeamHubAgentReasoningEffort,
-                  );
+                  modelSelection.selectReasoningEffort(value);
                 }}
                 value={modelSelection.reasoningEffort ?? ""}
               >

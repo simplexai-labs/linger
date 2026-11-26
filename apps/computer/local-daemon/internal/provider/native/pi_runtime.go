@@ -7,17 +7,40 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
 const (
-	piDefaultModel   = "pi-default"
-	piBaseTools      = "read,bash,edit,write,grep,find,ls"
-	piChildPipeDrain = time.Second
+	piDefaultModel     = "pi-default"
+	piBaseTools        = "read,bash,edit,write,grep,find,ls"
+	piWindowsBaseTools = "read,powershell,edit,write,grep,find,ls"
+	piChildPipeDrain   = time.Second
 )
 
-type piRuntime struct{ profile Profile }
+func piUsesPowerShell(goos string) bool {
+	return goos == "windows"
+}
+
+func piBaseToolsFor(goos string) string {
+	if piUsesPowerShell(goos) {
+		return piWindowsBaseTools
+	}
+	return piBaseTools
+}
+
+type piRuntime struct {
+	profile      Profile
+	goosOverride string
+}
+
+func (p *piRuntime) goos() string {
+	if p.goosOverride != "" {
+		return p.goosOverride
+	}
+	return runtime.GOOS
+}
 
 func newPiRuntime(profile Profile) Runtime { return &piRuntime{profile: profile} }
 
@@ -184,6 +207,7 @@ func (p *piRuntime) reuse(ctx context.Context, proc *piProcess, plan piLaunchPla
 	proc.mu.Lock()
 	proc.prestartCreated = false
 	proc.mu.Unlock()
+	proc.setModel(plan.spec.Model)
 	fail := func(err error) (*Run, bool, error) {
 		cancel()
 		piResidents.retire(proc)
@@ -283,8 +307,10 @@ func (p *piRuntime) launchProcess(plan piLaunchPlan, lock *os.File) (*piProcess,
 	launched = true
 	proc.cancel = procCancel
 	proc.sessionID, proc.sessionDir, proc.contextDir = plan.sessionID, plan.sessionDir, spec.Dir
+	proc.compactionSettings = piLoadCompactionSettings(piAgentDirFromEnv(childEnvironment(p.profile.Env)))
 	proc.shape, proc.lock, proc.mcp, proc.front, proc.releaseTemp = plan.shape, lock, mcp, front, releaseTemp
 	proc.canSyncMCP = plan.canSyncMCP
+	proc.setModel(plan.spec.Model)
 	proc.res.bind(plan.sessionDir, p.profile)
 	return proc, nil
 }
@@ -336,10 +362,11 @@ func (p *piRuntime) args(plan piLaunchPlan, instructions string, wired bool) []s
 			args = append(args, "--skill", skills)
 		}
 	}
-	// The managed extension carries bash pipefail, the shell text check, and
-	// permission review. Its tool_call hook asks the Daemon over RPC for each
-	// bash and MCP call, which the Daemon allows when permission review is off.
-	tools := piBaseTools
+	// The managed extension carries bash pipefail, the POSIX shell text check,
+	// permission review, and the Windows PowerShell UTF-8 override. Its
+	// tool_call hook asks the Daemon over RPC for each bash, powershell, and
+	// MCP call, which the Daemon allows when permission review is off.
+	tools := piBaseToolsFor(p.goos())
 	if p.profile.ManagedMCPExtension != "" {
 		args = append(args, "--extension", p.profile.ManagedMCPExtension)
 	}
@@ -356,9 +383,10 @@ func (p *piRuntime) canSyncMCP() bool {
 }
 
 // guardsShellText reports whether the managed extension runs the
-// shell-text-hook before the Run's bash calls.
+// shell-text-hook before the Run's bash calls. Windows Pi runs PowerShell, so
+// it skips the POSIX shell text check.
 func (p *piRuntime) guardsShellText(spec RunSpec) bool {
-	return spec.ShellTextHook != "" && p.profile.ManagedMCPExtension != ""
+	return !piUsesPowerShell(p.goos()) && spec.ShellTextHook != "" && p.profile.ManagedMCPExtension != ""
 }
 
 // piResolveProgram finds the Pi executable on the Daemon's own search path.

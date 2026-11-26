@@ -110,6 +110,7 @@ func (s *Service) ExecuteTenantAgentUpdate(
 	if request.Instructions != nil {
 		instructions = *request.Instructions
 	}
+	nextEffort := optionalAgentReasoningEffort(runtime.ReasoningEffort)
 	updated, err := queries.ApplyAgentConfigurationUpdate(ctx, store.ApplyAgentConfigurationUpdateParams{
 		ActorID: actorID, TenantID: tenantID,
 		ExpectedRevision:       row.ConfigurationRevision,
@@ -117,7 +118,7 @@ func (s *Service) ExecuteTenantAgentUpdate(
 		Description:            description,
 		Instructions:           instructions,
 		RuntimeModel:           runtime.Model,
-		RuntimeReasoningEffort: optionalAgentReasoningEffort(runtime.ReasoningEffort),
+		RuntimeReasoningEffort: nextEffort,
 		ComputerID:             *placement.ComputerId,
 		LocalRuntimeType:       string(*placement.RuntimeType),
 		WorkspaceGrantID:       *placement.WorkspaceGrantId,
@@ -129,8 +130,21 @@ func (s *Service) ExecuteTenantAgentUpdate(
 		return httpapi.TenantAgent{}, ErrAgentConfigurationConflict
 	}
 	if shouldClearAnotherMeBackgroundFailures(
-		row.AgentType, row.ComputerID.String, row.LocalRuntimeType.String, row.RuntimeModel,
-		*placement.ComputerId, string(*placement.RuntimeType), runtime.Model,
+		row.AgentType,
+		anotherMeRuntimeTarget{
+			computerID:       row.ComputerID.String,
+			runtimeType:      row.LocalRuntimeType.String,
+			workspaceGrantID: row.WorkspaceGrantID.String,
+			model:            row.RuntimeModel,
+			reasoningEffort:  row.RuntimeReasoningEffort.String,
+		},
+		anotherMeRuntimeTarget{
+			computerID:       *placement.ComputerId,
+			runtimeType:      string(*placement.RuntimeType),
+			workspaceGrantID: *placement.WorkspaceGrantId,
+			model:            runtime.Model,
+			reasoningEffort:  nextEffort.String,
+		},
 	) {
 		if err := clearAnotherMeBackgroundFailuresTx(ctx, queries, tenantID, actorID); err != nil {
 			return httpapi.TenantAgent{}, err

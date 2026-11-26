@@ -9,7 +9,7 @@ export const CONTEXT_RESTART_FEATURE_ID = "context-restart";
 
 const COMPACTION_PERIOD_MS = 12 * 60 * 60 * 1_000;
 const IDLE_TIMER = `${CONTEXT_RESTART_FEATURE_ID}.idle`;
-const COMPACTING_RUNTIMES = new Set(["codex", "claude"]);
+const COMPACTING_RUNTIMES = new Set(["codex", "claude", "pi", "antigravity"]);
 
 export interface ContextRestartFeatureDeps {
   readonly timers: FeatureTimers;

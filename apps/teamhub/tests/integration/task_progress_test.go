@@ -128,4 +128,31 @@ func TestTaskProgressReadsTheTasksAMetaCoordinates(t *testing.T) {
 	if _, snapshot, body := readTaskProgress(t, env, roomID); len(snapshot.Tasks) != 0 {
 		t.Fatalf("stopped Task=%s", body)
 	}
+
+	// Resuming it tells the origin Room, whose background Task list is idle.
+	originEvents := func() int {
+		var count int
+		if err := env.pool.QueryRow(t.Context(), `SELECT count(*) FROM room_events
+			WHERE room_id=$1 AND event_type='work_item.changed' AND resource_id=$2`, roomID, created.TaskID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+	before := originEvents()
+	tx, err = env.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err := taskexecution.AppendTaskInput(t.Context(), store.New(tx), taskexecution.TaskInput{
+		TaskID: created.TaskID, Cause: taskexecution.TaskInputMetaMessage, Body: "Start again.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if after := originEvents(); after != before+1 {
+		t.Fatalf("origin Room work_item.changed events before=%d after=%d", before, after)
+	}
 }

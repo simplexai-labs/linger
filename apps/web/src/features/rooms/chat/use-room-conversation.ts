@@ -1,20 +1,201 @@
-import { type QueryKey, useQueryClient } from "@tanstack/react-query";
-import { type ComponentProps, useEffect, useMemo, useState } from "react";
+import {
+  type QueryClient,
+  type QueryKey,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import {
+  type ComponentProps,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
 import type { TeamHubMessagePresentation } from "@/features/teamhub/teamhub-runtime";
-import type { TeamHubMessage } from "@/features/teamhub/teamhub-types";
+import type {
+  TeamHubMessage,
+  TeamHubTenantAgent,
+} from "@/features/teamhub/teamhub-types";
 
 import type { RoomMessageSender } from "./room-message-sender";
 
-import { tenantRoomActivityQueryKey } from "../room-queries";
+import {
+  teamHubQueryRoot,
+  tenantAgentsQueryOptions,
+  tenantRoomActivityQueryKey,
+} from "../room-queries";
 import { visibleDirectPeerRunStatuses } from "./direct-peer-streaming";
 import type { AgentStreamingStatusDock } from "./message-timeline";
 import { useMessageReactionToggle } from "./message-reactions/use-message-reaction-toggle";
 import type { RoomMessageOutboxScope } from "./room-message-outbox";
 import { useRoomAgentStreamingStatus } from "./use-room-agent-streaming-status";
 import { useRoomMessageDelivery } from "./use-room-message-delivery";
+
+const EMPTY_AGENT_RUNTIME_UPDATED_AT: Readonly<Record<string, string>> = {};
+
+interface ObservedAgentRuntime {
+  runtimeKey: string;
+  changedAt?: string;
+}
+
+interface AgentRuntimeChangeTracker {
+  getSnapshot(tenantId: string): Readonly<Record<string, string>>;
+  subscribe(listener: () => void): () => void;
+}
+
+// Scoped per QueryClient so runtime-change timestamps survive Room <-> Settings
+// navigation within a session while staying isolated across test clients.
+const agentRuntimeTrackers = new WeakMap<
+  QueryClient,
+  AgentRuntimeChangeTracker
+>();
+
+function agentRuntimeFingerprint(
+  runtime: TeamHubTenantAgent["runtime"],
+): string {
+  const placement = runtime.placement;
+  return JSON.stringify([
+    runtime.model,
+    runtime.reasoning_effort ?? "",
+    placement?.type ?? "",
+    placement?.computer_id ?? "",
+    placement?.runtime_type ?? "",
+    placement?.workspace_grant_id ?? "",
+  ]);
+}
+
+function tenantIdFromAgentsQueryKey(
+  queryKey: readonly unknown[],
+): string | undefined {
+  if (
+    queryKey.length === 3 &&
+    queryKey[0] === teamHubQueryRoot[0] &&
+    typeof queryKey[1] === "string" &&
+    queryKey[2] === "agents"
+  ) {
+    return queryKey[1];
+  }
+  return undefined;
+}
+
+function tenantAgentItems(
+  value: unknown,
+): readonly TeamHubTenantAgent[] | undefined {
+  if (typeof value !== "object" || value === null || !("items" in value)) {
+    return undefined;
+  }
+  return Array.isArray(value.items)
+    ? (value.items as readonly TeamHubTenantAgent[])
+    : undefined;
+}
+
+function getOrCreateAgentRuntimeTracker(
+  queryClient: QueryClient,
+): AgentRuntimeChangeTracker {
+  const existing = agentRuntimeTrackers.get(queryClient);
+  if (existing) return existing;
+
+  const observedByTenant = new Map<string, Map<string, ObservedAgentRuntime>>();
+  const snapshotsByTenant = new Map<string, Readonly<Record<string, string>>>();
+  const listeners = new Set<() => void>();
+
+  const observe = (tenantId: string, items: readonly TeamHubTenantAgent[]) => {
+    let observed = observedByTenant.get(tenantId);
+    if (!observed) {
+      observed = new Map();
+      observedByTenant.set(tenantId, observed);
+    }
+    let snapshotChanged = false;
+    for (const agent of items) {
+      const runtimeKey = agentRuntimeFingerprint(agent.runtime);
+      const previous = observed.get(agent.actor.id);
+      if (!previous) {
+        observed.set(agent.actor.id, { runtimeKey });
+      } else if (previous.runtimeKey !== runtimeKey) {
+        observed.set(agent.actor.id, {
+          runtimeKey,
+          changedAt: agent.updated_at,
+        });
+        snapshotChanged = true;
+      }
+    }
+    if (!snapshotChanged) return;
+    const nextSnapshot: Record<string, string> = {};
+    for (const [actorId, entry] of observed) {
+      if (entry.changedAt !== undefined) {
+        nextSnapshot[actorId] = entry.changedAt;
+      }
+    }
+    snapshotsByTenant.set(tenantId, nextSnapshot);
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+
+  for (const query of queryClient.getQueryCache().getAll()) {
+    const tenantId = tenantIdFromAgentsQueryKey(query.queryKey);
+    const items = tenantId ? tenantAgentItems(query.state.data) : undefined;
+    if (tenantId && items) {
+      observe(tenantId, items);
+    }
+  }
+
+  queryClient.getQueryCache().subscribe((event) => {
+    if (event.type !== "added" && event.type !== "updated") return;
+    const tenantId = tenantIdFromAgentsQueryKey(event.query.queryKey);
+    const items = tenantId
+      ? tenantAgentItems(event.query.state.data)
+      : undefined;
+    if (tenantId && items) {
+      observe(tenantId, items);
+    }
+  });
+
+  const tracker: AgentRuntimeChangeTracker = {
+    getSnapshot(tenantId: string) {
+      return snapshotsByTenant.get(tenantId) ?? EMPTY_AGENT_RUNTIME_UPDATED_AT;
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+  agentRuntimeTrackers.set(queryClient, tracker);
+  return tracker;
+}
+
+/**
+ * Tracks per-Agent timestamps when `agent.runtime` changes in the tenant
+ * directory cache, ignoring profile/avatar edits that bump `updated_at`
+ * without changing model, reasoning effort, or placement.
+ */
+export function useAgentRuntimeUpdatedAtByActorId(
+  tenantId: string,
+): Readonly<Record<string, string>> {
+  const queryClient = useQueryClient();
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      getOrCreateAgentRuntimeTracker(queryClient).subscribe(listener),
+    [queryClient],
+  );
+  const getSnapshot = useCallback(
+    () =>
+      agentRuntimeTrackers.get(queryClient)?.getSnapshot(tenantId) ??
+      EMPTY_AGENT_RUNTIME_UPDATED_AT,
+    [queryClient, tenantId],
+  );
+  return useSyncExternalStore(
+    subscribe,
+    getSnapshot,
+    () => EMPTY_AGENT_RUNTIME_UPDATED_AT,
+  );
+}
 
 /**
  * The live conversation of one Room: Agent streaming from the Run statuses
@@ -88,6 +269,12 @@ export function useRoomConversation({
     roomId,
     tenantId,
   });
+  useQuery({
+    ...tenantAgentsQueryOptions(client, tenantId),
+    enabled: live,
+  });
+  const agentRuntimeUpdatedAtByActorId =
+    useAgentRuntimeUpdatedAtByActorId(tenantId);
   const streamingRunStatuses = useMemo(
     () =>
       visibleDirectPeerRunStatuses(
@@ -112,6 +299,7 @@ export function useRoomConversation({
     return () => window.clearTimeout(timer);
   }, [pending.nextExpiry]);
   const dock: ComponentProps<typeof AgentStreamingStatusDock> = {
+    agentRuntimeUpdatedAtByActorId,
     cancelRoomRun: (runId, requestId) =>
       teamHubData(
         client.api.POST("/v0/rooms/{roomId}/runs/{runId}/cancel", {

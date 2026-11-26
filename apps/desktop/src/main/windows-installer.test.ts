@@ -23,6 +23,29 @@ const order = (text: string, ...steps: string[]) => {
   expect(at.every((index) => index >= 0)).toBe(true);
   expect(at).toEqual([...at].sort((a, b) => a - b));
 };
+const expandUn = (text: string, un: "" | "un.") => {
+  const out: string[] = [];
+  let active = true;
+  let inBranch = false;
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed === '!if "${UN}" == ""') {
+      inBranch = true;
+      active = un === "";
+    } else if (trimmed === '!if "${UN}" == "un."') {
+      inBranch = true;
+      active = un === "un.";
+    } else if (trimmed === "!else") {
+      if (inBranch) active = !active;
+    } else if (trimmed === "!endif") {
+      inBranch = false;
+      active = true;
+    } else if (active) {
+      out.push(line);
+    }
+  }
+  return out.join("\n").replaceAll("${UN}", un);
+};
 
 it("stops an earlier release before an install replaces its files", () => {
   order(
@@ -160,6 +183,115 @@ it("starts the earlier app after a failed update only if no file was replaced", 
     "rerun:",
     "Run this setup again",
     "$EXEPATH",
+    "done:",
+  );
+});
+
+it("skips --stop during /update after --quit and jumps straight to waiting for Linger.exe", () => {
+  expect(script).toContain("Var ForceFullStop");
+  const stopInstall = expandUn(
+    block("Function ${UN}StopLinger", "FunctionEnd"),
+    "",
+  );
+  order(
+    stopInstall,
+    "StrCpy $2 0",
+    'IfFileExists "$INSTDIR\\Linger.exe" 0 done',
+    'IfFileExists "${STOP_MARKER}" 0 stop',
+    "ExecWait '\"$INSTDIR\\Linger.exe\" --quit'",
+    "StrCmp $Updating 1 0 stop",
+    "StrCmp $ForceFullStop 1 stop 0",
+    "StrCpy $2 1",
+    "Goto wait_start",
+    "stop:",
+    "--instance desktop --stop",
+    "stopped:",
+    'IfFileExists "${STOP_MARKER}" 0 done',
+    "wait_start:",
+    "StrCpy $1 0",
+    "wait:",
+    'Delete "$INSTDIR\\Linger.exe"',
+  );
+});
+
+it("falls back once to --stop if Linger.exe stays locked after /update waits", () => {
+  const stopInstall = expandUn(
+    block("Function ${UN}StopLinger", "FunctionEnd"),
+    "",
+  );
+  const waitSection = stopInstall.slice(stopInstall.indexOf("wait_start:"));
+  order(
+    waitSection,
+    "wait_start:",
+    "wait:",
+    'Delete "$INSTDIR\\Linger.exe"',
+    "IntCmp $1 20 wait_expired",
+    "Sleep 500",
+    "Goto wait",
+    "wait_expired:",
+    "StrCmp $2 1 0 done",
+    "StrCpy $2 0",
+    "StrCpy $ForceFullStop 1",
+    "Goto stop",
+    "done:",
+  );
+});
+
+it("forces a full --stop on Retry in CloseLinger for installs only", () => {
+  const closeRaw = block("Function ${UN}CloseLinger", "FunctionEnd");
+  order(
+    closeRaw,
+    "again:",
+    '!if "${UN}" == ""',
+    "StrCpy $ForceFullStop 1",
+    "!endif",
+    "Call ${UN}StopLinger",
+    "Goto retry",
+  );
+  const closeInstall = expandUn(closeRaw, "");
+  order(closeInstall, "again:", "StrCpy $ForceFullStop 1", "Call StopLinger");
+  const closeUninstall = expandUn(closeRaw, "un.");
+  expect(closeUninstall).not.toContain("ForceFullStop");
+  order(closeUninstall, "again:", "Call un.StopLinger", "Goto retry");
+});
+
+it("always runs --stop for manual overwrite installs and uninstalls", () => {
+  const stopRaw = block("Function ${UN}StopLinger", "FunctionEnd");
+  // Manual overwrite installs leave $Updating unset, so StrCmp $Updating 1 0 stop
+  // branches directly to stop: before setting $2 = 1 or jumping to wait_start.
+  const stopInstall = expandUn(stopRaw, "");
+  order(
+    stopInstall,
+    "StrCpy $2 0",
+    "ExecWait '\"$INSTDIR\\Linger.exe\" --quit'",
+    "StrCmp $Updating 1 0 stop",
+    "StrCpy $2 1",
+    "Goto wait_start",
+    "stop:",
+    "--instance desktop --stop",
+  );
+
+  // Uninstall excludes the entire /update fast path and fallback labels so
+  // un.StopLinger always runs --stop with no unused labels or variables.
+  const stopUninstall = expandUn(stopRaw, "un.");
+  expect(stopUninstall).not.toContain("$Updating");
+  expect(stopUninstall).not.toContain("$ForceFullStop");
+  expect(stopUninstall).not.toContain("$2");
+  expect(stopUninstall).not.toContain("wait_start");
+  expect(stopUninstall).not.toContain("wait_expired");
+  order(
+    stopUninstall,
+    'IfFileExists "${STOP_MARKER}" 0 stop',
+    "ExecWait '\"$INSTDIR\\Linger.exe\" --quit'",
+    "stop:",
+    "--instance desktop --stop",
+    "IDRETRY stop",
+    "stopped:",
+    'IfFileExists "${STOP_MARKER}" 0 done',
+    "wait:",
+    'Delete "$INSTDIR\\Linger.exe"',
+    "IntCmp $1 20 done",
+    "Goto wait",
     "done:",
   );
 });

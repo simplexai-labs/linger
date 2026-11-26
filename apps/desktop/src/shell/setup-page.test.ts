@@ -1843,3 +1843,279 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
     );
   });
 });
+
+describe("setup page install location and customizing layout", () => {
+  const fill = (text: string, values: Record<string, string>) =>
+    text.replace(/\{(\w+)\}/gu, (_, name: string) => values[name]!);
+  const withLocation = (
+    localModels: SetupLocalModelsCheck,
+    location: SetupState["localServer"]["location"],
+  ): SetupState => {
+    const base = welcome(localModels);
+    return {
+      ...base,
+      localServer: {
+        ...base.localServer,
+        location,
+      },
+    };
+  };
+  const type = (id: string, value: string) => {
+    const input = $(id) as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new Event("input"));
+  };
+
+  it("renders a quiet install-location bar and shows Reset only for custom folders (EN and zh-CN)", async () => {
+    const { run, push } = await openPage(
+      withLocation(small, {
+        path: "~/.linger",
+        custom: false,
+        freeBytes: 80 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+      "welcome",
+    );
+    expect($("install-location").hidden).toBe(false);
+    expect($("install-location").dataset.warn).toBe("false");
+    expect($("location-path").textContent).toBe("~/.linger");
+    expect($("location-path").title).toBe("~/.linger");
+    expect($("location-sub").hidden).toBe(true);
+    expect($("location-sub").textContent).toBe("");
+    expect($("location-reset").hidden).toBe(true);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+
+    $("location-change").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({ op: "local.location.pick" }),
+    );
+
+    push(
+      withLocation(small, {
+        path: "/Volumes/Data/Linger",
+        custom: true,
+        freeBytes: 120 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+    );
+    expect($("install-location").dataset.warn).toBe("false");
+    expect($("location-path").textContent).toBe("/Volumes/Data/Linger");
+    expect($("location-reset").hidden).toBe(false);
+    expect($("location-reset").textContent).toBe("Reset");
+    $("location-reset").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({ op: "local.location.reset" }),
+    );
+
+    await openPage(
+      withLocation(small, {
+        path: "/Volumes/Data/Linger",
+        custom: true,
+        freeBytes: 120 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+      "welcome",
+      "zh-CN",
+    );
+    expect($("location-reset").hidden).toBe(false);
+    expect($("location-reset").textContent).toBe(zhCN.setup.resetLocation);
+  });
+
+  it("warns and disables Quick Install when default disk space is below minFreeBytes in EN and zh-CN", async () => {
+    await openPage(
+      withLocation(small, {
+        path: "C:\\Users\\demo\\.linger",
+        custom: false,
+        freeBytes: 10 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+      "welcome",
+    );
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").dataset.warn).toBe("true");
+    expect($("location-sub").textContent).toBe(
+      "Needs 20 GB free; this disk has 10 GB.",
+    );
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect($("location-reset").hidden).toBe(true);
+
+    await openPage(
+      withLocation(small, {
+        path: "C:\\Users\\demo\\.linger",
+        custom: false,
+        freeBytes: 10 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+      "welcome",
+      "zh-CN",
+    );
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(
+      fill(zhCN.setup.locationSpaceLow, { needed: "20", free: "10" }),
+    );
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect($("location-reset").hidden).toBe(true);
+  });
+
+  it("includes the planned local model disk budget dynamically and clears the warning for Subscription or valid BYOK", async () => {
+    const bigModel: SetupLocalModelsCheck = {
+      ...capable,
+      model: {
+        name: "inkling-2-mini:Q4_K_M",
+        downloadBytes: 15 * GB,
+        diskBytes: 18 * GB,
+        memoryBytes: 22 * GB,
+        featuredInkling: true,
+      },
+    };
+    await openPage(
+      withLocation(bigModel, {
+        path: "~/.linger",
+        custom: false,
+        freeBytes: 28 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+      "welcome",
+    );
+    // 28 GB free covers the 20 GB base requirement, but not 20 + 18 = 38 GB for the local model.
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(
+      "Needs 38 GB free; this disk has 28 GB.",
+    );
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect($("location-reset").hidden).toBe(true);
+
+    $("local-customize").click();
+    const source = (value: string) =>
+      document.querySelector<HTMLButtonElement>(
+        `[data-plan="source"] [data-value="${value}"]`,
+      )!;
+    source("subscription").click();
+    expect($("install-location").dataset.warn).toBe("false");
+    expect($("location-sub").hidden).toBe(true);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+
+    source("byok").click();
+    expect($("install-location").dataset.warn).toBe("false");
+    expect($("location-sub").hidden).toBe(true);
+    // Disabled only because BYOK fields are incomplete.
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    type("byok-url", "https://api.example.com");
+    type("byok-model", "claude-sonnet-4-6");
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("gives location.error precedence over spaceLow and shows full error text with Reset", async () => {
+    const errorMessage =
+      "Linger can't write to this folder. Choose another one.";
+    await openPage(
+      withLocation(small, {
+        path: "~/.linger",
+        custom: false,
+        freeBytes: 5 * GB,
+        minFreeBytes: 20 * GB,
+        error: errorMessage,
+      }),
+      "welcome",
+    );
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(errorMessage);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect($("location-reset").hidden).toBe(false);
+  });
+
+  it("syncs document.body.dataset.customizing when toggling Customize and leaving welcome", async () => {
+    await openPage(welcome(capable), "welcome");
+    expect(document.body.dataset.customizing).toBe("false");
+
+    $("local-customize").click();
+    expect(document.body.dataset.customizing).toBe("true");
+
+    $("local-customize").click();
+    expect(document.body.dataset.customizing).toBe("false");
+
+    // Enter customizing, then leave welcome via a step transition: body flag resets to false.
+    $("local-customize").click();
+    expect(document.body.dataset.customizing).toBe("true");
+    document
+      .querySelector<HTMLButtonElement>('#team [data-go="server"]')!
+      .click();
+    expect(document.body.dataset.customizing).toBe("false");
+  });
+
+  it("handles legacy snapshots without freeBytes/minFreeBytes cleanly", async () => {
+    await openPage(
+      withLocation(small, {
+        path: "~/.linger",
+        custom: false,
+      }),
+      "welcome",
+    );
+    expect($("install-location").hidden).toBe(false);
+    expect($("install-location").dataset.warn).toBe("false");
+    expect($("location-path").textContent).toBe("~/.linger");
+    expect($("location-sub").hidden).toBe(true);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("warns and disables Quick Install when freeBytes is 0", async () => {
+    await openPage(
+      withLocation(small, {
+        path: "~/.linger",
+        custom: false,
+        freeBytes: 0,
+        minFreeBytes: 20 * GB,
+      }),
+      "welcome",
+    );
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(
+      "Needs 20 GB free; this disk has 0 GB.",
+    );
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect($("location-reset").hidden).toBe(true);
+  });
+
+  it("shows rejectedPath while location.error is active and restores location.path once cleared", async () => {
+    const errorMessage =
+      "Linger can't write to this folder. Choose another one.";
+    const { push } = await openPage(
+      withLocation(small, {
+        path: "~/.linger",
+        custom: false,
+        freeBytes: 80 * GB,
+        minFreeBytes: 20 * GB,
+        error: errorMessage,
+        rejectedPath: "/Volumes/ReadOnly/Linger",
+      }),
+      "welcome",
+    );
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-path").textContent).toBe("/Volumes/ReadOnly/Linger");
+    expect($("location-path").title).toBe("/Volumes/ReadOnly/Linger");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(errorMessage);
+    expect($("location-reset").hidden).toBe(false);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+
+    push(
+      withLocation(small, {
+        path: "~/.linger",
+        custom: false,
+        freeBytes: 80 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+    );
+    expect($("install-location").dataset.warn).toBe("false");
+    expect($("location-path").textContent).toBe("~/.linger");
+    expect($("location-path").title).toBe("~/.linger");
+    expect($("location-sub").hidden).toBe(true);
+    expect($("location-reset").hidden).toBe(true);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+  });
+});

@@ -1,13 +1,21 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  type InfiniteData,
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+} from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
-import type { TeamHubDocument } from "@/features/teamhub/teamhub-types";
+import type {
+  TeamHubDocument,
+  TeamHubDocumentPage,
+} from "@/features/teamhub/teamhub-types";
 
 import { roomCatalogRetry } from "./room-catalog-retry";
 
-/** One bounded page keeps the Composer catalog small in Tenants with many Documents. */
+/** Pages stay bounded; scrolling the Docs list to its end loads the next one. */
 export const COMPOSER_DOCUMENT_PAGE_SIZE = 50;
 /**
  * Binding a Document into a Room needs collaborator management rights, which
@@ -68,17 +76,30 @@ export function useComposerDocumentOptions({
     return () => window.clearTimeout(timer);
   }, [documentQuery, searchTerm]);
 
-  const shareableDocuments = useQuery({
+  const shareableDocuments = useInfiniteQuery<
+    TeamHubDocumentPage,
+    Error,
+    InfiniteData<TeamHubDocumentPage>,
+    readonly ["teamhub", string, "shareable-documents"],
+    string | undefined
+  >({
     enabled: documentQuery !== null,
-    queryFn: () =>
+    getNextPageParam: (lastPage) =>
+      lastPage.page.has_more ? lastPage.page.next_cursor : undefined,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
       teamHubData(
         client.api.GET("/v0/library/documents", {
           params: {
-            query: { limit: COMPOSER_DOCUMENT_PAGE_SIZE, view: "shareable" },
+            query: {
+              cursor: pageParam,
+              limit: COMPOSER_DOCUMENT_PAGE_SIZE,
+              view: "shareable",
+            },
           },
         }),
       ),
-    queryKey: ["teamhub", tenantId, "shareable-documents"],
+    queryKey: ["teamhub", tenantId, "shareable-documents"] as const,
     ...roomCatalogRetry,
     staleTime: 10_000,
   });
@@ -129,7 +150,7 @@ export function useComposerDocumentOptions({
   const documents = useMemo(() => {
     const catalog = new Map<string, TeamHubDocument>();
     for (const document of [
-      ...(shareableDocuments.data?.items ?? []),
+      ...(shareableDocuments.data?.pages.flatMap((page) => page.items) ?? []),
       ...(searchedDocuments.data?.items ?? []),
     ]) {
       if (document.tenant_id === tenantId && isRoomShareable(document)) {
@@ -148,7 +169,7 @@ export function useComposerDocumentOptions({
     draftDocuments.data,
     roomDocuments,
     searchedDocuments.data?.items,
-    shareableDocuments.data?.items,
+    shareableDocuments.data?.pages,
     tenantId,
   ]);
 
@@ -160,6 +181,14 @@ export function useComposerDocumentOptions({
       (query: string | null) => setDocumentQuery(query),
       [],
     ),
+    /** Loads the next shareable page once the browsed list reaches its end. */
+    onLoadMoreDocuments: useCallback(() => {
+      if (
+        shareableDocuments.hasNextPage &&
+        !shareableDocuments.isFetchingNextPage
+      )
+        void shareableDocuments.fetchNextPage();
+    }, [shareableDocuments]),
     shareableDocuments,
   };
 }

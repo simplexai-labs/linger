@@ -160,6 +160,77 @@ describe("EditAgentRuntimeDialog", () => {
     },
   );
 
+  it("keeps the form usable when a background computer refetch fails with cached data", async () => {
+    const onSave = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const listTenantLocalComputers = vi
+      .fn()
+      .mockResolvedValueOnce({
+        items: [localComputer("computer-old", "Old Mac", "online")],
+      })
+      .mockRejectedValueOnce(new Error("transient network error"));
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <EditAgentRuntimeDialog
+            client={{ listTenantLocalComputers }}
+            isPending={false}
+            onClose={vi.fn()}
+            onSave={onSave}
+            registration={localCodexAgent()}
+            tenantId="tenant-northstar"
+          />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    const save = await screen.findByRole("button", { name: "Save Runtime" });
+    await waitFor(() => expect(save).toBeEnabled());
+    await act(async () => {
+      await queryClient.refetchQueries({
+        queryKey: localComputersQueryKey("tenant-northstar"),
+      });
+    });
+    expect(listTenantLocalComputers).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByText("Runtime options are unavailable."),
+    ).not.toBeInTheDocument();
+    expect(save).toBeEnabled();
+  });
+
+  it("renders dynamic model-advertised reasoning efforts like minimal and future tokens", async () => {
+    const onSave = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
+    const computer = localComputer("computer-old", "Old Mac", "online");
+    computer.runtimes[1] = {
+      type: "codex",
+      status: "ready",
+      models: [
+        {
+          id: "codex-default",
+          label: "Codex default",
+          allowed_reasoning_effort: ["minimal", "low", "custom_tier"],
+          default_reasoning_effort: "minimal",
+        },
+      ],
+    };
+    renderDialog({ onSave, computersOverride: { items: [computer] } });
+    const reasoning = await screen.findByRole("combobox", {
+      name: "Agent reasoning effort",
+    });
+    await waitFor(() => expect(reasoning).toHaveTextContent("Minimal"));
+    fireEvent.click(reasoning);
+    fireEvent.click(await screen.findByRole("option", { name: "Custom tier" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Runtime" }));
+    expect(onSave).toHaveBeenCalledWith({
+      runtime: {
+        model: "codex-default",
+        reasoning_effort: "custom_tier",
+        placement: localCodexAgent().runtime.placement,
+      },
+    });
+  });
+
   it.each(["claude", "pi"] as const)(
     "switches local runtime to %s while retaining the Computer and transport",
     async (type) => {

@@ -98,7 +98,9 @@ export const composerMessages = defineMessages("composer", {
   },
 
   // Thinking effort, shown on the model pill and in the Agent's settings.
+  effortOff: "Off",
   effortNone: "None",
+  effortMinimal: "Minimal",
   effortLow: "Low",
   effortMedium: "Medium",
   effortHigh: "High",

@@ -1760,6 +1760,12 @@ describe("RemoteCodexProvider session compaction", () => {
         { signal: signal() },
       ),
     ).resolves.toEqual({ status: "nothing_to_compact" });
+    await expect(
+      createProvider(dispatcher, "pi").compactSession!(
+        { provider: "pi", sessionId: "s-pi", lingerMaterialized: false },
+        { signal: signal() },
+      ),
+    ).resolves.toEqual({ status: "nothing_to_compact" });
     expect(dispatcher.compactions).toEqual([]);
   });
 
@@ -1780,10 +1786,57 @@ describe("RemoteCodexProvider session compaction", () => {
     expect(dispatcher.compactions).toHaveLength(1);
   });
 
-  it("offers compaction only for Codex and Claude on a Gateway that supports it", () => {
-    expect(
-      createProvider(new CompactingDispatcher(), "pi").compactSession,
-    ).toBe(undefined);
+  it("offers compaction for Codex, Claude, Pi, and Antigravity on a Gateway that supports it", async () => {
+    const dispatcher = new CompactingDispatcher();
+    dispatcher.outcome = { outcome: "compacted", pre_tokens: 32_100 };
+    const piProvider = createProvider(dispatcher, "pi");
+    expect(piProvider.compactSession).toBeTypeOf("function");
+    await expect(
+      piProvider.compactSession!(
+        { provider: "pi", sessionId: "session-pi-1", lingerMaterialized: true },
+        { instructions: "Keep decisions", signal: signal() },
+      ),
+    ).resolves.toEqual({ status: "compacted", preTokens: 32_100 });
+
+    dispatcher.outcome = { outcome: "compacted", pre_tokens: 12_345 };
+    const agyProvider = createProvider(dispatcher, "antigravity");
+    expect(agyProvider.compactSession).toBeTypeOf("function");
+    await expect(
+      agyProvider.compactSession!({ threadId: "" }, { signal: signal() }),
+    ).resolves.toEqual({ status: "nothing_to_compact" });
+    await expect(
+      agyProvider.compactSession!(
+        { threadId: "agy-session-1" },
+        { instructions: "Keep task ids", signal: signal() },
+      ),
+    ).resolves.toEqual({ status: "compacted", preTokens: 12_345 });
+
+    expect(dispatcher.compactions).toEqual([
+      {
+        target: {
+          runnerId: "runner-local",
+          agentId: "agent-reviewer",
+          executionContextKey: contextScope.executionContextKey,
+        },
+        options: {
+          runtimeType: "pi",
+          instructions: "Keep decisions",
+          signal: expect.any(AbortSignal),
+        },
+      },
+      {
+        target: {
+          runnerId: "runner-local",
+          agentId: "agent-reviewer",
+          executionContextKey: contextScope.executionContextKey,
+        },
+        options: {
+          runtimeType: "antigravity",
+          instructions: "Keep task ids",
+          signal: expect.any(AbortSignal),
+        },
+      },
+    ]);
     expect(createProvider(new ScriptedDispatcher()).compactSession).toBe(
       undefined,
     );
@@ -1892,7 +1945,7 @@ describe("RemoteCodexProvider session compaction", () => {
 
 const createProvider = (
   dispatcher: RunnerOperationDispatcher,
-  runtimeType: "codex" | "claude" | "pi" = "codex",
+  runtimeType: "codex" | "claude" | "pi" | "antigravity" = "codex",
 ) =>
   new RemoteCodexProvider({
     dispatcher,

@@ -32,6 +32,8 @@ import {
   FIRST_MODEL_INVOKE_OUTCOMES_COMPUTER_VERSION,
   FIRST_LOCAL_MODELS_ENGINE_COMPUTER_VERSION,
   FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
+  FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION,
+  FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION,
   FIRST_SERVICE_FEATURES_COMPUTER_VERSION,
   resolveSupportedReasoningEffort,
   type LocalPlacementRequirement,
@@ -503,6 +505,7 @@ export class RunnerConnections {
               "local_models_external_holders",
               "runtime_failure_detail",
               "operation_background_wait",
+              "dynamic_reasoning_efforts",
             ],
           }
         : {}),
@@ -710,6 +713,9 @@ export class RunnerConnections {
           connection.hello,
         ),
       });
+      await this.owners
+        .lifecycle()
+        .refreshComputerPlacements(connection.runnerId);
       return;
     }
     if (envelope.type === "runtime.registration.observed") {
@@ -875,7 +881,18 @@ export class RunnerConnections {
     const connection = this.#connections.get(runnerId);
     return (
       isServingConnection(connection) &&
-      (runtimeType === "codex" || runtimeType === "claude") &&
+      (runtimeType === "codex" ||
+        runtimeType === "claude" ||
+        (runtimeType === "pi" &&
+          isComputerVersionAtLeast(
+            connection.hello.daemon_version,
+            FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION,
+          )) ||
+        (runtimeType === "antigravity" &&
+          isComputerVersionAtLeast(
+            connection.hello.daemon_version,
+            FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION,
+          ))) &&
       connection.hello.runtime_diagnostics.some(
         ({ type, status }) => type === runtimeType && status === "ready",
       )
@@ -1038,7 +1055,6 @@ export class RunnerConnections {
     const resolvedEffort = resolveSupportedReasoningEffort(
       model,
       reasoningEffort,
-      requirement.runtimeType,
     );
     if (
       reasoningEffort !== undefined &&

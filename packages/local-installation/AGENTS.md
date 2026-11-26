@@ -486,17 +486,21 @@ without adding contract fields. Each wall-clock second counts toward exactly one
 stage on the critical path, so stage durations sum to the total job duration:
 `runtime` runs alongside `release`, `images`, and (on overlapped installs)
 `migrate`, `services`, and `account`, and counts only the wait beyond that
-parallel work, appearing only when the runtime finishes last. LiveKit binds its
-saved port before `prepareFoundationServices` on both paths (before the fork
-when overlapped), because the model controller asks the OS for a free port. On
-fresh installs (`!switchingCheckout`, no
-provisioned account unless a legacy backup was set aside, and no running
-services) and cold resumes (`resume: true`, `!switchingCheckout`, and no running
-services), `migrate`, `services`, and `account` run concurrently with `runtime`,
+parallel work, appearing only when the runtime or local-stack branch finishes
+last. LiveKit binds its saved port before `prepareFoundationServices` (before
+the fork on both paths), because the model controller asks the OS for a free
+port. On fresh installs (`!switchingCheckout`, no provisioned account unless a
+legacy backup was set aside, and no running services) and cold resumes
+(`resume: true`, `!switchingCheckout`, and no running services), `migrate`,
+`services`, and `account` run concurrently with `runtime`,
 `prepareFoundationServices`, and `prepareModelGateway`, holding
 `services`/`account` `succeeded` events and `saveSourceBinding` until both
-branches succeed and aborting and draining both before rollback on failure;
-upgrades and live re-runs keep `migrate` sequential after `runtime`. When
+branches succeed and aborting and draining both before rollback on failure; on
+upgrades and live re-runs (`!overlapWithRuntime`), `runtime`, `migrate`, and
+`bindLiveKit` still run sequentially first, after which
+`prepareFoundationServices` and `prepareModelGateway` run concurrently with
+`startAndAwaitServices` and `provisionAccount` under the same
+`Promise.allSettled`, abort, and deferred `saveSourceBinding` barrier. When
 `resume: true`, `prepareRuntime` inspects the selected runtime (or a saved BYOK
 source's runtime) once and skips
 `harness plan` and `harness apply` when it is already installed (falling back to

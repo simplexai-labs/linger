@@ -64,11 +64,63 @@ func TestShellScriptsAreNamedByTheirSteps(t *testing.T) {
 		{"python3 compare_fares.py\nrm out.txt", "file_change", []string{"Running a script", "Organizing files"}},
 		{"cat a.md; rg x; curl https://c.com; python3 s.py; git status", "command", []string{"Fetching c.com", "Running a script", "Checking changes"}},
 		{"some-unknown-tool --flag", "command", nil},
+		{"@'\nDon't split; a | b\n'@ | teamhub message send --file -", "message", nil},
+		{"@'\r\nDon't split; a | b\r\n'@ | teamhub.cmd message send --file -", "message", nil},
+		{"@\"\r\nDouble quoted body; a | b\r\n\"@ | TEAMHUB.EXE docs create --title 'Plan' --file -", "file_change", []string{"Creating a document"}},
+		{"teamhub.cmd message read --json", "message_read", []string{"Reading messages"}},
+		{"teamhub.exe docs get doc_123 --json", "read", []string{"Reading a document"}},
+		{`C:\Users\alice\AppData\Local\Linger\cli\teamhub.cmd message read --json`, "message_read", []string{"Reading messages"}},
+		{`& 'C:\Users\alice\AppData\Local\Linger\cli\teamhub.cmd' docs get doc_123`, "read", []string{"Reading a document"}},
+		{`& "C:\Users\alice\AppData\Local\Linger\cli\teamhub.exe" task create --name 'Check'`, "delegation", []string{"Assigning a task"}},
 	} {
 		kind, _, status := activityPresentation(native.Event{Kind: native.EventToolCall, ToolName: "exec_command", ActivityKind: native.ActivityCommand, Input: map[string]any{"command": test.command}})
 		if kind != test.kind || !slices.Equal(status.steps, test.steps) || status.title != "" {
 			t.Errorf("%q: got %q %q, want %q %q", test.command, kind, status.steps, test.kind, test.steps)
 		}
+	}
+}
+
+func TestPowerShellToolActivityAndTaskCreation(t *testing.T) {
+	for _, command := range []string{
+		"@'\r\nCan't wait; check a | b\r\n'@ | teamhub.cmd message send --file -",
+		"@'\nHello\n'@ | `\nteamhub message send --file -",
+		"@'\r\nHello\r\n'@ | `\r\nteamhub.cmd message send --file -",
+		"teamhub `\n message send --content \"Done\"",
+		"cd .\\my` folder; teamhub message send --content \"Done\"",
+		"Write-Output \"He said `\"hi`\"\" | teamhub message send --file -",
+		`cd "C:\work\" ; teamhub message send --content "hi"`,
+		"$msg=@'\nDon't split\n'@\n$msg | teamhub message send --file -",
+		"teamhub message send --content 'It''s fine'",
+	} {
+		kind, _, status := activityPresentation(native.Event{
+			Kind:         native.EventToolCall,
+			ToolName:     "powershell",
+			ActivityKind: native.ActivityCommand,
+			Input:        map[string]any{"command": command},
+		})
+		if kind != native.ActivityMessage || status.steps != nil {
+			t.Errorf("powershell %q = %q %q, want %q nil", command, kind, status.steps, native.ActivityMessage)
+		}
+	}
+
+	taskCmd := "@'\r\nInvestigate it's failing; check logs | tail\r\n'@ | teamhub.cmd task create --name 'Debug' --requirement-file -"
+	kind, _, status := activityPresentation(native.Event{
+		Kind:         native.EventToolCall,
+		ToolName:     "powershell",
+		ActivityKind: native.ActivityCommand,
+		Input:        map[string]any{"command": taskCmd},
+	})
+	if kind != native.ActivityDelegation || !slices.Equal(status.steps, []string{"Assigning a task"}) {
+		t.Fatalf("powershell task create = %q %q", kind, status.steps)
+	}
+	if !createsTaskFor(taskCmd, true) {
+		t.Fatalf("createsTaskFor(%q, true) = false, want true", taskCmd)
+	}
+	if !createsTaskFor("teamhub.cmd `\r\n task create --name 'It''s ready'", true) {
+		t.Fatal("createsTaskFor failed for PowerShell line continuation and doubled quotes")
+	}
+	if !createsTaskFor(`C:\Users\alice\cli\teamhub.exe task create --name 'Debug'`, false) {
+		t.Fatal("createsTaskFor failed for full Windows path")
 	}
 }
 

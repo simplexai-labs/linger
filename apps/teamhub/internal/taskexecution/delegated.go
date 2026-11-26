@@ -319,8 +319,28 @@ func setDelegatedTaskStatus(
 	if updated != 1 {
 		return 0, ErrConflict
 	}
-	return nextRevision, appendExecutionEvent(ctx, queries, snapshot.TenantID, snapshot.EventRoomID, snapshot.TaskID,
-		actorID, snapshot.Version, nextRevision, toStatus)
+	if err := appendExecutionEvent(ctx, queries, snapshot.TenantID, snapshot.EventRoomID, snapshot.TaskID,
+		actorID, snapshot.Version, nextRevision, toStatus); err != nil {
+		return 0, err
+	}
+	// Execution Events go to the Task's work Room. The origin Room lists its
+	// running background Tasks and only polls while that list is non-empty, so
+	// a Task resumed after it stopped must also announce itself there.
+	origin := snapshot.OriginRoomID
+	if isActiveDelegatedStatus(toStatus) && !isActiveDelegatedStatus(fromStatus) &&
+		origin.Valid && origin.String != snapshot.EventRoomID {
+		if err := appendExecutionEvent(ctx, queries, snapshot.TenantID, origin.String, snapshot.TaskID,
+			actorID, snapshot.Version, nextRevision, toStatus); err != nil {
+			return 0, err
+		}
+	}
+	return nextRevision, nil
+}
+
+// isActiveDelegatedStatus reports whether a status keeps the Task in its
+// origin Room's background Task list.
+func isActiveDelegatedStatus(status string) bool {
+	return status == "running" || status == "waiting_for_approval"
 }
 
 // appendTaskReport writes one hidden report to the Task's callback stream,

@@ -135,6 +135,10 @@ func Surface(tool, command string) string {
 		return "connected_app"
 	case tool == "Bash":
 		return "shell"
+	case tool == "PowerShell" && isPowerShellTeamHubCommand(command):
+		return "connected_app"
+	case tool == "PowerShell":
+		return "shell"
 	}
 	return "other"
 }

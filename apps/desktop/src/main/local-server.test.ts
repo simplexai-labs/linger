@@ -50,6 +50,7 @@ import {
   computerNotOnline,
   followHttps,
   formatInstallJobFailure,
+  freeDiskBytes,
   hasNativePostgres,
   InstallerApi,
   installLocation,
@@ -1615,6 +1616,7 @@ describe("LocalServerModule", () => {
         installerDirectory: path.join(f.root, "installer"),
         platform: "linux",
         arch: "x64",
+        freeBytes: 1,
         sourceArchive: { file: "source/linger.tar.gz", sha256 },
         signIn: f.signIn,
       });
@@ -1676,6 +1678,7 @@ describe("LocalServerModule", () => {
         installerDirectory: path.join(f.root, "installer"),
         platform: "linux",
         arch: "x64",
+        freeBytes: 1,
         sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
         signIn: f.signIn,
       })
@@ -1751,6 +1754,7 @@ describe("LocalServerModule", () => {
         installerDirectory: path.join(f.root, "installer"),
         platform: "linux",
         arch: "x64",
+        freeBytes: 1,
         glibcVersion,
         sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
         signIn: f.signIn,
@@ -1888,6 +1892,7 @@ describe("LocalServerModule", () => {
         installerDirectory: path.join(f.root, "installer"),
         platform: "linux",
         arch: "x64",
+        freeBytes: 1,
         glibcVersion,
         sourceArchive: { file: "source/linger.tar.gz", sha256: archiveSha },
         signIn: f.signIn,
@@ -1987,6 +1992,7 @@ describe("LocalServerModule", () => {
         installerDirectory: installer,
         platform: "darwin",
         arch: "arm64",
+        freeBytes: 1,
         sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
         signIn: f.signIn,
       })
@@ -2156,6 +2162,7 @@ describe("LocalServerModule", () => {
         installerDirectory: installer,
         platform: "darwin",
         arch: "arm64",
+        freeBytes: 1,
         sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
         signIn: f.signIn,
         fetch: fetchMock,
@@ -4078,7 +4085,12 @@ describe("LocalServerModule install location", () => {
     writeFileSync(path.join(picked, "notes.txt"), "");
     await f.module.chooseLocation(picked);
     const home = path.join(picked, "Linger");
-    expect(f.module.status().location).toEqual({ path: home, custom: true });
+    expect(f.module.status().location).toEqual({
+      path: home,
+      custom: true,
+      freeBytes: expect.any(Number),
+      minFreeBytes: 1,
+    });
 
     await f.module.begin();
     const args = installerArgs(home);
@@ -4107,11 +4119,15 @@ describe("LocalServerModule install location", () => {
     expect(f.module.status().location).toEqual({
       path: path.join(f.root, "missing", "deeper"),
       custom: true,
+      freeBytes: expect.any(Number),
+      minFreeBytes: 1,
     });
     await f.module.chooseLocation(null);
     expect(f.module.status().location).toEqual({
       path: f.home,
       custom: false,
+      freeBytes: expect.any(Number),
+      minFreeBytes: 1,
     });
     await f.host.stop("quit");
   });
@@ -4129,6 +4145,7 @@ describe("LocalServerModule install location", () => {
           path: f.home,
           custom: false,
           error: "Linger can't write to this folder. Choose another one.",
+          rejectedPath: locked,
         });
       } finally {
         chmodSync(locked, 0o700);
@@ -4192,7 +4209,345 @@ describe("LocalServerModule install location", () => {
       path: f.home,
       custom: false,
       error: "This folder has shared access.",
+      rejectedPath: picked,
     });
+  });
+
+  it("reads freeDiskBytes read-only without creating missing folders or probe files", async () => {
+    const root = tempDirectory();
+    const missing = path.join(root, "does-not-exist", "deeper");
+    const free = await freeDiskBytes(missing);
+    expect(typeof free).toBe("number");
+    expect(Number.isFinite(free)).toBe(true);
+    expect(free!).toBeGreaterThanOrEqual(0);
+    expect(existsSync(path.join(root, "does-not-exist"))).toBe(false);
+    expect(readdirSync(root)).toEqual([]);
+    expect(await freeDiskBytes("relative/path")).toBeUndefined();
+  });
+
+  it("refreshes location space and emits only when freeBytes changes", async () => {
+    const GiB = 1024 ** 3;
+    let currentHomeFree = 5 * GiB;
+    const f = fixture({
+      checkout: "/src",
+      freeBytes: 20 * GiB,
+      freeDiskBytes: async () => currentHomeFree,
+    });
+    await f.host.start();
+    const changed = vi.fn();
+    const off = f.bus.on("local-server.changed", changed);
+    try {
+      await f.module.refreshLocationSpace();
+      expect(f.module.status().location).toEqual({
+        path: f.home,
+        custom: false,
+        freeBytes: 5 * GiB,
+        minFreeBytes: 20 * GiB,
+      });
+      expect(changed).toHaveBeenCalledTimes(1);
+
+      // Same value does not emit again.
+      await f.module.refreshLocationSpace();
+      expect(changed).toHaveBeenCalledTimes(1);
+
+      // A changed value updates status and emits.
+      currentHomeFree = 35 * GiB;
+      await f.module.refreshLocationSpace();
+      expect(f.module.status().location).toEqual({
+        path: f.home,
+        custom: false,
+        freeBytes: 35 * GiB,
+        minFreeBytes: 20 * GiB,
+      });
+      expect(changed).toHaveBeenCalledTimes(2);
+    } finally {
+      off();
+      await f.host.stop("quit");
+    }
+  });
+
+  it("discards a stale refreshLocationSpace result when chooseLocation runs concurrently", async () => {
+    const GiB = 1024 ** 3;
+    let staleResolve!: (value: number | undefined) => void;
+    const picked = path.join(tempDirectory(), "custom-disk");
+    mkdirSync(picked);
+    let homeCalls = 0;
+    const f = fixture({
+      checkout: "/src",
+      freeBytes: 1,
+      freeDiskBytes: async (directory) => {
+        if (directory === f.home) {
+          homeCalls += 1;
+          if (homeCalls === 1) {
+            return new Promise<number | undefined>((resolve) => {
+              staleResolve = resolve;
+            });
+          }
+          return 12 * GiB;
+        }
+        return 95 * GiB;
+      },
+    });
+    await f.host.start();
+    try {
+      const pendingRefresh = f.module.refreshLocationSpace();
+      await f.module.chooseLocation(picked);
+      expect(f.module.status().location).toEqual({
+        path: picked,
+        custom: true,
+        freeBytes: 95 * GiB,
+        minFreeBytes: 1,
+      });
+      // Resolve the older default-home probe after choosing the new path.
+      staleResolve(4 * GiB);
+      await pendingRefresh;
+      expect(f.module.status().location).toEqual({
+        path: picked,
+        custom: true,
+        freeBytes: 95 * GiB,
+        minFreeBytes: 1,
+      });
+      // Resetting refreshes freeBytes for the default home.
+      await f.module.chooseLocation(null);
+      expect(f.module.status().location).toEqual({
+        path: f.home,
+        custom: false,
+        freeBytes: 12 * GiB,
+        minFreeBytes: 1,
+      });
+    } finally {
+      await f.host.stop("quit");
+    }
+  });
+
+  it("preserves active path and freeBytes when a picked folder is rejected", async () => {
+    const GiB = 1024 ** 3;
+    const f = fixture({
+      checkout: "/src",
+      platform: "win32",
+      freeBytes: 1,
+      freeDiskBytes: async () => 18 * GiB,
+      checkPrivateLocation: async () => {
+        throw new Error("This folder has shared access.");
+      },
+    });
+    await f.host.start();
+    try {
+      await f.module.refreshLocationSpace();
+      expect(f.module.status().location).toEqual({
+        path: f.home,
+        custom: false,
+        freeBytes: 18 * GiB,
+        minFreeBytes: 1,
+      });
+      const picked = path.join(f.root, "shared");
+      await f.module.chooseLocation(picked);
+      expect(f.module.status().location).toEqual({
+        path: f.home,
+        custom: false,
+        error: "This folder has shared access.",
+        rejectedPath: picked,
+        freeBytes: 18 * GiB,
+        minFreeBytes: 1,
+      });
+    } finally {
+      await f.host.stop("quit");
+    }
+  });
+
+  it("commits chooseLocation atomically and keeps only the latest overlapping choice", async () => {
+    const GiB = 1024 ** 3;
+    const slowDir = path.join(tempDirectory(), "slow-disk");
+    const fastDir = path.join(tempDirectory(), "fast-disk");
+    mkdirSync(slowDir);
+    mkdirSync(fastDir);
+    let slowProbeStarted!: () => void;
+    const slowStarted = new Promise<void>((resolve) => {
+      slowProbeStarted = resolve;
+    });
+    let resolveSlow!: (value: number | undefined) => void;
+    const f = fixture({
+      checkout: "/src",
+      freeBytes: 1,
+      freeDiskBytes: async (directory) => {
+        if (directory === f.home) return 10 * GiB;
+        if (directory === slowDir) {
+          slowProbeStarted();
+          return new Promise<number | undefined>((resolve) => {
+            resolveSlow = resolve;
+          });
+        }
+        return 120 * GiB;
+      },
+    });
+    await f.host.start();
+    const changed = vi.fn();
+    const off = f.bus.on("local-server.changed", changed);
+    try {
+      await f.module.refreshLocationSpace();
+      expect(f.module.status().location).toEqual({
+        path: f.home,
+        custom: false,
+        freeBytes: 10 * GiB,
+        minFreeBytes: 1,
+      });
+      changed.mockClear();
+
+      // Start a slow chooseLocation and wait until it is awaiting freeDiskBytes.
+      const slowChoice = f.module.chooseLocation(slowDir);
+      await slowStarted;
+      // Must not expose (slowDir, 10 GiB) while freeDiskBytes(slowDir) is still pending.
+      expect(f.module.status().location).toEqual({
+        path: f.home,
+        custom: false,
+        freeBytes: 10 * GiB,
+        minFreeBytes: 1,
+      });
+      expect(changed).not.toHaveBeenCalled();
+
+      // A newer fast chooseLocation commits (fastDir, 120 GiB).
+      await f.module.chooseLocation(fastDir);
+      expect(f.module.status().location).toEqual({
+        path: fastDir,
+        custom: true,
+        freeBytes: 120 * GiB,
+        minFreeBytes: 1,
+      });
+      expect(changed).toHaveBeenCalledTimes(1);
+
+      // When the older slow choice resolves later, it is discarded without overwriting or emitting.
+      resolveSlow(45 * GiB);
+      await slowChoice;
+      expect(f.module.status().location).toEqual({
+        path: fastDir,
+        custom: true,
+        freeBytes: 120 * GiB,
+        minFreeBytes: 1,
+      });
+      expect(changed).toHaveBeenCalledTimes(1);
+    } finally {
+      off();
+      await f.host.stop("quit");
+    }
+  });
+
+  it("checks the default data folder before launching the installer on non-Windows platforms too", async () => {
+    const f = fixture({
+      checkout: "/src",
+      platform: "darwin",
+      arch: "arm64",
+      freeBytes: Number.MAX_SAFE_INTEGER,
+    });
+    await f.host.start();
+    try {
+      await expect(f.module.begin()).rejects.toThrow(/Needs \d+ GB free/);
+      expect(f.module.status().message).toContain(f.home);
+      expect(existsSync(path.join(f.home, "installer", "args.json"))).toBe(
+        false,
+      );
+    } finally {
+      await f.host.stop("quit");
+    }
+  });
+
+  it("does not starve an in-flight refreshLocationSpace call when a second caller overlaps for the same target", async () => {
+    const GiB = 1024 ** 3;
+    const resolvers: Array<(value: number | undefined) => void> = [];
+    const probe = vi.fn(
+      () =>
+        new Promise<number | undefined>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    const f = fixture({
+      checkout: "/src",
+      freeBytes: 20 * GiB,
+      freeDiskBytes: probe,
+    });
+    await f.host.start();
+    try {
+      const first = f.module.refreshLocationSpace();
+      const second = f.module.refreshLocationSpace();
+      expect(probe).toHaveBeenCalledTimes(2);
+      // Resolving the first probe while the second is still pending must still populate freeBytes.
+      resolvers[0]!(14 * GiB);
+      await first;
+      expect(f.module.status().location).toEqual({
+        path: f.home,
+        custom: false,
+        freeBytes: 14 * GiB,
+        minFreeBytes: 20 * GiB,
+      });
+      resolvers[1]!(15 * GiB);
+      await second;
+      expect(f.module.status().location).toEqual({
+        path: f.home,
+        custom: false,
+        freeBytes: 15 * GiB,
+        minFreeBytes: 20 * GiB,
+      });
+    } finally {
+      await f.host.stop("quit");
+    }
+  });
+
+  it("refreshes location space when recheck is called while inspection is already checking", async () => {
+    const GiB = 1024 ** 3;
+    let free = 30 * GiB;
+    const probe = vi.fn(async () => free);
+    const f = fixture({
+      checkout: "/src",
+      freeBytes: 20 * GiB,
+      freeDiskBytes: probe,
+    });
+    writeFileSync(path.join(f.home, "tool-download"), "");
+    await f.host.start();
+    try {
+      f.module.inspect();
+      await waitForInstaller(() =>
+        expect(f.module.status().location.freeBytes).toBe(30 * GiB),
+      );
+      expect(f.module.status().localModels.state).toBe("checking");
+
+      free = 11 * GiB;
+      f.module.recheck();
+      await waitForInstaller(() =>
+        expect(f.module.status().location.freeBytes).toBe(11 * GiB),
+      );
+      expect(probe).toHaveBeenCalledTimes(2);
+    } finally {
+      writeFileSync(path.join(f.home, "tool-ready"), "");
+      await f.host.stop("quit");
+    }
+  });
+
+  it("refreshes location.freeBytes automatically when begin fails", async () => {
+    const GiB = 1024 ** 3;
+    let free = 40 * GiB;
+    const f = fixture(
+      (home) => ({
+        ...withCheckout(home),
+        freeBytes: 1,
+        freeDiskBytes: async () => free,
+      }),
+      {},
+      checkout,
+      installerApi([], { state: "failed", message: "Disk full" }),
+    );
+    await f.host.start();
+    try {
+      await f.module.refreshLocationSpace();
+      expect(f.module.status().location.freeBytes).toBe(40 * GiB);
+
+      free = 3 * GiB;
+      await expect(f.module.begin()).rejects.toThrow("Disk full");
+      expect(f.module.status().phase).toBe("failed");
+      await waitForInstaller(() =>
+        expect(f.module.status().location.freeBytes).toBe(3 * GiB),
+      );
+    } finally {
+      await f.host.stop("quit");
+    }
   });
 });
 
@@ -5734,6 +6089,7 @@ describe("LocalServerModule after a restart", () => {
           installerDirectory: installer,
           platform: "darwin",
           arch: "arm64",
+          freeBytes: 1,
           sourceArchive: {
             file: "source/linger.tar.gz",
             sha256: archive.sha256,
@@ -5831,6 +6187,7 @@ describe("LocalServerModule after a restart", () => {
         installerDirectory: installer,
         platform: "darwin",
         arch: "arm64",
+        freeBytes: 1,
         sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
         signIn: f.signIn,
       })
@@ -7421,7 +7778,12 @@ describe("LocalServerModule on Windows", () => {
     const picked = path.join(f.root, "\u65b0\u5efa\u6587\u4ef6\u5939");
     mkdirSync(picked);
     await f.module.chooseLocation(picked);
-    expect(f.module.status().location).toEqual({ path: picked, custom: true });
+    expect(f.module.status().location).toEqual({
+      path: picked,
+      custom: true,
+      freeBytes: expect.any(Number),
+      minFreeBytes: 1,
+    });
     const hash = archive.sha256.slice(0, 16);
     const source = path.join(picked, "desktop", "source");
     // A run that stopped half-way left the folder without its marker.
