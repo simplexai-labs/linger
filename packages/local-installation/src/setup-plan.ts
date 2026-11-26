@@ -16,6 +16,7 @@ import {
   isLibraryModel,
   listSetupModels,
   type SetupModelOption,
+  type SetupModels,
 } from "./setup-models.js";
 import { windowsPrivateRefusal } from "./windows-private.js";
 
@@ -150,6 +151,8 @@ export interface SetupReport {
     models?: SetupModelOption[];
     /** This computer's memory, from the same library report. */
     totalMemoryBytes?: number;
+    /** The memory free now, from the same library report. */
+    availableMemoryBytes?: number;
   };
   runtimes: {
     choice: RuntimeChoice;
@@ -351,7 +354,7 @@ export async function inspectSetup(
       signal: options.signal,
       ...(options.env ? { env: options.env } : {}),
       localmodels: tool,
-    }).catch((): { models: SetupModelOption[]; totalMemoryBytes?: number } => {
+    }).catch((): SetupModels => {
       options.signal?.throwIfAborted();
       return { models: [] };
     });
@@ -633,6 +636,9 @@ export async function inspectSetup(
         ...(choices.models.length ? { models: choices.models } : {}),
         ...(choices.totalMemoryBytes !== undefined
           ? { totalMemoryBytes: choices.totalMemoryBytes }
+          : {}),
+        ...(choices.availableMemoryBytes !== undefined
+          ? { availableMemoryBytes: choices.availableMemoryBytes }
           : {}),
       },
       runtimes: reportedRuntimes,

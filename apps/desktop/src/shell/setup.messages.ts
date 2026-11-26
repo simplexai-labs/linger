@@ -50,6 +50,9 @@ export const setupMessages = defineMessages("setup", {
   download: "Download",
   memory: "Memory",
   memOf: "{used} of {total}",
+  memSystemMac: "macOS & apps",
+  memSystemComputer: "System & apps",
+  memFree: "Free",
   whySmartestMac: "The smartest model this Mac can run",
   whySmartestComputer: "The smartest model this computer can run",
   whyFastestMac: "The fastest model on this Mac",
@@ -65,7 +68,6 @@ export const setupMessages = defineMessages("setup", {
   compact: "Compact",
   pickerTitleMac: "Models for this Mac",
   pickerTitleComputer: "Models for this computer",
-  pickerLead: "Quality and speed are estimates for this machine.",
   needsMac: "Needs a {size} GB Mac",
   needsComputer: "Needs {size} GB of memory",
   needsFreeMemory: "Needs more free memory now",
@@ -94,8 +96,6 @@ export const setupMessages = defineMessages("setup", {
   localNotAvailable: "Not available here",
 
   // Download progress.
-  thisFile: "This file: {amount}",
-  amountOf: "{done} of {total}",
 
   // Why a local model is not offered, in the page's words for each reason
   // code of the localmodels tool.

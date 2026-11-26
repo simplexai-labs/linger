@@ -303,7 +303,7 @@ if (args.includes("--prefetch-bifrost")) {
   // The picker's models, when a test lists some.
   const modelsFile = path.join(target, "library-models");
   const models = fs.existsSync(modelsFile) ? JSON.parse(fs.readFileSync(modelsFile, "utf8")) : undefined;
-  process.stdout.write(JSON.stringify({ hardware, localModels: { ...local, reasons, estimate: finalEstimate, ...(libraryModel ? { libraryModel } : {}), ...(models ? { models, totalMemoryBytes: 68719476736 } : {}) }, recommendation }) + "\n");
+  process.stdout.write(JSON.stringify({ hardware, localModels: { ...local, reasons, estimate: finalEstimate, ...(libraryModel ? { libraryModel } : {}), ...(models ? { models, totalMemoryBytes: 68719476736, availableMemoryBytes: 41231686041 } : {}) }, recommendation }) + "\n");
   process.exit(0);
 } else {
 fs.mkdirSync(path.join(home, "installer"), { recursive: true });
@@ -10296,6 +10296,7 @@ describe("LocalServerModule setup sources", () => {
       expect(f.module.status().localModels).toMatchObject({
         state: "checked",
         totalMemoryBytes: 68719476736,
+        availableMemoryBytes: 41231686041,
       }),
     );
     const check = f.module.status().localModels;

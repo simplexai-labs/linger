@@ -321,6 +321,8 @@ export type SetupLocalModelsCheck =
       readonly models?: readonly SetupModelOption[];
       // This computer's memory, for the picker's memory bar.
       readonly totalMemoryBytes?: number;
+      // Memory free right now, so the bar can show what the system holds.
+      readonly availableMemoryBytes?: number;
       // The localmodels tool's code for why not, or, when eligible, for
       // what could still stop the install, with the counts it carries. The
       // page words each code itself.

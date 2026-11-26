@@ -187,6 +187,8 @@ export type LocalModelsCheck =
       // Every model the localmodels catalog offers here, for the picker.
       readonly models?: readonly SetupModelOption[];
       readonly totalMemoryBytes?: number;
+      // The memory free now; the rest is held by the system and other apps.
+      readonly availableMemoryBytes?: number;
       // The localmodels tool's code for why not, or, when eligible, for
       // what could still stop the install, with the counts it carries.
       readonly reasons?: readonly SetupReason[];
@@ -1818,6 +1820,7 @@ export class LocalServerModule implements Module {
         libraryModel?: unknown;
         models?: unknown;
         totalMemoryBytes?: unknown;
+        availableMemoryBytes?: unknown;
         memory?: Record<string, unknown>;
         reasons?: unknown;
         estimate?: {
@@ -1941,6 +1944,12 @@ export class LocalServerModule implements Module {
       ...(models.length ? { models } : {}),
       ...(bytes(report.localModels.totalMemoryBytes) !== null
         ? { totalMemoryBytes: report.localModels.totalMemoryBytes as number }
+        : {}),
+      ...(bytes(report.localModels.availableMemoryBytes) !== null
+        ? {
+            availableMemoryBytes: report.localModels
+              .availableMemoryBytes as number,
+          }
         : {}),
     };
     return { check, reasonLog };

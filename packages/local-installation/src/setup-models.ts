@@ -62,6 +62,8 @@ export interface SetupModelOption {
 
 export interface SetupModels {
   totalMemoryBytes?: number;
+  /** Memory free now: the rest is held by the system and other apps. */
+  availableMemoryBytes?: number;
   models: SetupModelOption[];
 }
 
@@ -230,6 +232,9 @@ export async function listSetupModels(
   return {
     ...(byteCount(host?.ram_total_bytes)
       ? { totalMemoryBytes: host.ram_total_bytes }
+      : {}),
+    ...(byteCount(host?.ram_available_bytes)
+      ? { availableMemoryBytes: host.ram_available_bytes }
       : {}),
     models,
   };

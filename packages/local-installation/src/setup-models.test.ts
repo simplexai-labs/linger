@@ -12,7 +12,12 @@ import {
 // --json` on a simulated 64 GB Mac with a 24 GB GPU share.
 const library = {
   schema: "localmodels.library-status/v1",
-  host: { platform: "darwin", arch: "arm64", ram_total_bytes: 68719476736 },
+  host: {
+    platform: "darwin",
+    arch: "arm64",
+    ram_total_bytes: 68719476736,
+    ram_available_bytes: 41231686041,
+  },
   models: [
     {
       id: "inkling-2-mini:UD-Q4_K_M",
@@ -145,6 +150,7 @@ it("lists every catalog model with the kit's estimates and whether it fits", asy
     expect.objectContaining({ bundledPi: null }),
   );
   expect(listing.totalMemoryBytes).toBe(68719476736);
+  expect(listing.availableMemoryBytes).toBe(41231686041);
   expect(listing.models.map((model) => model.library)).toEqual([
     "inkling-2-mini:UD-Q4_K_M",
     "inkling-2-mini-iq3xxs:UD-IQ3_XXS",

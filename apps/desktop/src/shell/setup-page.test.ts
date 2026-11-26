@@ -1578,10 +1578,12 @@ describe("setup page installing", () => {
   });
 
   it("folds a download into the same line, in its own words", async () => {
-    // The installer's words name tools and timings; the line does not.
+    // The installer's words name tools and timings; the line does not, and
+    // it carries no file sizes: the bar says how far.
     const { push } = await openPage(
       withLocal("installing", {
         step: "download",
+        progress: 0,
         transfer: {
           label: "Downloading private Go 1.26.5",
           completed: 26 * 1024 ** 2,
@@ -1589,9 +1591,13 @@ describe("setup page installing", () => {
         },
       }),
     );
-    expect($("installing-step").textContent).toBe(
-      "Downloading Linger · 26 MB of 62 MB",
-    );
+    expect($("installing-step").textContent).toBe("Downloading Linger");
+    // The download moves the bar through its step: 26 of 62 MB of the
+    // first of the install's steps.
+    const steps = withLocal("installing").localServer.steps.length;
+    const filled = Number($("installing-bar").getAttribute("aria-valuenow"));
+    expect(filled).toBeGreaterThanOrEqual(Math.floor((26 / 62 / steps) * 98));
+    expect(filled).toBeLessThan(Math.ceil(100 / steps));
     // The local model downloads while the services start.
     push(
       withLocal("installing", {
@@ -1605,7 +1611,7 @@ describe("setup page installing", () => {
       }),
     );
     expect($("installing-step").textContent).toBe(
-      "Downloading the local model · 12.0 GB of 31.0 GB",
+      "Downloading the local model",
     );
     push(
       withLocal("installing", {
@@ -1619,7 +1625,7 @@ describe("setup page installing", () => {
       }),
     );
     expect($("installing-step").textContent).toBe(
-      "Downloading the local model · This file: 3.0 GB of 4.0 GB",
+      "Downloading the local model",
     );
     push(withLocal("installing", { source: "local" }));
     expect($("installing-step").textContent).toBe("Setting up your workspace");
@@ -1860,7 +1866,7 @@ describe("setup page in Chinese", () => {
     );
   });
 
-  it("counts the download its way", async () => {
+  it("names the download in its words", async () => {
     const base = state("installing");
     await openPage(
       {
@@ -1879,11 +1885,7 @@ describe("setup page in Chinese", () => {
       "installing",
       "zh-CN",
     );
-    expect($("installing-step").textContent).toBe(
-      `${zh.stepModel} · ${fill(zh.thisFile, {
-        amount: fill(zh.amountOf, { done: "3.0 GB", total: "4.0 GB" }),
-      })}`,
-    );
+    expect($("installing-step").textContent).toBe(zh.stepModel);
   });
 
   it("words the loader, BYOK and the password change", async () => {
@@ -1925,6 +1927,7 @@ describe("setup page model picker", () => {
     ...capable,
     memoryBytes: 36 * GB,
     totalMemoryBytes: 36 * GB,
+    availableMemoryBytes: 27 * GB,
     model: {
       name: "Inkling 2 Mini",
       library: "inkling-2-mini:UD-Q4_K_M",
@@ -1983,9 +1986,10 @@ describe("setup page model picker", () => {
   it("shows the kit's pick on the card with its estimates", async () => {
     await openPage(onMac(), "welcome");
     open("local");
-    expect($("local-model-name").textContent).toBe("Inkling 2 Mini");
+    // Two builds of one model: the build follows the name.
+    expect($("local-model-name").textContent).toBe("Inkling 2 Mini · Standard");
     expect($("local-model-sub").textContent).toBe(
-      "Inkling · 26.4B · 3.4B active · Standard",
+      "Inkling · 26.4B · 3.4B active",
     );
     expect($("local-model-why").textContent).toBe(
       "The smartest model this Mac can run",
@@ -1994,6 +1998,15 @@ describe("setup page model picker", () => {
     expect($("local-model-speed").textContent).toBe("~63 tok/s");
     expect($("local-model-needs").textContent).toBe("16.0 GB");
     expect($("local-model-mem").textContent).toBe("18 GB of 36 GB");
+    // The bar: what macOS and apps hold now (36 - 27 GB), then the model,
+    // then what is free, with a key for each.
+    expect($("local-model-sys").style.width).toBe("25%");
+    expect($("local-model-bar").style.width).toBe("50%");
+    expect(
+      [...document.querySelectorAll("#local-model-memory .memkey > span")].map(
+        (key) => key.textContent,
+      ),
+    ).toEqual(["macOS & apps", "Inkling 2 Mini · Standard", "Free"]);
     expect($("model-change").hidden).toBe(false);
     expect($("model-sheet").hidden).toBe(true);
   });
@@ -2005,21 +2018,31 @@ describe("setup page model picker", () => {
     expect($("model-sheet").hidden).toBe(false);
     expect($("model-change").getAttribute("aria-expanded")).toBe("true");
     expect($("model-sheet-title").textContent).toBe("Models for this Mac");
-    const rows = document.querySelectorAll("#model-list .mrow");
+    // No subtitle: the estimates carry their own ≈ and ~.
+    expect(document.querySelector("#model-sheet .head p")).toBeNull();
+    const rows =
+      document.querySelectorAll<HTMLButtonElement>("#model-list .mrow");
     expect(rows).toHaveLength(4);
+    // What fits comes first; what cannot run here is last, dimmed.
+    expect(rows[3]!.dataset.library).toBe("qwen3.8-flash-next-iq2xs:IQ2_XS");
     const best = rowFor("inkling-2-mini:UD-Q4_K_M");
     expect(best.getAttribute("aria-checked")).toBe("true");
     expect(document.activeElement).toBe(best);
+    expect(best.querySelector(".nm")!.textContent).toBe(
+      "Inkling 2 Mini · Standard",
+    );
     expect(best.querySelector(".tg")!.textContent).toBe(
-      "Inkling · 26.4B · 3.4B active · Standard",
+      "Inkling · 26.4B · 3.4B active",
     );
     expect([...best.querySelectorAll(".mc")].map((c) => c.textContent)).toEqual(
       ["16.0 GB", "Best fit"],
     );
-    expect(best.querySelectorAll(".meter")).toHaveLength(2);
     expect(
-      rowFor("inkling-2-mini:IQ3_XXS").querySelector(".tg")!.textContent,
-    ).toBe("Inkling · 26.4B · 3.4B active · Compact");
+      [...best.querySelectorAll(".meter em")].map((c) => c.textContent),
+    ).toEqual(["≈ Sonnet 4.6", "~63 tok/s"]);
+    expect(
+      rowFor("inkling-2-mini:IQ3_XXS").querySelector(".nm")!.textContent,
+    ).toBe("Inkling 2 Mini · Compact");
     // Fastest only where the kit says so.
     expect(
       [...rowFor("spark-x2.6-4b-q4km:Q4_K_M").querySelectorAll(".mc")].map(
