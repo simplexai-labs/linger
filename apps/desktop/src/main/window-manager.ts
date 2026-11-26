@@ -357,6 +357,13 @@ export class WindowManagerModule implements Module {
       "blur",
     ] as const)
       window.on(event as "focus", () => this.#pushState());
+    // Keyboard focus belongs to the page: without this, a focused window can
+    // hand it to the title bar's first control, which then shows its focus
+    // ring and swallows typing.
+    if (titlebar)
+      window.on("focus", () => {
+        if (!content.webContents.isDestroyed()) content.webContents.focus();
+      });
 
     if (titlebar) this.#guardTitlebar(titlebar.webContents);
     this.#guardContent(content.webContents);

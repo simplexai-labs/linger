@@ -744,4 +744,22 @@ describe("WindowManagerModule", () => {
       Object.defineProperty(process, "platform", platform);
     }
   });
+
+  it("hands keyboard focus to the page, not the title bar, when the window is focused", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "linux" });
+    try {
+      const { host } = setup({ serverUrl: "http://localhost:3000" });
+      await host.start();
+      const titlebar = titlebarView()!.webContents;
+      const content = contentView().webContents;
+      const before = vi.mocked(content.focus).mock.calls.length;
+      state.windows.at(-1)!.emit("focus");
+      expect(content.focus).toHaveBeenCalledTimes(before + 1);
+      expect(titlebar.focus).not.toHaveBeenCalled();
+      await host.stop("quit");
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
+  });
 });
