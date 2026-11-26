@@ -354,6 +354,7 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 	d.runtimeFailureDetail.Store(slices.Contains(command.ServiceFeatures, serviceFeatureRuntimeFailureDetail))
 	d.operationBackgroundWait.Store(slices.Contains(command.ServiceFeatures, serviceFeatureOperationBackgroundWait))
 	d.dynamicReasoningEfforts.Store(slices.Contains(command.ServiceFeatures, serviceFeatureDynamicReasoningEfforts))
+	d.antigravityHistory.Store(slices.Contains(command.ServiceFeatures, serviceFeatureAntigravityHistory))
 	localModels := slices.Contains(command.ServiceFeatures, serviceFeatureLocalModels)
 	if err := d.activateStreamAndReplay(ctx, stream, command.ReconcileOperationIDs, localModels, helloRev); err != nil {
 		return err
@@ -532,6 +533,7 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 		d.runtimeFailureDetail.Store(false)
 		d.operationBackgroundWait.Store(false)
 		d.dynamicReasoningEfforts.Store(false)
+		d.antigravityHistory.Store(false)
 	}
 	if d.localModelsStream == stream {
 		d.localModelsStream = nil

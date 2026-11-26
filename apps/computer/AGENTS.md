@@ -80,8 +80,10 @@
 - Background model calls (`execute` `model_invoke`) follow the same model as
   Agent Runs when the Agent Service supplies `model` (Computer `0.62.0` or
   later), passing it explicitly to Codex (`-m` / `--config model=...`), Claude
-  (`--model`), and Pi (`--model`), normalizing reasoning effort against that
-  model, and calling `ensureLocalModel` for Pi library models on demand.
+  (`--model`), Pi (`--model`), and Antigravity (Computer `0.67.0` or later,
+  via isolated `agy acp` `session/set_config_option`), normalizing reasoning
+  effort against that model, and calling `ensureLocalModel` for Pi library
+  models on demand.
 - For legacy callers that omit `model`, a Pi background model call runs on
   whatever model Pi's profile selects by default (refused when no library model
   is loaded), and a Codex call runs the model its `config.toml` selects or the

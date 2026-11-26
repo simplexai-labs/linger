@@ -269,6 +269,168 @@ describe("RuntimeHistoryView", () => {
     expect(within(group.closest("li")!).getByText("Read")).toBeVisible();
     expect(within(group.closest("li")!).getByText("Search")).toBeVisible();
   });
+
+  it("renders Antigravity USER_INPUT and multi-tool PLANNER_RESPONSE without key collisions", () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      render(
+        <RuntimeHistoryView
+          records={[
+            claudeRecord(0, "message", {
+              native_type: "USER_INPUT",
+              role: "user",
+              native_record: {
+                type: "USER_INPUT",
+                content: "Check the workspace",
+              },
+            }),
+            claudeRecord(1, "tool_call", {
+              native_type: "PLANNER_RESPONSE",
+              role: "assistant",
+              native_record: {
+                type: "PLANNER_RESPONSE",
+                content: "Running **checks**.",
+                tool_calls: [
+                  { name: "run_command", args: { CommandLine: "ls" } },
+                  { name: "view_file", args: { AbsolutePath: "README.md" } },
+                ],
+              },
+            }),
+          ]}
+        />,
+      );
+      expect(screen.getByText("Check the workspace")).toBeVisible();
+      expect(screen.getByText("checks").tagName).toBe("STRONG");
+      const group = screen.getByText("Working through 2 steps");
+      fireEvent.click(group);
+      expect(
+        within(group.closest("li")!).getByText("run_command"),
+      ).toBeVisible();
+      expect(within(group.closest("li")!).getByText("view_file")).toBeVisible();
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("unwraps JSON-encoded Antigravity run_command args so teamhub task create opens its task", async () => {
+    const created = "workitem_fedcba9876543210fedcba9876543210";
+    const runtime = createTestTeamHubRuntime();
+    runtime.server.on("GET", "/v0/tasks/{taskId}/execution", () => ({
+      status: "idle",
+      task_id: created,
+    }));
+    const openTask = vi.fn();
+    const command =
+      'teamhub task create --name "Ship" --requirement "Verify release"';
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <TeamHubRuntimeProvider runtime={runtime}>
+          <TaskActivityLinksProvider openTask={openTask} tenantId="tenant-1">
+            <RuntimeHistoryView
+              records={[
+                claudeRecord(0, "tool_call", {
+                  native_type: "PLANNER_RESPONSE",
+                  role: "assistant",
+                  tool_call_id: "agy-create",
+                  tool_name: "run_command",
+                  native_record: {
+                    type: "PLANNER_RESPONSE",
+                    tool_calls: [
+                      {
+                        id: "agy-create",
+                        name: "run_command",
+                        args: { CommandLine: JSON.stringify(command) },
+                      },
+                    ],
+                  },
+                }),
+                claudeRecord(1, "tool_result", {
+                  native_type: "GENERIC",
+                  tool_call_id: "agy-create",
+                  native_record: {
+                    type: "GENERIC",
+                    tool_call_id: "agy-create",
+                    content: `Task created and running\nTask ID: ${created}`,
+                  },
+                }),
+              ]}
+            />
+          </TaskActivityLinksProvider>
+        </TeamHubRuntimeProvider>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("Finished")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Open task Ship" }));
+    expect(openTask).toHaveBeenCalledWith(created, "Ship");
+  });
+
+  it("pairs a task create call inside a mixed multi-tool Antigravity PLANNER_RESPONSE message", async () => {
+    const created = "workitem_00112233445566778899aabbccddeeff";
+    const runtime = createTestTeamHubRuntime();
+    runtime.server.on("GET", "/v0/tasks/{taskId}/execution", () => ({
+      status: "idle",
+      task_id: created,
+    }));
+    const openTask = vi.fn();
+    const command =
+      'teamhub task create --name "Ship" --requirement "Verify release"';
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <TeamHubRuntimeProvider runtime={runtime}>
+          <TaskActivityLinksProvider openTask={openTask} tenantId="tenant-1">
+            <RuntimeHistoryView
+              records={[
+                claudeRecord(0, "message", {
+                  native_type: "PLANNER_RESPONSE",
+                  role: "assistant",
+                  native_record: {
+                    type: "PLANNER_RESPONSE",
+                    content: "Starting the **release** check now.",
+                    tool_calls: [
+                      {
+                        id: "tc-read",
+                        name: "view_file",
+                        args: { Path: JSON.stringify("README.md") },
+                      },
+                      {
+                        id: "tc-ship",
+                        name: "run_command",
+                        args: { CommandLine: JSON.stringify(command) },
+                      },
+                    ],
+                  },
+                }),
+                claudeRecord(1, "tool_result", {
+                  native_type: "GENERIC",
+                  tool_call_id: "tc-ship",
+                  native_record: {
+                    type: "GENERIC",
+                    tool_call_id: "tc-ship",
+                    content: `Task created and running\nTask ID: ${created}`,
+                  },
+                }),
+              ]}
+            />
+          </TaskActivityLinksProvider>
+        </TeamHubRuntimeProvider>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("release").tagName).toBe("STRONG");
+    expect(await screen.findByText("Finished")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Open task Ship" }));
+    expect(openTask).toHaveBeenCalledWith(created, "Ship");
+  });
 });
 
 const claudeRecord = (

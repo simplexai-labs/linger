@@ -28,14 +28,17 @@ const (
 
 // Defines values for AgentDebugHistoryInstructionsSource.
 const (
-	AgentDebugHistoryInstructionsSourceClaudeTranscript AgentDebugHistoryInstructionsSource = "claude_transcript"
-	AgentDebugHistoryInstructionsSourceCodexRollout     AgentDebugHistoryInstructionsSource = "codex_rollout"
-	AgentDebugHistoryInstructionsSourcePiSession        AgentDebugHistoryInstructionsSource = "pi_session"
+	AgentDebugHistoryInstructionsSourceAntigravityTranscript AgentDebugHistoryInstructionsSource = "antigravity_transcript"
+	AgentDebugHistoryInstructionsSourceClaudeTranscript      AgentDebugHistoryInstructionsSource = "claude_transcript"
+	AgentDebugHistoryInstructionsSourceCodexRollout          AgentDebugHistoryInstructionsSource = "codex_rollout"
+	AgentDebugHistoryInstructionsSourcePiSession             AgentDebugHistoryInstructionsSource = "pi_session"
 )
 
 // Valid indicates whether the value is a known member of the AgentDebugHistoryInstructionsSource enum.
 func (e AgentDebugHistoryInstructionsSource) Valid() bool {
 	switch e {
+	case AgentDebugHistoryInstructionsSourceAntigravityTranscript:
+		return true
 	case AgentDebugHistoryInstructionsSourceClaudeTranscript:
 		return true
 	case AgentDebugHistoryInstructionsSourceCodexRollout:
@@ -172,16 +175,22 @@ func (e AgentDebugInspectionStatus) Valid() bool {
 
 // Defines values for AgentDebugRuntimeHistorySource.
 const (
-	AgentDebugRuntimeHistorySourceClaudeTranscript AgentDebugRuntimeHistorySource = "claude_transcript"
-	AgentDebugRuntimeHistorySourceCodexRollout     AgentDebugRuntimeHistorySource = "codex_rollout"
+	AgentDebugRuntimeHistorySourceAntigravityTranscript AgentDebugRuntimeHistorySource = "antigravity_transcript"
+	AgentDebugRuntimeHistorySourceClaudeTranscript      AgentDebugRuntimeHistorySource = "claude_transcript"
+	AgentDebugRuntimeHistorySourceCodexRollout          AgentDebugRuntimeHistorySource = "codex_rollout"
+	AgentDebugRuntimeHistorySourcePiSession             AgentDebugRuntimeHistorySource = "pi_session"
 )
 
 // Valid indicates whether the value is a known member of the AgentDebugRuntimeHistorySource enum.
 func (e AgentDebugRuntimeHistorySource) Valid() bool {
 	switch e {
+	case AgentDebugRuntimeHistorySourceAntigravityTranscript:
+		return true
 	case AgentDebugRuntimeHistorySourceClaudeTranscript:
 		return true
 	case AgentDebugRuntimeHistorySourceCodexRollout:
+		return true
+	case AgentDebugRuntimeHistorySourcePiSession:
 		return true
 	default:
 		return false

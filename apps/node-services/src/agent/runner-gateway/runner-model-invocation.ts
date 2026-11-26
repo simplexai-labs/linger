@@ -254,7 +254,9 @@ export class RunnerModelInvocation {
       throw new RunnerModelInvokeUnavailableError(
         runtimeType === "pi"
           ? "Pi is not ready for background model calls. Update the Local Computer and check that Pi is ready."
-          : `Local Computer Runtime ${runtimeType} is not ready`,
+          : runtimeType === "antigravity"
+            ? "Antigravity is not ready for background model calls. Update the Local Computer and check that Antigravity is ready."
+            : `Local Computer Runtime ${runtimeType} is not ready`,
       );
     }
   }

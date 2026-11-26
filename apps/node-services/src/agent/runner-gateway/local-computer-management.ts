@@ -93,6 +93,12 @@ export const FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION = "0.65.0";
 // Computers on 0.65.0 and earlier reject `"antigravity"` and close the connection.
 export const FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION = "0.66.0";
 
+// The first release that serves Antigravity native transcript history.
+export const FIRST_ANTIGRAVITY_HISTORY_COMPUTER_VERSION = "0.67.0";
+
+// The first release that decodes Antigravity as a `model_invoke` Runtime.
+export const FIRST_ANTIGRAVITY_MODEL_INVOKE_COMPUTER_VERSION = "0.67.0";
+
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 /** Source builds report `dev` and follow the current wire contract. */

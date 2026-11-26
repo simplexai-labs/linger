@@ -138,3 +138,67 @@ func TestInjectPreviousContextHint(t *testing.T) {
 		t.Fatalf("unexpected prompt without reminder:\n%s", gotNoRem)
 	}
 }
+
+func TestExportPreviousContextAntigravityAndStaleCleanup(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	sessionID := "agy-prev-1"
+	logsDir := filepath.Join(home, ".gemini", "antigravity-cli", "brain", sessionID, ".system_generated", "logs")
+	if err := os.MkdirAll(logsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	transcript := strings.Join([]string{
+		`{"type":"USER_INPUT","step_index":0,"created_at":"2026-08-01T10:00:00Z","content":"Inspect deployment config"}`,
+		`{"type":"PLANNER_RESPONSE","step_index":1,"created_at":"2026-08-01T10:00:01Z","thinking":"private-cot","content":"Checking the file.","tool_calls":[{"name":"run_command","args":{"CommandLine":"cat deploy.yaml"}}]}`,
+		`{"type":"GENERIC","step_index":2,"created_at":"2026-08-01T10:00:02Z","content":"Authorization: Bearer agy-secret-token\nreplicas: 4"}`,
+		`{"type":"CHECKPOINT","step_index":3,"created_at":"2026-08-01T10:00:03Z","content":"Summarized earlier turns."}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(logsDir, "transcript.jsonl"), []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spec := OperationSpec{
+		OperationKind:    "run.start",
+		Provider:         "antigravity",
+		WorkingDirectory: workspace,
+		Environment:      map[string]string{"HOME": home},
+		PreviousSession: &PreviousSession{
+			ProviderType: "antigravity",
+			SessionID:    sessionID,
+		},
+	}
+
+	// Empty runtimeHomeRoot must still work for Antigravity, which reads from HOME.
+	relPath, ok := exportPreviousContext(context.Background(), "", spec)
+	if !ok || relPath != previousContextRelPath {
+		t.Fatalf("exportPreviousContext() = (%q, %v), want (%q, true)", relPath, ok, previousContextRelPath)
+	}
+	raw, err := os.ReadFile(filepath.Join(workspace, "playground", ".previous-context.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	for _, want := range []string{
+		"Inspect deployment config",
+		"Checking the file.",
+		"Tool Call: run_command",
+		"Tool Output",
+		"Compaction Summary",
+		"Summarized earlier turns.",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected %q in exported Antigravity markdown:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "private-cot") || strings.Contains(content, "agy-secret-token") {
+		t.Fatalf("expected thinking and secrets redacted:\n%s", content)
+	}
+
+	// Missing Antigravity transcript cleans up stale .previous-context.md.
+	spec.PreviousSession = &PreviousSession{ProviderType: "antigravity", SessionID: "missing-agy"}
+	if relPath, ok := exportPreviousContext(context.Background(), "", spec); ok || relPath != "" {
+		t.Fatalf("expected missing Antigravity transcript to return false, got (%q, %v)", relPath, ok)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "playground", ".previous-context.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale previous-context file removed, err=%v", err)
+	}
+}

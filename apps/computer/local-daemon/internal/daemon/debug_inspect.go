@@ -15,6 +15,11 @@ import (
 	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
+// serviceFeatureAntigravityHistory in runner.welcome's service_features says
+// the Agent Service accepts antigravity_transcript history inspection results.
+// Older services close the connection on an unknown source enum value.
+const serviceFeatureAntigravityHistory = "antigravity_history"
+
 func debugInspectedEvent(command protocol.Command, payload json.RawMessage) protocol.Event {
 	return protocol.Event{
 		Type: protocol.EventDebugInspected, ProtocolVersion: command.ProtocolVersion, CommandID: command.CommandID,
@@ -44,8 +49,13 @@ func (d *Daemon) handleDebugInspect(ctx context.Context, stream transport.Stream
 			reason = "context_view_conflict"
 		}
 		source := "codex_rollout"
-		if payload.Request.Runtime.Type == "claude" {
+		switch payload.Request.Runtime.Type {
+		case "claude":
 			source = "claude_transcript"
+		case "antigravity":
+			if d.antigravityHistory.Load() {
+				source = "antigravity_transcript"
+			}
 		}
 		slog.Warn("Runner Debug history unavailable", "command_id", command.CommandID,
 			"connection_epoch", command.ConnectionEpoch, "view_digest", command.ViewDigest, "reason", reason)
@@ -79,7 +89,13 @@ func (d *Daemon) inspectDebug(ctx context.Context, command protocol.Command) (js
 		return nil, err
 	}
 	request := payload.Request
-	if request.Runtime.Type != "codex" && request.Runtime.Type != "claude" && request.Runtime.Type != "pi" {
+	switch request.Runtime.Type {
+	case "codex", "claude", "pi":
+	case "antigravity":
+		if !d.antigravityHistory.Load() {
+			return nil, errors.New("Debug history Runtime is not supported")
+		}
+	default:
 		return nil, errors.New("Debug history Runtime is not supported")
 	}
 	if !payload.DetachedHistory {
@@ -115,21 +131,36 @@ func (d *Daemon) inspectDebug(ctx context.Context, command protocol.Command) (js
 	if binding.Key.DaemonID != d.daemonID || binding.Key.TenantID != command.TenantID || binding.Key.ProviderType != request.Runtime.Type {
 		return nil, errors.New("Debug history Registration binding is invalid")
 	}
-	home, err := localworkspace.RuntimeHomePath(d.runtimeHomeRoot, localworkspace.RuntimeHomeIdentity{
-		TenantID: command.TenantID, OwnerActorID: binding.Key.OwnerActorID,
-		AgentID: command.AgentID, ScopeID: command.ExecutionContextKey, ProviderType: request.Runtime.Type,
-	})
+	var home string
+	if request.Runtime.Type == "antigravity" {
+		home, err = d.antigravityHistoryHome()
+	} else {
+		home, err = localworkspace.RuntimeHomePath(d.runtimeHomeRoot, localworkspace.RuntimeHomeIdentity{
+			TenantID: command.TenantID, OwnerActorID: binding.Key.OwnerActorID,
+			AgentID: command.AgentID, ScopeID: command.ExecutionContextKey, ProviderType: request.Runtime.Type,
+		})
+	}
 	if err != nil {
 		return nil, err
 	}
 	threadID := firstDebugSessionID(request.Session.ThreadID, request.Session.ThreadIDCamel, request.Session.SessionID, request.Session.SessionIDCamel)
 	inspect := runtimehistory.Inspect
-	if request.Runtime.Type == "claude" {
+	switch request.Runtime.Type {
+	case "claude":
 		inspect = runtimehistory.InspectClaude
-	} else if request.Runtime.Type == "pi" {
+	case "pi":
 		inspect = runtimehistory.InspectPi
+	case "antigravity":
+		inspect = runtimehistory.InspectAntigravity
 	}
 	return json.Marshal(inspect(ctx, runtimehistory.Request{CodexHome: home, ThreadID: threadID, Cursor: request.Cursor, Limit: request.Limit}))
+}
+
+func (d *Daemon) antigravityHistoryHome() (string, error) {
+	if d.antigravityHome != "" {
+		return d.antigravityHome, nil
+	}
+	return localworkspace.AntigravitySourceHome(nil)
 }
 
 // detachedHistoryAssignment returns the ready Assignment that authorizes a

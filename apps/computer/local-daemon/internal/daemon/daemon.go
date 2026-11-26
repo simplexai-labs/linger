@@ -58,6 +58,7 @@ type Options struct {
 	WorkspaceGrants     json.RawMessage
 	StateDirectory      string
 	RuntimeHomeRoot     string
+	AntigravityHome     string
 	RuntimeObservations []transport.RegistrationObservation
 	// OnModelUnavailable learns that the Runtime login refused a model, so
 	// the Computer can stop offering it.
@@ -161,6 +162,9 @@ type Daemon struct {
 	// dynamicReasoningEfforts holds whether the current Agent Service declared
 	// serviceFeatureDynamicReasoningEfforts in its welcome.
 	dynamicReasoningEfforts atomic.Bool
+	// antigravityHistory holds whether the current Agent Service declared
+	// serviceFeatureAntigravityHistory in its welcome.
+	antigravityHistory atomic.Bool
 	// authorityRevision counts, under admissionMu, the commands that can change
 	// what an accepted Operation may start with: Registration snapshots, Agent
 	// Runner commands and Context commands. A start whose revision is unchanged
@@ -204,6 +208,7 @@ type Daemon struct {
 	workspaceGrants         json.RawMessage
 	stateDirectory          string
 	runtimeHomeRoot         string
+	antigravityHome         string
 	runtimeObservations     []transport.RegistrationObservation
 	inventoryMu             sync.RWMutex
 	diagnosticsRevision     uint64
@@ -292,6 +297,7 @@ func New(options Options) (*Daemon, error) {
 		workspaceGrants:      append(json.RawMessage(nil), options.WorkspaceGrants...),
 		stateDirectory:       options.StateDirectory,
 		runtimeHomeRoot:      options.RuntimeHomeRoot,
+		antigravityHome:      options.AntigravityHome,
 		runtimeObservations:  append([]transport.RegistrationObservation(nil), options.RuntimeObservations...),
 		diagnosticsRevision:  nextRevisionAbove(1, options.RuntimeObservations),
 		gatewayState:         "connecting",

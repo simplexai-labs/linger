@@ -32,19 +32,22 @@ take precedence.
 
 - Keep model/provider behavior behind the existing runtime interfaces. The only
   exception is `src/runtime-model-call.ts`: a stateless prompt on the owner's
-  Agent Runtime (Codex, Claude or Pi, using its default model) through the
+  Agent Runtime (Codex, Claude, Pi, or Antigravity) through the
   Daemon's one-shot `model.invoke`, for tool-less service work such as Agent
   Memory, also used by Memory, by the LLM Wiki, and exposed
-  to TeamHub as `POST /v1/model-calls`. Antigravity has no `model.invoke`, so
-  a call for an Antigravity owner runs on Claude on the same Computer, or on
-  Codex when only Codex is ready. Agent Memory skips Antigravity Agents,
-  because it reads native history that Antigravity does not expose.
+  to TeamHub as `POST /v1/model-calls`. On Computer 0.67.0 or later
+  (`FIRST_ANTIGRAVITY_MODEL_INVOKE_COMPUTER_VERSION`), an Antigravity owner
+  runs on Antigravity (tool-free, without workspace mode), falling back to
+  Claude and then Codex on the same Computer when Antigravity is unavailable
+  (such as on older Computers). Agent Memory supports Codex, Claude, Pi, and
+  Antigravity (reading Antigravity native transcripts on Computer 0.67.0 or
+  later, `FIRST_ANTIGRAVITY_HISTORY_COMPUTER_VERSION`).
   It is not a Runtime turn and never creates a Context, Local Run, or
   Operation. Callers name an owner (or an Agent placement) and a reasoning
   effort; never add a model name, gateway, or model environment variable. Pi
   stays on Pi, on whatever model Pi defaults to, and never falls back to
-  Codex or Claude. It serves structured and text calls without tools; workspace mode remains on
-  Codex and Claude.
+  Codex or Claude. Pi and Antigravity serve structured and text calls without
+  tools; workspace mode remains on Codex and Claude.
   Each background (non-interactive) call that ran on an Another Me's Computer
   and completed, or failed for a reason other than an offline Computer, a
   stopped call, a call the Daemon canceled (its connection closed or it is
@@ -270,6 +273,13 @@ take precedence.
   (`FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION`), because Computers
   on 0.65.0 and earlier reject `"antigravity"` in `SessionCompact.runtime_type`
   and close the connection.
+- `antigravity_history` in `runner.welcome`'s `service_features` is advertised
+  to every Computer (a Daemon ignores an unknown feature); only a Daemon that
+  sees it returns `antigravity_transcript` history inspection results. Agent
+  Service gates detached Antigravity history reads
+  (`FIRST_ANTIGRAVITY_HISTORY_COMPUTER_VERSION`) and Antigravity `model_invoke`
+  (`FIRST_ANTIGRAVITY_MODEL_INVOKE_COMPUTER_VERSION`) on Computer 0.67.0 or
+  later.
 - Default unit, integration, and fixture smoke tests use deterministic adapters
   and do not call a live model provider. Explicitly named live suites such as
   `smoke:local-runner:live` may use an authenticated provider and must remain

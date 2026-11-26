@@ -57,7 +57,7 @@ func main() {
 	if len(os.Args) == 3 && os.Args[1] == "stop-hook" {
 		os.Exit(permission.CodexRunStopHook(os.Stdin, os.Stdout, os.Stderr, os.Args[2]))
 	}
-	// Antigravity runs this for managed PreInvocation and Stop hooks.
+	// Antigravity runs this for managed PreInvocation, PreToolUse, and Stop hooks.
 	if len(os.Args) == 3 && os.Args[1] == "antigravity-hook" {
 		os.Exit(native.AntigravityRunHook(os.Stdin, os.Stdout, os.Stderr, os.Args[2]))
 	}
@@ -449,6 +449,7 @@ func run(args []string) (resultErr error) {
 		},
 	})
 	codexModelSessions := &provider.CodexSessions{Root: filepath.Join(computer.StateDirectory, "model-invoke", "codex-sessions")}
+	antigravityHome, _ := localworkspace.AntigravitySourceHome(providerEnvironment)
 	localDaemon, err = daemon.New(daemon.Options{
 		ComputerID: computer.ComputerID, DisplayName: computer.DisplayName,
 		Runtimes:           runtimes,
@@ -456,6 +457,7 @@ func run(args []string) (resultErr error) {
 		RuntimeDiagnostics: diagnostics, WorkspaceGrants: encodedGrants,
 		StateDirectory:      computer.StateDirectory,
 		RuntimeHomeRoot:     filepath.Join(computer.StateDirectory, "runtime-homes"),
+		AntigravityHome:     antigravityHome,
 		RuntimeObservations: runtimeObservations(computer, provider.GatewayDiagnostics(discovered.Diagnostics), runtimeObservationRevision),
 		OnModelUnavailable:  inventory.reject,
 		ModelInvokeUnready: func(runtimeType string) bool {

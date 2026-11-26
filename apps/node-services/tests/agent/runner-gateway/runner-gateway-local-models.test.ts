@@ -209,6 +209,7 @@ describe("Runner Gateway local models", () => {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     ],
     [
@@ -226,6 +227,7 @@ describe("Runner Gateway local models", () => {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     ],
     [
@@ -242,6 +244,7 @@ describe("Runner Gateway local models", () => {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     ],
     [
@@ -258,6 +261,7 @@ describe("Runner Gateway local models", () => {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     ],
     [
@@ -274,6 +278,7 @@ describe("Runner Gateway local models", () => {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     ],
     [
@@ -289,6 +294,7 @@ describe("Runner Gateway local models", () => {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     ],
     [
@@ -303,6 +309,7 @@ describe("Runner Gateway local models", () => {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     ],
     [
@@ -317,6 +324,7 @@ describe("Runner Gateway local models", () => {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     ],
     [
@@ -330,6 +338,7 @@ describe("Runner Gateway local models", () => {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     ],
     [
@@ -343,6 +352,7 @@ describe("Runner Gateway local models", () => {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     ],
     [
@@ -355,6 +365,7 @@ describe("Runner Gateway local models", () => {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     ],
     [
@@ -367,6 +378,7 @@ describe("Runner Gateway local models", () => {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     ],
     ["0.51.0", undefined],

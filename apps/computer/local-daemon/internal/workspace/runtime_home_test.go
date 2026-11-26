@@ -152,3 +152,22 @@ func TestRuntimeHomeInspectionAndReuseIgnoreRetiredBindingMarker(t *testing.T) {
 		t.Fatalf("retained session = %q, %v", content, err)
 	}
 }
+
+func TestAntigravitySourceHomeCaseInsensitiveLookup(t *testing.T) {
+	base := t.TempDir()
+	homeDir := filepath.Join(base, "home-user")
+	profileDir := filepath.Join(base, "profile-user")
+
+	got, err := AntigravitySourceHome(map[string]string{"UserProfile": "  " + profileDir + "  "})
+	if err != nil || got != filepath.Join(profileDir, ".gemini", "antigravity-cli") {
+		t.Fatalf("UserProfile lookup = %q, %v", got, err)
+	}
+	got, err = AntigravitySourceHome(map[string]string{"Home": homeDir, "UserProfile": profileDir})
+	if err != nil || got != filepath.Join(homeDir, ".gemini", "antigravity-cli") {
+		t.Fatalf("Home precedence lookup = %q, %v", got, err)
+	}
+	got, err = AntigravitySourceHome(map[string]string{"HOME": homeDir, "Home": profileDir})
+	if err != nil || got != filepath.Join(homeDir, ".gemini", "antigravity-cli") {
+		t.Fatalf("exact HOME lookup = %q, %v", got, err)
+	}
+}

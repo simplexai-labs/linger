@@ -176,6 +176,44 @@ func CodexSourceHome(environment map[string]string) (string, error) {
 	return filepath.Clean(absolute), nil
 }
 
+// EnvLookup returns the trimmed value of key in environment, preferring an
+// exact key match before falling back to a case-insensitive match.
+func EnvLookup(environment map[string]string, key string) string {
+	if value, ok := environment[key]; ok {
+		return strings.TrimSpace(value)
+	}
+	for k, value := range environment {
+		if strings.EqualFold(k, key) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+// AntigravitySourceHome resolves the Computer user's native Antigravity store
+// (`<home>/.gemini/antigravity-cli`) from environment or the current OS user.
+func AntigravitySourceHome(environment map[string]string) (string, error) {
+	home := EnvLookup(environment, "HOME")
+	if home == "" {
+		home = EnvLookup(environment, "USERPROFILE")
+	}
+	if home == "" {
+		resolved, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve local Antigravity source home: %w", err)
+		}
+		home = strings.TrimSpace(resolved)
+	}
+	if home == "" {
+		return "", errors.New("local Antigravity source home requires HOME or USERPROFILE")
+	}
+	absolute, err := filepath.Abs(filepath.Join(home, ".gemini", "antigravity-cli"))
+	if err != nil {
+		return "", fmt.Errorf("resolve local Antigravity source home: %w", err)
+	}
+	return filepath.Clean(absolute), nil
+}
+
 func validateRuntimeHomeIdentity(root string, identity RuntimeHomeIdentity) error {
 	if !filepath.IsAbs(root) {
 		return errors.New("Runtime home root must be absolute")

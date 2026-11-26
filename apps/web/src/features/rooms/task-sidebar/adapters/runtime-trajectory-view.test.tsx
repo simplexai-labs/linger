@@ -190,6 +190,108 @@ describe("RuntimeTrajectoryView", () => {
     fireEvent.click(ran);
     expect(screen.getByText("notes.md")).toBeVisible();
   });
+
+  it("reads Antigravity PLANNER_RESPONSE tool calls and assistant prose", () => {
+    const records: TeamHubMessageActivityRecord[] = [
+      {
+        category: "message",
+        native_record: {
+          content: "Inspect the repo",
+          step_index: 0,
+          type: "USER_INPUT",
+        },
+        native_type: "USER_INPUT",
+        ordinal: 0,
+        redacted_fields: [],
+        role: "user",
+        turn_id: "step-0",
+      },
+      {
+        category: "tool_call",
+        native_record: {
+          content: "Checking the workspace.",
+          step_index: 1,
+          tool_calls: [
+            {
+              args: { CommandLine: JSON.stringify("git status") },
+              id: "agy-1",
+              name: "run_command",
+            },
+            {
+              args: { AbsolutePath: "docs/guide.md" },
+              id: "agy-2",
+              name: "view_file",
+            },
+            {
+              args: { DirectoryPath: JSON.stringify("src") },
+              id: "agy-3",
+              name: "list_dir",
+            },
+            {
+              args: {
+                Query: JSON.stringify("antigravity"),
+                SearchPath: JSON.stringify("apps"),
+              },
+              id: "agy-4",
+              name: "grep_search",
+            },
+            {
+              args: {
+                Path: JSON.stringify("docs/notes.md"),
+                Replacement: JSON.stringify("updated line"),
+                Target: JSON.stringify("stale line"),
+              },
+              id: "agy-5",
+              name: "edit_file",
+            },
+            {
+              args: {
+                Content: JSON.stringify("hello world"),
+                Path: JSON.stringify("docs/new.md"),
+              },
+              id: "agy-6",
+              name: "write_file",
+            },
+          ],
+          type: "PLANNER_RESPONSE",
+        },
+        native_type: "PLANNER_RESPONSE",
+        ordinal: 1,
+        redacted_fields: [],
+        role: "assistant",
+        tool_call_id: "agy-1",
+        tool_name: "run_command",
+        turn_id: "step-1",
+      },
+      {
+        category: "tool_result",
+        native_record: {
+          content: "nothing to commit",
+          step_index: 2,
+          tool_call_id: "agy-1",
+          type: "GENERIC",
+        },
+        native_type: "GENERIC",
+        ordinal: 2,
+        redacted_fields: [],
+        tool_call_id: "agy-1",
+        turn_id: "step-2",
+      },
+    ];
+
+    render(<RuntimeTrajectoryView live={false} records={records} />);
+
+    expect(screen.getByText("Checking the workspace.")).toBeVisible();
+    expect(screen.getByTitle("Ran git status")).toBeVisible();
+    expect(screen.getByTitle("Read docs/guide.md")).toBeVisible();
+    expect(screen.getByTitle("Listed src")).toBeVisible();
+    expect(screen.getByTitle("Searched antigravity in apps")).toBeVisible();
+    fireEvent.click(screen.getByTitle("Edited docs/notes.md"));
+    expect(screen.getByText("-stale line")).toHaveClass("text-app-danger");
+    expect(screen.getByText("+updated line")).toHaveClass("text-app-success");
+    fireEvent.click(screen.getByTitle("Wrote docs/new.md"));
+    expect(screen.getByText("+hello world")).toHaveClass("text-app-success");
+  });
 });
 
 function codex(

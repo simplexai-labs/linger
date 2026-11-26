@@ -66,6 +66,7 @@ func (r *antigravityRuntime) prestart(ctx context.Context, spec RunSpec, program
 	proc.res.bind(key, r.profile)
 	proc.res.bindEpoch(epoch)
 	proc.hookEP = hookEP
+	proc.storeRoot = antigravityStoreRoot(r.profile.Env)
 	proc.releaseTemp = releaseTemp
 	spec.Readiness.spawned()
 

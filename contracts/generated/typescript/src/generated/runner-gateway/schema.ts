@@ -217,6 +217,7 @@ export const runnerGatewayEnvelopeSchema = {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "antigravity_history",
       ],
     },
     ReasoningEffort: {
@@ -1131,7 +1132,12 @@ export const runnerGatewayEnvelopeSchema = {
           enum: ["available", "unavailable"],
         },
         source: {
-          enum: ["codex_rollout", "claude_transcript", "pi_session"],
+          enum: [
+            "codex_rollout",
+            "claude_transcript",
+            "pi_session",
+            "antigravity_transcript",
+          ],
         },
         reason: {
           type: "string",
@@ -1264,7 +1270,12 @@ export const runnerGatewayEnvelopeSchema = {
           maxLength: 500,
         },
         source: {
-          enum: ["codex_rollout", "claude_transcript", "pi_session"],
+          enum: [
+            "codex_rollout",
+            "claude_transcript",
+            "pi_session",
+            "antigravity_transcript",
+          ],
         },
         snapshot: {
           $ref: "#/$defs/DebugHistorySnapshot",
@@ -4782,7 +4793,7 @@ export const runnerGatewayEnvelopeSchema = {
     },
     ModelInvoke: {
       description:
-        "Runs one model call on the Computer's signed-in Codex or Claude CLI in a fresh temporary directory, outside the Operation ledger and without a Context. Only structured carries output_schema, which it requires; only workspace carries workspace_files, the input files of the temporary directory, and gets its tree back. A workspace file may not be AGENTS.md, AGENTS.override.md or CLAUDE.md at the root or lie under a .codex or .claude directory. Codex cannot read files in workspace mode, so the Daemon also inlines the workspace files into the prompt and Codex writes only through apply_patch. The Daemon answers failed for a request that breaks these rules, and for a reply whose encoded model.invoked would exceed the frame limit.",
+        "Runs one model call on the Computer's signed-in Codex, Claude, Pi, or Antigravity CLI in a fresh temporary directory, outside the Operation ledger and without a Context. Only structured carries output_schema, which it requires; only workspace carries workspace_files, the input files of the temporary directory, and gets its tree back. A workspace file may not be AGENTS.md, AGENTS.override.md or CLAUDE.md at the root or lie under a .codex or .claude directory. Codex cannot read files in workspace mode, so the Daemon also inlines the workspace files into the prompt and Codex writes only through apply_patch. Pi and Antigravity do not support workspace mode. The Daemon answers failed for a request that breaks these rules, and for a reply whose encoded model.invoked would exceed the frame limit.",
       type: "object",
       additionalProperties: false,
       required: [
@@ -4831,7 +4842,7 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/Id",
         },
         runtime_type: {
-          enum: ["codex", "claude", "pi"],
+          enum: ["codex", "claude", "pi", "antigravity"],
         },
         model: {
           description:

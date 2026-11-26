@@ -51,6 +51,7 @@ type acpProcess struct {
 	shape       *antigravityShape
 	front       *mcpFront
 	hookEP      *AntigravityHookEndpoint
+	storeRoot   string
 	releaseTemp func() error
 	releaseOnce sync.Once
 	fixedHandle func(acpFrame)

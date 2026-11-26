@@ -135,13 +135,14 @@ distinguishing), cancels on disconnect and drain, loads a named Pi library model
 on demand through `ensureLocalModel` (matching `run.start`), clamps reasoning
 effort against the requested model, and checks before sending that
 the encoded `executed` (kind `model_invoke`) fits the 4 MiB frame limit (otherwise
-it reports `failed`). `internal/provider/model_invoke.go` and
-`internal/provider/pi_model_invoke.go` run one `codex exec`, `claude -p`, or
-ephemeral `pi` RPC turn in a temporary directory, passing the requested `model`
-explicitly when supplied: the prompt goes through stdin, tools and
-user customization are off, and it refuses workspace files at the root named
-`AGENTS.md`, `AGENTS.override.md` or `CLAUDE.md` and anything under `.codex` or
-`.claude` at any depth. `internal/workspace/codex_invoke_home.go` prepares a
+it reports `failed`). `internal/provider/model_invoke.go`, `internal/provider/pi_model_invoke.go`,
+and `internal/provider/antigravity_model_invoke.go` run one `codex exec`,
+`claude -p`, ephemeral `pi` RPC turn, or isolated tool-disabled `agy acp` turn
+in a temporary directory, passing the requested `model` explicitly when
+supplied: the prompt goes through stdin or ACP, tools and user customization
+are off, and it refuses workspace files at the root named `AGENTS.md`,
+`AGENTS.override.md` or `CLAUDE.md` and anything under `.codex` or `.claude`
+at any depth. `internal/workspace/codex_invoke_home.go` prepares a
 temporary `CODEX_HOME` holding only an `auth.json` link, provider settings and
 a seeded models cache (see below).
 Claude uses the fixed `model-invoke/claude/.claude` under the state directory as
@@ -539,8 +540,11 @@ heredoc (`internal/permission/shell_text.go`). Named variables such as `"$id"`,
   uses the built-in `powershell` tool instead of `bash`, so it skips the POSIX
   `shell-text-hook` and `pipefail`, and the managed extension overrides
   `powershell` to set UTF-8 `$OutputEncoding` and console encodings.
-- Antigravity is not checked: its permission request can only allow or reject
-  a call, with no reason the Agent would read.
+- Antigravity runs the same `permission.ShellTextRewritten` check inside its
+  managed `PreToolUse` hook for `run_command` (except on Windows, where shells
+  are PowerShell), returning `{"decision":"deny","reason":...}` so the model
+  reads the refusal directly and `{"decision":"allow"}` otherwise so ACP
+  `session/request_permission` review still runs.
 
 A hook that cannot run lets the command through.
 
@@ -599,13 +603,14 @@ for a browser sign-in when signed out.
   turns never park and confirm process-tree exit.
 - Idle session compaction (`session_compact`, Computer 0.66.0 or later) takes a
   parked Antigravity process (never an unadopted pre-start), rejects every
-  `session/request_permission` during the compaction turn, submits
-  `/compact <instructions>` over ACP while its `mcpFront` stays unbound, and
-  verifies compaction deterministically from `CHECKPOINT` entries appended to
-  the session's JSONL transcript (never from model prose). It records the first
-  positive `usage_update` `used` value as `pre_tokens`, parks the process back
-  only when the turn ends cleanly with no open tool calls and a valid release
-  fence, and otherwise retires the process before returning.
+  `session/request_permission` (and denies `run_command` via `PreToolUse` on
+  POSIX) during the compaction turn, submits `/compact <instructions>` over ACP
+  while its `mcpFront` stays unbound, and verifies compaction deterministically
+  from `CHECKPOINT` entries appended to the session's JSONL transcript via
+  symlink-safe `runtimehistory` openers (never from model prose). It records the
+  first positive `usage_update` `used` value as `pre_tokens`, parks the process
+  back only when the turn ends cleanly with no open tool calls and a valid
+  release fence, and otherwise retires the process before returning.
 - Managed Antigravity hooks (`--add-dir`) canonicalize their temp directory path
   via symlink resolution and keep the loopback callback URL unquoted on Windows
   (wrapping the full command in outer quotes only when the Daemon executable
@@ -653,8 +658,32 @@ for a browser sign-in when signed out.
   model turn reports usage or activity, the adapter fails such a Run, retires
   the process instead of parking it, and surfaces the trimmed redacted notice in
   `failure.detail` when the Agent Service announces `runtime_failure_detail`.
-- History reads, Local Skill scans and local models do not support
-  Antigravity, so Agent Memory skips Antigravity Agents.
+- Managed Antigravity hooks (`PreInvocation`, `PreToolUse`, and `Stop`) bridge
+  back to the Daemon over a loopback endpoint (`AntigravityHookTimeout` = 15s).
+  Resident `hooks.json` scopes `PreToolUse` to `"matcher": "run_command"` on
+  POSIX (enforcing `ShellTextHook` during normal turns and denying `run_command`
+  during compaction) and omits resident `PreToolUse` on Windows where
+  `ShellTextHook` is inactive. On an idle `Stop` (`fullyIdle` true/omitted, no
+  error, and normal `NO_TOOL_CALL` termination), the turn invokes `StopHook`
+  and answers `{"decision":"continue","reason":...}` on block, guarding against
+  repeat blocking via `continuationActive || executionNum > 0 || stopHookBlocked`.
+- Native history reads (`runtimehistory.InspectAntigravity`, Computer 0.67.0 or
+  later) read bounded, symlink-checked `transcript.jsonl` files under
+  `~/.gemini/antigravity-cli/brain/<sessionID>/.system_generated/logs/` with
+  `thinking` redacted as `reasoning_content`, and are served over `debug_history`
+  only when `runner.welcome`'s `service_features` names `antigravity_history`.
+  Because `agy`'s `transcript.jsonl` currently omits ACP `toolCallId` and
+  `turn_id`, Antigravity native history serves Debug History, Agent Memory, and
+  `.previous-context.md` export (TeamHub per-Message/Run activity linking
+  requires persisted turn or tool call IDs).
+- Background stateless model calls (`execute` `model_invoke`, Computer 0.67.0
+  or later) run a single tool-disabled `agy acp` turn
+  (`--include-default-customizations=false` plus a sealed `PreToolUse`
+  `--deny-tools` hook and denied permission requests) inside an isolated
+  temporary `--gemini-dir` seeded with user OAuth token and settings, leaving
+  `~/.gemini/antigravity-cli` untouched; workspace mode
+  answers `unsupported`. Local Skill scans and local models do not support
+  Antigravity.
 - The Gateway hello leaves out the Antigravity diagnostic while `agy` is not
   installed, so such a Computer still connects to an Agent Service released
   before Antigravity support. When `agy` is installed later, the next

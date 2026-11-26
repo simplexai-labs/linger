@@ -57,7 +57,8 @@ export interface RuntimeHistoryInstructionBlock {
 export type RuntimeHistorySource =
   | "codex_rollout"
   | "claude_transcript"
-  | "pi_session";
+  | "pi_session"
+  | "antigravity_transcript";
 
 export type RuntimeHistoryInstructions =
   | {
@@ -125,7 +126,9 @@ export function unavailableRuntimeHistory(
           ? "pi_session"
           : providerKind === "claude"
             ? "claude_transcript"
-            : "codex_rollout",
+            : providerKind === "antigravity"
+              ? "antigravity_transcript"
+              : "codex_rollout",
       reason,
       blocks: [],
     },
@@ -267,9 +270,10 @@ const redactHistoryValue = (
     );
   }
 
+  const record = value as { readonly [key: string]: RuntimeHistoryJsonValue };
   const output: Record<string, RuntimeHistoryJsonValue> = {};
   let reasoningContentPresent = false;
-  for (const [key, item] of Object.entries(value)) {
+  for (const [key, item] of Object.entries(record)) {
     const childPointer = `${pointer}/${escapeJsonPointer(key)}`;
     const normalizedKey = normalizeFieldName(key);
     if (normalizedKey === "encrypted_content") {
@@ -278,6 +282,18 @@ const redactHistoryValue = (
         reason: "encrypted_content",
       });
       if (inReasoningPayload) reasoningContentPresent = true;
+      continue;
+    }
+    if (
+      normalizedKey === "thinking" &&
+      (record.type === "thinking" ||
+        record.type === "redacted_thinking" ||
+        record.type === "PLANNER_RESPONSE")
+    ) {
+      redactedFields.push({
+        path: manifestPath(childPointer),
+        reason: "reasoning_content",
+      });
       continue;
     }
     if (isSecretField(key)) {

@@ -1475,6 +1475,8 @@ components:
           enum:
             - codex_rollout
             - claude_transcript
+            - pi_session
+            - antigravity_transcript
         snapshot:
           $ref: ../components/agent-debug.yaml#/components/schemas/AgentDebugHistorySnapshot
         instructions:
