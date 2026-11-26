@@ -46,6 +46,9 @@ import { mentionStyle } from "./mention-style";
 import { sendRetryingOnce } from "./upload-retry";
 import { AttachMenu, type AttachSource } from "./attach-menu";
 import { armLive } from "../voice";
+import type { Translate } from "../i18n/language";
+import { useTranslation } from "../i18n/use-translation";
+import { chatComposerMessages as m } from "./composer.messages";
 import { useOutbox } from "./outbox-context";
 import { Text, TextInput } from "../ui/text";
 
@@ -62,6 +65,7 @@ export function Composer(props: {
   readonly roomId: string;
   readonly placeholder: string;
 }) {
+  const { t } = useTranslation();
   const teamHub = useTeamHub();
   const outbox = useOutbox();
   const directAgent = useDirectAgent(props.roomId);
@@ -153,25 +157,25 @@ export function Composer(props: {
   const attach = async (source: AttachSource) => {
     setProblem(undefined);
     if (!teamHub.connected) {
-      setProblem("Connect to your computer to attach files.");
+      setProblem(t(m.connectToAttach));
       return;
     }
     let asset: PickedFile | undefined;
     try {
-      asset = await pickFile(source);
+      asset = await pickFile(source, t);
     } catch (error) {
       setProblem(
         error instanceof CameraNotAllowed
-          ? "Allow Linger to use the camera in the Settings app."
+          ? t(m.cameraNotAllowed)
           : source === "camera"
-            ? "The camera is not available."
-            : "That could not be opened. Try again.",
+            ? t(m.cameraUnavailable)
+            : t(m.pickFailed),
       );
       return;
     }
     if (!asset) return;
     if (asset.size !== undefined && asset.size > MAX_UPLOAD_BYTES) {
-      setProblem("Files from the phone can be up to 25 MB.");
+      setProblem(t(m.fileTooLarge));
       return;
     }
     const localId = newIdempotencyKey();
@@ -209,8 +213,8 @@ export function Composer(props: {
       setFiles((current) => current.filter((file) => file.localId !== localId));
       setProblem(
         error instanceof HttpError && error.status === 413
-          ? "That file is larger than your computer accepts."
-          : `${asset.name} did not upload. Try again.`,
+          ? t(m.fileTooLargeForComputer)
+          : t(m.uploadFailed, { name: asset.name }),
       );
     }
   };
@@ -248,7 +252,7 @@ export function Composer(props: {
     } catch {
       setText(message);
       setMentions(named);
-      setProblem("The message could not be saved on this phone. Try again.");
+      setProblem(t(m.notSaved));
     }
   };
 
@@ -277,7 +281,7 @@ export function Composer(props: {
               </Text>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Remove ${file.name}`}
+                accessibilityLabel={t(m.removeFile, { name: file.name })}
                 onPress={() => remove(file)}
                 hitSlop={10}
               >
@@ -289,7 +293,7 @@ export function Composer(props: {
       ) : null}
       <View style={styles.dock}>
         <View ref={plusRef} collapsable={false}>
-          <RoundButton label="Attach" onPress={toggleMenu} icon="add" />
+          <RoundButton label={t(m.attach)} onPress={toggleMenu} icon="add" />
         </View>
         <AttachMenu
           anchor={menuAt}
@@ -309,7 +313,7 @@ export function Composer(props: {
           placeholderTextColor={colors.placeholder}
           multiline
           textAlignVertical="center"
-          accessibilityLabel="Message"
+          accessibilityLabel={t(m.message)}
           submitBehavior="newline"
         >
           {/* Children instead of value, so a chosen @ shows as a mention. */}
@@ -327,7 +331,7 @@ export function Composer(props: {
             Live, with words it sends them. */}
         {showSend ? (
           <RoundButton
-            label="Send"
+            label={t(m.send)}
             onPress={() => void send()}
             icon="send"
             tone="ink"
@@ -335,7 +339,7 @@ export function Composer(props: {
           />
         ) : (
           <RoundButton
-            label="Talk live"
+            label={t(m.talkLive)}
             onPress={() => {
               tap();
               armLive();
@@ -363,7 +367,10 @@ interface PickedFile {
 }
 
 /** Opens the camera, the photo library or Files; undefined when cancelled. */
-async function pickFile(source: AttachSource): Promise<PickedFile | undefined> {
+async function pickFile(
+  source: AttachSource,
+  t: Translate,
+): Promise<PickedFile | undefined> {
   if (source === "files") {
     const picked = await DocumentPicker.getDocumentAsync({
       copyToCacheDirectory: true,
@@ -397,11 +404,12 @@ async function pickFile(source: AttachSource): Promise<PickedFile | undefined> {
   const asset = picked.canceled ? undefined : picked.assets[0];
   if (!asset) return undefined;
   const extension = asset.mimeType?.split("/")[1] ?? "jpg";
+  const time = new Date().toISOString().slice(0, 19).replace("T", " ");
   return {
     uri: asset.uri,
     name:
       asset.fileName ??
-      `${asset.type === "video" ? "Video" : "Photo"} ${new Date().toISOString().slice(0, 19).replace("T", " ")}.${extension}`,
+      `${t(asset.type === "video" ? m.videoName : m.photoName, { time })}.${extension}`,
     mimeType: asset.mimeType,
     size: asset.fileSize,
   };
@@ -448,6 +456,7 @@ function MentionSheet(props: {
   readonly actors: readonly Mentionable[];
   readonly onChoose: (actor: Mentionable) => void;
 }) {
+  const { t } = useTranslation();
   const rise = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.spring(rise, {
@@ -479,13 +488,13 @@ function MentionSheet(props: {
         showsHorizontalScrollIndicator={false}
         keyboardShouldPersistTaps="always"
         contentContainerStyle={styles.sheetRow}
-        accessibilityLabel="People and Agents to mention"
+        accessibilityLabel={t(m.mentionList)}
       >
         {props.actors.map((actor) => (
           <Pressable
             key={actor.id}
             accessibilityRole="button"
-            accessibilityLabel={`Mention ${actor.display_name}`}
+            accessibilityLabel={t(m.mention, { name: actor.display_name })}
             onPress={() => props.onChoose(actor)}
             style={({ pressed }) => [
               styles.pick,

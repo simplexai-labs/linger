@@ -15,12 +15,14 @@ import {
   viewerFor,
   type FileKind,
 } from "../library/file-kind";
+import { useTranslation } from "../i18n/use-translation";
 import { toBase64 } from "../lib/bytes";
 import { teamHubKey, useTeamHub } from "../state/queries";
 import { colors, radius, shadow, space, type } from "../theme";
 import { PressScale } from "../ui/press-scale";
 import { Icon, type IconName, type IconSize } from "../ui/icon";
 import { Text } from "../ui/text";
+import { chatFileMessages as m } from "./file-card.messages";
 
 /**
  * The web's file type icons and category colors
@@ -134,6 +136,7 @@ export function FileTile(props: {
 }
 
 function InlineImage(props: { readonly attachment: MessageAttachment }) {
+  const { t } = useTranslation();
   const { attachment } = props;
   const teamHub = useTeamHub();
   const [ratio, setRatio] = useState(4 / 3);
@@ -156,7 +159,7 @@ function InlineImage(props: { readonly attachment: MessageAttachment }) {
   return (
     <PressScale
       accessibilityRole="imagebutton"
-      accessibilityLabel={`Open ${attachment.filename}`}
+      accessibilityLabel={t(m.open, { name: attachment.filename })}
       onPress={() => open(attachment)}
       style={[styles.image, { aspectRatio: ratio }]}
     >
@@ -184,6 +187,7 @@ export function FileCard(props: {
   readonly attachment: MessageAttachment;
   readonly mine: boolean;
 }) {
+  const { t } = useTranslation();
   const { attachment } = props;
   const media = attachment.media_type ?? "";
   if (
@@ -199,7 +203,7 @@ export function FileCard(props: {
   return (
     <PressScale
       accessibilityRole="button"
-      accessibilityLabel={`Open ${attachment.filename}`}
+      accessibilityLabel={t(m.open, { name: attachment.filename })}
       disabled={!attachment.available}
       onPress={() => open(attachment)}
       containerStyle={props.mine ? styles.alignEnd : styles.alignStart}
@@ -212,8 +216,11 @@ export function FileCard(props: {
         </Text>
         <Text style={styles.detail} numberOfLines={1}>
           {attachment.available
-            ? `${fileTypeLabel(attachment.filename, media)} · ${fileSize(attachment.size_bytes)}`
-            : "No longer available"}
+            ? t(m.details, {
+                type: fileTypeLabel(attachment.filename, media),
+                size: fileSize(attachment.size_bytes),
+              })
+            : t(m.unavailable)}
         </Text>
       </View>
       {attachment.available ? (

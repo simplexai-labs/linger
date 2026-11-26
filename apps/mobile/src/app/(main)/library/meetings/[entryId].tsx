@@ -9,10 +9,12 @@ import {
   getDocumentVersion,
   getMemoryEntry,
 } from "../../../../api/teamhub";
+import { useTranslation } from "../../../../i18n/use-translation";
 import {
   readKnowledgeMarkdown,
   withoutLeadingHeading,
 } from "../../../../library/knowledge-markdown";
+import { meetingsDetailMessages as m } from "../../../../library/library-screen.messages";
 import { readableFrom, ReadableView } from "../../../../library/readable";
 import { Recording } from "../../../../library/recording";
 import { UnderlineTabs } from "../../../../library/underline-tabs";
@@ -23,12 +25,8 @@ import { Markdown } from "../../../../ui/markdown";
 import { StatusStrip } from "../../../../ui/status-strip";
 import { Text } from "../../../../ui/text";
 
-const tabs = [
-  { id: "summary", label: "Summary" },
-  { id: "transcript", label: "Transcript" },
-] as const;
-
 function Transcript(props: { readonly versionId: string }) {
+  const { t } = useTranslation();
   const teamHub = useTeamHub();
   const transcript = useQuery({
     queryKey: teamHubKey(
@@ -57,9 +55,9 @@ function Transcript(props: { readonly versionId: string }) {
   if (transcript.isError)
     return (
       <EmptyState
-        title="The transcript did not load"
+        title={t(m.transcriptFailed)}
         action={{
-          label: "Try again",
+          label: t(m.tryAgain),
           onPress: () => void transcript.refetch(),
         }}
       />
@@ -68,6 +66,7 @@ function Transcript(props: { readonly versionId: string }) {
 }
 
 export default function MeetingScreen() {
+  const { t, language } = useTranslation();
   const { entryId } = useLocalSearchParams<{ entryId: string }>();
   const teamHub = useTeamHub();
   const tenantId = useIdentity().data?.tenantId;
@@ -94,25 +93,33 @@ export default function MeetingScreen() {
     [entry.data?.content],
   );
 
+  const tabs = [
+    { id: "summary", label: t(m.summary) },
+    { id: "transcript", label: t(m.transcript) },
+  ] as const;
+
   return (
     <View style={styles.screen}>
-      <Stack.Screen options={{ title: entry.data?.title || "Meeting" }} />
+      <Stack.Screen options={{ title: entry.data?.title || t(m.meeting) }} />
       <StatusStrip />
       {!entry.data ? (
         entry.isError ? (
           <EmptyState
-            title="This meeting did not load"
-            action={{ label: "Try again", onPress: () => void entry.refetch() }}
+            title={t(m.meetingFailed)}
+            action={{
+              label: t(m.tryAgain),
+              onPress: () => void entry.refetch(),
+            }}
           />
         ) : (
           <ActivityIndicator style={styles.loading} color={colors.muted} />
         )
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={type.title}>{entry.data.title || "Meeting"}</Text>
+          <Text style={type.title}>{entry.data.title || t(m.meeting)}</Text>
           {meeting ? (
             <Text style={type.small}>
-              {new Date(meeting.started_at).toLocaleString(undefined, {
+              {new Date(meeting.started_at).toLocaleString(language, {
                 weekday: "long",
                 month: "long",
                 day: "numeric",
@@ -135,14 +142,14 @@ export default function MeetingScreen() {
           />
           {tab === "summary" ? (
             meeting && !meeting.summary_ready ? (
-              <Text style={type.body}>The summary is still being written.</Text>
+              <Text style={type.body}>{t(m.summaryPending)}</Text>
             ) : (
               <Markdown text={summary} />
             )
           ) : meeting ? (
             <Transcript versionId={meeting.transcript_version_id} />
           ) : (
-            <Text style={type.body}>This meeting has no transcript.</Text>
+            <Text style={type.body}>{t(m.noTranscript)}</Text>
           )}
         </ScrollView>
       )}

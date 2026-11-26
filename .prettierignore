@@ -14,3 +14,5 @@ skills/builtin/*/*/**
 apps/node-services/prompts/llm-wiki/personal/session-meeting-note/*.md
 # Preserve supplied Profile Skill bytes and its explicitly maintained references.
 apps/teamhub/internal/personalprofile/skill/
+# Built by apps/mobile/scripts/build-viewer.mjs; ignored by Git.
+apps/mobile/assets/viewer

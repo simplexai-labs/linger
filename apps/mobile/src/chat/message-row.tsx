@@ -9,7 +9,10 @@ import { colors, radius, space, type } from "../theme";
 import { ActorAvatar } from "../ui/avatar";
 import { Markdown } from "../ui/markdown";
 import { bubbleSegments } from "./bubble-segments";
+import { useTranslation } from "../i18n/use-translation";
 import { openAgent } from "./agent-stage";
+import { chatStageMessages } from "./agent-stage.messages";
+import { chatMessageMessages as m } from "./message-row.messages";
 import { DecisionCard } from "./decision-card";
 import { FileCard, FileTile } from "./file-card";
 import { mentionOnInkStyle, mentionStyle } from "./mention-style";
@@ -84,6 +87,7 @@ export const MessageRow = memo(function MessageRow(props: {
   /** Names and avatars over other people's messages; off in a direct chat. */
   readonly showAuthor: boolean;
 }) {
+  const { t } = useTranslation();
   const { message } = props;
   if (message.message_kind === "room_notice")
     return (
@@ -112,7 +116,9 @@ export const MessageRow = memo(function MessageRow(props: {
             accessibilityRole={
               message.author.kind === "agent" ? "button" : undefined
             }
-            accessibilityLabel={`About ${message.author.display_name}`}
+            accessibilityLabel={t(chatStageMessages.about, {
+              name: message.author.display_name,
+            })}
             disabled={message.author.kind !== "agent"}
             onPress={() => openAgent(message.author.id, message.room_id)}
             style={styles.author}
@@ -169,6 +175,7 @@ export function PendingRow(props: {
   readonly onRetry: () => void;
   readonly onDiscard: () => void;
 }) {
+  const { t } = useTranslation();
   const { entry } = props;
   const failed = entry.state === "failed";
   const text = pendingText(entry.body, props.directAgentId);
@@ -189,27 +196,27 @@ export function PendingRow(props: {
       ))}
       {failed ? (
         <View style={styles.failed}>
-          <Text style={[type.caption, styles.failedText]}>Not sent</Text>
+          <Text style={[type.caption, styles.failedText]}>{t(m.notSent)}</Text>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Send again"
+            accessibilityLabel={t(m.sendAgain)}
             onPress={props.onRetry}
             hitSlop={10}
           >
-            <Text style={styles.failedAction}>Send again</Text>
+            <Text style={styles.failedAction}>{t(m.sendAgain)}</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Delete this message"
+            accessibilityLabel={t(m.deleteMessage)}
             onPress={props.onDiscard}
             hitSlop={10}
           >
-            <Text style={styles.failedAction}>Delete</Text>
+            <Text style={styles.failedAction}>{t(m.delete)}</Text>
           </Pressable>
         </View>
       ) : (
         <Text style={type.caption} accessibilityLiveRegion="polite">
-          Sending…
+          {t(m.sending)}
         </Text>
       )}
     </View>

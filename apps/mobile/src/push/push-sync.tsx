@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import { useEffect, useRef } from "react";
 
 import { useComputer } from "../computer/computer-context";
+import { useTranslation } from "../i18n/use-translation";
 import { documentFiles } from "../computer/store-expo";
 import { notificationTarget } from "./grant";
 import { syncPushGrant } from "./push";
@@ -40,6 +41,8 @@ function openTarget(
 export function PushSync() {
   const { active, session, computers, switchTo, loaded } = useComputer();
   const hostId = active?.hostId;
+  // A new interface language renews the grant, so alerts follow it.
+  const { language } = useTranslation();
   const computersRef = useRef(computers);
   const switchRef = useRef(switchTo);
 
@@ -54,7 +57,7 @@ export function PushSync() {
     syncPushGrant({ session, hostId, files: documentFiles }).catch(
       () => undefined,
     );
-  }, [hostId, session]);
+  }, [hostId, session, language]);
 
   // A tap that launched the app: act once the paired computers are known.
   useEffect(() => {

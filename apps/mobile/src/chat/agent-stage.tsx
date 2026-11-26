@@ -28,8 +28,11 @@ import { useRoomMembers } from "../state/queries";
 import { colors, radius, space, type } from "../theme";
 import { AgentAvatar } from "../ui/avatar";
 import { Icon } from "../ui/icon";
+import { useTranslation } from "../i18n/use-translation";
+import { chatStageMessages as m } from "./agent-stage.messages";
 import { isWorking } from "./run-status";
-import { useRunViews, useStopRun } from "./run-status-bar";
+import { runLine, useRunViews, useStopRun } from "./run-status-bar";
+import { chatRunMessages } from "./run-status.messages";
 import { useReducedMotion } from "../ui/motion";
 import { RoomAvatar } from "../ui/room-avatar";
 import { SidebarButton } from "../ui/sidebar-button";
@@ -98,6 +101,7 @@ export function openAgent(agentId: string, roomId?: string): void {
 
 /** The bar above a stage; only Another Me's chat offers Record. */
 function TopBar(props: { readonly record?: boolean }) {
+  const { t } = useTranslation();
   return (
     <View style={styles.bar}>
       <SidebarButton />
@@ -105,7 +109,7 @@ function TopBar(props: { readonly record?: boolean }) {
       {props.record ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Record a meeting"
+          accessibilityLabel={t(m.recordMeeting)}
           hitSlop={8}
           onPress={() => router.push("/voice/record")}
           style={({ pressed }) => [styles.barButton, pressed && styles.pressed]}
@@ -123,12 +127,15 @@ function StopButton(props: {
   readonly runId: string;
   readonly agentName: string;
 }) {
+  const { t } = useTranslation();
   const { stopping, stop } = useStopRun(props.roomId);
   const isStopping = stopping.has(props.runId);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Stop ${props.agentName}`}
+      accessibilityLabel={t(chatRunMessages.stopAgent, {
+        name: props.agentName,
+      })}
       disabled={isStopping}
       hitSlop={10}
       onPress={() => stop(props.runId)}
@@ -154,6 +161,7 @@ function WorkLine(props: {
   readonly line: string;
   readonly agentName: string;
 }) {
+  const { t } = useTranslation();
   const { stopping } = useStopRun(props.roomId);
   const isStopping = stopping.has(props.runId);
   return (
@@ -172,7 +180,7 @@ function WorkLine(props: {
         numberOfLines={1}
         accessibilityLiveRegion="polite"
       >
-        {isStopping ? "Stopping…" : props.line}
+        {isStopping ? t(chatRunMessages.stopping) : props.line}
       </Text>
       <StopButton
         roomId={props.roomId}
@@ -194,6 +202,7 @@ function FoldedStage(props: {
   readonly record?: boolean;
   readonly working?: { readonly runId: string; readonly line: string };
 }) {
+  const { t } = useTranslation();
   const { stopping } = useStopRun(props.roomId);
   const working = props.working;
   const isStopping = !!working && stopping.has(working.runId);
@@ -204,7 +213,7 @@ function FoldedStage(props: {
       </View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`About ${props.agent.display_name}`}
+        accessibilityLabel={t(m.about, { name: props.agent.display_name })}
         onPress={() => openAgent(props.agent.id, props.roomId)}
         style={({ pressed }) => [
           styles.foldedCenter,
@@ -228,7 +237,7 @@ function FoldedStage(props: {
               numberOfLines={1}
               accessibilityLiveRegion="polite"
             >
-              {isStopping ? "Stopping…" : working.line}
+              {isStopping ? t(chatRunMessages.stopping) : working.line}
             </Text>
           </Reanimated.View>
         ) : null}
@@ -243,7 +252,7 @@ function FoldedStage(props: {
         ) : props.record ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Record a meeting"
+            accessibilityLabel={t(m.recordMeeting)}
             hitSlop={8}
             onPress={() => router.push("/voice/record")}
             style={({ pressed }) => [
@@ -266,6 +275,7 @@ export function AgentStage(props: {
   /** Another Me's chat: the bar offers Record. */
   readonly record?: boolean;
 }) {
+  const { t } = useTranslation();
   const views = useRunViews(props.roomId);
   const working = Object.values(views).find(
     (view) => view.run.agent.id === props.agent.id && isWorking(view.run),
@@ -277,7 +287,7 @@ export function AgentStage(props: {
     outputRange: [1, 1.06],
   });
   const lift = breath.interpolate({ inputRange: [0, 1], outputRange: [0, -2] });
-  const line = working ? working.line || "Working…" : (props.idleLine ?? "");
+  const line = working ? runLine(working, t) : (props.idleLine ?? "");
 
   // The keyboard's own progress, frame by frame and while it is dragged,
   // shrinks the stage to the folded bar and crossfades the two, so the
@@ -319,7 +329,7 @@ export function AgentStage(props: {
         <View style={styles.stage}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`About ${props.agent.display_name}`}
+            accessibilityLabel={t(m.about, { name: props.agent.display_name })}
             onPress={() => openAgent(props.agent.id, props.roomId)}
             style={({ pressed }) => pressed && styles.facePressed}
           >
@@ -374,6 +384,7 @@ export function GroupStage(props: {
   readonly roomId: string;
   readonly title: string;
 }) {
+  const { t } = useTranslation();
   const members = useRoomMembers(props.roomId).data ?? [];
   return (
     <View>
@@ -389,7 +400,7 @@ export function GroupStage(props: {
         </Text>
         {members.length > 0 ? (
           <Text style={type.small}>
-            {members.length === 1 ? "1 member" : `${members.length} members`}
+            {t(m.members, { count: members.length })}
           </Text>
         ) : null}
       </View>

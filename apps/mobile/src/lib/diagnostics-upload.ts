@@ -6,6 +6,10 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { strToU8, zipSync } from "fflate";
 
+import type { Translate } from "../i18n/language";
+import { formatMessage } from "../i18n/messages";
+import { diagnosticsUploadMessages as m } from "./diagnostics-upload.messages";
+
 export const DIAGNOSTICS_UPLOAD_SCHEMA = "linger.diagnostics-upload/v1";
 /** The receiver files phone reports apart from the desktop's by this name. */
 export const MOBILE_CLIENT_NAME = "linger-mobile";
@@ -18,15 +22,69 @@ const RESERVED_HEADERS = new Set([
   "connection",
 ]);
 
+export type DiagnosticsUploadProblem =
+  | "TOO_LARGE"
+  | "UNREACHABLE"
+  | "REDIRECTED"
+  | "REFUSED"
+  | "UNUSABLE_ANSWER"
+  | "UPLOAD_UNFINISHED"
+  | "UPLOAD_REFUSED";
+
+interface Refusal {
+  readonly status: number;
+  /** The receiver's own explanation, shown as it is. */
+  readonly message?: string;
+}
+
+function describe(
+  t: Translate,
+  problem: DiagnosticsUploadProblem,
+  refusal: Refusal | undefined,
+): string {
+  switch (problem) {
+    case "TOO_LARGE":
+      return t(m.tooLarge);
+    case "UNREACHABLE":
+      return t(m.unreachable);
+    case "REDIRECTED":
+      return t(m.redirected);
+    case "REFUSED":
+      return (
+        refusal?.message ??
+        t(m.answered, { status: String(refusal?.status ?? "") })
+      );
+    case "UNUSABLE_ANSWER":
+      return t(m.unusableAnswer);
+    case "UPLOAD_UNFINISHED":
+      return t(m.uploadUnfinished);
+    case "UPLOAD_REFUSED":
+      return t(m.uploadRefused);
+  }
+}
+
+const english: Translate = (message, ...values) =>
+  formatMessage(message, "en", undefined, values[0]);
+
+/** The error's message is English for the log; the screen shows its text. */
 export class DiagnosticsUploadError extends Error {
   constructor(
-    message: string,
+    readonly problem: DiagnosticsUploadProblem,
     /** Whether Try Again can help. */
     readonly retry: boolean,
+    readonly refusal?: Refusal,
   ) {
-    super(message);
+    super(describe(english, problem, refusal));
     this.name = "DiagnosticsUploadError";
   }
+}
+
+/** What the phone shows for a failed upload, in the language on screen. */
+export function diagnosticsUploadErrorText(
+  error: DiagnosticsUploadError,
+  t: Translate,
+): string {
+  return describe(t, error.problem, error.refusal);
 }
 
 /** https, or http to this machine while developing a receiver. */
@@ -83,16 +141,17 @@ function readTicket(value: unknown): Ticket | undefined {
   return { reportId: ticket.reportId, url: upload.url, headers };
 }
 
-async function errorMessage(response: Response): Promise<string> {
+async function refusalOf(response: Response): Promise<Refusal> {
   try {
     const body = (await response.json()) as {
       error?: { message?: unknown };
     };
-    if (typeof body.error?.message === "string") return body.error.message;
+    if (typeof body.error?.message === "string")
+      return { status: response.status, message: body.error.message };
   } catch {
     // Not the error envelope.
   }
-  return `The receiver answered ${response.status}.`;
+  return { status: response.status };
 }
 
 /** Uploads a zip and returns the report id the Human gives to support. */
@@ -104,10 +163,7 @@ export async function uploadDiagnostics(input: {
 }): Promise<string> {
   const send = input.fetch ?? fetch;
   if (input.zip.length > MAX_BYTES)
-    throw new DiagnosticsUploadError(
-      "The diagnostics are too large to send.",
-      false,
-    );
+    throw new DiagnosticsUploadError("TOO_LARGE", false);
   let asked: Response;
   try {
     asked = await send(input.endpoint, {
@@ -122,30 +178,21 @@ export async function uploadDiagnostics(input: {
       }),
     });
   } catch {
-    throw new DiagnosticsUploadError(
-      "The receiver could not be reached.",
-      true,
-    );
+    throw new DiagnosticsUploadError("UNREACHABLE", true);
   }
   // React Native's fetch follows redirects whatever `redirect` says, so an
   // answer from anywhere but the configured receiver is refused here: only
   // that receiver may say where the report goes.
   if (asked.redirected || (asked.url && asked.url !== input.endpoint))
-    throw new DiagnosticsUploadError(
-      "The receiver sent the report somewhere else.",
-      false,
-    );
+    throw new DiagnosticsUploadError("REDIRECTED", false);
   if (!asked.ok)
     throw new DiagnosticsUploadError(
-      await errorMessage(asked),
+      "REFUSED",
       asked.status === 429 || asked.status >= 500,
+      await refusalOf(asked),
     );
   const ticket = readTicket(await asked.json().catch(() => undefined));
-  if (!ticket)
-    throw new DiagnosticsUploadError(
-      "The receiver sent an unusable answer.",
-      false,
-    );
+  if (!ticket) throw new DiagnosticsUploadError("UNUSABLE_ANSWER", false);
   let uploaded: Response;
   try {
     uploaded = await send(ticket.url, {
@@ -155,11 +202,11 @@ export async function uploadDiagnostics(input: {
       body: input.zip.slice().buffer,
     });
   } catch {
-    throw new DiagnosticsUploadError("The upload did not finish.", true);
+    throw new DiagnosticsUploadError("UPLOAD_UNFINISHED", true);
   }
   if (!uploaded.ok)
     throw new DiagnosticsUploadError(
-      "The upload was refused.",
+      "UPLOAD_REFUSED",
       uploaded.status === 403 || uploaded.status >= 500,
     );
   return ticket.reportId;

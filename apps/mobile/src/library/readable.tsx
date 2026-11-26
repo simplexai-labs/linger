@@ -1,14 +1,16 @@
 // Read-only rendering of downloaded content: Markdown, text, code and images
-// render natively. Other files open in the system viewer instead. No web views.
+// render natively. HTML is handed back for the viewer page to render.
 import { StyleSheet, View } from "react-native";
 
 import type { Download } from "../api/teamhub";
+import { useTranslation } from "../i18n/use-translation";
 import { toBase64 } from "../lib/bytes";
 import { utf8 } from "../session/frames";
 import { space, type } from "../theme";
 import { EmptyState } from "../ui/controls";
 import { Markdown } from "../ui/markdown";
 import { Text } from "../ui/text";
+import { libraryReadableMessages as m } from "./readable.messages";
 import { ZoomableImage } from "./zoomable-image";
 
 /** Larger text stays on the computer; a phone screen is no place for it. */
@@ -27,6 +29,7 @@ export type Readable =
   | { readonly kind: "markdown"; readonly text: string }
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "image"; readonly uri: string }
+  | { readonly kind: "html"; readonly text: string }
   | { readonly kind: "unsupported" };
 
 export function readableFrom(download: Download): Readable {
@@ -43,6 +46,9 @@ export function readableFrom(download: Download): Readable {
   if (download.bytes.length > MAX_TEXT_BYTES) return { kind: "unsupported" };
   if (mediaType === "text/markdown" || mediaType === "text/x-markdown")
     return { kind: "markdown", text: utf8(download.bytes) };
+  // A native Document can render as HTML; shown as text it would be markup.
+  if (mediaType === "text/html")
+    return { kind: "html", text: utf8(download.bytes) };
   if (
     mediaType.startsWith("text/") ||
     mediaType === "application/json" ||
@@ -57,17 +63,16 @@ export function readableFrom(download: Download): Readable {
 
 /** Text scrolls in its parent; an image fills it, fitted and zoomable. */
 export function ReadableView(props: { readonly content: Readable }) {
+  const { t } = useTranslation();
   const { content } = props;
   if (content.kind === "unsupported")
     return (
-      <EmptyState
-        title="Open on your computer"
-        body="This file cannot be shown on the phone. Open it in Linger on your computer."
-      />
+      <EmptyState title={t(m.unsupportedTitle)} body={t(m.unsupportedBody)} />
     );
   if (content.kind === "image") return <ZoomableImage uri={content.uri} />;
   return (
     <View style={styles.body}>
+      {/* HTML belongs in the viewer page; a caller without one shows its source. */}
       {content.kind === "markdown" ? (
         <Markdown text={content.text} />
       ) : (

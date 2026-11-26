@@ -6,10 +6,17 @@ import type {
   RuntimePresentationEventRecord,
 } from "../api/types";
 
+/** What a Run is doing when it has not said in its own words. */
+export type RunPhase = "working" | "thinking" | "queued";
+
 export interface RunView {
   readonly run: RoomRunStatus;
-  /** The short line under the Agent's name. */
-  readonly line: string;
+  /**
+   * The short line under the Agent's name, in the Run's own words; when
+   * absent the screen words `phase`.
+   */
+  readonly line: string | undefined;
+  readonly phase: RunPhase;
   /** The last presentation event ordinal folded into line. */
   readonly appliedOrdinal: string | undefined;
 }
@@ -28,7 +35,8 @@ export function mergeRun(
     return current;
   return {
     run: incoming,
-    line: current?.line ?? "Working",
+    line: current?.line,
+    phase: current?.phase ?? "working",
     appliedOrdinal: current?.appliedOrdinal,
   };
 }
@@ -47,16 +55,19 @@ export function applyPresentationEvents(
   publishedThrough: string,
 ): RunView {
   let line = view.line;
+  let phase = view.phase;
   const titles = new Map<string, string>();
   for (const record of records) {
     const event = record.event;
     switch (event.type) {
       case "status.changed":
-        if (event.status === "thinking")
-          line = event.title ? event.title : "Thinking";
-        else if (event.status === "queued")
-          line = event.title ? event.title : "Queued";
-        else if (event.status === "working") line = "Working";
+        if (event.status === "thinking" || event.status === "queued") {
+          phase = event.status;
+          line = event.title || undefined;
+        } else if (event.status === "working") {
+          phase = "working";
+          line = undefined;
+        }
         break;
       case "activity.started":
         titles.set(event.activity_id, event.title);
@@ -76,5 +87,5 @@ export function applyPresentationEvents(
         break;
     }
   }
-  return { ...view, line, appliedOrdinal: publishedThrough };
+  return { ...view, line, phase, appliedOrdinal: publishedThrough };
 }

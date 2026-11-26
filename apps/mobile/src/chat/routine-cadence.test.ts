@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { describeCadence } from "./routine-cadence";
+import { formatMessage } from "../i18n/messages";
+import type { Translate } from "../i18n/language";
+import { describeCadence as describeIn } from "./routine-cadence";
+
+const english: Translate = (message, ...values) =>
+  formatMessage(message, "en", undefined, values[0]);
+
+function describeCadence(cadence: Parameters<typeof describeIn>[0]): string {
+  return describeIn(cadence, english);
+}
 
 describe("describeCadence", () => {
   it("reads each schedule kind in a few words", () => {

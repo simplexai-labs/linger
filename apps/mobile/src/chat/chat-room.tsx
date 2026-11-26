@@ -35,6 +35,8 @@ import {
 import { colors, space, type } from "../theme";
 import { EmptyState } from "../ui/controls";
 import { StatusStrip } from "../ui/status-strip";
+import { useTranslation } from "../i18n/use-translation";
+import { chatRoomMessages as m } from "./chat-room.messages";
 import { presentDirectMessage } from "./compose-message";
 import { Composer } from "./composer";
 import { newestFirst, type MessagePages } from "./message-cache";
@@ -112,6 +114,7 @@ export function ChatRoom(props: {
   /** The header shows the Agent's work and Stop, so no bar above the composer. */
   readonly runsInHeader?: boolean;
 }) {
+  const { t } = useTranslation();
   const { roomId } = props;
   const teamHub = useTeamHub();
   const identity = useIdentity();
@@ -186,10 +189,7 @@ export function ChatRoom(props: {
               <ActivityIndicator color={colors.muted} />
             </View>
           ) : (
-            <EmptyState
-              title="Waiting for your computer"
-              body="Messages appear once the phone is connected."
-            />
+            <EmptyState title={t(m.waitingTitle)} body={t(m.waitingBody)} />
           )
         ) : items.length === 0 ? (
           <EmptyState title={props.emptyTitle} />

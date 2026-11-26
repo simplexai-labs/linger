@@ -11,6 +11,8 @@ export interface PushRecord {
   readonly grantedAt?: string;
   /** The Expo token that grant names. */
   readonly expoToken?: string;
+  /** The interface language that grant's alert text is in. */
+  readonly language?: string;
   /** Push was turned off while the computer could not be told. */
   readonly revokePending?: boolean;
   /** What to be alerted about; the computer's defaults until changed. */
@@ -66,13 +68,20 @@ export function pushSetupFrom(extra: unknown): PushSetup | undefined {
   return { projectId, serviceUrl: pushServiceUrl.replace(/\/+$/, "") };
 }
 
+/**
+ * A grant is renewed weekly, for a new Expo token, and when the interface
+ * language changes, since the Push Service writes alerts in the language the
+ * grant names. A grant from before phones sent one counts as English.
+ */
 export function shouldRefreshGrant(
   record: PushRecord,
   expoToken: string,
+  language: string,
   now: number,
 ): boolean {
   if (!record.enabled) return false;
   if (!record.grantedAt || record.expoToken !== expoToken) return true;
+  if ((record.language ?? "en") !== language) return true;
   const grantedAt = Date.parse(record.grantedAt);
   return Number.isNaN(grantedAt) || now - grantedAt >= GRANT_REFRESH_MS;
 }
@@ -115,6 +124,8 @@ export async function readPushRecord(
       enabled: parsed.enabled !== false,
       grantedAt: parsed.grantedAt,
       expoToken: parsed.expoToken,
+      language:
+        typeof parsed.language === "string" ? parsed.language : undefined,
       revokePending: parsed.revokePending === true,
       preferences: preferencesFrom(parsed.preferences),
       preferencesPending: parsed.preferencesPending === true,

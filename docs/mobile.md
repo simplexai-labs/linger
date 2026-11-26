@@ -344,10 +344,12 @@ does not need it: every phone uses the official Push Service.
 
 1. After each session opens, the phone gets its Expo push token and asks the
    Push Service for a **push grant** for this computer:
-   `POST <push>/v1/push/grants {"expo_token","host_id"}` →
+   `POST <push>/v1/push/grants {"expo_token","host_id","language"}` →
    `{"grant","expires_at"}`. The grant is sealed with the service's key,
-   names the Expo token, the Host ID and an expiry 30 days out, and is
-   useless to anyone without the service.
+   names the Expo token, the Host ID, the phone's interface language and an
+   expiry 30 days out, and is useless to anyone without the service. The
+   phone asks again when its interface language changes; a grant without a
+   language, or with one the service has no text for, gets English alerts.
 2. The phone gives the grant and the Push Service's https origin, never the
    raw token, to its computer: `PUT /v0/me/phone/push-grant
 {"grant","service_url"}`.
@@ -369,10 +371,13 @@ does not need it: every phone uses the official Push Service.
    `RELAY_PUSH_SEAL_KEY` and `RELAY_PUSH_EXPO_ACCESS_TOKEN`
    (`apps/relay/README.md`).
 
-| Kind       | When                                                                                                             | Alert text                   |
+| Kind       | When                                                                                                             | Alert text (English)         |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------- |
 | `message`  | An Agent's turn ends with a reply in the Human's direct chat with it, or a group message that mentions the Human | "You have a new reply"       |
 | `decision` | A decision card for the Human is created                                                                         | "Linger needs your decision" |
+
+The Push Service also holds the same two texts in Simplified Chinese
+(`zh-CN`) and picks by the grant's language.
 
 A phone hears about a turn once, not about each of its messages, and not
 while the Human is already looking:
@@ -425,8 +430,18 @@ Desktop after a reboot.
   (Wiki pages cannot be exported). A native Document reads
   `GET /v0/documents/{id}/downloads`, which needs export permission and
   retries a `202` after `Retry-After`. Markdown, text, code, images and audio
-  render in the app; generated knowledge pages hide their leading metadata
-  block. Other files open in the system viewer.
+  render natively; generated knowledge pages hide their leading metadata
+  block. Files up to 50 MB that the desktop previews (PDF, Word, Excel,
+  PowerPoint, CSV and TSV, HTML, Mermaid, other images and video) are
+  downloaded into the cache and shown in the app by an offline viewer page
+  in a WebView, built from the desktop's libraries
+  (`apps/mobile/viewer`). The page reads only the file beside it, its
+  Content-Security-Policy allows only `file:`, `data:` and `blob:`, and an
+  HTML file renders in a sandboxed frame with no scripts. Larger files, and
+  files the viewer cannot read, open in the system viewer, which the header's
+  share button also offers.
+- The interface language is chosen per phone in Settings, Language: Follow
+  System (the default), English or Simplified Chinese. Dates follow it.
 - The Library has three tabs: Meetings by day, recent Documents, and the
   personal Wiki (`GET /v0/tenants/{id}/personal-wiki/documents`).
 - Meetings list from `GET /v0/tenants/{id}/memory` and play their recording

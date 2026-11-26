@@ -7,12 +7,14 @@ import { File, Paths } from "expo-file-system";
 import { AppState, Platform, Share } from "react-native";
 
 import { documentFiles } from "../computer/store-expo";
+import { t } from "../i18n/language";
 import { AppLog, setLogSink, type LogFields, type LogLevel } from "./app-log";
 import {
   diagnosticsZip,
   isUploadUrl,
   uploadDiagnostics,
 } from "./diagnostics-upload";
+import { diagnosticsUploadMessages } from "./diagnostics-upload.messages";
 import { timingSummary } from "./timing";
 
 export const appLog = new AppLog({ files: documentFiles });
@@ -84,7 +86,10 @@ export async function shareAppLog(): Promise<void> {
   if (file.exists) file.delete();
   file.create();
   await file.write(text);
-  await Share.share({ url: file.uri, title: "Linger phone log" });
+  await Share.share({
+    url: file.uri,
+    title: t(diagnosticsUploadMessages.shareTitle),
+  });
 }
 
 /** The receiver this build sends diagnostics to, or none. */

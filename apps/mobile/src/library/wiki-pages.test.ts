@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import type { Translate } from "../i18n/language";
+import { formatMessage } from "../i18n/messages";
 import { wikiPageTitle, wikiSections } from "./wiki-pages";
+
+const t: Translate = (message, ...values) =>
+  formatMessage(message, "en", undefined, values[0]);
 
 function page(title: string, pageKey?: string, kind = "wiki_page") {
   return {
@@ -17,13 +22,16 @@ function page(title: string, pageKey?: string, kind = "wiki_page") {
 
 describe("wikiSections", () => {
   it("groups generated pages by collection and keeps the list order", () => {
-    const sections = wikiSections([
-      page("Topic b", "topics/b.md"),
-      page("Acme", "clients/acme.md"),
-      page("Topic a", "topics/a.md"),
-      page("Room abc", "sessions/2026-11-20/room_abc.md"),
-      page("Overview", "overview.md"),
-    ]);
+    const sections = wikiSections(
+      [
+        page("Topic b", "topics/b.md"),
+        page("Acme", "clients/acme.md"),
+        page("Topic a", "topics/a.md"),
+        page("Room abc", "sessions/2026-11-20/room_abc.md"),
+        page("Overview", "overview.md"),
+      ],
+      t,
+    );
     expect(
       sections.map((section) => [
         section.label,
@@ -40,21 +48,27 @@ describe("wikiSections", () => {
 
   it("leaves out indexes and Wiki sources, as the desktop does", () => {
     expect(
-      wikiSections([
-        page("Index", "index.md"),
-        page("Projects", "projects/index.md"),
-        page("notes.pdf", undefined, "wiki_source"),
-      ]),
+      wikiSections(
+        [
+          page("Index", "index.md"),
+          page("Projects", "projects/index.md"),
+          page("notes.pdf", undefined, "wiki_source"),
+        ],
+        t,
+      ),
     ).toEqual([]);
   });
 
   it("lists meeting notes with the conversations of their day", () => {
-    const sections = wikiSections([
-      page(
-        "Capture session 7db5d734e00fd667",
-        "sessions/2026-11-20/capture_session_7db5d734e00fd667.md",
-      ),
-    ]);
+    const sections = wikiSections(
+      [
+        page(
+          "Capture session 7db5d734e00fd667",
+          "sessions/2026-11-20/capture_session_7db5d734e00fd667.md",
+        ),
+      ],
+      t,
+    );
     expect(sections.map((section) => section.label)).toEqual(["Conversations"]);
     expect(sections[0]!.entries[0]).toMatchObject({
       title: "Meeting notes",
@@ -70,6 +84,7 @@ describe("wikiSections", () => {
           "sessions/2026-11-20/capture_session_7db5.md",
         ),
       ],
+      t,
       new Map([["capture_session_7db5", "Launch review"]]),
     );
     expect(section!.entries[0]!.title).toBe("Launch review");
@@ -84,11 +99,12 @@ describe("wikiPageTitle", () => {
           "Capture session 7db5",
           "sessions/2026-11-20/capture_session_7db5.md",
         ),
+        t,
       ),
     ).toBe("Meeting notes");
-    expect(wikiPageTitle(page("Room x", "sessions/2026-11-20/room_x.md"))).toBe(
-      "Conversation",
-    );
-    expect(wikiPageTitle(page("Acme", "clients/acme.md"))).toBe("Acme");
+    expect(
+      wikiPageTitle(page("Room x", "sessions/2026-11-20/room_x.md"), t),
+    ).toBe("Conversation");
+    expect(wikiPageTitle(page("Acme", "clients/acme.md"), t)).toBe("Acme");
   });
 });

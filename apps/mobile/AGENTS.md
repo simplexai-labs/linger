@@ -56,6 +56,20 @@ and reading rules; `docs/adr/0001` to `0004` record why.
   file to the system viewer. Changing it needs a native build.
 - `src/library/file-kind.ts`: file kinds, labels and which viewer opens a
   file, following the web's `artifact-file-kind.ts`.
+- `viewer/`: the offline file viewer page (pdf.js, open-file-viewer,
+  papaparse, mermaid, as on the desktop). `scripts/build-viewer.mjs` bundles
+  it into the ignored `assets/viewer/viewer.html`; `pnpm start`, `check` and
+  EAS's `eas-build-post-install` run it. `src/library/file-viewer.tsx` shows
+  it in a WebView.
+- `src/i18n`: the interface language (Follow System, English, Simplified
+  Chinese) kept on this phone, `useTranslation()` for screens and `t()` for
+  plain modules, over `@linger/service-kit/messages` as on the Web. English
+  source text lives in `*.messages.ts` files beside the code (outside
+  `src/app`, whose every file is a route); translations live in
+  `src/i18n/locales/zh-CN.json` and follow the Web's glossary
+  (`apps/web/src/i18n/locales/zh-CN.glossary.md`).
+  `src/i18n/catalog.test.ts` checks every message is translated with the
+  same placeholders.
 - `src/theme.ts`: the Linger design system's tokens from the web
   (`apps/web/src/app/visual-theme.css`, `globals.css`): colors, the radius
   steps 4/6/8/12/16/pill, the chat text sizes 15/22 and 13/18, and shadows
@@ -104,13 +118,15 @@ and reading rules; `docs/adr/0001` to `0004` record why.
   share sheet; logic modules write through
   `logEvent`, and `no-console` is an error. `src/lib/timing.ts` counts where
   the phone spends its time and the log records a summary each minute.
-- No web views. Text, Markdown, code, images and audio render in the app;
-  every other file the computer opens is downloaded into the cache and shown
-  by the system viewer (`modules/file-preview`: Quick Look on iOS, the app
-  the system picks on Android), and the cache file is deleted when its
-  screen closes. Anything else says to open it on the
-  computer.
-- English only, like the rest of the repository.
+- The only web view is the offline file viewer. It loads the bundled page
+  from beside the downloaded file, may read only that directory, and never
+  reaches the network. Text, Markdown, code, small images and audio render
+  natively; files the viewer cannot show are handed to the system viewer
+  (`modules/file-preview`: Quick Look on iOS, the app the system picks on
+  Android). The cache file is deleted when its screen closes.
+- English source text, like the rest of the repository; other languages go
+  only in `src/i18n/locales/`. Call `t()` when text is shown, never at
+  module scope, because the language can change while the app runs.
 - Logic lives in modules that import no Expo or React Native code, so Vitest
   runs them in Node; the device adapters (`store-expo.ts`, `push.ts`,
   `voice/audio.ts`, screens) stay thin.

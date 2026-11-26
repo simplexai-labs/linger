@@ -5,6 +5,9 @@
 // Wiki generator gave it, so a Session page reads as a dated conversation
 // rather than the title TeamHub derives from its file name.
 import type { TeamHubDocument } from "../api/types";
+import type { Translate } from "../i18n/language";
+import type { Message } from "../i18n/messages";
+import { libraryWikiMessages as m } from "./wiki-pages.messages";
 
 type WikiDocument = Pick<TeamHubDocument, "title" | "from">;
 
@@ -19,14 +22,14 @@ export type WikiCollection =
 /** Section order and names; the directories are the generator's node types. */
 export const WIKI_COLLECTIONS: readonly {
   readonly id: WikiCollection;
-  readonly label: string;
+  readonly label: Message<string>;
 }[] = [
-  { id: "projects", label: "Projects" },
-  { id: "topics", label: "Topics" },
-  { id: "contacts", label: "People" },
-  { id: "clients", label: "Companies" },
-  { id: "sessions", label: "Conversations" },
-  { id: "pages", label: "Pages" },
+  { id: "projects", label: m.projects },
+  { id: "topics", label: m.topics },
+  { id: "contacts", label: m.people },
+  { id: "clients", label: m.companies },
+  { id: "sessions", label: m.conversations },
+  { id: "pages", label: m.pages },
 ];
 
 const SESSION_PAGE = /^sessions\/(\d{4}-\d{2}-\d{2})\/([^/]+)\.md$/u;
@@ -57,13 +60,13 @@ function collectionOf(pageKey: string): WikiCollection {
 }
 
 /** A reader's title for the page: meeting notes and conversations by kind. */
-export function wikiPageTitle(document: WikiDocument): string {
+export function wikiPageTitle(document: WikiDocument, t: Translate): string {
   const session = SESSION_PAGE.exec(wikiPageKey(document) ?? "");
   if (session)
     return MEETING_SESSION_ID.test(session[2]!)
-      ? "Meeting notes"
-      : "Conversation";
-  return document.title.trim() || "Untitled";
+      ? t(m.meetingNotes)
+      : t(m.conversation);
+  return document.title.trim() || t(m.untitled);
 }
 
 /**
@@ -72,6 +75,7 @@ export function wikiPageTitle(document: WikiDocument): string {
  */
 export function wikiEntry<T extends WikiDocument>(
   document: T,
+  t: Translate,
   meetingTitles?: ReadonlyMap<string, string>,
 ): WikiEntry<T> | undefined {
   const pageKey = wikiPageKey(document);
@@ -82,7 +86,7 @@ export function wikiEntry<T extends WikiDocument>(
     document,
     title:
       (session ? meetingTitles?.get(session[2]!) : undefined) ??
-      wikiPageTitle(document),
+      wikiPageTitle(document, t),
     collection: collectionOf(pageKey),
     ...(session ? { sessionDate: session[1] } : {}),
   };
@@ -97,11 +101,12 @@ export interface WikiSection<T extends WikiDocument = TeamHubDocument> {
 /** Pages grouped by collection, each keeping the list's most-recent-first order. */
 export function wikiSections<T extends WikiDocument>(
   documents: readonly T[],
+  t: Translate,
   meetingTitles?: ReadonlyMap<string, string>,
 ): WikiSection<T>[] {
   const byCollection = new Map<WikiCollection, WikiEntry<T>[]>();
   for (const document of documents) {
-    const entry = wikiEntry(document, meetingTitles);
+    const entry = wikiEntry(document, t, meetingTitles);
     if (!entry) continue;
     const list = byCollection.get(entry.collection) ?? [];
     list.push(entry);
@@ -113,7 +118,7 @@ export function wikiSections<T extends WikiDocument>(
       ? [
           {
             collection: collection.id,
-            label: collection.label,
+            label: t(collection.label),
             entries,
           },
         ]

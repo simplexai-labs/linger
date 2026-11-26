@@ -14,13 +14,30 @@ import {
 import { runsKey, type RunViews } from "../realtime/realtime-context";
 import { useTeamHub } from "../state/queries";
 import { colors, radius, space, touchTarget, type } from "../theme";
+import type { Translate } from "../i18n/language";
+import type { Message } from "../i18n/messages";
+import { useTranslation } from "../i18n/use-translation";
 import {
   applyPresentationEvents,
   isWorking,
   mergeRun,
   needsEvents,
+  type RunPhase,
+  type RunView,
 } from "./run-status";
+import { chatRunMessages as m } from "./run-status.messages";
 import { Text } from "../ui/text";
+
+const PHASES: Record<RunPhase, Message<string>> = {
+  working: m.working,
+  thinking: m.thinking,
+  queued: m.queued,
+};
+
+/** What a working Run's status line says: its own words, or its phase. */
+export function runLine(view: RunView, t: Translate): string {
+  return view.line || t(PHASES[view.phase]);
+}
 
 export function useRunViews(roomId: string): RunViews {
   const teamHub = useTeamHub();
@@ -103,6 +120,7 @@ export function useStopRun(roomId: string): {
 }
 
 export function RunStatusBar(props: { readonly roomId: string }) {
+  const { t } = useTranslation();
   const views = useRunViews(props.roomId);
   const { stopping, stop } = useStopRun(props.roomId);
   const working = Object.values(views).filter((view) => isWorking(view.run));
@@ -119,11 +137,13 @@ export function RunStatusBar(props: { readonly roomId: string }) {
             <Text style={[type.small, styles.text]} numberOfLines={1}>
               <Text style={styles.agent}>{view.run.agent.display_name}</Text>
               {"  "}
-              {isStopping ? "Stopping…" : view.line}
+              {isStopping ? t(m.stopping) : runLine(view, t)}
             </Text>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`Stop ${view.run.agent.display_name}`}
+              accessibilityLabel={t(m.stopAgent, {
+                name: view.run.agent.display_name,
+              })}
               disabled={isStopping}
               hitSlop={8}
               onPress={() => stop(runId)}
@@ -134,7 +154,7 @@ export function RunStatusBar(props: { readonly roomId: string }) {
               ]}
             >
               <View style={styles.stopSquare} />
-              <Text style={styles.stopLabel}>Stop</Text>
+              <Text style={styles.stopLabel}>{t(m.stop)}</Text>
             </Pressable>
           </View>
         );

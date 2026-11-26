@@ -16,7 +16,7 @@ const now = Date.parse("2026-11-22T10:00:00Z");
 describe("shouldRefreshGrant", () => {
   it("asks for a grant when there is none or the token changed", () => {
     expect(
-      shouldRefreshGrant({ enabled: true }, "ExponentPushToken[a]", now),
+      shouldRefreshGrant({ enabled: true }, "ExponentPushToken[a]", "en", now),
     ).toBe(true);
     expect(
       shouldRefreshGrant(
@@ -26,6 +26,7 @@ describe("shouldRefreshGrant", () => {
           expoToken: "ExponentPushToken[b]",
         },
         "ExponentPushToken[a]",
+        "en",
         now,
       ),
     ).toBe(true);
@@ -41,17 +42,46 @@ describe("shouldRefreshGrant", () => {
       shouldRefreshGrant(
         record(GRANT_REFRESH_MS - 1000),
         "ExponentPushToken[a]",
+        "en",
         now,
       ),
     ).toBe(false);
     expect(
-      shouldRefreshGrant(record(GRANT_REFRESH_MS), "ExponentPushToken[a]", now),
+      shouldRefreshGrant(
+        record(GRANT_REFRESH_MS),
+        "ExponentPushToken[a]",
+        "en",
+        now,
+      ),
     ).toBe(true);
+  });
+
+  it("renews when the interface language changes", () => {
+    const record = {
+      enabled: true,
+      grantedAt: new Date(now - 1000).toISOString(),
+      expoToken: "ExponentPushToken[a]",
+    };
+    // A grant from before phones sent a language is English.
+    expect(shouldRefreshGrant(record, "ExponentPushToken[a]", "en", now)).toBe(
+      false,
+    );
+    expect(
+      shouldRefreshGrant(record, "ExponentPushToken[a]", "zh-CN", now),
+    ).toBe(true);
+    expect(
+      shouldRefreshGrant(
+        { ...record, language: "zh-CN" },
+        "ExponentPushToken[a]",
+        "zh-CN",
+        now,
+      ),
+    ).toBe(false);
   });
 
   it("never asks while push is off", () => {
     expect(
-      shouldRefreshGrant({ enabled: false }, "ExponentPushToken[a]", now),
+      shouldRefreshGrant({ enabled: false }, "ExponentPushToken[a]", "en", now),
     ).toBe(false);
   });
 });

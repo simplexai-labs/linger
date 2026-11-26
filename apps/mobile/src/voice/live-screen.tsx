@@ -9,6 +9,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { VoiceLiveRuntimeEvent, VoiceLiveTurnMarker } from "../api/types";
 import { useOutbox } from "../chat/outbox-context";
+import { t as translate } from "../i18n/language";
+import type { Message } from "../i18n/messages";
+import { useTranslation } from "../i18n/use-translation";
 import {
   useAnotherMe,
   useAnotherMeName,
@@ -24,6 +27,7 @@ import { Icon } from "../ui/icon";
 import { ensureMicrophonePermission, openSpeaker, type Speaker } from "./audio";
 import { BridgeFailed } from "./bridge-client";
 import { LiveFace } from "./live-face";
+import { voiceLiveMessages as m } from "./live-screen.messages";
 import { createLiveTurns, type LiveLine, type LiveTurns } from "./live-turns";
 import { useSessionSource, type SessionSource } from "./use-session-source";
 import {
@@ -152,7 +156,7 @@ function startLive(input: {
         onPartial: view.partial,
         interrupt: () => speaker?.clear(),
         end: () => void end().then(view.left),
-        failed: (code) => fail(`Live stopped on your computer (${code}).`),
+        failed: (code) => fail(translate(m.liveStopped, { code })),
       });
       if (ending) return;
       await opened.ready;
@@ -167,12 +171,12 @@ function startLive(input: {
   return { end, setMuted: (muted) => link?.microphone.setMuted(muted) };
 }
 
-const statusText: Record<LiveStatus, string> = {
-  starting: "Connecting to your computer…",
-  listening: "Listening",
-  reconnecting: "Reconnecting…",
-  paused: "Paused while another app uses audio",
-  ending: "Ending…",
+const statusText: Record<LiveStatus, Message<string>> = {
+  starting: m.starting,
+  listening: m.listening,
+  reconnecting: m.reconnecting,
+  paused: m.paused,
+  ending: m.ending,
 };
 
 export function LiveScreen(props: {
@@ -181,6 +185,7 @@ export function LiveScreen(props: {
   readonly autoStart?: boolean;
 }) {
   useKeepAwake();
+  const { t } = useTranslation();
   const teamHub = useTeamHub();
   const anotherMe = useAnotherMe();
   const anotherMeName = useAnotherMeName();
@@ -262,7 +267,10 @@ export function LiveScreen(props: {
         lines.indexOf(lastYou) > lines.indexOf(lastLive)));
 
   const youBubble = (
-    <View style={styles.youBubble} accessibilityLabel={`You: ${youText}`}>
+    <View
+      style={styles.youBubble}
+      accessibilityLabel={t(m.you, { text: youText })}
+    >
       <Text
         style={[styles.you, partial ? styles.youPartial : null]}
         numberOfLines={3}
@@ -278,12 +286,12 @@ export function LiveScreen(props: {
         <EmptyState
           title={
             teamHub.connected
-              ? `${anotherMeName ?? "Another Me"} is getting ready`
-              : "Waiting for your computer"
+              ? t(m.gettingReady, { name: anotherMeName ?? "Another Me" })
+              : t(m.waitingForComputer)
           }
           busy={teamHub.connected && anotherMe.isPending}
         />
-        <Button label="Close" variant="secondary" onPress={leave} />
+        <Button label={t(m.close)} variant="secondary" onPress={leave} />
       </SafeAreaView>
     );
 
@@ -292,22 +300,22 @@ export function LiveScreen(props: {
       <StatusBar barStyle="light-content" />
       <ConfirmDialog
         visible={!confirmed}
-        title={`Talk live with ${agentName ?? "Another Me"}?`}
-        body="Linger listens through the microphone until you end the call."
-        confirmLabel="Start"
+        title={t(m.confirmTitle, { name: agentName ?? "Another Me" })}
+        body={t(m.confirmBody)}
+        confirmLabel={t(m.start)}
         onConfirm={() => setConfirmed(true)}
         onCancel={leave}
       />
       <View style={styles.header}>
         <Text style={styles.headerTitle} accessibilityRole="header">
-          {agentName ?? "Live"}
+          {agentName ?? t(m.live)}
         </Text>
         <Text style={styles.headerStatus} accessibilityLiveRegion="polite">
           {error
-            ? "Stopped"
+            ? t(m.stopped)
             : muted && status === "listening"
-              ? "Muted"
-              : statusText[status]}
+              ? t(m.muted)
+              : t(statusText[status])}
         </Text>
       </View>
       <View style={styles.stage}>
@@ -324,7 +332,7 @@ export function LiveScreen(props: {
         {youText && !youNewer ? youBubble : null}
         {lastLive ? (
           <View style={styles.replyBlock}>
-            <Text style={styles.replyName}>{agentName ?? "Live"}</Text>
+            <Text style={styles.replyName}>{agentName ?? t(m.live)}</Text>
             <Text style={styles.reply} numberOfLines={6}>
               {lastLive.text}
             </Text>
@@ -341,7 +349,7 @@ export function LiveScreen(props: {
         {error ? null : (
           <PressScale
             accessibilityRole="button"
-            accessibilityLabel={muted ? "Unmute" : "Mute"}
+            accessibilityLabel={muted ? t(m.unmute) : t(m.mute)}
             disabled={status === "ending"}
             onPress={() => {
               const next = !muted;
@@ -361,7 +369,7 @@ export function LiveScreen(props: {
         )}
         <PressScale
           accessibilityRole="button"
-          accessibilityLabel={error ? "Close" : "End"}
+          accessibilityLabel={error ? t(m.close) : t(m.end)}
           accessibilityState={{ busy: status === "ending" && !error }}
           onPress={() => {
             const current = run.current;

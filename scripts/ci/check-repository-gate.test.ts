@@ -200,6 +200,7 @@ describe("local repository gate", { timeout: 60_000 }, () => {
     for (const changedPath of [
       "apps/web/src/i18n/locales/zh-CN.json",
       "apps/desktop/src/i18n/locales/zh-CN.json",
+      "apps/mobile/src/i18n/locales/zh-CN.json",
     ]) {
       const catalog = runGate({ changedPath, changedContent });
       expect(catalog.status).toBe(0);
@@ -215,6 +216,7 @@ describe("local repository gate", { timeout: 60_000 }, () => {
       "apps/desktop/src/i18n/locales.json",
       "apps/desktop/src/shell/setup.html",
       "apps/desktop/locales/zh-CN.json",
+      "apps/mobile/src/i18n/zh-CN.json",
     ]) {
       const elsewhere = runGate({ changedPath, changedContent });
       expect(elsewhere.status).not.toBe(0);

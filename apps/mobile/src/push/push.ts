@@ -10,6 +10,7 @@ import {
   putPushPreferences,
 } from "../api/teamhub";
 import type { TextFiles } from "../computer/store";
+import { getTranslation } from "../i18n/language";
 import type { PhoneSession } from "../session/session";
 import {
   pushSetupFrom,
@@ -50,11 +51,16 @@ async function requestGrant(
   setup: PushSetup,
   expoToken: string,
   hostId: string,
+  language: string,
 ): Promise<string> {
   const response = await fetch(`${setup.serviceUrl}/v1/push/grants`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ expo_token: expoToken, host_id: hostId }),
+    body: JSON.stringify({
+      expo_token: expoToken,
+      host_id: hostId,
+      language,
+    }),
   });
   if (!response.ok) throw new Error(`Push Service answered ${response.status}`);
   const body = (await response.json()) as { grant?: unknown };
@@ -99,13 +105,15 @@ export async function syncPushGrant(input: {
   const expoToken = (
     await Notifications.getExpoPushTokenAsync({ projectId: setup.projectId })
   ).data;
-  if (!shouldRefreshGrant(record, expoToken, Date.now())) return;
-  const grant = await requestGrant(setup, expoToken, input.hostId);
+  const { language } = getTranslation();
+  if (!shouldRefreshGrant(record, expoToken, language, Date.now())) return;
+  const grant = await requestGrant(setup, expoToken, input.hostId, language);
   await putPushGrant(input.session, { grant, service_url: setup.serviceUrl });
   await updatePushRecord(input.files, input.hostId, {
     enabled: true,
     grantedAt: new Date().toISOString(),
     expoToken,
+    language,
   });
 }
 

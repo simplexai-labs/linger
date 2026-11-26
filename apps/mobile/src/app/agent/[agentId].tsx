@@ -17,6 +17,9 @@ import {
 } from "../../api/teamhub";
 import type { TenantAgent } from "../../api/types";
 import { describeCadence } from "../../chat/routine-cadence";
+import type { Message } from "../../i18n/messages";
+import { useTranslation } from "../../i18n/use-translation";
+import { agentMessages as m } from "../../screens/agent.messages";
 import { teamHubKey, useIdentity, useTeamHub } from "../../state/queries";
 import { colors, radius, space, type } from "../../theme";
 import { AgentAvatar } from "../../ui/avatar";
@@ -26,10 +29,10 @@ import { Text } from "../../ui/text";
 
 type Tab = "details" | "routines" | "connectors";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "details", label: "Details" },
-  { id: "routines", label: "Routines" },
-  { id: "connectors", label: "Connectors" },
+const TABS: { id: Tab; label: Message<string> }[] = [
+  { id: "details", label: m.details },
+  { id: "routines", label: m.routines },
+  { id: "connectors", label: m.connectors },
 ];
 
 function useAgent(agentId: string) {
@@ -71,6 +74,7 @@ function Segmented(props: {
   readonly value: Tab;
   readonly onChange: (tab: Tab) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <View style={styles.segmented} accessibilityRole="tablist">
       {TABS.map((tab) => {
@@ -86,7 +90,7 @@ function Segmented(props: {
             <Text
               style={[styles.segmentText, selected && styles.segmentTextOn]}
             >
-              {tab.label}
+              {t(tab.label)}
             </Text>
           </Pressable>
         );
@@ -96,19 +100,20 @@ function Segmented(props: {
 }
 
 function Details(props: { readonly agent: TenantAgent }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const instructions = props.agent.instructions.trim();
   return (
     <>
       {props.agent.description ? (
-        <SettingsGroup label="About">
+        <SettingsGroup label={t(m.about)}>
           <View style={styles.textBlock}>
             <Text style={type.chat}>{props.agent.description}</Text>
           </View>
         </SettingsGroup>
       ) : null}
       {instructions ? (
-        <SettingsGroup label="Instructions">
+        <SettingsGroup label={t(m.instructions)}>
           <View style={styles.textBlock}>
             <Text style={type.chat} numberOfLines={open ? undefined : 6}>
               {instructions}
@@ -119,14 +124,14 @@ function Details(props: { readonly agent: TenantAgent }) {
               hitSlop={8}
             >
               <Text style={styles.more}>
-                {open ? "Show less" : "Show more"}
+                {open ? t(m.showLess) : t(m.showMore)}
               </Text>
             </Pressable>
           </View>
         </SettingsGroup>
       ) : null}
       <SettingsGroup>
-        <SettingsRow title="Model" detail={props.agent.runtime.model} />
+        <SettingsRow title={t(m.model)} detail={props.agent.runtime.model} />
       </SettingsGroup>
     </>
   );
@@ -136,6 +141,7 @@ function Routines(props: {
   readonly agentId: string;
   readonly roomId?: string;
 }) {
+  const { t } = useTranslation();
   const teamHub = useTeamHub();
   const roomId = props.roomId;
   const routines = useQuery({
@@ -144,23 +150,22 @@ function Routines(props: {
     queryFn: () =>
       teamHub.run((session) => listRoomRoutines(session, roomId ?? "")),
   });
-  if (!roomId) return <EmptyState title="Open this Agent from a chat" />;
-  if (routines.isPending) return <EmptyState title="Loading" busy />;
+  if (!roomId) return <EmptyState title={t(m.openFromChat)} />;
+  if (routines.isPending) return <EmptyState title={t(m.loading)} busy />;
   // Routines without a named Agent wake whoever the chat belongs to.
   const items = (routines.data?.items ?? []).filter(
     (routine) =>
       !routine.mention_actor_id || routine.mention_actor_id === props.agentId,
   );
-  if (items.length === 0)
-    return <EmptyState title="No Routines in this chat" />;
+  if (items.length === 0) return <EmptyState title={t(m.noRoutines)} />;
   return (
     <SettingsGroup>
       {items.map((routine) => (
         <SettingsRow
           key={routine.id}
           title={routine.name}
-          subtitle={describeCadence(routine.cadence)}
-          detail={routine.enabled ? undefined : "Off"}
+          subtitle={describeCadence(routine.cadence, t)}
+          detail={routine.enabled ? undefined : t(m.off)}
         />
       ))}
     </SettingsGroup>
@@ -168,6 +173,7 @@ function Routines(props: {
 }
 
 function Connectors(props: { readonly agentId: string }) {
+  const { t } = useTranslation();
   const teamHub = useTeamHub();
   const granted = useQuery({
     queryKey: teamHubKey(teamHub.hostId, "agent-connectors", props.agentId),
@@ -206,9 +212,9 @@ function Connectors(props: { readonly agentId: string }) {
           }));
       }),
   });
-  if (granted.isPending) return <EmptyState title="Loading" busy />;
+  if (granted.isPending) return <EmptyState title={t(m.loading)} busy />;
   if (!granted.data || granted.data.length === 0)
-    return <EmptyState title="No connected accounts" />;
+    return <EmptyState title={t(m.noAccounts)} />;
   return (
     <SettingsGroup>
       {granted.data.map((item) => (
@@ -219,6 +225,7 @@ function Connectors(props: { readonly agentId: string }) {
 }
 
 export default function AgentSheet() {
+  const { t } = useTranslation();
   const {
     agentId,
     roomId,
@@ -242,7 +249,7 @@ export default function AgentSheet() {
     <View style={styles.screen}>
       <View style={styles.bar}>
         <Button
-          label="Close"
+          label={t(m.close)}
           variant="quiet"
           compact
           onPress={() => router.back()}
@@ -265,9 +272,9 @@ export default function AgentSheet() {
           <Segmented value={tab} onChange={setTab} />
         </View>
         {agent.isPending ? (
-          <EmptyState title="Loading" busy />
+          <EmptyState title={t(m.loading)} busy />
         ) : !agent.data ? (
-          <EmptyState title="This Agent is not available" />
+          <EmptyState title={t(m.unavailable)} />
         ) : tab === "details" ? (
           <Details agent={agent.data} />
         ) : tab === "routines" ? (

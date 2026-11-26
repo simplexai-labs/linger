@@ -20,6 +20,9 @@ import { ActorAvatar } from "../ui/avatar";
 import { Button } from "../ui/controls";
 import { replaceMessage, type MessagePages } from "./message-cache";
 import { Text, TextInput } from "../ui/text";
+import type { Message as UiMessage } from "../i18n/messages";
+import { useTranslation } from "../i18n/use-translation";
+import { chatDecisionMessages as m } from "./decision-card.messages";
 
 /** Kinds whose details the phone shows in full and can answer. */
 const PHONE_KINDS = new Set<Card["kind"]>([
@@ -29,18 +32,18 @@ const PHONE_KINDS = new Set<Card["kind"]>([
   "agent_change",
 ]);
 
-const STATUS_LABELS: Record<Card["status"], string> = {
-  pending: "Waiting for a decision",
-  approved: "Approved",
-  executing: "Running",
-  succeeded: "Done",
-  failed: "Failed",
-  unknown: "Result unknown",
-  denied: "Denied",
-  expired: "Expired",
-  answered: "Answered",
-  consumed: "Answered",
-  authorizing: "Connecting",
+const STATUS_LABELS: Record<Card["status"], UiMessage<string>> = {
+  pending: m.statusPending,
+  approved: m.statusApproved,
+  executing: m.statusExecuting,
+  succeeded: m.statusSucceeded,
+  failed: m.statusFailed,
+  unknown: m.statusUnknown,
+  denied: m.statusDenied,
+  expired: m.statusExpired,
+  answered: m.statusAnswered,
+  consumed: m.statusAnswered,
+  authorizing: m.statusAuthorizing,
 };
 
 function Detail(props: {
@@ -48,6 +51,7 @@ function Detail(props: {
   readonly value?: string;
   readonly mono?: boolean;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   if (!props.value) return null;
   const long = props.value.length > 400;
@@ -64,13 +68,15 @@ function Detail(props: {
           accessibilityRole="button"
           accessibilityLabel={
             expanded
-              ? `Show less of ${props.label}`
-              : `Show all of ${props.label}`
+              ? t(m.showLessOf, { label: props.label })
+              : t(m.showAllOf, { label: props.label })
           }
           onPress={() => setExpanded(!expanded)}
           hitSlop={8}
         >
-          <Text style={styles.more}>{expanded ? "Show less" : "Show all"}</Text>
+          <Text style={styles.more}>
+            {expanded ? t(m.showLess) : t(m.showAll)}
+          </Text>
         </Pressable>
       ) : null}
     </View>
@@ -82,6 +88,7 @@ function Screenshot(props: {
   readonly width: number;
   readonly height: number;
 }) {
+  const { t } = useTranslation();
   const teamHub = useTeamHub();
   const screenshot = useQuery({
     queryKey: teamHubKey(
@@ -107,12 +114,13 @@ function Screenshot(props: {
         { aspectRatio: props.width / Math.max(1, props.height) },
       ]}
       resizeMode="contain"
-      accessibilityLabel="Screenshot of the screen before this action, with the target marked"
+      accessibilityLabel={t(m.screenshot)}
     />
   );
 }
 
 function CardDetails(props: { readonly card: Card }) {
+  const { t } = useTranslation();
   const { card } = props;
   if (card.runtime_permission) {
     const view = card.runtime_permission;
@@ -122,7 +130,7 @@ function CardDetails(props: { readonly card: Card }) {
         <Text style={type.body}>{view.rationale}</Text>
         {view.page ? (
           <Detail
-            label="Page"
+            label={t(m.page)}
             value={
               view.page.title
                 ? `${view.page.title}\n${view.page.url}`
@@ -138,19 +146,19 @@ function CardDetails(props: { readonly card: Card }) {
           />
         ) : null}
         <Detail
-          label={view.kind === "code" ? "Command" : "Action"}
+          label={view.kind === "code" ? t(m.command) : t(m.action)}
           value={view.input}
           mono
         />
         {view.script ? (
           <Detail
-            label={`Script ${view.script.path}`}
+            label={t(m.script, { path: view.script.path })}
             value={view.script.body}
             mono
           />
         ) : null}
-        <Detail label="Changes to files" value={view.patch} mono />
-        <Detail label="Tool" value={view.tool} mono />
+        <Detail label={t(m.fileChanges)} value={view.patch} mono />
+        <Detail label={t(m.tool)} value={view.tool} mono />
       </>
     );
   }
@@ -161,26 +169,26 @@ function CardDetails(props: { readonly card: Card }) {
       <>
         <Text style={type.label}>{view.title}</Text>
         <Detail
-          label="App and account"
+          label={t(m.appAndAccount)}
           value={`${view.app} · ${view.account}`}
         />
         {message ? (
           <>
             <Detail
-              label="To"
+              label={t(m.to)}
               value={
                 [...(message.to ?? []), ...(message.cc ?? [])].join(", ") ||
                 message.destination
               }
             />
-            <Detail label="Subject" value={message.subject} />
-            <Detail label="Message" value={message.body} />
+            <Detail label={t(m.subject)} value={message.subject} />
+            <Detail label={t(m.message)} value={message.body} />
           </>
         ) : null}
         {(view.fields ?? []).map((field) => (
           <Detail key={field.label} label={field.label} value={field.value} />
         ))}
-        <Detail label="Full request" value={view.input} mono />
+        <Detail label={t(m.fullRequest)} value={view.input} mono />
       </>
     );
   }
@@ -190,18 +198,18 @@ function CardDetails(props: { readonly card: Card }) {
       <>
         <Text style={type.label}>
           {view.action === "create"
-            ? `Create the Agent ${view.agent_name}`
-            : `Change ${view.agent_name}`}
+            ? t(m.createAgent, { name: view.agent_name })
+            : t(m.changeAgent, { name: view.agent_name })}
         </Text>
         {view.changes.map((change) => (
           <Detail
             key={change.field}
             label={
               change.field === "prompt"
-                ? "Instructions"
+                ? t(m.fieldInstructions)
                 : change.field === "name"
-                  ? "Name"
-                  : "Description"
+                  ? t(m.fieldName)
+                  : t(m.fieldDescription)
             }
             value={
               change.before !== undefined
@@ -221,6 +229,7 @@ function Question(props: {
   readonly busy: boolean;
   readonly onSubmit: (answers: Record<string, string | string[]>) => void;
 }) {
+  const { t } = useTranslation();
   const questions = props.card.question?.questions ?? [];
   const [chosen, setChosen] = useState<Record<string, string[]>>({});
   const [written, setWritten] = useState<Record<string, string>>({});
@@ -292,8 +301,8 @@ function Question(props: {
             style={styles.input}
             placeholder={
               question.options.length > 0
-                ? "Or write your own answer"
-                : "Your answer"
+                ? t(m.writeOwnAnswer)
+                : t(m.yourAnswer)
             }
             placeholderTextColor={colors.placeholder}
             value={written[question.id] ?? ""}
@@ -302,13 +311,15 @@ function Question(props: {
               if (question.input === "radio" && text)
                 setChosen((current) => ({ ...current, [question.id]: [] }));
             }}
-            accessibilityLabel={`Your own answer to ${question.prompt}`}
+            accessibilityLabel={t(m.ownAnswerTo, {
+              question: question.prompt,
+            })}
             multiline
           />
         </View>
       ))}
       <Button
-        label="Send answer"
+        label={t(m.sendAnswer)}
         onPress={() => props.onSubmit(answers)}
         disabled={!complete}
         busy={props.busy}
@@ -323,6 +334,7 @@ export function DecisionCard(props: {
   readonly messageId: string;
   readonly myActorId: string | undefined;
 }) {
+  const { t } = useTranslation();
   const { card } = props;
   const teamHub = useTeamHub();
   const client = useQueryClient();
@@ -331,6 +343,8 @@ export function DecisionCard(props: {
   const pending = card.status === "pending";
   const mine = card.decision_owner.id === props.myActorId;
   const supported = PHONE_KINDS.has(card.kind);
+  // A status a newer computer adds has no label here yet.
+  const status = STATUS_LABELS[card.status] as UiMessage<string> | undefined;
 
   const store = (message: Message) =>
     client.setQueryData<MessagePages>(
@@ -351,13 +365,13 @@ export function DecisionCard(props: {
       store(message);
     } catch (error) {
       if (error instanceof HttpError && error.status === 409) {
-        setProblem("This card changed. Check it again.");
+        setProblem(t(m.cardChanged));
         const fresh = await teamHub
           .run((session) => getMessage(session, props.roomId, props.messageId))
           .catch(() => undefined);
         if (fresh) store(fresh);
       } else {
-        setProblem("Your answer was not sent. Try again.");
+        setProblem(t(m.answerNotSent));
       }
     } finally {
       setBusy(false);
@@ -365,11 +379,14 @@ export function DecisionCard(props: {
   };
 
   return (
-    <View style={styles.card} accessibilityLabel={`Decision: ${card.title}`}>
+    <View
+      style={styles.card}
+      accessibilityLabel={t(m.decision, { title: card.title })}
+    >
       <View style={styles.cardHeader}>
         <ActorAvatar actor={card.requester} size={24} />
         <Text style={[type.caption, styles.asker]} numberOfLines={1}>
-          {card.requester.display_name} asks
+          {t(m.asks, { name: card.requester.display_name })}
         </Text>
         <View style={styles.status}>
           <View
@@ -378,7 +395,7 @@ export function DecisionCard(props: {
               { backgroundColor: dotColor(card.status) },
             ]}
           />
-          <Text style={styles.statusText}>{STATUS_LABELS[card.status]}</Text>
+          <Text style={styles.statusText}>{status ? t(status) : null}</Text>
         </View>
       </View>
       <Text style={styles.cardTitle}>{card.title}</Text>
@@ -389,11 +406,11 @@ export function DecisionCard(props: {
       ) : null}
       {pending && !mine ? (
         <Text style={type.small}>
-          Waiting for {card.decision_owner.display_name} to decide.
+          {t(m.waitingFor, { name: card.decision_owner.display_name })}
         </Text>
       ) : null}
       {pending && mine && !supported ? (
-        <Text style={type.small}>Open on your computer to answer this.</Text>
+        <Text style={type.small}>{t(m.openOnComputer)}</Text>
       ) : null}
       {pending && mine && supported && card.kind === "question" ? (
         <Question
@@ -405,13 +422,13 @@ export function DecisionCard(props: {
       {pending && mine && supported && card.kind !== "question" ? (
         <View style={styles.actions}>
           <Button
-            label="Approve"
+            label={t(m.approve)}
             onPress={() => void answer({ decision: "approve" })}
             busy={busy}
             style={styles.action}
           />
           <Button
-            label="Deny"
+            label={t(m.deny)}
             variant="secondary"
             onPress={() => void answer({ decision: "deny" })}
             disabled={busy}

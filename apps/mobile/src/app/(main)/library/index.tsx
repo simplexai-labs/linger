@@ -11,7 +11,9 @@ import {
   listWikiDocuments,
 } from "../../../api/teamhub";
 import type { MemoryEntry, TeamHubDocument } from "../../../api/types";
+import { useTranslation } from "../../../i18n/use-translation";
 import { groupByDay } from "../../../library/library-items";
+import { libraryScreenMessages as m } from "../../../library/library-screen.messages";
 import {
   DocumentRow,
   LibrarySectionHeader,
@@ -31,12 +33,6 @@ import { EmptyState } from "../../../ui/controls";
 import { StatusStrip } from "../../../ui/status-strip";
 
 type Tab = "meetings" | "documents" | "wiki";
-
-const tabs: { id: Tab; label: string }[] = [
-  { id: "meetings", label: "Meetings" },
-  { id: "documents", label: "Documents" },
-  { id: "wiki", label: "Wiki" },
-];
 
 function useListQuery<T>(
   name: Tab,
@@ -86,6 +82,7 @@ function List<T>(props: {
   readonly empty: string;
   readonly emptyBody?: string;
 }) {
+  const { t } = useTranslation();
   const { query } = props;
   // The spinner follows only the Human's pull: background refetches would
   // set it too, and iOS can leave a spinner set from code stuck on screen.
@@ -105,8 +102,8 @@ function List<T>(props: {
   if (query.isError)
     return (
       <EmptyState
-        title="This list did not load"
-        action={{ label: "Try again", onPress: () => void query.refetch() }}
+        title={t(m.listFailed)}
+        action={{ label: t(m.tryAgain), onPress: () => void query.refetch() }}
       />
     );
   if (query.isPending || !exhausted)
@@ -153,6 +150,8 @@ function openDocument(document: TeamHubDocument) {
 }
 
 export default function LibraryScreen() {
+  const translation = useTranslation();
+  const { t } = translation;
   const [tab, setTab] = useState<Tab>("meetings");
   const teamHub = useTeamHub();
   const tenantId = useIdentity().data?.tenantId ?? "";
@@ -190,8 +189,9 @@ export default function LibraryScreen() {
       groupByDay(
         meetings.data?.pages.flatMap((page) => page.items) ?? [],
         (entry) => entry.meeting?.started_at ?? entry.updated_at,
+        translation,
       ),
-    [meetings.data],
+    [meetings.data, translation],
   );
   const documentSections = useMemo(() => {
     const items = documents.data?.pages.flatMap((page) => page.items) ?? [];
@@ -201,6 +201,7 @@ export default function LibraryScreen() {
     () =>
       wikiSections(
         wiki.data?.pages.flatMap((page) => page.items) ?? [],
+        translation.t,
         new Map(
           (meetings.data?.pages.flatMap((page) => page.items) ?? []).flatMap(
             (entry) =>
@@ -214,8 +215,14 @@ export default function LibraryScreen() {
         title: section.label,
         data: section.entries,
       })),
-    [meetings.data, wiki.data],
+    [meetings.data, translation.t, wiki.data],
   );
+
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "meetings", label: t(m.meetings) },
+    { id: "documents", label: t(m.documents) },
+    { id: "wiki", label: t(m.wiki) },
+  ];
 
   return (
     <View style={styles.screen}>
@@ -227,14 +234,14 @@ export default function LibraryScreen() {
         style={styles.tabs}
       />
       {!teamHub.connected ? (
-        <EmptyState title="Waiting for your computer" />
+        <EmptyState title={t(m.waitingForComputer)} />
       ) : tab === "meetings" ? (
         <List<MemoryEntry>
           query={meetings}
           sections={meetingSections}
           keyOf={(entry) => entry.id}
-          empty="No meetings yet"
-          emptyBody="Meetings you record appear here with their summary and transcript."
+          empty={t(m.noMeetings)}
+          emptyBody={t(m.noMeetingsBody)}
           render={(entry) => (
             <MeetingRow
               entry={entry}
@@ -252,8 +259,8 @@ export default function LibraryScreen() {
           query={documents}
           sections={documentSections}
           keyOf={(document) => document.id}
-          empty="No documents yet"
-          emptyBody="Files and documents from your chats appear here."
+          empty={t(m.noDocuments)}
+          emptyBody={t(m.noDocumentsBody)}
           render={(document) => (
             <DocumentRow
               document={document}
@@ -266,8 +273,8 @@ export default function LibraryScreen() {
           query={wiki}
           sections={wikiPageSections}
           keyOf={(entry) => entry.document.id}
-          empty="Your wiki has no pages yet"
-          emptyBody="Pages about your projects, topics and people appear here as Linger learns them."
+          empty={t(m.noWikiPages)}
+          emptyBody={t(m.noWikiPagesBody)}
           render={(entry) => (
             <WikiRow
               entry={entry}

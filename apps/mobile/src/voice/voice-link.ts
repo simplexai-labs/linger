@@ -5,6 +5,8 @@
 import { getVoiceSession } from "../api/teamhub";
 import type { VoiceSession, VoiceSessionPurpose } from "../api/types";
 import { documentFiles } from "../computer/store-expo";
+import { t } from "../i18n/language";
+import type { Message } from "../i18n/messages";
 import { HttpError } from "../session/http";
 import { SessionClosed } from "../session/session";
 import {
@@ -20,6 +22,7 @@ import {
   type BridgeListener,
 } from "./bridge-client";
 import type { SessionSource } from "./use-session-source";
+import { voiceErrorMessages } from "./voice-link.messages";
 import {
   VoiceNotReady,
   closeVoice,
@@ -149,35 +152,38 @@ export async function openVoiceLink(input: {
   return { voice, bridge, microphone, ready, close };
 }
 
-const bridgeMessages: Record<string, string> = {
-  TOO_MANY_SESSIONS:
-    "Your computer is already serving its most voice sessions.",
-  CONNECT_FAILED: "Your computer could not start voice. Try again.",
-  ROOM_CLOSED: "The voice session ended on your computer.",
-  HOLD_EXPIRED: "The phone was away from your computer for too long.",
-  SHUTTING_DOWN: "Voice is restarting on your computer. Try again.",
+const m = voiceErrorMessages;
+
+const bridgeMessages: Record<string, Message<string>> = {
+  TOO_MANY_SESSIONS: m.tooManySessions,
+  CONNECT_FAILED: m.connectFailed,
+  ROOM_CLOSED: m.roomClosed,
+  HOLD_EXPIRED: m.holdExpired,
+  SHUTTING_DOWN: m.shuttingDown,
 };
 
-const httpMessages: Record<string, string> = {
-  LIVE_UNAVAILABLE: "Live needs Another Me to be ready on your computer.",
-  VOICE_CAPTURE_CONFLICT:
-    "Another voice session from this phone is still open. Try again in a moment.",
-  VOICE_MEDIA_UNAVAILABLE: "Voice is not available on your computer right now.",
-  NOT_AVAILABLE_ON_MOBILE:
-    "Update Linger on your computer to use voice from the phone.",
+const httpMessages: Record<string, Message<string>> = {
+  LIVE_UNAVAILABLE: m.liveUnavailable,
+  VOICE_CAPTURE_CONFLICT: m.captureConflict,
+  VOICE_MEDIA_UNAVAILABLE: m.mediaUnavailable,
+  NOT_AVAILABLE_ON_MOBILE: m.notAvailableOnMobile,
 };
 
 /** A sentence for the screen; the code decides it, never an error's prose. */
 export function describeVoiceError(error: unknown): string {
-  if (error instanceof BridgeFailed)
-    return bridgeMessages[error.code] ?? `Voice stopped (${error.code}).`;
-  if (error instanceof HttpError)
-    return (
-      httpMessages[error.code] ?? `Your computer refused voice (${error.code}).`
-    );
-  if (error instanceof SessionClosed)
-    return "Connect to your computer to use voice.";
-  if (error instanceof MicrophoneBusy || error instanceof VoiceNotReady)
-    return error.message;
-  return "Voice could not start. Try again.";
+  if (error instanceof BridgeFailed) {
+    const known = bridgeMessages[error.code];
+    return known ? t(known) : t(m.bridgeStopped, { code: error.code });
+  }
+  if (error instanceof HttpError) {
+    const known = httpMessages[error.code];
+    return known ? t(known) : t(m.refused, { code: error.code });
+  }
+  if (error instanceof SessionClosed) return t(m.notConnected);
+  if (error instanceof MicrophoneBusy) return t(m.microphoneBusy);
+  if (error instanceof VoiceNotReady)
+    return error.code
+      ? t(m.voiceUnavailable, { code: error.code })
+      : t(m.notReadyInTime);
+  return t(m.couldNotStart);
 }

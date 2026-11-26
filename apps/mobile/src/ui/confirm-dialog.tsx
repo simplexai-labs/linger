@@ -12,9 +12,11 @@ import {
   View,
 } from "react-native";
 
+import { useTranslation } from "../i18n/use-translation";
 import { colors, radius, shadow, space } from "../theme";
 import { Button } from "./controls";
 import { Text } from "./text";
+import { uiMessages } from "./ui.messages";
 
 export function ConfirmDialog(props: {
   readonly visible: boolean;
@@ -28,6 +30,8 @@ export function ConfirmDialog(props: {
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
 }) {
+  const { t } = useTranslation();
+  const cancelLabel = props.cancelLabel ?? t(uiMessages.cancel);
   const enter = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (!props.visible) {
@@ -52,7 +56,7 @@ export function ConfirmDialog(props: {
     >
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={props.cancelLabel ?? "Cancel"}
+        accessibilityLabel={cancelLabel}
         style={styles.scrim}
         onPress={props.onCancel}
       />
@@ -80,7 +84,7 @@ export function ConfirmDialog(props: {
           {props.body ? <Text style={styles.body}>{props.body}</Text> : null}
           <View style={styles.actions}>
             <Button
-              label={props.cancelLabel ?? "Cancel"}
+              label={cancelLabel}
               variant="secondary"
               onPress={props.onCancel}
               disabled={props.busy}

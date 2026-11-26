@@ -17,6 +17,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useComputer } from "../../computer/computer-context";
 import type { ConnectionStatus } from "../../computer/connection";
 import type { RoomListItem } from "../../api/types";
+import type { Translate } from "../../i18n/language";
+import { useTranslation } from "../../i18n/use-translation";
+import { navigationMessages as m } from "../../screens/navigation.messages";
 import { useAnotherMe, useIdentity, useRooms } from "../../state/queries";
 import { tick } from "../../ui/haptics";
 import { colors, radius, space, type } from "../../theme";
@@ -29,22 +32,23 @@ import { Icon, type IconName } from "../../ui/icon";
 import { Text } from "../../ui/text";
 
 function statusLabel(
+  t: Translate,
   status: ConnectionStatus | undefined,
   route: string | undefined,
 ): string {
   switch (status?.kind) {
     case "connected":
-      return route === "relay" ? "Through a Relay" : "Same Wi-Fi";
+      return route === "relay" ? t(m.throughRelay) : t(m.sameWifi);
     case "pending":
-      return "Waiting for approval";
+      return t(m.waitingApproval);
     case "offline":
-      return "Offline";
+      return t(m.offline);
     case "removed":
-      return "Removed this phone";
+      return t(m.removed);
     case "keyChanged":
-      return "Needs pairing again";
+      return t(m.needsPairing);
     default:
-      return "Connecting…";
+      return t(m.connecting);
   }
 }
 
@@ -59,6 +63,7 @@ function AnotherMeCard(props: {
   readonly me?: string;
   readonly onNavigate: () => void;
 }) {
+  const { t } = useTranslation();
   const agent = props.room.direct_peer;
   const brand = useAgentBrand(agent?.id) ?? colors.ink;
   const unread = props.room.unread_message_count ?? 0;
@@ -68,7 +73,7 @@ function AnotherMeCard(props: {
   return (
     <PressScale
       accessibilityRole="button"
-      accessibilityLabel={`${agent.display_name}, your Another Me`}
+      accessibilityLabel={t(m.anotherMeLabel, { name: agent.display_name })}
       accessibilityState={{ selected: props.active }}
       onPress={() => {
         tick();
@@ -173,13 +178,16 @@ function ChatRow(props: {
   readonly me?: string;
   readonly onNavigate: () => void;
 }) {
+  const { t } = useTranslation();
   const { room } = props;
   const unread = room.unread_message_count ?? 0;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={
-        unread ? `${props.title}, ${unread} unread` : props.title
+        unread
+          ? t(m.chatUnread, { title: props.title, count: unread })
+          : props.title
       }
       accessibilityState={{ selected: props.active }}
       onPress={() => {
@@ -227,6 +235,7 @@ function ChatRow(props: {
 }
 
 function DrawerMenu(props: DrawerContentComponentProps) {
+  const { t } = useTranslation();
   const { active, status, route } = useComputer();
   const pathname = usePathname();
   const rooms = useRooms();
@@ -250,7 +259,7 @@ function DrawerMenu(props: DrawerContentComponentProps) {
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.head}>
           <Text style={styles.title} accessibilityRole="header">
-            Messages
+            {t(m.messages)}
           </Text>
         </View>
         {lead ? (
@@ -263,8 +272,8 @@ function DrawerMenu(props: DrawerContentComponentProps) {
         ) : null}
         <View style={styles.chats}>
           <ToolRow
-            label="Library"
-            detail="Meetings, documents and wiki"
+            label={t(m.library)}
+            detail={t(m.libraryDetail)}
             icon="library"
             href="/library"
             active={pathname.startsWith("/library")}
@@ -276,7 +285,7 @@ function DrawerMenu(props: DrawerContentComponentProps) {
               key={room.id}
               room={room}
               me={me}
-              title={room.direct_peer?.display_name || room.name || "Chat"}
+              title={room.direct_peer?.display_name || room.name || t(m.chat)}
               href={`/rooms/${room.id}`}
               active={pathname === `/rooms/${room.id}`}
               onNavigate={close}
@@ -293,7 +302,7 @@ function DrawerMenu(props: DrawerContentComponentProps) {
       {/* The computer and Settings sit at the foot, as a profile row does. */}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Settings"
+        accessibilityLabel={t(m.settings)}
         onPress={() => {
           tick();
           close();
@@ -307,12 +316,12 @@ function DrawerMenu(props: DrawerContentComponentProps) {
         <Icon name="laptop" size={20} color={colors.secondary} />
         <View style={styles.footText}>
           <Text style={styles.footName} numberOfLines={1}>
-            {active?.name ?? "Your computer"}
+            {active?.name ?? t(m.yourComputer)}
           </Text>
           <View style={styles.statusLine}>
             <View style={[styles.dot, { backgroundColor: dot }]} />
             <Text style={type.caption} numberOfLines={1}>
-              {statusLabel(status, route)}
+              {statusLabel(t, status, route)}
             </Text>
           </View>
         </View>
@@ -323,6 +332,7 @@ function DrawerMenu(props: DrawerContentComponentProps) {
 }
 
 function KeyChanged() {
+  const { t } = useTranslation();
   const { active, computers, unpair, switchTo } = useComputer();
   const others = computers.filter(
     (computer) => computer.hostId !== active?.hostId,
@@ -330,12 +340,14 @@ function KeyChanged() {
   return (
     <SafeAreaView style={styles.blocked}>
       <EmptyState
-        title={`${active?.name ?? "Your computer"} needs pairing again`}
-        body="It no longer answers to the key this phone paired with. If you reset Linger on it, pair this phone again. Otherwise, do not pair until you know why it changed."
+        title={t(m.keyChangedTitle, {
+          name: active?.name ?? t(m.yourComputer),
+        })}
+        body={t(m.keyChangedBody)}
       />
       <View style={styles.blockedActions}>
         <Button
-          label="Pair again"
+          label={t(m.pairAgain)}
           onPress={() => {
             if (active)
               void unpair(active.hostId).then(() => router.replace("/pair"));
@@ -343,7 +355,7 @@ function KeyChanged() {
         />
         {others[0] ? (
           <Button
-            label={`Switch to ${others[0].name}`}
+            label={t(m.switchTo, { name: others[0].name })}
             variant="secondary"
             onPress={() => void switchTo(others[0]?.hostId ?? "")}
           />
@@ -354,6 +366,7 @@ function KeyChanged() {
 }
 
 export default function MainLayout() {
+  const { t } = useTranslation();
   const { loaded, active, status } = useComputer();
   if (!loaded)
     return (
@@ -383,19 +396,19 @@ export default function MainLayout() {
       />
       <Drawer.Screen
         name="rooms/index"
-        options={{ title: "Messages", headerShown: false }}
+        options={{ title: t(m.messages), headerShown: false }}
       />
       <Drawer.Screen
         name="rooms/[roomId]"
-        options={{ title: "Room", headerShown: false }}
+        options={{ title: t(m.room), headerShown: false }}
       />
       <Drawer.Screen
         name="library"
-        options={{ headerShown: false, title: "Library" }}
+        options={{ headerShown: false, title: t(m.library) }}
       />
       <Drawer.Screen
         name="settings"
-        options={{ headerShown: false, title: "Settings" }}
+        options={{ headerShown: false, title: t(m.settings) }}
       />
     </Drawer>
   );

@@ -6,11 +6,13 @@ import { Pressable, StyleSheet, View } from "react-native";
 
 import type { MemoryEntry, TeamHubDocument } from "../api/types";
 import { FileTile } from "../chat/file-card";
+import { useTranslation } from "../i18n/use-translation";
 import { colors, radius, space, type } from "../theme";
 import { Icon, type IconName } from "../ui/icon";
 import { Text } from "../ui/text";
 import { fileTypeLabel } from "./file-kind";
 import { documentFileName, documentTitle, shortWhen } from "./library-items";
+import { libraryRowsMessages as m } from "./library-rows.messages";
 import type { WikiEntry } from "./wiki-pages";
 
 const TILE = 36;
@@ -69,12 +71,17 @@ export function MeetingRow(props: {
   readonly entry: MemoryEntry;
   readonly onPress: () => void;
 }) {
+  const translation = useTranslation();
+  const { t } = translation;
   const { entry } = props;
-  const title = entry.title || "Meeting";
-  const when = shortWhen(entry.meeting?.started_at ?? entry.updated_at);
+  const title = entry.title || t(m.meeting);
+  const when = shortWhen(
+    entry.meeting?.started_at ?? entry.updated_at,
+    translation,
+  );
   const snippet =
     entry.meeting && !entry.meeting.summary_ready
-      ? "Writing the summary…"
+      ? t(m.writingSummary)
       : entry.summary.trim() || undefined;
   return (
     <LibraryRow
@@ -93,10 +100,11 @@ export function DocumentRow(props: {
   readonly document: TeamHubDocument;
   readonly onPress: () => void;
 }) {
+  const translation = useTranslation();
   const { document } = props;
-  const filename = documentFileName(document);
-  const title = documentTitle(document);
-  const meta = `${fileTypeLabel(filename)} · ${shortWhen(document.updated_at)}`;
+  const filename = documentFileName(document, translation.t);
+  const title = documentTitle(document, translation.t);
+  const meta = `${fileTypeLabel(filename)} · ${shortWhen(document.updated_at, translation)}`;
   return (
     <LibraryRow
       leading={<FileTile filename={filename} size={TILE} />}
@@ -108,10 +116,10 @@ export function DocumentRow(props: {
   );
 }
 
-function sessionDay(date: string): string {
+function sessionDay(date: string, language: string): string {
   const [year, month, day] = date.split("-").map(Number);
   return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).toLocaleDateString(
-    undefined,
+    language,
     { weekday: "short", month: "short", day: "numeric" },
   );
 }
@@ -121,10 +129,13 @@ export function WikiRow(props: {
   readonly entry: WikiEntry;
   readonly onPress: () => void;
 }) {
+  const translation = useTranslation();
   const { entry } = props;
   const meta = entry.sessionDate
-    ? sessionDay(entry.sessionDate)
-    : `Updated ${shortWhen(entry.document.updated_at)}`;
+    ? sessionDay(entry.sessionDate, translation.language)
+    : translation.t(m.updated, {
+        when: shortWhen(entry.document.updated_at, translation),
+      });
   return (
     <LibraryRow
       leading={<GlyphTile icon="page" />}

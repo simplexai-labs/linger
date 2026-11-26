@@ -24,17 +24,20 @@ import { tick } from "../ui/haptics";
 import { Icon, type IconName } from "../ui/icon";
 import { useReducedMotion } from "../ui/motion";
 import { Text } from "../ui/text";
+import type { Message } from "../i18n/messages";
+import { useTranslation } from "../i18n/use-translation";
+import { chatComposerMessages as m } from "./composer.messages";
 
 export type AttachSource = "camera" | "photos" | "files";
 
 const SOURCES: readonly {
   source: AttachSource;
-  label: string;
+  label: Message<string>;
   icon: IconName;
 }[] = [
-  { source: "camera", label: "Camera", icon: "camera" },
-  { source: "photos", label: "Photos", icon: "photo" },
-  { source: "files", label: "Files", icon: "attachment" },
+  { source: "camera", label: m.camera, icon: "camera" },
+  { source: "photos", label: m.photos, icon: "photo" },
+  { source: "files", label: m.files, icon: "attachment" },
 ];
 
 function Layer(props: {
@@ -59,6 +62,7 @@ export function AttachMenu(props: {
   readonly onChoose: (source: AttachSource) => void;
   readonly onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const window = useWindowDimensions();
   const reduced = useReducedMotion();
   const open = useSharedValue(0);
@@ -79,7 +83,7 @@ export function AttachMenu(props: {
     <Layer visible={visible} onClose={props.onClose}>
       <Pressable
         style={StyleSheet.absoluteFill}
-        accessibilityLabel="Close"
+        accessibilityLabel={t(m.closeMenu)}
         onPress={props.onClose}
       />
       {props.anchor ? (
@@ -107,7 +111,7 @@ export function AttachMenu(props: {
               <View style={styles.icon}>
                 <Icon name={item.icon} size={20} color={colors.ink} />
               </View>
-              <Text style={styles.label}>{item.label}</Text>
+              <Text style={styles.label}>{t(item.label)}</Text>
             </Pressable>
           ))}
         </Reanimated.View>

@@ -64,9 +64,10 @@ while IFS= read -r -d '' file; do
       if [[ "$app_lints" == false ]]; then eslint_files+=("$file"); fi
       ;;
   esac
-  # Translation catalogs: the Web client's and the desktop shell's.
+  # Translation catalogs: the Web client's, the desktop shell's and the
+  # Mobile App's.
   case "$file" in
-    apps/web/src/i18n/locales/* | apps/desktop/src/i18n/locales/*) ;;
+    apps/web/src/i18n/locales/* | apps/desktop/src/i18n/locales/* | apps/mobile/src/i18n/locales/*) ;;
     *) english_only_files+=("$file") ;;
   esac
 done < <(list_changed)

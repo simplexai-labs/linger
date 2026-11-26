@@ -26,9 +26,13 @@ import {
   PairingLinkError,
   type PairingLink,
 } from "../computer/pairing-link";
+import { computerPairingMessages } from "../computer/pairing.messages";
 import { documentFiles } from "../computer/store-expo";
+import type { Message } from "../i18n/messages";
+import { useTranslation } from "../i18n/use-translation";
 import { requestPushPermission, syncPushGrant } from "../push/push";
 import { generateKeyPair } from "../session/noise";
+import { pairMessages as m } from "../screens/pair.messages";
 import { PhoneSession } from "../session/session";
 import { colors, radius, space, touchTarget, type } from "../theme";
 import { Button } from "../ui/controls";
@@ -43,23 +47,24 @@ type Stage =
   | { readonly kind: "connecting"; readonly link: PairingLink }
   | { readonly kind: "waiting"; readonly link: PairingLink }
   | { readonly kind: "finishing" }
-  | { readonly kind: "error"; readonly message: string };
+  | { readonly kind: "error"; readonly message: Message<string> };
 
-function linkProblemMessage(error: unknown): string {
+function linkProblemMessage(error: unknown): Message<string> {
   if (error instanceof PairingLinkError) {
     switch (error.problem) {
       case "EXPIRED":
-        return "This pairing code expired. Create a new code on your computer.";
+        return computerPairingMessages.expired;
       case "UNSUPPORTED_VERSION":
-        return "This pairing code is from a newer Linger. Update this app and try again.";
+        return m.newerVersion;
       case "NOT_A_PAIRING_CODE":
-        return "That is not a Linger pairing code. Open Settings, then Phones on your computer to show one.";
+        return m.notAPairingCode;
     }
   }
-  return "That code could not be read. Try scanning it again.";
+  return m.unreadable;
 }
 
 export default function PairScreen() {
+  const { t } = useTranslation();
   const params = useLocalSearchParams<{ d?: string }>();
   const computer = useComputer();
   const [permission, requestPermission] = useCameraPermissions();
@@ -103,7 +108,7 @@ export default function PairScreen() {
           message:
             error instanceof PairingError
               ? pairingFailureMessage(error.failure)
-              : "Pairing stopped unexpectedly. Try again.",
+              : m.stoppedUnexpectedly,
         });
         busy.current = false;
       }
@@ -159,7 +164,7 @@ export default function PairScreen() {
       <View style={styles.header}>
         {canCancel ? (
           <Button
-            label="Cancel"
+            label={t(m.cancel)}
             variant="quiet"
             compact
             onPress={() =>
@@ -182,21 +187,18 @@ export default function PairScreen() {
           />
           <View style={styles.intro}>
             <Text style={type.title} accessibilityRole="header">
-              Pair with your computer
+              {t(m.title)}
             </Text>
-            <Text style={styles.lead}>
-              Linger on this phone talks to your own computer, end-to-end
-              encrypted.
-            </Text>
+            <Text style={styles.lead}>{t(m.lead)}</Text>
           </View>
 
           <View style={styles.steps}>
             {STEPS.map((step, index) => (
-              <View key={step} style={styles.step}>
+              <View key={step.id} style={styles.step}>
                 <View style={styles.stepNumber}>
                   <Text style={styles.stepNumberText}>{index + 1}</Text>
                 </View>
-                <Text style={styles.stepText}>{step}</Text>
+                <Text style={styles.stepText}>{t(step)}</Text>
               </View>
             ))}
           </View>
@@ -208,7 +210,7 @@ export default function PairScreen() {
                 facing="back"
                 barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
                 onBarcodeScanned={(result) => void start(result.data)}
-                accessibilityLabel="Camera viewfinder for the pairing code"
+                accessibilityLabel={t(m.viewfinder)}
               />
               <CornerGuides color={colors.surface} />
             </View>
@@ -220,12 +222,12 @@ export default function PairScreen() {
               </View>
               <Text style={styles.cameraText}>
                 {permission && !permission.canAskAgain
-                  ? "Camera access is off for Linger. Turn it on in the system settings to scan the code."
-                  : "Linger uses the camera only to scan the pairing code."}
+                  ? t(m.cameraOff)
+                  : t(m.cameraUse)}
               </Text>
               {!permission || permission.canAskAgain ? (
                 <Button
-                  label="Allow camera"
+                  label={t(m.allowCamera)}
                   onPress={() => void requestPermission()}
                 />
               ) : null}
@@ -240,7 +242,7 @@ export default function PairScreen() {
         <View style={styles.centered}>
           <ActivityIndicator color={colors.muted} />
           <Text style={type.body}>
-            Connecting to {stage.link.computerName}…
+            {t(m.connecting, { name: stage.link.computerName })}
           </Text>
         </View>
       ) : null}
@@ -249,25 +251,24 @@ export default function PairScreen() {
         <View style={styles.centered}>
           {code ? (
             <>
-              <Text style={type.small}>Confirmation code</Text>
+              <Text style={type.small}>{t(m.confirmationCode)}</Text>
               <Text
                 style={styles.code}
-                accessibilityLabel={`Confirmation code ${code.split("").join(" ")}`}
+                accessibilityLabel={t(m.confirmationCodeSpoken, {
+                  digits: code.split("").join(" "),
+                })}
               >
                 {code.slice(0, 3)} {code.slice(3)}
               </Text>
-              <Text style={[type.body, styles.center]}>
-                Check that your computer shows the same code, then approve this
-                phone there.
-              </Text>
+              <Text style={[type.body, styles.center]}>{t(m.checkCode)}</Text>
             </>
           ) : (
             <>
               <ActivityIndicator color={colors.muted} />
               <Text style={[type.body, styles.center]}>
                 {computer.status?.kind === "connected"
-                  ? "Paired."
-                  : `Reconnecting to ${stage.link.computerName}…`}
+                  ? t(m.paired)
+                  : t(m.reconnecting, { name: stage.link.computerName })}
               </Text>
             </>
           )}
@@ -277,17 +278,17 @@ export default function PairScreen() {
       {stage.kind === "finishing" ? (
         <View style={styles.centered}>
           <ActivityIndicator color={colors.muted} />
-          <Text style={type.body}>Paired. Opening Linger…</Text>
+          <Text style={type.body}>{t(m.opening)}</Text>
         </View>
       ) : null}
 
       {stage.kind === "error" ? (
         <View style={styles.centered}>
           <Text style={[type.body, styles.center]} accessibilityRole="alert">
-            {stage.message}
+            {t(stage.message)}
           </Text>
           <Button
-            label="Scan again"
+            label={t(m.scanAgain)}
             onPress={() => {
               busy.current = false;
               setStage({ kind: "scan" });
@@ -299,11 +300,7 @@ export default function PairScreen() {
   );
 }
 
-const STEPS = [
-  "On your computer, open Linger, then Settings, then Phones.",
-  "Choose Pair a phone.",
-  "Point this phone at the code it shows.",
-] as const;
+const STEPS = [m.stepOpenSettings, m.stepPairPhone, m.stepPoint] as const;
 
 /** Four soft corners that frame where the code goes. */
 function CornerGuides(props: { readonly color: string }) {
@@ -325,6 +322,7 @@ function CornerGuides(props: { readonly color: string }) {
 function PairingLinkEntry(props: {
   readonly onSubmit: (link: string) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(!Device.isDevice);
   const [value, setValue] = useState("");
   const link = value.trim();
@@ -337,17 +335,14 @@ function PairingLinkEntry(props: {
         style={({ pressed }) => [styles.linkToggle, pressed && styles.pressed]}
       >
         <Icon name="link" size={20} color={colors.muted} />
-        <Text style={styles.linkTitle}>Can't scan? Use a pairing link</Text>
+        <Text style={styles.linkTitle}>{t(m.linkToggle)}</Text>
         <View style={open ? styles.chevronOpen : undefined}>
           <Icon name="chevron" size={16} color={colors.muted} />
         </View>
       </Pressable>
       {open ? (
         <View style={styles.linkBody}>
-          <Text style={styles.linkText}>
-            Under the code on your computer, choose Copy pairing link. Open the
-            link on this phone, or paste it here.
-          </Text>
+          <Text style={styles.linkText}>{t(m.linkHelp)}</Text>
           <TextInput
             value={value}
             onChangeText={setValue}
@@ -358,11 +353,11 @@ function PairingLinkEntry(props: {
             keyboardType="url"
             returnKeyType="go"
             onSubmitEditing={() => link && props.onSubmit(link)}
-            accessibilityLabel="Pairing link"
+            accessibilityLabel={t(m.linkLabel)}
             style={styles.input}
           />
           <Button
-            label="Pair"
+            label={t(m.pair)}
             variant="secondary"
             disabled={!link}
             onPress={() => props.onSubmit(link)}

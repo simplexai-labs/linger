@@ -113,6 +113,27 @@ func TestAGrantDeliversAGenericAlertForItsComputerOnly(t *testing.T) {
 	}
 }
 
+func TestAlertsFollowTheGrantsLanguage(t *testing.T) {
+	now := time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC)
+	_, expo, server := newService(t, &now)
+	for _, c := range []struct{ language, body string }{
+		{"zh-CN", "Linger \u9700\u8981\u4f60\u505a\u51b3\u5b9a"},
+		{"tlh", "Linger needs your decision"},
+		{"", "Linger needs your decision"},
+	} {
+		status, body := post(t, server, "/v1/push/grants", map[string]string{"expo_token": token, "host_id": host, "language": c.language})
+		if status != 200 {
+			t.Fatalf("grant status %d %v", status, body)
+		}
+		if status, _ := send(t, server, body["grant"].(string), "decision", host); status != http.StatusAccepted {
+			t.Fatalf("send status %d", status)
+		}
+		if got := expo.requests[len(expo.requests)-1]; got["body"] != c.body || got["title"] != "Linger" {
+			t.Fatalf("language %q: alert %v", c.language, got)
+		}
+	}
+}
+
 func TestGrantsExpireAndQuotasHold(t *testing.T) {
 	now := time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC)
 	_, _, server := newService(t, &now)

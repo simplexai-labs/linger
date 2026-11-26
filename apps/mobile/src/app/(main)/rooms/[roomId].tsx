@@ -4,14 +4,17 @@ import { useLocalSearchParams } from "expo-router";
 
 import { AgentStage, GroupStage } from "../../../chat/agent-stage";
 import { ChatRoom } from "../../../chat/chat-room";
+import { useTranslation } from "../../../i18n/use-translation";
+import { roomsMessages as m } from "../../../screens/rooms.messages";
 import { useDirectAgent, useRoom } from "../../../state/queries";
 
 export default function RoomScreen() {
+  const { t } = useTranslation();
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
   const room = useRoom(roomId);
   const agent = useDirectAgent(roomId);
   const title =
-    room.data?.name || room.data?.direct_peer?.display_name || "Room";
+    room.data?.name || room.data?.direct_peer?.display_name || t(m.room);
   return (
     <ChatRoom
       key={roomId}
@@ -28,8 +31,8 @@ export default function RoomScreen() {
         )
       }
       runsInHeader={!!agent}
-      placeholder={`Message ${title}`}
-      emptyTitle="No messages yet"
+      placeholder={t(m.messagePlaceholder, { name: title })}
+      emptyTitle={t(m.noMessages)}
     />
   );
 }

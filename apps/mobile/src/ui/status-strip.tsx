@@ -4,8 +4,10 @@
 import { useEffect, useState } from "react";
 
 import { useComputer } from "../computer/computer-context";
+import { useTranslation } from "../i18n/use-translation";
 import { useAnotherMeCanRunTasks } from "../state/queries";
 import { Notice } from "./controls";
+import { statusStripMessages as m } from "./status-strip.messages";
 
 /** Brief reconnects should not flash a banner. */
 const CONNECTING_GRACE_MS = 1_500;
@@ -24,31 +26,28 @@ function useDelayed(value: boolean, delay: number): boolean {
 }
 
 export function StatusStrip() {
+  const { t } = useTranslation();
   const { active, status, retryNow } = useComputer();
   const canRunTasks = useAnotherMeCanRunTasks();
   const connecting = useDelayed(
     status?.kind === "connecting",
     CONNECTING_GRACE_MS,
   );
-  const name = active?.name ?? "Your computer";
+  const name = active?.name ?? t(m.yourComputer);
 
   if (status?.kind === "offline")
     return (
       <Notice
         tone="warning"
-        text={`${name} is offline. Linger keeps trying.`}
-        action={{ label: "Retry", onPress: retryNow }}
+        text={t(m.offline, { name })}
+        action={{ label: t(m.retry), onPress: retryNow }}
       />
     );
   if (connecting)
-    return <Notice tone="neutral" text={`Connecting to ${name}…`} />;
+    return <Notice tone="neutral" text={t(m.connecting, { name })} />;
   if (status?.kind === "pending")
-    return (
-      <Notice tone="info" text={`Approve this phone on ${name} to continue.`} />
-    );
+    return <Notice tone="info" text={t(m.approve, { name })} />;
   if (status?.kind === "connected" && canRunTasks === false)
-    return (
-      <Notice tone="warning" text="Your computer can't run tasks right now." />
-    );
+    return <Notice tone="warning" text={t(m.cannotRunTasks)} />;
   return null;
 }

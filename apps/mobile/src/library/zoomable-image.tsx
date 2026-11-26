@@ -18,6 +18,9 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+import { useTranslation } from "../i18n/use-translation";
+import { libraryReadableMessages as m } from "./readable.messages";
+
 const MAX_SCALE = 5;
 const TAP_SCALE = 2.5;
 const SETTLE = { duration: 220 };
@@ -26,6 +29,7 @@ export function ZoomableImage(props: {
   readonly uri: string;
   readonly accessibilityLabel?: string;
 }) {
+  const { t } = useTranslation();
   const [frame, setFrame] = useState<LayoutRectangle>();
   const [natural, setNatural] = useState<{ width: number; height: number }>();
 
@@ -150,8 +154,8 @@ export function ZoomableImage(props: {
         onLayout={(event) => setFrame(event.nativeEvent.layout)}
         accessible
         accessibilityRole="image"
-        accessibilityLabel={props.accessibilityLabel ?? "Image"}
-        accessibilityHint="Pinch or double-tap to zoom"
+        accessibilityLabel={props.accessibilityLabel ?? t(m.image)}
+        accessibilityHint={t(m.zoomHint)}
       >
         <Animated.Image
           source={{ uri: props.uri }}

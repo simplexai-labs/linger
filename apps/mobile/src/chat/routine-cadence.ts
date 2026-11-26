@@ -1,17 +1,20 @@
 // A Routine's schedule in a few words, the way the desktop's Routines list
 // reads it: "Daily at 09:00", "Mon, Wed at 18:30", "Every 2 hours".
 import type { Routine } from "../api/types";
+import type { Translate } from "../i18n/language";
+import type { Message } from "../i18n/messages";
+import { chatRoutineCadenceMessages as m } from "./routine-cadence.messages";
 
 type Cadence = NonNullable<Routine["cadence"]>;
 
-const DAYS: Record<string, string> = {
-  monday: "Mon",
-  tuesday: "Tue",
-  wednesday: "Wed",
-  thursday: "Thu",
-  friday: "Fri",
-  saturday: "Sat",
-  sunday: "Sun",
+const DAYS: Record<string, Message<string>> = {
+  monday: m.monday,
+  tuesday: m.tuesday,
+  wednesday: m.wednesday,
+  thursday: m.thursday,
+  friday: m.friday,
+  saturday: m.saturday,
+  sunday: m.sunday,
 };
 
 function clock(cadence: Cadence): string {
@@ -20,24 +23,34 @@ function clock(cadence: Cadence): string {
   return `${hour}:${minute}`;
 }
 
-export function describeCadence(cadence: Cadence | undefined): string {
-  if (!cadence) return "When something happens";
+/** `t` is passed in so this module stays free of the device's language. */
+export function describeCadence(
+  cadence: Cadence | undefined,
+  t: Translate,
+): string {
+  if (!cadence) return t(m.onEvent);
   switch (cadence.kind) {
     case "daily":
-      return `Daily at ${clock(cadence)}`;
+      return t(m.dailyAt, { time: clock(cadence) });
     case "weekly": {
-      const days = (cadence.weekdays ?? []).map((day) => DAYS[day] ?? day);
-      return `${days.join(", ") || "Weekly"} at ${clock(cadence)}`;
+      const days = (cadence.weekdays ?? []).map((day) => {
+        const name = DAYS[day];
+        return name ? t(name) : day;
+      });
+      return days.length > 0
+        ? t(m.daysAt, {
+            days: days.join(t(m.daySeparator)),
+            time: clock(cadence),
+          })
+        : t(m.weeklyAt, { time: clock(cadence) });
     }
     case "every_n_hours":
-      return cadence.interval_hours === 1
-        ? "Every hour"
-        : `Every ${cadence.interval_hours ?? 1} hours`;
+      return t(m.everyHours, { count: cadence.interval_hours ?? 1 });
     case "every_n_minutes":
-      return `Every ${cadence.interval_minutes ?? 10} minutes`;
+      return t(m.everyMinutes, { count: cadence.interval_minutes ?? 10 });
     case "once":
-      return "Once";
+      return t(m.once);
     default:
-      return "Scheduled";
+      return t(m.scheduled);
   }
 }

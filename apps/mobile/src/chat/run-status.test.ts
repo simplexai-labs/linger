@@ -30,7 +30,8 @@ function run(
 describe("run status", () => {
   it("keeps the newer snapshot and asks for unread presentation events", () => {
     const first = mergeRun(undefined, run(3));
-    expect(first.line).toBe("Working");
+    expect(first.line).toBeUndefined();
+    expect(first.phase).toBe("working");
     expect(needsEvents(first)).toBe(true);
     expect(mergeRun(first, run(2)).run.event_ordinal).toBe(3);
     const read = applyPresentationEvents(

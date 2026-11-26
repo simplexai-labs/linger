@@ -1,7 +1,10 @@
 // What a file is and where it opens. The kinds and labels follow the web
 // (apps/web/src/features/rooms/files/artifact-file-kind.ts) so a file looks
-// the same on both. The phone renders text, Markdown, images and audio
-// itself; everything else opens in the system viewer.
+// the same on both. The phone opens every type the desktop previews inside
+// the app: text, Markdown, images, audio and video natively, and the rest in
+// the offline viewer page (file-viewer.tsx). Only what the desktop cannot
+// preview either goes to the system viewer.
+import type { WebKind } from "./file-viewer";
 
 export type FileKind =
   | "archive"
@@ -25,7 +28,7 @@ add("archive", "7z bz2 gz gzip rar tar xz zip");
 add("audio", "aac flac m4a mp3 ogg opus wav");
 add(
   "code",
-  "c cpp css go h hpp java js json jsx less mmd py rs scss sh sql toml ts tsx xml yaml yml",
+  "c cpp css go h hpp java js json jsx less mermaid mmd py rs scss sh sql toml ts tsx xml yaml yml",
 );
 add("image", "avif bmp gif heic heif ico jpeg jpg png svg webp");
 add("spreadsheet", "csv ods tsv xls xlsx");
@@ -95,23 +98,78 @@ export function fileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Where a file opens: drawn by the app, played by the app, or the system viewer. */
-export type Viewer = "page" | "image" | "audio" | "system";
+/** The desktop's preview limit, which the phone shares. */
+export const MAX_VIEW_BYTES = 50 * 1024 * 1024;
+/** Text past this renders in the viewer page, not as native text. */
+const MAX_NATIVE_TEXT_BYTES = 2 * 1024 * 1024;
+/** Images past this decode in the viewer page, not natively. */
+const MAX_NATIVE_IMAGE_BYTES = 20 * 1024 * 1024;
 
-export function viewerFor(filename: string, mediaType = ""): Viewer {
+/**
+ * Where a file opens: drawn natively as a page or an image, played natively
+ * as audio or video, rendered by the viewer page, or, for what the desktop
+ * cannot preview either, handed to the system viewer.
+ */
+export type Viewer =
+  | "page"
+  | "image"
+  | "audio"
+  | "video"
+  | { readonly web: WebKind }
+  | "system";
+
+function webKind(filename: string, mediaType: string): WebKind | undefined {
+  const extension = extensionOf(filename);
   switch (fileKind(filename, mediaType)) {
+    case "pdf":
+      return "pdf";
+    case "document":
+    case "presentation":
+      return /^(docx?|pptx?)$/.test(extension) ? "office" : undefined;
+    case "spreadsheet":
+      if (extension === "csv") return "csv";
+      if (extension === "tsv") return "tsv";
+      return /^xlsx?$/.test(extension) ? "office" : undefined;
+    case "html":
+      return "html";
+    case "image":
+      return /^(heic|heif|ico)$/.test(extension) ? undefined : "image";
+    case "video":
+      // AVPlayer and ExoPlayer do not both read WebM; the WebView does.
+      return extension === "webm" ? "video" : undefined;
     case "markdown":
     case "text":
     case "code":
-      return "page";
-    case "image":
-      // HEIC and SVG need the system viewer; the app decodes the rest.
-      return /^(heic|heif|svg|ico|bmp|avif)$/.test(extensionOf(filename))
-        ? "system"
-        : "image";
-    case "audio":
-      return "audio";
+      return /^(mmd|mermaid)$/.test(extension) ? "mermaid" : "text";
     default:
-      return "system";
+      return undefined;
   }
+}
+
+/** size, when known, moves a large text or image into the viewer page. */
+export function viewerFor(
+  filename: string,
+  mediaType = "",
+  size?: number,
+): Viewer {
+  const kind = fileKind(filename, mediaType);
+  const extension = extensionOf(filename);
+  if (size !== undefined && size > MAX_VIEW_BYTES)
+    return kind === "audio" ? "audio" : "system";
+  if (kind === "audio") return "audio";
+  if (kind === "video" && /^(mp4|m4v|mov)$/.test(extension)) return "video";
+  if (
+    (kind === "markdown" || kind === "text" || kind === "code") &&
+    !/^(mmd|mermaid)$/.test(extension) &&
+    (size === undefined || size <= MAX_NATIVE_TEXT_BYTES)
+  )
+    return "page";
+  if (
+    kind === "image" &&
+    /^(png|jpe?g|gif|webp)$/.test(extension) &&
+    (size === undefined || size <= MAX_NATIVE_IMAGE_BYTES)
+  )
+    return "image";
+  const web = webKind(filename, mediaType);
+  return web ? { web } : "system";
 }

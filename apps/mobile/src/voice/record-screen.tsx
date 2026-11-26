@@ -30,6 +30,8 @@ import type {
 } from "../api/types";
 import { useOutbox } from "../chat/outbox-context";
 import { computerDirectory } from "../computer/store";
+import { t as translate } from "../i18n/language";
+import { useTranslation } from "../i18n/use-translation";
 import type { PhoneSession } from "../session/session";
 import { useAnotherMe, useAnotherMeName, useTeamHub } from "../state/queries";
 import { colors, space, touchTarget, type } from "../theme";
@@ -43,6 +45,7 @@ import {
 } from "./audio";
 import { ListeningBuddy } from "./listening-buddy";
 import { FRAME_MS } from "./pcm";
+import { voiceRecordMessages as m } from "./record-screen.messages";
 import { useSessionSource, type SessionSource } from "./use-session-source";
 import { followVoiceEvents } from "./voice-events";
 import {
@@ -89,8 +92,6 @@ interface RecordRun {
   retrySend(): Promise<void>;
 }
 
-/** The message that carries the phone's own copy of a meeting. */
-const GAP_MESSAGE = "Full phone recording (the live copy has a gap)";
 const MAX_ATTACHMENTS = 5;
 const CAPTURE_START_MS = 15_000;
 const POLL_MS = 3_000;
@@ -120,7 +121,7 @@ function deleteFiles(paths: readonly string[]): void {
 
 function speakerLabel(event: VoiceTranscriptEvent): string | undefined {
   const match = /^spk_(\d+)$/.exec(event.speaker_id ?? "");
-  return match ? `Speaker ${match[1]}` : undefined;
+  return match ? translate(m.speaker, { number: match[1]! }) : undefined;
 }
 
 function terminal(capture: VoiceCapture | undefined): boolean {
@@ -168,13 +169,11 @@ function startRecording(input: {
     if (files.length === 0) {
       // The phone's own copy did not finish; nothing here can fill the gap.
       view.notice(undefined);
-      view.error(
-        "The phone's copy of this meeting could not be saved, so the computer's copy has a gap.",
-      );
+      view.error(translate(m.phoneCopyNotSaved));
       view.phase("failed");
       return;
     }
-    view.notice(`Sending the phone's recording to ${input.agentName}…`);
+    view.notice(translate(m.sendingPhoneCopy, { name: input.agentName }));
     const uploads: MessageAttachmentUpload[] = [];
     for (const path of files) {
       const file = fileFor(path);
@@ -188,12 +187,14 @@ function startRecording(input: {
         ),
       );
     }
+    // The message that carries the phone's own copy of a meeting.
+    const text = translate(m.gapMessage);
     const keys: string[] = [];
     for (let index = 0; index < uploads.length; index += MAX_ATTACHMENTS) {
       const key = `mobile:recording:${name}:message:${index}`;
       keys.push(key);
       await input.send(
-        GAP_MESSAGE,
+        text,
         uploads.slice(index, index + MAX_ATTACHMENTS),
         key,
       );
@@ -202,9 +203,7 @@ function startRecording(input: {
     // an upload alone expires if the message never arrives.
     if (!(await input.delivered(keys, DELIVERY_WAIT_MS))) {
       view.notice(undefined);
-      view.result(
-        "The recording is on its way and stays on this phone until your computer has it.",
-      );
+      view.result(translate(m.onItsWay));
       view.phase("done");
       return;
     }
@@ -212,9 +211,7 @@ function startRecording(input: {
     files = [];
     view.notice(undefined);
     view.resendable(false);
-    view.result(
-      `Your computer has the full recording. It is in your chat with ${input.agentName}.`,
-    );
+    view.result(translate(m.computerHasRecording, { name: input.agentName }));
     view.phase("done");
   };
 
@@ -224,9 +221,7 @@ function startRecording(input: {
     } catch {
       view.notice(undefined);
       view.resendable(true);
-      view.error(
-        "The phone's recording could not be sent. It stays on this phone; try again when your computer is reachable.",
-      );
+      view.error(translate(m.sendFailed));
       view.phase("failed");
     }
   };
@@ -253,16 +248,13 @@ function startRecording(input: {
             if (recording && !bridgeLost)
               view.notice(
                 state === "reconnecting"
-                  ? "Reconnecting. The phone keeps every word until your computer has it."
+                  ? translate(m.reconnecting)
                   : undefined,
               );
           },
           failed: () => {
             bridgeLost = true;
-            if (recording)
-              view.notice(
-                "The computer's copy stopped. The phone keeps recording and sends the whole meeting when you stop.",
-              );
+            if (recording) view.notice(translate(m.computerCopyStopped));
           },
         },
         microphone: {
@@ -331,7 +323,7 @@ function startRecording(input: {
       await hideRecordingNotification();
       view.error(
         error instanceof Error && error.message.startsWith("Capture ")
-          ? "Your computer could not start the recording."
+          ? translate(m.couldNotStart)
           : describeVoiceError(error),
       );
       view.phase("failed");
@@ -351,7 +343,9 @@ function startRecording(input: {
         const backlogMs = opened.bridge.unacknowledged * FRAME_MS;
         view.notice(
           backlogMs > 2_000
-            ? `Sending the last ${Math.ceil(backlogMs / 1_000)} seconds to your computer…`
+            ? translate(m.sendingLastSeconds, {
+                seconds: Math.ceil(backlogMs / 1_000),
+              })
             : undefined,
         );
         drained = await Promise.race([
@@ -391,18 +385,14 @@ function startRecording(input: {
       await hideRecordingNotification();
       if (!terminal(capture)) {
         // The phone keeps its copy: nothing says the computer has it all.
-        view.result(
-          `Your computer is still saving the meeting. It lands in your chat with ${input.agentName} when done.`,
-        );
+        view.result(translate(m.stillSaving, { name: input.agentName }));
         view.phase("done");
         return;
       }
       if (capture?.status === "finalized" && capture.gap_count === 0) {
         deleteFiles(files);
         files = [];
-        view.result(
-          `Saved. The notes arrive in your chat with ${input.agentName}.`,
-        );
+        view.result(translate(m.saved, { name: input.agentName }));
         view.phase("done");
         return;
       }
@@ -437,6 +427,7 @@ function elapsedText(ms: number): string {
 }
 
 export function RecordScreen() {
+  const { t } = useTranslation();
   const teamHub = useTeamHub();
   const anotherMe = useAnotherMe();
   const agentName = useAnotherMeName() ?? "Another Me";
@@ -550,30 +541,30 @@ export function RecordScreen() {
         <EmptyState
           title={
             teamHub.connected
-              ? `${agentName} is getting ready`
-              : "Connect to your computer to record"
+              ? t(m.gettingReady, { name: agentName })
+              : t(m.connectToRecord)
           }
           busy={teamHub.connected && anotherMe.isPending}
         />
-        <Button label="Close" variant="secondary" onPress={leave} />
+        <Button label={t(m.close)} variant="secondary" onPress={leave} />
       </SafeAreaView>
     );
 
   const heading: Record<Phase, string> = {
-    idle: "Record a meeting",
-    starting: "Starting…",
-    recording: interrupted ? "Paused for a call" : "Recording",
-    stopping: "Stopping…",
-    saving: "Saving on your computer…",
-    done: "Saved",
-    failed: "Recording stopped",
+    idle: t(m.headingIdle),
+    starting: t(m.headingStarting),
+    recording: interrupted ? t(m.headingPaused) : t(m.headingRecording),
+    stopping: t(m.headingStopping),
+    saving: t(m.headingSaving),
+    done: t(m.headingDone),
+    failed: t(m.headingFailed),
   };
 
   return (
     <SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
       <View style={styles.topBar}>
         {phase === "idle" ? (
-          <Button label="Close" variant="quiet" compact onPress={leave} />
+          <Button label={t(m.close)} variant="quiet" compact onPress={leave} />
         ) : null}
       </View>
       <View style={styles.header}>
@@ -583,7 +574,9 @@ export function RecordScreen() {
         {startedAt && phase !== "idle" ? (
           <Text
             style={styles.elapsed}
-            accessibilityLabel={`Recorded ${elapsedText(now - startedAt)}`}
+            accessibilityLabel={t(m.recordedFor, {
+              time: elapsedText(now - startedAt),
+            })}
           >
             {elapsedText(now - startedAt)}
           </Text>
@@ -593,7 +586,7 @@ export function RecordScreen() {
         <View style={styles.intro}>
           <ListeningBuddy level={0} size={150} />
           <Text style={[type.body, styles.center]}>
-            {`Notes land in your chat with ${agentName}. Recording goes on with the screen locked.`}
+            {t(m.intro, { name: agentName })}
           </Text>
         </View>
       ) : (
@@ -612,13 +605,11 @@ export function RecordScreen() {
             onContentSizeChange={() =>
               scroll.current?.scrollToEnd({ animated: true })
             }
-            accessibilityLabel="Live transcript"
+            accessibilityLabel={t(m.liveTranscript)}
           >
             {lines.length === 0 && !partial ? (
               <Text style={[type.small, styles.center]}>
-                {phase === "recording"
-                  ? "The transcript appears as people speak."
-                  : ""}
+                {phase === "recording" ? t(m.transcriptHint) : ""}
               </Text>
             ) : null}
             {lines.map((line) => (
@@ -652,14 +643,14 @@ export function RecordScreen() {
       <View style={styles.controls}>
         {phase === "idle" ? (
           <Button
-            label="Start recording"
+            label={t(m.startRecording)}
             disabled={!teamHub.connected}
             onPress={start}
             style={styles.control}
           />
         ) : phase === "starting" || phase === "recording" ? (
           <Button
-            label="Stop"
+            label={t(m.stop)}
             variant="danger"
             disabled={phase !== "recording"}
             onPress={confirmStop}
@@ -669,7 +660,7 @@ export function RecordScreen() {
           // Stopping always saves; the screen waits for it instead of
           // offering a way out that reads as discarding the meeting.
           <Button
-            label="Saving…"
+            label={t(m.saving)}
             variant="secondary"
             busy
             disabled
@@ -680,21 +671,21 @@ export function RecordScreen() {
           <>
             {phase === "failed" && resendable ? (
               <Button
-                label="Send again"
+                label={t(m.sendAgain)}
                 variant="secondary"
                 onPress={() => void run.current?.retrySend()}
                 style={styles.control}
               />
             ) : null}
-            <Button label="Close" onPress={leave} style={styles.control} />
+            <Button label={t(m.close)} onPress={leave} style={styles.control} />
           </>
         )}
       </View>
       <ConfirmDialog
         visible={confirming}
-        title="Stop recording?"
-        confirmLabel="Stop"
-        cancelLabel="Keep recording"
+        title={t(m.confirmStopTitle)}
+        confirmLabel={t(m.stop)}
+        cancelLabel={t(m.keepRecording)}
         tone="danger"
         onConfirm={() => {
           thud();

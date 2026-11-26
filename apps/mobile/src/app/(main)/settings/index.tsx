@@ -27,7 +27,10 @@ import {
   sendAppLog,
   shareAppLog,
 } from "../../../lib/app-log-expo";
-import { DiagnosticsUploadError } from "../../../lib/diagnostics-upload";
+import {
+  DiagnosticsUploadError,
+  diagnosticsUploadErrorText,
+} from "../../../lib/diagnostics-upload";
 import { HttpError } from "../../../session/http";
 import { colors, radius, space, type } from "../../../theme";
 import { ConfirmDialog } from "../../../ui/confirm-dialog";
@@ -42,6 +45,10 @@ import {
 } from "../../../ui/settings";
 import { StatusStrip } from "../../../ui/status-strip";
 import { Text, TextInput } from "../../../ui/text";
+import { setLanguageChoice, type Translate } from "../../../i18n/language";
+import { LANGUAGES, type LanguageChoice } from "../../../i18n/languages";
+import { useTranslation } from "../../../i18n/use-translation";
+import { settingsMessages as m } from "../../../screens/settings.messages";
 
 function Check() {
   return <Icon name="check" size={20} color={colors.accent} />;
@@ -49,6 +56,7 @@ function Check() {
 
 /** The active computer's state and route as a dot and a few words. */
 function statusLine(
+  t: Translate,
   status: ConnectionStatus | undefined,
   via: string | undefined,
 ): { tone: "success" | "warning" | "muted"; text: string } {
@@ -56,17 +64,17 @@ function statusLine(
     case "connected":
       return {
         tone: "success",
-        text: via ? `Connected · ${via}` : "Connected",
+        text: via ? t(m.connectedVia, { route: via }) : t(m.connected),
       };
     case "pending":
-      return { tone: "warning", text: "Waiting for approval" };
+      return { tone: "warning", text: t(m.waitingApproval) };
     case "offline":
-      return { tone: "warning", text: "Offline · Retrying" };
+      return { tone: "warning", text: t(m.offline) };
     case "removed":
     case "keyChanged":
-      return { tone: "warning", text: "Needs pairing again" };
+      return { tone: "warning", text: t(m.needsPairing) };
     default:
-      return { tone: "muted", text: "Connecting…" };
+      return { tone: "muted", text: t(m.connecting) };
   }
 }
 
@@ -76,6 +84,7 @@ function statusLine(
  * measured; a node added here joins the computer's list at once.
  */
 function RelaySetting() {
+  const { t } = useTranslation();
   const { active, session, relay, setRelayChoice, probeRelays, setRelayNodes } =
     useComputer();
   const [adding, setAdding] = useState(false);
@@ -149,15 +158,15 @@ function RelaySetting() {
     } catch (error) {
       setProblem(
         error instanceof HttpError && error.code === "INVALID_RELAY_URL"
-          ? "Use a ws:// or wss:// address, such as ws://203.0.113.7:7787."
+          ? t(m.invalidRelayURL)
           : error instanceof HttpError && error.code === "RELAY_EXISTS"
-            ? "Your computer already has this node."
+            ? t(m.relayExists)
             : error instanceof HttpError && error.code === "TOO_MANY_RELAYS"
-              ? "Your computer has eight nodes you added. Remove one there first."
+              ? t(m.tooManyRelays)
               : error instanceof HttpError &&
                   error.code === "RELAY_PRIVATE_FROM_PHONE"
-                ? "A node on a private network can be added only on your computer."
-                : "The node was not added. Try again.",
+                ? t(m.relayPrivate)
+                : t(m.relayNotAdded),
       );
     } finally {
       setBusy(false);
@@ -166,25 +175,25 @@ function RelaySetting() {
 
   const timeOf = (url: string) => {
     const ms = active.relayLatency?.[url];
-    if (ms !== undefined) return `${Math.round(ms)} ms`;
+    if (ms !== undefined) return t(m.milliseconds, { ms: Math.round(ms) });
     return measuring ? "…" : "–";
   };
 
   return (
     <SettingsGroup
-      label="Relay"
+      label={t(m.relayLabel)}
       footer={
         problem ? (
           <SettingsNote tone="warning">{problem}</SettingsNote>
         ) : (
-          "Used away from your computer's Wi-Fi. Times are a request's round trip."
+          t(m.relayFooter)
         )
       }
     >
       <SettingsRow
-        title="Automatic"
+        title={t(m.automatic)}
         onPress={() => choose("auto")}
-        accessibilityLabel="Automatic Relay node"
+        accessibilityLabel={t(m.automaticNode)}
         accessibilityState={{ selected: choice === "auto" }}
         trailing={choice === "auto" ? <Check /> : <View style={styles.check} />}
       />
@@ -194,12 +203,12 @@ function RelaySetting() {
           title={node.label}
           subtitle={
             relay === node.url ? (
-              <StatusLine tone="success" text="In use" />
+              <StatusLine tone="success" text={t(m.inUse)} />
             ) : undefined
           }
           detail={timeOf(node.url)}
           onPress={() => choose(node.id)}
-          accessibilityLabel={`Use only ${node.label}`}
+          accessibilityLabel={t(m.useOnly, { name: node.label })}
           accessibilityState={{ selected: choice === node.id }}
           trailing={
             choice === node.id ? <Check /> : <View style={styles.check} />
@@ -219,12 +228,12 @@ function RelaySetting() {
             returnKeyType="done"
             autoFocus
             style={styles.addInput}
-            accessibilityLabel="Relay node address"
+            accessibilityLabel={t(m.nodeAddress)}
             onSubmitEditing={() => void add()}
           />
           <View style={styles.addActions}>
             <Button
-              label="Cancel"
+              label={t(m.cancel)}
               variant="quiet"
               compact
               onPress={() => {
@@ -233,7 +242,7 @@ function RelaySetting() {
               }}
             />
             <Button
-              label="Add"
+              label={t(m.add)}
               compact
               busy={busy}
               disabled={!draft.trim() || !session}
@@ -243,7 +252,7 @@ function RelaySetting() {
         </View>
       ) : (
         <SettingsRow
-          title="Add Node"
+          title={t(m.addNode)}
           tone="accent"
           onPress={() => setAdding(true)}
         />
@@ -269,6 +278,7 @@ type Sending =
  * the same log to the share sheet instead.
  */
 function DiagnosticsSetting() {
+  const { t } = useTranslation();
   const receiver = diagnosticsReceiver();
   const [sending, setSending] = useState<Sending | undefined>();
 
@@ -280,9 +290,9 @@ function DiagnosticsSetting() {
       setSending({
         step: "failed",
         message:
-          error instanceof Error
-            ? error.message
-            : "The diagnostics were not sent.",
+          error instanceof DiagnosticsUploadError
+            ? diagnosticsUploadErrorText(error, t)
+            : t(m.diagnosticsNotSentBody),
         retry: error instanceof DiagnosticsUploadError ? error.retry : true,
       });
     }
@@ -291,42 +301,42 @@ function DiagnosticsSetting() {
   const host = receiver ? new URL(receiver).host : "";
   return (
     <SettingsGroup
-      label="Diagnostics"
-      footer="Diagnostics hold this phone's events and timings, never messages, documents or keys."
+      label={t(m.diagnosticsLabel)}
+      footer={t(m.diagnosticsFooter)}
     >
       {receiver ? (
         <SettingsRow
           icon="upload"
-          title="Send Diagnostics"
-          subtitle="Upload for support and get a report ID"
+          title={t(m.sendDiagnostics)}
+          subtitle={t(m.sendDiagnosticsHint)}
           onPress={() => setSending({ step: "ask" })}
         />
       ) : null}
       <SettingsRow
         icon="share"
-        title="Save Diagnostics"
-        subtitle="Share the log file yourself"
+        title={t(m.saveDiagnostics)}
+        subtitle={t(m.saveDiagnosticsHint)}
         onPress={() => void shareAppLog()}
       />
       <ConfirmDialog
         visible={sending?.step === "ask" || sending?.step === "busy"}
-        title="Send diagnostics?"
-        body={`This phone's log of events and timings goes to ${host}. It holds no messages, documents or keys.`}
-        confirmLabel="Send"
+        title={t(m.sendDiagnosticsTitle)}
+        body={t(m.sendDiagnosticsBody, { host })}
+        confirmLabel={t(m.send)}
         busy={sending?.step === "busy"}
         onConfirm={() => void send()}
         onCancel={() => setSending(undefined)}
       />
       <ConfirmDialog
         visible={sending?.step === "sent"}
-        title="Diagnostics sent"
+        title={t(m.diagnosticsSent)}
         body={
           sending?.step === "sent"
-            ? `Report ID ${sending.reportId}. Give it to support so they can find it.`
+            ? t(m.reportID, { id: sending.reportId })
             : undefined
         }
-        confirmLabel="Share ID"
-        cancelLabel="Done"
+        confirmLabel={t(m.shareID)}
+        cancelLabel={t(m.done)}
         onConfirm={() => {
           if (sending?.step === "sent")
             void Share.share({ message: sending.reportId });
@@ -335,14 +345,14 @@ function DiagnosticsSetting() {
       />
       <ConfirmDialog
         visible={sending?.step === "failed"}
-        title="Diagnostics not sent"
+        title={t(m.diagnosticsNotSent)}
         body={sending?.step === "failed" ? sending.message : undefined}
         confirmLabel={
           sending?.step === "failed" && sending.retry
-            ? "Try Again"
-            : "Save Instead"
+            ? t(m.tryAgain)
+            : t(m.saveInstead)
         }
-        cancelLabel="Close"
+        cancelLabel={t(m.close)}
         onConfirm={() => {
           if (sending?.step === "failed" && sending.retry) void send();
           else {
@@ -357,6 +367,7 @@ function DiagnosticsSetting() {
 }
 
 function PushSetting() {
+  const { t } = useTranslation();
   const { active, session } = useComputer();
   const [enabled, setEnabled] = useState<boolean | undefined>();
   const [preferences, setPreferences] = useState(DEFAULT_PUSH_PREFERENCES);
@@ -389,18 +400,13 @@ function PushSetting() {
           hostId,
           files: documentFiles,
         });
-        if (!granted)
-          setProblem("Turn on notifications for Linger in iOS Settings.");
+        if (!granted) setProblem(t(m.notificationsOffInSystem));
       } else {
         await disablePush({ session, hostId, files: documentFiles });
       }
     } catch {
       setEnabled(!next);
-      setProblem(
-        session
-          ? "The change did not reach your computer. Try again."
-          : "Connect to your computer to change this.",
-      );
+      setProblem(session ? t(m.changeNotDelivered) : t(m.connectToChange));
     }
   };
 
@@ -416,15 +422,13 @@ function PushSetting() {
       });
     } catch {
       // The phone keeps the choice and sends it on the next session.
-      setProblem(
-        "Saved on this phone. Your computer gets it when it connects.",
-      );
+      setProblem(t(m.savedOnPhone));
     }
   };
   const option = (
     key: keyof PushPreferences,
     title: string,
-    subtitle: string,
+    subtitle?: string,
   ) => (
     <SettingsRow
       key={key}
@@ -433,6 +437,7 @@ function PushSetting() {
       trailing={
         <SettingsSwitch
           value={preferences[key]}
+          disabled={!enabled}
           onValueChange={(value) =>
             void change({ ...preferences, [key]: value })
           }
@@ -442,42 +447,77 @@ function PushSetting() {
     />
   );
 
+  // The master switch gets a group of its own; the two groups under it dim,
+  // and keep their choices, while it is off, so the dependency shows.
   return (
-    <SettingsGroup
-      footer={
-        problem ? (
-          <SettingsNote tone="warning">{problem}</SettingsNote>
-        ) : enabled ? (
-          "One alert when an Agent finishes, never while you are looking at the chat."
-        ) : null
-      }
-    >
-      <SettingsRow
-        title="Notifications"
-        trailing={
-          <SettingsSwitch
-            value={enabled}
-            onValueChange={(value) => void toggle(value)}
-            accessibilityLabel="Notifications"
-          />
+    <>
+      <SettingsGroup
+        label={t(m.notificationsLabel)}
+        footer={
+          problem ? <SettingsNote tone="warning">{problem}</SettingsNote> : null
         }
-      />
-      {enabled
-        ? [
-            option("replies", "Replies", "When an Agent finishes a reply"),
-            option("decisions", "Decisions", "When Linger needs your decision"),
-            option(
-              "whenActive",
-              "Even at My Computer",
-              "Also while you look at the chat elsewhere",
-            ),
-          ]
-        : null}
+      >
+        <SettingsRow
+          title={t(m.allowNotifications)}
+          trailing={
+            <SettingsSwitch
+              value={enabled}
+              onValueChange={(value) => void toggle(value)}
+              accessibilityLabel={t(m.allowNotifications)}
+            />
+          }
+        />
+      </SettingsGroup>
+      <SettingsGroup label={t(m.notifyAbout)} disabled={!enabled}>
+        {option("replies", t(m.agentReplies), t(m.agentRepliesHint))}
+        {option("decisions", t(m.decisions), t(m.decisionsHint))}
+      </SettingsGroup>
+      <SettingsGroup
+        label={t(m.elsewhereLabel)}
+        disabled={!enabled}
+        footer={preferences.whenActive ? t(m.elsewhereOn) : t(m.elsewhereOff)}
+      >
+        {option("whenActive", t(m.notifyPhoneToo))}
+      </SettingsGroup>
+    </>
+  );
+}
+
+/**
+ * The interface language, kept on this phone: Follow System (the default)
+ * tracks the phone's language, or English or Simplified Chinese is pinned.
+ * Each language is named in its own language, as on the Web.
+ */
+function LanguageSetting() {
+  const { t, choice, language } = useTranslation();
+  const nameOf = (tag: string) =>
+    LANGUAGES.find((entry) => entry.tag === tag)?.name ?? tag;
+  const row = (value: LanguageChoice, title: string, detail?: string) => (
+    <SettingsRow
+      key={value}
+      title={title}
+      detail={detail}
+      onPress={() => {
+        if (value !== choice) setLanguageChoice(value);
+      }}
+      accessibilityState={{ selected: choice === value }}
+      trailing={choice === value ? <Check /> : <View style={styles.check} />}
+    />
+  );
+  return (
+    <SettingsGroup label={t(m.languageLabel)} footer={t(m.languageFooter)}>
+      {row(
+        "system",
+        t(m.followSystem),
+        choice === "system" ? nameOf(language) : undefined,
+      )}
+      {LANGUAGES.map((entry) => row(entry.tag, entry.name))}
     </SettingsGroup>
   );
 }
 
 export default function SettingsScreen() {
+  const { t } = useTranslation();
   const { computers, active, route, relay, status, switchTo, unpair } =
     useComputer();
   const version = Constants.expoConfig?.version ?? "unknown";
@@ -503,11 +543,11 @@ export default function SettingsScreen() {
     route === "relay"
       ? (active &&
           relayNodesOf(active).find((node) => node.url === relay)?.label) ||
-        "Relay"
+        t(m.routeRelay)
       : route === "lan"
-        ? "Same Wi-Fi"
+        ? t(m.routeLan)
         : undefined;
-  const activeStatus = statusLine(status, via);
+  const activeStatus = statusLine(t, status, via);
 
   return (
     <View style={styles.screen}>
@@ -517,7 +557,7 @@ export default function SettingsScreen() {
         contentContainerStyle={styles.content}
       >
         <Text style={styles.title} accessibilityRole="header">
-          Settings
+          {t(m.title)}
         </Text>
         <SettingsGroup>
           {computers.map((computer) => {
@@ -531,7 +571,7 @@ export default function SettingsScreen() {
                   isActive ? (
                     <StatusLine {...activeStatus} />
                   ) : (
-                    <StatusLine tone="muted" text="Tap to switch" />
+                    <StatusLine tone="muted" text={t(m.tapToSwitch)} />
                   )
                 }
                 onPress={
@@ -542,20 +582,20 @@ export default function SettingsScreen() {
                           router.replace("/"),
                         )
                 }
-                accessibilityLabel={`Switch to ${computer.name}`}
+                accessibilityLabel={t(m.switchTo, { name: computer.name })}
               />
             );
           })}
           <SettingsRow
             icon="add"
-            title="Pair Another Computer"
+            title={t(m.pairAnother)}
             chevron
             onPress={() => router.push("/pair")}
           />
           {active ? (
             <SettingsRow
               icon={null}
-              title={`Unpair ${active.name}`}
+              title={t(m.unpairNamed, { name: active.name })}
               tone="danger"
               onPress={() =>
                 setUnpairing({ hostId: active.hostId, name: active.name })
@@ -568,8 +608,10 @@ export default function SettingsScreen() {
 
         <PushSetting />
 
-        <SettingsGroup footer="Your data stays on your computer.">
-          <SettingsRow title="Version" detail={version} />
+        <LanguageSetting />
+
+        <SettingsGroup footer={t(m.dataStays)}>
+          <SettingsRow title={t(m.version)} detail={version} />
         </SettingsGroup>
 
         <DiagnosticsSetting />
@@ -577,9 +619,13 @@ export default function SettingsScreen() {
 
       <ConfirmDialog
         visible={unpairing !== undefined}
-        title={`Unpair ${unpairing?.name ?? "this computer"}?`}
-        body="This phone forgets the computer and deletes what it keeps for it."
-        confirmLabel="Unpair"
+        title={
+          unpairing
+            ? t(m.unpairTitle, { name: unpairing.name })
+            : t(m.unpairThisComputer)
+        }
+        body={t(m.unpairBody)}
+        confirmLabel={t(m.unpair)}
         tone="danger"
         busy={unpairBusy}
         onConfirm={() => void confirmUnpair()}

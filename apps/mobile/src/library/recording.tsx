@@ -18,12 +18,14 @@ import {
 } from "react-native";
 
 import { documentVersionContentPath } from "../api/teamhub";
+import { useTranslation } from "../i18n/use-translation";
 import { useTeamHub } from "../state/queries";
 import { colors, radius, space, touchTarget, type } from "../theme";
 import { Icon, type IconName } from "../ui/icon";
 import { Text } from "../ui/text";
 import { downloadToFile, freshCacheFile } from "./cache-file";
 import { fileSize } from "./file-kind";
+import { libraryRecordingMessages as m } from "./recording.messages";
 
 const SKIP_SECONDS = 15;
 
@@ -105,6 +107,7 @@ export function Recording(props: {
   readonly versionId: string;
   readonly filename: string;
 }) {
+  const { t } = useTranslation();
   const teamHub = useTeamHub();
   const player = useAudioPlayer(null);
   const status = useAudioPlayerStatus(player);
@@ -176,8 +179,13 @@ export function Recording(props: {
       <View
         accessible
         accessibilityRole="adjustable"
-        accessibilityLabel="Playback position"
-        accessibilityValue={{ text: `${clock(shown)} of ${clock(duration)}` }}
+        accessibilityLabel={t(m.position)}
+        accessibilityValue={{
+          text: t(m.positionValue, {
+            current: clock(shown),
+            duration: clock(duration),
+          }),
+        }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
         onAccessibilityAction={(event) =>
           seek(
@@ -199,10 +207,10 @@ export function Recording(props: {
           <Text style={styles.time}>
             {state === "downloading"
               ? bytes > 0
-                ? `Getting it… ${fileSize(bytes)}`
-                : "Getting it…"
+                ? t(m.gettingItSize, { size: fileSize(bytes) })
+                : t(m.gettingIt)
               : state === "failed"
-                ? "Did not load"
+                ? t(m.didNotLoad)
                 : ready
                   ? clock(duration)
                   : "--:--"}
@@ -212,7 +220,7 @@ export function Recording(props: {
       <View style={styles.controls}>
         <IconButton
           icon="back15"
-          label={`Back ${SKIP_SECONDS} seconds`}
+          label={t(m.back, { seconds: SKIP_SECONDS })}
           disabled={!ready}
           onPress={() => seek(current - SKIP_SECONDS)}
         />
@@ -220,10 +228,10 @@ export function Recording(props: {
           accessibilityRole="button"
           accessibilityLabel={
             state === "failed"
-              ? "Try again"
+              ? t(m.tryAgain)
               : ready && status.playing
-                ? "Pause"
-                : "Play"
+                ? t(m.pause)
+                : t(m.play)
           }
           accessibilityState={{
             disabled: !teamHub.connected,
@@ -249,7 +257,7 @@ export function Recording(props: {
         </Pressable>
         <IconButton
           icon="forward15"
-          label={`Forward ${SKIP_SECONDS} seconds`}
+          label={t(m.forward, { seconds: SKIP_SECONDS })}
           disabled={!ready}
           onPress={() => seek(current + SKIP_SECONDS)}
         />

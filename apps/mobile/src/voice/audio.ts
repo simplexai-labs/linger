@@ -15,6 +15,7 @@ import {
   type SystemOptions,
 } from "react-native-audio-api";
 
+import { t } from "../i18n/language";
 import {
   BRIDGE_SAMPLE_RATE,
   FRAME_SAMPLES,
@@ -24,6 +25,7 @@ import {
   resample,
   rms,
 } from "./pcm";
+import { voiceAudioMessages as m } from "./audio.messages";
 
 /** What the microphone is for; it decides echo cancellation and routing. */
 export type AudioUse = "dictate" | "live" | "record";
@@ -75,11 +77,15 @@ export async function ensureMicrophonePermission(): Promise<boolean> {
   if (status === "Undetermined") {
     const proceed = await new Promise<boolean>((resolve) =>
       Alert.alert(
-        "Allow the microphone",
-        "Linger sends what you say through the encrypted session to your own computer, which transcribes it. The phone keeps a meeting recording only until your computer has it.",
+        t(m.permissionTitle),
+        t(m.permissionBody),
         [
-          { text: "Not now", style: "cancel", onPress: () => resolve(false) },
-          { text: "Continue", onPress: () => resolve(true) },
+          {
+            text: t(m.notNow),
+            style: "cancel",
+            onPress: () => resolve(false),
+          },
+          { text: t(m.continue), onPress: () => resolve(true) },
         ],
         { cancelable: true, onDismiss: () => resolve(false) },
       ),
@@ -88,14 +94,10 @@ export async function ensureMicrophonePermission(): Promise<boolean> {
     status = await AudioManager.requestRecordingPermissions();
     if (status === "Granted") return true;
   }
-  Alert.alert(
-    "Microphone access is off",
-    "Turn on microphone access for Linger in Settings to dictate, talk live or record meetings.",
-    [
-      { text: "Cancel", style: "cancel" },
-      { text: "Open Settings", onPress: () => void Linking.openSettings() },
-    ],
-  );
+  Alert.alert(t(m.deniedTitle), t(m.deniedBody), [
+    { text: t(m.cancel), style: "cancel" },
+    { text: t(m.openSettings), onPress: () => void Linking.openSettings() },
+  ]);
   return false;
 }
 
@@ -317,8 +319,8 @@ export async function openSpeaker(
 export async function showRecordingNotification(): Promise<void> {
   if (Platform.OS !== "android") return;
   await RecordingNotificationManager.show({
-    title: "Linger is recording",
-    contentText: "The meeting goes to your computer as you speak.",
+    title: t(m.notificationTitle),
+    contentText: t(m.notificationBody),
   }).catch(() => undefined);
 }
 

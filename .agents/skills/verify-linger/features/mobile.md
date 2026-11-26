@@ -205,13 +205,14 @@ Use the Simulator with authorized Documents, generated Wiki pages, and personal 
 4. Open a read-only Wiki file through its Document Version. Open a native Document through the latest-download route using an identity with export access. Exercise export denial and a delayed `202` response. The client honors `Retry-After` within its bounded retry loop.
 5. Test the preview boundaries below with valid files. Use an exact-size file and one byte above each applicable threshold. One MiB is 1,048,576 bytes.
 
-| Surface                                                            | Expected result                                                                                                                              |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Markdown, text, and code                                           | The in-app reader handles up to 2 MiB. Oversized content offers `Open on your computer`.                                                     |
-| PNG, JPEG, GIF, and WebP                                           | The in-app image viewer handles up to 20 MiB. Check double-tap zoom, pinch, pan, and return to fit.                                          |
-| Chat image                                                         | The inline limit is 8 MiB. A larger supported image can still open in the Document viewer within its 20 MiB limit.                           |
-| Audio                                                              | Download to a temporary file, play, pause, scrub, and seek with the screen still open after disconnecting.                                   |
-| PDF, Office, HTML, video, archive, and system-viewed image formats | Open the downloaded file in iOS Quick Look or the Android viewer. Check progress, reopen, and an unavailable viewer or interrupted download. |
+| Surface                                                                       | Expected result                                                                                                                                   |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Markdown, text, and code                                                      | The in-app reader handles up to 2 MiB. Oversized content offers `Open on your computer`.                                                          |
+| PNG, JPEG, GIF, and WebP                                                      | The in-app image viewer handles up to 20 MiB. Check double-tap zoom, pinch, pan, and return to fit.                                               |
+| Chat image                                                                    | The inline limit is 8 MiB. A larger supported image can still open in the Document viewer within its 20 MiB limit.                                |
+| Audio                                                                         | Download to a temporary file, play, pause, scrub, and seek with the screen still open after disconnecting.                                        |
+| PDF, Office, CSV and TSV, HTML, Mermaid, other images, and video up to 50 MiB | The in-app viewer shows the file. A table over 5,000 rows or 5 MiB shows its head with a note. The header's share button opens the system viewer. |
+| Larger files, archives, and files the viewer cannot read                      | Open the downloaded file in iOS Quick Look or the Android viewer. Check progress, reopen, and an unavailable viewer or interrupted download.      |
 
 6. In Wiki, inspect Projects, Topics, People, Companies, Conversations, and remaining Pages when populated. Check a dated meeting note. Generated pages should show readable titles and prose. Source documents and `index.md` stay out of the list. Check that metadata and generated citation markup are hidden while fenced code survives.
 7. Open a meeting. Compare `Summary` and `Transcript`, speakers, timestamps, and the recording with the same meeting on the computer. While a summary is pending, wait for its 15-second refresh. Check that the title appears once.
@@ -284,9 +285,17 @@ Use a physical phone with a push-capable native build, OS permission, and a conf
 6. Turn notifications off online and refresh Web to `Push off`. Generate a new qualifying event. Repeat the toggle while offline. Revocation remains pending until reconnect, so check suppression after Web confirms it.
 7. Turn notifications on again and confirm fresh delivery. With a second registered phone, disable or remove only the first. Generate another event and verify independent delivery to the second.
 
+8. Switch Settings > `Language` to Simplified Chinese with a session open. The phone renews its grant; the next alert is in Chinese. Switch back and check English again.
+
 Keep redacted payload field names, notification wording, event and Room IDs, both Web grant states, and the destination after tapping. An injected Simulator notification can verify tap routing. Actual delivery needs Expo and a physical device. A naturally generated Another Me reply also needs a real model.
 
 Reuse `push/grant.test.ts`, TeamHub `internal/mobilepush/mobilepush_test.go`, Relay `internal/push/push_test.go`, and Web `phones-settings-page.test.tsx`. These cover grant refresh, event selection, expired grants, and rate-limited alerts. The Relay test uses a stand-in Expo endpoint.
+
+## Switch the interface language
+
+Use the Simulator. Set the phone's system language to Simplified Chinese, then to English, with Settings > `Language` on `Follow System`. Every screen follows after returning to the app. Pin English, then Simplified Chinese, and relaunch; the choice holds. Check dates in the Messages list, the Library and a meeting in both languages.
+
+Reuse `i18n/catalog.test.ts`, which checks every message has a translation with the same placeholders.
 
 ## Save and send diagnostics
 

@@ -9,9 +9,11 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { OutboxProvider } from "../chat/outbox-context";
 import { ComputerProvider } from "../computer/computer-context";
+import { useTranslation } from "../i18n/use-translation";
 import { startAppLog } from "../lib/app-log-expo";
 import { PushSync } from "../push/push-sync";
 import { RealtimeProvider } from "../realtime/realtime-context";
+import { documentMessages } from "../screens/document.messages";
 import { createQueryClient, QueryProvider } from "../state/queries";
 import { colors } from "../theme";
 import { GEIST_FONTS } from "../ui/fonts";
@@ -20,6 +22,7 @@ import { GEIST_FONTS } from "../ui/fonts";
 startAppLog();
 
 export default function RootLayout() {
+  const { t } = useTranslation();
   const [queryClient] = useState(createQueryClient);
   // The splash stays up until Geist is ready, so no screen draws in the
   // system font first; a font that fails to load falls back to it.
@@ -66,8 +69,8 @@ export default function RootLayout() {
                       name="document/[documentId]"
                       options={{
                         headerShown: true,
-                        title: "Document",
-                        headerBackTitle: "Back",
+                        title: t(documentMessages.title),
+                        headerBackTitle: t(documentMessages.back),
                         headerTintColor: colors.ink,
                         headerStyle: { backgroundColor: colors.canvas },
                         headerShadowVisible: false,

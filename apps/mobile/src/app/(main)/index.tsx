@@ -4,12 +4,15 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AgentStage } from "../../chat/agent-stage";
 import { ChatHeader, ChatRoom } from "../../chat/chat-room";
+import { useTranslation } from "../../i18n/use-translation";
+import { roomsMessages as m } from "../../screens/rooms.messages";
 import { useAnotherMe, useDirectAgent, useTeamHub } from "../../state/queries";
 import { colors } from "../../theme";
 import { EmptyState } from "../../ui/controls";
 import { StatusStrip } from "../../ui/status-strip";
 
 export default function AnotherMeScreen() {
+  const { t } = useTranslation();
   const teamHub = useTeamHub();
   const anotherMe = useAnotherMe();
   const roomId = anotherMe.data?.room_id;
@@ -27,8 +30,8 @@ export default function AnotherMeScreen() {
           )
         }
         runsInHeader={!!agent}
-        placeholder={`Message ${name}`}
-        emptyTitle={`What can ${name} take off your plate?`}
+        placeholder={t(m.messagePlaceholder, { name })}
+        emptyTitle={t(m.anotherMeEmpty, { name })}
       />
     );
   return (
@@ -36,22 +39,19 @@ export default function AnotherMeScreen() {
       <ChatHeader title={name} />
       <StatusStrip />
       {!teamHub.connected || anotherMe.isPending ? (
-        <EmptyState
-          title="Waiting for your computer"
-          busy={teamHub.connected}
-        />
+        <EmptyState title={t(m.waiting)} busy={teamHub.connected} />
       ) : anotherMe.isError ? (
         <EmptyState
-          title={`${name} could not be loaded`}
+          title={t(m.couldNotLoad, { name })}
           action={{
-            label: "Try again",
+            label: t(m.tryAgain),
             onPress: () => void anotherMe.refetch(),
           }}
         />
       ) : (
         <EmptyState
-          title={`${name} is getting ready`}
-          body="It appears here once Linger has started on your computer."
+          title={t(m.gettingReady, { name })}
+          body={t(m.gettingReadyBody)}
         />
       )}
     </SafeAreaView>

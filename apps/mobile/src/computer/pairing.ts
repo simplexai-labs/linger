@@ -6,10 +6,12 @@ import {
   type Hello,
   type SocketFactory,
 } from "../session/session";
+import type { Message } from "../i18n/messages";
 import type { KeyPair } from "../session/noise";
 import type { ManagedSession, OpenSession, Route } from "./connection";
 import { relayNodesOf } from "./relay-nodes";
 import { connectUrl, type PairingLink } from "./pairing-link";
+import { computerPairingMessages as m } from "./pairing.messages";
 
 export type PairingFailure =
   | "INVITE_INVALID"
@@ -38,24 +40,29 @@ const KNOWN_FAILURES = new Set<string>([
   "PHONE_UNKNOWN",
 ]);
 
-/** What the phone tells the Human for each way pairing can fail. */
-export function pairingFailureMessage(failure: PairingFailure): string {
+/**
+ * What the phone tells the Human for each way pairing can fail, translated
+ * where it is shown.
+ */
+export function pairingFailureMessage(
+  failure: PairingFailure,
+): Message<string> {
   switch (failure) {
     case "INVITE_INVALID":
-      return "This pairing code was already used or is not valid. Create a new code on your computer.";
+      return m.inviteInvalid;
     case "PAIRING_EXPIRED":
-      return "This pairing code expired. Create a new code on your computer.";
+      return m.expired;
     case "RATE_LIMITED":
-      return "Too many pairing attempts. Wait a minute and try again.";
+      return m.rateLimited;
     case "BAD_HELLO":
-      return "Your computer did not accept this phone's request. Update Linger on both devices and try again.";
+      return m.badHello;
     case "UNAVAILABLE":
-      return "Your computer could not pair right now. Try again in a moment.";
+      return m.unavailable;
     case "PHONE_REMOVED":
     case "PHONE_UNKNOWN":
-      return "Your computer did not approve this phone. Create a new code to try again.";
+      return m.notApproved;
     case "UNREACHABLE":
-      return "Could not reach your computer. Check that it is on and that this phone is on the same Wi-Fi, or that Linger's relay is set up.";
+      return m.unreachable;
   }
 }
 

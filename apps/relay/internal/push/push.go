@@ -45,12 +45,34 @@ var (
 	idRE      = regexp.MustCompile(`^[A-Za-z0-9_\-]{1,128}$`)
 )
 
-// Alert texts per kind. They name the kind of event, never its content.
-// A decision interrupts more than a reply where the app holds the
-// time-sensitive entitlement; elsewhere iOS shows it as active.
-var alerts = map[string]struct{ title, body, level string }{
-	"message":  {"Linger", "You have a new reply", "active"},
-	"decision": {"Linger", "Linger needs your decision", "time-sensitive"},
+// Alert texts per kind and interface language. They name the kind of event,
+// never its content. A decision interrupts more than a reply where the app
+// holds the time-sensitive entitlement; elsewhere iOS shows it as active.
+// English is the fallback for a grant that names no language, or one this
+// service does not know; Chinese is written as escaped code points because
+// the repository keeps other languages to translation catalogs.
+var alerts = map[string]struct {
+	level string
+	body  map[string]string
+}{
+	"message": {"active", map[string]string{
+		"en":    "You have a new reply",
+		"zh-CN": "\u4f60\u6536\u5230\u4e00\u6761\u65b0\u56de\u590d",
+	}},
+	"decision": {"time-sensitive", map[string]string{
+		"en":    "Linger needs your decision",
+		"zh-CN": "Linger \u9700\u8981\u4f60\u505a\u51b3\u5b9a",
+	}},
+}
+
+const alertTitle = "Linger"
+
+// alertBody is the kind's text in the grant's language, or in English.
+func alertBody(kind, language string) string {
+	if body, ok := alerts[kind].body[language]; ok {
+		return body
+	}
+	return alerts[kind].body["en"]
 }
 
 // Options configures the Push Service.
@@ -89,6 +111,9 @@ type sealedGrant struct {
 	Token     string `json:"t"`
 	HostID    string `json:"h"`
 	ExpiresAt int64  `json:"e"`
+	// Language is the phone's interface language for alert text; a grant
+	// sealed before phones sent one has none and gets English.
+	Language string `json:"l,omitempty"`
 }
 
 // New builds the Service; SealKey must be 32 bytes.
@@ -136,6 +161,8 @@ func (s *Service) handleGrant(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		ExpoToken string `json:"expo_token"`
 		HostID    string `json:"host_id"`
+		// Language is optional; an unknown one falls back to English.
+		Language string `json:"language"`
 	}
 	if json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&request) != nil ||
 		!expoToken.MatchString(request.ExpoToken) || !hostIDRE.MatchString(request.HostID) {
@@ -143,7 +170,11 @@ func (s *Service) handleGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	expires := s.options.Now().Add(GrantLifetime).UTC().Truncate(time.Second)
-	grant, err := s.seal(sealedGrant{Token: request.ExpoToken, HostID: request.HostID, ExpiresAt: expires.Unix()})
+	language := request.Language
+	if _, known := alerts["message"].body[language]; !known {
+		language = ""
+	}
+	grant, err := s.seal(sealedGrant{Token: request.ExpoToken, HostID: request.HostID, ExpiresAt: expires.Unix(), Language: language})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR")
 		return
@@ -186,7 +217,7 @@ func (s *Service) handleSend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, "RATE_LIMITED")
 		return
 	}
-	status, err := s.deliver(r.Context(), grant.Token, alert.title, alert.body, alert.level, map[string]string{
+	status, err := s.deliver(r.Context(), grant.Token, alertTitle, alertBody(request.Kind, grant.Language), alert.level, map[string]string{
 		"kind": request.Kind, "host_id": request.Handle.HostID, "room_id": request.Handle.RoomID, "event_id": request.Handle.EventID,
 	})
 	switch {

@@ -16,10 +16,15 @@ export function SettingsGroup(props: {
   readonly meta?: string;
   /** A short note under the group; a string renders as the muted 12px note. */
   readonly footer?: ReactNode;
+  /** Dims the group to show it waits on a switch above it. */
+  readonly disabled?: boolean;
   readonly children: ReactNode;
 }) {
   return (
-    <View style={styles.group}>
+    <View
+      style={[styles.group, props.disabled && styles.groupDisabled]}
+      accessibilityState={props.disabled ? { disabled: true } : undefined}
+    >
       {props.label ? (
         <View style={styles.labelRow}>
           <Text style={styles.label} accessibilityRole="header">
@@ -176,6 +181,7 @@ export function SettingsSwitch(props: {
 
 const styles = StyleSheet.create({
   group: { paddingHorizontal: space.md, paddingTop: space.xl },
+  groupDisabled: { opacity: 0.4 },
   labelRow: {
     flexDirection: "row",
     alignItems: "center",

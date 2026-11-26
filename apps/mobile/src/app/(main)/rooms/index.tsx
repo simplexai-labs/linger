@@ -13,6 +13,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { RoomListItem } from "../../../api/types";
+import { useTranslation } from "../../../i18n/use-translation";
+import { roomsMessages as m } from "../../../screens/rooms.messages";
 import { previewOf, when } from "../../../chat/room-preview";
 import { useAnotherMe, useIdentity, useRooms } from "../../../state/queries";
 import { colors, radius, space, type } from "../../../theme";
@@ -51,6 +53,7 @@ function AnotherMeCard(props: {
   readonly room: RoomListItem;
   readonly me?: string;
 }) {
+  const { t } = useTranslation();
   const { room } = props;
   const unread = room.unread_message_count ?? 0;
   const name = room.direct_peer?.display_name || "Another Me";
@@ -59,8 +62,8 @@ function AnotherMeCard(props: {
       accessibilityRole="button"
       accessibilityLabel={
         unread
-          ? `${name}, your Another Me, ${unread} unread`
-          : `${name}, your Another Me`
+          ? t(m.anotherMeUnread, { name, count: unread })
+          : t(m.anotherMeLabel, { name })
       }
       onPress={() => router.navigate("/")}
       style={styles.hero}
@@ -96,6 +99,7 @@ function RoomCard(props: {
   readonly me?: string;
   readonly href: string;
 }) {
+  const { t } = useTranslation();
   const { room } = props;
   const unread = room.unread_message_count ?? 0;
   const latest = room.latest_message;
@@ -104,7 +108,9 @@ function RoomCard(props: {
     <PressScale
       accessibilityRole="button"
       accessibilityLabel={
-        unread ? `${props.title}, ${unread} unread` : props.title
+        unread
+          ? t(m.roomUnread, { title: props.title, count: unread })
+          : props.title
       }
       onPress={() => router.navigate(props.href)}
       style={[styles.card, { width: props.width }]}
@@ -125,6 +131,7 @@ function RoomCard(props: {
 }
 
 export default function RoomsScreen() {
+  const { t } = useTranslation();
   const rooms = useRooms();
   const anotherMe = useAnotherMe();
   const me = useIdentity().data?.actorId;
@@ -141,7 +148,7 @@ export default function RoomsScreen() {
         <SidebarButton />
       </View>
       <Text style={styles.title} accessibilityRole="header">
-        Messages
+        {t(m.messages)}
       </Text>
       <StatusStrip />
       {rooms.isPending ? (
@@ -149,7 +156,7 @@ export default function RoomsScreen() {
           <ActivityIndicator color={colors.muted} />
         </View>
       ) : items.length === 0 && !lead ? (
-        <EmptyState title="No messages yet" />
+        <EmptyState title={t(m.noMessages)} />
       ) : (
         <FlatList
           data={items}
@@ -165,7 +172,7 @@ export default function RoomsScreen() {
               room={item}
               me={me}
               width={cardWidth}
-              title={item.direct_peer?.display_name || item.name || "Room"}
+              title={item.direct_peer?.display_name || item.name || t(m.room)}
               href={`/rooms/${item.id}`}
             />
           )}

@@ -1,13 +1,16 @@
 // A Document or file, read-only. Text, Markdown and images are drawn by the
-// app; audio plays in the app; every other file the computer can open is
-// downloaded into the cache and shown by the system viewer (Quick Look on
-// iOS). A file Document reads its current Version, which needs only read
-// access: Wiki pages are read-only and cannot be exported, so their
-// GET /v0/documents/{id}/downloads answers 404. A native Document's latest
-// content comes from that route, which waits out one still rendering.
+// app; audio and video play in the app; PDF, Office, tables, HTML and the
+// rest the desktop previews are downloaded into the cache and rendered by the
+// offline viewer page. Only what the desktop cannot preview either goes to
+// the system viewer (Quick Look on iOS), which every downloaded file also
+// offers from the header. A file Document reads its current Version, which
+// needs only read access: Wiki pages are read-only and cannot be exported,
+// so their GET /v0/documents/{id}/downloads answers 404. A native Document's
+// latest content comes from that route, which waits out one still rendering.
 import { useQuery } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams } from "expo-router";
 import type { File } from "expo-file-system";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -27,6 +30,7 @@ import {
 } from "../../api/teamhub";
 import { FileTile } from "../../chat/file-card";
 import { downloadToFile, freshCacheFile } from "../../library/cache-file";
+import { FileViewer, type WebKind } from "../../library/file-viewer";
 import {
   fileSize,
   fileTypeLabel,
@@ -37,6 +41,8 @@ import { readKnowledgeMarkdown } from "../../library/knowledge-markdown";
 import { readableFrom, ReadableView } from "../../library/readable";
 import { Recording } from "../../library/recording";
 import { isWikiPage, wikiPageTitle } from "../../library/wiki-pages";
+import { useTranslation } from "../../i18n/use-translation";
+import { documentMessages as m } from "../../screens/document.messages";
 import { HttpError } from "../../session/http";
 import { teamHubKey, useTeamHub } from "../../state/queries";
 import { colors, radius, space, type } from "../../theme";
@@ -73,16 +79,38 @@ function FileHead(props: { readonly facts: FileFacts }) {
   );
 }
 
-/** Downloads the version into the cache and opens it in the system viewer. */
-function SystemFile(props: {
+/** A downloaded video, played by the phone's own player. */
+function VideoFile(props: { readonly uri: string }) {
+  const player = useVideoPlayer(props.uri);
+  return (
+    <VideoView
+      player={player}
+      nativeControls
+      fullscreenOptions={{ enable: true }}
+      contentFit="contain"
+      style={styles.video}
+    />
+  );
+}
+
+/**
+ * Downloads the version into the cache, then shows it where viewer says:
+ * the viewer page, the video player, or the system viewer. A file the page
+ * cannot render falls back to the system viewer.
+ */
+function DownloadedFile(props: {
   readonly facts: FileFacts & { versionId: string };
+  readonly viewer: { readonly web: WebKind } | "video" | "system";
 }) {
   const { facts } = props;
+  const { t, language } = useTranslation();
   const teamHub = useTeamHub();
   const fileRef = useRef<File | undefined>(undefined);
   const [state, setState] = useState<
     "downloading" | "ready" | "failed" | "unsupported"
   >("downloading");
+  const [inApp, setInApp] = useState(props.viewer !== "system");
+  const [truncatedRows, setTruncatedRows] = useState<number>();
   const [bytes, setBytes] = useState(0);
   const [attempt, setAttempt] = useState(0);
 
@@ -114,7 +142,7 @@ function SystemFile(props: {
       .then(() => {
         if (cancelled) return;
         setState("ready");
-        void show();
+        if (!inApp) void show();
       })
       .catch(() => {
         if (!cancelled) setState("failed");
@@ -122,6 +150,8 @@ function SystemFile(props: {
     return () => {
       cancelled = true;
     };
+    // inApp only matters for the first open, after the download.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt, facts.filename, facts.versionId, show, teamHub]);
 
   // The phone keeps no file from the computer once this screen closes.
@@ -132,6 +162,53 @@ function SystemFile(props: {
     },
     [],
   );
+
+  const fallBack = useCallback(() => setInApp(false), []);
+  const file = fileRef.current;
+  const openIn =
+    state === "ready" && inApp ? (
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t(m.openInAnotherApp)}
+              hitSlop={8}
+              onPress={() => void show()}
+            >
+              <Icon name="share" size={20} color={colors.ink} />
+            </Pressable>
+          ),
+        }}
+      />
+    ) : null;
+
+  if (state === "ready" && inApp && file) {
+    const viewer = props.viewer;
+    return (
+      <View style={styles.fill}>
+        {openIn}
+        {truncatedRows !== undefined ? (
+          <Text style={styles.strip}>
+            {t(m.truncatedRows, { count: truncatedRows })}
+          </Text>
+        ) : null}
+        {viewer === "video" ? (
+          <VideoFile uri={file.uri} />
+        ) : typeof viewer === "object" ? (
+          <FileViewer
+            file={file}
+            kind={viewer.web}
+            filename={facts.filename}
+            mediaType={facts.mediaType}
+            language={language}
+            onFailed={fallBack}
+            onTruncated={setTruncatedRows}
+          />
+        ) : null}
+      </View>
+    );
+  }
 
   const progress =
     facts.size && facts.size > 0 ? Math.min(1, bytes / facts.size) : undefined;
@@ -154,34 +231,38 @@ function SystemFile(props: {
             <Text style={styles.note}>
               {bytes > 0
                 ? facts.size
-                  ? `Getting it… ${fileSize(bytes)} of ${fileSize(facts.size)}`
-                  : `Getting it… ${fileSize(bytes)}`
-                : "Getting it from your computer…"}
+                  ? t(m.gettingOf, {
+                      received: fileSize(bytes),
+                      total: fileSize(facts.size),
+                    })
+                  : t(m.getting, { received: fileSize(bytes) })
+                : t(m.gettingFromComputer)}
             </Text>
           </View>
         ) : state === "ready" ? (
           <View style={styles.progress}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Open"
+              accessibilityLabel={t(m.open)}
               onPress={() => void show()}
               style={({ pressed }) => [styles.open, pressed && styles.pressed]}
             >
               <Icon name="open" size={16} color={colors.onAction} />
-              <Text style={styles.openLabel}>Open</Text>
+              <Text style={styles.openLabel}>{t(m.open)}</Text>
             </Pressable>
-            <Text style={styles.note}>Opens in the phone's viewer.</Text>
+            <Text style={styles.note}>
+              {props.viewer === "system"
+                ? t(m.opensInViewer)
+                : t(m.couldNotShow)}
+            </Text>
           </View>
         ) : state === "unsupported" ? (
-          <Text style={styles.note}>
-            No app on this phone opens this kind of file. Open it in Linger on
-            your computer.
-          </Text>
+          <Text style={styles.note}>{t(m.noApp)}</Text>
         ) : (
           <View style={styles.progress}>
-            <Text style={styles.note}>The file did not download.</Text>
+            <Text style={styles.note}>{t(m.didNotDownload)}</Text>
             <Button
-              label="Try again"
+              label={t(m.tryAgain)}
               variant="secondary"
               onPress={() => {
                 fileRef.current = undefined;
@@ -215,6 +296,46 @@ function AudioFile(props: {
   );
 }
 
+/** A native Document rendered as HTML, written to the cache for the viewer page. */
+function HtmlPage(props: {
+  readonly documentId: string;
+  readonly html: string;
+}) {
+  const { t, language } = useTranslation();
+  const teamHub = useTeamHub();
+  const [file, setFile] = useState<File>();
+  const [failed, setFailed] = useState(false);
+  const { documentId, html } = props;
+  useEffect(() => {
+    const hostId = teamHub.hostId;
+    if (!hostId) return;
+    const next = freshCacheFile(hostId, documentId, "page.html");
+    next.writeSync(html);
+    setFile(next);
+    return () => {
+      if (next.exists) next.delete();
+    };
+  }, [documentId, html, teamHub.hostId]);
+  const fail = useCallback(() => setFailed(true), []);
+  if (failed) return <EmptyState title={t(m.didNotLoad)} />;
+  if (!file)
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color={colors.muted} />
+      </View>
+    );
+  return (
+    <FileViewer
+      file={file}
+      kind="html"
+      filename="page.html"
+      mediaType="text/html"
+      language={language}
+      onFailed={fail}
+    />
+  );
+}
+
 function Page(props: {
   readonly documentId: string;
   /** Read this Version; without one, the Document's latest content. */
@@ -223,6 +344,7 @@ function Page(props: {
   readonly knowledge: boolean;
   readonly onTitle: (title: string) => void;
 }) {
+  const { t } = useTranslation();
   const teamHub = useTeamHub();
   const content = useQuery({
     queryKey: teamHubKey(
@@ -259,6 +381,8 @@ function Page(props: {
     (content.error.status === 403 || content.error.status === 404);
   if (content.data?.kind === "image")
     return <ReadableView content={content.data} />;
+  if (content.data?.kind === "html")
+    return <HtmlPage documentId={props.documentId} html={content.data.text} />;
   if (content.data)
     return (
       <ScrollView contentInsetAdjustmentBehavior="automatic">
@@ -274,16 +398,12 @@ function Page(props: {
   if (content.isError)
     return (
       <EmptyState
-        title={
-          denied ? "You cannot read this here" : "The document did not load"
-        }
-        body={
-          denied ? "It is not shared with you, or it was deleted." : undefined
-        }
+        title={denied ? t(m.cannotRead) : t(m.didNotLoad)}
+        body={denied ? t(m.notShared) : undefined}
         action={
           denied
             ? undefined
-            : { label: "Try again", onPress: () => void content.refetch() }
+            : { label: t(m.tryAgain), onPress: () => void content.refetch() }
         }
       />
     );
@@ -292,7 +412,7 @@ function Page(props: {
       <ActivityIndicator color={colors.muted} />
     </View>
   ) : (
-    <EmptyState title="Waiting for your computer" />
+    <EmptyState title={t(m.waiting)} />
   );
 }
 
@@ -304,6 +424,7 @@ export default function DocumentScreen() {
     mediaType?: string;
   }>();
   const { documentId } = params;
+  const { t } = useTranslation();
   const teamHub = useTeamHub();
   const [pageTitle, setPageTitle] = useState<string>();
   const document = useQuery({
@@ -319,30 +440,30 @@ export default function DocumentScreen() {
     (document.data && document.data.format !== "blocknote"
       ? document.data.current_version?.id
       : undefined);
-  // A file opened from the Library comes without its name; read its version.
+  // The version names the file and gives its size, which picks the viewer.
   const version = useQuery({
     queryKey: teamHubKey(teamHub.hostId, "document-version", versionId),
-    enabled: teamHub.connected && !!versionId && !params.filename,
+    enabled: teamHub.connected && !!versionId,
     queryFn: () =>
       teamHub.run((session) => getDocumentVersion(session, versionId ?? "")),
   });
-  const facts: FileFacts | undefined = params.filename
+  const facts: FileFacts | undefined = version.data
     ? {
         versionId,
-        filename: params.filename,
-        mediaType: params.mediaType ?? "",
+        filename: version.data.filename,
+        mediaType: version.data.media_type,
+        size: version.data.size_bytes,
       }
-    : version.data
+    : params.filename && (version.isError || !versionId)
       ? {
           versionId,
-          filename: version.data.filename,
-          mediaType: version.data.media_type,
-          size: version.data.size_bytes,
+          filename: params.filename,
+          mediaType: params.mediaType ?? "",
         }
       : undefined;
   // A native Document has no file of its own: it reads as a page.
   const viewer: Viewer | undefined = facts
-    ? viewerFor(facts.filename, facts.mediaType)
+    ? viewerFor(facts.filename, facts.mediaType, facts.size)
     : document.data && !versionId
       ? "page"
       : version.isError
@@ -353,10 +474,10 @@ export default function DocumentScreen() {
     pageTitle ||
     (document.data
       ? wikiPage
-        ? wikiPageTitle(document.data)
+        ? wikiPageTitle(document.data, t)
         : document.data.title
       : facts?.filename) ||
-    "Document";
+    t(m.title);
 
   return (
     <View style={styles.screen}>
@@ -371,13 +492,16 @@ export default function DocumentScreen() {
         />
       ) : viewer === "audio" && facts?.versionId ? (
         <AudioFile facts={{ ...facts, versionId: facts.versionId }} />
-      ) : viewer === "system" && facts?.versionId ? (
-        <SystemFile facts={{ ...facts, versionId: facts.versionId }} />
+      ) : viewer && viewer !== "audio" && facts?.versionId ? (
+        <DownloadedFile
+          facts={{ ...facts, versionId: facts.versionId }}
+          viewer={viewer}
+        />
       ) : document.isError ? (
         <EmptyState
-          title="The document did not load"
+          title={t(m.didNotLoad)}
           action={{
-            label: "Try again",
+            label: t(m.tryAgain),
             onPress: () => void document.refetch(),
           }}
         />
@@ -386,7 +510,7 @@ export default function DocumentScreen() {
           <ActivityIndicator color={colors.muted} />
         </View>
       ) : (
-        <EmptyState title="Waiting for your computer" />
+        <EmptyState title={t(m.waiting)} />
       )}
     </View>
   );
@@ -412,6 +536,14 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   audio: { alignSelf: "stretch", gap: space.xl },
+  fill: { flex: 1 },
+  video: { flex: 1, backgroundColor: "#000" },
+  strip: {
+    ...StyleSheet.flatten(type.chatMeta),
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
+    backgroundColor: colors.surfaceSoft,
+  },
   head: { alignItems: "center", gap: space.xs },
   headName: {
     marginTop: space.sm,
