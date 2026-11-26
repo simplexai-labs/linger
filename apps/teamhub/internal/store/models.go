@@ -844,7 +844,6 @@ type LocalComputer struct {
 	DisplayName           string             `json:"display_name"`
 	Status                string             `json:"status"`
 	CredentialGeneration  int64              `json:"credential_generation"`
-	Capacity              pgtype.Int4        `json:"capacity"`
 	ActiveOperations      int32              `json:"active_operations"`
 	RuntimeInventory      []byte             `json:"runtime_inventory"`
 	WorkspaceGrants       []byte             `json:"workspace_grants"`

@@ -441,7 +441,7 @@ func run(args []string) (resultErr error) {
 	codexModelSessions := &provider.CodexSessions{Root: filepath.Join(computer.StateDirectory, "model-invoke", "codex-sessions")}
 	localDaemon, err = daemon.New(daemon.Options{
 		ComputerID: computer.ComputerID, DisplayName: computer.DisplayName,
-		Capacity: computer.MaxConcurrentOperations, Runtimes: runtimes,
+		Runtimes:           runtimes,
 		EnabledRuntimes:    computer.EnabledRuntimes,
 		RuntimeDiagnostics: diagnostics, WorkspaceGrants: encodedGrants,
 		StateDirectory:      computer.StateDirectory,
@@ -510,7 +510,6 @@ func run(args []string) (resultErr error) {
 	controller = &controlController{
 		daemon: localDaemon, assignments: assignmentStore, diagnostics: discovered.Diagnostics,
 		services: managedServices, computerID: computer.ComputerID,
-		capacity:    computer.MaxConcurrentOperations,
 		launchNonce: os.Getenv("LINGER_DAEMON_LAUNCH_NONCE"), cancel: cancel,
 	}
 	controlServer, err := lingercontrol.New(computer.StateDirectory, controller)
@@ -581,7 +580,6 @@ type controlController struct {
 	diagnostics   []provider.RuntimeDiagnostic
 	diagnosticsMu sync.RWMutex
 	computerID    string
-	capacity      *int
 	launchNonce   string
 	cancel        context.CancelFunc
 }
@@ -602,9 +600,6 @@ func (c *controlController) Status(ctx context.Context) (map[string]any, error) 
 		"gateway_state":  c.daemon.GatewayState(),
 		"reconciled":     c.daemon.Reconciled(),
 		"active_runners": activeRunners, "active_operations": c.daemon.ActiveOperationCount(),
-	}
-	if c.capacity != nil {
-		result["capacity"] = *c.capacity
 	}
 	if c.launchNonce != "" {
 		result["launch_nonce"] = c.launchNonce

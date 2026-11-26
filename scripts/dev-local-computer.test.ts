@@ -97,28 +97,10 @@ describe("dev Local Computer lifecycle script", () => {
 
     const config = JSON.parse(await readFile(configPath, "utf8")) as {
       codex?: unknown;
-      max_concurrent_operations?: number;
       runtime_paths: { codex?: string };
     };
     expect(config.codex).toBeUndefined();
-    expect(config.max_concurrent_operations).toBeUndefined();
     expect(config.runtime_paths.codex).toBe(codexFixturePath);
-  }, 30_000);
-
-  it("writes a Computer-wide limit only when explicitly configured", async () => {
-    const root = await createTemporaryRoot();
-    const configPath = path.join(root, "computer.json");
-    await seedRegistration(root);
-
-    await runScript("config", {
-      ...configurationEnvironment(root, configPath),
-      LINGER_LOCAL_COMPUTER_MAX_CONCURRENT_RUNS: "4",
-    });
-
-    const config = JSON.parse(await readFile(configPath, "utf8")) as {
-      max_concurrent_operations?: number;
-    };
-    expect(config.max_concurrent_operations).toBe(4);
   }, 30_000);
 
   it("registers once through TeamHub as the local owner and reuses the stored credential", async () => {

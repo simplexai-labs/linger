@@ -113,7 +113,6 @@ func (d *Daemon) connectionHello(ctx context.Context, deviceIdentity transport.I
 		Identity:           deviceIdentity,
 		SentAt:             time.Now().UTC(),
 		DisplayName:        d.displayName,
-		Capacity:           d.capacity,
 		Runtimes:           runtimes,
 		RuntimeDiagnostics: runtimeDiagnostics,
 		WorkspaceGrants:    append(json.RawMessage(nil), d.workspaceGrants...),

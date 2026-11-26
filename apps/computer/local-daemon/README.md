@@ -1,6 +1,14 @@
 # Local Computer Daemon
 
 This Go module is the resident Local Computer Daemon.
+
+Each execution Context can run one Operation at a time. Different Contexts on
+the same Computer can run concurrently, subject to their model endpoint's
+queue. On upgrade, the Daemon removes the retired `max_concurrent_operations`
+setting from existing Computer configuration on first load. Remove
+`--max-concurrent-runs` and `--no-max-concurrent-runs` from scripted
+`linger-computer login` commands when updating the CLI.
+
 It carries the frozen Linger execution implementation needed for local process,
 provider, workspace, and daemon lifecycle behavior while adapting all product
 control through Linger's Runner Gateway.

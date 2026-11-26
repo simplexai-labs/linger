@@ -29,8 +29,6 @@ type LocalComputer = TeamHubLocalComputerPage["items"][number];
 
 const newMac: LocalComputer = {
   active_operations: 0,
-  available_capacity: 2,
-  capacity: 2,
   computer_id: "computer-new-mac",
   display_name: "New Mac",
   runtimes: [

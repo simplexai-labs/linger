@@ -856,7 +856,6 @@ jq -n \
     runner_id: $computer,
     display_name: $display,
     gateway: {url: $gateway, token_file: $token},
-    max_concurrent_operations: 2,
     state_directory: $state,
     runtime_paths: {codex: $codex, claude: $claude, pi: $pi},
     workspace_grants: [
@@ -891,7 +890,7 @@ DAEMON_PID="$(computer daemon status --json | jq -er '.daemon.pid')"
 wait_for_gateway_ready
 computer daemon status --json | jq -e \
   --arg computer "$COMPUTER_ID" \
-  '.daemon.computer_id == $computer and .daemon.state == "running" and .daemon.gateway_state == "connected" and .daemon.capacity == 2' \
+  '.daemon.computer_id == $computer and .daemon.state == "running" and .daemon.gateway_state == "connected"' \
   >/dev/null
 wait_for_runtime_inventory
 

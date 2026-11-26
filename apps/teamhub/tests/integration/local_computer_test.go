@@ -219,7 +219,7 @@ func TestLocalComputerInventoryEnrollmentAndCLICredentialExchange(t *testing.T) 
 	if _, err := pool.Exec(t.Context(), `
 UPDATE local_computers
 SET status='online',last_seen_at=now(),platform='darwin',daemon_version='0.40.0',recommended_version='0.41.0',
-    active_operations=1,capacity=2,runtime_inventory='["claude"]',
+    active_operations=1,runtime_inventory='["claude"]',
     workspace_grants=jsonb_build_array(jsonb_build_object('grant_id','grant_linger','tenant_id',$2::text,'scope','owner','label','Linger','mode','workspace-write')),
     runtime_diagnostics=jsonb_build_array(jsonb_build_object('type','claude','status','ready','protocol','stream-json','checked_at',to_jsonb(now()),'version','1.2.3',
         'models',jsonb_build_array(jsonb_build_object('id','claude-sonnet','label','Claude Sonnet','allowed_reasoning_effort','[]'::jsonb))))
@@ -229,7 +229,7 @@ WHERE computer_id=$1`, computerID, acmeTenant); err != nil {
 	status, _, body = env.request(alice, http.MethodGet, "/v0/tenants/"+acmeTenant+"/local-computers", nil, "")
 	if status != http.StatusOK || !containsJSONText(body, computerID) || !containsJSONText(body, "claude-sonnet") ||
 		!strings.Contains(string(body), `"platform":"darwin"`) || !strings.Contains(string(body), `"status":"online"`) ||
-		!strings.Contains(string(body), `"daemon_version":"0.40.0"`) || !strings.Contains(string(body), `"available_capacity":1`) {
+		!strings.Contains(string(body), `"daemon_version":"0.40.0"`) || !strings.Contains(string(body), `"active_operations":1`) {
 		t.Fatalf("list Local Computers status=%d body=%s", status, body)
 	}
 	if _, err := pool.Exec(t.Context(), `UPDATE local_computers SET status='offline',active_operations=0 WHERE computer_id=$1`, computerID); err != nil {

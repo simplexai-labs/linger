@@ -875,11 +875,9 @@ func TestOperationPrepareReservesItsContextUntilStartOrCancel(t *testing.T) {
 	d.WaitForOperations()
 }
 
-func TestOperationPrepareCountsTowardDaemonCapacity(t *testing.T) {
+func TestOperationPrepareBlocksACompetingStartInItsContext(t *testing.T) {
 	backend := &prepareBackend{prepareStarted: make(chan struct{}), blockPrepare: true}
 	d, stream, prepare := prepareDaemonFixture(t, backend)
-	capacity := 1
-	d.capacity = &capacity
 	if err := d.handleOperationPrepare(context.Background(), stream, prepare); err != nil {
 		t.Fatal(err)
 	}
@@ -889,19 +887,17 @@ func TestOperationPrepareCountsTowardDaemonCapacity(t *testing.T) {
 		t.Fatal("prepare did not reach provider")
 	}
 
-	competing := prepareCommand("operation-capacity")
-	competing.ExecutionContextKey = "context-2"
-	competing.RuntimeInstanceID = "runtime-2"
+	competing := prepareCommand("competing-operation")
 	if err := d.handleOperationStart(context.Background(), stream, startFromPrepare(competing)); err != nil {
 		t.Fatal(err)
 	}
 	if got := len(backend.snapshot()); got != 1 {
-		t.Fatalf("start exceeded capacity while preparation was pending: %d executions", got)
+		t.Fatalf("start ran while its Context was preparing: %d executions", got)
 	}
 	events := stream.snapshotEvents()
 	if len(events) == 0 || events[len(events)-1].Type != protocol.EventOperationFailed ||
-		!strings.Contains(string(events[len(events)-1].Payload), "capacity") {
-		t.Fatalf("capacity rejection events=%+v", events)
+		!strings.Contains(string(events[len(events)-1].Payload), "Context") {
+		t.Fatalf("Context rejection events=%+v", events)
 	}
 	cancel := prepare
 	cancel.Type = protocol.CommandOperationCancel

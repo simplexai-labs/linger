@@ -123,14 +123,6 @@ func projectStoredLocalComputer(row store.LocalComputer, tenantID string, now ti
 	if row.LastSeenAt.Valid {
 		item.LastSeenAt = &row.LastSeenAt.Time
 	}
-	if row.Capacity.Valid && row.Capacity.Int32 > 0 {
-		capacity := int(row.Capacity.Int32)
-		available := max(0, capacity-item.ActiveOperations)
-		if !online {
-			available = 0
-		}
-		item.Capacity, item.AvailableCapacity = &capacity, &available
-	}
 	return item, true, nil
 }
 

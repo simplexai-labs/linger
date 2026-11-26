@@ -18,7 +18,6 @@ type LocalComputer struct {
 	Status               string             `json:"status"`
 	CredentialGeneration int64              `json:"credential_generation"`
 	LastSeenAt           *time.Time         `json:"last_seen_at,omitempty"`
-	Capacity             *int32             `json:"capacity,omitempty"`
 	Runtimes             json.RawMessage    `json:"runtimes"`
 	RuntimeDiagnostics   json.RawMessage    `json:"runtime_diagnostics"`
 	WorkspaceGrants      json.RawMessage    `json:"workspace_grants"`
@@ -43,7 +42,6 @@ type ConnectLocalComputerInput struct {
 	SeenAt             time.Time
 	DisplayName        string
 	Platform           string
-	Capacity           *int32
 	Runtimes           json.RawMessage
 	RuntimeDiagnostics json.RawMessage
 	WorkspaceGrants    json.RawMessage

@@ -1,7 +1,6 @@
 import { isRecord } from "@linger/service-kit";
 import { runPriorities, type RunKind } from "../../model-tasks.js";
 import type { ExecutionContextRef } from "./context-ref.js";
-import type { RuntimeStateSchemas } from "./teamhub-runtime-state-client.js";
 import type { Message } from "./types.js";
 
 /** The fields of one queued Inbox Message that say what it is. */
@@ -37,24 +36,6 @@ function inputRunKinds(message: Message): readonly RunKind[] {
         messageRunKind,
       )
     : ["chat"];
-}
-
-/** Classifies the compact TeamHub projection with the same policy used after claim. */
-export function queuedMetaRunKind(
-  origins: readonly RuntimeStateSchemas["AgentRunInputOrigin"][],
-): RunKind {
-  return highestKind(
-    origins.map((origin) => {
-      if (!origin.notification) return "follow_up";
-      if (origin.task_inbox) return "task_callback";
-      return messageRunKind({
-        authorType: origin.author_type,
-        messageKind: origin.message_kind,
-        firedRoutine: origin.fired_routine,
-        humanWaiting: origin.human_waiting,
-      });
-    }),
-  );
 }
 
 const kindOrder = Object.keys(runPriorities) as RunKind[];

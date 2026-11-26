@@ -454,26 +454,26 @@ describe("RunnerGateway model invocation", () => {
   });
 
   it.each([
-    { capacity: 1, pending: [], waiting: [], afterChat: [] },
+    { pending: [], claimPending: false, order: ["chat-run"] },
     {
-      capacity: 1,
-      pending: ["task"],
-      waiting: ["document"],
-      afterChat: ["task", "document"],
+      pending: ["task", "document"],
+      claimPending: false,
+      order: ["chat-run", "task", "document"],
     },
     {
-      capacity: 2,
       pending: ["task", "routine"],
-      waiting: [],
-      afterChat: ["routine", "task"],
+      claimPending: false,
+      order: ["chat-run", "routine", "task"],
+    },
+    {
+      pending: ["task", "routine"],
+      claimPending: true,
+      order: ["routine", "chat-run", "task"],
     },
   ] as const)(
-    "admits a Room chat with a busy model (capacity $capacity, pending $pending)",
-    async ({ capacity, pending, waiting, afterChat }) => {
-      const { gateway, peer, connection } = await connect({
-        ...invokingHello(),
-        capacity,
-      });
+    "dispatches $order with a pending chat claim of $claimPending",
+    async ({ pending, claimPending, order }) => {
+      const { gateway, peer, connection } = await connect();
       const requests = new AbortController();
       const starts = () =>
         peer.sent.filter(
@@ -508,18 +508,14 @@ describe("RunnerGateway model invocation", () => {
           string,
           ReturnType<typeof gateway.startOperation>
         >();
-        for (const kind of [...pending, ...waiting]) {
+        for (const kind of pending) {
           const runTarget = {
             ...target,
             ...readyContextScope(kind),
             priority: new RunPriority(runPriorities[kind]),
           };
-          const capacityPermit = pending.some((item) => item === kind)
-            ? await gateway.acquireOperationCapacity(runTarget, requests.signal)
-            : undefined;
           const run = gateway.startOperation({
             ...runTarget,
-            capacityPermit,
             signal: requests.signal,
             runKind: kind,
             request: {
@@ -532,20 +528,29 @@ describe("RunnerGateway model invocation", () => {
         }
         expect(starts()).toHaveLength(0);
 
-        const chat = gateway.startOperation({
-          ...target,
-          ...readyContextScope("another-room"),
-          runKind: "chat",
-          signal: requests.signal,
-          request: {
-            ...target.request,
-            run_context: {
-              execution_run_ref: "chat-run",
-              source_inbox_ids: [],
+        const chatTarget = { ...target, ...readyContextScope("another-room") };
+        const capacityPermit = await gateway.acquireOperationCapacity(
+          chatTarget,
+          requests.signal,
+        );
+        const startChat = () => {
+          const chat = gateway.startOperation({
+            ...chatTarget,
+            capacityPermit,
+            runKind: "chat",
+            signal: requests.signal,
+            request: {
+              ...target.request,
+              run_context: {
+                execution_run_ref: "chat-run",
+                source_inbox_ids: [],
+              },
             },
-          },
-        });
-        void chat.catch(() => undefined);
+          });
+          void chat.catch(() => undefined);
+          queuedRuns.set("chat-run", chat);
+        };
+        if (!claimPending) startChat();
         const active = sentInvocations(peer)[0]!;
         await vi.waitFor(() =>
           expect(sentCancels(peer)).toEqual([
@@ -561,21 +566,14 @@ describe("RunnerGateway model invocation", () => {
         await expect(background).rejects.toBeInstanceOf(
           RunnerModelInvokeYieldedError,
         );
-        await vi.waitFor(() => expect(starts()).toHaveLength(1));
-        expect(starts()[0]!.request.run_context.execution_run_ref).toBe(
-          "chat-run",
-        );
-        const chatOperation = await chat;
-        await finish(starts()[0]!);
-        await chatOperation.result;
-
-        for (const [index, kind] of afterChat.entries()) {
-          await vi.waitFor(() => expect(starts()).toHaveLength(index + 2));
-          expect(
-            starts()[index + 1]!.request.run_context.execution_run_ref,
-          ).toBe(kind);
+        if (claimPending) startChat();
+        for (const [index, kind] of order.entries()) {
+          await vi.waitFor(() => expect(starts()).toHaveLength(index + 1));
+          expect(starts()[index]!.request.run_context.execution_run_ref).toBe(
+            kind,
+          );
           const operation = await queuedRuns.get(kind)!;
-          await finish(starts()[index + 1]!);
+          await finish(starts()[index]!);
           await operation.result;
         }
       } finally {

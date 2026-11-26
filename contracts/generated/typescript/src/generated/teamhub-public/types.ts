@@ -4615,10 +4615,6 @@ export interface components {
       /** @description Recommended Computer release. This is advisory and does not prevent legacy execution. */
       recommended_version?: string;
       last_seen_at?: components["schemas"]["Timestamp"];
-      /** @description Optional maximum simultaneous active Operations on this Computer. Omission means unlimited; it does not limit bound Agents. */
-      capacity?: number;
-      /** @description Currently available active Operation slots. Present only when capacity is configured. */
-      available_capacity?: number;
       /** @description Active Operations the Computer reported at its last heartbeat; 0 while it is offline. */
       active_operations: number;
       /** @description Runtimes and models as the Computer last reported them, kept while it is offline so an Agent can be placed there. */

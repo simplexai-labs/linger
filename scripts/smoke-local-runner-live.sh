@@ -825,7 +825,6 @@ jq -n \
     runner_id: $computer,
     display_name: "Live Local Computer",
     gateway: {url: $gateway, token_file: $token},
-    max_concurrent_operations: 2,
     state_directory: $state,
     runtime_paths: ({codex: $codex} + if $soak == "1" then {
       claude: ($state + "/not-installed/claude"),

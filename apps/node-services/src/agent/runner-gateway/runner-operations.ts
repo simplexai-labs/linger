@@ -7,13 +7,7 @@ import type {
 } from "@linger/wire-contracts/runner-gateway/types";
 import { isRecord } from "@linger/service-kit";
 import { isDeepStrictEqual } from "node:util";
-import {
-  admissionLimit,
-  INTERACTIVE_PRIORITY,
-  runPriorities,
-  RunPriority,
-  softLimit,
-} from "../../model-tasks.js";
+import { runPriorities, RunPriority } from "../../model-tasks.js";
 import { logAgentEvent } from "../observability/agent-log.js";
 import {
   FIRST_PREVIOUS_SESSION_COMPUTER_VERSION,
@@ -22,7 +16,7 @@ import {
   LocalComputerOfflineError,
   resolveOperationModel,
 } from "./local-computer-management.js";
-import { INTERACTIVE_STALL_MS, type ModelEndpoint } from "./model-queue.js";
+import type { ModelEndpoint } from "./model-queue.js";
 import { isServingConnection } from "./runner-connections.js";
 import type {
   CapacitySignal,
@@ -54,15 +48,6 @@ type ModelResponded = Extract<
 
 /** Runtime failure codes that mean the model endpoint refused the work. */
 const OVERLOAD_FAILURES = new Set(["rate_limited", "model_service_error"]);
-const MODEL_WAIT_YIELDED = Symbol("model wait yielded");
-
-interface CapacityReservation {
-  target: RunnerCapacityTarget;
-  connection: ConnectedRunner;
-  queuedAt: number;
-  operationId?: string;
-  modelWait?: { priority: RunPriority; yield: () => void };
-}
 
 // These events only change what the Room shows while a Run works; nothing the
 // Run settles on reads them.
@@ -114,10 +99,13 @@ export class RunnerOperations {
   readonly #leases = new Map<string, ModelLease>();
 
   // Reconstructible reservations only: TeamHub remains the durable Run queue.
-  readonly #capacityReservations = new Map<string, CapacityReservation>();
-
-  readonly #capacityWaiters = new Set<
-    RunnerCapacityTarget & { rank?: number; queuedAt: number }
+  readonly #capacityReservations = new Map<
+    string,
+    {
+      target: RunnerCapacityTarget;
+      connection: ConnectedRunner;
+      operationId?: string;
+    }
   >();
 
   #capacitySignal = capacitySignal();
@@ -140,160 +128,47 @@ export class RunnerOperations {
   async acquireOperationCapacity(
     target: RunnerCapacityTarget,
     signal: AbortSignal,
-    queuedAt?: number,
   ): Promise<RunnerCapacityPermit> {
-    const source = target.priority ?? runPriorities.chat;
-    const known = typeof source === "number" || source instanceof RunPriority;
-    const waiter = {
-      ...target,
-      queuedAt: queuedAt ?? (known ? performance.now() : source.queuedAt),
-      rank:
-        typeof source === "number"
-          ? source
-          : source instanceof RunPriority
-            ? source.value
-            : undefined,
-    };
-    const unsubscribe =
-      source instanceof RunPriority
-        ? source.onRaise(() => {
-            waiter.rank = source.value;
-            this.wakeCapacityWaiters();
-          })
-        : undefined;
-    const waitStartedAt = Date.now();
-    let stall: ReturnType<typeof setTimeout> | undefined;
-    const watchStall = () => {
-      stall = setTimeout(() => {
-        if (waiter.rank === undefined || waiter.rank > INTERACTIVE_PRIORITY)
-          return watchStall();
-        logAgentEvent("warn", "runner.capacity.interactive_waiting", {
-          computer_id: target.runnerId,
-          execution_context_key: target.executionContextKey,
-          priority: waiter.rank,
-          waited_ms: Date.now() - waitStartedAt,
-          capacity:
-            this.owners.connections().getConnection(target.runnerId)?.hello
-              .capacity ?? null,
-          reservations: [...this.#capacityReservations.values()].filter(
-            (item) => item.target.runnerId === target.runnerId,
-          ).length,
-          holders: this.describeHolders(target.runnerId),
-        });
-      }, INTERACTIVE_STALL_MS);
-      stall.unref?.();
-    };
-    if (typeof source !== "number" || source <= INTERACTIVE_PRIORITY)
-      watchStall();
-    this.#capacityWaiters.add(waiter);
-    try {
-      for (;;) {
-        signal.throwIfAborted();
-        // Taken before any read, so a change during the reads still wakes us.
-        const { changed } = this.#capacitySignal;
-        const connection = this.owners
-          .connections()
-          .getConnection(target.runnerId);
-        if (!isServingConnection(connection)) {
-          // Waiting for capacity is not waiting for connectivity: an offline
-          // Computer fails the Run visibly.
-          throw new LocalComputerOfflineError(
-            "Local Computer is offline or not yet reconciled",
-          );
-        }
-        const active = this.activeOperations(target.runnerId);
-        const reservations = [...this.#capacityReservations.values()].filter(
-          (item) =>
-            item.target.runnerId === target.runnerId && !item.operationId,
+    for (;;) {
+      signal.throwIfAborted();
+      // Taken before any read, so a change during the reads still wakes us.
+      const { changed } = this.#capacitySignal;
+      const connection = this.owners
+        .connections()
+        .getConnection(target.runnerId);
+      if (!isServingConnection(connection)) {
+        // Waiting for capacity is not waiting for connectivity: an offline
+        // Computer fails the Run visibly.
+        throw new LocalComputerOfflineError(
+          "Local Computer is offline or not yet reconciled",
         );
-        const occupied = [
-          ...active.map((operation) => ({
-            runnerId: operation.start.runner_id,
-            tenantId: operation.start.tenant_id,
-            agentId: operation.start.agent_id,
-            executionContextKey: operation.start.execution_context_key,
-          })),
-          ...reservations.map((item) => item.target),
-        ];
-        const isBusy = (candidate: RunnerCapacityTarget): boolean =>
-          occupied.some(
-            (other) =>
-              candidate.runnerId === other.runnerId &&
-              candidate.tenantId === other.tenantId &&
-              candidate.executionContextKey === other.executionContextKey,
-          );
-        const hard = connection.hello.capacity;
-        const soft = hard === undefined ? Infinity : softLimit(hard);
-        const peers = [...this.#capacityWaiters].filter(
-          (other) => other.runnerId === target.runnerId && !isBusy(other),
-        );
-        if (
-          hard !== undefined &&
-          waiter.rank === undefined &&
-          !known &&
-          (occupied.length >= soft || peers.length > 1)
-        ) {
-          waiter.rank = await source.resolve();
-          this.wakeCapacityWaiters();
-          continue;
-        }
-        const rank = waiter.rank ?? runPriorities.chat;
-        // An unresolved contender may be interactive. Its lookup wakes every waiter.
-        const first = peers.sort(
-          (a, b) =>
-            (a.rank ?? runPriorities.chat) - (b.rank ?? runPriorities.chat) ||
-            a.queuedAt - b.queuedAt,
-        )[0];
-        if (
-          first === waiter &&
-          (hard === undefined || occupied.length < admissionLimit(hard, rank))
-        ) {
-          const id = this.context.createId();
-          this.#capacityReservations.set(id, {
-            target,
-            connection,
-            queuedAt: waiter.queuedAt,
-          });
-          return {
-            id,
-            reservedForChat: occupied.length >= soft && hard !== 1,
-            release: () => {
-              if (this.#capacityReservations.delete(id))
-                this.wakeCapacityWaiters();
-            },
-          };
-        }
-        if (
-          first === waiter &&
-          waiter.rank !== undefined &&
-          rank <= INTERACTIVE_PRIORITY
-        ) {
-          // A Run waiting for its model has not reached the Computer. Reclaim
-          // its reservation before asking an already-started Run to stop.
-          const lowerWait = reservations
-            .flatMap(({ modelWait, queuedAt }) =>
-              modelWait && modelWait.priority.value > rank
-                ? [{ ...modelWait, queuedAt }]
-                : [],
-            )
-            .sort(
-              (a, b) =>
-                b.priority.value - a.priority.value || b.queuedAt - a.queuedAt,
-            )[0];
-          if (lowerWait) {
-            lowerWait.yield();
-            continue;
-          }
-          yieldLowerRun(active, rank);
-        }
-        await waitForCapacityChange(changed, signal);
       }
-    } finally {
-      clearTimeout(stall);
-      unsubscribe?.();
-      this.#capacityWaiters.delete(waiter);
-      // A leaving waiter may have held the FIFO position others wait behind.
-      this.wakeCapacityWaiters();
+      const sameContext = (other: RunnerCapacityTarget) =>
+        other.runnerId === target.runnerId &&
+        other.tenantId === target.tenantId &&
+        other.executionContextKey === target.executionContextKey;
+      const busy =
+        this.activeOperations(target.runnerId).some(
+          ({ start }) =>
+            start.tenant_id === target.tenantId &&
+            start.execution_context_key === target.executionContextKey,
+        ) ||
+        [...this.#capacityReservations.values()].some(
+          (reservation) =>
+            !reservation.operationId && sameContext(reservation.target),
+        );
+      if (!busy) {
+        const id = this.context.createId();
+        this.#capacityReservations.set(id, { target, connection });
+        return {
+          id,
+          release: () => {
+            if (this.#capacityReservations.delete(id))
+              this.wakeCapacityWaiters();
+          },
+        };
+      }
+      await waitForCapacityChange(changed, signal);
     }
   }
 
@@ -304,106 +179,57 @@ export class RunnerOperations {
     const priority =
       target.priority ??
       new RunPriority(runPriorities[target.runKind ?? "chat"]);
-    let permit = target.capacityPermit;
-    // The durable claim may select a different Run than the scheduling hint.
-    if (permit?.reservedForChat && priority.value > INTERACTIVE_PRIORITY) {
-      permit.release();
-      permit = undefined;
-    }
     const signal = target.signal ?? new AbortController().signal;
     const waitSignal = target.preemptSignal
       ? AbortSignal.any([signal, target.preemptSignal])
       : signal;
-    const operationTarget = { ...target, priority };
-    let queuedAt: number | undefined;
-    for (;;) {
-      const capacity =
-        permit ??
-        (await this.acquireOperationCapacity(
-          operationTarget,
-          waitSignal,
-          queuedAt,
-        ));
-      permit = undefined;
+    const permit =
+      target.capacityPermit ??
+      (await this.acquireOperationCapacity(target, waitSignal));
+    try {
+      // Holding this Context excludes a second Operation in the same session.
+      const lease = await this.owners.queue().acquire(
+        {
+          computerId: target.runnerId,
+          runtimeType: target.request.runtime.type,
+        },
+        {
+          priority,
+          kind: target.runKind ?? "chat",
+          key: target.request.run_context.execution_run_ref,
+        },
+        waitSignal,
+      );
       try {
-        const reservation = this.#requireReservation(capacity.id, target);
-        queuedAt = reservation.queuedAt;
-        return await this.#startAfterModelWait(
-          operationTarget,
-          capacity,
-          reservation,
-          waitSignal,
+        if (target.beforeYieldResume) await target.beforeYieldResume();
+        waitSignal.throwIfAborted();
+        const reservation = this.#capacityReservations.get(permit.id);
+        if (
+          !reservation ||
+          reservation.operationId ||
+          reservation.target.runnerId !== target.runnerId ||
+          reservation.target.agentId !== target.agentId ||
+          reservation.target.executionContextKey !==
+            target.executionContextKey ||
+          reservation.connection !==
+            this.owners.connections().getConnection(target.runnerId)
+        ) {
+          throw new RunnerGatewayError(
+            "Operation capacity reservation is no longer valid",
+          );
+        }
+        return await this.#startReservedOperation(
+          { ...target, priority },
+          permit.id,
+          lease,
         );
       } catch (error) {
-        if (error !== MODEL_WAIT_YIELDED) throw error;
-        waitSignal.throwIfAborted();
-      } finally {
-        capacity.release();
+        lease.release({ outcome: "not_sent" });
+        throw error;
       }
+    } finally {
+      permit.release();
     }
-  }
-
-  async #startAfterModelWait(
-    target: RunnerOperationTarget & { priority: RunPriority },
-    capacity: RunnerCapacityPermit,
-    reservation: CapacityReservation,
-    waitSignal: AbortSignal,
-  ): Promise<RunnerOperation> {
-    const { priority } = target;
-    const yielded = new AbortController();
-    reservation.modelWait = {
-      priority,
-      yield() {
-        capacity.release();
-        yielded.abort(MODEL_WAIT_YIELDED);
-      },
-    };
-    this.wakeCapacityWaiters();
-    const modelWaitSignal = AbortSignal.any([waitSignal, yielded.signal]);
-    const lease = await this.owners.queue().acquire(
-      {
-        computerId: target.runnerId,
-        runtimeType: target.request.runtime.type,
-      },
-      {
-        priority,
-        kind: target.runKind ?? "chat",
-        key: target.request.run_context.execution_run_ref,
-      },
-      modelWaitSignal,
-    );
-    reservation.modelWait = undefined;
-    try {
-      modelWaitSignal.throwIfAborted();
-      if (target.beforeYieldResume) await target.beforeYieldResume();
-      waitSignal.throwIfAborted();
-      this.#requireReservation(capacity.id, target);
-      return await this.#startReservedOperation(target, capacity.id, lease);
-    } catch (error) {
-      lease.release({ outcome: "not_sent" });
-      throw error;
-    }
-  }
-
-  #requireReservation(
-    id: string,
-    target: RunnerOperationTarget,
-  ): CapacityReservation {
-    const reservation = this.#capacityReservations.get(id);
-    if (
-      !reservation ||
-      reservation.operationId ||
-      reservation.target.runnerId !== target.runnerId ||
-      reservation.target.agentId !== target.agentId ||
-      reservation.target.executionContextKey !== target.executionContextKey ||
-      reservation.connection !==
-        this.owners.connections().getConnection(target.runnerId)
-    ) {
-      throw new RunnerGatewayError(
-        "Operation capacity reservation is no longer valid",
-      );
-    }
-    return reservation;
   }
 
   /** The running Operations on a Computer, or one of its Runtimes, and why

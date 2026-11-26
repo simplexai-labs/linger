@@ -291,75 +291,62 @@ type shutdownBackend struct {
 	cleanupUnconfirmed bool
 }
 
-func TestDaemonEnforcesCapacityAndOneOperationPerContext(t *testing.T) {
-	tests := []struct {
-		name        string
-		capacity    *int
-		secondAgent string
-		message     string
-	}{
-		{name: "computer capacity", capacity: intPointer(1), secondAgent: "agent-2", message: "capacity is exhausted"},
-		{name: "context serial execution", secondAgent: "agent-1", message: "already has an active Operation"},
+func TestDaemonEnforcesOneOperationPerContext(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{}, 2)
+	d, err := newTestDaemon(t, Options{
+		ComputerID:   "computer-1",
+		ControlPlane: fakeControlPlane{stream: &fakeStream{}}, IdentityStore: fakeStore{},
+		OperationResolver: fakeOperationResolver{},
+		Executor: provider.Executor{NewBackend: func(string, native.Profile) (native.Runtime, error) {
+			started <- struct{}{}
+			return heldBackend{release: release}, nil
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			release := make(chan struct{})
-			started := make(chan struct{}, 2)
-			d, err := newTestDaemon(t, Options{
-				ComputerID: "computer-1", Capacity: test.capacity,
-				ControlPlane: fakeControlPlane{stream: &fakeStream{}}, IdentityStore: fakeStore{},
-				OperationResolver: fakeOperationResolver{},
-				Executor: provider.Executor{NewBackend: func(string, native.Profile) (native.Runtime, error) {
-					started <- struct{}{}
-					return heldBackend{release: release}, nil
-				}},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			stream := &fakeStream{}
-			first := daemonOperationStart("operation-1", "agent-1")
-			if err := d.handleOperationStart(context.Background(), stream, first); err != nil {
-				t.Fatal(err)
-			}
-			second := daemonOperationStart("operation-2", test.secondAgent)
-			if err := d.handleOperationStart(context.Background(), stream, second); err != nil {
-				t.Fatal(err)
-			}
-			// Start is asynchronous: the first Operation starts after acceptance, and
-			// the second was rejected synchronously, so no second start may follow.
-			awaitProviderStarts(t, started, 1)
-			if len(started) != 0 {
-				t.Fatalf("backend starts=%d, want 1", 1+len(started))
-			}
-			failed := false
-			for _, event := range stream.snapshotEvents() {
-				if event.OperationID == second.OperationID && event.Type == protocol.EventOperationFailed && strings.Contains(string(event.Payload), test.message) {
-					failed = true
-					// The Remote Provider retries only on this exact wire contract.
-					var payload struct {
-						Code      string `json:"code"`
-						Retryable bool   `json:"retryable"`
-					}
-					if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.Code != "OPERATION_CAPACITY_BUSY" || !payload.Retryable || event.Stage != "operation_admission" {
-						t.Fatalf("admission busy contract = %s stage=%q err=%v", event.Payload, event.Stage, err)
-					}
-				}
-			}
-			if !failed {
-				t.Fatalf("second Operation was not rejected: %+v", stream.snapshotEvents())
-			}
-			close(release)
-			d.WaitForOperations()
-		})
+	stream := &fakeStream{}
+	first := daemonOperationStart("operation-1", "agent-1")
+	if err := d.handleOperationStart(context.Background(), stream, first); err != nil {
+		t.Fatal(err)
 	}
+	second := daemonOperationStart("operation-2", "agent-1")
+	if err := d.handleOperationStart(context.Background(), stream, second); err != nil {
+		t.Fatal(err)
+	}
+	// Start is asynchronous: the first Operation starts after acceptance, and
+	// the second was rejected synchronously, so no second start may follow.
+	awaitProviderStarts(t, started, 1)
+	if len(started) != 0 {
+		t.Fatalf("backend starts=%d, want 1", 1+len(started))
+	}
+	failed := false
+	for _, event := range stream.snapshotEvents() {
+		if event.OperationID == second.OperationID && event.Type == protocol.EventOperationFailed && strings.Contains(string(event.Payload), "already has an active Operation") {
+			failed = true
+			// The Remote Provider retries only on this exact wire contract.
+			var payload struct {
+				Code      string `json:"code"`
+				Retryable bool   `json:"retryable"`
+			}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.Code != "OPERATION_CAPACITY_BUSY" || !payload.Retryable || event.Stage != "operation_admission" {
+				t.Fatalf("admission busy contract = %s stage=%q err=%v", event.Payload, event.Stage, err)
+			}
+		}
+	}
+	if !failed {
+		t.Fatalf("second Operation was not rejected: %+v", stream.snapshotEvents())
+	}
+	close(release)
+	d.WaitForOperations()
 }
 
 func TestDaemonAllowsSameAgentAcrossContexts(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{}, 2)
 	d, err := newTestDaemon(t, Options{
-		ComputerID: "computer-1", Capacity: intPointer(2),
+		ComputerID:   "computer-1",
 		ControlPlane: fakeControlPlane{stream: &fakeStream{}}, IdentityStore: fakeStore{},
 		OperationResolver: fakeOperationResolver{},
 		Executor: provider.Executor{NewBackend: func(string, native.Profile) (native.Runtime, error) {
@@ -386,7 +373,7 @@ func TestDaemonDoesNotFenceNextAdmissionAfterPriorTerminalCommit(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
 	d, err := newTestDaemon(t, Options{
-		ComputerID: "computer-1", Capacity: intPointer(1),
+		ComputerID:   "computer-1",
 		ControlPlane: fakeControlPlane{stream: &fakeStream{}}, IdentityStore: fakeStore{},
 		OperationResolver: fakeOperationResolver{},
 		Executor: provider.Executor{NewBackend: func(string, native.Profile) (native.Runtime, error) {
@@ -432,7 +419,7 @@ func TestSchedulerYieldRequiresConfirmedCleanup(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stream := &fakeStream{}
-			d, err := newTestDaemon(t, Options{ComputerID: "computer-1", Capacity: intPointer(1), ControlPlane: fakeControlPlane{stream: stream}, IdentityStore: fakeStore{}, OperationResolver: fakeOperationResolver{}})
+			d, err := newTestDaemon(t, Options{ComputerID: "computer-1", ControlPlane: fakeControlPlane{stream: stream}, IdentityStore: fakeStore{}, OperationResolver: fakeOperationResolver{}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -775,8 +762,6 @@ func daemonAgentRunnerCommand(commandType string, revision uint64) protocol.Comm
 		Payload: json.RawMessage(`{"runtime":{"type":"codex"},"workspace_grant_id":"grant-1"}`),
 	}
 }
-
-func intPointer(value int) *int { return &value }
 
 func (b shutdownBackend) Start(ctx context.Context, _ string, _ native.RunSpec) (*native.Run, error) {
 	messages := make(chan native.Event)

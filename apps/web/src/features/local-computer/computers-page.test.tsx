@@ -321,7 +321,6 @@ describe("ComputersPage", () => {
     const inventory = replacementComputerInventory();
     inventory.items[0] = {
       ...inventory.items[0]!,
-      available_capacity: 0,
       last_seen_at: "2026-07-31T10:00:00Z",
       status: "offline",
     };
@@ -430,7 +429,6 @@ describe("ComputersPage", () => {
     const inventory = replacementComputerInventory();
     inventory.items[0] = {
       ...inventory.items[0]!,
-      available_capacity: 0,
       status: "offline",
     };
     const runtime: TeamHubRuntime = {
@@ -810,8 +808,6 @@ function replacementComputerInventory(): TeamHubLocalComputerPage {
     items: [
       {
         active_operations: 0,
-        available_capacity: 1,
-        capacity: 1,
         display_name: "New Build Mac",
         computer_id: "computer-new-build-mac",
         runtimes: [

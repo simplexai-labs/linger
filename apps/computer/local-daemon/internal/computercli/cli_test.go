@@ -123,7 +123,7 @@ func TestLoginMapsTokenInputAndRuntimeOverrides(t *testing.T) {
 	claudePath := filepath.Join(f.root, "bin", "claude")
 	f.stdin = "  linger-connect-v1.payload\n"
 	code := f.run("login", "--config", f.configPath, "--gateway-url", "wss://gateway.example.test/v1/runner-gateway",
-		"--max-concurrent-runs", "4", "--token-stdin", "--codex-path", codexPath, "--claude-path", claudePath)
+		"--token-stdin", "--codex-path", codexPath, "--claude-path", claudePath)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, f.stderr.String())
 	}
@@ -133,7 +133,7 @@ func TestLoginMapsTokenInputAndRuntimeOverrides(t *testing.T) {
 	}
 	options := f.setupOptions[0]
 	if options.configPath != f.configPath || options.stateDirectory != filepath.Join(f.root, "state") ||
-		options.gatewayURL != "wss://gateway.example.test/v1/runner-gateway" || options.maxRuns == nil || *options.maxRuns != 4 ||
+		options.gatewayURL != "wss://gateway.example.test/v1/runner-gateway" ||
 		options.serverToken != "linger-connect-v1.payload" || !reflect.DeepEqual(options.runtimePaths, want) {
 		t.Fatalf("setup=%+v", options)
 	}
@@ -170,31 +170,6 @@ func TestLoginRejectsTokensInArgumentsAndRemovedTokenInputs(t *testing.T) {
 	}
 	if len(f.setupOptions) != 0 {
 		t.Fatal("setup ran")
-	}
-}
-
-func TestLoginRunLimitOptions(t *testing.T) {
-	f := newFixture(t)
-	if code := f.run("login", "--no-max-concurrent-runs", "--config", f.configPath); code != 0 {
-		t.Fatalf("exit=%d", code)
-	}
-	if options := f.setupOptions[0]; !options.maxRunsSet || options.maxRuns != nil {
-		t.Fatalf("clear limit=%+v", options)
-	}
-	for _, limit := range []string{"0", "101", "1.5"} {
-		f.clear()
-		if code := f.run("login", "--max-concurrent-runs", limit); code != 2 {
-			t.Fatalf("limit %s exit=%d", limit, code)
-		}
-		contains(t, f.stderr.String(), "--max-concurrent-runs must be an integer between 1 and 100")
-	}
-	f.clear()
-	if code := f.run("login", "--max-concurrent-runs", "3", "--no-max-concurrent-runs"); code != 2 {
-		t.Fatalf("conflict exit=%d", code)
-	}
-	contains(t, f.stderr.String(), "Use only one of --max-concurrent-runs or --no-max-concurrent-runs")
-	if len(f.setupOptions) != 1 {
-		t.Fatalf("setup runs=%d", len(f.setupOptions))
 	}
 }
 
@@ -385,7 +360,7 @@ func TestDaemonStatusJSONKeepsItsShape(t *testing.T) {
 	}
 	got := decodeJSON(t, f.stdout.String())
 	want := decodeJSON(t, `{"version":1,"config":{"configured":true,"path":`+quote(f.configPath)+`},
-		"daemon":{"state":"running","pid":42,"computer_id":"computer-local","gateway_state":"connecting","reconciled":false,"active_operations":0,"active_runners":1,"capacity":2},
+		"daemon":{"state":"running","pid":42,"computer_id":"computer-local","gateway_state":"connecting","reconciled":false,"active_operations":0,"active_runners":1},
 		"runtimes":[{"type":"codex","status":"ready","version":"1.2.3"}],
 		"runners":[{"agent_id":"agent-a","state":"running","pid":84}]}`)
 	if !reflect.DeepEqual(got, want) {

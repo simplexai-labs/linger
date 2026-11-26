@@ -175,8 +175,6 @@ describe("TeamHubClient", () => {
     const inventory = {
       items: [
         {
-          available_capacity: 1,
-          capacity: 2,
           display_name: "Build Mac",
           computer_id: "computer-build-mac",
           runtimes: [

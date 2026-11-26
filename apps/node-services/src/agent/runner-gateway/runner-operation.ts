@@ -1,9 +1,4 @@
-import {
-  runPriorities,
-  RunPriority,
-  type RunKind,
-  type CapacityPriority,
-} from "../../model-tasks.js";
+import { runPriorities, RunPriority, type RunKind } from "../../model-tasks.js";
 import { EventEmitter, once } from "node:events";
 import { isDeepStrictEqual } from "node:util";
 
@@ -99,10 +94,9 @@ export interface RunnerOperation {
 export type RunnerCapacityTarget = Pick<
   RunnerOperationTarget,
   "runnerId" | "tenantId" | "agentId" | "executionContextKey"
-> & { readonly priority?: CapacityPriority };
+>;
 
 export interface RunnerCapacityPermit {
-  readonly reservedForChat?: boolean;
   readonly id: string;
   release(): void;
 }

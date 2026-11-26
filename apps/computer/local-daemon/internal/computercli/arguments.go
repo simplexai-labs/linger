@@ -37,8 +37,6 @@ type command struct {
 	displayName     string
 	gatewayURL      string
 	codexAuthFile   string
-	maxRunsSet      bool
-	maxRuns         *int
 	enabledRuntimes []string
 	tokenStdin      bool
 	localModels     *stagedLocalModels
@@ -293,26 +291,6 @@ func parseLogin(args []string, configPath string, options parseOptions) (command
 	}
 	if parsed.gatewayURL, err = removeOption(&args, "--gateway-url"); err != nil {
 		return command{}, err
-	}
-	maximum, err := removeOption(&args, "--max-concurrent-runs")
-	if err != nil {
-		return command{}, err
-	}
-	clearMaximum, err := removeFlag(&args, "--no-max-concurrent-runs")
-	if err != nil {
-		return command{}, err
-	}
-	if maximum != "" && clearMaximum {
-		return command{}, newError(categoryUsage, "Use only one of --max-concurrent-runs or --no-max-concurrent-runs")
-	}
-	if clearMaximum {
-		parsed.maxRunsSet = true
-	} else if maximum != "" {
-		value, err := strconv.Atoi(maximum)
-		if err != nil || value < 1 || value > 100 {
-			return command{}, newError(categoryUsage, "--max-concurrent-runs must be an integer between 1 and 100")
-		}
-		parsed.maxRunsSet, parsed.maxRuns = true, &value
 	}
 	codexAuth, err := removeOption(&args, "--codex-auth")
 	if err != nil {

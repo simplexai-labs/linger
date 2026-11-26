@@ -1155,8 +1155,6 @@ function localComputer(
 ): LocalComputer {
   return {
     active_operations: 0,
-    available_capacity: 2,
-    capacity: 2,
     computer_id: computerId,
     display_name: displayName,
     runtimes: [

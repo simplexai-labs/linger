@@ -52,7 +52,6 @@ type Options struct {
 	OperationResolver   OperationResolver
 	RetryDelay          func(attempt int) time.Duration
 	DisplayName         string
-	Capacity            *int
 	Runtimes            []string
 	EnabledRuntimes     []string
 	RuntimeDiagnostics  json.RawMessage
@@ -197,7 +196,6 @@ type Daemon struct {
 	stableConnection    time.Duration
 	now                 func() time.Time
 	displayName         string
-	capacity            *int
 	runtimes            []string
 	runtimeDiagnostics  json.RawMessage
 	workspaceGrants     json.RawMessage
@@ -285,7 +283,6 @@ func New(options Options) (*Daemon, error) {
 		stableConnection:     stableGatewayConnection,
 		now:                  time.Now,
 		displayName:          options.DisplayName,
-		capacity:             options.Capacity,
 		runtimes:             append([]string(nil), options.Runtimes...),
 		runtimeDiagnostics:   append(json.RawMessage(nil), options.RuntimeDiagnostics...),
 		workspaceGrants:      append(json.RawMessage(nil), options.WorkspaceGrants...),

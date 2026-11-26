@@ -48,7 +48,7 @@ func (s *Service) ConnectLocalComputer(ctx context.Context, input ConnectLocalCo
 	if !validComputerID(input.ComputerID) || !validOwner(input.Owner) || input.CredentialGeneration < 0 ||
 		!daemonIDPattern.MatchString(input.DaemonID) || len(input.DaemonPublicKey) != 32 || input.IdentityVersion < 1 ||
 		!slices.Contains([]string{"online", "offline"}, input.Status) || input.SeenAt.IsZero() ||
-		!validDisplayName(input.DisplayName) || (input.Capacity != nil && *input.Capacity < 0) ||
+		!validDisplayName(input.DisplayName) ||
 		!slices.Contains([]string{"", "darwin", "linux", "win32"}, input.Platform) ||
 		!validText(input.DaemonVersion, 1, 64) || len(input.RecommendedVersion) > 64 {
 		return ConnectLocalComputerResult{}, ErrInvalid
@@ -89,7 +89,7 @@ func (s *Service) ConnectLocalComputer(ctx context.Context, input ConnectLocalCo
 		}
 		row, err := queries.ObserveAgentRuntimeLocalComputer(ctx, store.ObserveAgentRuntimeLocalComputerParams{
 			DisplayName: strings.TrimSpace(input.DisplayName), Status: input.Status,
-			Platform: optionalText(input.Platform), Capacity: optionalInt4(input.Capacity),
+			Platform:         optionalText(input.Platform),
 			RuntimeInventory: runtimes, RuntimeDiagnostics: diagnostics, WorkspaceGrants: grants,
 			DaemonVersion: optionalText(input.DaemonVersion), RecommendedVersion: optionalText(input.RecommendedVersion),
 			LastSeenAt: timestamptz(input.SeenAt), ComputerID: input.ComputerID,
@@ -206,7 +206,7 @@ func localComputerChanged(previous, current store.LocalComputer) (bool, error) {
 		}
 	}
 	return previous.DisplayName != current.DisplayName || previous.Status != current.Status ||
-		previous.Capacity != current.Capacity || previous.Platform != current.Platform ||
+		previous.Platform != current.Platform ||
 		previous.DaemonVersion != current.DaemonVersion || previous.RecommendedVersion != current.RecommendedVersion ||
 		previous.ActiveOperations != current.ActiveOperations, nil
 }
@@ -612,10 +612,6 @@ func localComputerFromRow(row store.LocalComputer) (LocalComputer, error) {
 	if row.LastSeenAt.Valid {
 		value := row.LastSeenAt.Time
 		result.LastSeenAt = &value
-	}
-	if row.Capacity.Valid {
-		value := row.Capacity.Int32
-		result.Capacity = &value
 	}
 	return result, nil
 }
