@@ -101,13 +101,11 @@ export function SettingRow({
   const panelId = useId();
   const expanded = open && !disabled;
   return (
-    // Open, the row and its choices share one tinted block, like a menu
-    // that unfolds from the row.
-    <div className={`rounded-lg ${expanded ? "bg-accent" : ""}`}>
+    <div>
       <button
         aria-controls={expanded ? panelId : undefined}
         aria-expanded={disabled ? undefined : expanded}
-        className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-left text-sm transition-colors focus-visible:outline-none disabled:cursor-default ${expanded ? "" : "enabled:hover:bg-accent focus-visible:bg-accent"}`}
+        className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-left text-sm transition-colors focus-visible:outline-none disabled:cursor-default enabled:hover:bg-accent focus-visible:bg-accent`}
         disabled={disabled}
         onClick={onToggle}
         type="button"
@@ -126,7 +124,7 @@ export function SettingRow({
         )}
       </button>
       {expanded ? (
-        <div className="px-1.5 pb-1.5" id={panelId}>
+        <div className="pb-1" id={panelId}>
           {children}
         </div>
       ) : null}
@@ -184,7 +182,7 @@ function OptionRow({
   const labelId = useId();
   const descriptionId = useId();
   return (
-    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors hover:bg-background/60 has-[:checked]:bg-background has-[:disabled]:cursor-default has-[:disabled]:opacity-50 has-[:disabled]:hover:bg-transparent has-[:focus-visible]:bg-background">
+    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors hover:bg-accent has-[:disabled]:cursor-default has-[:disabled]:opacity-50 has-[:disabled]:hover:bg-transparent has-[:focus-visible]:bg-accent">
       <input
         aria-describedby={option.description ? descriptionId : undefined}
         aria-labelledby={labelId}
@@ -236,7 +234,7 @@ export function EffortSegments({
   return (
     <div
       aria-label={label}
-      className="grid auto-cols-fr grid-flow-col gap-0.5 rounded-md bg-background/50 p-[3px]"
+      className="grid auto-cols-fr grid-flow-col gap-0.5 rounded-lg bg-muted p-[3px]"
       role="radiogroup"
     >
       {efforts.map((effort) => (
