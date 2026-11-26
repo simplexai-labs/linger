@@ -36,14 +36,19 @@ type runtimeProbeOutcome struct {
 	catalog *native.ModelList
 }
 
-func probeRuntime(ctx context.Context, runtimeType, executable string, environment map[string]string, timeout time.Duration, runtimeHomeRoot ...string) runtimeProbeOutcome {
+type probeOptions struct {
+	runtimeHomeRoot string
+	tempBase        string
+}
+
+func probeRuntime(ctx context.Context, runtimeType, executable string, environment map[string]string, timeout time.Duration, options probeOptions) runtimeProbeOutcome {
 	if runtimeType == "pi" {
 		return probePiRuntime(ctx, executable, environment, timeout)
 	}
 	policy := runtimeDetectionPolicies[runtimeType]
 	authentication := runtimeProbeOutcome{Status: "ready"}
 	if policy.authenticationBeforeProtocol && policy.authenticationProbe != nil {
-		authentication = probeRuntimeAuthentication(ctx, runtimeType, executable, environment, timeout, runtimeHomeRoot...)
+		authentication = probeRuntimeAuthentication(ctx, runtimeType, executable, environment, timeout, options)
 		if authentication.Status != "ready" {
 			return authentication
 		}
@@ -55,7 +60,7 @@ func probeRuntime(ctx context.Context, runtimeType, executable string, environme
 		return runtimeProbeOutcome{Status: "incompatible", Code: "RUNTIME_INCOMPATIBLE", Message: "Runtime protocol handshake failed"}
 	}
 	if !policy.authenticationBeforeProtocol && policy.authenticationProbe != nil {
-		authentication = probeRuntimeAuthentication(ctx, runtimeType, executable, environment, timeout, runtimeHomeRoot...)
+		authentication = probeRuntimeAuthentication(ctx, runtimeType, executable, environment, timeout, options)
 	}
 	authentication.protocolVerified = true
 	return authentication
@@ -165,7 +170,7 @@ func protocolProbeResponseMatches(runtimeType string, response map[string]any) b
 	}
 }
 
-func probeCodexAuthentication(ctx context.Context, executable string, environment map[string]string, timeout time.Duration) runtimeProbeOutcome {
+func probeCodexAuthentication(ctx context.Context, executable string, environment map[string]string, timeout time.Duration, _ string) runtimeProbeOutcome {
 	initialize := `{"id":1,"method":"initialize","params":{"clientInfo":{"name":"linger-computer-doctor","version":"1.0.0"},"capabilities":null}}` + "\n"
 	var accountResponse map[string]any
 	initialized := false
@@ -222,12 +227,12 @@ func probeCodexAuthentication(ctx context.Context, executable string, environmen
 	return failure
 }
 
-func probeClaudeAuthentication(ctx context.Context, executable string, environment map[string]string, timeout time.Duration) runtimeProbeOutcome {
+func probeClaudeAuthentication(ctx context.Context, executable string, environment map[string]string, timeout time.Duration, tempBase string) runtimeProbeOutcome {
 	// Probe the credentials an Operation will see, not the ones the daemon
 	// happens to sit next to: execution moves CLAUDE_CONFIG_DIR to an isolated
 	// Context Runtime home, so a probe against the Host configuration can
 	// report ready for a Runtime that cannot authenticate once it runs.
-	prepared, release, err := localworkspace.ClaudeProbeEnvironment(environment)
+	prepared, release, err := localworkspace.ClaudeProbeEnvironment(environment, tempBase)
 	if err != nil {
 		return runtimeProbeOutcome{Status: "error", Code: "RUNTIME_DIAGNOSTIC_FAILED", Message: "Claude authentication status could not be verified"}
 	}
@@ -364,17 +369,14 @@ func (b *boundedProbeBuffer) String() string {
 	return b.buffer.String()
 }
 
-func probeRuntimeAuthentication(ctx context.Context, runtimeType, executable string, environment map[string]string, timeout time.Duration, runtimeHomeRoot ...string) runtimeProbeOutcome {
-	if runtimeType == "codex" {
-		return probeCodexAuthentication(ctx, executable, environment, timeout)
-	}
-	outcome := runtimeDetectionPolicies[runtimeType].authenticationProbe(ctx, executable, environment, timeout)
-	if runtimeType != "claude" || outcome.Status != "ready" || len(runtimeHomeRoot) == 0 {
+func probeRuntimeAuthentication(ctx context.Context, runtimeType, executable string, environment map[string]string, timeout time.Duration, options probeOptions) runtimeProbeOutcome {
+	outcome := runtimeDetectionPolicies[runtimeType].authenticationProbe(ctx, executable, environment, timeout, options.tempBase)
+	if runtimeType != "claude" || outcome.Status != "ready" || options.runtimeHomeRoot == "" {
 		return outcome
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	err := localworkspace.VisitClaudeAuthEnvironments(probeCtx, runtimeHomeRoot[0], environment, retireClaudeResident, func(prepared map[string]string) error {
+	err := localworkspace.VisitClaudeAuthEnvironments(probeCtx, options.runtimeHomeRoot, environment, retireClaudeResident, func(prepared map[string]string) error {
 		// The host check above already proved the executable and its login
 		// work. Only a definite logout in a Context home changes that result;
 		// a slow or unreadable probe there proves nothing either way.

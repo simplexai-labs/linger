@@ -1,9 +1,12 @@
 package workspace
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
 
 // ConfigureClaudeContextHome prepares the isolated Claude configuration the
@@ -18,7 +21,7 @@ import (
 // link that leaves it, and the Snapshot projection refuses a link at all.
 func ConfigureClaudeContextHome(home, workspace string, environment map[string]string, retireResident func() error) ([]string, error) {
 	configRoot := filepath.Join(home, ".claude")
-	if err := os.MkdirAll(configRoot, 0o700); err != nil {
+	if err := privatefs.EnsureDir(configRoot); err != nil {
 		return nil, err
 	}
 	// Read the Computer's own configuration directory before seeding, which
@@ -57,21 +60,11 @@ func ClaudeSourceHome(environment map[string]string) string {
 }
 
 func writePrivateRuntimeFile(path string, content []byte) error {
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".linger-config-*")
-	if err != nil {
+	if err := privatefs.EnsureDir(filepath.Dir(path)); err != nil {
 		return err
 	}
-	defer os.Remove(temporary.Name())
-	if _, err := temporary.Write(content); err != nil {
-		_ = temporary.Close()
+	if err := privatefs.ProtectFile(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporary.Name(), path)
+	return privatefs.WriteFile(path, content, false)
 }

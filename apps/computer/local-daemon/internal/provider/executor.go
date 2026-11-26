@@ -484,6 +484,7 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 		ManagedMCPExtension: e.PiMCPExtension,
 		Env:                 environment,
 		RetainProcessTemp:   retainProcessTemp,
+		TempBase:            e.TempBase,
 		ContextKey:          spec.ScopeID,
 		AgentID:             spec.AgentID,
 		Logger:              logger,

@@ -18,6 +18,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 // AntigravityHookTimeout bounds one managed Antigravity hook invocation in
@@ -54,12 +57,13 @@ type AntigravityHookHandler func(context.Context, AntigravityHookRequest) Antigr
 // AntigravityHookEndpoint hosts the Daemon-wide loopback callback server and
 // managed .agents/hooks.json directory passed to `agy acp --add-dir`.
 type AntigravityHookEndpoint struct {
-	dir      string
-	url      string
-	listener net.Listener
-	server   *http.Server
-	mu       sync.Mutex
-	handlers map[string]*antigravityHookRegistration
+	dir        string
+	removeRoot func() error
+	url        string
+	listener   net.Listener
+	server     *http.Server
+	mu         sync.Mutex
+	handlers   map[string]*antigravityHookRegistration
 }
 
 type antigravityHookRegistration struct {
@@ -71,7 +75,16 @@ var (
 	antigravitySharedHookInit     bool
 	antigravitySharedHookEndpoint *AntigravityHookEndpoint
 	antigravitySharedHookErr      error
+	antigravityHookTempBase       string
 )
+
+// ConfigureAntigravityHookTempBase sets the private Daemon operation-tmp base
+// directory used when creating the shared Antigravity hook endpoint directory.
+func ConfigureAntigravityHookTempBase(baseDir string) {
+	antigravitySharedHookMu.Lock()
+	antigravityHookTempBase = baseDir
+	antigravitySharedHookMu.Unlock()
+}
 
 // AntigravitySharedHookEndpoint starts the Daemon-wide Antigravity hook
 // endpoint on first use: loopback only, on a random port under a secret path,
@@ -84,7 +97,7 @@ func AntigravitySharedHookEndpoint() (*AntigravityHookEndpoint, error) {
 		if err != nil {
 			antigravitySharedHookErr = fmt.Errorf("locate Daemon executable for Antigravity hooks: %w", err)
 		} else {
-			antigravitySharedHookEndpoint, antigravitySharedHookErr = newAntigravityHookEndpoint(exe)
+			antigravitySharedHookEndpoint, antigravitySharedHookErr = newAntigravityHookEndpoint(exe, antigravityHookTempBase)
 		}
 		antigravitySharedHookInit = true
 	}
@@ -107,7 +120,7 @@ func CloseAntigravitySharedHookEndpoint() error {
 	return ep.Close()
 }
 
-func newAntigravityHookEndpoint(daemonExecutable string) (*AntigravityHookEndpoint, error) {
+func newAntigravityHookEndpoint(daemonExecutable, baseDir string) (*AntigravityHookEndpoint, error) {
 	if strings.TrimSpace(daemonExecutable) == "" {
 		return nil, errors.New("Daemon executable path is required for Antigravity hooks")
 	}
@@ -115,42 +128,51 @@ func newAntigravityHookEndpoint(daemonExecutable string) (*AntigravityHookEndpoi
 	if _, err := rand.Read(secret[:]); err != nil {
 		return nil, err
 	}
-	dir, err := os.MkdirTemp("", "linger-agy-hooks-*")
+	root, removeRoot, err := localworkspace.PrivateTempRoot(baseDir, "linger-agy-hooks-")
 	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(root, "hooks")
+	cleanupDir := func() {
+		unlockAntigravityHookDir(dir)
+		_ = removeRoot()
+	}
+	if err := privatefs.EnsureDir(dir); err != nil {
+		cleanupDir()
 		return nil, err
 	}
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil && resolved != "" {
 		dir = resolved
 	}
 	agentsDir := filepath.Join(dir, ".agents")
-	if err := os.MkdirAll(agentsDir, 0o700); err != nil {
-		_ = os.RemoveAll(dir)
+	if err := privatefs.EnsureDir(agentsDir); err != nil {
+		cleanupDir()
 		return nil, err
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		_ = os.RemoveAll(dir)
+		cleanupDir()
 		return nil, err
 	}
 	token := hex.EncodeToString(secret[:])
 	path := "/antigravity-hook/" + token
 	url := "http://" + listener.Addr().String() + path
 	endpoint := &AntigravityHookEndpoint{
-		dir:      dir,
-		url:      url,
-		listener: listener,
-		handlers: map[string]*antigravityHookRegistration{},
+		dir:        dir,
+		removeRoot: removeRoot,
+		url:        url,
+		listener:   listener,
+		handlers:   map[string]*antigravityHookRegistration{},
 	}
 	hooksFile := filepath.Join(agentsDir, "hooks.json")
 	if err := writeAntigravityHooksFile(hooksFile, daemonExecutable, url); err != nil {
 		_ = listener.Close()
-		_ = os.RemoveAll(dir)
+		cleanupDir()
 		return nil, err
 	}
 	if err := sealAntigravityHookDir(dir, agentsDir, hooksFile); err != nil {
 		_ = listener.Close()
-		unlockAntigravityHookDir(dir)
-		_ = os.RemoveAll(dir)
+		cleanupDir()
 		return nil, err
 	}
 	mux := http.NewServeMux()
@@ -202,7 +224,11 @@ func (e *AntigravityHookEndpoint) Close() error {
 	}
 	if e.dir != "" {
 		unlockAntigravityHookDir(e.dir)
-		err = errors.Join(err, os.RemoveAll(e.dir))
+		if e.removeRoot != nil {
+			err = errors.Join(err, e.removeRoot())
+		} else {
+			err = errors.Join(err, os.RemoveAll(e.dir))
+		}
 	}
 	return err
 }
@@ -269,7 +295,7 @@ func writeAntigravityHooksFile(path, daemonExecutable, endpointURL string) error
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(encoded, '\n'), 0o600)
+	return privatefs.WriteFile(path, append(encoded, '\n'), true)
 }
 
 func antigravityHookCommand(daemonExecutable, endpointURL string) string {

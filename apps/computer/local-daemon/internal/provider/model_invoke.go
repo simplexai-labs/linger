@@ -275,7 +275,7 @@ func (m ModelInvoker) invoke(ctx context.Context, request ModelInvokeRequest, in
 	if request.RuntimeType == "codex" {
 		invocation, err = codexModelInvocation(request, environment, root, work, installed, m.codexModelsCache())
 	} else {
-		invocation, err = claudeModelInvocation(request, environment, m.ClaudeConfigRoot)
+		invocation, err = claudeModelInvocation(request, environment, m.ClaudeConfigRoot, m.TempBase)
 	}
 	if err != nil {
 		var unavailable modelInvokeUnavailableError
@@ -674,12 +674,12 @@ func (e *codexInvokeEvents) diagnostics() (string, native.RuntimeFailureDiagnost
 	return "", e.lastDiagnostics
 }
 
-func claudeModelInvocation(request ModelInvokeRequest, environment map[string]string, configRoot string) (modelInvocation, error) {
+func claudeModelInvocation(request ModelInvokeRequest, environment map[string]string, configRoot, tempBase string) (modelInvocation, error) {
 	var prepared map[string]string
 	var release func()
 	var err error
 	if configRoot == "" {
-		prepared, release, err = localworkspace.ClaudeProbeEnvironment(environment)
+		prepared, release, err = localworkspace.ClaudeProbeEnvironment(environment, tempBase)
 	} else {
 		prepared, err = localworkspace.ClaudeModelInvokeEnvironment(configRoot, environment)
 	}

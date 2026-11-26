@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
 
 func TestCodexProbeEnvironmentPreservesSelectedProviderAndPrivateLifetime(t *testing.T) {
@@ -31,7 +32,7 @@ func TestCodexProbeEnvironmentPreservesSelectedProviderAndPrivateLifetime(t *tes
 	}
 	environment := map[string]string{"HOME": root, "CODEX_HOME": source, "PATH": "/selected/bin"}
 	before := maps.Clone(environment)
-	prepared, release, err := CodexProbeEnvironment(context.Background(), environment, "0.150.1", nil)
+	prepared, release, err := CodexProbeEnvironment(context.Background(), environment, "0.150.1", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,13 +90,13 @@ func TestCodexProbeEnvironmentCleansPreparationFailureAndHonorsCancellation(t *t
 		t.Fatal(err)
 	}
 	environment := map[string]string{"HOME": source, "CODEX_HOME": source}
-	prepared, release, err := CodexProbeEnvironment(context.Background(), environment, "0.150.1", nil)
+	prepared, release, err := CodexProbeEnvironment(context.Background(), environment, "0.150.1", nil, "")
 	if err == nil || prepared != nil || release != nil {
 		t.Fatal("malformed selected configuration was accepted")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := CodexProbeEnvironment(ctx, environment, "0.150.1", nil); !errors.Is(err, context.Canceled) {
+	if _, _, err := CodexProbeEnvironment(ctx, environment, "0.150.1", nil, ""); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled probe preparation = %v", err)
 	}
 	entries, err := os.ReadDir(root)
@@ -106,5 +107,40 @@ func TestCodexProbeEnvironmentCleansPreparationFailureAndHonorsCancellation(t *t
 		if entry.IsDir() && strings.HasPrefix(entry.Name(), "linger-codex-probe-") {
 			t.Fatal("failed preparation leaked its private root")
 		}
+	}
+}
+
+func TestCodexProbeEnvironmentUsesStateBaseAndProtectsProjectedHome(t *testing.T) {
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "auth.json"), []byte(`{"auth_mode":"apikey","OPENAI_API_KEY":"SYNTHETIC"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stateTempBase := filepath.Join(t.TempDir(), "daemon-state", "operation-tmp")
+	prepared, release, err := CodexProbeEnvironment(context.Background(), map[string]string{
+		"HOME": source, "CODEX_HOME": source,
+	}, "0.150.1", nil, stateTempBase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	home := prepared["CODEX_HOME"]
+	probeRoot := filepath.Dir(home)
+	if !strings.HasPrefix(probeRoot, stateTempBase+string(os.PathSeparator)) {
+		t.Fatalf("codex probe root %q is not under state base %q", probeRoot, stateTempBase)
+	}
+	if err := privatefs.CheckPath(probeRoot, "directory", true); err != nil {
+		t.Fatalf("probeRoot not private: %v", err)
+	}
+	if err := privatefs.CheckPath(home, "directory", true); err != nil {
+		t.Fatalf("probe home not private: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		if err := privatefs.CheckPath(filepath.Join(home, "auth.json"), "file", true); err != nil {
+			t.Fatalf("copied auth.json not private on Windows: %v", err)
+		}
+	}
+	release()
+	if _, err := os.Stat(probeRoot); !os.IsNotExist(err) {
+		t.Fatalf("codex probe root outlived release: %v", err)
 	}
 }

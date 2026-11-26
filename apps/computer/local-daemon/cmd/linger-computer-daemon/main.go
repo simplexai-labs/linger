@@ -149,6 +149,8 @@ func run(args []string) (resultErr error) {
 	} else if removed > 0 {
 		slog.Info("pruned abandoned Operation temp directories", "removed", removed, "bytes_freed", bytesFreed)
 	}
+	native.ConfigureAntigravityHookTempBase(operationTempBase)
+	defer func() { _ = native.CloseAntigravitySharedHookEndpoint() }()
 	baseProviderEnvironment := runtimeProviderEnvironment(environment, computer.GatewayToken, computer.CodexAuthFile)
 	var localModelsStateDir string
 	if computer.LocalModels != nil {
@@ -187,6 +189,7 @@ func run(args []string) (resultErr error) {
 			Runtimes:         computer.EnabledRuntimes,
 			PreferredRuntime: computer.PreferredRuntime,
 			RuntimeHomeRoot:  filepath.Join(computer.StateDirectory, "runtime-homes"),
+			TempBase:         operationTempBase,
 			Environment:      currentProviderEnvironment(),
 		}
 	}

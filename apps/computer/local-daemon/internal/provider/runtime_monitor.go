@@ -395,18 +395,19 @@ func carryOrResolveModelLinks(ctx context.Context, kind string, environment map[
 
 func refreshAuthenticationProbe(ctx context.Context, diagnostic RuntimeDiagnostic, environment map[string]string, options DiscoveryOptions) runtimeProbeOutcome {
 	budget := boundedAuthTimeout(options.Timeout)
+	probeOpts := probeOptions{runtimeHomeRoot: options.RuntimeHomeRoot, tempBase: options.TempBase}
 	if diagnostic.Type != "codex" {
-		return probeRuntimeAuthentication(ctx, diagnostic.Type, diagnostic.ExecutablePath, environment, budget, options.RuntimeHomeRoot)
+		return probeRuntimeAuthentication(ctx, diagnostic.Type, diagnostic.ExecutablePath, environment, budget, probeOpts)
 	}
 	probe, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	// An authentication probe lists no models, so its home needs no cache.
-	prepared, release, err := localworkspace.CodexProbeEnvironment(probe, environment, diagnostic.Version, nil)
+	prepared, release, err := localworkspace.CodexProbeEnvironment(probe, environment, diagnostic.Version, nil, options.TempBase)
 	if err != nil {
 		return runtimeProbeOutcome{Status: "error", Code: "RUNTIME_DIAGNOSTIC_FAILED", Message: "Codex diagnostic home could not be prepared"}
 	}
 	defer release()
-	return probeRuntimeAuthentication(probe, diagnostic.Type, diagnostic.ExecutablePath, prepared, budget, options.RuntimeHomeRoot)
+	return probeRuntimeAuthentication(probe, diagnostic.Type, diagnostic.ExecutablePath, prepared, budget, probeOpts)
 }
 
 // changedInstallations names the Runtimes discovery found not installed or

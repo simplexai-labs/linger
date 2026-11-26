@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
 
 // Authentication checks cannot make a newly arriving Operation fail its home claim.
@@ -113,18 +115,12 @@ func claimRuntimeHome(root string, identity RuntimeHomeIdentity) (*RuntimeHome, 
 		return nil, err
 	}
 	providerRoot := filepath.Join(root, identity.ProviderType)
-	if err := os.MkdirAll(providerRoot, 0o700); err != nil {
-		return nil, fmt.Errorf("create Runtime home root: %w", err)
-	}
-	if err := os.Chmod(providerRoot, 0o700); err != nil { //nolint:gosec // owner-only directory mode; gosec expects a file mode for Chmod
-		return nil, fmt.Errorf("protect Runtime home root: %w", err)
+	if err := privatefs.EnsureDir(providerRoot); err != nil {
+		return nil, fmt.Errorf("prepare Runtime home root: %w", err)
 	}
 	homePath := filepath.Join(providerRoot, digest)
-	if err := os.MkdirAll(homePath, 0o700); err != nil {
-		return nil, fmt.Errorf("create Runtime home: %w", err)
-	}
-	if err := os.Chmod(homePath, 0o700); err != nil { //nolint:gosec // owner-only directory mode; gosec expects a file mode for Chmod
-		return nil, fmt.Errorf("protect Runtime home: %w", err)
+	if err := privatefs.EnsureDir(homePath); err != nil {
+		return nil, fmt.Errorf("prepare Runtime home: %w", err)
 	}
 	return claimRuntimeHomePath(homePath)
 }

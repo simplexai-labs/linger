@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
@@ -88,10 +89,14 @@ func TestClaudeCredentialsAdoptTheHostKeychainWithoutAFile(t *testing.T) {
 	if mode := info.Mode().Perm(); runtime.GOOS != "windows" && mode&0o077 != 0 {
 		t.Fatalf("seeded credential mode = %v, want owner-only", mode)
 	}
-	if runtime.GOOS == "windows" {
-		if err := privatefs.CheckPath(filepath.Join(configRoot, ".credentials.json"), "file", true); err != nil {
-			t.Fatalf("seeded credential ACL: %v", err)
-		}
+	if err := privatefs.CheckPath(configRoot, "directory", true); err != nil {
+		t.Fatalf("configRoot ACL: %v", err)
+	}
+	if err := privatefs.CheckPath(filepath.Join(configRoot, ".credentials.json"), "file", true); err != nil {
+		t.Fatalf("seeded credential ACL: %v", err)
+	}
+	if err := privatefs.CheckPath(filepath.Join(configRoot, ".linger-auth-source.sha256"), "file", true); err != nil {
+		t.Fatalf("seeded generation marker ACL: %v", err)
 	}
 }
 
@@ -132,7 +137,7 @@ func TestClaudeCredentialsRejectAMalformedKeychain(t *testing.T) {
 func TestClaudeProbeEnvironmentMatchesTheContextRuntimeHome(t *testing.T) {
 	_, environment := claudeSource(t)
 	stubClaudeKeychain(t, `{"claudeAiOauth":{"accessToken":"keychain"}}`)
-	prepared, release, err := ClaudeProbeEnvironment(environment)
+	prepared, release, err := ClaudeProbeEnvironment(environment, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +165,7 @@ func TestClaudeProbeEnvironmentMatchesTheContextRuntimeHome(t *testing.T) {
 func TestClaudeProbeEnvironmentReportsNoCredentialWhenTheHostHasNone(t *testing.T) {
 	_, environment := claudeSource(t)
 	stubClaudeKeychain(t, "")
-	prepared, release, err := ClaudeProbeEnvironment(environment)
+	prepared, release, err := ClaudeProbeEnvironment(environment, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,5 +286,223 @@ func TestClaudeCredentialsWithoutAnExpiryFollowTheHost(t *testing.T) {
 	}
 	if string(content) != host {
 		t.Fatalf("seeded credential = %s, want the Host copy", content)
+	}
+}
+
+func TestWritePrivateRuntimeFileAtomicAndHardensLegacyPermissions(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nested", ".claude")
+	path := filepath.Join(dir, ".credentials.json")
+	if err := writePrivateRuntimeFile(path, []byte(`{"v":1}`)); err != nil {
+		t.Fatalf("initial writePrivateRuntimeFile: %v", err)
+	}
+	if err := privatefs.CheckPath(dir, "directory", true); err != nil {
+		t.Fatalf("dir not private: %v", err)
+	}
+	if err := privatefs.CheckPath(path, "file", true); err != nil {
+		t.Fatalf("file not private: %v", err)
+	}
+
+	// Simulate a legacy loosely-permitted file and overwrite atomically.
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writePrivateRuntimeFile(path, []byte(`{"v":2}`)); err != nil {
+		t.Fatalf("replacement writePrivateRuntimeFile: %v", err)
+	}
+	if err := privatefs.CheckPath(dir, "directory", true); err != nil {
+		t.Fatalf("dir not re-hardened: %v", err)
+	}
+	if err := privatefs.CheckPath(path, "file", true); err != nil {
+		t.Fatalf("file not re-hardened: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != `{"v":2}` {
+		t.Fatalf("content = %q, err = %v", got, err)
+	}
+
+	// Symlink destinations must be refused without altering their target.
+	outside := filepath.Join(t.TempDir(), "outside.json")
+	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "symlink.json")
+	if err := os.Symlink(outside, link); err == nil {
+		if err := writePrivateRuntimeFile(link, []byte("overwrite")); err == nil {
+			t.Fatal("writePrivateRuntimeFile followed a symlink")
+		}
+		if data, err := os.ReadFile(outside); err != nil || string(data) != "keep" {
+			t.Fatalf("symlink target modified: %q, %v", data, err)
+		}
+	}
+}
+
+func TestClaudeConfigRootEntryPointsProtectDirectoriesAndKeepProbesInStateBase(t *testing.T) {
+	t.Run("ConfigureClaudeContextHome", func(t *testing.T) {
+		_, environment := claudeSource(t)
+		stubClaudeKeychain(t, `{"claudeAiOauth":{"accessToken":"keychain"}}`)
+		home := t.TempDir()
+		workspaceDir := t.TempDir()
+		configRoot := filepath.Join(home, ".claude")
+		if err := os.MkdirAll(configRoot, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if runtime.GOOS != "windows" {
+			if err := os.Chmod(configRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := ConfigureClaudeContextHome(home, workspaceDir, environment, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := privatefs.CheckPath(configRoot, "directory", true); err != nil {
+			t.Fatalf("configRoot not private: %v", err)
+		}
+		if err := privatefs.CheckPath(filepath.Join(configRoot, ".credentials.json"), "file", true); err != nil {
+			t.Fatalf("credential not private: %v", err)
+		}
+		if err := privatefs.CheckPath(filepath.Join(configRoot, ".linger-auth-source.sha256"), "file", true); err != nil {
+			t.Fatalf("marker not private: %v", err)
+		}
+	})
+
+	t.Run("ClaudeProbeEnvironment in daemon state base", func(t *testing.T) {
+		_, environment := claudeSource(t)
+		stubClaudeKeychain(t, `{"claudeAiOauth":{"accessToken":"keychain"}}`)
+		stateTempBase := filepath.Join(t.TempDir(), "daemon-state", "operation-tmp")
+		prepared, release, err := ClaudeProbeEnvironment(environment, stateTempBase)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer release()
+		probeConfig := prepared["CLAUDE_CONFIG_DIR"]
+		probeRoot := filepath.Dir(probeConfig)
+		if !strings.HasPrefix(probeRoot, stateTempBase+string(os.PathSeparator)) {
+			t.Fatalf("probe root %q is not under configured state base %q", probeRoot, stateTempBase)
+		}
+		if err := privatefs.CheckPath(stateTempBase, "directory", true); err != nil {
+			t.Fatalf("stateTempBase not private: %v", err)
+		}
+		if err := privatefs.CheckPath(probeRoot, "directory", true); err != nil {
+			t.Fatalf("probeRoot not private: %v", err)
+		}
+		if err := privatefs.CheckPath(probeConfig, "directory", true); err != nil {
+			t.Fatalf("probeConfig not private: %v", err)
+		}
+		if err := privatefs.CheckPath(filepath.Join(probeConfig, ".credentials.json"), "file", true); err != nil {
+			t.Fatalf("probe credential not private: %v", err)
+		}
+		// While the probe is active, PruneOperationTemps must not remove it.
+		if removed, _, err := PruneOperationTemps(stateTempBase, nil); err != nil || removed != 0 {
+			t.Fatalf("prune removed active probe: removed=%d err=%v", removed, err)
+		}
+		// Release is idempotent and removes the probe directory completely.
+		release()
+		release()
+		if _, err := os.Stat(probeRoot); !os.IsNotExist(err) {
+			t.Fatalf("probe root outlived release: %v", err)
+		}
+	})
+
+	t.Run("ClaudeProbeEnvironment fallback protects OS temp dir", func(t *testing.T) {
+		_, environment := claudeSource(t)
+		stubClaudeKeychain(t, `{"claudeAiOauth":{"accessToken":"keychain"}}`)
+		prepared, release, err := ClaudeProbeEnvironment(environment, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer release()
+		probeConfig := prepared["CLAUDE_CONFIG_DIR"]
+		if err := privatefs.CheckPath(filepath.Dir(probeConfig), "directory", true); err != nil {
+			t.Fatalf("fallback probe root not private: %v", err)
+		}
+		if err := privatefs.CheckPath(probeConfig, "directory", true); err != nil {
+			t.Fatalf("fallback probe configRoot not private: %v", err)
+		}
+		if err := privatefs.CheckPath(filepath.Join(probeConfig, ".credentials.json"), "file", true); err != nil {
+			t.Fatalf("fallback probe credential not private: %v", err)
+		}
+	})
+
+	t.Run("ClaudeModelInvokeEnvironment", func(t *testing.T) {
+		_, environment := claudeSource(t)
+		stubClaudeKeychain(t, `{"claudeAiOauth":{"accessToken":"keychain"}}`)
+		configRoot := filepath.Join(t.TempDir(), "model-invoke", ".claude")
+		if err := os.MkdirAll(configRoot, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if runtime.GOOS != "windows" {
+			if err := os.Chmod(configRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := ClaudeModelInvokeEnvironment(configRoot, environment); err != nil {
+			t.Fatal(err)
+		}
+		if err := privatefs.CheckPath(configRoot, "directory", true); err != nil {
+			t.Fatalf("model invoke configRoot not private: %v", err)
+		}
+		if err := privatefs.CheckPath(filepath.Join(configRoot, ".credentials.json"), "file", true); err != nil {
+			t.Fatalf("model invoke credential not private: %v", err)
+		}
+	})
+}
+
+func TestClaudeCredentialsRepairLegacyLoosePermissionsOnUnchangedFastPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX mode bits test; Windows ACL equivalent is in claude_credentials_windows_test.go")
+	}
+	_, environment := claudeSource(t)
+	token := `{"claudeAiOauth":{"accessToken":"keychain","expiresAt":4102444800000}}`
+	stubClaudeKeychain(t, token)
+	configRoot := filepath.Join(t.TempDir(), ".claude")
+	if err := configureClaudeCredentials(configRoot, environment, nil); err != nil {
+		t.Fatal(err)
+	}
+	credPath := filepath.Join(configRoot, ".credentials.json")
+	markerPath := filepath.Join(configRoot, ".linger-auth-source.sha256")
+
+	// Simulate legacy loosely-permitted directory and files on disk.
+	if err := os.Chmod(configRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(credPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(markerPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := privatefs.CheckPath(credPath, "file", true); err == nil {
+		t.Fatal("expected loose credential to fail CheckPath before repair")
+	}
+
+	// Re-run with unchanged source and a resident process: files and directory
+	// must be repaired in place without retiring the resident.
+	retired := 0
+	if err := configureClaudeCredentials(configRoot, map[string]string{"HOME": environment["HOME"]}, func() error {
+		retired++
+		return nil
+	}); err != nil {
+		t.Fatalf("reconcile unchanged credential: %v", err)
+	}
+	if retired != 0 {
+		t.Fatalf("ACL-only repair retired resident %d times", retired)
+	}
+	if err := privatefs.CheckPath(configRoot, "directory", true); err != nil {
+		t.Fatalf("configRoot was not repaired: %v", err)
+	}
+	if err := privatefs.CheckPath(credPath, "file", true); err != nil {
+		t.Fatalf("credential was not repaired: %v", err)
+	}
+	if err := privatefs.CheckPath(markerPath, "file", true); err != nil {
+		t.Fatalf("marker was not repaired: %v", err)
+	}
+	got, err := os.ReadFile(credPath)
+	if err != nil || string(got) != token {
+		t.Fatalf("repaired credential content = %q, err = %v", got, err)
 	}
 }

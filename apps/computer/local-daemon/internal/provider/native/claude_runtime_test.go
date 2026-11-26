@@ -419,15 +419,41 @@ func TestClaudeRemoveMCPConfigKeepsForeignLayout(t *testing.T) {
 	if _, err := os.Stat(sibling); err != nil {
 		t.Fatal("foreign directory was removed")
 	}
-	path, err := claudeWriteMCPConfig([]byte("{}"))
+	path, cleanup, err := claudeWriteMCPConfig("", []byte("{}"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info, err := os.Stat(path); err != nil || (info.Mode().Perm() != 0o600 && os.PathSeparator == '/') {
 		t.Fatalf("mcp file = %v %v", info, err)
 	}
-	claudeRemoveMCPConfig(path)
+	cleanup()
 	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("MCP directory survived")
+	}
+}
+
+func TestClaudeWriteMCPConfigUsesOperationTempBaseAndCleansUp(t *testing.T) {
+	opTempBase := filepath.Join(t.TempDir(), "daemon-state", "operation-tmp")
+	path, cleanup, err := claudeWriteMCPConfig(opTempBase, []byte(`{"mcpServers":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcpDir := filepath.Dir(path)
+	opTempDir := filepath.Dir(mcpDir)
+	if !strings.HasPrefix(opTempDir, opTempBase+string(os.PathSeparator)) {
+		cleanup()
+		t.Fatalf("mcp config path %q is not under operation-tmp base %q", path, opTempBase)
+	}
+	if !strings.HasPrefix(filepath.Base(mcpDir), claudeMCPDirPrefix) {
+		cleanup()
+		t.Fatalf("mcp dir %q missing prefix %q", mcpDir, claudeMCPDirPrefix)
+	}
+	if info, err := os.Stat(path); err != nil || (info.Mode().Perm() != 0o600 && os.PathSeparator == '/') {
+		cleanup()
+		t.Fatalf("mcp file = %v %v", info, err)
+	}
+	cleanup()
+	if _, err := os.Stat(opTempDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("mcp operation temp dir survived cleanup: %v", err)
 	}
 }

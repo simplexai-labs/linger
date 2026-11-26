@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/clicredential"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 // fakeCardCLI installs a teamhub program that records how it was run and
@@ -164,5 +166,61 @@ func TestPlaygroundImageRefusesAnIncompletePlacement(t *testing.T) {
 		if _, err := daemon.placePlaygroundImage(t.Context(), "tenant-1", "agent-1", image); !errors.As(err, &failure) || failure.code != "invalid_image" {
 			t.Fatalf("image %+v = %v", image, err)
 		}
+	}
+}
+
+func TestPlaygroundAgentCLIConfigUsesDaemonOperationTempBase(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "daemon-state")
+	opTempBase := filepath.Join(stateDir, "operation-tmp")
+	home, configPath, cleanup, err := prepareAgentCLIConfig(opTempBase, cardInstallation, "room-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(home, opTempBase+string(os.PathSeparator)) {
+		cleanup()
+		t.Fatalf("CLI config home %q is not under operation-tmp %q", home, opTempBase)
+	}
+	if err := privatefs.CheckPath(home, "directory", true); err != nil {
+		cleanup()
+		t.Fatalf("CLI config home not private: %v", err)
+	}
+	if err := privatefs.CheckPath(configPath, "file", true); err != nil {
+		cleanup()
+		t.Fatalf("CLI config.json not private: %v", err)
+	}
+	if removed, _, err := localworkspace.PruneOperationTemps(opTempBase, nil); err != nil || removed != 0 {
+		cleanup()
+		t.Fatalf("prune removed active CLI temp dir: removed=%d err=%v", removed, err)
+	}
+	cleanup()
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("CLI temp dir survived cleanup: %v", err)
+	}
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+	// Verify runAgentCLI places TEAMHUB_CONFIG inside stateDirectory/operation-tmp
+	// and cleans it up when the CLI finishes.
+	cliDir := t.TempDir()
+	configPathRecord := filepath.Join(t.TempDir(), "config-path")
+	script := "#!/bin/sh\nprintf '%s' \"$TEAMHUB_CONFIG\" > '" + configPathRecord + "'\nprintf '%s' '{\"accepted\":true,\"message_id\":\"m1\"}'\n"
+	if err := os.WriteFile(filepath.Join(cliDir, "teamhub"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{stateDirectory: stateDir, teamhubCLIBin: cliDir}
+	if _, err := d.runAgentCLI(t.Context(), cardInstallation, "room-1", []string{"message", "card"}, "body"); err != nil {
+		t.Fatalf("runAgentCLI: %v", err)
+	}
+	recorded, err := os.ReadFile(configPathRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usedConfig := string(recorded)
+	if !strings.HasPrefix(usedConfig, opTempBase+string(os.PathSeparator)) {
+		t.Fatalf("runAgentCLI wrote TEAMHUB_CONFIG at %q, want under %q", usedConfig, opTempBase)
+	}
+	if _, err := os.Stat(filepath.Dir(usedConfig)); !os.IsNotExist(err) {
+		t.Fatalf("runAgentCLI temp dir %q survived return: %v", filepath.Dir(usedConfig), err)
 	}
 }

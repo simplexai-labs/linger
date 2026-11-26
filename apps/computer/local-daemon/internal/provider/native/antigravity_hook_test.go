@@ -4,14 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 func TestAntigravityHookEndpointWritesHooksConfigAndRoutesBySession(t *testing.T) {
-	ep, err := newAntigravityHookEndpoint("/opt/linger/daemon's-bin")
+	ep, err := newAntigravityHookEndpoint("/opt/linger/daemon's-bin", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +85,7 @@ func TestAntigravityHookEndpointWritesHooksConfigAndRoutesBySession(t *testing.T
 }
 
 func TestAntigravityRunHookFailsOpenWhenEndpointUnreachable(t *testing.T) {
-	ep, err := newAntigravityHookEndpoint("/bin/daemon")
+	ep, err := newAntigravityHookEndpoint("/bin/daemon", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +142,7 @@ func TestAntigravitySharedHookEndpointCloseCleansTempDir(t *testing.T) {
 }
 
 func TestAntigravityHookEndpointCanonicalizesDir(t *testing.T) {
-	ep, err := newAntigravityHookEndpoint("/bin/daemon")
+	ep, err := newAntigravityHookEndpoint("/bin/daemon", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,5 +184,74 @@ func TestAntigravityHookCommandForOS(t *testing.T) {
 	wantPosix := `'/opt/linger/daemon'\''s-bin' antigravity-hook '` + endpointURL + `'`
 	if posix != wantPosix {
 		t.Fatalf("posix command=%q, want %q", posix, wantPosix)
+	}
+}
+
+func TestAntigravityHookEndpointUsesOperationTempBaseAndCleansUp(t *testing.T) {
+	opTempBase := filepath.Join(t.TempDir(), "daemon-state", "operation-tmp")
+	ep, err := newAntigravityHookEndpoint("/bin/daemon", opTempBase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedBase := opTempBase
+	if resolved, err := filepath.EvalSymlinks(opTempBase); err == nil && resolved != "" {
+		expectedBase = resolved
+	}
+	hookDir := ep.Dir()
+	opTempDir := filepath.Dir(hookDir)
+	if !strings.HasPrefix(opTempDir, expectedBase+string(os.PathSeparator)) {
+		_ = ep.Close()
+		t.Fatalf("hook endpoint dir %q is not under operation-tmp base %q", hookDir, expectedBase)
+	}
+	if err := privatefs.CheckPath(hookDir, "directory", true); err != nil {
+		_ = ep.Close()
+		t.Fatalf("hookDir not private: %v", err)
+	}
+	if err := privatefs.CheckPath(filepath.Join(hookDir, ".agents", "hooks.json"), "file", true); err != nil {
+		_ = ep.Close()
+		t.Fatalf("hooks.json not private: %v", err)
+	}
+	if removed, _, err := localworkspace.PruneOperationTemps(opTempBase, nil); err != nil || removed != 0 {
+		_ = ep.Close()
+		t.Fatalf("prune removed active hook endpoint dir: removed=%d err=%v", removed, err)
+	}
+	if err := ep.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := os.Stat(opTempDir); !os.IsNotExist(err) {
+		t.Fatalf("hook operation temp dir survived Close: %v", err)
+	}
+
+	// Shared singleton respects ConfigureAntigravityHookTempBase.
+	t.Cleanup(func() {
+		_ = CloseAntigravitySharedHookEndpoint()
+		ConfigureAntigravityHookTempBase("")
+	})
+	_ = CloseAntigravitySharedHookEndpoint()
+	ConfigureAntigravityHookTempBase(opTempBase)
+	shared, err := AntigravitySharedHookEndpoint()
+	if err != nil {
+		t.Fatalf("AntigravitySharedHookEndpoint: %v", err)
+	}
+	sharedOpDir := filepath.Dir(shared.Dir())
+	if !strings.HasPrefix(sharedOpDir, expectedBase+string(os.PathSeparator)) {
+		t.Fatalf("shared hook dir %q is not under configured base %q", shared.Dir(), expectedBase)
+	}
+	if err := CloseAntigravitySharedHookEndpoint(); err != nil {
+		t.Fatalf("CloseAntigravitySharedHookEndpoint: %v", err)
+	}
+	if _, err := os.Stat(sharedOpDir); !os.IsNotExist(err) {
+		t.Fatalf("shared hook dir survived close: %v", err)
+	}
+}
+
+func TestAntigravityHookEndpointCloseJoinsRemoveRootError(t *testing.T) {
+	sentinel := os.ErrPermission
+	ep := &AntigravityHookEndpoint{
+		dir:        t.TempDir(),
+		removeRoot: func() error { return sentinel },
+	}
+	if err := ep.Close(); !errors.Is(err, sentinel) {
+		t.Fatalf("Close() = %v, want joined %v", err, sentinel)
 	}
 }

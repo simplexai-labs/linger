@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
 
 // Test seams never read or change the developer's login.
@@ -30,6 +32,9 @@ func configureClaudeCredentials(configRoot string, environment map[string]string
 		return err
 	}
 	if source != configRoot {
+		if err := privatefs.EnsureDir(configRoot); err != nil {
+			return err
+		}
 		var content []byte
 		if !explicitClaudeAuthEnvironment(environment) {
 			var err error
@@ -90,7 +95,7 @@ func adoptClaudeCredential(configRoot string, source []byte, retireResident func
 	removeScoped := len(scoped) > 0 && (sourceChanged || !claudeCredentialUsable(scoped) || (claudeCredentialExpiry(scoped) <= claudeCredentialExpiry(selected) && !bytes.Equal(scoped, selected)) || len(selected) == 0)
 	writeMarker := string(previous) != generation
 	if !removeDestination && !writeDestination && !removeScoped && !writeMarker {
-		return nil
+		return protectClaudeCredentialFiles(destination, marker)
 	}
 	// A parked process caches the login it started with and may refresh it, so
 	// it is stopped before either store changes under it. Mirroring its own
@@ -110,6 +115,8 @@ func adoptClaudeCredential(configRoot string, source []byte, retireResident func
 		if err := writePrivateRuntimeFile(destination, selected); err != nil {
 			return err
 		}
+	} else if err := protectClaudeCredentialFiles(destination); err != nil {
+		return err
 	}
 	if removeScoped {
 		if err := claudeKeychainRemove(configRoot); err != nil {
@@ -117,9 +124,21 @@ func adoptClaudeCredential(configRoot string, source []byte, retireResident func
 		}
 	}
 	if !writeMarker {
-		return nil
+		return protectClaudeCredentialFiles(marker)
 	}
 	return writePrivateRuntimeFile(marker, []byte(generation))
+}
+
+// protectClaudeCredentialFiles tightens permissions on existing managed
+// credential files in place so legacy files written with inherited weak ACLs
+// are repaired automatically even when their content has not changed.
+func protectClaudeCredentialFiles(paths ...string) error {
+	for _, path := range paths {
+		if err := privatefs.ProtectFile(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 func claudeCredentialUsable(content []byte) bool {
@@ -153,18 +172,30 @@ func explicitClaudeAuthEnvironment(environment map[string]string) bool {
 	return false
 }
 
-func ClaudeProbeEnvironment(environment map[string]string) (map[string]string, func(), error) {
+// ClaudeProbeEnvironment prepares an isolated temporary Claude configuration
+// directory. When baseDir is non-empty, the directory is allocated inside
+// baseDir via PrepareOperationTemp so it stays inside the Daemon's private
+// state directory and abandoned directories are swept on restart. When empty,
+// it falls back to the OS temp directory and hardens the created directory with
+// privatefs before any credential is written.
+func ClaudeProbeEnvironment(environment map[string]string, baseDir string) (map[string]string, func(), error) {
 	prepared := make(map[string]string, len(environment)+1)
 	for name, value := range environment {
 		prepared[name] = value
 	}
-	root, err := os.MkdirTemp("", "linger-claude-probe-")
+	root, removeRoot, err := PrivateTempRoot(baseDir, "linger-claude-probe-")
 	if err != nil {
 		return nil, nil, err
 	}
 	configRoot := filepath.Join(root, ".claude")
-	release := func() { _ = claudeKeychainRemove(configRoot); _ = os.RemoveAll(root) }
-	if err := os.MkdirAll(configRoot, 0o700); err != nil {
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			_ = claudeKeychainRemove(configRoot)
+			_ = removeRoot()
+		})
+	}
+	if err := privatefs.EnsureDir(configRoot); err != nil {
 		release()
 		return nil, nil, err
 	}
@@ -196,7 +227,7 @@ func ClaudeModelInvokeEnvironment(configRoot string, environment map[string]stri
 	}
 	claudeModelInvokeMu.Lock()
 	defer claudeModelInvokeMu.Unlock()
-	if err := os.MkdirAll(configRoot, 0o700); err != nil {
+	if err := privatefs.EnsureDir(configRoot); err != nil {
 		return nil, err
 	}
 	info, err := os.Lstat(configRoot)

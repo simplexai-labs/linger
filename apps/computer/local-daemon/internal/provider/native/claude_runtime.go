@@ -176,7 +176,7 @@ func claudeSettledRun(outcome Outcome) *Run {
 // configuration. front, when set, belongs to the new process. On failure
 // everything it was given is released.
 func (r *claudeRuntime) launchProcess(spec RunSpec, launch claudeLaunch, front *mcpFront, config []byte, logger *slog.Logger) (*claudeProcess, error) {
-	mcpPath, err := claudeWriteMCPConfig(config)
+	mcpPath, mcpCleanup, err := claudeWriteMCPConfig(r.profile.TempBase, config)
 	if err != nil {
 		front.Close()
 		return nil, fmt.Errorf("write Claude MCP configuration: %w", err)
@@ -184,7 +184,7 @@ func (r *claudeRuntime) launchProcess(spec RunSpec, launch claudeLaunch, front *
 	argv := append(append([]string(nil), launch.launchArgs...), "--mcp-config", mcpPath)
 	abandon := func(release func() error) {
 		front.Close()
-		claudeRemoveMCPConfig(mcpPath)
+		mcpCleanup()
 		if release != nil {
 			if err := release(); err != nil {
 				logger.Warn("release Claude process temp failed", "error", err)
@@ -217,7 +217,7 @@ func (r *claudeRuntime) launchProcess(spec RunSpec, launch claudeLaunch, front *
 
 	proc := claudeNewProcess(claudeOwnedGroup{cmd}, logger)
 	proc.stdin, proc.stdout, proc.stderr = pipes.in, pipes.out, pipes.err
-	proc.shape, proc.front, proc.mcpPath, proc.release = launch.shape, front, mcpPath, release
+	proc.shape, proc.front, proc.mcpPath, proc.mcpCleanup, proc.release = launch.shape, front, mcpPath, mcpCleanup, release
 	proc.res.bind(launch.root, r.profile)
 	proc.startOwned(cmd)
 	return proc, nil

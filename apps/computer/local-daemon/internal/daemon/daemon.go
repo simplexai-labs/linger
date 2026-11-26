@@ -318,9 +318,15 @@ func New(options Options) (*Daemon, error) {
 // Run loads or creates the Daemon Identity and keeps the Gateway stream
 // connected until ctx ends or a terminal configuration error stops redials.
 func (d *Daemon) Run(ctx context.Context) error {
+	if base := d.operationTempBase(); base != "" {
+		native.ConfigureAntigravityHookTempBase(base)
+	}
 	defer func() {
 		_, _ = native.StopAllParkedResidents()
 		_ = native.CloseAntigravitySharedHookEndpoint()
+		if d.stateDirectory != "" {
+			native.ConfigureAntigravityHookTempBase("")
+		}
 		if d.modelInvoker != nil {
 			d.modelInvoker.Close()
 		}

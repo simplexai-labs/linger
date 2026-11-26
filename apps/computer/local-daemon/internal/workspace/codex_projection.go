@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
 
 // The caller resolves the user identity and holds the Runtime home lease.
@@ -373,7 +374,7 @@ func readProjectionSource(path string) ([]byte, error) {
 }
 
 func openProjectionRoot(path string) (*os.Root, error) {
-	if err := os.MkdirAll(path, 0700); err != nil {
+	if err := privatefs.EnsureDir(path); err != nil {
 		return nil, err
 	}
 	root, err := os.OpenRoot(path)

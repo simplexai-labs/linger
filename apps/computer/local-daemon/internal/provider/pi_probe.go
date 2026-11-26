@@ -45,7 +45,7 @@ func probePiRuntime(ctx context.Context, executable string, environment map[stri
 	return outcome
 }
 
-func probePiAuthentication(ctx context.Context, executable string, environment map[string]string, timeout time.Duration) runtimeProbeOutcome {
+func probePiAuthentication(ctx context.Context, executable string, environment map[string]string, timeout time.Duration, _ string) runtimeProbeOutcome {
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	failure := runtimeProbeOutcome{Status: "error", Code: "RUNTIME_DIAGNOSTIC_FAILED", Message: "Pi authentication could not be verified"}
