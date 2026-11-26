@@ -48,6 +48,7 @@ describe("AuthenticatedRouteLoading", () => {
     ["/t/tenant-northstar/library", false],
     ["/t/tenant-northstar/library/wiki", false],
     ["/t/tenant-northstar/library/meetings/meeting-1", true],
+    ["/t/library-co/library/meetings/meeting-1", true],
   ])(
     "draws the Library sidebar for %s only where the page has one",
     (pathname, sidebar) => {

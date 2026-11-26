@@ -1,5 +1,9 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { LibraryOverviewSkeleton } from "@/features/library/library-loading-skeletons";
+import {
+  sectionHasSidebar,
+  workspaceSection,
+} from "@/features/library/library-section";
 import type { TeamHubRoomListItem } from "@/features/teamhub/teamhub-types";
 import { commonMessages } from "@/i18n/common.messages";
 import type { Translate } from "@/i18n/language";
@@ -297,8 +301,8 @@ function WorkspaceSidebarLoading() {
  * The overview mirrors its page so the content lands where its shapes were.
  */
 function LibraryLoading({ pathname }: { pathname: string }) {
-  const rest = pathname.split("/library")[1] ?? "";
-  if (!rest.startsWith("/wiki") && !rest.startsWith("/meetings")) {
+  const section = workspaceSection(pathname);
+  if (section === "overview") {
     return (
       <div className="flex min-h-0 flex-1 overflow-hidden" aria-hidden="true">
         <LibraryOverviewSkeleton />
@@ -307,7 +311,7 @@ function LibraryLoading({ pathname }: { pathname: string }) {
   }
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden" aria-hidden="true">
-      {rest.startsWith("/meetings") ? <WorkspaceSidebarLoading /> : null}
+      {sectionHasSidebar(section) ? <WorkspaceSidebarLoading /> : null}
       <section className="workspace-content-viewport min-w-0 flex-1 px-6 py-7">
         <Skeleton className="h-5 w-32" />
         <div className="mt-5 flex gap-3">

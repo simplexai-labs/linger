@@ -11,6 +11,7 @@ export function RecentCardsSkeleton({ label }: { label?: string }) {
       aria-busy="true"
       aria-hidden={label ? undefined : true}
       aria-label={label}
+      role={label ? "status" : undefined}
       className="workspace-recent-cards"
     >
       {skeletonKeys.map((key) => (
@@ -41,6 +42,7 @@ export function DocumentRowsSkeleton({ label }: { label?: string }) {
       aria-busy="true"
       aria-hidden={label ? undefined : true}
       aria-label={label}
+      role={label ? "status" : undefined}
       className="workspace-file-list"
     >
       {skeletonKeys.slice(0, 4).map((key) => (
