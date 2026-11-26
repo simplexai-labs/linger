@@ -4064,9 +4064,12 @@
         const localUnavailable = plan.source === "local" && !model;
         const location = local.location;
         $("local-install").disabled ||=
-          checking || byokIncomplete || localUnavailable || !!location.error;
-        $("local-install").dataset.busy = String(checking);
-        $("local-install").setAttribute("aria-busy", String(checking));
+          waitingForCheck ||
+          byokIncomplete ||
+          localUnavailable ||
+          !!location.error;
+        $("local-install").dataset.busy = String(waitingForCheck);
+        $("local-install").setAttribute("aria-busy", String(waitingForCheck));
         $("plan-summary").textContent = checking
           ? t("findingSetup")
           : following && known
