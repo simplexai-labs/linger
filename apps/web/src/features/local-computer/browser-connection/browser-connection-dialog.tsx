@@ -139,7 +139,7 @@ export function BrowserConnectionDialog({
   return (
     <ModalDialog
       ariaLabel={t(computersMessages.connectChrome)}
-      className="fixed inset-0 z-50 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-[480px] overflow-auto rounded-xl border border-border bg-popover p-0 shadow-lg backdrop:bg-[var(--app-overlay)]"
+      className="fixed inset-0 z-50 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-[480px] overflow-auto rounded-[var(--app-modal-radius)] border-0 bg-popover p-0 shadow-lg backdrop:bg-[var(--app-overlay)]"
       onClose={requestClose}
     >
       <div className="p-5">

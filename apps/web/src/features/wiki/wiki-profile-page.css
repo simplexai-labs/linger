@@ -3,7 +3,7 @@
 /* No overflow clipping: Sources tooltips may extend past the box. */
 .wiki-profile-infobox {
   border: 1px solid hsl(var(--town-border));
-  border-radius: 12px;
+  border-radius: var(--app-card-radius);
   background: var(--app-surface);
   font-size: 14px;
   letter-spacing: 0.02em;
@@ -12,7 +12,8 @@
 
 .wiki-profile-infobox-title {
   padding: 10px 16px;
-  border-radius: 11px 11px 0 0;
+  border-radius: calc(var(--app-card-radius) - 1px)
+    calc(var(--app-card-radius) - 1px) 0 0;
   background: var(--app-surface);
   color: hsl(var(--town-foreground));
   font-size: 14px;

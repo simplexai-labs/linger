@@ -161,7 +161,7 @@
   --app-pill-radius: 999px;
   --app-card-radius: 12px;
   --app-panel-radius: 16px;
-  --app-modal-radius: 8px;
+  --app-modal-radius: 16px;
   --app-typed-card-radius: 12px;
 
   /* Chat component tokens: the one place to tune how the chat looks.
@@ -554,7 +554,7 @@ a[href][aria-disabled="true"],
 .auth-form .ui-field-control {
   height: 2.75rem;
   border-color: hsl(var(--town-border-hover));
-  border-radius: 10px;
+  border-radius: var(--app-control-radius-large);
   background: hsl(var(--town-card));
   padding-inline-start: 0.875rem;
 }
@@ -584,7 +584,7 @@ a[href][aria-disabled="true"],
 .auth-form .auth-submit {
   height: 2.75rem;
   margin-top: 0.375rem;
-  border-radius: 10px;
+  border-radius: var(--app-button-radius-large);
 }
 
 .auth-local-account {
@@ -593,7 +593,7 @@ a[href][aria-disabled="true"],
 
 .auth-local-account .ui-button-large {
   height: 2.75rem;
-  border-radius: 10px;
+  border-radius: var(--app-button-radius-large);
 }
 
 .auth-divider {
@@ -2200,7 +2200,7 @@ a[href][aria-disabled="true"],
 }
 
 .room-member-avatar[data-actor-kind="agent"] > [role="img"] {
-  border-radius: 5px;
+  border-radius: 20%;
 }
 
 .room-readable {
@@ -2308,7 +2308,6 @@ a[href][aria-disabled="true"],
 
 .app-dialog.global-search {
   width: min(560px, calc(100vw - 32px));
-  border-radius: 8px;
 }
 
 /* Provider key dialogs (Composio, voice) share the search dialog's width. */
@@ -2813,7 +2812,7 @@ a[href][aria-disabled="true"],
   display: inline;
   margin: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 0;
   font: inherit;
   letter-spacing: inherit;
@@ -5523,7 +5522,7 @@ button.question-choice:focus-visible {
   position: fixed;
   z-index: 50;
   padding: 5px 9px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: var(--app-ink);
   color: #fdfdfc;
   font-size: 12px;

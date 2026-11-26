@@ -126,7 +126,7 @@ export function UnifiedDocumentTimelineDialog({
   return (
     <ModalDialog
       ariaLabel={t(m.pageHistory)}
-      className="fixed inset-0 z-50 m-0 max-h-none max-w-none overflow-hidden border-0 bg-popover p-0 shadow-lg backdrop:bg-[var(--app-overlay)] backdrop:backdrop-blur-sm sm:inset-0 sm:m-auto sm:h-[min(640px,82dvh)] sm:w-[calc(100%-2.5rem)] sm:max-w-3xl sm:rounded-lg"
+      className="fixed inset-0 z-50 m-0 max-h-none max-w-none overflow-hidden border-0 bg-popover p-0 shadow-lg backdrop:bg-[var(--app-overlay)] backdrop:backdrop-blur-sm sm:inset-0 sm:m-auto sm:h-[min(640px,82dvh)] sm:w-[calc(100%-2.5rem)] sm:max-w-3xl sm:rounded-[var(--app-modal-radius)]"
       onClose={onClose}
     >
       <div className="flex h-full min-h-0 flex-col">
