@@ -461,6 +461,9 @@ func (c *cli) executeDoctorPrune(ctx context.Context, parsed command) (int, erro
 }
 
 func (c *cli) executeLogin(ctx context.Context, parsed command) (int, error) {
+	if parsed.deprecatedConcurrencyFlag {
+		c.write(c.deps.stderr, "Warning: --max-concurrent-runs and --no-max-concurrent-runs are deprecated and ignored. Model endpoints now control concurrency.\n")
+	}
 	var requested map[string]string
 	if len(parsed.runtimePaths) > 0 {
 		requested = parsed.runtimePaths

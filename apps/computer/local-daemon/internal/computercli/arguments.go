@@ -33,13 +33,14 @@ type command struct {
 	agentID string
 
 	// login
-	webURL          string
-	displayName     string
-	gatewayURL      string
-	codexAuthFile   string
-	enabledRuntimes []string
-	tokenStdin      bool
-	localModels     *stagedLocalModels
+	webURL                    string
+	displayName               string
+	gatewayURL                string
+	codexAuthFile             string
+	enabledRuntimes           []string
+	tokenStdin                bool
+	deprecatedConcurrencyFlag bool
+	localModels               *stagedLocalModels
 
 	// daemon service start|stop
 	serviceName string
@@ -292,6 +293,24 @@ func parseLogin(args []string, configPath string, options parseOptions) (command
 	if parsed.gatewayURL, err = removeOption(&args, "--gateway-url"); err != nil {
 		return command{}, err
 	}
+	maximum, err := removeOption(&args, "--max-concurrent-runs")
+	if err != nil {
+		return command{}, err
+	}
+	unlimited, err := removeFlag(&args, "--no-max-concurrent-runs")
+	if err != nil {
+		return command{}, err
+	}
+	if maximum != "" {
+		if unlimited {
+			return command{}, newError(categoryUsage, "Use only one of --max-concurrent-runs or --no-max-concurrent-runs")
+		}
+		n, err := strconv.Atoi(maximum)
+		if err != nil || n < 1 || n > 100 {
+			return command{}, newError(categoryUsage, "--max-concurrent-runs must be an integer between 1 and 100")
+		}
+	}
+	parsed.deprecatedConcurrencyFlag = maximum != "" || unlimited
 	codexAuth, err := removeOption(&args, "--codex-auth")
 	if err != nil {
 		return command{}, err

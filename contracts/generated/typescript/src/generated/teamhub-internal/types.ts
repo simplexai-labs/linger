@@ -2520,6 +2520,11 @@ export interface components {
       display_name: string;
       /** @enum {string} */
       platform?: "darwin" | "linux" | "win32";
+      /**
+       * @deprecated
+       * @description Accepted from older Agent Services and ignored by TeamHub.
+       */
+      capacity?: number;
       runtimes: ("codex" | "claude" | "pi" | "antigravity")[];
       runtime_diagnostics: {
         [key: string]: unknown;

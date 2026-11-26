@@ -32,6 +32,18 @@ func decodeJSON(t *testing.T, text string) map[string]any {
 	return value
 }
 
+func TestLoginAcceptsRetiredConcurrencyFlags(t *testing.T) {
+	for _, args := range [][]string{{"login", "--max-concurrent-runs", "2"}, {"login", "--no-max-concurrent-runs"}} {
+		t.Run(args[1], func(t *testing.T) {
+			f := newFixture(t)
+			if code := f.run(args...); code != 0 || len(f.setupOptions) != 1 {
+				t.Fatalf("login exit=%d stderr=%s", code, f.stderr.String())
+			}
+			contains(t, f.stderr.String(), "deprecated and ignored")
+		})
+	}
+}
+
 func TestLoginLimitsDiagnosticsAndSetupToTheEnabledRuntime(t *testing.T) {
 	f := newFixture(t)
 	var requested []string

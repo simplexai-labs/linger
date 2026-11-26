@@ -13,6 +13,9 @@ import (
 
 func TestLoadReadsOwnerScopedExistingComputerConfig(t *testing.T) {
 	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	token := testToken("computer-1", "tenant-1", "owner-1")
 	tokenPath := filepath.Join(root, "token")
 	authPath := filepath.Join(root, "auth.json")
@@ -54,7 +57,6 @@ func TestLoadReadsOwnerScopedExistingComputerConfig(t *testing.T) {
 	if _, err := Load(configPath, nil); err != nil {
 		t.Fatal(err)
 	}
-
 }
 
 func TestLoadRejectsCredentialForAnotherComputer(t *testing.T) {

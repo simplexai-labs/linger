@@ -153,7 +153,7 @@ func (q *Queries) AssignAgentRuntimeSteerInput(ctx context.Context, arg AssignAg
 }
 
 const bindAgentRuntimeLocalComputerDaemonIdentity = `-- name: BindAgentRuntimeLocalComputerDaemonIdentity :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET daemon_id=$1::text,
     daemon_public_key=$2::bytea,
     daemon_identity_version=$3::bigint,
@@ -178,14 +178,14 @@ type BindAgentRuntimeLocalComputerDaemonIdentityParams struct {
 	ComputerID      string `json:"computer_id"`
 }
 
-func (q *Queries) BindAgentRuntimeLocalComputerDaemonIdentity(ctx context.Context, arg BindAgentRuntimeLocalComputerDaemonIdentityParams) (LocalComputer, error) {
+func (q *Queries) BindAgentRuntimeLocalComputerDaemonIdentity(ctx context.Context, arg BindAgentRuntimeLocalComputerDaemonIdentityParams) (RuntimeLocalComputer, error) {
 	row := q.db.QueryRow(ctx, bindAgentRuntimeLocalComputerDaemonIdentity,
 		arg.DaemonID,
 		arg.DaemonPublicKey,
 		arg.IdentityVersion,
 		arg.ComputerID,
 	)
-	var i LocalComputer
+	var i RuntimeLocalComputer
 	err := row.Scan(
 		&i.ComputerID,
 		&i.DisplayName,
@@ -989,13 +989,13 @@ func (q *Queries) GetAgentRuntimeInput(ctx context.Context, arg GetAgentRuntimeI
 
 const getAgentRuntimeLocalComputer = `-- name: GetAgentRuntimeLocalComputer :one
 SELECT computer_id, display_name, status, credential_generation, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id
-FROM local_computers
+FROM runtime_local_computers
 WHERE computer_id=$1::text
 `
 
-func (q *Queries) GetAgentRuntimeLocalComputer(ctx context.Context, computerID string) (LocalComputer, error) {
+func (q *Queries) GetAgentRuntimeLocalComputer(ctx context.Context, computerID string) (RuntimeLocalComputer, error) {
 	row := q.db.QueryRow(ctx, getAgentRuntimeLocalComputer, computerID)
-	var i LocalComputer
+	var i RuntimeLocalComputer
 	err := row.Scan(
 		&i.ComputerID,
 		&i.DisplayName,
@@ -1735,7 +1735,7 @@ func (q *Queries) InsertAgentRuntimeInput(ctx context.Context, arg InsertAgentRu
 }
 
 const insertAgentRuntimeLocalComputer = `-- name: InsertAgentRuntimeLocalComputer :one
-INSERT INTO local_computers(
+INSERT INTO runtime_local_computers(
     computer_id,display_name,status,owner_tenant_id,owner_actor_id
 ) VALUES(
     $1::text,$2::text,'offline',
@@ -1751,14 +1751,14 @@ type InsertAgentRuntimeLocalComputerParams struct {
 	OwnerActorID  string `json:"owner_actor_id"`
 }
 
-func (q *Queries) InsertAgentRuntimeLocalComputer(ctx context.Context, arg InsertAgentRuntimeLocalComputerParams) (LocalComputer, error) {
+func (q *Queries) InsertAgentRuntimeLocalComputer(ctx context.Context, arg InsertAgentRuntimeLocalComputerParams) (RuntimeLocalComputer, error) {
 	row := q.db.QueryRow(ctx, insertAgentRuntimeLocalComputer,
 		arg.ComputerID,
 		arg.DisplayName,
 		arg.OwnerTenantID,
 		arg.OwnerActorID,
 	)
-	var i LocalComputer
+	var i RuntimeLocalComputer
 	err := row.Scan(
 		&i.ComputerID,
 		&i.DisplayName,
@@ -2430,20 +2430,20 @@ func (q *Queries) ListAgentRunnerPlacementsOnComputer(ctx context.Context, compu
 
 const listAgentRuntimeLocalComputers = `-- name: ListAgentRuntimeLocalComputers :many
 SELECT computer_id, display_name, status, credential_generation, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id
-FROM local_computers
+FROM runtime_local_computers
 WHERE status<>'removed'
 ORDER BY display_name,computer_id
 `
 
-func (q *Queries) ListAgentRuntimeLocalComputers(ctx context.Context) ([]LocalComputer, error) {
+func (q *Queries) ListAgentRuntimeLocalComputers(ctx context.Context) ([]RuntimeLocalComputer, error) {
 	rows, err := q.db.Query(ctx, listAgentRuntimeLocalComputers)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []LocalComputer{}
+	items := []RuntimeLocalComputer{}
 	for rows.Next() {
-		var i LocalComputer
+		var i RuntimeLocalComputer
 		if err := rows.Scan(
 			&i.ComputerID,
 			&i.DisplayName,
@@ -2673,7 +2673,7 @@ func (q *Queries) ListMaterializableAgentRuntimeRegistrationsAfter(ctx context.C
 
 const listOwnedLocalComputers = `-- name: ListOwnedLocalComputers :many
 SELECT computer_id, display_name, status, credential_generation, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id
-FROM local_computers
+FROM runtime_local_computers
 WHERE owner_tenant_id=$1::text
   AND owner_actor_id=$2::text
   AND status<>'removed'
@@ -2685,15 +2685,15 @@ type ListOwnedLocalComputersParams struct {
 	OwnerActorID string `json:"owner_actor_id"`
 }
 
-func (q *Queries) ListOwnedLocalComputers(ctx context.Context, arg ListOwnedLocalComputersParams) ([]LocalComputer, error) {
+func (q *Queries) ListOwnedLocalComputers(ctx context.Context, arg ListOwnedLocalComputersParams) ([]RuntimeLocalComputer, error) {
 	rows, err := q.db.Query(ctx, listOwnedLocalComputers, arg.TenantID, arg.OwnerActorID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []LocalComputer{}
+	items := []RuntimeLocalComputer{}
 	for rows.Next() {
-		var i LocalComputer
+		var i RuntimeLocalComputer
 		if err := rows.Scan(
 			&i.ComputerID,
 			&i.DisplayName,
@@ -3472,14 +3472,14 @@ func (q *Queries) LockAgentRunStatusRoom(ctx context.Context, roomID string) (bo
 
 const lockAgentRuntimeLocalComputer = `-- name: LockAgentRuntimeLocalComputer :one
 SELECT computer_id, display_name, status, credential_generation, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id
-FROM local_computers
+FROM runtime_local_computers
 WHERE computer_id=$1::text
 FOR UPDATE
 `
 
-func (q *Queries) LockAgentRuntimeLocalComputer(ctx context.Context, computerID string) (LocalComputer, error) {
+func (q *Queries) LockAgentRuntimeLocalComputer(ctx context.Context, computerID string) (RuntimeLocalComputer, error) {
 	row := q.db.QueryRow(ctx, lockAgentRuntimeLocalComputer, computerID)
-	var i LocalComputer
+	var i RuntimeLocalComputer
 	err := row.Scan(
 		&i.ComputerID,
 		&i.DisplayName,
@@ -3507,15 +3507,15 @@ func (q *Queries) LockAgentRuntimeLocalComputer(ctx context.Context, computerID 
 
 const lockAgentRuntimeLocalComputerByDaemonID = `-- name: LockAgentRuntimeLocalComputerByDaemonID :one
 SELECT computer_id, display_name, status, credential_generation, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id
-FROM local_computers
+FROM runtime_local_computers
 WHERE daemon_id=$1::text
   AND status<>'removed'
 FOR UPDATE
 `
 
-func (q *Queries) LockAgentRuntimeLocalComputerByDaemonID(ctx context.Context, daemonID string) (LocalComputer, error) {
+func (q *Queries) LockAgentRuntimeLocalComputerByDaemonID(ctx context.Context, daemonID string) (RuntimeLocalComputer, error) {
 	row := q.db.QueryRow(ctx, lockAgentRuntimeLocalComputerByDaemonID, daemonID)
-	var i LocalComputer
+	var i RuntimeLocalComputer
 	err := row.Scan(
 		&i.ComputerID,
 		&i.DisplayName,
@@ -3734,21 +3734,21 @@ func (q *Queries) LockOpenAgentExecutionContextsForAgentRevocation(ctx context.C
 }
 
 const markAgentRuntimeLocalComputersOffline = `-- name: MarkAgentRuntimeLocalComputersOffline :many
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET status='offline',active_operations=0,updated_at=clock_timestamp()
 WHERE status IN ('online','upgrade_required')
 RETURNING computer_id, display_name, status, credential_generation, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id
 `
 
-func (q *Queries) MarkAgentRuntimeLocalComputersOffline(ctx context.Context) ([]LocalComputer, error) {
+func (q *Queries) MarkAgentRuntimeLocalComputersOffline(ctx context.Context) ([]RuntimeLocalComputer, error) {
 	rows, err := q.db.Query(ctx, markAgentRuntimeLocalComputersOffline)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []LocalComputer{}
+	items := []RuntimeLocalComputer{}
 	for rows.Next() {
-		var i LocalComputer
+		var i RuntimeLocalComputer
 		if err := rows.Scan(
 			&i.ComputerID,
 			&i.DisplayName,
@@ -3795,7 +3795,7 @@ func (q *Queries) NextAgentLocalRunSteerOrdinal(ctx context.Context, runID strin
 }
 
 const observeAgentRuntimeLocalComputer = `-- name: ObserveAgentRuntimeLocalComputer :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET display_name=$1::text,
     status=$2::text,
     platform=COALESCE($3::text,platform),
@@ -3823,7 +3823,7 @@ type ObserveAgentRuntimeLocalComputerParams struct {
 	ComputerID         string             `json:"computer_id"`
 }
 
-func (q *Queries) ObserveAgentRuntimeLocalComputer(ctx context.Context, arg ObserveAgentRuntimeLocalComputerParams) (LocalComputer, error) {
+func (q *Queries) ObserveAgentRuntimeLocalComputer(ctx context.Context, arg ObserveAgentRuntimeLocalComputerParams) (RuntimeLocalComputer, error) {
 	row := q.db.QueryRow(ctx, observeAgentRuntimeLocalComputer,
 		arg.DisplayName,
 		arg.Status,
@@ -3836,7 +3836,7 @@ func (q *Queries) ObserveAgentRuntimeLocalComputer(ctx context.Context, arg Obse
 		arg.LastSeenAt,
 		arg.ComputerID,
 	)
-	var i LocalComputer
+	var i RuntimeLocalComputer
 	err := row.Scan(
 		&i.ComputerID,
 		&i.DisplayName,
@@ -3947,7 +3947,7 @@ func (q *Queries) RedeliverAgentRuntimeInput(ctx context.Context, arg RedeliverA
 }
 
 const removeAgentRuntimeLocalComputer = `-- name: RemoveAgentRuntimeLocalComputer :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET status='removed',removed_at=clock_timestamp(),updated_at=clock_timestamp(),
     daemon_id=NULL,daemon_public_key=NULL
 WHERE computer_id=$1::text AND status<>'removed'
@@ -3956,9 +3956,9 @@ RETURNING computer_id, display_name, status, credential_generation, active_opera
 
 // A Daemon keeps its identity key across pairings, so the removed Computer
 // frees its Daemon Identity for the next Computer that machine pairs as.
-func (q *Queries) RemoveAgentRuntimeLocalComputer(ctx context.Context, computerID string) (LocalComputer, error) {
+func (q *Queries) RemoveAgentRuntimeLocalComputer(ctx context.Context, computerID string) (RuntimeLocalComputer, error) {
 	row := q.db.QueryRow(ctx, removeAgentRuntimeLocalComputer, computerID)
-	var i LocalComputer
+	var i RuntimeLocalComputer
 	err := row.Scan(
 		&i.ComputerID,
 		&i.DisplayName,
@@ -4082,7 +4082,7 @@ func (q *Queries) RestoreAlterEgoContextsAfterTaskArchive(ctx context.Context, t
 }
 
 const rotateAgentRuntimeLocalComputerCredential = `-- name: RotateAgentRuntimeLocalComputerCredential :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET display_name=$1::text,
     credential_generation=credential_generation+1,
     status='offline',updated_at=clock_timestamp()
@@ -4097,9 +4097,9 @@ type RotateAgentRuntimeLocalComputerCredentialParams struct {
 	ComputerID  string `json:"computer_id"`
 }
 
-func (q *Queries) RotateAgentRuntimeLocalComputerCredential(ctx context.Context, arg RotateAgentRuntimeLocalComputerCredentialParams) (LocalComputer, error) {
+func (q *Queries) RotateAgentRuntimeLocalComputerCredential(ctx context.Context, arg RotateAgentRuntimeLocalComputerCredentialParams) (RuntimeLocalComputer, error) {
 	row := q.db.QueryRow(ctx, rotateAgentRuntimeLocalComputerCredential, arg.DisplayName, arg.ComputerID)
-	var i LocalComputer
+	var i RuntimeLocalComputer
 	err := row.Scan(
 		&i.ComputerID,
 		&i.DisplayName,
@@ -4538,7 +4538,7 @@ func (q *Queries) TerminateWorkRoomPerRoomMetaContext(ctx context.Context, conte
 }
 
 const touchAgentRuntimeLocalComputer = `-- name: TouchAgentRuntimeLocalComputer :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET status=$1::text,
     runtime_inventory=COALESCE($2::jsonb,runtime_inventory),
     runtime_diagnostics=COALESCE($3::jsonb,runtime_diagnostics),
@@ -4563,7 +4563,7 @@ type TouchAgentRuntimeLocalComputerParams struct {
 	ComputerID         string             `json:"computer_id"`
 }
 
-func (q *Queries) TouchAgentRuntimeLocalComputer(ctx context.Context, arg TouchAgentRuntimeLocalComputerParams) (LocalComputer, error) {
+func (q *Queries) TouchAgentRuntimeLocalComputer(ctx context.Context, arg TouchAgentRuntimeLocalComputerParams) (RuntimeLocalComputer, error) {
 	row := q.db.QueryRow(ctx, touchAgentRuntimeLocalComputer,
 		arg.Status,
 		arg.RuntimeInventory,
@@ -4574,7 +4574,7 @@ func (q *Queries) TouchAgentRuntimeLocalComputer(ctx context.Context, arg TouchA
 		arg.LastSeenAt,
 		arg.ComputerID,
 	)
-	var i LocalComputer
+	var i RuntimeLocalComputer
 	err := row.Scan(
 		&i.ComputerID,
 		&i.DisplayName,

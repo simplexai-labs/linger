@@ -1575,6 +1575,11 @@ components:
         platform:
           type: string
           enum: [darwin, linux, win32]
+        capacity:
+          type: integer
+          minimum: 0
+          deprecated: true
+          description: Accepted from older Agent Services and ignored by TeamHub.
         runtimes:
           type: array
           items:

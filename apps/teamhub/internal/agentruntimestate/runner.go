@@ -187,7 +187,7 @@ func (s *Service) TouchLocalComputer(ctx context.Context, input TouchLocalComput
 
 // localComputerChanged reports whether the Web's view of a Computer changed:
 // its connection state, Runtimes, workspaces, versions or load.
-func localComputerChanged(previous, current store.LocalComputer) (bool, error) {
+func localComputerChanged(previous, current store.RuntimeLocalComputer) (bool, error) {
 	for _, pair := range [][2][]byte{
 		{previous.RuntimeInventory, current.RuntimeInventory},
 		{previous.RuntimeDiagnostics, current.RuntimeDiagnostics},
@@ -590,7 +590,7 @@ func publishLocalComputerChanges(ctx context.Context, queries *store.Queries, ow
 	return nil
 }
 
-func localComputerFromRow(row store.LocalComputer) (LocalComputer, error) {
+func localComputerFromRow(row store.RuntimeLocalComputer) (LocalComputer, error) {
 	runtimes, err := activeRuntimeProjection(row.RuntimeInventory, false)
 	if err != nil {
 		return LocalComputer{}, err

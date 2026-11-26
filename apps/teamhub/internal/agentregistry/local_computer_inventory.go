@@ -70,7 +70,7 @@ func listOwnedLocalComputers(ctx context.Context, queries *store.Queries, tenant
 	return items, nil
 }
 
-func projectStoredLocalComputer(row store.LocalComputer, tenantID string, now time.Time) (httpapi.LocalComputer, bool, error) {
+func projectStoredLocalComputer(row store.RuntimeLocalComputer, tenantID string, now time.Time) (httpapi.LocalComputer, bool, error) {
 	var storedGrants []storedWorkspaceGrant
 	if err := json.Unmarshal(row.WorkspaceGrants, &storedGrants); err != nil {
 		return httpapi.LocalComputer{}, false, err

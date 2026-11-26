@@ -1066,7 +1066,7 @@ LIMIT 1;
 
 -- name: ListAgentRuntimeLocalComputers :many
 SELECT *
-FROM local_computers
+FROM runtime_local_computers
 WHERE status<>'removed'
 ORDER BY display_name,computer_id;
 
@@ -1088,7 +1088,7 @@ ORDER BY registration.agent_management_id;
 
 -- name: ListOwnedLocalComputers :many
 SELECT *
-FROM local_computers
+FROM runtime_local_computers
 WHERE owner_tenant_id=sqlc.arg(tenant_id)::text
   AND owner_actor_id=sqlc.arg(owner_actor_id)::text
   AND status<>'removed'
@@ -1096,17 +1096,17 @@ ORDER BY computer_id;
 
 -- name: GetAgentRuntimeLocalComputer :one
 SELECT *
-FROM local_computers
+FROM runtime_local_computers
 WHERE computer_id=sqlc.arg(computer_id)::text;
 
 -- name: LockAgentRuntimeLocalComputer :one
 SELECT *
-FROM local_computers
+FROM runtime_local_computers
 WHERE computer_id=sqlc.arg(computer_id)::text
 FOR UPDATE;
 
 -- name: InsertAgentRuntimeLocalComputer :one
-INSERT INTO local_computers(
+INSERT INTO runtime_local_computers(
     computer_id,display_name,status,owner_tenant_id,owner_actor_id
 ) VALUES(
     sqlc.arg(computer_id)::text,sqlc.arg(display_name)::text,'offline',
@@ -1115,7 +1115,7 @@ INSERT INTO local_computers(
 RETURNING *;
 
 -- name: RotateAgentRuntimeLocalComputerCredential :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET display_name=sqlc.arg(display_name)::text,
     credential_generation=credential_generation+1,
     status='offline',updated_at=clock_timestamp()
@@ -1125,7 +1125,7 @@ WHERE computer_id=sqlc.arg(computer_id)::text
 RETURNING *;
 
 -- name: ObserveAgentRuntimeLocalComputer :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET display_name=sqlc.arg(display_name)::text,
     status=sqlc.arg(status)::text,
     platform=COALESCE(sqlc.narg(platform)::text,platform),
@@ -1140,7 +1140,7 @@ WHERE computer_id=sqlc.arg(computer_id)::text AND status<>'removed'
 RETURNING *;
 
 -- name: TouchAgentRuntimeLocalComputer :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET status=sqlc.arg(status)::text,
     runtime_inventory=COALESCE(sqlc.narg(runtime_inventory)::jsonb,runtime_inventory),
     runtime_diagnostics=COALESCE(sqlc.narg(runtime_diagnostics)::jsonb,runtime_diagnostics),
@@ -1154,7 +1154,7 @@ WHERE computer_id=sqlc.arg(computer_id)::text AND status<>'removed'
 RETURNING *;
 
 -- name: MarkAgentRuntimeLocalComputersOffline :many
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET status='offline',active_operations=0,updated_at=clock_timestamp()
 WHERE status IN ('online','upgrade_required')
 RETURNING *;
@@ -1162,7 +1162,7 @@ RETURNING *;
 -- name: RemoveAgentRuntimeLocalComputer :one
 -- A Daemon keeps its identity key across pairings, so the removed Computer
 -- frees its Daemon Identity for the next Computer that machine pairs as.
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET status='removed',removed_at=clock_timestamp(),updated_at=clock_timestamp(),
     daemon_id=NULL,daemon_public_key=NULL
 WHERE computer_id=sqlc.arg(computer_id)::text AND status<>'removed'
@@ -1173,7 +1173,7 @@ DELETE FROM local_computer_enrollments
 WHERE requested_computer_id=sqlc.arg(computer_id)::text;
 
 -- name: BindAgentRuntimeLocalComputerDaemonIdentity :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET daemon_id=sqlc.arg(daemon_id)::text,
     daemon_public_key=sqlc.arg(daemon_public_key)::bytea,
     daemon_identity_version=sqlc.arg(identity_version)::bigint,
@@ -1192,7 +1192,7 @@ RETURNING *;
 
 -- name: LockAgentRuntimeLocalComputerByDaemonID :one
 SELECT *
-FROM local_computers
+FROM runtime_local_computers
 WHERE daemon_id=sqlc.arg(daemon_id)::text
   AND status<>'removed'
 FOR UPDATE;

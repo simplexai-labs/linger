@@ -9,8 +9,8 @@ import (
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
 
-func storedLocalComputer(status string, lastSeen time.Time) store.LocalComputer {
-	return store.LocalComputer{
+func storedLocalComputer(status string, lastSeen time.Time) store.RuntimeLocalComputer {
+	return store.RuntimeLocalComputer{
 		ComputerID: "computer_1", DisplayName: "Mac", Status: status, ActiveOperations: 1,
 		LastSeenAt:         pgtype.Timestamptz{Time: lastSeen, Valid: true},
 		DaemonVersion:      pgtype.Text{String: "0.40.0", Valid: true},
@@ -60,7 +60,7 @@ func TestProjectStoredLocalComputerReadsTheRecordedInventory(t *testing.T) {
 
 func TestProjectStoredLocalComputerKeepsRuntimesOfAnOfflineComputer(t *testing.T) {
 	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
-	for name, row := range map[string]store.LocalComputer{
+	for name, row := range map[string]store.RuntimeLocalComputer{
 		"disconnected":     storedLocalComputer("offline", now.Add(-time.Hour)),
 		"stale heartbeat":  storedLocalComputer("online", now.Add(-2*time.Minute)),
 		"upgrade required": storedLocalComputer("upgrade_required", now),

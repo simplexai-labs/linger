@@ -3205,6 +3205,10 @@ type CompleteAgentSteerRequestOutcome string
 
 // ConnectAgentRuntimeLocalComputerRequest defines model for ConnectAgentRuntimeLocalComputerRequest.
 type ConnectAgentRuntimeLocalComputerRequest struct {
+	// Capacity Accepted from older Agent Services and ignored by TeamHub.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Capacity *int `json:"capacity,omitempty"`
+
 	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	ComputerId           Id                           `json:"computer_id"`
 	CredentialGeneration AgentRuntimeInt64            `json:"credential_generation"`

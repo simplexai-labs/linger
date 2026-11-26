@@ -218,12 +218,12 @@ func TestLocalComputerInventoryEnrollmentAndCLICredentialExchange(t *testing.T) 
 	// that row, online or not.
 	if _, err := pool.Exec(t.Context(), `
 UPDATE local_computers
-SET status='online',last_seen_at=now(),platform='darwin',daemon_version='0.40.0',recommended_version='0.41.0',
+SET status='online',last_seen_at=$3,platform='darwin',daemon_version='0.40.0',recommended_version='0.41.0',
     active_operations=1,runtime_inventory='["claude"]',
     workspace_grants=jsonb_build_array(jsonb_build_object('grant_id','grant_linger','tenant_id',$2::text,'scope','owner','label','Linger','mode','workspace-write')),
     runtime_diagnostics=jsonb_build_array(jsonb_build_object('type','claude','status','ready','protocol','stream-json','checked_at',to_jsonb(now()),'version','1.2.3',
         'models',jsonb_build_array(jsonb_build_object('id','claude-sonnet','label','Claude Sonnet','allowed_reasoning_effort','[]'::jsonb))))
-WHERE computer_id=$1`, computerID, acmeTenant); err != nil {
+WHERE computer_id=$1`, computerID, acmeTenant, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	status, _, body = env.request(alice, http.MethodGet, "/v0/tenants/"+acmeTenant+"/local-computers", nil, "")
@@ -412,9 +412,19 @@ func TestLocalComputerEnrollmentDaemonIdentityHTTP(t *testing.T) {
 			"daemon_version":        "0.51.0",
 		}
 	}
-	status, body := agentRuntimeStateRequest(t, application.Handler(), http.MethodPost, "/v0/agent-runtime/local-computers/connect", teamHubInternalToken, connectBody(computerA, "actor_acme_alice", "0"))
+	// During a rolling upgrade, an old TeamHub can still read and write its limit.
+	if _, err := pool.Exec(t.Context(), "UPDATE local_computers SET capacity=5 WHERE computer_id=$1", computerA); err != nil {
+		t.Fatal(err)
+	}
+	legacyConnect := connectBody(computerA, "actor_acme_alice", "0")
+	legacyConnect["capacity"] = 2
+	status, body := agentRuntimeStateRequest(t, application.Handler(), http.MethodPost, "/v0/agent-runtime/local-computers/connect", teamHubInternalToken, legacyConnect)
 	if status != http.StatusOK {
 		t.Fatalf("connect Computer A status=%d body=%s", status, body)
+	}
+	var storedLimit int
+	if err := pool.QueryRow(t.Context(), "SELECT capacity FROM local_computers WHERE computer_id=$1", computerA).Scan(&storedLimit); err != nil || storedLimit != 5 {
+		t.Fatalf("legacy limit after reconnect=%d err=%v", storedLimit, err)
 	}
 
 	status, _, removeBody := env.request(alice, http.MethodDelete, "/v0/tenants/"+acmeTenant+"/local-computers/"+computerA, nil, "")
