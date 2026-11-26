@@ -235,9 +235,26 @@ func (t *piTurn) outcomeFor(began time.Time, status, failure string) Outcome {
 // abortQueue clears queued steering before aborting and reports whether Pi
 // accepted the abort while the turn was still pending.
 func (t *piTurn) abortQueue() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), piAbortBudget)
+	deadline := time.Now().Add(piAbortBudget)
+	budget, endBudget := context.WithDeadline(context.Background(), deadline)
+	defer endBudget()
+	_, _ = t.proc.call(budget, "clear_queue", nil, nil)
+	if budget.Err() != nil {
+		return false
+	}
+	// An aborted assistant message may precede a slow extension's settle hook.
+	// Keep the RPC open for a bounded grace period to receive Pi's actual verdict.
+	ctx, cancel := context.WithDeadline(context.Background(), deadline.Add(piExitWait))
 	defer cancel()
-	_, _ = t.proc.call(ctx, "clear_queue", nil, nil)
+	stopTimer := context.AfterFunc(budget, func() {
+		t.mu.Lock()
+		aborted := t.aborted
+		t.mu.Unlock()
+		if !aborted {
+			cancel()
+		}
+	})
+	defer stopTimer()
 	_, err := t.proc.call(ctx, "abort", nil, func() bool {
 		t.mu.Lock()
 		defer t.mu.Unlock()

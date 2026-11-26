@@ -90,7 +90,9 @@
 
 - A Pi assistant message with `stopReason: "aborted"` interrupts the turn.
   A scheduler cancellation resumes the same Run only after the native turn
-  stops for that cancellation and cleanup is confirmed. An independent Pi
+  stops for that cancellation and cleanup is confirmed. If Pi reports an abort
+  while the cancellation RPC is pending, the Daemon gives Pi a bounded grace
+  period to report whether the cancellation stopped that turn. An independent Pi
   abort ends the Run as interrupted, including when a yield arrives late.
 
 - Default tests use deterministic providers and real fixture child processes;

@@ -345,6 +345,29 @@ func TestPiSlowAbortExitsOnStdinClose(t *testing.T) {
 	}
 }
 
+func TestPiDelayedAbortSettlement(t *testing.T) {
+	shortenForTest(t, &piAbortBudget, 200*time.Millisecond)
+	shortenForTest(t, &piExitWait, time.Second)
+	for _, tc := range []struct{ mode, status string }{
+		{"slow-settle", piStatusCancelled},
+		{"slow-idle-settle", statusAborted},
+		{"missing-settle", statusAborted},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			h := piNewHarness(t, tc.mode, nil)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			run := h.start(ctx, "go", RunSpec{})
+			piWaitRunning(t, run)
+			cancel()
+			_, out := piCollect(t, run)
+			if out.Status != tc.status || !out.ExitConfirmed {
+				t.Fatalf("outcome = %+v", out)
+			}
+		})
+	}
+}
+
 func TestPiCancelClearsQueueAndReapsChildren(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	commands := filepath.Join(t.TempDir(), "commands")

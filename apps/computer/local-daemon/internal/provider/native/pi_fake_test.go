@@ -234,9 +234,15 @@ func (f *piFakeProcess) handle(id, kind, message, level string) int {
 			return -1
 		}
 		f.assistantEnd("", "aborted", "Request was aborted")
+		if f.mode == "missing-settle" {
+			return -1
+		}
+		if f.mode == "slow-settle" || f.mode == "slow-idle-settle" {
+			time.Sleep(500 * time.Millisecond)
+		}
 		// Pi also accepts abort on an idle session. Its settle identifies
 		// whether the command interrupted the active turn.
-		f.send(map[string]any{"type": "agent_settled", "aborted": f.mode != "abort-after-settle"})
+		f.send(map[string]any{"type": "agent_settled", "aborted": f.mode != "abort-after-settle" && f.mode != "slow-idle-settle"})
 		if f.mode == "abort-rejected" {
 			f.send(map[string]any{"type": "response", "command": kind, "id": id, "success": false, "error": "turn already ended"})
 			return -1
@@ -250,7 +256,8 @@ func (f *piFakeProcess) handle(id, kind, message, level string) int {
 
 func (f *piFakeProcess) act() int {
 	switch f.mode {
-	case "steer", "steer-race", "steer-unconsumed", "complete-on-abort", "abort-during-clear", "abort-rejected", "abort-after-settle", "exit-during-clear", "slow-abort":
+	case "steer", "steer-race", "steer-unconsumed", "complete-on-abort", "abort-during-clear", "abort-rejected",
+		"abort-after-settle", "exit-during-clear", "slow-abort", "slow-settle", "slow-idle-settle", "missing-settle":
 	case "model-aborted", "model-aborted-exit", "model-aborted-hold", "model-aborted-crash":
 		f.assistantEnd("", "aborted", "Request was aborted")
 		if f.mode == "model-aborted-crash" {
