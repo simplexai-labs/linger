@@ -397,7 +397,8 @@ Gateway and runs Agents. The daemon exits with the app.
   `linger-diagnostics-<time>.zip` in Downloads) for the setup page's failed
   step, the start failure page and the tray; the Web client's Settings runs
   the same save through the preload's `diagnostics.save`. The zip holds the
-  Desktop logs and `config.json`, the installer job JSON and logs, the
+  Desktop logs and `config.json`, the installer job JSON and logs (including
+  the last two `installer --resume` runs' `resume.log`), the
   instance JSON and service logs under each install home. Credential files (`gateway.json`, `caller.key`,
   `control.key`, `credential.json`, `launch.html`, `*.env`, `*.input.json`,
   keys, cookies, databases) never go in, every saved voice key is replaced

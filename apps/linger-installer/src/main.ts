@@ -151,6 +151,8 @@ async function resume(options: ReturnType<typeof parseInstallerArguments>) {
   // Headless restart for the desktop client: progress on stderr, the outcome
   // as one JSON line on stdout.
   const { resumeSourceInstance } = await import("./server/resume.js");
+  const { openResumeLog } = await import("./server/resume-log.js");
+  const resumeLog = await openResumeLog(options.home);
   const controller = new AbortController();
   process.once("SIGTERM", () => controller.abort());
   let runtimeDescriptors: RuntimeDescriptor[] | undefined;
@@ -163,13 +165,20 @@ async function resume(options: ReturnType<typeof parseInstallerArguments>) {
       runtimeDescriptors = descriptors;
     },
     signal: controller.signal,
-    log: (message) => process.stderr.write(message.replace(/\n?$/, "\n")),
+    log: (message) => {
+      process.stderr.write(message.replace(/\n?$/, "\n"));
+      resumeLog.write(message);
+    },
   }).catch((error: unknown) => ({
     code: 1,
     state: "failed",
     message: error instanceof Error ? error.message : String(error),
     details: undefined,
   }));
+  resumeLog.write(
+    `outcome code=${outcome.code} state=${outcome.state}: ${outcome.message}`,
+  );
+  resumeLog.close();
   // The desktop's own Computer takes the runtime and localmodels tool paths
   // from every resume, so an install from before it knew one gains it.
   // The desktop does not read resume stderr, so timings ride in the outcome.

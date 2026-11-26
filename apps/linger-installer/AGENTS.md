@@ -48,7 +48,11 @@ the running login. A failed login carries its `reason`; a timeout stays
 
 `--resume` (native source with `--instance`) starts an installed instance's
 stopped services headless, reusing its saved choices; the desktop client runs it
-after a reboot and reads the outcome from the single JSON line on stdout. Cold
+after a reboot and reads the outcome from the single JSON line on stdout. The
+desktop does not read its stderr (detached services could hold a pipe open), so
+every `--resume` also writes its progress lines and outcome, timestamped,
+redacted and capped at 512 KiB, to `<home>/installer/resume.log`, keeping the
+previous run as `resume.1.log`; Save Diagnostics collects both. Cold
 resumes on the same checkout pass `resume: true` (a resume onto another
 checkout omits it and prepares the runtime in full, sequentially) so an already-installed runtime
 is reused after one status check, runtime/foundation preparation overlaps

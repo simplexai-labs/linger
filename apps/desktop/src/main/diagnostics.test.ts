@@ -189,6 +189,11 @@ describe("collectDiagnostics", () => {
       '{"apiKey":"sk-1"}',
     );
     write(
+      path.join(home, "installer", "resume.log"),
+      "2026-11-24T14:26:47.000Z localmodels stack up exited with code 2\n",
+    );
+    write(path.join(home, "installer", "resume.1.log"), "earlier resume\n");
+    write(
       path.join(home, "instances", "desktop", "instance.json"),
       JSON.stringify({ mode: "source-native" }),
     );
@@ -223,6 +228,8 @@ describe("collectDiagnostics", () => {
       "desktop/logs/computer-daemon.log",
       "desktop/logs/main.log",
       "linger-home/installer/jobs/job_1.json",
+      "linger-home/installer/resume.1.log",
+      "linger-home/installer/resume.log",
       "linger-home/instances/desktop/instance.json",
       "linger-home/instances/desktop/native/logs/teamhub.log",
       "summary.json",
