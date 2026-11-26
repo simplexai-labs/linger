@@ -4719,7 +4719,7 @@ export const runnerGatewayEnvelopeSchema = {
     },
     SessionCompact: {
       description:
-        "Compacts the native session of the process parked for this Context with the Runtime's own compaction. It never starts a process; without a parked process the answer is no_process.",
+        "Compacts the native session of the process parked for this Context with the Runtime's own compaction. It never starts a process; without a parked process the answer is no_process. Pi compaction is sent only to a Computer release that decodes it.",
       type: "object",
       additionalProperties: false,
       required: [
@@ -4757,7 +4757,7 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/Id",
         },
         runtime_type: {
-          enum: ["codex", "claude"],
+          enum: ["codex", "claude", "pi"],
         },
         execution_context_key: {
           $ref: "#/$defs/ExecutionContextKey",

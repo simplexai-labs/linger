@@ -198,17 +198,102 @@ describe("RunnerGateway session compaction", () => {
     running.release({ outcome: "lost" });
   });
 
-  it("never offers compaction for Pi or a Runtime that is not ready", async () => {
-    const { gateway, connection } = await connect();
+  it("gates Pi compaction to Computer 0.65.0 or later and rejects unready or unsupported Runtimes", async () => {
+    const oldComputer = await connect({
+      ...hello(),
+      daemon_version: "0.64.0",
+      runtimes: ["codex", "claude", "pi", "antigravity"],
+      runtime_diagnostics: runtimeDiagnostics({
+        ready: ["codex", "claude", "pi", "antigravity"],
+        link: "api",
+      }),
+    });
     try {
-      expect(gateway.supportsSessionCompaction("runner-local", "pi")).toBe(
-        false,
-      );
-      expect(gateway.supportsSessionCompaction("runner-local", "claude")).toBe(
-        false,
-      );
+      expect(
+        oldComputer.gateway.supportsSessionCompaction("runner-local", "codex"),
+      ).toBe(true);
+      expect(
+        oldComputer.gateway.supportsSessionCompaction("runner-local", "claude"),
+      ).toBe(true);
+      expect(
+        oldComputer.gateway.supportsSessionCompaction("runner-local", "pi"),
+      ).toBe(false);
+      expect(
+        oldComputer.gateway.supportsSessionCompaction(
+          "runner-local",
+          "antigravity",
+        ),
+      ).toBe(false);
+      await expect(
+        oldComputer.gateway.compactParkedSession(target, {
+          runtimeType: "pi",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({ outcome: "no_process" });
+      expect(
+        oldComputer.peer.sent.some(
+          (frame) =>
+            frame.type === "execute" && frame.kind === "session_compact",
+        ),
+      ).toBe(false);
     } finally {
-      connection.disconnect();
+      oldComputer.connection.disconnect();
+    }
+
+    for (const daemonVersion of ["0.65.0", "dev"] as const) {
+      const current = await connect({
+        ...hello(),
+        daemon_version: daemonVersion,
+        runtimes: ["codex", "pi"],
+        runtime_diagnostics: runtimeDiagnostics({
+          ready: ["codex", "pi"],
+          link: "api",
+        }),
+      });
+      try {
+        expect(
+          current.gateway.supportsSessionCompaction("runner-local", "pi"),
+        ).toBe(true);
+        expect(
+          current.gateway.supportsSessionCompaction("runner-local", "claude"),
+        ).toBe(false);
+        const pending = current.gateway.compactParkedSession(target, {
+          runtimeType: "pi",
+          instructions: "Keep open questions",
+          signal: new AbortController().signal,
+        });
+        const command = await sentCompaction(current.peer);
+        expect(command).toMatchObject({
+          type: "execute",
+          kind: "session_compact",
+          runtime_type: "pi",
+          instructions: "Keep open questions",
+        });
+        await compacted(current.connection, command);
+        await expect(pending).resolves.toMatchObject({
+          outcome: "compacted",
+          pre_tokens: 120_000,
+        });
+      } finally {
+        current.connection.disconnect();
+      }
+    }
+
+    const unreadyPi = await connect({
+      ...hello(),
+      daemon_version: "0.65.0",
+      runtimes: ["codex"],
+      runtime_diagnostics: runtimeDiagnostics({
+        ready: ["codex"],
+        link: "api",
+      }),
+    });
+    try {
+      expect(
+        unreadyPi.gateway.supportsSessionCompaction("runner-local", "pi"),
+      ).toBe(false);
+    } finally {
+      unreadyPi.connection.disconnect();
     }
   });
 

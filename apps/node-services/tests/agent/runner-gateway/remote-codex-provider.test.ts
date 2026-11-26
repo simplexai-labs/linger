@@ -1760,6 +1760,12 @@ describe("RemoteCodexProvider session compaction", () => {
         { signal: signal() },
       ),
     ).resolves.toEqual({ status: "nothing_to_compact" });
+    await expect(
+      createProvider(dispatcher, "pi").compactSession!(
+        { provider: "pi", sessionId: "s-pi", lingerMaterialized: false },
+        { signal: signal() },
+      ),
+    ).resolves.toEqual({ status: "nothing_to_compact" });
     expect(dispatcher.compactions).toEqual([]);
   });
 
@@ -1780,9 +1786,33 @@ describe("RemoteCodexProvider session compaction", () => {
     expect(dispatcher.compactions).toHaveLength(1);
   });
 
-  it("offers compaction only for Codex and Claude on a Gateway that supports it", () => {
+  it("offers compaction for Codex, Claude, and Pi on a Gateway that supports it", async () => {
+    const dispatcher = new CompactingDispatcher();
+    dispatcher.outcome = { outcome: "compacted", pre_tokens: 32_100 };
+    const piProvider = createProvider(dispatcher, "pi");
+    expect(piProvider.compactSession).toBeTypeOf("function");
+    await expect(
+      piProvider.compactSession!(
+        { provider: "pi", sessionId: "session-pi-1", lingerMaterialized: true },
+        { instructions: "Keep decisions", signal: signal() },
+      ),
+    ).resolves.toEqual({ status: "compacted", preTokens: 32_100 });
+    expect(dispatcher.compactions).toEqual([
+      {
+        target: {
+          runnerId: "runner-local",
+          agentId: "agent-reviewer",
+          executionContextKey: contextScope.executionContextKey,
+        },
+        options: {
+          runtimeType: "pi",
+          instructions: "Keep decisions",
+          signal: expect.any(AbortSignal),
+        },
+      },
+    ]);
     expect(
-      createProvider(new CompactingDispatcher(), "pi").compactSession,
+      createProvider(new CompactingDispatcher(), "antigravity").compactSession,
     ).toBe(undefined);
     expect(createProvider(new ScriptedDispatcher()).compactSession).toBe(
       undefined,
@@ -1892,7 +1922,7 @@ describe("RemoteCodexProvider session compaction", () => {
 
 const createProvider = (
   dispatcher: RunnerOperationDispatcher,
-  runtimeType: "codex" | "claude" | "pi" = "codex",
+  runtimeType: "codex" | "claude" | "pi" | "antigravity" = "codex",
 ) =>
   new RemoteCodexProvider({
     dispatcher,

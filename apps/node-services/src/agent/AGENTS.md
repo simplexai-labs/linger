@@ -255,6 +255,11 @@ take precedence.
   Runtime Session with `recovery_reason`, and reactivates in a fresh native
   session so the Run resumes with inlined recent messages and (on Computer
   0.63.0+) an exported `./playground/.previous-context.md` transcript.
+- Pi idle session compaction (`execute` `session_compact` with
+  `runtime_type: "pi"`) goes only to Computer 0.65.0 or later
+  (`FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION`), because older Computers
+  reject `"pi"` in `SessionCompact.runtime_type` and close the connection.
+  Codex and Claude session compaction stay enabled regardless of that gate.
 - Default unit, integration, and fixture smoke tests use deterministic adapters
   and do not call a live model provider. Explicitly named live suites such as
   `smoke:local-runner:live` may use an authenticated provider and must remain

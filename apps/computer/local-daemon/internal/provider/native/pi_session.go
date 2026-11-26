@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
@@ -112,27 +113,48 @@ func piLockSession(dir string) (*os.File, error) {
 	return file, nil
 }
 
-// piValidateSession requires a transcript of this identity whose header
-// names the same working directory as contextDir.
-func piValidateSession(sessionDir, id, contextDir string) error {
+// piFindSessionFile returns the latest validated transcript file for id in
+// sessionDir whose header names the same working directory as contextDir.
+func piFindSessionFile(sessionDir, id, contextDir string) (string, error) {
 	want, err := filepath.EvalSymlinks(contextDir)
 	if err != nil || contextDir == "" {
-		return errPiSessionMismatch
+		return "", errPiSessionMismatch
 	}
 	entries, err := os.ReadDir(sessionDir)
 	if err != nil {
-		return errPiSessionMismatch
+		return "", errPiSessionMismatch
 	}
 	suffix := "_" + id + ".jsonl"
+	var bestPath string
+	var bestMod time.Time
 	for _, entry := range entries {
 		if entry.Type()&os.ModeSymlink != 0 || !strings.HasSuffix(entry.Name(), suffix) {
 			continue
 		}
-		if piSessionHeaderMatches(filepath.Join(sessionDir, entry.Name()), id, want) {
-			return nil
+		path := filepath.Join(sessionDir, entry.Name())
+		if !piSessionHeaderMatches(path, id, want) {
+			continue
+		}
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		if bestPath == "" || info.ModTime().After(bestMod) || (info.ModTime().Equal(bestMod) && path > bestPath) {
+			bestPath = path
+			bestMod = info.ModTime()
 		}
 	}
-	return errPiSessionMismatch
+	if bestPath == "" {
+		return "", errPiSessionMismatch
+	}
+	return bestPath, nil
+}
+
+// piValidateSession requires a transcript of this identity whose header
+// names the same working directory as contextDir.
+func piValidateSession(sessionDir, id, contextDir string) error {
+	_, err := piFindSessionFile(sessionDir, id, contextDir)
+	return err
 }
 
 func piSessionHeaderMatches(path, id, resolvedDir string) bool {

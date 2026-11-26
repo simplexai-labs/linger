@@ -35,7 +35,7 @@ type sessionCompact struct {
 
 // parkedSession is a parked native process taken out for one compaction.
 type parkedSession interface {
-	Compact(ctx context.Context, instructions string) native.CompactResult
+	CompactWithPrepare(ctx context.Context, instructions string, prepare func(ctx context.Context, modelID string) error) native.CompactResult
 }
 
 func takeNativeParkedSession(runtimeType, contextKey string) parkedSession {
@@ -129,7 +129,7 @@ func (d *Daemon) sessionCompactBlocked(command protocol.Command) string {
 
 func (d *Daemon) runSessionCompact(ctx context.Context, stream transport.Stream, command protocol.Command, instructions string, session parkedSession, entry *sessionCompact) {
 	slog.Info("runner.session.compact", "phase", "started", "compact_id", entry.id, "execution_context_key", entry.contextKey)
-	result := session.Compact(ctx, instructions)
+	result := d.executeSessionCompact(ctx, command.RuntimeType, instructions, session)
 	entry.cancel()
 	d.sessionCompactMu.Lock()
 	if d.sessionCompacts[entry.contextKey] == entry {
@@ -140,6 +140,23 @@ func (d *Daemon) runSessionCompact(ctx context.Context, stream transport.Stream,
 	if err := d.sendSessionCompacted(context.WithoutCancel(ctx), stream, command, entry.id, result, time.Since(entry.startedAt)); err != nil {
 		slog.Debug("runner.session.compact receipt unavailable", "compact_id", entry.id)
 	}
+}
+
+// executeSessionCompact compacts session. For Pi, model gateway and local model
+// readiness run off admissionMu only after local pre-flight checks confirm
+// compaction will proceed.
+func (d *Daemon) executeSessionCompact(ctx context.Context, runtimeType, instructions string, session parkedSession) native.CompactResult {
+	var prepare func(ctx context.Context, modelID string) error
+	if runtimeType == "pi" {
+		prepare = func(prepareCtx context.Context, modelID string) error {
+			_, err := d.ensureModelGateway(prepareCtx, "pi", false)
+			if err == nil && modelID != "" {
+				_, err = d.ensureLocalModel(prepareCtx, "pi", modelID)
+			}
+			return err
+		}
+	}
+	return session.CompactWithPrepare(ctx, instructions, prepare)
 }
 
 func (d *Daemon) sessionCompactInFlight(contextKey string) bool {

@@ -212,3 +212,14 @@ the requested mode, such as Pi workspace calls) only after `runner.welcome`'s
 (`FIRST_MODEL_INVOKE_OUTCOMES_COMPUTER_VERSION`, `0.60.0`); otherwise the
 Daemon downgrades them to `failed` and `runtime_unavailable` for older Agent
 Services.
+
+## Session compaction flow
+
+`execute` with kind `session_compact` compacts the native session of the
+process already parked for an idle Context (`codex`, `claude`, or `pi`), and
+answers `executed` with kind `session_compact` (`compacted`,
+`nothing_to_compact`, `no_process`, `canceled`, or `failed`). The Daemon never
+spawns a process for compaction. Agent Service sends `runtime_type: "pi"` only
+to Computer `0.65.0` or later (`FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION`),
+because older Computers reject `"pi"` in `SessionCompact.runtime_type` and
+close the connection.

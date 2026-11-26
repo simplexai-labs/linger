@@ -84,6 +84,11 @@ export const FIRST_PREVIOUS_SESSION_COMPUTER_VERSION = "0.63.0";
 // welcome feature and gates per-model `concurrency_probing` behind it.
 export const FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION = "0.64.0";
 
+// The first release that decodes `"pi"` in `SessionCompact.runtime_type`.
+// Older Computers reject `"pi"` in `SessionCompact.runtime_type` and close the
+// connection, so Pi session compaction is gated to this release and later.
+export const FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION = "0.65.0";
+
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 /** Source builds report `dev` and follow the current wire contract. */

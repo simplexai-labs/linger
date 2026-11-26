@@ -1203,6 +1203,26 @@ command. A Run without review gets an allow verdict, because a resident Pi
 process may serve both kinds of Run. A missing or unreadable verdict blocks the
 call. The Daemon cancels any other extension dialog.
 
+Idle session compaction (`execute` `session_compact`) compacts a parked Pi
+process in place through Pi's native `compact` RPC (forwarding optional
+`customInstructions` and reporting `tokensBefore` as `pre_tokens`). Local
+pre-flight checks run first: the Daemon verifies idle state and transcript
+validity, resolves Pi's effective `compaction.keepRecentTokens` from the
+`<agentDir>/settings.json` and `modelOverrides` snapshotted when the Pi process
+launched (managed Pi starts with `--no-approve`, so Pi ignores project
+`<cwd>/.pi/settings.json`), and structurally evaluates Pi's active branch,
+`context_edit` records, and cut-point rules so empty, post-compaction
+metadata-only, or under-budget sessions return `nothing_to_compact` without
+matching error prose and without triggering gateway or local model loads. Only
+when compaction will proceed does the Daemon check model gateway and local
+model readiness off the admission lock using the active model observed from
+`get_state`. Clean compaction parks the process back for reuse; a clean
+JSON-RPC rejection probes idle state and parks a still-healthy process back
+when its fence still admits it; transport errors, unhealthy probes, and
+cancellation (which sends a bounded `abort` RPC) retire the process before
+returning; and a pre-RPC gateway or local model failure parks the untouched
+process back when its fence still admits it.
+
 The compatibility probe of the pinned Playwright catalog is
 `TestPinnedPlaywrightCatalog`; it needs `LINGER_PLAYWRIGHT_COMPAT_ENTRY` and
 `LINGER_PLAYWRIGHT_COMPAT_NODE`. The macOS read-only probe is

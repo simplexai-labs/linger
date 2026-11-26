@@ -13,22 +13,24 @@ import (
 type CompactResult struct {
 	// Outcome is compacted, nothing_to_compact, canceled or failed.
 	Outcome string
-	// PreTokens is the context size Claude reported before it compacted.
+	// PreTokens is the context size the Runtime reported before it compacted.
 	PreTokens *int64
 	Reason    string
 }
 
-// ParkedSession is a parked Codex or Claude process taken out of its
+// ParkedSession is a parked Codex, Claude, or Pi process taken out of its
 // resident table for one compaction, so no Run can take it meanwhile.
 type ParkedSession struct {
 	codex  *codexProcess
 	claude *claudeProcess
+	pi     *piProcess
 	fence  releaseFence
 	logger *slog.Logger
 }
 
 // TakeParkedSession takes the process parked for an execution Context, or
-// returns nil when none is. Compact must then be called exactly once.
+// returns nil when none is. CompactWithPrepare must then be called exactly
+// once.
 func TakeParkedSession(runtimeType, contextKey string) *ParkedSession {
 	session := &ParkedSession{logger: slog.Default().With("execution_context_key", contextKey)}
 	var taken bool
@@ -37,6 +39,8 @@ func TakeParkedSession(runtimeType, contextKey string) *ParkedSession {
 		session.codex, session.fence, taken = codexResidents.takeContext(contextKey, session.logger)
 	case "claude":
 		session.claude, session.fence, taken = claudeResidents.takeContext(contextKey, session.logger)
+	case "pi":
+		session.pi, session.fence, taken = piResidents.takeContext(contextKey, session.logger)
 	}
 	if !taken {
 		return nil
@@ -44,10 +48,19 @@ func TakeParkedSession(runtimeType, contextKey string) *ParkedSession {
 	return session
 }
 
-// Compact runs the Runtime's own compaction of the session. A turn that ends
-// cleanly parks the process back unchanged, so the next Run reuses it; any
-// other end retires the process before Compact returns.
-func (s *ParkedSession) Compact(ctx context.Context, instructions string) CompactResult {
+// CompactWithPrepare runs the Runtime's own compaction of the session. A turn
+// that ends cleanly parks the process back unchanged, so the next Run reuses
+// it. The prepare hook applies to Pi compaction only: it runs after local
+// pre-flight checks confirm the session can compact, receiving the active model
+// observed from get_state (or launch), before the compact RPC is sent.
+func (s *ParkedSession) CompactWithPrepare(ctx context.Context, instructions string, prepare func(ctx context.Context, modelID string) error) CompactResult {
+	if s.pi != nil {
+		if ctx.Err() != nil {
+			s.retirePi()
+			return compactContextResult(ctx)
+		}
+		return s.compactPi(ctx, instructions, prepare)
+	}
 	var status, reason string
 	var compactions int64
 	var preTokens *int64

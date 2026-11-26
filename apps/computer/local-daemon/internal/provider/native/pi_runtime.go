@@ -184,6 +184,7 @@ func (p *piRuntime) reuse(ctx context.Context, proc *piProcess, plan piLaunchPla
 	proc.mu.Lock()
 	proc.prestartCreated = false
 	proc.mu.Unlock()
+	proc.setModel(plan.spec.Model)
 	fail := func(err error) (*Run, bool, error) {
 		cancel()
 		piResidents.retire(proc)
@@ -283,8 +284,10 @@ func (p *piRuntime) launchProcess(plan piLaunchPlan, lock *os.File) (*piProcess,
 	launched = true
 	proc.cancel = procCancel
 	proc.sessionID, proc.sessionDir, proc.contextDir = plan.sessionID, plan.sessionDir, spec.Dir
+	proc.compactionSettings = piLoadCompactionSettings(piAgentDirFromEnv(childEnvironment(p.profile.Env)))
 	proc.shape, proc.lock, proc.mcp, proc.front, proc.releaseTemp = plan.shape, lock, mcp, front, releaseTemp
 	proc.canSyncMCP = plan.canSyncMCP
+	proc.setModel(plan.spec.Model)
 	proc.res.bind(plan.sessionDir, p.profile)
 	return proc, nil
 }
