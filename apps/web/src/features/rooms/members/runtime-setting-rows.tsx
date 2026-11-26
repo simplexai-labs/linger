@@ -107,7 +107,7 @@ export function SettingRow({
       <button
         aria-controls={expanded ? panelId : undefined}
         aria-expanded={disabled ? undefined : expanded}
-        className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default ${expanded ? "" : "enabled:hover:bg-accent"}`}
+        className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-left text-sm transition-colors focus-visible:outline-none disabled:cursor-default ${expanded ? "" : "enabled:hover:bg-accent focus-visible:bg-accent"}`}
         disabled={disabled}
         onClick={onToggle}
         type="button"
@@ -184,7 +184,7 @@ function OptionRow({
   const labelId = useId();
   const descriptionId = useId();
   return (
-    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors hover:bg-background/60 has-[:checked]:bg-background has-[:disabled]:cursor-default has-[:disabled]:opacity-50 has-[:disabled]:hover:bg-transparent has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
+    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors hover:bg-background/60 has-[:checked]:bg-background has-[:disabled]:cursor-default has-[:disabled]:opacity-50 has-[:disabled]:hover:bg-transparent has-[:focus-visible]:bg-background">
       <input
         aria-describedby={option.description ? descriptionId : undefined}
         aria-labelledby={labelId}
@@ -241,7 +241,7 @@ export function EffortSegments({
     >
       {efforts.map((effort) => (
         <label
-          className="cursor-pointer rounded-md py-1.5 text-center text-[13px] text-muted-foreground transition-colors has-[:checked]:bg-background has-[:checked]:font-medium has-[:checked]:text-foreground has-[:checked]:shadow-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+          className="cursor-pointer rounded-md py-1.5 text-center text-[13px] text-muted-foreground transition-colors has-[:checked]:bg-background has-[:checked]:font-medium has-[:checked]:text-foreground has-[:checked]:shadow-sm has-[:focus-visible]:text-foreground"
           key={effort}
         >
           <input
