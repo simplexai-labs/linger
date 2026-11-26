@@ -4165,6 +4165,95 @@ describe("LocalServerModule install location", () => {
     const other = tempDirectory();
     writeFileSync(path.join(other, "notes.txt"), "");
     expect(await installLocation(other)).toBe(path.join(other, "Linger"));
+    // A Windows drive root always installs into a Linger subfolder even when
+    // empty or unreadable.
+    if (process.platform === "win32")
+      expect(await installLocation("F:\\")).toBe("F:\\Linger");
+  });
+
+  it("pre-checks Windows private-path safety during chooseLocation without modifying the folder", async () => {
+    const GiB = 1024 ** 3;
+    const checkPrivateLocation = vi.fn(async (directory: string) => {
+      if (directory.endsWith("unsafe-drive"))
+        throw Object.assign(
+          new Error(
+            `Windows private path validation failed: ${directory} is inside a folder other accounts on this computer can rename or replace. Use a current-user owned local directory without links or shared access.`,
+          ),
+          {
+            code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+            reason: "UNSAFE_PARENT_ACCESS",
+            path: directory,
+          },
+        );
+    });
+    const f = fixture({
+      checkout: "/src",
+      platform: "win32",
+      freeBytes: 1,
+      freeDiskBytes: async (directory) =>
+        directory.endsWith("safe-drive") ? 90 * GiB : 40 * GiB,
+      checkPrivateLocation,
+    });
+    const unsafe = path.join(f.root, "unsafe-drive");
+    const safe = path.join(f.root, "safe-drive");
+    mkdirSync(unsafe);
+    mkdirSync(safe);
+    await f.host.start();
+    try {
+      f.module.inspect();
+      await vi.waitFor(() =>
+        expect(f.module.status().localModels.state).toBe("checked"),
+      );
+      await f.module.refreshLocationSpace();
+      await f.module.chooseLocation(unsafe);
+      expect(checkPrivateLocation).toHaveBeenCalledWith(unsafe);
+      expect(readdirSync(unsafe)).toEqual([]);
+      expect(f.module.status().location).toEqual({
+        path: f.home,
+        custom: false,
+        freeBytes: 40 * GiB,
+        minFreeBytes: 1,
+        error: expect.stringContaining(
+          "Windows private path validation failed",
+        ),
+        refusal: {
+          code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+          reason: "UNSAFE_PARENT_ACCESS",
+        },
+        rejectedPath: unsafe,
+      });
+      // Picking a valid location clears the refusal and switches to it.
+      await f.module.chooseLocation(safe);
+      expect(f.module.status().location).toEqual({
+        path: safe,
+        custom: true,
+        freeBytes: 90 * GiB,
+        minFreeBytes: 1,
+      });
+      // A subsequent refusal keeps the previous valid custom location and
+      // resetting clears the refusal.
+      await f.module.chooseLocation(unsafe);
+      expect(f.module.status().location).toMatchObject({
+        path: safe,
+        custom: true,
+        freeBytes: 90 * GiB,
+        minFreeBytes: 1,
+        refusal: {
+          code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+          reason: "UNSAFE_PARENT_ACCESS",
+        },
+        rejectedPath: unsafe,
+      });
+      await f.module.chooseLocation(null);
+      expect(f.module.status().location).toEqual({
+        path: f.home,
+        custom: false,
+        freeBytes: 40 * GiB,
+        minFreeBytes: 1,
+      });
+    } finally {
+      await f.host.stop("quit");
+    }
   });
 
   it("asks for free space on the folder's disk", async () => {

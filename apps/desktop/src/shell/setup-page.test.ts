@@ -1516,17 +1516,92 @@ describe("setup page refused install location", () => {
     );
   });
 
-  it("gives no hint the person has already followed", async () => {
-    // Directly on the drive, the drive's own permissions are what refuse it.
+  it("gives drive-root recovery guidance when a folder directly on a drive is refused", async () => {
+    // Directly on a stock secondary NTFS drive (e.g. Everyone:(OI)(CI)(F)),
+    // the drive root's own permissions refuse the install.
     await openPage(failed("E:\\Linger", "UNSAFE_PARENT_ACCESS"));
-    expect($("installing-plan").textContent).toBe(usual);
+    expect($("installing-plan").textContent).toBe(
+      "Permissions on E:\\ allow other accounts (such as Everyone) to replace folders there. Go back and use the default location, pick another drive, or remove Full Control for other accounts in E:\\ Properties → Security.",
+    );
+    await openPage(failed("F:\\Linger", "UNSAFE_PARENT_ACCESS"));
+    expect($("installing-plan").textContent).toBe(
+      "Permissions on F:\\ allow other accounts (such as Everyone) to replace folders there. Go back and use the default location, pick another drive, or remove Full Control for other accounts in F:\\ Properties → Security.",
+    );
+    await openPage(failed("F:\\", "UNSAFE_PARENT_ACCESS"));
+    expect($("installing-plan").textContent).toBe(
+      "Permissions on F:\\ allow other accounts (such as Everyone) to replace folders there. Go back and use the default location, pick another drive, or remove Full Control for other accounts in F:\\ Properties → Security.",
+    );
+  });
+
+  it("shows actionable guidance in the install location bar when picking an unsafe Windows folder", async () => {
+    const base = welcome(capable);
+    const withPickRefusal = (
+      rejectedPath: string,
+      reason: NonNullable<SetupState["localServer"]["refusal"]>["reason"],
+    ): SetupState => ({
+      ...base,
+      platform: "win32",
+      localServer: {
+        ...base.localServer,
+        location: {
+          path: "~\\.simplexai",
+          custom: false,
+          freeBytes: 5 * GB,
+          minFreeBytes: 20 * GB,
+          error: message(rejectedPath),
+          refusal: { code: "WINDOWS_PRIVATE_PATH_UNSAFE", reason },
+          rejectedPath,
+        },
+      },
+    });
+    await openPage(
+      withPickRefusal("F:\\Linger", "UNSAFE_PARENT_ACCESS"),
+      "welcome",
+    );
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-path").textContent).toBe("F:\\Linger");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(
+      "Permissions on F:\\ allow other accounts (such as Everyone) to replace folders there. Keep the default location, pick another drive, or remove Full Control for other accounts in F:\\ Properties → Security.",
+    );
+    expect($("location-sub").dataset.warn).toBe("true");
+    expect($("location-reset").hidden).toBe(false);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+
+    await openPage(
+      withPickRefusal("D:\\Software\\Linger", "UNSAFE_PARENT_ACCESS"),
+      "welcome",
+    );
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-path").textContent).toBe("D:\\Software\\Linger");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(
+      "Other accounts can rename or replace a folder above this path. Choose D:\\ itself (Linger installs into D:\\Linger) or an empty folder directly on D:\\.",
+    );
+    expect($("location-sub").dataset.warn).toBe("true");
+    expect($("location-reset").hidden).toBe(false);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+
+    // Non-parent-access refusals fall back to the raw error message.
+    await openPage(withPickRefusal("F:\\Linger", "UNSAFE_OWNER"), "welcome");
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-path").textContent).toBe("F:\\Linger");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(message("F:\\Linger"));
+    expect($("location-sub").dataset.warn).toBe("true");
+    expect($("location-reset").hidden).toBe(false);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("keeps the hint to this refusal, known by its code", async () => {
     await openPage(failed("D:\\Software\\Linger", "UNSAFE_OWNER"));
     expect($("installing-plan").textContent).toBe(usual);
+    await openPage(failed("F:\\Linger", "UNSAFE_OWNER"));
+    expect($("installing-plan").textContent).toBe(usual);
     // The words alone do not bring the hint.
     await openPage(failed("D:\\Software\\Linger"));
+    expect($("installing-plan").textContent).toBe(usual);
+    await openPage(failed("F:\\Linger"));
     expect($("installing-plan").textContent).toBe(usual);
   });
 });
@@ -1560,6 +1635,29 @@ describe("setup page in Chinese", () => {
     await openPage(welcome(held), "welcome", "zh-CN");
     expect($("plan-why").textContent).toBe(
       fill(zh.heldWhy, { reasons: zh.reasonHeld }),
+    );
+  });
+
+  it("words Windows drive-root permission guidance from the catalog", async () => {
+    const base = state("failed");
+    await openPage(
+      {
+        ...base,
+        platform: "win32",
+        localServer: {
+          ...base.localServer,
+          location: { path: "F:\\Linger", custom: true },
+          refusal: {
+            code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+            reason: "UNSAFE_PARENT_ACCESS",
+          },
+        },
+      },
+      "installing",
+      "zh-CN",
+    );
+    expect($("installing-plan").textContent).toBe(
+      fill(zh.locationDriveRootHint, { drive: "F:\\" }),
     );
   });
 

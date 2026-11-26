@@ -266,6 +266,8 @@ export interface LocalServerLocation {
   readonly custom: boolean;
   // Why the folder last chosen cannot be used.
   readonly error?: string;
+  // Windows private-path refusal for the rejected candidate folder.
+  readonly refusal?: WindowsPrivateRefusal;
   // The folder last chosen that failed validation (when `error` is set).
   readonly rejectedPath?: string;
   // Available disk space on the target path's filesystem (read-only statfs).
@@ -591,6 +593,7 @@ export class LocalServerModule implements Module {
   #home: string;
   #location: string | undefined;
   #locationError: string | undefined;
+  #locationRefusal: WindowsPrivateRefusal | undefined;
   #locationRejectedPath: string | undefined;
   #locationFreeBytes: number | undefined;
   #locationChoiceSeq = 0;
@@ -1032,6 +1035,7 @@ export class LocalServerModule implements Module {
         path: this.#location ?? this.#home,
         custom: this.#location !== undefined,
         ...(this.#locationError ? { error: this.#locationError } : {}),
+        ...(this.#locationRefusal ? { refusal: this.#locationRefusal } : {}),
         ...(this.#locationRejectedPath
           ? { rejectedPath: this.#locationRejectedPath }
           : {}),
@@ -1108,33 +1112,23 @@ export class LocalServerModule implements Module {
     const choiceSeq = ++this.#locationChoiceSeq;
     let nextLocation: string | undefined;
     let nextError: string | undefined;
+    let nextRefusal: WindowsPrivateRefusal | undefined;
     let nextRejectedPath: string | undefined;
     let nextFreeBytes: number | undefined;
     let updateFreeBytes = false;
     if (picked === null) {
       nextLocation = undefined;
       nextError = undefined;
+      nextRefusal = undefined;
       nextRejectedPath = undefined;
       nextFreeBytes = await this.#probeLocationSpace(this.#home);
       updateFreeBytes = true;
     } else {
       const home = await installLocation(picked);
-      let locationError = await checkLocation(home, this.#freeBytes());
-      if (
-        !locationError &&
-        (this.#options.platform ?? process.platform) === "win32"
-      ) {
-        try {
-          await (this.#options.checkPrivateLocation ?? windowsPrivateLocation)(
-            home,
-          );
-        } catch (error) {
-          locationError =
-            error instanceof Error ? error.message : String(error);
-        }
-      }
-      nextError = locationError;
-      if (!nextError) {
+      const problem = await this.#checkLocation(home, this.#freeBytes());
+      nextError = problem?.error;
+      nextRefusal = problem?.refusal;
+      if (!problem) {
         nextLocation = home === this.#home ? undefined : home;
         nextRejectedPath = undefined;
         nextFreeBytes = await this.#probeLocationSpace(home);
@@ -1151,6 +1145,7 @@ export class LocalServerModule implements Module {
       return;
     const previous = this.#location;
     this.#locationError = nextError;
+    this.#locationRefusal = nextRefusal;
     this.#locationRejectedPath = nextRejectedPath;
     if (updateFreeBytes) {
       this.#location = nextLocation;
@@ -1162,6 +1157,31 @@ export class LocalServerModule implements Module {
       if (this.#check.state !== "unchecked") this.recheck();
     }
     this.#ctx?.bus.emit("local-server.changed");
+  }
+
+  async #checkLocation(
+    directory: string,
+    neededBytes: number,
+  ): Promise<
+    | { readonly error: string; readonly refusal?: WindowsPrivateRefusal }
+    | undefined
+  > {
+    const error = await checkLocation(directory, neededBytes);
+    if (error) return { error };
+    if ((this.#options.platform ?? process.platform) !== "win32")
+      return undefined;
+    try {
+      await (this.#options.checkPrivateLocation ?? windowsPrivateLocation)(
+        directory,
+      );
+      return undefined;
+    } catch (failure) {
+      const refusal = windowsPrivateRefusal(failure);
+      return {
+        error: failure instanceof Error ? failure.message : String(failure),
+        ...(refusal ? { refusal } : {}),
+      };
+    }
   }
 
   // Stops idle background source pre-staging and Bifrost pre-fetch (such as
@@ -3916,6 +3936,7 @@ export class LocalServerModule implements Module {
     previous?: string,
     reason: WindowLoadReason = "local_ready",
   ): void {
+    this.#locationRefusal = undefined;
     this.#locationRejectedPath = undefined;
     this.#locationFreeBytes = undefined;
     this.#origin = origin;
@@ -5926,14 +5947,16 @@ export const followHttps =
   };
 
 // The folder a picked one installs into: the folder itself when it is empty
-// or already holds Linger, else a Linger folder inside it.
+// or already holds Linger, else a Linger folder inside it. A drive or
+// filesystem root always installs into a Linger subfolder unless it already
+// holds an installation.
 export const installLocation = async (picked: string): Promise<string> => {
   const entries = await readdir(picked).catch(() => [] as string[]);
-  return entries.every((entry) => entry.startsWith(".")) ||
-    entries.includes("instances") ||
-    entries.includes("installer")
-    ? picked
-    : path.join(picked, "Linger");
+  if (entries.includes("instances") || entries.includes("installer"))
+    return picked;
+  const isRoot = path.dirname(picked) === picked;
+  if (!isRoot && entries.every((entry) => entry.startsWith("."))) return picked;
+  return path.join(picked, "Linger");
 };
 
 // Walks up from `directory` to the nearest existing directory without creating
