@@ -30,9 +30,15 @@ const actionRefusals: Record<
   LOCAL_MODEL_ACTION_FAILED: m.refusalActionFailed,
   LOCAL_MODEL_ACTION_UNCONFIRMED: m.refusalUnconfirmed,
   LOCAL_MODEL_ACTION_FORBIDDEN: m.refusalForbidden,
+  LOCAL_MODEL_CORRUPT_WEIGHTS: m.refusalCorruptWeights,
   LOCAL_MODEL_DISK_INSUFFICIENT: m.refusalDiskInsufficient,
   LOCAL_MODEL_DRIVER_UPDATE_REQUIRED: m.refusalDriverUpdateRequired,
   LOCAL_MODEL_GPU_UNSUPPORTED: m.refusalGpuUnsupported,
+  LOCAL_MODEL_HUB_AUTH_REQUIRED: m.refusalHubAuthRequired,
+  LOCAL_MODEL_HUB_FORBIDDEN: m.refusalHubForbidden,
+  LOCAL_MODEL_HUB_FORMAT_UNSUPPORTED: m.refusalHubFormatUnsupported,
+  LOCAL_MODEL_HUB_REPO_NOT_FOUND: m.refusalHubRepoNotFound,
+  LOCAL_MODEL_HUB_UNREACHABLE: m.refusalHubUnreachable,
   LOCAL_MODEL_INVALID_STATE: m.refusalInvalidState,
   LOCAL_MODEL_JOB_RUNNING: m.refusalJobRunning,
   LOCAL_MODEL_MEMORY_INSUFFICIENT: m.refusalMemoryInsufficient,
@@ -40,6 +46,8 @@ const actionRefusals: Record<
   LOCAL_MODEL_PLATFORM_UNSUPPORTED: m.refusalPlatformUnsupported,
   LOCAL_MODEL_RUNTIME_DEPENDENCY_MISSING: m.refusalRuntimeDependencyMissing,
   LOCAL_MODEL_UNKNOWN: m.refusalModelUnknown,
+  LOCAL_MODEL_UNSUPPORTED_ARCHITECTURE: m.refusalUnsupportedArchitecture,
+  LOCAL_MODELS_CUSTOM_UNSUPPORTED: m.refusalCustomUnsupported,
   LOCAL_MODELS_SERVICE_UNAVAILABLE: m.refusalServiceUnavailable,
   LOCAL_MODELS_UNAVAILABLE: m.refusalToolsUnavailable,
 };
@@ -59,6 +67,7 @@ export function actionErrorCopy(code: string | undefined, t: Translate) {
 const modelErrors: Record<Schemas["LocalModelErrorCode"], Message<string>> = {
   CANCELLED: m.errorCancelled,
   CHECKSUM_MISMATCH: m.errorChecksumMismatch,
+  CORRUPT_WEIGHTS: m.errorCorruptWeights,
   DISK_INSUFFICIENT: m.errorDiskInsufficient,
   DOWNLOAD_FAILED: m.errorDownloadFailed,
   DRIVER_UPDATE_REQUIRED: m.errorDriverUpdateRequired,
@@ -66,6 +75,11 @@ const modelErrors: Record<Schemas["LocalModelErrorCode"], Message<string>> = {
   GATEWAY_REGISTRATION_FAILED: m.errorGatewayRegistrationFailed,
   GPU_UNSUPPORTED: m.errorGpuUnsupported,
   HEALTH_CHECK_FAILED: m.errorHealthCheckFailed,
+  HUB_AUTH_REQUIRED: m.errorHubAuthRequired,
+  HUB_FORBIDDEN: m.errorHubForbidden,
+  HUB_FORMAT_UNSUPPORTED: m.errorHubFormatUnsupported,
+  HUB_REPO_NOT_FOUND: m.errorHubRepoNotFound,
+  HUB_UNREACHABLE: m.errorHubUnreachable,
   INVALID_STATE: m.errorInvalidState,
   JOB_RUNNING: m.errorJobRunning,
   LOAD_NO_ROOM: m.errorLoadNoRoom,
@@ -77,6 +91,7 @@ const modelErrors: Record<Schemas["LocalModelErrorCode"], Message<string>> = {
   PLATFORM_UNSUPPORTED: m.refusalPlatformUnsupported,
   RUNTIME_DEPENDENCY_MISSING: m.errorRuntimeDependencyMissing,
   UNKNOWN_ERROR: m.errorUnknownError,
+  UNSUPPORTED_ARCHITECTURE: m.errorUnsupportedArchitecture,
 };
 
 const modelErrorCauses = {
@@ -95,6 +110,7 @@ const modelErrorsShort: Record<
 > = {
   CANCELLED: m.shortCancelled,
   CHECKSUM_MISMATCH: m.shortChecksumMismatch,
+  CORRUPT_WEIGHTS: m.shortCorruptWeights,
   DISK_INSUFFICIENT: m.shortDiskInsufficient,
   DOWNLOAD_FAILED: undefined,
   DRIVER_UPDATE_REQUIRED: m.shortDriverUpdateRequired,
@@ -102,6 +118,11 @@ const modelErrorsShort: Record<
   GATEWAY_REGISTRATION_FAILED: m.shortGatewayRegistrationFailed,
   GPU_UNSUPPORTED: m.shortGpuUnsupported,
   HEALTH_CHECK_FAILED: m.shortHealthCheckFailed,
+  HUB_AUTH_REQUIRED: m.shortHubAuthRequired,
+  HUB_FORBIDDEN: m.shortHubForbidden,
+  HUB_FORMAT_UNSUPPORTED: m.shortHubFormatUnsupported,
+  HUB_REPO_NOT_FOUND: m.shortHubRepoNotFound,
+  HUB_UNREACHABLE: m.shortHubUnreachable,
   INVALID_STATE: m.shortBusy,
   JOB_RUNNING: m.shortBusy,
   LOAD_NO_ROOM: m.shortLoadNoRoom,
@@ -113,6 +134,7 @@ const modelErrorsShort: Record<
   PLATFORM_UNSUPPORTED: m.shortNotForComputer,
   RUNTIME_DEPENDENCY_MISSING: m.shortRuntimeDependencyMissing,
   UNKNOWN_ERROR: m.shortUnknownError,
+  UNSUPPORTED_ARCHITECTURE: m.shortUnsupportedArchitecture,
 };
 
 /** Short failure summary for a collapsed model row; undefined when the status label suffices. */
@@ -482,6 +504,7 @@ export function architectureCopy(
 /** Inference engine names read the same in every language. */
 const engineBadgeLabels: Record<Schemas["LocalModelEngine"], string> = {
   "llama.cpp": "llama.cpp",
+  mlx: "MLX",
   polystrata: "PolyStrata",
   strata: "Strata",
 };

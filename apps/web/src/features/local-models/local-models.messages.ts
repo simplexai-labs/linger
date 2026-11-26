@@ -344,6 +344,21 @@ export const localModelsMessages = defineMessages("localModels", {
   refusalRuntimeDependencyMissing:
     "This computer is missing a system runtime library required for local models.",
   refusalModelUnknown: "The computer doesn't have this model anymore.",
+  refusalCustomUnsupported:
+    "Update Linger on this computer to install custom models.",
+  refusalHubAuthRequired:
+    "This repository requires a read-only access token to inspect or download.",
+  refusalHubForbidden:
+    "The access token doesn't have permission to access this repository.",
+  refusalHubRepoNotFound: "That repository wasn't found on the model hub.",
+  refusalHubFormatUnsupported:
+    "This repository doesn't contain a model format supported on this computer.",
+  refusalHubUnreachable:
+    "The computer couldn't reach the model hub right now. Try again.",
+  refusalUnsupportedArchitecture:
+    "This model's architecture isn't supported by the local engine on this computer.",
+  refusalCorruptWeights:
+    "The model weight files appear corrupt or incomplete. Re-download them and try again.",
   refusalServiceUnavailable:
     "Linger couldn't reach the computer right now. Try again.",
   refusalToolsUnavailable:
@@ -356,6 +371,8 @@ export const localModelsMessages = defineMessages("localModels", {
   errorCancelled: "Loading was stopped.",
   errorChecksumMismatch:
     "The downloaded files were damaged. Remove the model and download it again.",
+  errorCorruptWeights:
+    "The model weight files are corrupt or incomplete. Re-download a clean copy.",
   errorDiskInsufficient: "There wasn't enough free disk.",
   errorDownloadFailed: "The download didn't finish.",
   errorDriverUpdateRequired:
@@ -366,6 +383,13 @@ export const localModelsMessages = defineMessages("localModels", {
   errorGpuUnsupported:
     "This computer doesn't have a supported GPU for local models.",
   errorHealthCheckFailed: "The model started but didn't answer.",
+  errorHubAuthRequired: "The repository requires a read-only access token.",
+  errorHubForbidden:
+    "The provided token doesn't have permission to access this repository.",
+  errorHubFormatUnsupported:
+    "This repository doesn't contain a supported model format.",
+  errorHubRepoNotFound: "The repository wasn't found on the model hub.",
+  errorHubUnreachable: "The computer couldn't reach the model hub.",
   errorInvalidState: "The model was busy with another step.",
   errorJobRunning: "Another step was still running.",
   errorLoadNoRoom: "There wasn't enough free memory to load it.",
@@ -378,18 +402,26 @@ export const localModelsMessages = defineMessages("localModels", {
   errorRuntimeDependencyMissing:
     "A required system runtime library is missing on this computer.",
   errorUnknownError: "Something went wrong on this computer. Try again.",
+  errorUnsupportedArchitecture:
+    "This model's architecture isn't supported by the bundled local engine.",
   errorGatewayHomeNotPrivate:
     "It loaded, but Agents couldn't be given access to it: a Linger folder on the computer belongs to another account.",
   errorGatewayHomeNotPrivatePath:
     "It loaded, but Agents couldn't be given access to it: the folder {path} belongs to another account. Quit Linger, rename that folder, then open Linger and load the model again.",
   shortCancelled: "loading stopped",
   shortChecksumMismatch: "files damaged",
+  shortCorruptWeights: "corrupt weights",
   shortDiskInsufficient: "not enough disk",
   shortDriverUpdateRequired: "driver update needed",
   shortEngineStartFailed: "engine didn't start",
   shortGatewayRegistrationFailed: "Agents couldn't reach it",
   shortGpuUnsupported: "GPU not supported",
   shortHealthCheckFailed: "model didn't answer",
+  shortHubAuthRequired: "token required",
+  shortHubForbidden: "access denied",
+  shortHubFormatUnsupported: "unsupported format",
+  shortHubRepoNotFound: "repo not found",
+  shortHubUnreachable: "hub unreachable",
   shortBusy: "busy with another step",
   shortLoadNoRoom: "not enough free memory",
   shortMemoryInsufficient: "not enough memory",
@@ -400,6 +432,7 @@ export const localModelsMessages = defineMessages("localModels", {
   shortNotForComputer: "not for this computer",
   shortRuntimeDependencyMissing: "missing runtime library",
   shortUnknownError: "unexpected error",
+  shortUnsupportedArchitecture: "unsupported architecture",
   noteNoRoomToLoad:
     "It downloaded, but there wasn't enough free {place} to load it. Load it when there is room.",
 

@@ -4,6 +4,7 @@ import {
   ArrowDown01Icon,
   InformationCircleIcon,
   RefreshIcon,
+  SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import {
   useMutation,
@@ -13,7 +14,9 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import {
+  lazy,
   type ReactNode,
+  Suspense,
   useEffect,
   useId,
   useMemo,
@@ -84,6 +87,8 @@ import {
   memoryGuidanceCopy,
   modelSourceReadErrorCopy,
 } from "./local-models-copy";
+import { customModelsMessages as cm } from "./custom-models.messages";
+import { installedCustomModels } from "./custom-model-rules";
 import { localModelsMessages as m } from "./local-models.messages";
 import {
   actOnLocalComputerModel,
@@ -131,7 +136,13 @@ import {
   type ModelSourceView,
 } from "./model-source-queries";
 
+const CustomModelHubTab = lazy(async () => ({
+  default: (await import("./custom-model-hub-tab")).CustomModelHubTab,
+}));
+
 const offlinePollIntervalMs = 5_000;
+
+type LocalCatalogSubTab = "curated" | "custom";
 
 function isModelSourceOffline(
   data: ModelSourceView | undefined,
@@ -182,6 +193,8 @@ export function ModelsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const computers = inventory.items;
   const linkedId = searchParams.get("computer");
+  const localSubTab: LocalCatalogSubTab =
+    searchParams.get("tab") === "custom" ? "custom" : "curated";
   const linkedOwned = linkedId
     ? computers.find((item) => item.computer_id === linkedId)
     : undefined;
@@ -221,51 +234,74 @@ export function ModelsPage() {
     );
   }
 
+  function selectLocalSubTab(nextTab: LocalCatalogSubTab) {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        if (nextTab === "custom") {
+          next.set("tab", "custom");
+        } else {
+          next.delete("tab");
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  }
+
+  if (sharedId) {
+    return (
+      <ComputerModels
+        computerId={sharedId}
+        defaultComputerName={defaultComputer?.display_name}
+        key={sharedId}
+        localSubTab={localSubTab}
+        onChangeLocalSubTab={selectLocalSubTab}
+        onOpenDefaultComputer={
+          defaultComputer
+            ? () => select(defaultComputer.computer_id)
+            : undefined
+        }
+        onSelectComputer={select}
+        ownedComputers={computers}
+        tenantId={tenantId}
+      />
+    );
+  }
+
+  if (computer) {
+    return (
+      <ComputerModels
+        computer={computer}
+        computerId={computer.computer_id}
+        displayName={computer.display_name}
+        isLocalDesktop={Boolean(
+          desktop?.status?.computerId &&
+          desktop.status.computerId === computer.computer_id,
+        )}
+        key={computer.computer_id}
+        localSubTab={localSubTab}
+        onChangeLocalSubTab={selectLocalSubTab}
+        onSelectComputer={select}
+        ownedComputers={computers}
+        tenantId={tenantId}
+      />
+    );
+  }
+
   return (
     <main className="mx-auto flex min-h-0 w-full max-w-(--app-settings-width) flex-col pb-4">
-      {sharedId ? (
-        <ComputerModels
-          computerId={sharedId}
-          defaultComputerName={defaultComputer?.display_name}
-          key={sharedId}
-          onOpenDefaultComputer={
-            defaultComputer
-              ? () => select(defaultComputer.computer_id)
-              : undefined
-          }
-          onSelectComputer={select}
-          ownedComputers={computers}
-          tenantId={tenantId}
+      <h1 className="text-2xl text-foreground">{t(m.title)}</h1>
+      <EmptyState title={t(m.noComputersTitle)}>
+        <RichMessage
+          message={m.noComputersBody}
+          tags={{
+            link: (text) => (
+              <ComputersLink tenantId={tenantId}>{text}</ComputersLink>
+            ),
+          }}
         />
-      ) : computer ? (
-        <ComputerModels
-          computer={computer}
-          computerId={computer.computer_id}
-          displayName={computer.display_name}
-          isLocalDesktop={Boolean(
-            desktop?.status?.computerId &&
-            desktop.status.computerId === computer.computer_id,
-          )}
-          key={computer.computer_id}
-          onSelectComputer={select}
-          ownedComputers={computers}
-          tenantId={tenantId}
-        />
-      ) : (
-        <>
-          <h1 className="text-2xl text-foreground">{t(m.title)}</h1>
-          <EmptyState title={t(m.noComputersTitle)}>
-            <RichMessage
-              message={m.noComputersBody}
-              tags={{
-                link: (text) => (
-                  <ComputersLink tenantId={tenantId}>{text}</ComputersLink>
-                ),
-              }}
-            />
-          </EmptyState>
-        </>
-      )}
+      </EmptyState>
     </main>
   );
 }
@@ -479,6 +515,8 @@ function ComputerModels({
   defaultComputerName,
   displayName,
   isLocalDesktop = false,
+  localSubTab,
+  onChangeLocalSubTab,
   onOpenDefaultComputer,
   onSelectComputer,
   ownedComputers,
@@ -490,6 +528,8 @@ function ComputerModels({
   /** Absent for a Computer outside the viewer's own inventory. */
   displayName?: string;
   isLocalDesktop?: boolean;
+  localSubTab: LocalCatalogSubTab;
+  onChangeLocalSubTab: (next: LocalCatalogSubTab) => void;
   onOpenDefaultComputer?: () => void;
   onSelectComputer: (computerId: string) => void;
   ownedComputers: readonly InventoryComputer[];
@@ -582,8 +622,23 @@ function ComputerModels({
   const status = source.data?.status;
   const [tab, setTab] = useState<ModelSourceMode | null>(null);
   // A Computer on a subscription opens on Local model, which offers the way
-  // off it; the Subscription tab is not offered.
-  const shownTab = tab ?? (status?.mode === "byok" ? "byok" : "local");
+  // off it; the Subscription tab is not offered. Deep-linking `?tab=custom`
+  // keeps Local model open so the Custom Hub tab renders directly.
+  const shownTab =
+    tab ??
+    (localSubTab === "custom"
+      ? "local"
+      : status?.mode === "byok"
+        ? "byok"
+        : "local");
+  const isCustomTabActive =
+    shownTab === "local" &&
+    localSubTab === "custom" &&
+    Boolean(view?.available);
+  const customModelsCount = useMemo(
+    () => (view?.available ? installedCustomModels(view).length : 0),
+    [view],
+  );
   const computerName =
     displayName ?? view?.computer.display_name ?? t(m.thisComputer);
   const { feedback, switcher } = useModelSourceSwitch({
@@ -713,7 +768,12 @@ function ComputerModels({
     shownTab !== "byok";
 
   return (
-    <>
+    <main
+      className={cn(
+        "mx-auto flex min-h-0 w-full flex-col pb-4",
+        isCustomTabActive ? "max-w-[1200px]" : "max-w-(--app-settings-width)",
+      )}
+    >
       <header className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
         <div className="min-w-48 flex-1">
           <h1 className="text-2xl text-foreground">{t(m.title)}</h1>
@@ -826,47 +886,132 @@ function ComputerModels({
         </>
       ) : view ? (
         <>
-          {view.available && summary?.totalBytes ? (
-            <MemorySummaryCard
-              canRecheck={canRecheck}
-              onDetails={() => setDialog({ kind: "advanced" })}
-              onRecheck={recheckMemory}
-              rechecking={refresh.isPending}
-              summary={summary}
-              view={view}
-            />
+          {view.available ? (
+            <div className="mt-4 border-b border-border">
+              <div
+                aria-label={t(cm.catalogModeRegion)}
+                className="inline-flex max-w-full gap-1 overflow-x-auto"
+                role="tablist"
+              >
+                <button
+                  aria-selected={localSubTab === "curated"}
+                  className={cn(
+                    "inline-flex h-10 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-medium transition-colors",
+                    localSubTab === "curated"
+                      ? "border-foreground text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                  onClick={() => onChangeLocalSubTab("curated")}
+                  role="tab"
+                  type="button"
+                >
+                  <span className="size-1.5 rounded-full bg-app-success" />
+                  {t(cm.tabCurated)}
+                </button>
+                <button
+                  aria-selected={localSubTab === "custom"}
+                  className={cn(
+                    "inline-flex h-10 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-medium transition-colors",
+                    localSubTab === "custom"
+                      ? "border-foreground text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                  onClick={() => onChangeLocalSubTab("custom")}
+                  role="tab"
+                  type="button"
+                >
+                  <Icon icon={SparklesIcon} size={14} />
+                  {t(cm.tabCustom)}
+                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-foreground">
+                    {customModelsCount}
+                  </span>
+                </button>
+              </div>
+            </div>
           ) : null}
-          {status && status.mode !== "local" ? (
-            <SwitchToLocalNotice
-              disabled={switching || offline}
-              models={switchTargets}
-              switcher={switcher}
-            />
-          ) : null}
-          <Library
-            blocker={blocker}
-            computer={computer}
-            dialog={dialog}
-            guidance={guidance}
-            isLocalDesktop={isLocalDesktop}
-            offline={offline}
-            onRefresh={recheckMemory}
-            onSwitchToByok={status ? () => changeTab("byok") : undefined}
-            onUseForAgents={(modelId) =>
-              switcher.request({ local_model_id: modelId, mode: "local" })
-            }
-            rechecking={refresh.isPending}
-            setDialog={setDialog}
-            status={status}
-            switchingModelId={
-              switcher.pending?.mode === "local"
-                ? switcher.pending.local_model_id
-                : undefined
-            }
-            switching={switching}
-            tenantId={tenantId}
-            view={view}
-          />
+          {isCustomTabActive ? (
+            <>
+              {offline ? (
+                <Notice>
+                  <OfflineMessage
+                    lastSeenAt={view.computer.last_seen_at}
+                    messages={
+                      view.viewer_is_owner
+                        ? [m.offlineLibrary, m.offlineLibraryLastSeen]
+                        : [m.offlineReadOnly, m.offlineReadOnlyLastSeen]
+                    }
+                    name={view.computer.display_name}
+                    tenantId={tenantId}
+                  />
+                </Notice>
+              ) : null}
+              <Suspense
+                fallback={<ModelsLoadingSkeleton label={t(m.loadingModels)} />}
+              >
+                <CustomModelHubTab
+                  offline={offline}
+                  onRefresh={recheckMemory}
+                  onUseForAgents={(modelId) =>
+                    switcher.request({ local_model_id: modelId, mode: "local" })
+                  }
+                  rechecking={refresh.isPending}
+                  status={status}
+                  switching={switching}
+                  switchingModelId={
+                    switcher.pending?.mode === "local"
+                      ? switcher.pending.local_model_id
+                      : undefined
+                  }
+                  tenantId={tenantId}
+                  view={view}
+                />
+              </Suspense>
+            </>
+          ) : (
+            <>
+              {view.available && summary?.totalBytes ? (
+                <MemorySummaryCard
+                  canRecheck={canRecheck}
+                  onDetails={() => setDialog({ kind: "advanced" })}
+                  onRecheck={recheckMemory}
+                  rechecking={refresh.isPending}
+                  summary={summary}
+                  view={view}
+                />
+              ) : null}
+              {status && status.mode !== "local" ? (
+                <SwitchToLocalNotice
+                  disabled={switching || offline}
+                  models={switchTargets}
+                  switcher={switcher}
+                />
+              ) : null}
+              <Library
+                blocker={blocker}
+                computer={computer}
+                dialog={dialog}
+                guidance={guidance}
+                isLocalDesktop={isLocalDesktop}
+                offline={offline}
+                onRefresh={recheckMemory}
+                onSwitchToByok={status ? () => changeTab("byok") : undefined}
+                onUseForAgents={(modelId) =>
+                  switcher.request({ local_model_id: modelId, mode: "local" })
+                }
+                rechecking={refresh.isPending}
+                setDialog={setDialog}
+                status={status}
+                switchingModelId={
+                  switcher.pending?.mode === "local"
+                    ? switcher.pending.local_model_id
+                    : undefined
+                }
+                switching={switching}
+                tenantId={tenantId}
+                view={view}
+              />
+            </>
+          )}
         </>
       ) : query.isError ? (
         <EmptyState
@@ -899,7 +1044,7 @@ function ComputerModels({
       ) : (
         <ModelsLoadingSkeleton label={t(m.loadingModels)} />
       )}
-    </>
+    </main>
   );
 }
 
@@ -1068,7 +1213,10 @@ function Library({
     ? `/t/${encodeURIComponent(tenantId)}/rooms/${encodeURIComponent(anotherMeQuery.data.room_id)}/chat`
     : undefined;
   const entries = useMemo(
-    () => (view.available ? modelEntries(view) : []),
+    () =>
+      view.available
+        ? modelEntries(view).filter((entry) => entry.model.origin !== "custom")
+        : [],
     [view],
   );
   const sections = useMemo(() => buildModelGroups(entries), [entries]);

@@ -56,7 +56,10 @@ export function downloadStopped(model: LocalModel): boolean {
     model.state === "failed" &&
     (model.error?.code === "DOWNLOAD_FAILED" ||
       model.error?.code === "NETWORK_UNAVAILABLE" ||
-      model.error?.code === "DISK_INSUFFICIENT")
+      model.error?.code === "DISK_INSUFFICIENT" ||
+      model.error?.code === "HUB_AUTH_REQUIRED" ||
+      model.error?.code === "HUB_FORBIDDEN" ||
+      model.error?.code === "HUB_UNREACHABLE")
   );
 }
 
@@ -970,7 +973,15 @@ export function modelSourceLabel(url: string) {
 export function localSwitchTargets(view: LocalModelsView): LocalModel[] {
   return view.models
     .map((item) => item.model)
-    .filter((model) => model.state === "loaded" || model.state === "idle")
+    .filter((model) => {
+      if (model.state !== "loaded" && model.state !== "idle") return false;
+      if (model.origin === "custom") {
+        return (
+          model.state === "loaded" || model.verification?.status === "verified"
+        );
+      }
+      return true;
+    })
     .sort((left, right) => {
       if (left.state !== right.state) {
         return left.state === "loaded" ? -1 : 1;

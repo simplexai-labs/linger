@@ -34,6 +34,7 @@ import {
 } from "@/features/local-computer/pi-runtime-setup-guidance";
 import { RuntimeLogo } from "@/features/local-computer/runtime-logo";
 import { ServerConnection } from "@/features/local-computer/server-connection";
+import { customModelsMessages } from "@/features/local-models/custom-models.messages";
 import { localModelsQueryOptions } from "@/features/local-models/local-models-queries";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type {
@@ -58,7 +59,10 @@ import {
   SettingRow,
   StatusDot,
 } from "./members/runtime-setting-rows";
-import { reasoningEffortLabel } from "./members/use-agent-model-selection";
+import {
+  customLocalModelIds,
+  reasoningEffortLabel,
+} from "./members/use-agent-model-selection";
 
 const localRuntimeLabels: Record<TeamHubLocalRuntimeType, string> = {
   claude: "Claude Code",
@@ -187,6 +191,12 @@ export function QuickCreateLocalAgentDialog({
     : selectedRuntime?.status === "authentication_required"
       ? selectedRuntime
       : undefined;
+  const hasLocalLibraryPiModels = Boolean(
+    selectedRuntime?.type === "pi" &&
+    selectedRuntime.models.some((item) =>
+      item.id.startsWith("localmodels-library/"),
+    ),
+  );
   const localModels = useQuery({
     ...localModelsQueryOptions(client, tenantId, selectedComputerId),
     // The Runtime list words Pi's status from its local models, so they load
@@ -194,13 +204,15 @@ export function QuickCreateLocalAgentDialog({
     enabled: Boolean(
       !setupOpen &&
       selectedComputerId &&
-      selectedComputer?.runtimes.some(
+      (selectedComputer?.runtimes.some(
         (runtime) =>
           runtime.type === "pi" && runtime.status === "authentication_required",
-      ),
+      ) ||
+        hasLocalLibraryPiModels),
     ),
   });
   const piModelsState = classifyPiLocalModelsState(localModels.data);
+  const customModelIds = customLocalModelIds(localModels.data);
 
   // One row opens at a time; all start closed on the chosen defaults.
   const [openRow, setOpenRow] = useState<
@@ -475,9 +487,16 @@ export function QuickCreateLocalAgentDialog({
                   open={openRow === "model"}
                   value={
                     selectedModel ? (
-                      <span className="truncate">
-                        {runtimeModelLabel(selectedModel, t)}
-                      </span>
+                      <>
+                        <span className="truncate">
+                          {runtimeModelLabel(selectedModel, t)}
+                        </span>
+                        {customModelIds.has(selectedModel.id) ? (
+                          <span className="shrink-0 rounded-sm border border-border bg-muted px-1 py-0.5 text-[10px] leading-none font-medium text-muted-foreground">
+                            {t(customModelsMessages.customModelBadge)}
+                          </span>
+                        ) : null}
+                      </>
                     ) : (
                       <Placeholder>
                         {t(createAgentMessages.noModels)}
@@ -493,6 +512,11 @@ export function QuickCreateLocalAgentDialog({
                       setOpenRow(undefined);
                     }}
                     options={modelOptions.map((model) => ({
+                      description: customModelIds.has(model.id) ? (
+                        <span className="rounded-sm border border-border bg-muted px-1 py-0.5 text-[10px] leading-none font-medium text-muted-foreground">
+                          {t(customModelsMessages.customModelBadge)}
+                        </span>
+                      ) : undefined,
                       label: runtimeModelLabel(model, t),
                       value: model.id,
                     }))}
