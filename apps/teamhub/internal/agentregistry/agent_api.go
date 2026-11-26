@@ -168,15 +168,6 @@ func (s *Service) CreateSponsorGeneralAgent(ctx context.Context, authorizer agen
 	if err != nil {
 		return AgentChange{}, err
 	}
-	count, err := queries.CountSponsorGeneralAgents(ctx, store.CountSponsorGeneralAgentsParams{
-		TenantID: auth.TenantID, SponsorActorID: auth.SponsorActorID,
-	})
-	if err == nil && count >= MaxSponsorGeneralAgents {
-		err = ErrAgentLimitReached
-	}
-	if err != nil {
-		return AgentChange{}, err
-	}
 	// The new Agent joins the caller's Room only when it can: a Direct Room has
 	// fixed members, and the Sponsor is the one who admits it.
 	direct, sponsorMember := false, false
@@ -190,23 +181,32 @@ func (s *Service) CreateSponsorGeneralAgent(ctx context.Context, authorizer agen
 			return AgentChange{}, err
 		}
 	}
+	if !sponsorMember {
+		count, err := queries.CountSponsorGeneralAgents(ctx, store.CountSponsorGeneralAgentsParams{
+			TenantID: auth.TenantID, SponsorActorID: auth.SponsorActorID,
+		})
+		if err != nil {
+			return AgentChange{}, err
+		}
+		if count >= MaxSponsorGeneralAgents {
+			return AgentChange{}, ErrAgentLimitReached
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return AgentChange{}, err
 	}
-	joinable := !direct && sponsorMember
-	sponsorDirect := direct && sponsorMember
-	if !joinable && !sponsorDirect {
+	if !sponsorMember {
 		return AgentChange{Auth: auth, Confirm: &typedcard.AgentChangeDecision{
 			Request: typedcard.AgentChangeRequest{Change: agentChangeRequestOf(change)},
 			View:    agentCreateCard(change),
 		}}, nil
 	}
-	actorID, replay, err := s.createSponsorAgent(ctx, accountID, auth.TenantID, auth.AgentActorID, change, "agent-create:"+request.InvocationId)
+	actorID, err := s.CreateSponsorAgent(ctx, accountID, auth.TenantID, auth.AgentActorID, change, "agent-create:"+request.InvocationId)
 	if err != nil {
 		return AgentChange{}, err
 	}
-	if sponsorDirect {
-		if err := s.settleDirectRoomCreation(ctx, accountID, auth, actorID, replay); err != nil {
+	if direct {
+		if err := s.settleDirectRoomCreation(ctx, accountID, auth, actorID); err != nil {
 			return AgentChange{}, err
 		}
 		return AgentChange{Auth: auth, Status: http.StatusOK, Created: &api.AgentAgentChangeResponse{
@@ -224,24 +224,38 @@ func (s *Service) CreateSponsorGeneralAgent(ctx context.Context, authorizer agen
 // settleDirectRoomCreation finishes a creation in the Sponsor's Direct Room
 // as an approved creation card does: it opens the new Agent's own Direct Room,
 // which the sidebar lists it by, and announces the Agent where it was asked
-// for. A replayed creation was already announced.
-func (s *Service) settleDirectRoomCreation(ctx context.Context, accountID string, auth agentauth.Authorization, actorID string, replay bool) error {
+// for. Registration and opening the Direct Room can both outlive a failed notice.
+func (s *Service) settleDirectRoomCreation(ctx context.Context, accountID string, auth agentauth.Authorization, actorID string) error {
 	if _, err := s.collaboration.OpenDirectRoom(ctx, accountID, auth.TenantID, actorID); err != nil {
 		return err
 	}
-	if replay {
-		return nil
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	queries := store.New(tx)
+	// The Room lock serializes concurrent retries. The published notice also
+	// identifies a completed creation whose registration key was written earlier.
+	if err := queries.LockTenantDeliveryRooms(ctx, store.LockTenantDeliveryRoomsParams{TenantID: auth.TenantID, RoomIds: []string{auth.RoomID}}); err != nil {
+		return err
+	}
+	published, err := queries.HasAgentCreationNotice(ctx, store.HasAgentCreationNoticeParams{RoomID: auth.RoomID, AuthorActorID: auth.AgentActorID, AgentActorID: actorID})
+	if err != nil || published {
+		return err
 	}
 	actors := make([]store.Actor, 0, 2)
 	for _, id := range []string{auth.AgentActorID, actorID} {
-		actor, err := s.queries.GetActor(ctx, store.GetActorParams{ID: id, TenantID: auth.TenantID})
+		actor, err := queries.GetActor(ctx, store.GetActorParams{ID: id, TenantID: auth.TenantID})
 		if err != nil {
 			return err
 		}
 		actors = append(actors, actor)
 	}
-	_, err := messagecreation.CreateNotice(ctx, s.queries, auth.TenantID, auth.RoomID, actors[0], messagecreation.AgentCreated(actors[1], nil))
-	return err
+	if _, err := messagecreation.CreateNotice(ctx, queries, auth.TenantID, auth.RoomID, actors[0], messagecreation.AgentCreated(actors[1], nil)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // AddSponsorAgentToRoom adds an existing Agent to the caller's Room with its

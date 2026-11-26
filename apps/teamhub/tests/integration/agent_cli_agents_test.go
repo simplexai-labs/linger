@@ -285,13 +285,47 @@ func TestAgentCLIManagesSponsorAgents(t *testing.T) {
 	}
 	directRoomID := direct.ID
 	inDirect := agent.in("room", directRoomID)
-	status, body = inDirect.post("agents", map[string]any{"invocation_id": agentInvocation("create-editor"), "name": "Editor", "prompt": "Edit for clarity."})
+	createEditor := map[string]any{"invocation_id": agentInvocation("create-editor"), "name": "Editor", "prompt": "Edit for clarity."}
+	// A publication failure lands after registration and after the notice row
+	// would be inserted. The retry must publish exactly once for the same Agent.
+	if _, err := env.pool.Exec(t.Context(), `CREATE FUNCTION reject_created_notice() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'injected notice event failure'; END $$;
+		CREATE TRIGGER reject_created_notice BEFORE INSERT ON room_events FOR EACH ROW
+		WHEN (NEW.payload #>> '{message,notice,type}' = 'agent_created') EXECUTE FUNCTION reject_created_notice()`); err != nil {
+		t.Fatal(err)
+	}
+	status, body = inDirect.post("agents", createEditor)
+	if status != http.StatusInternalServerError {
+		t.Fatalf("injected notice failure=%d %s", status, body)
+	}
+	if got := roomNotices(t, env, directRoomID, "agent_created", ""); got != 0 {
+		t.Fatalf("unpublished notices after failed creation=%d", got)
+	}
+	var registeredID string
+	if err := env.pool.QueryRow(t.Context(), `SELECT id FROM actors WHERE tenant_id=$1 AND kind='agent' AND display_name='Editor'`, acmeTenant).Scan(&registeredID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), "DROP TRIGGER reject_created_notice ON room_events; DROP FUNCTION reject_created_notice()"); err != nil {
+		t.Fatal(err)
+	}
+	directHeaders := headers.Clone()
+	directHeaders.Set("X-TeamHub-Context-Id", directRoomID)
+	for range 2 {
+		if err := startAsyncJSONRequestWithHeaders(results, "retry-create-editor", env.server.Client(), http.MethodPost, env.server.URL+"/api/agent/v1/agents", "", createEditor, directHeaders); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil || first.status != http.StatusOK || second.status != http.StatusOK || !bytes.Equal(first.body, second.body) {
+		t.Fatalf("concurrent Direct Room retries=%d %s (%v), %d %s (%v)", first.status, first.body, first.err, second.status, second.body, second.err)
+	}
+	status, body = first.status, first.body
 	var editor agentChangeResult
 	decode(t, body, &editor)
-	if status != http.StatusOK || editor.Status != "applied" || editor.ActorID == "" || editor.RoomID != "" {
+	if status != http.StatusOK || editor.Status != "applied" || editor.ActorID != registeredID || editor.RoomID != "" {
 		t.Fatalf("create in Direct Room=%d %s", status, body)
 	}
-	if replay, again := inDirect.post("agents", map[string]any{"invocation_id": agentInvocation("create-editor"), "name": "Editor", "prompt": "Edit for clarity."}); replay != http.StatusOK || !bytes.Equal(again, body) {
+	if replay, again := inDirect.post("agents", createEditor); replay != http.StatusOK || !bytes.Equal(again, body) {
 		t.Fatalf("Direct Room create replay=%d %s", replay, again)
 	}
 	editorID := editor.ActorID
@@ -299,6 +333,10 @@ func TestAgentCLIManagesSponsorAgents(t *testing.T) {
 		AND notice @> jsonb_build_object('type','agent_created','agent',jsonb_build_object('id',$3::text)) AND NOT notice ? 'approved_by'`,
 		directRoomID, caller.Actor.ID, editorID); got != 1 {
 		t.Fatalf("Direct Room creation notices=%d", got)
+	}
+	if got := countRows(t, env, `SELECT count(*) FROM room_events WHERE room_id=$1 AND event_type='message.created'
+		AND payload #>> '{message,notice,type}'='agent_created' AND payload #>> '{message,notice,agent,id}'=$2`, directRoomID, editorID); got != 1 {
+		t.Fatalf("Direct Room creation events=%d", got)
 	}
 	if got := countRows(t, env, `SELECT count(*) FROM active_room_members WHERE room_id=$1 AND actor_id=$2`, directRoomID, editorID); got != 0 {
 		t.Fatal("created Agent joined the Sponsor's Direct Room")

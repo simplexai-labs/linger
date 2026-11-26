@@ -263,6 +263,14 @@ WHERE actor_id=sqlc.arg(actor_id)::text
   AND status='active'
   AND configuration_revision=sqlc.arg(expected_revision)::bigint;
 
+-- name: HasAgentCreationNotice :one
+SELECT EXISTS (
+    SELECT 1 FROM messages
+    WHERE room_id=sqlc.arg(room_id)::text AND author_actor_id=sqlc.arg(author_actor_id)::text
+      AND message_kind='room_notice' AND room_seq IS NOT NULL
+      AND notice->>'type'='agent_created' AND notice->'agent'->>'id'=sqlc.arg(agent_actor_id)::text
+);
+
 -- name: CountSponsorGeneralAgents :one
 SELECT count(*)::bigint
 FROM agent_registrations
