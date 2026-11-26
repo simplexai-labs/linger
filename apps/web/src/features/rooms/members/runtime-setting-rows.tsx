@@ -100,6 +100,9 @@ export function SettingRow({
 }) {
   const panelId = useId();
   const expanded = open && !disabled;
+  // The choices line up under the value column: the label is w-28 and the
+  // gap gap-3, so the panel indents by both and each choice keeps the row's
+  // own 10px padding.
   return (
     <div>
       <button
@@ -124,7 +127,7 @@ export function SettingRow({
         )}
       </button>
       {expanded ? (
-        <div className="pb-1" id={panelId}>
+        <div className="pb-1 pl-[calc(7rem+0.75rem)]" id={panelId}>
           {children}
         </div>
       ) : null}
@@ -234,7 +237,7 @@ export function EffortSegments({
   return (
     <div
       aria-label={label}
-      className="grid auto-cols-fr grid-flow-col gap-0.5 rounded-lg bg-muted p-[3px]"
+      className="mx-2.5 grid auto-cols-fr grid-flow-col gap-0.5 rounded-lg bg-muted p-[3px]"
       role="radiogroup"
     >
       {efforts.map((effort) => (
