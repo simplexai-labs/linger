@@ -70,8 +70,8 @@ const VoiceModeMiniWindow = lazy(
   () => import("./chat/voice-mode/voice-mode-mini-window"),
 );
 const RecordingWindow = lazy(() => import("./voice-control/recording-window"));
-const RoomCreateDialog = lazy(async () => ({
-  default: (await import("./room-create-dialog")).RoomCreateDialog,
+const RoomCreator = lazy(async () => ({
+  default: (await import("./room-creator")).RoomCreator,
 }));
 const GlobalSearchDialog = lazy(async () => ({
   default: (await import("@/features/search/global-search-dialog"))
@@ -463,7 +463,7 @@ function RoomShellContent({
           ) : null}
           {createRoomOpen ? (
             <Suspense fallback={null}>
-              <RoomCreateDialog
+              <RoomCreator
                 onClose={() => setCreateRoomOpen(false)}
                 tenantId={tenantId}
               />

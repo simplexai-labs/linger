@@ -25,13 +25,11 @@ import { roomSettingsMessages as m } from "./room-settings.messages";
 import { roomSurfaceMessages } from "./room-surface.messages";
 
 export function RoomSettingsDialog({
-  embedded = false,
   onClose,
   onDelete,
   room,
   tenantId,
 }: {
-  embedded?: boolean;
   onClose: () => void;
   onDelete: () => void;
   room: TeamHubRoom;
@@ -148,19 +146,6 @@ export function RoomSettingsDialog({
       </Button>
     </>
   );
-
-  if (embedded) {
-    return (
-      <section aria-label={t(roomSurfaceMessages.roomSettings)}>
-        <form className="p-5" id={formId} onSubmit={handleSubmit}>
-          {fields}
-          <div className="mt-6 flex items-center justify-end gap-2">
-            {actions}
-          </div>
-        </form>
-      </section>
-    );
-  }
 
   return (
     <ModalDialog

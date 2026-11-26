@@ -62,7 +62,6 @@ describe("Room settings", () => {
       <QueryClientProvider client={new QueryClient()}>
         <TeamHubRuntimeProvider runtime={runtime}>
           <RoomSettingsDialog
-            embedded
             onClose={vi.fn()}
             onDelete={vi.fn()}
             room={room}

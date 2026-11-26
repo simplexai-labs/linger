@@ -307,11 +307,14 @@ export function TaskSidebar({
     return () => clearTimeout(timer);
   }, [open, reduceMotion]);
 
+  // Agent and Room panels read as one profile surface, not a framed card.
+  const profileTab =
+    activeTab?.kind === "agentInfo" || activeTab?.kind === "roomSettings";
   return (
     <aside
       aria-busy={activeResolution === "loading" || undefined}
       aria-label={t(m.panelSidebar)}
-      className={`panel-sidebar relative h-full min-h-0 shrink-0 ${activeTab?.kind === "agentInfo" ? "bg-card" : "bg-sidebar"}`}
+      className={`panel-sidebar relative h-full min-h-0 shrink-0 ${profileTab ? "bg-card" : "bg-sidebar"}`}
       data-dragging={dragging || undefined}
       data-open={expanded ? "true" : "false"}
       data-voice-area="sidebar"
@@ -339,7 +342,7 @@ export function TaskSidebar({
         />
       ) : null}
       <div
-        className={`panel-sidebar-body flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden pb-1 ${activeTab?.kind === "agentInfo" ? "pr-1" : "px-1"}`}
+        className={`panel-sidebar-body flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden pb-1 ${profileTab ? "pr-1" : "px-1"}`}
       >
         <PanelTabStrip
           includeAgentInfo={directPeer?.kind === "agent"}
@@ -373,7 +376,7 @@ export function TaskSidebar({
         />
 
         <div
-          className={`panel-content-surface relative flex min-h-0 flex-1 flex-col overflow-hidden bg-card ${activeTab?.kind === "agentInfo" ? "" : "rounded-lg rounded-br-2xl shadow-outline"}`}
+          className={`panel-content-surface relative flex min-h-0 flex-1 flex-col overflow-hidden bg-card ${profileTab ? "" : "rounded-lg rounded-br-2xl shadow-outline"}`}
           data-testid="panel-content-surface"
         >
           {launcherOpen ? (

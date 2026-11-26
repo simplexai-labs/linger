@@ -10,8 +10,8 @@ import { requireRoomRouteParam } from "./room-route-params";
 import { roomSurfaceMessages } from "./room-surface.messages";
 
 // Opened on demand, so it stays off the initial JavaScript graph.
-const RoomCreateDialog = lazy(async () => ({
-  default: (await import("./room-create-dialog")).RoomCreateDialog,
+const RoomCreator = lazy(async () => ({
+  default: (await import("./room-creator")).RoomCreator,
 }));
 
 export function RoomEmptyPage() {
@@ -42,7 +42,7 @@ export function RoomEmptyPage() {
       </div>
       {createOpen ? (
         <Suspense fallback={null}>
-          <RoomCreateDialog
+          <RoomCreator
             onClose={() => setCreateOpen(false)}
             tenantId={tenantId}
           />

@@ -11,6 +11,8 @@ export const roomSettingsMessages = defineMessages("roomSettings", {
   members: "Members",
   loadingMembers: "Loading members...",
   shareConversation: "Share conversation",
+  share: "Share",
+  renameRoom: "Rename {name}",
   leaveRoom: "Leave Room",
   leaveDescription:
     "You will stop receiving messages from this room and cannot send messages until you rejoin. Your role, existing access and message history stay the same. You can rejoin at any time.",
@@ -26,6 +28,7 @@ export const roomSettingsMessages = defineMessages("roomSettings", {
     "TeamHub did not confirm whether these Room changes were committed. Check the Room settings before you retry.",
 
   roomMembers: "Room members",
+  roomActions: "Room actions",
   // The tag on an Agent the person looking at the list created.
   yours: "Yours",
   roleOwner: "owner",

@@ -22,6 +22,8 @@ import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import { SettingsLayout } from "@/features/settings/settings-page";
 import {
+  acceptRoomCreation,
+  acceptRoomMembers,
   createTestTeamHubRuntime,
   type TestTeamHubRuntime,
 } from "@/test/teamhub-test-runtime";
@@ -111,9 +113,13 @@ describe("Room shell Account menu", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("loads the Create Room dialog from the navigation and keeps the shell visible on close", async () => {
-    await renderAccountShell({
+  it("creates a Room from the navigation and opens its add-members step over the shell", async () => {
+    const { router, runtime } = await renderAccountShell({
       initialEntry: "/t/tenant-northstar/rooms/room-all/chat",
+      configureRuntime: (runtime) => {
+        acceptRoomCreation(runtime);
+        acceptRoomMembers(runtime);
+      },
     });
     fireEvent.click(await shellControl("Open Room navigation"));
     // The shared create menu lives in the lazily loaded navigation.
@@ -121,12 +127,24 @@ describe("Room shell Account menu", () => {
     fireEvent.click(
       await screen.findByRole("menuitem", { name: "Create Room" }),
     );
-    const dialog = await screen.findByRole("dialog", { name: "Create Room" });
-    expect(dialog).toBeVisible();
+    const dialog = await screen.findByRole(
+      "dialog",
+      { name: "Add Room members" },
+      { timeout: 10_000 },
+    );
+    expect(router.state.location.pathname).toBe(
+      "/t/tenant-northstar/rooms/room-created-1/chat",
+    );
+    expect(
+      runtime.server.requestsTo("POST", "/v0/tenants/{tenantId}/rooms"),
+    ).toHaveLength(1);
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Skip for now" }),
+    );
     await waitFor(() =>
       expect(
-        screen.queryByRole("dialog", { name: "Create Room" }),
+        screen.queryByRole("dialog", { name: "Add Room members" }),
       ).not.toBeInTheDocument(),
     );
     expect(screen.getByText("Shell content")).toBeVisible();
