@@ -241,6 +241,9 @@ export class SetupWindowModule implements Module {
     window.on("closed", () => {
       if (this.#window === window) this.#window = undefined;
       this.#account?.hide();
+      // Idle background pre-staging and Bifrost pre-fetch stop when setup
+      // closes before Install is started.
+      this.#ctx?.get<LocalServerModule>("LocalServer").cancelPrestage();
       // A report waiting on this page's consent would block other sends.
       const sender = this.#ctx?.get<DiagnosticsModule>("Diagnostics").sender;
       if (sender?.state().phase === "confirm") void sender.cancel();

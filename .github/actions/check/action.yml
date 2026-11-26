@@ -94,6 +94,13 @@ runs:
       with:
         path: apps/teamhub/.tools/bin
         key: teamhub-tools-${{ runner.os }}-${{ hashFiles('apps/teamhub/Makefile', 'apps/teamhub/go.mod') }}
+    # Verified pinned localmodels kit reused by localmodels-tool.test.ts so
+    # fresh CI runners do not re-download the ~21 MB tarball on every run.
+    - uses: actions/cache@v6
+      if: inputs.app == 'packages'
+      with:
+        path: ~/.cache/linger-test-localmodels-kit
+        key: localmodels-test-kit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/desktop/distribution/linux-x64.json') }}
     # A cold golangci-lint analysis cache costs about 115 s. Pull requests
     # restore main's latest entry; only pushes save, so they never write one.
     - uses: actions/cache/restore@v6

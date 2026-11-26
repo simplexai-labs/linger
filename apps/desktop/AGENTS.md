@@ -411,6 +411,38 @@ Gateway and runs Agents. The daemon exits with the app.
   LiveKit whenever this computer has voice tools, with or without a voice
   key (see Source Package and Release). There is no settings page
   after setup yet: keys change on the next Install or Try Again.
+  When the setup window opens and runs `inspect()`, in addition to prewarming
+  Node, `LocalServer` silently pre-stages a bundled local source archive (source
+  skeleton, TeamHub binaries, and offline native runtime) into the default home
+  (`#startPrestage`, skipped for remote URLs, developer checkouts, unsupported
+  macOS, or custom locations; on Windows it checks `windowsPrivateLocation`
+  first and never mutates setup UI progress or phase). After inspection succeeds
+  on the default home (and fire-and-forget when the user clicks BYOK model
+  listing or endpoint test), it runs
+  `installer.js --prefetch-bifrost --abort-on-stdin-close`
+  (`#startBifrostPrefetch`) to populate localmodels' archive cache without
+  blocking BYOK controls, allocating ports, or writing `owned.json`. Closing the
+  setup window (`cancelPrestage()`) or switching the install location
+  (`chooseLocation()`) cancels both idle background tasks and suppresses late
+  post-inspect prefetch (`#prestageAllowed` when setup closes, `#location` on
+  custom locations), while `runChild` awaits child exit on abort and
+  `#prestageSettling` drains prior cleanup so `.partial` cleanup and TeamHub
+  unquarantine abort cleanup never race a subsequent install. Starting Install
+  joins or reuses an in-flight or completed same-home pre-stage, and always
+  stops `#bifrostPrefetch` and awaits its child tree exit
+  (`#stopBifrostPrefetch`, via stdin EOF, `SIGTERM`, and
+  `SIGKILL`/`taskkill /T /F` escalation) before launching `installer_job` so
+  `hosts.file_lock` is free and `source apply`/`stack apply` can resume partial
+  downloads with live progress instead of blocking on the lock. During
+  installation, `InstallerApi.run` and `#awaitAgents` use fast initial polling
+  (`200 ms` for the first 10 s via `pollDelayMs`, then falling back to
+  `basePollMs`); once `services` succeeds or `account` begins running,
+  `LocalServer` triggers one deduplicated cookieless
+  `WindowManager.prewarmAssets(origin)`; once `installer_job` completes without
+  sign-in required, `loadRuntime`, `handleLegacyBackup`, and `signInOwner` run
+  in parallel (with a scoped `AbortController` so any failure cancels a pending
+  runtime lookup) before recording state, calling `enroll()`, preloading the
+  hidden window (`preloadAuthenticated`), and awaiting agents.
 - `src/main/diagnostics.ts`: Diagnostics, "Show Logs" (opens
   `<userData>/logs`) and "Save Diagnostics" (a redacted
   `linger-diagnostics-<time>.zip` in Downloads) for the setup page's failed

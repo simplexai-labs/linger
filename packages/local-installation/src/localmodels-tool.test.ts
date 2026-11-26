@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, renameSync } from "node:fs";
+import { chmodSync, existsSync, renameSync } from "node:fs";
 import {
   chmod,
   mkdtemp,
@@ -8,6 +8,7 @@ import {
   rm,
   readFile,
   readdir,
+  realpath,
   rename,
   stat,
   utimes,
@@ -15,10 +16,14 @@ import {
   link,
 } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
+import { c as archive } from "tar";
 import { INSTANCE_BUSY, withInstanceLock, type Instance } from "./instance.js";
+import { runProcess } from "./process.js";
 import { REGION_SCHEMA, regionFile } from "./region.js";
 import { requestUrlText } from "@linger/service-kit";
 import { afterEach, expect, test, vi } from "vitest";
@@ -29,6 +34,7 @@ import {
   localmodelsLegacyToolsMarkerFile,
   localmodelsStateDirectory,
   localmodelsToolsDirectory,
+  prefetchLocalmodelsBifrost,
   readPublishedTool,
   resolveLocalmodelsBifrostAddr,
   runLocalmodels,
@@ -2182,3 +2188,679 @@ test("readPublishedTool returns undefined when the staged path is not a director
     readPublishedTool(path.join(setupFile, "Contents", "distribution.json")),
   ).resolves.toBeUndefined();
 });
+
+test("prefetchLocalmodelsBifrost runs isolated Python without allocating a Bifrost port", async () => {
+  const f = await fixture();
+  const ensureTool = vi.fn(async () => ({
+    python: path.join(f.directory, "python/python"),
+    moduleDir: path.join(f.directory, "modules"),
+    sourceCommit: f.source.sourceCommit,
+  }));
+  const run = vi.fn(async () => ({
+    code: 0,
+    stdout: `${JSON.stringify({
+      ok: true,
+      cached: false,
+      version: "1.4.2",
+      name: "bifrost-darwin-arm64",
+      bytes: 42_000_000,
+    })}\n`,
+    stderr: "",
+  }));
+
+  const result = await prefetchLocalmodelsBifrost(
+    f.home,
+    {
+      env: {
+        PYTHONHOME: "/bad/python",
+        PYTHONSTARTUP: "/bad/startup.py",
+        PYTHONINSPECT: "1",
+        LOCALMODELS_TOOLS_DIR: "/shared/tools",
+      },
+    },
+    { run, ensureTool },
+  );
+
+  expect(result).toEqual({
+    ok: true,
+    cached: false,
+    version: "1.4.2",
+    name: "bifrost-darwin-arm64",
+    bytes: 42_000_000,
+  });
+  expect(ensureTool).toHaveBeenCalledTimes(1);
+  expect(run).toHaveBeenCalledTimes(1);
+  const [executable, args, opts] = run.mock.calls[0] as unknown as [
+    string,
+    string[],
+    { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number },
+  ];
+  expect(executable).toBe(path.join(f.directory, "python/python"));
+  expect(args.slice(0, 3)).toEqual(["-P", "-s", "-c"]);
+  expect(args[3]).toContain("gateway_bifrost.plan_tools");
+  expect(args[3]).toContain("harness.archive_files");
+  expect(args[3]).toContain("harness._fetch");
+  expect(opts.cwd).toBe(path.join(f.directory, "modules"));
+  expect(opts.env.LOCALMODELS_TOOLS_DIR).toBe(
+    localmodelsToolsDirectory(f.home),
+  );
+  expect(opts.env.LOCALMODELS_BIFROST_DIR).toBe(
+    localmodelsBifrostDirectory(f.home),
+  );
+  expect(opts.env.LOCALMODELS_STATE).toBe(localmodelsStateDirectory(f.home));
+  expect(opts.env.SIMPLEX_REGION).toBe("global");
+  expect(opts.env.PYTHONPATH).toBe(path.join(f.directory, "modules"));
+  expect(opts.env.PYTHONNOUSERSITE).toBe("1");
+  expect(opts.env.PYTHONDONTWRITEBYTECODE).toBe("1");
+  expect(opts.env.PYTHONUTF8).toBe("1");
+  expect(opts.env.PYTHONIOENCODING).toBe("utf-8");
+  expect(opts.env.PYTHONHOME).toBeUndefined();
+  expect(opts.env.PYTHONSTARTUP).toBeUndefined();
+  expect(opts.env.PYTHONINSPECT).toBeUndefined();
+  await expect(stat(localmodelsBifrostAddrFile(f.home))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+});
+
+test("prefetchLocalmodelsBifrost reports cached hits, unsupported targets, and non-zero exits cleanly", async () => {
+  const f = await fixture();
+  const ensureTool = vi.fn(async () => ({
+    python: path.join(f.directory, "python/python"),
+    moduleDir: path.join(f.directory, "modules"),
+    sourceCommit: f.source.sourceCommit,
+  }));
+
+  const cached = await prefetchLocalmodelsBifrost(
+    f.home,
+    {},
+    {
+      ensureTool,
+      run: async () => ({
+        code: 0,
+        stdout: `progress noise\n${JSON.stringify({
+          ok: true,
+          cached: true,
+          version: "1.4.2",
+          name: "bifrost-darwin-arm64",
+          bytes: 42_000_000,
+        })}\n`,
+        stderr: "",
+      }),
+    },
+  );
+  expect(cached).toEqual({
+    ok: true,
+    cached: true,
+    version: "1.4.2",
+    name: "bifrost-darwin-arm64",
+    bytes: 42_000_000,
+  });
+
+  const unsupported = await prefetchLocalmodelsBifrost(
+    f.home,
+    {},
+    {
+      ensureTool,
+      run: async () => ({
+        code: 0,
+        stdout: `${JSON.stringify({
+          ok: false,
+          unsupported: true,
+          message: "no Bifrost build for plan9/mips",
+        })}\n`,
+        stderr: "",
+      }),
+    },
+  );
+  expect(unsupported).toEqual({
+    ok: false,
+    unsupported: true,
+    message: "no Bifrost build for plan9/mips",
+  });
+
+  const failed = await prefetchLocalmodelsBifrost(
+    f.home,
+    {},
+    {
+      ensureTool,
+      run: async () => ({
+        code: 1,
+        stdout: "",
+        stderr: "network unreachable\n",
+      }),
+    },
+  );
+  expect(failed).toEqual({ ok: false, message: "network unreachable" });
+});
+
+test("prefetchLocalmodelsBifrost propagates AbortSignal cancellation", async () => {
+  const f = await fixture();
+  const preAborted = new AbortController();
+  preAborted.abort(new DOMException("Cancelled", "AbortError"));
+  const ensureTool = vi.fn(async () => ({
+    python: path.join(f.directory, "python/python"),
+    moduleDir: path.join(f.directory, "modules"),
+    sourceCommit: f.source.sourceCommit,
+  }));
+  await expect(
+    prefetchLocalmodelsBifrost(
+      f.home,
+      { signal: preAborted.signal },
+      { ensureTool },
+    ),
+  ).rejects.toMatchObject({ name: "AbortError" });
+  expect(ensureTool).not.toHaveBeenCalled();
+
+  const midRun = new AbortController();
+  const run = vi.fn(
+    async (_cmd: string, _args: string[], opts?: { signal?: AbortSignal }) =>
+      new Promise<{ code: number; stdout: string; stderr: string }>(
+        (_resolve, reject) => {
+          opts?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Interrupted", "AbortError")),
+            { once: true },
+          );
+        },
+      ),
+  );
+  const pending = prefetchLocalmodelsBifrost(
+    f.home,
+    { signal: midRun.signal },
+    { ensureTool, run },
+  );
+  await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+  midRun.abort();
+  await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+});
+
+const pinnedDistributionFile = fileURLToPath(
+  new URL(
+    `../../../apps/desktop/distribution/${process.platform}-${process.arch}.json`,
+    import.meta.url,
+  ),
+);
+
+const UNCACHED_KIT_DOWNLOAD_TIMEOUT_MS = 30_000;
+
+interface EnsurePinnedKitOptions {
+  kitHome: string;
+  source: NonNullable<Awaited<ReturnType<typeof readPublishedTool>>>;
+  alreadyCached: boolean;
+  requireNetwork: boolean;
+  skip: (note: string) => void;
+  timeoutMs?: number;
+  fetcher?: typeof fetch;
+}
+
+async function ensurePinnedKitOrSkip(
+  options: EnsurePinnedKitOptions,
+): Promise<Awaited<ReturnType<typeof ensureLocalmodelsTool>> | undefined> {
+  const skipOnDownloadFailure =
+    !options.alreadyCached && !options.requireNetwork;
+  const downloadOptions = skipOnDownloadFailure
+    ? {
+        signal: AbortSignal.timeout(
+          options.timeoutMs ?? UNCACHED_KIT_DOWNLOAD_TIMEOUT_MS,
+        ),
+      }
+    : {};
+  try {
+    return await ensureLocalmodelsTool(options.kitHome, downloadOptions, {
+      source: options.source,
+      ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+    });
+  } catch (error) {
+    if (skipOnDownloadFailure) {
+      options.skip(
+        `Skipped real localmodels kit contract test (uncached kit download unavailable: ${error instanceof Error ? error.message : String(error)})`,
+      );
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+test("ensurePinnedKitOrSkip aborts slow uncached downloads on timeout and skips unless network is required", async () => {
+  vi.stubEnv("LINGER_LOCALMODELS_DEV_PYTHON", "");
+  vi.stubEnv("LINGER_LOCALMODELS_DEV_MODULE_DIR", "");
+  const kitHome = await realpath(
+    await mkdtemp(path.join(os.tmpdir(), "linger-kit-timeout-")),
+  );
+  roots.push(kitHome);
+  await mkdir(path.dirname(regionFile(kitHome)), {
+    recursive: true,
+    mode: 0o700,
+  });
+  await writeFile(
+    regionFile(kitHome),
+    JSON.stringify({
+      schema: REGION_SCHEMA,
+      region: "global",
+      resolved_at: new Date().toISOString(),
+      method: "probe",
+    }),
+  );
+  const source = {
+    url: "https://downloads.example.invalid/localmodels-kit.tgz",
+    sha256: "a".repeat(64),
+    bytes: 1024,
+    manifestSha256: "b".repeat(64),
+    sourceCommit: "1".repeat(40),
+  };
+
+  let receivedSignal: AbortSignal | undefined;
+  const hangingFetcher = vi.fn<typeof fetch>(
+    (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        receivedSignal = init?.signal ?? undefined;
+        if (receivedSignal?.aborted) {
+          reject(receivedSignal.reason);
+          return;
+        }
+        receivedSignal?.addEventListener(
+          "abort",
+          () => reject(receivedSignal?.reason),
+          { once: true },
+        );
+      }),
+  );
+  const skip = vi.fn<(note: string) => void>();
+  const startedAt = Date.now();
+  const result = await ensurePinnedKitOrSkip({
+    kitHome,
+    source,
+    alreadyCached: false,
+    requireNetwork: false,
+    skip,
+    timeoutMs: 50,
+    fetcher: hangingFetcher,
+  });
+  expect(Date.now() - startedAt).toBeLessThan(5_000);
+  expect(result).toBeUndefined();
+  expect(hangingFetcher).toHaveBeenCalledTimes(1);
+  expect(receivedSignal?.aborted).toBe(true);
+  expect(skip).toHaveBeenCalledTimes(1);
+  expect(skip.mock.calls[0]?.[0]).toMatch(
+    /uncached kit download unavailable:.*(?:timed out|timeout|aborted)/i,
+  );
+
+  // When network tests are required, do not attach the skip timeout or swallow failures.
+  let requiredSignalAbortedAfterDelay: boolean | undefined;
+  const failingFetcher = vi.fn<typeof fetch>(async (_input, init) => {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    requiredSignalAbortedAfterDelay = init?.signal?.aborted ?? false;
+    return new Response("not found", { status: 404 });
+  });
+  const requiredSkip = vi.fn<(note: string) => void>();
+  await expect(
+    ensurePinnedKitOrSkip({
+      kitHome,
+      source,
+      alreadyCached: false,
+      requireNetwork: true,
+      skip: requiredSkip,
+      timeoutMs: 50,
+      fetcher: failingFetcher,
+    }),
+  ).rejects.toThrow();
+  expect(failingFetcher).toHaveBeenCalledTimes(1);
+  expect(requiredSignalAbortedAfterDelay).toBe(false);
+  expect(requiredSkip).not.toHaveBeenCalled();
+
+  // When already cached, failures are never skipped or bounded by the uncached timeout.
+  const cachedSkip = vi.fn<(note: string) => void>();
+  await expect(
+    ensurePinnedKitOrSkip({
+      kitHome,
+      source,
+      alreadyCached: true,
+      requireNetwork: false,
+      skip: cachedSkip,
+      timeoutMs: 50,
+      fetcher: async () => new Response("not found", { status: 404 }),
+    }),
+  ).rejects.toThrow();
+  expect(cachedSkip).not.toHaveBeenCalled();
+});
+
+test.skipIf(!existsSync(pinnedDistributionFile))(
+  "verifies prefetchLocalmodelsBifrost and cache helpers against the real pinned localmodels kit",
+  async (context) => {
+    const source = await readPublishedTool(pinnedDistributionFile);
+    expect(source).toBeDefined();
+    vi.stubEnv("LINGER_LOCALMODELS_DEV_PYTHON", "");
+    vi.stubEnv("LINGER_LOCALMODELS_DEV_MODULE_DIR", "");
+
+    const cacheHome = path.resolve(
+      process.env.LINGER_TEST_LOCALMODELS_CACHE ||
+        (process.platform === "win32" && process.env.LOCALAPPDATA
+          ? path.join(
+              process.env.LOCALAPPDATA,
+              "Linger",
+              "test-cache",
+              "localmodels-kit",
+            )
+          : path.join(os.homedir(), ".cache", "linger-test-localmodels-kit")),
+    );
+    await mkdir(cacheHome, { recursive: true, mode: 0o700 });
+    const kitHome = await realpath(cacheHome);
+    const alreadyCached = existsSync(
+      path.join(kitHome, "tools", "localmodels", source!.sha256),
+    );
+    const pinnedTool = await ensurePinnedKitOrSkip({
+      kitHome,
+      source: source!,
+      alreadyCached,
+      requireNetwork: process.env.LINGER_REQUIRE_NETWORK_TESTS === "1",
+      skip: (note) => context.skip(note),
+    });
+    if (!pinnedTool) return;
+
+    const workRoot = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "linger-pinned-kit-")),
+    );
+    roots.push(workRoot);
+    const home1 = path.join(workRoot, "prefetch-home");
+    const home2 = path.join(workRoot, "cache-home");
+    const tarWork = path.join(workRoot, "tar-work");
+    await Promise.all([
+      mkdir(home1, { recursive: true, mode: 0o700 }),
+      mkdir(home2, { recursive: true, mode: 0o700 }),
+      mkdir(path.join(tarWork, "package"), { recursive: true, mode: 0o700 }),
+    ]);
+
+    const syntheticBinary = Buffer.from("synthetic-bifrost-binary\n");
+    await writeFile(
+      path.join(tarWork, "package", "bifrost-http"),
+      syntheticBinary,
+      { mode: 0o755 },
+    );
+    const syntheticTgzPath = path.join(tarWork, "synthetic-bifrost.tgz");
+    await archive(
+      { file: syntheticTgzPath, cwd: tarWork, gzip: true, portable: true },
+      ["package/bifrost-http"],
+    );
+    const syntheticTgz = await readFile(syntheticTgzPath);
+    const syntheticBinarySha = hash(syntheticBinary);
+    const syntheticTgzSha = hash(syntheticTgz);
+
+    const syntheticPackage = "@simplexai/bifrost-contract-test";
+    const syntheticVersion = "0.0.0-test";
+    const syntheticPath = `/${syntheticPackage}/-/bifrost-contract-test-${syntheticVersion}.tgz`;
+    const dummyPayload = Buffer.alloc(64, 0x41);
+    const recordedPaths: string[] = [];
+    let syntheticHits = 0;
+
+    const server = http.createServer((req, res) => {
+      const reqPath = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+      recordedPaths.push(reqPath);
+      if (reqPath === syntheticPath) {
+        syntheticHits += 1;
+        res.writeHead(200, {
+          "Content-Type": "application/gzip",
+          "Content-Length": String(syntheticTgz.length),
+        });
+        res.end(syntheticTgz);
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": String(dummyPayload.length),
+      });
+      res.end(dummyPayload);
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string")
+        throw new Error("Expected local HTTP server TCP address.");
+      const serverOrigin = `http://127.0.0.1:${address.port}`;
+
+      // Pre-populate home1's region cache so Check 1 never probes external registries.
+      await mkdir(path.dirname(regionFile(home1)), {
+        recursive: true,
+        mode: 0o700,
+      });
+      await writeFile(
+        regionFile(home1),
+        JSON.stringify({
+          schema: REGION_SCHEMA,
+          region: "global",
+          resolved_at: new Date().toISOString(),
+          method: "probe",
+        }),
+      );
+
+      const loopbackEnv: NodeJS.ProcessEnv = {
+        SIMPLEX_NPM_REGISTRY: serverOrigin,
+        SIMPLEX_REGION: "global",
+        NO_PROXY: "127.0.0.1,localhost",
+        no_proxy: "127.0.0.1,localhost",
+        HTTP_PROXY: "",
+        http_proxy: "",
+        HTTPS_PROXY: "",
+        https_proxy: "",
+        ALL_PROXY: "",
+        all_proxy: "",
+      };
+
+      // Check 1: real prefetchLocalmodelsBifrost end-to-end against real pinned kit + 127.0.0.1 server.
+      const prefetch = await prefetchLocalmodelsBifrost(
+        home1,
+        { env: loopbackEnv },
+        { ensureTool: async () => pinnedTool },
+      );
+      expect(
+        recordedPaths.some((reqPath) =>
+          /^\/@simplexai\/bifrost-.*\/-\/bifrost-.*\.tgz$/.test(reqPath),
+        ),
+      ).toBe(true);
+      await expect(
+        stat(localmodelsBifrostAddrFile(home1)),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        stat(path.join(localmodelsToolsDirectory(home1), "owned.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(prefetch.ok).toBe(false);
+      expect(prefetch.unsupported).not.toBe(true);
+      expect(prefetch.message).toMatch(/digest|checksum|sha256|size/i);
+      expect(prefetch.message).not.toMatch(
+        /AttributeError|ImportError|KeyError|TypeError/,
+      );
+
+      // Check 2: real harness._fetch + gateway_bifrost.plan_tools + harness.archive_files round-trip.
+      const toolsDir2 = localmodelsToolsDirectory(home2);
+      const stateDir2 = localmodelsStateDirectory(home2);
+      const bifrostDir2 = localmodelsBifrostDirectory(home2);
+      await Promise.all([
+        mkdir(toolsDir2, { recursive: true, mode: 0o700 }),
+        mkdir(stateDir2, { recursive: true, mode: 0o700 }),
+        mkdir(bifrostDir2, { recursive: true, mode: 0o700 }),
+      ]);
+
+      const strippedNames = new Set([
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "PYTHONINSPECT",
+        "PYTHONPATH",
+        "PYTHONUTF8",
+        "PYTHONIOENCODING",
+        "LOCALMODELS_STATE",
+        "LOCALMODELS_TOOLS_DIR",
+        "LOCALMODELS_BIFROST_DIR",
+        "LOCALMODELS_BIFROST_ADDR",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+      ]);
+      const kitEnv: NodeJS.ProcessEnv = {};
+      for (const [key, value] of Object.entries(process.env)) {
+        if (!strippedNames.has(key.toUpperCase())) kitEnv[key] = value;
+      }
+      Object.assign(kitEnv, loopbackEnv, {
+        PYTHONPATH: pinnedTool.moduleDir,
+        LOCALMODELS_STATE: stateDir2,
+        LOCALMODELS_TOOLS_DIR: toolsDir2,
+        LOCALMODELS_BIFROST_DIR: bifrostDir2,
+        PYTHONNOUSERSITE: "1",
+        PYTHONDONTWRITEBYTECODE: "1",
+        PYTHONUTF8: "1",
+        PYTHONIOENCODING: "utf-8",
+      });
+
+      const syntheticArtifact = {
+        name: "bifrost-http-contract-test",
+        url: `${serverOrigin}${syntheticPath}`,
+        sha256: syntheticBinarySha,
+        size_bytes: syntheticBinary.length,
+        npm: {
+          package: syntheticPackage,
+          version: syntheticVersion,
+          sha256: syntheticTgzSha,
+          bytes: syntheticTgz.length,
+        },
+      };
+
+      const fetchAndVerifyScript = `
+import json, os, platform, shutil, sys
+from pathlib import Path
+from localmodels import gateway_bifrost, harness, hosts
+
+tools_dir = Path(os.path.expanduser(hosts.tools_dir()))
+artifact = json.loads(os.environ["CONTRACT_ARTIFACT_JSON"])
+expected_archive = Path(harness.archive_files(tools_dir, artifact)[0])
+assert expected_archive == tools_dir / ".archives" / artifact["name"], (
+    f"unexpected archive path: {expected_archive}"
+)
+fetched = harness._fetch(tools_dir, artifact, lambda _line: None)
+assert fetched == expected_archive, f"fetch returned {fetched} != {expected_archive}"
+assert expected_archive.is_file()
+assert harness.digest(str(expected_archive)) == artifact["sha256"]
+
+machine = platform.machine().lower()
+arch = {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64"}.get(machine, machine)
+lock = harness.load_lock()
+build = harness.tool_build(lock["bifrost"]["builds"], sys.platform, arch, "Bifrost")
+real_artifact = harness.tool_artifact(build)
+version = lock["bifrost"]["version"]
+actions, _ = gateway_bifrost.plan_tools({}, sys.platform, arch, False, str(tools_dir), lock)
+bifrost_action = next(a for a in actions if a["tool"] == "bifrost")
+expected_bin = tools_dir / f"bifrost-{version}" / ("bifrost-http.exe" if sys.platform == "win32" else "bifrost-http")
+assert bifrost_action["action"] == "install"
+assert bifrost_action["version"] == version
+assert Path(bifrost_action["path"]) == expected_bin
+assert len(bifrost_action["artifacts"]) == 1
+assert bifrost_action["artifacts"][0]["name"] == real_artifact["name"]
+assert bifrost_action["artifacts"][0]["sha256"] == real_artifact["sha256"]
+assert Path(harness.archive_files(tools_dir, real_artifact)[0]) == tools_dir / ".archives" / real_artifact["name"]
+
+synthetic_version = artifact["npm"]["version"]
+synthetic_lock = {
+    "bifrost": {
+        "version": synthetic_version,
+        "builds": [{**artifact, "platform": sys.platform, "arch": arch}],
+    }
+}
+synth_actions, _ = gateway_bifrost.plan_tools({}, sys.platform, arch, False, str(tools_dir), synthetic_lock)
+synth_before = next(a for a in synth_actions if a["tool"] == "bifrost")
+assert synth_before["action"] == "install"
+assert synth_before["artifacts"][0]["sha256"] == artifact["sha256"]
+installed_synth = Path(synth_before["path"])
+installed_synth.parent.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(expected_archive, installed_synth)
+reuse_actions, _ = gateway_bifrost.plan_tools({}, sys.platform, arch, False, str(tools_dir), synthetic_lock)
+synth_after = next(a for a in reuse_actions if a["tool"] == "bifrost")
+assert synth_after["action"] == "reuse"
+assert synth_after["artifacts"] == []
+assert not (tools_dir / "owned.json").exists()
+
+print(json.dumps({
+    "realBifrostName": real_artifact["name"],
+    "realBifrostVersion": version,
+    "archivePath": str(expected_archive),
+}))
+`.trim();
+
+      const firstRun = await runProcess(
+        pinnedTool.python,
+        ["-P", "-s", "-c", fetchAndVerifyScript],
+        {
+          cwd: pinnedTool.moduleDir,
+          env: {
+            ...kitEnv,
+            CONTRACT_ARTIFACT_JSON: JSON.stringify(syntheticArtifact),
+          },
+          timeoutMs: 30_000,
+        },
+      );
+      expect(firstRun.code, firstRun.stderr).toBe(0);
+      expect(syntheticHits).toBe(1);
+
+      const meta = JSON.parse(
+        firstRun.stdout.trim().split(/\r?\n/).at(-1) ?? "{}",
+      ) as {
+        realBifrostName: string;
+        realBifrostVersion: string;
+        archivePath: string;
+      };
+      expect(meta.realBifrostName).toMatch(/^bifrost-/);
+      expect(meta.archivePath).toBe(
+        path.join(toolsDir2, ".archives", syntheticArtifact.name),
+      );
+
+      // Confirm Check 1's real harness._fetch created <bifrostName>.lock inside .archives/.
+      const lockStat = await stat(
+        path.join(
+          localmodelsToolsDirectory(home1),
+          ".archives",
+          `${meta.realBifrostName}.lock`,
+        ),
+      );
+      expect(lockStat.isFile()).toBe(true);
+
+      // Second fetch call in a fresh Python process must reuse the cache with zero HTTP requests.
+      const reuseScript = `
+import json, os
+from pathlib import Path
+from localmodels import harness, hosts
+
+tools_dir = Path(os.path.expanduser(hosts.tools_dir()))
+artifact = json.loads(os.environ["CONTRACT_ARTIFACT_JSON"])
+expected_archive = Path(harness.archive_files(tools_dir, artifact)[0])
+fetched = harness._fetch(tools_dir, artifact, lambda _line: None)
+assert fetched == expected_archive
+assert harness.digest(str(fetched)) == artifact["sha256"]
+assert not (tools_dir / "owned.json").exists()
+print(json.dumps({"ok": True}))
+`.trim();
+
+      const secondRun = await runProcess(
+        pinnedTool.python,
+        ["-P", "-s", "-c", reuseScript],
+        {
+          cwd: pinnedTool.moduleDir,
+          env: {
+            ...kitEnv,
+            CONTRACT_ARTIFACT_JSON: JSON.stringify(syntheticArtifact),
+          },
+          timeoutMs: 30_000,
+        },
+      );
+      expect(secondRun.code, secondRun.stderr).toBe(0);
+      expect(syntheticHits).toBe(1);
+      await expect(
+        stat(path.join(toolsDir2, "owned.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+  120_000,
+);

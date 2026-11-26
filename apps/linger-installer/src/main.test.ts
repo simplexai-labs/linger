@@ -657,3 +657,178 @@ it("runs --prepare-voice-tools without legacy migration and exits 0 even on erro
     vi.resetModules();
   }
 });
+
+it("parses --prefetch-bifrost without requiring --source-repo", async () => {
+  const { parseInstallerArguments } = await import("./main.js");
+  const home = path.join(os.tmpdir(), "linger-prefetch-home");
+  expect(
+    parseInstallerArguments([
+      "--home",
+      home,
+      "--prefetch-bifrost",
+      "--abort-on-stdin-close",
+    ]),
+  ).toMatchObject({
+    home: path.resolve(home),
+    prefetchBifrost: true,
+    abortOnStdinClose: true,
+  });
+  expect(() =>
+    parseInstallerArguments([
+      "--source-repo",
+      "checkout",
+      "--abort-on-stdin-close",
+    ]),
+  ).toThrow("--abort-on-stdin-close requires --prefetch-bifrost.");
+});
+
+it("runs --prefetch-bifrost without legacy migration and aborts cleanly on SIGTERM", async () => {
+  const migrate = vi.fn().mockResolvedValue([]);
+  let prefetchSignal: AbortSignal | undefined;
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const prefetch = vi.fn(
+    (_home: string, opts?: { signal?: AbortSignal }) =>
+      new Promise<never>((_resolve, reject) => {
+        prefetchSignal = opts?.signal;
+        started();
+        opts?.signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("Interrupted", "AbortError")),
+          { once: true },
+        );
+      }),
+  );
+  vi.doMock("@linger/local-installation/legacy-migration", () => ({
+    migrateLegacyInstallation: migrate,
+  }));
+  vi.doMock("@linger/local-installation/localmodels-tool", () => ({
+    readPublishedTool: vi.fn().mockResolvedValue(undefined),
+    prefetchLocalmodelsBifrost: prefetch,
+  }));
+  const argv = process.argv;
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const once = vi.spyOn(process, "once");
+  const off = vi.spyOn(process, "off");
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    process.argv = [
+      process.execPath,
+      fileURLToPath(new URL("./main.ts", import.meta.url)),
+      "--home",
+      "prefetch-home",
+      "--prefetch-bifrost",
+    ];
+    vi.resetModules();
+    const running = import("./main.js");
+    await ready;
+    expect(migrate).not.toHaveBeenCalled();
+    expect(prefetch).toHaveBeenCalledWith(
+      path.resolve("prefetch-home"),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    const registered = once.mock.calls.find(
+      ([event]) => event === "SIGTERM",
+    )?.[1];
+    expect(typeof registered).toBe("function");
+    process.emit("SIGTERM");
+    await running;
+    expect(prefetchSignal?.aborted).toBe(true);
+    expect(off).toHaveBeenCalledWith("SIGTERM", registered);
+    const line = stdout.mock.calls.at(-1)?.[0];
+    expect(JSON.parse(String(line))).toEqual({
+      ok: false,
+      message: "Interrupted",
+    });
+    const done = stdout.mock.calls.at(-1)?.[1] as unknown;
+    if (typeof done === "function") done();
+    expect(exit).toHaveBeenCalledWith(1);
+  } finally {
+    process.argv = argv;
+    stdout.mockRestore();
+    stderr.mockRestore();
+    once.mockRestore();
+    off.mockRestore();
+    exit.mockRestore();
+    vi.doUnmock("@linger/local-installation/legacy-migration");
+    vi.doUnmock("@linger/local-installation/localmodels-tool");
+    vi.resetModules();
+  }
+});
+
+it("aborts --prefetch-bifrost --abort-on-stdin-close on stdin EOF and cleans up listeners", async () => {
+  const { EventEmitter } = await import("node:events");
+  const fakeStdin = Object.assign(new EventEmitter(), {
+    readableEnded: false,
+    destroyed: false,
+    resume: vi.fn(),
+    pause: vi.fn(),
+  });
+  const originalStdin = Object.getOwnPropertyDescriptor(process, "stdin");
+  Object.defineProperty(process, "stdin", {
+    value: fakeStdin,
+    configurable: true,
+  });
+  let prefetchSignal: AbortSignal | undefined;
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const prefetch = vi.fn(
+    (_home: string, opts?: { signal?: AbortSignal }) =>
+      new Promise<never>((_resolve, reject) => {
+        prefetchSignal = opts?.signal;
+        started();
+        opts?.signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("Interrupted", "AbortError")),
+          { once: true },
+        );
+      }),
+  );
+  vi.doMock("@linger/local-installation/localmodels-tool", () => ({
+    readPublishedTool: vi.fn().mockResolvedValue(undefined),
+    prefetchLocalmodelsBifrost: prefetch,
+  }));
+  const argv = process.argv;
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    process.argv = [
+      process.execPath,
+      fileURLToPath(new URL("./main.ts", import.meta.url)),
+      "--home",
+      "stdin-eof-home",
+      "--prefetch-bifrost",
+      "--abort-on-stdin-close",
+    ];
+    vi.resetModules();
+    const running = import("./main.js");
+    await ready;
+    expect(fakeStdin.resume).toHaveBeenCalledOnce();
+    expect(prefetchSignal?.aborted).toBe(false);
+    fakeStdin.emit("end");
+    await running;
+    expect(prefetchSignal?.aborted).toBe(true);
+    expect(fakeStdin.pause).toHaveBeenCalledOnce();
+    expect(fakeStdin.listenerCount("end")).toBe(0);
+    expect(fakeStdin.listenerCount("close")).toBe(0);
+    const done = stdout.mock.calls.at(-1)?.[1] as unknown;
+    if (typeof done === "function") done();
+    expect(exit).toHaveBeenCalledWith(1);
+  } finally {
+    if (originalStdin) Object.defineProperty(process, "stdin", originalStdin);
+    process.argv = argv;
+    stdout.mockRestore();
+    exit.mockRestore();
+    vi.doUnmock("@linger/local-installation/localmodels-tool");
+    vi.resetModules();
+  }
+});
