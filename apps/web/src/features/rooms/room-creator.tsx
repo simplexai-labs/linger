@@ -65,7 +65,7 @@ export function RoomCreator({
             !(error instanceof TeamHubError) ||
             error.code !== "ROOM_NAME_TAKEN"
           ) {
-            if (!(error instanceof TeamHubError)) unconfirmedRef.current = true;
+            if (outcomeUnknown(error)) unconfirmedRef.current = true;
             throw error;
           }
           if (unconfirmedRef.current) return undefined;
@@ -104,11 +104,11 @@ export function RoomCreator({
       description={
         !error
           ? undefined
-          : error instanceof TeamHubError
-            ? error.code === "ROOM_NAME_TAKEN"
-              ? t(m.nameTaken)
+          : outcomeUnknown(error)
+            ? t(m.createUnconfirmed)
+            : error instanceof TeamHubError && error.code === "ROOM_NAME_TAKEN"
+              ? t(m.defaultNamesTaken)
               : error.message
-            : t(m.createUnconfirmed)
       }
       onClose={onClose}
       size="sm"
@@ -129,4 +129,10 @@ export function RoomCreator({
       {null}
     </ModalDialog>
   );
+}
+
+/** A failure TeamHub may have committed anyway: no response reached us, or a
+ * gateway or server error answered after the Room was saved. */
+function outcomeUnknown(error: unknown) {
+  return !(error instanceof TeamHubError) || error.status >= 500;
 }

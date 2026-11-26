@@ -113,6 +113,31 @@ describe("Room creation", () => {
     expect(screen.queryByText(/ opened$/)).toBeNull();
   });
 
+  it("treats a gateway error as unconfirmed, so a taken retry makes no second Room", async () => {
+    const runtime = createTestTeamHubRuntime();
+    const createRoom = vi
+      .fn<TestRouteHandler>()
+      .mockImplementationOnce(() => new Response(null, { status: 504 }))
+      .mockImplementationOnce(() =>
+        teamHubErrorResponse(409, "ROOM_NAME_TAKEN"),
+      );
+    runtime.server.on("POST", "/v0/tenants/{tenantId}/rooms", createRoom);
+    const onClose = vi.fn();
+
+    renderCreator(runtime, onClose);
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Couldn't create the Room",
+    });
+    expect(
+      within(dialog).getByText(/did not confirm whether this Room was created/),
+    ).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(await postedNames(runtime)).toEqual(["New Room", "New Room"]);
+  });
+
   it("shows a definite TeamHub error and tries again on Retry", async () => {
     const runtime = createTestTeamHubRuntime();
     const rooms = new TeamHubTestServer();

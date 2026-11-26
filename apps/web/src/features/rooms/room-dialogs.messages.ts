@@ -6,6 +6,8 @@ export const roomDialogMessages = defineMessages("roomDialogs", {
   defaultRoomName: "New Room",
   defaultRoomNameNumbered: "New Room {number}",
   createFailed: "Couldn't create the Room",
+  defaultNamesTaken:
+    "Every default Room name is in use. Rename a Room called New Room, then try again.",
   nameTaken: "You already have a Room with this name. Choose a different name.",
   createUnconfirmed:
     "TeamHub did not confirm whether this Room was created. Check your Rooms before you retry.",

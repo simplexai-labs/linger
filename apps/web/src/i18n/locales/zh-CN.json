@@ -1837,6 +1837,7 @@
     "defaultRoomName": "新 Room",
     "defaultRoomNameNumbered": "新 Room {number}",
     "createFailed": "没能创建 Room",
+    "defaultNamesTaken": "默认的 Room 名称都已被占用。请先给一个名为「新 Room」的 Room 改名，然后重试。",
     "nameTaken": "你已经有一个同名的 Room，请换一个名称。",
     "createUnconfirmed": "TeamHub 未确认这个 Room 是否已创建。重试前请先查看你的 Room。",
     "deleteRoom": "删除 Room",
