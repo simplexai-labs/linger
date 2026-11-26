@@ -111,7 +111,8 @@ func unifiedUITools() []tool {
 				"Fill several named controls from one observation with v=await v.fill([{type,name,value},...]); type is the control role, e.g. textbox or combobox. " +
 				"macOS: when the user names an app and window, discover and read it in one call: const r=await ui.computer.list_windows({app:appName}); const matches=r.structuredContent.windows.filter(w=>w.title===windowTitle); if(matches.length!==1)return r.structuredContent.windows; const w=matches[0]; let v=await ui.window(w.pid,w.window_id).observe(); use v.text for reads. " +
 				"To act, v=await v.click('AXButton',name). Each named action returns the next observation. Use it for the next decision. Observe again for missing or changing state. " +
-				"On recovery inspect existing field values first. Raw ui.browser and ui.computer methods return driver results. Use ui.emit(result) for images, console.log for notes and ui.help(namespace) for unfamiliar methods. Never replay an unknown write. Linger reviews each action before it runs.",
+				"To see a window, return await ui.computer.get_window_state({pid,window_id,include_screenshot:true}): a returned or emitted screenshot reaches you in this same call. A confirmed click only means the driver sent it, so after a click by coordinates return the next screenshot and check for the change you expected. If nothing changed, read the window again and click from that fresh screenshot before trying another route, and report what the screen shows when the control still does not respond. " +
+				"On recovery inspect existing field values first. Raw ui.browser and ui.computer methods return driver results. Use ui.emit(result) to choose which images and text to return, console.log for notes and ui.help(namespace) for unfamiliar methods. Never replay an unknown write. Linger reviews each action before it runs.",
 			InputSchema: schema(map[string]any{
 				"code": map[string]any{"type": "string", "minLength": 1, "maxLength": 65536, "description": "Async JavaScript body. Put repeated decisions in a for loop: inspect v.text, stop on completion or ambiguity, derive values from that view, then assign each awaited action back to v. " +
 					"Return what you read, e.g. return v.text. Do not yield between known stages. Single-step tasks need no loop."},
@@ -196,8 +197,14 @@ func (u *uiExecution) call(ctx context.Context, name string, args json.RawMessag
 	}
 	content := []json.RawMessage{}
 	expandedBytes := 0
-	for _, output := range result.Output {
-		parts, expandErr := u.expandOutput(output)
+	hasImage := false
+	outputs := result.Output
+	if len(outputs) == 0 {
+		outputs = u.returnedImages(result.Value)
+	}
+	for _, output := range outputs {
+		var outputHasImage bool
+		parts, expandErr := u.expandContent(output, 0, &outputHasImage)
 		for _, part := range parts {
 			expandedBytes += len(part)
 		}
@@ -210,6 +217,7 @@ func (u *uiExecution) call(ctx context.Context, name string, args json.RawMessag
 			break
 		}
 		content = append(content, parts...)
+		hasImage = hasImage || outputHasImage
 	}
 	// A returned string, usually page text, reads poorly once escaped inside
 	// the summary JSON, so the model gets it verbatim and the summary omits it.
@@ -224,7 +232,13 @@ func (u *uiExecution) call(ctx context.Context, name string, args json.RawMessag
 	encoded, _ := json.Marshal(shown)
 	text, _ := json.Marshal(map[string]string{"type": "text", "text": string(encoded)})
 	content = append(content, text)
-	return json.Marshal(map[string]any{"isError": err != nil, "content": content, "structuredContent": summary})
+	reply := map[string]any{"isError": err != nil, "content": content}
+	// Codex gives the model structuredContent in place of content, which
+	// drops the image parts. The last text part carries the same summary.
+	if !hasImage {
+		reply["structuredContent"] = summary
+	}
+	return json.Marshal(reply)
 }
 
 func decodeUI[T any](data []byte, result *T) error {
@@ -516,11 +530,34 @@ func (u *uiExecution) retainImages(raw json.RawMessage) (json.RawMessage, error)
 	return json.Marshal(result)
 }
 
-func (u *uiExecution) expandOutput(raw json.RawMessage) ([]json.RawMessage, error) {
-	return u.expandContent(raw, 0)
+// returnedImages selects the screenshots of a driver observation the script
+// returned without emitting anything, so returning a view shows it to the
+// model. The observation itself stays in the summary's value.
+func (u *uiExecution) returnedImages(value json.RawMessage) []json.RawMessage {
+	var observation struct {
+		Content []json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(value, &observation) != nil {
+		return nil
+	}
+	parts := observation.Content
+	if parts == nil {
+		parts = []json.RawMessage{value}
+	}
+	var images []json.RawMessage
+	for _, part := range parts {
+		var handle struct {
+			Type    string `json:"type"`
+			ImageID string `json:"image_id"`
+		}
+		if json.Unmarshal(part, &handle) == nil && handle.Type == "image" && u.images[handle.ImageID] != nil {
+			images = append(images, part)
+		}
+	}
+	return images
 }
 
-func (u *uiExecution) expandContent(raw json.RawMessage, depth int) ([]json.RawMessage, error) {
+func (u *uiExecution) expandContent(raw json.RawMessage, depth int, hasImage *bool) ([]json.RawMessage, error) {
 	if depth > 1 {
 		return nil, errors.New("UI content envelopes cannot be nested")
 	}
@@ -543,12 +580,13 @@ func (u *uiExecution) expandContent(raw json.RawMessage, depth int) ([]json.RawM
 		if !ok {
 			return nil, errors.New("UI image handle is stale or unavailable")
 		}
+		*hasImage = true
 		return []json.RawMessage{part}, nil
 	}
 	if object.Content != nil {
 		var out []json.RawMessage
 		for _, c := range object.Content {
-			parts, err := u.expandContent(c, depth+1)
+			parts, err := u.expandContent(c, depth+1, hasImage)
 			if err != nil {
 				return nil, err
 			}

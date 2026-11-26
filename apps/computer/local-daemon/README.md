@@ -727,7 +727,11 @@ all named fields against one observation before sending the driver call. If an
 action has no browser snapshot, the helper obtains one. Use `ui.help("browser")`
 or `ui.help("computer")` for the underlying methods. `ui.emit(result)` selects
 text or native images for the model; the script receives opaque image handles.
-`console.log` lines join the same output.
+`console.log` lines join the same output. A script that emits nothing and
+returns an observation holding screenshots delivers those screenshots too. A
+result with an image part carries no `structuredContent`, because Codex shows
+the model `structuredContent` in place of `content` and would drop the image;
+its last text part is the same summary.
 
 The public tool allows ten minutes. The default script budget is 165 seconds,
 with up to nine minutes per call. Nested calls reserve time to return their
