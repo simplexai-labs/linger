@@ -11,10 +11,14 @@ import base64
 import ctypes
 import json
 import os
+import re
 import shutil
 import signal
+import socket
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -22,11 +26,7 @@ from urllib.parse import urlsplit, unquote
 
 # Answers go to a private copy of stdout; fd 1 becomes stderr, so a child
 # such as xdotool never writes a line the daemon would take as an answer.
-if __name__ == "__main__":
-    protocol = os.fdopen(os.dup(1), "w", buffering=1)
-    os.dup2(2, 1)
-else:
-    protocol = sys.stdout
+protocol = sys.stdout
 
 
 outcome = "unsupported"
@@ -592,6 +592,7 @@ def release_input():
 def exit_driver():
     try:
         release_input()
+        _close_last_launch()
     finally:
         os._exit(0)
 
@@ -619,13 +620,9 @@ def desktop_click(x, y):
 def stop_driver(*_):
     try:
         release_input()
+        _close_last_launch()
     finally:
         raise SystemExit(0)
-
-
-if __name__ == "__main__":
-    signal.signal(signal.SIGTERM, stop_driver)
-    signal.signal(signal.SIGINT, stop_driver)
 
 
 # Window classes of terminal emulators, matched case-insensitively: xterm,
@@ -683,12 +680,340 @@ APPS = {
 }
 
 
-def launch(args):
-    desktop_env = ["--setenv=" + key + "=" + os.environ[key] for key in ("DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "XDG_SESSION_TYPE") if key in os.environ]
-    # KillMode=process: xdg-open hands the URL to gio, which starts the browser
-    # and exits at once; the default control-group mode would then kill the
-    # browser before it opened the page.
-    command(["systemd-run", "--user", "--quiet", "--collect", "--service-type=exec", "--property=KillMode=process", "--unit=linger-app-" + uuid.uuid4().hex, *desktop_env, "--", *args])
+LAUNCH_SETTLE_SECONDS = 0.8
+LAUNCH_POLL_INTERVAL = 0.02
+LAUNCH_STDERR_RAW_LIMIT = 65536
+LAUNCH_ERROR_TEXT_LIMIT = 500
+JOURNAL_STDOUT_SOCKET = "/run/systemd/journal/stdout"
+JOURNAL_PROBE_RETRIES = 6
+JOURNAL_READ_RETRIES = 6
+JOURNAL_RETRY_INTERVAL = 0.03
+
+# Benign dynamic-loader preload noise emitted by every subprocess when
+# /etc/ld.so.preload references a missing library. Filtered before deciding
+# whether meaningful stderr exists and before truncating error text.
+_LD_PRELOAD_NOISE_RE = re.compile(r"^ERROR:\s+ld\.so:\s+object\s+.+\s+cannot be preloaded\b")
+
+
+class LaunchError(RuntimeError):
+    """A desktop launch failed with a confirmed exit status or exec error."""
+
+
+last_launch = None
+_journal_sink_ready = None
+
+
+def _close_last_launch():
+    global last_launch
+    if last_launch is not None:
+        err_file = last_launch.get("stderr_file")
+        if err_file is not None:
+            try:
+                err_file.close()
+            except OSError:
+                pass
+        last_launch = None
+
+
+def _compact_stderr(text):
+    lines = [s for line in text.splitlines() if (s := line.strip()) and not _LD_PRELOAD_NOISE_RE.match(s)]
+    summary = "; ".join(lines)
+    if len(summary) > LAUNCH_ERROR_TEXT_LIMIT:
+        summary = "…" + summary[-(LAUNCH_ERROR_TEXT_LIMIT - 1):]
+    return summary
+
+
+def _read_file_stderr(err_file, limit=LAUNCH_STDERR_RAW_LIMIT):
+    if err_file is None:
+        return ""
+    try:
+        size = os.fstat(err_file.fileno()).st_size
+        if size <= 0:
+            return ""
+        err_file.seek(max(0, size - limit))
+        raw = err_file.read(limit)
+    except OSError:
+        return ""
+    return _compact_stderr(raw.decode("utf-8", errors="replace"))
+
+
+def _open_journal_stream(tag):
+    """Open a systemd-journald stdout stream socket matching sd_journal_stream_fd()."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.connect(JOURNAL_STDOUT_SOCKET)
+        sock.shutdown(socket.SHUT_RD)
+        # Standard 7-line header: identifier, unit_id, priority (3=LOG_ERR),
+        # level_prefix (0), forward_to_syslog/kmsg/console (0).
+        sock.sendall(f"{tag}\n\n3\n0\n0\n0\n0\n".encode("ascii"))
+        return sock
+    except OSError:
+        sock.close()
+        raise
+
+
+def _query_journal_raw(tag, env=None, lines=200):
+    try:
+        result = subprocess.run(
+            ["journalctl", "--user", "-q", "--no-pager", "-o", "cat", "-t", tag, "-n", str(lines)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.decode("utf-8", errors="replace") if result.returncode == 0 and result.stdout else ""
+
+
+def _read_journal_stderr(tag, env=None, retries=JOURNAL_READ_RETRIES):
+    if not tag:
+        return ""
+    saw_noise_only = False
+    for attempt in range(max(1, retries)):
+        raw = _query_journal_raw(tag, env=env)
+        if raw.strip():
+            compacted = _compact_stderr(raw)
+            if compacted:
+                return compacted
+            # Allow one brief tick for a trailing error line after preload noise.
+            if saw_noise_only or attempt + 1 >= retries:
+                return ""
+            saw_noise_only = True
+        if attempt + 1 < retries:
+            time.sleep(JOURNAL_RETRY_INTERVAL)
+    return ""
+
+
+def _journal_sink_available(env=None):
+    """Verify once per driver session that journald stream entries are readable."""
+    global _journal_sink_ready
+    if _journal_sink_ready is not None:
+        return _journal_sink_ready
+    path = env.get("PATH") if env else None
+    if not shutil.which("journalctl", path=path) or not os.path.exists(JOURNAL_STDOUT_SOCKET):
+        _journal_sink_ready = False
+        return False
+    probe_tag = "linger-probe-" + uuid.uuid4().hex[:16]
+    try:
+        with _open_journal_stream(probe_tag) as sock:
+            sock.sendall(b"ok\n")
+    except OSError:
+        _journal_sink_ready = False
+        return False
+    for attempt in range(max(1, JOURNAL_PROBE_RETRIES)):
+        if "ok" in _query_journal_raw(probe_tag, env=env, lines=5).splitlines():
+            _journal_sink_ready = True
+            return True
+        if attempt + 1 < JOURNAL_PROBE_RETRIES:
+            time.sleep(JOURNAL_RETRY_INTERVAL)
+    _journal_sink_ready = False
+    return False
+
+
+def _format_exit_error(label, returncode, stderr_text):
+    status = f"killed by signal {-returncode}" if returncode < 0 else f"exited with status {returncode}"
+    return f"{label} failed ({status}): {stderr_text}" if stderr_text else f"{label} failed ({status})"
+
+
+def _systemd_user_bus_has_owner():
+    if "Gio" not in globals() or "GLib" not in globals():
+        return False
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        owned = bus.call_sync(
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "NameHasOwner",
+            GLib.Variant("(s)", ("org.freedesktop.systemd1",)),
+            GLib.VariantType.new("(b)"),
+            Gio.DBusCallFlags.NO_AUTO_START,
+            300,
+            None,
+        )
+        return bool(owned.unpack()[0])
+    except Exception:
+        return False
+
+
+def _systemd_user_reachable(env):
+    """Report whether systemd-run --user can reach an active user manager.
+
+    Checks both the user manager's private socket and D-Bus NameHasOwner for
+    org.freedesktop.systemd1 (without triggering activation) so containers and
+    sessions with a broken user bus fall back to detached launch cleanly.
+    """
+    if not shutil.which("systemd-run", path=env.get("PATH")):
+        return False
+    runtime_dir = env.get("XDG_RUNTIME_DIR")
+    if not runtime_dir:
+        return False
+    private_sock = os.path.join(runtime_dir, "systemd", "private")
+    try:
+        if not stat.S_ISSOCK(os.stat(private_sock).st_mode):
+            return False
+    except OSError:
+        return False
+    return _systemd_user_bus_has_owner()
+
+
+def launch_env():
+    """Environment for launched desktop applications.
+
+    Preserves the session environment and fills standard XDG_RUNTIME_DIR and
+    DBUS_SESSION_BUS_ADDRESS defaults when the user bus socket exists, so
+    desktop launchers and snapd tracking scopes can reach systemd --user.
+    """
+    env = os.environ.copy()
+    runtime_dir = env.get("XDG_RUNTIME_DIR")
+    if not runtime_dir:
+        candidate = f"/run/user/{os.getuid()}"
+        try:
+            info = os.stat(candidate)
+            if stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid():
+                runtime_dir = candidate
+                env["XDG_RUNTIME_DIR"] = runtime_dir
+        except OSError:
+            pass
+    if not env.get("DBUS_SESSION_BUS_ADDRESS") and runtime_dir:
+        bus_path = os.path.join(runtime_dir, "bus")
+        try:
+            if stat.S_ISSOCK(os.stat(bus_path).st_mode):
+                env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=" + bus_path
+        except OSError:
+            pass
+    return env
+
+
+def _systemd_scope_command(args):
+    # Launch inside a transient user .scope under app.slice rather than a
+    # transient .service:
+    # - Matches the systemd XDG desktop app layout (app-<launcher>-<id>.scope),
+    #   preserving the caller's environment and allowing Snap apps (such as
+    #   Ubuntu's snap Firefox) to create their snap.<pkg>.<app>-<uuid>.scope
+    #   tracking cgroup instead of failing inside a non-snap .service unit.
+    # - Scopes keep all descendants alive after short-lived launchers like
+    #   xdg-open/gio exit, without needing KillMode=process, and survive the
+    #   driver process group or daemon stopping.
+    return [
+        "systemd-run", "--user", "--scope", "--quiet", "--collect",
+        "--slice=app.slice",
+        "--unit=app-linger-" + uuid.uuid4().hex + ".scope",
+        "--", *args,
+    ]
+
+
+def _open_stderr_sink(env):
+    """Return (stderr_fd_obj, close_after_spawn, journal_tag, err_file).
+
+    Prefers a native systemd-journald stream socket when journalctl --user
+    readback is verified: zero /tmp disk growth over long-lived GUI app
+    lifetimes, zero SIGPIPE, zero SIG_IGN inheritance, and zero relay processes.
+    Falls back to an unlinked TemporaryFile on non-systemd/container hosts or
+    when user journal readback is unavailable.
+    """
+    if _journal_sink_available(env=env):
+        tag = "linger-launch-" + uuid.uuid4().hex[:16]
+        try:
+            return _open_journal_stream(tag), True, tag, None
+        except OSError:
+            pass
+    err_file = tempfile.TemporaryFile()
+    return err_file, False, None, err_file
+
+
+def _spawn_and_settle(argv, env, label, settle_seconds=None):
+    if settle_seconds is None:
+        settle_seconds = LAUNCH_SETTLE_SECONDS
+    stderr_target, close_after_spawn, journal_tag, err_file = _open_stderr_sink(env)
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_target,
+            env=env,
+            start_new_session=True,
+            close_fds=True,
+        )
+    except OSError as error:
+        stderr_target.close()
+        raise LaunchError(f"{label} failed to start: {error}") from error
+    if close_after_spawn:
+        # The child owns its dup'd fd 2 connected to journald; close the parent
+        # socket immediately so the driver retains no fd to the stream.
+        stderr_target.close()
+
+    deadline = time.monotonic() + max(0.0, settle_seconds)
+    rc = proc.poll()
+    while rc is None and time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(LAUNCH_POLL_INTERVAL, remaining))
+        rc = proc.poll()
+    if rc is not None and rc != 0:
+        if journal_tag is not None:
+            stderr_text = _read_journal_stderr(journal_tag, env=env)
+        else:
+            stderr_text = _read_file_stderr(err_file)
+            err_file.close()
+        return proc, rc, stderr_text, None, None
+
+    if rc is None:
+        # Reap a long-lived child if it exits later while the driver is still
+        # running, avoiding zombie entries without blocking launch().
+        threading.Thread(target=proc.wait, daemon=True).start()
+    return proc, rc, "", err_file, journal_tag
+
+
+def launch(args, settle_seconds=None):
+    global last_launch
+    _close_last_launch()
+    env = launch_env()
+    label = os.path.basename(args[0]) if args else "launch"
+    argv = _systemd_scope_command(args) if _systemd_user_reachable(env) else args
+    proc, rc, stderr_text, err_file, journal_tag = _spawn_and_settle(
+        argv, env, label, settle_seconds=settle_seconds
+    )
+    if rc is not None and rc != 0:
+        raise LaunchError(_format_exit_error(label, rc, stderr_text))
+
+    last_launch = {
+        "label": label,
+        "proc": proc,
+        "stderr_file": err_file,
+        "journal_tag": journal_tag,
+        "env": env,
+    }
+
+
+def launch_error(mode="open"):
+    """Diagnostic failure detail for the most recent launch(), if any.
+
+    Only inspects stderr once the launched process has actually exited. A still-
+    running process (for example cold-start Firefox taking >8s) must not pollute
+    a timeout with harmless startup stderr or ld.so.preload warnings.
+    """
+    if last_launch is None:
+        return ""
+    proc = last_launch["proc"]
+    rc = proc.poll()
+    if rc is None:
+        return ""
+    label = last_launch["label"]
+    journal_tag = last_launch.get("journal_tag")
+    if journal_tag is not None:
+        stderr_text = _read_journal_stderr(journal_tag, env=last_launch.get("env"), retries=2)
+    else:
+        stderr_text = _read_file_stderr(last_launch.get("stderr_file"))
+    if rc != 0:
+        return _format_exit_error(label, rc, stderr_text)
+    if mode == "open" and stderr_text:
+        return stderr_text
+    return ""
 
 
 def native_action(name, args):
@@ -698,13 +1023,16 @@ def native_action(name, args):
             raise ValueError("Local Linux desktop requires the signed-in user's X11 session; Wayland is not supported")
         if not os.environ.get("DISPLAY"):
             raise ValueError("Local Linux desktop requires DISPLAY; start the Computer from the signed-in user's X11 session")
-        for executable in ["xdotool", "import", "xclip", "systemd-run"]:
+        for executable in ["xdotool", "import", "xclip"]:
             if not shutil.which(executable):
                 raise ValueError("Local Linux desktop dependency is missing: " + executable)
         if missing:
             raise ValueError("Local Linux AT-SPI is unavailable: " + missing)
         command(["xdotool", "getdisplaygeometry"])
         return b"ready"
+    if name == "launch-error":
+        mode = args[0] if args else "open"
+        return launch_error(mode).encode("utf-8")
     if name == "screenshot":
         return command(["import", "-window", "root", "png:-"])
     if name == "accessibility":
@@ -739,6 +1067,7 @@ def native_action(name, args):
             if uri.netloc or os.path.commonpath([path, os.path.expanduser("~")]) != os.path.expanduser("~"):
                 raise ValueError("local URL must be inside the user's home")
         elif not uri.netloc: raise ValueError("web URL must have a host")
+        if not shutil.which("xdg-open"): raise ValueError("URL launcher is not installed: xdg-open")
         begin_input(); launch(["xdg-open", args[0]])
     elif name == "type":
         if len(args) != 1: raise ValueError("type requires text")
@@ -792,7 +1121,8 @@ def native_action(name, args):
     return b""
 
 
-if __name__ == "__main__":
+def run_server():
+    global rpc_id, outcome
     for line in sys.stdin:
         request = json.loads(line)
         if "id" not in request: continue
@@ -809,7 +1139,20 @@ if __name__ == "__main__":
                 values = request["params"]["arguments"]
                 result = native_action(values["command"], values.get("args", []))
                 if result is not None: reply({"status":"confirmed","output_base64":base64.b64encode(result).decode()})
+            except LaunchError as error:
+                # A confirmed non-zero exit or exec failure during launch means
+                # the failure is known (not an unknown input outcome), so the
+                # action journal stays unblocked and the real error surfaces.
+                reply({"status":"failed","error":str(error)})
             except Exception as error:
                 reply({"status":outcome,"error":str(error)})
         else:
             send_rpc({"jsonrpc":"2.0","id":rpc_id,"error":{"code":-32601,"message":"method not found"}})
+
+
+if __name__ == "__main__":
+    protocol = os.fdopen(os.dup(1), "w", buffering=1)
+    os.dup2(2, 1)
+    signal.signal(signal.SIGTERM, stop_driver)
+    signal.signal(signal.SIGINT, stop_driver)
+    run_server()

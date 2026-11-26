@@ -1093,21 +1093,27 @@ Agent reads the window again first. Windows Operations get `WindowsToolGuide`.
 
 Linux controls the signed-in user's X11 desktop. The driver `local_linux.py` is
 embedded in the Go binary; it reads windows through AT-SPI and sends input with
-`xdotool`. The host needs `python3-pyatspi`, `xdotool`, ImageMagick, `xclip` and a
-user systemd manager. The Daemon must run as the desktop user and inherit
+`xdotool`. The host needs `python3-pyatspi`, `xdotool`, ImageMagick and `xclip`;
+a reachable user systemd manager is used when available, with detached session
+fallback otherwise. The Daemon must run as the desktop user and inherit
 `DISPLAY`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS` and `XDG_SESSION_TYPE`. With a
 missing dependency or under Wayland, `check_permissions` explains why; browser and
 file tools still work.
 
-`open_application` and `open_url` start the program through `systemd-run --user`
-with `KillMode=process`, so it outlives the tool call. `xdg-open` hands a URL to
-`gio`, which exits as soon as it started the browser; the default control-group
-mode would kill the browser with it. `open_url` then waits up to 8 seconds for
-the active window or its title to change, and fails when neither does. After
-any input, a page that is still loading is read again until it loads, for at
-most 8 seconds; the result marks `loading` when it has not. A desktop with no
-active window, as right after a GNOME login, still launches: any window that
-appears counts as opened.
+`open_application` and `open_url` launch the program in its own session inside a
+transient user scope (`systemd-run --user --scope` under `app.slice`) when
+`org.freedesktop.systemd1` is reachable on the user session bus, or directly
+detached otherwise, so launched apps outlive the tool call and Snap apps can
+create their own tracking scope without `.service` cgroup rejections. The driver
+observes startup briefly and surfaces immediate non-zero exits (with stderr from
+the user journal stream, or an unlinked temporary file fallback) as confirmed
+errors without waiting 8 seconds or blocking the action record. Otherwise
+`open_url` waits up to 8 seconds for the active window or its title to change,
+failing with any post-exit launch stderr when neither does. After any input, a
+page that is still loading is read again until it loads, for at most 8 seconds;
+the result marks `loading` when it has not. A desktop with no active window, as
+right after a GNOME login, still launches: any window that appears counts as
+opened.
 
 `type_text` pastes the text. A terminal emulator gets it on both the clipboard
 and the primary selection and receives `shift+Insert`, which every common
