@@ -7,7 +7,6 @@ import { defineMessages } from "@/i18n/messages";
 export const roomSettingsMessages = defineMessages("roomSettings", {
   loading: "Loading Room settings...",
   loadFailed: "Room settings could not be loaded.",
-  editDetails: "Edit Room details",
   members: "Members",
   loadingMembers: "Loading members...",
   shareConversation: "Share conversation",
@@ -19,11 +18,6 @@ export const roomSettingsMessages = defineMessages("roomSettings", {
   leave: "Leave",
 
   name: "Name",
-  description: "Description",
-  roomDescription: "Room description",
-  descriptionPlaceholder: "What is this Room for?",
-  saveChanges: "Save changes",
-  deleteDescription: "Deleting this Room revokes access for every member.",
   saveUnconfirmed:
     "TeamHub did not confirm whether these Room changes were committed. Check the Room settings before you retry.",
 

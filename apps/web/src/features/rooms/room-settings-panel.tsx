@@ -26,8 +26,6 @@ import {
   teamHubIdentityQueryOptions,
   tenantRoomsQueryKey,
 } from "./room-queries";
-import { RoomSettingsDialog } from "./room-settings-dialog";
-import { AvatarEditButton } from "./members/avatar-edit-button";
 import { RoomAvatar } from "./members/room-avatar";
 import { RoomMembersSection } from "./members/room-members-section";
 import { RoomDeleteDialog } from "./room-delete-dialog";
@@ -89,7 +87,6 @@ function RoomSettingsContent({
   room: TeamHubRoom;
   owner: boolean;
 }) {
-  const [editing, setEditing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -104,7 +101,7 @@ function RoomSettingsContent({
       <RoomHeader
         groupRoom={groupRoom}
         members={members}
-        onEditDetails={owner ? () => setEditing(true) : undefined}
+        canRename={owner}
         onShare={owner ? () => setSharing(true) : undefined}
         room={room}
       />
@@ -155,18 +152,6 @@ function RoomSettingsContent({
             </SettingsGroup>
           ) : null}
         </>
-      ) : null}
-      {editing ? (
-        <RoomSettingsDialog
-          key={room.id}
-          room={room}
-          tenantId={room.tenant_id}
-          onClose={() => setEditing(false)}
-          onDelete={() => {
-            setEditing(false);
-            setDeleting(true);
-          }}
-        />
       ) : null}
       {sharing ? (
         <RoomHistoryShareDialog
@@ -251,20 +236,19 @@ function PanelCommand({
 }
 
 /**
- * The Room's identity, laid out like an Agent's: the avatar opens its details,
- * the name renames in place, and Share sits in the corner where an Agent has
- * Publish.
+ * The Room's identity, laid out like an Agent's: the name renames in place
+ * and Share sits in the corner where an Agent has Publish.
  */
 function RoomHeader({
+  canRename,
   groupRoom,
   members,
-  onEditDetails,
   onShare,
   room,
 }: {
+  canRename: boolean;
   groupRoom: boolean;
   members: TeamHubActorRef[];
-  onEditDetails?: () => void;
   onShare?: () => void;
   room: TeamHubRoom;
 }) {
@@ -312,7 +296,6 @@ function RoomHeader({
         : rename.error.message
       : t(m.saveUnconfirmed)
     : undefined;
-  const avatar = <RoomAvatar members={members} size="lg" />;
   return (
     <header className="relative mx-auto flex w-full max-w-[780px] flex-col items-center px-5 pb-4 pt-5 text-center">
       {onShare ? (
@@ -328,13 +311,7 @@ function RoomHeader({
           </button>
         </div>
       ) : null}
-      {onEditDetails ? (
-        <AvatarEditButton label={t(m.editDetails)} onClick={onEditDetails}>
-          {avatar}
-        </AvatarEditButton>
-      ) : (
-        avatar
-      )}
+      <RoomAvatar members={members} size="lg" />
       {renaming ? (
         <input
           aria-label={t(m.name)}
@@ -354,7 +331,7 @@ function RoomHeader({
           }}
           value={draft}
         />
-      ) : onEditDetails ? (
+      ) : canRename ? (
         <h2 className="mt-2.5 max-w-full text-[15px] font-semibold leading-5 text-foreground">
           <button
             aria-label={t(m.renameRoom, { name: room.name })}

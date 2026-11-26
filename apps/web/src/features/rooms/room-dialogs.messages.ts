@@ -3,7 +3,6 @@ import { defineMessages } from "@/i18n/messages";
 /** The dialogs the Messages list opens: create a Room, delete a Room, remove an Agent. */
 export const roomDialogMessages = defineMessages("roomDialogs", {
   createRoom: "Create Room",
-  roomName: "Room name",
   defaultRoomName: "New Room",
   defaultRoomNameNumbered: "New Room {number}",
   createFailed: "Couldn't create the Room",
