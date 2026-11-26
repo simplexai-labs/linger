@@ -886,7 +886,7 @@ export function AgentStreamingStatusDock({
   runtimePresentationEventsByRunStatusId = EMPTY_RUNTIME_EVENTS,
   scopeKey = EMPTY_SCOPE_KEY,
   typingAgent,
-  waitingDecisionAgentIds,
+  waitingDecisionSince,
 }: {
   cancelRoomRun?: (
     runId: string,
@@ -911,8 +911,11 @@ export function AgentStreamingStatusDock({
   scopeKey?: readonly string[];
   /** Shown only while that Agent has no Run status; it offers no Stop. */
   typingAgent?: AgentStreamingTypingAgent;
-  /** Agents with a decision card still pending in this Room or Thread. */
-  waitingDecisionAgentIds?: ReadonlySet<string>;
+  /**
+   * For each Agent with a decision card still waiting on the current Human,
+   * when its newest one was posted.
+   */
+  waitingDecisionSince?: ReadonlyMap<string, string>;
 }) {
   const t = useT();
   const runtimeViewCache = useRef<RuntimeTimelineViewCache>(new Map());
@@ -952,12 +955,12 @@ export function AgentStreamingStatusDock({
     () =>
       entries.map((entry) => ({
         id: entry.key,
-        content: dockEntryLine(entry, waitingDecisionAgentIds, t),
+        content: dockEntryLine(entry, waitingDecisionSince, t),
         ...(entry.runtimeStatus?.lineQueue
           ? { queue: entry.runtimeStatus.lineQueue }
           : {}),
       })),
-    [entries, waitingDecisionAgentIds, t],
+    [entries, waitingDecisionSince, t],
   );
   const line = useAgentStatusLine(lineTargets, hovered);
   const workingEntries = entries.filter(
@@ -1191,16 +1194,19 @@ function dockRuntimeStatuses(
 
 function dockEntryLine(
   entry: AgentStreamingDockEntry,
-  waitingDecisionAgentIds: ReadonlySet<string> | undefined,
+  waitingDecisionSince: ReadonlyMap<string, string> | undefined,
   t: Translate,
 ): AgentStatusLineContent {
   const status = entry.runtimeStatus;
   if (!status) return { tone: "wait" };
-  // A Run that ended while its Agent asked a Human for something, such as a
-  // macOS permission, is waiting on that Human, not broken.
+  // A Run that ended after its Agent asked this Human for something, such as
+  // a macOS permission, is waiting on them, not broken. A card from before
+  // the Run says nothing about why this Run ended.
+  const cardAt = waitingDecisionSince?.get(entry.key);
   if (
     (status.state === "Failed" || status.state === "Stopped") &&
-    waitingDecisionAgentIds?.has(entry.key)
+    cardAt !== undefined &&
+    Date.parse(cardAt) >= Date.parse(status.runStatus.created_at)
   )
     return { tone: "waiting", text: t(m.waitingForDecision) };
   return status.line;

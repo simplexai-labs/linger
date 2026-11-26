@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { translate } from "@/i18n/language";
 
-import { runtimeFailureMessage } from "./runtime-failure-message";
+import {
+  runtimeFailureDiagnostic,
+  runtimeFailureMessage,
+} from "./runtime-failure-message";
 import { runtimeStatusMessages as m } from "./runtime-status.messages";
 
 describe("Runtime failure messages", () => {
@@ -81,5 +84,26 @@ describe("Runtime failure messages", () => {
       }),
     ).not.toContain("private");
     expect(runtimeFailureMessage(translate)).toBe(translate(m.runFailed));
+  });
+});
+
+describe("runtimeFailureDiagnostic", () => {
+  it.each([
+    [
+      {
+        code: "execution_failed",
+        runtime_type: "codex",
+        runtime_version: "0.170.0",
+      },
+      "codex 0.170.0 \u00b7 execution_failed",
+    ],
+    [{ code: "timeout", runtime_type: "claude" }, "claude \u00b7 timeout"],
+    [{ code: "reply_not_sent" }, "reply_not_sent"],
+  ] as const)("names %j as %s", (failure, expected) => {
+    expect(runtimeFailureDiagnostic(failure)).toBe(expected);
+  });
+
+  it("names nothing without a failure", () => {
+    expect(runtimeFailureDiagnostic()).toBeUndefined();
   });
 });

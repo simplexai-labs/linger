@@ -2105,22 +2105,26 @@ describe("Room Message timeline cards", () => {
         },
       ],
     };
-    const dock = (waiting?: ReadonlySet<string>) => (
+    const dock = (waiting?: ReadonlyMap<string, string>) => (
       <QueryClientProvider client={new QueryClient()}>
         <MemoryRouter>
           <AgentStreamingStatusDock
             runStatuses={[runStatus({ status: "aborted" })]}
             runtimePresentationEventsByRunStatusId={failed}
-            {...(waiting ? { waitingDecisionAgentIds: waiting } : {})}
+            {...(waiting ? { waitingDecisionSince: waiting } : {})}
           />
         </MemoryRouter>
       </QueryClientProvider>
     );
+    // A fresh Dock each time, since a shown line holds before it changes.
     const { unmount } = render(dock());
     expect(shownStatus()).toMatch(/^Codex: Couldn't finish/);
     unmount();
-    // A fresh Dock, since a shown line holds before it changes.
-    render(dock(new Set(["agent-1"])));
+    // A card from before the Run did not stop it.
+    const stale = render(dock(new Map([["agent-1", "2026-08-13T23:59:59Z"]])));
+    expect(shownStatus()).toMatch(/^Codex: Couldn't finish/);
+    stale.unmount();
+    render(dock(new Map([["agent-1", "2026-08-14T00:00:00Z"]])));
     expect(shownStatus()).toBe("Codex: Waiting for you to answer its request");
   });
 
