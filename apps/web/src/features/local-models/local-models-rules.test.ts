@@ -22,7 +22,11 @@ import {
   downloadStopped,
   featuredInklingEntry,
   formatGigabytes,
+  gatewayAdminUrl,
+  gatewayCurlSnippet,
+  gatewayModelId,
   hostBlocker,
+  isLoopbackUrl,
   isModelOnComputer,
   loadCheck,
   localSwitchTargets,
@@ -704,6 +708,34 @@ describe("local models rules", () => {
     expect(sharedGatewayEndpoint("ftp://127.0.0.1:18480")).toBeUndefined();
     expect(sharedGatewayEndpoint("not a url")).toBeUndefined();
     expect(sharedGatewayEndpoint(undefined)).toBeUndefined();
+    expect(gatewayAdminUrl("http://127.0.0.1:18480/v1/")).toBe(
+      "http://127.0.0.1:18480",
+    );
+    expect(gatewayAdminUrl("http://127.0.0.1:18480")).toBe(
+      "http://127.0.0.1:18480",
+    );
+    expect(gatewayAdminUrl("ftp://127.0.0.1:18480")).toBeUndefined();
+    expect(isLoopbackUrl("http://127.0.0.1:18480/v1")).toBe(true);
+    expect(isLoopbackUrl("http://localhost:18480")).toBe(true);
+    expect(isLoopbackUrl("http://192.168.1.10:18480")).toBe(false);
+    expect(
+      gatewayModelId({
+        pi_model:
+          "localmodels-library/localmodels-lib-inkling-2-mini/Inkling-2-Mini",
+      }),
+    ).toBe("localmodels-lib-inkling-2-mini/Inkling-2-Mini");
+    expect(
+      gatewayModelId({ pi_model: "localmodels-library/" }),
+    ).toBeUndefined();
+    expect(gatewayModelId({ pi_model: undefined })).toBeUndefined();
+    expect(
+      gatewayCurlSnippet(
+        "http://127.0.0.1:18480/v1",
+        "localmodels-lib-spark/Spark-4B",
+      ),
+    ).toBe(
+      'curl http://127.0.0.1:18480/v1/chat/completions -H "Content-Type: application/json" -d \'{"messages":[{"content":"Hello","role":"user"}],"model":"localmodels-lib-spark/Spark-4B"}\'',
+    );
     expect(
       downloadStatusDetail(
         localModel({

@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   IPC,
   type ComputerStatus,
+  type DesktopLocalGatewayInfo,
   type DesktopSettings,
   type DesktopUpdateState,
   type LocalAccountSignIn,
@@ -17,6 +18,7 @@ import type { DiagnosticsModule } from "./diagnostics.js";
 import type { DriverUpdaterHost } from "./driver-updater.js";
 import type { EnrollmentModule } from "./enrollment.js";
 import type { LanguageModule } from "./language.js";
+import type { LocalGatewayService } from "./local-gateway.js";
 import type { LocalServerModule } from "./local-server.js";
 import type { Module, ModuleContext } from "./modules.js";
 import { sameOrigin } from "./navigation.js";
@@ -30,6 +32,7 @@ import type { WindowManagerModule } from "./window-manager.js";
 import type { WorkspaceGrantsModule } from "./workspace-grants.js";
 
 const grantIdInput = z.string().min(1).max(128);
+const computerIdInput = z.string().min(1).max(128);
 const languageInput = z.enum(LANGUAGES);
 // The server address is not settable from the SPA: a page served by one
 // server must not be able to repoint the app. It changes on app://offline.
@@ -105,16 +108,19 @@ export class DesktopIpcModule implements Module {
   // Set on macOS only.
   readonly #permissions: DesktopPermissionHost | undefined;
   readonly #driverUpdater: DriverUpdaterHost | undefined;
+  readonly #localGateway: LocalGatewayService | undefined;
   readonly #unsubscribe: (() => void)[] = [];
 
   constructor(options: {
     defaultDisplayName: string;
     permissions?: DesktopPermissionHost;
     driverUpdater?: DriverUpdaterHost;
+    localGateway?: LocalGatewayService;
   }) {
     this.#defaultDisplayName = options.defaultDisplayName;
     this.#permissions = options.permissions;
     this.#driverUpdater = options.driverUpdater;
+    this.#localGateway = options.localGateway;
   }
 
   async start(ctx: ModuleContext): Promise<void> {
@@ -257,6 +263,43 @@ export class DesktopIpcModule implements Module {
     handle(IPC.updateState, () => updateView(updater.state()));
     handle(IPC.updateInstall, () => updater.install());
     handle(IPC.updateCheck, () => updater.check());
+
+    const localGateway = this.#localGateway;
+    // Security boundary is `handle()`'s `serverUrl` origin check; `isOwnComputer`
+    // is a UI-routing guard so calls only target this desktop's enrolled computer.
+    const isOwnComputer = (computerId: unknown): boolean => {
+      const requested = computerIdInput.parse(computerId);
+      const enrolled = ctx.config.get().computerId;
+      return Boolean(enrolled && requested === enrolled);
+    };
+    const requireOwnGateway = (computerId: unknown): LocalGatewayService => {
+      if (!localGateway || !isOwnComputer(computerId)) {
+        throw new Error("Not allowed");
+      }
+      return localGateway;
+    };
+    handle(
+      IPC.localGatewayInfo,
+      async (computerId): Promise<DesktopLocalGatewayInfo> => {
+        if (!localGateway || !isOwnComputer(computerId)) {
+          return { available: false };
+        }
+        return localGateway.getInfo();
+      },
+    );
+    handle(IPC.localGatewayRevealPassword, (computerId) =>
+      requireOwnGateway(computerId).revealPassword(),
+    );
+    handle(IPC.localGatewayCopyPassword, (computerId) =>
+      requireOwnGateway(computerId).copyPassword(),
+    );
+    handle(IPC.localGatewayOpenAdmin, (computerId) =>
+      requireOwnGateway(computerId).openAdmin(),
+    );
+    handle(IPC.localGatewayOpenFolder, (computerId) =>
+      requireOwnGateway(computerId).openFolder(),
+    );
+    this.#unsubscribe.push(() => localGateway?.dispose());
 
     const permissions = this.#permissions;
     if (permissions)

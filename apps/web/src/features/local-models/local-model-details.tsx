@@ -9,7 +9,6 @@ import { NVIDIA_DRIVER_GUIDE_URL } from "@linger/service-kit/nvidia-driver";
 import { Button } from "@/components/ui/button";
 import { FormFeedback } from "@/components/ui/form-feedback";
 import { Icon } from "@/components/ui/icon";
-import { ModalDialog } from "@/components/ui/modal-dialog";
 import { Select, SelectItem } from "@/components/ui/select";
 import type { TeamHubLocalComputerPage } from "@/features/teamhub/teamhub-types";
 import { commonMessages } from "@/i18n/common.messages";
@@ -33,7 +32,7 @@ import {
   unavailableCopy,
 } from "./local-models-copy";
 import { localModelsMessages as m } from "./local-models.messages";
-import type { LocalModelPool, LocalModelsView } from "./local-models-queries";
+import type { LocalModelsView } from "./local-models-queries";
 import {
   contextLabel,
   downloadStopped,
@@ -49,19 +48,15 @@ import {
   poolLabel,
   poolOf,
   poolOtherBytes,
-  poolUnaccountedBytes,
   safeModelSourceUrl,
   sharedGatewayEndpoint,
   speedLabel,
   type ModelEntry,
 } from "./local-models-rules";
 
-/** Category colors from the Nature palette, one per model holding memory. */
-const segmentColors = ["bg-rain-500", "bg-lichen-500", "bg-sun-500"] as const;
-/** Foundation components hold memory too, but are not models of the list. */
-const componentColor = "bg-muted-foreground/40";
+export { AdvancedDialog } from "./local-model-advanced-dialog";
 
-function Fact({
+export function Fact({
   children,
   className,
   label,
@@ -87,7 +82,7 @@ function Fact({
   );
 }
 
-function CopyEndpoint({
+export function CopyEndpoint({
   ariaLabel,
   copiedAriaLabel,
   endpoint,
@@ -548,229 +543,5 @@ export function ModelFacts({
         ) : null}
       </div>
     </div>
-  );
-}
-
-function PoolBar({
-  colorOf,
-  pool,
-  view,
-}: {
-  colorOf: (holderId: string) => string;
-  pool: LocalModelPool;
-  view: LocalModelsView;
-}) {
-  const t = useT();
-  const label = poolLabel(view, pool, t);
-  // used_bytes is the device's real use; on a shared card other processes
-  // hold memory that no holder accounts for.
-  const otherBytes = poolOtherBytes(pool);
-  const unaccountedBytes = poolUnaccountedBytes(pool);
-  const width = (bytes: number) =>
-    `${pool.total_bytes ? Math.min(100, (bytes / pool.total_bytes) * 100) : 0}%`;
-  return (
-    <div className="flex min-h-10 items-center gap-3 py-2 text-sm">
-      <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">
-        {pool.kind === "gpu"
-          ? t(m.gpuIndex, { index: String(pool.gpu_index) })
-          : label}
-      </span>
-      <span
-        aria-label={t(m.poolInUse, {
-          pool: label,
-          total: formatGigabytes(pool.total_bytes, t),
-          used: formatGigabytes(pool.used_bytes, t),
-        })}
-        className="flex h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-muted"
-        role="img"
-      >
-        {pool.holders
-          .filter((holder) => holder.bytes > 0)
-          .map((holder) => (
-            <span
-              className={cn(
-                "h-full border-r-2 border-card last:border-r-0",
-                colorOf(holder.id),
-              )}
-              key={holder.id}
-              style={{ width: width(holder.bytes) }}
-              title={`${holder.name} · ${formatGigabytes(holder.bytes, t)}`}
-            />
-          ))}
-        {otherBytes ? (
-          <span
-            className="h-full bg-muted-foreground/30"
-            style={{ width: width(otherBytes) }}
-            title={t(m.otherAppsSize, {
-              size: formatGigabytes(otherBytes, t),
-            })}
-          />
-        ) : null}
-        {unaccountedBytes ? (
-          <span
-            className="h-full bg-muted-foreground/15"
-            style={{ width: width(unaccountedBytes) }}
-            title={t(m.systemAndEngineSize, {
-              size: formatGigabytes(unaccountedBytes, t),
-            })}
-          />
-        ) : null}
-      </span>
-      <span className="w-24 shrink-0 text-right text-xs whitespace-nowrap tabular-nums text-muted-foreground">
-        {t(m.memoryFree, { free: formatGigabytes(poolFreeBytes(pool), t) })}
-      </span>
-    </div>
-  );
-}
-
-/** Memory, hardware, and shared gateway of one Computer, for people who want the numbers. */
-export function AdvancedDialog({
-  gatewayUrl,
-  onClose,
-  view,
-}: {
-  gatewayUrl?: string;
-  onClose: () => void;
-  view: LocalModelsView;
-}) {
-  const t = useT();
-  const host = view.computer.host;
-  const gatewayEndpoint = sharedGatewayEndpoint(gatewayUrl);
-  type PoolHolder = LocalModelPool["holders"][number];
-  const seenHolderIds = new Set<string>();
-  const models: PoolHolder[] = [];
-  const components: PoolHolder[] = [];
-  let hasOtherApps = false;
-  let hasUnaccounted = false;
-  for (const pool of view.pools) {
-    if (poolOtherBytes(pool) > 0) hasOtherApps = true;
-    if (poolUnaccountedBytes(pool) > 0) hasUnaccounted = true;
-    for (const holder of pool.holders) {
-      if (seenHolderIds.has(holder.id)) continue;
-      seenHolderIds.add(holder.id);
-      if (holder.kind === "model") models.push(holder);
-      else components.push(holder);
-    }
-  }
-  const colorOf = (holderId: string) => {
-    const index = models.findIndex((holder) => holder.id === holderId);
-    return index < 0
-      ? componentColor
-      : segmentColors[index % segmentColors.length]!;
-  };
-
-  return (
-    <ModalDialog
-      closeOnBackdrop
-      onClose={onClose}
-      size="md"
-      title={t(m.detailsOf, { name: view.computer.display_name })}
-    >
-      <div className="space-y-5 px-5 py-4">
-        {view.pools.length ? (
-          <section>
-            <h3 className="mb-2 text-xs font-medium text-muted-foreground">
-              {t(m.factMemory)}
-            </h3>
-            <div className="rounded-xl border border-border bg-app-canvas/40 px-3.5">
-              {view.pools.map((pool) => (
-                <PoolBar
-                  colorOf={colorOf}
-                  key={pool.id}
-                  pool={pool}
-                  view={view}
-                />
-              ))}
-            </div>
-            {seenHolderIds.size > 0 || hasOtherApps || hasUnaccounted ? (
-              <p className="mt-2.5 flex flex-wrap gap-x-3.5 gap-y-1 px-0.5 text-xs text-muted-foreground">
-                {[...models, ...components].map((holder) => (
-                  <span className="flex items-center gap-1.5" key={holder.id}>
-                    <span
-                      aria-hidden
-                      className={cn(
-                        "size-1.5 rounded-full",
-                        colorOf(holder.id),
-                      )}
-                    />
-                    {holder.name}
-                  </span>
-                ))}
-                {hasOtherApps ? (
-                  <span className="flex items-center gap-1.5">
-                    <span
-                      aria-hidden
-                      className="size-1.5 rounded-full bg-muted-foreground/30"
-                    />
-                    {t(m.otherApps)}
-                  </span>
-                ) : null}
-                {hasUnaccounted ? (
-                  <span className="flex items-center gap-1.5">
-                    <span
-                      aria-hidden
-                      className="size-1.5 rounded-full bg-muted-foreground/15"
-                    />
-                    {t(m.systemAndEngine)}
-                  </span>
-                ) : null}
-              </p>
-            ) : null}
-          </section>
-        ) : null}
-        {host ? (
-          <section>
-            <h3 className="mb-2 text-xs font-medium text-muted-foreground">
-              {t(m.hardware)}
-            </h3>
-            <div className="rounded-xl border border-border bg-app-canvas/40 px-3.5">
-              {host.os_label ? (
-                <Fact label={t(m.factSystem)}>{host.os_label}</Fact>
-              ) : null}
-              {host.engine_label ? (
-                <Fact label={t(m.factEngine)}>{host.engine_label}</Fact>
-              ) : null}
-              <Fact label={t(m.factMemory)}>
-                {formatGigabytes(host.ram_total_bytes, t)}
-              </Fact>
-              {host.gpus.map((gpu) => (
-                <Fact
-                  key={gpu.index}
-                  label={t(m.gpuIndex, { index: String(gpu.index) })}
-                >
-                  {gpu.name} · {formatGigabytes(gpu.total_bytes, t)}
-                </Fact>
-              ))}
-              <Fact label={t(m.factFreeDisk)}>
-                {formatGigabytes(host.disk_free_bytes, t)}
-              </Fact>
-            </div>
-          </section>
-        ) : null}
-        {gatewayEndpoint ? (
-          <section>
-            <h3 className="mb-2 text-xs font-medium text-muted-foreground">
-              {t(m.gatewaySection)}
-            </h3>
-            <div className="rounded-xl border border-border bg-app-canvas/40 px-3.5">
-              <Fact
-                className="flex-col items-start gap-1 py-2 sm:flex-row sm:items-center sm:gap-3 sm:py-1.5"
-                label={t(m.factGateway)}
-              >
-                <CopyEndpoint
-                  ariaLabel={t(m.copyGatewayEndpoint)}
-                  copiedAriaLabel={t(m.copiedGatewayEndpoint)}
-                  endpoint={gatewayEndpoint}
-                  title={t(m.copyGatewayEndpoint)}
-                />
-              </Fact>
-            </div>
-            <p className="mt-2 px-0.5 text-xs text-muted-foreground">
-              {t(m.gatewaySharedNote)}
-            </p>
-          </section>
-        ) : null}
-      </div>
-    </ModalDialog>
   );
 }

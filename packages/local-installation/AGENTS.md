@@ -268,7 +268,10 @@ when present, else `<home>/runtime/localmodels/bifrost-addr`, and on commands
 that may plan or start Bifrost defaults to `127.0.0.1:18480` when free across
 loopback and local interfaces or allocates and persists an ephemeral port free
 across local interfaces when `18480` is held by another process; stop and
-read-only calls never probe or allocate a port.
+read-only calls never probe or allocate a port. `resolveLocalmodelsBifrostLocation`
+exposes the same read-only Bifrost directory and address resolution (reusing
+`legacyLocalmodelsTools` without writing a marker and `resolveLocalmodelsBifrostAddr`
+with `allocate: false`) for Desktop's local gateway reader.
 A home whose Quick Install ran before per-home isolation (0.1.6 and earlier)
 keeps its plan's deployments, Pi profile and Bifrost in localmodels' default
 `~/.local/share/localmodels/tools`, so it stays there: when the home has no

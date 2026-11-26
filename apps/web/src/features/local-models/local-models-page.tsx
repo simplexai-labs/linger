@@ -4,6 +4,7 @@ import {
   ArrowDown01Icon,
   InformationCircleIcon,
   RefreshIcon,
+  SlidersHorizontalIcon,
 } from "@hugeicons/core-free-icons";
 import {
   useMutation,
@@ -227,6 +228,10 @@ export function ModelsPage() {
         <ComputerModels
           computerId={sharedId}
           defaultComputerName={defaultComputer?.display_name}
+          isLocalDesktop={
+            Boolean(desktop?.status?.computerId) &&
+            desktop?.status?.computerId === sharedId
+          }
           key={sharedId}
           onOpenDefaultComputer={
             defaultComputer
@@ -389,7 +394,8 @@ function MemorySummaryCard({
             </Button>
           ) : null}
           <Button onClick={onDetails} size="compact">
-            {t(m.details)}
+            <Icon icon={SlidersHorizontalIcon} size={14} />
+            {t(m.advanced)}
           </Button>
         </div>
       </div>
@@ -747,7 +753,8 @@ function ComputerModels({
                 onClick={() => setDialog({ kind: "advanced" })}
                 size="compact"
               >
-                {t(m.details)}
+                <Icon icon={SlidersHorizontalIcon} size={14} />
+                {t(m.advanced)}
               </Button>
             ) : null}
           </div>
@@ -1915,6 +1922,7 @@ function Library({
       {dialog?.kind === "advanced" ? (
         <AdvancedDialog
           gatewayUrl={status?.gateway_url}
+          isLocalDesktop={isLocalDesktop}
           onClose={() => setDialog(null)}
           view={view}
         />

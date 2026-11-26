@@ -990,6 +990,74 @@ export function sharedGatewayEndpoint(
   }
 }
 
+/**
+ * Normalizes a Computer's shared Bifrost gateway URL to its root admin console
+ * address (without a trailing `/v1`).
+ */
+export function gatewayAdminUrl(
+  gatewayUrl: string | undefined,
+): string | undefined {
+  if (!gatewayUrl) return undefined;
+  try {
+    const parsed = new URL(gatewayUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return undefined;
+    }
+    const trimmedPath = parsed.pathname
+      .replace(/\/+$/, "")
+      .replace(/\/v1$/, "");
+    return `${parsed.origin}${trimmedPath}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether a URL targets the local loopback interface. */
+export function isLoopbackUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return (
+      host === "127.0.0.1" ||
+      host === "localhost" ||
+      host === "[::1]" ||
+      host === "::1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+const PI_LIBRARY_PROVIDER_PREFIX = "localmodels-library/";
+
+/**
+ * Derives the OpenAI-compatible `model` ID served on the shared Bifrost `/v1`
+ * endpoint from a loaded model's `pi_model` selector.
+ */
+export function gatewayModelId(
+  model: Pick<LocalModel, "pi_model">,
+): string | undefined {
+  const selector = model.pi_model?.trim();
+  if (!selector) return undefined;
+  if (selector.startsWith(PI_LIBRARY_PROVIDER_PREFIX)) {
+    const stripped = selector.slice(PI_LIBRARY_PROVIDER_PREFIX.length).trim();
+    return stripped || undefined;
+  }
+  return selector;
+}
+
+/** Copy-ready `curl` example targeting a model through the shared Bifrost `/v1` endpoint. */
+export function gatewayCurlSnippet(
+  gatewayEndpoint: string,
+  modelId: string,
+): string {
+  const payload = JSON.stringify({
+    messages: [{ content: "Hello", role: "user" }],
+    model: modelId,
+  });
+  return `curl ${gatewayEndpoint}/chat/completions -H "Content-Type: application/json" -d '${payload}'`;
+}
+
 /** Candidate local models on disk ordered loaded-first, recommended, then largest. */
 export function localSwitchTargets(view: LocalModelsView): LocalModel[] {
   return view.models

@@ -32,6 +32,20 @@ const fixture = async (
     servesWindow?: () => Promise<boolean>;
     signInWithAccount?: () => Promise<void>;
   } = {},
+  options: {
+    computerId?: string;
+    localGateway?: {
+      getInfo?: () => Promise<unknown>;
+      revealPassword?: () => Promise<{ readonly password: string }>;
+      copyPassword?: () => Promise<{
+        readonly copied: boolean;
+        readonly clearAfterMs: number;
+      }>;
+      openAdmin?: () => Promise<void>;
+      openFolder?: () => Promise<void>;
+      dispose?: () => void;
+    };
+  } = {},
 ) => {
   const local = {
     ...stubModule("LocalServer"),
@@ -82,6 +96,24 @@ const fixture = async (
     })),
     clearInstallState: vi.fn(),
   };
+  const gateway = options.localGateway
+    ? {
+        getInfo: vi.fn(
+          options.localGateway.getInfo ?? (async () => ({ available: false })),
+        ),
+        revealPassword: vi.fn(
+          options.localGateway.revealPassword ??
+            (async () => ({ password: PASSWORD })),
+        ),
+        copyPassword: vi.fn(
+          options.localGateway.copyPassword ??
+            (async () => ({ copied: true, clearAfterMs: 60_000 })),
+        ),
+        openAdmin: vi.fn(options.localGateway.openAdmin ?? (async () => {})),
+        openFolder: vi.fn(options.localGateway.openFolder ?? (async () => {})),
+        dispose: vi.fn(options.localGateway.dispose ?? (() => {})),
+      }
+    : undefined;
   const send = vi.fn();
   const windows = {
     ...stubModule("WindowManager"),
@@ -102,9 +134,16 @@ const fixture = async (
       stubModule("WorkspaceGrants"),
       updater as never,
       local as never,
-      new DesktopIpcModule({ defaultDisplayName: "Desk", driverUpdater }),
+      new DesktopIpcModule({
+        defaultDisplayName: "Desk",
+        driverUpdater,
+        ...(gateway ? { localGateway: gateway as never } : {}),
+      }),
     ],
-    { serverUrl: SERVER },
+    {
+      serverUrl: SERVER,
+      ...(options.computerId ? { computerId: options.computerId } : {}),
+    },
     bus,
   );
   await host.start();
@@ -119,6 +158,7 @@ const fixture = async (
     bus,
     diagnostics,
     driverUpdater,
+    gateway,
     language,
     local,
     power,
@@ -427,5 +467,65 @@ describe("DesktopIpcModule driverUpdate", () => {
     ).toThrow();
     expect(f.driverUpdater.startInstall).not.toHaveBeenCalled();
     await f.host.stop("quit");
+  });
+});
+
+describe("DesktopIpcModule local gateway", () => {
+  it("serves local Bifrost metadata and secret actions only for this desktop's enrolled computer and server origin", async () => {
+    const f = await fixture(
+      {},
+      {
+        computerId: "computer-this-mac",
+        localGateway: {
+          getInfo: async () => ({
+            available: true,
+            adminUrl: "http://127.0.0.1:18480",
+            username: "admin",
+            hasPassword: true,
+            inferenceAuthDisabled: true,
+          }),
+        },
+      },
+    );
+
+    expect(
+      await f.invoke(IPC.localGatewayInfo, SERVER, "computer-this-mac"),
+    ).toEqual({
+      available: true,
+      adminUrl: "http://127.0.0.1:18480",
+      username: "admin",
+      hasPassword: true,
+      inferenceAuthDisabled: true,
+    });
+    expect(
+      await f.invoke(IPC.localGatewayInfo, SERVER, "computer-other"),
+    ).toEqual({ available: false });
+    expect(() =>
+      f.invoke(IPC.localGatewayRevealPassword, SERVER, "computer-other"),
+    ).toThrow("Not allowed");
+    expect(() =>
+      f.invoke(
+        IPC.localGatewayRevealPassword,
+        "https://evil.example.com",
+        "computer-this-mac",
+      ),
+    ).toThrow("Not allowed");
+
+    expect(
+      await f.invoke(
+        IPC.localGatewayRevealPassword,
+        SERVER,
+        "computer-this-mac",
+      ),
+    ).toEqual({ password: PASSWORD });
+    expect(
+      await f.invoke(IPC.localGatewayCopyPassword, SERVER, "computer-this-mac"),
+    ).toEqual({ copied: true, clearAfterMs: 60_000 });
+    await f.invoke(IPC.localGatewayOpenAdmin, SERVER, "computer-this-mac");
+    await f.invoke(IPC.localGatewayOpenFolder, SERVER, "computer-this-mac");
+    expect(f.gateway!.openAdmin).toHaveBeenCalledOnce();
+    expect(f.gateway!.openFolder).toHaveBeenCalledOnce();
+    await f.host.stop("quit");
+    expect(f.gateway!.dispose).toHaveBeenCalledOnce();
   });
 });
