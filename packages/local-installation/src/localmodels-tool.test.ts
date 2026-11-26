@@ -29,10 +29,12 @@ import {
   localmodelsLegacyToolsMarkerFile,
   localmodelsStateDirectory,
   localmodelsToolsDirectory,
+  readPublishedTool,
   resolveLocalmodelsBifrostAddr,
   runLocalmodels,
   stopLocalmodels,
   validateToolSource,
+  withLocalmodelsToolCache,
 } from "./localmodels-tool.js";
 const roots: string[] = [];
 async function reopenDirectories(directory: string): Promise<void> {
@@ -2130,3 +2132,52 @@ test("skips bundled Pi PATH injection for setup inspect while keeping it for har
     );
   }
 });
+
+test("withLocalmodelsToolCache reuses a verified kit within one session while verifying outside it", async () => {
+  const f = await fixture();
+  let calls = 0;
+  await withLocalmodelsToolCache(async () => {
+    const first = await ensureLocalmodelsTool(f.home, {}, { source: f.source });
+    calls += 1;
+    // Remove the stamp file after the first verified call; an in-session
+    // call still hits the session cache instead of re-verifying assets.
+    await rm(`${f.directory}.verified.json`, { force: true });
+    await chmod(path.join(f.directory, "modules/localmodels"), 0o700);
+    await chmod(
+      path.join(f.directory, "modules/localmodels/__init__.py"),
+      0o600,
+    );
+    await writeFile(
+      path.join(f.directory, "modules/localmodels/__init__.py"),
+      "tampered-after-session-verify",
+    );
+    const second = await ensureLocalmodelsTool(
+      f.home,
+      {},
+      { source: f.source },
+    );
+    calls += 1;
+    expect(second).toEqual(first);
+  });
+  expect(calls).toBe(2);
+  // Outside the session, verification still detects the tampered asset immediately.
+  await expect(
+    ensureLocalmodelsTool(
+      f.home,
+      {},
+      {
+        source: f.source,
+        fetcher: async () => new Response("bad", { status: 200 }),
+      },
+    ),
+  ).rejects.toThrow(/checksum|size|SHA/i);
+});
+
+test("readPublishedTool returns undefined when the staged path is not a directory (ENOTDIR)", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "linger-tool-enotdir-"));
+  roots.push(root);
+  const setupFile = path.join(root, "setup.exe");
+  await writeFile(setupFile, "setup-binary");
+  await expect(
+    readPublishedTool(path.join(setupFile, "Contents", "distribution.json")),
+  ).resolves.toBeUndefined();

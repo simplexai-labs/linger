@@ -41,6 +41,10 @@ import { latestLegacyBackup } from "@linger/local-installation/legacy-database";
 import { legacyMigrationPending } from "@linger/local-installation/home";
 import { loadInstance } from "@linger/local-installation/instance";
 import { foldersInUse } from "@linger/local-installation/native-process";
+import {
+  ensureLocalmodelsTool,
+  readPublishedTool,
+} from "@linger/local-installation/localmodels-tool";
 import { normalizeFailurePunctuation } from "@linger/local-installation/localmodels-failure";
 import {
   canBuildNativeServicesFromSource,
@@ -67,7 +71,9 @@ import {
 import { linuxNodeFdHygieneArgs } from "@linger/local-installation/native-process-fds";
 import {
   installTeamhubBinaries,
+  readTeamhubBinaries,
   TEAMHUB_BINARY_DIRECTORY,
+  teamhubBinaryStampsFile,
 } from "@linger/local-installation/teamhub-binaries";
 import { redact } from "@linger/local-installation/redaction";
 import { isInkling2MiniModelId } from "@linger/service-kit/featured-models";
@@ -555,6 +561,10 @@ export class LocalServerModule implements Module {
   #node: Promise<string> | undefined;
   #abort = new AbortController();
   #inspectAbort: AbortController | undefined;
+  #pruning: Promise<void> = Promise.resolve();
+  #preStagedSources = new Map<string, PreStagedSourceState>();
+  #stagingSources = new Map<string, Promise<void>>();
+  #abortedStaging = new WeakSet<Promise<void>>();
   #offRetry: (() => void) | undefined;
   #offUnreachable: (() => void) | undefined;
   #watch: ReturnType<typeof setInterval> | undefined;
@@ -767,6 +777,160 @@ export class LocalServerModule implements Module {
       return this.#origin !== undefined && sameOrigin(this.#origin, serverUrl);
     if (!this.#started) return this.resumable(serverUrl);
     return false;
+  }
+
+  // Pre-fetches the updated release's pinned localmodels tool and pre-stages
+  // its bundled source checkout, TeamHub binaries, and offline runtime into
+  // the enrolled home before the user restarts to apply an update.
+  async prepareUpdateTool(
+    stagedBundle: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const effectiveSignal = AbortSignal.any([signal, this.#abort.signal]);
+    effectiveSignal.throwIfAborted();
+    const record = await this.#readRecord();
+    const config = this.#ctx?.config.get();
+    if (
+      !record ||
+      config?.serverUrl === undefined ||
+      !sameOrigin(config.serverUrl, record.origin) ||
+      !config.computerId
+    )
+      return;
+    const installerDirectory = path.join(
+      stagedBundle,
+      "Contents",
+      "Resources",
+      "app",
+      "dist",
+      "installer",
+    );
+    const prepareTool = async (): Promise<void> => {
+      const source = await readPublishedTool(
+        path.join(installerDirectory, "distribution.json"),
+      );
+      if (!source) return;
+      const startedAt = Date.now();
+      await ensureLocalmodelsTool(
+        record.home,
+        { signal: effectiveSignal },
+        {
+          source,
+          fetcher: followHttps(this.#options.fetch ?? fetch),
+        },
+      );
+      this.#ctx?.log.info("local_server.update_tool_prepared", {
+        sha256: source.sha256.slice(0, 12),
+        ms: Date.now() - startedAt,
+      });
+    };
+    const results = await Promise.allSettled([
+      prepareTool(),
+      this.#prepareUpdateSource(
+        record.home,
+        record.repo,
+        installerDirectory,
+        effectiveSignal,
+      ),
+    ]);
+    effectiveSignal.throwIfAborted();
+    const rejected = results.find((result) => result.status === "rejected");
+    if (rejected) throw rejected.reason;
+  }
+
+  async #resolveUpdateSource(
+    installerDirectory: string,
+  ): Promise<{ archiveFile: string; sha256: string } | undefined> {
+    const entries = await readdir(path.join(installerDirectory, "source"), {
+      withFileTypes: true,
+    }).catch(() => undefined);
+    const archives = entries?.filter(
+      (entry) =>
+        entry.isFile() &&
+        !entry.name.startsWith(".") &&
+        !entry.name.endsWith(".partial") &&
+        entry.name.endsWith(".tar.gz"),
+    );
+    if (archives?.length !== 1) return undefined;
+    const target = this.#target();
+    const [teamhubManifest, runtimeManifest] = await Promise.all([
+      readTeamhubBinaries(
+        path.join(installerDirectory, "native", `teamhub-${target}`),
+      ).catch(() => undefined),
+      this.#bundledRuntime(installerDirectory),
+    ]);
+    const teamhubDigest =
+      teamhubManifest?.target === target
+        ? teamhubManifest.sourceArchiveSha256
+        : undefined;
+    const runtimeDigest =
+      runtimeManifest?.target === target &&
+      typeof runtimeManifest.sourceArchiveSha256 === "string" &&
+      /^[0-9a-f]{64}$/.test(runtimeManifest.sourceArchiveSha256)
+        ? runtimeManifest.sourceArchiveSha256
+        : undefined;
+    if (!teamhubDigest && !runtimeDigest) return undefined;
+    if (teamhubDigest && runtimeDigest && teamhubDigest !== runtimeDigest)
+      return undefined;
+    return {
+      archiveFile: archives[0]!.name,
+      sha256: (teamhubDigest ?? runtimeDigest)!,
+    };
+  }
+
+  async #prepareUpdateSource(
+    home: string,
+    currentRepo: string,
+    installerDirectory: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (this.#options.checkout) return;
+    signal.throwIfAborted();
+    const resolvedSource = await this.#resolveUpdateSource(installerDirectory);
+    signal.throwIfAborted();
+    if (!resolvedSource) return;
+    const { archiveFile, sha256 } = resolvedSource;
+    const directory = path.join(home, "desktop", "source", sha256.slice(0, 16));
+    if (
+      path.resolve(directory) === path.resolve(currentRepo) ||
+      path.basename(currentRepo) === sha256.slice(0, 16)
+    )
+      return;
+    const resolved = path.resolve(directory);
+    let entry = this.#preStagedSources.get(resolved);
+    if (!entry) {
+      entry = { active: 0, completed: false };
+      this.#preStagedSources.set(resolved, entry);
+    }
+    entry.active += 1;
+    const sourceStartedAt = Date.now();
+    let succeeded = false;
+    try {
+      await this.#stageSourceFromInstaller(
+        home,
+        { file: path.join("source", archiveFile), sha256 },
+        signal,
+        { installerDirectory, reportProgress: false },
+      );
+      entry.completed = true;
+      succeeded = true;
+    } finally {
+      entry.active -= 1;
+      if (!succeeded && entry.active === 0 && !entry.completed) {
+        const hasMarker = await isFile(path.join(directory, SOURCE_MARKER));
+        if (
+          !hasMarker &&
+          this.#preStagedSources.get(resolved) === entry &&
+          entry.active === 0 &&
+          !entry.completed
+        )
+          this.#preStagedSources.delete(resolved);
+      }
+    }
+    this.#ctx?.log.info("local_server.update_source_prepared", {
+      source: path.basename(directory),
+      ms: Date.now() - sourceStartedAt,
+    });
   }
 
   status(): LocalServerStatus {
@@ -1304,11 +1468,12 @@ export class LocalServerModule implements Module {
       // Keep what runs now until this version replaces it.
       const record = await this.#readRecord();
       await this.#timed("prune_sources", () =>
-        this.#pruneSources(home, [
+        this.#schedulePruneSources(home, [
           record?.repo,
           this.#options.sourceArchive?.sha256.slice(0, 16),
         ]),
       );
+      signal.throwIfAborted();
       // A chosen folder may have filled up or gone since it was picked.
       if (this.#location) {
         const model =
@@ -1484,7 +1649,7 @@ export class LocalServerModule implements Module {
         origin: job.origin,
         version: this.#options.version,
       });
-      await this.#pruneSources(home, [repo]);
+      const prune = this.#schedulePruneSources(home, [repo]);
       this.#home = home;
       this.#location = undefined;
       this.#ready(
@@ -1502,6 +1667,7 @@ export class LocalServerModule implements Module {
       await this.#timed("await_agents", () =>
         this.#awaitAgents(job.origin, signal),
       );
+      await prune;
       this.#set("ready", "Linger is running on this computer.");
     } catch (error) {
       this.#endSignIn();
@@ -2176,7 +2342,11 @@ export class LocalServerModule implements Module {
 
   // The source package, unpacked once into the installation folder; or the
   // developer's checkout.
-  async #ensureSource(home: string, signal: AbortSignal): Promise<string> {
+  async #ensureSource(
+    home: string,
+    signal: AbortSignal,
+    options: StageSourceOptions = {},
+  ): Promise<string> {
     if (this.#options.checkout) {
       const repo = await realpath(this.#options.checkout);
       if (!(await isFile(path.join(repo, "scripts/source-native.mjs"))))
@@ -2187,78 +2357,183 @@ export class LocalServerModule implements Module {
     }
     const archive = this.#options.sourceArchive;
     if (!archive) throw new Error("This build has no source package");
-    const directory = path.join(
+    if ("file" in archive)
+      return this.#stageSourceFromInstaller(home, archive, signal, options);
+    const reportProgress = options.reportProgress ?? true;
+    return this.#stageSource(
       home,
-      "desktop",
-      "source",
-      archive.sha256.slice(0, 16),
+      archive.sha256,
+      signal,
+      options,
+      (directory) =>
+        this.#unpack(
+          { ...archive, maxBytes: 1024 * MiB },
+          directory,
+          SOURCE_MARKER,
+          path.join(home, "desktop", "downloads"),
+          signal,
+          reportProgress
+            ? (bytes) =>
+                this.#advance(
+                  "download",
+                  (bytes.completed / bytes.total) * 0.05,
+                  "Downloading Linger…",
+                  bytes,
+                )
+            : undefined,
+        ),
     );
-    if (await isFile(path.join(directory, SOURCE_MARKER))) {
-      if (
-        await validateSourceRepository(directory).then(
+  }
+
+  async #stageSourceFromInstaller(
+    home: string,
+    archive: { file: string; sha256: string },
+    signal: AbortSignal,
+    options: StageSourceOptions = {},
+  ): Promise<string> {
+    const installerDirectory =
+      options.installerDirectory ?? this.#options.installerDirectory;
+    return this.#stageSource(
+      home,
+      archive.sha256,
+      signal,
+      options,
+      (directory) =>
+        this.#extract(
+          archive,
+          directory,
+          SOURCE_MARKER,
+          signal,
+          installerDirectory,
+        ),
+    );
+  }
+
+  async #stageSource(
+    home: string,
+    sha256: string,
+    signal: AbortSignal,
+    options: StageSourceOptions,
+    unpack: (directory: string) => Promise<void>,
+  ): Promise<string> {
+    const directory = path.join(home, "desktop", "source", sha256.slice(0, 16));
+    await this.#stageDirectory(directory, signal, async () => {
+      const hasMarker = await isFile(path.join(directory, SOURCE_MARKER));
+      const valid =
+        hasMarker &&
+        (await validateSourceRepository(directory).then(
           () => true,
           () => false,
-        )
-      ) {
-        await this.#timed("teamhub_binaries", () =>
-          this.#ensureTeamhubBinaries(directory, archive.sha256, signal),
-        );
-        await this.#timed("native_runtime", () =>
-          this.#ensureNativeRuntime(directory, archive.sha256, signal),
-        );
-        return directory;
+        ));
+      if (!valid) {
+        if (hasMarker)
+          this.#ctx?.log.warn("local_server.source_damaged", {
+            source: path.basename(directory),
+          });
+        if (hasMarker || existsSync(directory)) await removeRetrying(directory);
+        await unpack(directory);
+        if (!(await isFile(path.join(directory, SOURCE_MARKER))))
+          throw new Error("The source package is not a Linger source tree");
       }
-      // This package's own folder, damaged since it was unpacked (files
-      // removed by hand or by a cleanup): the installer would refuse it, so
-      // it is unpacked again in its place.
-      this.#ctx?.log.warn("local_server.source_damaged", {
-        source: path.basename(directory),
-      });
-      await removeRetrying(directory);
-    }
-    if ("file" in archive)
-      await this.#extract(archive, directory, SOURCE_MARKER, signal);
-    else
-      await this.#unpack(
-        { ...archive, maxBytes: 1024 * MiB },
-        directory,
-        SOURCE_MARKER,
-        path.join(home, "desktop", "downloads"),
-        signal,
-        (bytes) =>
-          this.#advance(
-            "download",
-            (bytes.completed / bytes.total) * 0.05,
-            "Downloading Linger…",
-            bytes,
-          ),
-      );
-    if (!(await isFile(path.join(directory, SOURCE_MARKER))))
-      throw new Error("The source package is not a Linger source tree");
-    await this.#timed("teamhub_binaries", () =>
-      this.#ensureTeamhubBinaries(directory, archive.sha256, signal),
-    );
-    await this.#timed("native_runtime", () =>
-      this.#ensureNativeRuntime(directory, archive.sha256, signal),
-    );
+      await this.#ensureSourceAssets(directory, sha256, signal, options);
+    });
     return directory;
+  }
+
+  // Deduplicates concurrent staging into the same versioned source directory
+  // so background pre-staging and launch/resume wait rather than collide on
+  // `<directory>.partial`.
+  async #stageDirectory(
+    directory: string,
+    signal: AbortSignal,
+    work: () => Promise<void>,
+  ): Promise<void> {
+    const key = path.resolve(directory);
+    for (;;) {
+      signal.throwIfAborted();
+      const existing = this.#stagingSources.get(key);
+      if (existing) {
+        try {
+          await raceAbort(existing, signal);
+          return;
+        } catch (error) {
+          if (signal.aborted) throw error;
+          if (this.#abortedStaging.has(existing)) continue;
+          throw error;
+        }
+      }
+      const task: Promise<void> = Promise.resolve()
+        .then(async () => {
+          await raceAbort(
+            this.#pruning.catch(() => undefined),
+            signal,
+          );
+          await work();
+        })
+        .catch((error: unknown) => {
+          if (signal.aborted) this.#abortedStaging.add(task);
+          throw error;
+        })
+        .finally(() => {
+          if (this.#stagingSources.get(key) === task)
+            this.#stagingSources.delete(key);
+        });
+      this.#stagingSources.set(key, task);
+      return await task;
+    }
+  }
+
+  async #ensureSourceAssets(
+    directory: string,
+    sha256: string,
+    signal: AbortSignal,
+    options: StageSourceOptions,
+  ): Promise<void> {
+    const installerDirectory =
+      options.installerDirectory ?? this.#options.installerDirectory;
+    const reportProgress = options.reportProgress ?? true;
+    const runBinaries = () =>
+      this.#ensureTeamhubBinaries(
+        directory,
+        sha256,
+        signal,
+        installerDirectory,
+      );
+    const runRuntime = () =>
+      this.#ensureNativeRuntime(directory, sha256, signal, options);
+    const results = await Promise.allSettled([
+      reportProgress
+        ? this.#timed("teamhub_binaries", runBinaries)
+        : runBinaries(),
+      reportProgress ? this.#timed("native_runtime", runRuntime) : runRuntime(),
+    ]);
+    const rejected = results.find((result) => result.status === "rejected");
+    if (rejected) throw rejected.reason;
   }
 
   // The manifest of the services and Node.js this build bundles for this
   // computer (scripts/build-native-runtime.mjs), or undefined without them.
-  async #bundledRuntime(): Promise<BundledRuntime | undefined> {
+  async #bundledRuntime(
+    installerDirectory = this.#options.installerDirectory,
+  ): Promise<BundledRuntime | undefined> {
     try {
       return JSON.parse(
-        await readFile(this.#bundledRuntimeFile("manifest.json"), "utf8"),
+        await readFile(
+          this.#bundledRuntimeFile("manifest.json", installerDirectory),
+          "utf8",
+        ),
       ) as BundledRuntime;
     } catch {
       return undefined;
     }
   }
 
-  #bundledRuntimeFile(file: string): string {
+  #bundledRuntimeFile(
+    file: string,
+    installerDirectory = this.#options.installerDirectory,
+  ): string {
     return path.join(
-      this.#options.installerDirectory,
+      installerDirectory,
       "native",
       `runtime-${this.#target()}`,
       file,
@@ -2272,8 +2547,13 @@ export class LocalServerModule implements Module {
     repo: string,
     sha256: string,
     signal: AbortSignal,
+    options: StageSourceOptions = {},
   ): Promise<void> {
-    const bundle = await this.#bundledRuntime();
+    signal.throwIfAborted();
+    const installerDirectory =
+      options.installerDirectory ?? this.#options.installerDirectory;
+    const reportProgress = options.reportProgress ?? true;
+    const bundle = await this.#bundledRuntime(installerDirectory);
     if (!bundle) return;
     const target = this.#target();
     const directory = path.join(repo, NATIVE_RUNTIME_DIRECTORY);
@@ -2292,6 +2572,7 @@ export class LocalServerModule implements Module {
       }
       return;
     }
+    let replacing = false;
     try {
       if (bundle.target !== target || bundle.sourceArchiveSha256 !== sha256)
         throw new Error("The bundled services are for another source package");
@@ -2302,20 +2583,29 @@ export class LocalServerModule implements Module {
         (await nativeRuntimeVerified(directory))
       )
         return;
-      this.#advance("download", 0.05, "Unpacking Linger services…");
+      if (reportProgress)
+        this.#advance("download", 0.05, "Unpacking Linger services…");
+      replacing = true;
       await removeRetrying(directory);
       if (bundle.layout === "directory")
         await this.#copyBundled(
-          this.#bundledRuntimeFile(path.dirname(bundle.directory!.file)),
+          this.#bundledRuntimeFile(
+            path.dirname(bundle.directory!.file),
+            installerDirectory,
+          ),
           directory,
           {
             file: path.basename(bundle.directory!.file),
             sha256: bundle.directory!.sha256,
           },
           signal,
+          installerDirectory,
         );
       else {
-        const file = this.#bundledRuntimeFile(bundle.archive!.file);
+        const file = this.#bundledRuntimeFile(
+          bundle.archive!.file,
+          installerDirectory,
+        );
         await this.#checkArchive(file, bundle.archive!.sha256, signal);
         // Unpacked in place: renaming a folder of fresh files waited up to
         // 30 s for Windows' scanners.
@@ -2326,8 +2616,9 @@ export class LocalServerModule implements Module {
       await markNativeRuntimeVerified(directory);
       this.#ctx?.log.info("local_server.native_runtime", { target });
     } catch (error) {
+      if (replacing || !signal.aborted)
+        await removeRetrying(directory).catch(() => undefined);
       if (signal.aborted) throw error;
-      await removeRetrying(directory).catch(() => undefined);
       const detail = error instanceof Error ? error.message : String(error);
       this.#ctx?.log.warn("local_server.native_runtime_failed", {
         error: detail,
@@ -2360,17 +2651,36 @@ export class LocalServerModule implements Module {
     directory: string,
     check: { file: string; sha256: string },
     signal: AbortSignal,
+    installerDirectory = this.#options.installerDirectory,
   ): Promise<void> {
     if (existsSync(path.join(directory, check.file))) return;
     const copied = `${directory}.partial`;
     try {
       await removeRetrying(copied);
       await mkdir(path.dirname(copied), { recursive: true });
-      // A clone on APFS: no extra space and no time.
-      await cp(from, copied, {
-        recursive: true,
-        mode: fsConstants.COPYFILE_FICLONE,
-      });
+      // A clone on APFS: no extra space and faster with system cp on macOS.
+      if (process.platform === "darwin") {
+        try {
+          await run(
+            "/bin/cp",
+            ["-Rpc", from, copied],
+            path.dirname(copied),
+            signal,
+          );
+        } catch (error) {
+          if (signal.aborted) throw error;
+          await removeRetrying(copied);
+          await cp(from, copied, {
+            recursive: true,
+            mode: fsConstants.COPYFILE_FICLONE,
+          });
+        }
+      } else {
+        await cp(from, copied, {
+          recursive: true,
+          mode: fsConstants.COPYFILE_FICLONE,
+        });
+      }
       const hash = createHash("sha256");
       for await (const chunk of createReadStream(
         path.join(copied, check.file),
@@ -2379,15 +2689,60 @@ export class LocalServerModule implements Module {
         hash.update(chunk as Buffer);
       if (hash.digest("hex") !== check.sha256)
         throw new Error(`The bundled ${check.file} is damaged`);
-      await this.#unquarantine(copied, signal);
+      await this.#unquarantine(copied, signal, [
+        path.join(copied, check.file),
+        installerDirectory,
+      ]);
       await this.#publish(copied, directory, check.file, signal);
     } finally {
       await removeRetrying(copied);
     }
   }
 
-  async #unquarantine(directory: string, signal: AbortSignal): Promise<void> {
+  async #hasQuarantine(
+    probes: readonly string[],
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const existing = probes.filter((entry) => existsSync(entry));
+    if (!existing.length) return false;
+    return new Promise<boolean>((resolve, reject) => {
+      const child = spawn(
+        "/usr/bin/xattr",
+        ["-p", "com.apple.quarantine", ...existing],
+        {
+          stdio: ["ignore", "pipe", "ignore"],
+          signal,
+          windowsHide: true,
+        },
+      );
+      let stdout = "";
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString("utf8");
+      });
+      child.once("error", () => {
+        if (signal.aborted) reject(signal.reason);
+        else resolve(true);
+      });
+      child.once("close", (code) => {
+        if (signal.aborted) reject(signal.reason);
+        else if (code === 0) resolve(true);
+        else if (code === 1) resolve(stdout.trim().length > 0);
+        else resolve(true);
+      });
+    });
+  }
+
+  async #unquarantine(
+    directory: string,
+    signal: AbortSignal,
+    probes: readonly string[] = [],
+  ): Promise<void> {
     if ((this.#options.platform ?? process.platform) !== "darwin") return;
+    if (
+      process.platform === "darwin" &&
+      !(await this.#hasQuarantine([directory, ...probes], signal))
+    )
+      return;
     await run(
       "/usr/bin/xattr",
       ["-dr", "com.apple.quarantine", directory],
@@ -2409,27 +2764,36 @@ export class LocalServerModule implements Module {
     repo: string,
     sha256: string,
     signal: AbortSignal,
+    installerDirectory = this.#options.installerDirectory,
   ): Promise<void> {
+    signal.throwIfAborted();
     const target = this.#target();
+    const binaryDir = path.join(repo, TEAMHUB_BINARY_DIRECTORY);
+    let shouldCleanOnAbort = false;
     try {
       const state = await installTeamhubBinaries(
-        path.join(
-          this.#options.installerDirectory,
-          "native",
-          `teamhub-${target}`,
-        ),
+        path.join(installerDirectory, "native", `teamhub-${target}`),
         repo,
-        { target, sourceArchiveSha256: sha256 },
+        { target, sourceArchiveSha256: sha256, signal },
       );
+      shouldCleanOnAbort = state === "installed";
+      signal.throwIfAborted();
       if (state === "installed") {
         await this.#unquarantine(
-          path.join(repo, TEAMHUB_BINARY_DIRECTORY),
+          binaryDir,
           signal,
+          ["teamhub", "migrate", "account"].map((command) =>
+            path.join(binaryDir, command),
+          ),
         );
+        signal.throwIfAborted();
         this.#ctx?.log.info("local_server.teamhub_binaries", { target });
       }
     } catch (error) {
-      if (signal.aborted) throw error;
+      if (signal.aborted) {
+        if (shouldCleanOnAbort) await this.#removeTeamhubBinaries(binaryDir);
+        throw error;
+      }
       const detail = error instanceof Error ? error.message : String(error);
       this.#ctx?.log.warn("local_server.teamhub_binaries_failed", {
         error: detail,
@@ -2441,6 +2805,13 @@ export class LocalServerModule implements Module {
         );
       }
     }
+  }
+
+  async #removeTeamhubBinaries(binaryDir: string): Promise<void> {
+    await Promise.all([
+      removeRetrying(binaryDir),
+      removeRetrying(teamhubBinaryStampsFile(binaryDir)),
+    ]).catch(() => undefined);
   }
 
   // Unpacks the published dependency store into the checkout, so installing
@@ -2494,6 +2865,25 @@ export class LocalServerModule implements Module {
     }
   }
 
+  #schedulePruneSources(
+    home: string,
+    keep: readonly (string | undefined)[],
+  ): Promise<void> {
+    const task = this.#pruning
+      .catch(() => undefined)
+      .then(async () => {
+        if (this.#abort.signal.aborted) return;
+        const current = await this.#readRecord();
+        await this.#pruneSources(home, [
+          ...keep,
+          current?.repo,
+          ...this.#preStagedSources.keys(),
+        ]);
+      });
+    this.#pruning = task;
+    return task;
+  }
+
   // Each version unpacks beside the last and builds its own dependencies, so
   // once services run from this one the older ones only fill the disk.
   async #pruneSources(
@@ -2502,17 +2892,39 @@ export class LocalServerModule implements Module {
   ): Promise<void> {
     if (this.#options.checkout) return;
     const parent = path.join(home, "desktop", "source");
-    const kept = keep.flatMap((item) => (item ? [path.basename(item)] : []));
+    const kept = new Set(
+      keep.flatMap((item) => (item ? [path.basename(item)] : [])),
+    );
+    for (const preStaged of this.#preStagedSources.keys())
+      kept.add(path.basename(preStaged));
+    const isProtected = (entry: string, folder: string) => {
+      if (kept.has(entry)) return true;
+      if (
+        entry.endsWith(".partial") &&
+        this.#stagingSources.has(
+          path.resolve(parent, entry.slice(0, -".partial".length)),
+        )
+      )
+        return true;
+      const resolved = path.resolve(folder);
+      return (
+        this.#stagingSources.has(resolved) ||
+        this.#preStagedSources.has(resolved)
+      );
+    };
     const prunable = (
       await readdir(parent).catch(() => [] as string[])
-    ).flatMap((entry) =>
-      kept.includes(entry) ? [] : [path.join(parent, entry)],
-    );
+    ).flatMap((entry) => {
+      const folder = path.join(parent, entry);
+      return isProtected(entry, folder) ? [] : [folder];
+    });
     if (!prunable.length) return;
     // A service still running from a folder (its restart onto the kept one
     // has not happened, or failed) would lose its files under it.
     const inUse = await foldersInUse(prunable);
+    if (this.#abort.signal.aborted) return;
     for (const folder of prunable) {
+      if (isProtected(path.basename(folder), folder)) continue;
       if (inUse.has(folder)) {
         this.#ctx?.log.info("local_server.source_in_use", {
           source: path.basename(folder),
@@ -2579,8 +2991,9 @@ export class LocalServerModule implements Module {
     directory: string,
     marker: string,
     signal: AbortSignal,
+    installerDirectory = this.#options.installerDirectory,
   ): Promise<void> {
-    const file = path.resolve(this.#options.installerDirectory, archive.file);
+    const file = path.resolve(installerDirectory, archive.file);
     await this.#checkArchive(file, archive.sha256, signal);
     const unpacked = `${directory}.partial`;
     try {
@@ -3055,6 +3468,8 @@ export class LocalServerModule implements Module {
       this.#ctx?.log.info("local_server.resume_succeeded", {
         total_ms: Date.now() - startedAt,
       });
+      if (repo !== currentRecord.repo)
+        void this.#schedulePruneSources(currentRecord.home, [repo]);
     } catch (error) {
       if (signal.aborted) return;
       const message = error instanceof Error ? error.message : String(error);
@@ -3178,7 +3593,6 @@ export class LocalServerModule implements Module {
       repo,
       version: this.#options.version,
     });
-    await this.#pruneSources(record.home, [repo]);
   }
 
   // Resolves with the source folder the installer reports the services
@@ -3499,6 +3913,16 @@ export class LocalServerModule implements Module {
       throw error;
     }
   }
+}
+
+interface StageSourceOptions {
+  readonly installerDirectory?: string;
+  readonly reportProgress?: boolean;
+}
+
+interface PreStagedSourceState {
+  active: number;
+  completed: boolean;
 }
 
 // What the desktop installed, so it can start the services again.
@@ -4850,3 +5274,21 @@ const run = (
         : reject(new Error(`${command} exited with code ${code}`)),
     );
   });
+
+const raceAbort = <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> => {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+};

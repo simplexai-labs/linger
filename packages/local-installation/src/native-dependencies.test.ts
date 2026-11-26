@@ -5,6 +5,7 @@ import {
   readFile,
   readdir,
   rm,
+  utimes,
   writeFile,
   symlink,
 } from "node:fs/promises";
@@ -196,6 +197,45 @@ describe("verified extraction", () => {
     );
     expect(progress.at(-1)).toBe(f.bytes.length);
     await writeFile(path.join(directory, "bin/tool"), "changed");
+    await expect(
+      acquireNativeArtifact(
+        f.home,
+        f.artifact,
+        new AbortController().signal,
+        undefined,
+        f.fetcher,
+      ),
+    ).rejects.toThrow(/cache/);
+  });
+  it("reuses settled stamps once clock ticks settle while still detecting mtime-backdated tampering", async () => {
+    const f = await fixture();
+    const directory = await acquireNativeArtifact(
+      f.home,
+      f.artifact,
+      new AbortController().signal,
+      undefined,
+      f.fetcher,
+    );
+    const stampFile = `${directory}.verified.json`;
+    expect(existsSync(stampFile)).toBe(true);
+    const before = await readFile(stampFile, "utf8");
+    const baseNow = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(baseNow + 10_000);
+    await expect(
+      acquireNativeArtifact(
+        f.home,
+        f.artifact,
+        new AbortController().signal,
+        undefined,
+        f.fetcher,
+      ),
+    ).resolves.toBe(directory);
+    expect(await readFile(stampFile, "utf8")).toBe(before);
+
+    // Tamper with identical byte count and restore an older mtime; ctime still triggers re-hash.
+    const past = new Date(baseNow - 10_000);
+    await writeFile(path.join(directory, "bin/tool"), "changed");
+    await utimes(path.join(directory, "bin/tool"), past, past);
     await expect(
       acquireNativeArtifact(
         f.home,

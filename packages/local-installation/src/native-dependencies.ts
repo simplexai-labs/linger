@@ -33,6 +33,14 @@ import { runProcess } from "./process.js";
 import { validatePublishedServiceSource } from "./published-source.js";
 import type { InstallerEvent } from "./events.js";
 import { renameRetrying } from "./fs-retry.js";
+import {
+  readSettledStamps,
+  runBounded,
+  settledStampMatches,
+  sha256File,
+  writeSettledStamps,
+  type SettledStamps,
+} from "./verified-stamps.js";
 
 const postgresPrograms = [
   "postgres",
@@ -235,27 +243,103 @@ function safePath(name: string) {
       )
   );
 }
-async function digest(file: string) {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(file)) hash.update(chunk);
-  return hash.digest("hex");
-}
-async function tree(
+const COMPONENT_HASH_CONCURRENCY = 32;
+const componentStampsFile = (directory: string) => `${directory}.verified.json`;
+
+async function collectTreeEntries(
   directory: string,
   prefix = "",
-): Promise<Record<string, string>> {
-  const result: Record<string, string> = {};
+  out: string[] = [],
+): Promise<string[]> {
   for (const entry of await readdir(path.join(directory, prefix), {
     withFileTypes: true,
   })) {
     const name = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (name === ".simplex-files.json") continue;
-    if (entry.isDirectory()) Object.assign(result, await tree(directory, name));
-    else if (entry.isFile())
-      result[name] = await digest(path.join(directory, name));
+    if (entry.isDirectory()) await collectTreeEntries(directory, name, out);
+    else if (entry.isFile()) out.push(name);
     else throw new Error("Unsafe native dependency cache entry.");
   }
-  return result;
+  return out;
+}
+
+async function hashTree(directory: string): Promise<{
+  hashes: Record<string, string>;
+  stamps: SettledStamps;
+}> {
+  const entries = await collectTreeEntries(directory);
+  const hashes: Record<string, string> = {};
+  const stamps: SettledStamps = {};
+  await runBounded(entries, COMPONENT_HASH_CONCURRENCY, async (name) => {
+    const file = path.join(directory, name);
+    const info = await lstat(file);
+    if (!info.isFile() || info.isSymbolicLink())
+      throw new Error("Unsafe native dependency cache entry.");
+    hashes[name] = await sha256File(file);
+    stamps[name] = [info.size, info.mtimeMs, info.ctimeMs];
+  });
+  return { hashes, stamps };
+}
+
+async function verifyCachedTree(
+  directory: string,
+  manifestFile: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const manifestInfo = await lstat(manifestFile);
+  if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink())
+    throw new Error("Unsafe native dependency cache manifest.");
+  const manifestText = await readFile(manifestFile, "utf8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(manifestText);
+  } catch {
+    throw new Error(
+      "Native dependency cache integrity mismatch; remove the damaged component and retry.",
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error(
+      "Native dependency cache integrity mismatch; remove the damaged component and retry.",
+    );
+  const expected = parsed as Record<string, unknown>;
+  const expectedKeys = Object.keys(expected);
+  const actualEntries = await collectTreeEntries(directory);
+  if (
+    actualEntries.length !== expectedKeys.length ||
+    actualEntries.some((name) => typeof expected[name] !== "string")
+  )
+    throw new Error(
+      "Native dependency cache integrity mismatch; remove the damaged component and retry.",
+    );
+  const manifestDigest = createHash("sha256")
+    .update(manifestText)
+    .digest("hex");
+  const stampPath = componentStampsFile(directory);
+  const known = await readSettledStamps(stampPath, manifestDigest);
+  const nowMs = Date.now();
+  const nextStamps: SettledStamps = {};
+  let hashed = 0;
+  await runBounded(actualEntries, COMPONENT_HASH_CONCURRENCY, async (name) => {
+    signal.throwIfAborted();
+    const file = path.join(directory, name);
+    const info = await lstat(file);
+    if (!info.isFile() || info.isSymbolicLink())
+      throw new Error("Unsafe native dependency cache entry.");
+    const seen = known?.[name];
+    if (settledStampMatches(seen, info, nowMs)) {
+      nextStamps[name] = seen!;
+      return;
+    }
+    hashed += 1;
+    if ((await sha256File(file)) !== expected[name])
+      throw new Error(
+        "Native dependency cache integrity mismatch; remove the damaged component and retry.",
+      );
+    nextStamps[name] = [info.size, info.mtimeMs, info.ctimeMs];
+  });
+  if (hashed > 0 || !known)
+    await writeSettledStamps(stampPath, manifestDigest, nextStamps);
 }
 type Artifact = (
   | {
@@ -387,14 +471,7 @@ export async function acquireNativeArtifact(
     if (exists) {
       await privateDirectory(directory);
       const manifestFile = path.join(directory, ".simplex-files.json");
-      const manifestInfo = await lstat(manifestFile);
-      if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink())
-        throw new Error("Unsafe native dependency cache manifest.");
-      const manifest = await readFile(manifestFile, "utf8");
-      if (manifest !== JSON.stringify(await tree(directory)))
-        throw new Error(
-          "Native dependency cache integrity mismatch; remove the damaged component and retry.",
-        );
+      await verifyCachedTree(directory, manifestFile, signal);
       return directory;
     }
     const stage = path.join(base, `pending-${randomUUID()}`),
@@ -486,13 +563,22 @@ export async function acquireNativeArtifact(
             { flag: "wx" },
           );
       }
-      await writeFile(
-        path.join(stage, ".simplex-files.json"),
-        JSON.stringify(await tree(stage)),
-        { mode: 0o600, flag: "wx" },
-      );
+      const { hashes, stamps } = await hashTree(stage);
+      const manifestBody = JSON.stringify(hashes);
+      await writeFile(path.join(stage, ".simplex-files.json"), manifestBody, {
+        mode: 0o600,
+        flag: "wx",
+      });
       signal.throwIfAborted();
       await renameRetrying(stage, directory, { signal });
+      const manifestDigest = createHash("sha256")
+        .update(manifestBody)
+        .digest("hex");
+      await writeSettledStamps(
+        componentStampsFile(directory),
+        manifestDigest,
+        stamps,
+      );
       return directory;
     } finally {
       await rm(archive, { force: true });
@@ -813,17 +899,19 @@ export async function prepareNativeDependencies(options: {
       `postgres (PostgreSQL) ${postgres.postgresVersion}`,
     ],
   ];
-  for (const [command, args, expected] of checks) {
-    const result = await runProcess(command, args, {
-      env,
-      signal: options.signal,
-      timeoutMs: 30000,
-    });
-    if (result.code !== 0 || result.stdout.trim() !== expected)
-      throw new Error(
-        "A verified private native tool could not execute the required version on this host.",
-      );
-  }
+  await Promise.all(
+    checks.map(async ([command, args, expected]) => {
+      const result = await runProcess(command, args, {
+        env,
+        signal: options.signal,
+        timeoutMs: 30000,
+      });
+      if (result.code !== 0 || result.stdout.trim() !== expected)
+        throw new Error(
+          "A verified private native tool could not execute the required version on this host.",
+        );
+    }),
+  );
   return {
     env,
     postgresBin: path.join(pg, "bin"),
@@ -911,16 +999,21 @@ export async function prepareNativeVoiceTools(options: {
     ["ffmpeg", `ffmpeg version ${tools.ffmpegVersion} `],
     ["ffprobe", `ffprobe version ${tools.ffmpegVersion} `],
   ];
-  for (const [program, expected] of checks) {
-    const result = await runProcess(
-      path.join(bin, `${program}${exe}`),
-      [program === "livekit-server" ? "--version" : "-version"],
-      { signal: options.signal, timeoutMs: 30000 },
-    );
-    if (result.code !== 0 || !`${result.stdout.trim()}\n`.startsWith(expected))
-      throw new Error(
-        "A verified private voice tool could not execute the required version on this host.",
+  await Promise.all(
+    checks.map(async ([program, expected]) => {
+      const result = await runProcess(
+        path.join(bin, `${program}${exe}`),
+        [program === "livekit-server" ? "--version" : "-version"],
+        { signal: options.signal, timeoutMs: 30000 },
       );
-  }
+      if (
+        result.code !== 0 ||
+        !`${result.stdout.trim()}\n`.startsWith(expected)
+      )
+        throw new Error(
+          "A verified private voice tool could not execute the required version on this host.",
+        );
+    }),
+  );
   return { bin, livekit: path.join(bin, `livekit-server${exe}`) };
 }

@@ -480,8 +480,11 @@ a full install if missing or unreadable), and passes the inspected descriptor
 through `onRuntimeDescriptors` so callers avoid a second status probe. Within
 `release`, binary and native-runtime bundle checks run in parallel, while
 dependency and voice tool preparations stay sequential on the shared
-native-tools lock; collaboration services start concurrently when `node-services`
-is not pre-stopped for a TeamHub config restart. `runLocalmodels`
+native-tools lock; collaboration services (`teamhub`, `node-services`, and
+`web`) always start concurrently via `Promise.allSettled`, even after
+`node-services` and `web` were pre-stopped for a TeamHub configuration restart
+(keeping pre-existing `node-services`, `web`, and `teamhub` untracked by
+`started` so rollback does not stop previously running services). `runLocalmodels`
 reads the kit's JSON event lines from stdout and stderr alike and forwards
 byte progress (`total: null` without a total) and the download
 `connecting`, `switching` and `retrying` stages of every command, labeled per

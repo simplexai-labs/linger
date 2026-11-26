@@ -71,6 +71,12 @@ export interface UpdaterOptions {
   readonly openExternal: (url: string) => Promise<void>;
   // Tells the person once per version that an update is ready or available.
   readonly announce?: (state: AnnouncedUpdate) => void;
+  // Pre-stages update runtime assets (such as localmodelsTool) from an
+  // unpacked bundle before announcing the update ready; errors never block ready.
+  readonly prepareUpdate?: (
+    stagedPath: string,
+    signal: AbortSignal,
+  ) => Promise<void>;
   readonly fetch?: typeof fetch;
   readonly extract?: (archive: string, directory: string) => Promise<void>;
   readonly spawn?: SpawnSetup;
@@ -126,6 +132,7 @@ export class UpdaterModule implements Module {
   #staged: { path: string; pkg: UpdatePackage } | undefined;
   #timer: NodeJS.Timeout | undefined;
   #checking: Promise<void> | undefined;
+  #prepareAbort: AbortController | undefined;
   #generation = 0;
   #consecutiveCheckFailures = 0;
   #lastCheckFailure: string | undefined;
@@ -166,6 +173,8 @@ export class UpdaterModule implements Module {
     this.#generation += 1;
     clearTimeout(this.#timer);
     this.#timer = undefined;
+    this.#prepareAbort?.abort();
+    this.#prepareAbort = undefined;
     for (const off of this.#unsubscribe.splice(0)) off();
   }
 
@@ -224,6 +233,7 @@ export class UpdaterModule implements Module {
   }
 
   async #check(): Promise<void> {
+    const generation = this.#generation;
     const ctx = this.#ctx!;
     const install = this.#options.install!;
     const feed = ctx.config.get().updateFeedUrl ?? DEFAULT_FEED_URL;
@@ -281,6 +291,33 @@ export class UpdaterModule implements Module {
           ? { path: await this.#extract(file, version), pkg }
           : { path: file, pkg };
       if (install.kind === "app-bundle") await rm(file, { force: true });
+      if (this.#generation !== generation) return;
+      if (
+        install.kind === "app-bundle" &&
+        this.#options.prepareUpdate &&
+        this.#staged
+      ) {
+        this.#prepareAbort?.abort();
+        const prepareAbort = new AbortController();
+        this.#prepareAbort = prepareAbort;
+        try {
+          await this.#options.prepareUpdate(
+            this.#staged.path,
+            prepareAbort.signal,
+          );
+        } catch (error) {
+          if (!prepareAbort.signal.aborted)
+            ctx.log.warn("update.prepare_failed", {
+              version,
+              error: String(error),
+            });
+        } finally {
+          if (this.#prepareAbort === prepareAbort)
+            this.#prepareAbort = undefined;
+        }
+        if (this.#generation !== generation || prepareAbort.signal.aborted)
+          return;
+      }
       this.#clearCheckFailures();
       ctx.log.info("update.ready", { version });
       this.#announce({ kind: "ready", version });
