@@ -1815,3 +1815,349 @@ done
 			harnessLegacyPi, harnessEqualPi, got.Version, got.ExecutablePath, canonical(bundledPi))
 	}
 }
+
+func TestStartupDiscoverySplit(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		preferred    string
+		enabled      []string
+		wantInitial  []string
+		wantBackfill []string
+	}{
+		{
+			name:         "preferred pi with all runtimes enabled",
+			preferred:    "pi",
+			enabled:      nil,
+			wantInitial:  []string{"pi"},
+			wantBackfill: []string{"codex", "claude", "antigravity"},
+		},
+		{
+			name:         "preferred pi with subset enabled",
+			preferred:    "pi",
+			enabled:      []string{"pi", "codex"},
+			wantInitial:  []string{"pi"},
+			wantBackfill: []string{"codex"},
+		},
+		{
+			name:         "preferred pi as only enabled runtime",
+			preferred:    "pi",
+			enabled:      []string{"pi"},
+			wantInitial:  []string{"pi"},
+			wantBackfill: nil,
+		},
+		{
+			name:         "no preferred runtime",
+			preferred:    "",
+			enabled:      nil,
+			wantInitial:  nil,
+			wantBackfill: nil,
+		},
+		{
+			name:         "preferred outside enabled subset",
+			preferred:    "claude",
+			enabled:      []string{"pi"},
+			wantInitial:  []string{"pi"},
+			wantBackfill: nil,
+		},
+		{
+			name:         "preferred outside multi-runtime enabled subset",
+			preferred:    "claude",
+			enabled:      []string{"pi", "codex"},
+			wantInitial:  []string{"pi", "codex"},
+			wantBackfill: nil,
+		},
+		{
+			name:         "preferred codex with all runtimes enabled",
+			preferred:    "codex",
+			enabled:      nil,
+			wantInitial:  []string{"codex"},
+			wantBackfill: []string{"claude", "pi", "antigravity"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			initial, backfill := startupDiscoverySplit(tc.preferred, tc.enabled)
+			if !reflect.DeepEqual(initial, tc.wantInitial) {
+				t.Fatalf("initial = %v, want %v", initial, tc.wantInitial)
+			}
+			if !reflect.DeepEqual(backfill, tc.wantBackfill) {
+				t.Fatalf("backfill = %v, want %v", backfill, tc.wantBackfill)
+			}
+		})
+	}
+}
+
+func TestStartupPreferredRuntimeDiscoveryDoesNotWaitForSlowNonPreferredRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX shell")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	binDir := filepath.Join(root, "bin")
+	for _, dir := range []string{home, binDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	piPath := filepath.Join(binDir, "pi")
+	piScript := `#!/bin/sh
+if [ "$1" = "--version" ]; then echo '1.5.2'; exit 0; fi
+if [ "$1" = "auth" ]; then echo '{"status":"ready"}'; exit 0; fi
+while IFS= read -r line; do
+  case "$line" in
+    *linger-probe*) echo '{"type":"response","id":"linger-probe","command":"get_state","success":true,"data":{"isStreaming":false,"model":{"provider":"fixture","id":"fast"},"thinkingLevel":"off"}}' ;;
+    *linger-models*) echo '{"type":"response","id":"linger-models","command":"get_available_models","success":true,"data":{"models":[{"provider":"fixture","id":"fast"}]}}' ;;
+  esac
+done
+`
+	if err := os.WriteFile(piPath, []byte(piScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	codexStarted := filepath.Join(root, "codex-started")
+	releaseCodex := filepath.Join(root, "release-codex")
+	codexPath := filepath.Join(binDir, "codex")
+	codexScript := `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo started > "$CODEX_STARTED"
+  i=0
+  while [ ! -f "$RELEASE_CODEX" ] && [ "$i" -lt 200 ]; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  echo 'codex-cli 0.171.0'
+  exit 0
+fi
+read line
+echo '{"jsonrpc":"2.0","id":1,"result":{"userAgent":"codex-test"}}'
+if read initialized && read second; then
+  case "$second" in
+    *'"method":"model/list"'*)
+      echo '{"id":2,"result":{"data":[{"id":"gpt-test","model":"gpt-test","displayName":"GPT Test","isDefault":true,"supportedReasoningEfforts":[]}]}}'
+      exit 0 ;;
+  esac
+  echo '{"id":2,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}'
+fi
+`
+	if err := os.WriteFile(codexPath, []byte(codexScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	env := map[string]string{
+		"HOME":          home,
+		"PATH":          binDir + ":/usr/bin:/bin",
+		"SHELL":         filepath.Join(root, "no-shell"),
+		"CODEX_HOME":    filepath.Join(home, ".codex"),
+		"CODEX_STARTED": codexStarted,
+		"RELEASE_CODEX": releaseCodex,
+	}
+	fullOptions := provider.DiscoveryOptions{
+		ConfiguredPaths:  map[string]string{"pi": piPath, "codex": codexPath},
+		Runtimes:         []string{"pi", "codex"},
+		PreferredRuntime: "pi",
+		Timeout:          10 * time.Second,
+		Environment:      env,
+	}
+
+	initialRuntimes, backfillRuntimes := startupDiscoverySplit("pi", []string{"pi", "codex"})
+	initialOptions := fullOptions
+	initialOptions.Runtimes = initialRuntimes
+
+	terminalCache := provider.NewTerminalEnvironmentCache()
+	rawDiscovered, err := terminalCache.Discover(t.Context(), initialOptions)
+	if err != nil {
+		t.Fatalf("Phase 1 Discover failed: %v", err)
+	}
+	if len(rawDiscovered.Diagnostics) != 1 || rawDiscovered.Diagnostics[0].Type != "pi" || rawDiscovered.Diagnostics[0].Status != "ready" || !rawDiscovered.Diagnostics[0].Preferred {
+		t.Fatalf("Phase 1 diagnostics = %+v, want only preferred ready pi", rawDiscovered.Diagnostics)
+	}
+	if _, statErr := os.Stat(codexStarted); !os.IsNotExist(statErr) {
+		t.Fatalf("slow non-preferred codex was invoked during Phase 1 discovery (stat err=%v)", statErr)
+	}
+
+	monitorCtx, cancelMonitor := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancelMonitor()
+	var published provider.DiscoveryResult
+	monitorDone := make(chan error, 1)
+	go func() {
+		monitorDone <- provider.MonitorRuntimeDiagnostics(monitorCtx, provider.RuntimeMonitorOptions{
+			Initial:               rawDiscovered,
+			BackfillRuntimes:      backfillRuntimes,
+			Discovery:             fullOptions,
+			TerminalEnvironment:   terminalCache,
+			RefreshInterval:       30 * time.Second,
+			FullRefreshEveryTicks: 4,
+			OnChanged: func(next provider.DiscoveryResult) error {
+				published = next
+				cancelMonitor()
+				return nil
+			},
+		})
+	}()
+
+	waitDeadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, statErr := os.Stat(codexStarted); statErr == nil {
+			break
+		}
+		if time.Now().After(waitDeadline) {
+			t.Fatal("Phase 2 backfill did not start probing codex asynchronously")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := os.WriteFile(releaseCodex, []byte("go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := <-monitorDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("MonitorRuntimeDiagnostics exited with %v, want context.Canceled", err)
+	}
+	if len(published.Diagnostics) != 2 || published.Diagnostics[0].Type != "codex" || published.Diagnostics[0].Status != "ready" ||
+		published.Diagnostics[1].Type != "pi" || published.Diagnostics[1].Status != "ready" || !published.Diagnostics[1].Preferred {
+		t.Fatalf("Phase 2 published diagnostics = %+v, want [codex(ready), pi(ready,preferred)]", published.Diagnostics)
+	}
+	if _, ok := published.Installations["codex"]; !ok {
+		t.Fatalf("Phase 2 installations missing codex: %+v", published.Installations)
+	}
+	if _, ok := published.Installations["pi"]; !ok {
+		t.Fatalf("Phase 2 installations missing pi: %+v", published.Installations)
+	}
+}
+
+func TestDeferredPiBackfillReconcilesLocalModelsHarness(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX shell")
+	}
+	newFakeLocalModelsLibrary := func(t *testing.T, initialHarnessDir string) (library *localmodels.Library, stateDir, harnessDir, callsLog string, runtimeChanged chan struct{}) {
+		t.Helper()
+		root, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		stateDir = filepath.Join(root, "local-models", "state")
+		moduleDir := filepath.Join(root, "local-models", "kit")
+		modelsDir := filepath.Join(root, "local-models", "models")
+		jobDir := filepath.Join(root, "jobs")
+		harnessDir = localmodels.HarnessRoot(stateDir)
+		for _, dir := range []string{stateDir, moduleDir, modelsDir, jobDir, harnessDir} {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		callsLog = filepath.Join(root, "calls.log")
+		fakePython := filepath.Join(root, "fake-python")
+		provisionedPi := filepath.Join(harnessDir, "tools", "pi", "1.5.2", "pi")
+		script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" >> "$CALLS_LOG"
+case " $* " in
+  *" library status "*)
+    cat <<'EOF'
+{"schema":"localmodels.library-status/v1","tool_version":"0.9.0","observed_at":"2026-11-13T08:00:00+00:00","host":{"platform":"linux","arch":"x86_64","os_label":"Linux","engine_label":"llama.cpp","ram_total_bytes":68719476736,"disk_free_bytes":536870912000,"gpus":[]},"pools":[],"models":[{"id":"qwen3-4b:Q4_K_M","name":"Qwen3 4B","description":"test","quant":"Q4_K_M","context_tokens":32768,"vision":false,"download_bytes":3221225472,"memory_bytes":4294967296,"fit":"gpu","recommended":false,"availability":{"downloadable":true},"pool":"gpu:0","state":"loaded","pi_model":"localmodels-library/qwen3-4b","endpoint":{"base_url":"http://127.0.0.1:18100/v1","gateway_model":"localmodels-library/qwen3-4b"}}]}
+EOF
+    exit 0 ;;
+  *" harness status "*)
+    printf '{"schema":"localmodels.harness-status/v1","runtimes":[{"runtime":"pi","installed":true,"executable":"%s","argvPrefix":[]}]}\n'
+    exit 0 ;;
+esac
+exit 1
+`, provisionedPi)
+		if err := os.WriteFile(fakePython, []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		runtimeChanged = make(chan struct{}, 4)
+		library = localmodels.New(localmodels.Options{
+			Tool: &localmodels.Tool{
+				Python:          fakePython,
+				ModuleDirectory: moduleDir,
+				StateDirectory:  stateDir,
+				BaseDirectory:   modelsDir,
+			},
+			Environment: map[string]string{
+				"HOME":      root,
+				"PATH":      "/usr/bin:/bin",
+				"CALLS_LOG": callsLog,
+			},
+			JobDirectory:     jobDir,
+			HarnessDirectory: initialHarnessDir,
+			RuntimeChanged: func() {
+				select {
+				case runtimeChanged <- struct{}{}:
+				default:
+				}
+			},
+		})
+		t.Cleanup(library.Close)
+		return library, stateDir, harnessDir, callsLog, runtimeChanged
+	}
+
+	t.Run("missing_or_broken_pi_on_backfill_enables_harness_provisioning", func(t *testing.T) {
+		library, stateDir, harnessDir, callsLog, runtimeChanged := newFakeLocalModelsLibrary(t, "")
+		// Refresh observes a loaded model while Pi is still deferred: must not
+		// provision before backfill reports Pi's diagnostic.
+		library.Refresh(t.Context())
+		phase1 := provider.DiscoveryResult{
+			Diagnostics: []provider.RuntimeDiagnostic{
+				{Type: "codex", Status: "ready", Protocol: "app-server", ExecutablePath: "/usr/bin/codex"},
+			},
+			Installations: map[string]provider.RuntimeDiagnostic{
+				"codex": {Type: "codex", Status: "ready", Protocol: "app-server", ExecutablePath: "/usr/bin/codex"},
+			},
+		}
+		reconcileLocalModelsHarness(library, true, stateDir, phase1)
+		if got := library.PiExecutable(); got != "" {
+			t.Fatalf("PiExecutable before Pi backfill = %q, want empty", got)
+		}
+		rawCalls, _ := os.ReadFile(callsLog)
+		if strings.Contains(string(rawCalls), "harness ") {
+			t.Fatalf("unexpected harness call before Pi backfill: %s", string(rawCalls))
+		}
+
+		// Phase 2 backfill reports Pi broken/unavailable (not in Installations).
+		backfillBroken := provider.DiscoveryResult{
+			Diagnostics: []provider.RuntimeDiagnostic{
+				{Type: "codex", Status: "ready", Protocol: "app-server", ExecutablePath: "/usr/bin/codex"},
+				{Type: "pi", Status: "error", Protocol: "rpc"},
+			},
+			Installations: map[string]provider.RuntimeDiagnostic{
+				"codex": {Type: "codex", Status: "ready", Protocol: "app-server", ExecutablePath: "/usr/bin/codex"},
+			},
+		}
+		reconcileLocalModelsHarness(library, true, stateDir, backfillBroken)
+
+		wantPi := filepath.Join(harnessDir, "tools", "pi", "1.5.2", "pi")
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if library.PiExecutable() == wantPi {
+				break
+			}
+			select {
+			case <-runtimeChanged:
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		if got := library.PiExecutable(); got != wantPi {
+			t.Fatalf("PiExecutable after broken Pi backfill = %q, want %q", got, wantPi)
+		}
+	})
+
+	t.Run("found_pi_on_backfill_clears_harness_provisioning", func(t *testing.T) {
+		library, stateDir, _, callsLog, _ := newFakeLocalModelsLibrary(t, localmodels.HarnessRoot(filepath.Join(t.TempDir(), "local-models", "state")))
+		backfillFound := provider.DiscoveryResult{
+			Diagnostics: []provider.RuntimeDiagnostic{
+				{Type: "codex", Status: "ready", Protocol: "app-server", ExecutablePath: "/usr/bin/codex"},
+				{Type: "pi", Status: "ready", Protocol: "rpc", ExecutablePath: "/usr/local/bin/pi"},
+			},
+			Installations: map[string]provider.RuntimeDiagnostic{
+				"codex": {Type: "codex", Status: "ready", Protocol: "app-server", ExecutablePath: "/usr/bin/codex"},
+				"pi":    {Type: "pi", Status: "ready", Protocol: "rpc", ExecutablePath: "/usr/local/bin/pi"},
+			},
+		}
+		reconcileLocalModelsHarness(library, true, stateDir, backfillFound)
+		library.Refresh(t.Context())
+		if got := library.PiExecutable(); got != "" {
+			t.Fatalf("PiExecutable after finding Pi on backfill = %q, want empty", got)
+		}
+		rawCalls, _ := os.ReadFile(callsLog)
+		if strings.Contains(string(rawCalls), "harness ") {
+			t.Fatalf("unexpected harness call after Pi was found on backfill: %s", string(rawCalls))
+		}
+	})
+}

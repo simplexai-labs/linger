@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -26,6 +27,7 @@ var teamhubEnvironment = []string{
 	"SONIOX_API_KEY",
 	"XAI_API_KEY",
 	"TEAMHUB_VOICE_MEDIA",
+	"TEAMHUB_VOICE_TOOLS_BIN",
 	"LIVEKIT_URL",
 	"LIVEKIT_API_URL",
 	"LIVEKIT_API_KEY",
@@ -194,6 +196,28 @@ func TestLoadVoiceMediaSetting(t *testing.T) {
 		t.Setenv("TEAMHUB_VOICE_MEDIA", value)
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "TEAMHUB_VOICE_MEDIA") {
 			t.Fatalf("TEAMHUB_VOICE_MEDIA=%q error = %v", value, err)
+		}
+	}
+}
+
+func TestLoadVoiceToolsBinConfiguration(t *testing.T) {
+	clearTeamHubEnvironment(t)
+	t.Setenv("TEAMHUB_DATABASE_URL", "postgres://environment.example/teamhub")
+	toolsBin := filepath.Join(t.TempDir(), "voice", "bin")
+	t.Setenv("TEAMHUB_VOICE_TOOLS_BIN", " "+toolsBin+" ")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() with absolute TEAMHUB_VOICE_TOOLS_BIN error = %v", err)
+	}
+	if cfg.Voice.MediaToolsBin != toolsBin {
+		t.Fatalf("MediaToolsBin = %q, want %q", cfg.Voice.MediaToolsBin, toolsBin)
+	}
+
+	for _, relative := range []string{"voice/bin", "./voice/bin", "../bin"} {
+		t.Setenv("TEAMHUB_VOICE_TOOLS_BIN", relative)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "TEAMHUB_VOICE_TOOLS_BIN must be an absolute path") {
+			t.Fatalf("TEAMHUB_VOICE_TOOLS_BIN=%q error = %v", relative, err)
 		}
 	}
 }

@@ -78,6 +78,14 @@ func (p *piRuntime) Start(ctx context.Context, prompt string, spec RunSpec) (*Ru
 	if plan.program, err = piResolveProgram(p.profile.Program); err != nil {
 		return nil, err
 	}
+	// Verify extension presence before pre-start or resident reuse so a
+	// reviewed Run never adopts an extension-less parked process and a missing
+	// configured extension fails fast.
+	if spec.PermissionReviewer != nil || p.profile.ManagedMCPExtension != "" {
+		if err := piCheckExtension(p.profile.ManagedMCPExtension); err != nil {
+			return nil, err
+		}
+	}
 	if spec.providerPrepare() {
 		return p.prestart(ctx, root, plan)
 	}
@@ -242,11 +250,6 @@ func (p *piRuntime) launchProcess(plan piLaunchPlan, lock *os.File) (*piProcess,
 			return nil, err
 		}
 	}
-	if spec.PermissionReviewer != nil {
-		if err := piCheckExtension(p.profile.ManagedMCPExtension); err != nil {
-			return nil, err
-		}
-	}
 	// The session flags sit right after "--mode rpc".
 	tail := p.args(plan, instructions, mcp.wired())
 	args := append([]string{tail[0], tail[1], "--session-dir", plan.sessionDir, "--session-id", plan.sessionID}, tail[2:]...)
@@ -257,7 +260,7 @@ func (p *piRuntime) launchProcess(plan piLaunchPlan, lock *os.File) (*piProcess,
 	if mcp.wired() {
 		env[piMCPConfigEnvKey] = mcp.configPath
 	}
-	if mcp.wired() || spec.PermissionReviewer != nil || p.guardsShellText(spec) {
+	if p.profile.ManagedMCPExtension != "" {
 		piExtensionNodePath(env, p.profile.ManagedMCPExtension)
 	}
 	if p.guardsShellText(spec) {
@@ -333,10 +336,11 @@ func (p *piRuntime) args(plan piLaunchPlan, instructions string, wired bool) []s
 			args = append(args, "--skill", skills)
 		}
 	}
-	// The managed extension also carries permission review: its tool_call
-	// hook asks the Daemon over RPC (piProcess.answerDialog).
+	// The managed extension carries bash pipefail, the shell text check, and
+	// permission review. Its tool_call hook asks the Daemon over RPC for each
+	// bash and MCP call, which the Daemon allows when permission review is off.
 	tools := piBaseTools
-	if wired || spec.PermissionReviewer != nil || p.guardsShellText(spec) {
+	if p.profile.ManagedMCPExtension != "" {
 		args = append(args, "--extension", p.profile.ManagedMCPExtension)
 	}
 	if wired {

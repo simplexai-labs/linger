@@ -15,7 +15,6 @@ OWNER_FILE="${LINGER_LOCAL_OWNER_FILE:-$ROOT/.linger-runtime/local-owner.json}"
 WORKSPACE_PATH="${LINGER_LOCAL_COMPUTER_WORKSPACE:-$ROOT}"
 GRANT_ID="${LINGER_LOCAL_COMPUTER_GRANT_ID:-workspace-local-dev}"
 GRANT_LABEL="${LINGER_LOCAL_COMPUTER_GRANT_LABEL:-Linger Workspace}"
-MAX_CONCURRENT_RUNS="${LINGER_LOCAL_COMPUTER_MAX_CONCURRENT_RUNS:-${LINGER_LOCAL_COMPUTER_CAPACITY:-}}"
 STATE_DIRECTORY="${LINGER_LOCAL_COMPUTER_STATE_DIRECTORY:-$ROOT/.linger-runtime/computer}"
 CONFIG_PATH="${LINGER_LOCAL_COMPUTER_CONFIG:-$STATE_DIRECTORY/config.json}"
 CODEX_AUTH_FILE="${LINGER_CODEX_AUTH_FILE:-${CODEX_HOME:-$HOME/.codex}/auth.json}"
@@ -70,13 +69,6 @@ ensure_registration() {
 }
 
 write_config() {
-  if [[ -n "$MAX_CONCURRENT_RUNS" ]]; then
-    [[ "$MAX_CONCURRENT_RUNS" =~ ^[1-9][0-9]*$ ]] &&
-      ((MAX_CONCURRENT_RUNS <= 100)) || {
-      printf 'LINGER_LOCAL_COMPUTER_MAX_CONCURRENT_RUNS must be an integer between 1 and 100\n' >&2
-      exit 2
-    }
-  fi
   WORKSPACE_PATH="$(absolute_path "$WORKSPACE_PATH")"
   [[ -d "$WORKSPACE_PATH" ]] || {
     printf 'Local workspace is not a directory: %s\n' "$WORKSPACE_PATH" >&2
@@ -106,7 +98,6 @@ write_config() {
     --arg grant_label "$GRANT_LABEL" \
     --arg tenant "$TENANT_ID" \
     --arg workspace "$WORKSPACE_PATH" \
-    --arg max_concurrent_runs "$MAX_CONCURRENT_RUNS" \
     --argjson runtime_paths "$runtime_paths" \
     '{
       runner_id: $computer,
@@ -123,7 +114,6 @@ write_config() {
         scope: "owner"
       }]
     }
-    + (if $max_concurrent_runs == "" then {} else {max_concurrent_operations: ($max_concurrent_runs | tonumber)} end)
     + (if $auth == "" then {} else {codex: {auth_file: $auth}} end)' >"$CONFIG_PATH"
   chmod 600 "$CONFIG_PATH"
 }

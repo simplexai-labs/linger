@@ -298,16 +298,6 @@ components:
           description: Recommended Computer release. This is advisory and does not prevent legacy execution.
         last_seen_at:
           $ref: "./common.yaml#/components/schemas/Timestamp"
-        capacity:
-          type: integer
-          minimum: 1
-          maximum: 100
-          description: Optional maximum simultaneous active Operations on this Computer. Omission means unlimited; it does not limit bound Agents.
-        available_capacity:
-          type: integer
-          minimum: 0
-          maximum: 100
-          description: Currently available active Operation slots. Present only when capacity is configured.
         active_operations:
           type: integer
           minimum: 0

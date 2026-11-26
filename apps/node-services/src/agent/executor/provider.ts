@@ -1,8 +1,4 @@
-import type {
-  RunKind,
-  CapacityPriority,
-  RunPriority,
-} from "../../model-tasks.js";
+import type { RunKind, RunPriority } from "../../model-tasks.js";
 import { redactSensitiveText } from "../../sensitive-text.js";
 import type { RuntimeHistoryOptions, RuntimeHistoryPage } from "./history.js";
 
@@ -385,11 +381,8 @@ export interface ProviderSessionOptions extends SessionSpec {
 }
 
 export interface AgentProvider {
-  /** Reserve execution capacity before claiming a durable Run. Always release. */
-  acquireRunCapacity?(
-    signal: AbortSignal,
-    priority?: CapacityPriority,
-  ): Promise<() => void>;
+  /** Reserve the execution Context before claiming a durable Run. Always release. */
+  acquireRunCapacity?(signal: AbortSignal): Promise<() => void>;
 
   createSession(options: ProviderSessionOptions): Promise<RuntimeSession>;
 

@@ -15,6 +15,7 @@ import {
 import {
   prepareRuntime,
   type NativeRuntime,
+  type RuntimeDependencies,
   type RuntimeDescriptor,
 } from "./managed-runtimes.js";
 import type { InstallOutcome, InstallerEvent } from "./events.js";
@@ -633,8 +634,23 @@ export async function prepareByokNativeRuntime(
   dependencies: {
     localmodels?: typeof runLocalmodels;
     prepareNative?: typeof prepareRuntime;
+    run?: RuntimeDependencies["run"];
+    probeRuntimes?: RuntimeDependencies["probeRuntimes"];
+    resolveBundledPi?: RuntimeDependencies["resolveBundledPi"];
   } = {},
 ): Promise<InstallOutcome | undefined> {
+  const runtimeDependencies: RuntimeDependencies = {
+    ...(dependencies.localmodels
+      ? { localmodels: dependencies.localmodels }
+      : {}),
+    ...(dependencies.run ? { run: dependencies.run } : {}),
+    ...(dependencies.probeRuntimes
+      ? { probeRuntimes: dependencies.probeRuntimes }
+      : {}),
+    ...(dependencies.resolveBundledPi
+      ? { resolveBundledPi: dependencies.resolveBundledPi }
+      : {}),
+  };
   const outcome = await (dependencies.prepareNative ?? prepareRuntime)(
     runtime,
     {
@@ -642,10 +658,11 @@ export async function prepareByokNativeRuntime(
       signal: options.signal,
       onEvent: options.onEvent,
       env: options.env,
+      skipHarnessWhenBundledPiMatches: runtime === "pi",
       ...(options.reuseInstalled ? { reuseInstalled: true } : {}),
       ...(options.onDescriptor ? { onDescriptor: options.onDescriptor } : {}),
     },
-    dependencies.localmodels ? { localmodels: dependencies.localmodels } : {},
+    runtimeDependencies,
   );
   return outcome.code === 0 ||
     (outcome.details as { code?: string } | undefined)?.code ===
@@ -666,6 +683,9 @@ export async function prepareByokRuntime(
   dependencies: {
     localmodels?: typeof runLocalmodels;
     prepareNative?: typeof prepareRuntime;
+    run?: RuntimeDependencies["run"];
+    probeRuntimes?: RuntimeDependencies["probeRuntimes"];
+    resolveBundledPi?: RuntimeDependencies["resolveBundledPi"];
   } = {},
 ): Promise<InstallOutcome> {
   const validated = validateByokConfiguration(config);

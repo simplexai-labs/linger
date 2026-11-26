@@ -148,6 +148,11 @@ type VoiceConfig struct {
 	// off whatever keys exist; without LINGER_SECRET_SEED or ffmpeg the App
 	// runs with voice off too.
 	MediaEnabled bool
+	// MediaToolsBin is TEAMHUB_VOICE_TOOLS_BIN: an optional pre-reserved
+	// absolute directory where ffmpeg and ffprobe appear asynchronously
+	// during native installation so TeamHub can enable voice media before
+	// extraction completes.
+	MediaToolsBin string
 	// XaiAPIKey is the deployment's xAI key for Live. It wins over a key saved
 	// in the product, which then cannot be saved.
 	XaiAPIKey string
@@ -501,7 +506,8 @@ func applyPermissionReview(cfg *Config) error {
 	return nil
 }
 
-// applyVoiceMedia reads TEAMHUB_VOICE_MEDIA; unset keeps the default, on.
+// applyVoiceMedia reads TEAMHUB_VOICE_MEDIA and TEAMHUB_VOICE_TOOLS_BIN;
+// unset TEAMHUB_VOICE_MEDIA keeps the default, on.
 func applyVoiceMedia(cfg *Config) error {
 	switch strings.TrimSpace(os.Getenv("TEAMHUB_VOICE_MEDIA")) {
 	case "":
@@ -511,6 +517,12 @@ func applyVoiceMedia(cfg *Config) error {
 		cfg.Voice.MediaEnabled = false
 	default:
 		return errors.New("TEAMHUB_VOICE_MEDIA must be on or off")
+	}
+	if value := strings.TrimSpace(os.Getenv("TEAMHUB_VOICE_TOOLS_BIN")); value != "" {
+		if !filepath.IsAbs(value) {
+			return errors.New("TEAMHUB_VOICE_TOOLS_BIN must be an absolute path")
+		}
+		cfg.Voice.MediaToolsBin = value
 	}
 	return nil
 }

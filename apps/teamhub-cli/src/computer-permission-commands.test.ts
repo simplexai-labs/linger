@@ -89,6 +89,15 @@ describe("computer permissions status", () => {
     expect(text).toContain(
       "Computer use (CuaDriver): screen_recording denied, accessibility not_determined",
     );
+    expect(text).toContain(
+      "teamhub computer permissions request --for shell --permissions screen_recording\n",
+    );
+    expect(text).toContain(
+      "teamhub computer permissions request --for computer-use --permissions screen_recording,accessibility\n",
+    );
+    expect(text).toContain(
+      "The managed browser (ui.page and ui.browser) needs none",
+    );
   });
 
   it("says a non-Mac needs no permissions", async () => {

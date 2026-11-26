@@ -1060,14 +1060,6 @@ components:
           type: boolean
         has_pending_work:
           type: boolean
-        next_run_origins:
-          type: array
-          description: >-
-            Distinct scheduling metadata of the initial inputs of every
-            claimable queued Run. The Run claimed next serves them all, so it
-            waits as the most urgent of them.
-          items:
-            $ref: "#/components/schemas/AgentRunInputOrigin"
         message_steers:
           type: array
           maxItems: 1024
@@ -1078,29 +1070,6 @@ components:
             or a native question's answer assigned to the Run that asked it.
           items:
             $ref: "#/components/schemas/StoredAgentRuntimeInput"
-    AgentRunInputOrigin:
-      type: object
-      additionalProperties: false
-      required:
-        [
-          notification,
-          task_inbox,
-          author_type,
-          message_kind,
-          fired_routine,
-          human_waiting,
-        ]
-      properties:
-        notification: { type: boolean }
-        task_inbox: { type: boolean }
-        author_type: { type: string }
-        message_kind: { type: string }
-        fired_routine: { type: boolean }
-        human_waiting:
-          type: boolean
-          description: >-
-            A Human acted through this hidden Message, by answering a card or
-            asking during a recording, and waits for the Agent's answer.
     AgentRuntimeWaitingContexts:
       type: object
       additionalProperties: false
@@ -1535,9 +1504,6 @@ components:
         last_seen_at:
           type: string
           format: date-time
-        capacity:
-          type: integer
-          minimum: 0
         runtimes:
           type: array
           items:
@@ -1612,6 +1578,8 @@ components:
         capacity:
           type: integer
           minimum: 0
+          deprecated: true
+          description: Accepted from older Agent Services and ignored by TeamHub.
         runtimes:
           type: array
           items:

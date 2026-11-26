@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExecutionContextRef } from "../../../src/agent/executor/context-ref.js";
-import {
-  queuedMetaRunKind,
-  runKind,
-} from "../../../src/agent/executor/run-kind.js";
+import { runKind } from "../../../src/agent/executor/run-kind.js";
 import type { Message } from "../../../src/agent/executor/types.js";
 
 const meta = {
@@ -106,25 +103,5 @@ describe("runKind", () => {
         inbox("room:r", { authorType: "agent", messageKind: "conversation" }),
       ]),
     ).toBe("agent_message");
-  });
-
-  it("takes the most urgent kind of every queued Run", () => {
-    const origin = {
-      notification: true,
-      task_inbox: false,
-      author_type: "user",
-      message_kind: "agent_runtime",
-      fired_routine: false,
-      human_waiting: false,
-    };
-    expect(queuedMetaRunKind([])).toBe("follow_up");
-    expect(queuedMetaRunKind([origin])).toBe("proactive");
-    expect(
-      queuedMetaRunKind([
-        { ...origin, notification: false },
-        origin,
-        { ...origin, human_waiting: true },
-      ]),
-    ).toBe("chat");
   });
 });

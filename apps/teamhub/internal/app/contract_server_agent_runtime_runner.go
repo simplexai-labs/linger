@@ -50,7 +50,7 @@ func (a *App) connectAgentRuntimeLocalComputer(c *gin.Context) {
 		ComputerID: request.ComputerId, Owner: localComputerOwnerFromContract(request.Owner),
 		CredentialGeneration: generation, DaemonID: request.DaemonId, DaemonPublicKey: request.DaemonPublicKey,
 		IdentityVersion: identityVersion, Status: string(request.Status), SeenAt: request.SeenAt,
-		DisplayName: request.DisplayName, Platform: platform, Capacity: optionalInt32(request.Capacity),
+		DisplayName: request.DisplayName, Platform: platform,
 		Runtimes: runtimes, RuntimeDiagnostics: diagnostics, WorkspaceGrants: grants,
 		DaemonVersion: request.DaemonVersion, RecommendedVersion: optionalStringValue(request.RecommendedVersion),
 	})
@@ -188,10 +188,6 @@ func agentRuntimeLocalComputerToContract(value agentruntimestate.LocalComputer) 
 		platform := teamhubinternal.AgentRuntimeLocalComputerPlatform(value.Platform)
 		result.Platform = &platform
 	}
-	if value.Capacity != nil {
-		capacity := int(*value.Capacity)
-		result.Capacity = &capacity
-	}
 	return result, nil
 }
 
@@ -206,12 +202,4 @@ func marshalRunnerProjectionArrays(runtimes any, diagnostics, grants []map[strin
 	}
 	grantsJSON, err := json.Marshal(grants)
 	return runtimeJSON, diagnosticsJSON, grantsJSON, err
-}
-
-func optionalInt32(value *int) *int32 {
-	if value == nil {
-		return nil
-	}
-	converted := int32(min(*value, math.MaxInt32))
-	return &converted
 }

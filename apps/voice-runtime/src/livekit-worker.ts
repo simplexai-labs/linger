@@ -428,13 +428,18 @@ export class VoiceTrackWorker {
     const now = Date.now();
     const sessionOffset = (at: number) =>
       Math.max(0, Math.round(at - this.sessionCreatedAtMs));
-    const epochStartMs = sessionOffset(input.oldestRetainedAtMs() ?? now);
     const droppedSamples = input.takeDroppedSamples();
     if (droppedSamples > 0 && this.dictation)
       throw new VoiceFailure(
         "dictation_audio_backlog",
         "Dictation audio backlog exceeded",
       );
+    // An overflowed window is still full: every frame arriving while this
+    // consumer opens its ASR connection would push out one it has not sent,
+    // so starting from the oldest frame fails every retry. Start from live
+    // input instead; the skipped audio becomes part of the input gap below.
+    if (droppedSamples > 0) input.discardRetained();
+    const epochStartMs = sessionOffset(input.oldestRetainedAtMs() ?? now);
     // Absence ends when the publisher's first frame reached this runtime,
     // even if the bounded queue has since dropped it. Dropped audio is an
     // input hole for integrity recovery, never a publisher_absent gap.
@@ -803,6 +808,13 @@ export class TrackAudioInput {
     const dropped = this.droppedSamples;
     this.droppedSamples = 0;
     return dropped;
+  }
+
+  // Forgets every retained frame without counting it as dropped: the caller
+  // already accounts for the skipped interval.
+  discardRetained() {
+    this.frames.length = 0;
+    this.queuedSamples = 0;
   }
 
   // Closing the SDK source retains its queued frames; reader.cancel() discards them.

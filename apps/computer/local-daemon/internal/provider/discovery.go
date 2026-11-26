@@ -100,6 +100,48 @@ var runtimeDefinitions = []runtimeDefinition{
 	{"antigravity", "agy", "acp"},
 }
 
+// AllRuntimeTypes returns every supported Runtime type in canonical discovery order.
+func AllRuntimeTypes() []string {
+	types := make([]string, len(runtimeDefinitions))
+	for i, definition := range runtimeDefinitions {
+		types[i] = definition.Type
+	}
+	return types
+}
+
+// MergeRuntimeDiagnostics combines base diagnostics with additions, replacing
+// matching types and ordering known Runtimes in canonical discovery order.
+func MergeRuntimeDiagnostics(base, additions []RuntimeDiagnostic) DiscoveryResult {
+	byType := make(map[string]RuntimeDiagnostic, len(base)+len(additions))
+	for _, diagnostic := range base {
+		byType[diagnostic.Type] = diagnostic
+	}
+	for _, diagnostic := range additions {
+		byType[diagnostic.Type] = diagnostic
+	}
+	merged := make([]RuntimeDiagnostic, 0, len(byType))
+	for _, definition := range runtimeDefinitions {
+		if diagnostic, ok := byType[definition.Type]; ok {
+			merged = append(merged, diagnostic)
+			delete(byType, definition.Type)
+		}
+	}
+	if len(byType) > 0 {
+		for _, source := range [][]RuntimeDiagnostic{base, additions} {
+			for _, diagnostic := range source {
+				if value, ok := byType[diagnostic.Type]; ok {
+					merged = append(merged, value)
+					delete(byType, diagnostic.Type)
+				}
+			}
+		}
+	}
+	return DiscoveryResult{
+		Diagnostics:   merged,
+		Installations: InstallationsFromDiagnostics(merged),
+	}
+}
+
 // ValidateRuntimeSelection accepts an omitted scope or a nonempty unique supported subset.
 func ValidateRuntimeSelection(types []string) error {
 	if types == nil {

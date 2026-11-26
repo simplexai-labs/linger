@@ -1,9 +1,17 @@
 # Local Computer Daemon
 
 This Go module is the resident Local Computer Daemon.
+
 It carries the frozen Linger execution implementation needed for local process,
 provider, workspace, and daemon lifecycle behavior while adapting all product
 control through Linger's Runner Gateway.
+
+Each execution Context can run one Operation at a time. Different Contexts on
+the same Computer can run concurrently, subject to their model endpoint's
+queue. On upgrade, the Daemon removes the retired `max_concurrent_operations`
+setting from existing Computer configuration on first load. Existing
+`linger-computer login` scripts can still pass `--max-concurrent-runs` or
+`--no-max-concurrent-runs`. The CLI prints a warning and ignores both options.
 
 ## Ownership
 
@@ -519,9 +527,15 @@ heredoc (`internal/permission/shell_text.go`). Named variables such as `"$id"`,
 - Codex runs `linger-computer-daemon shell-text-hook` as a
   PreToolUse hook for every shell command. Codex on Windows runs PowerShell,
   so it gets no hook.
-- Pi loads the managed extension (`extensions/pi-mcp.mjs`) for every Run. It
-  runs the same hook before a `bash` call that names `teamhub` and holds `$` or
-  a backquote.
+- Pi loads the managed extension (`extensions/pi-mcp.mjs`) for every Run.
+  Before a `bash` call runs, it runs the shell text check (for calls naming
+  `teamhub` with `$` or a backquote) and permission review on the original
+  command, then prepends `pipefail` for bash and zsh (skipping unsupported
+  POSIX `sh` fallbacks) only after the call is allowed. Under `pipefail`, a
+  producer killed by `SIGPIPE` when a downstream reader closes early (such as
+  `| head`, exit `141`) or a non-zero upstream stage (such as `grep` with no
+  matches piped to `wc -l`) fails the pipeline; a command that wants to ignore
+  upstream failures can run `set +o pipefail`.
 - Antigravity is not checked: its permission request can only allow or reject
   a call, with no reason the Agent would read.
 
@@ -704,14 +718,16 @@ its image until `ui_reset`, so a completed action never reports an error.
 
 Use `await ui.page(url)` for a managed browser and `ui.window(pid, window_id)`
 for a macOS window. Use `ui.computer.list_windows({app: appName})` to discover
-a named window and check its title. `await target.observe()` returns the visible
-text and actions. Call `view.click(role, name)` on that observation and use its
+a named window and check its title. `await ui.page(url)` navigates and returns
+the observation itself; `await ui.window(pid, window_id).observe()` and
+`await view.observe()` return the visible text and actions. Call `view.click(role, name)` on that observation and use its
 returned view for the next step. A newer driver call in the same namespace
 expires the previous observation. In a browser, `view.fill(fields)` resolves
 all named fields against one observation before sending the driver call. If an
 action has no browser snapshot, the helper obtains one. Use `ui.help("browser")`
 or `ui.help("computer")` for the underlying methods. `ui.emit(result)` selects
 text or native images for the model; the script receives opaque image handles.
+`console.log` lines join the same output.
 
 The public tool allows ten minutes. The default script budget is 165 seconds,
 with up to nine minutes per call. Nested calls reserve time to return their

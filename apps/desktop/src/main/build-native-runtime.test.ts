@@ -14,6 +14,7 @@ import { gzipSync } from "node:zlib";
 import { afterEach, expect, it } from "vitest";
 
 import { NODE_RUNTIME_VERSION } from "../../../../scripts/local-computer-node-distributions.mjs";
+import * as buildNativeRuntimeModule from "../../scripts/build-native-runtime.mjs";
 import {
   buildRuntime,
   copyExternals,
@@ -22,6 +23,15 @@ import {
   RUNTIME_SCHEMA,
   verifyRuntime,
 } from "../../scripts/build-native-runtime.mjs";
+
+interface BuildNativeRuntimeExtras {
+  OPTIONAL_IMPORTS: Set<string>;
+  RUNTIME_PACKAGES: string[];
+  unusedPackageEntry(name: string, relativePath: string): boolean;
+}
+
+const { OPTIONAL_IMPORTS, RUNTIME_PACKAGES, unusedPackageEntry } =
+  buildNativeRuntimeModule as unknown as BuildNativeRuntimeExtras;
 
 const roots: string[] = [];
 afterEach(() => {
@@ -300,4 +310,86 @@ it("refuses a shipped archive from another commit before touching output", async
     }),
   ).rejects.toThrow("does not record its commit");
   expect(existsSync(sentinel)).toBe(true);
+});
+
+it("prunes unused browser viewer and non-legacy subtrees from pdfjs-dist", async () => {
+  expect(unusedPackageEntry("pdfjs-dist", "build")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "build/pdf.mjs")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "web")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "web/viewer.mjs")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "legacy/web")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "legacy/web/viewer.mjs")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "types")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "types/src/pdf.d.ts")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "legacy/build/pdf.mjs")).toBe(false);
+  expect(unusedPackageEntry("pdfjs-dist", "cmaps/Adobe-GB1-UCS2.bcmap")).toBe(
+    false,
+  );
+  expect(unusedPackageEntry("pdfjs-dist", "standard_fonts/Helvetica.pfb")).toBe(
+    false,
+  );
+  expect(unusedPackageEntry("pdfjs-dist", "wasm/openjpeg.wasm")).toBe(false);
+  expect(unusedPackageEntry("other-package", "build/index.js")).toBe(false);
+  expect(unusedPackageEntry("other-package", "web/viewer.mjs")).toBe(false);
+
+  const root = mkdtempSync(path.join(tmpdir(), "build-native-runtime-pdfjs-"));
+  roots.push(root);
+  const pkgDir = path.join(root, "deploy/node_modules/pdfjs-dist");
+  const write = (rel: string, content = "") => {
+    const file = path.join(pkgDir, rel);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, content);
+  };
+  write(
+    "package.json",
+    JSON.stringify({ name: "pdfjs-dist", version: "6.2.108" }),
+  );
+  write("LICENSE", "Apache-2.0");
+  write("README.md", "# pdfjs-dist");
+  write("legacy/build/pdf.mjs", "export const getDocument = () => {};");
+  write("legacy/build/pdf.mjs.map", "{}");
+  write("legacy/build/pdf.worker.mjs", "export const worker = true;");
+  write("cmaps/Adobe-GB1-UCS2.bcmap", "cmap");
+  write("standard_fonts/Helvetica.pfb", "font");
+  write("wasm/openjpeg.wasm", "wasm");
+  write("iccs/CGATS001Compat-v2-micro.icc", "icc");
+  write("image_decoders/pdf.image_decoders.mjs", "export {};");
+  write("build/pdf.mjs", "browser-only");
+  write("web/viewer.mjs", "browser-viewer");
+  write("legacy/web/viewer.mjs", "legacy-viewer");
+  write("types/src/pdf.d.ts", "export {};");
+
+  const output = path.join(root, "output");
+  await copyExternals(path.join(root, "deploy"), output, ["pdfjs-dist"]);
+
+  const outPkg = path.join(output, "node_modules/pdfjs-dist");
+  for (const kept of [
+    "package.json",
+    "LICENSE",
+    "legacy/build/pdf.mjs",
+    "legacy/build/pdf.worker.mjs",
+    "cmaps/Adobe-GB1-UCS2.bcmap",
+    "standard_fonts/Helvetica.pfb",
+    "wasm/openjpeg.wasm",
+    "iccs/CGATS001Compat-v2-micro.icc",
+    "image_decoders/pdf.image_decoders.mjs",
+  ]) {
+    expect(existsSync(path.join(outPkg, kept))).toBe(true);
+  }
+  for (const dropped of [
+    "build",
+    "web",
+    "legacy/web",
+    "types",
+    "legacy/build/pdf.mjs.map",
+    "README.md",
+  ]) {
+    expect(existsSync(path.join(outPkg, dropped))).toBe(false);
+  }
+});
+
+it("bundles word-extractor and ignores optional tesseract.js and canvas imports", () => {
+  expect(RUNTIME_PACKAGES).toEqual(["@livekit/local-inference"]);
+  expect(OPTIONAL_IMPORTS.has("tesseract.js")).toBe(true);
+  expect(OPTIONAL_IMPORTS.has("canvas")).toBe(true);
 });

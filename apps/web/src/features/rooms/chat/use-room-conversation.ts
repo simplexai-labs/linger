@@ -1,5 +1,5 @@
 import { type QueryKey, useQueryClient } from "@tanstack/react-query";
-import { type ComponentProps, useMemo } from "react";
+import { type ComponentProps, useEffect, useMemo, useState } from "react";
 
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
@@ -96,6 +96,21 @@ export function useRoomConversation({
       ),
     [agentStreaming.runStatuses, directPeerAgentId],
   );
+  // Re-read the clock when the next pending card lapses, so an expired card
+  // stops holding its Agent's line at waiting without a new Message.
+  const [now, setNow] = useState(Date.now);
+  const pending = useMemo(
+    () => pendingDecisionsByRequester(messages, currentActorId, now),
+    [messages, currentActorId, now],
+  );
+  useEffect(() => {
+    if (pending.nextExpiry === undefined) return;
+    const timer = window.setTimeout(
+      () => setNow(Date.now()),
+      Math.max(0, pending.nextExpiry - Date.now()),
+    );
+    return () => window.clearTimeout(timer);
+  }, [pending.nextExpiry]);
   const dock: ComponentProps<typeof AgentStreamingStatusDock> = {
     cancelRoomRun: (runId, requestId) =>
       teamHubData(
@@ -129,6 +144,7 @@ export function useRoomConversation({
     runtimePresentationEventsByRunStatusId:
       agentStreaming.runtimePresentationEventsByRunStatusId,
     scopeKey: ["teamhub", tenantId, roomId],
+    waitingDecisionSince: pending.since,
   };
 
   return {
@@ -167,4 +183,35 @@ function compareRoomMessages(
     return leftNotice ? -1 : 1;
   }
   return left.id < right.id ? -1 : 1;
+}
+
+/**
+ * The decision cards in these Messages that still wait on `ownerId`: for each
+ * requesting Agent, when its newest one was posted, and when the first of
+ * them lapses. Cards another Human decides are left out, since this Human
+ * cannot answer them.
+ */
+export function pendingDecisionsByRequester(
+  messages: readonly TeamHubMessage[],
+  ownerId: string | undefined,
+  now: number,
+): { since: ReadonlyMap<string, string>; nextExpiry?: number } {
+  const since = new Map<string, string>();
+  let nextExpiry: number | undefined;
+  if (!ownerId) return { since };
+  for (const { card, created_at } of messages) {
+    if (card?.status !== "pending" || card.decision_owner.id !== ownerId)
+      continue;
+    const expiry = card.expires_at ? Date.parse(card.expires_at) : undefined;
+    if (expiry !== undefined && expiry <= now) continue;
+    if (
+      expiry !== undefined &&
+      (nextExpiry === undefined || expiry < nextExpiry)
+    )
+      nextExpiry = expiry;
+    const newest = since.get(card.requester.id);
+    if (!newest || Date.parse(newest) < Date.parse(created_at))
+      since.set(card.requester.id, created_at);
+  }
+  return nextExpiry === undefined ? { since } : { since, nextExpiry };
 }

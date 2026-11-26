@@ -92,7 +92,10 @@ take precedence.
   persisted reply status (`GET /v0/agent-runtime/runs/reply-status`) for each
   Inbox where a Human mentioned the Agent, so a chat steered in from another
   Inbox needs its own reply, and blocks the Runtime's Stop hook at most once
-  so the model can still send a visible reply in the same turn. When the Stop
+  so the model can still send a visible reply in the same turn. A Run woken
+  only by a Task report is blocked once too when it sent no visible message,
+  since the report is private. TeamHub does not count a message sent with
+  `--continuing` as the reply. When the Stop
   hook confirms delivery (`replyConfirmed`), the Run loop skips both
   `reply_undelivered` and `reply_not_sent` and avoids a redundant post-hoc check.
   Otherwise (for instance, when a Stop hook blocked once, its check failed, or
@@ -103,7 +106,11 @@ take precedence.
   reactions that activity classification missed are not misreported. When no
   reply reached the Room while such a Human waits, a Run with at least one
   failed write attempt finishes failed with `reply_undelivered`, and one with
-  no failed write attempt finishes failed with `reply_not_sent`. Runs where no
+  no failed write attempt finishes failed with `reply_not_sent`. After a Stop
+  hook block that no reply confirmed, a delivered write may be only a
+  `--continuing` acknowledgement, so the Run loop asks TeamHub as well and
+  fails the Run with `reply_not_sent` only when TeamHub answers that no reply
+  landed; a failed check keeps the Run succeeded. Runs where no
   Human waits on a reply are not failed as `reply_undelivered` or
   `reply_not_sent`. The Runtime's final text is private scratch and is never
   posted for it.

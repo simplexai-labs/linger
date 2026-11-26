@@ -240,11 +240,14 @@ skills:
         version: 1.0.0
         package_path: builtin/personal-profile/1.0.0
   - skill_id: simplexai_humanlike_browse
-    bootstrap_manifest_id: skill_manifest_simplexai_humanlike_browse_1_0_9
+    bootstrap_manifest_id: skill_manifest_simplexai_humanlike_browse_1_1_0
     default_agent_types:
       - anotherme
       - general
     manifests:
+      - manifest_id: skill_manifest_simplexai_humanlike_browse_1_1_0
+        version: 1.1.0
+        package_path: builtin/humanlike-browse/1.1.0
       - manifest_id: skill_manifest_simplexai_humanlike_browse_1_0_9
         version: 1.0.9
         package_path: builtin/humanlike-browse/1.0.9

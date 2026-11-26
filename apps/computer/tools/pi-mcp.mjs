@@ -149,6 +149,26 @@ export function reviewedTool(toolName) {
   return toolName === "bash" || toolName.startsWith("mcp__");
 }
 
+export const PIPEFAIL_PREFIX =
+  'if [ -n "${BASH_VERSION:-}${ZSH_VERSION:-}" ]; then set -o pipefail; fi\n';
+
+/**
+ * Enables pipefail for each bash call without spawning an extra subshell,
+ * guarded on BASH_VERSION/ZSH_VERSION so a POSIX sh fallback without pipefail
+ * does not abort. Runs only after the shell text check and permission review
+ * pass so reviewers and allowlists inspect the original command. Under
+ * pipefail, pipelines whose downstream reader closes early (such as | head)
+ * can exit with SIGPIPE (141); a command that wants to opt out can run
+ * `set +o pipefail`.
+ */
+export function enablePipefail(event) {
+  if (event.toolName !== "bash") return;
+  const command = event.input?.command;
+  if (typeof command !== "string" || command.startsWith(PIPEFAIL_PREFIX))
+    return;
+  event.input.command = `${PIPEFAIL_PREFIX}${command}`;
+}
+
 // reviewToolCall asks the Daemon about one call and blocks it unless the
 // verdict allows it. A missing or unreadable answer blocks the call.
 // The Daemon allows every call of a Run without permission review.
@@ -296,10 +316,11 @@ export async function mountManagedMcp(
   });
 }
 
-// The Daemon loads this extension for the shell text check, permission
-// review, MCP servers, or any of them. The review hook is always on, because
-// a resident Pi process may serve a reviewed Run after one without review.
-// A call the shell text check refuses never reaches review.
+// The Daemon loads this extension for every Pi Run to enforce bash pipefail,
+// the shell text check, permission review, and managed MCP servers. The review
+// hook stays on because a resident Pi process may serve a reviewed Run after an
+// unreviewed one. A call the shell text check refuses never reaches review, and
+// a refused call is neither run nor rewritten.
 export default async function managedExtension(pi) {
   pi.on("before_agent_start", () => {
     if (
@@ -318,12 +339,14 @@ export default async function managedExtension(pi) {
     }
     return undefined;
   });
-  pi.on(
-    "tool_call",
-    async (event, ctx) =>
+  pi.on("tool_call", async (event, ctx) => {
+    const blocked =
       (await refuseRewrittenShellText(event)) ??
-      reviewToolCall(event, ctx.ui, ctx.signal),
-  );
+      (await reviewToolCall(event, ctx.ui, ctx.signal));
+    if (blocked) return blocked;
+    enablePipefail(event);
+    return undefined;
+  });
   if (process.env.LINGER_PI_MANAGED_MCP_CONFIG) {
     await mountManagedMcp(pi, process.env.LINGER_PI_MANAGED_MCP_CONFIG);
   }

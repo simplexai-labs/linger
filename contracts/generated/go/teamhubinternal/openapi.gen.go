@@ -2529,18 +2529,6 @@ type AgentRepresentedHumanRef struct {
 	Memory *UserMemoryRevision `json:"memory,omitempty"`
 }
 
-// AgentRunInputOrigin defines model for AgentRunInputOrigin.
-type AgentRunInputOrigin struct {
-	AuthorType   string `json:"author_type"`
-	FiredRoutine bool   `json:"fired_routine"`
-
-	// HumanWaiting A Human acted through this hidden Message, by answering a card or asking during a recording, and waits for the Agent's answer.
-	HumanWaiting bool   `json:"human_waiting"`
-	MessageKind  string `json:"message_kind"`
-	Notification bool   `json:"notification"`
-	TaskInbox    bool   `json:"task_inbox"`
-}
-
 // AgentRuntimeAcceptedContextState The Context state the accepting transaction committed. The Agent Service applies it to its Context record instead of reading the Context again.
 type AgentRuntimeAcceptedContextState struct {
 	NextInputSequence AgentRuntimeInt64                               `json:"next_input_sequence"`
@@ -2719,8 +2707,6 @@ type AgentRuntimeInt64 = string
 
 // AgentRuntimeLocalComputer defines model for AgentRuntimeLocalComputer.
 type AgentRuntimeLocalComputer struct {
-	Capacity *int `json:"capacity,omitempty"`
-
 	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	ComputerId           Id                             `json:"computer_id"`
 	CredentialGeneration AgentRuntimeInt64              `json:"credential_generation"`
@@ -2936,9 +2922,6 @@ type AgentRuntimeWorkState struct {
 
 	// MessageSteers Present on the work-state read. Steers a Message transaction queued for this Context that the Agent Service has not settled, in input order: a targeted Message for the running Run that reads its Inbox, or a native question's answer assigned to the Run that asked it.
 	MessageSteers *[]StoredAgentRuntimeInput `json:"message_steers,omitempty"`
-
-	// NextRunOrigins Distinct scheduling metadata of the initial inputs of every claimable queued Run. The Run claimed next serves them all, so it waits as the most urgent of them.
-	NextRunOrigins *[]AgentRunInputOrigin `json:"next_run_origins,omitempty"`
 }
 
 // AgentRuntimeWorkingStatusChangedEvent defines model for AgentRuntimeWorkingStatusChangedEvent.
@@ -3240,6 +3223,8 @@ type CompleteAgentSteerRequestOutcome string
 
 // ConnectAgentRuntimeLocalComputerRequest defines model for ConnectAgentRuntimeLocalComputerRequest.
 type ConnectAgentRuntimeLocalComputerRequest struct {
+	// Capacity Accepted from older Agent Services and ignored by TeamHub.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Capacity *int `json:"capacity,omitempty"`
 
 	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.

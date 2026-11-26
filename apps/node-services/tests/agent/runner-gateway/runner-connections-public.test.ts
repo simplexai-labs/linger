@@ -1028,6 +1028,32 @@ describe("RunnerGateway local Computer reconnect wait", () => {
     await waiting;
   });
 
+  it("passes an old Computer's reported limit through to a mixed-version TeamHub", async () => {
+    const connectLocalComputer = vi.fn().mockResolvedValue({ placements: [] });
+    const registry = createTeamHubLocalComputerRegistry({
+      getLocalComputer: vi.fn(),
+      connectLocalComputer,
+      touchLocalComputer: vi.fn(),
+      removeLocalComputer: vi.fn(),
+      recordLocalModels: vi.fn(),
+    });
+    const connection = {
+      computerId: "computer-local",
+      owner: { tenantId: "tenant-acme", ownerActorId: "actor-alice" },
+      credentialGeneration: 0,
+      status: "offline" as const,
+    };
+    await registry.connect({ ...connection, hello: hello([], 5) });
+    await registry.connect({ ...connection, hello: hello([], null) });
+    expect(connectLocalComputer.mock.calls[0]![0]).toHaveProperty(
+      "capacity",
+      5,
+    );
+    expect(connectLocalComputer.mock.calls[1]![0]).not.toHaveProperty(
+      "capacity",
+    );
+  });
+
   it("maps DAEMON_IDENTITY_IN_USE from TeamHub connect to RunnerDaemonIdentityInUseError", async () => {
     const connectLocalComputer = vi
       .fn()

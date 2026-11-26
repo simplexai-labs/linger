@@ -67,7 +67,7 @@ const claudeWebToolGuide = `Web tools: WebSearch searches the web and WebFetch r
 const teamHubWebFallback = "If that fails, `teamhub web search <query>` and `teamhub web open <url>` search the web and read pages through the search providers the user set up, or DuckDuckGo without a key."
 
 // teamHubWebToolGuide is the web access of Pi and of a Runtime on an API link.
-const teamHubWebToolGuide = "Web tools: search the web with `teamhub web search <query>` and read one page as Markdown with `teamhub web open <url>`; `teamhub web list` shows the search backends and which are ready. Run `teamhub web search --help` for filters."
+const teamHubWebToolGuide = "Web tools: search the web with `teamhub web search <query>` and read one page as Markdown with `teamhub web open <url>`; both call search services such as Tavily or Exa and never drive a browser; `teamhub web list` shows the search backends and which are ready. Run `teamhub web search --help` for filters. Never open a search engine's results page; search with `teamhub web search`."
 
 // teamHubWebOverOwnTools follows teamHubWebToolGuide for a Runtime on an API
 // link that still has its own web tools.

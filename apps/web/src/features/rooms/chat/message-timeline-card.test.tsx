@@ -2092,6 +2092,42 @@ describe("Room Message timeline cards", () => {
     expect(resend()).toBeInTheDocument();
   });
 
+  it("shows a failed Run whose Agent awaits a decision card as waiting", () => {
+    const failed = {
+      "run-status-1": [
+        {
+          ...runtimeTerminalStatusRecord("2", "failed"),
+          event: {
+            type: "status.changed" as const,
+            status: "stopped" as const,
+            outcome: "failed" as const,
+          },
+        },
+      ],
+    };
+    const dock = (waiting?: ReadonlyMap<string, string>) => (
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <AgentStreamingStatusDock
+            runStatuses={[runStatus({ status: "aborted" })]}
+            runtimePresentationEventsByRunStatusId={failed}
+            {...(waiting ? { waitingDecisionSince: waiting } : {})}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    // A fresh Dock each time, since a shown line holds before it changes.
+    const { unmount } = render(dock());
+    expect(shownStatus()).toMatch(/^Codex: Couldn't finish/);
+    unmount();
+    // A card from before the Run did not stop it.
+    const stale = render(dock(new Map([["agent-1", "2026-08-13T23:59:59Z"]])));
+    expect(shownStatus()).toMatch(/^Codex: Couldn't finish/);
+    stale.unmount();
+    render(dock(new Map([["agent-1", "2026-08-14T00:00:00Z"]])));
+    expect(shownStatus()).toBe("Codex: Waiting for you to answer its request");
+  });
+
   it("keeps an interrupted Run in the Dock as a stop, not a failure", () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
@@ -2115,7 +2151,7 @@ describe("Room Message timeline cards", () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    expect(shownStatus()).toMatch(/^Codex: Its computer restarted/);
+    expect(shownStatus()).toMatch(/^Codex: The run was interrupted/);
     expect(shownStatus()).not.toMatch(/Claude:|Couldn't finish/);
   });
 
@@ -2144,7 +2180,7 @@ describe("Room Message timeline cards", () => {
       </QueryClientProvider>,
     );
     expect(shownStatus()).toMatch(
-      /^Codex: Its computer restarted.* Your follow-up may not have arrived\.$/,
+      /^Codex: The run was interrupted.* Your follow-up may not have arrived\.$/,
     );
     expect(shownStatus()).not.toMatch(/Couldn't finish|\.\./);
   });

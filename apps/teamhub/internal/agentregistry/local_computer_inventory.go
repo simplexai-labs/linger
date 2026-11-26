@@ -70,7 +70,7 @@ func listOwnedLocalComputers(ctx context.Context, queries *store.Queries, tenant
 	return items, nil
 }
 
-func projectStoredLocalComputer(row store.LocalComputer, tenantID string, now time.Time) (httpapi.LocalComputer, bool, error) {
+func projectStoredLocalComputer(row store.RuntimeLocalComputer, tenantID string, now time.Time) (httpapi.LocalComputer, bool, error) {
 	var storedGrants []storedWorkspaceGrant
 	if err := json.Unmarshal(row.WorkspaceGrants, &storedGrants); err != nil {
 		return httpapi.LocalComputer{}, false, err
@@ -122,14 +122,6 @@ func projectStoredLocalComputer(row store.LocalComputer, tenantID string, now ti
 	}
 	if row.LastSeenAt.Valid {
 		item.LastSeenAt = &row.LastSeenAt.Time
-	}
-	if row.Capacity.Valid && row.Capacity.Int32 > 0 {
-		capacity := int(row.Capacity.Int32)
-		available := max(0, capacity-item.ActiveOperations)
-		if !online {
-			available = 0
-		}
-		item.Capacity, item.AvailableCapacity = &capacity, &available
 	}
 	return item, true, nil
 }

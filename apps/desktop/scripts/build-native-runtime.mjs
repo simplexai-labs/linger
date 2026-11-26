@@ -81,7 +81,7 @@ const PLATFORMS = {
 
 // Packages the services load at runtime by a name esbuild cannot see:
 // createRequire, require.resolve of data files, or a native binding.
-const RUNTIME_PACKAGES = ["@livekit/local-inference", "word-extractor"];
+export const RUNTIME_PACKAGES = ["@livekit/local-inference"];
 // Packages that are model data rather than code: the installer leaves them
 // out and Node Services downloads them when a feature first needs them
 // (apps/node-services/src/model-packages.ts). Local models install
@@ -100,12 +100,16 @@ const MODEL_REGISTRIES = [
 ];
 // Imports inside try/catch for features Native does not use; development
 // does not install them either.
-const OPTIONAL_IMPORTS = new Set([
+export const OPTIONAL_IMPORTS = new Set([
   "@pdf-lib/fontkit",
   "bufferutil",
+  // jsdom probes optional native `canvas` inside a try/catch; we never install it.
+  "canvas",
   "pdf-lib",
   "pnpapi",
   "puppeteer",
+  // officeparser lazy-imports tesseract.js only when OCR is enabled; we always pass ocr: false.
+  "tesseract.js",
   // Only source files running under tsx register it.
   "tsx",
   "utf-8-validate",
@@ -116,6 +120,21 @@ const OPTIONAL_IMPORTS = new Set([
 // wasm) only when a parse asks for OCR, and document-office-extract.ts
 // always passes `ocr: false`.
 const UNLOADED_PACKAGES = new Set(["tesseract.js"]);
+
+// Package subtrees that Node Services never loads at runtime (for example
+// browser viewer assets, non-legacy builds, and type declaration trees).
+const PACKAGE_UNUSED_SUBPATHS = {
+  "pdfjs-dist": ["build", "web", "legacy/web", "types"],
+};
+
+export function unusedPackageEntry(name, relativePath) {
+  const prefixes = PACKAGE_UNUSED_SUBPATHS[name];
+  if (!prefixes || !relativePath) return false;
+  return prefixes.some(
+    (prefix) =>
+      relativePath === prefix || relativePath.startsWith(`${prefix}/`),
+  );
+}
 
 export const runtimeDirectory = (target) =>
   path.join(desktop, "dist/installer/native", `runtime-${target}`);
@@ -180,7 +199,7 @@ export async function copyExternals(
       excluded.set(name, manifest.version);
       return;
     }
-    copied.set(directory, manifest.version);
+    copied.set(directory, { name, version: manifest.version });
     for (const dependency of Object.keys(manifest.dependencies ?? {}))
       await visit(dependency, directory, true);
     // Platform packages for other computers are not installed.
@@ -193,18 +212,22 @@ export async function copyExternals(
   for (const root of roots) await visit(root, deployed, true);
   if (missing.length)
     throw new Error(`Missing runtime packages: ${missing.join(", ")}`);
-  for (const directory of copied.keys())
+  for (const [directory, info] of copied)
     await cp(directory, path.join(output, path.relative(deployed, directory)), {
       recursive: true,
       // Nested packages are copied on their own when something needs them.
-      filter: (file) =>
-        !path
-          .relative(directory, file)
-          .split(path.sep)
-          .includes("node_modules") && !unused(file),
+      filter: (file) => {
+        const relative = path.relative(directory, file);
+        const normalized = relative.split(path.sep).join("/");
+        return (
+          !normalized.split("/").includes("node_modules") &&
+          !unused(file) &&
+          !unusedPackageEntry(info.name, normalized)
+        );
+      },
     });
   return {
-    packages: [...copied].map(([directory, version]) => ({
+    packages: [...copied].map(([directory, { version }]) => ({
       package: path.relative(deployed, directory).split(path.sep).join("/"),
       version,
     })),

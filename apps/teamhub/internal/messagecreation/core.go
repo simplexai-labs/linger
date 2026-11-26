@@ -91,6 +91,9 @@ type Draft struct {
 	// and now waits for the Agent's answer, so the Agent's Run for it is
 	// scheduled as chat.
 	HumanWaiting bool
+	// Continues marks an Agent Message sent with --continuing: it says the
+	// Agent is still working, so it does not count as the Run's reply.
+	Continues bool
 	// TrustedRunID is the Local Run a writer knows wrote the Message: a runtime
 	// callback, a delayed bubble or a published directory. Without it, the Run
 	// an Agent request names in its header is checked by ResolveRunClaim.
@@ -244,6 +247,7 @@ func Persist(ctx context.Context, queries *store.Queries, draft Draft) (Persiste
 		FiredRoutineID:          firedRoutineID,
 		FiredRoutineInstruction: firedRoutineInstruction,
 		HumanWaiting:            draft.HumanWaiting,
+		Continues:               draft.Continues,
 	})
 	if err != nil {
 		return Persisted{}, err

@@ -12,7 +12,7 @@ import (
 )
 
 func TestLocalComputerReadSkipsRetiredRuntimeInventoryAndDiagnostics(t *testing.T) {
-	row := store.LocalComputer{
+	row := store.RuntimeLocalComputer{
 		ComputerID: "mixed", RuntimeInventory: []byte(`["hermes","codex","opencode","pi"]`),
 		RuntimeDiagnostics: []byte(`[{"type":"hermes","protocol":"acp"},{"type":"codex","status":"ready"},{"type":"opencode"},{"type":"pi","status":"not_installed"}]`),
 		WorkspaceGrants:    []byte(`[]`),
@@ -62,7 +62,7 @@ func TestLocalComputerReadPreservesSupportedObservationFormats(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			row := store.LocalComputer{
+			row := store.RuntimeLocalComputer{
 				ComputerID: "computer_runtime_freshness", Status: "online",
 				Platform:         pgtype.Text{String: "win32", Valid: true},
 				RuntimeInventory: []byte(test.inventory), RuntimeDiagnostics: []byte(test.diagnostics),

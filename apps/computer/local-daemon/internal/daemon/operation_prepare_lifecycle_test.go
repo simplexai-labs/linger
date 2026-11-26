@@ -107,11 +107,9 @@ func TestOperationPrepareReleasesConnectionCallbackAfterFailureOrCancel(t *testi
 	}
 }
 
-func TestOperationStartAdoptedPreparationCountsCapacityOnce(t *testing.T) {
+func TestOperationStartAdoptedPreparationAllowsAnotherContext(t *testing.T) {
 	backend := &prepareBackend{prepareStarted: make(chan struct{}), blockPrepare: true}
 	d, stream, prepare := prepareDaemonFixture(t, backend)
-	capacity := 2
-	d.capacity = &capacity
 	if err := d.handleOperationPrepare(t.Context(), stream, prepare); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +127,7 @@ func TestOperationStartAdoptedPreparationCountsCapacityOnce(t *testing.T) {
 	}
 	d.WaitForOperations()
 	if got := len(backend.snapshot()); got != 2 {
-		t.Fatalf("adopted future consumed capacity twice: executions=%d", got)
+		t.Fatalf("expected both Contexts to execute: executions=%d", got)
 	}
 }
 

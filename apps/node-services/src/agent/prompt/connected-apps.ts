@@ -7,7 +7,7 @@
 export function connectableAppsRule(keys: readonly string[]): string {
   return keys.length === 0
     ? ""
-    : ` Apps the Human can connect: ${keys.join(", ")}. When a request needs the Human's account in one of these apps, to create or change something there or to read data that is not public, use teamhub apps, not the browser: with no account, run teamhub apps connect <app-key> to post an authorization card instead of asking for credentials, and end your turn; the card result wakes you. Then find the tool with teamhub apps search and run it with teamhub apps execute. Read a public page the usual way.${keys.includes("feishu_mail") ? FEISHU_MAIL_RULE : ""}`;
+    : ` Apps the Human can connect: ${keys.join(", ")}. When a request needs the Human's account in one of these apps, to create or change something there or to read data that is not public, use teamhub apps, not the browser: with no account, run teamhub apps connect <app-key> to post an authorization card instead of asking for credentials, and end your turn; the card result wakes you. Then find the tool with teamhub apps search and run it with teamhub apps execute. Read a public page with teamhub web open or the browser.${keys.includes("feishu_mail") ? FEISHU_MAIL_RULE : ""}`;
 }
 
 /**

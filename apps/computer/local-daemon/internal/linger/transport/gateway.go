@@ -701,10 +701,6 @@ func (s *gatewayStream) runnerHello() (wire.RunnerHello, error) {
 		Runtimes:     append([]string{}, s.hello.Runtimes...),
 		Capabilities: append([]string{}, s.hello.Capabilities...),
 	}
-	if s.hello.Capacity != nil {
-		capacity := uint64(*s.hello.Capacity)
-		hello.Capacity = &capacity
-	}
 	for _, part := range []struct {
 		raw    json.RawMessage
 		target any

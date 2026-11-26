@@ -265,6 +265,11 @@ func (r *Runtime) Exec(hardCtx, schedulingCtx context.Context, code string) (res
 			}
 		case "done":
 			if msg.Error != "" {
+				// Console lines and emitted output explain the failure, so they
+				// survive it when they are well formed.
+				if outputWithin(msg.Output, r.opts.Limits.MaxOutputBytes) {
+					result.Output = msg.Output
+				}
 				return result, fmt.Errorf("UI script failed: %s", msg.Error)
 			}
 			if len(msg.Value) == 0 || !json.Valid(msg.Value) {
@@ -286,6 +291,17 @@ func (r *Runtime) Exec(hardCtx, schedulingCtx context.Context, code string) (res
 			return result, errors.New("unexpected UI protocol message")
 		}
 	}
+}
+
+func outputWithin(output []json.RawMessage, limit int) bool {
+	size := 0
+	for _, v := range output {
+		if !json.Valid(v) {
+			return false
+		}
+		size += len(v)
+	}
+	return size <= limit
 }
 
 func executionCause(hard, scheduling context.Context) error {

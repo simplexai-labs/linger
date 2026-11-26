@@ -379,7 +379,11 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
 - Voice: `TEAMHUB_VOICE_MEDIA` (`on` by default) builds the voice media plane
   over LiveKit; `off`, a missing `LINGER_SECRET_SEED`, or missing ffmpeg keep
   voice off (the last two log `voice.media_unavailable`) without stopping
-  TeamHub.
+  TeamHub. When `TEAMHUB_VOICE_TOOLS_BIN` names a pre-reserved absolute tools
+  directory, `NewHLSMaterializerWithToolsBin` enables voice media before
+  extraction completes and resolves `ffmpeg`/`ffprobe` lazily, preferring
+  `TEAMHUB_VOICE_TOOLS_BIN` over system `PATH` (falling back to `PATH` without
+  caching until the bundled binaries appear).
   `internal/voicekey` resolves the Soniox and xAI keys at each use, the
   environment key over one saved in the product (`voice_provider_keys`, sealed
   with `TEAMHUB_SECRET_ENCRYPTION_KEY`), so a save applies without a restart

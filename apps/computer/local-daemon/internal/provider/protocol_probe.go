@@ -37,6 +37,9 @@ type runtimeProbeOutcome struct {
 }
 
 func probeRuntime(ctx context.Context, runtimeType, executable string, environment map[string]string, timeout time.Duration, runtimeHomeRoot ...string) runtimeProbeOutcome {
+	if runtimeType == "pi" {
+		return probePiRuntime(ctx, executable, environment, timeout)
+	}
 	policy := runtimeDetectionPolicies[runtimeType]
 	authentication := runtimeProbeOutcome{Status: "ready"}
 	if policy.authenticationBeforeProtocol && policy.authenticationProbe != nil {
@@ -70,9 +73,6 @@ func probeRuntimeProtocol(ctx context.Context, runtimeType, executable string, e
 	var args []string
 	var payload string
 	switch runtimeType {
-	case "pi":
-		args = append([]string{"--mode", "rpc", "--no-session"}, native.PiRPCResourceArgs("")...)
-		payload = `{"id":"linger-probe","type":"get_state"}` + "\n"
 	case "codex":
 		args = codexProbeArgs()
 		// Codex emits the initialize response before accepting the initialized
@@ -150,10 +150,6 @@ func logProbeExit(event, runtimeType string, err error, stderr string) {
 
 func protocolProbeResponseMatches(runtimeType string, response map[string]any) bool {
 	switch runtimeType {
-	case "pi":
-		data, ok := response["data"].(map[string]any)
-		_, streaming := data["isStreaming"].(bool)
-		return ok && streaming && response["id"] == "linger-probe" && response["type"] == "response" && response["command"] == "get_state" && response["success"] == true
 	case "claude":
 		control, ok := response["response"].(map[string]any)
 		return ok && response["type"] == "control_response" && control["subtype"] == "success" && control["request_id"] == "linger-computer-doctor"
@@ -271,7 +267,7 @@ func boundedAuthTimeout(timeout time.Duration) time.Duration {
 
 func runBoundedProbe(ctx context.Context, executable string, args []string, environment map[string]string, stdin string, timeout time.Duration) (string, string, error) {
 	return runBoundedProbeExchange(ctx, executable, args, environment, stdin, timeout, func(response map[string]any) (string, bool) {
-		return "", protocolProbeResponseMatches("pi", response) || protocolProbeResponseMatches("claude", response) || (response["id"] == float64(1) && (response["result"] != nil || response["error"] != nil))
+		return "", protocolProbeResponseMatches("claude", response) || (response["id"] == float64(1) && (response["result"] != nil || response["error"] != nil))
 	})
 }
 

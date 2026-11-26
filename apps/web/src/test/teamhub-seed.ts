@@ -521,8 +521,6 @@ export function createTeamHubTestSeed(): TeamHubTestSeed {
   const localComputers: TeamHubLocalComputerPage["items"] = [
     {
       active_operations: 0,
-      available_capacity: 2,
-      capacity: 2,
       display_name: "Jenny's Mac",
       computer_id: "computer-jenny-mac",
       runtimes: [
@@ -552,8 +550,6 @@ export function createTeamHubTestSeed(): TeamHubTestSeed {
     },
     {
       active_operations: 0,
-      available_capacity: 0,
-      capacity: 2,
       display_name: "Offline Lab Mac",
       computer_id: "computer-offline-lab",
       last_seen_at: "2026-09-29T10:00:00.000Z",
@@ -584,8 +580,6 @@ export function createTeamHubTestSeed(): TeamHubTestSeed {
     },
     {
       active_operations: 0,
-      available_capacity: 0,
-      capacity: 2,
       display_name: "Assigned Offline Mac",
       computer_id: "computer-assigned-offline",
       last_seen_at: "2026-09-29T09:30:00.000Z",
@@ -616,8 +610,6 @@ export function createTeamHubTestSeed(): TeamHubTestSeed {
     },
     {
       active_operations: 0,
-      available_capacity: 0,
-      capacity: 2,
       display_name: "Legacy Mac",
       computer_id: "computer-legacy-mac",
       last_seen_at: "2026-09-29T08:00:00.000Z",

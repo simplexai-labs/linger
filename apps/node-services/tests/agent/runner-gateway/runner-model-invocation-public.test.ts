@@ -18,10 +18,13 @@ import { RunnerModelInvokeUnavailableError } from "../../../src/agent/runner-gat
 import { RunnerModelInvokeYieldedError } from "../../../src/agent/runner-gateway/runner-model-invocation.js";
 import {
   modelCallPolicies,
+  RunPriority,
+  runPriorities,
   type ModelCallKind,
 } from "../../../src/model-tasks.js";
 import { CURRENT_RUNNER_CAPABILITIES } from "../test-support/runner-capabilities.js";
 import { createTestRunnerGateway } from "../test-support/runner-gateway.js";
+import { readyContextScope } from "../test-support/ready-context-view.js";
 import {
   acceptReadyConnection,
   defaultAgentPlacement,
@@ -449,6 +452,136 @@ describe("RunnerGateway model invocation", () => {
       connection.disconnect();
     }
   });
+
+  it.each([
+    { pending: [], claimPending: false, order: ["chat-run"] },
+    {
+      pending: ["task", "document"],
+      claimPending: false,
+      order: ["chat-run", "task", "document"],
+    },
+    {
+      pending: ["task", "routine"],
+      claimPending: false,
+      order: ["chat-run", "routine", "task"],
+    },
+    {
+      pending: ["task", "routine"],
+      claimPending: true,
+      order: ["routine", "chat-run", "task"],
+    },
+  ] as const)(
+    "dispatches $order with a pending chat claim of $claimPending",
+    async ({ pending, claimPending, order }) => {
+      const { gateway, peer, connection } = await connect();
+      const requests = new AbortController();
+      const starts = () =>
+        peer.sent.filter(
+          (command): command is OperationStart =>
+            command.type === "operation.start",
+        );
+      const finish = async (start: OperationStart) => {
+        await connection.receive(
+          event(start, 1, {
+            type: "operation.accepted",
+            command_id: start.command_id,
+            runner_pid: 100,
+          }),
+        );
+        await connection.receive(
+          event(start, 2, {
+            type: "operation.completed",
+            result: { type: "run", final_response: "done", session: {} },
+          }),
+        );
+      };
+      try {
+        const background = gateway.invokeModel(
+          "runner-local",
+          request({ signal: requests.signal }),
+        );
+        void background.catch(() => undefined);
+        await vi.waitFor(() => expect(sentInvocations(peer)).toHaveLength(1));
+
+        const target = sessionTarget();
+        const queuedRuns = new Map<
+          string,
+          ReturnType<typeof gateway.startOperation>
+        >();
+        for (const kind of pending) {
+          const runTarget = {
+            ...target,
+            ...readyContextScope(kind),
+            priority: new RunPriority(runPriorities[kind]),
+          };
+          const run = gateway.startOperation({
+            ...runTarget,
+            signal: requests.signal,
+            runKind: kind,
+            request: {
+              ...target.request,
+              run_context: { execution_run_ref: kind, source_inbox_ids: [] },
+            },
+          });
+          void run.catch(() => undefined);
+          queuedRuns.set(kind, run);
+        }
+        expect(starts()).toHaveLength(0);
+
+        const chatTarget = { ...target, ...readyContextScope("another-room") };
+        const capacityPermit = await gateway.acquireOperationCapacity(
+          chatTarget,
+          requests.signal,
+        );
+        const startChat = () => {
+          const chat = gateway.startOperation({
+            ...chatTarget,
+            capacityPermit,
+            runKind: "chat",
+            signal: requests.signal,
+            request: {
+              ...target.request,
+              run_context: {
+                execution_run_ref: "chat-run",
+                source_inbox_ids: [],
+              },
+            },
+          });
+          void chat.catch(() => undefined);
+          queuedRuns.set("chat-run", chat);
+        };
+        if (!claimPending) startChat();
+        const active = sentInvocations(peer)[0]!;
+        await vi.waitFor(() =>
+          expect(sentCancels(peer)).toEqual([
+            expect.objectContaining({
+              invoke_id: active.invoke_id,
+              reason: "scheduler_yield",
+            }),
+          ]),
+        );
+        expect(starts()).toHaveLength(0);
+
+        await invoked(connection, active, "canceled");
+        await expect(background).rejects.toBeInstanceOf(
+          RunnerModelInvokeYieldedError,
+        );
+        if (claimPending) startChat();
+        for (const [index, kind] of order.entries()) {
+          await vi.waitFor(() => expect(starts()).toHaveLength(index + 1));
+          expect(starts()[index]!.request.run_context.execution_run_ref).toBe(
+            kind,
+          );
+          const operation = await queuedRuns.get(kind)!;
+          await finish(starts()[index]!);
+          await operation.result;
+        }
+      } finally {
+        requests.abort();
+        connection.disconnect();
+      }
+    },
+  );
 
   it("keeps the answer of a background call that finished before its cancel", async () => {
     const { gateway, peer, connection } = await connect();

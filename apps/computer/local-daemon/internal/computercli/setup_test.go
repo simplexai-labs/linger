@@ -183,9 +183,6 @@ func TestBrowserEnrollmentPersistsOwnerOnlyStateAndStartsTheDaemon(t *testing.T)
 	if strings.Contains(string(encoded), fixtureGatewayToken) {
 		t.Fatal("config contains the Gateway credential")
 	}
-	if _, ok := config["max_concurrent_operations"]; ok {
-		t.Fatal("unconfigured run limit persisted")
-	}
 	grant := config["workspace_grants"].([]any)[0].(map[string]any)
 	if config["runner_id"] != "runner-server-issued" || config["credential_expires_at"] != "2099-01-01T00:00:00Z" || config["display_name"] != "Alice's Mac" ||
 		config["state_directory"] != f.options.stateDirectory || gateway["url"] != "wss://agent.example.test/v1/runner-gateway" ||
@@ -220,11 +217,10 @@ func TestBrowserEnrollmentPersistsOwnerOnlyStateAndStartsTheDaemon(t *testing.T)
 	}
 }
 
-func TestSetupPersistsRuntimeScopeAndRunLimitBeforeTheFirstStart(t *testing.T) {
+func TestSetupPersistsRuntimeScopeBeforeTheFirstStart(t *testing.T) {
 	server := newExchangeServer(t, "runner-selected")
 	f := newSetupFixture(t, server)
 	f.options.enabledRuntimes = []string{"codex"}
-	f.options.maxRunsSet, f.options.maxRuns = true, new(3)
 	f.deps.startDaemon = func(_ context.Context, configPath string) error {
 		encoded, err := os.ReadFile(configPath)
 		if err != nil {
@@ -232,16 +228,11 @@ func TestSetupPersistsRuntimeScopeAndRunLimitBeforeTheFirstStart(t *testing.T) {
 		}
 		var config map[string]any
 		_ = json.Unmarshal(encoded, &config)
-		if runtimes, _ := config["enabled_runtimes"].([]any); len(runtimes) != 1 || runtimes[0] != "codex" || config["max_concurrent_operations"] != float64(3) {
+		if runtimes, _ := config["enabled_runtimes"].([]any); len(runtimes) != 1 || runtimes[0] != "codex" {
 			return errors.New("scope missing at start: " + string(encoded))
 		}
 		return nil
 	}
-	if _, err := runComputerSetup(context.Background(), f.options, f.deps); err != nil {
-		t.Fatal(err)
-	}
-	// A later login without a limit keeps the configured one.
-	f.options.maxRunsSet, f.options.maxRuns = false, nil
 	if _, err := runComputerSetup(context.Background(), f.options, f.deps); err != nil {
 		t.Fatal(err)
 	}

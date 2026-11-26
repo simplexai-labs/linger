@@ -1,3 +1,87 @@
+diff --git a/dist/ipc/proc_pool.cjs b/dist/ipc/proc_pool.cjs
+index a4f446ccc69f2ea8c206a825b4a9a2b677cde990..8c92e071c8baa206aac0da0a99e2deb2221c39bc 100644
+--- a/dist/ipc/proc_pool.cjs
++++ b/dist/ipc/proc_pool.cjs
+@@ -61,9 +61,17 @@ class ProcPool {
+   async launchJob(info) {
+     let proc;
+     if (this.procMutex) {
+-      const entry = await this.warmedProcQueue.get();
+-      proc = entry.proc;
+-      entry.unlock();
++      // A warmed process can die while it waits (the host slept past its ping
++      // timeout); sending it a job fails at once, so skip it. Its unlock lets
++      // the pool warm a replacement.
++      for (;;) {
++        const entry = await this.warmedProcQueue.get();
++        entry.unlock();
++        if (entry.proc.isAlive) {
++          proc = entry.proc;
++          break;
++        }
++      }
+     } else {
+       proc = new import_job_proc_executor.JobProcExecutor(
+         this.agent,
+@@ -113,6 +121,16 @@ class ProcPool {
+         } catch {
+         }
+         await proc.join();
++        // A warmed process that exits before any job takes it must leave the
++        // queue and free its slot, or the next job is handed a dead process.
++        // close() already released the queued entries it shuts down.
++        if (procUnlockTransferred && !this.closed) {
++          const queued = this.warmedProcQueue.items.findIndex((entry) => entry.proc === proc);
++          if (queued !== -1) {
++            this.warmedProcQueue.items.splice(queued, 1);
++            procUnlock();
++          }
++        }
+       } finally {
+         if (!initReleased) {
+           unlock();
+diff --git a/dist/ipc/proc_pool.js b/dist/ipc/proc_pool.js
+index 628ba309ac4bf1194c08cec510460184c6384376..7a44019a1816ce4a49d5d1b88e92f98c3fb8ca56 100644
+--- a/dist/ipc/proc_pool.js
++++ b/dist/ipc/proc_pool.js
+@@ -38,9 +38,17 @@ class ProcPool {
+   async launchJob(info) {
+     let proc;
+     if (this.procMutex) {
+-      const entry = await this.warmedProcQueue.get();
+-      proc = entry.proc;
+-      entry.unlock();
++      // A warmed process can die while it waits (the host slept past its ping
++      // timeout); sending it a job fails at once, so skip it. Its unlock lets
++      // the pool warm a replacement.
++      for (;;) {
++        const entry = await this.warmedProcQueue.get();
++        entry.unlock();
++        if (entry.proc.isAlive) {
++          proc = entry.proc;
++          break;
++        }
++      }
+     } else {
+       proc = new JobProcExecutor(
+         this.agent,
+@@ -90,6 +98,16 @@ class ProcPool {
+         } catch {
+         }
+         await proc.join();
++        // A warmed process that exits before any job takes it must leave the
++        // queue and free its slot, or the next job is handed a dead process.
++        // close() already released the queued entries it shuts down.
++        if (procUnlockTransferred && !this.closed) {
++          const queued = this.warmedProcQueue.items.findIndex((entry) => entry.proc === proc);
++          if (queued !== -1) {
++            this.warmedProcQueue.items.splice(queued, 1);
++            procUnlock();
++          }
++        }
+       } finally {
+         if (!initReleased) {
+           unlock();
 diff --git a/dist/worker.cjs b/dist/worker.cjs
 index 825526b2dfc3e91efc74b166a5f1c043d7a0ead6..748668b0c2a36ff7de85dc0f4c4b4224bdc4298e 100644
 --- a/dist/worker.cjs

@@ -1185,6 +1185,7 @@ type Message struct {
 	FiredRoutineInstruction pgtype.Text        `json:"fired_routine_instruction"`
 	CardKind                pgtype.Text        `json:"card_kind"`
 	HumanWaiting            bool               `json:"human_waiting"`
+	Continues               bool               `json:"continues"`
 }
 
 type MessageCard struct {
@@ -1652,6 +1653,29 @@ type RoutineEventDelivery struct {
 	Source          string             `json:"source"`
 	UpstreamEventID string             `json:"upstream_event_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type RuntimeLocalComputer struct {
+	ComputerID            string             `json:"computer_id"`
+	DisplayName           string             `json:"display_name"`
+	Status                string             `json:"status"`
+	CredentialGeneration  int64              `json:"credential_generation"`
+	ActiveOperations      int32              `json:"active_operations"`
+	RuntimeInventory      []byte             `json:"runtime_inventory"`
+	WorkspaceGrants       []byte             `json:"workspace_grants"`
+	RuntimeDiagnostics    []byte             `json:"runtime_diagnostics"`
+	LastSeenAt            pgtype.Timestamptz `json:"last_seen_at"`
+	RemovedAt             pgtype.Timestamptz `json:"removed_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	DaemonID              pgtype.Text        `json:"daemon_id"`
+	DaemonPublicKey       []byte             `json:"daemon_public_key"`
+	DaemonIdentityVersion int64              `json:"daemon_identity_version"`
+	Platform              pgtype.Text        `json:"platform"`
+	DaemonVersion         pgtype.Text        `json:"daemon_version"`
+	RecommendedVersion    pgtype.Text        `json:"recommended_version"`
+	OwnerTenantID         string             `json:"owner_tenant_id"`
+	OwnerActorID          string             `json:"owner_actor_id"`
 }
 
 type Skill struct {

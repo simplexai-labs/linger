@@ -52,7 +52,6 @@ type Options struct {
 	OperationResolver   OperationResolver
 	RetryDelay          func(attempt int) time.Duration
 	DisplayName         string
-	Capacity            *int
 	Runtimes            []string
 	EnabledRuntimes     []string
 	RuntimeDiagnostics  json.RawMessage
@@ -184,30 +183,30 @@ type Daemon struct {
 	// after a failed model call; nil dials for real.
 	dialNetwork func(ctx context.Context, network, address string) error
 	// localModelsMu orders runner.local_models sends with their revision.
-	localModelsMu       sync.Mutex
-	localModelsRevision uint64
-	operationWG         sync.WaitGroup
-	inputWG             sync.WaitGroup
-	preparationWG       sync.WaitGroup
-	cleanupWG           sync.WaitGroup
-	draining            bool
-	closing             bool
-	selfUpdate          SelfUpdater
-	retryDelay          func(int) time.Duration
-	stableConnection    time.Duration
-	now                 func() time.Time
-	displayName         string
-	capacity            *int
-	runtimes            []string
-	runtimeDiagnostics  json.RawMessage
-	workspaceGrants     json.RawMessage
-	stateDirectory      string
-	runtimeHomeRoot     string
-	runtimeObservations []transport.RegistrationObservation
-	inventoryMu         sync.RWMutex
-	diagnosticsRevision uint64
-	connectionMu        sync.Mutex
-	diagnosticsStream   transport.Stream
+	localModelsMu           sync.Mutex
+	localModelsRevision     uint64
+	operationWG             sync.WaitGroup
+	inputWG                 sync.WaitGroup
+	preparationWG           sync.WaitGroup
+	cleanupWG               sync.WaitGroup
+	draining                bool
+	closing                 bool
+	selfUpdate              SelfUpdater
+	retryDelay              func(int) time.Duration
+	stableConnection        time.Duration
+	now                     func() time.Time
+	displayName             string
+	runtimes                []string
+	runtimeDiagnostics      json.RawMessage
+	workspaceGrants         json.RawMessage
+	stateDirectory          string
+	runtimeHomeRoot         string
+	runtimeObservations     []transport.RegistrationObservation
+	inventoryMu             sync.RWMutex
+	diagnosticsRevision     uint64
+	connectionMu            sync.Mutex
+	diagnosticsStream       transport.Stream
+	sentDiagnosticsRevision uint64
 	// localModelsStream is the live connection when its Agent Service
 	// accepts runner.local_models; nil otherwise.
 	localModelsStream transport.Stream
@@ -285,7 +284,6 @@ func New(options Options) (*Daemon, error) {
 		stableConnection:     stableGatewayConnection,
 		now:                  time.Now,
 		displayName:          options.DisplayName,
-		capacity:             options.Capacity,
 		runtimes:             append([]string(nil), options.Runtimes...),
 		runtimeDiagnostics:   append(json.RawMessage(nil), options.RuntimeDiagnostics...),
 		workspaceGrants:      append(json.RawMessage(nil), options.WorkspaceGrants...),

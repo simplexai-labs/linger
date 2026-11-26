@@ -56,9 +56,10 @@ The current adaptive limit is the hard limit. Ordinary work can start while
 the total running count is below the soft limit, `max(1, hard - 1)`.
 Recording questions and notes, chat, the rest of a Room conversation's work
 and standalone approvals can use the last place. When the limit drops, new
-work respects the lower limit. A Computer with an explicit Operation capacity
-also reserves its last place for an interactive Run when that capacity
-exceeds one.
+work respects the lower limit. Each Context runs one Operation at a time.
+Runs from different Contexts can wait for their model independently. Priority
+applies when work enters the endpoint queue. A Run being claimed in TeamHub
+does not hold back work already waiting there.
 
 | Work in priority order        | Unit                                                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -77,9 +78,8 @@ Computer stops the call, the waiting work starts once the Computer confirms
 the stop, and the call queues again at its priority to run the same attempt
 later, without counting it as a failed try. A Computer before release 0.53.0
 cannot stop one call, so there the waiting work waits for it. Otherwise the
-work asks the lowest-priority running Run below it on that endpoint or
-Computer to yield. A recording question can swap out a chat, a chat can swap
-out a routine, and any conversation Run can swap out a Task. Routines and
+work asks the lowest-priority running Run below it on that endpoint to yield.
+A recording question can swap out a chat, a chat can swap out a routine, and any conversation Run can swap out a Task. Routines and
 proactive Runs rank above Tasks on purpose: a routine that comes due or a
 reminder the user asked for runs on time instead of waiting for a long Task,
 and the Task gives up its current turn for it. Work of one

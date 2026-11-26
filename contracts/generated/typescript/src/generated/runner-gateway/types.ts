@@ -1208,7 +1208,7 @@ export interface RunnerHello {
   runtime_registrations: RuntimeRegistrationObservation[];
   sent_at: Timestamp;
   /**
-   * Optional Computer-wide active Operation limit. Omission means unlimited.
+   * Deprecated. Older Computers can report a locally enforced Operation limit. The gateway schedules by model endpoint.
    */
   capacity?: number;
   /**

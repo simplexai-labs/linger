@@ -446,11 +446,90 @@ describe("RunLoop + room-reply-guard stop hook", () => {
       { action: "block", reason: ROOM_REPLY_REMINDER },
       { action: "allow" },
     ]);
-    expect(stateReplySpy).not.toHaveBeenCalled();
+    expect(stateReplySpy).toHaveBeenCalledTimes(1);
     expect(state.getLocalRun(runId)?.status).toBe("succeeded");
     expect(
       entries.some((entry) => entry.event === "local_run.stop_hook_recovered"),
     ).toBe(true);
+  });
+
+  it("fails with reply_not_sent when only an acknowledgement landed after a stop-hook block", async () => {
+    const readReplyStatus = vi
+      .fn<() => Promise<{ readonly replied: boolean }>>()
+      .mockResolvedValueOnce({ replied: false })
+      .mockRejectedValueOnce(new Error("teamhub 503"));
+    const composed = composeContextFeatures({
+      context: makeMetaContext(),
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
+    });
+    const state = new TestContextRuntimeState({
+      databasePath: ":memory:",
+      ref: ROOM_REF,
+    });
+    const stateReplySpy = vi
+      .spyOn(state, "hasLocalRunReplied")
+      .mockReturnValue(false);
+    const { logger, entries } = createSilentLogger();
+
+    const decisions: Array<{ action: string; reason?: string }> = [];
+    const provider = new StopHookFakeProvider(async (spec, emit) => {
+      decisions.push(
+        await spec.onStopHook!(
+          { runtime: "codex", attempt: 0, stopHookActive: false },
+          new AbortController().signal,
+        ),
+      );
+      emit({
+        type: "activity.started",
+        activityId: "msg-1",
+        kind: "message",
+      } as RunEvent);
+      emit({
+        type: "activity.finished",
+        activityId: "msg-1",
+        outcome: "succeeded",
+      });
+      decisions.push(
+        await spec.onStopHook!(
+          { runtime: "codex", attempt: 1, stopHookActive: true },
+          new AbortController().signal,
+        ),
+      );
+      return { finalResponse: "" };
+    });
+
+    const loop = new RunLoop({
+      logger,
+      executionContextRef: ROOM_REF,
+      provider,
+      runtimeName: "codex",
+      runtimeSession: { threadId: "thread-1" },
+      state,
+      prepareInput: (m) => m,
+      onRunEvent: () => [],
+      onRunBeforeStop: (input, signal) =>
+        composed.evaluateRunBeforeStop(input, signal),
+    });
+
+    const runId = state.enqueueTrustedTurn([
+      makeRoomMessage("m1", "@Helper hi", true),
+    ]);
+    loop.start();
+    await loop.drain({ cancelActive: false });
+    state.close();
+
+    expect(decisions).toEqual([
+      { action: "block", reason: ROOM_REPLY_REMINDER },
+      { action: "allow" },
+    ]);
+    expect(stateReplySpy).toHaveBeenCalledTimes(1);
+    expect(state.getLocalRun(runId)?.terminal).toMatchObject({
+      failure: { code: "reply_not_sent" },
+    });
+    expect(state.getLocalRun(runId)?.status).toBe("failed");
+    expect(
+      entries.some((entry) => entry.event === "local_run.stop_hook_recovered"),
+    ).toBe(false);
   });
 
   it("suppresses reply_undelivered and skips fallback reply check when stop hook confirms delivery despite a failed write", async () => {

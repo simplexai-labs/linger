@@ -3186,7 +3186,7 @@ export const runnerGatewayEnvelopeSchema = {
           minimum: 1,
           maximum: 100,
           description:
-            "Optional Computer-wide active Operation limit. Omission means unlimited.",
+            "Deprecated. Older Computers can report a locally enforced Operation limit. The gateway schedules by model endpoint.",
         },
         runtimes: {
           type: "array",

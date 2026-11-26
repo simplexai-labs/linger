@@ -9,10 +9,9 @@ import (
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
 
-func storedLocalComputer(status string, lastSeen time.Time) store.LocalComputer {
-	return store.LocalComputer{
+func storedLocalComputer(status string, lastSeen time.Time) store.RuntimeLocalComputer {
+	return store.RuntimeLocalComputer{
 		ComputerID: "computer_1", DisplayName: "Mac", Status: status, ActiveOperations: 1,
-		Capacity:           pgtype.Int4{Int32: 2, Valid: true},
 		LastSeenAt:         pgtype.Timestamptz{Time: lastSeen, Valid: true},
 		DaemonVersion:      pgtype.Text{String: "0.40.0", Valid: true},
 		RecommendedVersion: pgtype.Text{String: "0.41.0", Valid: true},
@@ -35,7 +34,7 @@ func TestProjectStoredLocalComputerReadsTheRecordedInventory(t *testing.T) {
 	if err != nil || !listed {
 		t.Fatalf("listed=%v err=%v", listed, err)
 	}
-	if item.Status != httpapi.LocalComputerStatusOnline || item.ActiveOperations != 1 || *item.AvailableCapacity != 1 ||
+	if item.Status != httpapi.LocalComputerStatusOnline || item.ActiveOperations != 1 ||
 		*item.DaemonVersion != "0.40.0" || *item.RecommendedVersion != "0.41.0" {
 		t.Fatalf("computer=%+v", item)
 	}
@@ -61,7 +60,7 @@ func TestProjectStoredLocalComputerReadsTheRecordedInventory(t *testing.T) {
 
 func TestProjectStoredLocalComputerKeepsRuntimesOfAnOfflineComputer(t *testing.T) {
 	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
-	for name, row := range map[string]store.LocalComputer{
+	for name, row := range map[string]store.RuntimeLocalComputer{
 		"disconnected":     storedLocalComputer("offline", now.Add(-time.Hour)),
 		"stale heartbeat":  storedLocalComputer("online", now.Add(-2*time.Minute)),
 		"upgrade required": storedLocalComputer("upgrade_required", now),
@@ -69,7 +68,7 @@ func TestProjectStoredLocalComputerKeepsRuntimesOfAnOfflineComputer(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			item, listed, err := projectStoredLocalComputer(row, "tenant_1", now)
 			if err != nil || !listed || item.Status != httpapi.LocalComputerStatusOffline ||
-				item.ActiveOperations != 0 || *item.AvailableCapacity != 0 {
+				item.ActiveOperations != 0 {
 				t.Fatalf("computer=%+v listed=%v err=%v", item, listed, err)
 			}
 			if item.UpgradeRequired != (row.Status == "upgrade_required") {

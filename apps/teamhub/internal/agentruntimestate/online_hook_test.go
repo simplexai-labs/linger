@@ -12,8 +12,8 @@ import (
 // included, so a hook that failed once tries again while the Computer stays
 // connected. Offline observations do not reach them.
 func TestOnlineHooksRunOnEveryOnlineObservation(t *testing.T) {
-	computer := func(status, diagnostics string) store.LocalComputer {
-		return store.LocalComputer{
+	computer := func(status, diagnostics string) store.RuntimeLocalComputer {
+		return store.RuntimeLocalComputer{
 			ComputerID: "computer_hook", Status: status, OwnerTenantID: "tenant_hook", OwnerActorID: "actor_hook",
 			RuntimeInventory: []byte(`[]`), RuntimeDiagnostics: []byte(diagnostics), WorkspaceGrants: []byte(`[]`),
 		}
@@ -22,7 +22,7 @@ func TestOnlineHooksRunOnEveryOnlineObservation(t *testing.T) {
 	const ready = `[{"type":"codex","status":"ready"}]`
 	for _, test := range []struct {
 		name              string
-		previous, current store.LocalComputer
+		previous, current store.RuntimeLocalComputer
 		want              int
 	}{
 		{"comes online", computer("offline", notReady), computer("online", notReady), 1},

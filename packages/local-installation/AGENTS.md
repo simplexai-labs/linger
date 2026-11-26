@@ -72,7 +72,21 @@ voice tools for this computer, Native prepares them and runs LiveKit with
 the key pair and ports in the instance's `livekit.env`, with or without a
 voice key; without them, or when they fail to prepare or LiveKit cannot
 reserve a local port, TeamHub gets `TEAMHUB_VOICE_MEDIA=off` and the install
-continues. The services' `voice`
+continues. On cold first installs (no provisioned account, no `SONIOX_API_KEY`
+or `XAI_API_KEY`, and an unextracted, undamaged voice-tools archive) when an
+explicit `launchVoiceToolsBackground` callback is supplied (such as
+`createVoiceToolsBackgroundLauncher(installerScript)` from
+`apps/linger-installer`), Native reserves LiveKit's loopback HTTP port before
+launching the parallel `runtime` branch (reclaiming orphans once on `EADDRINUSE`
+and disabling voice if still occupied), passes `TEAMHUB_VOICE_TOOLS_BIN` to
+TeamHub only, spawns a detached `--prepare-voice-tools` worker strictly after
+`reclaimEarlierProcesses`, and releases the reservation and commits `"go\n"`
+only right before returning a kept-running outcome (aborting the worker on
+cancellation or rollback); upgrades, existing accounts, configured voice keys,
+and damaged caches keep voice preparation and LiveKit startup synchronous. `acquireNativeArtifact`
+locks per artifact under `tools/native/components/.locks/<key>` with bounded
+`INSTANCE_BUSY` retries so concurrent component preparations do not contend.
+The services' `voice`
 setting tracks only the tools, so a key change never restarts them through
 it. A native process restarts when its generated environment changes.
 The desktop passes the system proxy it resolved for Soniox as
@@ -206,10 +220,20 @@ Both copies use the same instance data directory and the same executable path
 in the supervisor's configuration hash. A matching live server keeps its
 connections during the upgrade. Its next start uses the UTF-8 copy.
 
-The desktop's bundled TeamHub binaries (`teamhub-binaries.ts`) count as current
-only when their files still match the manifest's sizes and hashes. A missing
-or damaged installed file is copied again from the bundle, so Native can use
-the verified binaries without downloading Go and compiling from source.
+The desktop's bundled TeamHub binaries (`teamhub-binaries.ts`) and native
+dependency caches (`native-dependencies.ts`) record `[size, mtimeMs, ctimeMs]`
+stamps keyed by the manifest SHA-256 digest (`STAMP_SETTLE_MS = 2_000`) via
+`verified-stamps.ts` in `<dir>.verified.json` (`prebuilt.verified.json` beside
+`prebuilt`, and `<component>.verified.json` beside extracted component trees).
+Warm restarts and resumes reuse the verified manifest without re-hashing every
+file once every recorded stamp is at least 2 seconds past coarse filesystem
+clock resolution and matches `[size, mtimeMs, ctimeMs]`; any missing stamp,
+unsettled timestamp (`< 2s`), or size/`mtimeMs`/`ctimeMs` mismatch triggers full
+SHA-256 verification against the manifest (and missing or damaged TeamHub
+binaries are copied again from the bundle before falling back to Go
+compilation). Native dependency `.simplex-files.json` manifests also preserve
+`readdir` traversal key order so older installers comparing serialized manifests
+directly still match.
 
 Every Linger release creates TeamHub's schema from the 852 baseline
 migration, which refuses a database that already holds one. A database from
@@ -477,11 +501,21 @@ upgrades and live re-runs keep `migrate` sequential after `runtime`. When
 source's runtime) once and skips
 `harness plan` and `harness apply` when it is already installed (falling back to
 a full install if missing or unreadable), and passes the inspected descriptor
-through `onRuntimeDescriptors` so callers avoid a second status probe. Within
-`release`, binary and native-runtime bundle checks run in parallel, while
-dependency and voice tool preparations stay sequential on the shared
-native-tools lock; collaboration services start concurrently when `node-services`
-is not pre-stopped for a TeamHub config restart. `runLocalmodels`
+through `onRuntimeDescriptors` so callers avoid a second status probe. For BYOK
+with `pi`, `prepareByokNativeRuntime` enables `skipHarnessWhenBundledPiMatches`
+so `installNativeRuntime` binds the verified bundled Pi directly via its stable
+symlink (`ensureStableBundledPi` + `--version` check) whenever
+`findHigherPrecedencePi` finds no higher-precedence `pi` (`SIMPLEX_PI_PATH`,
+non-bundled `LINGER_PI_PATH`, user `PATH`/`~/.local/bin`/`%APPDATA%\npm`, or a
+strictly newer harness copy), falling back to `harness plan` and `apply`
+otherwise. Within `release`, binary and native-runtime bundle checks run in
+parallel, and per-artifact locks under `tools/native/components/.locks/<key>`
+allow independent native tools to prepare without blocking each other;
+collaboration services (`teamhub`, `node-services`, and `web`) always start
+concurrently via `Promise.allSettled`, even after `node-services` is
+pre-stopped for a TeamHub configuration restart (keeping pre-stopped
+`node-services` and pre-existing `web` and `teamhub` untracked by `started` so
+rollback does not stop previously running services). `runLocalmodels`
 reads the kit's JSON event lines from stdout and stderr alike and forwards
 byte progress (`total: null` without a total) and the download
 `connecting`, `switching` and `retrying` stages of every command, labeled per

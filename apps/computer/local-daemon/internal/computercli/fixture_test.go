@@ -37,7 +37,7 @@ func (c fakeClient) Status(context.Context) (object, error) {
 	reconciled := c.f.gatewayState == "connected"
 	encoded, _ := json.Marshal(map[string]any{
 		"pid": 42, "computer_id": "computer-local", "state": "running", "gateway_state": c.f.gatewayState,
-		"reconciled": reconciled, "active_runners": 1, "capacity": 2, "active_operations": c.f.activeOperations,
+		"reconciled": reconciled, "active_runners": 1, "active_operations": c.f.activeOperations,
 	})
 	return decodeObject(encoded)
 }
@@ -182,7 +182,7 @@ func newFixture(t *testing.T) *fixture {
 func (f *fixture) writeConfig(extra map[string]any) {
 	f.t.Helper()
 	config := map[string]any{
-		"runner_id": "computer-local", "max_concurrent_operations": 2,
+		"runner_id":        "computer-local",
 		"state_directory":  filepath.Join(f.root, "state"),
 		"gateway":          map[string]any{"url": "wss://gateway.example.test/v1/runner-gateway", "token_file": filepath.Join(f.root, "runner-token")},
 		"runtime_paths":    map[string]any{},

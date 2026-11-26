@@ -7125,12 +7125,6 @@ type LocalComputer struct {
 	// ActiveOperations Active Operations the Computer reported at its last heartbeat; 0 while it is offline.
 	ActiveOperations int `json:"active_operations"`
 
-	// AvailableCapacity Currently available active Operation slots. Present only when capacity is configured.
-	AvailableCapacity *int `json:"available_capacity,omitempty"`
-
-	// Capacity Optional maximum simultaneous active Operations on this Computer. Omission means unlimited; it does not limit bound Agents.
-	Capacity *int `json:"capacity,omitempty"`
-
 	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	ComputerId Id `json:"computer_id"`
 

@@ -1,7 +1,9 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
   access,
+  chmod,
   mkdtemp,
+  readlink,
   rm,
   writeFile,
   realpath,
@@ -968,3 +970,202 @@ it("passes includeBundled and stable bundled Pi executable in configuredPaths du
     }),
   );
 });
+
+it("fast-binds verified bundled Pi when skipHarnessWhenBundledPiMatches is enabled and no higher-precedence Pi exists", async () => {
+  const options = await fixture();
+  const bundledBin = path.join(options.home, "bundled-tools", "bin");
+  const bundledExe = path.join(
+    bundledBin,
+    process.platform === "win32" ? "pi.exe" : "pi",
+  );
+  await mkdir(bundledBin, { recursive: true });
+  await writeFile(bundledExe, "#!/bin/sh\n", { mode: 0o755 });
+  const isolatedHome = path.join(options.home, "user-home");
+  await mkdir(isolatedHome, { recursive: true });
+
+  const localmodels = vi.fn();
+  const probeRuntimes = vi.fn();
+  const run = vi.fn(async () => ({
+    code: 0,
+    stdout: "1.5.2\n",
+    stderr: "",
+  }));
+  const events: string[] = [];
+
+  const outcome = await installNativeRuntime(
+    "pi",
+    {
+      ...options,
+      env: {
+        HOME: isolatedHome,
+        USERPROFILE: isolatedHome,
+        PATH: "",
+        SIMPLEX_PI_PATH: "",
+        LINGER_PI_PATH: "",
+      },
+      skipHarnessWhenBundledPiMatches: true,
+      onEvent: (event) => events.push(event.message),
+    },
+    {
+      localmodels,
+      probeRuntimes,
+      run,
+      resolveBundledPi: async () => ({
+        binDir: bundledBin,
+        executable: bundledExe,
+        version: "1.5.2",
+      }),
+    },
+  );
+
+  expect(localmodels).not.toHaveBeenCalled();
+  expect(probeRuntimes).not.toHaveBeenCalled();
+  const expectedExecutable =
+    process.platform === "win32"
+      ? bundledExe
+      : path.join(
+          path.resolve(options.home),
+          "runtime",
+          "bundled-pi",
+          "bin",
+          "pi",
+        );
+  expect(run).toHaveBeenCalledWith(
+    expectedExecutable,
+    ["--version"],
+    expect.objectContaining({ timeoutMs: 15_000 }),
+  );
+  if (process.platform !== "win32") {
+    expect(await readlink(expectedExecutable)).toBe(path.resolve(bundledExe));
+  }
+  expect(outcome).toEqual({
+    code: 0,
+    state: "ready",
+    message: "pi is installed. Authentication will be checked separately.",
+    details: {
+      executable: expectedExecutable,
+      descriptor: {
+        runtime: "pi",
+        executable: expectedExecutable,
+        argvPrefix: [],
+        installed: true,
+        authenticated: false,
+        authMode: null,
+        status: "authentication_required",
+        version: "1.5.2",
+        loginCommand: null,
+      },
+    },
+  });
+  expect(events.join("")).toContain(
+    "Reusing verified bundled Pi 1.5.2 directly (skipped harness plan/apply).",
+  );
+});
+
+it.each([
+  "valid_simplex_pi_path",
+  "invalid_simplex_pi_path",
+  "user_path_pi",
+  "newer_harness_pi",
+  "version_mismatch",
+  "version_exit_nonzero",
+] as const)(
+  "falls back to harness plan and apply when bundled Pi fast-bind cannot apply (%s)",
+  async (scenario) => {
+    const options = await fixture();
+    const bundledBin = path.join(options.home, "bundled-tools", "bin");
+    const bundledExe = path.join(
+      bundledBin,
+      process.platform === "win32" ? "pi.exe" : "pi",
+    );
+    await mkdir(bundledBin, { recursive: true });
+    await writeFile(bundledExe, "#!/bin/sh\n", { mode: 0o755 });
+    const isolatedHome = path.join(options.home, "user-home");
+    const userBin = path.join(options.home, "user-bin");
+    await mkdir(isolatedHome, { recursive: true });
+    await mkdir(userBin, { recursive: true });
+
+    const env: NodeJS.ProcessEnv = {
+      HOME: isolatedHome,
+      USERPROFILE: isolatedHome,
+      PATH: userBin,
+      SIMPLEX_PI_PATH: "",
+      LINGER_PI_PATH: "",
+    };
+    const piName = process.platform === "win32" ? "pi.exe" : "pi";
+    if (scenario === "valid_simplex_pi_path") {
+      const customPi = path.join(options.home, "custom", piName);
+      await mkdir(path.dirname(customPi), { recursive: true });
+      await writeFile(customPi, "#!/bin/sh\n", { mode: 0o755 });
+      env.SIMPLEX_PI_PATH = customPi;
+    } else if (scenario === "invalid_simplex_pi_path") {
+      env.SIMPLEX_PI_PATH = path.join(options.home, "missing", piName);
+    } else if (scenario === "user_path_pi") {
+      const userPi = path.join(userBin, piName);
+      await writeFile(userPi, "#!/bin/sh\n", { mode: 0o755 });
+      if (process.platform !== "win32") await chmod(userPi, 0o755);
+    } else if (scenario === "newer_harness_pi") {
+      const newerPi = path.join(
+        options.home,
+        "runtime",
+        "harness",
+        "tools",
+        "pi",
+        "1.7.0",
+        piName,
+      );
+      await mkdir(path.dirname(newerPi), { recursive: true });
+      await writeFile(newerPi, "#!/bin/sh\n", { mode: 0o755 });
+      if (process.platform !== "win32") await chmod(newerPi, 0o755);
+    }
+
+    const id = "e".repeat(64);
+    const localmodels = vi.fn(async (_home: string, args: string[]) => {
+      if (args[1] === "plan") {
+        await writeFile(
+          args[args.indexOf("--out") + 1]!,
+          JSON.stringify({
+            schema: "localmodels.harness-plan/v1",
+            id,
+            runtime: "pi",
+          }),
+        );
+      }
+      return {
+        code: 0,
+        stdout: args[1] === "apply" ? JSON.stringify(status("pi", false)) : "",
+        stderr: "",
+      };
+    });
+    const run = vi.fn(async () =>
+      scenario === "version_mismatch"
+        ? { code: 0, stdout: "1.5.20\n", stderr: "" }
+        : { code: 1, stdout: "", stderr: "broken" },
+    );
+
+    const outcome = await installNativeRuntime(
+      "pi",
+      {
+        ...options,
+        env,
+        skipHarnessWhenBundledPiMatches: true,
+      },
+      {
+        localmodels,
+        probeRuntimes: noDaemon,
+        run,
+        resolveBundledPi: async () => ({
+          binDir: bundledBin,
+          executable: bundledExe,
+          version: "1.5.2",
+        }),
+      },
+    );
+
+    expect(outcome.code).toBe(0);
+    expect(localmodels.mock.calls.map(([, args]) => args[1])).toEqual([
+      "plan",
+      "apply",
+    ]);
+  },
+);

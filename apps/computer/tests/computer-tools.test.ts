@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import {
   mkdir,
   mkdtemp,
+  readFile,
   rename,
   rm,
   symlink,
@@ -801,3 +802,212 @@ it("stages a compact self-contained computer-tools bundle with bundled Pi MCP, j
     await rm(root, { recursive: true, force: true });
   }
 }, 60_000);
+
+it("enables pipefail for each managed Pi bash call only after review allows it", async () => {
+  const entry = new URL("../tools/pi-mcp.mjs", import.meta.url).href;
+  interface ToolCallEvent {
+    toolName: string;
+    input?: { command?: unknown };
+  }
+  interface ToolCallContext {
+    ui: { input: (title: string, placeholder: string) => Promise<unknown> };
+  }
+  type ToolCallHandler = (
+    event: ToolCallEvent,
+    ctx: ToolCallContext,
+  ) => Promise<unknown>;
+  const mod = (await import(entry)) as {
+    PIPEFAIL_PREFIX: string;
+    enablePipefail: (event: ToolCallEvent) => void;
+    default: (pi: {
+      on: (event: string, handler: ToolCallHandler) => void;
+    }) => Promise<void>;
+  };
+
+  const bash = { toolName: "bash", input: { command: "false | head -1" } };
+  mod.enablePipefail(bash);
+  expect(bash.input.command).toBe(`${mod.PIPEFAIL_PREFIX}false | head -1`);
+  mod.enablePipefail(bash);
+  expect(bash.input.command).toBe(`${mod.PIPEFAIL_PREFIX}false | head -1`);
+
+  const read = { toolName: "read", input: { command: "false | head -1" } };
+  mod.enablePipefail(read);
+  expect(read.input.command).toBe("false | head -1");
+
+  const malformed = { toolName: "bash", input: { command: 42 } };
+  mod.enablePipefail(malformed);
+  expect(malformed.input.command).toBe(42);
+
+  let toolCall: ToolCallHandler | undefined;
+  await mod.default({
+    on: (event, handler) => {
+      if (event === "tool_call") toolCall = handler;
+    },
+  });
+
+  const allowedReviewed: Array<unknown> = [];
+  const hooked = { toolName: "bash", input: { command: "false | head -1" } };
+  const allowedResult = await toolCall!(hooked, {
+    ui: {
+      input: async (_title, placeholder) => {
+        allowedReviewed.push(JSON.parse(placeholder));
+        return JSON.stringify({ allow: true });
+      },
+    },
+  });
+  expect(allowedReviewed).toEqual([
+    { toolName: "bash", input: { command: "false | head -1" } },
+  ]);
+  expect(allowedResult).toBeUndefined();
+  expect(hooked.input.command).toBe(`${mod.PIPEFAIL_PREFIX}false | head -1`);
+
+  const deniedReviewed: Array<unknown> = [];
+  const denied = { toolName: "bash", input: { command: "git push" } };
+  const deniedResult = await toolCall!(denied, {
+    ui: {
+      input: async (_title, placeholder) => {
+        deniedReviewed.push(JSON.parse(placeholder));
+        return JSON.stringify({ allow: false, message: "denied" });
+      },
+    },
+  });
+  expect(deniedReviewed).toEqual([
+    { toolName: "bash", input: { command: "git push" } },
+  ]);
+  expect(deniedResult).toEqual({ block: true, reason: "denied" });
+  expect(denied.input.command).toBe("git push");
+});
+
+it.skipIf(process.platform === "win32")(
+  "runs the shell text check before enabling pipefail and leaves refused commands unchanged",
+  async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "linger-pi-pipefail-shell-text-"),
+    );
+    try {
+      const hook = path.join(root, "daemon.mjs");
+      const recorded = path.join(root, "command");
+      const original = 'teamhub message send --content "Quote: $180"';
+      await writeFile(
+        hook,
+        `#!${process.execPath}
+import { writeFileSync } from "node:fs";
+let input = "";
+process.stdin.on("data", (chunk) => (input += chunk));
+process.stdin.on("end", () => {
+  const { tool_input } = JSON.parse(input);
+  writeFileSync(${JSON.stringify(recorded)}, String(tool_input.command ?? ""));
+  if (process.argv[2] !== "shell-text-hook" || tool_input.command !== ${JSON.stringify(original)}) process.exit(0);
+  process.stderr.write("Not run: use a quoted heredoc\\n");
+  process.exit(2);
+});
+`,
+        { mode: 0o700 },
+      );
+      const result = await run(
+        process.execPath,
+        [
+          "--input-type=module",
+          "--eval",
+          `
+      import assert from "node:assert/strict";
+      import managedExtension from ${JSON.stringify(new URL("../tools/pi-mcp.mjs", import.meta.url).href)};
+      let toolCall;
+      await managedExtension({
+        on: (event, handler) => {
+          if (event === "tool_call") toolCall = handler;
+        },
+      });
+      let uiCalls = 0;
+      const event = { toolName: "bash", input: { command: ${JSON.stringify(original)} } };
+      const blocked = await toolCall(event, {
+        ui: {
+          input: async () => {
+            uiCalls += 1;
+            return JSON.stringify({ allow: true });
+          },
+        },
+      });
+      assert.deepEqual(blocked, { block: true, reason: "Not run: use a quoted heredoc" });
+      assert.equal(uiCalls, 0);
+      assert.equal(event.input.command, ${JSON.stringify(original)});
+      console.log("refused shell text stayed unprefixed");
+    `,
+        ],
+        {
+          timeout: 20_000,
+          env: {
+            ...process.env,
+            LINGER_PI_SHELL_TEXT_HOOK: hook,
+          },
+        },
+      );
+      expect(result.stdout).toContain("refused shell text stayed unprefixed");
+      expect(await readFile(recorded, "utf8")).toBe(original);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  30_000,
+);
+
+it.skipIf(process.platform === "win32")(
+  "enforces pipefail in bash while staying compatible with sh and opt-out",
+  async () => {
+    const entry = new URL("../tools/pi-mcp.mjs", import.meta.url).href;
+    const { PIPEFAIL_PREFIX } = (await import(entry)) as {
+      PIPEFAIL_PREFIX: string;
+    };
+    const shellOptions = {
+      timeout: 20_000,
+      env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
+    };
+
+    let bashFailureCode: unknown;
+    try {
+      await run(
+        "/bin/bash",
+        ["--norc", "--noprofile", "-c", `${PIPEFAIL_PREFIX}false | head -1`],
+        shellOptions,
+      );
+    } catch (error) {
+      bashFailureCode = (error as { code?: unknown }).code;
+    }
+    expect(typeof bashFailureCode).toBe("number");
+    expect(bashFailureCode).not.toBe(0);
+
+    await expect(
+      run(
+        "/bin/bash",
+        [
+          "--norc",
+          "--noprofile",
+          "-c",
+          `${PIPEFAIL_PREFIX}set +o pipefail\nfalse | head -1`,
+        ],
+        shellOptions,
+      ),
+    ).resolves.toMatchObject({ stdout: "", stderr: "" });
+
+    await expect(
+      run(
+        "/bin/bash",
+        ["--norc", "--noprofile", "-c", `${PIPEFAIL_PREFIX}true`],
+        shellOptions,
+      ),
+    ).resolves.toMatchObject({ stdout: "", stderr: "" });
+
+    await expect(
+      run("/bin/sh", ["-c", `${PIPEFAIL_PREFIX}true`], shellOptions),
+    ).resolves.toMatchObject({ stdout: "", stderr: "" });
+
+    await expect(
+      run(
+        "/bin/sh",
+        ["-n", "-c", `${PIPEFAIL_PREFIX}false | head -1`],
+        shellOptions,
+      ),
+    ).resolves.toMatchObject({ stdout: "", stderr: "" });
+  },
+  30_000,
+);

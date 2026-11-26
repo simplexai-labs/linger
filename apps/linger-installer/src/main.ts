@@ -23,11 +23,14 @@ export function parseInstallerArguments(args: string[]) {
     resume?: boolean;
     inspect?: boolean;
     inspectTarget?: string;
+    prefetchBifrost?: boolean;
+    abortOnStdinClose?: boolean;
     byokCommand?: "check" | "models";
     userKeys?: boolean;
     migrate?: boolean;
     stop?: boolean;
     stopLocalModels?: boolean;
+    prepareVoiceTools?: boolean;
   } = {
     home: lingerHome(),
   };
@@ -45,6 +48,14 @@ export function parseInstallerArguments(args: string[]) {
       options.inspect = true;
       continue;
     }
+    if (flag === "--prefetch-bifrost") {
+      options.prefetchBifrost = true;
+      continue;
+    }
+    if (flag === "--abort-on-stdin-close") {
+      options.abortOnStdinClose = true;
+      continue;
+    }
     if (flag === "--check-byok" || flag === "--list-byok-models") {
       options.byokCommand = flag === "--check-byok" ? "check" : "models";
       continue;
@@ -59,6 +70,10 @@ export function parseInstallerArguments(args: string[]) {
     }
     if (flag === "--stop-local-models") {
       options.stopLocalModels = true;
+      continue;
+    }
+    if (flag === "--prepare-voice-tools") {
+      options.prepareVoiceTools = true;
       continue;
     }
     if (flag === "--user-keys") {
@@ -100,21 +115,27 @@ export function parseInstallerArguments(args: string[]) {
   if (
     !options.sourceRepo &&
     !options.inspect &&
+    !options.prefetchBifrost &&
     !options.byokCommand &&
     !options.userKeys &&
     !options.migrate &&
     !options.stop &&
-    !options.stopLocalModels
+    !options.stopLocalModels &&
+    !options.prepareVoiceTools
   )
     throw new Error("The installer needs a source checkout (--source-repo).");
   if (options.inspectTarget && !options.inspect)
     throw new Error("An inspection target requires --inspect.");
+  if (options.abortOnStdinClose && !options.prefetchBifrost)
+    throw new Error("--abort-on-stdin-close requires --prefetch-bifrost.");
   if (options.resume && !options.instanceName)
     throw new Error("Resume needs a source checkout and an instance.");
   if (options.userKeys && !options.instanceName)
     throw new Error("Keys need an instance.");
   if (options.stop && !options.instanceName)
     throw new Error("Stop needs an instance.");
+  if (options.prepareVoiceTools && !options.instanceName)
+    throw new Error("Voice tools preparation needs an instance.");
   return options;
 }
 // The desktop client shows this line, so it carries the real cause; only an
@@ -151,47 +172,54 @@ const serveFailed = (error: unknown) => {
 async function resume(options: ReturnType<typeof parseInstallerArguments>) {
   // Headless restart for the desktop client: progress on stderr, the outcome
   // as one JSON line on stdout.
-  const { resumeSourceInstance } = await import("./server/resume.js");
+  const [{ resumeSourceInstance }, { withLocalmodelsToolCache }] =
+    await Promise.all([
+      import("./server/resume.js"),
+      import("@linger/local-installation/localmodels-tool"),
+    ]);
   const controller = new AbortController();
   process.once("SIGTERM", () => controller.abort());
   let runtimeDescriptors: RuntimeDescriptor[] | undefined;
   let resumeTimings: ResumeTimings | undefined;
-  const outcome = await resumeSourceInstance({
-    home: options.home,
-    sourceRepo: options.sourceRepo!,
-    instanceName: options.instanceName!,
-    externalComputer: options.externalComputer,
-    onRuntimeDescriptors: (descriptors) => {
-      runtimeDescriptors = descriptors;
-    },
-    onTimings: (timings) => {
-      resumeTimings = timings;
-    },
-    signal: controller.signal,
-    log: (message) => process.stderr.write(message.replace(/\n?$/, "\n")),
-  }).catch((error: unknown) => ({
-    code: 1,
-    state: "failed",
-    message: error instanceof Error ? error.message : String(error),
-    details: undefined,
-  }));
-  // The desktop's own Computer takes the runtime and localmodels tool paths
-  // from every resume, so an install from before it knew one gains it.
-  // The desktop does not read resume stderr, so timings ride in the outcome.
   let runtimeLookupTimings: RuntimeLookupTimings | undefined;
-  const runtime =
-    outcome.code === 0 && options.externalComputer
-      ? await import("./server/instance-runtime.js")
-          .then(({ instanceRuntime }) =>
-            instanceRuntime(options.home, options.instanceName!, {
-              runtimeDescriptors,
-              onTimings: (timings) => {
-                runtimeLookupTimings = timings;
-              },
-            }),
-          )
-          .catch(() => undefined)
-      : undefined;
+  const { outcome, runtime } = await withLocalmodelsToolCache(async () => {
+    const resumeOutcome = await resumeSourceInstance({
+      home: options.home,
+      sourceRepo: options.sourceRepo!,
+      instanceName: options.instanceName!,
+      externalComputer: options.externalComputer,
+      onRuntimeDescriptors: (descriptors) => {
+        runtimeDescriptors = descriptors;
+      },
+      onTimings: (timings) => {
+        resumeTimings = timings;
+      },
+      signal: controller.signal,
+      log: (message) => process.stderr.write(message.replace(/\n?$/, "\n")),
+    }).catch((error: unknown) => ({
+      code: 1,
+      state: "failed",
+      message: error instanceof Error ? error.message : String(error),
+      details: undefined,
+    }));
+    // The desktop's own Computer takes the runtime and localmodels tool paths
+    // from every resume, so an install from before it knew one gains it.
+    // The desktop does not read resume stderr, so timings ride in the outcome.
+    const instanceRuntimeResult =
+      resumeOutcome.code === 0 && options.externalComputer
+        ? await import("./server/instance-runtime.js")
+            .then(({ instanceRuntime }) =>
+              instanceRuntime(options.home, options.instanceName!, {
+                runtimeDescriptors,
+                onTimings: (timings) => {
+                  runtimeLookupTimings = timings;
+                },
+              }),
+            )
+            .catch(() => undefined)
+        : undefined;
+    return { outcome: resumeOutcome, runtime: instanceRuntimeResult };
+  });
   // Detached service processes may keep handles open; exit once flushed.
   process.stdout.write(
     `${JSON.stringify({
@@ -261,6 +289,51 @@ async function inspect(options: ReturnType<typeof parseInstallerArguments>) {
     report ?? (refusal ? { error: failureMessage ?? "", refusal } : null);
   process.stdout.write(`${JSON.stringify(output)}\n`, () =>
     process.exit(report ? 0 : 1),
+  );
+}
+// Headless background Bifrost pre-fetch for the desktop setup page: downloads
+// the pinned Bifrost archive into localmodels' archive cache without allocating
+// a port or starting the gateway, writing one JSON line on stdout.
+async function prefetchBifrost(
+  options: ReturnType<typeof parseInstallerArguments>,
+) {
+  const { prefetchLocalmodelsBifrost } =
+    await import("@linger/local-installation/localmodels-tool");
+  const controller = new AbortController();
+  const onTerm = () => controller.abort();
+  process.once("SIGTERM", onTerm);
+  if (options.abortOnStdinClose) {
+    if (process.stdin.readableEnded || process.stdin.destroyed) {
+      controller.abort();
+    } else {
+      process.stdin.once("end", onTerm);
+      process.stdin.once("close", onTerm);
+      process.stdin.resume();
+    }
+  }
+  let result: Awaited<ReturnType<typeof prefetchLocalmodelsBifrost>>;
+  try {
+    result = await prefetchLocalmodelsBifrost(options.home, {
+      signal: AbortSignal.any([
+        controller.signal,
+        AbortSignal.timeout(10 * 60_000),
+      ]),
+    });
+  } catch (error) {
+    result = {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    process.off("SIGTERM", onTerm);
+    if (options.abortOnStdinClose) {
+      process.stdin.off("end", onTerm);
+      process.stdin.off("close", onTerm);
+      process.stdin.pause();
+    }
+  }
+  process.stdout.write(`${JSON.stringify(result)}\n`, () =>
+    process.exit(result.ok || result.unsupported ? 0 : 1),
   );
 }
 // Headless key update for the desktop client: the changes arrive as JSON on
@@ -416,10 +489,44 @@ async function stopLocalModels(
     process.exit(outcome.failed.length ? 1 : 0),
   );
 }
+// Detached background worker for cold first installs: extracts and verifies
+// voice tools while the main install proceeds, then waits for "go\n" on stdin
+// before starting native LiveKit.
+async function prepareVoiceTools(
+  options: ReturnType<typeof parseInstallerArguments>,
+) {
+  const { prepareVoiceToolsAndStartLiveKit } =
+    await import("@linger/local-installation/native-source");
+  const controller = new AbortController();
+  const onStop = () => controller.abort();
+  process.once("SIGTERM", onStop);
+  process.once("SIGINT", onStop);
+  try {
+    await prepareVoiceToolsAndStartLiveKit({
+      home: options.home,
+      instanceName: options.instanceName!,
+      waitForGoOnStdin: true,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    process.stderr.write(
+      `Background voice tools preparation failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+  } finally {
+    process.off("SIGTERM", onStop);
+    process.off("SIGINT", onStop);
+  }
+  process.exit(0);
+}
 async function serve(options: ReturnType<typeof parseInstallerArguments>) {
+  const { createVoiceToolsBackgroundLauncher } =
+    await import("@linger/local-installation/native-source");
   const server = await launchInstaller({
     ...options,
     sourceRepo: options.sourceRepo!,
+    launchVoiceToolsBackground: createVoiceToolsBackgroundLauncher(
+      fileURLToPath(import.meta.url),
+    ),
   });
   process.stdout.write(
     `Installer is running at ${server.origin}\nOpen the private launcher in your browser: ${path.join(options.home, "installer", "launch.html")}\nOn a remote Linux host, forward the installer port over SSH and open the private launcher on your computer.\n`,
@@ -470,13 +577,21 @@ if (
   }
   // Installs from before the rename move to the Linger home once, before
   // any mode opens it; --migrate does only that, for the desktop client.
-  // Inspecting or stopping for an uninstall or a quit never migrates it.
+  // Inspecting, pre-fetching, or stopping for an uninstall or a quit never
+  // migrates it.
   // Only --migrate reports the instances it skipped, as warnings and as one
   // JSON line on stdout: the desktop runs it first, and in the other modes a
   // warning on stderr would read as the reason a start failed. A skipped
   // instance is refused with its own error when a mode opens it.
   let skipped: LegacyInstanceSkipped[] = [];
-  if (options && !options.inspect && !options.stop && !options.stopLocalModels)
+  if (
+    options &&
+    !options.inspect &&
+    !options.prefetchBifrost &&
+    !options.stop &&
+    !options.stopLocalModels &&
+    !options.prepareVoiceTools
+  )
     await import("@linger/local-installation/legacy-migration")
       .then(async ({ migrateLegacyInstallation }) => {
         skipped = await migrateLegacyInstallation({ home: options!.home });
@@ -490,6 +605,7 @@ if (
       });
   if (options?.stop) await stopInstallation(options);
   else if (options?.stopLocalModels) await stopLocalModels(options);
+  else if (options?.prepareVoiceTools) await prepareVoiceTools(options);
   else if (options?.migrate)
     process.stdout.write(`${JSON.stringify({ skipped })}\n`, () =>
       process.exit(0),
@@ -497,6 +613,7 @@ if (
   else if (options?.userKeys) await userKeys(options);
   else if (options?.byokCommand)
     await byokEndpointCommand(options, options.byokCommand);
+  else if (options?.prefetchBifrost) await prefetchBifrost(options);
   else if (options?.inspect) await inspect(options);
   else if (options?.resume) await resume(options);
   else if (options) await serve(options).catch(serveFailed);

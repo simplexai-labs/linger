@@ -383,17 +383,22 @@ async function newerHarnessPiDirs(
   return matched.map((item) => item.dir);
 }
 
-/**
- * Appends fallback Pi lookup directories to PATH so user PATH, ~/.local/bin,
- * Windows %APPDATA%\npm, and strictly newer harness-managed Pi installs take
- * precedence over the bundled Pi, while bundled Pi supersedes older or equal
- * harness copies without touching SIMPLEX_PI_PATH.
- */
-export async function withBundledPiPath(
+const WINDOWS_PI_EXECUTABLES = [
+  "pi.exe",
+  "pi.cmd",
+  "pi.bat",
+  "pi.com",
+] as const;
+
+async function collectUserSearchDirs(
   env: NodeJS.ProcessEnv,
-  options: WithBundledPiPathOptions,
-): Promise<NodeJS.ProcessEnv> {
-  const platform = options.platform ?? process.platform;
+  options: Pick<WithBundledPiPathOptions, "homedir">,
+  platform: NodeJS.Platform,
+): Promise<{
+  pathKey: string;
+  nextEnv: NodeJS.ProcessEnv;
+  directories: string[];
+}> {
   const isWin = platform === "win32";
   const delimiter = isWin ? ";" : ":";
 
@@ -418,7 +423,7 @@ export async function withBundledPiPath(
     nextEnv[key] = value;
   }
 
-  const candidates = [...existingEntries];
+  const directories = [...existingEntries];
   const userHome =
     lookupEnvValue(env, "HOME", isWin) ||
     lookupEnvValue(env, "USERPROFILE", isWin) ||
@@ -427,7 +432,7 @@ export async function withBundledPiPath(
   if (userHome) {
     const localBin = path.join(userHome, ".local", "bin");
     if (await isExistingDirectory(localBin)) {
-      candidates.push(localBin);
+      directories.push(localBin);
     }
   }
   if (isWin) {
@@ -435,18 +440,122 @@ export async function withBundledPiPath(
     if (appData) {
       const npmBin = path.join(appData, "npm");
       if (await isExistingDirectory(npmBin)) {
-        candidates.push(npmBin);
+        directories.push(npmBin);
       }
     }
   }
-  candidates.push(
+  return { pathKey, nextEnv, directories };
+}
+
+async function findPiInDirectory(
+  directory: string,
+  platform: NodeJS.Platform,
+): Promise<string | undefined> {
+  const names =
+    platform === "win32" ? WINDOWS_PI_EXECUTABLES : (["pi"] as const);
+  for (const name of names) {
+    const candidate = path.join(directory, name);
+    try {
+      const info = await stat(candidate);
+      if (!info.isFile()) continue;
+      if (platform !== "win32" && process.platform !== "win32") {
+        await access(candidate, fsConstants.X_OK);
+      }
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Returns the first Pi executable or explicit override that outranks the
+ * bundled Pi under the shared precedence rules, or undefined when bundled Pi
+ * unambiguously wins.
+ */
+export async function findHigherPrecedencePi(
+  env: NodeJS.ProcessEnv,
+  options: WithBundledPiPathOptions,
+): Promise<string | undefined> {
+  const platform = options.platform ?? process.platform;
+  const isWin = platform === "win32";
+
+  const simplexPiPath = lookupEnvValue(env, "SIMPLEX_PI_PATH", isWin)?.trim();
+  if (simplexPiPath) return simplexPiPath;
+
+  const ignoredDirs = new Set<string>([
+    pathKeyForComparison(options.bundledPi.binDir, isWin),
+  ]);
+  if (options.home.trim()) {
+    ignoredDirs.add(
+      pathKeyForComparison(
+        path.join(path.resolve(options.home), "runtime", "bundled-pi", "bin"),
+        isWin,
+      ),
+    );
+  }
+
+  const lingerPiPath = lookupEnvValue(env, "LINGER_PI_PATH", isWin)?.trim();
+  if (lingerPiPath) {
+    const parentDir = isWin
+      ? path.win32.dirname(lingerPiPath)
+      : path.posix.dirname(lingerPiPath);
+    if (!ignoredDirs.has(pathKeyForComparison(parentDir, isWin))) {
+      return lingerPiPath;
+    }
+  }
+
+  const { directories } = await collectUserSearchDirs(env, options, platform);
+  const seen = new Set<string>();
+  for (const entry of directories) {
+    if (!entry.trim()) continue;
+    const key = pathKeyForComparison(entry, isWin);
+    if (seen.has(key) || ignoredDirs.has(key)) continue;
+    seen.add(key);
+    const found = await findPiInDirectory(entry, platform);
+    if (found) return found;
+  }
+
+  const newerDirs = await newerHarnessPiDirs(
+    options.home,
+    options.bundledPi.version,
+    platform,
+  );
+  if (newerDirs.length > 0) {
+    return path.join(newerDirs[0]!, isWin ? "pi.exe" : "pi");
+  }
+  return undefined;
+}
+
+/**
+ * Appends fallback Pi lookup directories to PATH so user PATH, ~/.local/bin,
+ * Windows %APPDATA%\npm, and strictly newer harness-managed Pi installs take
+ * precedence over the bundled Pi, while bundled Pi supersedes older or equal
+ * harness copies without touching SIMPLEX_PI_PATH.
+ */
+export async function withBundledPiPath(
+  env: NodeJS.ProcessEnv,
+  options: WithBundledPiPathOptions,
+): Promise<NodeJS.ProcessEnv> {
+  const platform = options.platform ?? process.platform;
+  const isWin = platform === "win32";
+  const delimiter = isWin ? ";" : ":";
+
+  const { pathKey, nextEnv, directories } = await collectUserSearchDirs(
+    env,
+    options,
+    platform,
+  );
+  const candidates = [
+    ...directories,
     ...(await newerHarnessPiDirs(
       options.home,
       options.bundledPi.version,
       platform,
     )),
-  );
-  candidates.push(options.bundledPi.binDir);
+    options.bundledPi.binDir,
+  ];
 
   const seen = new Set<string>();
   const deduped: string[] = [];

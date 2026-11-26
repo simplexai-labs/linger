@@ -134,6 +134,7 @@ export const createTeamHubLocalComputerRegistry = (
         seen_at: new Date().toISOString(),
         display_name: hello.display_name ?? computerId,
         platform: hello.platform,
+        // A rolling upgrade can still route this reconnect to an older TeamHub.
         ...(hello.capacity === undefined ? {} : { capacity: hello.capacity }),
         runtimes: [...hello.runtimes],
         runtime_diagnostics: jsonObjects(hello.runtime_diagnostics),

@@ -58,4 +58,60 @@ describe("module host", () => {
       vi.useRealTimers();
     }
   });
+
+  it("stops peers in the same layer concurrently after dependents and stays idempotent", async () => {
+    const events: string[] = [];
+    const peerEntered = new Set<string>();
+    let releasePeers!: () => void;
+    const peersBarrier = new Promise<void>((resolve) => {
+      releasePeers = resolve;
+    });
+
+    const host = testHost([
+      {
+        ...stubModule("Config"),
+        stop: async () => {
+          events.push("stop:Config");
+        },
+      },
+      {
+        ...stubModule("BridgeClient", ["Config"]),
+        stop: async () => {
+          events.push("begin:BridgeClient");
+          peerEntered.add("BridgeClient");
+          if (peerEntered.size === 2) releasePeers();
+          await peersBarrier;
+          events.push("end:BridgeClient");
+        },
+      },
+      {
+        ...stubModule("WorkspaceGrants", ["Config"]),
+        stop: async () => {
+          events.push("begin:WorkspaceGrants");
+          peerEntered.add("WorkspaceGrants");
+          if (peerEntered.size === 2) releasePeers();
+          await peersBarrier;
+          events.push("end:WorkspaceGrants");
+          throw new Error("peer error");
+        },
+      },
+      {
+        ...stubModule("RuntimeHost", ["BridgeClient", "WorkspaceGrants"]),
+        stop: async () => {
+          events.push("stop:RuntimeHost");
+        },
+      },
+    ]);
+
+    await host.start();
+    await host.stop("quit");
+    expect(events[0]).toBe("stop:RuntimeHost");
+    expect(peerEntered).toEqual(new Set(["BridgeClient", "WorkspaceGrants"]));
+    expect(events.at(-1)).toBe("stop:Config");
+
+    // Repeated stop() does not stop already-stopped modules again.
+    events.length = 0;
+    await host.stop("quit");
+    expect(events).toEqual([]);
+  });
 });

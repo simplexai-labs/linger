@@ -43,6 +43,7 @@ func runFixture(name string, args []string) int {
 	switch name {
 	case "print":
 		fmt.Print(os.Getenv("FIXTURE_STDOUT"))
+		fmt.Fprint(os.Stderr, os.Getenv("FIXTURE_STDERR"))
 		code, _ := strconv.Atoi(os.Getenv("FIXTURE_EXIT"))
 		return code
 	case "block":

@@ -206,9 +206,14 @@ func run(args []string) (resultErr error) {
 		return result, err
 	}
 	providerEnvironment := currentProviderEnvironment()
+	initialRuntimes, backfillRuntimes := startupDiscoverySplit(computer.PreferredRuntime, computer.EnabledRuntimes)
+	initialOptions := currentDiscoveryOptions()
+	if len(backfillRuntimes) > 0 {
+		initialOptions.Runtimes = initialRuntimes
+	}
 	// The monitor refreshes from what Discover found, not from the shaped
 	// result, so it gets the unshaped one.
-	rawDiscovered, err := terminalCache.Discover(context.Background(), currentDiscoveryOptions())
+	rawDiscovered, err := terminalCache.Discover(context.Background(), initialOptions)
 	if err != nil {
 		return err
 	}
@@ -375,8 +380,9 @@ func run(args []string) (resultErr error) {
 	}
 	piEnabled := len(computer.EnabledRuntimes) == 0 || slices.Contains(computer.EnabledRuntimes, "pi")
 	_, hasPi := discovered.Installations["pi"]
+	piDeferred := slices.Contains(backfillRuntimes, "pi")
 	libraryHarnessDir := ""
-	if piEnabled && !hasPi {
+	if piEnabled && !hasPi && !piDeferred {
 		libraryHarnessDir = localmodels.HarnessRoot(localModelsStateDir)
 	}
 	localModels = localmodels.New(localmodels.Options{
@@ -404,6 +410,7 @@ func run(args []string) (resultErr error) {
 	defer localModels.Close()
 	antigravityExecutable := &antigravityExecutableTracker{path: discovered.Installations["antigravity"].ExecutablePath}
 	applyDiscovered := func(publishCtx context.Context, next provider.DiscoveryResult) error {
+		reconcileLocalModelsHarness(localModels, piEnabled, localModelsStateDir, next)
 		if antigravityExecutable.changed(next) && localDaemon != nil {
 			localDaemon.InvalidateAntigravityResidents("executable_changed")
 		}
@@ -441,7 +448,7 @@ func run(args []string) (resultErr error) {
 	codexModelSessions := &provider.CodexSessions{Root: filepath.Join(computer.StateDirectory, "model-invoke", "codex-sessions")}
 	localDaemon, err = daemon.New(daemon.Options{
 		ComputerID: computer.ComputerID, DisplayName: computer.DisplayName,
-		Capacity: computer.MaxConcurrentOperations, Runtimes: runtimes,
+		Runtimes:           runtimes,
 		EnabledRuntimes:    computer.EnabledRuntimes,
 		RuntimeDiagnostics: diagnostics, WorkspaceGrants: encodedGrants,
 		StateDirectory:      computer.StateDirectory,
@@ -510,7 +517,6 @@ func run(args []string) (resultErr error) {
 	controller = &controlController{
 		daemon: localDaemon, assignments: assignmentStore, diagnostics: discovered.Diagnostics,
 		services: managedServices, computerID: computer.ComputerID,
-		capacity:    computer.MaxConcurrentOperations,
 		launchNonce: os.Getenv("LINGER_DAEMON_LAUNCH_NONCE"), cancel: cancel,
 	}
 	controlServer, err := lingercontrol.New(computer.StateDirectory, controller)
@@ -535,6 +541,7 @@ func run(args []string) (resultErr error) {
 		monitorDone <- provider.MonitorRuntimeDiagnostics(ctx, provider.RuntimeMonitorOptions{
 			Initial:               rawDiscovered,
 			InitialPublished:      &discovered,
+			BackfillRuntimes:      backfillRuntimes,
 			Discovery:             currentDiscoveryOptions(),
 			ResolveDiscovery:      currentDiscoveryOptions,
 			TerminalEnvironment:   terminalCache,
@@ -581,7 +588,6 @@ type controlController struct {
 	diagnostics   []provider.RuntimeDiagnostic
 	diagnosticsMu sync.RWMutex
 	computerID    string
-	capacity      *int
 	launchNonce   string
 	cancel        context.CancelFunc
 }
@@ -602,9 +608,6 @@ func (c *controlController) Status(ctx context.Context) (map[string]any, error) 
 		"gateway_state":  c.daemon.GatewayState(),
 		"reconciled":     c.daemon.Reconciled(),
 		"active_runners": activeRunners, "active_operations": c.daemon.ActiveOperationCount(),
-	}
-	if c.capacity != nil {
-		result["capacity"] = *c.capacity
 	}
 	if c.launchNonce != "" {
 		result["launch_nonce"] = c.launchNonce
@@ -983,6 +986,43 @@ func daemonDiscoveryPaths(configured map[string]string, stateDir, managedPi stri
 	layers := localmodels.ResolveRuntimePathsWithBundled(configured, stateDir, bundledPiVersion)
 	filteredManagedPi := localmodels.FilterManagedPiPath(managedPi, stateDir, bundledPiVersion)
 	return layers.Configured, withManagedPiPath(layers.Managed, filteredManagedPi), bundledRuntimePaths(toolInstallation)
+}
+
+// startupDiscoverySplit splits startup Runtime discovery into an immediate
+// phase for the preferred Runtime and an asynchronous backfill phase for the
+// remaining enabled Runtimes when more than one Runtime is in scope.
+func startupDiscoverySplit(preferred string, enabled []string) (initial []string, backfill []string) {
+	full := enabled
+	if len(full) == 0 {
+		full = provider.AllRuntimeTypes()
+	}
+	if preferred == "" || len(full) <= 1 || !slices.Contains(full, preferred) {
+		return enabled, nil
+	}
+	backfill = make([]string, 0, len(full)-1)
+	for _, runtimeType := range provider.AllRuntimeTypes() {
+		if runtimeType != preferred && slices.Contains(full, runtimeType) {
+			backfill = append(backfill, runtimeType)
+		}
+	}
+	return []string{preferred}, backfill
+}
+
+func hasRuntimeDiagnostic(diagnostics []provider.RuntimeDiagnostic, runtimeType string) bool {
+	return slices.ContainsFunc(diagnostics, func(diagnostic provider.RuntimeDiagnostic) bool {
+		return diagnostic.Type == runtimeType
+	})
+}
+
+func reconcileLocalModelsHarness(library *localmodels.Library, piEnabled bool, localModelsStateDir string, next provider.DiscoveryResult) {
+	if library == nil || !piEnabled || !hasRuntimeDiagnostic(next.Diagnostics, "pi") {
+		return
+	}
+	if _, ok := next.Installations["pi"]; ok {
+		library.SetHarnessDirectory("")
+		return
+	}
+	library.SetHarnessDirectory(localmodels.HarnessRoot(localModelsStateDir))
 }
 
 func bundledRuntimePaths(installation *localtools.Installation) map[string]string {

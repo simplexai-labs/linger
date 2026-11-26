@@ -566,21 +566,27 @@ Linux with `node scripts/prepare-native-voice-tools.mjs --target <target>
 and it checks the versions, the ffmpeg components the voice workers use,
 static linking and the Mach-O signatures. Licenses ship in `licenses/` of the
 archive. On every install and start, whether or not a voice key is saved,
-Native extracts the archive into
-`tools/native/components`, puts its `bin` first on the services' `PATH`
-(TeamHub and the voice workers run `ffmpeg`/`ffprobe` from it) and runs
-`livekit-server` as the `livekit` Native service: HTTP and WebSocket signalling
-on one free `127.0.0.1` port and media on one free UDP port (bound to
-`127.0.0.1` on macOS and Linux, and to local interfaces alongside `127.0.0.1`
-with ICE-Lite on Windows because Windows blocks cross-scope UDP between
-WebRTC's non-loopback sockets and `127.0.0.1`; ICE-Lite keeps LiveKit from
-adding default public STUN servers when `node_ip` is unset, while signalling
-stays loopback-only so LAN peers cannot obtain ICE credentials; binding
-non-loopback UDP on Windows can trigger a Windows Defender Firewall prompt and
-single-port UDPMux snapshots local interfaces at startup so network changes
-require restarting LiveKit), both kept with
-the generated API key and secret in the owner-only `livekit.env` of the
-instance, logs in `native/logs/livekit.log`. ICE over TCP stays off because
+Native places the component's `bin` under `tools/native/components` first on
+the services' `PATH`, passes it to TeamHub as `TEAMHUB_VOICE_TOOLS_BIN`
+(TeamHub resolves `ffmpeg`/`ffprobe` lazily from it, and the voice workers run
+them from `PATH`), and runs `livekit-server` as the `livekit` Native service:
+HTTP and WebSocket signalling on one free `127.0.0.1` port and media on one
+free UDP port (bound to `127.0.0.1` on macOS and Linux, and to local interfaces
+alongside `127.0.0.1` with ICE-Lite on Windows because Windows blocks
+cross-scope UDP between WebRTC's non-loopback sockets and `127.0.0.1`; ICE-Lite
+keeps LiveKit from adding default public STUN servers when `node_ip` is unset,
+while signalling stays loopback-only so LAN peers cannot obtain ICE
+credentials; binding non-loopback UDP on Windows can trigger a Windows Defender
+Firewall prompt and single-port UDPMux snapshots local interfaces at startup so
+network changes require restarting LiveKit), both kept with the generated API
+key and secret in the owner-only `livekit.env` of the instance, logs in
+`native/logs/livekit.log`. On a cold first install where the archive is not yet
+extracted (and no voice provider key is configured), a detached background
+installer worker extracts and verifies the voice tools asynchronously while the
+main install temporarily holds LiveKit's loopback HTTP port so foundation
+services cannot claim it, then releases the port and signals the worker to
+start `livekit-server` once the core services are ready; subsequent starts
+reuse the extracted tools directly. ICE over TCP stays off because
 LiveKit binds it on every interface. Without the tools for the computer, or
 when they fail to prepare, Native logs it, keeps voice off, gives TeamHub
 `TEAMHUB_VOICE_MEDIA=off` and finishes the install. The macOS tools live in

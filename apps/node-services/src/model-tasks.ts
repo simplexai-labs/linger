@@ -93,16 +93,6 @@ export interface ModelLease {
   release(result: ModelLeaseResult): void;
 }
 
-/** A bounded Computer resolves an unknown Meta priority only when work contends. */
-export type CapacityPriority =
-  | number
-  | RunPriority
-  | {
-      /** Monotonic arrival time retained across priority refreshes for this wait. */
-      readonly queuedAt: number;
-      resolve(): Promise<number>;
-    };
-
 /** A question or the notes of a recording go before chat. */
 export const RECORDING_PRIORITY = 5;
 

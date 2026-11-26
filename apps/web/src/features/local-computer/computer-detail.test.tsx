@@ -68,7 +68,6 @@ it("keeps the last reported presentation stable throughout reconnect churn", () 
     daemon_version: "0.1.0",
     recommended_version: "0.2.0",
     active_operations: 0,
-    capacity: 2,
     workspace_grants: [],
     runtimes: [{ type: "codex", status: "ready", models: [] }],
   };

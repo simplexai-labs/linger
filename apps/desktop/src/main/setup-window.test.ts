@@ -7,42 +7,58 @@ const state = vi.hoisted(() => {
   const { EventEmitter } =
     require("node:events") as typeof import("node:events");
   /* eslint-enable @typescript-eslint/no-require-imports */
+
   const windows: MockBrowserWindow[] = [];
 
   class MockWebContents extends EventEmitter {
-    readonly setWindowOpenHandler = vi.fn();
-    readonly send = vi.fn();
-    isDestroyed(): boolean {
-      return false;
-    }
-  }
-
-  class MockBrowserWindow extends EventEmitter {
-    readonly webContents = new MockWebContents();
-    readonly show = vi.fn();
-    readonly focus = vi.fn();
-    readonly loadURL = vi.fn(async () => {});
-    readonly destroy = vi.fn(() => {
-      this.destroyed = true;
-    });
     destroyed = false;
-
-    constructor() {
-      super();
-      windows.push(this);
-    }
-
+    readonly send = vi.fn();
+    readonly setWindowOpenHandler = vi.fn();
     isDestroyed(): boolean {
       return this.destroyed;
     }
   }
 
-  return { windows, MockBrowserWindow };
+  class MockBrowserWindow extends EventEmitter {
+    readonly webContents = new MockWebContents();
+    destroyed = false;
+    readonly show = vi.fn();
+    readonly focus = vi.fn();
+    readonly close = vi.fn(() => {
+      this.destroyed = true;
+      this.emit("closed");
+    });
+    readonly destroy = vi.fn(() => {
+      this.destroyed = true;
+    });
+    readonly loadURL = vi.fn(async () => {});
+    isDestroyed(): boolean {
+      return this.destroyed;
+    }
+    constructor() {
+      super();
+      windows.push(this);
+    }
+  }
+
+  const cookies = new EventEmitter();
+  const partitionSession = {
+    protocol: {
+      handle: vi.fn(),
+      unhandle: vi.fn(),
+    },
+  };
+
+  return { windows, MockBrowserWindow, cookies, partitionSession };
 });
 
 vi.mock("electron", () => ({
   BrowserWindow: state.MockBrowserWindow,
-  Notification: class {},
+  Notification: class {
+    static isSupported(): boolean {
+      return false;
+    }
+  },
   clipboard: { readText: vi.fn(() => ""), writeText: vi.fn() },
   dialog: { showOpenDialog: vi.fn() },
   ipcMain: {
@@ -53,22 +69,12 @@ vi.mock("electron", () => ({
     createFromBuffer: vi.fn(() => ({})),
   },
   session: {
-    defaultSession: {
-      cookies: {
-        on: vi.fn(),
-        off: vi.fn(),
-      },
-    },
-    fromPartition: vi.fn(() => ({
-      protocol: {
-        handle: vi.fn(),
-        unhandle: vi.fn(),
-      },
-    })),
+    defaultSession: { cookies: state.cookies },
+    fromPartition: vi.fn(() => state.partitionSession),
   },
   shell: {
-    showItemInFolder: vi.fn(),
     openExternal: vi.fn(async () => {}),
+    showItemInFolder: vi.fn(),
   },
 }));
 
@@ -101,7 +107,12 @@ import { ConfigStore } from "./config.js";
 import { LanguageModule } from "./language.js";
 import { EventBus, ModuleHost, type Module } from "./modules.js";
 import { SetupWindowModule } from "./setup-window.js";
-import { silentLog, stubModule, tempDirectory } from "./test-support.js";
+import {
+  silentLog,
+  stubModule,
+  tempDirectory,
+  testHost,
+} from "./test-support.js";
 
 function setupHost(options: {
   initialComputerId?: string;
@@ -117,6 +128,7 @@ function setupHost(options: {
       : {}),
   });
   const inspect = vi.fn();
+  const cancelPrestage = vi.fn();
   const localServer: Module = {
     name: "LocalServer",
     dependsOn: ["WindowManager", "Enrollment"],
@@ -124,10 +136,11 @@ function setupHost(options: {
       options.onLocalServerStart?.(config);
     },
     stop: async () => {},
-    ...({ inspect, status: () => ({ phase: "idle" }) } as Record<
-      string,
-      unknown
-    >),
+    ...({
+      inspect,
+      cancelPrestage,
+      status: () => ({ phase: "idle" }),
+    } as Record<string, unknown>),
   };
   const showOption = options.show;
   const setup = new SetupWindowModule({
@@ -156,10 +169,10 @@ function setupHost(options: {
       bus: new EventBus(),
     },
   );
-  return { host, config, inspect, setup };
+  return { host, config, inspect, cancelPrestage, setup };
 }
 
-describe("SetupWindowModule startup visibility", () => {
+describe("SetupWindowModule", () => {
   beforeEach(() => {
     state.windows.length = 0;
   });
@@ -209,5 +222,80 @@ describe("SetupWindowModule startup visibility", () => {
     await shown.host.start();
     expect(state.windows).toHaveLength(1);
     await shown.host.stop("quit");
+  });
+
+  it("cancels idle pre-staging when the setup window closes", async () => {
+    const inspect = vi.fn();
+    const cancelPrestage = vi.fn();
+    const bus = new EventBus();
+    const setup = new SetupWindowModule({
+      preload: "/preload.js",
+      version: "0.17.0",
+      defaultDisplayName: "My Mac",
+      show: true,
+      loginItem: { get: () => false, set: () => {} },
+    });
+
+    const host = testHost(
+      [
+        {
+          ...stubModule("Diagnostics"),
+          uploadUrl: () => undefined,
+          sender: { state: () => ({ phase: "idle" }), cancel: vi.fn() },
+        } as never,
+        {
+          ...stubModule("Enrollment"),
+          signedIn: vi.fn(async () => false),
+        } as never,
+        {
+          ...stubModule("Language"),
+          current: () => "en",
+          t: (message: { en: string }) => message.en,
+        } as never,
+        {
+          ...stubModule("LocalServer"),
+          inspect,
+          cancelPrestage,
+          account: vi.fn(),
+          status: () => ({
+            available: true,
+            phase: "idle",
+            message: "",
+            steps: [],
+            step: "prepare",
+            progress: 0,
+            attempt: 0,
+            localModels: { state: "unchecked" },
+            location: { path: "/home", custom: false },
+            keys: { composio: false },
+          }),
+        } as never,
+        {
+          ...stubModule("PowerGuard"),
+          alwaysOn: () => false,
+        } as never,
+        {
+          ...stubModule("WindowManager"),
+          show: vi.fn(),
+          markOpenFromSetup: vi.fn(),
+        } as never,
+        {
+          ...stubModule("WorkspaceGrants"),
+        } as never,
+        setup,
+      ],
+      {},
+      bus,
+    );
+
+    await host.start();
+    expect(state.windows).toHaveLength(1);
+    expect(inspect).toHaveBeenCalledOnce();
+    expect(cancelPrestage).not.toHaveBeenCalled();
+
+    state.windows[0]!.emit("closed");
+    expect(cancelPrestage).toHaveBeenCalledOnce();
+
+    await host.stop("quit");
   });
 });

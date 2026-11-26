@@ -1,17 +1,20 @@
-import { createRequire } from "node:module";
-
 import type { SupportedFileType } from "officeparser";
+// @ts-expect-error word-extractor does not ship TypeScript declarations.
+import WordExtractorModule from "word-extractor";
 
 import { archiveLimits, listSafeZipFiles } from "./document-archive-extract.js";
 
 import { DocumentNormalizationError } from "./document-normalizer.js";
 
-const require = createRequire(import.meta.url);
-const WordExtractor = require("word-extractor") as {
-  new (): {
-    extract(input: Buffer): Promise<{ getBody(): string }>;
-  };
-};
+interface WordExtractorInstance {
+  extract(input: Buffer): Promise<{ getBody(): string }>;
+}
+
+interface WordExtractorConstructor {
+  new (): WordExtractorInstance;
+}
+
+const WordExtractor = WordExtractorModule as WordExtractorConstructor;
 
 const OLE_SIGNATURE = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 

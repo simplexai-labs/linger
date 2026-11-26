@@ -596,6 +596,12 @@ export async function stopNativeProcess(
   await rm(paths(root, name).record, { force: true });
   await rm(request, { force: true });
 }
+const STOP_POLL_MS = [20, 40, 80, 100] as const;
+
+function pollDelay(attempt: number): Promise<void> {
+  return delay(STOP_POLL_MS[Math.min(attempt, STOP_POLL_MS.length - 1)]);
+}
+
 /**
  * macOS and Linux: ends the supervisor holding the lease and everything
  * under it, SIGINT first and SIGKILL for what outlives `interruptMs`.
@@ -623,7 +629,7 @@ async function stopLease(
   ) => signalLeasedProcess(name, candidate, record.lease, signal, record);
   const interrupted = new Map<number, string>();
   const deadline = Date.now() + interruptMs;
-  for (;;) {
+  for (let attempt = 0; ; attempt++) {
     for (const candidate of owned) {
       if (
         candidate.pid === record.pid ||
@@ -638,15 +644,19 @@ async function stopLease(
       Date.now() >= deadline
     )
       break;
-    await delay(100);
+    await pollDelay(attempt);
     owned = await nativeLeaseProcesses(record.lease);
   }
   // Keep the supervisor alive until separate-group descendants are reclaimed.
   const forceDeadline = Date.now() + 5_000;
-  while (owned.some((candidate) => candidate.pid !== record.pid)) {
+  for (
+    let attempt = 0;
+    owned.some((candidate) => candidate.pid !== record.pid);
+    attempt++
+  ) {
     for (const candidate of owned)
       if (candidate.pid !== record.pid) await signalOwned(candidate, "SIGKILL");
-    await delay(100);
+    await pollDelay(attempt);
     owned = await nativeLeaseProcesses(record.lease);
     if (
       Date.now() >= forceDeadline &&
@@ -662,15 +672,20 @@ async function stopLease(
   // written may have restarted its service since the last listing; with the
   // supervisor gone nothing restarts it again.
   for (let count = 0; count < 30; count++) {
-    owned = await nativeLeaseProcesses(record.lease);
-    if (!owned.length && !(await groupLive(record.pid))) break;
+    let liveInGroup: boolean;
+    [owned, liveInGroup] = await Promise.all([
+      nativeLeaseProcesses(record.lease),
+      groupLive(record.pid),
+    ]);
+    if (!owned.length && !liveInGroup) break;
     for (const candidate of owned) await signalOwned(candidate, "SIGKILL");
-    await delay(100);
+    await pollDelay(count);
   }
-  if (
-    (await groupLive(record.pid)) ||
-    (await nativeLeaseProcesses(record.lease)).length
-  )
+  const [liveInGroup, remainingOwned] = await Promise.all([
+    groupLive(record.pid),
+    nativeLeaseProcesses(record.lease),
+  ]);
+  if (liveInGroup || remainingOwned.length)
     throw new Error(`Native ${name} did not stop; identity record retained.`);
 }
 

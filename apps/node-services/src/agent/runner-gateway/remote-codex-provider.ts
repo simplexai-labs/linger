@@ -1,8 +1,4 @@
-import {
-  runPriorities,
-  RunPriority,
-  type CapacityPriority,
-} from "../../model-tasks.js";
+import { runPriorities, RunPriority } from "../../model-tasks.js";
 import { displayText } from "@linger/service-kit";
 import {
   OPERATION_OUTCOME_UNKNOWN,
@@ -166,14 +162,11 @@ export class RemoteRuntimeProvider implements AgentProvider {
   #capacityPermit?: RunnerCapacityPermit;
   readonly #closed = new AbortController();
 
-  async acquireRunCapacity(
-    signal: AbortSignal,
-    priority?: CapacityPriority,
-  ): Promise<() => void> {
+  async acquireRunCapacity(signal: AbortSignal): Promise<() => void> {
     let permit: RunnerCapacityPermit | undefined;
     try {
       permit = await this.#dispatcher.acquireOperationCapacity?.(
-        { ...this.#target, priority },
+        this.#target,
         AbortSignal.any([signal, this.#closed.signal]),
       );
     } catch (error) {
@@ -789,7 +782,7 @@ export class RemoteRuntimeProvider implements AgentProvider {
     const permit =
       this.#capacityPermit ??
       (await this.#dispatcher.acquireOperationCapacity?.(
-        { ...this.#target, priority },
+        this.#target,
         preemptSignal ? AbortSignal.any([signal, preemptSignal]) : signal,
       ));
     try {

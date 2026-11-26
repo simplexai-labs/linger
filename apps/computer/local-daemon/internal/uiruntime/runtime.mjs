@@ -90,7 +90,10 @@ evaluate(
     return parse(text);
   };
   const errorText = error => {
-    try { return String(error && error.message || error).slice(0, 4096); }
+    try {
+      const name = error && typeof error.name === 'string' && error.name !== 'Error' ? error.name + ': ' : '';
+      return (name + String(error && error.message || error)).slice(0, 4096);
+    }
     catch { return 'UI script failed'; }
   };
   const revisions = {browser:0, computer:0};
@@ -135,7 +138,7 @@ evaluate(
         const match = /^((?:\\[[^\\]\\n]*\\] )*)\\[ref=([a-zA-Z0-9_-]+)\\](?=[: \\t]|$)/.exec(row.slice(prefix.length));
         if (match) refs.push(match[2]);
       }
-      if (refs.length !== 1) throw new Error('Expected one matching control; inspect the current snapshot');
+      if (refs.length !== 1) throw new Error((refs.length ? 'Several controls match ' : 'No control matches ') + role + ' ' + stringify(name) + '; copy the role and the quoted name exactly from a line such as - button "Save" [ref=e4] in v.text');
       return refs[0];
     },
     async page(url) {
@@ -149,7 +152,7 @@ evaluate(
       };
       const view = (snapshot, revision) => {
         const act = async (method, argumentsForView) => {
-          if (revision !== revisions.browser) throw new Error('Page observation expired; observe again');
+          if (revision !== revisions.browser) throw new Error('This page view is stale: a newer browser call (another ui.page() or ui.browser.*) replaced it; act on the latest view');
           const pending = b[method](argumentsForView());
           const nextRevision = revisions.browser;
           const result = await pending;
@@ -161,6 +164,7 @@ evaluate(
         };
         return Object.freeze({
           text: ui.text(snapshot),
+          observe: read,
           click: (role, name) => act('click', () => ({target: ui.ref(snapshot, role, name)})),
           type: (role, name, text) => act('type', () => ({target: ui.ref(snapshot, role, name), text})),
           select: (role, name, values) => act('select_option', () => ({target: ui.ref(snapshot, role, name), values})),
@@ -176,7 +180,9 @@ evaluate(
           }),
         });
       };
-      return Object.freeze({observe: read});
+      // Return the observed page itself: scripts read v.text right after
+      // navigating, and every view can observe again.
+      return read();
     },
     window(pid, window_id) {
       const c = this.computer;
@@ -196,7 +202,7 @@ evaluate(
               const match = /^\\s*(?:-\\s+)?\\[(\\d+)\\]\\s+(AX\\w+)\\s+("(?:[^"\\\\]|\\\\.)*")(?=\\s|$)/.exec(line);
               if (match && match[2] === role && match[3] === stringify(name)) rows.push(match[1]);
             }
-            if (!stamp || rows.length !== 1) throw new Error('Expected one named window control with a snapshot token');
+            if (!stamp || rows.length !== 1) throw new Error((rows.length > 1 ? 'Several controls match ' : 'No control matches ') + role + ' ' + stringify(name) + '; copy the AX role and the quoted name exactly from v.text');
             const pending = c.click({pid, window_id, element_token: stamp[1] + ':' + rows[0]});
             const nextRevision = revisions.computer;
             return view(await pending, nextRevision);
@@ -208,7 +214,8 @@ evaluate(
         const revision = revisions.computer;
         return view(await pending, revision);
       };
-      return Object.freeze({observe});
+      const unread = () => { throw new Error('Read the window first: let v = await ui.window(pid, window_id).observe()'); };
+      return Object.freeze({observe, get text() { return unread(); }, get click() { return unread(); }});
     },
     help(topic = "") {
       if (typeof topic !== 'string' || topic.length > 256) throw new Error('UI help requires a topic');
@@ -224,10 +231,37 @@ evaluate(
     }
   });
   Object.defineProperty(globalThis, 'state', { value: Object.create(null) });
+  // Scripts habitually log. Console lines join this execution's output within
+  // a quarter of its byte budget, so a log never crowds out the return value;
+  // later lines are dropped instead of failing the script.
+  const utf8Bytes = text => {
+    let size = 0;
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      if (code < 0x80) size += 1;
+      else if (code < 0x800) size += 2;
+      else if (code >= 0xd800 && code < 0xdc00 && i + 1 < text.length) { size += 4; i++; }
+      else size += 3;
+    }
+    return size;
+  };
+  let consoleBytes = 0;
+  const log = (...values) => {
+    if (!active || completed) return;
+    const line = values.map(value => {
+      if (typeof value === 'string') return value;
+      if (value instanceof Error) return errorText(value);
+      try { return stringify(value) ?? String(value); } catch { return String(value); }
+    }).join(' ');
+    const size = utf8Bytes(stringify(line));
+    if (consoleBytes + size > Math.floor(maxOutput / 4) || outputSize + size > maxOutput) return;
+    consoleBytes += size; outputSize += size; outputs.push(line);
+  };
+  Object.defineProperty(globalThis, 'console', { value: Object.freeze({ log, info: log, warn: log, error: log, debug: log }) });
   Object.defineProperty(globalThis, '__uiBridge', { value: Object.freeze({
     start(fn) {
       if (active || pending.size) throw new Error('UI runtime is busy');
-      queue = []; outputs = []; outputSize = 0; next = 0;
+      queue = []; outputs = []; outputSize = 0; consoleBytes = 0; next = 0;
       completed = false; failure = ''; finalValue = null; active = true;
       fn(makeUI(++epoch)).then(value => { finalValue = value; completed = true; }, error => {
         failure = errorText(error); completed = true;
@@ -241,7 +275,7 @@ evaluate(
       else item.resolve(message.value);
     },
     drain() {
-      if (failure) return stringify({ type: 'done', error: failure });
+      if (failure) return stringify({ type: 'done', error: failure, output: outputs });
       if (completed) {
         if (pending.size) return stringify({ type: 'done', error: 'UI calls must be awaited before execution completes' });
         const value = clone(finalValue);

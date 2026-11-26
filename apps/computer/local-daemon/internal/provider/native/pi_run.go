@@ -61,6 +61,7 @@ type piTurnState struct {
 	stopping         bool
 	running          bool
 	sawAssistant     bool
+	aborted          bool
 	settleAborted    bool
 	failure          string
 	output           string
@@ -132,8 +133,12 @@ func (t *piTurn) markSettled(aborted bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active = false
-	t.settleAborted = aborted
+	if aborted && t.failure == "" {
+		t.aborted = true
+		t.failure = "Pi aborted the turn"
+	}
 	if !t.settledClosed {
+		t.settleAborted = aborted
 		t.settledClosed = true
 		close(t.settled)
 	}
@@ -146,8 +151,8 @@ func (t *piTurn) resetForContinuation() {
 	defer t.mu.Unlock()
 	t.settled = make(chan struct{})
 	t.settledClosed = false
-	t.sawAssistant = false
 	t.settleAborted = false
+	t.sawAssistant = false
 }
 
 // live: the turn runs and is not stopping. The caller may hold proc.mu.
