@@ -854,6 +854,23 @@ describe("VoiceFocusSurface", () => {
       expect(screen.queryByText(allowAccess)).not.toBeInTheDocument();
     });
 
+    it("shows the starting title as a tooltip only when it is cut off", async () => {
+      stubMicrophonePermission(new Promise(() => undefined));
+      renderArming();
+      const title = await screen.findByRole("heading", {
+        name: "Starting recording…",
+      });
+      // A title that fits gets no tooltip repeating the words beside it.
+      fireEvent.pointerOver(title);
+      expect(title).not.toHaveAttribute("title");
+      Object.defineProperties(title, {
+        clientWidth: { configurable: true, value: 80 },
+        scrollWidth: { configurable: true, value: 160 },
+      });
+      fireEvent.pointerOver(title);
+      expect(title).toHaveAttribute("title", "Starting recording…");
+    });
+
     it("does not ask for access once the browser has granted it", async () => {
       stubMicrophonePermission(Promise.resolve(permissionStatus("granted")));
       renderArming();

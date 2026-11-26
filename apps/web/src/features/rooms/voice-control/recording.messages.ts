@@ -11,8 +11,8 @@ export const recordingMessages = defineMessages("recording", {
   open: "Open recording",
   float: "Float recording window",
   floatHint: "Float over other tabs and apps",
-  returnToLinger: "Return recording to Linger",
-  returnHint: "Back to Linger; recording continues",
+  showLinger: "Show Linger window",
+  showLingerHint: "Bring Linger to the front; recording continues here",
 
   // The row with the live duration and the controls.
   surface: "Hardware voice focus",

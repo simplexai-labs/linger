@@ -160,8 +160,8 @@ build:assets` to check the initial JS budget.
   Stop or save is under way: a transcript recovery shows its attempt
   ("Recovering 2/8"), and a Stop that failed three times or a failed recovery
   shows a red dot and opens the window on its Retry without starting a new
-  recording. If browser activation expires during the
-  switch, the new mode opens in the page and can be floated from there.
+  recording. If browser activation expires during the switch in a browser,
+  the new mode opens in the page; the desktop app needs no activation.
   During Live, the Meeting entry offers to start a new Meeting even while an
   earlier one is saving. Both in-page voice windows retain a visible, draggable
   bar. The recording window's title bar uses the window's surface colour
@@ -180,9 +180,13 @@ build:assets` to check the initial JS budget.
   is minimized or closed to the tray: when the preload offers
   `window.lingerDesktop.voiceWindow`, `voice-pip.ts` opens it with
   `window.open("")` (the desktop main process allows only that call) and is
-  the only place that knows which kind of window it got. A desktop app without that field keeps voice windows
-  in the page with no float button. Voice Mode has no float button: it floats
-  when it starts. In the page on macOS they stay out of the
+  the only place that knows which kind of window it got. In the desktop app
+  the voice windows live only there: Meeting opens floating, also when the
+  page finds a running recording after a reload, and shows in the page (with
+  a Float button) only if the app refused the window. A desktop app without
+  that field keeps voice windows in the page with no float button. Voice Mode
+  has no float button: it floats when it starts. Only the floating window's
+  title gets a tooltip, and only while it is cut off. In the page on macOS they stay out of the
   window drag strip. In the page both windows resize by any edge or corner
   (`voice-window-resize.tsx`), down to a minimum size and never past the
   viewport; the corner grip also takes arrow keys. Dragging the title bar
@@ -212,7 +216,7 @@ build:assets` to check the initial JS budget.
   an active drag; keyboard resizing and double-click reset remain available.
 - Opening Meeting from the sidebar requests the initial floating-window
   size in the desktop app so a new recording opens expanded. In browsers it
-  opens the in-page window and offers no Float or Return controls.
+  opens the in-page window and offers no Float or Show Linger controls.
 - Recording desktop-window collapse remembers that window's actual
   expanded outer dimensions and restores both dimensions with an absolute
   resize inside the user's click, bounded by the current screen. A pending
@@ -220,19 +224,20 @@ build:assets` to check the initial JS budget.
   metrics. Collapse never closes the window or stops the recording; native
   window placement remains under desktop control. Stop preserves the current
   recording view and window dimensions. A minimized window, in the page
-  (including the desktop app) or floated, shows the confirmation
+  or floated, shows the confirmation
   actions side by side within its control row in place of Pause and Stop, so
   they stay on screen wherever the row sits and never draw over the controls;
   the timer stays beside them while it fits. An open window keeps the vertical
   confirmation card. Escape or Keep recording returns focus to Stop.
-- Closing a desktop recording window ends the recording. Its explicit Return
-  button brings the main window forward and keeps recording in the page,
-  where Float can reopen the desktop window. Closing a floated Voice Mode
-  window ends the call. Browser visibility or focus changes never decide
+- Closing a desktop recording window ends the recording at once. Its Show
+  Linger button brings the main window forward and keeps recording in the
+  floating window; there is no way back into the page. A Stop that fails
+  after the close keeps a still-running recording and opens its window again
+  at its top row. Closing a floated Voice Mode window ends the call. Browser visibility or focus changes never decide
   whether a window close ends a session.
   Recording moves one portal host between documents so paused state, Ask
   drafts and transcript scroll survive the move. Hide it while processing a
-  native close, and ignore a late result after unmount or a replacement window.
+  native close.
 - Pausing a recording mutes the shared microphone for that recording only:
   the microphone track can outlive it, so a new recording turns the
   microphone back on before it starts, and Start on a running paused

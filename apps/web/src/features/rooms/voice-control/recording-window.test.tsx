@@ -17,7 +17,6 @@ import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubVoiceCaptureQuestion } from "@/features/teamhub/teamhub-types";
 import {
   openVoicePip,
-  returnVoicePipToPage,
   resetVoicePipForTest,
 } from "../chat/voice-mode/voice-pip";
 import RecordingWindow, { pinchedPlacement } from "./recording-window";
@@ -818,114 +817,86 @@ describe("Recording window", () => {
     );
   });
 
-  it("returns to the page without stopping and preserves pause and Ask when floated again", async () => {
-    vi.useFakeTimers();
-    try {
-      const first = stubDesktopVoiceWindow();
-      const voice = voiceValue();
-      renderWindow(voice);
-      await act(() => openVoicePip("recording"));
-      const floating = within(first.frame.contentDocument!.body);
-      await act(async () => {
-        fireEvent.click(
-          floating.getByRole("button", { name: "Pause recording" }),
-        );
-      });
-      fireEvent.click(floating.getByRole("tab", { name: "Ask" }));
-      const draft = floating.getByRole<HTMLTextAreaElement>("textbox", {
-        name: "Ask about this recording",
-      });
-      fireEvent.change(draft, {
-        target: { value: "Keep this draft while changing windows" },
-      });
-      act(() => {
-        returnVoicePipToPage("recording");
-      });
-      expect(
-        screen.queryByRole("region", { name: "Recording window" }),
-      ).toBeNull();
-      await act(() => vi.advanceTimersByTimeAsync(300));
-      expect(
-        screen.getByRole("region", { name: "Recording window" }),
-      ).toBeVisible();
-      expect(
-        screen.getByRole("button", { name: "Resume recording" }),
-      ).toBeVisible();
-      expect(
-        screen.getByRole("textbox", { name: "Ask about this recording" }),
-      ).toBe(draft);
-      expect(draft.value).toBe("Keep this draft while changing windows");
-      expect(voice.leavePage).not.toHaveBeenCalled();
-      expect(voice.stopCapture).not.toHaveBeenCalled();
-
-      const second = stubDesktopVoiceWindow();
-      await act(async () => {
-        fireEvent.click(
-          screen.getByRole("button", { name: "Float recording window" }),
-        );
-        await second.open.mock.results[0]?.value;
-      });
-      const refloated = within(second.frame.contentDocument!.body);
-      expectInDocument(
-        refloated.getByRole("region", { name: "Recording window" }),
-        second.frame.contentDocument!,
-      );
-      expectInDocument(
-        refloated.getByRole("button", { name: "Resume recording" }),
-        second.frame.contentDocument!,
-      );
-      expect(
-        refloated.getByRole("textbox", { name: "Ask about this recording" }),
-      ).toBe(draft);
-      expect(draft.value).toBe("Keep this draft while changing windows");
-      expect(
-        screen.queryByRole("region", { name: "Recording window" }),
-      ).toBeNull();
-      expect(second.open).toHaveBeenCalledOnce();
-      expect(voice.leavePage).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("returns from the desktop app's window by its own button, and ends when that window closes", async () => {
+  it("opens only in its own desktop window, with no copy in the page", async () => {
     const desktop = stubDesktopVoiceWindow();
     const voice = voiceValue();
     renderWindow(voice);
-    await act(() => openVoicePip("recording"));
     const floating = within(desktop.frame.contentDocument!.body);
+    expectInDocument(
+      await floating.findByRole("region", { name: "Recording window" }),
+      desktop.frame.contentDocument!,
+    );
+    expect(desktop.open).toHaveBeenCalledOnce();
+    expect(desktop.requestWindow).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("region", { name: "Recording window" }),
+    ).toBeNull();
+    // There is no way to move it back into the page.
+    expect(
+      floating.queryByRole("button", { name: "Float recording window" }),
+    ).toBeNull();
+    expect(
+      floating.queryByRole("button", { name: "Return recording to Linger" }),
+    ).toBeNull();
+  });
+
+  it("shows the Linger window by its own button and keeps recording in the floating window", async () => {
+    const desktop = stubDesktopVoiceWindow();
+    const voice = voiceValue();
+    renderWindow(voice);
+    const floating = within(desktop.frame.contentDocument!.body);
+    await floating.findByRole("region", { name: "Recording window" });
     await act(async () => {
       fireEvent.click(
-        floating.getByRole("button", { name: "Return recording to Linger" }),
+        floating.getByRole("button", { name: "Show Linger window" }),
       );
     });
     expect(desktop.showMain).toHaveBeenCalledOnce();
-    expect(desktop.pipWindow.close).toHaveBeenCalledOnce();
-    // The recording goes on in the page, with no return button there.
+    expect(desktop.pipWindow.close).not.toHaveBeenCalled();
+    expectInDocument(
+      floating.getByRole("region", { name: "Recording window" }),
+      desktop.frame.contentDocument!,
+    );
     expect(
-      await screen.findByRole("region", { name: "Recording window" }),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "Return recording to Linger" }),
+      screen.queryByRole("region", { name: "Recording window" }),
     ).toBeNull();
     expect(voice.leavePage).not.toHaveBeenCalled();
 
+    // Its close button still ends the recording as the main window comes
+    // to the front.
+    act(() => {
+      desktop.pipWindow.close();
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitFor(() => expect(voice.leavePage).toHaveBeenCalledOnce());
+    expect(desktop.open).toHaveBeenCalledOnce();
+  });
+
+  it("stays in the page with a Float button when the desktop app refuses the window", async () => {
+    const desktop = stubDesktopVoiceWindow();
+    desktop.open.mockReturnValueOnce(
+      null as unknown as typeof desktop.pipWindow,
+    );
+    const voice = voiceValue();
+    renderWindow(voice);
+    expect(
+      await screen.findByRole("region", { name: "Recording window" }),
+    ).toBeVisible();
     await act(async () => {
       fireEvent.click(
         screen.getByRole("button", { name: "Float recording window" }),
       );
     });
     expect(desktop.open).toHaveBeenCalledTimes(2);
-    expect(desktop.requestWindow).not.toHaveBeenCalled();
-    await floating.findByRole("region", { name: "Recording window" });
-    // The window's close button ends the recording even as the main window
-    // comes to the front.
-    act(() => {
-      desktop.pipWindow.close();
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-    await waitFor(() => expect(voice.leavePage).toHaveBeenCalledOnce());
-    expect(desktop.showMain).toHaveBeenCalledOnce();
+    const floating = within(desktop.frame.contentDocument!.body);
+    expectInDocument(
+      await floating.findByRole("region", { name: "Recording window" }),
+      desktop.frame.contentDocument!,
+    );
+    expect(
+      screen.queryByRole("region", { name: "Recording window" }),
+    ).toBeNull();
+    expect(voice.leavePage).not.toHaveBeenCalled();
   });
 
   it("cannot be dragged out of the page, and moves back in when it opens or the page narrows", () => {
@@ -1039,43 +1010,23 @@ describe("Recording window", () => {
     expect(body).toHaveStyle({ height: "188px" });
   });
 
-  it("ignores a pending native close after a new floating window opens", async () => {
-    vi.useFakeTimers();
-    try {
-      const first = stubDesktopVoiceWindow();
-      const voice = voiceValue();
-      renderWindow(voice);
-      await act(() => openVoicePip("recording"));
-      act(() => first.pipWindow.close());
-      const second = stubDesktopVoiceWindow();
-      await act(() => openVoicePip("recording"));
-      await act(() => vi.advanceTimersByTimeAsync(300));
-      expectInDocument(
-        within(second.frame.contentDocument!.body).getByRole("region", {
-          name: "Recording window",
-        }),
-        second.frame.contentDocument!,
-      );
-      expect(voice.leavePage).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("does not end recording from a close classification after unmount", async () => {
-    vi.useFakeTimers();
-    try {
-      const { pipWindow } = stubDesktopVoiceWindow();
-      const voice = voiceValue();
-      const { unmount } = renderWindow(voice);
-      await act(() => openVoicePip("recording"));
-      act(() => pipWindow.close());
-      unmount();
-      await act(() => vi.advanceTimersByTimeAsync(300));
-      expect(voice.leavePage).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+  it("ends at once when its window closes and does not open it again", async () => {
+    const desktop = stubDesktopVoiceWindow();
+    let finishStop = () => {};
+    const voice = voiceValue({
+      leavePage: vi.fn(
+        () => new Promise<void>((resolve) => (finishStop = resolve)),
+      ),
+    });
+    renderWindow(voice);
+    await waitFor(() => expect(desktop.open).toHaveBeenCalledOnce());
+    act(() => desktop.pipWindow.close());
+    expect(voice.leavePage).toHaveBeenCalledOnce();
+    await act(async () => finishStop());
+    await waitFor(() =>
+      expect(screen.getByTestId("window-state")).toHaveTextContent("closed"),
+    );
+    expect(desktop.open).toHaveBeenCalledOnce();
   });
 
   it("restores the user's full window size across repeated minimize cycles", async () => {
@@ -1220,7 +1171,7 @@ describe("Recording window", () => {
     );
   });
 
-  it("hides the closed window while distinguishing close from return to page", async () => {
+  it("hides the closed window while it stops", async () => {
     const { pipWindow } = stubDesktopVoiceWindow();
     let finishStop = () => {};
     const voice = voiceValue({
@@ -1243,8 +1194,8 @@ describe("Recording window", () => {
     );
   });
 
-  it("keeps recording in the page when stopping after the close fails", async () => {
-    const { pipWindow } = stubDesktopVoiceWindow();
+  it("opens its window again at its top row when stopping after the close fails", async () => {
+    const { frame, open, pipWindow } = stubDesktopVoiceWindow();
     const voice = voiceValue({
       leavePage: vi.fn(async () => {
         throw new Error("stop failed");
@@ -1257,9 +1208,17 @@ describe("Recording window", () => {
     await waitFor(() =>
       expect(screen.getByTestId("window-state")).toHaveTextContent("minimized"),
     );
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(pipWindow.innerHeight).toBe(104));
+    expectInDocument(
+      within(frame.contentDocument!.body).getByRole("button", {
+        name: "Open recording",
+      }),
+      frame.contentDocument!,
+    );
     expect(
-      screen.getByRole("region", { name: "Recording window" }),
-    ).toBeVisible();
+      screen.queryByRole("region", { name: "Recording window" }),
+    ).toBeNull();
   });
 });
 

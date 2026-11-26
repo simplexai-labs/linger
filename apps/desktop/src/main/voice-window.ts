@@ -84,8 +84,14 @@ export function adoptVoiceWindow(
       skipTransformProcessType: true,
     });
   child.setMenuBarVisibility(false);
-  // The page sets no title; the window keeps its own.
-  child.on("page-title-updated", (event) => event.preventDefault());
+  // The page names the window in the interface language ("Meeting", "会议");
+  // an empty or blank-page title keeps the window's own "Linger".
+  child.on("page-title-updated", (event, title) => {
+    event.preventDefault();
+    const named = title.trim();
+    if (named && named !== "about:blank" && !child.isDestroyed())
+      child.setTitle(named);
+  });
 
   const contents = child.webContents;
   contents.setWindowOpenHandler(() => ({ action: "deny" }));

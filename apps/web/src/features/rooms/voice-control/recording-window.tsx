@@ -13,8 +13,7 @@ import {
   closeVoicePip,
   onVoicePipClosedByHuman,
   openVoicePip,
-  returnedToOpener,
-  returnVoicePipToPage,
+  showLingerFromVoicePip,
   useVoicePip,
   voicePipSupported,
 } from "../chat/voice-mode/voice-pip";
@@ -62,11 +61,11 @@ const pageTop = 36;
 
 /**
  * The one place a recording is watched and controlled from, whatever page is
- * behind it. In the desktop app the window floats over other apps;
- * in a browser it stays in the page, where
- * its edges and corners resize it. Minimizing it leaves only its top row and
- * keeps recording; Stop, or closing the open floating window, ends the
- * recording. The desktop window's return button keeps recording in the page.
+ * behind it. In the desktop app it lives only in its own window floating over
+ * other apps; in a browser it stays in the page, where its edges and corners
+ * resize it. Minimizing it leaves only its top row and keeps recording; Stop,
+ * or closing the floating window, ends the recording. The floating window's
+ * Show Linger button brings the main window forward and keeps floating.
  */
 export default function RecordingWindow() {
   const t = useT();
@@ -79,20 +78,26 @@ export default function RecordingWindow() {
   const [lastView, setLastView] = useState<RecordingView>("transcript");
   const view = windowState.minimized ? undefined : lastView;
 
-  // Hide the surface while the desktop window closes. Only its explicit
-  // return button keeps recording in the page.
-  const [floated, setFloated] = useState(false);
-  const [backInPage, setBackInPage] = useState(false);
-  if (pip && !floated) setFloated(true);
-  if (pip && backInPage) setBackInPage(false);
-  const pipClosed = floated && !pip && !backInPage;
+  // The desktop app shows the recording only in its floating window; the page
+  // keeps it only in a browser, or when the desktop app refused the window.
+  const desktop = voicePipSupported();
+  const [pipRefused, setPipRefused] = useState(false);
+  // Closing the floating window ends the recording; nothing shows meanwhile.
+  const [closedByHuman, setClosedByHuman] = useState(false);
+  const inPage = !pip && (!desktop || pipRefused);
+  const wanted =
+    windowState.open || status === "recording" || status === "starting";
 
   // Moving one portal host preserves pause timing, Ask drafts and transcript
   // scroll state; changing the portal target would remount the recording UI.
   const [portalHost] = useState(() => document.createElement("div"));
   const portalParent =
-    voice && !windowState.ending && !pipClosed
-      ? (pip?.document.body ?? document.body)
+    voice && !windowState.ending && !closedByHuman
+      ? pip
+        ? pip.document.body
+        : inPage
+          ? document.body
+          : undefined
       : undefined;
   useLayoutEffect(() => {
     if (!portalParent) return;
@@ -103,12 +108,12 @@ export default function RecordingWindow() {
   // The desktop's close button on the floating window ends the recording the
   // way Stop does, whether the window was open or minimized to its top row.
   const voiceRef = useRef(voice);
-  const pipRef = useRef(pip);
+  const minimizedRef = useRef(windowState.minimized);
   const endingRef = useRef(false);
   const closedByHumanRef = useRef(() => {});
   useLayoutEffect(() => {
     voiceRef.current = voice;
-    pipRef.current = pip;
+    minimizedRef.current = windowState.minimized;
     closedByHumanRef.current = () => {
       if (endingRef.current) return;
       endingRef.current = true;
@@ -119,29 +124,48 @@ export default function RecordingWindow() {
       endRecordingWindow();
       void endRecording(voice).then(closeRecordingWindow, () => {
         endingRef.current = false;
-        // Only a recording that is still running stays, kept controllable.
+        // Only a recording that is still running stays, kept controllable:
+        // its window opens again at its top row.
         const latest = voiceRef.current?.captureState?.status;
         if (latest === "recording" || latest === "starting") {
-          setFloated(false);
+          setClosedByHuman(false);
           minimizeRecordingWindow();
         } else closeRecordingWindow();
       });
     };
   });
   useEffect(() => {
-    let mounted = true;
-    const unsubscribe = onVoicePipClosedByHuman("recording", () => {
-      void returnedToOpener().then((returned) => {
-        if (!mounted || pipRef.current) return;
-        if (returned) setBackInPage(true);
-        else closedByHumanRef.current();
-      });
+    // Only the window the Human closed calls this, right as it closes, so
+    // the recording is marked ending before the window could open again.
+    return onVoicePipClosedByHuman("recording", () => {
+      setClosedByHuman(true);
+      closedByHumanRef.current();
     });
-    return () => {
-      mounted = false;
-      unsubscribe();
-    };
   }, []);
+  // In the desktop app the recording opens in its floating window, also when
+  // the page shows a running recording on its own (after a reload) or a
+  // failed Stop keeps it running. Electron opens it without a click.
+  const shouldFloat =
+    desktop &&
+    Boolean(voice) &&
+    wanted &&
+    !pip &&
+    !pipRefused &&
+    !closedByHuman &&
+    !windowState.ending;
+  useEffect(() => {
+    if (!shouldFloat) return;
+    // Publishing the opened window re-runs this effect before the promise
+    // settles, so its result is applied without a cleanup guard.
+    void openVoicePip("recording").then((opened) => {
+      if (!opened) {
+        setPipRefused(true);
+        return;
+      }
+      // A minimized recording reopens as its top row.
+      if (minimizedRef.current) collapsePip(opened);
+    });
+  }, [shouldFloat]);
   // Spend auto start once, so re-opening this window cannot start a second
   // recording when this one stops.
   useEffect(() => {
@@ -280,14 +304,17 @@ export default function RecordingWindow() {
         height={sized?.height}
         floating={pip ? "pip" : "page"}
         onFloat={
-          !pip && voicePipSupported()
+          // Only a desktop app that refused the window shows it in the page.
+          inPage && desktop
             ? () => {
-                void openVoicePip("recording");
+                void openVoicePip("recording").then((opened) => {
+                  if (opened) setPipRefused(false);
+                });
               }
             : undefined
         }
         onMoveStart={startMove}
-        onReturn={pip ? () => returnVoicePipToPage("recording") : undefined}
+        onShowMain={pip ? showLingerFromVoicePip : undefined}
         onViewChange={changeView}
         view={view}
       />
@@ -312,6 +339,18 @@ export default function RecordingWindow() {
     </div>,
     portalHost,
   );
+}
+
+/** Shrinks a floating window to the minimized recording's top row. */
+function collapsePip(view: Window) {
+  try {
+    view.resizeTo(
+      view.outerWidth,
+      collapsedPipHeight + Math.max(0, view.outerHeight - view.innerHeight),
+    );
+  } catch {
+    // The Human can still drag the window to size.
+  }
 }
 
 /** The part of the page the in-page window may cover. */
@@ -400,7 +439,7 @@ function RecordingPanel({
   floating,
   onFloat,
   onMoveStart,
-  onReturn,
+  onShowMain,
   onViewChange,
   view,
 }: {
@@ -409,7 +448,7 @@ function RecordingPanel({
   floating: "page" | "pip";
   onFloat?: () => void;
   onMoveStart: (event: PointerEvent<HTMLDivElement>) => void;
-  onReturn?: () => void;
+  onShowMain?: () => void;
   onViewChange: (view: RecordingView | undefined) => void;
   view?: RecordingView;
 }) {
@@ -430,7 +469,7 @@ function RecordingPanel({
       floating={floating}
       onFloat={onFloat}
       onMoveStart={onMoveStart}
-      onReturn={onReturn}
+      onShowMain={onShowMain}
       onExit={() => {
         // Saving finishes in the background; the sidebar's Recording tool
         // shows its progress and reopens this window on request.

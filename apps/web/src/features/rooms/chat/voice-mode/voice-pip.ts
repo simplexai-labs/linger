@@ -44,10 +44,6 @@ const pipTitles = {
 let pip: { owner: VoicePipOwner; window: Window } | undefined;
 const listeners = new Set<() => void>();
 const closedByHuman = new Set<(owner: VoicePipOwner) => void>();
-/** Set while the voice window's return button closes the floating window. */
-let returning = false;
-/** How the floating window last closed, when that is known for sure. */
-let returnedByButton: boolean | undefined;
 
 function desktopVoiceWindow(): DesktopVoiceWindow | undefined {
   const voiceWindow = (
@@ -60,7 +56,10 @@ function desktopVoiceWindow(): DesktopVoiceWindow | undefined {
     : undefined;
 }
 
-/** Only the desktop app can float a window without browser-owned chrome. */
+/**
+ * Only the desktop app can float a window without browser-owned chrome. There
+ * the voice windows live only in that window; a browser keeps them in the page.
+ */
 export function voicePipSupported() {
   return desktopVoiceWindow() !== undefined;
 }
@@ -91,17 +90,14 @@ export async function openVoicePip(
       `popup=yes,width=${width},height=${height}`,
     );
     if (!opened) return undefined;
-    returning = false;
-    returnedByButton = undefined;
     opened.document.title = translate(pipTitles[owner]);
     const stopMirroring = mirrorStyles(opened.document);
     opened.addEventListener("pagehide", () => {
       stopMirroring();
       if (pip?.window !== opened) return;
-      // Closed from the window itself rather than from the page.
+      // Closed from the window itself rather than from the page: the desktop
+      // window has no way back into the page, so this ends its session.
       publish(undefined);
-      returnedByButton = returning;
-      returning = false;
       for (const listener of closedByHuman) listener(owner);
     });
     publish({ owner, window: opened });
@@ -118,22 +114,15 @@ export function closeVoicePip(owner: VoicePipOwner) {
   current.close();
 }
 
-/** Returns a desktop voice window to the main page without ending its session. */
-export function returnVoicePipToPage(owner: VoicePipOwner) {
-  if (pip?.owner !== owner) return;
-  returning = true;
-  // The session still moves into the page if the main window cannot be shown.
+/**
+ * Brings the desktop app's main window to the front from the floating window.
+ * The floating window stays open and keeps the session: the desktop app has
+ * no in-page voice window to return to.
+ */
+export function showLingerFromVoicePip() {
   void desktopVoiceWindow()
     ?.showMainWindow()
     .catch(() => undefined);
-  pip.window.close();
-}
-
-/** Only the desktop window's own return button keeps the session in the page. */
-export function returnedToOpener(): Promise<boolean> {
-  const returned = returnedByButton === true;
-  returnedByButton = undefined;
-  return Promise.resolve(returned);
 }
 
 /** Runs when this owner's window closes from the window, not from the page. */
@@ -169,10 +158,15 @@ export function useVoicePip(owner: VoicePipOwner) {
 function mirrorStyles(target: Document) {
   const root = document.documentElement;
   // The floating window has a title bar of its own, so it takes no room for
-  // window controls the way the desktop app's main window does on macOS.
-  for (const { name, value } of Array.from(root.attributes))
-    if (name !== "data-desktop-chrome")
-      target.documentElement.setAttribute(name, value);
+  // window controls the way the desktop app's main window does on macOS. The
+  // desktop preload may mark the new window as well, so the mark is removed.
+  const copyRoot = () => {
+    for (const { name, value } of Array.from(root.attributes))
+      if (name !== "data-desktop-chrome")
+        target.documentElement.setAttribute(name, value);
+    target.documentElement.removeAttribute("data-desktop-chrome");
+  };
+  copyRoot();
   const copy = (node: Node) => {
     if (
       node instanceof HTMLStyleElement ||
@@ -186,13 +180,17 @@ function mirrorStyles(target: Document) {
     for (const record of records) record.addedNodes.forEach(copy);
   });
   observer.observe(document.head, { childList: true });
-  return () => observer.disconnect();
+  // The language or theme the page switches to later follows into the window.
+  const rootObserver = new MutationObserver(copyRoot);
+  rootObserver.observe(root, { attributes: true });
+  return () => {
+    observer.disconnect();
+    rootObserver.disconnect();
+  };
 }
 
 export function resetVoicePipForTest() {
   pip = undefined;
   listeners.clear();
   closedByHuman.clear();
-  returning = false;
-  returnedByButton = undefined;
 }

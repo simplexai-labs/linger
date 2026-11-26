@@ -541,12 +541,14 @@ Gateway and runs Agents. The daemon exits with the app.
   is open the page is not background-throttled. Only a window the main page
   itself opened is kept; one from a frame in it is destroyed. It opens at the
   bottom right of the main window's screen and resizes down to 240x96. Its
-  native close button ends the call or the recording;
-  `lingerDesktop.voiceWindow.showMainWindow()` (its presence is how the SPA
-  knows the app supports this) restores and focuses the main window, on macOS
-  bringing the app in front of the active one, and the SPA then closes the
-  floating window and keeps the session in the page. An app without
-  `voiceWindow` keeps the in-page windows.
+  title is the one the page gives it in the interface language ("Meeting",
+  "会议"); a blank title keeps "Linger". Its native close button ends the call
+  or the recording; `lingerDesktop.voiceWindow.showMainWindow()` (its presence
+  is how the SPA knows the app supports this) restores and focuses the main
+  window, on macOS bringing the app in front of the active one, while the
+  floating window stays up and the session keeps running in it: the app has
+  no in-page voice windows. An app without `voiceWindow` keeps the in-page
+  windows.
 - `src/shell/*.html`: app-owned pages (title bar, offline/setup page). They
   have no network access and talk to the main process via `src/preload/shell.ts`.
   Their text lives in the `*.messages.ts` beside them; the main process

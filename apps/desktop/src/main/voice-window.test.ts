@@ -18,6 +18,7 @@ function fakes() {
     setAlwaysOnTop: vi.fn(),
     setVisibleOnAllWorkspaces: vi.fn(),
     setMenuBarVisibility: vi.fn(),
+    setTitle: vi.fn(),
     isDestroyed: vi.fn(() => false),
     close: vi.fn(() => child.emit("closed")),
     destroy: vi.fn(),
@@ -117,8 +118,19 @@ describe("adoptVoiceWindow", () => {
     expect(handler({})).toEqual({ action: "deny" });
     const event = { preventDefault: vi.fn() };
     f.childContents.emit("will-navigate", event);
-    f.child.emit("page-title-updated", event);
+    f.child.emit("page-title-updated", event, "about:blank");
     expect(event.preventDefault).toHaveBeenCalledTimes(2);
+    expect(f.child.setTitle).not.toHaveBeenCalled();
+  });
+
+  it("takes the title the page gives it in the interface language", () => {
+    const f = fakes();
+    adopt(f);
+    const event = { preventDefault: vi.fn() };
+    f.child.emit("page-title-updated", event, "会议");
+    expect(f.child.setTitle).toHaveBeenCalledWith("会议");
+    f.child.emit("page-title-updated", event, "  ");
+    expect(f.child.setTitle).toHaveBeenCalledOnce();
   });
 });
 

@@ -66,7 +66,7 @@ export function VoiceFocusSurface({
   onExit,
   onFloat,
   onMoveStart,
-  onReturn,
+  onShowMain,
   onViewChange,
   panels,
   view,
@@ -77,12 +77,18 @@ export function VoiceFocusSurface({
   /** A picture-in-picture window fills its own window instead of floating. */
   floating?: "page" | "pip";
   onExit: () => void;
-  /** Returns the page window to the always-on-top window. */
+  /**
+   * Moves the page window into the always-on-top window; offered only when a
+   * desktop app refused that window at first.
+   */
   onFloat?: () => void;
   /** Starts moving the in-page window from its title bar. */
   onMoveStart?: (event: PointerEvent<HTMLDivElement>) => void;
-  /** Brings the always-on-top window back into the page. */
-  onReturn?: () => void;
+  /**
+   * Brings the desktop app's main window to the front from the always-on-top
+   * window, which keeps floating and recording.
+   */
+  onShowMain?: () => void;
   onViewChange?: (view: RecordingView | undefined) => void;
   /** Present once a recording runs; before that only the transcript shows. */
   panels?: RecordingPanels;
@@ -417,12 +423,12 @@ export function VoiceFocusSurface({
           <Icon icon={PictureInPictureOnIcon} />
         </button>
       ) : null}
-      {onReturn ? (
+      {onShowMain ? (
         <button
-          aria-label={t(m.returnToLinger)}
+          aria-label={t(m.showLinger)}
           className={styles.windowButton}
-          onClick={onReturn}
-          title={t(m.returnHint)}
+          onClick={onShowMain}
+          title={t(m.showLingerHint)}
           type="button"
         >
           <Icon icon={PictureInPictureExitIcon} />
@@ -589,7 +595,11 @@ export function VoiceFocusSurface({
               ) : (
                 <h1
                   className="min-w-0 truncate text-sm leading-5 font-medium text-app-ink"
-                  title={title}
+                  // The full title as a tooltip only when it is cut off;
+                  // otherwise it would repeat the words right beside them.
+                  onPointerEnter={(event) =>
+                    showTitleWhenTruncated(event.currentTarget, title)
+                  }
                 >
                   {title}
                 </h1>
@@ -811,6 +821,12 @@ function VoiceFocusTranscriptRow({ item }: { item: VoiceTranscriptItem }) {
       <p className="m-0 text-sm leading-5 text-app-body">{item.text}</p>
     </div>
   );
+}
+
+/** Gives `element` the tooltip `text` only while its own text is cut off. */
+function showTitleWhenTruncated(element: HTMLElement, text: string) {
+  if (element.scrollWidth > element.clientWidth) element.title = text;
+  else element.removeAttribute("title");
 }
 
 function focusTitle(captureStatus: VoiceCaptureState["status"]) {
