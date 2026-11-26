@@ -23,6 +23,8 @@ export function parseInstallerArguments(args: string[]) {
     resume?: boolean;
     inspect?: boolean;
     inspectTarget?: string;
+    prefetchBifrost?: boolean;
+    abortOnStdinClose?: boolean;
     byokCommand?: "check" | "models";
     userKeys?: boolean;
     migrate?: boolean;
@@ -44,6 +46,14 @@ export function parseInstallerArguments(args: string[]) {
     }
     if (flag === "--inspect") {
       options.inspect = true;
+      continue;
+    }
+    if (flag === "--prefetch-bifrost") {
+      options.prefetchBifrost = true;
+      continue;
+    }
+    if (flag === "--abort-on-stdin-close") {
+      options.abortOnStdinClose = true;
       continue;
     }
     if (flag === "--check-byok" || flag === "--list-byok-models") {
@@ -105,6 +115,7 @@ export function parseInstallerArguments(args: string[]) {
   if (
     !options.sourceRepo &&
     !options.inspect &&
+    !options.prefetchBifrost &&
     !options.byokCommand &&
     !options.userKeys &&
     !options.migrate &&
@@ -115,6 +126,8 @@ export function parseInstallerArguments(args: string[]) {
     throw new Error("The installer needs a source checkout (--source-repo).");
   if (options.inspectTarget && !options.inspect)
     throw new Error("An inspection target requires --inspect.");
+  if (options.abortOnStdinClose && !options.prefetchBifrost)
+    throw new Error("--abort-on-stdin-close requires --prefetch-bifrost.");
   if (options.resume && !options.instanceName)
     throw new Error("Resume needs a source checkout and an instance.");
   if (options.userKeys && !options.instanceName)
@@ -269,6 +282,51 @@ async function inspect(options: ReturnType<typeof parseInstallerArguments>) {
     report ?? (refusal ? { error: failureMessage ?? "", refusal } : null);
   process.stdout.write(`${JSON.stringify(output)}\n`, () =>
     process.exit(report ? 0 : 1),
+  );
+}
+// Headless background Bifrost pre-fetch for the desktop setup page: downloads
+// the pinned Bifrost archive into localmodels' archive cache without allocating
+// a port or starting the gateway, writing one JSON line on stdout.
+async function prefetchBifrost(
+  options: ReturnType<typeof parseInstallerArguments>,
+) {
+  const { prefetchLocalmodelsBifrost } =
+    await import("@linger/local-installation/localmodels-tool");
+  const controller = new AbortController();
+  const onTerm = () => controller.abort();
+  process.once("SIGTERM", onTerm);
+  if (options.abortOnStdinClose) {
+    if (process.stdin.readableEnded || process.stdin.destroyed) {
+      controller.abort();
+    } else {
+      process.stdin.once("end", onTerm);
+      process.stdin.once("close", onTerm);
+      process.stdin.resume();
+    }
+  }
+  let result: Awaited<ReturnType<typeof prefetchLocalmodelsBifrost>>;
+  try {
+    result = await prefetchLocalmodelsBifrost(options.home, {
+      signal: AbortSignal.any([
+        controller.signal,
+        AbortSignal.timeout(10 * 60_000),
+      ]),
+    });
+  } catch (error) {
+    result = {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    process.off("SIGTERM", onTerm);
+    if (options.abortOnStdinClose) {
+      process.stdin.off("end", onTerm);
+      process.stdin.off("close", onTerm);
+      process.stdin.pause();
+    }
+  }
+  process.stdout.write(`${JSON.stringify(result)}\n`, () =>
+    process.exit(result.ok || result.unsupported ? 0 : 1),
   );
 }
 // Headless key update for the desktop client: the changes arrive as JSON on
@@ -507,7 +565,8 @@ if (
   }
   // Installs from before the rename move to the Linger home once, before
   // any mode opens it; --migrate does only that, for the desktop client.
-  // Inspecting or stopping for an uninstall or a quit never migrates it.
+  // Inspecting, pre-fetching, or stopping for an uninstall or a quit never
+  // migrates it.
   // Only --migrate reports the instances it skipped, as warnings and as one
   // JSON line on stdout: the desktop runs it first, and in the other modes a
   // warning on stderr would read as the reason a start failed. A skipped
@@ -516,6 +575,7 @@ if (
   if (
     options &&
     !options.inspect &&
+    !options.prefetchBifrost &&
     !options.stop &&
     !options.stopLocalModels &&
     !options.prepareVoiceTools
@@ -541,6 +601,7 @@ if (
   else if (options?.userKeys) await userKeys(options);
   else if (options?.byokCommand)
     await byokEndpointCommand(options, options.byokCommand);
+  else if (options?.prefetchBifrost) await prefetchBifrost(options);
   else if (options?.inspect) await inspect(options);
   else if (options?.resume) await resume(options);
   else if (options) await serve(options).catch(serveFailed);

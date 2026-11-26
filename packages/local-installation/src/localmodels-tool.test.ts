@@ -29,6 +29,7 @@ import {
   localmodelsLegacyToolsMarkerFile,
   localmodelsStateDirectory,
   localmodelsToolsDirectory,
+  prefetchLocalmodelsBifrost,
   resolveLocalmodelsBifrostAddr,
   runLocalmodels,
   stopLocalmodels,
@@ -2129,4 +2130,187 @@ test("skips bundled Pi PATH injection for setup inspect while keeping it for har
       process.platform === "win32" ? bundledBin : stableBin,
     );
   }
+});
+
+test("prefetchLocalmodelsBifrost runs isolated Python without allocating a Bifrost port", async () => {
+  const f = await fixture();
+  const ensureTool = vi.fn(async () => ({
+    python: path.join(f.directory, "python/python"),
+    moduleDir: path.join(f.directory, "modules"),
+    sourceCommit: f.source.sourceCommit,
+  }));
+  const run = vi.fn(async () => ({
+    code: 0,
+    stdout: `${JSON.stringify({
+      ok: true,
+      cached: false,
+      version: "1.4.2",
+      name: "bifrost-darwin-arm64",
+      bytes: 42_000_000,
+    })}\n`,
+    stderr: "",
+  }));
+
+  const result = await prefetchLocalmodelsBifrost(
+    f.home,
+    {
+      env: {
+        PYTHONHOME: "/bad/python",
+        PYTHONSTARTUP: "/bad/startup.py",
+        PYTHONINSPECT: "1",
+        LOCALMODELS_TOOLS_DIR: "/shared/tools",
+      },
+    },
+    { run, ensureTool },
+  );
+
+  expect(result).toEqual({
+    ok: true,
+    cached: false,
+    version: "1.4.2",
+    name: "bifrost-darwin-arm64",
+    bytes: 42_000_000,
+  });
+  expect(ensureTool).toHaveBeenCalledTimes(1);
+  expect(run).toHaveBeenCalledTimes(1);
+  const [executable, args, opts] = run.mock.calls[0] as unknown as [
+    string,
+    string[],
+    { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number },
+  ];
+  expect(executable).toBe(path.join(f.directory, "python/python"));
+  expect(args.slice(0, 3)).toEqual(["-P", "-s", "-c"]);
+  expect(args[3]).toContain("harness._fetch");
+  expect(opts.cwd).toBe(path.join(f.directory, "modules"));
+  expect(opts.env.LOCALMODELS_TOOLS_DIR).toBe(
+    localmodelsToolsDirectory(f.home),
+  );
+  expect(opts.env.LOCALMODELS_BIFROST_DIR).toBe(
+    localmodelsBifrostDirectory(f.home),
+  );
+  expect(opts.env.LOCALMODELS_STATE).toBe(localmodelsStateDirectory(f.home));
+  expect(opts.env.SIMPLEX_REGION).toBe("global");
+  expect(opts.env.PYTHONPATH).toBe(path.join(f.directory, "modules"));
+  expect(opts.env.PYTHONNOUSERSITE).toBe("1");
+  expect(opts.env.PYTHONDONTWRITEBYTECODE).toBe("1");
+  expect(opts.env.PYTHONUTF8).toBe("1");
+  expect(opts.env.PYTHONIOENCODING).toBe("utf-8");
+  expect(opts.env.PYTHONHOME).toBeUndefined();
+  expect(opts.env.PYTHONSTARTUP).toBeUndefined();
+  expect(opts.env.PYTHONINSPECT).toBeUndefined();
+  await expect(stat(localmodelsBifrostAddrFile(f.home))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+});
+
+test("prefetchLocalmodelsBifrost reports cached hits, unsupported targets, and non-zero exits cleanly", async () => {
+  const f = await fixture();
+  const ensureTool = vi.fn(async () => ({
+    python: path.join(f.directory, "python/python"),
+    moduleDir: path.join(f.directory, "modules"),
+    sourceCommit: f.source.sourceCommit,
+  }));
+
+  const cached = await prefetchLocalmodelsBifrost(
+    f.home,
+    {},
+    {
+      ensureTool,
+      run: async () => ({
+        code: 0,
+        stdout: `progress noise\n${JSON.stringify({
+          ok: true,
+          cached: true,
+          version: "1.4.2",
+          name: "bifrost-darwin-arm64",
+          bytes: 42_000_000,
+        })}\n`,
+        stderr: "",
+      }),
+    },
+  );
+  expect(cached).toEqual({
+    ok: true,
+    cached: true,
+    version: "1.4.2",
+    name: "bifrost-darwin-arm64",
+    bytes: 42_000_000,
+  });
+
+  const unsupported = await prefetchLocalmodelsBifrost(
+    f.home,
+    {},
+    {
+      ensureTool,
+      run: async () => ({
+        code: 0,
+        stdout: `${JSON.stringify({
+          ok: false,
+          unsupported: true,
+          message: "no Bifrost build for plan9/mips",
+        })}\n`,
+        stderr: "",
+      }),
+    },
+  );
+  expect(unsupported).toEqual({
+    ok: false,
+    unsupported: true,
+    message: "no Bifrost build for plan9/mips",
+  });
+
+  const failed = await prefetchLocalmodelsBifrost(
+    f.home,
+    {},
+    {
+      ensureTool,
+      run: async () => ({
+        code: 1,
+        stdout: "",
+        stderr: "network unreachable\n",
+      }),
+    },
+  );
+  expect(failed).toEqual({ ok: false, message: "network unreachable" });
+});
+
+test("prefetchLocalmodelsBifrost propagates AbortSignal cancellation", async () => {
+  const f = await fixture();
+  const preAborted = new AbortController();
+  preAborted.abort(new DOMException("Cancelled", "AbortError"));
+  const ensureTool = vi.fn(async () => ({
+    python: path.join(f.directory, "python/python"),
+    moduleDir: path.join(f.directory, "modules"),
+    sourceCommit: f.source.sourceCommit,
+  }));
+  await expect(
+    prefetchLocalmodelsBifrost(
+      f.home,
+      { signal: preAborted.signal },
+      { ensureTool },
+    ),
+  ).rejects.toMatchObject({ name: "AbortError" });
+  expect(ensureTool).not.toHaveBeenCalled();
+
+  const midRun = new AbortController();
+  const run = vi.fn(
+    async (_cmd: string, _args: string[], opts?: { signal?: AbortSignal }) =>
+      new Promise<{ code: number; stdout: string; stderr: string }>(
+        (_resolve, reject) => {
+          opts?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Interrupted", "AbortError")),
+            { once: true },
+          );
+        },
+      ),
+  );
+  const pending = prefetchLocalmodelsBifrost(
+    f.home,
+    { signal: midRun.signal },
+    { ensureTool, run },
+  );
+  await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+  midRun.abort();
+  await expect(pending).rejects.toMatchObject({ name: "AbortError" });
 });
