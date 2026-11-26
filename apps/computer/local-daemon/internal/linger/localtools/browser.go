@@ -561,13 +561,17 @@ func (op *operation) requestBrowser(ctx context.Context, name string, args json.
 	if err != nil {
 		return result, err
 	}
-	output := op.browserOutput()
-	if op.userChromeSession != nil {
-		output = op.userChromeSession.output
-	}
-	result = inlineSnapshot(result, op.spec.WorkingDirectory, output)
+	result = inlineSnapshot(result, op.spec.WorkingDirectory, op.currentBrowserOutput())
 	op.pages.observe(result)
 	return result, nil
+}
+
+// currentBrowserOutput is read while holding the browser call lock.
+func (op *operation) currentBrowserOutput() string {
+	if session := op.userChromeSession; session != nil && session.output != "" {
+		return session.output
+	}
+	return op.browserOutput()
 }
 
 // inlineSnapshot replaces a snapshot link with the file's text and removes

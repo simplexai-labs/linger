@@ -80,6 +80,7 @@ type Runtime struct {
 	life       context.Context
 	cancel     context.CancelFunc
 	opts       Options
+	program    string
 	slot       chan struct{}
 	mu         sync.Mutex
 	child      *child
@@ -98,7 +99,7 @@ func New(lifetime context.Context, opts Options) (*Runtime, error) {
 		return nil, err
 	}
 	life, cancel := context.WithCancel(lifetime)
-	return &Runtime{life: life, cancel: cancel, opts: opts, slot: make(chan struct{}, 1), generation: 1}, nil
+	return &Runtime{life: life, cancel: cancel, opts: opts, program: script, slot: make(chan struct{}, 1), generation: 1}, nil
 }
 
 func defaultLimits(l *Limits) error {
@@ -439,7 +440,7 @@ func (r *Runtime) ensureChild(hard, scheduling context.Context) (*child, error) 
 		return nil, fmt.Errorf("open bundled UI engine: %w", err)
 	}
 	cfg, _ := json.Marshal(map[string]any{"engineDirectory": engineDir, "heapBytes": r.opts.Limits.HeapMiB * 1024 * 1024, "maxProtocolBytes": r.opts.Limits.MaxProtocolBytes, "maxOutputBytes": r.opts.Limits.MaxOutputBytes, "maxCalls": r.opts.Limits.MaxCalls, "rssBytes": r.opts.Limits.RSSMiB * 1024 * 1024, "pumpMs": r.opts.Limits.PumpTimeout.Milliseconds()})
-	cmd := exec.Command(r.opts.NodePath, "--permission", "--allow-fs-read="+engineDir, "--no-addons", "--max-old-space-size="+strconv.Itoa(r.opts.Limits.HeapMiB), "--input-type=module", "-e", script, string(cfg))
+	cmd := exec.Command(r.opts.NodePath, "--permission", "--allow-fs-read="+engineDir, "--no-addons", "--max-old-space-size="+strconv.Itoa(r.opts.Limits.HeapMiB), "--input-type=module", "-e", r.program, string(cfg))
 	cmd.Env = []string{}
 	cmd.Stderr = io.Discard
 	stdin, err := cmd.StdinPipe()

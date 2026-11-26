@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -153,6 +154,85 @@ func TestUnifiedUIStateImagesAndPrivateCapabilities(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("reset or state reads called driver: %d", calls.Load())
+	}
+}
+
+func TestUnifiedUIEmitsExplicitBrowserDiffFromViewsAndAcrossCalls(t *testing.T) {
+	data, err := os.ReadFile("../../uiruntime/testdata/browser-snapshots.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshots map[string]json.RawMessage
+	if err := json.Unmarshal(data, &snapshots); err != nil {
+		t.Fatal(err)
+	}
+	var step atomic.Int32
+	f := newUIRuntimeFixture(t, false, func(_ context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
+		switch n := step.Add(1); {
+		case n == 1 && name == "browser_snapshot":
+			return snapshots["initial"], nil
+		case n == 2 && name == "browser_click" && strings.Contains(string(args), `"target":"e3"`):
+			return json.RawMessage(`{"content":[{"type":"text","text":"Click delivered"}]}`), nil
+		case n == 3 && name == "browser_snapshot":
+			return snapshots["opened"], nil
+		case n == 4 && name == "browser_type" && strings.Contains(string(args), `"target":"e8"`):
+			return snapshots["edited"], nil
+		case n == 5 && name == "browser_snapshot":
+			return snapshots["edited"], nil
+		default:
+			return nil, errors.New("unexpected browser call: " + name + " " + string(args))
+		}
+	})
+	clear, err := f.set.RegisterToolReviewer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear()
+	if catalog := f.rpc(t, t.Context(), "tools/list", nil); !strings.Contains(string(catalog), "ui.diff(before, after)") {
+		t.Fatalf("ui_exec catalog omitted diff discovery: %s", catalog)
+	}
+	readText := func(result json.RawMessage) []string {
+		t.Helper()
+		var outer struct {
+			IsError bool `json:"isError"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if err := json.Unmarshal(result, &outer); err != nil || outer.IsError {
+			t.Fatalf("ui_exec result: %s (decode error: %v)", result, err)
+		}
+		texts := make([]string, 0, len(outer.Content))
+		for _, part := range outer.Content {
+			texts = append(texts, part.Text)
+		}
+		return texts
+	}
+	texts := readText(f.execute(t, `
+const help = await ui.help('browser');
+if (!help.helpers['ui.diff(prev, next)'] || help.methods.some(m => m.name.includes('diff'))) throw Error('diff help is misplaced');
+const page = await ui.page();
+const start = await page.observe();
+state.before = start.text;
+const opened = await start.click('button', "It's a test: Save");
+if (opened.content[0].text !== 'Click delivered' || !opened.text.includes('### Snapshot')) throw Error('missing view readback');
+const filled = await opened.type('textbox', 'Menu: title', 'Title: updated');
+ui.emit(ui.diff(start, opened));
+ui.emit(ui.diff(start, filled));
+if (start.text !== state.before || !filled.text.includes('### Snapshot\n') || filled.text.includes('### Snapshot diff')) throw Error('source observation changed');
+`))
+	if len(texts) != 3 || !strings.HasPrefix(texts[0], "### Open tabs\n") ||
+		!strings.Contains(texts[0], "### Snapshot diff\n") || !strings.Contains(texts[0], `+ - dialog "Editor"`) ||
+		!strings.Contains(texts[1], `+ - dialog "Editor"`) || !strings.Contains(texts[1], "Title: updated") ||
+		!strings.Contains(texts[1], "/url: /after") {
+		t.Fatalf("emitted diffs: %q", texts)
+	}
+	later := readText(f.execute(t, `
+const view = await (await ui.page()).observe();
+ui.emit(ui.diff(state.before, view));
+`))
+	if len(later) != 2 || later[0] != texts[1] || step.Load() != 5 {
+		t.Fatalf("cross-execution diff: %q, calls: %d", later, step.Load())
 	}
 }
 

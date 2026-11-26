@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -362,9 +365,360 @@ const button = "- 'button \"Order #42: Jo''s\" [active] [ref=e4]'";
 const field = "- 'textbox \"Menu: title\" [ref=e3]': Value";
 const matched = [ui.ref(snap(button),'button',"Order #42: Jo's"), ui.ref(snap(field),'textbox','Menu: title')];
 try { ui.ref(snap(button+'\n'+button),'button',"Order #42: Jo's"); } catch { matched.push('ambiguous'); }
+const doubleQuoted = '- ' + JSON.stringify('button "Details" [ref=e6]');
+const plain = '- link "Next" [ref=e7]';
+const crlf = snap([button, doubleQuoted, plain, ''].join('\r\n'));
+matched.push(ui.ref(crlf,'button',"Order #42: Jo's"), ui.ref(crlf,'button','Details'), ui.ref(crlf,'link','Next'));
 return matched;`)
-	if string(result.Value) != `["e4","e3","ambiguous"]` {
+	if string(result.Value) != `["e4","e3","ambiguous","e4","e6","e7"]` {
 		t.Fatalf("quoted lookup: %s", result.Value)
+	}
+}
+
+func TestBrowserSnapshotDiffWithPlaywrightObservations(t *testing.T) {
+	fixtures, err := os.ReadFile("testdata/browser-snapshots.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := nodeRuntime(t, noCalls(t), Limits{})
+	result := execute(t, r, "const {initial, opened, edited, closed, frameEdited} = "+string(fixtures)+";\n"+`
+const diffText = (before, after) => ui.text(ui.diff(before, after)).split('### Snapshot diff\n')[1] ?? '';
+const first = diffText(initial, opened);
+const net = diffText(initial, edited);
+const last = diffText(edited, closed);
+const frame = diffText(closed, frameEdited);
+const roundTrip = diffText(initial, closed);
+const mixed = ui.text(initial).replaceAll('\n','\r\n').replace('\r\n  -','\n  -');
+return {
+  opened: first.includes('+ - dialog "Editor"') && first.includes("It''s a test: Save"),
+  edited: net.includes('+ - dialog "Editor"') && net.includes('Title: updated') && net.includes('/url: /after'),
+  closed: last.includes('- - dialog "Editor"') && !last.includes('Close editor'),
+  net: roundTrip.includes('/url: /after') && !roundTrip.includes('dialog "Editor"'),
+  iframe: frame.includes('~ - iframe [active] [ref=e5]:') &&
+    frame.includes('+ - button "Frame updated" [active] [ref=f1e4]') &&
+    frame.includes('- - button "Frame action" [ref=f1e3]') &&
+    !frame.split('\n').some(line => line.trimStart() === '- main [ref=f1e2]:'),
+  unchanged: diffText(initial, initial) === 'no_change: the accessibility tree matches the previous snapshot.',
+  mixed: diffText(initial, mixed) === 'no_change: the accessibility tree matches the previous snapshot.',
+  guide: net.endsWith('Unchanged elements omitted; call ui.browser.snapshot({}) for the full tree.'),
+};
+`)
+	if string(result.Value) != `{"opened":true,"edited":true,"closed":true,"net":true,"iframe":true,"unchanged":true,"mixed":true,"guide":true}` {
+		t.Fatalf("Playwright diff check: %s", result.Value)
+	}
+}
+
+func TestBrowserSnapshotDiffPreservesMCPPartsAndUsesViewText(t *testing.T) {
+	fixtures, err := os.ReadFile("testdata/browser-snapshots.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := nodeRuntime(t, noCalls(t), Limits{})
+	result := execute(t, r, "const {initial, edited} = "+string(fixtures)+";\n"+`
+const previous = ui.text(initial);
+const text = ui.text(edited) + '\n### Events\n- Browser event as originally reported';
+const part = Object.freeze({type:'text', text, annotations:{audience:['assistant']}});
+const image = Object.freeze({type:'image', handle:'opaque'});
+const original = Object.freeze({content:Object.freeze([{type:'text',text:'receipt'},image,part]), _meta:Object.freeze({source:'browser'})});
+const view = Object.freeze({text, content:[{type:'text',text:'action delivered'}]});
+const rawDiff = ui.diff(initial, original);
+const viewDiff = ui.diff(previous, view);
+const stringDiff = ui.diff(previous, text);
+ui.emit(viewDiff);
+const header = '### Snapshot diff\n';
+const tag = 'linger/browserSnapshotDiff';
+const note = '\n### Events\n- Browser event as originally reported';
+return {
+  shape: rawDiff !== original && rawDiff.content !== original.content && rawDiff.content[2] !== part &&
+    rawDiff.content[0] === original.content[0] && rawDiff.content[1] === image && rawDiff.content[2].annotations === part.annotations,
+  metadata: rawDiff._meta.source === 'browser' && rawDiff._meta[tag] === true && original._meta[tag] === undefined,
+  text: ui.text(viewDiff) === ui.text(stringDiff) && rawDiff.content[2].text === ui.text(viewDiff) &&
+    ui.text(viewDiff).startsWith(text.split('### Snapshot\n')[0] + header) && ui.text(viewDiff).endsWith(note),
+  input: ui.text(initial) === previous && original.content[2].text === text && view.text === text && view.content[0].text === 'action delivered',
+};
+`)
+	if string(result.Value) != `{"shape":true,"metadata":true,"text":true,"input":true}` || len(result.Output) != 1 ||
+		!strings.Contains(string(result.Output[0]), "### Snapshot diff") {
+		t.Fatalf("MCP diff check: %s, output: %s", result.Value, result.Output)
+	}
+}
+
+func TestBrowserSnapshotDiffFallbacks(t *testing.T) {
+	r := nodeRuntime(t, noCalls(t), Limits{})
+	result := execute(t, r, `
+const fence = '\x60'.repeat(3);
+const wrap = (rows, url = 'https://fixture.example/', tabs = '') =>
+  tabs + '### Page\n- Page URL: ' + url + '\n### Snapshot\n' + fence + 'yaml\n' + rows.join('\n') + '\n' + fence;
+const stable = '- button "Save" [ref=e1]';
+const link = '- link "Inventory" [ref=e2]';
+const original = wrap([stable,link]);
+const newRole = wrap([stable,link.replace('link','menuitem')]);
+const newParent = wrap([stable,'- group [ref=e3]:','  '+link]);
+const newOrder = wrap([link,stable]);
+const newURL = wrap([stable,link],'https://other.example/');
+const otherTab = wrap([stable,link], 'https://fixture.example/', '### Open tabs\n- 1: (current) [](https://fixture.example/)\n');
+const unparseable = [
+  wrap([stable,'- button "Other" [ref=e1]']),
+  wrap([stable,'- text: |','  invalid']),
+  wrap([stable,'- generic:', '   - text: bad indent']),
+  wrap([stable,'- generic: &anchor value']),
+  wrap([stable,'- generic: {key: value}']),
+  wrap([stable,'- generic:', '  - text: "bad" junk']),
+  wrap([stable,'- button "Unclosed:']),
+  wrap([stable,'- button "Unclosed']),
+  ...['@',String.fromCharCode(96),'%',','].flatMap(indicator => [
+    wrap([stable,'- text: '+indicator+'invalid']),
+    wrap([stable,'- textbox "Field" [ref=e3]: '+indicator+'invalid']),
+  ]),
+];
+const checks = [
+  ['missing_snapshot','done',original],
+  ['page_changed',original,newURL], ['page_changed',original,otherTab],
+  ['layout_changed',original,newRole], ['layout_changed',original,newParent], ['layout_changed',original,newOrder],
+  ['layout_changed',original,wrap([stable.replace('ref=e1','ref=e9')])],
+  ...unparseable.map(next => ['unparseable_snapshot',original,next]),
+];
+for (const [reason,before,after] of checks) {
+  const result = ui.diff(before,after);
+  const note = 'Note: full snapshot returned instead of diff (reason: ' + reason + ').\n\n';
+  const text = ui.text(result);
+  if (result._meta?.['linger/browserSnapshotDiff'] || !text.includes(note+'### Snapshot') || text.replace(note,'') !== after)
+    throw Error('fallback mismatch: ' + reason + ' ' + text);
+  const [role,name,ref] = after.includes('ref=e9') ? ['button','Save','e9'] :
+    after.includes('button "Other" [ref=e1]') ? ['button','Other','e1'] : ['button','Save','e1'];
+  if (ui.ref(result,role,name) !== ref) throw Error('lost full snapshot');
+}
+const missing = ui.diff(original,{content:[{type:'text',text:'delivery only'}]});
+if (ui.text(missing) !== 'Note: the newer result has no full snapshot (reason: missing_snapshot).\n\ndelivery only') throw Error('lost action receipt');
+const quoted = wrap([stable,'- text: "@valid"','- textbox "Field" [ref=e3]: ",valid"']);
+if (!ui.text(ui.diff(original,quoted)).includes('### Snapshot diff')) throw Error('rejected quoted indicators');
+const diff = ui.diff(original,original);
+const message = 'ui.ref requires a full snapshot. Pass the result of ui.browser.snapshot({}).';
+for (const snapshot of [diff,ui.text(diff),{content:diff.content}]) {
+  let caught;
+  try { ui.ref(snapshot,'button','Save'); } catch (err) { caught = err.message; }
+  if (caught !== message) throw Error('diff accepted as full snapshot');
+}
+return true;
+`)
+	if string(result.Value) != "true" {
+		t.Fatalf("fallback checks: %s", result.Value)
+	}
+}
+
+func TestBrowserSnapshotDiffOmitsEqualAnonymousRowsBetweenChanges(t *testing.T) {
+	r := nodeRuntime(t, noCalls(t), Limits{})
+	result := execute(t, r, `
+const fence = '\x60'.repeat(3);
+const wrap = rows => ['### Page','- Page URL: https://fixture.example/','### Snapshot',fence+'yaml','- main [ref=e1]:',
+  ...rows.map(text => '  - text: '+text),'  - button "Save" [ref=e2]',fence].join('\n');
+for (const same of [['Unchanged'], Array.from({length:300},(_,i) => 'Unchanged '+i)]) {
+  const diff = ui.text(ui.diff(wrap(['Ready',...same,'Pending']),wrap(['Updated',...same,'Finished'])));
+  for (const row of ['- - text: Ready','- - text: Pending','+ - text: Updated','+ - text: Finished']) {
+    if (!diff.includes(row)) throw Error('missing '+row+' in '+diff);
+  }
+  if (diff.includes('- text: Unchanged') || diff.includes('button "Save"')) throw Error('unchanged row emitted');
+}
+const old = Array.from({length:67},(_,i) => i === 33 ? 'Shared' : 'Old '+i);
+const next = Array.from({length:67},(_,i) => i === 33 ? 'Shared' : 'New '+i);
+const range = ui.text(ui.diff(wrap(old),wrap(next)));
+if (!range.includes('~ anonymous range replaced (67 old rows, 67 new rows)') ||
+  !range.includes('- text: Shared') || range.includes('+ - text: Shared') ||
+  range.includes('Unchanged elements omitted') || range.includes('button "Save"'))
+  throw Error('misleading range replacement');
+return true;`)
+	if string(result.Value) != "true" {
+		t.Fatalf("anonymous edit script: %s", result.Value)
+	}
+}
+
+func TestBrowserSnapshotDiffHasNoLengthFallback(t *testing.T) {
+	r := nodeRuntime(t, noCalls(t), Limits{})
+	result := execute(t, r, `
+const fence = '\x60'.repeat(3);
+const header = '### Page\n- Page URL: https://fixture.example/\n### Snapshot\n' + fence + 'yaml\n';
+const parent = '- main [ref=e1]:\n  - button "Open" [ref=e2]\n';
+const choices = Array.from({length:55}, (_,i) => '    - button "Choice ' + i + '" [ref=item' + i + ']\n').join('');
+const big = header + parent + '  - dialog "Large" [ref=e4]:\n' + choices + fence;
+const small = header + parent + fence;
+const smaller = ui.text(ui.diff(big,small));
+const larger = ui.text(ui.diff(small,big));
+const focused = ui.text(ui.diff(big,big.replace('dialog "Large" [ref=e4]', 'dialog "Large" [active] [ref=e4]')));
+const peers = header + parent + Array.from({length:55}, (_,i) => '  - text "Peer ' + i + '" [ref=item' + i + ']\n').join('') + fence;
+const removed = ui.text(ui.diff(peers,small));
+return larger.includes('### Snapshot diff') && larger.includes('Choice 54') &&
+  smaller.includes('- - dialog "Large"') && !smaller.includes('Choice 0') && !smaller.includes('reason:') &&
+  focused.includes('~ - dialog "Large" [active] [ref=e4]:') && !focused.includes('Choice ') &&
+  removed.includes('... 45 more removed') && removed.includes('Peer 9') && !removed.includes('Peer 10');
+`)
+	if string(result.Value) != "true" {
+		t.Fatalf("length checks: %s", result.Value)
+	}
+}
+
+func TestBrowserSnapshotDiffTracksAnonymousRowsAndEscapedKeys(t *testing.T) {
+	r := nodeRuntime(t, noCalls(t), Limits{})
+	result := execute(t, r, `
+const fence = '\x60'.repeat(3);
+const wrap = rows => '### Page\n- Page URL: https://fixture.example/\n### Snapshot\n' + fence + 'yaml\n' + rows.join('\n') + '\n' + fence;
+const button = '  - ' + JSON.stringify('button ' + JSON.stringify('He said "Save" \\ [ref=e2]') + ' [ref=e2]');
+const anonymous = '  - text: "literal [ref=e2]"';
+const looksLikeRef = '  - generic "Example [ref=e2]" [active]';
+const root = '- group [ref=e1]:';
+const prev = wrap([root,anonymous,button,looksLikeRef]);
+const next = wrap([root,button,anonymous,looksLikeRef]);
+const data = ui.text(ui.diff(prev,next));
+const top = ui.text(ui.diff(wrap(['- text: Ready',button.trimStart()]),wrap(['- text: Updated',button.trimStart()])));
+const link = '  - link "Home" [ref=e3] [cursor=pointer]:';
+const leaf = wrap([root,link,'    - /url: /before',button]);
+const container = wrap([root,link,'    - /url: /after','    - img "Logo" [ref=e4]',button]);
+const expanded = ui.text(ui.diff(leaf,container));
+const collapsed = ui.text(ui.diff(container,leaf));
+return data.includes('### Snapshot diff') && !data.includes('He said') &&
+  data.includes('- - text: "literal [ref=e2]"\n    under - group [ref=e1]:\n    before [ref=e2]') &&
+  data.includes('+ - text: "literal [ref=e2]"\n    under - group [ref=e1]:\n    after [ref=e2]') &&
+  top.includes('- - text: Ready\n    before [ref=e2]') &&
+  top.includes('+ - text: Updated\n    before [ref=e2]') && !top.includes('He said') &&
+  expanded.includes('+ - img "Logo" [ref=e4]') && expanded.includes('- - /url: /before') &&
+  expanded.includes('+ - /url: /after') && collapsed.includes('- - img "Logo" [ref=e4]') &&
+  collapsed.includes('- - /url: /after') && collapsed.includes('+ - /url: /before');
+`)
+	if string(result.Value) != "true" {
+		t.Fatalf("anonymous rows and quoted keys: %s", result.Value)
+	}
+}
+
+func TestBrowserSnapshotDiffKeepsOnlyChanges(t *testing.T) {
+	testBrowserSnapshotDiffPages(t, 256, "")
+}
+
+var browserDiffCPUStress = flag.Bool("browser-diff-cpu-stress", false, "run browser diff stress tests with a thread CPU clock")
+
+func TestBrowserSnapshotDiffThreadCPUStress(t *testing.T) {
+	if !*browserDiffCPUStress {
+		t.Skip("enable with -args -browser-diff-cpu-stress")
+	}
+	// Shadow the wrapper's clock in this child only. The normal tests exercise
+	// the production wall clock, while these cases measure compute headroom.
+	const threadCPUClock = `
+const performance = {
+  now() {
+    const {user, system} = process.threadCpuUsage();
+    return (user + system) / 1000;
+  },
+};
+`
+	testBrowserSnapshotDiffPages(t, 5000, threadCPUClock)
+}
+
+func testBrowserSnapshotDiffPages(t *testing.T, controls int, clockPrelude string) {
+	t.Helper()
+	link := func(name, ref, value string) string {
+		return fmt.Sprintf("  - link %q [ref=%s] [cursor=pointer]:\n    - /url: %s\n", name, ref, value)
+	}
+	quotedLink := func(name, ref, value string) string {
+		label := fmt.Sprintf("link %q [ref=%s] [cursor=pointer]", name+`: it's "quoted" \`, ref)
+		return fmt.Sprintf("  - '%s':\n    - /url: %s\n", strings.ReplaceAll(label, "'", "''"), value)
+	}
+	textbox := func(name, ref, value string) string {
+		return fmt.Sprintf("  - textbox %q [ref=%s]: %q\n", name, ref, value)
+	}
+	button := func(name, ref, _ string) string {
+		return fmt.Sprintf("  - button %q [ref=%s]\n", name, ref)
+	}
+	for _, test := range []struct {
+		name string
+		row  func(name, ref, value string) string
+		want []string
+	}{
+		{"buttons", button, nil},
+		{"links", link, []string{"- - /url: /items/before", "+ - /url: /items/after"}},
+		{"quoted-links", quotedLink, []string{"- - /url: /items/before", "+ - /url: /items/after"}},
+		{"textboxes", textbox, []string{`~ - textbox "Edited item" [ref=e2]: "/items/after"`}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var rows strings.Builder
+			for i := 1; i < controls; i++ {
+				rows.WriteString(test.row(fmt.Sprint("Inventory row item ", i), fmt.Sprint("e", i+2), fmt.Sprint("/items/", i)))
+			}
+			const header = "### Page\n- Page URL: https://fixture.example/\n### Snapshot\n```yaml\n- main [ref=e1]:\n"
+			const fence = "```"
+			controlsText := rows.String()
+			oldRow := test.row("Edited item", "e2", "/items/before")
+			newRow := test.row("Edited item", "e2", "/items/after")
+			added := test.row("New item", "newItem", "/items/new")
+			before := header + "  - text: Ready\n" + oldRow + controlsText + fence
+			after := header + "  - text: Updated\n" + newRow + added + controlsText + fence
+			r := nodeRuntime(t, func(_ context.Context, c Call) (json.RawMessage, error) {
+				if c.Namespace != "browser" || c.Method != "snapshot" {
+					return nil, errors.New("expected browser snapshot")
+				}
+				text := before
+				if string(c.Arguments) == `{"after":true}` {
+					text = after
+				}
+				return json.Marshal(map[string]any{"content": []map[string]string{{"type": "text", "text": text}}})
+			}, Limits{})
+			r.program = clockPrelude + r.program
+			result := execute(t, r, `
+state.before = ui.text(await ui.browser.snapshot({}));
+const next = await ui.browser.snapshot({after:true});
+ui.emit(ui.diff(state.before,next));`)
+			if len(result.Output) != 1 {
+				t.Fatalf("expected one diff, got %d outputs", len(result.Output))
+			}
+			var output struct {
+				Content []struct{ Text string }
+			}
+			if err := json.Unmarshal(result.Output[0], &output); err != nil || len(output.Content) != 1 {
+				t.Fatalf("invalid diff result: %v", err)
+			}
+			diff := output.Content[0].Text
+			addedHeader, _, _ := strings.Cut(added, "\n")
+			want := append([]string{
+				"### Snapshot diff\n",
+				"- - text: Ready\n    under - main [ref=e1]:",
+				"+ - text: Updated\n    under - main [ref=e1]:",
+				"+ " + strings.TrimSpace(addedHeader),
+			}, test.want...)
+			for _, fragment := range want {
+				if !strings.Contains(diff, fragment) {
+					t.Fatalf("missing %q in %q", fragment, diff)
+				}
+			}
+			if strings.Contains(diff, "Inventory row item") || strings.Contains(diff, "/items/1") {
+				t.Fatalf("unchanged controls leaked into a %d-byte diff", len(diff))
+			}
+			later := execute(t, r, `return state.before.length;`)
+			if later.Generation != result.Generation || string(later.Value) != fmt.Sprint(len(before)) {
+				t.Fatalf("persisted snapshot lost: %s", later.Value)
+			}
+		})
+	}
+}
+
+func TestBrowserSnapshotDiffHandlesPlaywrightHexEscapes(t *testing.T) {
+	r := nodeRuntime(t, noCalls(t), Limits{})
+	result := execute(t, r, `
+const fence = '\x60'.repeat(3);
+const slash = '\\';
+const quote = slash + '"';
+const key = '- "button ' + quote + 'Control ' + slash + 'x7f' + quote + ' [ref=e2]"';
+const literalKey = '- "button ' + quote + 'Literal ' + slash.repeat(4) + 'x7f' + quote + ' [ref=e3]"';
+const oldValue = '- textbox "Value" [ref=e4]: "a' + slash + 'x7fb"';
+const newValue = '- textbox "Value" [ref=e4]: "' + slash.repeat(2) + 'x7f"';
+const wrap = rows => ['### Page','- Page URL: https://fixture.example/','### Snapshot',fence+'yaml',...rows,fence].join('\n');
+const before = wrap([key,literalKey,oldValue]);
+const next = wrap([key,literalKey,newValue]);
+const diff = ui.text(ui.diff(before,next));
+if (!diff.includes('### Snapshot diff') || !diff.includes('~ '+newValue)) throw Error(diff);
+if (ui.ref(before,'button','Control \x7f') !== 'e2' || ui.ref(next,'button','Literal '+slash+'x7f') !== 'e3')
+  throw Error('incorrectly decoded key');
+const invalid = next.replace(newValue,oldValue.replace('x7f','xZZ'));
+if (!ui.text(ui.diff(before,invalid)).includes('reason: unparseable_snapshot')) throw Error('accepted malformed escape');
+return true;`)
+	if string(result.Value) != "true" {
+		t.Fatalf("hex escapes: %s", result.Value)
 	}
 }
 

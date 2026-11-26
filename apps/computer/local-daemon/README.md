@@ -725,6 +725,62 @@ file, puts the snapshot back into the result and deletes the file, so the model
 need not call `browser_snapshot` again. Only links under `.linger/browser-output/`
 are replaced.
 
+Browser snapshots remain complete inside the script. Use `ui.emit(result)` for
+a raw browser result or `ui.emit(view.text)` for the full text of a page view.
+To show the changes from one action, compare its result with the view it used.
+
+```js
+const page = await ui.page();
+const before = await page.observe();
+const after = await before.click("button", "Open editor");
+ui.emit(ui.diff(before, after));
+```
+
+For the net changes across several actions, keep the first view and compare
+it with the final view.
+
+```js
+const page = await ui.page();
+const before = await page.observe();
+const opened = await before.click("button", "Open editor");
+const filled = await opened.type("textbox", "Title", "Inventory");
+ui.emit(ui.diff(before, filled));
+```
+
+To compare across `ui_exec` calls, save the first view's text in `state`.
+
+```js
+const page = await ui.page();
+const view = await page.observe();
+state.before = view.text;
+```
+
+In a later call, observe the same document again and use
+`ui.emit(ui.diff(state.before, view))`. `ui_reset` and uncaught script errors
+clear `state`.
+
+`ui.diff(prev, next)` accepts raw browser results, page views, or snapshot
+text. It returns a browser-shaped MCP result with the difference in the
+accessibility tree and the other sections from the newer observation. When it
+cannot compare the trees, it returns the newer observation with a reason.
+Text and properties without an element reference are reported with their parent
+and, when available, their position before or after a retained reference.
+When an anonymous range has too many edits to isolate individual changes, the
+result labels that range as a replacement and shows its newer rows.
+`missing_snapshot` means at least one snapshot is absent, so the newer result
+may contain only the original action receipt. `page_changed` means the page URL
+or active tab cannot be matched. `unparseable_snapshot` means the tree is
+malformed or uses an unsupported format. `layout_changed` means there is no
+shared element reference, or a shared element changed role, parent, or order.
+Use the original observations or a fresh `ui.browser.snapshot({})` to look up
+controls with `ui.ref`.
+
+Supply two whole-page observations of the same browser document. The
+comparison checks the URL, tab information and element structure recorded in
+the snapshots. Those fields may look the same after a same-URL reload, an
+iframe reload, or closing the first of two tabs with the same URL. Keep
+targeted or depth-limited snapshots out of the comparison.
+
 A Codex Context home receives the public entry as a URL server in its projected
 `config.toml`, together with `mcp_oauth_credentials_store = "file"`. Codex
 otherwise reads the OAuth credentials of every URL server from the OS keyring,

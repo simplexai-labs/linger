@@ -96,7 +96,7 @@ func (op *operation) browserEvidence(ctx context.Context, name string, input jso
 var screenshotLink = regexp.MustCompile(`\]\(([^)\n]+\.jpeg)\)`)
 
 // browserScreenshot captures the visible page. Playwright also saves the
-// image in the Operation's output directory; that copy is removed.
+// image in the active browser's output directory; that copy is removed.
 func (op *operation) browserScreenshot(ctx context.Context) *permission.Screenshot {
 	releaseCalls, err := op.holdBrowserCalls(ctx)
 	if err != nil {
@@ -128,7 +128,7 @@ func (op *operation) browserScreenshot(ctx context.Context) *permission.Screensh
 	if err != nil {
 		return nil
 	}
-	output := filepath.Clean(op.browserOutput())
+	output := filepath.Clean(op.currentBrowserOutput())
 	for _, link := range screenshotLink.FindAllStringSubmatch(string(result), -1) {
 		if path := filepath.Join(op.spec.WorkingDirectory, filepath.FromSlash(link[1])); filepath.Dir(path) == output {
 			_ = os.Remove(path)

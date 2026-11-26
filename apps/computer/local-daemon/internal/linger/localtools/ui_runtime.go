@@ -106,6 +106,7 @@ func unifiedUITools() []tool {
 				"For repeated stages, read changing values from each observation in JavaScript and continue in a bounded loop. Never paste a value from the last model turn when the current UI supplies it. On an unrecognized stage return its observation before writing. " +
 				"Browser: const page=await ui.page(url); let v=await page.observe(); on resume omit the URL. Read v.text. Use v=await v.click(role,name), v=await v.type(role,name,text) or v=await v.select(role,name,[value]). " +
 				"Fill several named controls from one observation with v=await v.fill([{type,name,value},...]); type is the control role, e.g. textbox or combobox. " +
+				"Use ui.emit(ui.diff(before, after)) to replace the snapshot tree with its changes between two full observations of the same page and keep the newer result's other sections. " +
 				"macOS: when the user names an app and window, discover and read it in one call: const r=await ui.computer.list_windows({app:appName}); const matches=r.structuredContent.windows.filter(w=>w.title===windowTitle); if(matches.length!==1)return r.structuredContent.windows; const w=matches[0]; let v=await ui.window(w.pid,w.window_id).observe(); use v.text for reads. " +
 				"To act, v=await v.click('AXButton',name). Each named action returns the next observation. Use it for the next decision. Observe again for missing or changing state. " +
 				"On recovery inspect existing field values first. Raw ui.browser and ui.computer methods return driver results. Use ui.emit(result) for images and ui.help(namespace) for unfamiliar methods. Never replay an unknown write. Each action retains its permission review.",
@@ -373,12 +374,16 @@ func (u *uiExecution) help(ctx context.Context, topic string) (json.RawMessage, 
 		return nil, err
 	}
 	listed := append([]tool(nil), methods...)
-	for i := range listed {
-		if topic == "browser" {
+	help := map[string]any{"namespace": topic, "methods": listed}
+	if topic == "browser" {
+		for i := range listed {
 			listed[i].Name = strings.TrimPrefix(listed[i].Name, "browser_")
 		}
+		help["helpers"] = map[string]string{
+			"ui.diff(prev, next)": "Compare two whole-page observations of the same browser document. Accepts browser results, page views or snapshot text. Use ui.emit(ui.diff(prev, next)) to replace the newer snapshot tree with its changes. If comparison is unavailable, the newer result is returned with a reason.",
+		}
 	}
-	return json.Marshal(map[string]any{"namespace": topic, "methods": listed})
+	return json.Marshal(help)
 }
 
 func (u *uiExecution) catalog(ctx context.Context, endpoint mcpproxy.ToolEndpoint) ([]tool, error) {

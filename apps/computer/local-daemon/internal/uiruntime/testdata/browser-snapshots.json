@@ -1,0 +1,42 @@
+{
+  "initial": {
+    "content": [
+      {
+        "type": "text",
+        "text": "### Open tabs\n- 0: (current) [Diff fixture](http://fixture.example/)\n- 1: [](about:blank)\n### Page\n- Page URL: http://fixture.example/\n- Page Title: Diff fixture\n### Snapshot\n```yaml\n- main [ref=e2]:\n  - 'button \"It''s a test: Save\" [ref=e3]'\n  - link \"Inventory\" [ref=e4] [cursor=pointer]:\n    - /url: /before\n  - iframe [ref=e5]:\n    - main [ref=f1e2]:\n      - button \"Frame action\" [ref=f1e3]\n```"
+      }
+    ]
+  },
+  "opened": {
+    "content": [
+      {
+        "type": "text",
+        "text": "### Open tabs\n- 0: (current) [Diff fixture](http://fixture.example/)\n- 1: [](about:blank)\n### Page\n- Page URL: http://fixture.example/\n- Page Title: Diff fixture\n### Snapshot\n```yaml\n- main [ref=e2]:\n  - 'button \"It''s a test: Save\" [active] [ref=e3]'\n  - link \"Inventory\" [ref=e4] [cursor=pointer]:\n    - /url: /before\n  - dialog \"Editor\" [ref=e6]:\n    - generic [ref=e7]:\n      - text: \"Menu: title\"\n      - 'textbox \"Menu: title\" [ref=e8]'\n    - button \"Close editor\" [ref=e9]\n  - iframe [ref=e5]:\n    - main [ref=f1e2]:\n      - button \"Frame action\" [ref=f1e3]\n```"
+      }
+    ]
+  },
+  "edited": {
+    "content": [
+      {
+        "type": "text",
+        "text": "### Open tabs\n- 0: (current) [Diff fixture](http://fixture.example/)\n- 1: [](about:blank)\n### Page\n- Page URL: http://fixture.example/\n- Page Title: Diff fixture\n### Snapshot\n```yaml\n- main [ref=e2]:\n  - 'button \"It''s a test: Save\" [ref=e3]'\n  - link \"Inventory\" [ref=e4] [cursor=pointer]:\n    - /url: /after\n  - dialog \"Editor\" [ref=e6]:\n    - generic [ref=e7]:\n      - text: \"Menu: title\"\n      - 'textbox \"Menu: title\" [active] [ref=e8]': \"Title: updated\"\n    - button \"Close editor\" [ref=e9]\n  - iframe [ref=e5]:\n    - main [ref=f1e2]:\n      - button \"Frame action\" [ref=f1e3]\n```"
+      }
+    ]
+  },
+  "closed": {
+    "content": [
+      {
+        "type": "text",
+        "text": "### Open tabs\n- 0: (current) [Diff fixture](http://fixture.example/)\n- 1: [](about:blank)\n### Page\n- Page URL: http://fixture.example/\n- Page Title: Diff fixture\n### Snapshot\n```yaml\n- main [ref=e2]:\n  - 'button \"It''s a test: Save\" [ref=e3]'\n  - link \"Inventory\" [ref=e4] [cursor=pointer]:\n    - /url: /after\n  - iframe [ref=e5]:\n    - main [ref=f1e2]:\n      - button \"Frame action\" [ref=f1e3]\n```"
+      }
+    ]
+  },
+  "frameEdited": {
+    "content": [
+      {
+        "type": "text",
+        "text": "### Open tabs\n- 0: (current) [Diff fixture](http://fixture.example/)\n- 1: [](about:blank)\n### Page\n- Page URL: http://fixture.example/\n- Page Title: Diff fixture\n### Snapshot\n```yaml\n- main [ref=e2]:\n  - 'button \"It''s a test: Save\" [ref=e3]'\n  - link \"Inventory\" [ref=e4] [cursor=pointer]:\n    - /url: /after\n  - iframe [active] [ref=e5]:\n    - main [ref=f1e2]:\n      - button \"Frame updated\" [active] [ref=f1e4]\n```"
+      }
+    ]
+  }
+}

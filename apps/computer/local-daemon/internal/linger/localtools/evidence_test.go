@@ -2,16 +2,23 @@ package localtools
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"math/rand/v2"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/permission"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 )
 
 func cuaRead(t *testing.T, text string, structured map[string]string) json.RawMessage {
@@ -144,6 +151,74 @@ func TestScreenshotEvidenceIsAJPEGWithItsSize(t *testing.T) {
 	data, _ := base64.StdEncoding.DecodeString(shot.Data)
 	if !bytes.HasPrefix(data, []byte{0xff, 0xd8, 0xff}) {
 		t.Fatal("not a JPEG")
+	}
+}
+
+func TestBrowserEvidenceCleansOnlyTheActiveChromeOutput(t *testing.T) {
+	workspace := t.TempDir()
+	op := &operation{
+		manager:           &Manager{journal: &actionJournal{}},
+		spec:              provider.OperationSpec{WorkingDirectory: workspace},
+		directory:         t.TempDir(),
+		userChromeSession: &userChromeSession{output: filepath.Join(workspace, "chrome")},
+	}
+	inside := filepath.Join(op.userChromeSession.output, "page-evidence.jpeg")
+	outside := filepath.Join(op.browserOutput(), "page-unrelated.jpeg")
+	var picture bytes.Buffer
+	if err := png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 40, 30))); err != nil {
+		t.Fatal(err)
+	}
+	var links []string
+	for _, path := range []string{inside, outside} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, picture.Bytes(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		relative, err := filepath.Rel(workspace, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		links = append(links, fmt.Sprintf("[Screenshot](%s)", filepath.ToSlash(relative)))
+	}
+	result, err := json.Marshal(map[string]any{"content": []any{
+		map[string]string{"type": "text", "text": links[0] + "\n" + links[1]},
+		map[string]string{"type": "image", "mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(picture.Bytes())},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requests, stdin := io.Pipe()
+	stdout, replies := io.Pipe()
+	t.Cleanup(func() {
+		_ = stdin.Close()
+		_ = stdout.Close()
+	})
+	op.browser = &mcpClient{
+		stdin: stdin, stdout: stdout, pending: make(map[uint64]chan rpcReply),
+		writeSlot: make(chan struct{}, 1), done: make(chan struct{}),
+	}
+	go op.browser.read()
+	go func() {
+		defer replies.Close()
+		defer requests.Close()
+		var request struct{ ID uint64 }
+		if err := json.NewDecoder(requests).Decode(&request); err == nil {
+			_ = json.NewEncoder(replies).Encode(rpcReply{ID: request.ID, Result: result})
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if shot := op.browserScreenshot(ctx); shot == nil || shot.MediaType != "image/jpeg" || shot.Width != 40 || shot.Height != 30 {
+		t.Fatalf("screenshot: %+v", shot)
+	}
+	if _, err := os.Stat(inside); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("session screenshot was not removed: %v", err)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("screenshot outside the active output was affected: %v", err)
 	}
 }
 
