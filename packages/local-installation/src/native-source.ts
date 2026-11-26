@@ -2355,7 +2355,7 @@ export async function stopNativeSource(
       await timedStep("computer", "native computer", () =>
         stopComputer(instance, { signal }),
       );
-      for (const name of nativeServices) {
+      const stopService = async (name: NativeService) => {
         signal?.throwIfAborted();
         await timedStep(name, `native ${name}`, async () => {
           try {
@@ -2373,6 +2373,21 @@ export async function stopNativeSource(
             );
           }
         });
+      };
+      if (process.platform === "win32") {
+        // Drain each wave before continuing: TeamHub must remain available
+        // while node-services stops, and PostgreSQL must outlive TeamHub.
+        for (const wave of [
+          ["web", "node-services"],
+          ["teamhub", "livekit"],
+          ["postgres"],
+        ] as const) {
+          const results = await Promise.allSettled(wave.map(stopService));
+          const failed = results.find((result) => result.status === "rejected");
+          if (failed) throw failed.reason;
+        }
+      } else {
+        for (const name of nativeServices) await stopService(name);
       }
       await timedStep("orphans", "native orphans", () =>
         reclaimEarlierProcesses(instance, path.resolve(instance.root, "../..")),

@@ -4391,9 +4391,81 @@ test("logs per-step stop timings and a summary even on partial stop failure", as
     expect.stringMatching(/^Stopping native teamhub failed after [\d.]+s\.$/),
   );
   expect(failLogs.at(-1)).toMatch(
-    /^Native stop timings \(s\): computer [\d.]+, web [\d.]+, node-services [\d.]+, teamhub [\d.]+\.$/,
+    process.platform === "win32"
+      ? /^Native stop timings \(s\): computer [\d.]+, web [\d.]+, node-services [\d.]+, teamhub [\d.]+, livekit [\d.]+\.$/
+      : /^Native stop timings \(s\): computer [\d.]+, web [\d.]+, node-services [\d.]+, teamhub [\d.]+\.$/,
   );
 });
+
+test.skipIf(process.platform !== "win32")(
+  "drains parallel Windows service stops before stopping dependent services",
+  async () => {
+    const f = await fixture();
+    const { prepareNativeConfiguration } = await import("./native-source.js");
+    const { instance } = await prepareNativeConfiguration(f.repo, {
+      home: f.home,
+      name: "parallel-stop",
+    });
+    const begun: string[] = [];
+    let releaseNode!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseNode = resolve;
+    });
+    vi.mocked(stopNativeProcess).mockImplementation(async (_root, name) => {
+      begun.push(name);
+      if (name === "node-services") await held;
+    });
+    const stopping = stopNativeSource(instance);
+    await vi.waitFor(() => expect(begun).toEqual(["web", "node-services"]));
+    expect(begun).not.toContain("teamhub");
+    releaseNode();
+    await stopping;
+    expect(begun).toEqual([
+      "web",
+      "node-services",
+      "teamhub",
+      "livekit",
+      "postgres",
+    ]);
+  },
+);
+
+test.skipIf(process.platform !== "win32")(
+  "waits for the whole Windows stop wave before reporting failure",
+  async () => {
+    const f = await fixture();
+    const { prepareNativeConfiguration } = await import("./native-source.js");
+    const { instance } = await prepareNativeConfiguration(f.repo, {
+      home: f.home,
+      name: "parallel-stop-failure",
+    });
+    let releaseWeb!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseWeb = resolve;
+    });
+    const begun: string[] = [];
+    vi.mocked(stopNativeProcess).mockImplementation(async (_root, name) => {
+      begun.push(name);
+      if (name === "web") await held;
+      if (name === "node-services") throw new Error("node stop failed");
+    });
+    const stopping = stopNativeSource(instance);
+    const outcome = stopping.then(
+      () => "ok",
+      () => "failed",
+    );
+    await vi.waitFor(() => expect(begun).toEqual(["web", "node-services"]));
+    let finished = false;
+    void outcome.then(() => {
+      finished = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(finished).toBe(false);
+    releaseWeb();
+    expect(await outcome).toBe("failed");
+    expect(begun).toEqual(["web", "node-services"]);
+  },
+);
 
 async function makeMinimalSkeletonRepo(repo: string) {
   await mkdir(path.join(repo, "apps/teamhub"), { recursive: true });

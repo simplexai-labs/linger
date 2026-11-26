@@ -518,6 +518,9 @@ breakdowns (`download`, retries/switches, `extract`, `verify`, `install`,
 logs per-service readiness times and a summary across `web`, `teamhub`,
 `node-services`, and `document-runtime`; `stopNativeSource` and
 `stopLocalmodels` log per-step stop durations and `Native stop timings (s)`.
+On Windows, native stop drains Web and node-services concurrently, then
+TeamHub and LiveKit concurrently, before stopping PostgreSQL. A failed wave
+drains all its stops and prevents the next wave from starting.
 
 Run `pnpm --filter @linger/local-installation check` (`make check-packages`
 runs it too); `make check-installer` runs its consumer, the installer, and
