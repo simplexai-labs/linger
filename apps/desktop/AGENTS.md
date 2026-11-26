@@ -542,13 +542,19 @@ Gateway and runs Agents. The daemon exits with the app.
   itself opened is kept; one from a frame in it is destroyed. It opens at the
   bottom right of the main window's screen and resizes down to 240x96. Its
   title is the one the page gives it in the interface language ("Meeting",
-  "会议"); a blank title keeps "Linger". Its native close button ends the call
-  or the recording; `lingerDesktop.voiceWindow.showMainWindow()` (its presence
-  is how the SPA knows the app supports this) restores and focuses the main
-  window, on macOS bringing the app in front of the active one, while the
-  floating window stays up and the session keeps running in it: the app has
-  no in-page voice windows. An app without `voiceWindow` keeps the in-page
-  windows.
+  "会议"); a blank title keeps "Linger". It is moved by its native title bar,
+  cannot be minimized, and its close button ends the call or the recording;
+  it has no way back into the page or to the main window, and the app has no
+  in-page voice windows. `lingerDesktop.voiceWindow.floats` tells the SPA the
+  app supports this; an app without `voiceWindow` keeps the in-page windows.
+  Stacking (`voiceWindowLevel`, `voiceWindowOptions`): macOS floats it at
+  `floating` on every Space and over full-screen apps; Windows and Linux use
+  `pop-up-menu`, because Electron moves a Windows window at the levels up to
+  `status` behind the taskbar each time it is activated. It is left out of
+  the Windows taskbar. The main window showing, restoring or taking focus,
+  and a display being added, removed or changed, call `setAlwaysOnTop(true)`
+  again, which only restacks it; never toggle it off and on (on Windows that
+  drops other apps' always-on-top windows).
 - `src/shell/*.html`: app-owned pages (title bar, offline/setup page). They
   have no network access and talk to the main process via `src/preload/shell.ts`.
   Their text lives in the `*.messages.ts` beside them; the main process

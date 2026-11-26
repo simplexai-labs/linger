@@ -178,12 +178,14 @@ build:assets` to check the initial JS budget.
   whose title bar and controls the page cannot hide or style. The desktop app floats
   them in its own always-on-top window, which stays up while the main window
   is minimized or closed to the tray: when the preload offers
-  `window.lingerDesktop.voiceWindow`, `voice-pip.ts` opens it with
+  `window.lingerDesktop.voiceWindow.floats` (older apps:
+  `voiceWindow.showMainWindow`), `voice-pip.ts` opens it with
   `window.open("")` (the desktop main process allows only that call) and is
   the only place that knows which kind of window it got. In the desktop app
   the voice windows live only there: Meeting opens floating, also when the
-  page finds a running recording after a reload, and shows in the page (with
-  a Float button) only if the app refused the window. A desktop app without
+  page finds a running recording after a reload, and shows in the page only
+  if the app refused the window, so Stop stays within reach; it offers no
+  Float button and does not ask again. A desktop app without
   that field keeps voice windows in the page with no float button. Voice Mode
   has no float button: it floats when it starts. Only the floating window's
   title gets a tooltip, and only while it is cut off. In the page on macOS they stay out of the
@@ -216,7 +218,8 @@ build:assets` to check the initial JS budget.
   an active drag; keyboard resizing and double-click reset remain available.
 - Opening Meeting from the sidebar requests the initial floating-window
   size in the desktop app so a new recording opens expanded. In browsers it
-  opens the in-page window and offers no Float or Show Linger controls.
+  opens the in-page window and offers no Float or Show Linger controls; the
+  floating window has none either and is moved by its native title bar.
 - Recording desktop-window collapse remembers that window's actual
   expanded outer dimensions and restores both dimensions with an absolute
   resize inside the user's click, bounded by the current screen. A pending
@@ -229,11 +232,12 @@ build:assets` to check the initial JS budget.
   they stay on screen wherever the row sits and never draw over the controls;
   the timer stays beside them while it fits. An open window keeps the vertical
   confirmation card. Escape or Keep recording returns focus to Stop.
-- Closing a desktop recording window ends the recording at once. Its Show
-  Linger button brings the main window forward and keeps recording in the
-  floating window; there is no way back into the page. A Stop that fails
-  after the close keeps a still-running recording and opens its window again
-  at its top row. Closing a floated Voice Mode window ends the call. Browser visibility or focus changes never decide
+- Closing a desktop recording window ends the recording at once; there is no
+  way back into the page or to the main window from it. A Stop that fails
+  after the close keeps a still-running recording and opens its floating
+  window again at full size, showing why Stop did not end it. Nothing sizes a
+  window right after `window.open`: it has not laid out yet and reports no
+  inner height. Closing a floated Voice Mode window ends the call. Browser visibility or focus changes never decide
   whether a window close ends a session.
   Recording moves one portal host between documents so paused state, Ask
   drafts and transcript scroll survive the move. Hide it while processing a

@@ -100,9 +100,7 @@ const api: LingerDesktopApi = {
       },
     },
   },
-  voiceWindow: {
-    showMainWindow: () => ipcRenderer.invoke(IPC.voiceWindowShowMain),
-  },
+  voiceWindow: { floats: true },
   language: {
     set: (language) => ipcRenderer.invoke(IPC.languageSet, language),
   },

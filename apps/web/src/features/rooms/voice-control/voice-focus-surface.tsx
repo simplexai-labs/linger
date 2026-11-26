@@ -5,8 +5,6 @@ import {
   Loading03Icon,
   Mic01Icon,
   PauseIcon,
-  PictureInPictureExitIcon,
-  PictureInPictureOnIcon,
   PlayIcon,
   StopIcon,
 } from "@hugeicons/core-free-icons";
@@ -64,9 +62,7 @@ export function VoiceFocusSurface({
   height,
   floating = "page",
   onExit,
-  onFloat,
   onMoveStart,
-  onShowMain,
   onViewChange,
   panels,
   view,
@@ -77,18 +73,8 @@ export function VoiceFocusSurface({
   /** A picture-in-picture window fills its own window instead of floating. */
   floating?: "page" | "pip";
   onExit: () => void;
-  /**
-   * Moves the page window into the always-on-top window; offered only when a
-   * desktop app refused that window at first.
-   */
-  onFloat?: () => void;
   /** Starts moving the in-page window from its title bar. */
   onMoveStart?: (event: PointerEvent<HTMLDivElement>) => void;
-  /**
-   * Brings the desktop app's main window to the front from the always-on-top
-   * window, which keeps floating and recording.
-   */
-  onShowMain?: () => void;
   onViewChange?: (view: RecordingView | undefined) => void;
   /** Present once a recording runs; before that only the transcript shows. */
   panels?: RecordingPanels;
@@ -411,29 +397,6 @@ export function VoiceFocusSurface({
         </button>
       ) : null}
       <span className="flex-1">{pip ? null : t(m.meeting)}</span>
-      {onFloat ? (
-        <button
-          aria-label={t(m.float)}
-          className={styles.windowButton}
-          disabled={confirmingStop}
-          onClick={onFloat}
-          title={t(m.floatHint)}
-          type="button"
-        >
-          <Icon icon={PictureInPictureOnIcon} />
-        </button>
-      ) : null}
-      {onShowMain ? (
-        <button
-          aria-label={t(m.showLinger)}
-          className={styles.windowButton}
-          onClick={onShowMain}
-          title={t(m.showLingerHint)}
-          type="button"
-        >
-          <Icon icon={PictureInPictureExitIcon} />
-        </button>
-      ) : null}
     </div>
   );
   const body = (

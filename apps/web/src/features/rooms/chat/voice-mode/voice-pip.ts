@@ -5,15 +5,6 @@ import type { Message } from "@/i18n/messages";
 import { voiceWindowMessages } from "./voice-window.messages";
 
 /**
- * The desktop app's floating window (`window.lingerDesktop.voiceWindow`): the
- * page opens a blank window under `desktopWindowTarget` and the app keeps it
- * on top, also while its main window is minimized or closed to the tray.
- */
-interface DesktopVoiceWindow {
-  showMainWindow(): Promise<void>;
-}
-
-/**
  * The window name the desktop app recognizes; it floats the window opened
  * under it. The suffix keeps a window that is still closing from being reused.
  */
@@ -45,23 +36,26 @@ let pip: { owner: VoicePipOwner; window: Window } | undefined;
 const listeners = new Set<() => void>();
 const closedByHuman = new Set<(owner: VoicePipOwner) => void>();
 
-function desktopVoiceWindow(): DesktopVoiceWindow | undefined {
-  const voiceWindow = (
-    window as Window & {
-      lingerDesktop?: { voiceWindow?: Partial<DesktopVoiceWindow> };
-    }
-  ).lingerDesktop?.voiceWindow;
-  return typeof voiceWindow?.showMainWindow === "function"
-    ? (voiceWindow as DesktopVoiceWindow)
-    : undefined;
-}
-
 /**
- * Only the desktop app can float a window without browser-owned chrome. There
- * the voice windows live only in that window; a browser keeps them in the page.
+ * Only the desktop app can float a window without browser-owned chrome: it
+ * marks that with `window.lingerDesktop.voiceWindow`, opens the blank window
+ * the page asks for under `desktopWindowTarget` and keeps it on top, also
+ * while its main window is minimized or closed to the tray. There the voice
+ * windows live only in that window; a browser keeps them in the page.
  */
 export function voicePipSupported() {
-  return desktopVoiceWindow() !== undefined;
+  const voiceWindow = (
+    window as Window & {
+      lingerDesktop?: {
+        voiceWindow?: { floats?: unknown; showMainWindow?: unknown };
+      };
+    }
+  ).lingerDesktop?.voiceWindow;
+  // Apps before `floats` marked it with their way back to the main window.
+  return (
+    voiceWindow?.floats === true ||
+    typeof voiceWindow?.showMainWindow === "function"
+  );
 }
 
 function publish(next: typeof pip) {
@@ -112,17 +106,6 @@ export function closeVoicePip(owner: VoicePipOwner) {
   const current = pip.window;
   publish(undefined);
   current.close();
-}
-
-/**
- * Brings the desktop app's main window to the front from the floating window.
- * The floating window stays open and keeps the session: the desktop app has
- * no in-page voice window to return to.
- */
-export function showLingerFromVoicePip() {
-  void desktopVoiceWindow()
-    ?.showMainWindow()
-    .catch(() => undefined);
 }
 
 /** Runs when this owner's window closes from the window, not from the page. */

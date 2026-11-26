@@ -7,7 +7,6 @@ import {
   onVoicePipClosedByHuman,
   openVoicePip,
   resetVoicePipForTest,
-  showLingerFromVoicePip,
   voicePipSupported,
 } from "./voice-pip";
 
@@ -50,12 +49,12 @@ function installFakeDesktopVoiceWindow() {
     (_url?: string, _target?: string, _features?: string) =>
       voiceWindow as unknown as Window,
   );
-  const showMain = vi.fn(async () => {});
   defineGlobalProperty(window, "open", { value: open });
+  // The bridge only marks that the app floats the window.
   defineGlobalProperty(window, "lingerDesktop", {
-    value: { voiceWindow: { showMainWindow: showMain } },
+    value: { voiceWindow: { floats: true } },
   });
-  return { document, open, showMain, voiceWindow };
+  return { document, open, voiceWindow };
 }
 
 function removeFakeVoicePip() {
@@ -149,34 +148,26 @@ describe("Voice Mode picture-in-picture window", () => {
     await expect(openVoicePip("voice-mode")).resolves.toBeUndefined();
   });
 
-  it("shows the main window from the desktop app's window and keeps floating", async () => {
+  it("ends the session when the desktop app's window is closed", async () => {
     const fake = installFakeDesktopVoiceWindow();
     const closedByHuman = vi.fn();
     const stop = onVoicePipClosedByHuman("voice-mode", closedByHuman);
     try {
       await openVoicePip("voice-mode");
-      showLingerFromVoicePip();
-      expect(fake.showMain).toHaveBeenCalledOnce();
-      // There is no in-page window to go back to in the desktop app.
-      expect(fake.voiceWindow.close).not.toHaveBeenCalled();
       expect(closedByHuman).not.toHaveBeenCalled();
-
-      // The window's close button ends the session.
+      // The window's close button is the only way out of it.
       fake.voiceWindow.close();
-      document.dispatchEvent(new Event("visibilitychange"));
       expect(closedByHuman).toHaveBeenCalledOnce();
     } finally {
       stop();
     }
   });
 
-  it("keeps floating when the main window cannot be shown", async () => {
-    const fake = installFakeDesktopVoiceWindow();
-    fake.showMain.mockRejectedValueOnce(new Error("no window"));
-    await openVoicePip("voice-mode");
-    showLingerFromVoicePip();
-    await Promise.resolve();
-    expect(fake.voiceWindow.close).not.toHaveBeenCalled();
+  it("floats with an older desktop app's bridge too", () => {
+    defineGlobalProperty(window, "lingerDesktop", {
+      value: { voiceWindow: { showMainWindow: vi.fn(async () => {}) } },
+    });
+    expect(voicePipSupported()).toBe(true);
   });
 
   it("carries the page's styles and theme, including later ones", async () => {

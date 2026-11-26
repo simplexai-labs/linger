@@ -40,6 +40,48 @@ export const voiceWindowPosition = (
   ),
 });
 
+// How high the window floats: over the main window and every ordinary window.
+// Windows and Linux know only on top or not, but on Windows Electron moves a
+// window at the levels up to "status" behind the taskbar each time it is
+// activated (electron#34814), so there it takes the first level above them.
+// macOS keeps "floating", under menus and the Dock, and follows the person
+// across Spaces and full-screen apps instead.
+export type VoiceWindowLevel = "floating" | "pop-up-menu";
+export const voiceWindowLevel = (
+  platform: VoiceWindowPlatform,
+): VoiceWindowLevel => (platform === "darwin" ? "floating" : "pop-up-menu");
+
+// The window the page's request opens. It has no parent, so it neither
+// minimizes nor hides with the main window and the main window never covers
+// it; it is moved by its native title bar and only closed, never minimized,
+// so it cannot get lost behind other windows. Windows lists every window in
+// the taskbar; this one belongs to the main window's session, so it is left
+// out there.
+export const voiceWindowOptions = (platform: VoiceWindowPlatform) =>
+  ({
+    title: "Linger",
+    // The page asks for the size of its content, as in a browser.
+    useContentSize: true,
+    minWidth: VOICE_WINDOW_MIN.width,
+    minHeight: VOICE_WINDOW_MIN.height,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: platform === "win32",
+    autoHideMenuBar: true,
+  }) as const;
+
+// Something whose events should put the window back on top.
+export interface VoiceWindowRaiser {
+  on(event: string, listener: () => void): unknown;
+  off(event: string, listener: () => void): unknown;
+}
+export type VoiceWindowRaiseSource = readonly [
+  VoiceWindowRaiser,
+  readonly string[],
+];
+
 // Hiding or minimizing the main window would otherwise throttle the page's
 // timers, which keep the call and the recording going. A window is counted
 // from when it is adopted to when it closes, so a closing window cannot lift
@@ -61,23 +103,38 @@ export function acceptVoiceWindow(
   opener: WebContents,
   previous: (() => void) | undefined,
   platform: VoiceWindowPlatform,
+  raiseOn: readonly VoiceWindowRaiseSource[] = [],
 ): (() => void) | undefined {
   if (child.webContents.opener !== opener.mainFrame) {
     child.destroy();
     return undefined;
   }
   previous?.();
-  return adoptVoiceWindow(child, opener, platform);
+  return adoptVoiceWindow(child, opener, platform, raiseOn);
 }
 
 // Floats `child` over other apps and ties it to `opener`. Returns a function
-// that closes it.
+// that closes it. Each event of `raiseOn` (the main window coming back or
+// taking focus, a screen being added, removed or rearranged) puts the window
+// on top again: Windows can drop a window out of the always-on-top band, and
+// asking again only restacks it without taking focus.
 export function adoptVoiceWindow(
   child: BrowserWindow,
   opener: WebContents,
   platform: VoiceWindowPlatform,
+  raiseOn: readonly VoiceWindowRaiseSource[] = [],
 ): () => void {
-  child.setAlwaysOnTop(true, "floating");
+  const level = voiceWindowLevel(platform);
+  const raise = (): void => {
+    if (!child.isDestroyed()) child.setAlwaysOnTop(true, level);
+  };
+  raise();
+  const sources: VoiceWindowRaiseSource[] = [
+    [child, ["show", "restore"]],
+    ...raiseOn,
+  ];
+  for (const [source, events] of sources)
+    for (const event of events) source.on(event, raise);
   if (platform === "darwin")
     child.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
@@ -113,6 +170,8 @@ export function adoptVoiceWindow(
   opener.on("did-start-navigation", onNavigate);
   opener.on("render-process-gone", close);
   child.on("closed", () => {
+    for (const [source, events] of sources)
+      for (const event of events) source.off(event, raise);
     opener.off("did-start-navigation", onNavigate);
     opener.off("render-process-gone", close);
     hold(opener, -1);

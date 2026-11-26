@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   acceptVoiceWindow,
   adoptVoiceWindow,
+  voiceWindowLevel,
+  voiceWindowOptions,
   voiceWindowPosition,
 } from "./voice-window.js";
 
@@ -41,9 +43,68 @@ describe("adoptVoiceWindow", () => {
   it("floats the window over other apps and keeps the page running", () => {
     const f = fakes();
     adopt(f);
-    expect(f.child.setAlwaysOnTop).toHaveBeenCalledWith(true, "floating");
+    expect(f.child.setAlwaysOnTop).toHaveBeenCalledWith(true, "pop-up-menu");
     expect(f.opener.setBackgroundThrottling).toHaveBeenLastCalledWith(false);
     expect(f.child.setVisibleOnAllWorkspaces).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["darwin", "floating"],
+    // Up to "status", Electron puts a Windows window behind the taskbar each
+    // time it is activated.
+    ["win32", "pop-up-menu"],
+    ["linux", "pop-up-menu"],
+  ] as const)(
+    "floats at a level above ordinary windows on %s",
+    (platform, level) => {
+      expect(voiceWindowLevel(platform)).toBe(level);
+      const f = fakes();
+      adopt(f, platform);
+      expect(f.child.setAlwaysOnTop).toHaveBeenCalledWith(true, level);
+    },
+  );
+
+  it("goes back on top when the main window returns or a screen changes, until it closes", () => {
+    const f = fakes();
+    const main = new EventEmitter();
+    const screen = new EventEmitter();
+    adoptVoiceWindow(f.child as never, f.opener as never, "win32", [
+      [main, ["show", "restore", "focus"]],
+      [screen, ["display-removed"]],
+    ]);
+    f.child.setAlwaysOnTop.mockClear();
+    main.emit("focus");
+    main.emit("restore");
+    screen.emit("display-removed");
+    f.child.emit("show");
+    expect(f.child.setAlwaysOnTop).toHaveBeenCalledTimes(4);
+    // Restacking only: never off and on again, which drops other apps'
+    // always-on-top windows on Windows (electron#31536).
+    expect(
+      f.child.setAlwaysOnTop.mock.calls.every(
+        ([flag, level]) => flag === true && level === "pop-up-menu",
+      ),
+    ).toBe(true);
+
+    f.child.emit("closed");
+    f.child.setAlwaysOnTop.mockClear();
+    main.emit("focus");
+    screen.emit("display-removed");
+    expect(f.child.setAlwaysOnTop).not.toHaveBeenCalled();
+    expect(main.listenerCount("focus")).toBe(0);
+    expect(screen.listenerCount("display-removed")).toBe(0);
+  });
+
+  it("is a movable window apart from the main window, in the taskbar only where it must be", () => {
+    for (const platform of ["darwin", "win32", "linux"] as const) {
+      const options = voiceWindowOptions(platform);
+      expect(options).toMatchObject({ movable: true, minimizable: false });
+      // No parent and no modal: it neither minimizes with the main window nor
+      // sits under it.
+      expect(options).not.toHaveProperty("parent");
+      expect(options).not.toHaveProperty("modal");
+      expect(options.skipTaskbar).toBe(platform === "win32");
+    }
   });
 
   it("follows the person across Spaces on macOS", () => {

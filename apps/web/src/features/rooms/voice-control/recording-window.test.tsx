@@ -831,48 +831,20 @@ describe("Recording window", () => {
     expect(
       screen.queryByRole("region", { name: "Recording window" }),
     ).toBeNull();
-    // There is no way to move it back into the page.
+    // It is moved by its title bar; nothing in it goes back to the page or
+    // the main window.
+    for (const name of [
+      "Float recording window",
+      "Return recording to Linger",
+      "Show Linger window",
+    ])
+      expect(floating.queryByRole("button", { name })).toBeNull();
     expect(
-      floating.queryByRole("button", { name: "Float recording window" }),
-    ).toBeNull();
-    expect(
-      floating.queryByRole("button", { name: "Return recording to Linger" }),
+      floating.queryByRole("button", { name: "Resize recording window" }),
     ).toBeNull();
   });
 
-  it("shows the Linger window by its own button and keeps recording in the floating window", async () => {
-    const desktop = stubDesktopVoiceWindow();
-    const voice = voiceValue();
-    renderWindow(voice);
-    const floating = within(desktop.frame.contentDocument!.body);
-    await floating.findByRole("region", { name: "Recording window" });
-    await act(async () => {
-      fireEvent.click(
-        floating.getByRole("button", { name: "Show Linger window" }),
-      );
-    });
-    expect(desktop.showMain).toHaveBeenCalledOnce();
-    expect(desktop.pipWindow.close).not.toHaveBeenCalled();
-    expectInDocument(
-      floating.getByRole("region", { name: "Recording window" }),
-      desktop.frame.contentDocument!,
-    );
-    expect(
-      screen.queryByRole("region", { name: "Recording window" }),
-    ).toBeNull();
-    expect(voice.leavePage).not.toHaveBeenCalled();
-
-    // Its close button still ends the recording as the main window comes
-    // to the front.
-    act(() => {
-      desktop.pipWindow.close();
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-    await waitFor(() => expect(voice.leavePage).toHaveBeenCalledOnce());
-    expect(desktop.open).toHaveBeenCalledOnce();
-  });
-
-  it("stays in the page with a Float button when the desktop app refuses the window", async () => {
+  it("keeps Stop within reach in the page when the desktop app refuses the window", async () => {
     const desktop = stubDesktopVoiceWindow();
     desktop.open.mockReturnValueOnce(
       null as unknown as typeof desktop.pipWindow,
@@ -882,20 +854,14 @@ describe("Recording window", () => {
     expect(
       await screen.findByRole("region", { name: "Recording window" }),
     ).toBeVisible();
-    await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", { name: "Float recording window" }),
-      );
-    });
-    expect(desktop.open).toHaveBeenCalledTimes(2);
-    const floating = within(desktop.frame.contentDocument!.body);
-    expectInDocument(
-      await floating.findByRole("region", { name: "Recording window" }),
-      desktop.frame.contentDocument!,
-    );
     expect(
-      screen.queryByRole("region", { name: "Recording window" }),
+      screen.getByRole("button", { name: "Stop recording" }),
+    ).toBeInTheDocument();
+    // It offers no way to float again and does not keep asking.
+    expect(
+      screen.queryByRole("button", { name: "Float recording window" }),
     ).toBeNull();
+    expect(desktop.open).toHaveBeenCalledOnce();
     expect(voice.leavePage).not.toHaveBeenCalled();
   });
 
@@ -1194,32 +1160,52 @@ describe("Recording window", () => {
     );
   });
 
-  it("opens its window again at its top row when stopping after the close fails", async () => {
-    const { frame, open, pipWindow } = stubDesktopVoiceWindow();
-    const voice = voiceValue({
-      leavePage: vi.fn(async () => {
-        throw new Error("stop failed");
-      }),
-    });
-    renderWindow(voice);
-    await act(() => openVoicePip("recording"));
-    act(() => pipWindow.close());
-    await waitFor(() => expect(voice.leavePage).toHaveBeenCalledOnce());
-    await waitFor(() =>
-      expect(screen.getByTestId("window-state")).toHaveTextContent("minimized"),
-    );
-    await waitFor(() => expect(open).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(pipWindow.innerHeight).toBe(104));
-    expectInDocument(
-      within(frame.contentDocument!.body).getByRole("button", {
-        name: "Open recording",
-      }),
-      frame.contentDocument!,
-    );
-    expect(
-      screen.queryByRole("region", { name: "Recording window" }),
-    ).toBeNull();
-  });
+  it.each([
+    ["open", false],
+    ["minimized", true],
+  ])(
+    "opens its window again at full size when stopping after closing it %s fails",
+    async (_state, minimized) => {
+      const { frame, open, pipWindow } = stubDesktopVoiceWindow();
+      const voice = voiceValue({
+        leavePage: vi.fn(async () => {
+          throw new Error("stop failed");
+        }),
+      });
+      renderWindow(voice);
+      await act(() => openVoicePip("recording"));
+      const floating = within(frame.contentDocument!.body);
+      if (minimized)
+        fireEvent.click(
+          floating.getByRole("button", { name: "Minimize recording" }),
+        );
+      // A window that has not laid out yet reports no inner height; nothing
+      // may size the reopened window from it.
+      open.mockImplementationOnce(() => {
+        pipWindow.innerHeight = 0;
+        return pipWindow;
+      });
+      pipWindow.resizeTo.mockClear();
+      act(() => pipWindow.close());
+      await waitFor(() => expect(voice.leavePage).toHaveBeenCalledOnce());
+      await waitFor(() => expect(open).toHaveBeenCalledTimes(2));
+      expect(screen.getByTestId("window-state")).toHaveTextContent("open");
+      expect(pipWindow.resizeTo).not.toHaveBeenCalled();
+      expectInDocument(
+        await floating.findByRole("tablist"),
+        frame.contentDocument!,
+      );
+      // The window lives in another realm, so its attribute is read directly.
+      expect(
+        floating
+          .getByRole("button", { name: "Minimize recording" })
+          .getAttribute("aria-expanded"),
+      ).toBe("true");
+      expect(
+        screen.queryByRole("region", { name: "Recording window" }),
+      ).toBeNull();
+    },
+  );
 });
 
 function expectInDocument(element: HTMLElement, target: Document) {
@@ -1268,12 +1254,11 @@ function stubDesktopVoiceWindow() {
     pipWindow.resizeTo(width, height);
     return pipWindow;
   });
-  const showMain = vi.fn(async () => {});
   defineGlobalProperty(window, "open", { value: open });
   defineGlobalProperty(window, "lingerDesktop", {
-    value: { voiceWindow: { showMainWindow: showMain } },
+    value: { voiceWindow: { floats: true } },
   });
-  return { frame, pipWindow, requestWindow, open, showMain };
+  return { frame, pipWindow, requestWindow, open };
 }
 
 describe("Recording window placement", () => {
