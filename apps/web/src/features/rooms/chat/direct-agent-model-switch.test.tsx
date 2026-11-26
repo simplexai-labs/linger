@@ -50,15 +50,13 @@ describe("Direct Agent runtime settings", () => {
     expect(
       await screen.findByRole("dialog", { name: "Runtime settings" }),
     ).toBeVisible();
-    expect(
-      screen.getByRole("combobox", { name: "Agent runtime" }),
-    ).toHaveTextContent("Codex");
-    fireEvent.click(screen.getByRole("combobox", { name: "Agent model" }));
-    fireEvent.click(await screen.findByRole("option", { name: "5.4 Luna" }));
-    fireEvent.click(
-      screen.getByRole("combobox", { name: "Agent reasoning effort" }),
+    expect(screen.getByRole("button", { name: /^Runtime/ })).toHaveTextContent(
+      "Codex",
     );
-    fireEvent.click(await screen.findByRole("option", { name: "High" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Model/ }));
+    fireEvent.click(await screen.findByRole("radio", { name: "5.4 Luna" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reasoning/ }));
+    fireEvent.click(await screen.findByRole("radio", { name: "High" }));
     expect(updateTenantAgent).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Save Runtime" }));
     await waitFor(() =>
