@@ -55,6 +55,7 @@ import {
 } from "./route-loading-surface";
 import { TeamHubEventSync } from "./event-sync";
 import { useAnotherMeNotifications } from "./another-me-notifications";
+import { clearDismissedBackgroundFailure } from "./chat/another-me-background-failure-dismissal";
 import { requireRoomRouteParam } from "./room-route-params";
 import { useScrollPaneActivity } from "./use-scroll-pane-activity";
 import {
@@ -121,6 +122,14 @@ function RoomShellReady({
   const navigate = useNavigate();
   const wasGated = useRef(false);
   const anotherMeRoomId = anotherMe?.room_id;
+  const hasBackgroundFailure = Boolean(anotherMe?.background_failure);
+  // Clear a session dismissal as soon as TeamHub drops the failure streak,
+  // even while the Human is viewing another Room and the banner is unmounted.
+  useEffect(() => {
+    if (anotherMeRoomId && !hasBackgroundFailure) {
+      clearDismissedBackgroundFailure(tenantId, anotherMeRoomId);
+    }
+  }, [anotherMeRoomId, hasBackgroundFailure, tenantId]);
   // The gate lands the Human in the Another Me Chat it waited for, once they
   // are back from Settings.
   useEffect(() => {

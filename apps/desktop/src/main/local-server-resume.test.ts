@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -11,13 +11,24 @@ import { describe, expect, it, vi } from "vitest";
 
 import { NODE_RUNTIME_VERSION } from "../../../../scripts/local-computer-node-distributions.mjs";
 import { ConfigStore } from "./config.js";
+import { CredentialStore } from "./computer-credential.js";
+import { EnrollmentModule } from "./enrollment.js";
 import {
+  isManagedLocalServerConfig,
   LocalServerModule,
   LocalServerUnverifiedError,
   type LocalServerIdentity,
 } from "./local-server.js";
 import { EventBus, ModuleHost } from "./modules.js";
-import { stubModule, tempDirectory } from "./test-support.js";
+import {
+  fixtureNode,
+  stubModule,
+  tempDirectory,
+  waitForInstaller,
+} from "./test-support.js";
+
+// These tests run the installer stub in real subprocesses.
+if (process.platform === "win32") vi.setConfig({ testTimeout: 20_000 });
 
 async function writeDesktopInstance(home: string, port: number): Promise<void> {
   const root = instanceRoot({ name: "desktop", home });
@@ -51,6 +62,8 @@ function setupResumeFixture(
     resolveProxy?: (url: string) => Promise<string>;
     watchMs?: number;
     unreachableGraceMs?: number;
+    withRecord?: boolean;
+    initialConfig?: Parameters<ConfigStore["update"]>[0];
   } = {},
 ) {
   const root = tempDirectory();
@@ -64,16 +77,18 @@ function setupResumeFixture(
   );
   const node = path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
   mkdirSync(path.join(node, "bin"), { recursive: true });
-  symlinkSync(process.execPath, path.join(node, "bin", "node"));
-  mkdirSync(path.join(home, "desktop"), { recursive: true });
-  writeFileSync(
-    path.join(home, "desktop", "local-server.json"),
-    JSON.stringify({
-      home,
-      repo: "/source",
-      origin: "http://localhost:3000",
-    }),
-  );
+  fixtureNode(path.join(node, "bin", "node"));
+  if (options.withRecord !== false) {
+    mkdirSync(path.join(home, "desktop"), { recursive: true });
+    writeFileSync(
+      path.join(home, "desktop", "local-server.json"),
+      JSON.stringify({
+        home,
+        repo: "/source",
+        origin: "http://localhost:3000",
+      }),
+    );
+  }
 
   const logs: Array<{
     level: string;
@@ -81,13 +96,17 @@ function setupResumeFixture(
     fields?: Record<string, unknown>;
   }> = [];
   const setServer = vi.fn(() => true);
+  const hide = vi.fn();
+  const loadServer = vi.fn();
   const showStarting = vi.fn();
   const showUpdating = vi.fn();
   const showStartFailed = vi.fn();
+  const unenroll = vi.fn(async () => {});
   const bus = new EventBus();
   const config = new ConfigStore(path.join(root, "config.json"), {
     serverUrl: "http://localhost:3000",
     computerId: "cmp_1",
+    ...options.initialConfig,
   });
 
   const module = new LocalServerModule({
@@ -119,11 +138,16 @@ function setupResumeFixture(
       {
         ...stubModule("WindowManager"),
         setServer,
+        hide,
+        loadServer,
         showStarting,
         showUpdating,
         showStartFailed,
       } as never,
-      stubModule("Enrollment"),
+      {
+        ...stubModule("Enrollment"),
+        unenroll,
+      } as never,
       module,
     ],
     {
@@ -143,9 +167,13 @@ function setupResumeFixture(
     module,
     host,
     bus,
+    config,
     logs,
     setServer,
+    hide,
+    loadServer,
     showStarting,
+    showUpdating,
     showStartFailed,
   };
 }
@@ -160,7 +188,7 @@ describe("LocalServerModule resume coordination", () => {
 
     await f.host.start();
 
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(f.showStarting).toHaveBeenCalledOnce();
     expect(f.setServer).toHaveBeenCalledWith(
       "http://localhost:3000",
@@ -184,7 +212,104 @@ describe("LocalServerModule resume coordination", () => {
       (entry) => entry.event === "local_server.resume_succeeded",
     );
     expect(typeof succeeded?.fields?.total_ms).toBe("number");
+    expect(
+      f.logs.find(
+        (entry) => entry.event === "local_server.installer_resume_timings",
+      ),
+    ).toBeUndefined();
     await f.host.stop("quit");
+  });
+
+  it("logs valid warm and cold installer resumeTimings and ignores malformed shapes", async () => {
+    const warm = setupResumeFixture(`
+      process.stdout.write(JSON.stringify({
+        code: 0,
+        details: { origin: "http://localhost:3000" },
+        resumeTimings: {
+          path: "warm",
+          probeMs: 42,
+          totalMs: 185,
+          restoreLocalModelsMs: 90,
+          restoreByokGatewayMs: 12,
+        },
+      }) + "\\n");
+    `);
+    await warm.host.start();
+    await vi.waitFor(() => expect(warm.module.status().phase).toBe("ready"));
+    expect(
+      warm.logs.find(
+        (entry) => entry.event === "local_server.installer_resume_timings",
+      ),
+    ).toEqual({
+      level: "info",
+      event: "local_server.installer_resume_timings",
+      fields: {
+        instance: "desktop",
+        path: "warm",
+        probe_ms: 42,
+        total_ms: 185,
+        restore_local_models_ms: 90,
+        restore_byok_gateway_ms: 12,
+      },
+    });
+    await warm.host.stop("quit");
+
+    const cold = setupResumeFixture(`
+      process.stdout.write(JSON.stringify({
+        code: 0,
+        details: { origin: "http://localhost:3000" },
+        resumeTimings: {
+          path: "cold",
+          probeMs: 15,
+          coldStartMs: 2400,
+          totalMs: 2450,
+          restoreLocalModelsMs: -5,
+        },
+      }) + "\\n");
+    `);
+    await cold.host.start();
+    await vi.waitFor(() => expect(cold.module.status().phase).toBe("ready"));
+    expect(
+      cold.logs.find(
+        (entry) => entry.event === "local_server.installer_resume_timings",
+      ),
+    ).toEqual({
+      level: "info",
+      event: "local_server.installer_resume_timings",
+      fields: {
+        instance: "desktop",
+        path: "cold",
+        probe_ms: 15,
+        total_ms: 2450,
+        cold_start_ms: 2400,
+      },
+    });
+    await cold.host.stop("quit");
+
+    for (const invalid of [
+      null,
+      "warm",
+      { path: "unknown", probeMs: 10, totalMs: 20 },
+      { path: "warm", probeMs: -1, totalMs: 20 },
+      { path: "warm", probeMs: 10 },
+      { path: "cold", probeMs: 10, totalMs: "20" },
+    ]) {
+      const f = setupResumeFixture(`
+        process.stdout.write(JSON.stringify({
+          code: 0,
+          details: { origin: "http://localhost:3000" },
+          resumeTimings: ${JSON.stringify(invalid)},
+        }) + "\\n");
+      `);
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      expect(
+        f.logs.find(
+          (entry) => entry.event === "local_server.installer_resume_timings",
+        ),
+      ).toBeUndefined();
+      await f.host.stop("quit");
+    }
   });
 
   it.each([
@@ -205,7 +330,9 @@ describe("LocalServerModule resume coordination", () => {
       );
       try {
         await f.host.start();
-        await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+        await waitForInstaller(() =>
+          expect(f.module.status().phase).toBe("ready"),
+        );
         expect(resolveProxy).toHaveBeenCalledWith(
           "wss://stt-rt.soniox.com/transcribe-websocket",
         );
@@ -254,7 +381,7 @@ describe("LocalServerModule resume coordination", () => {
 
     await f.host.start();
 
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(f.showStartFailed).not.toHaveBeenCalled();
     expect(f.module.status().localModelsDegraded).toBeUndefined();
     expect(
@@ -276,7 +403,7 @@ describe("LocalServerModule resume coordination", () => {
 
     await f.host.start();
 
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(f.showStartFailed).not.toHaveBeenCalled();
     expect(f.module.status().localModelsDegraded).toEqual({
       code: "LOCAL_MODELS_RECOVERY_REQUIRED",
@@ -309,7 +436,9 @@ describe("LocalServerModule resume coordination", () => {
     `);
 
     await f.host.start();
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("failed"));
+    await waitForInstaller(() =>
+      expect(f.module.status().phase).toBe("failed"),
+    );
 
     const failed = f.logs.find(
       (entry) => entry.event === "local_server.resume_failed",
@@ -342,7 +471,7 @@ describe("LocalServerModule resume coordination", () => {
       false,
     );
 
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     await expect(
       f.module.resumable("http://localhost:3000/rooms/1"),
     ).resolves.toBe(true);
@@ -489,7 +618,7 @@ describe("LocalServerModule resume coordination", () => {
     await writeDesktopInstance(f.home, 63009);
 
     await f.host.start();
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(proved).toEqual([
       expect.objectContaining({ origin: "http://localhost:63009" }),
     ]);
@@ -537,7 +666,7 @@ describe("LocalServerModule resume coordination", () => {
     await writeDesktopInstance(f.home, 63009);
 
     await f.host.start();
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(f.showStarting).toHaveBeenCalledOnce();
     expect(f.setServer).toHaveBeenCalledExactlyOnceWith(
       "http://localhost:63011",
@@ -562,7 +691,7 @@ describe("LocalServerModule resume coordination", () => {
     await expect(f.module.isStarting("http://localhost:3000")).resolves.toBe(
       true,
     );
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     await expect(f.module.isStarting("http://localhost:3000")).resolves.toBe(
       false,
     );
@@ -606,12 +735,16 @@ describe("LocalServerModule resume coordination", () => {
       const server = answering();
       const f = setupResumeFixture(counting, { fetch: server.fetch });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       expect(runs(f)).toBe(1);
       server.state.up = false;
       f.bus.emit("local-server.retry");
-      await vi.waitFor(() => expect(runs(f)).toBe(2));
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() => expect(runs(f)).toBe(2));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       expect(recoveries(f)).toEqual([{ trigger: "retry" }]);
       expect(f.showStarting).toHaveBeenCalledOnce();
       await f.host.stop("quit");
@@ -621,7 +754,9 @@ describe("LocalServerModule resume coordination", () => {
       const server = answering();
       const f = setupResumeFixture(counting, { fetch: server.fetch });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       f.bus.emit("local-server.retry");
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(runs(f)).toBe(1);
@@ -636,17 +771,21 @@ describe("LocalServerModule resume coordination", () => {
         unreachableGraceMs: 100,
       });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       server.state.up = false;
       f.bus.emit("local-server.unreachable");
       // Further failed loads while it waits change nothing.
       f.bus.emit("local-server.unreachable");
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(runs(f)).toBe(1);
-      await vi.waitFor(() => expect(runs(f)).toBe(2));
+      await waitForInstaller(() => expect(runs(f)).toBe(2));
       // Three checks in a row went unanswered, then the resume's own one.
       expect(server.state.unanswered).toBeGreaterThanOrEqual(4);
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       expect(recoveries(f)).toEqual([{ trigger: "load_failed" }]);
       await f.host.stop("quit");
     });
@@ -658,7 +797,9 @@ describe("LocalServerModule resume coordination", () => {
         unreachableGraceMs: 150,
       });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       server.state.up = false;
       f.bus.emit("local-server.unreachable");
       setTimeout(() => {
@@ -678,11 +819,13 @@ describe("LocalServerModule resume coordination", () => {
         unreachableGraceMs: 30,
       });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       await new Promise((resolve) => setTimeout(resolve, 150));
       expect(runs(f)).toBe(1);
       server.state.up = false;
-      await vi.waitFor(() => expect(runs(f)).toBe(2));
+      await waitForInstaller(() => expect(runs(f)).toBe(2));
       await new Promise((resolve) => setTimeout(resolve, 400));
       expect(runs(f)).toBe(2);
       expect(recoveries(f)).toEqual([{ trigger: "watch" }]);
@@ -740,7 +883,9 @@ describe("LocalServerModule resume coordination", () => {
         unreachableGraceMs: 60,
       });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       // Two of the three checks go unanswered, the last one answers.
       misses = 2;
       f.bus.emit("local-server.unreachable");
@@ -759,12 +904,625 @@ describe("LocalServerModule resume coordination", () => {
         unreachableGraceMs: 100,
       });
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       server.state.up = false;
       f.bus.emit("local-server.unreachable");
       await f.host.stop("quit");
       await new Promise((resolve) => setTimeout(resolve, 300));
       expect(runs(f)).toBe(1);
     });
+  });
+
+  describe("localServer config flag lifecycle", () => {
+    const VALID_TOKEN = "sr1.payload." + "b".repeat(32);
+
+    function startNextLaunch(options: {
+      home: string;
+      config: ConfigStore;
+      credentials: CredentialStore;
+      probe: typeof fetch;
+    }) {
+      const bus = new EventBus();
+      const hide = vi.fn();
+      const loadServer = vi.fn();
+      const logs: Array<{
+        level: string;
+        event: string;
+        fields?: Record<string, unknown>;
+      }> = [];
+      const local = new LocalServerModule({
+        home: options.home,
+        version: "0.16.20",
+        installerDirectory: tempDirectory(),
+        platform: "linux",
+        arch: "x64",
+        pollMs: 10,
+        signIn: async () => {},
+        fetch: options.probe,
+      });
+      const host = new ModuleHost(
+        [
+          stubModule("Config"),
+          new EnrollmentModule({
+            defaultDisplayName: "Desk",
+            credentials: options.credentials,
+            sessionCookie: async () => undefined,
+          }),
+          {
+            ...stubModule("WindowManager"),
+            setServer: vi.fn(() => true),
+            hide,
+            loadServer,
+            showStarting: vi.fn(),
+            showUpdating: vi.fn(),
+            showStartFailed: vi.fn(),
+          } as never,
+          local,
+        ],
+        {
+          config: options.config,
+          bus,
+          log: {
+            info: (event, fields) =>
+              logs.push({ level: "info", event, fields }),
+            warn: (event, fields) =>
+              logs.push({ level: "warn", event, fields }),
+            error: (event, fields) =>
+              logs.push({ level: "error", event, fields }),
+          },
+        },
+      );
+      return { host, bus, hide, loadServer, logs };
+    }
+
+    it("stamps localServer on resume, preserves it on server.moved, and sets it false on server.changed", async () => {
+      const f = setupResumeFixture(`
+        process.stdout.write(JSON.stringify({ code: 0, details: { origin: "http://localhost:3000" } }) + "\\n");
+      `);
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      expect(f.config.get().localServer).toBe(true);
+
+      // Moving ports for the same local server preserves localServer.
+      f.bus.emit(
+        "server.moved",
+        "http://localhost:3000",
+        "http://localhost:3001",
+      );
+      expect(f.config.get().localServer).toBe(true);
+
+      // Switching to another server explicitly marks localServer false.
+      f.bus.emit("server.changed", "https://team.example.com");
+      expect(f.config.get().localServer).toBe(false);
+      await f.host.stop("quit");
+    });
+
+    it("keeps preferredRuntime and runtimeEnvironment on reset and does not wipe an external localhost dev server after server.changed", async () => {
+      const f = setupResumeFixture(
+        `
+          process.stdout.write(JSON.stringify({ code: 0, details: { origin: "http://localhost:3000" } }) + "\\n");
+        `,
+        {
+          initialConfig: {
+            localServer: true,
+            preferredRuntime: "pi",
+            runtimeEnvironment: { LINGER_PI_PATH: "/home/.simplexai/bin/pi" },
+          },
+        },
+      );
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+
+      const opened = vi.fn();
+      f.bus.on("setup.open", opened);
+      f.bus.emit("local-server.reset");
+      await vi.waitFor(() => expect(opened).toHaveBeenCalledOnce());
+      expect(f.hide).toHaveBeenCalledOnce();
+      expect(f.loadServer).toHaveBeenCalledOnce();
+      expect(f.config.get().serverUrl).toBeUndefined();
+      expect(f.config.get().localServer).toBeUndefined();
+      expect(f.config.get().preferredRuntime).toBe("pi");
+      expect(f.config.get().runtimeEnvironment).toEqual({
+        LINGER_PI_PATH: "/home/.simplexai/bin/pi",
+      });
+
+      // User connects to an external localhost dev server instead; switching
+      // servers emits server.changed, which explicitly marks localServer false.
+      const credentials = new CredentialStore(
+        path.join(tempDirectory(), "credential.json"),
+      );
+      credentials.write({
+        computerId: "cmp_dev",
+        gatewayUrl: "ws://127.0.0.1:5173/v1/runner-gateway",
+        token: VALID_TOKEN,
+      });
+      f.config.update({
+        serverUrl: "http://localhost:5173",
+        computerId: "cmp_dev",
+        ownerActorId: "act_dev",
+      });
+      f.bus.emit("server.changed", "http://localhost:5173");
+      expect(f.config.get().localServer).toBe(false);
+      await f.host.stop("quit");
+
+      // Next launch with the external dev server stopped leaves it intact.
+      const probe = vi.fn(async () => {
+        throw new Error("ECONNREFUSED");
+      }) as unknown as typeof fetch;
+      const next = startNextLaunch({
+        home: f.home,
+        config: f.config,
+        credentials,
+        probe,
+      });
+      await next.host.start();
+      expect(probe).not.toHaveBeenCalled();
+      expect(f.config.get().serverUrl).toBe("http://localhost:5173");
+      expect(f.config.get().computerId).toBe("cmp_dev");
+      expect(f.config.get().preferredRuntime).toBe("pi");
+      expect(f.config.get().runtimeEnvironment).toEqual({
+        LINGER_PI_PATH: "/home/.simplexai/bin/pi",
+      });
+      expect(credentials.read()?.computerId).toBe("cmp_dev");
+      await next.host.stop("quit");
+    });
+
+    it.each([
+      { label: "modern localServer: true", localServer: true as const },
+      { label: "legacy unset localServer", localServer: undefined },
+    ])(
+      "marks localServer false on server.changed ($label) so a stopped external localhost dev server is not wiped on next launch",
+      async ({ localServer }) => {
+        const f = setupResumeFixture(
+          `
+            process.stdout.write(JSON.stringify({ code: 0, details: { origin: "http://localhost:3000" } }) + "\\n");
+          `,
+          {
+            withRecord: localServer === true,
+            initialConfig: {
+              ...(localServer !== undefined ? { localServer } : {}),
+              preferredRuntime: "claude",
+              runtimeEnvironment: {
+                LINGER_CLAUDE_PATH: "/home/.simplexai/bin/claude",
+              },
+            },
+            fetch: (async () =>
+              new Response(null, { status: 200 })) as typeof fetch,
+          },
+        );
+        await f.host.start();
+        if (localServer === true) {
+          await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+          rmSync(path.join(f.home, "desktop", "local-server.json"), {
+            force: true,
+          });
+        }
+
+        f.config.update({
+          serverUrl: "http://localhost:5173",
+          computerId: "cmp_dev",
+          ownerActorId: "act_dev",
+        });
+        f.bus.emit("server.changed", "http://localhost:5173");
+        expect(f.config.get().localServer).toBe(false);
+        await f.host.stop("quit");
+
+        const credentials = new CredentialStore(
+          path.join(tempDirectory(), "credential.json"),
+        );
+        credentials.write({
+          computerId: "cmp_dev",
+          gatewayUrl: "ws://127.0.0.1:5173/v1/runner-gateway",
+          token: VALID_TOKEN,
+        });
+        const probe = vi.fn(async () => {
+          throw new Error("ECONNREFUSED");
+        }) as unknown as typeof fetch;
+        const next = startNextLaunch({
+          home: f.home,
+          config: f.config,
+          credentials,
+          probe,
+        });
+        await next.host.start();
+        expect(probe).not.toHaveBeenCalled();
+        expect(f.config.get().serverUrl).toBe("http://localhost:5173");
+        expect(f.config.get().computerId).toBe("cmp_dev");
+        expect(credentials.read()?.computerId).toBe("cmp_dev");
+        await next.host.stop("quit");
+      },
+    );
+
+    it("clears the active local origin on server.changed so local -> remote -> external localhost on the same port sets localServer false", async () => {
+      const f = setupResumeFixture(
+        `
+          process.stdout.write(JSON.stringify({ code: 0, details: { origin: "http://localhost:3000" } }) + "\\n");
+        `,
+        {
+          initialConfig: {
+            preferredRuntime: "codex",
+          },
+        },
+      );
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      expect(f.config.get().localServer).toBe(true);
+
+      // Local -> remote clears both the tracked local origin and localServer.
+      f.config.update({ serverUrl: "https://team.example.com" });
+      f.bus.emit("server.changed", "https://team.example.com");
+      expect(f.config.get().localServer).toBe(false);
+
+      // Remove the local record and point manually at an external server on
+      // the same loopback port; #origin was cleared so server.changed does not
+      // treat it as Desktop's own local server.
+      rmSync(path.join(f.home, "desktop", "local-server.json"), {
+        force: true,
+      });
+      f.config.update({
+        serverUrl: "http://localhost:3000",
+        localServer: undefined,
+      });
+      f.bus.emit("server.changed", "http://localhost:3000");
+      expect(f.config.get().localServer).toBe(false);
+      await expect(f.module.ownsWindow()).resolves.toBe(false);
+      await f.host.stop("quit");
+    });
+  });
+});
+
+describe("orphaned local server recovery during LocalServerModule.start()", () => {
+  const VALID_TOKEN = "sr1.payload." + "a".repeat(32);
+
+  function setupOrphanStart(
+    initial: Parameters<ConfigStore["update"]>[0],
+    options: {
+      record?: "valid" | "corrupt" | "notdir" | "missing";
+      reachable?: boolean;
+    } = {},
+  ) {
+    const root = tempDirectory();
+    const home = path.join(root, "home");
+    const installerDirectory = path.join(root, "installer");
+    mkdirSync(installerDirectory, { recursive: true });
+    writeFileSync(
+      path.join(installerDirectory, "installer.js"),
+      `process.stdout.write(JSON.stringify({ code: 0, details: { origin: "http://localhost:3000" } }) + "\\n");`,
+    );
+    writeFileSync(
+      path.join(installerDirectory, "package.json"),
+      '{"type":"commonjs"}',
+    );
+    const config = new ConfigStore(path.join(root, "config.json"), {
+      ownerActorId: "act_1",
+      ...initial,
+    });
+    const credentials = new CredentialStore(path.join(root, "credential.json"));
+    credentials.write({
+      computerId: initial.computerId ?? "cmp_1",
+      gatewayUrl: "ws://127.0.0.1:4100/v1/runner-gateway",
+      token: VALID_TOKEN,
+    });
+    if (options.record === "valid" || options.record === "corrupt") {
+      mkdirSync(path.join(home, "desktop"), { recursive: true });
+      if (options.record === "valid") {
+        const node = path.join(
+          home,
+          "desktop",
+          "node",
+          `v${NODE_RUNTIME_VERSION}`,
+        );
+        mkdirSync(path.join(node, "bin"), { recursive: true });
+        fixtureNode(path.join(node, "bin", "node"));
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home,
+            repo: "/source",
+            origin: initial.serverUrl ?? "http://localhost:3000",
+          }),
+        );
+      } else {
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          "{not json",
+        );
+      }
+    } else if (options.record === "notdir") {
+      mkdirSync(home, { recursive: true });
+      // Putting a file where the desktop directory belongs triggers ENOTDIR.
+      writeFileSync(path.join(home, "desktop"), "not-a-dir");
+    }
+    const logs: Array<{
+      level: string;
+      event: string;
+      fields?: Record<string, unknown>;
+    }> = [];
+    const probe = vi.fn(async () => {
+      if (options.reachable) return new Response(null, { status: 200 });
+      throw new Error("ECONNREFUSED");
+    }) as unknown as typeof fetch;
+    const hide = vi.fn();
+    const loadServer = vi.fn();
+    const bus = new EventBus();
+    const setupOpened = vi.fn();
+    const computerChanged = vi.fn();
+    bus.on("setup.open", setupOpened);
+    bus.on("computer.changed", computerChanged);
+
+    const enrollment = new EnrollmentModule({
+      defaultDisplayName: "Desk",
+      credentials,
+      sessionCookie: async () => undefined,
+    });
+    const module = new LocalServerModule({
+      home,
+      version: "0.16.20",
+      installerDirectory,
+      platform: "linux",
+      arch: "x64",
+      pollMs: 10,
+      signIn: async () => {},
+      fetch: probe,
+    });
+    const host = new ModuleHost(
+      [
+        stubModule("Config"),
+        enrollment,
+        {
+          ...stubModule("WindowManager"),
+          setServer: vi.fn(() => true),
+          hide,
+          loadServer,
+          showStarting: vi.fn(),
+          showUpdating: vi.fn(),
+          showStartFailed: vi.fn(),
+        } as never,
+        module,
+      ],
+      {
+        config,
+        bus,
+        log: {
+          info: (event, fields) => logs.push({ level: "info", event, fields }),
+          warn: (event, fields) => logs.push({ level: "warn", event, fields }),
+          error: (event, fields) =>
+            logs.push({ level: "error", event, fields }),
+        },
+      },
+    );
+    return {
+      home,
+      config,
+      credentials,
+      logs,
+      probe,
+      hide,
+      loadServer,
+      setupOpened,
+      computerChanged,
+      host,
+      module,
+    };
+  }
+
+  it("resets stale local config via Enrollment.unenroll() and hides the main window when local-server.json is ENOENT and localhost is unreachable", async () => {
+    const f = setupOrphanStart({
+      serverUrl: "http://localhost:3000",
+      localServer: true,
+      computerId: "cmp_1",
+      tenantId: "ten_1",
+      ownerActorId: "act_1",
+      daemonId: "dmn_1",
+      preferredRuntime: "pi",
+      runtimeEnvironment: { LINGER_PI_PATH: "/home/.simplexai/bin/pi" },
+      language: "zh-CN",
+      preventSleep: true,
+      permissionsAsked: ["folders"],
+      updateFeedUrl: "https://updates.example.com/releases",
+      diagnosticsUploadUrl: "https://diagnostics.example.com/upload",
+      window: { x: 10, y: 20, width: 1200, height: 800 },
+    });
+
+    await f.host.start();
+
+    expect(f.credentials.read()).toBeUndefined();
+    expect(f.computerChanged).toHaveBeenCalledWith(undefined);
+    expect(f.hide).toHaveBeenCalledOnce();
+    expect(f.loadServer).toHaveBeenCalledOnce();
+    expect(f.setupOpened).toHaveBeenCalledOnce();
+    expect(f.config.get()).toMatchObject({
+      serverUrl: undefined,
+      localServer: undefined,
+      computerId: undefined,
+      tenantId: undefined,
+      ownerActorId: undefined,
+      daemonId: undefined,
+      preferredRuntime: "pi",
+      runtimeEnvironment: { LINGER_PI_PATH: "/home/.simplexai/bin/pi" },
+      language: "zh-CN",
+      preventSleep: true,
+      permissionsAsked: ["folders"],
+      updateFeedUrl: "https://updates.example.com/releases",
+      diagnosticsUploadUrl: "https://diagnostics.example.com/upload",
+      window: { x: 10, y: 20, width: 1200, height: 800 },
+    });
+    expect(f.logs).toContainEqual({
+      level: "warn",
+      event: "local_server.orphaned_config_reset",
+      fields: { server_url: "http://localhost:3000" },
+    });
+    expect(f.logs).toContainEqual({
+      level: "info",
+      event: "enrollment.cleared",
+      fields: undefined,
+    });
+    await f.host.stop("quit");
+  });
+
+  it.each([
+    {
+      label: "preferredRuntime",
+      extra: { preferredRuntime: "claude" as const },
+    },
+    {
+      label: "runtimeEnvironment",
+      extra: { runtimeEnvironment: { LINGER_CODEX_PATH: "/opt/codex" } },
+    },
+  ])(
+    "recovers legacy local configs without localServer flag when $label is set",
+    async ({ extra }) => {
+      const f = setupOrphanStart({
+        serverUrl: "http://127.0.0.1:3000",
+        computerId: "cmp_legacy",
+        ...extra,
+      });
+
+      await f.host.start();
+
+      expect(f.config.get().computerId).toBeUndefined();
+      expect(f.config.get().serverUrl).toBeUndefined();
+      expect(f.credentials.read()).toBeUndefined();
+      expect(f.setupOpened).toHaveBeenCalledOnce();
+      await f.host.stop("quit");
+    },
+  );
+
+  it("does not reset an external localhost developer server config", async () => {
+    const f = setupOrphanStart({
+      serverUrl: "http://localhost:3000",
+      computerId: "cmp_dev",
+    });
+
+    await f.host.start();
+
+    expect(f.probe).not.toHaveBeenCalled();
+    expect(f.setupOpened).not.toHaveBeenCalled();
+    expect(f.config.get().computerId).toBe("cmp_dev");
+    expect(f.config.get().serverUrl).toBe("http://localhost:3000");
+    expect(f.credentials.read()?.computerId).toBe("cmp_dev");
+    await f.host.stop("quit");
+  });
+
+  it("does not reset an external localhost config explicitly marked localServer: false", async () => {
+    const f = setupOrphanStart({
+      serverUrl: "http://localhost:3000",
+      localServer: false,
+      computerId: "cmp_dev",
+      preferredRuntime: "codex",
+      runtimeEnvironment: { LINGER_CODEX_PATH: "/opt/codex" },
+    });
+
+    await f.host.start();
+
+    expect(f.probe).not.toHaveBeenCalled();
+    expect(f.setupOpened).not.toHaveBeenCalled();
+    expect(f.config.get().computerId).toBe("cmp_dev");
+    expect(f.credentials.read()?.computerId).toBe("cmp_dev");
+    await f.host.stop("quit");
+  });
+
+  it("does not reset a remote team server config", async () => {
+    const f = setupOrphanStart({
+      serverUrl: "https://team.example.com",
+      computerId: "cmp_team",
+      preferredRuntime: "codex",
+    });
+
+    await f.host.start();
+
+    expect(f.probe).not.toHaveBeenCalled();
+    expect(f.setupOpened).not.toHaveBeenCalled();
+    expect(f.config.get().computerId).toBe("cmp_team");
+    expect(f.credentials.read()?.computerId).toBe("cmp_team");
+    await f.host.stop("quit");
+  });
+
+  it("does not reset when the localhost server still answers even if local-server.json is missing", async () => {
+    const f = setupOrphanStart(
+      {
+        serverUrl: "http://localhost:3000",
+        localServer: true,
+        computerId: "cmp_alive",
+      },
+      { reachable: true },
+    );
+
+    await f.host.start();
+
+    expect(f.probe).toHaveBeenCalledOnce();
+    expect(f.setupOpened).not.toHaveBeenCalled();
+    expect(f.config.get().computerId).toBe("cmp_alive");
+    expect(f.credentials.read()?.computerId).toBe("cmp_alive");
+    await f.host.stop("quit");
+  });
+
+  it("does not reset when local-server.json still exists (valid or corrupt)", async () => {
+    const valid = setupOrphanStart(
+      {
+        serverUrl: "http://localhost:3000",
+        localServer: true,
+        computerId: "cmp_1",
+      },
+      { record: "valid", reachable: false },
+    );
+    await valid.host.start();
+    await vi.waitFor(() => expect(valid.module.status().phase).toBe("ready"));
+    expect(valid.setupOpened).not.toHaveBeenCalled();
+    expect(valid.config.get().computerId).toBe("cmp_1");
+    expect(valid.credentials.read()?.computerId).toBe("cmp_1");
+    await valid.host.stop("quit");
+
+    const corrupt = setupOrphanStart(
+      {
+        serverUrl: "http://localhost:3000",
+        localServer: true,
+        computerId: "cmp_corrupt",
+      },
+      { record: "corrupt", reachable: false },
+    );
+    await corrupt.host.start();
+    expect(corrupt.probe).not.toHaveBeenCalled();
+    expect(corrupt.setupOpened).not.toHaveBeenCalled();
+    expect(corrupt.config.get().computerId).toBe("cmp_corrupt");
+    expect(corrupt.credentials.read()?.computerId).toBe("cmp_corrupt");
+    await corrupt.host.stop("quit");
+  });
+
+  it("does not reset when reading local-server.json fails with a non-ENOENT error", async () => {
+    const f = setupOrphanStart(
+      {
+        serverUrl: "http://localhost:3000",
+        localServer: true,
+        computerId: "cmp_notdir",
+      },
+      { record: "notdir" },
+    );
+
+    await f.host.start();
+
+    expect(f.probe).not.toHaveBeenCalled();
+    expect(f.setupOpened).not.toHaveBeenCalled();
+    expect(f.config.get().computerId).toBe("cmp_notdir");
+    expect(f.credentials.read()?.computerId).toBe("cmp_notdir");
+    await f.host.stop("quit");
+  });
+
+  it("recognizes IPv6 loopback hosts in isManagedLocalServerConfig", () => {
+    expect(
+      isManagedLocalServerConfig({
+        serverUrl: "http://[::1]:3000",
+        localServer: true,
+      }),
+    ).toBe(true);
+    expect(
+      isManagedLocalServerConfig({
+        serverUrl: "http://[::1]:3000",
+        localServer: false,
+        preferredRuntime: "codex",
+      }),
+    ).toBe(false);
   });
 });

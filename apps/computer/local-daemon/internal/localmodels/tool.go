@@ -8,6 +8,8 @@ package localmodels
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -15,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -89,10 +92,12 @@ func LegacyToolsMarkerFile(stateDir string) string {
 // Tool is where the installer put the localmodels tool and its state, as
 // the Computer config records it.
 type Tool struct {
-	Python          string
-	ModuleDirectory string
-	StateDirectory  string
-	BaseDirectory   string
+	Python           string
+	ModuleDirectory  string
+	StateDirectory   string
+	BaseDirectory    string
+	BundledPiBinDir  string
+	BundledPiVersion string
 }
 
 // Action is one owner-chosen library action. Model is empty only for
@@ -212,11 +217,175 @@ func (t Tool) commandArgs(environment map[string]string, args []string) *exec.Cm
 	effective["PYTHONDONTWRITEBYTECODE"] = "1"
 	effective["PYTHONUTF8"] = "1"
 	effective["PYTHONIOENCODING"] = "utf-8"
+	if t.BundledPiBinDir != "" && !isSetupInspectArgs(args) {
+		appendBundledPiPath(effective, t.StateDirectory, t.BundledPiBinDir, t.BundledPiVersion)
+	}
 	cmd.Env = make([]string, 0, len(effective))
 	for key, value := range effective {
 		cmd.Env = append(cmd.Env, key+"="+value)
 	}
 	return cmd
+}
+
+type versionedPiDir struct {
+	version string
+	dir     string
+}
+
+func newerHarnessPiDirs(stateDir, bundledVersion string) []string {
+	harness := HarnessRoot(stateDir)
+	if harness == "" || !parseVersionName(bundledVersion).isVersion {
+		return nil
+	}
+	piToolsDir := filepath.Join(harness, "tools", "pi")
+	entries, err := os.ReadDir(piToolsDir)
+	if err != nil {
+		return nil
+	}
+	var matched []versionedPiDir
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		if !parseVersionName(name).isVersion || compareVersionNames(name, bundledVersion) <= 0 {
+			continue
+		}
+		versionDir := filepath.Join(piToolsDir, name)
+		if !dirExists(versionDir) || harnessExecutableInDir(versionDir, "pi") == "" {
+			continue
+		}
+		matched = append(matched, versionedPiDir{version: name, dir: versionDir})
+	}
+	slices.SortFunc(matched, func(a, b versionedPiDir) int {
+		return compareVersionNames(b.version, a.version)
+	})
+	dirs := make([]string, 0, len(matched))
+	for _, item := range matched {
+		dirs = append(dirs, item.dir)
+	}
+	return dirs
+}
+
+func appendBundledPiPath(effective map[string]string, stateDir, bundledBinDir, bundledVersion string) {
+	pathKey := "PATH"
+	var existing []string
+	if runtime.GOOS == "windows" {
+		var keys []string
+		for key := range effective {
+			if strings.EqualFold(key, "PATH") {
+				keys = append(keys, key)
+			}
+		}
+		slices.Sort(keys)
+		if len(keys) > 0 {
+			pathKey = keys[0]
+			for _, key := range keys {
+				if key == "PATH" {
+					pathKey = "PATH"
+					break
+				}
+			}
+			for _, key := range keys {
+				if value := effective[key]; value != "" {
+					existing = append(existing, filepath.SplitList(value)...)
+				}
+				if key != pathKey {
+					delete(effective, key)
+				}
+			}
+		}
+	} else if value := effective["PATH"]; value != "" {
+		existing = filepath.SplitList(value)
+	}
+
+	candidates := append([]string(nil), existing...)
+	userHome := envLookup(effective, "HOME")
+	if userHome == "" {
+		userHome = envLookup(effective, "USERPROFILE")
+	}
+	if userHome == "" {
+		userHome, _ = os.UserHomeDir()
+	}
+	if userHome != "" {
+		if localBin := filepath.Join(userHome, ".local", "bin"); dirExists(localBin) {
+			candidates = append(candidates, localBin)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		if appData := envLookup(effective, "APPDATA"); appData != "" {
+			if npmBin := filepath.Join(appData, "npm"); dirExists(npmBin) {
+				candidates = append(candidates, npmBin)
+			}
+		}
+	}
+	candidates = append(candidates, newerHarnessPiDirs(stateDir, bundledVersion)...)
+	candidates = append(candidates, ensureStableBundledPiBinDir(stateDir, bundledBinDir))
+
+	seen := make(map[string]struct{}, len(candidates))
+	deduped := make([]string, 0, len(candidates))
+	for _, entry := range candidates {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed == "" {
+			continue
+		}
+		normalized := filepath.Clean(trimmed)
+		if runtime.GOOS == "windows" {
+			normalized = strings.ToLower(normalized)
+		}
+		if _, dup := seen[normalized]; dup {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		deduped = append(deduped, entry)
+	}
+	effective[pathKey] = strings.Join(deduped, string(os.PathListSeparator))
+}
+
+func ensureStableBundledPiBinDir(stateDir, bundledBinDir string) string {
+	if runtime.GOOS == "windows" || stateDir == "" || bundledBinDir == "" || !filepath.IsAbs(stateDir) || !filepath.IsAbs(bundledBinDir) {
+		return bundledBinDir
+	}
+	target := filepath.Clean(filepath.Join(bundledBinDir, "pi"))
+	runtimeDir := filepath.Dir(filepath.Dir(filepath.Clean(stateDir)))
+	bundledRoot := filepath.Join(runtimeDir, "bundled-pi")
+	binDir := filepath.Join(bundledRoot, "bin")
+	linkPath := filepath.Join(binDir, "pi")
+	if target == linkPath {
+		return binDir
+	}
+	if currentTarget, err := os.Readlink(linkPath); err == nil && currentTarget == target {
+		return binDir
+	}
+	if err := privatefs.EnsureDir(bundledRoot); err != nil {
+		return bundledBinDir
+	}
+	if err := privatefs.EnsureDir(binDir); err != nil {
+		return bundledBinDir
+	}
+	var nonce [8]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return bundledBinDir
+	}
+	tempLink := filepath.Join(binDir, ".pi."+hex.EncodeToString(nonce[:])+".tmp")
+	if err := os.Symlink(target, tempLink); err != nil {
+		return bundledBinDir
+	}
+	if err := os.Rename(tempLink, linkPath); err != nil {
+		_ = os.Remove(tempLink)
+		return bundledBinDir
+	}
+	return binDir
+}
+
+func isSetupInspectArgs(args []string) bool {
+	sub := localmodelsSubcommand(args)
+	for i := 0; i+1 < len(sub); i++ {
+		if sub[i] == "setup" && sub[i+1] == "inspect" {
+			return true
+		}
+	}
+	return false
 }
 
 func dirExists(path string) bool {

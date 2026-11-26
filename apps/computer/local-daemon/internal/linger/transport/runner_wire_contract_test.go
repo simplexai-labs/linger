@@ -420,12 +420,72 @@ func TestGatewaySessionCompactionKeepsIdentityAndRawRequest(t *testing.T) {
 // A service feature this release does not know is ignored, not refused, so
 // an Agent Service may name a newer one to every Computer.
 func TestWelcomeAcceptsAnUnknownServiceFeature(t *testing.T) {
-	const welcome = `{"type":"runner.welcome","protocol_version":"2","runner_id":"computer-1","connection_id":"connection-1","connection_epoch":1,"heartbeat_interval_ms":15000,"reconcile_operation_ids":[],"service_features":["local_models","a_future_feature"]}`
+	const welcome = `{"type":"runner.welcome","protocol_version":"2","runner_id":"computer-1","connection_id":"connection-1","connection_epoch":1,"heartbeat_interval_ms":15000,"reconcile_operation_ids":[],"service_features":["local_models","model_gateway_unavailable","a_future_feature"]}`
 	command, err := decodeGatewayCommand([]byte(welcome))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(command.ServiceFeatures) != 2 || command.ServiceFeatures[1] != "a_future_feature" {
+	if len(command.ServiceFeatures) != 3 || command.ServiceFeatures[1] != "model_gateway_unavailable" || command.ServiceFeatures[2] != "a_future_feature" {
 		t.Fatalf("service_features = %v", command.ServiceFeatures)
+	}
+}
+
+func TestOperationFailedEncodesModelGatewayUnavailable(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"code":      "OPERATION_FAILED",
+		"message":   "The BYOK gateway could not be started on this Computer.",
+		"retryable": true,
+		"failure": map[string]any{
+			"code":         "model_gateway_unavailable",
+			"runtime_type": "codex",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := replyFrame(protocol.Event{
+		Type:                protocol.EventOperationFailed,
+		ProtocolVersion:     "2",
+		HostAccess:          "trusted",
+		CommandID:           "command-1",
+		TenantID:            "tenant-1",
+		RunnerID:            "computer-1",
+		AgentID:             "agent-1",
+		RegistrationID:      "registration-1",
+		AssignmentRevision:  1,
+		OperationID:         "operation-1",
+		ConnectionEpoch:     1,
+		RunnerRevision:      1,
+		Generation:          1,
+		ExecutionLeaseID:    "lease-1",
+		WorkspaceGrantID:    "grant-1",
+		RuntimeType:         "codex",
+		ExecutionContextKey: "context-1",
+		RuntimeInstanceID:   "runtime-1",
+		ContextViewRef:      json.RawMessage(`{"view_digest":"` + strings.Repeat("a", 64) + `"}`),
+		Sequence:            1,
+		Payload:             payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wireFrame struct {
+		Type  string `json:"type"`
+		Error struct {
+			Failure struct {
+				Code        string `json:"code"`
+				RuntimeType string `json:"runtime_type"`
+			} `json:"failure"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(encoded, &wireFrame); err != nil {
+		t.Fatal(err)
+	}
+	if wireFrame.Type != "operation.failed" || wireFrame.Error.Failure.Code != "model_gateway_unavailable" || wireFrame.Error.Failure.RuntimeType != "codex" {
+		t.Fatalf("encoded frame = %s", encoded)
 	}
 }

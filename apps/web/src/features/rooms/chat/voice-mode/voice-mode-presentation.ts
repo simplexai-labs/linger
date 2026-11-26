@@ -2,6 +2,7 @@ import type { Translate } from "@/i18n/language";
 import type { Message } from "@/i18n/messages";
 import type { VoiceModeState } from "./voice-mode-controller";
 import { voiceModeMessages } from "./voice-mode.messages";
+import { voiceWindowMessages } from "./voice-window.messages";
 
 export interface VoiceModePresentation {
   entered: boolean;
@@ -38,4 +39,24 @@ export function voiceModeStatusLabel(
   if (state.flushing) return text(voiceModeMessages.statusFlushing);
   if (state.sending) return text(voiceModeMessages.statusSending);
   return text(voiceModeMessages.statusListening);
+}
+
+/**
+ * The window's one-line state. A live call says it is waking up until the
+ * live model itself is connected, though the microphone may already be heard.
+ */
+export function voiceWindowStatus(
+  state: VoiceModePresentation,
+  call: { muted: boolean; waking?: boolean },
+): Message<string> {
+  if (state.error || state.status === "error")
+    return voiceWindowMessages.statusStopped;
+  if (state.status === "closing") return voiceWindowMessages.statusFinishing;
+  if (state.status === "connecting" || state.status === "idle" || call.waking)
+    return voiceWindowMessages.statusWakingUp;
+  if (!state.entered || state.status === "paused")
+    return voiceWindowMessages.statusPaused;
+  if (call.muted) return voiceWindowMessages.statusMicOff;
+  if (state.sending || state.flushing) return voiceWindowMessages.statusSending;
+  return voiceWindowMessages.statusListening;
 }

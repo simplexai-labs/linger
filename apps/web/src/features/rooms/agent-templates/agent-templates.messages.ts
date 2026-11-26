@@ -53,8 +53,6 @@ export const agentTemplateMessages = defineMessages("agentTemplates", {
   connectorCount: { one: "{count} Connector", other: "{count} Connectors" },
   instructionsOnly: "Instructions only",
   publishTitle: "Publish as template",
-  publishDescription:
-    "Everyone in this deployment will be able to create Agents from it.",
   publish: "Publish",
   templateName: "Template name",
   sharedWithOthers: "Shared with others",

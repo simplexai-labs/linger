@@ -33,14 +33,21 @@ type BrowserRoute = (
   body: unknown,
 ) => Promise<TeamHubBrowserConnectionStatus>;
 
-function setup(browser: BrowserRoute) {
+const mac = {
+  computer_id: "computer-mac",
+  display_name: "Alice's Mac",
+  status: "online",
+};
+
+function setup(browser: BrowserRoute, computers = [mac]) {
   const route = vi.fn(browser);
   const request = vi.fn(async (path: string, init: SentRequestInit) => {
     const match =
       /^\/v0\/tenants\/[^/]+\/local-computers\/([^/]+)\/browser-connection$/.exec(
         path,
       );
-    if (!match || match[1] !== "computer-mac") throw new Error(path);
+    if (!computers.some(({ computer_id }) => computer_id === match?.[1]))
+      throw new Error(path);
     return route(
       init.method ?? "GET",
       init.body ? JSON.parse(init.body as string) : undefined,
@@ -62,15 +69,7 @@ function setup(browser: BrowserRoute) {
     onAuthenticationRequired: vi.fn(),
   });
   const client = {
-    listTenantLocalComputers: vi.fn().mockResolvedValue({
-      items: [
-        {
-          computer_id: "computer-mac",
-          display_name: "Alice's Mac",
-          status: "online",
-        },
-      ],
-    }),
+    listTenantLocalComputers: vi.fn().mockResolvedValue({ items: computers }),
     api,
   };
   const queryClient = new QueryClient({
@@ -93,23 +92,16 @@ describe("BrowserConnectionDialog", () => {
       method === "PUT" ? connected : isolated,
     );
 
-    expect(
-      await screen.findByText(
-        "Not connected. Agents use a separate browser without your sign-ins.",
-      ),
-    ).toBeVisible();
-    // The only online Computer is selected.
-    expect(screen.getByRole("combobox", { name: "Computer" })).toHaveAttribute(
-      "value",
-      "computer-mac",
-    );
+    const input = await screen.findByLabelText("Extension token");
+    // The subtitle names the only Computer, so there is nothing to pick.
+    expect(screen.getByText("Alice's Mac")).toBeVisible();
+    expect(screen.queryByRole("combobox")).toBeNull();
     expect(
       screen.getByRole("link", { name: /Playwright Extension/ }),
     ).toHaveAttribute(
       "href",
       "https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm",
     );
-    const input = screen.getByLabelText("Extension token");
     expect(input).toHaveAttribute("type", "password");
     expect(input).toHaveAttribute("autocomplete", "off");
     const pasted = ` PLAYWRIGHT_MCP_EXTENSION_TOKEN=${token} `;
@@ -117,13 +109,10 @@ describe("BrowserConnectionDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     expect(input).toHaveValue("");
-    expect(
-      await screen.findByText(
-        "Connected. Browser tasks use your Chrome and its sign-ins.",
-      ),
-    ).toBeVisible();
-    expect(screen.getByText("Chrome 147 connected")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Reconfigure" })).toBeVisible();
+    expect(await screen.findByRole("status")).toHaveTextContent("Connected");
+    // A healthy connection needs no detail.
+    expect(screen.queryByText("Chrome 147 connected")).toBeNull();
+    expect(screen.getByRole("button", { name: "Replace token" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeVisible();
     expect(route).toHaveBeenCalledWith("PUT", { extension_token: pasted });
     expect(request).not.toHaveBeenCalledWith(
@@ -146,6 +135,32 @@ describe("BrowserConnectionDialog", () => {
     expect(JSON.stringify({ ...sessionStorage })).not.toContain(token);
   });
 
+  it("offers a picker when there are several Computers and reads the chosen one", async () => {
+    const { request } = setup(
+      async () => isolated,
+      [
+        mac,
+        {
+          computer_id: "computer-pc",
+          display_name: "Alice's PC",
+          status: "online",
+        },
+      ],
+    );
+
+    const picker = await screen.findByRole("combobox", { name: "Computer" });
+    fireEvent.click(picker);
+    fireEvent.click(await screen.findByRole("option", { name: "Alice's PC" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("/local-computers/computer-pc/"),
+        expect.anything(),
+      ),
+    );
+    expect(picker).toHaveAttribute("value", "computer-pc");
+  });
+
   it("disconnects a connected Chrome", async () => {
     const { route } = setup(async (method) =>
       method === "DELETE" ? isolated : connected,
@@ -153,11 +168,7 @@ describe("BrowserConnectionDialog", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Disconnect" }));
 
-    expect(
-      await screen.findByText(
-        "Not connected. Agents use a separate browser without your sign-ins.",
-      ),
-    ).toBeVisible();
+    expect(await screen.findByLabelText("Extension token")).toBeVisible();
     expect(route).toHaveBeenCalledWith("DELETE", undefined);
   });
 
@@ -173,10 +184,10 @@ describe("BrowserConnectionDialog", () => {
 
     expect(
       await screen.findByText(
-        "Token expired. Copy a new token from the extension, then reconnect.",
+        "Copy a new token from the extension, then reconnect.",
       ),
     ).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Reconfigure" }));
+    fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
     const input = screen.getByLabelText("Extension token");
     fireEvent.change(input, { target: { value: "not a token" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
@@ -224,9 +235,7 @@ describe("BrowserConnectionDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     expect(
-      await screen.findByText(
-        "Connected. Browser tasks use your Chrome and its sign-ins.",
-      ),
+      await screen.findByRole("button", { name: "Replace token" }),
     ).toBeVisible();
     expect(route).toHaveBeenCalledWith("PUT", { extension_token: token });
   });

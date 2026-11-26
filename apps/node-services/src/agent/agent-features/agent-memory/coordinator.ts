@@ -660,6 +660,11 @@ export class AgentMemoryCoordinator {
       runtimeType: runtime,
       ...(ghost.runtime.model ? { model: ghost.runtime.model } : {}),
     };
+    const targetKey = memoryTargetKey(
+      computerId,
+      runtime,
+      placement.model ?? "",
+    );
     // Looked up once per pass, and only when a stage is built or run. An
     // offline Computer fails the pass as the model call would, so no stage
     // is sized without the window.
@@ -1049,10 +1054,6 @@ export class AgentMemoryCoordinator {
         pending = document.pending
       ) {
         const attempt = pending.attempt ?? 0;
-        if (attempt >= MAX_STAGE_ATTEMPTS)
-          throw new Error(
-            `Memory ${pending.stage} produced no valid output in ${MAX_STAGE_ATTEMPTS} attempts`,
-          );
         let output: Record<string, unknown>;
         let consolidated: string;
         const { stage } = pending;
@@ -1088,6 +1089,56 @@ export class AgentMemoryCoordinator {
           document = await memory.commit(agentId, rest, signal);
           rebuildStage = stage;
           break;
+        }
+        if (attempt >= MAX_STAGE_ATTEMPTS) {
+          let resetReason:
+            | "runtime_changed"
+            | "legacy_target_unknown"
+            | "thread_changed"
+            | undefined;
+          if (
+            pending.target !== targetKey &&
+            (stage === "consolidate" || readable)
+          ) {
+            resetReason =
+              pending.target === undefined
+                ? "legacy_target_unknown"
+                : "runtime_changed";
+          } else if (stage === "extract" && readable && pending.thread_id) {
+            try {
+              const parsed = JSON.parse(pending.prompt) as {
+                source_context?: unknown;
+              };
+              if (typeof parsed.source_context === "string") {
+                const page = await host.inspectDebugContextHistory(
+                  decodeExecutionContextKey(parsed.source_context),
+                  { limit: 1, signal },
+                );
+                if (
+                  page.status === "available" &&
+                  page.snapshot.threadId !== pending.thread_id
+                ) {
+                  resetReason = "thread_changed";
+                }
+              }
+            } catch {
+              // Keep the exhausted checkpoint when its context key cannot be read.
+            }
+          }
+          if (resetReason) {
+            const { pending: _dropped, ...rest } = document;
+            this.options.logger.log("info", "agent_memory.pending_reset", {
+              agentId,
+              stage,
+              reason: resetReason,
+            });
+            document = await memory.commit(agentId, rest, signal);
+            rebuildStage = stage;
+            break;
+          }
+          throw new Error(
+            `Memory ${pending.stage} produced no valid output in ${MAX_STAGE_ATTEMPTS} attempts`,
+          );
         }
         // Throws what the output schema cannot express; a consolidation
         // returns the memory its edits produce.
@@ -1250,7 +1301,14 @@ export class AgentMemoryCoordinator {
             }
             await memory.commit(
               agentId,
-              { ...document, pending: { ...pending, attempt: attempt + 1 } },
+              {
+                ...document,
+                pending: {
+                  ...pending,
+                  attempt: attempt + 1,
+                  target: targetKey,
+                },
+              },
               signal,
             );
             throw error;
@@ -1271,7 +1329,10 @@ export class AgentMemoryCoordinator {
             throw error;
           await memory.commit(
             agentId,
-            { ...document, pending: { ...pending, attempt: attempt + 1 } },
+            {
+              ...document,
+              pending: { ...pending, attempt: attempt + 1, target: targetKey },
+            },
             signal,
           );
           throw error;
@@ -1371,6 +1432,16 @@ export class AgentMemoryCoordinator {
         error: String(error),
       });
   }
+}
+
+function memoryTargetKey(
+  computerId: string,
+  runtime: string,
+  model: string,
+): string {
+  const encoded = JSON.stringify([computerId, runtime, model]);
+  if (Buffer.byteLength(encoded, "utf8") <= 512) return encoded;
+  return sha256Hex(encoded);
 }
 
 function outputText(

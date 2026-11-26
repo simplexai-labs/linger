@@ -140,6 +140,14 @@ func (s *Service) SwitchComputerRuntime(ctx context.Context, input ComputerRunti
 		if changed != 1 {
 			return ComputerRuntimeSwitchResult{}, ErrAgentConfigurationConflict
 		}
+		if shouldClearAnotherMeBackgroundFailures(
+			row.AgentType, row.ComputerID.String, row.LocalRuntimeType.String, row.RuntimeModel,
+			input.ComputerID, input.RuntimeType, input.Model,
+		) {
+			if err := clearAnotherMeBackgroundFailuresTx(ctx, queries, input.TenantID, placement.ActorID); err != nil {
+				return ComputerRuntimeSwitchResult{}, err
+			}
+		}
 		updated = append(updated, row.AgentManagementID.String)
 	}
 	if len(updated) > 0 {

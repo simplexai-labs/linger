@@ -1,3 +1,4 @@
+import { suppressFollowUpClick } from "@/components/ui/suppress-follow-up-click";
 import {
   Copy01Icon,
   Download04Icon,
@@ -189,9 +190,10 @@ function FragmentHostActions({ html, title }: { html: string; title: string }) {
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
+      if (rootRef.current?.contains(event.target as Node)) return;
+      // The paired click would otherwise activate the control under the menu.
+      if ((event.button ?? 0) === 0) suppressFollowUpClick(event);
+      setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);

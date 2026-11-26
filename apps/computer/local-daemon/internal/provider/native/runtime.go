@@ -17,6 +17,10 @@ import (
 // on this Computer.
 var ErrSessionNotFound = errors.New("native session not found")
 
+// ErrProviderPrepareNotEligible reports that a Runtime installation or
+// configuration cannot park a pre-started process for provider prepare.
+var ErrProviderPrepareNotEligible = errors.New("provider prepare is not eligible")
+
 // Kinds lists the Runtime kinds this package can open.
 var Kinds = []string{"claude", "codex", "pi", "antigravity"}
 
@@ -175,14 +179,17 @@ type TokenCount struct {
 }
 
 type Outcome struct {
-	Parked      bool
-	Status      string
-	Output      string
-	Error       string
-	SessionID   string
-	TurnID      string
-	ElapsedMs   int64
-	Diagnostics RuntimeFailureDiagnostics
+	Parked bool
+	Status string
+	Output string
+	Error  string
+	// PublicDetail carries redacted-eligible, public-safe failure text set
+	// only from structured provider/runtime notices (never CLI stderr).
+	PublicDetail string
+	SessionID    string
+	TurnID       string
+	ElapsedMs    int64
+	Diagnostics  RuntimeFailureDiagnostics
 	// FailureCode is a public failure code set only from a runtime-specific
 	// structured signal; empty leaves classification to Diagnostics.
 	FailureCode     string

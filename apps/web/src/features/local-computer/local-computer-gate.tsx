@@ -96,10 +96,7 @@ export function LocalComputerGate({
         role="dialog"
       >
         <header className="border-b border-border px-6 pb-4 pt-5">
-          <p className="text-xs text-muted-foreground">
-            {t(computersMessages.gateKicker)}
-          </p>
-          <h2 className="mt-1 text-lg" id="local-computer-gate-title">
+          <h2 className="text-lg" id="local-computer-gate-title">
             {t(computersMessages.gateTitle)}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -265,7 +262,7 @@ function AppSetup({
   return (
     <div className="mt-2 space-y-3">
       <p className="text-xs text-muted-foreground">
-        {t(computersMessages.oneReadyAppEnough)}
+        {t(computersMessages.aiAppsHint)}
       </p>
       <ul className="divide-y divide-border rounded-lg border border-border">
         {apps.map((app) => (

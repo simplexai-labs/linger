@@ -1,4 +1,9 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { LibraryOverviewSkeleton } from "@/features/library/library-loading-skeletons";
+import {
+  sectionHasSidebar,
+  workspaceSection,
+} from "@/features/library/library-section";
 import type { TeamHubRoomListItem } from "@/features/teamhub/teamhub-types";
 import { commonMessages } from "@/i18n/common.messages";
 import type { Translate } from "@/i18n/language";
@@ -86,7 +91,7 @@ export function AuthenticatedRouteLoading({
       ) : route.kind === "dashboard" ? (
         <DashboardLoading />
       ) : route.kind === "library" ? (
-        <LibraryLoading />
+        <LibraryLoading pathname={pathname} />
       ) : route.kind === "document" ? (
         <DocumentLoading />
       ) : (
@@ -291,10 +296,22 @@ function WorkspaceSidebarLoading() {
   );
 }
 
-function LibraryLoading() {
+/**
+ * The Library overview and Wiki have no sidebar; an open meeting keeps it.
+ * The overview mirrors its page so the content lands where its shapes were.
+ */
+function LibraryLoading({ pathname }: { pathname: string }) {
+  const section = workspaceSection(pathname);
+  if (section === "overview") {
+    return (
+      <div className="flex min-h-0 flex-1 overflow-hidden" aria-hidden="true">
+        <LibraryOverviewSkeleton />
+      </div>
+    );
+  }
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden" aria-hidden="true">
-      <WorkspaceSidebarLoading />
+      {sectionHasSidebar(section) ? <WorkspaceSidebarLoading /> : null}
       <section className="workspace-content-viewport min-w-0 flex-1 px-6 py-7">
         <Skeleton className="h-5 w-32" />
         <div className="mt-5 flex gap-3">

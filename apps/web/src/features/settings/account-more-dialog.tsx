@@ -429,14 +429,9 @@ function AccountMoreHeader({ onClose }: { onClose: () => void }) {
   const t = useT();
   return (
     <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
-      <div>
-        <h2 className="text-base font-semibold">
-          {t(accountSettingsMessages.addToProfile)}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t(accountSettingsMessages.addToProfileHint)}
-        </p>
-      </div>
+      <h2 className="text-base font-semibold">
+        {t(accountSettingsMessages.addToProfile)}
+      </h2>
       <Button
         data-voice-close
         aria-label={t(commonMessages.close)}

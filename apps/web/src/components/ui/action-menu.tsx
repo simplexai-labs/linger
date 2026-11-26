@@ -14,6 +14,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { Icon } from "@/components/ui/icon";
+import { suppressFollowUpClick } from "./suppress-follow-up-click";
 
 export type MenuPlacement =
   | "bottom-end"
@@ -67,6 +68,10 @@ export function ActionMenu({
   trigger?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  // A hover-opened menu closes on its own delay, so its next click belongs to
+  // whatever is under the pointer; a menu the person opened by tap or click
+  // keeps swallowing the paired click, on touch too.
+  const openedByHover = useRef(false);
   const [focusOnOpen, setFocusOnOpen] = useState(true);
   const hoverCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -151,6 +156,10 @@ export function ActionMenu({
         !menuRef.current?.contains(target) &&
         !submenuRef.current?.contains(target)
       ) {
+        // A menu opened by hover closes on its own delay, so the pointer may
+        // never have meant to use it: its next click belongs to the control.
+        if (!openedByHover.current && (event.button ?? 0) === 0)
+          suppressFollowUpClick(event);
         setOpen(false);
       }
     };
@@ -237,6 +246,7 @@ export function ActionMenu({
           cancelHoverClose();
           if (!open) {
             setFocusOnOpen(false);
+            openedByHover.current = true;
             setOpen(true);
           }
         }}
@@ -251,6 +261,7 @@ export function ActionMenu({
             return;
           }
           setFocusOnOpen(true);
+          openedByHover.current = false;
           setOpen((current) => openOnHover || !current);
           setActiveSubmenu(null);
         }}

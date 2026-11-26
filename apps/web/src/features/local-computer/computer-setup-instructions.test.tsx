@@ -90,7 +90,7 @@ describe("CopyValueButton", () => {
       />,
     );
     const dialog = screen.getByRole("dialog", {
-      name: "Connect Local Computer",
+      name: "Connect a computer",
     });
     const buttons = within(dialog).getAllByRole("button", {
       name: "Copy command",

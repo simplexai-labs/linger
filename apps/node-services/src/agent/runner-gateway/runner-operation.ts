@@ -9,9 +9,11 @@ import { isDeepStrictEqual } from "node:util";
 
 import { logAgentEvent } from "../observability/agent-log.js";
 import {
+  formatRuntimeFailureDiagnostics,
   RuntimeExecutionError,
   ProviderRunYieldedError,
   runtimeSessionAwaitsFirstRun,
+  sanitizeRuntimeFailureDetail,
 } from "../executor/provider.js";
 import type { ProviderSteerAck } from "../executor/provider.js";
 import type {
@@ -77,6 +79,14 @@ export interface RunnerOperationInput {
   readonly input: OperationInput["input"];
   readonly contextViewRef?: ContextViewRef;
 }
+
+export interface BackgroundWaitTool {
+  readonly callId: string;
+  readonly toolName: string;
+  readonly startedAtUnixMs: number;
+}
+
+export type RunnerOperationPhase = "running" | "waiting_background";
 
 export interface RunnerOperation {
   readonly operationId: string;
@@ -304,6 +314,8 @@ export class RunnerOperationState {
   #inputReceiptTimer: ReturnType<typeof setTimeout> | undefined;
   #inputReceipts: Deferred<void> | undefined;
   #turnId: string | undefined;
+  #phase: RunnerOperationPhase = "running";
+  #backgroundTools: readonly BackgroundWaitTool[] = [];
 
   // Called after the operation.start frame is written to the Computer peer.
   // Replays on reconnect are later writes of the same frame.
@@ -420,6 +432,16 @@ export class RunnerOperationState {
   /** The Runtime turn the Operation started, once the Daemon reports it. */
   get turnId(): string | undefined {
     return this.#turnId;
+  }
+
+  /** Whether the Run is actively executing or waiting on background tools. */
+  get phase(): RunnerOperationPhase {
+    return this.#phase;
+  }
+
+  /** Native background tools currently keeping the Run open while idle. */
+  get backgroundTools(): readonly BackgroundWaitTool[] {
+    return this.#backgroundTools;
   }
 
   /** The usage the Daemon reported with the terminal, when it reported one. */
@@ -977,6 +999,18 @@ export class RunnerOperationState {
           )
             this.#yieldSessionId = threadId;
         }
+        if (envelope.event.type === "run.background_waiting") {
+          this.#phase = "waiting_background";
+          this.#backgroundTools = envelope.event.tools.map((tool) => ({
+            callId: tool.call_id,
+            toolName: tool.tool_name,
+            startedAtUnixMs: tool.started_at_unix_ms,
+          }));
+        }
+        if (envelope.event.type === "run.background_resumed") {
+          this.#phase = "running";
+          this.#backgroundTools = [];
+        }
         if (
           envelope.event.type === "tool.called" ||
           envelope.event.type === "tool.returned" ||
@@ -1034,21 +1068,30 @@ export class RunnerOperationState {
           runtimeType: this.start.runtime_type,
           runtimeVersion: envelope.error.failure?.runtime_version,
         });
-        this.#complete(
-          () =>
+        this.#complete(() => {
+          if (envelope.error.failure) {
+            const { detail: rawDetail, ...baseFailure } =
+              envelope.error.failure;
+            const detail =
+              rawDetail !== undefined
+                ? sanitizeRuntimeFailureDetail(rawDetail)
+                : formatRuntimeFailureDiagnostics(envelope.error.diagnostics);
+            const failure = detail ? { ...baseFailure, detail } : baseFailure;
             this.#outcome.reject(
-              envelope.error.failure
-                ? new RuntimeExecutionError(envelope.error.failure, {
-                    diagnostics: envelope.error.diagnostics,
-                  })
-                : new RunnerOperationError(
-                    envelope.error.code,
-                    envelope.error.message,
-                    envelope.error.retryable,
-                  ),
+              new RuntimeExecutionError(failure, {
+                diagnostics: envelope.error.diagnostics,
+              }),
+            );
+            return;
+          }
+          this.#outcome.reject(
+            new RunnerOperationError(
+              envelope.error.code,
+              envelope.error.message,
+              envelope.error.retryable,
             ),
-          true,
-        );
+          );
+        }, true);
         break;
       case "operation.cancelled": {
         const id = this.#yieldSessionId;

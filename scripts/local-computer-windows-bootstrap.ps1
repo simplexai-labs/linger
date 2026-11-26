@@ -440,8 +440,11 @@ function Get-LingerComputerToolEntries([string]$Bundle) {
     if (-not (Test-Path -LiteralPath (Get-LingerFullPath $root))) { return @() }
     Assert-LingerPath $root $true
     $manifest = (Read-LingerPrivateText (Join-Path $root 'manifest.json')) | ConvertFrom-Json
+    $piEntryProperty = $manifest.PSObject.Properties['pi_entry']
+    $piEntry = if ($null -ne $piEntryProperty) { $piEntryProperty.Value } else { $null }
     if ($manifest.schema_version -ne 1 -or -not $manifest.assets -or
         $manifest.playwright_entry -cne 'node_modules/@playwright/mcp/cli.js' -or $manifest.pi_extension -cne 'extensions/pi-mcp.mjs' -or
+        ($null -ne $piEntry -and $piEntry -cne 'bin/pi.exe') -or
         $manifest.cua_entry -cne 'cua/cua-driver.exe' -or $manifest.artifact_sha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid Computer tool manifest.' }
     $seen = @{}
     $names = @('manifest.json')
@@ -450,7 +453,9 @@ function Get-LingerComputerToolEntries([string]$Bundle) {
         $seen[$asset.path] = $true
         $names += $asset.path
     }
-    if (-not $seen.ContainsKey($manifest.playwright_entry) -or -not $seen.ContainsKey($manifest.pi_extension) -or -not $seen.ContainsKey($manifest.cua_entry)) { throw 'Computer tool entrypoint is missing.' }
+    if (-not $seen.ContainsKey($manifest.playwright_entry) -or -not $seen.ContainsKey($manifest.pi_extension) -or
+        ($null -ne $piEntry -and -not $seen.ContainsKey($piEntry)) -or
+        -not $seen.ContainsKey($manifest.cua_entry)) { throw 'Computer tool entrypoint is missing.' }
     # Match JavaScript ordinal ordering in the installed bundle checksum.
     [Array]::Sort($names, [StringComparer]::Ordinal)
     return @($names | ForEach-Object { 'cli/computer-tools/' + $_ })

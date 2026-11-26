@@ -1,6 +1,8 @@
 import { execFileSync, type SpawnOptions } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -70,8 +72,12 @@ const fixture = () => {
   const root = mkdtempSync(path.join(tmpdir(), "build-teamhub-"));
   roots.push(root);
   const repo = path.join(root, "repo");
-  mkdirSync(path.join(repo, "apps/teamhub"), { recursive: true });
+  mkdirSync(path.join(repo, "apps/teamhub/cmd/teamhub"), { recursive: true });
   writeFileSync(path.join(repo, "apps/teamhub/go.mod"), "module teamhub\n");
+  writeFileSync(
+    path.join(repo, "apps/teamhub/cmd/teamhub/main.go"),
+    "package main\n",
+  );
   const git = (...args: string[]) =>
     execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
   git("init", "-q");
@@ -85,7 +91,7 @@ const fixture = () => {
     "-qm",
     "source",
   );
-  const packageSource = (output: string, ref: string) => {
+  const packageSource = (output: string, ref: string, paths: string[] = []) => {
     const tar = execFileSync("git", [
       "-C",
       repo,
@@ -93,12 +99,20 @@ const fixture = () => {
       "--format=tar",
       "--prefix=linger-test/",
       ref,
+      ...(paths.length ? ["--", ...paths] : []),
     ]);
     writeFileSync(output, gzipSync(tar));
   };
   const archive = path.join(root, "linger-test.tar.gz");
   packageSource(archive, "HEAD");
-  return { root, archive, packageSource, commit: git("rev-parse", "HEAD") };
+  return {
+    root,
+    repo,
+    archive,
+    packageSource,
+    git,
+    commit: git("rev-parse", "HEAD"),
+  };
 };
 
 it("reads the commit git archive records in a source package", async () => {
@@ -148,4 +162,62 @@ it("builds each TeamHub command for Windows from the source package", async () =
   await expect(
     verifyTeamhub(output, "win32-x64", manifest.sourceArchiveSha256),
   ).rejects.toThrow("account.exe does not match");
+});
+
+it("stamps the shipped archive digest when compiling from a separate full archive of the same commit", async () => {
+  const f = fixture();
+  const shippedArchive = path.join(f.root, "linger-minimal.tar.gz");
+  f.packageSource(shippedArchive, "HEAD", ["apps/teamhub/go.mod"]);
+  const fullSha256 = createHash("sha256")
+    .update(readFileSync(f.archive))
+    .digest("hex");
+  const shippedSha256 = createHash("sha256")
+    .update(readFileSync(shippedArchive))
+    .digest("hex");
+  expect(shippedSha256).not.toBe(fullSha256);
+
+  const output = path.join(f.root, "out-shipped");
+  const manifest = await buildTeamhub("win32-x64", f.archive, output, {
+    shippedArchive,
+  });
+
+  expect(manifest.sourceCommit).toBe(f.commit);
+  expect(manifest.sourceArchiveSha256).toBe(shippedSha256);
+  await expect(
+    verifyTeamhub(output, "win32-x64", shippedSha256),
+  ).resolves.toEqual(manifest);
+  await expect(verifyTeamhub(output, "win32-x64", fullSha256)).rejects.toThrow(
+    "another target or source package",
+  );
+});
+
+it("refuses a shipped archive from a different commit before touching output", async () => {
+  const f = fixture();
+  writeFileSync(path.join(f.repo, "apps/teamhub/go.mod"), "module teamhub2\n");
+  f.git("add", ".");
+  f.git(
+    "-c",
+    "user.name=test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "-qm",
+    "second",
+  );
+  const otherArchive = path.join(f.root, "linger-other.tar.gz");
+  f.packageSource(otherArchive, "HEAD", ["apps/teamhub/go.mod"]);
+
+  const output = path.join(f.root, "existing-out");
+  mkdirSync(output, { recursive: true });
+  const sentinel = path.join(output, "sentinel.txt");
+  writeFileSync(sentinel, "keep");
+
+  await expect(
+    buildTeamhub("win32-x64", f.archive, output, {
+      shippedArchive: otherArchive,
+    }),
+  ).rejects.toThrow(
+    /Shipped source archive commit .* does not match build source archive/,
+  );
+  expect(existsSync(sentinel)).toBe(true);
 });

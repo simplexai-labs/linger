@@ -12,6 +12,7 @@ import (
 	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
+// RuntimeMonitorOptions configures periodic Runtime diagnostic monitoring.
 type RuntimeMonitorOptions struct {
 	Initial   DiscoveryResult
 	Discovery DiscoveryOptions
@@ -23,6 +24,9 @@ type RuntimeMonitorOptions struct {
 	OnChanged             func(DiscoveryResult) error
 	OnError               func(error)
 	Discover              func(context.Context, DiscoveryOptions) (DiscoveryResult, error)
+	// TerminalEnvironment caches the login-shell PATH across full discovery
+	// ticks when Discover is nil. When nil, the monitor creates its own cache.
+	TerminalEnvironment *TerminalEnvironmentCache
 	// Shape projects each DiscoveryResult after full discovery or
 	// authentication refresh (for example applying a persisted BYOK catalog
 	// overlay) before diffing against current diagnostics or publishing.
@@ -45,6 +49,8 @@ type RuntimeMonitorOptions struct {
 
 const transientRuntimeFailureThreshold = 2
 
+// MonitorRuntimeDiagnostics periodically refreshes Runtime authentication and
+// full discovery state until ctx ends or OnChanged/OnError aborts.
 func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOptions) error {
 	if options.RefreshInterval <= 0 || options.FullRefreshEveryTicks < 1 || options.OnChanged == nil {
 		return errors.New("Runtime diagnostic monitor options are invalid")
@@ -77,11 +83,21 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 	activeDiscovery := resolveDiscovery()
 	prevEnv := maps.Clone(activeDiscovery.Environment)
 	prevPaths := maps.Clone(activeDiscovery.ConfiguredPaths)
+	prevManaged := maps.Clone(activeDiscovery.ManagedPaths)
+	prevBundled := maps.Clone(activeDiscovery.BundledPaths)
 	transientFailures := make(map[string]int)
 	authenticationFailures := make(map[string]int)
-	discover := options.Discover
-	if discover == nil {
-		discover = Discover
+	termCache := options.TerminalEnvironment
+	if termCache == nil && options.Discover == nil {
+		termCache = NewTerminalEnvironmentCache()
+	}
+	discover := func(ctx context.Context, discoverOptions DiscoveryOptions, forceTerminalCapture bool) (DiscoveryResult, error) {
+		if options.Discover != nil {
+			return options.Discover(ctx, discoverOptions)
+		}
+		resolved := discoverOptions
+		resolved.Environment = termCache.Resolve(ctx, discoverOptions.Environment, forceTerminalCapture)
+		return discoverResolved(ctx, resolved), nil
 	}
 	ticker := time.NewTicker(options.RefreshInterval)
 	defer ticker.Stop()
@@ -99,16 +115,22 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 			continue
 		}
 		activeDiscovery = resolveDiscovery()
-		envChanged := !maps.Equal(prevEnv, activeDiscovery.Environment) || !maps.Equal(prevPaths, activeDiscovery.ConfiguredPaths)
+		envChanged := !maps.Equal(prevEnv, activeDiscovery.Environment) ||
+			!maps.Equal(prevPaths, activeDiscovery.ConfiguredPaths) ||
+			!maps.Equal(prevManaged, activeDiscovery.ManagedPaths) ||
+			!maps.Equal(prevBundled, activeDiscovery.BundledPaths)
+		executablesChanged := runtimeExecutablesChanged(current.Diagnostics)
 		var next DiscoveryResult
 		var err error
-		if (requested || envChanged || tick%options.FullRefreshEveryTicks == 0 || runtimeExecutablesChanged(current.Diagnostics)) &&
+		if (requested || envChanged || tick%options.FullRefreshEveryTicks == 0 || executablesChanged) &&
 			(options.FullRefreshAllowed == nil || options.FullRefreshAllowed()) {
-			next, err = discover(ctx, activeDiscovery)
+			next, err = discover(ctx, activeDiscovery, executablesChanged)
 			if err == nil {
 				requested = false
 				prevEnv = maps.Clone(activeDiscovery.Environment)
 				prevPaths = maps.Clone(activeDiscovery.ConfiguredPaths)
+				prevManaged = maps.Clone(activeDiscovery.ManagedPaths)
+				prevBundled = maps.Clone(activeDiscovery.BundledPaths)
 				for _, diagnostic := range next.Diagnostics {
 					if diagnostic.Status == "ready" {
 						delete(authenticationFailures, diagnostic.Type)
@@ -132,7 +154,7 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 					targeted := activeDiscovery
 					targeted.Runtimes = changed
 					var found DiscoveryResult
-					if found, err = discover(ctx, targeted); err == nil {
+					if found, err = discover(ctx, targeted, false); err == nil {
 						next = withRuntimeDiagnostics(next, found.Diagnostics, changed)
 					}
 				}
@@ -356,7 +378,12 @@ func changedInstallations(ctx context.Context, diagnostics []RuntimeDiagnostic, 
 		}
 		environment["PATH"] = diagnostic.searchPath
 		entry, err := resolveExecutableEntry(ctx, diagnostic.Type, runtimeDefinitions[definition].Command,
-			DiscoveryOptions{ConfiguredPaths: options.ConfiguredPaths, Environment: environment})
+			DiscoveryOptions{
+				ConfiguredPaths: options.ConfiguredPaths,
+				ManagedPaths:    options.ManagedPaths,
+				BundledPaths:    options.BundledPaths,
+				Environment:     environment,
+			})
 		canonical := ""
 		if err == nil {
 			canonical, err = canonicalExecutable(entry)

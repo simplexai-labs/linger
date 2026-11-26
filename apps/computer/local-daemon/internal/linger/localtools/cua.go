@@ -451,6 +451,13 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 	if err := c.checkDesktop(); err != nil {
 		return nil, err
 	}
+	// Only a call that passed every refusal above may un-minimize a window.
+	if runtime.GOOS == "windows" {
+		pid, window := c.targetWindow(arguments)
+		if err := windowsRestore(name, pid, window, restoreMinimizedWindow); err != nil {
+			return nil, err
+		}
+	}
 	// timing splits one call into its phases, so a slow input names its cause.
 	started := time.Now()
 	var focusMs, driverMs int64

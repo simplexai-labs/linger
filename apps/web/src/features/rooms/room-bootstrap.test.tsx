@@ -390,7 +390,7 @@ describe("Room cached presentation during bootstrap", () => {
       );
       expect(
         await screen.findByRole("heading", {
-          name: /not found|access|could not|unavailable|not available/i,
+          name: /not found|access|couldn't|unavailable|not available/i,
         }),
       ).toBeVisible();
       expect(screen.queryByText(/^Chat room-all:/)).not.toBeInTheDocument();
@@ -424,7 +424,7 @@ describe("Room cached presentation during bootstrap", () => {
       );
       expect(
         await screen.findByRole("heading", {
-          name: /not found|access|could not|unavailable|not available/i,
+          name: /not found|access|couldn't|unavailable|not available/i,
         }),
       ).toBeVisible();
       expect(screen.queryByText(/^Chat room-all:/)).not.toBeInTheDocument();

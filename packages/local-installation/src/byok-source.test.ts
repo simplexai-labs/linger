@@ -449,6 +449,48 @@ describe("BYOK localmodels integration", () => {
       vi.useRealTimers();
     }
   });
+
+  it("logs separate elapsed timings for runtime preparation and gateway mount", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      const home = await makeHome();
+      const events: { kind: string; stage?: string; message: string }[] = [];
+      const outcome = await prepareByokRuntime(
+        {
+          baseUrl: "https://api.example.com",
+          path: "/v1",
+          endpoint: "/responses",
+          protocol: "openai-responses",
+          modelId: "gpt-4o",
+          runtime: "codex",
+        },
+        {
+          home,
+          signal: new AbortController().signal,
+          onEvent: (event) => events.push(event),
+        },
+        {
+          prepareNative: async () => {
+            vi.advanceTimersByTime(1_300);
+            return { code: 0, state: "ready", message: "ok" };
+          },
+          localmodels: async () => {
+            vi.advanceTimersByTime(2_700);
+            return { code: 0, stdout: "{}", stderr: "" };
+          },
+        },
+      );
+      expect(outcome).toMatchObject({ code: 0, state: "ready" });
+      expect(events).toContainEqual({
+        kind: "log",
+        stage: "runtime",
+        message: "BYOK preparation timings (s): runtime 1.3, gateway 2.7.\n",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 async function writeSource(home: string, source: unknown): Promise<void> {

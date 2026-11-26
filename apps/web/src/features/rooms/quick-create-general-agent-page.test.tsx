@@ -839,11 +839,7 @@ describe("quick Local Agent creation", () => {
     fireEvent.click(screen.getByRole("combobox", { name: "Runtime" }));
     fireEvent.click(await screen.findByRole("option", { name: "Pi" }));
     expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
-    expect(
-      await screen.findByText(
-        "In Pi, enter /login to sign in, or configure an API key in Pi auth.json.",
-      ),
-    ).toBeVisible();
+    expect(await screen.findByText("Or enter /login in Pi.")).toBeVisible();
     list.mockResolvedValue({
       items: [
         {
@@ -1004,10 +1000,8 @@ describe("quick Local Agent creation", () => {
 
     expect(await screen.findByText("Downloading local model")).toBeVisible();
     expect(
-      screen.getByText(
-        "Qwen3 Coder 30B is downloading on Jenny's Mac (63%). Once it finishes, Pi can use it when Local model is selected as the model source.",
-      ),
-    ).toBeVisible();
+      screen.getByRole("link", { name: "Settings › Models" }).closest("p"),
+    ).toHaveTextContent("Qwen3 Coder 30B is downloading on Jenny's Mac (63%).");
     expect(screen.queryByText("Pi sign-in required")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
   });

@@ -57,18 +57,21 @@ type piTurn struct {
 
 // piTurnState is what the event stream has taught the turn so far.
 type piTurnState struct {
-	active        bool
-	stopping      bool
-	running       bool
-	sawAssistant  bool
-	settleAborted bool
-	failure       string
-	output        string
-	textID        string
-	filter        piMarkupFilter
-	usage         map[string]TokenCount
-	lastUsage     map[string]TokenCount
-	compactions   int64
+	active           bool
+	stopping         bool
+	running          bool
+	sawAssistant     bool
+	settleAborted    bool
+	failure          string
+	output           string
+	textID           string
+	filter           piMarkupFilter
+	thinkingOpen     bool
+	sawThinkingDelta bool
+	thinkingClosed   bool
+	usage            map[string]TokenCount
+	lastUsage        map[string]TokenCount
+	compactions      int64
 }
 
 func newPiTurn(runCtx context.Context, cancel context.CancelFunc, p *piProcess, reused bool, fence releaseFence, logger *slog.Logger) *piTurn {

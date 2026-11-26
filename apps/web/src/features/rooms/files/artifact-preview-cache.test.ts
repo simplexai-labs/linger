@@ -118,13 +118,15 @@ describe("immutable preview content reuse", () => {
         versionId: document.current_version!.id,
         signal: signal(),
       }),
-    ).rejects.toThrow(/does not belong/);
+    ).rejects.toThrow("This version can't be previewed here.");
     const version = await readDocumentVersion(
       client,
       document.current_version!.id,
     );
     metadata.mockReturnValue({ ...version, sha256: "a".repeat(64) });
-    await expect(load()).rejects.toThrow(/SHA-256/);
+    await expect(load()).rejects.toThrow(
+      "This file changed while loading. Reload to preview it.",
+    );
     expect(download).toHaveBeenCalledTimes(2);
   });
 

@@ -1,3 +1,4 @@
+import { suppressFollowUpClick } from "@/components/ui/suppress-follow-up-click";
 import {
   Apple01Icon,
   BulbIcon,
@@ -236,8 +237,11 @@ export function MessageReactionPicker({
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!panelRef.current?.contains(target) && !anchor.contains(target))
+      if (!panelRef.current?.contains(target) && !anchor.contains(target)) {
+        // The paired click would otherwise reach the message underneath.
+        if ((event.button ?? 0) === 0) suppressFollowUpClick(event);
         dismiss(false);
+      }
     };
     document.addEventListener("pointerdown", closeOutside);
     return () => document.removeEventListener("pointerdown", closeOutside);

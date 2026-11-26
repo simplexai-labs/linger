@@ -18,7 +18,7 @@ import { createHash } from "node:crypto";
 import net from "node:net";
 import path from "node:path";
 import os from "node:os";
-import { withInstanceLock, type Instance } from "./instance.js";
+import { INSTANCE_BUSY, withInstanceLock, type Instance } from "./instance.js";
 import { REGION_SCHEMA, regionFile } from "./region.js";
 import { requestUrlText } from "@linger/service-kit";
 import { afterEach, expect, test, vi } from "vitest";
@@ -849,12 +849,14 @@ test("a kit disappearing after verification is not downloaded during stop", asyn
   vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
   const fetcher = vi.fn<typeof fetch>();
   vi.stubGlobal("fetch", fetcher);
+  let moved = false;
   await expect(
     stopLocalmodels(f.home, {
       signal: AbortSignal.timeout(10_000),
       keepController: true,
       log: (message) => {
-        if (message.includes("library status")) {
+        if (!moved && message.includes("library status")) {
+          moved = true;
           if (process.platform !== "win32") chmodSync(f.directory, 0o700);
           renameSync(f.directory, f.directory + ".moved");
         }
@@ -1034,8 +1036,13 @@ test("forwards safe extraction and verification stages after Harness downloads f
       message: "Harness files installed; checking runtime status…",
     }),
   );
-  // The three stages, then how long the tool check and the run took.
-  expect(onEvent).toHaveBeenCalledTimes(4);
+  // The three stages, then the phase breakdown and summary logs.
+  expect(
+    onEvent.mock.calls.filter(
+      ([event]) => (event as { kind: string }).kind === "stage",
+    ),
+  ).toHaveLength(3);
+  expect(onEvent).toHaveBeenCalledTimes(5);
   expect(onEvent).toHaveBeenLastCalledWith({
     kind: "log",
     message: expect.stringMatching(
@@ -1684,4 +1691,442 @@ test("isolates a home whose shared deployment localmodels marked removed", async
   await expect(
     stat(localmodelsLegacyToolsMarkerFile(f.home)),
   ).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test.skipIf(process.platform === "win32")(
+  "logs region resolution, mirror switch, fallback, and kit preparation timings when downloading the kit",
+  async () => {
+    const f = await fixture();
+    const bytes = await packed(f);
+    const npm = "https://registry.npmjs.org/@simplexai/kit/-/kit-1.tgz";
+    const mirror =
+      "https://cdn.npmmirror.com/packages/@simplexai/kit/1/kit-1.tgz";
+    const source = {
+      ...f.source,
+      url: npm,
+      mirrors: [mirror],
+      sha256: hash(bytes),
+      bytes: bytes.length,
+    };
+    await writeFile(
+      regionFile(f.home),
+      JSON.stringify({
+        schema: REGION_SCHEMA,
+        region: "cn",
+        resolved_at: new Date().toISOString(),
+        method: "probe",
+      }),
+    );
+    const logs: { stage?: string; message: string }[] = [];
+    await ensureLocalmodelsTool(
+      f.home,
+      {
+        onEvent: (event) => {
+          if (event.kind === "log")
+            logs.push({ stage: event.stage, message: event.message });
+        },
+      },
+      {
+        source,
+        fetcher: async (url) => {
+          if (requestUrlText(url).includes("npmmirror"))
+            return new Response("missing", { status: 404 });
+          return new Response(bytes);
+        },
+      },
+    );
+    expect(logs.every((entry) => entry.stage === "preflight")).toBe(true);
+    const joined = logs.map((entry) => entry.message).join("");
+    expect(joined).toMatch(/Download region: cn \(cache, \d+ms\)\./);
+    expect(joined).toContain(
+      "Download failed on cdn.npmmirror.com (HTTP 404); switching to registry.npmjs.org.",
+    );
+    expect(joined).toContain(
+      "Download region fallback: cn -> global (registry.npmjs.org).",
+    );
+    expect(joined).toMatch(
+      /localmodels kit prepared \(s\): download [\d.]+, unpack [\d.]+, verify [\d.]+\./,
+    );
+  },
+);
+
+test("logs phase breakdowns for harness apply and source apply alongside the command timing line", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const harnessEvents: { kind: string; stage?: string; message: string }[] =
+      [];
+    await runLocalmodels(
+      f.home,
+      ["harness", "apply", "plan", "--jsonl"],
+      { onEvent: (event) => harnessEvents.push(event) },
+      {
+        run: async (_file, _args, options) => {
+          options?.onOutput?.(
+            '{"kind":"stage","stage":"download","state":"connecting","host":"registry.npmjs.org"}\n',
+          );
+          vi.advanceTimersByTime(1_200);
+          options?.onOutput?.(
+            '{"kind":"stage","stage":"download","state":"switching","to":"cdn.npmmirror.com"}\n',
+          );
+          vi.advanceTimersByTime(300);
+          options?.onOutput?.(
+            '{"kind":"stage","stage":"download","state":"retrying"}\n',
+          );
+          vi.advanceTimersByTime(500);
+          options?.onOutput?.(
+            '{"kind":"stage","stage":"extract","state":"running"}\n',
+          );
+          vi.advanceTimersByTime(400);
+          options?.onOutput?.(
+            '{"kind":"stage","stage":"verify","state":"running"}\n',
+          );
+          vi.advanceTimersByTime(200);
+          options?.onOutput?.(
+            '{"kind":"stage","stage":"install","state":"running"}\n',
+          );
+          vi.advanceTimersByTime(600);
+          options?.onOutput?.(
+            '{"kind":"stage","stage":"install","state":"succeeded"}\n',
+          );
+          return { code: 0, stdout: "{}", stderr: "" };
+        },
+      },
+    );
+    const harnessLogs = harnessEvents
+      .filter((event) => event.kind === "log")
+      .map((event) => event.message);
+    expect(harnessLogs).toEqual([
+      "localmodels harness apply phases: download 2.0s, retries 1, switches 1, extract 0.4s, verify 0.2s, install 0.6s.\n",
+      expect.stringMatching(
+        /^localmodels harness apply: tool checked in [\d.]+s, ran in [\d.]+s\.\n$/,
+      ),
+    ]);
+
+    const sourceEvents: { kind: string; stage?: string; message: string }[] =
+      [];
+    await runLocalmodels(
+      f.home,
+      ["source", "apply", "--mode", "byok", "--json"],
+      { onEvent: (event) => sourceEvents.push(event) },
+      {
+        run: async (_file, _args, options) => {
+          options?.onOutput?.(
+            '{"kind":"stage","stage":"download","state":"connecting","host":"registry.npmjs.org"}\n',
+          );
+          vi.advanceTimersByTime(1_500);
+          options?.onOutput?.(
+            '{"kind":"progress","stage":"download","completed":100,"total":100,"unit":"bytes"}\n',
+          );
+          // Gateway start + health wait after the last download event.
+          vi.advanceTimersByTime(2_500);
+          return { code: 0, stdout: "{}", stderr: "" };
+        },
+      },
+    );
+    const sourceLogs = sourceEvents
+      .filter((event) => event.kind === "log")
+      .map((event) => event.message);
+    expect(sourceLogs).toEqual([
+      "localmodels source apply phases: download 1.5s, post-download 2.5s.\n",
+      expect.stringMatching(
+        /^localmodels source apply: tool checked in [\d.]+s, ran in [\d.]+s\.\n$/,
+      ),
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("logs per-step durations when stopping localmodels", async () => {
+  const logs: string[] = [];
+  const run = vi.fn<typeof runLocalmodels>(async (_home, args) =>
+    args[1] === "status"
+      ? libraryStatus([{ id: "qwen3-8b:Q4_K_M", state: "loaded" }])
+      : { code: 0, stdout: "{}", stderr: "" },
+  );
+  await stopLocalmodels(
+    "/home",
+    {
+      signal: AbortSignal.timeout(5000),
+      log: (message) => logs.push(message),
+    },
+    { run, installed: async () => true },
+  );
+  expect(logs).toEqual([
+    "Stopping the local models (localmodels library status).",
+    expect.stringMatching(/^Stopped localmodels library status in [\d.]+s\.$/),
+    "Stopping the local models (localmodels library unload qwen3-8b:Q4_K_M).",
+    expect.stringMatching(
+      /^Stopped localmodels library unload qwen3-8b:Q4_K_M in [\d.]+s\.$/,
+    ),
+    "Stopping the local models (localmodels foundations stop).",
+    expect.stringMatching(
+      /^Stopped localmodels foundations stop in [\d.]+s\.$/,
+    ),
+    "Stopping the local models (localmodels stack down).",
+    expect.stringMatching(/^Stopped localmodels stack down in [\d.]+s\.$/),
+  ]);
+});
+
+test("waits for an in-progress cross-process kit download and reuses the published kit without re-fetching", async () => {
+  const f = await fixture();
+  const staged = path.join(f.home, "staged-kit");
+  await rename(f.directory, staged);
+  const lock = path.join(f.home, "tools", "localmodels", "lock");
+  await mkdir(lock, { recursive: true, mode: 0o700 });
+  let releaseLock!: () => void;
+  let lockHeld!: () => void;
+  const holding = new Promise<void>((resolve) => {
+    lockHeld = resolve;
+  });
+  const holder = withInstanceLock({ root: lock } as Instance, async () => {
+    lockHeld();
+    await new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+  });
+  await holding;
+  const events: { kind: string; stage?: string; message: string }[] = [];
+  const fetcher = vi.fn<typeof fetch>();
+  try {
+    const waiting = ensureLocalmodelsTool(
+      f.home,
+      { onEvent: (event) => events.push(event) },
+      { source: f.source, fetcher, lockPollMs: 10, lockWaitMs: 5_000 },
+    );
+    await vi.waitFor(() =>
+      expect(
+        events.some((event) =>
+          event.message.includes("download already in progress"),
+        ),
+      ).toBe(true),
+    );
+    await rename(staged, f.directory);
+    releaseLock();
+    await holder;
+    const tool = await waiting;
+    expect(tool.python).toBe(path.join(f.directory, "python/python"));
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(
+      events.filter((event) =>
+        event.message.includes("download already in progress"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      events.filter((event) =>
+        event.message.includes("Waiting for another process preparing"),
+      ),
+    ).toHaveLength(1);
+  } finally {
+    releaseLock?.();
+    await holder.catch(() => {});
+  }
+});
+
+test.skipIf(process.platform === "win32")(
+  "takes over downloading the kit when the previous lock holder releases without publishing",
+  async () => {
+    const f = await fixture();
+    const bytes = await packed(f);
+    const source = { ...f.source, sha256: hash(bytes), bytes: bytes.length };
+    const lock = path.join(f.home, "tools", "localmodels", "lock");
+    await mkdir(lock, { recursive: true, mode: 0o700 });
+    let releaseLock!: () => void;
+    let lockHeld!: () => void;
+    const holding = new Promise<void>((resolve) => {
+      lockHeld = resolve;
+    });
+    const holder = withInstanceLock({ root: lock } as Instance, async () => {
+      lockHeld();
+      await new Promise<void>((resolve) => {
+        releaseLock = resolve;
+      });
+    });
+    await holding;
+    const events: string[] = [];
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(bytes));
+    try {
+      const waiting = ensureLocalmodelsTool(
+        f.home,
+        { onEvent: (event) => events.push(event.message) },
+        { source, fetcher, lockPollMs: 10, lockWaitMs: 5_000 },
+      );
+      await vi.waitFor(() =>
+        expect(
+          events.some((message) =>
+            message.includes("download already in progress"),
+          ),
+        ).toBe(true),
+      );
+      releaseLock();
+      await holder;
+      const tool = await waiting;
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(tool.python).toBe(
+        path.join(f.home, "tools/localmodels", source.sha256, "python/python"),
+      );
+    } finally {
+      releaseLock?.();
+      await holder.catch(() => {});
+    }
+  },
+);
+
+test("aborts immediately while waiting for another process preparing the kit", async () => {
+  const f = await fixture();
+  await rm(f.directory, { recursive: true, force: true });
+  const lock = path.join(f.home, "tools", "localmodels", "lock");
+  await mkdir(lock, { recursive: true, mode: 0o700 });
+  let releaseLock!: () => void;
+  let lockHeld!: () => void;
+  const holding = new Promise<void>((resolve) => {
+    lockHeld = resolve;
+  });
+  const holder = withInstanceLock({ root: lock } as Instance, async () => {
+    lockHeld();
+    await new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+  });
+  await holding;
+  const controller = new AbortController();
+  const events: string[] = [];
+  const fetcher = vi.fn<typeof fetch>();
+  try {
+    const waiting = ensureLocalmodelsTool(
+      f.home,
+      {
+        signal: controller.signal,
+        onEvent: (event) => events.push(event.message),
+      },
+      { source: f.source, fetcher, lockPollMs: 500, lockWaitMs: 10_000 },
+    );
+    await vi.waitFor(() =>
+      expect(
+        events.some((message) =>
+          message.includes("download already in progress"),
+        ),
+      ).toBe(true),
+    );
+    controller.abort();
+    await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetcher).not.toHaveBeenCalled();
+  } finally {
+    releaseLock?.();
+    await holder.catch(() => {});
+  }
+});
+
+test("rejects with INSTANCE_BUSY when the kit lock stays held past lockWaitMs", async () => {
+  const f = await fixture();
+  await rm(f.directory, { recursive: true, force: true });
+  const lock = path.join(f.home, "tools", "localmodels", "lock");
+  await mkdir(lock, { recursive: true, mode: 0o700 });
+  let releaseLock!: () => void;
+  let lockHeld!: () => void;
+  const holding = new Promise<void>((resolve) => {
+    lockHeld = resolve;
+  });
+  const holder = withInstanceLock({ root: lock } as Instance, async () => {
+    lockHeld();
+    await new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+  });
+  await holding;
+  const fetcher = vi.fn<typeof fetch>();
+  try {
+    await expect(
+      ensureLocalmodelsTool(
+        f.home,
+        {},
+        { source: f.source, fetcher, lockPollMs: 10, lockWaitMs: 40 },
+      ),
+    ).rejects.toMatchObject({ code: INSTANCE_BUSY });
+    expect(fetcher).not.toHaveBeenCalled();
+  } finally {
+    releaseLock?.();
+    await holder.catch(() => {});
+  }
+});
+
+test("skips bundled Pi PATH injection for setup inspect while keeping it for harness commands", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  const bundledBin = path.join(f.home, "app-bundled-pi", "bin");
+  await mkdir(bundledBin, { recursive: true });
+  const bundledExecutable = path.join(
+    bundledBin,
+    process.platform === "win32" ? "pi.exe" : "pi",
+  );
+  await writeFile(
+    bundledExecutable,
+    process.platform === "win32" ? "MZ" : "#!/bin/sh\n",
+    { mode: 0o755 },
+  );
+  const resolveBundled = vi.fn(async () => ({
+    binDir: bundledBin,
+    executable: bundledExecutable,
+    version: "1.5.2",
+  }));
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+  const basePath = path.join(f.home, "empty-path");
+
+  await runLocalmodels(
+    f.home,
+    ["setup", "inspect", "--json"],
+    { env: { PATH: basePath } },
+    { run, resolveBundledPi: resolveBundled },
+  );
+  expect(resolveBundled).not.toHaveBeenCalled();
+  const inspectEnv = (
+    run.mock.calls[0] as unknown as [
+      string,
+      string[],
+      { env: NodeJS.ProcessEnv },
+    ]
+  )[2].env;
+  const inspectPathKey = Object.keys(inspectEnv).find(
+    (key) => key.toUpperCase() === "PATH",
+  );
+  const inspectEntries = inspectEnv[inspectPathKey!]!.split(path.delimiter);
+  const stableBin = path.join(
+    path.resolve(f.home),
+    "runtime",
+    "bundled-pi",
+    "bin",
+  );
+  expect(inspectEntries).not.toContain(bundledBin);
+  expect(inspectEntries).not.toContain(stableBin);
+
+  for (const args of [
+    ["harness", "status", "--json"],
+    ["harness", "apply", "plan", "--jsonl"],
+  ]) {
+    run.mockClear();
+    resolveBundled.mockClear();
+    await runLocalmodels(
+      f.home,
+      args,
+      { env: { PATH: basePath } },
+      { run, resolveBundledPi: resolveBundled },
+    );
+    expect(resolveBundled).toHaveBeenCalledTimes(1);
+    const passedEnv = (
+      run.mock.calls[0] as unknown as [
+        string,
+        string[],
+        { env: NodeJS.ProcessEnv },
+      ]
+    )[2].env;
+    const pathKey = Object.keys(passedEnv).find(
+      (key) => key.toUpperCase() === "PATH",
+    );
+    const entries = passedEnv[pathKey!]!.split(path.delimiter);
+    expect(entries.at(-1)).toBe(
+      process.platform === "win32" ? bundledBin : stableBin,
+    );
+  }
 });

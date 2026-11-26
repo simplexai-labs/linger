@@ -3,13 +3,36 @@ package computercli
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/computerconfig"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/localtools"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 )
+
+var resolveBundledRuntimePaths = defaultBundledRuntimePaths
+
+func defaultBundledRuntimePaths() map[string]string {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	return bundledRuntimePathsForExecutable(executable)
+}
+
+func bundledRuntimePathsForExecutable(executable string) map[string]string {
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	installation, err := localtools.Installed(executable)
+	if err != nil || installation == nil || installation.PiEntry == "" {
+		return nil
+	}
+	return map[string]string{"pi": installation.PiEntry}
+}
 
 // runtimeDiagnostic is one Runtime as login, doctor and runtime check see it.
 type runtimeDiagnostic struct {
@@ -58,21 +81,18 @@ func checkRuntime(ctx context.Context, runtimeType string, request runtimeReques
 }
 
 func requestRuntimeChecks(ctx context.Context, types []string, request runtimeRequest) ([]runtimeCheck, error) {
-	// LINGER_<TYPE>_PATH selects a Runtime that no configured path names. The
-	// Runtime itself never receives these variables.
-	selected := map[string]string{}
-	for _, runtimeType := range runtimeTypes {
-		value := request.configuredPaths[runtimeType]
-		if value == "" {
-			value = strings.TrimSpace(selectedRuntimePath(request.environment, runtimeType))
-		}
-		if value != "" {
-			selected[runtimeType] = value
-		}
-	}
-	options := provider.DiscoveryOptions{ConfiguredPaths: selected, Environment: computerconfig.RuntimeEnvironment(request.environment, "")}
+	var selectedRuntimes []string
 	if len(types) < len(runtimeTypes) {
-		options.Runtimes = types
+		selectedRuntimes = types
+	}
+	options, err := computerconfig.RuntimeDiscoveryOptions(computerconfig.RuntimeDiscoveryRequest{
+		ConfiguredPaths: request.configuredPaths,
+		BundledPaths:    resolveBundledRuntimePaths(),
+		Environment:     request.environment,
+		Runtimes:        selectedRuntimes,
+	})
+	if err != nil {
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -81,7 +101,6 @@ func requestRuntimeChecks(ctx context.Context, types []string, request runtimeRe
 	if request.live {
 		discovered, live = provider.DiscoverLive(ctx, options, 75*time.Second)
 	} else {
-		var err error
 		if discovered, err = provider.Discover(ctx, options); err != nil {
 			return nil, err
 		}
@@ -117,17 +136,4 @@ func requestRuntimeChecks(ctx context.Context, types []string, request runtimeRe
 		checks = append(checks, check)
 	}
 	return checks, nil
-}
-
-// selectedRuntimePath is the executable LINGER_<TYPE>_PATH selects.
-func selectedRuntimePath(environment map[string]string, runtimeType string) string {
-	switch runtimeType {
-	case "codex":
-		return environment["LINGER_CODEX_PATH"]
-	case "claude":
-		return environment["LINGER_CLAUDE_PATH"]
-	case "pi":
-		return environment["LINGER_PI_PATH"]
-	}
-	return ""
 }

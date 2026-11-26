@@ -14,7 +14,7 @@ func TestTerminalRunUsageBuckets(t *testing.T) {
 	{
 		var payload map[string]any
 		spec := provider.OperationSpec{Provider: "codex", OperationKind: "run.start"}
-		if err := json.Unmarshal(terminalPayload(spec, result), &payload); err != nil {
+		if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &payload); err != nil {
 			t.Fatal(err)
 		}
 		usage := payload["usage"].([]any)
@@ -32,8 +32,8 @@ func TestTerminalRunUsageBuckets(t *testing.T) {
 			t.Fatal("missing last request")
 		}
 		result.Status = "failed"
-		if err := json.Unmarshal(terminalPayload(spec, result), &payload); err != nil || payload["usage"] == nil {
-			t.Fatalf("failed usage lost: %s", terminalPayload(spec, result))
+		if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &payload); err != nil || payload["usage"] == nil {
+			t.Fatalf("failed usage lost: %s", terminalPayloadFor(spec, result, false))
 		}
 	}
 }
@@ -78,7 +78,7 @@ func TestNativeResumeMeasurementOnTerminalOutcomes(t *testing.T) {
 			if payload["native_resume"] == nil {
 				t.Fatalf("measurement lost: %v", payload)
 			}
-			if err := json.Unmarshal(terminalPayload(spec, result), &payload); err != nil {
+			if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &payload); err != nil {
 				t.Fatal(err)
 			}
 			if payload["native_resume"] == nil {

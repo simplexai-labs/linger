@@ -44,10 +44,7 @@ export function ComputerSetupInstructions({
             <Icon icon={ComputerTerminal01Icon} size={16} />
           </span>
           <div>
-            <h3 className="text-sm font-semibold text-foreground">
-              {t(computerSetupMessages.title)}
-            </h3>
-            <p className="mt-0.5 text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               {t(
                 platform === "win32"
                   ? computerSetupMessages.runInPowerShell

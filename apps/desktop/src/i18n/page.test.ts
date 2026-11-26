@@ -107,4 +107,17 @@ describe("localizePage", () => {
     );
     expect(html).not.toContain("</script><script>alert(1)");
   });
+
+  it("renders the offline card logo without a corner status badge", () => {
+    const offline = readFileSync(
+      path.join(
+        path.dirname(fileURLToPath(import.meta.url)),
+        "../shell/offline.html",
+      ),
+      "utf8",
+    );
+    document.documentElement.innerHTML = offline;
+    expect(document.querySelector(".mark img")).not.toBeNull();
+    expect(document.querySelector(".mark .badge")).toBeNull();
+  });
 });

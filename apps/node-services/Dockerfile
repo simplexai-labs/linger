@@ -104,10 +104,26 @@ RUN --mount=type=cache,id=pnpm-store-computer-node26.5.0-pnpm11.7.0-linux-amd64,
 # builds.
 FROM computer-dependencies AS computer-deps
 ARG COMPUTER_RELEASE_TARGETS=darwin-arm64,darwin-x64,linux-arm64,linux-x64,win32-x64
+COPY --from=golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd /usr/local/go /usr/local/go
+# The slim Node image has no CA bundle; Go module downloads need one.
+COPY --from=golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+ENV PATH="/usr/local/go/bin:$PATH"
+COPY apps/computer/local-daemon/go.mod apps/computer/local-daemon/go.sum ./apps/computer/local-daemon/
+COPY contracts/generated/go/runnergateway ./contracts/generated/go/runnergateway
+RUN --mount=type=cache,id=computer-go-modules,target=/root/go/pkg/mod \
+    cd apps/computer/local-daemon && for attempt in 1 2 3 4 5; do \
+        go mod download && exit 0; \
+        sleep $((attempt * 5)); \
+    done; \
+    exit 1
+COPY apps/computer/local-daemon/internal/platform ./apps/computer/local-daemon/internal/platform
+COPY apps/computer/local-daemon/cmd/linger-pi-launcher ./apps/computer/local-daemon/cmd/linger-pi-launcher
 COPY scripts/local-computer-node-distributions.mjs scripts/managed-tools-runtime-files.mjs scripts/prepare-local-computer-release.mjs scripts/publish-windows-installers.mjs ./scripts/
 COPY apps/computer/scripts/bundle-computer-tools.mjs ./apps/computer/scripts/
 COPY apps/computer/tools ./apps/computer/tools
 RUN --mount=type=cache,id=computer-release-downloads,target=/root/.cache \
+    --mount=type=cache,id=computer-go-modules,target=/root/go/pkg/mod \
+    --mount=type=cache,id=computer-go-build,target=/root/.cache/go-build \
     LINGER_COMPUTER_NODE_DISTRIBUTION_CACHE=/root/.cache/node-distributions \
     COMPUTER_RELEASE_TARGETS="$COMPUTER_RELEASE_TARGETS" \
     node scripts/prepare-local-computer-release.mjs --part deps --output /out \

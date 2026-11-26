@@ -3,6 +3,11 @@ import path from "node:path";
 import type { InstallerEvent } from "./events.js";
 import { localmodelsFailure } from "./localmodels-failure.js";
 import { runLocalmodels } from "./localmodels-tool.js";
+import {
+  probeRuntimesWithDaemon,
+  recommendRuntimeFromDaemon,
+  type DaemonRuntimeStatus,
+} from "./daemon-runtime-probe.js";
 import { DEFAULT_GPU_SHARING } from "./setup-selection.js";
 import { windowsPrivateRefusal } from "./windows-private.js";
 
@@ -129,6 +134,9 @@ export interface SetupReport {
     choice: RuntimeChoice;
     installed: boolean;
     auth: "unknown" | "authenticated" | "unauthenticated";
+    status?: DaemonRuntimeStatus;
+    version?: string | null;
+    requiredVersion?: string;
     estimate: SetupEstimate;
   }[];
   recommendation: SetupChoice;
@@ -138,8 +146,12 @@ export interface SetupOptions {
   home?: string;
   targetHome?: string;
   userHome?: string;
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  daemonExecutable?: string;
   signal?: AbortSignal;
   localmodels?: typeof runLocalmodels;
+  probeRuntimes?: typeof probeRuntimesWithDaemon;
   onEvent?: (event: InstallerEvent) => void;
 }
 interface UpstreamPlan {
@@ -198,7 +210,7 @@ interface UpstreamReport {
     plan: UpstreamPlan | null;
     upgrade?: UpstreamUpgrade | null;
   };
-  harness: {
+  harness?: {
     schema: string;
     runtimes: {
       runtime: RuntimeChoice;
@@ -207,7 +219,7 @@ interface UpstreamReport {
       estimate?: SetupEstimate;
     }[];
   };
-  recommendation: SetupChoice;
+  recommendation?: SetupChoice;
 }
 export const setupChoices: readonly SetupChoice[] = [
   "local-models",
@@ -216,11 +228,25 @@ export const setupChoices: readonly SetupChoice[] = [
   "pi",
 ];
 /**
- * Presentation adapter only. Host probes, admission, recommendation and
- * budgets belong upstream, with one exception: when local models are blocked
- * now, a tool before setup-report `stack.state` still picks "local-models",
- * which its own install-time plan refuses; the adapter replaces that pick.
- * Remove the override and the fallbacks once the pinned tool reports `state`.
+ * Combines local-model hardware evaluation from `localmodels setup inspect`
+ * with authoritative CLI Runtime discovery, minimum-version checks, and
+ * authentication probing from `linger-computer-daemon probe-runtimes --json`.
+ *
+ * Ownership boundary:
+ * - `localmodels` owns hardware facts, resource budgets, upgrade hints, and
+ *   local-model stack eligibility (`ready` | `blocked-now` | `unavailable`).
+ * - `local-daemon` owns CLI Runtime discovery, version compatibility, auth
+ *   status, and non-local Runtime recommendation (matching
+ *   `apps/web/src/features/local-computer/computer-readiness.ts`:
+ *   `ready` -> `authentication_required` -> `incompatible` -> `installed`,
+ *   ordered `claude` -> `codex` -> `pi`, falling back to `claude` when none is
+ *   installed).
+ * - Recommendation picks `"local-models"` when the local stack is `ready` and
+ *   `available`; otherwise it delegates to `local-daemon` observations.
+ * - When no daemon binary is available (e.g., bare dev environments or unit
+ *   tests injecting `probeRuntimes: async () => null`), `inspectSetup` falls
+ *   back to upstream `harness` rows and `recommendation` (retaining the legacy
+ *   `blocked-now` override for tools before `stack.state`).
  */
 export async function inspectSetup(
   options: SetupOptions = {},
@@ -249,11 +275,29 @@ export async function inspectSetup(
       "en",
       "--json",
     ];
-    const result = await (options.localmodels ?? runLocalmodels)(home, args, {
-      signal: options.signal,
-      timeoutMs: 120000,
-      ...(options.onEvent ? { onEvent: options.onEvent } : {}),
-    });
+    const tool = options.localmodels ?? runLocalmodels;
+    const probeEnv = options.env ?? process.env;
+    const probeRuntimes = options.probeRuntimes ?? probeRuntimesWithDaemon;
+    const [result, daemonObservations] = await Promise.all([
+      tool(home, args, {
+        signal: options.signal,
+        ...(options.env ? { env: options.env } : {}),
+        timeoutMs: 120000,
+        // Keep bundled Pi off setup inspect's PATH so legacy localmodels
+        // fallback does not treat bundled Pi as a user-installed runtime.
+        bundledPi: null,
+        ...(options.onEvent ? { onEvent: options.onEvent } : {}),
+      }),
+      // Omit includeBundled during setup inspection so non-local machines
+      // without Claude or Codex do not recommend bundled Pi.
+      probeRuntimes({
+        runtimes: ["codex", "claude", "pi"],
+        env: probeEnv,
+        daemonExecutable: options.daemonExecutable,
+        platform: options.platform,
+        signal: options.signal,
+      }),
+    ]);
     options.signal?.throwIfAborted();
     if (result.code !== 0) {
       const { cause, log } = localmodelsFailure(args, result);
@@ -269,11 +313,20 @@ export async function inspectSetup(
       throw new Error("Upstream setup failed");
     }
     const value = JSON.parse(result.stdout) as UpstreamReport;
+    const hasValidHarness =
+      value.harness === undefined ||
+      (value.harness.schema === "localmodels.harness-status/v1" &&
+        Array.isArray(value.harness.runtimes));
+    const hasValidRecommendation =
+      value.recommendation === undefined ||
+      setupChoices.includes(value.recommendation);
     if (
       value.schema !== "localmodels.setup-report/v1" ||
-      value.harness.schema !== "localmodels.harness-status/v1" ||
-      !setupChoices.includes(value.recommendation) ||
-      typeof value.stack.available !== "boolean"
+      !hasValidHarness ||
+      !hasValidRecommendation ||
+      typeof value.stack?.available !== "boolean" ||
+      (!daemonObservations &&
+        (!value.harness || value.recommendation === undefined))
     )
       throw new Error("Invalid upstream report");
     const plan = value.stack.plan;
@@ -436,17 +489,57 @@ export async function inspectSetup(
     };
     const upgrade = parseUpgrade(value.stack.upgrade);
     const memory = value.stack.memory ? counts(value.stack.memory) : undefined;
-    const runtimes = value.harness.runtimes;
-    const installed = runtimes.filter((row) => row.installed);
-    // A tool before `stack.state` recommends local models whenever they fit
-    // the hardware, even when they cannot be installed until memory is
-    // freed. Then the adapter picks as upstream does for unavailable local
-    // models: an installed (signed-in first) runtime, else Codex.
-    const recommendation =
-      state === "blocked-now" && value.recommendation === "local-models"
+    const upstreamRuntimes = value.harness?.runtimes ?? [];
+    const upstreamEstimates = new Map(
+      upstreamRuntimes.map((row) => [row.runtime, row.estimate]),
+    );
+    // Single source of truth: local-daemon owns AI Runtime discovery, version
+    // checks and authentication status; localmodels owns hardware and local
+    // model eligibility. Fall back to upstream harness rows only when no daemon
+    // binary is available (e.g., bare dev environments or unit mocks).
+    const reportedRuntimes: SetupReport["runtimes"] = daemonObservations
+      ? (["codex", "claude", "pi"] as const).map((choice) => {
+          const obs = daemonObservations.find((item) => item.type === choice);
+          const status: DaemonRuntimeStatus = obs?.status ?? "not_installed";
+          const installed = obs?.installed ?? false;
+          const auth =
+            status === "ready"
+              ? ("authenticated" as const)
+              : status === "error"
+                ? ("unknown" as const)
+                : ("unauthenticated" as const);
+          return {
+            choice,
+            installed,
+            auth,
+            status,
+            ...(obs?.version ? { version: obs.version } : {}),
+            ...(obs?.requiredVersion
+              ? { requiredVersion: obs.requiredVersion }
+              : {}),
+            estimate: estimate(upstreamEstimates.get(choice)),
+          };
+        })
+      : upstreamRuntimes.map((row) => ({
+          choice: row.runtime,
+          installed: row.installed,
+          auth:
+            row.authenticated === null
+              ? "unknown"
+              : row.authenticated
+                ? "authenticated"
+                : "unauthenticated",
+          estimate: estimate(row.estimate),
+        }));
+    const installed = upstreamRuntimes.filter((row) => row.installed);
+    const recommendation: SetupChoice = daemonObservations
+      ? state === "ready" && value.stack.available
+        ? "local-models"
+        : recommendRuntimeFromDaemon(daemonObservations, "claude")
+      : state === "blocked-now" && value.recommendation === "local-models"
         ? ((installed.find((row) => row.authenticated) ?? installed[0])
             ?.runtime ?? "codex")
-        : value.recommendation;
+        : value.recommendation!;
     return {
       hardware: {
         platform: value.facts.platform,
@@ -493,17 +586,7 @@ export async function inspectSetup(
         },
         ...(upgrade ? { upgrade } : {}),
       },
-      runtimes: runtimes.map((row) => ({
-        choice: row.runtime,
-        installed: row.installed,
-        auth:
-          row.authenticated === null
-            ? "unknown"
-            : row.authenticated
-              ? "authenticated"
-              : "unauthenticated",
-        estimate: estimate(row.estimate),
-      })),
+      runtimes: reportedRuntimes,
       recommendation,
     };
   } catch (error) {

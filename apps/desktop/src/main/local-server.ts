@@ -8,7 +8,9 @@ import {
   readFileSync,
 } from "node:fs";
 import {
+  chmod,
   constants as fsConstants,
+  copyFile,
   cp,
   mkdir,
   readdir,
@@ -41,6 +43,8 @@ import { loadInstance } from "@linger/local-installation/instance";
 import { foldersInUse } from "@linger/local-installation/native-process";
 import { normalizeFailurePunctuation } from "@linger/local-installation/localmodels-failure";
 import {
+  canBuildNativeServicesFromSource,
+  canCompileTeamhubFromSource,
   localRunnerGatewayUrl,
   validateSourceRepository,
 } from "@linger/local-installation/source-checkout";
@@ -79,6 +83,7 @@ import {
   NODE_RUNTIME_VERSION,
   nodeRuntimeDownloadUrls,
 } from "../../../../scripts/local-computer-node-distributions.mjs";
+import type { DesktopConfig } from "./config.js";
 import type { Logger } from "./log.js";
 import type { Module, ModuleContext, StopReason } from "./modules.js";
 import {
@@ -364,8 +369,22 @@ export interface LocalServerOptions {
   readonly home: string;
   // This app's version, recorded with the source package it unpacks.
   readonly version: string;
+  // The resolved user terminal environment passed ONLY to read-only setup
+  // inspection (--inspect) so daemon runtime probing can read profile
+  // variables (e.g. ANTHROPIC_BASE_URL, OPENAI_API_KEY, CODEX_HOME). Never
+  // forwarded to --resume, BYOK checks, or the serving installer that starts
+  // local services.
+  readonly inspectEnv?:
+    | Readonly<Record<string, string>>
+    | Promise<Readonly<Record<string, string>>>;
+  // Bundled linger-computer-daemon executable used as the single source of
+  // truth for AI Runtime discovery and authentication probing during setup.
+  readonly daemonExecutable?: string;
   // The bundled installer (installer.js, web/, native-process-worker.mjs).
   readonly installerDirectory: string;
+  // Shared bundled Node.js executable shipped with Computer tools
+  // (resources/runtime/bin/node(.exe)), reused for Native services.
+  readonly bundledNodePath?: string;
   readonly sourceArchive?: SourceArchive;
   readonly sourceDependencies?: SourceDependencies;
   // A linger checkout installed instead of the source package, for developers
@@ -536,12 +555,14 @@ export class LocalServerModule implements Module {
   #localModelsDegraded: LocalModelsDegradedStatus | undefined;
   #node: Promise<string> | undefined;
   #abort = new AbortController();
+  #inspectAbort: AbortController | undefined;
   #offRetry: (() => void) | undefined;
   #offUnreachable: (() => void) | undefined;
   #watch: ReturnType<typeof setInterval> | undefined;
   #recovering = false;
   #recoveredAt: number | undefined;
   #offReset: (() => void) | undefined;
+  #offServerChanged: (() => void) | undefined;
   #offDaemon: (() => void) | undefined;
   #offDaemonConnection: (() => void) | undefined;
   #offComputerChanged: (() => void) | undefined;
@@ -595,6 +616,16 @@ export class LocalServerModule implements Module {
       config.serverUrl !== undefined &&
       sameOrigin(config.serverUrl, record.origin) &&
       !!config.computerId;
+    if (
+      !record &&
+      !migrationFailure &&
+      (await this.#isOrphanedLocalServer(config))
+    ) {
+      ctx.log.warn("local_server.orphaned_config_reset", {
+        server_url: config.serverUrl,
+      });
+      await this.#reset();
+    }
     this.#started = true;
     if (migrationFailure) {
       // Resume would fail on the legacy record with a less useful error;
@@ -632,6 +663,12 @@ export class LocalServerModule implements Module {
       record = undefined;
       void this.#reset();
     });
+    this.#offServerChanged = ctx.bus.on("server.changed", (serverUrl) => {
+      if (this.#origin && sameOrigin(this.#origin, serverUrl)) return;
+      this.#origin = undefined;
+      if (ctx.config.get().localServer !== false)
+        ctx.config.update({ localServer: false });
+    });
     const grace = this.#options.unreachableGraceMs ?? UNREACHABLE_GRACE_MS;
     this.#offUnreachable = ctx.bus.on("local-server.unreachable", () => {
       void this.#recoverUnreachable("load_failed", grace, true);
@@ -648,6 +685,7 @@ export class LocalServerModule implements Module {
     this.#offUnreachable?.();
     clearInterval(this.#watch);
     this.#offReset?.();
+    this.#offServerChanged?.();
     this.#offDaemon?.();
     this.#offDaemonConnection?.();
     this.#offComputerChanged?.();
@@ -821,6 +859,19 @@ export class LocalServerModule implements Module {
     } else {
       const home = await installLocation(picked);
       this.#locationError = await checkLocation(home, this.#freeBytes());
+      if (
+        !this.#locationError &&
+        (this.#options.platform ?? process.platform) === "win32"
+      ) {
+        try {
+          await (this.#options.checkPrivateLocation ?? windowsPrivateLocation)(
+            home,
+          );
+        } catch (error) {
+          this.#locationError =
+            error instanceof Error ? error.message : String(error);
+        }
+      }
       if (!this.#locationError)
         this.#location = home === this.#home ? undefined : home;
     }
@@ -845,8 +896,12 @@ export class LocalServerModule implements Module {
     this.#checkedAt = undefined;
     this.#ctx?.bus.emit("local-server.changed");
     const started = Date.now();
-    const signal = this.#abort.signal;
-    if (!signal.aborted) void this.#ensureNode(signal).catch(() => undefined);
+    const appSignal = this.#abort.signal;
+    const inspectAbort = new AbortController();
+    this.#inspectAbort = inspectAbort;
+    const signal = AbortSignal.any([appSignal, inspectAbort.signal]);
+    if (!appSignal.aborted)
+      void this.#ensureNode(appSignal).catch(() => undefined);
     const home = this.#location ?? this.#home;
     void this.#inspect(home, signal, (download) => {
       if (this.#check.state !== "checking") return;
@@ -855,6 +910,8 @@ export class LocalServerModule implements Module {
     })
       .then(
         ({ check, reasonLog }) => {
+          if (inspectAbort.signal.aborted && !appSignal.aborted)
+            return { state: "unchecked" } as const;
           this.#ctx?.log.info("local_server.inspected", {
             ms: Date.now() - started,
             eligible: check.state === "checked" && check.eligible,
@@ -874,6 +931,8 @@ export class LocalServerModule implements Module {
           return check;
         },
         (error: unknown) => {
+          if (inspectAbort.signal.aborted && !appSignal.aborted)
+            return { state: "unchecked" } as const;
           this.#ctx?.log.warn("local_server.inspect_failed", {
             ms: Date.now() - started,
             error: error instanceof Error ? error.message : String(error),
@@ -882,7 +941,14 @@ export class LocalServerModule implements Module {
         },
       )
       .then((check) => {
-        if (signal.aborted) return;
+        if (this.#inspectAbort === inspectAbort) this.#inspectAbort = undefined;
+        if (appSignal.aborted) return;
+        if (inspectAbort.signal.aborted) {
+          this.#check = { state: "unchecked" };
+          this.#checkedAt = undefined;
+          this.#ctx?.bus.emit("local-server.changed");
+          return;
+        }
         if (home !== (this.#location ?? this.#home)) {
           this.#check = { state: "unchecked" };
           this.inspect();
@@ -967,6 +1033,26 @@ export class LocalServerModule implements Module {
           };
   }
 
+  #daemonEnv(): NodeJS.ProcessEnv {
+    return this.#options.daemonExecutable
+      ? {
+          ...process.env,
+          LINGER_COMPUTER_DAEMON: this.#options.daemonExecutable,
+        }
+      : { ...process.env };
+  }
+
+  async #inspectEnv(): Promise<NodeJS.ProcessEnv> {
+    const resolved = await this.#options.inspectEnv;
+    const base: NodeJS.ProcessEnv = resolved
+      ? { ...resolved }
+      : { ...process.env };
+    if (this.#options.daemonExecutable) {
+      base.LINGER_COMPUTER_DAEMON = this.#options.daemonExecutable;
+    }
+    return base;
+  }
+
   // Runs the installer's headless BYOK command: the endpoint and key go on
   // stdin, never in argv, and its last stdout line is the JSON answer. A
   // failure to run it comes back as { ok: false, message }.
@@ -991,7 +1077,7 @@ export class LocalServerModule implements Module {
             stdio: ["pipe", "pipe", "pipe"],
             windowsHide: true,
             env: {
-              ...process.env,
+              ...this.#daemonEnv(),
               ELECTRON_RUN_AS_NODE: "1",
               LINGER_HOME: home,
             },
@@ -1027,6 +1113,7 @@ export class LocalServerModule implements Module {
     // The tool's codes with its words, for the log only.
     reasonLog: string[];
   }> {
+    const inspectEnv = await this.#inspectEnv();
     // The app's own Node runs the check, so it needs no download of its own;
     // installing still uses the pinned Node runtime.
     const output = await new Promise<string>((resolve, reject) => {
@@ -1045,7 +1132,7 @@ export class LocalServerModule implements Module {
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
           env: {
-            ...process.env,
+            ...inspectEnv,
             ELECTRON_RUN_AS_NODE: "1",
             LINGER_HOME: this.#options.home,
           },
@@ -1231,6 +1318,12 @@ export class LocalServerModule implements Module {
       throw new Error("Running Linger on this computer is not supported here");
     const signal = this.#abort.signal;
     const home = this.#location ?? this.#home;
+    // In-flight inspection downloads the localmodels kit into the default
+    // home; abort it when installing into another folder so it does not
+    // compete for bandwidth, while letting default-home inspection finish so
+    // the installer can reuse its kit.
+    if (path.resolve(home) !== path.resolve(this.#options.home))
+      this.#inspectAbort?.abort();
     this.#attempt += 1;
     this.#acquireBusy();
     try {
@@ -1248,21 +1341,27 @@ export class LocalServerModule implements Module {
           this.#options.sourceArchive?.sha256.slice(0, 16),
         ]),
       );
-      // A chosen folder may have filled up or gone since it was picked.
-      if (this.#location) {
+      const platform = this.#options.platform ?? process.platform;
+      // On Windows the default data location also needs a space check. A
+      // custom folder may have filled up or gone since it was picked.
+      if (platform === "win32" || this.#location) {
         const model =
-          this.#check.state === "checked" ? this.#check.model : undefined;
+          this.#check.state === "checked" &&
+          (plan.runtime === "local" ||
+            (plan.runtime === "recommended" &&
+              this.#check.recommendation === "local-models"))
+            ? this.#check.model
+            : undefined;
         const error = await checkLocation(
           home,
-          this.#freeBytes() +
-            (plan.runtime === "local" ? (model?.diskBytes ?? 0) : 0),
+          this.#freeBytes() + (model?.diskBytes ?? 0),
         );
-        if (error) throw new Error(error);
+        if (error) throw new Error(`${home}: ${error}`);
       }
       // On Windows, pre-check both the install home and the Computer daemon
       // directory (<userData>/computer) before unpacking so ancestor ACL
       // refusals fail immediately instead of after installation and enrollment.
-      if ((this.#options.platform ?? process.platform) === "win32") {
+      if (platform === "win32") {
         const checkPrivate =
           this.#options.checkPrivateLocation ?? windowsPrivateLocation;
         await this.#timed("private_paths", async () => {
@@ -1977,19 +2076,57 @@ export class LocalServerModule implements Module {
       "node",
       `v${NODE_RUNTIME_VERSION}`,
     );
+    const isWindows = (this.#options.platform ?? process.platform) === "win32";
     // Windows builds are zips with node.exe at the top.
-    const binary =
-      (this.#options.platform ?? process.platform) === "win32"
-        ? path.join(directory, "node.exe")
-        : path.join(directory, "bin", "node");
+    const binary = isWindows
+      ? path.join(directory, "node.exe")
+      : path.join(directory, "bin", "node");
     if (existsSync(binary)) return binary;
-    // A build that bundles the services also bundles this same Node.js: the
-    // release archive, or on macOS its signed binary.
+    // A build that bundles the services also pins this same Node.js: shared
+    // with the Computer tools under resources/runtime/bin/, or a legacy
+    // archive / folder copy inside runtime-<target>/.
     const bundle = await this.#bundledRuntime();
     const bundled = bundle?.node;
+    const expectedSharedBinary = isWindows
+      ? "runtime/bin/node.exe"
+      : "runtime/bin/node";
+    if (
+      bundle?.target === this.#target() &&
+      bundled?.shared === true &&
+      bundled.version === NODE_RUNTIME_VERSION &&
+      (bundled.binary === undefined ||
+        bundled.binary === expectedSharedBinary) &&
+      typeof bundled.sha256 === "string" &&
+      bundled.sha256.length > 0
+    ) {
+      const source = this.#sharedBundledNodePath(isWindows);
+      if (source) {
+        try {
+          await this.#copySharedNode(
+            source,
+            directory,
+            path.relative(directory, binary),
+            bundled.sha256,
+            isWindows,
+            signal,
+          );
+          return binary;
+        } catch (error) {
+          if (signal.aborted) throw error;
+          this.#ctx?.log.warn("local_server.shared_node_failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } else {
+        this.#ctx?.log.warn("local_server.shared_node_missing", {
+          target: this.#target(),
+        });
+      }
+    }
     if (
       bundle?.layout === "directory" &&
-      bundled?.version === NODE_RUNTIME_VERSION
+      bundled?.version === NODE_RUNTIME_VERSION &&
+      typeof bundled.file === "string"
     ) {
       await this.#copyBundled(
         this.#bundledRuntimeFile(path.dirname(path.dirname(bundled.file))),
@@ -2000,7 +2137,8 @@ export class LocalServerModule implements Module {
       return binary;
     }
     if (
-      bundled?.file === release.archive &&
+      typeof bundled?.file === "string" &&
+      bundled.file === release.archive &&
       bundled.sha256 === release.sha256
     ) {
       await this.#extract(
@@ -2028,6 +2166,50 @@ export class LocalServerModule implements Module {
       signal,
     );
     return binary;
+  }
+
+  #sharedBundledNodePath(isWindows: boolean): string | undefined {
+    const candidate =
+      this.#options.bundledNodePath ??
+      path.resolve(
+        this.#options.installerDirectory,
+        "../../..",
+        "runtime",
+        "bin",
+        isWindows ? "node.exe" : "node",
+      );
+    return existsSync(candidate) ? candidate : undefined;
+  }
+
+  // Copies the single shared Node.js binary from the app bundle into the
+  // user's home so running services never lock the app install directory on
+  // Windows, verifies its digest after copying, and publishes atomically.
+  async #copySharedNode(
+    source: string,
+    directory: string,
+    relativeBinary: string,
+    sha256: string,
+    isWindows: boolean,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (existsSync(path.join(directory, relativeBinary))) return;
+    const copied = `${directory}.partial`;
+    const target = path.join(copied, relativeBinary);
+    try {
+      await removeRetrying(copied);
+      await mkdir(path.dirname(target), { recursive: true });
+      await copyFile(source, target, fsConstants.COPYFILE_FICLONE);
+      const hash = createHash("sha256");
+      for await (const chunk of createReadStream(target, { signal }))
+        hash.update(chunk as Buffer);
+      if (hash.digest("hex") !== sha256)
+        throw new Error(`The bundled ${relativeBinary} is damaged`);
+      if (!isWindows) await chmod(target, 0o755);
+      await this.#unquarantine(copied, signal);
+      await this.#publish(copied, directory, relativeBinary, signal);
+    } finally {
+      await removeRetrying(copied);
+    }
   }
 
   // The source package, unpacked once into the installation folder; or the
@@ -2122,8 +2304,10 @@ export class LocalServerModule implements Module {
   }
 
   // Unpacks the services this build compiled from its source package into
-  // the source, so Native installs no packages and needs no network. Without
-  // them Native installs the source's packages and runs it in development.
+  // the source, so Native installs no packages and needs no network. Release
+  // packages ship a minimal source skeleton and fail fast if the host cannot
+  // run these prebuilt binaries (for example Linux glibc < MIN_GLIBC), while
+  // full development checkouts can still fall back to installing from source.
   async #ensureNativeRuntime(
     repo: string,
     sha256: string,
@@ -2135,12 +2319,18 @@ export class LocalServerModule implements Module {
     const directory = path.join(repo, NATIVE_RUNTIME_DIRECTORY);
     const glibc = this.#glibcVersion();
     if (glibc && !atLeast(glibc, MIN_GLIBC)) {
-      // Its native packages, like the PostgreSQL build, need a newer glibc;
-      // Native installs the source's packages instead.
+      // Its native packages, like the PostgreSQL build, need glibc >= MIN_GLIBC.
+      // Fail fast on minimal release source skeletons that cannot compile from
+      // source; full development checkouts can still fall back to source install.
       this.#ctx?.log.warn("local_server.native_runtime_skipped", {
         glibc,
         required: MIN_GLIBC,
       });
+      if (!(await canBuildNativeServicesFromSource(repo))) {
+        throw new Error(
+          `Linger requires Linux with glibc ${MIN_GLIBC} or later (detected ${glibc}) because this release uses prebuilt offline services.`,
+        );
+      }
       return;
     }
     try {
@@ -2179,9 +2369,16 @@ export class LocalServerModule implements Module {
     } catch (error) {
       if (signal.aborted) throw error;
       await removeRetrying(directory).catch(() => undefined);
+      const detail = error instanceof Error ? error.message : String(error);
       this.#ctx?.log.warn("local_server.native_runtime_failed", {
-        error: error instanceof Error ? error.message : String(error),
+        error: detail,
       });
+      if (!(await canBuildNativeServicesFromSource(repo))) {
+        throw new Error(
+          `The bundled offline Linger services could not be unpacked or verified (${detail}). Reinstall Linger to restore them.`,
+          { cause: error },
+        );
+      }
     }
   }
 
@@ -2273,9 +2470,17 @@ export class LocalServerModule implements Module {
         this.#ctx?.log.info("local_server.teamhub_binaries", { target });
       }
     } catch (error) {
+      if (signal.aborted) throw error;
+      const detail = error instanceof Error ? error.message : String(error);
       this.#ctx?.log.warn("local_server.teamhub_binaries_failed", {
-        error: error instanceof Error ? error.message : String(error),
+        error: detail,
       });
+      if (!(await canCompileTeamhubFromSource(repo))) {
+        throw new Error(
+          `The bundled TeamHub binaries could not be verified (${detail}). Reinstall Linger to restore them.`,
+          { cause: error },
+        );
+      }
     }
   }
 
@@ -2577,7 +2782,7 @@ export class LocalServerModule implements Module {
         // A detached Windows process otherwise opens its own console window.
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, ...proxyEnv, LINGER_HOME: home },
+        env: { ...this.#daemonEnv(), ...proxyEnv, LINGER_HOME: home },
       },
     );
     const log = this.#ctx?.log;
@@ -2653,6 +2858,14 @@ export class LocalServerModule implements Module {
     this.#ctx
       ?.get<WindowManagerModule>("WindowManager")
       ?.setServer(origin, previous, { reason });
+    const serverUrl = this.#ctx?.config.get().serverUrl;
+    const stillOurs =
+      reason === "local_ready" ||
+      !serverUrl ||
+      sameOrigin(serverUrl, origin) ||
+      (previous !== undefined && sameOrigin(serverUrl, previous));
+    if (stillOurs && this.#ctx?.config.get().localServer !== true)
+      this.#ctx?.config.update({ localServer: true });
   }
 
   // The server sets up the Another Me once this computer offers a signed-in
@@ -2788,11 +3001,21 @@ export class LocalServerModule implements Module {
     this.#acquireBusy();
     try {
       const update = this.#sourceUpdate(currentRecord);
+      const versionChanged =
+        !currentRecord.version ||
+        compareVersions(this.#options.version, currentRecord.version) > 0;
       if (update) {
-        // The services restart even if they still answer.
-        this.#preparing = "updating";
-        this.#set("preparing", "Updating Linger on this computer…");
-        windows?.showUpdating();
+        // The services restart even if they still answer. A same-version
+        // bundle refresh shows Starting instead of claiming a new version.
+        if (versionChanged) {
+          this.#preparing = "updating";
+          this.#set("preparing", "Updating Linger on this computer…");
+          windows?.showUpdating();
+        } else {
+          this.#preparing = "starting";
+          this.#set("preparing", "Starting Linger on this computer…");
+          windows?.showStarting();
+        }
       } else {
         this.#preparing = "starting";
         this.#set("preparing", "Starting Linger on this computer…");
@@ -2861,8 +3084,13 @@ export class LocalServerModule implements Module {
         // The record moves, and the older folder goes, only once the
         // services run from the new one and answer; until then the older
         // services keep running from their folder, and Retry moves them.
+        const [servingSource, expectedRepo] = await Promise.all([
+          serving.source ? canonicalPath(serving.source) : undefined,
+          canonicalPath(repo),
+        ]);
         if (
-          serving.source !== (await realpath(repo).catch(() => repo)) ||
+          !servingSource ||
+          servingSource !== expectedRepo ||
           !(await this.#reachable(origin))
         )
           throw new Error(
@@ -2907,6 +3135,22 @@ export class LocalServerModule implements Module {
     }
   }
 
+  async #isOrphanedLocalServer(config: DesktopConfig): Promise<boolean> {
+    if (!config.serverUrl || !config.computerId) return false;
+    if (!isManagedLocalServerConfig(config)) return false;
+    try {
+      await stat(this.#recordFile());
+      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+    }
+    return !(await answers(
+      this.#options.fetch ?? fetch,
+      config.serverUrl,
+      ORPHANED_SERVER_PROBE_MS,
+    ));
+  }
+
   // The person gave up on the installation the window used, whose services
   // do not start (it may have been removed or left broken by an uninstall):
   // forget it and this computer's enrollment with it, and show setup. Its
@@ -2920,8 +3164,10 @@ export class LocalServerModule implements Module {
       this.#set("idle", "");
       ctx.log.info("local_server.reset");
       await ctx.get<EnrollmentModule>("Enrollment").unenroll();
-      ctx.config.update({ serverUrl: undefined });
-      ctx.get<WindowManagerModule>("WindowManager").loadServer();
+      ctx.config.update({ serverUrl: undefined, localServer: undefined });
+      const windows = ctx.get<WindowManagerModule>("WindowManager");
+      windows?.hide?.();
+      windows?.loadServer();
     } catch (error) {
       ctx.log.warn("local_server.reset_failed", { error: String(error) });
     }
@@ -3037,7 +3283,7 @@ export class LocalServerModule implements Module {
       ms: Date.now() - nodeStartedAt,
     });
     const env = {
-      ...process.env,
+      ...this.#daemonEnv(),
       ...(await proxyEnv),
       LINGER_HOME: record.home,
     };
@@ -3129,6 +3375,12 @@ export class LocalServerModule implements Module {
       this.#ctx?.log.info("local_server.installer_runtime_timings", {
         instance: LOCAL_INSTANCE,
         ...lookupTimings,
+      });
+    const resumeTimings = resumeTimingFields(outcome.resumeTimings);
+    if (resumeTimings)
+      this.#ctx?.log.info("local_server.installer_resume_timings", {
+        instance: LOCAL_INSTANCE,
+        ...resumeTimings,
       });
     if (outcome.code !== 0) {
       const { code, causeCode, reasons } = outcome.details ?? {};
@@ -3333,7 +3585,8 @@ export class LocalServerModule implements Module {
 
 // What the desktop installed, so it can start the services again.
 // dist/installer/native/runtime-<target>/manifest.json: an archive of the
-// services beside the Node.js release, or on macOS both as folders.
+// services (or on macOS a folder) plus the pinned Node.js metadata (shared
+// with Computer tools, or legacy archive / folder copy).
 interface BundledRuntime {
   target: string;
   sourceArchiveSha256: string;
@@ -3341,8 +3594,15 @@ interface BundledRuntime {
   archive?: { file: string; sha256: string };
   // runtime/files.json, when the services are a folder.
   directory?: { file: string; sha256: string };
-  // The release archive, or node/bin/node in the folder layout.
-  node?: { version?: string; file: string; sha256: string };
+  // The shared Computer tools binary, or a legacy release archive / folder copy.
+  node?: {
+    version?: string;
+    shared?: boolean;
+    binary?: string;
+    file?: string;
+    sha256: string;
+    bytes?: number;
+  };
 }
 
 // The bundled services' native packages need this glibc or newer, like the
@@ -3380,6 +3640,8 @@ interface ResumeOutcome {
   // Resume stderr is not piped (detached services could hold it open), so
   // the runtime lookup's stage timings ride in the outcome instead.
   runtimeLookupTimings?: unknown;
+  // Warm/cold resume breakdown from installer.js --resume, when reported.
+  resumeTimings?: unknown;
 }
 
 interface RuntimeLookupTimingFields {
@@ -3388,6 +3650,55 @@ interface RuntimeLookupTimingFields {
   local_models_ms: number;
   tool_ms: number;
   total_ms: number;
+}
+
+interface ResumeTimingFields {
+  path: "warm" | "cold";
+  probe_ms: number;
+  total_ms: number;
+  restore_local_models_ms?: number;
+  restore_byok_gateway_ms?: number;
+  cold_start_ms?: number;
+}
+
+function nonNegativeFinite(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+// The installer's resume stage timings, or undefined unless the required
+// fields have valid shapes; older installers omit this completely.
+function resumeTimingFields(value: unknown): ResumeTimingFields | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  const {
+    path: resumePath,
+    probeMs,
+    totalMs,
+    restoreLocalModelsMs,
+    restoreByokGatewayMs,
+    coldStartMs,
+  } = value as Record<string, unknown>;
+  if (resumePath !== "warm" && resumePath !== "cold") return undefined;
+  const probe = nonNegativeFinite(probeMs);
+  const total = nonNegativeFinite(totalMs);
+  if (probe === undefined || total === undefined) return undefined;
+  const restoreLocalModels = nonNegativeFinite(restoreLocalModelsMs);
+  const restoreByokGateway = nonNegativeFinite(restoreByokGatewayMs);
+  const coldStart = nonNegativeFinite(coldStartMs);
+  return {
+    path: resumePath,
+    probe_ms: probe,
+    total_ms: total,
+    ...(restoreLocalModels !== undefined
+      ? { restore_local_models_ms: restoreLocalModels }
+      : {}),
+    ...(restoreByokGateway !== undefined
+      ? { restore_byok_gateway_ms: restoreByokGateway }
+      : {}),
+    ...(coldStart !== undefined ? { cold_start_ms: coldStart } : {}),
+  };
 }
 
 // The installer's runtime lookup timings, or undefined unless every stage is
@@ -3625,6 +3936,33 @@ async function answers(
   } catch {
     return false;
   }
+}
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+const ORPHANED_SERVER_PROBE_MS = 1_500;
+
+const canonicalPath = (file: string): Promise<string> =>
+  realpath(file).catch(() => path.resolve(file));
+
+// Whether Desktop's saved server config belongs to a Desktop-managed local
+// server rather than a remote team server or an external developer server.
+export function isManagedLocalServerConfig(
+  config: Pick<
+    DesktopConfig,
+    "serverUrl" | "localServer" | "preferredRuntime" | "runtimeEnvironment"
+  >,
+): boolean {
+  if (!config.serverUrl) return false;
+  let hostname: string;
+  try {
+    hostname = new URL(config.serverUrl).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (!LOOPBACK_HOSTS.has(hostname)) return false;
+  if (config.localServer === true) return true;
+  if (config.localServer === false) return false;
+  return Boolean(config.preferredRuntime || config.runtimeEnvironment);
 }
 
 // Done: services run and the owner exists. A runtime sign-in still missing

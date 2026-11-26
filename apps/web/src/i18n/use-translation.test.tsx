@@ -31,7 +31,7 @@ describe("translated components", () => {
       />,
     );
     expect(screen.getByText(/^Run/)).toHaveTextContent(
-      "Run codex login or update the configured Codex credentials on <code>Studio</code>,",
+      "Run codex login on <code>Studio</code>.",
     );
     const command = () =>
       [...document.querySelectorAll("code")].map((code) => code.textContent);

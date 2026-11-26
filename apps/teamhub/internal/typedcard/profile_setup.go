@@ -154,9 +154,13 @@ type onboardingStatus struct {
 	files       int
 	// chatted reports that the Human has written in the chat themselves.
 	chatted bool
-	// alreadyAsked reports that an earlier status offered the Profile, so the
-	// Human is not asked about the Profile again.
+	// alreadyAsked reports that an earlier status offered the Profile while
+	// the Human chatted or a Profile was already started, so the Human is not
+	// asked about the Profile again.
 	alreadyAsked bool
+	// profileStarted reports that the Human already has a Profile or an active
+	// build, so AnotherMe must not start another initial build.
+	profileStarted bool
 	// idleReminder reports the reminder TeamHub writes once the Room is quiet
 	// while setup is unfinished; no Message of the Human's comes with it.
 	idleReminder bool
@@ -213,6 +217,8 @@ func onboardingStatusText(status onboardingStatus) string {
 		lines = append(lines, "You already brought up their profile; do not ask the Human about it again. If their profile is started or done, add these sources to it with the personal-profile Skill; otherwise only acknowledge them briefly.")
 	case status.chatted:
 		lines = append(lines, "Building their profile takes a while, so ask the Human once whether to start now from these sources, and start it with the personal-profile Skill only after they agree. If their profile is already started or done, only offer to add the sources it does not cover yet.")
+	case status.profileStarted:
+		lines = append(lines, "Their profile is already started or done; do not start another initial build. Add any sources here that it does not cover yet with the personal-profile Skill, and acknowledge them briefly.")
 	default:
 		lines = append(lines, "Tell the Human you are starting their profile from these sources, that it takes a while, and that they can talk with you about anything meanwhile. Then start it with the personal-profile Skill.")
 	}
@@ -371,6 +377,34 @@ func (s *Service) profileSetupOutcome(
 	return []messagecreation.Persisted{result, acknowledgement, card}, nil
 }
 
+// finishedOnboardingStatus builds the status for a completed sources card, or
+// reports false when no second status is needed.
+//
+// Once an earlier status offered the Profile, a sources card that shares no
+// links or files writes nothing, and one with new links or files hands them
+// over without offering the Profile again. That guard applies only when the
+// Human has written in the Room or a Profile is already started; when the Human
+// has never chatted and still has no Profile (for example after an idle
+// reminder fired while setup was open), finishing the setup cards completes
+// onboarding and tells AnotherMe to start the Profile from everything
+// collected. When a Profile was already started without an earlier offer in
+// this Room, profileStarted keeps AnotherMe from starting a duplicate build.
+func finishedOnboardingStatus(
+	links []string,
+	files int,
+	chatted, offered, notStarted bool,
+) (onboardingStatus, bool) {
+	profileStarted := !notStarted
+	alreadyAsked := offered && (chatted || profileStarted)
+	if alreadyAsked && len(links) == 0 && files == 0 {
+		return onboardingStatus{}, false
+	}
+	return onboardingStatus{
+		finished: true, links: links, files: files,
+		chatted: chatted, alreadyAsked: alreadyAsked, profileStarted: profileStarted,
+	}, true
+}
+
 // onboardingFinished writes the hidden status of a finished setup, with the
 // sources card's uploads attached, which wakes AnotherMe.
 func (s *Service) onboardingFinished(
@@ -385,30 +419,31 @@ func (s *Service) onboardingFinished(
 	if s.onboardingHandoff == nil {
 		return messagecreation.Persisted{}, false, errors.New("onboarding handoff writer is not configured")
 	}
-	// The Human is offered the Profile once: after a status that offered it,
-	// a sources card that shares nothing writes none, and new links or files
-	// are handed over without offering it again. A status that only said to
-	// wait for a source does not count.
-	offered, err := queries.ProfileOfferedInRoom(ctx, store.ProfileOfferedInRoomParams{RoomID: authority.RoomID, HumanActorID: human.ID, AgentActorID: agent.ID})
-	if err != nil || offered && len(answer.Links) == 0 && len(answer.AttachmentUploadIDs) == 0 {
+	chatted, err := queries.HumanWroteInRoom(ctx, store.HumanWroteInRoomParams{RoomID: authority.RoomID, HumanActorID: human.ID})
+	if err != nil {
 		return messagecreation.Persisted{}, false, err
+	}
+	offered, err := queries.ProfileOfferedInRoom(ctx, store.ProfileOfferedInRoomParams{RoomID: authority.RoomID, HumanActorID: human.ID, AgentActorID: agent.ID})
+	if err != nil {
+		return messagecreation.Persisted{}, false, err
+	}
+	notStarted, err := queries.PersonalProfileNotStarted(ctx, store.PersonalProfileNotStartedParams{TenantID: authority.TenantID, OwnerActorID: human.ID})
+	if err != nil {
+		return messagecreation.Persisted{}, false, err
+	}
+	status, ok := finishedOnboardingStatus(answer.Links, len(answer.AttachmentUploadIDs), chatted, offered, notStarted)
+	if !ok {
+		return messagecreation.Persisted{}, false, nil
 	}
 	connections, err := s.grantedConnections(ctx, tx, agent)
 	if err != nil {
 		return messagecreation.Persisted{}, false, err
 	}
-	chatted, err := queries.HumanWroteInRoom(ctx, store.HumanWroteInRoomParams{RoomID: authority.RoomID, HumanActorID: human.ID})
-	if err != nil {
-		return messagecreation.Persisted{}, false, err
-	}
-	text := onboardingStatusText(onboardingStatus{
-		finished: true, connections: connections, links: answer.Links,
-		files: len(answer.AttachmentUploadIDs), chatted: chatted, alreadyAsked: offered,
-	})
+	status.connections = connections
 	handoff, err := s.onboardingHandoff(ctx, tx, queries, OnboardingHandoff{
 		TenantID: authority.TenantID, RoomID: authority.RoomID, AccountID: accountID,
 		Human: human, Agent: agent, CardMessageID: authority.MessageID,
-		IdempotencyKey: decisionID, Text: text, AttachmentUploadIDs: answer.AttachmentUploadIDs,
+		IdempotencyKey: decisionID, Text: onboardingStatusText(status), AttachmentUploadIDs: answer.AttachmentUploadIDs,
 	})
 	return handoff, err == nil, err
 }

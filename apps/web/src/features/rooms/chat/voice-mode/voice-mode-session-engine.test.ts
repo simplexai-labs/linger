@@ -13,10 +13,12 @@ interface Opened {
     setMuted: (muted: boolean) => Promise<void>;
   }) => void;
   channel?: (connection: unknown) => void;
+  providerReady?: (ready: boolean) => void;
 }
 
 const live = vi.hoisted(() => ({
   failToOpen: false,
+  providerReady: true,
   opened: undefined as undefined | Opened,
   connection: {
     voiceSessionId: "live-session",
@@ -33,6 +35,7 @@ vi.mock("./live/voice-live-transport", () => ({
     live.opened = input;
     if (live.failToOpen) throw new Error("LIVE_UNAVAILABLE");
     input.channel?.(live.connection);
+    input.providerReady?.(live.providerReady);
     return live.connection;
   },
 }));
@@ -97,6 +100,7 @@ afterEach(() => {
   vi.clearAllMocks();
   live.failToOpen = false;
   live.opened = undefined;
+  live.providerReady = true;
   dictation.opened = undefined;
   live.connection.active.mockReturnValue(true);
 });
@@ -114,7 +118,11 @@ describe("Voice Mode session engine live mode", () => {
   it("falls back once the live session fails, keeping unsent words and sending them once", async () => {
     const { engine, session } = start();
     await vi.waitFor(() => expect(session()?.state.status).toBe("listening"));
-    expect(session()?.live).toEqual({ soundOff: false, transcript: [] });
+    expect(session()?.live).toEqual({
+      soundOff: false,
+      transcript: [],
+      waking: false,
+    });
 
     live.opened!.receive({
       kind: "partial",
@@ -151,6 +159,19 @@ describe("Voice Mode session engine live mode", () => {
     engine.dispose();
   });
 
+  it("stays waking up while it listens until the live model is connected", async () => {
+    live.providerReady = false;
+    const { engine, session } = start();
+    await vi.waitFor(() => expect(session()?.state.status).toBe("listening"));
+    expect(session()?.live?.waking).toBe(true);
+    live.opened!.providerReady!(true);
+    expect(session()?.live?.waking).toBe(false);
+    // A provider reconnect wakes it up again.
+    live.opened!.providerReady!(false);
+    expect(session()?.live?.waking).toBe(true);
+    engine.dispose();
+  });
+
   it("turns the reply sound off without muting the microphone", async () => {
     const { engine, session } = start();
     await vi.waitFor(() => expect(session()?.state.status).toBe("listening"));
@@ -159,7 +180,7 @@ describe("Voice Mode session engine live mode", () => {
     expect(live.connection.setSoundOff).toHaveBeenCalledWith(true);
     expect(session()).toEqual(
       expect.objectContaining({
-        live: { soundOff: true, transcript: [] },
+        live: { soundOff: true, transcript: [], waking: false },
         muted: false,
       }),
     );

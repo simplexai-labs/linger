@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
+  access,
   mkdtemp,
   rm,
   writeFile,
@@ -13,9 +14,11 @@ import path from "node:path";
 import {
   installNativeRuntime,
   inspectRuntime,
+  inspectRuntimeDescriptors,
   prepareRuntime,
   runtimeEnvironmentFromDescriptors,
 } from "./managed-runtimes.js";
+const noDaemon = async () => null;
 const roots: string[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -53,7 +56,10 @@ it("uses upstream status and OAuth descriptors without provider-specific probes"
     stdout: JSON.stringify(status()),
     stderr: "",
   }));
-  const value = await inspectRuntime("claude", options, { localmodels });
+  const value = await inspectRuntime("claude", options, {
+    localmodels,
+    probeRuntimes: noDaemon,
+  });
   expect(value).toMatchObject({
     installed: true,
     ready: false,
@@ -96,7 +102,10 @@ it("approves the exact upstream install plan and delegates apply", async () => {
     };
   });
   expect(
-    await installNativeRuntime("pi", options, { localmodels }),
+    await installNativeRuntime("pi", options, {
+      localmodels,
+      probeRuntimes: noDaemon,
+    }),
   ).toMatchObject({ state: "ready" });
   expect(localmodels.mock.calls.map(([, args]) => args[1])).toEqual([
     "plan",
@@ -120,6 +129,7 @@ it("does not fall back to an installer when upstream fails", async () => {
   await expect(
     installNativeRuntime("codex", options, {
       run,
+      probeRuntimes: noDaemon,
       localmodels: vi.fn(async () => ({
         code: 1,
         stdout: "secret",
@@ -177,7 +187,10 @@ it("keeps runtime plans under private Linger state regardless of the system temp
     };
   });
   await expect(
-    installNativeRuntime("pi", options, { localmodels }),
+    installNativeRuntime("pi", options, {
+      localmodels,
+      probeRuntimes: noDaemon,
+    }),
   ).resolves.toMatchObject({ state: "ready" });
   expect(await readdir(target)).toEqual([]);
   expect(await readdir(path.join(parent, "setup", "harness-plans"))).toEqual(
@@ -186,6 +199,7 @@ it("keeps runtime plans under private Linger state regardless of the system temp
   await expect(
     installNativeRuntime("pi", options, {
       localmodels: async () => ({ code: 1, stdout: "", stderr: "" }),
+      probeRuntimes: noDaemon,
     }),
   ).rejects.toMatchObject({ code: "LOCALMODELS_RUNTIME_UNAVAILABLE" });
   expect(await readdir(path.join(parent, "setup", "harness-plans"))).toEqual(
@@ -212,10 +226,13 @@ it("preserves the safe timeout category instead of replacing it with runtime una
     });
   });
   await expect(
-    installNativeRuntime("pi", options, { localmodels }),
+    installNativeRuntime("pi", options, {
+      localmodels,
+      probeRuntimes: noDaemon,
+    }),
   ).rejects.toMatchObject({ code: "COMMAND_TIMEOUT" });
   await expect(
-    inspectRuntime("pi", options, { localmodels }),
+    inspectRuntime("pi", options, { localmodels, probeRuntimes: noDaemon }),
   ).rejects.toMatchObject({ code: "COMMAND_TIMEOUT" });
 });
 
@@ -252,6 +269,7 @@ it.each([
     });
     const failure = await installNativeRuntime("pi", options, {
       localmodels,
+      probeRuntimes: noDaemon,
     }).catch((error: Error & { code: string }) => error);
     expect(failure).toMatchObject({ code });
     expect((failure as Error).message).not.toContain("private-token");
@@ -288,7 +306,7 @@ it("names the upstream cause of a failed Harness apply and logs its output", asy
   const failure = await installNativeRuntime(
     "claude",
     { ...options, onEvent: (event) => events.push(event.message) },
-    { localmodels },
+    { localmodels, probeRuntimes: noDaemon },
   ).catch((error: Error & { code: string }) => error);
   expect(failure).toMatchObject({
     code: "LOCALMODELS_RUNTIME_UNAVAILABLE",
@@ -328,7 +346,10 @@ it("retries a Windows Runtime version execution failure once", async () => {
   const options = { ...(await fixture()), platform: "win32" as const };
   const localmodels = applyFailing(["RUNTIME_VERSION_EXECUTION_FAILED"]);
   expect(
-    await installNativeRuntime("pi", options, { localmodels }),
+    await installNativeRuntime("pi", options, {
+      localmodels,
+      probeRuntimes: noDaemon,
+    }),
   ).toMatchObject({ state: "ready" });
   expect(applies(localmodels)).toHaveLength(2);
   expect(applies(localmodels)[1]![1]).toEqual(applies(localmodels)[0]![1]);
@@ -344,7 +365,10 @@ it("surfaces the second Windows Runtime version execution failure", async () => 
     "RUNTIME_VERSION_EXECUTION_FAILED",
   ]);
   await expect(
-    installNativeRuntime("pi", options, { localmodels }),
+    installNativeRuntime("pi", options, {
+      localmodels,
+      probeRuntimes: noDaemon,
+    }),
   ).rejects.toMatchObject({ code: "RUNTIME_VERSION_EXECUTION_FAILED" });
   expect(applies(localmodels)).toHaveLength(2);
 });
@@ -356,7 +380,10 @@ it.each([
   const options = { ...(await fixture()), platform };
   const localmodels = applyFailing([code]);
   await expect(
-    installNativeRuntime("pi", options, { localmodels }),
+    installNativeRuntime("pi", options, {
+      localmodels,
+      probeRuntimes: noDaemon,
+    }),
   ).rejects.toMatchObject({ code });
   expect(applies(localmodels)).toHaveLength(1);
 });
@@ -371,7 +398,10 @@ it("does not retry once the install is cancelled during the wait", async () => {
   };
   const localmodels = applyFailing(["RUNTIME_VERSION_EXECUTION_FAILED"]);
   await expect(
-    installNativeRuntime("pi", options, { localmodels }),
+    installNativeRuntime("pi", options, {
+      localmodels,
+      probeRuntimes: noDaemon,
+    }),
   ).rejects.toThrow();
   expect(applies(localmodels)).toHaveLength(1);
 });
@@ -412,6 +442,7 @@ it("reports a plan the harness refused, such as a Windows runtime root too long 
   );
   const failure = await installNativeRuntime("pi", options, {
     localmodels,
+    probeRuntimes: noDaemon,
   }).catch((error: Error & { code: string }) => error);
   expect(failure).toMatchObject({ code: "RUNTIME_PLAN_REFUSED" });
   expect((failure as Error).message).toContain(
@@ -427,6 +458,7 @@ it.each(["RUNTIME_ACTION_FAILED", "RUNTIME_EXTENSIONS_FAILED"])(
   async (code) => {
     const options = await fixture();
     const failure = await installNativeRuntime("pi", options, {
+      probeRuntimes: noDaemon,
       localmodels: harnessFailing(
         "apply",
         code,
@@ -467,7 +499,10 @@ it("reuses the harness-status/v1 line emitted by harness apply without a redunda
     };
   });
   expect(
-    await installNativeRuntime("pi", options, { localmodels }),
+    await installNativeRuntime("pi", options, {
+      localmodels,
+      probeRuntimes: noDaemon,
+    }),
   ).toMatchObject({
     code: 0,
     state: "ready",
@@ -501,7 +536,10 @@ it("fails closed when harness apply emits installed: false in its final status l
     };
   });
   await expect(
-    installNativeRuntime("pi", options, { localmodels }),
+    installNativeRuntime("pi", options, {
+      localmodels,
+      probeRuntimes: noDaemon,
+    }),
   ).rejects.toMatchObject({ code: "LOCALMODELS_RUNTIME_UNAVAILABLE" });
   expect(localmodels.mock.calls.map(([, args]) => args[1])).toEqual([
     "plan",
@@ -543,7 +581,7 @@ it.each([
         ...options,
         onDescriptor: (descriptor) => descriptors.push(descriptor),
       },
-      { localmodels },
+      { localmodels, probeRuntimes: noDaemon },
     );
     expect(outcome).toMatchObject({
       code: expectedCode,
@@ -583,7 +621,7 @@ it.each([
         reuseInstalled: true,
         onDescriptor: (descriptor) => descriptors.push(descriptor),
       },
-      { localmodels },
+      { localmodels, probeRuntimes: noDaemon },
     );
     expect(outcome).toMatchObject({
       code: expectedCode,
@@ -631,7 +669,7 @@ it("prepareRuntime with reuseInstalled falls back to plan and apply when not ins
       reuseInstalled: true,
       onDescriptor: (descriptor) => descriptors.push(descriptor),
     },
-    { localmodels },
+    { localmodels, probeRuntimes: noDaemon },
   );
   expect(outcome.state).toBe("ready");
   expect(localmodels.mock.calls.map(([, args]) => args[1])).toEqual([
@@ -642,4 +680,291 @@ it("prepareRuntime with reuseInstalled falls back to plan and apply when not ins
   ]);
   expect(descriptors).toHaveLength(1);
   expect(descriptors[0]).toMatchObject({ runtime: "pi", installed: true });
+});
+
+it("delegates Codex auth verification to local-daemon so CC Switch Codex is ready without prompting codex auth", async () => {
+  const options = await fixture();
+  const localmodels = vi.fn(async () => ({
+    code: 0,
+    stdout: JSON.stringify(status("codex", false)),
+    stderr: "",
+  }));
+  const probeRuntimes = vi.fn(async () => [
+    {
+      type: "codex" as const,
+      status: "ready" as const,
+      installed: true,
+      authenticated: true,
+      version: "codex-cli 0.171.0",
+      requiredVersion: "0.166.0",
+      executable: "/opt/homebrew/bin/codex",
+    },
+  ]);
+
+  const outcome = await prepareRuntime(
+    "codex",
+    { ...options, reuseInstalled: true },
+    { localmodels, probeRuntimes },
+  );
+  expect(outcome).toMatchObject({ code: 0, state: "ready" });
+  expect(probeRuntimes).toHaveBeenCalledTimes(1);
+});
+
+it("falls back directly to local-daemon observations when localmodels harness status is unavailable", async () => {
+  const options = await fixture();
+  const localmodels = vi.fn(async () => ({
+    code: 1,
+    stdout: "",
+    stderr: "harness status removed",
+  }));
+  const probeRuntimes = vi.fn(async () => [
+    {
+      type: "claude" as const,
+      status: "ready" as const,
+      installed: true,
+      authenticated: true,
+      version: "2.1.310 (Claude Code)",
+      requiredVersion: "2.1.282",
+      executable: "/Users/me/.local/bin/claude",
+    },
+  ]);
+
+  const inspection = await inspectRuntime("claude", options, {
+    localmodels,
+    probeRuntimes,
+  });
+  expect(inspection).toMatchObject({
+    runtime: "claude",
+    installed: true,
+    ready: true,
+    executable: "/Users/me/.local/bin/claude",
+  });
+  expect(inspection.descriptor.status).toBe("ready");
+});
+
+it("refuses to reuse an incompatible local runtime and passes managed harness paths to local-daemon", async () => {
+  const options = await fixture();
+  const id = "e".repeat(64);
+  const managedClaude = path.join(
+    options.home,
+    "runtime",
+    "harness",
+    "tools",
+    "claude",
+    "2.1.310",
+    "claude",
+  );
+  const localmodels = vi.fn(async (_home: string, args: string[]) => {
+    if (args[1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify(status("claude", true)),
+        stderr: "",
+      };
+    }
+    if (args[1] === "plan") {
+      await writeFile(
+        args[args.indexOf("--out") + 1]!,
+        JSON.stringify({
+          schema: "localmodels.harness-plan/v1",
+          id,
+          runtime: "claude",
+        }),
+      );
+    }
+    if (args[1] === "apply") {
+      const applied = status("claude", true);
+      applied.runtimes[0]!.executable = managedClaude;
+      return {
+        code: 0,
+        stdout: JSON.stringify(applied),
+        stderr: "",
+      };
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  });
+  let calls = 0;
+  const probeRuntimes = vi.fn(async () => {
+    calls += 1;
+    if (calls === 1) {
+      return [
+        {
+          type: "claude" as const,
+          status: "incompatible" as const,
+          installed: true,
+          authenticated: false,
+          version: "2.1.100 (Claude Code)",
+          requiredVersion: "2.1.282",
+          executable: "/usr/local/bin/claude",
+        },
+      ];
+    }
+    return [
+      {
+        type: "claude" as const,
+        status: "ready" as const,
+        installed: true,
+        authenticated: true,
+        version: "2.1.310 (Claude Code)",
+        requiredVersion: "2.1.282",
+        executable: managedClaude,
+      },
+    ];
+  });
+
+  const outcome = await prepareRuntime(
+    "claude",
+    { ...options, reuseInstalled: true },
+    { localmodels, probeRuntimes },
+  );
+  expect(outcome.state).toBe("ready");
+  expect(localmodels.mock.calls.map(([, args]) => args[1])).toEqual([
+    "status",
+    "plan",
+    "apply",
+  ]);
+  // Second probe verifies the newly installed managed harness binary via configuredPaths
+  // without a redundant third probe in prepareRuntime.
+  expect(probeRuntimes).toHaveBeenCalledTimes(2);
+  expect(probeRuntimes).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      configuredPaths: { claude: managedClaude },
+    }),
+  );
+});
+
+it("inspectRuntimeDescriptors reads localmodels descriptors without invoking local-daemon", async () => {
+  const options = await fixture();
+  const marker = path.join(options.home, "daemon-probed");
+  const fakeDaemon = path.join(
+    options.home,
+    process.platform === "win32"
+      ? "linger-computer-daemon.cmd"
+      : "linger-computer-daemon",
+  );
+  await writeFile(
+    fakeDaemon,
+    process.platform === "win32"
+      ? `@echo probed > "${marker}"\r\n@exit /b 1\r\n`
+      : `#!/bin/sh\necho probed > ${JSON.stringify(marker)}\nexit 1\n`,
+    { mode: 0o700 },
+  );
+  vi.stubEnv("LINGER_COMPUTER_DAEMON", fakeDaemon);
+
+  const localmodels = vi.fn(async () => ({
+    code: 0,
+    stdout: JSON.stringify(status("codex", false)),
+    stderr: "",
+  }));
+
+  const rows = await inspectRuntimeDescriptors(
+    options.home,
+    { runtime: "codex" },
+    { localmodels },
+  );
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ runtime: "codex", installed: true });
+  await expect(access(marker)).rejects.toThrow();
+});
+
+it("passes includeBundled and stable bundled Pi executable in configuredPaths during daemon reconciliation", async () => {
+  const options = await fixture();
+  const id = "f".repeat(64);
+  const stableBundledPi = path.join(
+    options.home,
+    "runtime",
+    "bundled-pi",
+    "bin",
+    "pi",
+  );
+  const localmodels = vi.fn(async (_home: string, args: string[]) => {
+    if (args[1] === "plan") {
+      await writeFile(
+        args[args.indexOf("--out") + 1]!,
+        JSON.stringify({
+          schema: "localmodels.harness-plan/v1",
+          id,
+          runtime: "pi",
+        }),
+      );
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    const row = status("pi", false);
+    row.runtimes[0]!.executable = stableBundledPi;
+    if (args[1] === "status") {
+      (
+        row.runtimes[0] as { environment?: Record<string, string> }
+      ).environment = {
+        PI_CODING_AGENT_DIR: path.join(options.home, "runtime", "pi-home"),
+      };
+    }
+    return { code: 0, stdout: JSON.stringify(row), stderr: "" };
+  });
+  const probeRuntimes = vi.fn(async () => [
+    {
+      type: "pi" as const,
+      status: "authentication_required" as const,
+      installed: true,
+      authenticated: false,
+      version: "1.5.2",
+      requiredVersion: "1.2.0",
+      executable: stableBundledPi,
+    },
+  ]);
+
+  const installed = await installNativeRuntime("pi", options, {
+    localmodels,
+    probeRuntimes,
+  });
+  expect(installed).toMatchObject({
+    code: 0,
+    state: "ready",
+    details: { executable: stableBundledPi },
+  });
+  expect(probeRuntimes).toHaveBeenNthCalledWith(
+    1,
+    expect.objectContaining({
+      runtimes: ["pi"],
+      includeBundled: true,
+      configuredPaths: { pi: stableBundledPi },
+    }),
+  );
+
+  const inspected = await inspectRuntime("pi", options, {
+    localmodels,
+    probeRuntimes,
+  });
+  expect(inspected).toMatchObject({
+    runtime: "pi",
+    installed: true,
+    executable: stableBundledPi,
+  });
+  expect(probeRuntimes).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({
+      runtimes: ["pi"],
+      includeBundled: true,
+      configuredPaths: { pi: stableBundledPi },
+      env: expect.objectContaining({
+        PI_CODING_AGENT_DIR: path.join(options.home, "runtime", "pi-home"),
+      }),
+    }),
+  );
+
+  // Fallback path when localmodels fails must also pass includeBundled: true.
+  await inspectRuntime("pi", options, {
+    localmodels: vi.fn(async () => ({
+      code: 1,
+      stdout: "",
+      stderr: "unavailable",
+    })),
+    probeRuntimes,
+  });
+  expect(probeRuntimes).toHaveBeenNthCalledWith(
+    3,
+    expect.objectContaining({
+      runtimes: ["pi"],
+      includeBundled: true,
+    }),
+  );
 });

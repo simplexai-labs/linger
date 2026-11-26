@@ -101,6 +101,23 @@ managed service start/list/stop. Managed services retain PID, process-group,
 and start-token identity across daemon restarts, and stop succeeds only after
 the recorded process group disappears.
 
+`linger-computer-daemon probe-runtimes --json` (`cmd/linger-computer-daemon/probe_runtimes.go`)
+provides a stateless, single-shot Runtime discovery, minimum-version check, and
+authentication probe for Desktop setup and the local installer. It shares
+`computerconfig.RuntimeDiscoveryOptions` (resolving explicit absolute
+`--<runtime>-path` flags or `LINGER_<TYPE>_PATH` overrides and scrubbing
+`LINGER_*`, `TEAMHUB_*`, `RUNNER_GATEWAY_*`, `MIRROR_*`, and `SERVICE_TOKEN`
+via `computerconfig.RuntimeEnvironment`) and `provider.Discover` (with
+`SkipModelCatalog: true`) with `linger-computer` and the resident Daemon.
+It accepts repeatable `--runtime <codex|claude|pi|antigravity>` (defaulting to
+`codex`, `claude`, and `pi`), optional `--include-bundled` (off by default so
+setup inspection reports only host-installed runtimes; enabled for runtime
+reconciliation so bundled Pi is discovered when absent from `PATH`), and
+optional `--timeout-ms`, and emits a single `linger.daemon.runtime-probe/v1`
+JSON object on stdout carrying per-runtime `type`, `status`, `installed`,
+`authenticated`, redacted `version`, `required_version`, `executable`, and
+optional `error`.
+
 ## One-shot model calls
 
 The Daemon accepts `execute` (kind `model_invoke`). `internal/daemon/model_invoke.go`
@@ -397,8 +414,10 @@ the `byok_endpoint` service feature. `localmodels` writes
 non-harness paths from before the rewrite alongside any `runtime_paths` that
 `apply` reported, without pinning paths inside `<home>/runtime/harness`. The
 Daemon re-reads the file on every discovery tick to overlay the Runtimes'
-environment (`OverlayEnvironment`) and executable paths (`OverlayRuntimePaths`),
-scanning `<home>/runtime/harness/bin/<runtime>` and the highest-version
+environment (`OverlayEnvironment`) and executable paths
+(`ResolveRuntimePathsWithBundled`, which keeps harness-managed Pi in
+`ManagedPaths` after user `PATH` and before bundled Pi), scanning
+`<home>/runtime/harness/bin/<runtime>` and the highest-version
 `<home>/runtime/harness/tools/<runtime>/<version>/<runtime>` on each read so
 managed Runtime updates take effect without rewriting `model-source.json`. It
 also drops any stale `byok-home` entry in `local` mode in favor of the managed
@@ -415,7 +434,10 @@ mounted again with `source apply --mode byok` from the configuration
 first. A failed mount fails the Run before its Runtime starts, with the
 public failure code of the tool's structured code: `BYOK_UNREACHABLE` and
 `NETWORK_UNAVAILABLE` become `network_error`, `BYOK_AUTH_FAILED`
-`authentication_required`; any other stays `execution_failed`. Model calls
+`authentication_required`; any other (including `BYOK_GATEWAY_FAILED`,
+`TOOL_FAILED`, and a remount deadline's `MODEL_SOURCE_TIMEOUT`) becomes
+`model_gateway_unavailable` when the Agent Service's welcome names that
+service feature, else `execution_failed` for an older service. Model calls
 answer `unavailable` for the two network codes, `auth_required` for
 `BYOK_AUTH_FAILED` and `runtime_unavailable` for any other, with the tool's
 code in the reason. Runs that waited for a remount that failed meanwhile share its
@@ -541,20 +563,32 @@ for a browser sign-in when signed out.
   family. A family's reasoning efforts are the levels its
   `<family>-<level>` entries in `availableModels` name. A Run selects them
   with `session/set_config_option` (`model`, then `thought_level`).
-- Each Operation runs in its own `agy acp` process; nothing is parked. A
-  first Run opens `session/new`, and its turn-started event reports the
-  session id as the checkpoint, like a Codex thread. Later Runs reopen it with
-  `session/load` and drop the history it replays. An id Antigravity has not
-  stored is not a usable session: `session/load` accepts it, but the prompt
-  then fails, so Linger never assigns one. A stored session replays at least
-  the prompt that made it, so a load that replays no prompt, or that
-  Antigravity refuses, finds no session and returns `session_not_found` so Agent
-  Service can clear the persisted session and restart the Run cleanly in a fresh
-  native session with recent messages. A resumed Run still reports its
-  turn-started event before `session/load`, because loading takes seconds
-  and the Room shows the Agent working from that event. A Run yields to
-  the scheduler only after native work, because its session holds no prompt
-  before that.
+- Residency-capable `agy acp` servers (those advertising both `session/list`
+  and `session/resume` during `initialize`) park in `antigravityResidents`,
+  keyed by Context. Room-presence `provider.prepare` runs `initialize` followed
+  by `session/list` with zero MCP servers so both blank and historical rooms
+  warm up without creating empty conversations; the first Run adopts the
+  parked process and opens `session/new` or `session/resume` directly.
+- Between turns, a cleanly completed resident keeps its `agy acp` process
+  parked and routes HTTP MCP servers through a loopback `mcpFront` that
+  answers 503 while parked and rebinds to each Run's upstream URLs on reuse.
+  Changing `systemPrompt.append` hot-updates via `session/resume` with an empty
+  `mcpServers` list so existing MCP connections are not duplicated; changing
+  `model` or `thought_level` hot-updates via `session/set_config_option`.
+- A parked Antigravity process is recycled on MCP server set changes, stdio
+  MCP configurations, executable/working-directory/environment/skill/auth file
+  changes, logout or re-login diagnostics transitions, Agent stop or removal,
+  and Daemon shutdown. Cancelled, timed-out, failed, or background-continuation
+  turns never park and confirm process-tree exit.
+- Legacy `agy` installations that lack `session/list` or `session/resume`
+  report `not_eligible` on `provider.prepare` and fall back to a one-shot
+  process per Operation using `session/load` (dropping replayed history). An id
+  Antigravity has not stored is not a usable session: `session/load` accepts it
+  with zero replayed prompts and `session/resume` rejects it with a JSON-RPC
+  error, so both return `session_not_found` and let Agent Service clear the
+  persisted session and restart cleanly in a fresh native session with recent
+  messages. A resumed Run still reports its turn-started event before session
+  restore, and a Run yields to the scheduler only after native work.
 - On a fresh `run.start` that names `previous_session` (Computer 0.63.0 or
   later), the provider executor reads the superseded native session through
   `runtimehistory`, writes a bounded, redacted Markdown tail to
@@ -582,11 +616,14 @@ for a browser sign-in when signed out.
   is not zero finishes as failed. Otherwise
   the adapter selects the allow option, as the Runtime runs with the Agent's
   full local authority.
-- Antigravity reports a model error, such as a rejected API key, as reply text
-  and ends the turn with `end_turn`. With no structured signal, such a Run
-  completes and the Room shows the text.
-- History reads, provider prepare, Local Skill scans and local models do not
-  support Antigravity, so Agent Memory skips Antigravity Agents.
+- Antigravity can report a model or preflight error (such as a rejected API key
+  or unsupported region) as plain text and end the turn with `end_turn` without
+  emitting model usage or any tool, thought, or plan activity. Because a normal
+  model turn reports usage or activity, the adapter fails such a Run, retires
+  the process instead of parking it, and surfaces the trimmed redacted notice in
+  `failure.detail` when the Agent Service announces `runtime_failure_detail`.
+- History reads, Local Skill scans and local models do not support
+  Antigravity, so Agent Memory skips Antigravity Agents.
 - The Gateway hello leaves out the Antigravity diagnostic while `agy` is not
   installed, so such a Computer still connects to an Agent Service released
   before Antigravity support. When `agy` is installed later, the next
@@ -1006,7 +1043,13 @@ mouse events. Cua's background refusals, which recommend a foreground retry or
 background route instead. Cua 0.35.4 refuses a background scroll in a
 Chromium window, so the Agent reads such a page with a `get_window_state`
 query instead; elsewhere a list or pane scrolls by its own `element_token`
-through UI Automation. Windows Operations get `WindowsToolGuide`.
+through UI Automation. Before a `get_window_state` or an input names a
+minimized window by `window_id`, the Daemon restores that window without
+activating it and orders it right below the window in front, so the user's
+foreground window and keyboard focus stay unchanged and background input then
+reaches it. An input to a window the Daemon just restored is not sent: the
+element positions of the earlier read belonged to the minimized window, so the
+Agent reads the window again first. Windows Operations get `WindowsToolGuide`.
 
 Linux controls the signed-in user's X11 desktop. The driver `local_linux.py` is
 embedded in the Go binary; it reads windows through AT-SPI and sends input with

@@ -109,47 +109,35 @@ export const composerMessages = defineMessages("composer", {
 
   // Notices above the input.
   agentsUnavailable: "Your agents are unavailable",
-  localAgentStatusUnavailable:
-    "Local Agent status is unavailable. You can still send messages; replies may be delayed.",
-  agentStatusUnavailable:
-    "Agent status is unavailable. Messages remain read-only.",
-  agentDeleted:
-    "This Agent has been deleted. Message and Run history remain available.",
+  localAgentStatusUnavailable: "Can't check this Agent's status right now.",
+  agentStatusUnavailable: "Can't load this Agent right now.",
+  agentDeleted: "This Agent was deleted.",
   lastConfirmedAt: "Last confirmed at {time}",
-  reconnectingLocalComputer: "Reconnecting to Local Computer…",
-  checkingLocalComputer: "Checking Local Computer status…",
-  keepSending: "You can keep sending messages.",
-  agentUnavailable: "Agent unavailable",
-  checkLocalRuntime: "Check the Local Computer Runtime and try again.",
-  agentCannotReply:
-    "You can still send messages. This Agent cannot reply until its Runtime recovers.",
+  reconnectingLocalComputer: "Reconnecting to {computer}…",
+  checkingLocalComputer: "Checking {computer}…",
+  checkLocalRuntime: "This Agent can't reply right now.",
+  signInHint: "Run <code>{command}</code> there.",
   dismissAgentAvatar: "Dismiss {name} avatar",
 
   // Delivery: what a Message that did not go through says.
   outboxRestoreFailed:
-    "Saved Messages could not be restored from browser storage. Reload or check browser storage before sending.",
+    "Couldn't restore unsent messages. Check browser storage, then reload.",
   outboxRestoreFailedDetail:
-    "Saved Messages could not be restored from browser storage: {detail} Reload or check browser storage before sending.",
+    "Couldn't restore unsent messages: {detail} Check browser storage, then reload.",
   outboxNormalizationFailed:
-    "Saved Messages were restored, but their interrupted delivery state could not be updated. They remain available in this tab; retry after checking browser storage.",
+    "Some unsent messages couldn't be restored. Check browser storage, then retry.",
   outboxNormalizationFailedDetail:
-    "Saved Messages were restored, but their interrupted delivery state could not be updated: {detail} They remain available in this tab; retry after checking browser storage.",
-  outboxCleanupFailed:
-    "This Message was sent, but its local retry record could not be cleared. Retry to reconcile it safely.",
+    "Some unsent messages couldn't be restored: {detail} Check browser storage, then retry.",
+  outboxCleanupFailed: "Sent, but not cleared from this browser. Retry.",
   outboxCleanupFailedDetail:
-    "This Message was sent, but its local retry record could not be cleared: {detail} Retry to reconcile it safely.",
+    "Sent, but not cleared from this browser: {detail} Retry.",
   outboxCancelFailed:
-    "Delivery was canceled, but its local retry record could not be cleared. Try cancel again.",
+    "Canceled, but not cleared from this browser. Cancel again.",
   outboxCancelFailedDetail:
-    "Delivery was canceled, but its local retry record could not be cleared: {detail} Try cancel again.",
-  deliveryMayHaveReached:
-    "Delivery may already have reached TeamHub. Retry with the same idempotency key to reconcile it safely.",
-  deliveryUnconfirmed:
-    "TeamHub did not confirm whether this Message was committed. Retry checks the same intent.",
-  deliveryInterrupted:
-    "Delivery was interrupted. Retry to confirm whether this Message was sent.",
-  saveLocallyStorageFull:
-    "This Message could not be saved locally because browser storage is full. Free storage and retry.",
+    "Canceled, but not cleared from this browser: {detail} Cancel again.",
+  deliveryUnconfirmed: "It may have sent. Retry won't send it twice.",
+  deliveryInterrupted: "Interrupted. Retry won't send it twice.",
+  saveLocallyStorageFull: "Browser storage is full. Free some space and retry.",
   saveLocallyFailed:
     "This Message could not be saved locally. Check browser storage and retry.",
   saveLocallyFailedDetail: "This Message could not be saved locally: {detail}",

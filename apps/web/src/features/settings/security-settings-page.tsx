@@ -21,21 +21,13 @@ export function SecuritySettingsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-(--app-settings-width) flex-col gap-8 pb-4">
-      <SettingsPageHeading
-        description={t(accountSettingsMessages.securityDescription)}
-        title={t(settingsMessages.security)}
-      />
+      <SettingsPageHeading title={t(settingsMessages.security)} />
 
       <section className="rounded-2xl border border-border bg-background p-6">
         <div className="flex flex-col justify-center gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm text-foreground">
-              {t(accountSettingsMessages.password)}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {t(accountSettingsMessages.passwordHint)}
-            </p>
-          </div>
+          <p className="text-sm text-foreground">
+            {t(accountSettingsMessages.password)}
+          </p>
           <Button
             onClick={() => {
               setPasswordChanged(false);

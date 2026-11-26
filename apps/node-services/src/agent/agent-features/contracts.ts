@@ -14,6 +14,7 @@ import type {
 import type { CanonicalInboxMessage } from "./inbox-source/types.js";
 import type { AgentInput, RunEvent } from "../executor/provider.js";
 import type { RuntimeStatusUpdate } from "../executor/runtime-status.js";
+import type { SplitInstructions } from "../prompt/index.js";
 
 /** A type that may be returned directly or as a Promise. */
 export type MaybePromise<T> = T | Promise<T>;
@@ -260,6 +261,11 @@ export type MaintenanceEvent =
       readonly outcome: MaintenanceOutcome;
     };
 
+export type ContextInstructionContribution =
+  | string
+  | SplitInstructions
+  | undefined;
+
 /**
  * Context-scope ports. Handlers run in deterministic declared order. Pure
  * contribution ports receive only FeatureContextView; `afterInboxInputAccepted`
@@ -282,7 +288,7 @@ export interface ContextFeatureHandlers {
   contributeContextInstructions?(
     view: FeatureContextView,
     facts: ContextInstructionFacts,
-  ): string | undefined;
+  ): ContextInstructionContribution;
   /** Pure contribution to notification prompt context (first render + replay). */
   contributeNotificationContext?(
     view: FeatureContextView,

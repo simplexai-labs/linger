@@ -11,7 +11,8 @@ import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 
 import { MyDocumentsTree } from "./library-documents-page";
-import { LibrarySidebar, type LibrarySection } from "./library-sidebar";
+import { sectionHasSidebar, workspaceSection } from "./library-section";
+import { LibrarySidebar } from "./library-sidebar";
 import { WORKSPACE_TREE_ID, WorkspaceTreeContext } from "./workspace-tree";
 
 /**
@@ -58,7 +59,7 @@ export function LibraryLayout() {
       openDocument.data?.from.some(
         (source) => source.binding_kind === "wiki_page",
       ) === true);
-  const hasList = section !== "wiki" && section !== "overview";
+  const hasList = sectionHasSidebar(section);
   const content = (
     <RouteContentBoundary>
       <div
@@ -121,13 +122,4 @@ export function LibraryLayout() {
       </DesktopBarSlot>
     </WorkspaceTreeContext>
   );
-}
-
-function workspaceSection(pathname: string): LibrarySection | null {
-  const rest = pathname.match(/^\/t\/[^/]+\/library(?=\/|$)(.*)$/)?.[1];
-  if (rest === undefined) return null;
-  if (rest.startsWith("/wiki")) return "wiki";
-  // An open meeting keeps the Library sidebar beside it.
-  if (rest.startsWith("/meetings")) return null;
-  return "overview";
 }

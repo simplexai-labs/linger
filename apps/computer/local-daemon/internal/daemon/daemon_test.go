@@ -1062,7 +1062,7 @@ func TestTerminalPayloadUsesProviderCompatibleSessionShapes(t *testing.T) {
 	decode := func(spec provider.OperationSpec, result provider.Result) map[string]any {
 		t.Helper()
 		var value map[string]any
-		if err := json.Unmarshal(terminalPayload(spec, result), &value); err != nil {
+		if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &value); err != nil {
 			t.Fatal(err)
 		}
 		return value["session"].(map[string]any)
@@ -2344,7 +2344,7 @@ func TestTerminalPayloadFailureDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(terminalPayload(spec, result), &payload); err != nil {
+	if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &payload); err != nil {
 		t.Fatal(err)
 	}
 	diagnostics, ok := payload["diagnostics"].(map[string]any)
@@ -2365,7 +2365,7 @@ func TestTerminalPayloadFailureDiagnostics(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var value map[string]any
-			if err := json.Unmarshal(terminalPayload(spec, tc.result), &value); err != nil {
+			if err := json.Unmarshal(terminalPayloadFor(spec, tc.result, false), &value); err != nil {
 				t.Fatal(err)
 			}
 			if _, exists := value["diagnostics"]; exists {
@@ -2377,7 +2377,7 @@ func TestTerminalPayloadFailureDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	var invalid map[string]any
-	if err := json.Unmarshal(terminalPayload(spec, result), &invalid); err != nil {
+	if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &invalid); err != nil {
 		t.Fatal(err)
 	}
 	if _, exists := invalid["diagnostics"]; exists {
@@ -2392,7 +2392,7 @@ func TestTerminalPayloadExternalCodexSignal(t *testing.T) {
 	for _, unconfirmed := range []bool{false, true} {
 		result.CleanupUnconfirmed = unconfirmed
 		var payload map[string]any
-		if err := json.Unmarshal(terminalPayload(spec, result), &payload); err != nil {
+		if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &payload); err != nil {
 			t.Fatal(err)
 		}
 		if unconfirmed {
@@ -2412,5 +2412,43 @@ func TestTerminalPayloadExternalCodexSignal(t *testing.T) {
 		if len(failure) != 2 || failure["code"] != "execution_failed" {
 			t.Fatalf("public classification: %+v", failure)
 		}
+	}
+}
+
+func TestTerminalPayloadFailureDetailOptIn(t *testing.T) {
+	spec := provider.OperationSpec{Provider: "antigravity", CodexVersion: "1.5.16", OperationKind: "run.start"}
+	result := provider.Result{
+		Status:       "failed",
+		Error:        "raw stderr with /srv/app/secret.txt",
+		PublicDetail: "\n\u26a0 FAILED_PRECONDITION (code 400): User location is not supported for the API use. Authorization: Bearer sk-secret1234567890abcdefghij\n",
+	}
+	var without map[string]any
+	if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &without); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := without["failure"].(map[string]any)["detail"]; exists {
+		t.Fatalf("detail must stay omitted without feature gate: %+v", without)
+	}
+	var with map[string]any
+	if err := json.Unmarshal(terminalPayloadFor(spec, result, true), &with); err != nil {
+		t.Fatal(err)
+	}
+	detail, _ := with["failure"].(map[string]any)["detail"].(string)
+	if !strings.Contains(detail, "FAILED_PRECONDITION (code 400): User location is not supported for the API use.") ||
+		strings.Contains(detail, "sk-secret1234567890") || strings.Contains(detail, "/srv/app/secret.txt") || strings.Contains(detail, "\n") {
+		t.Fatalf("detail=%q", detail)
+	}
+	// Raw Error without PublicDetail (e.g. CLI stderr) must never leak into failure.detail.
+	stderrOnly := provider.Result{
+		Status: "failed",
+		Error:  "codex exited; codex stderr: stack trace under /srv/app/private.go",
+	}
+	stderrOnly.Diagnostics.Signal = "SIGTERM"
+	var stderrPayload map[string]any
+	if err := json.Unmarshal(terminalPayloadFor(provider.OperationSpec{Provider: "codex", OperationKind: "run.start"}, stderrOnly, true), &stderrPayload); err != nil {
+		t.Fatal(err)
+	}
+	if got := stderrPayload["failure"].(map[string]any)["detail"]; got != "signal SIGTERM" {
+		t.Fatalf("stderr leaked into detail: %v", got)
 	}
 }

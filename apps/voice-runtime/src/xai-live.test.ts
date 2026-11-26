@@ -323,12 +323,12 @@ describe("XaiLiveSession", () => {
         delta: odd.subarray(3).toString("base64"),
       },
       { type: "response.output_audio_transcript.delta", delta: "OK" },
-      // The settled transcript arrives after the reply already started.
+      // The settled transcript, which carries no status, arrives after the
+      // reply already started.
       {
         type: "conversation.item.input_audio_transcription.completed",
         item_id: "u1",
         transcript: "Check the schedule",
-        status: "completed",
       },
       { type: "response.output_audio.done" },
       { type: "response.done", response: { status: "completed" } },
@@ -342,6 +342,55 @@ describe("XaiLiveSession", () => {
       { type: "audio_delta", pcm: Int16Array.from([1]) },
       { type: "audio_delta", pcm: Int16Array.from([2]) },
       { type: "text_delta", text: "OK", update: false },
+    ]);
+    await session.close();
+  });
+
+  it("settles the input on its final transcript when the reply only calls a tool", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    const events = collect(session, 5);
+    provider.emit(
+      { type: "input_audio_buffer.speech_started", item_id: "u1" },
+      {
+        type: "conversation.item.input_audio_transcription.updated",
+        item_id: "u1",
+        transcript: "Open the...",
+      },
+      {
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "u1",
+        transcript: "Open the...",
+        status: "in_progress",
+      },
+      // xAI's final transcript carries no status.
+      {
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "u1",
+        transcript: "Open the mail from Lisa",
+      },
+      { type: "response.created", response: { id: "r1" } },
+      {
+        type: "response.function_call_arguments.done",
+        call_id: "c1",
+        name: "lookup",
+        arguments: "{}",
+      },
+    );
+    expect(await events).toEqual([
+      { type: "speech_started", itemId: "u1" },
+      { type: "transcript_delta", itemId: "u1", text: "Open the..." },
+      {
+        type: "transcript_completed",
+        itemId: "u1",
+        text: "Open the mail from Lisa",
+      },
+      { type: "response_started" },
+      {
+        type: "function_calls",
+        update: false,
+        calls: [{ callId: "c1", name: "lookup", arguments: "{}" }],
+      },
     ]);
     await session.close();
   });
@@ -430,7 +479,6 @@ describe("XaiLiveSession", () => {
         type: "conversation.item.input_audio_transcription.completed",
         item_id: "i1",
         transcript: spanishRequest,
-        status: "completed",
       },
       { type: "response.created", response: { id: "r1" } },
       {
@@ -727,6 +775,51 @@ describe("XaiLiveSession", () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(provider.sent).toHaveLength(3);
+    await session.close();
+  });
+
+  it("never says or shows Grok's marker for words it already said, nor the repeat inside it", async () => {
+    const provider = await fakeProvider();
+    const session = await open(provider.url);
+    const shown: string[] = [];
+    const heard: number[] = [];
+    const done = (async () => {
+      for await (const event of session.events()) {
+        if (event.type === "text_delta") shown.push(event.text);
+        if (event.type === "audio_delta") heard.push(...event.pcm);
+        if (event.type === "response_finished") break;
+      }
+    })();
+    provider.emit(
+      { type: "response.created", response: { id: "r1" } },
+      { type: "response.output_audio_transcript.delta", delta: "Is this OK? " },
+      { type: "response.output_audio.delta", delta: pcmBase64(1) },
+      // The marker arrives split across deltas, as streamed words do.
+      {
+        type: "response.output_audio_transcript.delta",
+        delta: "<response_seg",
+      },
+      {
+        type: "response.output_audio_transcript.delta",
+        delta:
+          "ment_0_already_spoken> Is this OK? </response_segment_0_already",
+      },
+      { type: "response.output_audio.delta", delta: pcmBase64(2) },
+      {
+        type: "response.output_audio_transcript.delta",
+        delta: "_spoken\n> Faster now.",
+      },
+      { type: "response.output_audio.delta", delta: pcmBase64(3) },
+      // A stray closing marker is dropped too; other angle brackets stay.
+      {
+        type: "response.output_audio_transcript.delta",
+        delta: "</response_segment_1_already_spoken> a <b> c",
+      },
+      { type: "response.done", response: { status: "completed" } },
+    );
+    await done;
+    expect(shown.join("")).toBe("Is this OK?  Faster now. a <b> c");
+    expect(heard).toEqual([1, 3]);
     await session.close();
   });
 

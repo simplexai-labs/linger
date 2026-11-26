@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { prepareDependencies } from "./dependencies.js";
+const noDaemon = async () => null;
 const roots: string[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -60,7 +61,10 @@ it("returns Runtime timeout category and stage through dependency preparation", 
       code: "COMMAND_TIMEOUT",
     });
   });
-  const result = await prepareDependencies(options, { localmodels });
+  const result = await prepareDependencies(options, {
+    localmodels,
+    probeRuntimes: noDaemon,
+  });
   expect(result).toMatchObject({
     state: "failed",
     details: { code: "COMMAND_TIMEOUT", stage: "runtime" },
@@ -97,7 +101,12 @@ it.each([
         stderr: "",
       };
     });
-    expect(await prepareDependencies(options, { localmodels })).toMatchObject({
+    expect(
+      await prepareDependencies(options, {
+        localmodels,
+        probeRuntimes: noDaemon,
+      }),
+    ).toMatchObject({
       state: "failed",
       details: { code, stage: "runtime" },
     });

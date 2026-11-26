@@ -373,3 +373,158 @@ it("writes null on stdout when --inspect fails without a Windows private path re
     vi.resetModules();
   }
 });
+
+it("includes resumeTimings in the --resume stdout JSON line alongside runtime fields", async () => {
+  const migrate = vi.fn().mockResolvedValue([]);
+  const resumeTimings = {
+    path: "warm" as const,
+    probeMs: 12,
+    restoreLocalModelsMs: 5,
+    restoreByokGatewayMs: 3,
+    totalMs: 25,
+  };
+  const runtimeLookupTimings = {
+    config: 1,
+    runtime: 2,
+    localModels: 3,
+    tool: 4,
+    total: 10,
+  };
+  const runtime = { environment: {} };
+  vi.doMock("@linger/local-installation/legacy-migration", () => ({
+    migrateLegacyInstallation: migrate,
+  }));
+  vi.doMock("./server/resume.js", () => ({
+    resumeSourceInstance: vi.fn(
+      async (opts: { onTimings?: (t: typeof resumeTimings) => void }) => {
+        opts.onTimings?.(resumeTimings);
+        return {
+          code: 0,
+          state: "ready",
+          message: "Services are already running.",
+        };
+      },
+    ),
+  }));
+  vi.doMock("./server/instance-runtime.js", () => ({
+    instanceRuntime: vi.fn(
+      async (
+        _home: string,
+        _name: string,
+        opts?: { onTimings?: (t: typeof runtimeLookupTimings) => void },
+      ) => {
+        opts?.onTimings?.(runtimeLookupTimings);
+        return runtime;
+      },
+    ),
+  }));
+  const argv = process.argv;
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    process.argv = [
+      process.execPath,
+      fileURLToPath(new URL("./main.ts", import.meta.url)),
+      "--home",
+      "resume-home",
+      "--source-repo",
+      "resume-repo",
+      "--instance",
+      "desktop",
+      "--external-computer",
+      "--resume",
+    ];
+    vi.resetModules();
+    await import("./main.js");
+    const line = stdout.mock.calls.at(-1)?.[0];
+    expect(typeof line).toBe("string");
+    expect(JSON.parse(String(line))).toEqual({
+      code: 0,
+      state: "ready",
+      message: "Services are already running.",
+      runtime,
+      runtimeLookupTimings,
+      resumeTimings,
+    });
+    const done = stdout.mock.calls.at(-1)?.[1] as unknown;
+    if (typeof done === "function") done();
+    expect(exit).toHaveBeenCalledWith(0);
+  } finally {
+    process.argv = argv;
+    stdout.mockRestore();
+    stderr.mockRestore();
+    exit.mockRestore();
+    vi.doUnmock("@linger/local-installation/legacy-migration");
+    vi.doUnmock("./server/resume.js");
+    vi.doUnmock("./server/instance-runtime.js");
+    vi.resetModules();
+  }
+});
+
+it("aborts --inspect gracefully on SIGTERM and removes the listener", async () => {
+  let inspectSignal: AbortSignal | undefined;
+  let inspectStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    inspectStarted = resolve;
+  });
+  const inspect = vi.fn(
+    (opts: { signal: AbortSignal }) =>
+      new Promise<never>((_resolve, reject) => {
+        inspectSignal = opts.signal;
+        inspectStarted();
+        opts.signal.addEventListener(
+          "abort",
+          () => reject(new Error("Inspection aborted")),
+          { once: true },
+        );
+      }),
+  );
+  vi.doMock("@linger/local-installation/setup-plan", () => ({
+    inspectSetup: inspect,
+  }));
+  const argv = process.argv;
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const once = vi.spyOn(process, "once");
+  const off = vi.spyOn(process, "off");
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    process.argv = [
+      process.execPath,
+      fileURLToPath(new URL("./main.ts", import.meta.url)),
+      "--home",
+      "sigterm-home",
+      "--inspect",
+    ];
+    vi.resetModules();
+    const running = import("./main.js");
+    await started;
+    const registered = once.mock.calls.find(
+      ([event]) => event === "SIGTERM",
+    )?.[1];
+    expect(typeof registered).toBe("function");
+    expect(inspectSignal?.aborted).toBe(false);
+    process.emit("SIGTERM");
+    await running;
+    expect(inspectSignal?.aborted).toBe(true);
+    expect(off).toHaveBeenCalledWith("SIGTERM", registered);
+    expect(stdout).toHaveBeenCalledWith("null\n", expect.any(Function));
+    const done = stdout.mock.calls.at(-1)?.[1] as unknown;
+    if (typeof done === "function") done();
+    expect(exit).toHaveBeenCalledWith(1);
+  } finally {
+    process.argv = argv;
+    stdout.mockRestore();
+    stderr.mockRestore();
+    once.mockRestore();
+    off.mockRestore();
+    exit.mockRestore();
+    vi.doUnmock("@linger/local-installation/setup-plan");
+    vi.resetModules();
+  }
+});

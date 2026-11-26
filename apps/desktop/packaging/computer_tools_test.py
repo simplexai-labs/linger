@@ -2,6 +2,7 @@
 
     python3 -m unittest discover -s apps/desktop/packaging -p '*_test.py'
 """
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -12,6 +13,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import threading
 import unittest
 import zipfile
 
@@ -39,12 +41,18 @@ def sha256(path):
         return hashlib.sha256(source.read()).hexdigest()
 
 
+def pi_entry(target):
+    return "bin/pi.exe" if target.startswith("win32-") else "bin/pi"
+
+
 def stage(root, target):
     """A resources/ folder holding tools laid out as stage-computer-tools.mjs writes them."""
     tools = os.path.join(root, "cli", "computer-tools")
+    pi = pi_entry(target)
     files = {
         PLAYWRIGHT_ENTRY: b"console.log('playwright')\n",
         PI_EXTENSION: b"export default {}\n",
+        pi: b"#!/bin/sh\n" if not target.startswith("win32-") else b"MZ",
         "node_modules/native/prebuilt.node": MACHO,
     }
     cua = FROZEN["cua"].get(target, {})
@@ -58,13 +66,16 @@ def stage(root, target):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as out:
             out.write(files[relative])
+        mode = 0o755 if relative == pi and not target.startswith("win32-") else 0o644
+        if mode == 0o755:
+            os.chmod(path, 0o755)
         assets.append({"path": relative, "size_bytes": len(files[relative]),
-                       "sha256": sha256(path), "mode": 0o644})
+                       "sha256": sha256(path), "mode": mode})
     # JSON.stringify of the asset list, as bundle-computer-tools.mjs digests it.
     digest = hashlib.sha256(json.dumps(assets, separators=(",", ":")).encode()).hexdigest()
     manifest = {"schema_version": 1, "versions": FROZEN["versions"], "target": target,
                 "playwright_entry": PLAYWRIGHT_ENTRY, "pi_extension": PI_EXTENSION,
-                "cua_entry": cua.get("entry", ""), "packages": [],
+                "pi_entry": pi, "cua_entry": cua.get("entry", ""), "packages": [],
                 "assets": assets, "artifact_sha256": digest}
     with open(os.path.join(tools, "manifest.json"), "w") as out:
         json.dump(manifest, out)
@@ -164,7 +175,7 @@ class ComputerToolsTest(unittest.TestCase):
         with tarfile.open(archive, "w:gz") as out:
             out.add(app, arcname="Linger")
         self.assertEqual(computer_tools.verify_archive(archive, "Linger/resources/", "linux-x64"),
-                         3 + len(FROZEN["quickjs"]))
+                         4 + len(FROZEN["quickjs"]))
 
         resources, _ = self.resources("win32-x64")
         archive = os.path.join(self.root, "Linger.zip")
@@ -174,7 +185,7 @@ class ComputerToolsTest(unittest.TestCase):
                     path = os.path.join(root, name)
                     out.write(path, "Linger/resources/" + os.path.relpath(path, resources))
         self.assertEqual(computer_tools.verify_archive(archive, "Linger/resources/", "win32-x64"),
-                         4 + len(FROZEN["quickjs"]))
+                         5 + len(FROZEN["quickjs"]))
 
         bare = os.path.join(self.root, "bare.tar.gz")
         with tarfile.open(bare, "w:gz") as out:
@@ -323,7 +334,7 @@ class MacSigningTest(unittest.TestCase):
             self.assertEqual(members["./bin/ff"].linkname, "ffmpeg")
         self.assertEqual(self.mac.unsigned_archive_files(output), [])
 
-    def test_emit_outputs_notarizes_dmg_once_then_staples_app_for_update_archive(self):
+    def _emit_fixture(self):
         root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, root)
         stage = os.path.join(root, "stage")
@@ -333,7 +344,150 @@ class MacSigningTest(unittest.TestCase):
         os.makedirs(out_dir)
         with open(os.path.join(app, "Contents", "Info.plist"), "wb") as out:
             out.write(b"plist")
+        return root, stage, app, out_dir
 
+    def _stub_emit_tools(self, fake_build_dmg, fake_update_archive, fake_check_archive):
+        orig_build_dmg = self.mac.build_dmg
+        orig_update_archive = self.mac.update_archive
+        orig_check_archive = self.mac.computer_tools.check_archive
+
+        def restore():
+            self.mac.build_dmg = orig_build_dmg
+            self.mac.update_archive = orig_update_archive
+            self.mac.computer_tools.check_archive = orig_check_archive
+
+        self.addCleanup(restore)
+        self.mac.build_dmg = fake_build_dmg
+        self.mac.update_archive = fake_update_archive
+        self.mac.computer_tools.check_archive = fake_check_archive
+
+    def test_emit_outputs_notarizes_and_staples_app_before_parallel_dmg_and_update(self):
+        root, stage, app, out_dir = self._emit_fixture()
+        ticket = os.path.join(app, "Contents", "CodeResources")
+        lock = threading.Lock()
+        events = []
+
+        class FakeSigning:
+            notary_key = "notary.json"
+
+            def sign_dmg(self, dmg):
+                with lock:
+                    events.append(("sign_dmg", os.path.basename(dmg)))
+
+            def notarize(self, path):
+                with lock:
+                    events.append(("notarize", os.path.basename(path)))
+                if path == app:
+                    with open(ticket, "wb") as out:
+                        out.write(b"ticket")
+
+        def fake_build_dmg(dmg_stage, dmg_workdir, output, volume_name):
+            self.assertEqual(dmg_stage, stage)
+            self.assertEqual(dmg_workdir, root)
+            self.assertTrue(os.path.isfile(ticket))
+            self.assertGreater(os.path.getsize(ticket), 0)
+            with lock:
+                events.append(("build_dmg", os.path.basename(output)))
+            with open(output, "wb") as out:
+                out.write(b"dmg")
+
+        def fake_update_archive(target_app, output):
+            self.assertEqual(target_app, app)
+            self.assertTrue(os.path.isfile(ticket))
+            self.assertGreater(os.path.getsize(ticket), 0)
+            with lock:
+                events.append(("update_archive", os.path.basename(output)))
+            with open(output, "wb") as out:
+                out.write(b"tar.gz")
+
+        def fake_check_archive(archive_path, prefix, target):
+            self.assertEqual(prefix, "Linger.app/Contents/Resources/")
+            with lock:
+                events.append(("check_archive", os.path.basename(archive_path), target))
+
+        self._stub_emit_tools(fake_build_dmg, fake_update_archive, fake_check_archive)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.mac.emit_outputs(stage, app, root, out_dir, "1.2.3", "arm64", FakeSigning(), True)
+
+        notarize_app = events.index(("notarize", "Linger.app"))
+        build_dmg = events.index(("build_dmg", "Linger-1.2.3-arm64.dmg"))
+        sign_dmg = events.index(("sign_dmg", "Linger-1.2.3-arm64.dmg"))
+        notarize_dmg = events.index(("notarize", "Linger-1.2.3-arm64.dmg"))
+        pack_update = events.index(("update_archive", "Linger-1.2.3-arm64.app.tar.gz"))
+        check_update = events.index(("check_archive", "Linger-1.2.3-arm64.app.tar.gz", "darwin-arm64"))
+
+        self.assertLess(notarize_app, build_dmg)
+        self.assertLess(notarize_app, pack_update)
+        self.assertLess(build_dmg, sign_dmg)
+        self.assertLess(sign_dmg, notarize_dmg)
+        self.assertLess(pack_update, check_update)
+        self.assertEqual(len(events), 6)
+        self.assertTrue(os.path.isfile(os.path.join(out_dir, "Linger-1.2.3-arm64.dmg")))
+        self.assertTrue(os.path.isfile(os.path.join(out_dir, "Linger-1.2.3-arm64.app.tar.gz")))
+
+    def test_emit_outputs_fails_closed_if_notarized_app_lacks_stapled_ticket(self):
+        for label, ticket_bytes in (("missing", None), ("empty", b"")):
+            with self.subTest(ticket=label):
+                root, stage, app, out_dir = self._emit_fixture()
+                ticket = os.path.join(app, "Contents", "CodeResources")
+                events = []
+
+                class FakeSigning:
+                    notary_key = "notary.json"
+
+                    def sign_dmg(self, dmg):
+                        events.append(("sign_dmg", os.path.basename(dmg)))
+
+                    def notarize(self, path):
+                        events.append(("notarize", os.path.basename(path)))
+                        if path == app and ticket_bytes is not None:
+                            with open(ticket, "wb") as out:
+                                out.write(ticket_bytes)
+
+                def fake_build_dmg(dmg_stage, dmg_workdir, output, volume_name):
+                    events.append(("build_dmg", os.path.basename(output)))
+
+                def fake_update_archive(target_app, output):
+                    events.append(("update_archive", os.path.basename(output)))
+
+                def fake_check_archive(archive_path, prefix, target):
+                    events.append(("check_archive", os.path.basename(archive_path), target))
+
+                self._stub_emit_tools(fake_build_dmg, fake_update_archive, fake_check_archive)
+                with self.assertRaises(SystemExit) as stopped:
+                    self.mac.emit_outputs(stage, app, root, out_dir, "1.2.3", "arm64", FakeSigning(), True)
+                self.assertIn("CodeResources", str(stopped.exception))
+                self.assertEqual(events, [("notarize", "Linger.app")])
+                self.assertEqual(os.listdir(out_dir), [])
+
+    def test_emit_outputs_without_notary_key_and_without_update_archive(self):
+        # Ad-hoc local build: no notary_key and no update archive.
+        root, stage, app, out_dir = self._emit_fixture()
+        events = []
+
+        def fake_build_dmg(dmg_stage, dmg_workdir, output, volume_name):
+            events.append(("build_dmg", os.path.basename(output)))
+            with open(output, "wb") as out:
+                out.write(b"dmg")
+
+        def fake_update_archive(target_app, output):
+            events.append(("update_archive", os.path.basename(output)))
+
+        def fake_check_archive(archive_path, prefix, target):
+            events.append(("check_archive", os.path.basename(archive_path), target))
+
+        self._stub_emit_tools(fake_build_dmg, fake_update_archive, fake_check_archive)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.mac.emit_outputs(stage, app, root, out_dir, "1.2.3", "arm64",
+                                  self.mac.Signing("rcodesign"), False)
+        self.assertFalse(os.path.exists(os.path.join(app, "Contents", "CodeResources")))
+        self.assertEqual(events, [("build_dmg", "Linger-1.2.3-arm64.dmg")])
+        self.assertTrue(os.path.isfile(os.path.join(out_dir, "Linger-1.2.3-arm64.dmg")))
+        self.assertFalse(os.path.exists(os.path.join(out_dir, "Linger-1.2.3-arm64.app.tar.gz")))
+
+        # Notarized build without --update-archive still notarizes/staples Linger.app first.
+        root, stage, app, out_dir = self._emit_fixture()
+        ticket = os.path.join(app, "Contents", "CodeResources")
         events = []
 
         class FakeSigning:
@@ -344,48 +498,73 @@ class MacSigningTest(unittest.TestCase):
 
             def notarize(self, path):
                 events.append(("notarize", os.path.basename(path)))
+                if path == app:
+                    with open(ticket, "wb") as out:
+                        out.write(b"ticket")
 
-            def staple(self, path):
-                events.append(("staple", os.path.basename(path)))
-
-        orig_build_dmg = self.mac.build_dmg
-        orig_update_archive = self.mac.update_archive
-        orig_check_archive = self.mac.computer_tools.check_archive
-
-        def fake_build_dmg(dmg_stage, dmg_workdir, output, volume_name):
-            self.assertEqual(dmg_stage, stage)
-            self.assertEqual(dmg_workdir, root)
+        def fake_notarized_build_dmg(dmg_stage, dmg_workdir, output, volume_name):
+            self.assertTrue(os.path.isfile(ticket))
+            self.assertGreater(os.path.getsize(ticket), 0)
             events.append(("build_dmg", os.path.basename(output)))
             with open(output, "wb") as out:
                 out.write(b"dmg")
 
-        def fake_update_archive(target_app, output):
-            self.assertEqual(target_app, app)
-            events.append(("update_archive", os.path.basename(output)))
-            with open(output, "wb") as out:
-                out.write(b"tar.gz")
-
-        def fake_check_archive(archive_path, prefix, target):
-            events.append(("check_archive", os.path.basename(archive_path), target))
-
-        try:
-            self.mac.build_dmg = fake_build_dmg
-            self.mac.update_archive = fake_update_archive
-            self.mac.computer_tools.check_archive = fake_check_archive
-            self.mac.emit_outputs(stage, app, root, out_dir, "1.2.3", "arm64", FakeSigning(), True)
-        finally:
-            self.mac.build_dmg = orig_build_dmg
-            self.mac.update_archive = orig_update_archive
-            self.mac.computer_tools.check_archive = orig_check_archive
-
+        self._stub_emit_tools(fake_notarized_build_dmg, fake_update_archive, fake_check_archive)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.mac.emit_outputs(stage, app, root, out_dir, "1.2.3", "arm64", FakeSigning(), False)
         self.assertEqual(events, [
+            ("notarize", "Linger.app"),
             ("build_dmg", "Linger-1.2.3-arm64.dmg"),
             ("sign_dmg", "Linger-1.2.3-arm64.dmg"),
             ("notarize", "Linger-1.2.3-arm64.dmg"),
-            ("staple", "Linger.app"),
-            ("update_archive", "Linger-1.2.3-arm64.app.tar.gz"),
-            ("check_archive", "Linger-1.2.3-arm64.app.tar.gz", "darwin-arm64"),
         ])
+        self.assertTrue(os.path.isfile(os.path.join(out_dir, "Linger-1.2.3-arm64.dmg")))
+        self.assertFalse(os.path.exists(os.path.join(out_dir, "Linger-1.2.3-arm64.app.tar.gz")))
+
+    def test_signing_notarize_waits_then_staples_and_handles_failures(self):
+        calls = []
+        should_fail = False
+        orig_run = self.mac.run
+        orig_staple = self.mac.Signing.staple
+
+        def fake_run(*args, **kwargs):
+            calls.append(("run", args))
+            if should_fail:
+                raise subprocess.CalledProcessError(1, args)
+
+        def fake_staple(signing_self, path):
+            calls.append(("staple", path))
+
+        try:
+            self.mac.run = fake_run
+            self.mac.Signing.staple = fake_staple
+
+            # Without a notary key, notarize is a no-op.
+            self.mac.Signing("rcodesign").notarize("/tmp/Linger.app")
+            self.assertEqual(calls, [])
+
+            # With a notary key, submit waits without --staple, then delegates to staple().
+            signing = self.mac.Signing("rcodesign", "id.p12", "id.password", "notary.json")
+            signing.notarize("/tmp/Linger.app")
+            expected_args = (
+                "rcodesign", "notary-submit", "--api-key-file", "notary.json",
+                "--wait", "--max-wait-seconds", "3600", "/tmp/Linger.app",
+            )
+            self.assertNotIn("--staple", expected_args)
+            self.assertEqual(calls, [
+                ("run", expected_args),
+                ("staple", "/tmp/Linger.app"),
+            ])
+
+            # Failure during notary-submit propagates without stapling.
+            calls.clear()
+            should_fail = True
+            with self.assertRaises(subprocess.CalledProcessError):
+                signing.notarize("/tmp/Linger.app")
+            self.assertEqual(calls, [("run", expected_args)])
+        finally:
+            self.mac.run = orig_run
+            self.mac.Signing.staple = orig_staple
 
     def test_signing_staple_retries_transient_lookup_errors(self):
         calls = []
@@ -464,6 +643,122 @@ class MacSigningTest(unittest.TestCase):
         self.assertEqual(refreshed["addon.node"]["sha256"], sha256(addon))
         self.assertEqual(refreshed["index.js"]["sha256"], sha256(script_file))
 
+    def test_native_bundle_check_and_refresh_shared_node_macos(self):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root)
+        resources = os.path.join(root, "Linger.app", "Contents", "Resources")
+        native_dir = os.path.join(resources, "app", "dist", "installer", "native")
+        runtime_dir = os.path.join(native_dir, "runtime-darwin-arm64")
+        runtime_files_dir = os.path.join(runtime_dir, "runtime")
+        shared_node = os.path.join(resources, "runtime", "bin", "node")
+        os.makedirs(runtime_files_dir)
+        os.makedirs(os.path.dirname(shared_node))
+
+        addon = os.path.join(runtime_files_dir, "addon.node")
+        with open(addon, "wb") as out:
+            out.write(MACHO)
+        with open(shared_node, "wb") as out:
+            out.write(MACHO)
+
+        files_json = os.path.join(runtime_files_dir, "files.json")
+        with open(files_json, "w") as out:
+            json.dump({
+                "schema": 1,
+                "target": "darwin-arm64",
+                "files": {
+                    "addon.node": {"bytes": os.path.getsize(addon), "sha256": sha256(addon)},
+                },
+            }, out)
+        manifest_path = os.path.join(runtime_dir, "manifest.json")
+        with open(manifest_path, "w") as out:
+            json.dump({
+                "schema": 1,
+                "target": "darwin-arm64",
+                "layout": "directory",
+                "directory": {"file": "runtime/files.json", "bytes": os.path.getsize(files_json), "sha256": sha256(files_json)},
+                "node": {
+                    "version": "26.5.0",
+                    "shared": True,
+                    "binary": "runtime/bin/node",
+                    "bytes": os.path.getsize(shared_node),
+                    "sha256": sha256(shared_node),
+                },
+            }, out)
+
+        native_bundle.check_runtime("darwin-arm64", native=native_dir, computer_tools_dir=resources)
+
+        # Signing rewrites both addon.node and the shared Contents/Resources/runtime/bin/node.
+        signed_addon = self.signed_macho(0x10000, b"cms-addon")
+        signed_node = self.signed_macho(0x10000, b"cms-node-signed")
+        with open(addon, "wb") as out:
+            out.write(signed_addon)
+        with open(shared_node, "wb") as out:
+            out.write(signed_node)
+
+        # Before refresh, check_runtime rejects the modified shared node.
+        with self.assertRaises(SystemExit):
+            native_bundle.check_runtime("darwin-arm64", native=native_dir, computer_tools_dir=resources)
+
+        native_bundle.refresh(native_dir, "darwin-arm64", shared_node=shared_node)
+        native_bundle.check_runtime("darwin-arm64", native=native_dir, computer_tools_dir=resources)
+        with open(manifest_path) as source:
+            refreshed = json.load(source)
+        self.assertTrue(refreshed["node"]["shared"])
+        self.assertEqual(refreshed["node"]["sha256"], sha256(shared_node))
+        self.assertEqual(refreshed["node"]["bytes"], os.path.getsize(shared_node))
+
+        # Two-argument refresh resolves the shared node relative to Contents/Resources/app/dist/installer/native.
+        resigned_node = self.signed_macho(0x10000, b"cms-node-resigned-v2")
+        with open(shared_node, "wb") as out:
+            out.write(resigned_node)
+        native_bundle.refresh(native_dir, "darwin-arm64")
+        native_bundle.check_runtime("darwin-arm64", native=native_dir, computer_tools_dir=resources)
+        with open(manifest_path) as source:
+            refreshed_again = json.load(source)
+        self.assertEqual(refreshed_again["node"]["sha256"], sha256(shared_node))
+        self.assertEqual(refreshed_again["node"]["bytes"], os.path.getsize(shared_node))
+
+    def test_native_bundle_check_shared_node_archive_layout(self):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root)
+        native_dir = os.path.join(root, "native")
+        runtime_dir = os.path.join(native_dir, "runtime-win32-x64")
+        tools_dir = os.path.join(root, "computer-tools", "win32-x64")
+        shared_node = os.path.join(tools_dir, "runtime", "bin", "node.exe")
+        os.makedirs(runtime_dir)
+        os.makedirs(os.path.dirname(shared_node))
+
+        archive_path = os.path.join(runtime_dir, "runtime.tar.zst")
+        with open(archive_path, "wb") as out:
+            out.write(b"zstd-payload")
+        with open(shared_node, "wb") as out:
+            out.write(b"MZ-node-binary")
+
+        with open(os.path.join(runtime_dir, "manifest.json"), "w") as out:
+            json.dump({
+                "schema": 1,
+                "target": "win32-x64",
+                "layout": "archive",
+                "archive": {
+                    "file": "runtime.tar.zst",
+                    "bytes": os.path.getsize(archive_path),
+                    "sha256": sha256(archive_path),
+                },
+                "node": {
+                    "version": "26.5.0",
+                    "shared": True,
+                    "binary": "runtime/bin/node.exe",
+                    "bytes": os.path.getsize(shared_node),
+                    "sha256": sha256(shared_node),
+                },
+            }, out)
+
+        native_bundle.check_runtime("win32-x64", native=native_dir, computer_tools_dir=tools_dir)
+        with open(shared_node, "wb") as out:
+            out.write(b"tampered")
+        with self.assertRaises(SystemExit):
+            native_bundle.check_runtime("win32-x64", native=native_dir, computer_tools_dir=tools_dir)
+
 
 class ArchiveHelperTest(unittest.TestCase):
     def setUp(self):
@@ -476,7 +771,11 @@ class ArchiveHelperTest(unittest.TestCase):
         file_path = os.path.join(bundle, "hello.txt")
         with open(file_path, "wb") as out:
             out.write(b"linger\n")
-        os.symlink("hello.txt", os.path.join(bundle, "link.txt"))
+        try:
+            os.symlink("hello.txt", os.path.join(bundle, "link.txt"))
+        except OSError as error:
+            # Windows lets a standard user create links only in Developer Mode.
+            self.skipTest(f"cannot create a symlink here: {error}")
 
         owned = os.path.join(self.root, "owned.tar.gz")
         archive.tar_gz(self.root, "Linger", owned, root_owner=True)

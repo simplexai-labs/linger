@@ -50,7 +50,6 @@ export function BrowserConnectionDecision({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const owner = currentActorId === card.decision_owner.id;
-  const agentName = card.requester.display_name;
 
   async function decline() {
     setBusy(true);
@@ -117,9 +116,6 @@ export function BrowserConnectionDecision({
           <BrowserConnectionDialog
             computerId={card.browser_connection?.computer_id ?? ""}
             onClose={() => setOpen(false)}
-            reason={t(cardsMessages.continuesOnceConnected, {
-              agent: agentName,
-            })}
             tenantId={tenantId}
           />
         </Suspense>

@@ -74,12 +74,19 @@ type DiscoveryResult struct {
 type DiscoveryOptions struct {
 	RuntimeHomeRoot string
 	ConfiguredPaths map[string]string
-	Environment     map[string]string
-	Timeout         time.Duration
+	// ManagedPaths holds installer- or harness-managed Runtime executables
+	// checked after user PATH and macOS app bundles, and before BundledPaths.
+	ManagedPaths map[string]string
+	BundledPaths map[string]string
+	Environment  map[string]string
+	Timeout      time.Duration
 	// Runtimes limits discovery to these types; empty diagnoses every Runtime.
 	Runtimes []string
 	// PreferredRuntime is the type whose diagnostic is marked Preferred.
 	PreferredRuntime string
+	// SkipModelCatalog skips model catalog listing after protocol and
+	// authentication verification (used by stateless setup/auth probes).
+	SkipModelCatalog bool
 }
 
 type runtimeDefinition struct {
@@ -214,7 +221,7 @@ func diagnose(ctx context.Context, kind, executable, protocol string, options Di
 	// Catalogs use live protocol exchanges. Preserve a failed protocol/auth
 	// probe instead of replacing it with a second failure from model discovery.
 	// Logged-out Claude must not receive an initialize request.
-	catalogAllowed := outcome.Status == "ready" || ((kind == "codex" || kind == "pi") && outcome.Status == "authentication_required")
+	catalogAllowed := !options.SkipModelCatalog && (outcome.Status == "ready" || ((kind == "codex" || kind == "pi") && outcome.Status == "authentication_required"))
 	if catalogAllowed {
 		catalogCtx, stop := context.WithTimeout(ctx, budget)
 		observation.Models, observation.ModelCatalogError = probedRuntimeModels(catalogCtx, kind, canonical, environment, outcome)
@@ -391,7 +398,12 @@ func boundedModelCatalogError(err error) string {
 
 func resolveExecutableEntry(ctx context.Context, kind, name string, options DiscoveryOptions) (string, error) {
 	if selected := options.ConfiguredPaths[kind]; selected != "" {
-		return selected, nil
+		if options.ManagedPaths[kind] == "" && options.BundledPaths[kind] == "" {
+			return selected, nil
+		}
+		if _, err := canonicalExecutable(selected); err == nil {
+			return selected, nil
+		}
 	}
 	path := options.Environment["PATH"]
 	if path == "" {
@@ -408,6 +420,16 @@ func resolveExecutableEntry(ctx context.Context, kind, name string, options Disc
 			if _, err := canonicalExecutable(candidate); err == nil {
 				return candidate, nil
 			}
+		}
+	}
+	if managed := options.ManagedPaths[kind]; managed != "" {
+		if _, err := canonicalExecutable(managed); err == nil {
+			return managed, nil
+		}
+	}
+	if bundled := options.BundledPaths[kind]; bundled != "" {
+		if _, err := canonicalExecutable(bundled); err == nil {
+			return bundled, nil
 		}
 	}
 	return "", os.ErrNotExist

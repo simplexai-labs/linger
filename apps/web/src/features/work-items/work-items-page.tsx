@@ -280,7 +280,7 @@ function RoomFilter({
 }) {
   const t = useT();
   return (
-    <label className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground">
+    <div className="grid min-w-0 gap-1 text-xs font-medium text-muted-foreground">
       {t(m.room)}
       <Select
         aria-label={t(m.room)}
@@ -295,7 +295,7 @@ function RoomFilter({
           </SelectItem>
         ))}
       </Select>
-    </label>
+    </div>
   );
 }
 

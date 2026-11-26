@@ -23,6 +23,7 @@ const (
 	ToolReadPocketNotes  = "read_pocket_notes"
 	ToolDeletePocketNote = "delete_pocket_note"
 	ToolCreateRoom       = "create_room"
+	ToolHandOffToRoom    = "hand_off_to_room"
 	ToolAddRoomMembers   = "add_room_members"
 	ToolReadDocument     = "read_document"
 	ToolCheckReminders   = "check_reminders"
@@ -60,9 +61,10 @@ func stringProperty(description string) map[string]any {
 var Tools = append([]Tool{
 	{
 		Name:        ToolSearchMessages,
-		Description: "Find a substring in chat message bodies. Attached notes and transcript text live on the recording. Searches only the current Room by default; all_rooms=true searches every Room the user is in.",
+		Description: "Find a substring in chat message bodies. Attached notes and transcript text live on the recording. Searches only the current Room by default; room_id selects another accessible Room, and all_rooms=true searches every Room the user is in. To read recent discussion in one Room, supply its room_id and an empty query.",
 		Parameters: objectSchema([]string{"query"}, map[string]any{
-			"query":     stringProperty("Keywords to search for"),
+			"query":     stringProperty("Keywords to search for, or empty to list recent messages in room_id"),
+			"room_id":   stringProperty("Optional accessible Room ID from find_rooms"),
 			"all_rooms": map[string]any{"type": "boolean", "description": "Whether to search all Rooms"},
 		}),
 	},
@@ -120,7 +122,7 @@ var Tools = append([]Tool{
 	},
 	{
 		Name: ToolSendMessage,
-		Description: "Send a message as the user in a room of this app. Without room_id it goes to the room this call belongs to (not the room open on the page); to message another Room or person here, get its room_id with find_rooms first. It cannot post outside this app: Slack is send_slack; Feishu, WeChat or email is start_task. " +
+		Description: "Send a message as the user in a room of this app. To speak as yourself, coordinate Agents or follow the discussion, use hand_off_to_room. Without room_id it goes to the room this call belongs to (not the room open on the page); to message another Room or person here, get its room_id with find_rooms first. It cannot post outside this app: Slack is send_slack; Feishu, WeChat or email is start_task. " +
 			"It posts the user's own words as the user; never use it to share a task's result, report or files: the Agent posts those in the chat with their files by itself. " +
 			"This is a write: first call without confirmed, read back the room name and content from the returned summary and ask the user to confirm, and after they agree call again with the same room_id and text and confirmed=true. " +
 			"Setting confirmed=true without first getting a summary returns needs_confirmation again and sends nothing. If the room is wrong, go through it again with another room_id.",
@@ -154,9 +156,19 @@ var Tools = append([]Tool{
 			"members": map[string]any{
 				"type": "array", "maxItems": MaxRoomMembers,
 				"items":       map[string]any{"type": "string"},
-				"description": "Optional names of people or Agents to add, not including the user",
+				"description": "Optional names of people or Agents to add; the user and the call's Agent join automatically",
 			},
 			"confirmed": map[string]any{"type": "boolean", "description": "Whether the user has confirmed out loud"},
+		}),
+	},
+	{
+		Name:        ToolHandOffToRoom,
+		Description: "From the private chat with the user's AnotherMe, ask yourself in another group Room to speak, mention the relevant Agents, and follow the discussion. Use this for Room coordination; create_room and add_room_members stay direct tools. Both the user and you must be members of the target Room; if you are missing, add yourself with add_room_members after confirmation. Only include the user's instruction and background they want shared. When the user's own turn tells you to pass it to that Room, call with confirmed=true and it is handed off without asking again. When you are not sure they want it handed off now, call without confirmed: it returns needs_confirmation with the Room and the gist of the request; ask, and after they say yes in their next turn call again with the same arguments and confirmed=true. Accepted means handed off, not finished. Questions and results arrive as Room reports; pass the user's answer with the same room_id and handoff_id. Use search_messages to read recent discussion when asked. Never use start_task to create a Room or speak in one.",
+		Parameters: objectSchema([]string{"room_id", "instruction", "confirmed"}, map[string]any{
+			"room_id":     stringProperty("Target group Room ID from find_rooms or create_room"),
+			"instruction": stringProperty("Self-contained request, at most 8000 characters; share only relevant authorized context"),
+			"handoff_id":  stringProperty("Existing handoff ID when answering a Room report or continuing that request"),
+			"confirmed":   map[string]any{"type": "boolean", "description": "true when the user, in their own latest turn, told you to hand it off or said yes to the preview"},
 		}),
 	},
 	{
@@ -217,6 +229,7 @@ var Tools = append([]Tool{
 type SearchArguments struct {
 	Query    string `json:"query"`
 	AllRooms bool   `json:"all_rooms"`
+	RoomID   string `json:"room_id"`
 }
 
 // ListWorkItemsArguments filters the user’s visible Work Items by state.
@@ -366,15 +379,21 @@ func Output(value any) string {
 	return string(encoded)
 }
 
-// DirectYesTools are writes whose content the user already sees, so the
-// user telling the model to do it in their own turn is their yes, unless that
-// turn asked about it or wrote the content; the others read their details
-// back for a yes first.
-var DirectYesTools = map[string]bool{ToolSendEmailCanvas: true}
+// DirectYesTools are writes the user can order outright: the user telling the
+// model to do it in their own turn is their yes, unless that turn asked about
+// it or wrote the content. Sending an email canvas shows exactly what goes out
+// beside the chat; a Room handoff passes the user's own request to a Room they
+// belong to and reports back. The others read their details back for a yes first.
+var DirectYesTools = map[string]bool{ToolSendEmailCanvas: true, ToolHandOffToRoom: true}
 
 // SentNext tells the live model to report a completed send: without it the
 // model can take the result as context and stay silent.
 const SentNext = "Tell the user in one warm, conversational sentence, in their language, that you sent it and to whom. Keep your friendly personality while leading with the confirmed result; a light touch is welcome when it fits, without forcing praise or a joke."
+
+// DoneNext tells the live model to report a finished write in the voice's
+// tone: without it the model improvises a bare status word, or repeats the
+// acknowledgement it spoke before the call.
+const DoneNext = "It is done. Tell the user in one warm, conversational first-person sentence, in their language, what you did and the part of the result that matters to them, such as the name and who is in it. If you already said you were doing it, go straight to the result without repeating that or adding another acknowledgement. A light touch is welcome when it fits; never a bare status word such as done or created."
 
 // StartedNext acknowledges accepted work in the voice's own words without
 // exposing implementation details or claiming that work has finished.
@@ -391,7 +410,7 @@ func ErrorOutput(code string) string {
 func NeedsConfirmation(summary string) string {
 	return Output(map[string]string{
 		"status": "needs_confirmation", "summary": summary,
-		"next": "Ask the user this now, once, in your own words with these details, and end your turn; never answer it for them, and do not say you are doing it yet. If the user already said yes to it while this call ran, do not ask again: call again with confirmed=true now. Otherwise call again with confirmed=true only after they say yes in their own next turn, and as you make that call say in one short complete sentence that you are doing it now, since it can take a few seconds.",
+		"next": "Ask the user this now, once, and end your turn. Ask the way a friend at their side would: a few words reacting to what they asked, then the details that matter (what, where, who) in your own words and their language, and a short question. Never read the summary out or translate it word for word, and never use a formal phrase such as please confirm. Never answer it for them, and do not say you are doing it yet. If the user already said yes to it while this call ran, do not ask again: call again with confirmed=true now. Otherwise call again with confirmed=true only after they say yes in their own next turn, and when its result comes, tell them in one warm sentence what came of it; never a bare progress word such as creating or sending.",
 	})
 }
 

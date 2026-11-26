@@ -97,6 +97,49 @@ describe("EditAgentRuntimeDialog", () => {
     });
   });
 
+  it("dismisses an open dropdown when clicking field headings without reopening or opening another field", async () => {
+    renderDialog({ onSave: vi.fn() });
+    const model = await screen.findByRole("combobox", { name: "Agent model" });
+    await waitFor(() => expect(model).toHaveTextContent("Codex default"));
+    const runtime = screen.getByRole("combobox", { name: "Agent runtime" });
+    const modelHeading = screen.getByText("Model");
+    const runtimeHeading = screen.getByText("Runtime");
+
+    // Clicking headings while closed does not spuriously open dropdowns.
+    fireEvent.pointerDown(modelHeading, { button: 0, pointerId: 1 });
+    fireEvent.pointerUp(modelHeading, { button: 0, pointerId: 1 });
+    fireEvent.click(modelHeading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(model).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.pointerDown(runtimeHeading, { button: 0, pointerId: 2 });
+    fireEvent.pointerUp(runtimeHeading, { button: 0, pointerId: 2 });
+    fireEvent.click(runtimeHeading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(runtime).toHaveAttribute("aria-expanded", "false");
+
+    // Clicking the Model heading/row while Model is open dismisses it without reopening.
+    fireEvent.click(model);
+    await screen.findByRole("option", { name: "Codex fast" });
+    fireEvent.pointerDown(modelHeading, { button: 0, pointerId: 3 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.pointerUp(modelHeading, { button: 0, pointerId: 3 });
+    fireEvent.click(modelHeading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(model).toHaveAttribute("aria-expanded", "false");
+
+    // Clicking the Runtime heading/row while Model is open closes Model without opening Runtime.
+    fireEvent.click(model);
+    await screen.findByRole("option", { name: "Codex fast" });
+    fireEvent.pointerDown(runtimeHeading, { button: 0, pointerId: 4 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.pointerUp(runtimeHeading, { button: 0, pointerId: 4 });
+    fireEvent.click(runtimeHeading, { button: 0 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(model).toHaveAttribute("aria-expanded", "false");
+    expect(runtime).toHaveAttribute("aria-expanded", "false");
+  });
+
   it.each(["computer", "workspace"])(
     "never falls back to a different %s if the configured binding is missing",
     async (missing) => {
@@ -217,11 +260,6 @@ describe("EditAgentRuntimeDialog", () => {
     );
     expect(screen.getByText("Antigravity update required")).toBeVisible();
     expect(
-      screen.getByText(
-        "Antigravity (1.5.9) on Old Mac needs an update before Agents can run with it.",
-      ),
-    ).toBeVisible();
-    expect(
       screen.getByText("antigravity version 1.5.9 is below minimum 1.5.12"),
     ).toBeVisible();
     expect(screen.getByText("agy update")).toBeVisible();
@@ -237,9 +275,12 @@ describe("EditAgentRuntimeDialog", () => {
       upgrade_required: true,
     });
     renderDialog({ computersOverride: { items: [computer] }, onSave: vi.fn() });
-    expect(
-      await screen.findByText("Old Mac needs a Linger update."),
-    ).toBeVisible();
+    const link = await screen.findByRole("link", {
+      name: "Settings › Computers",
+    });
+    expect(link.closest("div")).toHaveTextContent(
+      "Old Mac needs a Linger update.",
+    );
     expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
   });
 
@@ -648,6 +689,11 @@ describe("EditAgentRuntimeDialog", () => {
         }),
       );
 
+      if (mode === "ready-empty") {
+        expect(
+          await screen.findByText("No models are available for this runtime."),
+        ).toBeVisible();
+      }
       const link = await screen.findByRole("link", {
         name: "Settings › Models",
       });
@@ -740,11 +786,6 @@ describe("EditAgentRuntimeDialog", () => {
 
     expect(await screen.findByText("Codex update required")).toBeVisible();
     expect(
-      screen.getByText(
-        "Codex (codex-cli 0.150.1) on Studio Mac needs an update before Agents can run with it.",
-      ),
-    ).toBeVisible();
-    expect(
       screen.getByText("codex version 0.150.1 is below minimum 0.166.0"),
     ).toBeVisible();
     expect(screen.getByText("npm install -g @openai/codex")).toBeVisible();
@@ -768,12 +809,16 @@ describe("EditAgentRuntimeDialog", () => {
       onSave: vi.fn(),
     });
 
-    expect(
-      await screen.findByText("Linger Computer update required"),
-    ).toBeVisible();
-    expect(
-      screen.getByRole("link", { name: "Settings › Computers" }),
-    ).toHaveAttribute("href", "/t/tenant-northstar/settings/computers");
+    const link = await screen.findByRole("link", {
+      name: "Settings › Computers",
+    });
+    expect(link).toHaveAttribute(
+      "href",
+      "/t/tenant-northstar/settings/computers",
+    );
+    expect(link.closest("div")).toHaveTextContent(
+      "Studio Mac needs a Linger update.",
+    );
     expect(
       screen.queryByText(
         "Install and sign in to this runtime on the computer, then wait for it to become ready.",
@@ -829,13 +874,11 @@ describe("EditAgentRuntimeDialog", () => {
     );
 
     expect(await screen.findByText("Pi needs a model")).toBeVisible();
-    expect(
-      screen.getByText(
-        "No local model is downloaded on Studio Mac yet, and Pi has no ready model source.",
-      ),
-    ).toBeVisible();
     const links = screen.getAllByRole("link", { name: "Settings › Models" });
     expect(links).toHaveLength(1);
+    expect(links[0]!.closest("p")).toHaveTextContent(
+      "No local model on Studio Mac yet.",
+    );
     expect(links[0]).toHaveAttribute(
       "href",
       "/t/tenant-northstar/settings/models?computer=computer-old",
@@ -902,10 +945,8 @@ describe("EditAgentRuntimeDialog", () => {
 
     expect(await screen.findByText("Downloading local model")).toBeVisible();
     expect(
-      screen.getByText(
-        "Qwen3 Coder 30B is downloading on Studio Mac (42%). Once it finishes, Pi can use it when Local model is selected as the model source.",
-      ),
-    ).toBeVisible();
+      screen.getByRole("link", { name: "Settings › Models" }).closest("p"),
+    ).toHaveTextContent("Qwen3 Coder 30B is downloading on Studio Mac (42%).");
     expect(screen.queryByText("Pi sign-in required")).not.toBeInTheDocument();
   });
 
@@ -989,11 +1030,7 @@ describe("EditAgentRuntimeDialog", () => {
     );
 
     expect(await screen.findByText("Pi sign-in required")).toBeVisible();
-    expect(
-      screen.getByText(
-        "In Pi, enter /login to sign in, or configure an API key in Pi auth.json.",
-      ),
-    ).toBeVisible();
+    expect(screen.getByText("Or enter /login in Pi.")).toBeVisible();
     expect(
       screen.queryByRole("link", { name: "Settings › Models" }),
     ).not.toBeInTheDocument();

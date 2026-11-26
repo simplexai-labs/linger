@@ -244,10 +244,12 @@ describe("ComputerPicker", () => {
       expect(addDocListener).not.toHaveBeenCalledWith(
         "pointerdown",
         expect.any(Function),
+        true,
       );
       expect(removeDocListener).not.toHaveBeenCalledWith(
         "pointerdown",
         expect.any(Function),
+        true,
       );
       expect(addWinListener).not.toHaveBeenCalledWith(
         "resize",
@@ -270,5 +272,38 @@ describe("ComputerPicker", () => {
       addWinListener.mockRestore();
       removeWinListener.mockRestore();
     }
+  });
+
+  it("dismisses on outside click and swallows the follow-up click without invoking an underlying button", () => {
+    const onUnderlyingClick = vi.fn();
+    const options: ComputerPickerOption[] = [
+      { computerId: "comp-a", displayName: "Mac Studio", online: true },
+      { computerId: "comp-b", displayName: "lab-241", online: true },
+    ];
+    render(
+      <div>
+        <ComputerPicker onSelect={vi.fn()} options={options} value="comp-a" />
+        <button onClick={onUnderlyingClick} type="button">
+          Recheck memory
+        </button>
+      </div>,
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "Computer" });
+    const recheck = screen.getByRole("button", { name: "Recheck memory" });
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    fireEvent.pointerDown(recheck, { button: 0, pointerId: 1 });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.pointerUp(recheck, { button: 0, pointerId: 1 });
+    fireEvent.click(recheck, { button: 0 });
+    expect(onUnderlyingClick).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(recheck, { button: 0, pointerId: 2 });
+    fireEvent.pointerUp(recheck, { button: 0, pointerId: 2 });
+    fireEvent.click(recheck, { button: 0 });
+    expect(onUnderlyingClick).toHaveBeenCalledTimes(1);
   });
 });

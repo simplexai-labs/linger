@@ -23,15 +23,13 @@ export const agentRuntimeMessages = defineMessages("agentRuntime", {
   reasoning: "Reasoning",
   reasoningLabel: "Agent reasoning effort",
   waitForAgent: "Wait for this Agent to finish before saving changes.",
-  moveHint:
-    "Moving starts a new native Runtime session on the new computer. Local files stay on the old computer.",
+  moveHint: "Local files stay on the old computer.",
   noWritableWorkspace:
     "This computer has no writable workspace. Choose another computer.",
   currentModelUnavailable:
     "The current model is unavailable. Choose another model.",
   noRuntimeModels: "No models are available for this runtime.",
   optionsUnavailable: "Runtime options are unavailable.",
-  readyAfterSignIn: "It turns ready here on its own shortly after you sign in.",
   installAndSignIn:
     "Install and sign in to this runtime on the computer, then wait for it to become ready.",
   missingDefault:

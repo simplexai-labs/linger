@@ -923,6 +923,7 @@ const roomHandoff = definition(
     "--inbox": flag(
       "room:<room-id> of another Room where you and your Human are both members. Run teamhub message read --list-inboxes and match kind=room entries to resolve a Room name to its room:<room-id>.",
     ),
+    "--handoff": flag("Existing handoff ID when continuing the same request."),
     ...bodyOptions,
   },
   async (args, reader) => {
@@ -944,6 +945,9 @@ const roomHandoff = definition(
     return {
       input: await validate("hand_off_to_room", {
         room_id: room[1],
+        ...(option(args, "--handoff")
+          ? { handoff_id: option(args, "--handoff") }
+          : {}),
         instruction: await markdownBodySource(args, reader),
       }),
     };
@@ -955,6 +959,7 @@ const roomHandoff = definition(
     notes: [
       "Only Another Me, from its direct chat with its Human, in a turn the Human started by writing to it or deciding one of its cards.",
       "When your Human names a Room without its room_id, run teamhub message read --list-inboxes first and match kind=room entries to resolve the Room name to room:<room-id>; if multiple Rooms share the same name, ask your Human to clarify before handing off.",
+      "Private reports carry room_handoff metadata; use its room_id and --handoff handoff_id when passing the Human's answer back.",
       "The instruction is hidden from that Room. You there are woken with it, read that Room, and post and @ the Agents yourself; the direct chat's messages are not copied.",
       "Results come back to the direct chat through teamhub message direct.",
     ],

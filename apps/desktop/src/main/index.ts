@@ -175,12 +175,20 @@ async function main(): Promise<void> {
       ? cookies.map((c) => `${c.name}=${c.value}`).join("; ")
       : undefined;
   };
+  const loginShell = resolveLoginShell(log);
+  const daemonPath = daemonExecutable();
+  const nodeBinaryName = process.platform === "win32" ? "node.exe" : "node";
   const localServer = new LocalServerModule({
     home,
     daemonDirectory,
+    daemonExecutable: daemonPath,
     version: VERSION,
+    inspectEnv: inspectEnv(loginShell),
     macosVersion: () => process.getSystemVersion(),
     installerDirectory: path.join(here, "../installer"),
+    bundledNodePath: app.isPackaged
+      ? path.join(process.resourcesPath, "runtime", "bin", nodeBinaryName)
+      : path.join(here, "../computer/runtime/bin", nodeBinaryName),
     ...(__SOURCE_ARCHIVE__ ? { sourceArchive: __SOURCE_ARCHIVE__ } : {}),
     ...(__SOURCE_DEPENDENCIES__
       ? { sourceDependencies: __SOURCE_DEPENDENCIES__ }
@@ -244,7 +252,7 @@ async function main(): Promise<void> {
     preload: path.join(here, "../preload/setup.cjs"),
     version: VERSION,
     defaultDisplayName,
-    show: !background && needsSetup,
+    show: () => !background && !config.get().computerId,
     loginItem: {
       get: () => app.getLoginItemSettings().openAtLogin,
       set: (on) =>
@@ -351,7 +359,7 @@ async function main(): Promise<void> {
     }),
     new ComputerDaemonModule({
       spawn: spawnDaemon(
-        daemonExecutable(),
+        daemonPath,
         path.join(userData, "logs", "computer-daemon.log"),
       ),
       credentials,
@@ -360,9 +368,9 @@ async function main(): Promise<void> {
       // with a matching version and the computer needs no Node.
       teamhubCliDirectory: path.join(here, "../teamhub-cli"),
       defaultDisplayName,
-      env: daemonEnv(log),
+      env: daemonEnv(loginShell),
       ...(process.platform === "win32"
-        ? { protect: protectWithDaemon(daemonExecutable()) }
+        ? { protect: protectWithDaemon(daemonPath) }
         : {}),
       ...desktopPermissions,
     }),
@@ -496,16 +504,43 @@ function electronPower(): PowerApi {
   };
 }
 
-// The user's terminal environment, which runtimes inherit, without the app's
-// own control variables. The runtime paths stay for the daemon config; the
-// daemon keeps LINGER_* from runtimes.
-async function daemonEnv(log: Logger): Promise<Record<string, string>> {
+async function resolveLoginShell(
+  log: Logger,
+): Promise<Record<string, string> | undefined> {
   const started = Date.now();
   const login = await loginShellEnvironment();
   log.info("computer_daemon.login_shell", {
     resolved: login !== undefined,
     duration_ms: Date.now() - started,
   });
+  return login;
+}
+
+// The user's terminal environment for read-only setup inspection (--inspect),
+// keeping LINGER_* controls while adding the login shell's PATH and profile.
+// Never forwarded to --resume, BYOK checks, or the serving installer that
+// starts local services.
+async function inspectEnv(
+  loginShell: Promise<Record<string, string> | undefined>,
+): Promise<Record<string, string>> {
+  const login = await loginShell;
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(
+    withLoginShell(process.env as Record<string, string>, login),
+  )) {
+    if (value === undefined) continue;
+    env[name] = value;
+  }
+  return env;
+}
+
+// The user's terminal environment, which runtimes inherit, without the app's
+// own control variables. The runtime paths stay for the daemon config; the
+// daemon keeps LINGER_* from runtimes.
+async function daemonEnv(
+  loginShell: Promise<Record<string, string> | undefined>,
+): Promise<Record<string, string>> {
+  const login = await loginShell;
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(
     withLoginShell(process.env as Record<string, string>, login),

@@ -38,13 +38,18 @@ export interface VoiceModeMicrophone {
 
 /**
  * `keepsText` marks a send that first waits before the turn reaches the
- * outbox (live Voice Mode waits for its verdict), so the words stay shown.
+ * outbox (live Voice Mode waits for its verdict), so the words stay shown
+ * until the send says, through its callback, that the outbox shows them.
  */
-type TurnSend = (() => Promise<void>) & { keepsText?: boolean };
+type TurnSend = ((onQueued?: () => void) => Promise<void>) & {
+  keepsText?: boolean;
+};
 interface Turn {
   id: string;
   text: string;
   send?: TurnSend;
+  /** The outbox shows this turn now, so its words are no longer shown here. */
+  queued?: boolean;
 }
 
 /**
@@ -77,6 +82,8 @@ export class VoiceModeController {
   private partial = { text: "", endOffsetMs: -1 };
   private carriedText = "";
   private inFlightId?: string;
+  /** A delivery pump is running; only one runs at a time. */
+  private delivering = false;
   private deliveryCompletion: Promise<void> = Promise.resolve();
   private deliveryFailed = false;
   private readonly seen = new Set<string>();
@@ -295,20 +302,22 @@ export class VoiceModeController {
   }
 
   private async deliver(manualRetry = false) {
-    if (this.state.sending || (!this.automatic && !manualRetry)) return;
+    if (this.delivering || (!this.automatic && !manualRetry)) return;
     let done!: () => void;
     this.deliveryCompletion = new Promise<void>((resolve) => {
       done = resolve;
     });
-    this.publish({ sending: true });
+    this.delivering = true;
+    this.publish({});
     try {
       await this.deliverHead(manualRetry, maximumQueuedTurns);
     } catch (error) {
       this.deliveryFailed = true;
       this.fail(error);
     } finally {
+      this.delivering = false;
       this.inFlightId = undefined;
-      this.publish({ sending: false });
+      this.publish({});
       done();
     }
     if (this.automatic && !this.state.error && this.queue.length)
@@ -330,7 +339,12 @@ export class VoiceModeController {
     const turn = this.queue[0]!;
     this.inFlightId = turn.id;
     this.publish({});
-    await (turn.send ? turn.send() : this.options.send(turn));
+    await (turn.send
+      ? turn.send(() => {
+          turn.queued = true;
+          this.publish({});
+        })
+      : this.options.send(turn));
     this.queue.shift();
     this.inFlightId = undefined;
     this.publish({});
@@ -384,11 +398,15 @@ export class VoiceModeController {
   private publish(update: Partial<VoiceModeState>) {
     const queuedText: string[] = [];
     for (const turn of this.queue)
-      if (turn.id !== this.inFlightId || turn.send?.keepsText)
+      if (turn.id !== this.inFlightId || (turn.send?.keepsText && !turn.queued))
         queuedText.push(turn.text);
     // Submitted text is retained by the ordinary durable outbox, not also
     // copied into an editable draft while its result is still unknown.
     const heardText = queuedText.filter(Boolean).join("\n");
+    // A live turn waiting for its reply to end is not being sent yet: it
+    // shows as heard words, and sending starts once the outbox has it.
+    const inFlight = this.queue.find((turn) => turn.id === this.inFlightId);
+    const waiting = Boolean(inFlight?.send?.keepsText && !inFlight.queued);
     const speakingText = [
       this.carriedText,
       ...[...this.speech.values()].map((part) => part.text),
@@ -399,6 +417,7 @@ export class VoiceModeController {
     this.state = {
       ...this.state,
       ...update,
+      sending: this.delivering && !waiting,
       text: [heardText, speakingText].filter(Boolean).join("\n"),
       heardText,
       speakingText,

@@ -18,17 +18,26 @@ export function probePi(executable, args, options, timeoutMs = 30_000) {
       finished = true;
       clearTimeout(timer);
       output.close();
-      child.kill();
-      if (reason) {
-        const diagnostic = stderr.trim().slice(-1500).replaceAll("\x1b", "");
-        reject(
-          new Error(
-            `Pi smoke: ${reason}${diagnostic ? `\n${diagnostic}` : ""}`,
-          ),
-        );
-      } else {
-        resolve();
-      }
+      const diagnostic = stderr.trim().slice(-1500).replaceAll("\x1b", "");
+      const settle = () =>
+        reason
+          ? reject(
+              new Error(
+                `Pi smoke: ${reason}${diagnostic ? `\n${diagnostic}` : ""}`,
+              ),
+            )
+          : resolve();
+      // Windows keeps the working directory busy until the process exits, so
+      // the caller may remove it only after that.
+      if (
+        child.pid === undefined ||
+        child.exitCode !== null ||
+        child.signalCode !== null
+      )
+        return settle();
+      child.once("exit", settle);
+      // A failed kill delivers no exit event.
+      if (!child.kill()) settle();
     }
     child.stderr.setEncoding("utf8").on("data", (chunk) => {
       stderr = (stderr + chunk).slice(-1500);
@@ -69,6 +78,35 @@ export function probePi(executable, args, options, timeoutMs = 30_000) {
   });
 }
 
+export async function assertNoFreshHarnessPi(home) {
+  const root = join(home, "runtime", "harness", "tools", "pi");
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  const downloaded = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const candidate = join(root, entry.name, "pi.exe");
+    if (
+      await access(candidate).then(
+        () => true,
+        () => false,
+      )
+    ) {
+      downloaded.push(candidate);
+    }
+  }
+  if (downloaded.length > 0) {
+    throw new Error(
+      `Expected bundled Pi reuse, but harness downloaded Pi into ${downloaded.join(", ")}`,
+    );
+  }
+}
+
 async function main() {
   const home = process.env.LINGER_HOME;
   if (
@@ -83,6 +121,7 @@ async function main() {
   const resources = join(dirname(process.execPath), "resources");
   const node = join(resources, "runtime", "bin", "node.exe");
   const installer = join(resources, "app", "dist", "installer", "installer.js");
+  const bundledPi = join(resources, "cli", "computer-tools", "bin", "pi.exe");
   const extension = join(
     resources,
     "cli",
@@ -92,6 +131,7 @@ async function main() {
   );
   await access(node);
   await access(installer);
+  await access(bundledPi);
   await access(extension);
   await mkdir(home);
   const source = join(home, "unused-source");
@@ -228,21 +268,7 @@ async function main() {
     if (job.state !== "succeeded")
       throw new Error("Packaged Pi preparation did not succeed");
 
-    const root = join(home, "runtime", "harness", "tools", "pi");
-    const candidates = [];
-    for (const entry of await readdir(root, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const candidate = join(root, entry.name, "pi.exe");
-      if (
-        await access(candidate).then(
-          () => true,
-          () => false,
-        )
-      )
-        candidates.push(candidate);
-    }
-    if (candidates.length !== 1)
-      throw new Error("Expected exactly one freshly installed Pi executable");
+    await assertNoFreshHarnessPi(home);
     const config = join(home, "mcp.json");
     await writeFile(config, '{"mcpServers":{}}', { flag: "wx", mode: 0o600 });
     const env = {
@@ -257,7 +283,7 @@ async function main() {
     // Resource flags match PiRPCResourceArgs in
     // apps/computer/local-daemon/internal/provider/native/pi_catalog.go.
     await probePi(
-      candidates[0],
+      bundledPi,
       [
         "--mode",
         "rpc",

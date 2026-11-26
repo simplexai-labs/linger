@@ -5,26 +5,35 @@ import (
 	"unicode/utf8"
 )
 
+// MaxReasoningTitleRunes is the Runner Gateway character limit for a thinking
+// status title.
+const MaxReasoningTitleRunes = 50_000
+
 // ReasoningTitle extracts a title from public reasoning text: a leading bold
 // heading, or else the first line. Incomplete text yields nothing until its
-// title is delimited. Every Runtime's thinking goes through it.
+// title is delimited or the buffered text exceeds MaxReasoningTitleRunes. Every
+// Runtime's thinking goes through it.
 func ReasoningTitle(text string, complete bool) (string, bool) {
+	rawLen := len(text)
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 	text = strings.TrimLeftFunc(text, jsSpace)
+	if text == "" {
+		return "", complete || rawLen > MaxReasoningTitleRunes*4
+	}
 	var candidate string
 	if strings.HasPrefix(text, "**") || strings.HasPrefix(text, "__") {
 		marker := text[:2]
 		if end := strings.Index(text[2:], marker); end >= 0 {
 			candidate = text[:end+4]
-		} else if complete {
+		} else if complete || utf8.RuneCountInString(text) > MaxReasoningTitleRunes {
 			candidate, _, _ = strings.Cut(text, "\n")
 		} else {
 			return "", false
 		}
 	} else {
 		line, _, found := strings.Cut(text, "\n")
-		if !found && !complete {
+		if !found && !complete && utf8.RuneCountInString(line) <= MaxReasoningTitleRunes {
 			return "", false
 		}
 		candidate = line

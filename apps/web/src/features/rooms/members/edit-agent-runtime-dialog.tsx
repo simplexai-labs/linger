@@ -191,7 +191,7 @@ export function EditAgentRuntimeDialog({
           className="space-y-4 px-5 py-4"
           disabled={isPending || loading}
         >
-          <label className="block">
+          <div>
             <span className="mb-1.5 block text-sm font-medium">
               {t(agentRuntimeMessages.computer)}
             </span>
@@ -213,8 +213,8 @@ export function EditAgentRuntimeDialog({
                 </SelectItem>
               ))}
             </Select>
-          </label>
-          <label className="block">
+          </div>
+          <div>
             <span className="mb-1.5 block text-sm font-medium">
               {t(agentRuntimeMessages.runtime)}
             </span>
@@ -244,9 +244,9 @@ export function EditAgentRuntimeDialog({
                 </SelectItem>
               ))}
             </Select>
-          </label>
+          </div>
           <div className="space-y-1.5">
-            <label className="block">
+            <div>
               <span className="mb-1.5 block text-sm font-medium">
                 {t(agentRuntimeMessages.model)}
               </span>
@@ -271,7 +271,7 @@ export function EditAgentRuntimeDialog({
                   </SelectItem>
                 ))}
               </Select>
-            </label>
+            </div>
             {selection.runtimeType === "pi" &&
             selection.computerId &&
             !loading &&
@@ -364,24 +364,42 @@ function EditAgentRuntimeFeedback({
   unavailable: boolean;
 }) {
   const t = useT();
+  const missingDefault = moving && computer && !runtimeType;
+  const modelMissing =
+    !loading &&
+    !unavailable &&
+    !modelIsAvailable &&
+    runtime?.status === "ready";
+  const showsError =
+    Boolean(missingDefault) ||
+    noWritableGrant ||
+    modelMissing ||
+    unavailable ||
+    Boolean(error);
+  const piHasNoModels =
+    modelMissing &&
+    !hasModelOptions &&
+    !missingDefault &&
+    !noWritableGrant &&
+    !error;
+  // One muted hint at most, and none while an error explains the state.
+  const hint = showsError
+    ? undefined
+    : busy
+      ? agentRuntimeMessages.waitForAgent
+      : computer?.status === "offline" && !computer.upgrade_required
+        ? createAgentMessages.offlineComputerHint
+        : moving && computer
+          ? agentRuntimeMessages.moveHint
+          : undefined;
   return (
     <>
-      {busy ? (
+      {hint ? (
         <p className="text-sm text-app-subtle" role="status">
-          {t(agentRuntimeMessages.waitForAgent)}
+          {t(hint)}
         </p>
       ) : null}
-      {moving && computer ? (
-        <p className="text-sm text-app-subtle" role="status">
-          {t(agentRuntimeMessages.moveHint)}
-        </p>
-      ) : null}
-      {computer?.status === "offline" && !computer.upgrade_required ? (
-        <p className="text-sm text-app-subtle" role="status">
-          {t(createAgentMessages.offlineComputerHint)}
-        </p>
-      ) : null}
-      {moving && computer && !runtimeType ? (
+      {missingDefault ? (
         <p className="text-sm text-app-danger" role="alert">
           {describeMissingDefault(registration, [computer], t)}
         </p>
@@ -391,10 +409,7 @@ function EditAgentRuntimeFeedback({
           {t(agentRuntimeMessages.noWritableWorkspace)}
         </p>
       ) : null}
-      {!loading &&
-      !unavailable &&
-      !modelIsAvailable &&
-      runtime?.status === "ready" ? (
+      {modelMissing ? (
         <p className="text-sm text-app-danger" role="alert">
           {t(
             hasModelOptions
@@ -422,7 +437,11 @@ function EditAgentRuntimeFeedback({
       runtime?.status !== "incompatible" &&
       runtime?.status !== "unknown" &&
       localModelsAvailable !== false &&
-      !piGuidanceCoversLocalModels ? (
+      !piGuidanceCoversLocalModels &&
+      !hint &&
+      // An empty Pi model list is only fixable from Settings › Models, so
+      // its link stays beside that error.
+      (!showsError || piHasNoModels) ? (
         <p className="text-xs text-muted-foreground">
           <RichMessage
             message={createAgentMessages.downloadModel}
@@ -476,23 +495,11 @@ function RuntimeSetupGuidance({
         className="rounded-lg border border-[var(--app-status-warning-border)] bg-[var(--app-status-warning-surface)] p-3 text-sm text-app-body"
         role="alert"
       >
-        <p className="font-medium text-foreground">
-          {t(computerSetupMessages.computerUpgradeRequiredTitle)}
-        </p>
-        <p className="mt-1 text-muted-foreground">
-          {localRuntimeMessage(
-            { error_code: "LOCAL_COMPUTER_UPGRADE_REQUIRED" },
-            runtime.type,
-            computer.display_name,
-            t,
-          )}
-        </p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          <RichMessage
-            message={computerSetupMessages.openComputerSettings}
-            tags={{ link: computersLink }}
-          />
-        </p>
+        <RichMessage
+          message={computerSetupMessages.computerUpgradeRequired}
+          tags={{ link: computersLink }}
+          values={{ computer: computer.display_name }}
+        />
       </div>
     );
   if (runtime.status === "incompatible")
@@ -502,7 +509,6 @@ function RuntimeSetupGuidance({
         diagnosticMessage={runtime.message}
         platform={computer.platform}
         runtimeType={runtime.type}
-        version={runtime.version}
       />
     );
   if (runtime.status === "not_installed")
@@ -536,9 +542,6 @@ function RuntimeSetupGuidance({
           computerName={computer.display_name}
           runtimeType={runtime.type}
         />
-        <p className="mt-1 text-muted-foreground">
-          {t(agentRuntimeMessages.readyAfterSignIn)}
-        </p>
       </div>
     );
   }
@@ -649,7 +652,7 @@ function ReasoningField({
     );
   }
   return (
-    <label className="block">
+    <div>
       <span className="mb-1.5 block text-sm font-medium">
         {t(agentRuntimeMessages.reasoning)}
       </span>
@@ -665,7 +668,7 @@ function ReasoningField({
           </SelectItem>
         ))}
       </Select>
-    </label>
+    </div>
   );
 }
 

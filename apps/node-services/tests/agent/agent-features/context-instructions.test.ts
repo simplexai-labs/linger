@@ -6,6 +6,7 @@ import {
   createContextInstructionsFeature,
   type ExecutionContextDeveloperInstructionsInput,
 } from "../../../src/agent/agent-features/context-instructions/index.js";
+import { STATIC_PREFIX_END_MARKER } from "../../../src/agent/prompt/index.js";
 import { createToolApprovalFeature } from "../../../src/agent/agent-features/tool-approval/index.js";
 import type { AgentCapability } from "../../../src/agent/executor/types.js";
 import type { ExecutionContextRef } from "../../../src/agent/executor/context-ref.js";
@@ -35,11 +36,10 @@ type Scene = Pick<ExecutionContextDeveloperInstructionsInput, "agentType"> &
 /** TeamHub sends the app catalog with or without a Composio key. */
 const catalogAppKeys = ["gmail", "google_calendar", "linear"];
 
-const render = (scene: Scene): string =>
-  assembleExecutionContextDeveloperInstructions({
+const render = (scene: Scene): string => {
+  const sections = assembleExecutionContextDeveloperInstructions({
     agentName: "Research Partner",
     agentActorId: "actor:agent-1",
-    developerInstructions: undefined,
     sponsor,
     connectedApps: true,
     connectedAppKeys: ["gmail", "google_calendar"],
@@ -48,6 +48,8 @@ const render = (scene: Scene): string =>
     ...(scene.agentType === "anotherme" ? { representedHuman } : {}),
     ...scene,
   });
+  return [sections.static, sections.dynamic].filter(Boolean).join("\n\n");
+};
 
 /** The Context instructions an Agent reads, as the composed features build them. */
 interface Deployment {
@@ -295,4 +297,215 @@ describe("context-instructions feature", () => {
       }),
     ).toContain('"display_name":"Research Partner"');
   });
+});
+
+function staticPrefixBeforeMarker(instructions: string): string {
+  const index = instructions.indexOf(STATIC_PREFIX_END_MARKER);
+  expect(index).toBeGreaterThan(0);
+  return instructions.slice(0, index + STATIC_PREFIX_END_MARKER.length);
+}
+
+describe("static prompt prefix stability", () => {
+  const composedFor = (input: {
+    readonly contextKind: "meta" | "alter_ego" | "document";
+    readonly agentType: "anotherme" | "general";
+    readonly agentName: string;
+    readonly agentActorId: string;
+    readonly roomId?: string;
+    readonly roomKind?: "direct" | "collaboration";
+    readonly taskId?: string;
+    readonly humanActorId?: string;
+    readonly connectedAppKeys: readonly string[];
+    readonly connectableAppKeys: readonly string[];
+    readonly compactInstructions: boolean;
+  }): string => {
+    const ref: ExecutionContextRef =
+      input.contextKind === "meta"
+        ? {
+            kind: "meta",
+            agentId: input.agentActorId,
+            roomId: input.roomId ?? "room-a",
+          }
+        : input.contextKind === "alter_ego"
+          ? {
+              kind: "alter_ego",
+              agentId: input.agentActorId,
+              taskId: input.taskId ?? "task-a",
+            }
+          : {
+              kind: "document",
+              agentId: input.agentActorId,
+              documentId: "doc-a",
+            };
+    const { context } = makeTestFeatureContext({
+      ref,
+      ...(input.contextKind === "meta"
+        ? { roomKind: input.roomKind ?? "direct" }
+        : {}),
+      identity: {
+        actorId: input.agentActorId,
+        agentType: input.agentType,
+        sponsor: { actorId: "actor:sponsor-x", displayName: "Sponsor X" },
+        ...(input.agentType === "anotherme"
+          ? {
+              representedHuman: {
+                actorId: input.humanActorId ?? "actor:human-x",
+                displayName: "Human X",
+                memory: { version: 1, markdown: "" },
+              },
+            }
+          : {}),
+      },
+      agentName: input.agentName,
+      agent: { name: input.agentName, instructions: "per-agent base prompt" },
+      capabilities: ["permissionReview"],
+    });
+    return composeContextFeatures({
+      context,
+      features: [
+        createContextInstructionsFeature(),
+        createToolApprovalFeature(),
+      ],
+    }).contextInstructions({
+      connectedApps: true,
+      connectedAppKeys: input.connectedAppKeys,
+      connectableAppKeys: input.connectableAppKeys,
+      compactInstructions: input.compactInstructions,
+    })!;
+  };
+
+  it.each([false, true])(
+    "shares an identical static prefix across all Meta agents, humans, rooms, and connected apps (compact=%s)",
+    (compactInstructions) => {
+      const baseline = staticPrefixBeforeMarker(
+        composedFor({
+          contextKind: "meta",
+          agentType: "anotherme",
+          agentName: "Alpha",
+          agentActorId: "actor:alpha",
+          roomId: "room-alpha",
+          roomKind: "direct",
+          humanActorId: "human-1",
+          connectedAppKeys: ["gmail", "slack"],
+          connectableAppKeys: ["gmail", "slack", "notion"],
+          compactInstructions,
+        }),
+      );
+      expect(baseline).toContain("<tool-approval-protocol>");
+
+      for (const variant of [
+        {
+          agentType: "anotherme" as const,
+          agentName: "Beta",
+          agentActorId: "actor:beta",
+          roomId: "room-beta",
+          roomKind: "collaboration" as const,
+          humanActorId: "human-2",
+          connectedAppKeys: ["feishu_mail"],
+          connectableAppKeys: ["feishu_mail", "linear"],
+        },
+        {
+          agentType: "general" as const,
+          agentName: "Researcher",
+          agentActorId: "actor:spec-1",
+          roomId: "room-gamma",
+          roomKind: "direct" as const,
+          connectedAppKeys: [],
+          connectableAppKeys: ["github"],
+        },
+        {
+          agentType: "general" as const,
+          agentName: "Reviewer",
+          agentActorId: "actor:spec-2",
+          roomId: "room-delta",
+          roomKind: "collaboration" as const,
+          connectedAppKeys: ["outlook", "github"],
+          connectableAppKeys: [],
+        },
+      ]) {
+        const rendered = composedFor({
+          contextKind: "meta",
+          compactInstructions,
+          ...variant,
+        });
+        expect(staticPrefixBeforeMarker(rendered)).toBe(baseline);
+      }
+
+      const specialistDirect = composedFor({
+        contextKind: "meta",
+        agentType: "general",
+        agentName: "Researcher",
+        agentActorId: "actor:spec-1",
+        roomId: "room-gamma",
+        roomKind: "direct",
+        connectedAppKeys: [],
+        connectableAppKeys: ["github"],
+        compactInstructions,
+      });
+      expect(specialistDirect).toContain(
+        compactInstructions
+          ? "Don't create Rooms or dispatch other Agents"
+          : "Don't create collaboration Rooms or dispatch other Agents.",
+      );
+      expect(specialistDirect).not.toContain("teamhub room handoff");
+      expect(specialistDirect).not.toContain("you orchestrate work");
+    },
+  );
+
+  it.each([false, true])(
+    "shares an identical static prefix across AlterEgo agents, tasks, and connected apps (compact=%s)",
+    (compactInstructions) => {
+      const a = composedFor({
+        contextKind: "alter_ego",
+        agentType: "anotherme",
+        agentName: "Alpha",
+        agentActorId: "actor:alpha",
+        taskId: "task-111",
+        humanActorId: "human-1",
+        connectedAppKeys: ["gmail"],
+        connectableAppKeys: ["gmail"],
+        compactInstructions,
+      });
+      const b = composedFor({
+        contextKind: "alter_ego",
+        agentType: "general",
+        agentName: "Worker",
+        agentActorId: "actor:worker",
+        taskId: "task-222",
+        connectedAppKeys: ["outlook", "github"],
+        connectableAppKeys: [],
+        compactInstructions,
+      });
+      expect(staticPrefixBeforeMarker(a)).toBe(staticPrefixBeforeMarker(b));
+      expect(a).toContain("./playground/task-111/");
+      expect(b).toContain("./playground/task-222/");
+      expect(staticPrefixBeforeMarker(a)).not.toContain("task-111");
+    },
+  );
+
+  it.each([false, true])(
+    "shares an identical static prefix across Document agents (compact=%s)",
+    (compactInstructions) => {
+      const a = composedFor({
+        contextKind: "document",
+        agentType: "anotherme",
+        agentName: "Alpha",
+        agentActorId: "actor:alpha",
+        humanActorId: "human-1",
+        connectedAppKeys: ["gmail"],
+        connectableAppKeys: ["gmail"],
+        compactInstructions,
+      });
+      const b = composedFor({
+        contextKind: "document",
+        agentType: "general",
+        agentName: "Reviewer",
+        agentActorId: "actor:reviewer",
+        connectedAppKeys: [],
+        connectableAppKeys: [],
+        compactInstructions,
+      });
+      expect(staticPrefixBeforeMarker(a)).toBe(staticPrefixBeforeMarker(b));
+    },
+  );
 });

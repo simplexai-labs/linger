@@ -7,6 +7,10 @@ const REDACTED = "[Redacted]";
 export function redactSensitiveText(value: string): string {
   return value
     .replace(
+      /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/gu,
+      "[Redacted private key]",
+    )
+    .replace(
       /data:[^\s,;]+;base64,[A-Za-z0-9+/=_-]+/gi,
       "[Redacted binary data]",
     )
@@ -16,13 +20,21 @@ export function redactSensitiveText(value: string): string {
       /(PLAYWRIGHT_MCP_EXTENSION_TOKEN\s*=\s*)["']?[A-Za-z0-9_-]+["']?/giu,
       `$1${REDACTED}`,
     )
-    .replace(/(\bBearer\s+)[^\s,;"']+/gi, `$1${REDACTED}`)
+    .replace(/(\bBearer[ \t]+)[^\s,;"']+/gi, `$1${REDACTED}`)
     .replace(
-      /((?:"|')?(?:access[_-]?token|api[_-]?key|authorization|client[_-]?secret|cookie|password|private[_-]?key|refresh[_-]?token|service[_-]?token|secret|token)(?:"|')?\s*:\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\s}\]]+)/gi,
+      /(\b(?:proxy-)?authorization[ \t]*[:=][ \t]*Basic[ \t]+)[^\s,;"']+/gi,
+      `$1${REDACTED}`,
+    )
+    .replace(
+      /\b((?:proxy-)?authorization|(?:set-)?cookie)\b([ \t]*[:=][ \t]*)(?![ \t]*(?:Bearer|Basic)[ \t]+\[Redacted\](?:[ \t]*(?:\r?\n|$)))(?![ \t]*["'[])[^\s\r\n][^\r\n]*/giu,
+      `$1$2${REDACTED}`,
+    )
+    .replace(
+      /((?:"|')?(?:access[_-]?token|api[_-]?key|authorization|client[_-]?secret|cookie|password|private[_-]?key|refresh[_-]?token|service[_-]?token|secret|token)(?:"|')?\s*:\s*)(?!(?:Bearer|Basic)[ \t]+\[Redacted\])(?!\[Redacted\])(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\s}\]]+)/gi,
       `$1"${REDACTED}"`,
     )
     .replace(
-      /(\b(?:access[_-]?token|api[_-]?key|authorization|client[_-]?secret|cookie|password|private[_-]?key|refresh[_-]?token|service[_-]?token|secret|token)\s*=\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&]+)/gi,
+      /(\b(?:access[_-]?token|api[_-]?key|authorization|client[_-]?secret|cookie|password|private[_-]?key|refresh[_-]?token|service[_-]?token|secret|token)\s*=\s*)(?!\[Redacted\])(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&]+)/gi,
       `$1${REDACTED}`,
     )
     .replace(

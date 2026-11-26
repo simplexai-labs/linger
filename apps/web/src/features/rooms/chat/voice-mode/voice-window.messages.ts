@@ -12,15 +12,20 @@ export const voiceWindowMessages = defineMessages("voiceWindow", {
   unmute: "Unmute Voice Mode",
   replySoundOn: "Turn reply sound on from the voice window",
   replySoundOff: "Turn reply sound off from the voice window",
-  returnToLinger: "Return Voice Mode to Linger",
-  returnHint: "Back to Linger; Voice Mode continues",
-  float: "Float Voice Mode window",
-  floatHint: "Float over other tabs and apps",
-  shrink: "Shrink Voice Mode window",
-  expand: "Expand Voice Mode window",
+  showConversation: "Show Voice Mode conversation",
+  hideConversation: "Hide Voice Mode conversation",
   end: "End Voice Mode",
   resize: "Resize Voice Mode window",
   dragHint: "Drag the floating window to move or resize it.",
+
+  // The call's state, short enough for the window's one line.
+  statusWakingUp: "Waking up",
+  statusListening: "Listening",
+  statusMicOff: "Mic off",
+  statusSending: "Sending…",
+  statusPaused: "Paused",
+  statusFinishing: "Finishing…",
+  statusStopped: "Stopped",
 
   // The conversation in the window.
   conversation: "Voice Mode conversation",

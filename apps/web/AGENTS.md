@@ -150,7 +150,10 @@ build:assets` to check the initial JS budget.
 - The Another Me Chat opens with a danger banner while TeamHub's Another Me
   carries `background_failure` (three or more failed background model calls
   in a row), worded from its reason code (an unknown code reads as unknown).
-  It cannot be dismissed and goes once a background call completes.
+  It can be dismissed for the current session for its active reason code
+  (kept in memory per Room and cleared on sign-out) and reappears if the
+  reason changes, if TeamHub clears the streak (observed by `RoomShell` even
+  while viewing another Room), or on reload.
 - Switching between Meeting and Voice Mode ends the previous session and
   releases its microphone before the new mode starts. Meeting saving can
   continue in the background. The sidebar Meeting entry spins only while a
@@ -161,56 +164,74 @@ build:assets` to check the initial JS budget.
   switch, the new mode opens in the page and can be floated from there.
   During Live, the Meeting entry offers to start a new Meeting even while an
   earlier one is saving. Both in-page voice windows retain a visible, draggable
-  title bar: dark in browsers, the window's own surface colour in the desktop
-  app. Picture-in-picture keeps the browser title bar. The desktop app floats
+  bar. The recording window's title bar uses the window's surface colour
+  in browsers and the desktop app. Voice Mode's bar is its white
+  island: Another Me, a one-line state, four pill bars that follow the
+  microphone, and the controls (mute, reply sound, conversation, hang up). It
+  says Waking up until the call listens and, in Live, until the runtime's
+  `linger.voice_provider_ready` attribute says the live model is connected
+  (a runtime without it counts as connected); meanwhile Another Me rests grey
+  and breathes, with every control already in place, then it leans in once.
+  In the Room the Human's live words fade in phrase by phrase as in the
+  window, and leave the moment the turn shows in the outbox. Both Meeting and
+  Voice Mode stay in the page in browsers: neither opens browser picture-in-picture,
+  whose title bar and controls the page cannot hide or style. The desktop app floats
   them in its own always-on-top window, which stays up while the main window
   is minimized or closed to the tray: when the preload offers
   `window.lingerDesktop.voiceWindow`, `voice-pip.ts` opens it with
   `window.open("")` (the desktop main process allows only that call) and is
   the only place that knows which kind of window it got. A desktop app without that field keeps voice windows
-  in the page with no float button. In the page on macOS they stay out of the
+  in the page with no float button. Voice Mode has no float button: it floats
+  when it starts. In the page on macOS they stay out of the
   window drag strip. In the page both windows resize by any edge or corner
   (`voice-window-resize.tsx`), down to a minimum size and never past the
   viewport; the corner grip also takes arrow keys. Dragging the title bar
   keeps the whole window inside the viewport too, and a window that grows
   where it sits, or whose viewport shrinks, moves back in. Neither window can
   be taller than the viewport leaves room for, so the header stays reachable.
-  The size lasts while the window is open and is not stored. Voice Mode's expand button switches
-  between its two preset sizes and drops a dragged size; a minimized
-  recording resizes in width only. A floated window has no handles: the
-  browser or the desktop app resizes it.
+  The size lasts while the window is open and is not stored. Voice Mode opens
+  as the island alone; its arrow (and the spoken expand and shrink) opens the
+  conversation directly under it with the chat's resize timing
+  (`AutoHeight`); a dragged size lasts through closing (its width) and
+  opening again (its height), and the window keeps one width either way. Only
+  the open conversation resizes by its edges. A floated Voice Mode window
+  also opens as the island alone (96px, the desktop app's minimum) and grows
+  to show the conversation or shrinks back inside the arrow's click, frame
+  by frame with the same timing and easing, the island staying at its top and
+  the conversation going once the window has shut over it. It keeps its
+  width and the open height the Human gave it. A minimized
+  recording resizes in width only. Meeting exposes its collapse arrow from
+  startup, before its Capture arrives. Its in-page body uses the same
+  `AutoHeight` timing as Voice Mode, preserving the expanded height, transcript
+  scroll and Ask draft through collapse. A floated window has no handles: the
+  desktop app resizes it.
 - The compact primary rail reveals labels on hover and keyboard focus without
   moving link hit areas or neighbouring links. A stationary pointer at an edge
   must not trigger repeated hover enter/leave; sidebar expansion and Chat list
   collapse remain explicit button actions. Pointer movement only resizes during
   an active drag; keyboard resizing and double-click reset remain available.
-- Opening Meeting from the sidebar requests the initial picture-in-picture
-  size so a new expanded recording cannot inherit the browser's cached
-  minimized window bounds. Floating an existing in-page recording keeps the
-  browser's usual placement behavior.
-- Recording picture-in-picture collapse remembers that window's actual
+- Opening Meeting from the sidebar requests the initial floating-window
+  size in the desktop app so a new recording opens expanded. In browsers it
+  opens the in-page window and offers no Float or Return controls.
+- Recording desktop-window collapse remembers that window's actual
   expanded outer dimensions and restores both dimensions with an absolute
   resize inside the user's click, bounded by the current screen. A pending
   native resize must not replace the saved expanded size with collapsed
   metrics. Collapse never closes the window or stops the recording; native
-  window placement remains under browser control. Stop preserves the current
+  window placement remains under desktop control. Stop preserves the current
   recording view and window dimensions. A minimized window, in the page
-  (including the desktop app) or picture-in-picture, shows the confirmation
+  (including the desktop app) or floated, shows the confirmation
   actions side by side within its control row in place of Pause and Stop, so
   they stay on screen wherever the row sits and never draw over the controls;
   the timer stays beside them while it fits. An open window keeps the vertical
   confirmation card. Escape or Keep recording returns focus to Stop.
-- Recording and Voice Mode distinguish the native window's close action from
-  back to tab through the shared PiP return detection. Back to tab keeps the
-  session running in the page and exposes a Float action; close ends it.
-  Every floated window also draws its own return button, in the browser and
-  in the desktop app: `returnVoicePipToPage` brings the tab or the main
-  window to the front, reports the return itself and closes the floated
-  window. Voice Mode then opens the Room the call started in; a recording
-  stays on the page the main window shows. The desktop app's window has no
-  back to tab button, so every other close of it ends the session.
+- Closing a desktop recording window ends the recording. Its explicit Return
+  button brings the main window forward and keeps recording in the page,
+  where Float can reopen the desktop window. Closing a floated Voice Mode
+  window ends the call. Browser visibility or focus changes never decide
+  whether a window close ends a session.
   Recording moves one portal host between documents so paused state, Ask
-  drafts and transcript scroll survive the move. Hide it while classifying a
+  drafts and transcript scroll survive the move. Hide it while processing a
   native close, and ignore a late result after unmount or a replacement window.
 - Pausing a recording mutes the shared microphone for that recording only:
   the microphone track can outlive it, so a new recording turns the

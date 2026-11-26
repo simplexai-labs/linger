@@ -118,7 +118,6 @@ export function PublishAgentTemplateDialog({
 
   return (
     <ModalDialog
-      description={t(m.publishDescription)}
       onClose={onClose}
       size="md"
       title={t(m.publishTitle)}

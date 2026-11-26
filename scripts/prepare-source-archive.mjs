@@ -15,10 +15,25 @@ const repositoryRoot = path.resolve(
 );
 const SOURCE_ENTRY = "scripts/source-native.mjs";
 const GZIP_LEVEL = 9;
+const SOURCE_ARCHIVE_MODES = Object.freeze(["full", "minimal"]);
+
+// Minimal set of tracked files needed to boot offline desktop services when
+// TeamHub binaries and the Native runtime are prebuilt. `apps/teamhub/go.mod`
+// keeps the `apps/teamhub/` directory present as TeamHub's working directory.
+export const SOURCE_SKELETON_FILES = Object.freeze([
+  ".env.example",
+  "apps/teamhub/go.mod",
+  "package.json",
+  "scripts/env-inventory.json",
+  "scripts/local-defaults.env",
+  "scripts/replace-process.mjs",
+  "scripts/source-native.mjs",
+  "scripts/with-local-env.mjs",
+]);
 
 /**
- * The desktop "Run on This Computer" flow downloads this archive and builds
- * the services from it, so it holds exactly one committed tree under a single
+ * The desktop "Run on This Computer" flow unpacks this archive and runs the
+ * services from it, so it holds committed files from one tree under a single
  * `<name>-<label>/` folder. `git archive` stamps entries with the commit time
  * and gzip runs without a header timestamp, so one commit always yields the
  * same digest.
@@ -26,6 +41,7 @@ const GZIP_LEVEL = 9;
 export function parseSourceArchiveArguments(arguments_) {
   const options = {
     label: null,
+    mode: "full",
     name: "linger",
     output: path.join(repositoryRoot, ".linger-runtime/source-archive"),
     ref: "HEAD",
@@ -34,9 +50,14 @@ export function parseSourceArchiveArguments(arguments_) {
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (
-      !["--label", "--name", "--output", "--ref", "--url-base"].includes(
-        argument,
-      )
+      ![
+        "--label",
+        "--mode",
+        "--name",
+        "--output",
+        "--ref",
+        "--url-base",
+      ].includes(argument)
     ) {
       throw new Error(`Unknown source archive argument: ${argument}`);
     }
@@ -44,6 +65,9 @@ export function parseSourceArchiveArguments(arguments_) {
     if (!value) throw new Error(`${argument} requires a value.`);
     options[argument.slice(2)] = value;
     index += 1;
+  }
+  if (!SOURCE_ARCHIVE_MODES.includes(options.mode)) {
+    throw new Error(`--mode must be full or minimal: ${options.mode}`);
   }
   for (const key of ["name", "label"]) {
     if (options[key] !== null && !/^[A-Za-z0-9][\w.-]*$/.test(options[key])) {
@@ -56,6 +80,7 @@ export function parseSourceArchiveArguments(arguments_) {
   }
   return {
     label: options.label,
+    mode: options.mode,
     name: options.name,
     output: path.resolve(repositoryRoot, options.output),
     ref: options.ref,
@@ -67,19 +92,40 @@ export function parseSourceArchiveArguments(arguments_) {
  * The commit a source ref names and the label its published files carry: a
  * tag names itself; any other ref gets the short commit.
  */
-export async function resolveSourceRef(ref, label, cwd) {
+export async function resolveSourceRef(ref, label, cwd, mode = "full") {
   const commit = (
     await capture("git", ["rev-parse", "--verify", `${ref}^{commit}`], {
       cwd,
     })
   ).trim();
-  const tracked = await capture(
-    "git",
-    ["ls-tree", "--name-only", commit, "--", SOURCE_ENTRY],
-    { cwd },
-  );
-  if (tracked.trim() !== SOURCE_ENTRY) {
-    throw new Error(`${ref} has no ${SOURCE_ENTRY}`);
+  if (mode === "minimal") {
+    const tracked = new Set(
+      (
+        await capture(
+          "git",
+          ["ls-tree", "--name-only", commit, "--", ...SOURCE_SKELETON_FILES],
+          { cwd },
+        )
+      )
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean),
+    );
+    const missing = SOURCE_SKELETON_FILES.filter((file) => !tracked.has(file));
+    if (missing.length > 0) {
+      throw new Error(
+        `${ref} is missing required minimal source files: ${missing.join(", ")}`,
+      );
+    }
+  } else {
+    const tracked = await capture(
+      "git",
+      ["ls-tree", "--name-only", commit, "--", SOURCE_ENTRY],
+      { cwd },
+    );
+    if (tracked.trim() !== SOURCE_ENTRY) {
+      throw new Error(`${ref} has no ${SOURCE_ENTRY}`);
+    }
   }
   const isTag = await capture(
     "git",
@@ -106,6 +152,7 @@ export async function prepareSourceArchive(
     options.ref,
     options.label,
     cwd,
+    options.mode,
   );
   const folder = `${options.name}-${label}`;
   const fileName = `${folder}.tar.gz`;
@@ -115,11 +162,17 @@ export async function prepareSourceArchive(
 
   const hash = createHash("sha256");
   let bytes = 0;
-  const git = spawn(
-    "git",
-    ["archive", "--format=tar", `--prefix=${folder}/`, commit],
-    { cwd, stdio: ["ignore", "pipe", "inherit"] },
-  );
+  const archiveArgs = [
+    "archive",
+    "--format=tar",
+    `--prefix=${folder}/`,
+    commit,
+    ...(options.mode === "minimal" ? ["--", ...SOURCE_SKELETON_FILES] : []),
+  ];
+  const git = spawn("git", archiveArgs, {
+    cwd,
+    stdio: ["ignore", "pipe", "inherit"],
+  });
   const exited = new Promise((resolve, reject) => {
     git.once("error", reject);
     git.once("close", (code) =>
@@ -153,6 +206,7 @@ export async function prepareSourceArchive(
     archive,
     bytes,
     commit,
+    mode: options.mode,
     sha256,
     ...(options.urlBase && {
       url: new URL(fileName, options.urlBase.replace(/\/?$/, "/")).href,

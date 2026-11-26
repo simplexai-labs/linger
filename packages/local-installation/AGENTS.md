@@ -101,7 +101,14 @@ Every port the installer chooses (`ports.ts`) must be free on both
 127.0.0.1 and ::1 with nothing answering there: `localhost` resolves to ::1
 first on macOS, and a program on ::1 alone would answer for a service that
 bound 127.0.0.1 without an error. UDP allocation holds the bound IPv4 socket
-while checking ::1 instead of closing and rebinding 127.0.0.1, and falls back
+while checking ::1 (and non-loopback local interfaces when `allInterfaces` is
+set, as LiveKit's RTC UDP port requires on Windows where LiveKit binds and
+advertises local interfaces alongside loopback with `use_ice_lite: true`
+because Windows blocks cross-scope UDP between WebRTC's non-loopback sockets
+and `127.0.0.1`, while ICE-Lite keeps LiveKit from auto-injecting public STUN
+servers when `node_ip` is unset; single-port UDPMux snapshots local interfaces
+at startup) instead
+of closing and rebinding 127.0.0.1, and falls back
 to unprivileged non-ephemeral ports when OS ephemeral UDP ports fail or
 collide. The web static host listens on both.
 Creating an instance also reserves other instances' saved LiveKit HTTP and RTC
@@ -127,6 +134,18 @@ still up, so its graceful shutdown requeues in-flight Agent Runs.
 
 `inspectSetup` keeps tool downloads and state in `home`; `targetHome`, when
 provided, selects the installation paths to inspect independently of that cache.
+During setup (`inspectSetup`), runtime preparation (`installNativeRuntime`,
+`prepareRuntime`), and runtime sign-in checks (`inspectRuntime`), CLI Runtime
+discovery, minimum-version verification, and authentication status are owned by
+the Go `local-daemon` via `linger-computer-daemon probe-runtimes --json`
+(`daemon-runtime-probe.ts`, locating the binary through explicit
+`daemonExecutable`, `LINGER_COMPUTER_DAEMON`, or `PATH`), while `localmodels`
+owns hardware/memory evaluation, local-model stack admission/lifecycle, and
+managed harness installation and profile descriptors. When no daemon binary is
+available, those entrypoints fall back cleanly to `localmodels` `harness`
+status. `inspectRuntimeDescriptors` (used by `managedRuntimeEnvironment`,
+`readManagedModel`, and Computer enrollment bindings) reads `localmodels`
+descriptors only and never probes `local-daemon`.
 
 The home is `LINGER_HOME`, else `~/.simplexai` (`home.ts`). Installs from
 before the product was renamed Linger convert once in
@@ -244,7 +263,8 @@ The local source is set only by a start whose request chose local models
 (`setupChoice` or a plan approval); a restart or version upgrade from the saved
 choice keeps a source the person switched to on the Models page (leaving the
 local model stack stopped while `model-source.json` names `byok` or
-`subscription`).
+`subscription`, omitting `--main-plan` from `prepareFoundationServices`, and
+keeping the active BYOK or subscription runtime for `prepareModelGateway`).
 The installer reads `model-source.json` (`readByokEnvironment`) but never
 writes it. When a deployed local-model stack's binding reports a stopped
 service or gateway (`deployment-unavailable` or `gateway-unavailable`) and its
@@ -390,9 +410,19 @@ Every download offered by both a global host and a mainland-China mirror
 goes through `downloadInRegion` (`region.ts`), which tries the home's
 download region first and never drops a source; the region is
 `SIMPLEX_REGION`, else `<home>/runtime/region.json` (24 hours), else a
-best-of-three npm registry probe (up to 1 MiB per round, fastest wins). When
+best-of-three npm registry probe (up to 1 MiB per round, fastest wins; a
+full-window first round short-circuits only on a 4x margin, when the other
+registry delivered nothing, or on a 2x margin at >= 160 KiB/s, so slow
+cold-start handshakes still run confirmation rounds). When
 the preferred region fails or transfers slowly while a mirror in the other
-region proves faster, the transfer resumes there and rewrites the file. The
+region proves faster, the transfer resumes there and rewrites the file;
+`downloadVerified` keeps `minRemainingMs` while another mirror remains so a
+faster alternate mirror finishing soon completes instead of aborting, and
+keeps slow-mirror comparison enabled until a round measures host throughput.
+`resolveRegion` tracks per-home resolution metadata (`method`, duration `ms`,
+and probe rates) via optional `onResolved`, and `downloadInRegion` /
+`downloadVerified` emit hostname-only diagnostic events (`region_resolved`,
+`slow_switch`, `host_switch`, `region_fallback`) for caller logs. The
 probe is shared per home, but cancellation belongs to each caller: one setup
 leaving does not cancel another, and the last waiter leaving aborts the probe
 so a later caller can retry. Even a cached region respects caller cancellation.
@@ -464,7 +494,16 @@ endpoint probe of up to about 35 s followed by Bifrost's health wait of up to
 180 s) stops it only after that long with no output. The resume mount
 keeps its 90 s wall clock. `prepareByokRuntime` logs elapsed time every 10 s while mounting
 the BYOK gateway (a log line, since the job appends and persists every stage
-event).
+event) and logs separate `runtime` and `gateway` elapsed seconds when done.
+`prepareLocalmodelsTool` waits for and reuses an in-progress cross-process kit
+download when the publication lock reports `INSTANCE_BUSY` (bounded by
+`lockWaitMs` and cancellable via `signal`), logs region/mirror events and kit
+preparation timings (`download`, `unpack`, `verify`); `runLocalmodels` logs sub-phase
+breakdowns (`download`, retries/switches, `extract`, `verify`, `install`,
+`post-download`) alongside its `tool checked in / ran in` line; `waitHealthy`
+logs per-service readiness times and a summary across `web`, `teamhub`,
+`node-services`, and `document-runtime`; `stopNativeSource` and
+`stopLocalmodels` log per-step stop durations and `Native stop timings (s)`.
 
 Run `pnpm --filter @linger/local-installation check` (`make check-packages`
 runs it too); `make check-installer` runs its consumer, the installer, and

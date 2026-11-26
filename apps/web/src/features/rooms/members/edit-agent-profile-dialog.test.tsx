@@ -200,7 +200,6 @@ describe("Agent profile editing", () => {
       updateAvatar,
     );
 
-    expect(screen.getByText("Update your Agent's avatar.")).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "Agent name" })).toBeNull();
     expect(
       screen.queryByRole("button", { name: "Edit agent name" }),

@@ -40,7 +40,10 @@ export type ServiceFeature =
   | "local_models_engine"
   | "local_models_concurrency_probe"
   | "local_model_unavailable"
-  | "local_models_external_holders";
+  | "model_gateway_unavailable"
+  | "local_models_external_holders"
+  | "runtime_failure_detail"
+  | "operation_background_wait";
 export type JsonValue =
   | null
   | boolean
@@ -727,6 +730,20 @@ export type RunEvent =
       path: string;
     }
   | {
+      type: "run.background_waiting";
+      observed_at_unix_ms: NonNegativeInteger;
+      tools: {
+        call_id: Id;
+        tool_name: string;
+        started_at_unix_ms: NonNegativeInteger;
+      }[];
+    }
+  | {
+      type: "run.background_resumed";
+      observed_at_unix_ms: NonNegativeInteger;
+      trigger: "background_continuation" | "user_input";
+    }
+  | {
       type: "run.completed";
     }
   | {
@@ -1010,7 +1027,7 @@ export interface ProviderPrepare {
   connection_epoch: PositiveInteger;
   agent_id: Id;
   workspace_grant_id: Id;
-  runtime_type: "codex" | "claude" | "pi";
+  runtime_type: "codex" | "claude" | "pi" | "antigravity";
   execution_context_key: ExecutionContextKey;
   runtime_instance_id: ExecutionContextKey;
   context_view_ref: ContextViewRef;
@@ -2289,13 +2306,16 @@ export interface RuntimeExecutionFailure {
     | "network_error"
     | "rate_limited"
     | "model_unavailable"
+    | "model_not_offered"
     | "local_model_unavailable"
+    | "model_gateway_unavailable"
     | "context_too_long"
     | "model_service_error"
     | "timeout"
     | "execution_failed";
   runtime_type: "codex" | "claude" | "pi" | "antigravity";
   runtime_version?: string;
+  detail?: string;
 }
 export interface RuntimeFailureDiagnostics {
   exitCode?: number;

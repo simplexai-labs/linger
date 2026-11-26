@@ -41,6 +41,8 @@ import { voiceSessionMessages as m } from "./voice-session.messages";
 interface LiveView {
   connection?: VoiceLiveConnection;
   transcript?: readonly VoiceLiveLine[];
+  /** The live model is not connected yet, or is reconnecting. */
+  waking?: boolean;
 }
 
 /**
@@ -104,8 +106,10 @@ export function runVoiceModeSession({
     if (prepared) return prepared;
     // Like the composer's, the first send fixes the turn's one key.
     let first: { voiceLiveTurn?: Parameters<VoiceModeTurnSend>[0] } | undefined;
-    return (voiceLiveTurn) => {
+    return (voiceLiveTurn, onQueued) => {
       first ??= { voiceLiveTurn };
+      // Without a composer here no live words are shown in this Room.
+      onQueued?.();
       return sendVoiceTurnToRoom({
         composition: roomMessageSender(runtime.client),
         eventId,
@@ -150,6 +154,7 @@ export function runVoiceModeSession({
     signal: AbortSignal,
   ) => {
     let transcript: readonly VoiceLiveLine[] = [];
+    let waking = true;
     const live = createVoiceLiveArbiter({
       voiceSessionId: () => connection?.voiceSessionId,
       active: () => connection?.active() ?? false,
@@ -159,7 +164,7 @@ export function runVoiceModeSession({
       page: { state: voicePageState, read: readVoicePage },
       onTranscript: (next) => {
         transcript = next;
-        if (arbiter === live) onLive({ connection, transcript });
+        if (arbiter === live) onLive({ connection, transcript, waking });
       },
     });
     arbiter = live;
@@ -189,7 +194,12 @@ export function runVoiceModeSession({
       channel: (opened) => {
         if (arbiter !== live) return;
         connection = opened;
-        onLive({ connection, transcript });
+        onLive({ connection, transcript, waking });
+      },
+      providerReady: (ready) => {
+        if (arbiter !== live) return;
+        waking = !ready;
+        onLive({ connection, transcript, waking });
       },
       audible: live.audible,
       beforeClose: live.settle,
@@ -358,6 +368,7 @@ export function createVoiceModeSessionEngine({
   const liveView = (): VoiceModeLivePresentation => ({
     soundOff,
     transcript: live?.transcript ?? [],
+    waking: live?.waking ?? true,
   });
   const present = (
     current: Run,

@@ -16,8 +16,9 @@ export interface DownloadTiming {
   /** An attempt that receives no bytes for this long starts again. */
   idleTimeoutMs: number;
   /**
-   * When mirrors exist, check throughput on this interval during the first
-   * round so a slow host yields to a faster mirror. Disabled when unset or <= 0.
+   * When mirrors exist, check throughput on this interval until a round
+   * compares host speeds so a slow host yields to a faster mirror. Disabled
+   * when unset or <= 0.
    */
   slowCheckAfterMs?: number;
   /** Throughput below which the first host checks alternate mirrors. */
@@ -36,6 +37,28 @@ const defaultTiming: DownloadTiming = {
 // A mirror replaces a slow primary only when it delivers a meaningful speedup,
 // preventing oscillation when both regions have similar bandwidth.
 const SLOW_SWITCH_RATIO = 1.5;
+
+export interface DownloadSlowSwitchEvent {
+  kind: "slow_switch";
+  fromHost: string;
+  toHost: string;
+  bytesPerSecond: number;
+  completed: number;
+  total?: number;
+}
+
+export interface DownloadHostSwitchEvent {
+  kind: "host_switch";
+  fromHost: string;
+  toHost: string;
+  reason: string;
+  completed: number;
+  total?: number;
+}
+
+export type DownloadDiagnosticEvent =
+  | DownloadSlowSwitchEvent
+  | DownloadHostSwitchEvent;
 
 interface SlowLimit {
   afterMs: number;
@@ -82,6 +105,7 @@ export async function downloadVerified(
     maxBytes: number;
     signal: AbortSignal;
     onProgress?: (completed: number, total?: number) => void;
+    onDiagnostic?: (event: DownloadDiagnosticEvent) => void;
     /** Keep `<output>.part` after a failure so the next call resumes it. */
     resumable?: boolean;
   },
@@ -299,6 +323,7 @@ export async function downloadVerified(
     const slowFloor = timing.minBytesPerSecond ?? 0;
     const slowRemainingMs = timing.minRemainingMs ?? 0;
     const slowEnabled = slowAfterMs > 0 && slowFloor > 0 && timing.attempts > 1;
+    let slowCompared = false;
     let skipNextDelay = false;
     rounds: for (let round = 0; round < timing.attempts; round += 1) {
       // A cancelled publication can leave every verified byte on disk.
@@ -316,7 +341,7 @@ export async function downloadVerified(
         const url = active[index]!;
         const remainingHosts = active.length - 1 - index;
         let slowLimit: SlowLimit | undefined;
-        if (round === 0 && slowEnabled && active.length > 1) {
+        if (!slowCompared && slowEnabled && active.length > 1) {
           if (bestSlowRate === undefined) {
             if (remainingHosts > 0) {
               slowLimit = {
@@ -325,7 +350,7 @@ export async function downloadVerified(
                 minRemainingMs: slowRemainingMs,
               };
             }
-          } else {
+          } else if (remainingHosts > 0 || round < timing.attempts - 1) {
             const targetRate =
               remainingHosts > 0
                 ? Math.max(slowFloor, bestSlowRate * SLOW_SWITCH_RATIO)
@@ -334,7 +359,11 @@ export async function downloadVerified(
               slowLimit = {
                 afterMs: slowAfterMs,
                 minBytesPerSecond: targetRate,
-                minRemainingMs: 0,
+                // Keep minRemainingMs while another mirror remains so a faster
+                // mirror that will finish soon completes instead of aborting;
+                // only the last mirror drops it so a crawling tail still yields
+                // back to a faster host measured earlier in the round.
+                minRemainingMs: remainingHosts > 0 ? slowRemainingMs : 0,
               };
             }
           }
@@ -343,7 +372,18 @@ export async function downloadVerified(
         result = outcome.status;
         served = url;
         if (outcome.status === "done") break rounds;
+        const nextUrl = active[index + 1];
         if (outcome.status === "next") {
+          if (nextUrl) {
+            options.onDiagnostic?.({
+              kind: "host_switch",
+              fromHost: url.hostname,
+              toHost: nextUrl.hostname,
+              reason: failure,
+              completed,
+              ...(size !== undefined ? { total: size } : {}),
+            });
+          }
           active = active.filter((item) => item !== url);
           index -= 1;
           continue;
@@ -355,9 +395,31 @@ export async function downloadVerified(
             bestSlowRate === undefined
               ? outcome.bytesPerSecond
               : Math.max(bestSlowRate, outcome.bytesPerSecond);
+          if (nextUrl) {
+            options.onDiagnostic?.({
+              kind: "slow_switch",
+              fromHost: url.hostname,
+              toHost: nextUrl.hostname,
+              bytesPerSecond: Math.round(outcome.bytesPerSecond),
+              completed,
+              ...(size !== undefined ? { total: size } : {}),
+            });
+          }
+          continue;
+        }
+        if (nextUrl) {
+          options.onDiagnostic?.({
+            kind: "host_switch",
+            fromHost: url.hostname,
+            toHost: nextUrl.hostname,
+            reason: failure,
+            completed,
+            ...(size !== undefined ? { total: size } : {}),
+          });
         }
       }
-      if (round === 0 && measured.size > 0) {
+      if (!slowCompared && measured.size > 0) {
+        slowCompared = true;
         const primary = active[0];
         const baseRate = primary ? (measured.get(primary) ?? 0) : 0;
         let bestUrl = primary;
@@ -375,6 +437,31 @@ export async function downloadVerified(
           active = [bestUrl, ...active.filter((item) => item !== bestUrl)];
         }
         if (anySlowProgress) skipNextDelay = true;
+      }
+      if (
+        round + 1 < timing.attempts &&
+        active.length > 0 &&
+        active[0] !== served
+      ) {
+        if (result === "slow") {
+          options.onDiagnostic?.({
+            kind: "slow_switch",
+            fromHost: served.hostname,
+            toHost: active[0]!.hostname,
+            bytesPerSecond: Math.round(measured.get(served) ?? 0),
+            completed,
+            ...(size !== undefined ? { total: size } : {}),
+          });
+        } else if (result === "retry" || result === "next") {
+          options.onDiagnostic?.({
+            kind: "host_switch",
+            fromHost: served.hostname,
+            toHost: active[0]!.hostname,
+            reason: failure,
+            completed,
+            ...(size !== undefined ? { total: size } : {}),
+          });
+        }
       }
     }
     if (result !== "done")

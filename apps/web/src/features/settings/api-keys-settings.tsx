@@ -10,7 +10,7 @@ import { AppLogoTile } from "@/features/apps/app-logo";
 import { externalAppsQueryOptions } from "@/features/apps/connected-apps-queries";
 import { ComposioKeyForm } from "@/features/apps/provider-key-form";
 import { ComposioKeyGuide } from "@/features/apps/provider-key-guide";
-import { roomListMessages } from "@/features/rooms/room-list.messages";
+import { voiceKeyMessages } from "@/features/rooms/voice-control/voice-key.messages";
 import { LazyVoiceKeyDialog } from "@/features/rooms/voice-control/lazy-voice-key-dialog";
 import { useVoiceMediaPolicy } from "@/features/rooms/voice-control/use-voice-media-policy";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
@@ -61,16 +61,14 @@ export function ApiKeysSettings() {
         {voicePolicy?.voice_available ? (
           <>
             <VoiceKeyRow
-              detail={t(accountSettingsMessages.sonioxDetail, {
-                pocketNotes: t(roomListMessages.pocketNotes),
-              })}
+              detail={t(voiceKeyMessages.sonioxPurpose)}
               environmentVariable="SONIOX_API_KEY"
               onOpen={() => openVoice("soniox")}
               status={voicePolicy.soniox_key}
               title="Soniox"
             />
             <VoiceKeyRow
-              detail={t(accountSettingsMessages.xaiDetail)}
+              detail={t(voiceKeyMessages.xaiPurpose)}
               environmentVariable="XAI_API_KEY"
               onOpen={() => openVoice("xai")}
               status={voicePolicy.xai_key}
@@ -96,7 +94,6 @@ export function ApiKeysSettings() {
         <ModalDialog
           className="app-key-dialog"
           closeOnBackdrop
-          description={t(accountSettingsMessages.composioDialogDescription)}
           onClose={() => setDialogOpen(false)}
           size="md"
           title={

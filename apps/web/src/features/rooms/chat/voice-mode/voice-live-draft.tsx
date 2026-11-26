@@ -2,6 +2,7 @@ import type { TeamHubActorRef } from "@/features/teamhub/teamhub-types";
 import { ActorAvatar } from "../../members/actor-avatar";
 import { useT } from "@/i18n/use-translation";
 import { voiceChatMessages as m } from "./voice-chat.messages";
+import { FadingText } from "./fading-text";
 
 export interface VoiceLiveDraft {
   actor: TeamHubActorRef;
@@ -40,8 +41,12 @@ export function VoiceLiveDraftRow({
       </div>
       <div className="room-message-content min-w-0">
         {draft.text ? (
-          <div className="room-message-bubble text-sm leading-5 text-app-body">
-            <p className="whitespace-pre-wrap break-words">{draft.text}</p>
+          // Words arrive as in the voice window: the bubble fades in, then
+          // each new phrase fades in whole while earlier words stay put.
+          <div className="room-message-bubble voice-live-fade-in text-sm leading-5 text-app-body">
+            <p className="whitespace-pre-wrap break-words">
+              <FadingText text={draft.text} />
+            </p>
           </div>
         ) : null}
         {draft.error ? (

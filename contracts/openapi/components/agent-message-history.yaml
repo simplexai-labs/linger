@@ -1,4 +1,13 @@
 schemas:
+  AgentHistoryRoomHandoff:
+    type: object
+    additionalProperties: false
+    required: [handoff_id, room_id, room_name, state]
+    properties:
+      handoff_id: { type: string }
+      room_id: { type: string }
+      room_name: { type: string }
+      state: { type: string, enum: [working, waiting_for_user, completed] }
   AgentHistoryInbox:
     type: object
     additionalProperties: false
@@ -40,6 +49,8 @@ schemas:
           enum: [conversation, agent_runtime, task_terminal_notice],
         }
       created_at: { type: string, format: date-time }
+      room_handoff:
+        $ref: "#/schemas/AgentHistoryRoomHandoff"
       context_message_ids: { type: array, items: { type: string } }
       resource_references:
         type: array
@@ -108,6 +119,8 @@ schemas:
           enum: [conversation, agent_runtime, task_terminal_notice],
         }
       created_at: { type: string, format: date-time }
+      room_handoff:
+        $ref: "#/schemas/AgentHistoryRoomHandoff"
       context_message_ids: { type: array, items: { type: string } }
       resource_references:
         type: array

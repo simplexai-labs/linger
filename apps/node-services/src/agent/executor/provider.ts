@@ -3,6 +3,7 @@ import type {
   CapacityPriority,
   RunPriority,
 } from "../../model-tasks.js";
+import { redactSensitiveText } from "../../sensitive-text.js";
 import type { RuntimeHistoryOptions, RuntimeHistoryPage } from "./history.js";
 
 export interface McpServerResource {
@@ -209,7 +210,7 @@ export interface ModelRespondedEvent {
   agent?: { id: string; parentCallId?: string };
 }
 
-export type RunActivityStatus = "working" | "thinking";
+export type RunActivityStatus = "working" | "thinking" | "waiting_background";
 export type RunActivityKind =
   | "command"
   | "tool"
@@ -477,7 +478,7 @@ export interface ProviderSteerAck {
   turnId: string;
 }
 
-/** Public diagnostic metadata only; native error text never belongs here. */
+/** Public classified failure and optional redacted single-line detail for Activity. */
 export interface RuntimeExecutionFailure {
   code:
     | "session_not_found"
@@ -488,6 +489,7 @@ export interface RuntimeExecutionFailure {
     | "model_unavailable"
     | "model_not_offered"
     | "local_model_unavailable"
+    | "model_gateway_unavailable"
     | "context_too_long"
     | "model_service_error"
     | "timeout"
@@ -503,9 +505,96 @@ export interface RuntimeExecutionFailure {
   /** Absent when the failure was observed without a selected Runtime. */
   runtime_type?: "codex" | "claude" | "pi" | "antigravity";
   runtime_version?: string;
+  /** Redacted, single-line diagnostic summary (at most 500 code points). */
+  detail?: string;
 }
 
-/** Logging-only metadata; never include this object in public failure state. */
+const MAX_RUNTIME_FAILURE_DETAIL_CHARS = 500;
+
+/**
+ * Normalizes a Daemon-supplied failure detail to one printable line within
+ * TeamHub's code-point limit without re-running credential redaction.
+ */
+export function sanitizeRuntimeFailureDetail(
+  detail: string,
+): string | undefined {
+  const normalized = normalizeFailureDetail(detail);
+  if (!normalized) return undefined;
+  return capFailureDetail(normalized);
+}
+
+/**
+ * Redacts credentials and OS home prefixes from a typed Agent Service failure
+ * message, normalizes it to one printable line, and bounds it to TeamHub's
+ * detail limit.
+ */
+export function formatRuntimeFailureDetail(
+  message: string,
+): string | undefined {
+  const redacted = redactSensitiveText(message)
+    .replace(/\/(?:Users|home)\/[^/\s'"<>)}\]]+\//gu, "~/")
+    .replace(/[A-Za-z]:\\Users\\[^\\\s'"<>)}\]]+\\/gu, "~\\");
+  return sanitizeRuntimeFailureDetail(redacted);
+}
+
+/**
+ * Formats structured failure diagnostics for older Daemons that do not send
+ * `failure.detail`.
+ */
+export function formatRuntimeFailureDiagnostics(
+  diagnostics?: RuntimeFailureDiagnostics,
+): string | undefined {
+  if (!diagnostics) return undefined;
+  const parts: string[] = [];
+  if (diagnostics.statusCode !== undefined) {
+    parts.push(`HTTP ${diagnostics.statusCode}`);
+  }
+  if (diagnostics.code) {
+    parts.push(diagnostics.code);
+  }
+  if (diagnostics.signal) {
+    parts.push(`signal ${diagnostics.signal}`);
+  }
+  if (diagnostics.exitCode !== undefined && diagnostics.exitCode !== 0) {
+    parts.push(`exit code ${diagnostics.exitCode}`);
+  }
+  if (parts.length === 0) return undefined;
+  return sanitizeRuntimeFailureDetail(parts.join(", "));
+}
+
+const capFailureDetail = (detail: string): string => {
+  const codePoints = [...detail];
+  if (codePoints.length <= MAX_RUNTIME_FAILURE_DETAIL_CHARS) return detail;
+  return `${codePoints
+    .slice(0, MAX_RUNTIME_FAILURE_DETAIL_CHARS - 3)
+    .join("")
+    .trimEnd()}...`;
+};
+
+const normalizeFailureDetail = (input: string): string => {
+  let out = "";
+  let spacePending = false;
+  for (const ch of input) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (ch === "\r" || ch === "\n" || ch === "\t" || /\s/u.test(ch)) {
+      if (out.length > 0) spacePending = true;
+      continue;
+    }
+    if (code < 0x20 || code === 0x7f) continue;
+    if (spacePending) {
+      out += " ";
+      spacePending = false;
+    }
+    out += ch;
+  }
+  return out;
+};
+
+/**
+ * Structured failure metadata logged on failure and summarized into public
+ * `failure.detail` when a Daemon omits `detail`; never include this raw object
+ * in public failure state.
+ */
 export interface RuntimeFailureDiagnostics {
   code?: string;
   statusCode?: number;

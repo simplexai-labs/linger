@@ -212,7 +212,10 @@ export const runnerGatewayEnvelopeSchema = {
         "local_models_engine",
         "local_models_concurrency_probe",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     },
     Timestamp: {
@@ -4671,7 +4674,7 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/Id",
         },
         runtime_type: {
-          enum: ["codex", "claude", "pi"],
+          enum: ["codex", "claude", "pi", "antigravity"],
         },
         execution_context_key: {
           $ref: "#/$defs/ExecutionContextKey",
@@ -5456,6 +5459,57 @@ export const runnerGatewayEnvelopeSchema = {
         {
           type: "object",
           additionalProperties: false,
+          required: ["type", "observed_at_unix_ms", "tools"],
+          properties: {
+            type: {
+              const: "run.background_waiting",
+            },
+            observed_at_unix_ms: {
+              $ref: "#/$defs/NonNegativeInteger",
+            },
+            tools: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["call_id", "tool_name", "started_at_unix_ms"],
+                properties: {
+                  call_id: {
+                    $ref: "#/$defs/Id",
+                  },
+                  tool_name: {
+                    type: "string",
+                    minLength: 1,
+                    maxLength: 200,
+                  },
+                  started_at_unix_ms: {
+                    $ref: "#/$defs/NonNegativeInteger",
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["type", "observed_at_unix_ms", "trigger"],
+          properties: {
+            type: {
+              const: "run.background_resumed",
+            },
+            observed_at_unix_ms: {
+              $ref: "#/$defs/NonNegativeInteger",
+            },
+            trigger: {
+              type: "string",
+              enum: ["background_continuation", "user_input"],
+            },
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
           required: ["type"],
           properties: {
             type: {
@@ -5784,7 +5838,9 @@ export const runnerGatewayEnvelopeSchema = {
             "network_error",
             "rate_limited",
             "model_unavailable",
+            "model_not_offered",
             "local_model_unavailable",
+            "model_gateway_unavailable",
             "context_too_long",
             "model_service_error",
             "timeout",
@@ -5798,6 +5854,11 @@ export const runnerGatewayEnvelopeSchema = {
           type: "string",
           pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$",
           maxLength: 80,
+        },
+        detail: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500,
         },
       },
     },

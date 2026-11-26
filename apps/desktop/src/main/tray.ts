@@ -122,12 +122,13 @@ export class TrayModule implements Module {
 
   #refresh(): void {
     const tone = this.#status().tone;
-    if (tone === "busy" && !this.#animation) {
+    const animate = tone === "busy" && process.platform !== "darwin";
+    if (animate && !this.#animation) {
       this.#animation = setInterval(() => {
         this.#frame = (this.#frame + 1) % 3;
         this.#tray?.setImage(this.#icon());
       }, BUSY_FRAME_MS);
-    } else if (tone !== "busy" && this.#animation) {
+    } else if (!animate && this.#animation) {
       clearInterval(this.#animation);
       this.#animation = undefined;
       this.#frame = 0;
@@ -146,10 +147,12 @@ export class TrayModule implements Module {
 
   #icon(): NativeImage {
     const tone = this.#status().tone;
-    const key = `${tone}:${tone === "busy" ? this.#frame : 0}`;
+    const frame =
+      tone === "busy" && process.platform !== "darwin" ? this.#frame : 0;
+    const key = `${tone}:${frame}`;
     let image = this.#icons.get(key);
     if (!image) {
-      image = icon(tone, this.#frame);
+      image = icon(tone, frame);
       this.#icons.set(key, image);
     }
     return image;

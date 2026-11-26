@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -359,5 +360,196 @@ func TestRunStartedOffersYieldOnlyWithNativeSession(t *testing.T) {
 		if (session["canYield"] == true) != tc.want {
 			t.Fatalf("run=%v session=%q: %+v", tc.run, tc.session, start)
 		}
+	}
+}
+
+type failingStartBackend struct{ err error }
+
+func (b failingStartBackend) Start(context.Context, string, native.RunSpec) (*native.Run, error) {
+	return nil, b.err
+}
+
+func TestExecutorPrepareProviderAntigravityAndNotEligiblePropagation(t *testing.T) {
+	t.Run("not_eligible", func(t *testing.T) {
+		executor := Executor{
+			NewBackend: func(string, native.Profile) (native.Runtime, error) {
+				return failingStartBackend{err: fmt.Errorf("%w: missing capabilities", native.ErrProviderPrepareNotEligible)}, nil
+			},
+		}
+		result, err := executor.PrepareProvider(t.Context(), OperationSpec{
+			Provider: "antigravity", ExecutablePath: "/bin/agy", WorkingDirectory: t.TempDir(),
+		})
+		if !errors.Is(err, native.ErrProviderPrepareNotEligible) {
+			t.Fatalf("err=%v, want ErrProviderPrepareNotEligible", err)
+		}
+		if result.FailureCode != "not_eligible" {
+			t.Fatalf("result=%+v, want FailureCode=not_eligible", result)
+		}
+	})
+
+	t.Run("completed", func(t *testing.T) {
+		var specs []native.RunSpec
+		executor := Executor{
+			NewBackend: func(string, native.Profile) (native.Runtime, error) {
+				return sequenceBackend{specs: &specs, runs: []*native.Run{
+					finishedRun(native.Outcome{Status: "completed", Parked: true}),
+				}}, nil
+			},
+		}
+		result, err := executor.PrepareProvider(t.Context(), OperationSpec{
+			Provider: "antigravity", ExecutablePath: "/bin/agy", WorkingDirectory: t.TempDir(),
+		})
+		if err != nil || !result.PreparedParked {
+			t.Fatalf("result=%+v err=%v, want parked completion", result, err)
+		}
+		if len(specs) != 1 || !specs[0].PrepareOnly || specs[0].WarmMCP {
+			t.Fatalf("specs=%+v, want single provider prepare", specs)
+		}
+	})
+}
+
+func TestExecutorFlushesStalledSingleLineReasoning(t *testing.T) {
+	origDelay := reasoningFlushDelay
+	reasoningFlushDelay = 25 * time.Millisecond
+	defer func() { reasoningFlushDelay = origDelay }()
+
+	messages := make(chan native.Event)
+	results := make(chan native.Outcome, 1)
+	published := make(chan map[string]any, 16)
+	executor := Executor{
+		RuntimeHomeRoot: t.TempDir(),
+		NewBackend: func(string, native.Profile) (native.Runtime, error) {
+			return fakeBackend{session: &native.Run{Events: messages, Outcome: results}}, nil
+		},
+	}
+	execution, err := executor.Start(t.Context(), OperationSpec{
+		OperationKind: "run.start", Provider: "pi", ExecutablePath: "/bin/pi",
+		WorkingDirectory: t.TempDir(), TaskID: "stalled-reasoning",
+		Environment: map[string]string{"HOME": t.TempDir()},
+		TenantID:    "tenant-1", OwnerActorID: "owner-1", AgentID: "agent-1", ScopeID: "scope-1",
+	}, func(_ context.Context, event protocol.Event) error {
+		var payload map[string]any
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return err
+		}
+		published <- payload
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nextPublished := func(label string) map[string]any {
+		t.Helper()
+		select {
+		case event := <-published:
+			return event
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for %s", label)
+			return nil
+		}
+	}
+
+	messages <- native.Event{Kind: native.EventReasoning, Body: "The user wants a pelican"}
+	first := nextPublished("untitled thinking status")
+	if first["type"] != "status.changed" || first["status"] != "thinking" || first["title"] != nil {
+		t.Fatalf("first event = %+v, want untitled thinking", first)
+	}
+
+	// Wait for the debounce flush before sending any subsequent event.
+	flushed := nextPublished("debounced thinking title")
+	if flushed["type"] != "status.changed" || flushed["status"] != "thinking" || flushed["title"] != "The user wants a pelican" {
+		t.Fatalf("flushed event = %+v, want single-line thinking title", flushed)
+	}
+
+	messages <- native.Event{
+		Kind:         native.EventToolCall,
+		InvocationID: "call-1",
+		ToolName:     "bash",
+		ActivityKind: native.ActivityCommand,
+		Input:        map[string]any{"command": "ls"},
+	}
+	working := nextPublished("working status")
+	called := nextPublished("tool.called")
+	started := nextPublished("activity.started")
+	if working["type"] != "status.changed" || working["status"] != "working" ||
+		called["type"] != "tool.called" || started["type"] != "activity.started" {
+		t.Fatalf("tool sequence = [%+v %+v %+v]", working, called, started)
+	}
+
+	close(messages)
+	results <- native.Outcome{Status: "completed", Output: ""}
+	close(results)
+	if result := <-execution.Result; result.Status != "completed" {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(published) != 0 {
+		t.Fatalf("unexpected trailing events: %d", len(published))
+	}
+}
+
+func TestExecutorDebouncesReasoningFlushWhileStreaming(t *testing.T) {
+	origDelay := reasoningFlushDelay
+	reasoningFlushDelay = 60 * time.Millisecond
+	defer func() { reasoningFlushDelay = origDelay }()
+
+	messages := make(chan native.Event)
+	results := make(chan native.Outcome, 1)
+	published := make(chan map[string]any, 16)
+	executor := Executor{
+		RuntimeHomeRoot: t.TempDir(),
+		NewBackend: func(string, native.Profile) (native.Runtime, error) {
+			return fakeBackend{session: &native.Run{Events: messages, Outcome: results}}, nil
+		},
+	}
+	execution, err := executor.Start(t.Context(), OperationSpec{
+		OperationKind: "run.start", Provider: "pi", ExecutablePath: "/bin/pi",
+		WorkingDirectory: t.TempDir(), TaskID: "debounced-reasoning",
+		Environment: map[string]string{"HOME": t.TempDir()},
+		TenantID:    "tenant-1", OwnerActorID: "owner-1", AgentID: "agent-1", ScopeID: "scope-1",
+	}, func(_ context.Context, event protocol.Event) error {
+		var payload map[string]any
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return err
+		}
+		published <- payload
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nextPublished := func(label string) map[string]any {
+		t.Helper()
+		select {
+		case event := <-published:
+			return event
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for %s", label)
+			return nil
+		}
+	}
+
+	messages <- native.Event{Kind: native.EventReasoning, Body: "Checking"}
+	first := nextPublished("untitled thinking status")
+	if first["status"] != "thinking" || first["title"] != nil {
+		t.Fatalf("first event = %+v, want untitled thinking", first)
+	}
+
+	time.Sleep(15 * time.Millisecond)
+	messages <- native.Event{Kind: native.EventReasoning, Body: " the files\nmore details"}
+	second := nextPublished("full first-line title")
+	if second["status"] != "thinking" || second["title"] != "Checking the files" {
+		t.Fatalf("second event = %+v, want full first-line title", second)
+	}
+
+	close(messages)
+	results <- native.Outcome{Status: "completed", Output: ""}
+	close(results)
+	if result := <-execution.Result; result.Status != "completed" {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(published) != 0 {
+		t.Fatalf("unexpected trailing events: %d", len(published))
 	}
 }

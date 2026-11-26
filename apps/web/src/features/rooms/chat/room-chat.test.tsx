@@ -612,9 +612,7 @@ describe("Room Chat", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByText("Delivery status unknown")).toBeVisible();
-    expect(
-      screen.getByText(/did not confirm whether this Message was committed/),
-    ).toBeVisible();
+    expect(screen.getByText(/It may have sent/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     await waitFor(() => expect(createMessage).toHaveBeenCalledTimes(2));

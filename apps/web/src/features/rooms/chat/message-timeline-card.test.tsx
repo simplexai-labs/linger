@@ -1971,7 +1971,7 @@ describe("Room Message timeline cards", () => {
     const trigger = screen.getByRole("button", {
       name: "Open Agent status activity",
     });
-    expect(trigger).toHaveTextContent("Follow-up delivery unconfirmed");
+    expect(trigger).toHaveTextContent("Your follow-up may not have arrived");
     expect(trigger.querySelector(".town-dots, .town-spinner")).toBeNull();
     fireEvent.click(trigger);
     expect(screen.queryByRole("button", { name: /Stop/ })).toBeNull();
@@ -2085,10 +2085,10 @@ describe("Room Message timeline cards", () => {
         name: "Resend unconfirmed follow-up to Codex",
       });
     const { rerender } = render(dock(failedWith()));
-    expect(shownStatus()).toMatch(/^Codex: Run failed/);
+    expect(shownStatus()).toMatch(/^Codex: Couldn't finish/);
     expect(resend()).toBeNull();
     rerender(dock(failedWith(["follow-up"])));
-    expect(shownStatus()).toMatch(/^Codex: Run failed/);
+    expect(shownStatus()).toMatch(/^Codex: Couldn't finish/);
     expect(resend()).toBeInTheDocument();
   });
 
@@ -2115,10 +2115,8 @@ describe("Room Message timeline cards", () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    expect(shownStatus()).toMatch(
-      /^Codex: Claude: The Run stopped before it finished because its Computer restarted/,
-    );
-    expect(shownStatus()).not.toMatch(/Run failed/);
+    expect(shownStatus()).toMatch(/^Codex: Its computer restarted/);
+    expect(shownStatus()).not.toMatch(/Claude:|Couldn't finish/);
   });
 
   it("tells an interrupted Run with an unconfirmed follow-up to resend it", () => {
@@ -2146,9 +2144,9 @@ describe("Room Message timeline cards", () => {
       </QueryClientProvider>,
     );
     expect(shownStatus()).toMatch(
-      /^Codex: The Run stopped before it finished .* Follow-up delivery unconfirmed\. Resend it if the Agent did not answer\.$/,
+      /^Codex: Its computer restarted.* Your follow-up may not have arrived\.$/,
     );
-    expect(shownStatus()).not.toMatch(/Run failed/);
+    expect(shownStatus()).not.toMatch(/Couldn't finish|\.\./);
   });
 
   it("shows the latest failure below the composer and clears it after success", () => {

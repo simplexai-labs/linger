@@ -13,9 +13,9 @@ type residentStore interface {
 }
 
 // residentStores lists the provider tables in stop order: Codex, Claude,
-// Pi. A provider without a table yet contributes nil.
+// Pi, Antigravity. A provider without a table yet contributes nil.
 func residentStores() []residentStore {
-	stores := []residentStore{codexResidents, claudeResidents, piResidentStore()}
+	stores := []residentStore{codexResidents, claudeResidents, piResidentStore(), antigravityResidentStore()}
 	out := stores[:0]
 	for _, store := range stores {
 		if store != nil {

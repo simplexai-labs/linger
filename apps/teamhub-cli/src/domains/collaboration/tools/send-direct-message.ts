@@ -3,6 +3,17 @@ import { roomIdSchema, teamHubIdSchema } from "../message-segments.js";
 
 export const sendDirectMessageInputSchema = z
   .object({
+    handoff_id: teamHubIdSchema
+      .optional()
+      .describe(
+        "Room handoff this report answers; only from that handoff's target Room.",
+      ),
+    handoff_state: z
+      .enum(["working", "waiting_for_user", "completed"])
+      .optional()
+      .describe(
+        "Whether this report is progress, a question, or the final result; requires handoff_id.",
+      ),
     messages: z
       .array(
         z

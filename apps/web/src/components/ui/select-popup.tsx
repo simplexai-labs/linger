@@ -18,6 +18,7 @@ import {
   selectPopupPosition,
   type SelectPopupPositionOptions,
 } from "./select-popup-layout";
+import { suppressFollowUpClick } from "./suppress-follow-up-click";
 
 export interface AnchoredSelectPopupInput {
   readonly align?: SelectPopupPositionOptions["align"];
@@ -138,6 +139,9 @@ export function useAnchoredSelectPopup({
         !triggerRef.current?.contains(target) &&
         !popupRef.current?.contains(target)
       ) {
+        if ((event.button ?? 0) === 0) {
+          suppressFollowUpClick(event);
+        }
         closePopup();
       }
     };
@@ -147,10 +151,10 @@ export function useAnchoredSelectPopup({
       event.stopPropagation();
       closePopup(true);
     };
-    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("pointerdown", closeOutside, true);
     document.addEventListener("keydown", closeOnEscape, true);
     return () => {
-      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("pointerdown", closeOutside, true);
       document.removeEventListener("keydown", closeOnEscape, true);
     };
   }, [triggerRef]);

@@ -204,7 +204,10 @@ describe("Runner Gateway local models", () => {
         "local_models_engine",
         "local_models_concurrency_probe",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -217,7 +220,10 @@ describe("Runner Gateway local models", () => {
         "local_models_engine",
         "local_models_concurrency_probe",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -229,7 +235,10 @@ describe("Runner Gateway local models", () => {
         "model_invoke_outcomes",
         "local_models_engine",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -241,7 +250,10 @@ describe("Runner Gateway local models", () => {
         "model_invoke_outcomes",
         "local_models_engine",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -253,7 +265,10 @@ describe("Runner Gateway local models", () => {
         "model_invoke_outcomes",
         "local_models_engine",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -264,7 +279,10 @@ describe("Runner Gateway local models", () => {
         "local_models_diagnostics",
         "model_invoke_outcomes",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -274,7 +292,10 @@ describe("Runner Gateway local models", () => {
         "byok_endpoint",
         "local_models_diagnostics",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -284,7 +305,10 @@ describe("Runner Gateway local models", () => {
         "byok_endpoint",
         "local_models_diagnostics",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -293,7 +317,10 @@ describe("Runner Gateway local models", () => {
         "local_models",
         "byok_endpoint",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -302,7 +329,10 @@ describe("Runner Gateway local models", () => {
         "local_models",
         "byok_endpoint",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -310,7 +340,10 @@ describe("Runner Gateway local models", () => {
       [
         "local_models",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     [
@@ -318,7 +351,10 @@ describe("Runner Gateway local models", () => {
       [
         "local_models",
         "local_model_unavailable",
+        "model_gateway_unavailable",
         "local_models_external_holders",
+        "runtime_failure_detail",
+        "operation_background_wait",
       ],
     ],
     ["0.51.0", undefined],
@@ -990,5 +1026,46 @@ describe("runner.local_models concurrency probing and ModelQueue wiring", () => 
     const second = await secondPromise;
     first.release({ outcome: "completed" });
     second.release({ outcome: "completed" });
+  });
+
+  it("accepts an operation.failed frame carrying model_gateway_unavailable", () => {
+    const parsed = parseDaemonToAgentEnvelope({
+      type: "operation.failed",
+      protocol_version: "2",
+      host_access: "trusted",
+      runner_id: target.computerId,
+      tenant_id: target.tenantId,
+      agent_id: "agent-1",
+      registration_id: "reg-1",
+      assignment_revision: 1,
+      operation_id: "op-1",
+      connection_epoch: 1,
+      runner_revision: 1,
+      generation: 1,
+      execution_lease_id: "lease-1",
+      workspace_grant_id: "grant-1",
+      runtime_type: "codex",
+      execution_context_key: "context-1",
+      runtime_instance_id: "runtime-1",
+      context_view_ref: { view_digest: "a".repeat(64) },
+      seq: 1,
+      stage: "runtime_execution",
+      error: {
+        code: "OPERATION_FAILED",
+        message: "The BYOK gateway could not be started on this Computer.",
+        retryable: true,
+        failure: {
+          code: "model_gateway_unavailable",
+          runtime_type: "codex",
+        },
+      },
+    });
+    expect(parsed.type).toBe("operation.failed");
+    if (parsed.type === "operation.failed") {
+      expect(parsed.error.failure).toEqual({
+        code: "model_gateway_unavailable",
+        runtime_type: "codex",
+      });
+    }
   });
 });

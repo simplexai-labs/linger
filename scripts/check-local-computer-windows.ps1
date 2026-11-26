@@ -64,7 +64,7 @@ try {
         Invoke-Verification 'native-runtime-contracts' $go @('test', './internal/provider/native', '-run', '^(TestRuntime.*|TestCommand.*|TestPi.*|TestCodexContract.*|TestCodexRPC.*|TestCodexEvents.*|TestWindowsRuntimeLaunchUsesConfiguredNodeSearchPath|TestWindowsClaudeInstructionSnapshotRejectsPublicACL)$')
         Invoke-Verification 'native-projection' $go @('test', './internal/linger/context', '-run', '^(TestWindowsContextRejectsFilenameAliasesBeforePublication|TestViewStoreAppliesRefreshesAndReleasesAtomically|TestViewStoreExportsOnlyReadyReceiptRegularFiles|TestCLIConfigurationInstallIsPrivateIdempotentAndFenced)$')
         Invoke-Verification 'cli' $go @('test', './internal/computercli', './internal/computerconfig')
-        Invoke-Verification 'native-launcher' $go @('test', './cmd/linger-computer-launcher')
+        Invoke-Verification 'native-launcher' $go @('test', './cmd/linger-computer-launcher', './cmd/linger-pi-launcher')
         Invoke-Verification 'native-helper' $go @('test', './cmd/linger-computer-daemon', '-run', '^(TestPlatformEntry.*|TestWindowsPlatform.*|TestInstalledTeamHubCLIBinUsesPlatformLauncher)$')
         Invoke-Verification 'native-skills' $go @('test', './internal/linger/localskills', '-run', '^(TestWindowsSkillScan.*|TestCatalogScansAndReplaysDurably|TestPackageDigestMatchesTypeScriptContract)$')
         Invoke-Verification 'native-runtime-home' $go @('test', './internal/workspace')

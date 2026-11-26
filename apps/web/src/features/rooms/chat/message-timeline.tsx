@@ -487,6 +487,7 @@ type AgentRuntimeState =
   | "Responding"
   | "Stopped"
   | "Thinking"
+  | "Waiting for background task"
   | "Waiting for your input"
   | "Working";
 
@@ -500,6 +501,7 @@ const stateLabels: Record<AgentRuntimeState, Message<string>> = {
   Responding: m.stateTyping,
   Stopped: m.stateStopped,
   Thinking: m.stateThinking,
+  "Waiting for background task": m.stateWaitingBackground,
   "Waiting for your input": m.stateWaitingForInput,
   Working: m.stateWorking,
 };
@@ -636,7 +638,7 @@ function resolveAgentRuntimeStatusSegment({
   marks?: readonly RuntimeStatusMark[];
   outputs?: readonly RuntimeOutputPresentation[];
   plan?: RuntimePlanPresentation;
-  status: "queued" | "working" | "thinking";
+  status: "queued" | "working" | "thinking" | "waiting_background";
   t: Translate;
   terminalOutcome?: "canceled" | "completed" | "failed";
   failure?: RuntimeExecutionFailure;
@@ -670,9 +672,11 @@ function resolveAgentRuntimeStatusSegment({
                 ? "Waiting for your input"
                 : status === "thinking"
                   ? "Thinking"
-                  : activeActivity?.kind === "response"
-                    ? "Responding"
-                    : "Working";
+                  : status === "waiting_background"
+                    ? "Waiting for background task"
+                    : activeActivity?.kind === "response"
+                      ? "Responding"
+                      : "Working";
   // Like grok-bot's, the status line names what the Agent did last and plays
   // the entries of its current group in order (see statusLineQueue). Dots
   // wait for the Agent's first Activity or thinking, and Working follows a
@@ -716,18 +720,23 @@ function resolveAgentRuntimeStatusSegment({
               }
             : status === "queued"
               ? { tone: "wait" }
-              : outputs.length > 0 && lineRunning.length === 0
-                ? { tone: "live", text: t(m.stateWorking) }
-                : queue.length > 0
-                  ? queue.at(-1)!.content
-                  : status === "thinking"
-                    ? {
-                        tone: "live",
-                        text: title?.trim() || t(m.stateThinking),
-                      }
-                    : first && activities.length === 0
-                      ? { tone: "wait" }
-                      : { tone: "live", text: t(m.stateWorking) };
+              : status === "waiting_background"
+                ? {
+                    tone: "live",
+                    text: t(m.stateWaitingBackground),
+                  }
+                : outputs.length > 0 && lineRunning.length === 0
+                  ? { tone: "live", text: t(m.stateWorking) }
+                  : queue.length > 0
+                    ? queue.at(-1)!.content
+                    : status === "thinking"
+                      ? {
+                          tone: "live",
+                          text: title?.trim() || t(m.stateThinking),
+                        }
+                      : first && activities.length === 0
+                        ? { tone: "wait" }
+                        : { tone: "live", text: t(m.stateWorking) };
   const lineQueue =
     queue.length > 0 && line === queue.at(-1)!.content ? queue : undefined;
   return {

@@ -21,6 +21,7 @@ import {
   type RuntimePreparation,
   type RuntimePreparationInput,
 } from "./contracts.js";
+import { STATIC_PREFIX_END_MARKER } from "../prompt/index.js";
 import type { AgentInput, RunEvent } from "../executor/provider.js";
 import type { ExecutionContextRef } from "../executor/context-ref.js";
 import type { Message, AgentCapability, AgentType } from "../executor/types.js";
@@ -511,12 +512,33 @@ export const composeContextFeatures = (input: {
     matched: bound.map((entry) => entry.feature.id),
     hasRunStopHooks: stopHookHandlers.length > 0,
     contextInstructions(facts) {
-      const parts = orderedHandlers(bound, "contributeContextInstructions")
-        .map(({ handler }) => handler(boundContext, facts))
-        .filter(
-          (part): part is string => part !== undefined && part.length > 0,
-        );
-      return parts.length > 0 ? parts.join("\n\n") : undefined;
+      const staticParts: string[] = [];
+      const dynamicParts: string[] = [];
+      for (const { handler } of orderedHandlers(
+        bound,
+        "contributeContextInstructions",
+      )) {
+        const contribution = handler(boundContext, facts);
+        if (typeof contribution === "string") {
+          if (contribution.length > 0) staticParts.push(contribution);
+          continue;
+        }
+        if (!contribution) continue;
+        if (contribution.static && contribution.static.length > 0) {
+          staticParts.push(contribution.static);
+        }
+        if (contribution.dynamic && contribution.dynamic.length > 0) {
+          dynamicParts.push(contribution.dynamic);
+        }
+      }
+      if (staticParts.length === 0 && dynamicParts.length === 0) {
+        return undefined;
+      }
+      if (dynamicParts.length === 0) return staticParts.join("\n\n");
+      if (staticParts.length === 0) return dynamicParts.join("\n\n");
+      return [...staticParts, STATIC_PREFIX_END_MARKER, ...dynamicParts].join(
+        "\n\n",
+      );
     },
     notificationContext(notificationInput) {
       return orderedHandlers(bound, "contributeNotificationContext").flatMap(

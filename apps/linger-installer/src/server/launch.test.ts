@@ -10,6 +10,9 @@ import {
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { launchInstaller } from "./launch.js";
+// Windows reports 0666 for every writable file; its private access is the
+// DACL that the Windows private-path tests check.
+const posixModes = process.platform !== "win32";
 const clean: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
   for (const fn of clean.splice(0).reverse()) await fn();
@@ -30,7 +33,7 @@ test("launcher passes only owner-private local HTML path to opener and removes f
   });
   clean.push(server.close);
   expect(opened).toBe(path.join(home, "installer", "launch.html"));
-  expect((await stat(opened)).mode & 0o777).toBe(0o600);
+  if (posixModes) expect((await stat(opened)).mode & 0o777).toBe(0o600);
   const html = await readFile(opened, "utf8");
   expect(html).toContain("#token=");
   expect(html).toContain('lang="en"');
@@ -161,6 +164,7 @@ test("reopen requires a separate private control capability and refuses non-priv
   });
   expect(denied.status).toBe(401);
   const file = path.join(home, "installer/session.json");
+  if (!posixModes) return;
   expect((await stat(file)).mode & 0o777).toBe(0o600);
   await chmod(file, 0o644);
   let refused = false;
@@ -184,9 +188,10 @@ test("browser opener failure preserves a reachable installer and private launche
   });
   clean.push(server.close);
   expect((await fetch(server.origin)).status).toBeLessThan(500);
-  expect(
-    (await stat(path.join(home, "installer/launch.html"))).mode & 0o777,
-  ).toBe(0o600);
+  if (posixModes)
+    expect(
+      (await stat(path.join(home, "installer/launch.html"))).mode & 0o777,
+    ).toBe(0o600);
   const reopened = await launchInstaller({
     home,
     sourceRepo: home,

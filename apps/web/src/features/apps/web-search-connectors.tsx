@@ -198,7 +198,6 @@ function WebSearchBackendDialog({
     <ModalDialog
       className="app-key-dialog"
       closeOnBackdrop
-      description={webSearchBackendDescription(backend, t)}
       onClose={onClose}
       size="md"
       title={backend.name}

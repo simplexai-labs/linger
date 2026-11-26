@@ -119,7 +119,7 @@ export function CopyToMyDocumentsDialog({
       }
     >
       <div className="px-5 py-4">
-        <label className="block text-sm font-medium text-app-body">
+        <div className="block text-sm font-medium text-app-body">
           {t(m.destination)}
           <Select
             aria-label={t(m.copyDestination)}
@@ -134,7 +134,7 @@ export function CopyToMyDocumentsDialog({
               </SelectItem>
             ))}
           </Select>
-        </label>
+        </div>
         {error ? (
           <p className="mt-3 text-sm text-app-danger" role="alert">
             {error}

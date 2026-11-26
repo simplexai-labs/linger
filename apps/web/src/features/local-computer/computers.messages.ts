@@ -17,7 +17,6 @@ export const computersMessages = defineMessages("computers", {
   setUpApp: "Set up {app}",
   ready: "Ready",
   readyRunning: "Ready · {count} running",
-  oneStepLeft: "One step left",
 
   // Empty and unavailable states.
   unavailableTitle: "Computer unavailable",
@@ -25,9 +24,7 @@ export const computersMessages = defineMessages("computers", {
     "This Computer is offline or no longer available to your account.",
   backToComputers: "Back to computers",
   setupCommands: "Setup commands",
-  connectDialogTitle: "Connect Local Computer",
-  connectDialogDescription:
-    "Install the CLI, then authorize this workspace from your terminal.",
+  connectDialogTitle: "Connect a computer",
   noComputersTitle: "Run Agents on your computer",
   noComputersBody: "About 2 minutes to set up.",
 
@@ -35,15 +32,13 @@ export const computersMessages = defineMessages("computers", {
   detailsLabel: "{computer} details",
   agents: "Agents",
   aiApps: "AI apps",
-  aiAppsHint:
-    "Agents use these apps on this computer to do the work. One ready app is enough.",
+  aiAppsHint: "One ready app is enough.",
   localModels: "Local models",
   manageLocalModels: "Manage local models",
-  manageLocalModelsHint: "Download and load models that run on this computer",
   power: "Power",
   preventSleep: "Prevent sleep",
   preventSleepHint:
-    "Keep this computer awake while locked so scheduled midnight Memory and Wiki tasks run on time (recommended while plugged in).",
+    "Keeps this computer awake for overnight Memory and Wiki tasks.",
   preventSleepFailed: "Could not update sleep setting. Try again.",
   access: "Access",
   advanced: "Advanced",
@@ -58,18 +53,17 @@ export const computersMessages = defineMessages("computers", {
   lingerRunning: "The Linger app is running",
   connected: "Connected",
   agentsUseApp: "Agents use {app} here",
-  appSignedOut: "{app} is installed but signed out",
+  appSignedOut: "{app} is installed",
   signIn: "Sign in",
   appTooOld: "{app} is too old to run Agents",
   needAiApp: "Agents need Claude Code, Codex or Pi on this computer",
   turnOn: "Turn it on",
-  turnOnHint:
-    "Turn it on and connect to the internet. It usually reconnects by itself.",
+  turnOnHint: "It usually reconnects by itself.",
   startApp: "Start the app",
   stillOffline: "Still offline after a minute?",
   runInTerminalOn: "Run in Terminal on {computer}:",
   reconnect: "Reconnect",
-  reconnectHint: "Reset or replaced it? Connect it again.",
+  reconnectHint: "For a reset or replaced computer.",
   add: "Add",
   optionalApp: "{description} · optional",
   notInstalled: "Not installed",
@@ -144,8 +138,7 @@ export const computersMessages = defineMessages("computers", {
   connectName: "Connect {computer}",
   reconnectName: "Reconnect {computer}",
   localRuntimeAccess: "Local runtime access",
-  localRuntimeAccessBody:
-    "The Computer will appear as an available runtime for your account.",
+  localRuntimeAccessBody: "Your Agents can run on this computer.",
   loadingSpaces: "Loading spaces...",
   spacesUnavailable: "Spaces are unavailable.",
   noSpace: "No space is available for this account.",
@@ -153,9 +146,9 @@ export const computersMessages = defineMessages("computers", {
   signedInAs: "Signed in as <email>{email}</email>",
   confirmReplacement: "Confirm Local Computer replacement",
   replacementRemoved:
-    "This Computer was removed from the signed-in account. Continuing stops the old local daemon and connects this machine as a new Computer for the account shown above. The old Computer and its Agents are not deleted from the server.",
+    "This Computer was removed from the signed-in account. The old Computer and its Agents stay on the server.",
   replacementWrongAccount:
-    "This Computer cannot be renewed by the signed-in account. Continuing stops the old local daemon and connects this machine as a new Computer for the account shown above. The old Computer and its Agents are not deleted from the server.",
+    "This Computer can't be renewed by the signed-in account. The old Computer and its Agents stay on the server.",
   keepCurrentSetup: "Keep current setup",
   replaceLocalIdentity: "Replace local identity",
   connectFailed: "The Computer could not be connected. Run setup again.",
@@ -168,7 +161,6 @@ export const computersMessages = defineMessages("computers", {
   couldNotConnect: "Could not connect",
 
   // The gate shown until a Computer can run Another Me.
-  gateKicker: "Before you start",
   gateTitle: "Connect your computer",
   gateIntro:
     "Your Agents run on your own computer with Claude Code, Codex or Pi. Connect one to start.",
@@ -184,7 +176,6 @@ export const computersMessages = defineMessages("computers", {
   computerOfflineStart:
     "{computer} is offline. Start it with <code>{command}</code>.",
   computerOnline: "{computer} is online.",
-  oneReadyAppEnough: "One ready app is enough.",
   orRunLocalModel:
     "Or run a model on {computer} itself: load one in <link>Settings › Models</link>.",
   checkingComputer: "Checking {computer}. Changes show up within a minute.",
@@ -192,7 +183,7 @@ export const computersMessages = defineMessages("computers", {
   // Removing a Computer.
   removeTitle: "Remove Local Computer",
   removeDescription:
-    "This revokes <strong>{computer}</strong> and removes it from this workspace. Reconnecting requires a new setup.",
+    "This revokes <strong>{computer}</strong> and removes it from this workspace.",
   noOtherComputer:
     "No other computer can take these Agents. Connect your new computer first.",
   moveAndRemove: {
@@ -219,9 +210,7 @@ export const computersMessages = defineMessages("computers", {
   moving: "Moving…",
 
   // Connecting the user's Chrome to a Computer.
-  connectMyBrowser: "Connect my browser",
-  connectMyBrowserIntro:
-    "Let Agent browser tasks on this Computer use your everyday Chrome and its sign-ins. The token goes only to your Computer and never appears in chat.",
+  connectChromeIntro: "Let Agents on <name>{computer}</name> use your Chrome.",
   loadingComputers: "Loading your Computers…",
   cannotLoadComputers: "Can't load your Computers right now.",
   computerNoLongerConnected:
@@ -229,17 +218,13 @@ export const computersMessages = defineMessages("computers", {
   noLocalComputerYet:
     "You don't have a Local Computer yet. Connect one in Settings > Computers first. Cloud Computers can't use your browser.",
   computer: "Computer",
-  computerNamed: "Computer: <name>{computer}</name>",
   computerOfflineOption: "{computer} (offline)",
-  reconfigure: "Reconfigure",
+  replaceToken: "Replace token",
   disconnect: "Disconnect",
   disconnecting: "Disconnecting…",
-  installExtensionStep: "Install <link>Playwright Extension</link> in Chrome",
-  copyTokenStep:
-    "Click the extension icon and copy the token it shows (the full <code>PLAYWRIGHT_MCP_EXTENSION_TOKEN=…</code> line also works)",
-  pasteTokenStep: "Paste it below and connect",
   extensionToken: "Extension token",
-  pasteToken: "Paste token",
+  pasteTokenFromExtension: "Paste the token from Playwright Extension",
+  noExtensionYet: "No extension yet? <link>Install Playwright Extension</link>",
   connectingUpToMinute: "Connecting, up to 1 minute…",
   checkingBrowserStatus: "Checking browser status…",
   browserComputerOffline:
@@ -254,22 +239,18 @@ export const computersMessages = defineMessages("computers", {
   agentsAskBeforeBrowsing: "Agents ask before browsing.",
 
   // What a Computer reports about its browser.
-  browserConnectedLabel:
-    "Connected. Browser tasks use your Chrome and its sign-ins.",
+  browserConnectedLabel: "Browser tasks use your Chrome and its sign-ins.",
   tokenExpired: "Token expired",
-  tokenExpiredLabel:
-    "Token expired. Copy a new token from the extension, then reconnect.",
+  tokenExpiredLabel: "Copy a new token from the extension, then reconnect.",
   chromeUnavailable: "Chrome unavailable",
-  chromeUnavailableLabel:
-    "Can't reach your Chrome. Make sure Chrome is open on this Computer, then reconnect.",
+  chromeUnavailableLabel: "Open Chrome on this Computer, then reconnect.",
   extensionUnavailable: "Extension unavailable",
   extensionNotFound:
     "Playwright Extension not found. Install and enable it in Chrome, then reconnect.",
   notConnected: "Not connected",
   notConnectedLabel:
-    "Not connected. Agent browser tasks wait until you connect your everyday Chrome.",
-  isolatedLabel:
-    "Not connected. Agents use a separate browser without your sign-ins.",
+    "Agent browser tasks wait until you connect your everyday Chrome.",
+  isolatedLabel: "Agents use a separate browser without your sign-ins.",
   notSupported: "Not supported",
   unsupportedLabel:
     "This Computer can't use your browser. Agents use a separate browser without your sign-ins.",

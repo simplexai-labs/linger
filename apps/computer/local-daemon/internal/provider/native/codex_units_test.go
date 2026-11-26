@@ -236,6 +236,18 @@ func TestCodexReasoningTitles(t *testing.T) {
 	}
 }
 
+func TestReasoningTitleBoundsLength(t *testing.T) {
+	overLimit := strings.Repeat("a", MaxReasoningTitleRunes+100)
+	if got, ok := ReasoningTitle(overLimit, false); !ok || got == "" {
+		t.Fatalf("over-limit incomplete line stayed buffered: ok=%v len=%d", ok, len(got))
+	}
+
+	unclosedBold := "**" + strings.Repeat("b", MaxReasoningTitleRunes+100)
+	if got, ok := ReasoningTitle(unclosedBold, false); !ok || got == "" {
+		t.Fatalf("over-limit unclosed bold span stayed buffered: ok=%v len=%d", ok, len(got))
+	}
+}
+
 func codexWriteRollout(t *testing.T, home, dir, name string, lines ...string) string {
 	t.Helper()
 	path := filepath.Join(home, "sessions", dir, name)

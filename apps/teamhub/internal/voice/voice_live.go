@@ -166,14 +166,16 @@ func (s *Service) executeVoiceLiveTool(ctx context.Context, session voicelive.Se
 		return s.searchVoiceLiveMeetings(ctx, session, request.Arguments)
 	case voicelive.ToolSearchMessages:
 		var args voicelive.SearchArguments
-		if voicelive.DecodeArguments(request.Arguments, &args) != nil || !voicelive.ValidQuery(args.Query) {
+		if voicelive.DecodeArguments(request.Arguments, &args) != nil || (!voicelive.ValidQuery(args.Query) && !(args.RoomID != "" && strings.TrimSpace(args.Query) == "")) || args.RoomID != "" && args.AllRooms {
 			return "", voicelive.ErrInvalid
 		}
 		input := store.SearchVoiceLiveMessagesForAccountParams{
 			AccountID: session.AccountID, TenantID: session.TenantID,
 			Query: strings.ToLower(strings.TrimSpace(args.Query)), PageLimit: 8,
 		}
-		if !args.AllRooms {
+		if args.RoomID != "" {
+			input.RoomID = args.RoomID
+		} else if !args.AllRooms {
 			input.RoomID = session.RoomID
 		}
 		rows, err := s.queries.SearchVoiceLiveMessagesForAccount(ctx, input)
@@ -315,6 +317,10 @@ func (s *Service) executeVoiceLiveTool(ctx context.Context, session voicelive.Se
 		return s.readVoiceLivePocketNotes(ctx, session, request, time.Now())
 	case voicelive.ToolDeletePocketNote:
 		return s.deleteVoiceLivePocketNote(ctx, session, request, time.Now())
+	case voicelive.ToolHandOffToRoom:
+		return s.handOffVoiceLiveRoom(ctx, session, request)
+	case "ack_room_reports":
+		return s.ackVoiceLiveRoomReports(ctx, session, request)
 	case voicelive.ToolAddRoomMembers:
 		return s.addVoiceLiveRoomMembers(ctx, session, request)
 	case voicelive.ToolCreateRoom:
@@ -480,12 +486,17 @@ func (s *Service) createVoiceLiveRoom(ctx context.Context, session voicelive.Ses
 			return voicelive.Output(members.Problem), nil
 		}
 	}
+	// The reply Agent participates so the same collaboration can continue in the new Room.
+	if !slices.Contains(members.IDs, session.Agent.ID) {
+		members.IDs = append(members.IDs, session.Agent.ID)
+		members.Names = append(members.Names, session.Agent.DisplayName)
+	}
 	summary := "Will create the room “" + name + "” as the user"
 	if len(members.Names) > 0 {
 		summary += ", adding " + strings.Join(members.Names, ", ")
 	}
 	prompt := voicelive.NeedsConfirmation(summary)
-	if confirmed, err := s.voiceLiveConfirmed(ctx, session, request, bool(args.Confirmed), prompt); err != nil || !confirmed {
+	if confirmed, err := s.voiceLiveConfirmed(ctx, session, request, bool(args.Confirmed), prompt+"\x00"+strings.Join(members.IDs, "\x00")); err != nil || !confirmed {
 		return prompt, err
 	}
 	input := httpapi.HumanRoomCreateRequest{Name: name}
@@ -519,6 +530,7 @@ func (s *Service) createVoiceLiveRoom(ctx context.Context, session voicelive.Ses
 	output := map[string]any{
 		"status": "created", "room_id": room.Id, "room": room.Name,
 		"path": "/t/" + session.TenantID + "/rooms/" + room.Id,
+		"next": voicelive.DoneNext,
 	}
 	if len(members.Names) > 0 {
 		output["members"] = members.Names

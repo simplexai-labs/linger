@@ -320,6 +320,34 @@ describe("composeContextFeatures", () => {
     ).toBe("A\n\nC");
   });
 
+  it("places static string contributions before the static-prefix marker and dynamic sections after it", () => {
+    const split = contextFeature(
+      "split",
+      { contributeContextInstructions: {} },
+      {
+        contributeContextInstructions: () => ({
+          static: "STATIC_BASE",
+          dynamic: "DYNAMIC_TAIL",
+        }),
+      },
+    );
+    const tailStatic = contextFeature(
+      "tailStatic",
+      { contributeContextInstructions: { after: ["split"] } },
+      { contributeContextInstructions: () => "STATIC_FEATURE" },
+    );
+    expect(
+      compose([tailStatic, split]).contextInstructions({
+        connectedApps: true,
+        connectedAppKeys: [],
+        connectableAppKeys: [],
+        compactInstructions: false,
+      }),
+    ).toBe(
+      "STATIC_BASE\n\nSTATIC_FEATURE\n\n<!-- LINGER_STATIC_PREFIX_END -->\n\nDYNAMIC_TAIL",
+    );
+  });
+
   it("flatMaps notification contributions in order with the same input", () => {
     const seen: [string, unknown][] = [];
     const a = contextFeature(

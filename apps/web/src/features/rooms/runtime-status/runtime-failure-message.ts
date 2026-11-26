@@ -13,6 +13,7 @@ const messages: Record<RuntimeExecutionFailure["code"], Message<string>> = {
   model_unavailable: m.failureModelUnavailable,
   model_not_offered: m.failureModelNotOffered,
   local_model_unavailable: m.failureLocalModelUnavailable,
+  model_gateway_unavailable: m.failureModelGatewayUnavailable,
   context_too_long: m.failureContextTooLong,
   model_service_error: m.failureModelServiceError,
   timeout: m.failureTimeout,
@@ -36,7 +37,7 @@ export function isRunInterruption(failure?: RuntimeExecutionFailure): boolean {
   return failure?.code === "interrupted";
 }
 
-/** Why a Run failed, or "Run failed" alone when its cause is not known. */
+/** Why a Run failed, or "Couldn't finish" alone when its cause is not known. */
 export function runtimeFailureMessage(
   t: Translate,
   failure?: RuntimeExecutionFailure,
@@ -44,28 +45,12 @@ export function runtimeFailureMessage(
   return runtimeFailureReason(t, failure) ?? t(m.runFailed);
 }
 
-/** The cause of a failed Run in words, when the client knows its code. */
+/** The cause of a failed Run in words, when the client knows its code. The
+ * Runtime and its version stay out of it: the reader acts on the cause. */
 export function runtimeFailureReason(
   t: Translate,
   failure?: RuntimeExecutionFailure,
 ): string | undefined {
   if (!failure || !Object.hasOwn(messages, failure.code)) return undefined;
-  const reason = t(messages[failure.code]);
-  // Failures the Agent Service or TeamHub observed name no Runtime.
-  if (!failure.runtime_type) return reason;
-  const runtime = {
-    codex: "Codex",
-    claude: "Claude",
-    pi: "Pi",
-    antigravity: "Antigravity",
-  }[failure.runtime_type];
-  if (!runtime) return undefined;
-  const version =
-    failure.runtime_version &&
-    /^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$/.test(
-      failure.runtime_version,
-    )
-      ? ` ${failure.runtime_version}`
-      : "";
-  return t(m.labeled, { label: `${runtime}${version}`, value: reason });
+  return t(messages[failure.code]);
 }

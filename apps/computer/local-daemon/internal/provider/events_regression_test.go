@@ -29,6 +29,61 @@ func TestToolNameFitsTheGatewayLimit(t *testing.T) {
 	}
 }
 
+func TestThinkingTitleFitsTheGatewayLimit(t *testing.T) {
+	unicodeTitle := strings.Repeat("\u00e9", native.MaxReasoningTitleRunes+25)
+	expandedSecretTitle := strings.Repeat("x", native.MaxReasoningTitleRunes-5) + " password=a"
+	for _, raw := range []string{unicodeTitle, expandedSecretTitle} {
+		event := normalizeMessage(native.Event{Kind: native.EventReasoning, Title: raw}, "operation-1").(map[string]any)
+		title, ok := event["title"].(string)
+		if !ok || title == "" {
+			t.Fatalf("thinking title missing: %v", event)
+		}
+		if got := utf8.RuneCountInString(title); got > native.MaxReasoningTitleRunes {
+			t.Fatalf("thinking title has %d characters", got)
+		}
+	}
+
+	projection := eventProjection{operationID: "operation-1"}
+	first := projection.project(native.Event{Kind: native.EventReasoning, Body: strings.Repeat("p", native.MaxReasoningTitleRunes-10)})
+	if len(first) != 1 || first[0].(map[string]any)["title"] != nil {
+		t.Fatalf("thinking did not start untitled: %v", first)
+	}
+	resolved := projection.project(native.Event{Kind: native.EventReasoning, Body: strings.Repeat("q", 20) + " password=a"})
+	if len(resolved) != 1 {
+		t.Fatalf("over-limit streamed thinking events = %v", resolved)
+	}
+	title, ok := resolved[0].(map[string]any)["title"].(string)
+	if !ok || title == "" {
+		t.Fatalf("over-limit streamed thinking title missing: %v", resolved)
+	}
+	if got := utf8.RuneCountInString(title); got > native.MaxReasoningTitleRunes {
+		t.Fatalf("streamed thinking title has %d characters", got)
+	}
+	if projection.reasoning != "" {
+		t.Fatalf("projection retained resolved reasoning buffer: %d bytes", len(projection.reasoning))
+	}
+
+	tokenProjection := eventProjection{operationID: "operation-2"}
+	tokenFirst := tokenProjection.project(native.Event{Kind: native.EventReasoning, Body: strings.Repeat("a", native.MaxReasoningTitleRunes-30)})
+	if len(tokenFirst) != 1 || tokenFirst[0].(map[string]any)["title"] != nil {
+		t.Fatalf("token thinking did not start untitled: %v", tokenFirst)
+	}
+	tokenResolved := tokenProjection.project(native.Event{Kind: native.EventReasoning, Body: " ghp_" + strings.Repeat("A", 36)})
+	if len(tokenResolved) != 1 {
+		t.Fatalf("over-limit token thinking events = %v", tokenResolved)
+	}
+	tokenTitle, ok := tokenResolved[0].(map[string]any)["title"].(string)
+	if !ok || tokenTitle == "" {
+		t.Fatalf("over-limit token thinking title missing: %v", tokenResolved)
+	}
+	if got := utf8.RuneCountInString(tokenTitle); got > native.MaxReasoningTitleRunes {
+		t.Fatalf("token thinking title has %d characters", got)
+	}
+	if strings.Contains(tokenTitle, "ghp_") || strings.Contains(tokenTitle, "AAAA") || !strings.Contains(tokenTitle, "[REDACTED") {
+		t.Fatalf("secret crossing clip boundary was not redacted before clipping")
+	}
+}
+
 func TestFirstTurnPublishesNativeSessionBeforeExecution(t *testing.T) {
 	event := normalizeMessage(native.Event{Kind: native.EventStatus, TurnID: "turn-first", SessionID: "thread-created"}, "operation-first").(map[string]any)
 	session, ok := event["session"].(map[string]any)
@@ -284,5 +339,54 @@ func TestEventProjectionReportsModelRequestsAndToolResultTimes(t *testing.T) {
 	returned := normalizeMessage(native.Event{Kind: native.EventToolOutput, InvocationID: "call-1", ObservedAt: started}, "operation").(map[string]any)
 	if returned["observed_at_unix_ms"] != int64(1_000) {
 		t.Fatalf("tool result = %v", returned)
+	}
+}
+
+func TestEventProjectionBackgroundWaitEventsFollowFeatureGate(t *testing.T) {
+	at := time.UnixMilli(5_000)
+	waitEvent := native.Event{
+		Kind:       native.EventBackgroundWaiting,
+		ObservedAt: at,
+		BackgroundTools: []native.BackgroundTool{
+			{CallID: "call-1", ToolName: "schedule", StartedAt: time.UnixMilli(4_000)},
+		},
+	}
+	resumedEvent := native.Event{
+		Kind:              native.EventBackgroundResumed,
+		ObservedAt:        at.Add(time.Second),
+		BackgroundTrigger: "user_input",
+	}
+
+	disabled := eventProjection{operationID: "op-1"}
+	if got := disabled.project(waitEvent); len(got) != 0 {
+		t.Fatalf("gated-off background wait projected %v", got)
+	}
+	if got := disabled.project(resumedEvent); len(got) != 0 {
+		t.Fatalf("gated-off background resume projected %v", got)
+	}
+
+	enabled := eventProjection{operationID: "op-1", supportsBackgroundWait: true}
+	enabled.project(native.Event{Kind: native.EventReasoning, Title: "Thinking..."})
+	waiting := enabled.project(waitEvent)
+	if len(waiting) != 1 {
+		t.Fatalf("waiting=%v, want 1 event", waiting)
+	}
+	waitWire := waiting[0].(map[string]any)
+	tools := waitWire["tools"].([]map[string]any)
+	if waitWire["type"] != "run.background_waiting" || waitWire["observed_at_unix_ms"] != int64(5_000) ||
+		len(tools) != 1 || tools[0]["call_id"] != "call-1" || tools[0]["tool_name"] != "schedule" || tools[0]["started_at_unix_ms"] != int64(4_000) {
+		t.Fatalf("waitWire=%v", waitWire)
+	}
+	if enabled.thinking {
+		t.Fatal("background waiting should clear active thinking state")
+	}
+
+	resumed := enabled.project(resumedEvent)
+	if len(resumed) != 1 {
+		t.Fatalf("resumed=%v, want 1 event", resumed)
+	}
+	resumedWire := resumed[0].(map[string]any)
+	if resumedWire["type"] != "run.background_resumed" || resumedWire["observed_at_unix_ms"] != int64(6_000) || resumedWire["trigger"] != "user_input" {
+		t.Fatalf("resumedWire=%v", resumedWire)
 	}
 }
