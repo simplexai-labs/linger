@@ -67,17 +67,22 @@ describe("Dashboard page", () => {
         "Verify release",
       ),
     ).toBeVisible();
+    // Closed column defaults collapsed to reduce clutter and expands on demand.
+    const closedRegion = screen.getByRole("region", { name: "Closed" });
+    expect(within(closedRegion).getByText("1")).toBeVisible();
     expect(
-      within(screen.getByRole("region", { name: "Closed" })).getByText(
-        "Retire old release",
-      ),
-    ).toBeVisible();
+      within(closedRegion).queryByText("Retire old release"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      within(closedRegion).getByRole("button", { name: "Expand closed" }),
+    );
+    expect(within(closedRegion).getByText("Retire old release")).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "Create Work Item" }),
     ).not.toBeInTheDocument();
   });
 
-  it("opens a detail drawer for deep-linked and clicked Work Items and closes cleanly", async () => {
+  it("opens a detail drawer for deep-linked and clicked Work Items, syncs URL on close, and manages focus", async () => {
     const runtime = await testRuntime();
     const identity = runtime.seed.identity;
     const human = identity.actors[0]!;
@@ -102,15 +107,20 @@ describe("Dashboard page", () => {
     });
     seedWorkItems(runtime, [item]);
 
-    renderPage(runtime, "/t/tenant-northstar/dashboard/workitem-linked");
+    renderPage(
+      runtime,
+      "/t/tenant-northstar/dashboard/workitem-linked?room=room-all",
+    );
 
     const card = await screen.findByRole("link", { name: /Linked task/ });
     expect(card).toHaveAttribute("aria-current", "location");
-    expect(card).toHaveFocus();
 
     const detail = screen.getByRole("complementary", {
       name: "Work Item details",
     });
+    // Opening the drawer moves keyboard focus into the drawer, not stuck on the background card.
+    expect(detail).toHaveFocus();
+    expect(card).not.toHaveFocus();
     expect(
       within(detail).getByRole("heading", { name: "Linked task" }),
     ).toBeVisible();
@@ -134,8 +144,9 @@ describe("Dashboard page", () => {
       screen.queryByRole("complementary", { name: "Work Item details" }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/t/tenant-northstar/dashboard/workitem-linked",
+      "/t/tenant-northstar/dashboard?room=room-all",
     );
+    expect(screen.getByRole("link", { name: /Linked task/ })).toHaveFocus();
 
     fireEvent.click(screen.getByRole("link", { name: /Linked task/ }));
     expect(
@@ -146,6 +157,9 @@ describe("Dashboard page", () => {
     expect(
       screen.queryByRole("complementary", { name: "Work Item details" }),
     ).not.toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/t/tenant-northstar/dashboard?room=room-all",
+    );
   });
 
   it("lists Work Item comments and posts new comments with segments and Idempotency-Key", async () => {
@@ -701,7 +715,7 @@ describe("Dashboard page", () => {
     );
   });
 
-  it("reuses the Dashboard deep link and focuses the highlighted Work Item", async () => {
+  it("reuses the Dashboard deep link and focuses the opened detail drawer", async () => {
     const runtime = await testRuntime();
     const identity = runtime.seed.identity;
     const human = identity.actors[0]!;
@@ -714,7 +728,9 @@ describe("Dashboard page", () => {
     const focused = await screen.findByRole("link", { name: /Focused work/ });
     expect(screen.getByRole("heading", { name: "Dashboard" })).toBeVisible();
     expect(focused).toHaveAttribute("aria-current", "location");
-    expect(focused).toHaveFocus();
+    expect(
+      screen.getByRole("complementary", { name: "Work Item details" }),
+    ).toHaveFocus();
   });
 
   it("keeps newer Dashboard state when a focused detail response is stale", async () => {
@@ -763,11 +779,13 @@ describe("Dashboard page", () => {
       name: /Archived focused work/,
     });
     expect(focused).toHaveAttribute("aria-current", "location");
-    expect(focused).toHaveFocus();
+    expect(
+      screen.getByRole("complementary", { name: "Work Item details" }),
+    ).toHaveFocus();
     expect(screen.getByText("1 item")).toBeVisible();
   });
 
-  it("focuses a deep-linked Work Item after Dashboard data arrives", async () => {
+  it("opens and focuses the detail drawer after Dashboard data arrives", async () => {
     const runtime = await testRuntime();
     const identity = runtime.seed.identity;
     const human = identity.actors[0]!;
@@ -801,10 +819,12 @@ describe("Dashboard page", () => {
 
     const focused = await screen.findByRole("link", { name: /Delayed work/ });
     expect(focused).toHaveAttribute("aria-current", "location");
-    expect(focused).toHaveFocus();
+    expect(
+      screen.getByRole("complementary", { name: "Work Item details" }),
+    ).toHaveFocus();
   });
 
-  it("keeps Closed records recoverable when the column is collapsed", async () => {
+  it("keeps Closed records recoverable when the column is expanded and collapsed", async () => {
     const runtime = await testRuntime();
     const identity = runtime.seed.identity;
     const human = identity.actors[0]!;
@@ -817,9 +837,7 @@ describe("Dashboard page", () => {
     ]);
 
     renderPage(runtime);
-    await screen.findByText("Duplicate work");
-
-    fireEvent.click(screen.getByRole("button", { name: "Collapse closed" }));
+    await screen.findByRole("heading", { name: "Dashboard" });
     expect(screen.queryByText("Duplicate work")).not.toBeInTheDocument();
     expect(
       within(screen.getByRole("region", { name: "Closed" })).getByText("1"),
@@ -827,6 +845,9 @@ describe("Dashboard page", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Expand closed" }));
     expect(screen.getByText("Duplicate work")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse closed" }));
+    expect(screen.queryByText("Duplicate work")).not.toBeInTheDocument();
   });
 
   it("shows an explicit empty state for a Tenant without Work Items", async () => {
@@ -955,6 +976,98 @@ describe("Dashboard page", () => {
     expect(
       screen.getByText("This Tenant Dashboard is not available to you."),
     ).toBeVisible();
+  });
+
+  it("shows a friendly not-found view with back links instead of Try again for an invalid Work Item ID", async () => {
+    const runtime = await testRuntime();
+    seedWorkItems(runtime, []);
+    runtime.server.on("GET", WORK_ITEM_PATH, () =>
+      teamHubErrorResponse(404, "NOT_FOUND", "resource was not found"),
+    );
+
+    renderPage(runtime, "/t/tenant-northstar/dashboard/nonexistent-id");
+
+    expect(
+      await screen.findByRole("heading", { name: "Work Item not found" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "This Work Item may have been deleted, or the link may be incorrect.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("resource was not found"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Try again" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Back to Dashboard" }),
+    ).toHaveAttribute("href", "/t/tenant-northstar/dashboard");
+    expect(
+      screen.getByRole("link", { name: "Back to Messages" }),
+    ).toHaveAttribute("href", "/t/tenant-northstar/rooms");
+  });
+
+  it("submits a comment with Cmd/Ctrl+Enter", async () => {
+    const runtime = await testRuntime();
+    const identity = runtime.seed.identity;
+    const human = identity.actors[0]!;
+    const item = workItem(human, {
+      id: "workitem-shortcut",
+      title: "Shortcut comment item",
+    });
+    seedWorkItems(runtime, [item]);
+    const comments: Array<{
+      author: typeof human;
+      body: string;
+      created_at: string;
+      id: string;
+      segments: Array<{ content: string; type: "text" }>;
+      tenant_id: string;
+      updated_at: string;
+      version: number;
+      work_item_id: string;
+    }> = [];
+    runtime.server
+      .on("GET", "/v0/work-items/{workItemId}/comments", () => ({
+        items: comments,
+        page: { has_more: false },
+      }))
+      .on("POST", "/v0/work-items/{workItemId}/comments", ({ body }) => {
+        const payload = body as {
+          body: string;
+          segments: Array<{ content: string; type: "text" }>;
+        };
+        const created = {
+          author: human,
+          body: payload.body,
+          created_at: "2026-07-30T02:00:00Z",
+          id: "comment-shortcut",
+          segments: payload.segments,
+          tenant_id: "tenant-northstar",
+          updated_at: "2026-07-30T02:00:00Z",
+          version: 1,
+          work_item_id: item.id,
+        };
+        comments.push(created);
+        return Response.json(created, { status: 201 });
+      });
+
+    renderPage(runtime, "/t/tenant-northstar/dashboard/workitem-shortcut");
+    const detail = await screen.findByRole("complementary", {
+      name: "Work Item details",
+    });
+    const input = within(detail).getByRole("textbox", {
+      name: "Add a comment",
+    });
+    fireEvent.change(input, { target: { value: "Submitted via shortcut" } });
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true });
+
+    expect(
+      await within(detail).findByText("Submitted via shortcut"),
+    ).toBeVisible();
+    expect(input).toHaveValue("");
   });
 });
 

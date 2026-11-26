@@ -80,7 +80,32 @@ describe("ConnectComputerPage", () => {
         name: "Connection request is invalid",
       }),
     ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Back to Linger" }),
+    ).toHaveAttribute("href", "/");
     expect(createEnrollment).not.toHaveBeenCalled();
+  });
+
+  it("shows actionable retry guidance when enrollment fails", async () => {
+    const runtime = createTestTeamHubRuntime();
+    serveEnrollment(runtime, () =>
+      teamHubErrorResponse(500, "INTERNAL_ERROR", "Server failed"),
+    );
+
+    renderPage(runtime, vi.fn(), validConnectPath());
+    const connectButton = await screen.findByRole("button", {
+      name: "Connect computer",
+    });
+    await waitFor(() => expect(connectButton).toBeEnabled());
+    fireEvent.click(connectButton);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "The Computer could not be connected. Run setup again.",
+    );
+    expect(alert).toHaveTextContent(
+      "Try connecting again below, or return to your terminal and re-run login.",
+    );
   });
 
   it("forwards an existing Computer identity for owner-authorized renewal", async () => {

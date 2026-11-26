@@ -228,21 +228,59 @@ function ProfileSetupApps(props: Props) {
   const moreApps = card.profile_setup?.more_apps ?? [];
   const catalogApp = (key: string) =>
     catalog.data?.apps.find((app) => app.key === key);
+  const listedAppKeys = new Set([...apps, ...moreApps]);
+  const connectedCount = activeExternalConnections(
+    connections.data?.connections ?? [],
+  ).filter(
+    (connection) =>
+      listedAppKeys.size === 0 || listedAppKeys.has(connection.provider),
+  ).length;
+  const replies: {
+    decision: SetupDecision;
+    label: string;
+    tone: "primary" | "subtle";
+  }[] =
+    connectedCount > 0
+      ? [
+          {
+            decision: "connected",
+            label: t(cardsMessages.continueWithConnected, {
+              count: connectedCount,
+            }),
+            tone: "primary",
+          },
+          {
+            decision: "skipped",
+            label: t(cardsMessages.skipForNow),
+            tone: "subtle",
+          },
+        ]
+      : connections.isError
+        ? [
+            {
+              decision: "connected",
+              label: t(cardsMessages.continueSetup),
+              tone: "primary",
+            },
+            {
+              decision: "skipped",
+              label: t(cardsMessages.skipForNow),
+              tone: "subtle",
+            },
+          ]
+        : [
+            {
+              decision: "skipped",
+              label: t(cardsMessages.skipForNow),
+              tone: "subtle",
+            },
+          ];
 
   return (
     <SetupCard
       actions={
         canDecide ? (
-          <SetupReplies
-            decision={decision}
-            replies={[
-              {
-                decision: "connected",
-                label: t(cardsMessages.replyConnected),
-              },
-              { decision: "skipped", label: t(cardsMessages.skipForNow) },
-            ]}
-          />
+          <SetupReplies decision={decision} replies={replies} />
         ) : undefined
       }
       card={card}
@@ -322,16 +360,16 @@ function SetupAppRow({
       connection.status_error_code === "provider_identity_unavailable",
   );
   return (
-    <div className="p-2">
-      <div className="flex min-h-8 items-center gap-2.5">
-        <span className="flex size-10 shrink-0 items-center justify-center [&>svg]:size-6 [&>img]:size-7">
+    <div className="px-1 py-2 sm:p-2">
+      <div className="flex min-h-8 items-center gap-2 sm:gap-2.5">
+        <span className="flex size-8 shrink-0 items-center justify-center sm:size-10 [&>svg]:size-5 sm:[&>svg]:size-6 [&>img]:size-6 sm:[&>img]:size-7">
           <AppLogo name={name} size="profile" url={app?.logo_url} />
         </span>
-        <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+        <span className="min-w-0 flex-1 text-sm leading-snug text-foreground">
           {name}
         </span>
         {active ? (
-          <span className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+          <span className="flex max-w-[48%] min-w-0 shrink-0 items-center gap-1.5 text-sm text-muted-foreground">
             <span
               aria-hidden
               className="size-1.5 shrink-0 rounded-full bg-[var(--app-status-success-text)]"
@@ -342,17 +380,21 @@ function SetupAppRow({
             </span>
           </span>
         ) : verifying && showConnections ? (
-          <span className="text-xs text-muted-foreground" role="status">
+          <span
+            className="shrink-0 text-xs text-muted-foreground"
+            role="status"
+          >
             {t(cardsMessages.verifyingConnection)}
           </span>
         ) : app && showConnections ? (
           <Button
             aria-label={t(cardsMessages.connectApp, { name })}
+            className="shrink-0"
             disabled={
               !interactive || !flow.canStart(app) || flow.connection.isPending
             }
             onClick={() => flow.start(app, pending)}
-            size="large"
+            size="default"
             tone="subtle"
           >
             {t(
@@ -362,7 +404,7 @@ function SetupAppRow({
             )}
           </Button>
         ) : showConnections && catalogLoaded && !app ? (
-          <span className="text-xs text-muted-foreground">
+          <span className="shrink-0 text-xs text-muted-foreground">
             {t(cardsMessages.notAvailableYet)}
           </span>
         ) : null}
@@ -689,7 +731,7 @@ function SourceRow({
   );
 }
 
-/** The replies of a pending setup card; the first one is the main answer. */
+/** The replies of a pending setup card; the first one is the main answer unless overridden. */
 function SetupReplies({
   decision,
   doneDisabled = false,
@@ -699,7 +741,11 @@ function SetupReplies({
   decision: ReturnType<typeof useSetupDecision>;
   doneDisabled?: boolean;
   onDone?: () => void;
-  replies: { decision: SetupDecision; label: string }[];
+  replies: {
+    decision: SetupDecision;
+    label: string;
+    tone?: "primary" | "subtle";
+  }[];
 }) {
   return replies.map((reply, index) => (
     <Button
@@ -713,7 +759,7 @@ function SetupReplies({
           : void decision.decide(reply.decision)
       }
       size="large"
-      tone={index === 0 ? "primary" : "subtle"}
+      tone={reply.tone ?? (index === 0 ? "primary" : "subtle")}
     >
       {reply.label}
     </Button>

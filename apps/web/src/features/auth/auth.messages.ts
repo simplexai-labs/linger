@@ -11,8 +11,9 @@ export const authMessages = defineMessages("auth", {
   showPassword: "Show password",
   hidePassword: "Hide password",
   signIn: "Sign in",
-  logIn: "Log in",
-  working: "Working...",
+  invalidCredentials:
+    "Incorrect email or password. Check your credentials and try again.",
+  accessHelp: "Need access or a password reset? Contact your workspace admin.",
   artTitleFirst: "Your personal AI.",
   artTitleSecond: "A step ahead.",
   artLede:

@@ -1,18 +1,27 @@
-import { Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+  Alert02Icon,
+  Globe02Icon,
+  Settings01Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { ModalDialog } from "@/components/ui/modal-dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { anotherMeQueryOptions } from "@/features/rooms/room-queries";
+import { settingsMessages } from "@/features/settings/settings.messages";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type {
   TeamHubLocalComputerPage,
   TeamHubLocalRuntimeType,
 } from "@/features/teamhub/teamhub-types";
-import { RichMessage, useT } from "@/i18n/use-translation";
+import { commonMessages } from "@/i18n/common.messages";
+import { LANGUAGES, setLanguage } from "@/i18n/language";
+import { RichMessage, useT, useTranslation } from "@/i18n/use-translation";
 import { cn } from "@/lib/cn";
 
 import { CommandLine } from "./computer-app-setup-dialog";
@@ -44,6 +53,7 @@ type RuntimeStatus = LocalComputer["runtimes"][number]["status"];
 // Runtime installs and sign-ins happen on the Computer and reach the Web only
 // through the inventory, so the gate polls while it is open.
 const pollIntervalMs = 3_000;
+const readyTimeoutMs = 30_000;
 
 /**
  * Every model call, Another Me's included, runs on the Human's own Computer,
@@ -61,11 +71,18 @@ export function LocalComputerGate({
   signingOut: boolean;
   tenantId: string;
 }) {
-  const t = useT();
+  const { language, t } = useTranslation();
   const { client } = useTeamHubRuntime();
   const desktop = useDesktopComputer();
   const cliInstallAvailable = useCliInstallAvailable();
   const [platform, setPlatform] = useState(browserComputerPlatform);
+  const [readyTimedOut, setReadyTimedOut] = useState(false);
+  const [readyRetryCount, setReadyRetryCount] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    containerRef.current?.focus();
+  }, []);
   // The desktop preloads this page hidden so "Open Linger" can reveal a
   // rendered Room, and the realtime stream is closed while hidden, so the gate
   // keeps polling in the background or it never sees Another Me arrive.
@@ -74,7 +91,7 @@ export function LocalComputerGate({
     refetchInterval: pollIntervalMs,
     refetchIntervalInBackground: true,
   });
-  useQuery({
+  const anotherMeQuery = useQuery({
     ...anotherMeQueryOptions(client, tenantId),
     refetchInterval: pollIntervalMs,
     refetchIntervalInBackground: true,
@@ -82,18 +99,45 @@ export function LocalComputerGate({
   const computer = gateComputer(computers.data?.items ?? []);
   const online = computer?.status === "online" && !computer.upgrade_required;
   const ready = online && hasReadyRuntime(computer);
+  const queryError = computers.isError || anotherMeQuery.isError;
   const desktopOnlyStep = Boolean(
     desktop && (!computer || !cliInstallAvailable),
   );
   const command = computerCommand();
+  const nextLanguage =
+    LANGUAGES.find((entry) => entry.tag !== language) ?? LANGUAGES[0];
+
+  useEffect(() => {
+    if (!ready) {
+      setReadyTimedOut(false);
+      return;
+    }
+    setReadyTimedOut(false);
+    const timer = window.setTimeout(() => {
+      setReadyTimedOut(true);
+    }, readyTimeoutMs);
+    return () => window.clearTimeout(timer);
+  }, [ready, readyRetryCount]);
+
+  function retryGateQueries() {
+    setReadyTimedOut(false);
+    setReadyRetryCount((count) => count + 1);
+    void computers.refetch();
+    void anotherMeQuery.refetch();
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
-      <section
-        aria-labelledby="local-computer-gate-title"
-        aria-modal="true"
-        className="workspace-scrollbar flex max-h-full w-full max-w-[560px] flex-col overflow-y-auto rounded-2xl border border-border bg-card text-foreground shadow-lg"
-        role="dialog"
+    <ModalDialog
+      ariaLabel={t(computersMessages.gateTitle)}
+      className="border border-border bg-card p-0 text-foreground"
+      closeOnBackdrop={false}
+      onClose={() => {}}
+      size="md"
+    >
+      <div
+        className="workspace-scrollbar flex max-h-[calc(100dvh-32px)] flex-col overflow-y-auto outline-none"
+        ref={containerRef}
+        tabIndex={-1}
       >
         <header className="border-b border-border px-6 pb-4 pt-5">
           <h2 className="text-lg" id="local-computer-gate-title">
@@ -107,14 +151,51 @@ export function LocalComputerGate({
           )}
         </header>
 
-        {ready ? (
-          <p
-            className="flex items-center justify-center gap-2 px-6 py-10 text-sm"
-            role="status"
+        {queryError ? (
+          <div
+            className="mx-6 mt-4 flex items-start justify-between gap-3 rounded-xl border border-[var(--app-status-danger-border)] bg-[var(--app-status-danger-surface)] px-3.5 py-3 text-xs text-app-danger"
+            role="alert"
           >
-            <Spinner size={14} />
-            {t(computersMessages.gateReady)}
-          </p>
+            <div className="flex min-w-0 items-start gap-2">
+              <Icon className="mt-0.5 shrink-0" icon={Alert02Icon} size={14} />
+              <p className="leading-5">{t(computersMessages.gateLoadError)}</p>
+            </div>
+            <Button
+              disabled={computers.isFetching || anotherMeQuery.isFetching}
+              onClick={retryGateQueries}
+              size="compact"
+              tone="secondary"
+            >
+              {t(commonMessages.retry)}
+            </Button>
+          </div>
+        ) : null}
+
+        {ready ? (
+          <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+            {readyTimedOut ? (
+              <>
+                <p className="text-sm text-foreground" role="alert">
+                  {t(computersMessages.gateReadySlow)}
+                </p>
+                <Button
+                  disabled={computers.isFetching || anotherMeQuery.isFetching}
+                  onClick={retryGateQueries}
+                  tone="secondary"
+                >
+                  {t(commonMessages.retry)}
+                </Button>
+              </>
+            ) : (
+              <p
+                className="flex items-center justify-center gap-2 text-sm"
+                role="status"
+              >
+                <Spinner size={14} />
+                {t(computersMessages.gateReady)}
+              </p>
+            )}
+          </div>
         ) : (
           <ol className="divide-y divide-border px-6">
             {desktopOnlyStep && desktop ? (
@@ -176,7 +257,25 @@ export function LocalComputerGate({
           </div>
         )}
 
-        <footer className="flex justify-end border-t border-border bg-muted/40 px-6 py-3">
+        <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-muted/40 px-6 py-3">
+          <div className="flex items-center gap-1">
+            <Button
+              aria-label={t(settingsMessages.interfaceLanguage)}
+              onClick={() => void setLanguage(nextLanguage.tag)}
+              size="compact"
+              tone="ghost"
+            >
+              <Icon icon={Globe02Icon} size={14} />
+              <span lang={nextLanguage.tag}>{nextLanguage.name}</span>
+            </Button>
+            <Link
+              className="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              to={`/t/${encodeURIComponent(tenantId)}/settings/account`}
+            >
+              <Icon icon={Settings01Icon} size={14} />
+              {t(settingsMessages.title)}
+            </Link>
+          </div>
           <Button
             data-voice-risk="never"
             disabled={signingOut}
@@ -188,8 +287,8 @@ export function LocalComputerGate({
               : t(computersMessages.signOut)}
           </Button>
         </footer>
-      </section>
-    </div>
+      </div>
+    </ModalDialog>
   );
 }
 

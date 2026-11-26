@@ -150,6 +150,11 @@ export const cardsMessages = defineMessages("cards", {
   fileNoLongerAvailable:
     "A file is no longer available. Remove it and upload it again.",
   replyConnected: "Connected",
+  continueWithConnected: {
+    one: "Continue ({count} connected)",
+    other: "Continue ({count} connected)",
+  },
+  continueSetup: "Continue",
   skipForNow: "Skip for now",
   connectYourApps: "Connect your apps",
   more: "More",

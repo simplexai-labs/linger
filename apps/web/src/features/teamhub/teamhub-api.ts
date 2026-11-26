@@ -14,11 +14,13 @@ import { readTeamHubError, TeamHubTransportError } from "./teamhub-error";
 export type TeamHubApi = Client<paths>;
 export type TeamHubApiPath = keyof paths;
 
-// Signing in, reading the Session, and opening a shared link decide
-// authentication themselves, so a 401 there is an answer, not a lost Session.
+// Signing in, reading the Session or initial Space list, and opening a shared
+// link decide authentication themselves, so a 401 there is an answer, not a
+// lost Session.
 const unauthenticatedPaths = new Set<TeamHubApiPath>([
   "/v0/auth/login",
   "/v0/session",
+  "/v0/tenants",
   "/v0/shared-documents/content",
   "/v0/shared-documents/resolve",
   "/v0/shared-room-history/asset",

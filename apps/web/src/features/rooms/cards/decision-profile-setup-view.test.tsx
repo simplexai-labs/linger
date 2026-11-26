@@ -346,10 +346,40 @@ describe("AnotherMe apps setup card", () => {
     expect(screen.queryByRole("button", { name: "Connect Gmail" })).toBeNull();
   });
 
-  it("submits Connected and Skip for now with the card version", async () => {
+  it("hides the primary Continue CTA when zero accounts are connected and keeps app names unclipped", async () => {
+    const runtime = createTestTeamHubRuntime();
+    vi.spyOn(runtime.client, "listExternalConnections").mockResolvedValue({
+      connections: [],
+    });
+    const { onDecision } = renderCard(setupCard(appsForm), { runtime });
+
+    const list = await screen.findByRole("region", {
+      name: "Connect your apps",
+    });
+    const calendarLabel = within(list).getByText("Google Calendar");
+    expect(calendarLabel).toBeVisible();
+    expect(calendarLabel).not.toHaveClass("truncate");
+
+    expect(
+      screen.queryByRole("button", { name: /^Connected$/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Continue/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    await waitFor(() =>
+      expect(onDecision).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: "skipped", expectedVersion: 3 }),
+      ),
+    );
+  });
+
+  it("submits Continue with connected count and Skip for now when at least one account is connected", async () => {
     const { onDecision } = renderCard(setupCard(appsForm));
 
-    fireEvent.click(await screen.findByRole("button", { name: "Connected" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue (1 connected)" }),
+    );
     await waitFor(() =>
       expect(onDecision).toHaveBeenCalledWith({
         decision: "connected",

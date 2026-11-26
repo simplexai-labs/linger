@@ -1,8 +1,18 @@
+import { useId, useRef } from "react";
+
 import { useT } from "@/i18n/use-translation";
+import { cn } from "@/lib/cn";
 
 import { computerSetupMessages } from "./computer-setup.messages";
 
 export type ComputerPlatform = "darwin" | "linux" | "win32";
+
+const PLATFORM_OPTIONS: readonly { label: string; value: ComputerPlatform }[] =
+  [
+    { label: "macOS", value: "darwin" },
+    { label: "Windows", value: "win32" },
+    { label: "Linux", value: "linux" },
+  ];
 
 export function browserComputerPlatform(): ComputerPlatform {
   const platform = navigator.platform || navigator.userAgent;
@@ -59,21 +69,65 @@ export function ComputerPlatformSelector({
   onChange: (platform: ComputerPlatform) => void;
 }) {
   const t = useT();
+  const labelId = useId();
+  const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const activeIndex = PLATFORM_OPTIONS.findIndex(
+    (option) => option.value === value,
+  );
+
+  function selectIndex(index: number) {
+    const nextIndex =
+      (index + PLATFORM_OPTIONS.length) % PLATFORM_OPTIONS.length;
+    onChange(PLATFORM_OPTIONS[nextIndex]!.value);
+    buttonRefs.current[nextIndex]?.focus();
+  }
+
   return (
-    <label className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-      {t(computerSetupMessages.operatingSystem)}
-      <select
-        className="h-8 rounded-md border border-border bg-card px-2 text-sm text-foreground transition-colors duration-150 hover:border-border-hover focus-visible:border-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        value={value}
-        onChange={(event) => onChange(event.target.value as ComputerPlatform)}
+    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <span id={labelId}>{t(computerSetupMessages.operatingSystem)}</span>
+      <div
+        aria-labelledby={labelId}
+        className="inline-flex rounded-lg border border-border bg-muted p-0.5"
+        role="radiogroup"
       >
-        <option value="" disabled>
-          {t(computerSetupMessages.chooseOperatingSystem)}
-        </option>
-        <option value="darwin">macOS</option>
-        <option value="win32">Windows</option>
-        <option value="linux">Linux</option>
-      </select>
-    </label>
+        {PLATFORM_OPTIONS.map((option, index) => {
+          const checked = value === option.value;
+          const focusable = checked || (activeIndex < 0 && index === 0);
+          return (
+            <button
+              aria-checked={checked}
+              className={cn(
+                "inline-flex h-7 items-center rounded-md px-2.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                checked
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              key={option.value}
+              onClick={() => onChange(option.value)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                  event.preventDefault();
+                  selectIndex(index + 1);
+                } else if (
+                  event.key === "ArrowLeft" ||
+                  event.key === "ArrowUp"
+                ) {
+                  event.preventDefault();
+                  selectIndex(index - 1);
+                }
+              }}
+              ref={(node) => {
+                buttonRefs.current[index] = node;
+              }}
+              role="radio"
+              tabIndex={focusable ? 0 : -1}
+              type="button"
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

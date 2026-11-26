@@ -4,7 +4,7 @@ import {
   ViewIcon,
   ViewOffIcon,
 } from "@hugeicons/core-free-icons";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 
 import { Button } from "@/components/ui/button";
@@ -40,8 +40,15 @@ export function TeamHubLoginPage({
   });
   const localAccount = useDesktopLocalAccount();
   const t = useT();
+  const reason = searchParams.get("reason");
+  const [dismissedReason, setDismissedReason] = useState<string | null>(null);
+  const dismissNotice = () => {
+    if (reason) setDismissedReason(reason);
+  };
   const authenticationNotice =
-    searchParams.get("reason") === "session-expired"
+    reason === "session-expired" &&
+    dismissedReason !== reason &&
+    !authentication.state.error
       ? t(m.sessionExpired)
       : null;
 
@@ -56,9 +63,14 @@ export function TeamHubLoginPage({
         <LocalAccountSignIn
           account={localAccount}
           authentication={authentication}
+          onAttempt={dismissNotice}
         />
       ) : null}
-      <AuthenticationForm authentication={authentication} />
+      <AuthenticationForm
+        authentication={authentication}
+        autoFocusEmail={!localAccount}
+        onInteract={dismissNotice}
+      />
     </AuthShell>
   );
 }
@@ -66,9 +78,11 @@ export function TeamHubLoginPage({
 function LocalAccountSignIn({
   account,
   authentication,
+  onAttempt,
 }: {
   account: DesktopLocalAccount;
   authentication: AuthenticationController;
+  onAttempt: () => void;
 }) {
   const t = useT();
   return (
@@ -77,6 +91,7 @@ function LocalAccountSignIn({
         className="w-full"
         disabled={authentication.state.isSubmitting}
         onClick={() => {
+          onAttempt();
           void authentication.signInWithDesktopAccount(account);
         }}
         size="large"
@@ -97,25 +112,42 @@ function LocalAccountSignIn({
 
 function AuthenticationForm({
   authentication,
+  autoFocusEmail,
+  onInteract,
 }: {
   authentication: AuthenticationController;
+  autoFocusEmail: boolean;
+  onInteract: () => void;
 }) {
   const { email, error, isSubmitting, password } = authentication.state;
   const { changeField, handleSubmit } = authentication;
+  const formRef = useRef<HTMLFormElement>(null);
   const t = useT();
+
+  useEffect(() => {
+    if (!autoFocusEmail) return;
+    formRef.current
+      ?.querySelector<HTMLInputElement>('input[type="email"]')
+      ?.focus();
+  }, [autoFocusEmail]);
 
   return (
     <form
       className="auth-form"
       noValidate
       onSubmit={(event) => {
+        onInteract();
         void handleSubmit(event);
       }}
+      ref={formRef}
     >
       <Field
         autoComplete="email"
         label={t(m.email)}
-        onChange={(event) => changeField("email", event.target.value)}
+        onChange={(event) => {
+          onInteract();
+          changeField("email", event.target.value);
+        }}
         placeholder="you@company.com"
         type="email"
         value={email}
@@ -123,21 +155,26 @@ function AuthenticationForm({
       <PasswordField
         autoComplete="current-password"
         label={t(m.password)}
-        onChange={(value) => changeField("password", value)}
+        onChange={(value) => {
+          onInteract();
+          changeField("password", value);
+        }}
         value={password}
       />
       {error ? <FormFeedback tone="danger">{error}</FormFeedback> : null}
       <Button
-        aria-label={t(m.signIn)}
         className="auth-submit w-full"
-        disabled={isSubmitting}
+        loading={isSubmitting}
         size="large"
         type="submit"
         tone="primary"
       >
-        <span>{t(isSubmitting ? m.working : m.logIn)}</span>
+        <span>{t(m.signIn)}</span>
         {!isSubmitting ? <Icon icon={ArrowRight02Icon} size={16} /> : null}
       </Button>
+      <p className="text-center text-xs text-muted-foreground">
+        {t(m.accessHelp)}
+      </p>
     </form>
   );
 }
