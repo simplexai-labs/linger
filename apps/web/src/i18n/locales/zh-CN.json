@@ -1635,7 +1635,13 @@
     "guidanceConstrainedTitleGpu": "其他应用正在占用显存",
     "guidanceConstrainedBody": "其他应用占用了 {other} 内存（剩余 {free} / {total}）。关掉一些后再检查。",
     "guidanceConstrainedBodyGpu": "其他应用占用了 {other} 显存（剩余 {free} / {total}）。关掉一些后再检查。",
-    "factSystem": "系统"
+    "factSystem": "系统",
+    "featuredDismiss": "关闭精选模型推荐",
+    "byokShowApiKey": "显示 API 密钥",
+    "byokMaskApiKey": "隐藏 API 密钥",
+    "byokDiscardUnsavedTitle": "放弃未保存的更改？",
+    "byokDiscardUnsavedDescription": "你有未保存的更改。离开此页面并放弃它们？",
+    "byokDiscardChanges": "放弃"
   },
   "runtimeStatus": {
     "stateCanceled": "已取消",
