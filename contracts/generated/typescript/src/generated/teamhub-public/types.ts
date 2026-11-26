@@ -7172,6 +7172,7 @@ export interface components {
         | "connect_link_expired"
         | "identity_mismatch"
         | "duplicate_remote_principal"
+        | "provider_auth_failed"
         | "stale_revision"
         | "internal_error";
       /**

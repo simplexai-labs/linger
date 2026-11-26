@@ -291,10 +291,10 @@ func (s *Service) SetAutoRemindersInTx(ctx context.Context, tx pgx.Tx, accountID
 	return err
 }
 
-func (s *Service) connectionStatus(ctx context.Context, connection Connection) (composio.ConnectionStatus, error) {
+func (s *Service) connectionStatus(ctx context.Context, connection Connection) (composio.ConnectionStatusReport, error) {
 	adapter, err := s.connectionAdapter(connection.Provider)
 	if err != nil {
-		return "", err
+		return composio.ConnectionStatusReport{}, err
 	}
 	return adapter.Status(ctx, connection.UpstreamConnectionID)
 }

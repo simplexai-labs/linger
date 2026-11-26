@@ -92,9 +92,9 @@ func (c *Client) executeDiscordTool(ctx context.Context, connectedAccountID, slu
 		_ = decodeDiscordToolData(response.Data, &failure)
 		switch {
 		case failure.StatusCode == http.StatusTooManyRequests:
-			return &RateLimitError{Operation: operation}
+			return &RateLimitError{Operation: operation, Source: ErrorSourceProvider}
 		case failure.StatusCode > 0:
-			return &remoteError{operation: operation, status: failure.StatusCode}
+			return &remoteError{operation: operation, status: failure.StatusCode, source: ErrorSourceProvider}
 		default:
 			return fmt.Errorf("Composio %s failed: %w", operation, ErrDiscordToolRefused)
 		}

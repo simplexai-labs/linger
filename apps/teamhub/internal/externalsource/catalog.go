@@ -37,7 +37,7 @@ type connectionIdentity struct {
 // reauthorization and cleanup drive: Composio's for most apps, TeamHub's own
 // for the apps it authorizes itself.
 type connectionAdapter interface {
-	Status(context.Context, string) (composio.ConnectionStatus, error)
+	Status(context.Context, string) (composio.ConnectionStatusReport, error)
 	Identify(context.Context, string, composio.ConnectionStatus) (connectionIdentity, error)
 	Revoke(context.Context, string) error
 }
@@ -50,8 +50,8 @@ type composioConnection struct {
 	identify func(context.Context, string) (connectionIdentity, error)
 }
 
-func (a composioConnection) Status(ctx context.Context, upstreamID string) (composio.ConnectionStatus, error) {
-	return a.client.GetConnectionStatusForToolkit(ctx, upstreamID, a.toolkit)
+func (a composioConnection) Status(ctx context.Context, upstreamID string) (composio.ConnectionStatusReport, error) {
+	return a.client.InspectConnectionStatusForToolkit(ctx, upstreamID, a.toolkit)
 }
 
 func (a composioConnection) Identify(ctx context.Context, upstreamID string, status composio.ConnectionStatus) (connectionIdentity, error) {

@@ -73,10 +73,10 @@ func (c *Client) slackProxy(ctx context.Context, connectedAccountID, endpoint st
 		return err
 	}
 	if response.Status == http.StatusTooManyRequests {
-		return &RateLimitError{Operation: strings.TrimPrefix(endpoint, "/"), RetryAfter: parseRetryAfter(time.Now(), headerValue(response.Headers, "retry-after"), 0)}
+		return &RateLimitError{Operation: strings.TrimPrefix(endpoint, "/"), RetryAfter: parseRetryAfter(time.Now(), headerValue(response.Headers, "retry-after"), 0), Source: ErrorSourceProvider}
 	}
 	if response.Status < 200 || response.Status >= 300 {
-		return &remoteError{operation: operation, status: response.Status}
+		return &remoteError{operation: operation, status: response.Status, source: ErrorSourceProvider}
 	}
 	raw := response.Data
 	var encoded string
@@ -89,7 +89,7 @@ func (c *Client) slackProxy(ctx context.Context, connectedAccountID, endpoint st
 	}
 	if !common.OK {
 		if common.Error == "ratelimited" {
-			return &RateLimitError{Operation: strings.TrimPrefix(endpoint, "/"), RetryAfter: parseRetryAfter(time.Now(), headerValue(response.Headers, "retry-after"), 0)}
+			return &RateLimitError{Operation: strings.TrimPrefix(endpoint, "/"), RetryAfter: parseRetryAfter(time.Now(), headerValue(response.Headers, "retry-after"), 0), Source: ErrorSourceProvider}
 		}
 		switch common.Error {
 		case "invalid_cursor":

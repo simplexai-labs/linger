@@ -1803,6 +1803,7 @@ const (
 	ExternalConnectionReauthorizationErrorCodeDuplicateRemotePrincipal ExternalConnectionReauthorizationErrorCode = "duplicate_remote_principal"
 	ExternalConnectionReauthorizationErrorCodeIdentityMismatch         ExternalConnectionReauthorizationErrorCode = "identity_mismatch"
 	ExternalConnectionReauthorizationErrorCodeInternalError            ExternalConnectionReauthorizationErrorCode = "internal_error"
+	ExternalConnectionReauthorizationErrorCodeProviderAuthFailed       ExternalConnectionReauthorizationErrorCode = "provider_auth_failed"
 	ExternalConnectionReauthorizationErrorCodeStaleRevision            ExternalConnectionReauthorizationErrorCode = "stale_revision"
 )
 
@@ -1818,6 +1819,8 @@ func (e ExternalConnectionReauthorizationErrorCode) Valid() bool {
 	case ExternalConnectionReauthorizationErrorCodeIdentityMismatch:
 		return true
 	case ExternalConnectionReauthorizationErrorCodeInternalError:
+		return true
+	case ExternalConnectionReauthorizationErrorCodeProviderAuthFailed:
 		return true
 	case ExternalConnectionReauthorizationErrorCodeStaleRevision:
 		return true

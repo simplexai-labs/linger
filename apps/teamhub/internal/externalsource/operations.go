@@ -251,7 +251,15 @@ func (s *Service) endReauthorizationTx(ctx context.Context, tx pgx.Tx, connectio
 	if keepCandidate {
 		return true, nil
 	}
-	return true, enqueueRevokeTx(ctx, tx, connectionID, candidate)
+	if err = enqueueRevokeTx(ctx, tx, connectionID, candidate); err != nil {
+		return false, err
+	}
+	if code != "" {
+		if err = jobs.InsertTx(ctx, tx, ConnectionAuthorizationSettleArgs{ConnectionID: connectionID}, nil); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 // reconcileOneReauthorization works one reauthorization attempt. A Connection
@@ -275,7 +283,8 @@ func (s *Service) reconcileOneReauthorization(ctx context.Context, connectionID 
 	}
 	defer check.finish(&resultErr)
 	// An expired link is checked once more: the user may have finished just in time.
-	status, err := s.connectionStatus(ctx, candidate)
+	report, err := s.connectionStatus(ctx, candidate)
+	status := report.Status
 	if err != nil && !(linkExpired && upstreamGone(err)) {
 		check.failed("connection_status", err)
 		return err
@@ -285,6 +294,22 @@ func (s *Service) reconcileOneReauthorization(ctx context.Context, connectionID 
 		return errReauthorizationPending
 	}
 	if state == "failed" {
+		args := []any{
+			"connection_id", connectionID,
+			"provider", provider,
+			"phase", "connection_status",
+			"reauthorization_error_code", code,
+			"status", string(status),
+			"reason", string(report.Reason),
+			"link_expired", linkExpired,
+		}
+		if err != nil {
+			args = append(args, "error_class", connectionCheckErrorClass(err))
+			if source := connectionCheckErrorSource(err); source != "" {
+				args = append(args, "error_source", source)
+			}
+		}
+		s.logger.Warn("external connection reauthorization failed", args...)
 		// Only the candidate's upstream is revoked; the Connection keeps its own.
 		return s.commitAccountExternalConnectionsMutation(ctx, accountID, func(tx pgx.Tx) (bool, error) {
 			return s.endReauthorizationTx(ctx, tx, connectionID, candidateUpstream, code, false)
@@ -294,6 +319,16 @@ func (s *Service) reconcileOneReauthorization(ctx context.Context, connectionID 
 		Provider: provider, UpstreamConnectionID: candidateUpstream, RemoteTeamID: remoteTeamID,
 	}, status)
 	if err != nil {
+		errorCode, _, failConnection := connectionIdentityFailurePolicy(provider, err)
+		if failConnection {
+			if mutationErr := s.commitAccountExternalConnectionsMutation(ctx, accountID, func(tx pgx.Tx) (bool, error) {
+				return s.endReauthorizationTx(ctx, tx, connectionID, candidateUpstream, errorCode, false)
+			}); mutationErr != nil {
+				return mutationErr
+			}
+			check.logTerminalFailure("identity_refresh", errorCode, err)
+			return nil
+		}
 		check.failed("identity_refresh", err)
 		return err
 	}
