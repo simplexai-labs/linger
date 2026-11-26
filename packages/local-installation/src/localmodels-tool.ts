@@ -967,7 +967,7 @@ export interface BifrostPrefetchResult {
 const PREFETCH_BIFROST_PYTHON = `
 import json, os, platform, sys
 from pathlib import Path
-from localmodels import harness, hosts
+from localmodels import gateway_bifrost, harness, hosts
 
 tools_dir = Path(os.path.expanduser(hosts.tools_dir()))
 lock = harness.load_lock()
@@ -983,10 +983,13 @@ except harness.HarnessError as exc:
     sys.exit(0)
 artifact = harness.tool_artifact(build)
 version = lock["bifrost"]["version"]
-installed = tools_dir / f"bifrost-{version}" / ("bifrost-http.exe" if sys.platform == "win32" else "bifrost-http")
-archive = tools_dir / ".archives" / artifact["name"]
+actions, _ = gateway_bifrost.plan_tools({}, sys.platform, arch, False, str(tools_dir), lock)
+bifrost_action = next((a for a in actions if a["tool"] == "bifrost"), None)
+if bifrost_action is None:
+    raise harness.HarnessError("Bifrost plan did not return a bifrost action")
+archive = Path(harness.archive_files(tools_dir, artifact)[0])
 already_cached = (
-    (installed.is_file() and harness.digest(str(installed)) == artifact["sha256"])
+    bifrost_action["action"] == "reuse"
     or (archive.is_file() and harness.digest(str(archive)) == artifact["sha256"])
 )
 if not already_cached:
