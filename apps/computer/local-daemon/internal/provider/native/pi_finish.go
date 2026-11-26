@@ -182,6 +182,8 @@ func (t *piTurn) park(began time.Time) bool {
 func (t *piTurn) finish(began time.Time, status, failure string, interrupted bool) {
 	p := t.proc
 	abortAccepted := status != statusCompleted && t.abortQueue()
+	// Closing stdin during stop can make Pi exit cleanly without emitting agent_settled.
+	endedBeforeStop := piDone(p.closed) || piDone(p.exited)
 	confirmed := p.stop()
 	if confirmed && status == piStatusCancelled {
 		t.mu.Lock()
@@ -189,7 +191,7 @@ func (t *piTurn) finish(began time.Time, status, failure string, interrupted boo
 		t.mu.Unlock()
 		if hasResult {
 			status, failure = t.settledStatus(abortAccepted)
-		} else if running && !p.terminated.Load() {
+		} else if running && endedBeforeStop && !p.terminated.Load() {
 			status, failure = statusFailed, "Pi exited before agent_settled"
 			interrupted = false
 		}

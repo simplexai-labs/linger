@@ -327,6 +327,24 @@ func TestPiCompletionRacingAbort(t *testing.T) {
 	}
 }
 
+func TestPiSlowAbortExitsOnStdinClose(t *testing.T) {
+	shortenForTest(t, &piAbortBudget, 200*time.Millisecond)
+	commands := filepath.Join(t.TempDir(), "commands")
+	h := piNewHarness(t, "slow-abort", map[string]string{piFakeLogEnv: commands})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	run := h.start(ctx, "go", RunSpec{})
+	piWaitRunning(t, run)
+	cancel()
+	_, out := piCollect(t, run)
+	if out.Status != piStatusCancelled || !out.ExitConfirmed || out.Diagnostics.ExitCode != nil {
+		t.Fatalf("outcome = %+v", out)
+	}
+	if log, _ := os.ReadFile(commands); !strings.HasSuffix(string(log), "clear_queue\nabort\n") {
+		t.Fatalf("commands = %q", log)
+	}
+}
+
 func TestPiCancelClearsQueueAndReapsChildren(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	commands := filepath.Join(t.TempDir(), "commands")

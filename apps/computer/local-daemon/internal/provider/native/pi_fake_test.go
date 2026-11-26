@@ -224,6 +224,10 @@ func (f *piFakeProcess) handle(id, kind, message, level string) int {
 		if !f.cleared {
 			return 24
 		}
+		if f.mode == "slow-abort" {
+			// Keep reading until the Daemon closes stdin during cleanup.
+			return -1
+		}
 		if f.mode == "complete-on-abort" {
 			f.finish()
 			f.reply(id, kind, nil)
@@ -246,7 +250,7 @@ func (f *piFakeProcess) handle(id, kind, message, level string) int {
 
 func (f *piFakeProcess) act() int {
 	switch f.mode {
-	case "steer", "steer-race", "steer-unconsumed", "complete-on-abort", "abort-during-clear", "abort-rejected", "abort-after-settle", "exit-during-clear":
+	case "steer", "steer-race", "steer-unconsumed", "complete-on-abort", "abort-during-clear", "abort-rejected", "abort-after-settle", "exit-during-clear", "slow-abort":
 	case "model-aborted", "model-aborted-exit", "model-aborted-hold", "model-aborted-crash":
 		f.assistantEnd("", "aborted", "Request was aborted")
 		if f.mode == "model-aborted-crash" {
