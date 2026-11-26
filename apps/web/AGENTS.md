@@ -79,8 +79,18 @@ build:assets` to check the initial JS budget.
   capability/parameter/context badges (never matched against
   `name` or `description`), state-distinct cards (`loaded`, `recommended`,
   `failed` with short failure reasons and direct `Remove` for damaged/missing
-  files, `unavailable`), download speed/ETA, live Bifrost (`Pi`) `Gateway`
-  readiness, and top diagnostic callouts with a two-column model-card facts
+  files, `unavailable`), download speed/ETA, live Bifrost (`Pi`) `Shared
+gateway` readiness and shared `/v1` endpoint (from
+  `model-source.status.gateway_url`) clearly separated from each model's own
+  `Model server` address, a tabbed `Advanced` dialog
+  (`local-model-advanced-dialog.tsx`) grouping `Gateway & access` (shared `/v1`
+  endpoint, admin console address, loaded Gateway Model IDs with copyable
+  `curl` snippets, and Linger Desktop local-only Bifrost admin credentials via
+  `window.lingerDesktop.localGateway`, where the Desktop `serverUrl` origin is
+  the IPC boundary and `computerId` routes the UI to this computer),
+  `Memory & hardware`, and `Diagnostics` (runtime versions, per-model backend
+  servers, and Desktop `Save diagnostics`), and top diagnostic callouts with a
+  two-column model-card facts
   grid (including `Engine`, `Concurrency`, and hybrid `System memory`) from
   structured `LocalModel` fields in `local-models-rules.ts`, resolves
   Sponsor-owned Agent eligibility and `Pi` runtime switch payloads in

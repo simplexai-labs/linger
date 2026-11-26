@@ -1,17 +1,17 @@
 import type { SetupLocalAccount } from "../shared/setup.js";
 import type { LocalAccount } from "./local-server.js";
+import {
+  CLIPBOARD_CLEAR_MS,
+  SecretClipboard,
+  type SecretClipboardTarget,
+} from "./secret-clipboard.js";
 
-// How long a copied password may stay on the clipboard.
-export const CLIPBOARD_CLEAR_MS = 60_000;
+export { CLIPBOARD_CLEAR_MS };
 
 export interface SetupAccountOptions {
   // Reads the installation's local-account.json.
   readonly read: () => Promise<LocalAccount>;
-  readonly clipboard: {
-    writeText(text: string): Promise<void>;
-    readText(): Promise<string>;
-    clear(): void;
-  };
+  readonly clipboard: SecretClipboardTarget;
   readonly showFile: (file: string) => void;
 }
 
@@ -22,12 +22,13 @@ type Cached = Pick<LocalAccount, "email" | "file"> | { readonly error: string };
 // person shows or copies it, and is held only while it is shown.
 export class SetupAccount {
   readonly #options: SetupAccountOptions;
+  readonly #clipboard: SecretClipboard;
   #account: Cached | undefined;
   #shown: string | undefined;
-  #clear: ReturnType<typeof setTimeout> | undefined;
 
   constructor(options: SetupAccountOptions) {
     this.#options = options;
+    this.#clipboard = new SecretClipboard(options.clipboard);
   }
 
   async refresh(): Promise<void> {
@@ -56,20 +57,7 @@ export class SetupAccount {
   async copy(): Promise<void> {
     const password = (await this.#read())?.password;
     if (password === undefined) return;
-    const clipboard = this.#options.clipboard;
-    await clipboard.writeText(password);
-    clearTimeout(this.#clear);
-    this.#clear = setTimeout(() => {
-      this.#clear = undefined;
-      // Something copied since is left alone.
-      void clipboard
-        .readText()
-        .then((text) => {
-          if (text === password) clipboard.clear();
-        })
-        .catch(() => undefined);
-    }, CLIPBOARD_CLEAR_MS);
-    this.#clear.unref?.();
+    await this.#clipboard.copy(password);
   }
 
   reveal(): void {

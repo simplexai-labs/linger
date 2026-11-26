@@ -640,7 +640,7 @@ export function localmodelsBifrostAddrFile(home: string): string {
     "bifrost-addr",
   );
 }
-function parseLoopbackBifrostAddress(
+export function parseLoopbackBifrostAddress(
   raw: unknown,
 ): LoopbackBifrostAddress | undefined {
   if (typeof raw !== "string") return undefined;
@@ -672,6 +672,13 @@ export function localmodelsLegacyToolsMarkerFile(home: string): string {
  */
 export function legacyLocalmodelsToolsDirectory(): string {
   return path.join(os.homedir(), ".local", "share", "localmodels", "tools");
+}
+/**
+ * localmodels' own default Bifrost directory (~/.local/share/localmodels/bifrost),
+ * used only when a legacy home's shared owned.json omits gateway.bifrost.app_dir.
+ */
+function legacyLocalmodelsBifrostDirectory(): string {
+  return path.join(os.homedir(), ".local", "share", "localmodels", "bifrost");
 }
 // owned.json and plan.json are written by localmodels with the process umask
 // rather than 0600, so this checks for a regular owned file of bounded size.
@@ -745,6 +752,7 @@ function planDeploymentNames(plan: unknown): string[] {
  */
 export async function legacyLocalmodelsTools(
   home: string,
+  options: { persist?: boolean } = {},
 ): Promise<string | undefined> {
   const marker = localmodelsLegacyToolsMarkerFile(home);
   const recorded = (await readPrivate(marker).catch(() => undefined))?.trim();
@@ -779,8 +787,10 @@ export async function legacyLocalmodelsTools(
     );
   };
   if (!names.some(ownsHere)) return undefined;
-  await privateDirectory(path.dirname(marker));
-  await atomicPrivate(marker, `${legacy}\n`);
+  if (options.persist ?? true) {
+    await privateDirectory(path.dirname(marker));
+    await atomicPrivate(marker, `${legacy}\n`);
+  }
   return legacy;
 }
 async function readSavedBifrostAddress(
@@ -867,6 +877,33 @@ export async function resolveLocalmodelsBifrostAddr(
   } finally {
     resolvingBifrostAddr.delete(key);
   }
+}
+
+export interface LocalmodelsBifrostLocation {
+  readonly bifrostDir: string;
+  readonly addr: string;
+}
+
+/**
+ * Read-only resolution of the Bifrost app directory and loopback address that
+ * localmodels runs for this home. Mirrors `localmodelsIsolation` without
+ * creating directories, writing legacy markers, or allocating ports.
+ */
+export async function resolveLocalmodelsBifrostLocation(
+  home: string,
+): Promise<LocalmodelsBifrostLocation> {
+  const legacy = await legacyLocalmodelsTools(home, { persist: false });
+  if (legacy) {
+    const owned = await readOwnedBifrost(legacy);
+    return {
+      bifrostDir: owned.appDir ?? legacyLocalmodelsBifrostDirectory(),
+      addr: owned.address?.addr ?? DEFAULT_BIFROST_ADDR,
+    };
+  }
+  return {
+    bifrostDir: localmodelsBifrostDirectory(home),
+    addr: await resolveLocalmodelsBifrostAddr(home, { allocate: false }),
+  };
 }
 function formatDownloadedBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;

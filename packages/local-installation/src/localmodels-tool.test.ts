@@ -37,6 +37,7 @@ import {
   prefetchLocalmodelsBifrost,
   readPublishedTool,
   resolveLocalmodelsBifrostAddr,
+  resolveLocalmodelsBifrostLocation,
   runLocalmodels,
   stopLocalmodels,
   validateToolSource,
@@ -2864,3 +2865,69 @@ print(json.dumps({"ok": True}))
   },
   120_000,
 );
+
+test("resolveLocalmodelsBifrostLocation stays read-only and never leaks another home's legacy gateway", async () => {
+  const f = await fixture();
+  const otherHome = await mkdtemp(path.join(os.tmpdir(), "linger-other-home-"));
+  roots.push(otherHome);
+  await legacyLayout(f.home, "qwen3.8-27b-18100", otherHome);
+
+  // Another home owns the shared legacy deployment, so this home stays isolated.
+  const isolated = await resolveLocalmodelsBifrostLocation(f.home);
+  expect(isolated).toEqual({
+    bifrostDir: localmodelsBifrostDirectory(f.home),
+    addr: "127.0.0.1:18480",
+  });
+  await expect(stat(localmodelsBifrostDirectory(f.home))).rejects.toMatchObject(
+    { code: "ENOENT" },
+  );
+  await expect(stat(localmodelsBifrostAddrFile(f.home))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+  await expect(
+    stat(localmodelsLegacyToolsMarkerFile(f.home)),
+  ).rejects.toMatchObject({ code: "ENOENT" });
+
+  // Per-home bifrost-addr and owned.json take precedence in the same order as runtime.
+  await mkdir(path.dirname(localmodelsBifrostAddrFile(f.home)), {
+    recursive: true,
+    mode: 0o700,
+  });
+  await writeFile(localmodelsBifrostAddrFile(f.home), "127.0.0.1:49201\n", {
+    mode: 0o600,
+  });
+  expect(await resolveLocalmodelsBifrostLocation(f.home)).toEqual({
+    bifrostDir: localmodelsBifrostDirectory(f.home),
+    addr: "127.0.0.1:49201",
+  });
+
+  await mkdir(localmodelsToolsDirectory(f.home), {
+    recursive: true,
+    mode: 0o700,
+  });
+  await writeFile(
+    path.join(localmodelsToolsDirectory(f.home), "owned.json"),
+    JSON.stringify({
+      schema: "localmodels.owned/v1",
+      gateway: { bifrost: { addr: "127.0.0.1:49202" } },
+    }),
+    { mode: 0o644 },
+  );
+  expect(await resolveLocalmodelsBifrostLocation(f.home)).toEqual({
+    bifrostDir: localmodelsBifrostDirectory(f.home),
+    addr: "127.0.0.1:49202",
+  });
+});
+
+test("resolveLocalmodelsBifrostLocation resolves a verified legacy home without writing the marker", async () => {
+  const f = await fixture();
+  const { legacyBifrost } = await legacyLayout(f.home, "qwen3.8-27b-18100");
+  const resolved = await resolveLocalmodelsBifrostLocation(f.home);
+  expect(resolved).toEqual({
+    bifrostDir: legacyBifrost,
+    addr: "127.0.0.1:18480",
+  });
+  await expect(
+    stat(localmodelsLegacyToolsMarkerFile(f.home)),
+  ).rejects.toMatchObject({ code: "ENOENT" });
+});

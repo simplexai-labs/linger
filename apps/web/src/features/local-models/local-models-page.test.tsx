@@ -389,12 +389,12 @@ describe("LocalModelsPage", () => {
     );
   });
 
-  it("shows the Computer's pools and hardware in Details", async () => {
+  it("shows the Computer's pools and hardware in Advanced", async () => {
     await renderPage(setup());
     await findModels();
 
-    fireEvent.click(screen.getByRole("button", { name: "Details" }));
-    const dialog = screen.getByRole("dialog", { name: "lab-118 details" });
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    const dialog = screen.getByRole("dialog", { name: "lab-118 · Advanced" });
     expect(
       within(dialog).getByRole("img", {
         name: "GPU 0 · RTX 4090: 21.4 GB of 24 GB in use",
@@ -413,8 +413,8 @@ describe("LocalModelsPage", () => {
     );
     await findModels();
 
-    fireEvent.click(screen.getByRole("button", { name: "Details" }));
-    const dialog = screen.getByRole("dialog", { name: "lab-118 details" });
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    const dialog = screen.getByRole("dialog", { name: "lab-118 · Advanced" });
     expect(within(dialog).getByTitle("Other apps · 15 GB")).toHaveStyle({
       width: "62.5%",
     });
@@ -1280,7 +1280,7 @@ describe("LocalModelsPage", () => {
         screen.queryByRole("region", { name: "Models" }),
       ).not.toBeInTheDocument();
       expect(
-        screen.queryByRole("button", { name: "Details" }),
+        screen.queryByRole("button", { name: "Advanced" }),
       ).not.toBeInTheDocument();
       expect(
         screen.queryByRole("button", { name: "Recheck memory" }),
@@ -1599,8 +1599,23 @@ describe("LocalModelsPage", () => {
     );
   });
 
-  it("shows Bifrost gateway readiness above Endpoint on an expanded loaded model", async () => {
-    const view = labView();
+  it("shows shared Bifrost gateway readiness and endpoint separately from each model server", async () => {
+    const view = labView({
+      models: [
+        ...labView().models,
+        modelView(
+          localModel({
+            endpoint: { base_url: "http://127.0.0.1:18103/v1" },
+            id: "spark-4b:Q4_K_M",
+            memory_bytes: gb(6.7),
+            name: "Spark 4B",
+            pi_model: "localmodels-library/spark-4b",
+            pool: "gpu:1",
+            state: "loaded",
+          }),
+        ),
+      ],
+    });
     const computer = {
       ...inventoryComputer(view),
       runtimes: [
@@ -1611,6 +1626,10 @@ describe("LocalModelsPage", () => {
               id: "localmodels-library/qwen3-coder-30b",
               label: "Qwen3 Coder 30B",
             },
+            {
+              id: "localmodels-library/spark-4b",
+              label: "Spark 4B",
+            },
           ],
           status: "ready" as const,
           type: "pi" as const,
@@ -1618,18 +1637,207 @@ describe("LocalModelsPage", () => {
         },
       ],
     };
-    await renderPage(setup([view], [computer]));
+    const fixture = setup([view], [computer]);
+    fixture.runtime.server.on("GET", modelSourcePath, ({ params }) =>
+      Response.json({
+        computer_id: params.computerId,
+        online: true,
+        status: {
+          byok: { configured: false, key_saved: false },
+          gateway_url: "http://127.0.0.1:18480",
+          mode: "local",
+          runtime: "pi",
+          runtime_model: "localmodels-library/qwen3-coder-30b",
+        },
+        viewer_is_owner: true,
+      }),
+    );
+    await renderPage(fixture);
     await findModels();
 
     fireEvent.click(screen.getByRole("button", { name: "Qwen3 Coder 30B" }));
-    const details = screen.getByRole("region", {
+    const coderDetails = screen.getByRole("region", {
       name: "Qwen3 Coder 30B details",
     });
-    expect(details).toHaveTextContent("GatewayReady · Bifrost (Pi)");
-    expect(details).toHaveTextContent("Endpointhttp://127.0.0.1:18100/v1");
+    expect(coderDetails).toHaveTextContent(
+      "Shared gatewayReady · Bifrost (Pi)http://127.0.0.1:18480/v1",
+    );
+    expect(coderDetails).toHaveTextContent(
+      "Model serverhttp://127.0.0.1:18100/v1",
+    );
+    expect(
+      within(coderDetails).getByRole("button", {
+        name: "Copy shared gateway endpoint",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(coderDetails).getByRole("button", {
+        name: "Copy Qwen3 Coder 30B model server endpoint",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Spark 4B" }));
+    const sparkDetails = screen.getByRole("region", {
+      name: "Spark 4B details",
+    });
+    expect(sparkDetails).toHaveTextContent(
+      "Shared gatewayReady · Bifrost (Pi)http://127.0.0.1:18480/v1",
+    );
+    expect(sparkDetails).toHaveTextContent(
+      "Model serverhttp://127.0.0.1:18103/v1",
+    );
+
+    // Computer Advanced dialog opens on Gateway & access, lists loaded Gateway
+    // Model IDs with copyable curl snippets, keeps credentials local-only in a
+    // browser, and exposes Memory & hardware + Diagnostics tabs.
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    const dialog = screen.getByRole("dialog", { name: "lab-118 · Advanced" });
+    expect(
+      within(dialog).getByRole("tab", {
+        name: "Gateway & access",
+        selected: true,
+      }),
+    ).toBeVisible();
+    expect(dialog).toHaveTextContent("API endpointhttp://127.0.0.1:18480/v1");
+    expect(dialog).toHaveTextContent("Admin consolehttp://127.0.0.1:18480");
+    expect(dialog).toHaveTextContent("Local only (127.0.0.1)");
+    expect(dialog).toHaveTextContent("qwen3-coder-30b");
+    expect(dialog).toHaveTextContent("spark-4b");
+    expect(dialog).toHaveTextContent(
+      "Bifrost admin credentials stay strictly local on lab-118",
+    );
+    expect(
+      within(dialog).queryByRole("button", { name: "Show gateway password" }),
+    ).toBeNull();
+
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: "Copy curl command for Spark 4B",
+      }),
+    );
+    expect(writeText).toHaveBeenCalledWith(
+      'curl http://127.0.0.1:18480/v1/chat/completions -H "Content-Type: application/json" -d \'{"messages":[{"content":"Hello","role":"user"}],"model":"spark-4b"}\'',
+    );
+
+    // Switch to Diagnostics tab and verify runtime + per-model backend servers.
+    fireEvent.click(within(dialog).getByRole("tab", { name: "Diagnostics" }));
+    expect(dialog).toHaveTextContent("0.9.0");
+    expect(dialog).toHaveTextContent("computer-lab");
+    expect(dialog).toHaveTextContent("http://127.0.0.1:18100/v1");
+    expect(dialog).toHaveTextContent("http://127.0.0.1:18103/v1");
   });
 
-  it("reflects Pi runtime setup, catalog registration, and failure states in the Gateway row", async () => {
+  it("reveals and copies local Bifrost admin credentials in Advanced only on this computer's Linger Desktop", async () => {
+    const revealPassword = vi.fn(async () => ({ password: "local-admin-pw" }));
+    const copyPassword = vi.fn(async () => ({
+      clearAfterMs: 60_000,
+      copied: true,
+    }));
+    const openAdmin = vi.fn(async () => {});
+    const openFolder = vi.fn(async () => {});
+    const saveDiagnostics = vi.fn(async () => {});
+    const getInfo = vi.fn(async () => ({
+      adminUrl: "http://127.0.0.1:18480",
+      available: true,
+      hasPassword: true,
+      inferenceAuthDisabled: true,
+      username: "admin",
+    }));
+
+    (window as { lingerDesktop?: unknown }).lingerDesktop = {
+      computer: {
+        enroll: vi.fn(),
+        getStatus: async () => ({
+          activeOperations: 0,
+          bridge: "connected",
+          computerId: "computer-lab",
+          runtime: "ready",
+        }),
+        onStatus: () => () => {},
+      },
+      diagnostics: { save: saveDiagnostics },
+      localGateway: {
+        copyPassword,
+        getInfo,
+        openAdmin,
+        openFolder,
+        revealPassword,
+      },
+    };
+
+    const fixture = setup([labView()]);
+    fixture.runtime.server.on("GET", modelSourcePath, ({ params }) =>
+      Response.json({
+        computer_id: params.computerId,
+        online: true,
+        status: {
+          byok: { configured: false, key_saved: false },
+          gateway_url: "http://127.0.0.1:18480",
+          mode: "local",
+          runtime: "pi",
+          runtime_model: "localmodels-library/qwen3-coder-30b",
+        },
+        viewer_is_owner: true,
+      }),
+    );
+
+    await renderPage(fixture);
+    await findModels();
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    const dialog = screen.getByRole("dialog", { name: "lab-118 · Advanced" });
+
+    await waitFor(() => expect(getInfo).toHaveBeenCalledWith("computer-lab"));
+    expect(await within(dialog).findByText("••••••••••••")).toBeVisible();
+    expect(dialog).not.toHaveTextContent("local-admin-pw");
+
+    // Reveal password on demand.
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Show gateway password" }),
+    );
+    expect(await within(dialog).findByText("local-admin-pw")).toBeVisible();
+    expect(revealPassword).toHaveBeenCalledWith("computer-lab");
+
+    // Copy password through main process (clears clipboard after 60s).
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Copy gateway password" }),
+    );
+    await waitFor(() =>
+      expect(copyPassword).toHaveBeenCalledWith("computer-lab"),
+    );
+    expect(
+      await within(dialog).findByText("Copied · clears in 60s"),
+    ).toBeVisible();
+
+    // Open admin console and gateway folder via Desktop IPC.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Open" }));
+    expect(openAdmin).toHaveBeenCalledWith("computer-lab");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Open gateway folder" }),
+    );
+    expect(openFolder).toHaveBeenCalledWith("computer-lab");
+
+    // Switching tabs clears the revealed password and exposes Save diagnostics.
+    fireEvent.click(within(dialog).getByRole("tab", { name: "Diagnostics" }));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save diagnostics" }),
+    );
+    await waitFor(() => expect(saveDiagnostics).toHaveBeenCalledOnce());
+
+    fireEvent.click(
+      within(dialog).getByRole("tab", { name: "Gateway & access" }),
+    );
+    expect(dialog).not.toHaveTextContent("local-admin-pw");
+    expect(await within(dialog).findByText("••••••••••••")).toBeVisible();
+  });
+
+  it("reflects Pi runtime setup, catalog registration, and failure states in the Shared gateway row", async () => {
     const fixture = setup([labView()]);
     await renderPage(fixture);
     await findModels();
@@ -1638,7 +1846,10 @@ describe("LocalModelsPage", () => {
     const details = screen.getByRole("region", {
       name: "Qwen3 Coder 30B details",
     });
-    expect(details).toHaveTextContent("GatewayBifrost · Pi not installed");
+    expect(details).toHaveTextContent(
+      "Shared gatewayBifrost · Pi not installed",
+    );
+    expect(details).toHaveTextContent("Model serverhttp://127.0.0.1:18100/v1");
     expect(
       screen.queryByRole("button", { name: /Use Qwen3 Coder 30B with/u }),
     ).toBeNull();
@@ -1661,7 +1872,9 @@ describe("LocalModelsPage", () => {
       type: "resource.invalidated",
     });
     await waitFor(() =>
-      expect(details).toHaveTextContent("GatewayBifrost · Setting up Pi…"),
+      expect(details).toHaveTextContent(
+        "Shared gatewayBifrost · Setting up Pi…",
+      ),
     );
     expect(
       screen.queryByRole("button", { name: /Use Qwen3 Coder 30B with/u }),
@@ -1682,7 +1895,7 @@ describe("LocalModelsPage", () => {
     });
     await waitFor(() =>
       expect(details).toHaveTextContent(
-        "GatewayBifrost · Registering with Pi…",
+        "Shared gatewayBifrost · Registering with Pi…",
       ),
     );
     expect(
@@ -1703,7 +1916,9 @@ describe("LocalModelsPage", () => {
       type: "resource.invalidated",
     });
     await waitFor(() =>
-      expect(details).toHaveTextContent("GatewayBifrost · Pi unavailable"),
+      expect(details).toHaveTextContent(
+        "Shared gatewayBifrost · Pi unavailable",
+      ),
     );
     await waitFor(() =>
       expect(
@@ -3289,10 +3504,10 @@ describe("Model source", () => {
       "Research agent uses this model. Load it so it can answer.",
     );
 
-    // Details modal includes Other apps in the legend when external apps hold memory.
-    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    // Advanced modal includes Other apps in the legend when external apps hold memory.
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     const detailsDialog = screen.getByRole("dialog", {
-      name: "Workstation details",
+      name: "Workstation · Advanced",
     });
     expect(detailsDialog).toHaveTextContent("Other apps");
     fireEvent.click(
@@ -4906,6 +5121,12 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     expect(inklingCard).toHaveTextContent("2 concurrent requests");
     expect(within(inklingCard).queryByText("System memory")).toBeNull();
 
+    // Advanced dialog surfaces both host engines from host.engine_label.
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent(
+      "Ubuntu 24.04 · llama.cpp b11370 · CUDA + PolyStrata 0.2.19-poly.1 · CUDA",
+    );
     // Chinese locale keeps product engine names and translates labels and hints.
     await reactAct(async () => {
       await setLanguage("zh-CN");
