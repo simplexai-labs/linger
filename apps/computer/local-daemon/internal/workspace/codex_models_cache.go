@@ -164,10 +164,15 @@ func stampCodexModelsCache(data []byte, now time.Time) ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-// codexClientVersion is the bare version Codex writes as a cache's
-// client_version; a probed version may carry the "codex-cli " banner.
+// codexClientVersion is the bare X.Y.Z version Codex writes and validates as a
+// cache's client_version; a probed version may carry the "codex-cli " banner
+// and prerelease or build suffixes.
 func codexClientVersion(version string) string {
-	return strings.TrimPrefix(strings.TrimSpace(version), "codex-cli ")
+	version = strings.TrimPrefix(strings.TrimSpace(version), "codex-cli ")
+	if i := strings.IndexAny(version, "-+"); i > 0 {
+		version = version[:i]
+	}
+	return version
 }
 
 // readCodexAuthIdentity returns the account identity of a Codex auth.json. Its

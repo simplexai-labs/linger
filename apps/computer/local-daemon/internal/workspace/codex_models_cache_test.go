@@ -156,12 +156,26 @@ func TestCodexModelsCacheIgnoresOtherAccountOrAuthMode(t *testing.T) {
 }
 
 func TestCodexModelsCacheIgnoresClientVersionMismatch(t *testing.T) {
-	fixture := newSeedFixture(t)
-	makeSibling(t, fixture.codexRoot, "old-cli", seedAccountAuth, seedCache(fixture.now, "0.150.0"), fixture.now)
-	logs := seedPrepare(t, fixture)
-	assertSeedOutcome(t, logs, "no_candidate")
-	if _, err := os.Stat(filepath.Join(fixture.home, codexModelsCacheName)); !os.IsNotExist(err) {
-		t.Fatalf("cache seeded across client_version mismatch: %v", err)
+	cases := []struct {
+		name          string
+		codexVersion  string
+		clientVersion string
+	}{
+		{name: "different version", codexVersion: "0.153.4", clientVersion: "0.150.0"},
+		{name: "suffixed cache version", codexVersion: "codex-cli 0.166.0-alpha.5.1", clientVersion: "0.166.0-alpha.5.1"},
+		{name: "truncated build metadata", codexVersion: "codex-cli 0.166.0+build-linux", clientVersion: "0.166.0+build"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newSeedFixture(t)
+			fixture.opts.CodexVersion = tc.codexVersion
+			makeSibling(t, fixture.codexRoot, "old-cli", seedAccountAuth, seedCache(fixture.now, tc.clientVersion), fixture.now)
+			logs := seedPrepare(t, fixture)
+			assertSeedOutcome(t, logs, "no_candidate")
+			if _, err := os.Stat(filepath.Join(fixture.home, codexModelsCacheName)); !os.IsNotExist(err) {
+				t.Fatalf("cache seeded across client_version mismatch: %v", err)
+			}
+		})
 	}
 }
 
@@ -223,13 +237,26 @@ func TestCodexModelsCacheReplacesAStaleOwnCacheWithANewerPeer(t *testing.T) {
 }
 
 func TestCodexModelsCacheMatchesAProbedVersionBanner(t *testing.T) {
-	fixture := newSeedFixture(t)
-	fixture.opts.CodexVersion = "codex-cli 0.153.4"
-	cache := seedCache(fixture.now.Add(-time.Hour), "0.153.4")
-	makeSibling(t, fixture.codexRoot, "sibling", seedAccountAuth, cache, fixture.now)
-	logs := seedPrepare(t, fixture)
-	assertSeedOutcome(t, logs, "seeded")
-	assertSeededFrom(t, fixture.home, cache, fixture.now)
+	cases := []struct {
+		name          string
+		codexVersion  string
+		clientVersion string
+	}{
+		{name: "stable", codexVersion: "codex-cli 0.153.4", clientVersion: "0.153.4"},
+		{name: "prerelease", codexVersion: "codex-cli 0.166.0-alpha.5.1", clientVersion: "0.166.0"},
+		{name: "build metadata with hyphen", codexVersion: "codex-cli 0.166.0+build-linux", clientVersion: "0.166.0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newSeedFixture(t)
+			fixture.opts.CodexVersion = tc.codexVersion
+			cache := seedCache(fixture.now.Add(-time.Hour), tc.clientVersion)
+			makeSibling(t, fixture.codexRoot, "sibling", seedAccountAuth, cache, fixture.now)
+			logs := seedPrepare(t, fixture)
+			assertSeedOutcome(t, logs, "seeded")
+			assertSeededFrom(t, fixture.home, cache, fixture.now)
+		})
+	}
 }
 
 func TestCodexModelsCacheSeedsFromTheSourceAndNamedHomes(t *testing.T) {
