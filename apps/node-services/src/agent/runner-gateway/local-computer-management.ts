@@ -351,10 +351,17 @@ export class LocalComputerModelError extends LocalComputerPlacementError {
 
 export class LocalRuntimeAuthenticationRequiredError extends LocalComputerPlacementError {
   readonly code = "RUNTIME_AUTHENTICATION_REQUIRED";
+  readonly failure: RuntimeExecutionFailure;
 
-  constructor(message = "Local Runtime authentication is required") {
+  constructor(
+    runtimeType?: LocalRuntimeType,
+    message = "Local Runtime authentication is required",
+  ) {
     super(message);
     this.name = "LocalRuntimeAuthenticationRequiredError";
+    this.failure = runtimeType
+      ? { code: "authentication_required", runtime_type: runtimeType }
+      : { code: "authentication_required" };
   }
 }
 

@@ -116,8 +116,9 @@ take precedence.
   credential.
 - Fixed Context activation prepares the Context workspace, publishes the
   Context View, configures CLI, and creates or resumes the Provider Runtime.
-  When the Computer does not offer the Agent's model or reasoning effort,
-  activation finishes every queued Run as failed with `model_not_offered`, so
+  When the Computer does not offer the Agent's model or reasoning effort, or
+  the Runtime requires authentication, activation finishes every queued Run as
+  failed with `model_not_offered` or `authentication_required`, so
   the Room shows the cause; the next input activates again. Ordinary
   resource reads do not repeat activation or replace filesystem policy. Keep
   this a fixed pipeline, not a dynamic hook registry.

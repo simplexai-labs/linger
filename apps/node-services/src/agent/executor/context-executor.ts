@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   isLocalComputerOfflineError,
   LocalComputerModelError,
+  LocalRuntimeAuthenticationRequiredError,
 } from "../runner-gateway/local-computer-management.js";
 import { LOCAL_COMPUTER_IDLE_TIMEOUT_MS } from "../runner-gateway/local-computer-management.js";
 import {
@@ -1922,7 +1923,8 @@ export class ContextExecutor<TRuntimeSettings> {
         },
       );
       if (
-        error instanceof LocalComputerModelError &&
+        (error instanceof LocalComputerModelError ||
+          error instanceof LocalRuntimeAuthenticationRequiredError) &&
         !signal.aborted &&
         !this.#stopped
       ) {
