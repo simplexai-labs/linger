@@ -271,14 +271,19 @@ across local interfaces when `18480` is held by another process; stop and
 read-only calls never probe or allocate a port.
 A home whose Quick Install ran before per-home isolation (0.1.6 and earlier)
 keeps its plan's deployments, Pi profile and Bifrost in localmodels' default
-`~/.local/share/localmodels/tools`, so it stays there: when the home has no
-per-home `owned.json`, its `runtime/localmodels/plan.json` names a deployment
-that the shared `owned.json` owns, every call gets that directory as
-`LOCALMODELS_TOOLS_DIR` plus only the Bifrost directory and address its
-`owned.json` records, and the choice is recorded once in
-`<home>/runtime/localmodels/tools-dir` for the installer and the Daemon to
-follow. Isolating such a home would read its deployments as removed and its
-plan as changed, and the upgraded app could not start.
+`~/.local/share/localmodels/tools` (or, in localmodels' debug mode, in
+`<home>/runtime/localmodels/state/gateway/tools`), so it stays there: when
+the home has no per-home `owned.json` and that directory's `owned.json` owns
+a deployment the home's `runtime/localmodels/plan.json` names, or a Bifrost
+whose `app_dir` is inside `<home>/runtime/localmodels` (a Quick Install that
+never finished leaves its gateway with no deployment recorded), every call
+gets that directory as `LOCALMODELS_TOOLS_DIR` plus only the Bifrost
+directory and address its `owned.json` records, and the choice is recorded
+once in `<home>/runtime/localmodels/tools-dir` for the installer and the
+Daemon to follow. Isolating such a home would read its deployments as
+removed and its plan as changed, and the upgraded app could not start; the
+setup check would also report the earlier gateway's port as
+`gateway-port-in-use` and `stack down` could not stop that gateway.
 
 Setup sets the Computer's model source through `localmodels source apply`
 (`byok-source.ts`): BYOK after the Runtime is ready, a local model after the

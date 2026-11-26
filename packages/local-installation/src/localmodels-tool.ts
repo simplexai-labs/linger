@@ -734,14 +734,26 @@ function planDeploymentNames(plan: unknown): string[] {
     .filter((name): name is string => typeof name === "string" && !!name);
 }
 /**
- * The shared tools directory this home still runs from, or undefined when it
- * uses its own. A home whose plan was applied before per-home isolation keeps
- * its deployments' ownership, Pi profile and Bifrost in localmodels' default
- * tools directory; running it against an empty per-home directory reads as
- * "deployments removed" and the plan as changed, so the home stays where its
- * plan was applied. Only a deployment the shared owned.json places under this
- * home's models counts, since names repeat across homes. The choice is
- * recorded once.
+ * localmodels' debug mode keeps a home's gateway apart under its state
+ * directory when nothing sets LOCALMODELS_TOOLS_DIR, as releases before
+ * per-home isolation did not.
+ */
+function debugLocalmodelsToolsDirectory(home: string): string {
+  return path.join(localmodelsStateDirectory(home), "gateway", "tools");
+}
+/**
+ * The earlier tools directory this home still runs from, or undefined when
+ * it uses its own. A home whose plan was applied before per-home isolation
+ * keeps its deployments' ownership, Pi profile and Bifrost in localmodels'
+ * default tools directory (or debug mode's, under its state directory);
+ * running it against an empty per-home directory reads as "deployments
+ * removed" and the plan as changed, and the Bifrost that directory records
+ * keeps the plan's gateway address, so the setup check reports the port in
+ * use and `stack down` cannot stop it. The home stays where its plan was
+ * applied when that directory owns a deployment under this home's models
+ * (names repeat across homes), or a Bifrost whose app directory is in this
+ * home: a Quick Install that never finished leaves the gateway with no
+ * deployment recorded. The choice is recorded once.
  */
 export async function legacyLocalmodelsTools(
   home: string,
@@ -758,30 +770,43 @@ export async function legacyLocalmodelsTools(
   const names = planDeploymentNames(
     await readOwnedJson(localmodelsPlanFile(home)),
   );
-  if (!names.length) return undefined;
-  const legacy = legacyLocalmodelsToolsDirectory();
-  const deployments = field(
-    await readOwnedJson(path.join(legacy, "owned.json")),
-    "deployments",
-  );
-  if (!deployments || typeof deployments !== "object") return undefined;
-  // Deployment names are only <model>-<port>, so another home may own the
-  // same name; only a deployment living under this home's models counts.
-  const base = localmodelsBaseDirectory(home);
-  const ownsHere = (name: string) => {
-    const entry = field(deployments, name);
-    const deployDir = field(entry, "deploy_dir");
-    if (field(entry, "removed") === true || typeof deployDir !== "string")
-      return false;
-    const relative = path.relative(base, deployDir);
+  const root = path.join(path.resolve(home), "runtime", "localmodels");
+  const inside = (parent: string, child: unknown) => {
+    if (typeof child !== "string" || !path.isAbsolute(child)) return false;
+    const relative = path.relative(parent, child);
     return (
-      !!relative && !relative.startsWith("..") && !path.isAbsolute(relative)
+      !!relative &&
+      relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative)
     );
   };
-  if (!names.some(ownsHere)) return undefined;
-  await privateDirectory(path.dirname(marker));
-  await atomicPrivate(marker, `${legacy}\n`);
-  return legacy;
+  for (const legacy of [
+    legacyLocalmodelsToolsDirectory(),
+    debugLocalmodelsToolsDirectory(home),
+  ]) {
+    const owned = await readOwnedJson(path.join(legacy, "owned.json"));
+    if (!owned) continue;
+    // Deployment names are only <model>-<port>, so another home may own the
+    // same name; only a deployment living under this home's models counts.
+    const deployments = field(owned, "deployments");
+    const ownsDeployment = names.some((name) => {
+      const entry = field(deployments, name);
+      return (
+        field(entry, "removed") !== true &&
+        inside(localmodelsBaseDirectory(home), field(entry, "deploy_dir"))
+      );
+    });
+    const bifrost = field(field(owned, "gateway"), "bifrost");
+    const ownsGateway =
+      field(bifrost, "removed") !== true &&
+      inside(root, field(bifrost, "app_dir"));
+    if (!ownsDeployment && !ownsGateway) continue;
+    await privateDirectory(path.dirname(marker));
+    await atomicPrivate(marker, `${legacy}\n`);
+    return legacy;
+  }
+  return undefined;
 }
 async function readSavedBifrostAddress(
   addrFile: string,

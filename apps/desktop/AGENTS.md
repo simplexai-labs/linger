@@ -710,8 +710,12 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
   its output in `<home>/installer/local-models-stop.log`, and does not wait
   for it. If the installed kit fails verification, the helper exits with a
   failure and logs the repair guidance; the app still quits, and no unverified
-  tool runs. It runs only when `desktop/local-server.json` names an
-  installation. The Computer exits with the app, so nothing uses the models
+  tool runs. It runs when `desktop/local-server.json` names an
+  installation or the default home has a saved local model plan
+  (`runtime/localmodels/plan.json`, saved before anything is deployed, so a
+  Quick Install that failed or still waits is stopped too); a custom
+  location the record does not name yet gets its own stop with `--home
+  <location>`. The Computer exits with the app, so nothing uses the models
   until the next launch, whose resume applies the approved plan again even
   though the services still run, unless the person switched the Computer's
   model source to a subscription; a BYOK source gets its gateway mounted
