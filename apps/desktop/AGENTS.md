@@ -443,6 +443,12 @@ Gateway and runs Agents. The daemon exits with the app.
   in parallel (with a scoped `AbortController` so any failure cancels a pending
   runtime lookup) before recording state, calling `enroll()`, preloading the
   hidden window (`preloadAuthenticated`), and awaiting agents.
+- `src/main/updater.ts`: `UpdaterModule` defers startup leftover cleanup
+  (`.Linger-old-*`, stale `.Linger-update-*`, and previous downloads) until 5 s
+  after `local-server.busy` clears (pausing while busy, with a 60 s fallback
+  when no busy event arrives), runs it at most once via a memoized promise, and
+  flushes or coalesces onto any in-flight cleanup before downloading in
+  `check()`.
 - `src/main/diagnostics.ts`: Diagnostics, "Show Logs" (opens
   `<userData>/logs`) and "Save Diagnostics" (a redacted
   `linger-diagnostics-<time>.zip` in Downloads) for the setup page's failed

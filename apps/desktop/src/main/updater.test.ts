@@ -1,6 +1,7 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
@@ -19,6 +20,8 @@ import {
 
 const RELEASES = "https://github.com/simplexai-labs/linger/releases";
 const PACKAGE = Buffer.from("new app archive");
+
+vi.mock("node:fs/promises", { spy: true });
 
 const release = (
   version: string,
@@ -183,11 +186,17 @@ describe("UpdaterModule", () => {
       quit: async () => {},
       openExternal: async () => {},
       checkDelayMs: 60 * 60_000,
+      cleanupDelayMs: 0,
     });
-    await testHost([stubModule("Config"), stubModule("ComputerDaemon"), next])
-      .start()
-      .then(() => waitFor(() => readdirSync(applications).length === 1));
+    const nextHost = testHost([
+      stubModule("Config"),
+      stubModule("ComputerDaemon"),
+      next,
+    ]);
+    await nextHost.start();
+    await waitFor(() => readdirSync(applications).length === 1);
     expect(readdirSync(applications)).toEqual(["Linger.app"]);
+    await nextHost.stop("quit");
   });
 
   it("refuses a manifest signed by another key", async () => {
@@ -726,6 +735,517 @@ describe("UpdaterModule for a download", () => {
     });
     await updater.check();
     expect(updater.state()).toEqual({ kind: "idle" });
+  });
+});
+
+describe("UpdaterModule deferred startup cleanup", () => {
+  const flushIo = async (): Promise<void> => {
+    for (let i = 0; i < 6; i++)
+      await new Promise<void>((resolve) => setImmediate(resolve));
+  };
+
+  const waitForIo = async (condition: () => boolean): Promise<void> => {
+    const deadline = Date.now() + 5_000;
+    for (let i = 0; i < 500; i++) {
+      if (condition()) return;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (Date.now() > deadline) break;
+    }
+    throw new Error("Timed out waiting for deferred cleanup");
+  };
+
+  const seedLeftovers = (applications: string, downloads: string) => {
+    const oldBundle = path.join(applications, ".Linger-old-12345");
+    const staleStage = path.join(applications, ".Linger-update-0.16.0");
+    mkdirSync(oldBundle, { recursive: true });
+    writeFileSync(path.join(oldBundle, "marker"), "old");
+    mkdirSync(staleStage, { recursive: true });
+    writeFileSync(path.join(staleStage, "marker"), "stale");
+    mkdirSync(downloads, { recursive: true });
+    writeFileSync(path.join(downloads, "Linger-0.16.0-stale.tar.gz"), "stale");
+  };
+
+  const createDeferred = (
+    feed: ReturnType<typeof release>,
+    options: Partial<UpdaterOptions> = {},
+  ) => {
+    const root = tempDirectory();
+    const applications = path.join(root, "Applications");
+    const bundle = path.join(applications, "Linger.app");
+    mkdirSync(bundle, { recursive: true });
+    writeFileSync(path.join(bundle, "version"), "0.16.7");
+    const downloads = path.join(root, "updates");
+    let restarts = 0;
+    let quits = 0;
+    const runtime = {
+      ...stubModule("ComputerDaemon"),
+      running: () => 0,
+    } as unknown as ComputerDaemonModule;
+    const updater = new UpdaterModule({
+      version: "0.16.7",
+      platform: "darwin",
+      arch: "arm64",
+      install: { kind: "app-bundle", appBundle: bundle },
+      downloadDirectory: downloads,
+      restart: async () => {
+        restarts += 1;
+      },
+      quit: async () => {
+        quits += 1;
+      },
+      openExternal: async () => {},
+      fetch: feed.fetch,
+      publicKey: feed.publicKey,
+      checkDelayMs: 60 * 60_000,
+      extract: async (archive, directory) => {
+        const app = path.join(directory, "Linger.app");
+        mkdirSync(app);
+        writeFileSync(path.join(app, "version"), readFileSync(archive));
+      },
+      ...options,
+    });
+    const host = testHost([stubModule("Config"), runtime, updater]);
+    return {
+      host,
+      updater,
+      bundle,
+      applications,
+      downloads,
+      restarts: () => restarts,
+      quits: () => quits,
+    };
+  };
+
+  it("defers startup cleanup until the default 60s fallback when no local-server.busy event arrives", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const feed = release("0.16.7");
+      const { host, applications, downloads } = createDeferred(feed);
+      seedLeftovers(applications, downloads);
+
+      await host.start();
+      await flushIo();
+      expect(readdirSync(applications).sort()).toEqual([
+        ".Linger-old-12345",
+        ".Linger-update-0.16.0",
+        "Linger.app",
+      ]);
+      expect(readdirSync(downloads)).toEqual(["Linger-0.16.0-stale.tar.gz"]);
+
+      await vi.advanceTimersByTimeAsync(59_999);
+      await flushIo();
+      expect(readdirSync(applications).sort()).toEqual([
+        ".Linger-old-12345",
+        ".Linger-update-0.16.0",
+        "Linger.app",
+      ]);
+      expect(readdirSync(downloads)).toEqual(["Linger-0.16.0-stale.tar.gz"]);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await waitForIo(
+        () =>
+          readdirSync(applications).length === 1 &&
+          readdirSync(downloads).length === 0,
+      );
+      expect(readdirSync(applications)).toEqual(["Linger.app"]);
+      expect(readdirSync(downloads)).toEqual([]);
+      await host.stop("quit");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pauses cleanup while local-server.busy is true and runs after the 5s post-busy settle delay", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const feed = release("0.16.7");
+      const { host, applications, downloads } = createDeferred(feed);
+      seedLeftovers(applications, downloads);
+
+      await host.start();
+      host.ctx.bus.emit("local-server.busy", true);
+
+      // Even well past the 60s fallback, cleanup stays paused while busy.
+      await vi.advanceTimersByTimeAsync(120_000);
+      await flushIo();
+      expect(readdirSync(applications).sort()).toEqual([
+        ".Linger-old-12345",
+        ".Linger-update-0.16.0",
+        "Linger.app",
+      ]);
+      expect(readdirSync(downloads)).toEqual(["Linger-0.16.0-stale.tar.gz"]);
+
+      // Transition to idle arms the 5s settle timer; another busy(true) pauses it again.
+      host.ctx.bus.emit("local-server.busy", false);
+      await vi.advanceTimersByTimeAsync(4_999);
+      await flushIo();
+      expect(readdirSync(applications)).toHaveLength(3);
+
+      host.ctx.bus.emit("local-server.busy", true);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await flushIo();
+      expect(readdirSync(applications)).toHaveLength(3);
+
+      host.ctx.bus.emit("local-server.busy", false);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await waitForIo(
+        () =>
+          readdirSync(applications).length === 1 &&
+          readdirSync(downloads).length === 0,
+      );
+      expect(readdirSync(applications)).toEqual(["Linger.app"]);
+      expect(readdirSync(downloads)).toEqual([]);
+      await host.stop("quit");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("handles local-server.busy(false) without a preceding true and caps settle delay at cleanupDelayMs", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const feed = release("0.16.7");
+      const { host, applications, downloads } = createDeferred(feed);
+      seedLeftovers(applications, downloads);
+
+      await host.start();
+      await vi.advanceTimersByTimeAsync(2_000);
+      host.ctx.bus.emit("local-server.busy", false);
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      await flushIo();
+      expect(readdirSync(applications)).toHaveLength(3);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await waitForIo(
+        () =>
+          readdirSync(applications).length === 1 &&
+          readdirSync(downloads).length === 0,
+      );
+      expect(readdirSync(applications)).toEqual(["Linger.app"]);
+      await host.stop("quit");
+
+      // When cleanupDelayMs < 5_000, the post-busy settle delay is capped at cleanupDelayMs.
+      const short = createDeferred(feed, { cleanupDelayMs: 1_000 });
+      seedLeftovers(short.applications, short.downloads);
+      await short.host.start();
+      short.host.ctx.bus.emit("local-server.busy", true);
+      await vi.advanceTimersByTimeAsync(5_000);
+      short.host.ctx.bus.emit("local-server.busy", false);
+      await vi.advanceTimersByTimeAsync(999);
+      await flushIo();
+      expect(readdirSync(short.applications)).toHaveLength(3);
+      await vi.advanceTimersByTimeAsync(1);
+      await waitForIo(() => readdirSync(short.applications).length === 1);
+      expect(readdirSync(short.applications)).toEqual(["Linger.app"]);
+      await short.host.stop("quit");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels pending cleanup and unsubscribes local-server.busy on stop()", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const feed = release("0.16.7");
+      const { host, applications, downloads } = createDeferred(feed);
+      seedLeftovers(applications, downloads);
+
+      await host.start();
+      await host.stop("quit");
+      host.ctx.bus.emit("local-server.busy", false);
+      await vi.advanceTimersByTimeAsync(120_000);
+      await flushIo();
+      expect(readdirSync(applications).sort()).toEqual([
+        ".Linger-old-12345",
+        ".Linger-update-0.16.0",
+        "Linger.app",
+      ]);
+      expect(readdirSync(downloads)).toEqual(["Linger-0.16.0-stale.tar.gz"]);
+
+      // Even with cleanupDelayMs: 0, synchronous stop() cancels before cleanup runs.
+      const zero = createDeferred(feed, { cleanupDelayMs: 0 });
+      seedLeftovers(zero.applications, zero.downloads);
+      await zero.host.start();
+      await zero.host.stop("quit");
+      await vi.advanceTimersByTimeAsync(1_000);
+      await flushIo();
+      expect(readdirSync(zero.applications)).toHaveLength(3);
+      expect(readdirSync(zero.downloads)).toEqual([
+        "Linger-0.16.0-stale.tar.gz",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("flushes cleanup before downloading in check() and preserves newly staged macOS and Windows updates", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      // macOS app-bundle path
+      const macFeed = release("0.17.0");
+      let macCleanedBeforeDownload = false;
+      const mac = createDeferred(macFeed, {
+        fetch: (async (url: URL) => {
+          if (url.pathname.endsWith(".tar.gz")) {
+            macCleanedBeforeDownload =
+              readdirSync(mac.applications).length === 1 &&
+              readdirSync(mac.downloads).length === 0;
+          }
+          return macFeed.fetch(url);
+        }) as unknown as typeof globalThis.fetch,
+      });
+      seedLeftovers(mac.applications, mac.downloads);
+
+      await mac.host.start();
+      await mac.updater.check();
+      expect(macCleanedBeforeDownload).toBe(true);
+      expect(mac.updater.state()).toEqual({ kind: "ready", version: "0.17.0" });
+      expect(readdirSync(mac.applications).sort()).toEqual([
+        ".Linger-update-0.17.0",
+        "Linger.app",
+      ]);
+
+      // Neither local-server.busy(false) nor fallback timer deletes the active staged bundle.
+      mac.host.ctx.bus.emit("local-server.busy", false);
+      await vi.advanceTimersByTimeAsync(120_000);
+      await flushIo();
+      expect(readdirSync(mac.applications).sort()).toEqual([
+        ".Linger-update-0.17.0",
+        "Linger.app",
+      ]);
+      await mac.updater.install();
+      expect(mac.restarts()).toBe(1);
+      await mac.host.stop("quit");
+
+      // Windows setup path
+      const setupExe = "Linger-0.17.0-windows-x64-setup.exe";
+      const winFeed = release("0.17.0", {
+        target: "win32-x64",
+        file: setupExe,
+      });
+      const spawned: string[] = [];
+      const spawn: SpawnSetup = (file) => {
+        spawned.push(file);
+        const child = Object.assign(new EventEmitter(), { unref: () => {} });
+        queueMicrotask(() => child.emit("spawn"));
+        return child;
+      };
+      let winCleanedBeforeDownload = false;
+      const win = createDeferred(winFeed, {
+        platform: "win32",
+        arch: "x64",
+        install: { kind: "windows-setup" },
+        spawn,
+        fetch: (async (url: URL) => {
+          if (url.pathname.endsWith(".exe")) {
+            winCleanedBeforeDownload = readdirSync(win.downloads).length === 0;
+          }
+          return winFeed.fetch(url);
+        }) as unknown as typeof globalThis.fetch,
+      });
+      mkdirSync(win.downloads, { recursive: true });
+      writeFileSync(
+        path.join(win.downloads, "Linger-0.16.0-windows-x64-setup.exe"),
+        "stale setup",
+      );
+
+      await win.host.start();
+      await win.updater.check();
+      expect(winCleanedBeforeDownload).toBe(true);
+      expect(win.updater.state()).toEqual({ kind: "ready", version: "0.17.0" });
+      expect(readdirSync(win.downloads)).toEqual([setupExe]);
+
+      win.host.ctx.bus.emit("local-server.busy", false);
+      await vi.advanceTimersByTimeAsync(120_000);
+      await flushIo();
+      expect(readdirSync(win.downloads)).toEqual([setupExe]);
+      await win.updater.install();
+      expect(spawned).toEqual([path.join(win.downloads, setupExe)]);
+      expect(win.quits()).toBe(1);
+      await win.host.stop("quit");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("coalesces a concurrent check() onto an in-flight timer cleanup before downloading", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { rm: realRm } =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    let releaseCleanup: (() => void) | undefined;
+    let staleRmCalls = 0;
+    let rmSpy: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      const setupExe = "Linger-0.17.0-windows-x64-setup.exe";
+      const winFeed = release("0.17.0", {
+        target: "win32-x64",
+        file: setupExe,
+      });
+      const spawned: string[] = [];
+      const spawn: SpawnSetup = (file) => {
+        spawned.push(file);
+        const child = Object.assign(new EventEmitter(), { unref: () => {} });
+        queueMicrotask(() => child.emit("spawn"));
+        return child;
+      };
+      let downloadStarted = false;
+      let cleanedBeforeDownload = false;
+      const win = createDeferred(winFeed, {
+        platform: "win32",
+        arch: "x64",
+        install: { kind: "windows-setup" },
+        spawn,
+        fetch: (async (url: URL) => {
+          if (url.pathname.endsWith(".exe")) {
+            downloadStarted = true;
+            cleanedBeforeDownload = readdirSync(win.downloads).length === 0;
+          }
+          return winFeed.fetch(url);
+        }) as unknown as typeof globalThis.fetch,
+      });
+      mkdirSync(win.downloads, { recursive: true });
+      const staleFile = path.join(
+        win.downloads,
+        "Linger-0.16.0-windows-x64-setup.exe",
+      );
+      writeFileSync(staleFile, "stale setup");
+
+      rmSpy = vi
+        .spyOn(fsPromises, "rm")
+        .mockImplementation(async (target, options) => {
+          if (String(target) === staleFile) {
+            staleRmCalls += 1;
+            await new Promise<void>((resolve) => {
+              releaseCleanup = resolve;
+            });
+          }
+          return realRm(target, options);
+        });
+
+      await win.host.start();
+      // Fire the fallback cleanup timer and pause inside #cleanup's rm().
+      await vi.advanceTimersByTimeAsync(60_000);
+      await waitForIo(() => releaseCleanup !== undefined);
+      expect(staleRmCalls).toBe(1);
+
+      // Start check() while #cleanup is in flight: it must coalesce onto the
+      // existing cleanup task and wait before downloading.
+      const checking = win.updater.check();
+      await flushIo();
+      expect(win.updater.state()).toEqual({
+        kind: "downloading",
+        version: "0.17.0",
+      });
+      expect(downloadStarted).toBe(false);
+      expect(staleRmCalls).toBe(1);
+
+      releaseCleanup!();
+      await checking;
+      expect(downloadStarted).toBe(true);
+      expect(cleanedBeforeDownload).toBe(true);
+      expect(staleRmCalls).toBe(1);
+      expect(win.updater.state()).toEqual({ kind: "ready", version: "0.17.0" });
+      expect(readdirSync(win.downloads)).toEqual([setupExe]);
+
+      await win.updater.install();
+      expect(spawned).toEqual([path.join(win.downloads, setupExe)]);
+      expect(win.quits()).toBe(1);
+      await win.host.stop("quit");
+    } finally {
+      releaseCleanup?.();
+      rmSpy?.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("exits check() without emitting downloading if stop() races manifest fetch", async () => {
+    const feed = release("0.17.0");
+    let releaseManifest: (() => void) | undefined;
+    let downloadRequested = false;
+    const { host, updater, applications, downloads } = createDeferred(feed, {
+      fetch: (async (url: URL) => {
+        if (url.pathname.endsWith("/manifest.json")) {
+          await new Promise<void>((resolve) => {
+            releaseManifest = resolve;
+          });
+        }
+        if (url.pathname.endsWith(".tar.gz")) downloadRequested = true;
+        return feed.fetch(url);
+      }) as unknown as typeof globalThis.fetch,
+    });
+    seedLeftovers(applications, downloads);
+    const states: string[] = [];
+    host.ctx.bus.on("update.changed", (state) => states.push(state));
+
+    await host.start();
+    const checking = updater.check();
+    await waitFor(() => releaseManifest !== undefined);
+    expect(states).toEqual(["checking"]);
+
+    await updater.stop();
+    releaseManifest!();
+    await checking;
+
+    expect(states).toEqual(["checking"]);
+    expect(updater.state()).toEqual({ kind: "checking" });
+    expect(downloadRequested).toBe(false);
+    expect(readdirSync(applications).sort()).toEqual([
+      ".Linger-old-12345",
+      ".Linger-update-0.16.0",
+      "Linger.app",
+    ]);
+    expect(readdirSync(downloads)).toEqual(["Linger-0.16.0-stale.tar.gz"]);
+  });
+
+  it("exits check() without downloading if stop() races in-flight cleanup", async () => {
+    const { rm: realRm } =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    let releaseCleanup: (() => void) | undefined;
+    let downloadRequested = false;
+    let rmSpy: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      const feed = release("0.17.0");
+      const { host, updater, applications, downloads } = createDeferred(feed, {
+        fetch: (async (url: URL) => {
+          if (url.pathname.endsWith(".tar.gz")) downloadRequested = true;
+          return feed.fetch(url);
+        }) as unknown as typeof globalThis.fetch,
+      });
+      seedLeftovers(applications, downloads);
+      const staleDownload = path.join(downloads, "Linger-0.16.0-stale.tar.gz");
+      rmSpy = vi
+        .spyOn(fsPromises, "rm")
+        .mockImplementation(async (target, options) => {
+          if (String(target) === staleDownload) {
+            await new Promise<void>((resolve) => {
+              releaseCleanup = resolve;
+            });
+          }
+          return realRm(target, options);
+        });
+
+      await host.start();
+      const checking = updater.check();
+      await waitFor(() => releaseCleanup !== undefined);
+
+      await updater.stop();
+      releaseCleanup!();
+      await checking;
+
+      expect(downloadRequested).toBe(false);
+      expect(updater.state()).toEqual({
+        kind: "downloading",
+        version: "0.17.0",
+      });
+    } finally {
+      releaseCleanup?.();
+      rmSpy?.mockRestore();
+    }
   });
 });
 
