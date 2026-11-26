@@ -1869,45 +1869,6 @@ describe("LocalServerModule", () => {
     );
   });
 
-  it("copies the services and Node.js a Mac build bundles as folders", async () => {
-    const node = (home: string) =>
-      path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
-    const f = fixture({}, {}, (home) =>
-      rmSync(node(home), { recursive: true, force: true }),
-    );
-    const installer = path.join(f.root, "installer");
-    const archive = sourceArchive(f.root);
-    mkdirSync(path.join(installer, "source"));
-    writeFileSync(
-      path.join(installer, "source", "linger.tar.gz"),
-      archive.bytes,
-    );
-    writeFileSync(
-      path.join(installer, "distribution.json"),
-      JSON.stringify({
-        platform: "darwin",
-        arch: "arm64",
-        nativeSources: [{ target: "darwin-arm64" }],
-      }),
-    );
-    const bundle = path.join(installer, "native", "runtime-darwin-arm64");
-    mkdirSync(path.join(bundle, "runtime", "web"), { recursive: true });
-    mkdirSync(path.join(bundle, "node", "bin"), { recursive: true });
-    const files = JSON.stringify({
-      target: "darwin-arm64",
-      sourceCommit: "a".repeat(40),
-      sourceArchiveSha256: archive.sha256,
-      files: {},
-    });
-    writeFileSync(path.join(bundle, "runtime", "files.json"), files);
-    writeFileSync(path.join(bundle, "runtime", "web", "static-host.mjs"), "");
-    // The signed binary; here the Node.js running the tests.
-    fixtureNode(path.join(bundle, "node", "bin", "node"));
-    const sha256 = (data: string | Buffer) =>
-      createHash("sha256").update(data).digest("hex");
-    writeFileSync(
-      path.join(bundle, "manifest.json"),
-      JSON.stringify({
   it(
     "copies the services and Node.js a Mac build bundles as folders",
     async () => {
